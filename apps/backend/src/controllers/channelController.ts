@@ -2,6 +2,10 @@ import { Request, Response } from 'express';
 import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
 import { ExternalSourcePlatform } from '@/integrations/core/types';
 import {
+  SOCIAL_MEDIA_PLATFORMS,
+  isSocialMediaPlatform,
+} from '@/integrations/social-media/constants';
+import {
   buildSlackDeskSourceName,
   resolveAppDeskInstalledAppId,
   extractSlackChannelId,
@@ -53,6 +57,7 @@ import { userActivityTrackingService } from '@/services/userActivityTrackingServ
 import { vespaQueue } from '@/queues/vespaQueue';
 import { channelSchema } from '@/vespa/src/types';
 import { db } from '@/database/client';
+import { hasProjectAdminAccess } from '@/database/acl/admin-access';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import {logger} from '@/utils/logger';
 import { messageMetadataService } from '@/services/messageMetadataService';
@@ -1551,9 +1556,10 @@ export class ChannelController {
 
       let connectedLabel: string | null = null;
       let outboundConfigured = true;
-      let googlePlayApps: Array<{
+      let deskApps: Array<{
         id: string;
         displayName: string;
+        externalIdentifier: string | null;
         packageName: string | null;
         isActive: boolean;
       }> = [];
@@ -1569,9 +1575,9 @@ export class ChannelController {
         );
       } else if (source?.sourceType === ExternalSourcePlatform.SLACK_DESK) {
         connectedLabel = extractSlackChannelId(source.name);
-      } else if (source?.sourceType === ExternalSourcePlatform.GOOGLE_PLAY) {
+      } else if (sourceType && isSocialMediaPlatform(sourceType)) {
         const reviewSources = await db.externalSource.findMany({
-          where: { channelId, workspaceId, sourceType: ExternalSourcePlatform.GOOGLE_PLAY },
+          where: { channelId, workspaceId, sourceType: { in: [...SOCIAL_MEDIA_PLATFORMS] } },
           select: {
             id: true,
             displayName: true,
@@ -1582,15 +1588,16 @@ export class ChannelController {
         });
         const activeReviewSources = reviewSources.filter(reviewSource => reviewSource.isActive);
         isConnected = activeReviewSources.length > 0;
-        googlePlayApps = reviewSources.map(reviewSource => ({
+        deskApps = reviewSources.map(reviewSource => ({
           id: reviewSource.id,
           displayName: reviewSource.displayName,
+          externalIdentifier: reviewSource.externalIdentifier,
           packageName: reviewSource.externalIdentifier,
           isActive: reviewSource.isActive,
         }));
         connectedLabel = activeReviewSources
           .map(reviewSource => reviewSource.displayName)
-          .join(', ') || 'No active Google Play apps';
+          .join(', ') || 'No active apps';
       }
 
       const fromDisplay = (source?.displayName ?? '').match(/[\w.+-]+@[\w.-]+\.[\w.-]+/)?.[0];
@@ -1598,7 +1605,7 @@ export class ChannelController {
         const email = fromDisplay.toLowerCase();
         res
           .status(200)
-          .json({ email, isConnected, hasSource, sourceType, connectedLabel: connectedLabel ?? email, outboundConfigured, googlePlayApps });
+          .json({ email, isConnected, hasSource, sourceType, connectedLabel: connectedLabel ?? email, outboundConfigured, deskApps, googlePlayApps: deskApps });
         return;
       }
 
@@ -1615,12 +1622,12 @@ export class ChannelController {
           const email = owner.email.toLowerCase();
           res
             .status(200)
-            .json({ email, isConnected, hasSource, sourceType, connectedLabel: connectedLabel ?? email, outboundConfigured, googlePlayApps });
+            .json({ email, isConnected, hasSource, sourceType, connectedLabel: connectedLabel ?? email, outboundConfigured, deskApps, googlePlayApps: deskApps });
           return;
         }
       }
 
-      res.status(200).json({ email: null, isConnected, hasSource, sourceType, connectedLabel, outboundConfigured, googlePlayApps });
+      res.status(200).json({ email: null, isConnected, hasSource, sourceType, connectedLabel, outboundConfigured, deskApps, googlePlayApps: deskApps });
     } catch (error) {
       logger.error('Error in getConnectedEmail:', error);
       res.status(500).json({ error: 'Internal server error' });
@@ -1746,6 +1753,29 @@ export class ChannelController {
       res.status(200).json({ success: true, data: { members } });
     } catch (error) {
       logger.error('Error in getChannelMembers:', error);
+      res.status(500).json({ success: false, error: 'Internal server error' });
+    }
+  };
+  
+  canLinkChannelBoards = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const userId = req.user!.id;
+      const { channelId } = req.params;
+      if (!channelId) {
+        res.status(400).json({ success: false, error: 'channelId is required' });
+        return;
+      }
+
+      const role = await this.channelParticipantRepository.getParticipantRole(channelId, userId);
+      if (role === ChannelRole.ADMIN) {
+        res.status(200).json({ success: true, data: { canLinkBoards: true } });
+        return;
+      }
+
+      const isProjectAdmin = await hasProjectAdminAccess(db, userId);
+      res.status(200).json({ success: true, data: { canLinkBoards: isProjectAdmin } });
+    } catch (error) {
+      logger.error('Error in canLinkChannelBoards:', error);
       res.status(500).json({ success: false, error: 'Internal server error' });
     }
   };
@@ -2606,13 +2636,14 @@ export class ChannelController {
           orgRole: req.user!.orgRole,
           memberId: req.user!.memberId,
         });
-        for (const participant of result.addedParticipants) {
+        // Awaited so "added" lands before the mention the client's prompt delete delivers next.
+        await Promise.all(result.addedParticipants.map(participant =>
           handler.onInsert({
             entityId: participant.participantId,
             entityType: 'channel_participants',
             operation: 'insert'
-          }).catch(err => logger.error('Side-effect handler error: channel_participants onInsert', err));
-        }
+          }).catch(err => logger.error('Side-effect handler error: channel_participants onInsert', err))
+        ));
       }
 
       const response: AddGroupDmParticipantsResponse = {

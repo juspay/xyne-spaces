@@ -14,7 +14,6 @@ import { ReleaseRepository } from '@/database/repositories/releaseRepository';
 import { createCommitAnalysisCanvas, upsertCommitAnalysisCanvas, type CommitAnalysisRepoSlice } from '@/utils/commitAnalysisCanvas';
 import { parseBitbucketRepoUrl, parseGitHubRepoUrl } from '@/utils/repoUrlParser';
 import { escapeHtml } from '@/utils/htmlEscape';
-import { isSameCommit } from '@/utils/commitIds';
 import { buildVcsClient } from '@/services/release/buildVcsClient';
 import { ReleaseTrackingMode, VCSProviderType, MessageType } from '@xyne/shared';
 
@@ -167,7 +166,7 @@ export interface CommitAnalysisParams {
   // the "🔥 Hotfix PRs" section instead of rebuilding the main analysis.
   hotfixSync?: boolean;
   // Multi-repo hotfix: restrict analysis to the merged repo's board(s) + post-merge head.
-  hotfixOverride?: { boardIds: string[]; mergeCommitSha: string };
+  hotfixOverride?: { boardIds: string[]; mergeCommitSha: string; branch: string };
   // Re-run keeps the deployed pointer frozen (it was set at create).
   isReRun?: boolean;
 }
@@ -303,7 +302,7 @@ export class CommitAnalysisController {
   private async deriveReleaseContexts(
     releaseTicketId: string,
     fallback: { deployedCommitId: string; newCommitId: string; branch: string },
-    hotfixOverride?: { boardIds: string[]; mergeCommitSha: string },
+    hotfixOverride?: { boardIds: string[]; mergeCommitSha: string; branch: string },
   ): Promise<{ contexts: ReleaseRepoContext[]; skipped: string[] }> {
     const ticket = await db.ticket.findUnique({
       where: { id: releaseTicketId },
@@ -334,7 +333,7 @@ export class CommitAnalysisController {
           boardId: r.mainReleaseBoardId,
           deployedCommitId: r.newCommit,
           newCommitId: hotfixOverride.mergeCommitSha,
-          branch: r.branch,
+          branch: hotfixOverride.branch,
         }));
     } else {
       // Plain re-run: every repo at its frozen range (idempotent).
@@ -389,10 +388,9 @@ export class CommitAnalysisController {
     params: CommitAnalysisParams,
   ): Promise<{
     results: CommitAnalysisResult[];
-    viewResults: CommitAnalysisResult[];
     affectedApplications: AffectedApplicationInfo[];
-    migrationLinks: Array<{ filePath: string; diffUrl: string }>;
-    envChanges: Array<{ fileName: string; filePath: string; newValue: string; commitId?: string }>;
+    migrationLinks: Array<{ filePath: string; diffUrl: string; applicationId?: string }>;
+    envChanges: Array<{ fileName: string; filePath: string; newValue: string; commitId?: string; applicationId?: string }>;
     appMatchSummary: Array<{ name: string; regex: string; matchCount: number; regexValid: boolean }>;
   }> {
     const { conversationId, userId, channelId, currentTicketId, userName, isHotFix, hotfixSync } = params;
@@ -421,16 +419,9 @@ export class CommitAnalysisController {
 
     const results = await commitAnalysisService.analyzeCommits(analysisRequest);
 
-    // getCommitsBetween() appends the boundary (deployedCommitId) commit to the
-    // range. For a hotfix sync that boundary is the FROZEN release head — a
-    // main PR — so drop it from the view.
-    const viewResults = hotfixSync
-      ? results.filter((r) => !isSameCommit(r.commitId, deployedCommitId))
-      : results;
-
     let affectedApplications: AffectedApplicationInfo[] = [];
-    let migrationLinks: Array<{ filePath: string; diffUrl: string }> = [];
-    let envChanges: Array<{ fileName: string; filePath: string; newValue: string; commitId?: string }> = [];
+    let migrationLinks: Array<{ filePath: string; diffUrl: string; applicationId?: string }> = [];
+    let envChanges: Array<{ fileName: string; filePath: string; newValue: string; commitId?: string; applicationId?: string }> = [];
     let appMatchSummary: Array<{ name: string; regex: string; matchCount: number; regexValid: boolean }> = [];
 
     if (projectId && currentTicketId) {
@@ -458,7 +449,7 @@ export class CommitAnalysisController {
       }
     }
 
-    return { results, viewResults, affectedApplications, migrationLinks, envChanges, appMatchSummary };
+    return { results, affectedApplications, migrationLinks, envChanges, appMatchSummary };
   }
 
   async analyzeCommits(params: CommitAnalysisParams): Promise<CommitAnalysisResponse> {
@@ -485,10 +476,9 @@ export class CommitAnalysisController {
       loadingMessageId = await postLoadingMessage(conversationId, userId);
 
       const results: CommitAnalysisResult[] = [];
-      const viewResults: CommitAnalysisResult[] = [];
       const affectedApplications: AffectedApplicationInfo[] = [];
-      const migrationLinks: Array<{ filePath: string; diffUrl: string }> = [];
-      const envChanges: Array<{ fileName: string; filePath: string; newValue: string; commitId?: string }> = [];
+      const migrationLinks: Array<{ filePath: string; diffUrl: string; applicationId?: string }> = [];
+      const envChanges: Array<{ fileName: string; filePath: string; newValue: string; commitId?: string; applicationId?: string }> = [];
       const appMatchSummary: Array<{ name: string; regex: string; matchCount: number; regexValid: boolean }> = [];
       const repoSlices: CommitAnalysisRepoSlice[] = [];
 
@@ -498,7 +488,6 @@ export class CommitAnalysisController {
         try {
           const slice = await this.analyzeReleaseContext(ctx, params);
           results.push(...slice.results);
-          viewResults.push(...slice.viewResults);
           affectedApplications.push(...slice.affectedApplications);
           migrationLinks.push(...slice.migrationLinks);
           envChanges.push(...slice.envChanges);
@@ -508,7 +497,8 @@ export class CommitAnalysisController {
             repoSlug: ctx.repoSlug,
             deployedCommitId: ctx.deployedCommitId,
             newCommitId: ctx.newCommitId,
-            results: slice.viewResults,
+            results: slice.results,
+            affectedApplications: slice.affectedApplications,
           });
         } catch (repoError) {
           failedRepos.push(label);
@@ -528,10 +518,10 @@ export class CommitAnalysisController {
       // One canvas per release: upsert the aggregated slices in place.
       let canvasUrl: string | undefined;
       let canvasId: string | null | undefined;
-      if (viewResults.length > 0) {
+      if (results.length > 0) {
         canvasId = await upsertCommitAnalysisCanvas({
           section: hotfixSync ? 'hotfix' : 'main',
-          results: viewResults,
+          results,
           affectedApplications,
           envChanges,
           migrationLinks,
@@ -566,9 +556,9 @@ export class CommitAnalysisController {
         );
       }
 
-      const totalCommits = viewResults.length;
-      const commitsWithPR = viewResults.filter((r) => r.pullRequest !== null).length;
-      const commitsWithTicket = viewResults.filter((r) => r.ticket !== null).length;
+      const totalCommits = results.length;
+      const commitsWithPR = results.filter((r) => r.pullRequest !== null).length;
+      const commitsWithTicket = results.filter((r) => r.ticket !== null).length;
 
       const warningLines = [
         failedRepos.length > 0
@@ -623,7 +613,7 @@ export class CommitAnalysisController {
           let content: string;
           if (canvasLink) {
             content = `Hotfix synced — release analysis canvas updated ${canvasLink}`;
-          } else if (viewResults.length === 0) {
+          } else if (results.length === 0) {
             content = 'Hotfix synced — no new commits to analyse, so the analysis canvas was left unchanged. Nothing to open.';
           } else {
             content = 'Hotfix synced — the analysis canvas could not be updated, so there is no link to open. Re-run the sync to refresh it.';
@@ -673,8 +663,8 @@ export class CommitAnalysisController {
     deployedCommitId: string,
     newCommitId: string,
     workspaceId: string,
-    envChanges?: Array<{ filePath: string; fileName: string; newValue: string }>,
-    migrationLinks?: Array<{ filePath: string; diffUrl: string }>,
+    envChanges?: Array<{ filePath: string; fileName: string; newValue: string; applicationId?: string }>,
+    migrationLinks?: Array<{ filePath: string; diffUrl: string; applicationId?: string }>,
     repoSlices?: CommitAnalysisRepoSlice[]
   ): Promise<void> {
     try {

@@ -7,6 +7,7 @@ import {
   type ReactNode,
   type RefObject,
 } from 'react';
+import { PanelRight, X } from 'lucide-react';
 import { cn } from '../../utils/classNames';
 import { AISidebar } from './AISidebar';
 import {
@@ -23,7 +24,12 @@ import {
   CHAT_SIDEBAR_MIN_WIDTH,
 } from '../../routes/ChatScreen/chatSidebarWidth';
 
-const APP_PANE_SIZE_KEY = 'xyne:ai-app-pane-size';
+const WORKSPACE_PANE_SIZE_KEY = 'xyne:ai-workspace-pane-size';
+const LEGACY_CHAT_PANE_SIZE_KEY = 'xyne:ai-chat-pane-size';
+const LEGACY_APP_PANE_SIZE_KEY = 'xyne:ai-app-pane-size';
+const WORKSPACE_PANE_MIN = 20;
+const WORKSPACE_PANE_MAX = 70;
+const WORKSPACE_PANE_DEFAULT = 45;
 
 /**
  * How long the app pane takes to slide open or shut, and the CSS that does it.
@@ -48,20 +54,77 @@ const PANE_ANIMATION_CSS = `
 }
 `;
 
-/** Last user-chosen pane width as a percentage string Panel accepts ("55%"). */
-function appPaneDefaultSize(): string {
-  const raw = localStorage.getItem(APP_PANE_SIZE_KEY);
+const NARROW_VIEWPORT_QUERY = '(max-width: 1100px)';
+
+function clampWorkspacePaneSize(n: number): number {
+  return Math.min(WORKSPACE_PANE_MAX, Math.max(WORKSPACE_PANE_MIN, n));
+}
+
+function migrateLegacyPaneSize(): void {
+  if (localStorage.getItem(WORKSPACE_PANE_SIZE_KEY) !== null) return;
+  const legacyChat = localStorage.getItem(LEGACY_CHAT_PANE_SIZE_KEY);
+  if (legacyChat !== null) {
+    const n = Number(legacyChat);
+    localStorage.removeItem(LEGACY_CHAT_PANE_SIZE_KEY);
+    localStorage.removeItem(LEGACY_APP_PANE_SIZE_KEY);
+    if (!Number.isFinite(n)) return;
+    const migrated = clampWorkspacePaneSize(100 - n);
+    localStorage.setItem(WORKSPACE_PANE_SIZE_KEY, String(Math.round(migrated * 10) / 10));
+    return;
+  }
+  const legacyApp = localStorage.getItem(LEGACY_APP_PANE_SIZE_KEY);
+  if (legacyApp === null) return;
+  const n = Number(legacyApp);
+  localStorage.removeItem(LEGACY_APP_PANE_SIZE_KEY);
+  if (!Number.isFinite(n)) return;
+  const migrated = clampWorkspacePaneSize(n);
+  localStorage.setItem(WORKSPACE_PANE_SIZE_KEY, String(Math.round(migrated * 10) / 10));
+}
+
+function workspacePaneSize(): number {
+  migrateLegacyPaneSize();
+  const raw = localStorage.getItem(WORKSPACE_PANE_SIZE_KEY);
   const n = raw ? Number(raw) : NaN;
   // Clamp to the Panel's own bounds so a corrupted value cannot wedge the
   // layout; NaN falls through to the original default.
-  if (!Number.isFinite(n) || n < 30 || n > 90) return '55%';
-  return `${n}%`;
+  if (!Number.isFinite(n) || n < WORKSPACE_PANE_MIN || n > WORKSPACE_PANE_MAX)
+    return WORKSPACE_PANE_DEFAULT;
+  return n;
 }
 
-function saveAppPaneSize(asPercentage: number): void {
+function saveWorkspacePaneSize(asPercentage: number): void {
   // 0 means the panel is unmounting/collapsed, not a chosen width.
-  if (asPercentage < 30 || asPercentage > 90) return;
-  localStorage.setItem(APP_PANE_SIZE_KEY, String(Math.round(asPercentage * 10) / 10));
+  if (asPercentage < WORKSPACE_PANE_MIN || asPercentage > WORKSPACE_PANE_MAX) return;
+  localStorage.setItem(WORKSPACE_PANE_SIZE_KEY, String(Math.round(asPercentage * 10) / 10));
+}
+
+function useNarrowViewport(): boolean {
+  const [narrow, setNarrow] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia(NARROW_VIEWPORT_QUERY).matches,
+  );
+  useEffect(() => {
+    const mql = window.matchMedia(NARROW_VIEWPORT_QUERY);
+    const onChange = (): void => setNarrow(mql.matches);
+    onChange();
+    mql.addEventListener('change', onChange);
+    return () => mql.removeEventListener('change', onChange);
+  }, []);
+  return narrow;
+}
+
+function setWorkspaceCollapsed(panel: PanelImperativeHandle | null, collapsed: boolean): void {
+  if (!panel) return;
+  try {
+    if (collapsed && !panel.isCollapsed()) panel.collapse();
+    else if (!collapsed && panel.isCollapsed()) panel.expand();
+  } catch {
+    return;
+  }
+}
+
+export interface WorkspacePanelControls {
+  expand: () => void;
+  collapse: () => void;
 }
 
 interface AIShellProps {
@@ -76,12 +139,11 @@ interface AIShellProps {
    *  `bg-background`) — e.g. `ai-page-bg` for screens (like /ai/knowledge)
    *  that need to match a different surface elsewhere in the app. */
   mainClassName?: string | undefined;
-  /**
-   * App Creation mode: a third, persistent panel to the right of the chat.
-   * Absent → the exact two-panel tree this shell has always rendered, which is
-   * what /ai/knowledge and the Library screens rely on via AISectionLayout.
-   */
-  rightPanel?: ReactNode | undefined;
+  workspacePanel?: ReactNode | undefined;
+  workspaceOpen?: boolean | undefined;
+  onExpandWorkspace?: (() => void) | undefined;
+  onCloseWorkspace?: (() => void) | undefined;
+  workspaceControlsRef?: React.MutableRefObject<WorkspacePanelControls | null> | undefined;
   /**
    * One-shot collapse EVENT: each increment collapses the sidebar once. An
    * event rather than steady state on purpose — the sidebar belongs to the
@@ -107,15 +169,24 @@ export function AIShell({
   onMobileOpenChange,
   mainRef,
   mainClassName,
-  rightPanel,
+  workspacePanel,
+  workspaceOpen,
+  onExpandWorkspace,
+  onCloseWorkspace,
+  workspaceControlsRef,
   collapseSignal,
   onSidebarCollapsedChange,
   sidebarToggleRef,
   children,
 }: AIShellProps): ReactElement {
   const sidebarPanelRef = useRef<PanelImperativeHandle>(null);
-  const appPanelRef = useRef<PanelImperativeHandle>(null);
-  const splitMode = rightPanel !== undefined && rightPanel !== null;
+  const workspacePanelRef = useRef<PanelImperativeHandle>(null);
+  const narrow = useNarrowViewport();
+  const hasWorkspace = workspacePanel !== undefined && workspacePanel !== null;
+  const workspaceEnabled = hasWorkspace && workspaceOpen !== false;
+  const splitMode = workspaceEnabled && !narrow;
+  const overlayMode = workspaceEnabled && narrow;
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
   // The pane outlives `splitMode` by one animation so it has something to
   // shrink: unmounting on the same commit is exactly the abrupt disappearance
@@ -126,7 +197,7 @@ export function AIShell({
   // The last non-null pane, so the closing animation still has something to
   // draw after the caller has stopped passing one.
   const lastPaneRef = useRef<ReactNode>(null);
-  if (rightPanel) lastPaneRef.current = rightPanel;
+  if (workspacePanel) lastPaneRef.current = workspacePanel;
 
   useEffect(() => {
     if (splitMode) {
@@ -135,7 +206,7 @@ export function AIShell({
     }
     if (!paneMounted) return;
     setAnimating(true);
-    appPanelRef.current?.collapse();
+    workspacePanelRef.current?.collapse();
     const done = setTimeout(() => {
       setPaneMounted(false);
       setAnimating(false);
@@ -151,7 +222,9 @@ export function AIShell({
     setAnimating(true);
     let inner = 0;
     const outer = requestAnimationFrame(() => {
-      inner = requestAnimationFrame(() => appPanelRef.current?.resize(appPaneDefaultSize()));
+      inner = requestAnimationFrame(() =>
+        workspacePanelRef.current?.resize(`${workspacePaneSize()}%`),
+      );
     });
     const done = setTimeout(() => setAnimating(false), PANE_ANIMATION_MS + 40);
     return () => {
@@ -160,6 +233,42 @@ export function AIShell({
       clearTimeout(done);
     };
   }, [paneMounted, splitMode]);
+
+  useEffect(() => {
+    if (!overlayMode && drawerOpen) setDrawerOpen(false);
+  }, [overlayMode, drawerOpen]);
+
+  useEffect(() => {
+    if (!overlayMode || !drawerOpen) return;
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setDrawerOpen(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [overlayMode, drawerOpen]);
+
+  useEffect(() => {
+    if (!workspaceControlsRef) return;
+    workspaceControlsRef.current = {
+      expand: () => {
+        if (overlayMode) {
+          setDrawerOpen(true);
+          return;
+        }
+        setWorkspaceCollapsed(workspacePanelRef.current, false);
+      },
+      collapse: () => {
+        if (overlayMode) {
+          setDrawerOpen(false);
+          return;
+        }
+        setWorkspaceCollapsed(workspacePanelRef.current, true);
+      },
+    };
+    return () => {
+      workspaceControlsRef.current = null;
+    };
+  }, [workspaceControlsRef, overlayMode]);
 
   // One-shot collapse on signal. Still a settle LOOP, not a single call:
   // `expand()`/`collapse()` in react-resizable-panels are no-ops unless the
@@ -211,8 +320,10 @@ export function AIShell({
   // re-initializes useDefaultLayout and reproduces the same churn.
   const panelIds = useMemo(
     () =>
-      splitMode ? ['ai-sidebar-panel', 'ai-main', 'ai-app-pane'] : ['ai-sidebar-panel', 'ai-main'],
-    [splitMode],
+      paneMounted
+        ? ['ai-sidebar-panel', 'ai-chat', 'ai-workspace']
+        : ['ai-sidebar-panel', 'ai-chat'],
+    [paneMounted],
   );
 
   useSidebarResizeShortcut({
@@ -256,50 +367,86 @@ export function AIShell({
         <div className='h-full w-[2px] bg-transparent group-hover:bg-primary group-active:bg-primary' />
       </Separator>
 
-      <Panel id='ai-main' minSize='30%'>
+      <Panel id='ai-chat' minSize='30%'>
         <div
           ref={mainRef}
           className={cn(
             'relative flex h-full min-w-0 flex-1 flex-col overflow-hidden',
-            // In the split view the chat's right edge butts against the app
-            // pane, so rounding it would cut a notch out of the seam between
-            // them. Round only the outer side; square where they meet.
-            splitMode ? 'rounded-l-2xl' : 'rounded-2xl',
+            // In the split view the chat's right edge butts against the
+            // workspace, so rounding it would cut a notch out of the seam
+            // between them. Round only the outer side; square where they meet.
+            paneMounted ? 'rounded-l-2xl' : 'rounded-2xl',
             mainClassName ?? 'bg-background',
           )}
         >
           {children}
+          {hasWorkspace && !workspaceEnabled && onExpandWorkspace && (
+            <button
+              type='button'
+              onClick={onExpandWorkspace}
+              aria-label='Open workspace'
+              title='Open workspace'
+              className='absolute right-3 top-3 z-30 inline-flex items-center gap-1.5 rounded-full border border-border bg-background/90 px-2.5 py-1 text-xs text-muted-foreground shadow-sm backdrop-blur transition-colors hover:bg-secondary/60 hover:text-foreground'
+              data-track-category='AskAI'
+              data-track-name='workspace-open'
+            >
+              <PanelRight className='h-3.5 w-3.5' />
+              Workspace
+            </button>
+          )}
+          {overlayMode && drawerOpen && (
+            <div
+              role='dialog'
+              aria-modal='false'
+              aria-label='Workspace'
+              className='absolute inset-y-0 right-0 z-50 flex w-full max-w-[min(100%,28rem)] flex-col border-l border-border bg-background shadow-2xl'
+            >
+              <button
+                type='button'
+                onClick={() => {
+                  setDrawerOpen(false);
+                  onCloseWorkspace?.();
+                }}
+                aria-label='Close workspace'
+                title='Close workspace'
+                className='absolute right-2 top-2 z-10 grid h-7 w-7 place-items-center rounded text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
+                data-track-category='AskAI'
+                data-track-name='workspace-drawer-close'
+              >
+                <X className='h-4 w-4' />
+              </button>
+              <div className='flex h-full min-h-0 flex-1 flex-col'>{workspacePanel}</div>
+            </div>
+          )}
         </div>
       </Panel>
-
       {paneMounted && (
         <>
           <Separator className='group flex w-[2px] cursor-col-resize items-center justify-center transition-colors'>
             <div className='h-full w-[2px] bg-transparent group-hover:bg-primary group-active:bg-primary' />
           </Separator>
           <Panel
-            id='ai-app-pane'
-            // The group's saved layout is only restored at GROUP mount, and
-            // this Panel mounts and unmounts while the group stays up — so
-            // without our own persistence every re-entry (and every thread
-            // switch) snapped back to the default width. One slot, not
-            // per-thread: the pane's width is a workspace habit, not a
-            // property of a conversation.
-            panelRef={appPanelRef}
+            id='ai-workspace'
+            panelRef={workspacePanelRef}
             // Mounts at zero and grows on the next frame — that IS the open
-            // animation. `collapsible` is what lets it sit below `minSize`;
-            // `saveAppPaneSize` clamps to 30–90% so these transient widths
-            // never overwrite the user's saved one.
+            // animation. `collapsible` is what lets it sit below `minSize`.
             defaultSize='0%'
             collapsible
             collapsedSize='0%'
-            minSize='30%'
-            onResize={(size: PanelSize) => saveAppPaneSize(size.asPercentage)}
+            minSize='20%'
+            // The group's saved layout is only restored at GROUP mount, and the
+            // workspace mounts and unmounts while the group stays up — so without
+            // our own persistence every re-entry (and every thread switch) snapped
+            // the workspace back to the default width. One slot, not per-thread: the
+            // workspace's width is a workspace habit, not a property of a conversation.
+            onResize={(size: PanelSize) => {
+              if (paneMounted && !animating) saveWorkspacePaneSize(size.asPercentage);
+            }}
           >
-            <div className='relative flex h-full min-w-0 flex-1 flex-col overflow-hidden'>
+            <div className='relative flex h-full min-w-0 flex-1 flex-col overflow-hidden rounded-r-2xl'>
               {/* Kept through the closing animation so the pane shrinks with
                   its contents rather than emptying first. */}
-              {rightPanel ?? lastPaneRef.current}
+              {workspacePanel ?? lastPaneRef.current}
             </div>
           </Panel>
         </>

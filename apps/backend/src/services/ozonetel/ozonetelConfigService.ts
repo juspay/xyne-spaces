@@ -18,6 +18,9 @@ export interface OzonetelTicketRules {
   createTicketOnProgressive?: boolean;
   createTicketOnPredictive?: boolean;
   ticketSubjectTemplate?: string;
+  /** Ticket custom fields holding numbers an agent may dial, e.g. customer and driver. */
+  phoneFieldNames?: string[];
+  /** @deprecated Only in configs saved before phoneFieldNames; getConfig folds it into phoneFieldNames. */
   customerPhoneFieldName?: string;
 }
 
@@ -49,13 +52,21 @@ export class OzonetelConfigValidationError extends Error {
   }
 }
 
+/** Configured phone field names, folding in the legacy single-field value. */
+function getPhoneFieldNames(rules?: OzonetelTicketRules | null): string[] {
+  const names = [...(rules?.phoneFieldNames ?? []), rules?.customerPhoneFieldName ?? '']
+    .map(name => name.trim())
+    .filter(name => name.length > 0);
+  return [...new Set(names)];
+}
+
 function normalizeTicketRules(
   input?: OzonetelTicketRules | null,
 ): OzonetelTicketRules | undefined {
   if (!input) return undefined;
 
   const defaultChannelId = input.defaultChannelId?.trim() || undefined;
-  const customerPhoneFieldName = input.customerPhoneFieldName?.trim() || undefined;
+  const phoneFieldNames = getPhoneFieldNames(input);
   const campaignRouting = Object.fromEntries(
     Object.entries(input.campaignRouting ?? {})
       .map(([campaignName, channelId]) => [campaignName.trim(), channelId.trim()])
@@ -65,15 +76,16 @@ function normalizeTicketRules(
   const normalized: OzonetelTicketRules = {
     ...input,
     ...(defaultChannelId ? { defaultChannelId } : {}),
-    ...(customerPhoneFieldName ? { customerPhoneFieldName } : {}),
+    ...(phoneFieldNames.length > 0 ? { phoneFieldNames } : {}),
     ...(Object.keys(campaignRouting).length > 0 ? { campaignRouting } : {}),
   };
 
   if (!defaultChannelId) {
     delete normalized.defaultChannelId;
   }
-  if (!customerPhoneFieldName) {
-    delete normalized.customerPhoneFieldName;
+  delete normalized.customerPhoneFieldName;
+  if (phoneFieldNames.length === 0) {
+    delete normalized.phoneFieldNames;
   }
   if (Object.keys(campaignRouting).length === 0) {
     delete normalized.campaignRouting;

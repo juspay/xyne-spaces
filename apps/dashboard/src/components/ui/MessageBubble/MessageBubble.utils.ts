@@ -6,6 +6,16 @@ interface MentionedUser {
   userId: string;
 }
 
+export interface ScheduledCallPillSnapshot {
+  /** Internal Call.id — what the Calls screen and the summary route key on. */
+  id: string;
+  title: string | null;
+  startsAt: number | null;
+  endsAt: number | null;
+  status: string;
+  channelId: string | null;
+}
+
 export interface MessageMetadata {
   ticketId?: string;
   xyneId?: string;
@@ -15,6 +25,18 @@ export interface MessageMetadata {
   executionTime?: string;
   workflowStatus?: 'NEW' | 'RUNNING' | 'SUCCESS' | 'FAILED' | 'PENDING';
   isCallMessage?: boolean;
+  /**
+   * Read-only "upcoming call" card in a channel. Deliberately NOT isCallMessage: that
+   * flag opts a SYSTEM message into ~8 affordances in ChatBubble (reply, forward, Ask
+   * AI, subscribe…), and the pill is inert.
+   */
+  isScheduledCallPill?: boolean;
+  /** The call state the pill renders, refreshed server-side on every change. */
+  call?: ScheduledCallPillSnapshot;
+  /** Stamped once when the call moved channels — the card is then permanently dead. */
+  retired?: boolean;
+  movedTo?: string;
+  movedCallTitle?: string;
   operation?: string;
   callId?: string;
   recordingId?: string;

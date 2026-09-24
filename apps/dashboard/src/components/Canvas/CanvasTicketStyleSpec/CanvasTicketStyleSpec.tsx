@@ -58,7 +58,7 @@ function CanvasTicketAnchor({ ticketId, contentRef }: CanvasTicketAnchorProps): 
     setSourceText(contentElementRef.current?.textContent?.trim() || '');
   }, []);
 
-  const ticketDescription = ticket?.description?.trim() || sourceText;
+  const previewDescription = sourceText || ticket?.description?.trim();
 
   const trigger = (
     <span
@@ -141,9 +141,9 @@ function CanvasTicketAnchor({ ticketId, contentRef }: CanvasTicketAnchorProps): 
             <p className='m-0 whitespace-normal text-sm font-semibold leading-5 text-foreground'>
               {ticket.title}
             </p>
-            {ticketDescription && (
+            {previewDescription && (
               <p className='m-0 max-h-32 overflow-y-auto whitespace-pre-wrap text-xs leading-5 text-muted-foreground'>
-                {ticketDescription}
+                {previewDescription}
               </p>
             )}
           </div>

@@ -57,6 +57,12 @@ import { cn } from '../../../utils/classNames';
 import { getApiErrorMessage } from '../../../utils/apiError';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { SummaryTemplateShareModal } from './SummaryTemplateShareModal';
+import { SummaryTemplateSelectionTestPanel } from './SummaryTemplateSelectionTestPanel';
+
+// The dialog widens itself while the selection-test panel is open, so callers don't
+// need to track the panel's state.
+export const SUMMARY_TEMPLATES_DIALOG_CLASS =
+  'h-full max-h-[824px] w-full max-w-screen-lg overflow-hidden rounded-2xl p-0 transition-[max-width] has-[[data-selection-test-open]]:max-w-screen-xl';
 
 type TemplateGroup = 'PENDING_REVIEW' | 'MY_TEMPLATES' | 'SHARED_WITH_ME' | 'PUBLIC' | 'STARTER';
 
@@ -388,6 +394,7 @@ export function SummaryTemplatesModal({
   const [shareTemplate, setShareTemplate] = useState<SummaryTemplate | null>(null);
   const [shareCount, setShareCount] = useState<number | null>(null);
   const [limitMessage, setLimitMessage] = useState<string | null>(null);
+  const [isSelectionTestOpen, setIsSelectionTestOpen] = useState(false);
   const draftCreator = useUser(draft?.createdBy ?? '');
 
   const nameInputRef = useRef<HTMLInputElement>(null);
@@ -891,7 +898,10 @@ export function SummaryTemplatesModal({
           : { icon: <Lock02Close className='size-3.5' />, label: 'Private' };
 
   return (
-    <div className='flex h-full min-h-0 flex-col bg-background text-foreground'>
+    <div
+      className='flex h-full min-h-0 flex-col bg-background text-foreground'
+      data-selection-test-open={isSelectionTestOpen || undefined}
+    >
       <header className='flex h-14 shrink-0 items-center justify-between border-b border-border px-4 sticky top-0 z-10 bg-background'>
         <h2 className='text-sm font-semibold'>Summary Templates</h2>
         <Button
@@ -1173,9 +1183,22 @@ export function SummaryTemplatesModal({
                   <div className='min-w-0 flex-1'>
                     <h3 className='font-semibold'>Meeting Context</h3>
                     <p className='text-sm text-muted-foreground'>
-                      What the meeting is about and what you want out of it.
+                      Used to auto-pick this template for matching recordings.
                     </p>
                   </div>
+                  {!isSelectionTestOpen && (
+                    <Button
+                      type='button'
+                      variant='outline'
+                      size='sm'
+                      onClick={() => setIsSelectionTestOpen(true)}
+                      className={AI_ACTION_BUTTON_CLASS}
+                      data-track-category='SummaryTemplates'
+                      data-track-name='OpenSelectionTest'
+                    >
+                      Test template selection
+                    </Button>
+                  )}
                   <Button
                     type='button'
                     variant='outline'
@@ -1191,7 +1214,7 @@ export function SummaryTemplatesModal({
                     ) : (
                       <XyneAIStar size={13} />
                     )}
-                    {aiAction === 'context' ? 'Drafting…' : 'Draft with AI'}
+                    {aiAction === 'context' ? 'Drafting…' : 'Draft'}
                   </Button>
                 </div>
                 <textarea
@@ -1487,6 +1510,19 @@ export function SummaryTemplatesModal({
             </div>
           )}
         </main>
+
+        {isSelectionTestOpen && draft && (
+          <SummaryTemplateSelectionTestPanel
+            draft={{
+              id: draft.id,
+              name: draft.name.trim(),
+              autoTriggerPrompt: draft.autoTriggerPrompt?.trim() || null,
+              sections: withMandatorySections(draft.sections),
+              systemPrompt: draft.systemPrompt.trim(),
+            }}
+            onClose={() => setIsSelectionTestOpen(false)}
+          />
+        )}
       </div>
 
       <footer className='flex shrink-0 items-center justify-between gap-2.5 border-t border-border px-5 py-3'>

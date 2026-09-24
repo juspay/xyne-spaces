@@ -44,6 +44,7 @@ router.get('/summary-templates', summaryTemplateController.list);
 router.post('/summary-templates', summaryTemplateController.create);
 router.post('/summary-templates/ai/draft-context', summaryTemplateController.draftContext);
 router.post('/summary-templates/ai/suggest-sections', summaryTemplateController.suggestSections);
+router.post('/summary-templates/ai/test-selection', summaryTemplateController.testSelection);
 router.post(
   '/summary-templates/ai/generate-system-prompt',
   summaryTemplateController.generateSystemPrompt
@@ -97,6 +98,9 @@ router.post(
 
 // PRD Generation endpoint (generates PRD canvas from call transcript)
 router.post('/:callId/generate-prd', callController.generatePRD);
+
+// Get or create the collaborative notes canvas (shared across a recurring series)
+router.post('/:callId/notes-canvas', callController.getOrCreateNotesCanvas);
 
 // Detailed Summary Generation endpoint (generates comprehensive summary from call transcript)
 router.post('/:callId/generate-detailed-summary', callController.generateDetailedSummary);

@@ -37,13 +37,16 @@ describe("subagent definition alias lookup", () => {
 });
 
 describe("fast-mode catalog with alias server type", () => {
-  it("includes alias-group read tools under the canonical subagent source", () => {
+  it("includes alias-group tools, writes included, under the canonical subagent source", () => {
     const items = buildToolCatalog({ groups: [githubNpxGroup], includeSubagentTools: true });
     const names = items.map((i) => i.entry.name);
     expect(names).toContain("GitHub__create_pull_request");
     expect(names).toContain("GitHub__search_code");
-    // write tools never enter the lazy catalog — they go always-active direct
-    expect(names).not.toContain("GitHub__merge_pull_request");
+    // Writes are catalogued too, so they can go dormant like everything else.
+    // They used to be excluded and pushed to the parent palette instead, which
+    // made them permanently prompt-resident. Safety is the signed pendingAction
+    // gate on execute, not residency in the prompt.
+    expect(names).toContain("GitHub__merge_pull_request");
     for (const i of items) expect(i.entry.source).toBe("subagent:github");
   });
 

@@ -33,8 +33,10 @@ interface UseCanvasTicketEditorBridgeOptions {
 
 interface UseCanvasTicketEditorBridgeResult {
   activeTicketAnchor: CanvasTicketAnchor | null;
+  activeTicketAction: 'create' | 'link' | null;
   isTicketChannelArchived: boolean;
   openTicketForCurrentSelection: () => void;
+  openTicketLinkForCurrentSelection: () => void;
   closeTicketModal: () => void;
   handleTicketCreated: (ticket: { id: string }) => void;
 }
@@ -131,9 +133,11 @@ export function useCanvasTicketEditorBridge({
   const { baseRoute } = useRouteContext();
   const channel = useChannel(channelId ?? '');
   const [activeTicketAnchor, setActiveTicketAnchor] = useState<CanvasTicketAnchor | null>(null);
+  const [activeTicketAction, setActiveTicketAction] = useState<'create' | 'link' | null>(null);
 
   useEffect(() => {
     setActiveTicketAnchor(null);
+    setActiveTicketAction(null);
   }, [channelId]);
 
   useEffect(() => {
@@ -193,81 +197,94 @@ export function useCanvasTicketEditorBridge({
     };
   }, [baseRoute, containerRef, navigate]);
 
+  const openTicketActionForCurrentSelection = useCallback(
+    (action: 'create' | 'link'): void => {
+      if (!ready) return;
+      if (channel?.isArchived) {
+        toast.error('Tickets cannot be linked in an archived channel');
+        return;
+      }
+
+      const editor = getEditor();
+      if (!editor) return;
+
+      try {
+        const currentBlock = editor.getTextCursorPosition().block;
+        const blockId = currentBlock?.id;
+        const tiptapEditor = getTiptapEditor(editor);
+        if (!blockId || !tiptapEditor || tiptapEditor.state.selection.empty) {
+          toast.error('Select text to use with a ticket');
+          return;
+        }
+
+        const { $from, $to } = tiptapEditor.state.selection;
+        const selectedBlocks = editor.getSelection()?.blocks;
+        if (tiptapEditor.state.selection instanceof CellSelection) {
+          toast.error('Select text within a single table cell to use with a ticket');
+          return;
+        }
+        if (
+          !$from.sameParent($to) ||
+          (selectedBlocks?.length ?? 0) > 1 ||
+          domSelectionSpansMultipleBlocks(containerRef.current)
+        ) {
+          toast.error('Select text within a single block to use with a ticket');
+          return;
+        }
+
+        const { from, to } = tiptapEditor.state.selection;
+        const blockFrom = $from.start();
+        const blockTo = $from.end();
+        if (rangeHasLink(tiptapEditor, blockFrom, blockTo)) {
+          toast.error('Ticket styles cannot be applied to linked text');
+          return;
+        }
+        if (rangeHasCodeStyle(tiptapEditor, from, to)) {
+          toast.error('Ticket styles cannot be applied to code-formatted text');
+          return;
+        }
+
+        const anchorText = tiptapEditor.state.doc.textBetween(from, to, ' ').trim();
+        if (!anchorText) {
+          toast.error('Select text to use with a ticket');
+          return;
+        }
+        if (rangeHasTicketStyle(tiptapEditor, from, to)) {
+          toast.error('Selected text is already linked to a ticket');
+          return;
+        }
+        if (rangeHasTicketStyle(tiptapEditor, blockFrom, blockTo)) {
+          toast.error('This block is already linked to a ticket');
+          return;
+        }
+        const blockText = $from.parent.textContent.trim();
+
+        setActiveTicketAnchor({
+          blockId,
+          anchorText,
+          blockText: blockText || anchorText,
+          selectionFrom: from,
+          selectionTo: to,
+        });
+        setActiveTicketAction(action);
+      } catch {
+        toast.error('Unable to use the selected canvas text');
+      }
+    },
+    [channel?.isArchived, containerRef, getEditor, ready],
+  );
+
   const openTicketForCurrentSelection = useCallback((): void => {
-    if (!ready) return;
-    if (channel?.isArchived) {
-      toast.error('Tickets cannot be created in an archived channel');
-      return;
-    }
+    openTicketActionForCurrentSelection('create');
+  }, [openTicketActionForCurrentSelection]);
 
-    const editor = getEditor();
-    if (!editor) return;
-
-    try {
-      const currentBlock = editor.getTextCursorPosition().block;
-      const blockId = currentBlock?.id;
-      const tiptapEditor = getTiptapEditor(editor);
-      if (!blockId || !tiptapEditor || tiptapEditor.state.selection.empty) {
-        toast.error('Select text to create a ticket');
-        return;
-      }
-
-      const { $from, $to } = tiptapEditor.state.selection;
-      const selectedBlocks = editor.getSelection()?.blocks;
-      if (tiptapEditor.state.selection instanceof CellSelection) {
-        toast.error('Select text within a single table cell to create a ticket');
-        return;
-      }
-      if (
-        !$from.sameParent($to) ||
-        (selectedBlocks?.length ?? 0) > 1 ||
-        domSelectionSpansMultipleBlocks(containerRef.current)
-      ) {
-        toast.error('Select text within a single block to create a ticket');
-        return;
-      }
-
-      const { from, to } = tiptapEditor.state.selection;
-      const blockFrom = $from.start();
-      const blockTo = $from.end();
-      if (rangeHasLink(tiptapEditor, blockFrom, blockTo)) {
-        toast.error('Tickets cannot be created from linked text');
-        return;
-      }
-      if (rangeHasCodeStyle(tiptapEditor, from, to)) {
-        toast.error('Tickets cannot be created from code-formatted text');
-        return;
-      }
-
-      const anchorText = tiptapEditor.state.doc.textBetween(from, to, ' ').trim();
-      if (!anchorText) {
-        toast.error('Select text to create a ticket');
-        return;
-      }
-      if (rangeHasTicketStyle(tiptapEditor, from, to)) {
-        toast.error('Selected text is already linked to a ticket');
-        return;
-      }
-      if (rangeHasTicketStyle(tiptapEditor, blockFrom, blockTo)) {
-        toast.error('This block is already linked to a ticket');
-        return;
-      }
-      const blockText = $from.parent.textContent.trim();
-
-      setActiveTicketAnchor({
-        blockId,
-        anchorText,
-        blockText: blockText || anchorText,
-        selectionFrom: from,
-        selectionTo: to,
-      });
-    } catch {
-      toast.error('Unable to use the selected canvas text');
-    }
-  }, [channel?.isArchived, containerRef, getEditor, ready]);
+  const openTicketLinkForCurrentSelection = useCallback((): void => {
+    openTicketActionForCurrentSelection('link');
+  }, [openTicketActionForCurrentSelection]);
 
   const closeTicketModal = useCallback((): void => {
     setActiveTicketAnchor(null);
+    setActiveTicketAction(null);
   }, []);
 
   const handleTicketCreated = useCallback(
@@ -304,17 +321,24 @@ export function useCanvasTicketEditorBridge({
       }
 
       setActiveTicketAnchor(null);
+      setActiveTicketAction(null);
       if (!styleApplied) {
-        toast.warning('Ticket created, but the selected canvas text changed and was not linked');
+        toast.warning(
+          activeTicketAction === 'create'
+            ? 'Ticket created, but the selected canvas text changed and was not linked'
+            : 'The selected canvas text changed and the ticket was not linked',
+        );
       }
     },
-    [activeTicketAnchor, getEditor],
+    [activeTicketAction, activeTicketAnchor, getEditor],
   );
 
   return {
     activeTicketAnchor,
+    activeTicketAction,
     isTicketChannelArchived: channel?.isArchived === true,
     openTicketForCurrentSelection,
+    openTicketLinkForCurrentSelection,
     closeTicketModal,
     handleTicketCreated,
   };

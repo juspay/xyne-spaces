@@ -10,6 +10,7 @@ import {
 } from '@blocknote/react';
 import { TextSelection, type Selection } from '@tiptap/pm/state';
 import { MessageSquarePlus, Ticket } from 'lucide-react';
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import type { FC, ReactElement } from 'react';
 import { useCallback, useEffect, useRef } from 'react';
 import { xyneAIActor, type SelectionInfo } from '../../../machines/xyneAIMachine';
@@ -35,6 +36,7 @@ type CanvasFormattingToolbarOptions = {
   selectionText?: string;
   canCreateTicket?: boolean;
   onCreateTicket?: (selectedText: string) => void;
+  onLinkTicket?: (selectedText: string) => void;
 };
 
 export function CanvasToolbarAttachedActions({
@@ -45,6 +47,7 @@ export function CanvasToolbarAttachedActions({
   selectionText,
   canCreateTicket = false,
   onCreateTicket,
+  onLinkTicket,
 }: {
   onAddComment: () => void;
 } & CanvasFormattingToolbarOptions): ReactElement {
@@ -142,6 +145,12 @@ export function CanvasToolbarAttachedActions({
     onCreateTicket?.(selectedText);
   }, [onCreateTicket]);
 
+  const handleLinkTicket = useCallback((): void => {
+    const selectedText = window.getSelection()?.toString().trim() || selectedTextRef.current;
+    if (!selectedText) return;
+    onLinkTicket?.(selectedText);
+  }, [onLinkTicket]);
+
   const hasSecondaryAction = canComment || canCreateTicket;
 
   return (
@@ -180,18 +189,41 @@ export function CanvasToolbarAttachedActions({
         </button>
       )}
       {canCreateTicket && (
-        <button
-          type='button'
-          className='canvas-formatting-menu__attached-button canvas-formatting-menu__attached-button--right'
-          onMouseDown={event => event.preventDefault()}
-          onClick={handleCreateTicket}
-          data-track-category='CANVAS'
-          data-track-name='Selection_Create_Ticket'
-          data-track-metadata={JSON.stringify({ canvasId })}
-        >
-          <Ticket className='size-3.5' aria-hidden='true' />
-          <span>Ticket</span>
-        </button>
+        <DropdownMenu.Root>
+          <DropdownMenu.Trigger asChild>
+            <button
+              type='button'
+              className='canvas-formatting-menu__attached-button canvas-formatting-menu__attached-button--right'
+              onMouseDown={event => event.preventDefault()}
+              data-track-category='CANVAS'
+              data-track-name='Selection_Ticket_Menu'
+              data-track-metadata={JSON.stringify({ canvasId })}
+            >
+              <Ticket className='size-3.5' aria-hidden='true' />
+              <span>Ticket</span>
+            </button>
+          </DropdownMenu.Trigger>
+          <DropdownMenu.Portal>
+            <DropdownMenu.Content
+              sideOffset={6}
+              align='end'
+              className='z-[1000] min-w-44 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md'
+            >
+              <DropdownMenu.Item
+                className='cursor-pointer rounded px-2 py-1.5 text-sm outline-none hover:bg-accent focus:bg-accent'
+                onSelect={handleCreateTicket}
+              >
+                Create new ticket
+              </DropdownMenu.Item>
+              <DropdownMenu.Item
+                className='cursor-pointer rounded px-2 py-1.5 text-sm outline-none hover:bg-accent focus:bg-accent'
+                onSelect={handleLinkTicket}
+              >
+                Link existing ticket
+              </DropdownMenu.Item>
+            </DropdownMenu.Content>
+          </DropdownMenu.Portal>
+        </DropdownMenu.Root>
       )}
     </div>
   );

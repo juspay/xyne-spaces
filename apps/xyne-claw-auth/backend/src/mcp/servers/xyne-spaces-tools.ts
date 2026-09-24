@@ -1341,12 +1341,12 @@ const spacesTickets: ToolDef = {
   description:
     "PRIMARY tool for all ticket queries. ALWAYS use this when the user asks about tickets, ticket status, ticket lists, " +
     "or anything ticket-related. Covers every filter the Spaces tickets UI offers: status, priority, assignee, creator, " +
-    "board, project, tags/labels, stage, channel, user group, ticket type, AI category, PR reviewer, QA assignee, " +
+    "board, project, tags/labels, stage, channel, merchant id (MID), user group, ticket type, AI category, PR reviewer, QA assignee, " +
     "due-date (ETA) range, and creation-date range. Every people filter (assignee, creator, PR reviewer, QA) accepts an " +
     "EMAIL or a userId. Most filters have a multi-select array form (statusIn, priorityIn, boardIdIn, stageNameIn, " +
-    "assignedToIn, createdByIn, userGroupIds, ticketTypes, aiCategory, prReviewers, qaAssigned) that matches ANY of the " +
+    "assignedToIn, createdByIn, userGroupIds, ticketTypes, aiCategory, prReviewers, qaAssigned, merchantIdIn) that matches ANY of the " +
     "given values. Returns structured ticket details including assignee, tags, stage, channel ID, conversation ID, " +
-    "createdAt, and updatedAt, plus (when set) the resolver + close time, last editor, first-response time, ticket type, " +
+    "createdAt, and updatedAt, plus (when set) the merchant id (MID), resolver + close time, last editor, first-response time, ticket type, " +
     "AI triage labels, owning group, due date (ETA), archived status, and related/duplicate tickets — the full lifecycle in one call. " +
     "Archived tickets are EXCLUDED from every filtered query (matching the Spaces UI); only a direct `ticketId`/`xyneId` " +
     "lookup can return one. " +
@@ -1401,6 +1401,16 @@ const spacesTickets: ToolDef = {
         description: "Filter by tag name(s), comma-separated (e.g. 'April-Launch,Q2')",
       },
       channelId: { type: "string", description: "Filter to tickets in this channel only" },
+      merchantId: {
+        type: "string",
+        description:
+          "Filter by merchant id (MID) — the ticket's merchantId column, matched exactly (e.g. 'merchant_1234'). Use when the user asks for tickets of a specific merchant.",
+      },
+      hasMerchantId: {
+        type: "boolean",
+        description:
+          "When true, return ONLY tickets that are linked to a merchant (merchantId is set); when false, only tickets with NO merchant. Ignored if `merchantId`/`merchantIdIn` is given.",
+      },
       // ── Multi-select variants (mirror the Spaces tickets UI, which is multi-select
       //    on every dropdown). Each is an array → Prisma `in`; when both a singular
       //    field above and its plural form are passed, the plural (array) wins. ──
@@ -1418,6 +1428,12 @@ const spacesTickets: ToolDef = {
         type: "array",
         items: { type: "string" },
         description: "Filter by MULTIPLE board ids (matches any). Multi-select form of `boardId`.",
+      },
+      merchantIdIn: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Filter by MULTIPLE merchant ids / MIDs (matches any). Multi-select form of `merchantId`.",
       },
       stageNameIn: {
         type: "array",
@@ -1567,6 +1583,7 @@ const spacesTickets: ToolDef = {
       if (args["projectId"]) baseWhere["projectId"] = { equals: args["projectId"] };
       if (args["stageName"]) baseWhere["stageName"] = { equals: args["stageName"] };
       if (args["channelId"]) baseWhere["channelId"] = { equals: args["channelId"] };
+      if (args["merchantId"]) baseWhere["merchantId"] = { equals: args["merchantId"] };
       if (args["tags"]) {
         const tagNames = (args["tags"] as string)
           .split(",")
@@ -1606,6 +1623,13 @@ const spacesTickets: ToolDef = {
       if (boardIdIn.length) baseWhere["boardId"] = { in: boardIdIn };
       const stageNameIn = asStrArr(args["stageNameIn"]);
       if (stageNameIn.length) baseWhere["stageName"] = { in: stageNameIn };
+      const merchantIdIn = asStrArr(args["merchantIdIn"]);
+      if (merchantIdIn.length) baseWhere["merchantId"] = { in: merchantIdIn };
+      // Presence filter — only when no explicit id was given, so a concrete MID
+      // always wins over "any merchant" (mirrors the Spaces tickets API).
+      if (!merchantIdIn.length && !args["merchantId"] && typeof args["hasMerchantId"] === "boolean") {
+        baseWhere["merchantId"] = args["hasMerchantId"] ? { not: null } : { equals: null };
+      }
       const userGroupIds = asStrArr(args["userGroupIds"]);
       if (userGroupIds.length) baseWhere["userGroupId"] = { in: userGroupIds };
       const ticketTypes = asStrArr(args["ticketTypes"]);
@@ -2131,6 +2155,7 @@ async function formatTickets(rows: TicketRow[], opts: FormatOptions = {}): Promi
     }
     if (t.updatedBy && t.updatedBy !== t.createdBy) parts.push(`  Last edited by: ${userLabel(t.updatedBy)}`);
     if (t.ticketType) parts.push(`  Type: ${t.ticketType}`);
+    if (t.merchantId) parts.push(`  Merchant ID: ${t.merchantId}`);
     if (t.aiCategory || t.aiSubCategory) {
       parts.push(`  AI triage: ${[t.aiCategory, t.aiSubCategory].filter(Boolean).join(" / ")}`);
     }
@@ -2373,6 +2398,7 @@ interface TicketRow {
   firstRespondedAt?: string; // SLA: first response
   userGroupId?: string; // owning group (id; name is gateway-blocked)
   ticketType?: string; // categorization (e.g. Bug/Fix)
+  merchantId?: string; // linked merchant (MID), when the ticket has one
   isArchived?: boolean; // live PG archived state
   aiCategory?: string; // AI triage label
   aiSubCategory?: string; // AI triage sub-label
@@ -4843,6 +4869,66 @@ const spacesScheduleCall: ToolDef = {
     }),
 };
 
+// ── spaces-start-call ─────────────────────────────────────────────────
+
+const spacesStartCall: ToolDef = {
+  name: "spaces-start-call",
+  description:
+    "Ring people on Spaces right now and start a live call. Use it when the user asks to call, ring, dial or get " +
+    "someone on a call — not for a future meeting, which is spaces-schedule-call. Resolve names to user IDs with " +
+    "spaces-users first. The people you name are rung on their Spaces clients and can accept or decline; you cannot " +
+    "make anyone answer. Report who was rung and the call link, and never claim a call was answered.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      targetUserIds: {
+        type: "array",
+        items: { type: "string" },
+        description: "User IDs to ring (use spaces-users to resolve names).",
+      },
+      channelId: { type: "string", description: "Ring a channel instead of named users." },
+      callType: { type: "string", enum: ["AUDIO", "VIDEO"], description: "Defaults to AUDIO." },
+      conversationId: {
+        type: "string",
+        description: "The AI conversation this call belongs to, so the call is linked back to this chat.",
+      },
+    },
+    required: [],
+  },
+  handler: withToolErrors("Start call error", async (args) => {
+      const targets = (args["targetUserIds"] as string[] | undefined) ?? [];
+      if (!args["channelId"] && targets.length === 0) {
+        return err("Must provide either channelId or targetUserIds.");
+      }
+
+      const body: Record<string, unknown> = {
+        callType: args["callType"] === "VIDEO" ? "VIDEO" : "AUDIO",
+      };
+      if (targets.length > 0) body["invitedUserIds"] = targets;
+      if (args["channelId"]) body["channelId"] = args["channelId"];
+      if (args["conversationId"]) body["conversationId"] = args["conversationId"];
+
+      const data = (await spacesFetch("/api/calls/claw/initiate", {
+        method: "POST",
+        body: JSON.stringify(body),
+      })) as { success?: boolean; callId?: string; externalId?: string; roomLink?: string };
+
+      if (data.success === false) return err("Failed to start the call.");
+      const who = targets.length > 0 ? `${targets.length} person(s)` : `channel ${String(args["channelId"])}`;
+      return ok(
+        [
+          `Ringing ${who} on Spaces now.`,
+          data.callId ? `  callId: ${data.callId}` : "",
+          data.externalId ? `  externalId: ${data.externalId}` : "",
+          data.roomLink ? `  join: ${data.roomLink}` : "",
+          "They can accept or decline; tell the user it is ringing, not that it was answered.",
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      );
+    }),
+};
+
 // ── spaces-whoami ─────────────────────────────────────────────────────
 
 const spacesWhoami: ToolDef = {
@@ -4890,7 +4976,7 @@ const spacesReadCanvas: ToolDef = {
       const viewAccessId = String(params["viewAccessId"] ?? "").trim();
       if (!viewAccessId) return err("viewAccessId is required");
 
-      const s2sKey = process.env["INTERNAL_S2S_KEY"] ?? "";
+      const s2sKey = process.env["INTERNAL_S2S_KEY"] || process.env["XYNE_CLAW_S2S_KEY"] || "";
       const result = (await spacesFetch(
         `/api/internal/canvas/view/${encodeURIComponent(viewAccessId)}`,
         {
@@ -4941,7 +5027,7 @@ const spacesEditCanvas: ToolDef = {
       if (!viewAccessId) return err("viewAccessId is required");
       if (!content) return err("content is required");
 
-      const s2sKey = process.env["INTERNAL_S2S_KEY"] ?? "";
+      const s2sKey = process.env["INTERNAL_S2S_KEY"] || process.env["XYNE_CLAW_S2S_KEY"] || "";
       const result = (await spacesFetch(
         `/api/internal/canvas/view/${encodeURIComponent(viewAccessId)}`,
         {
@@ -5192,6 +5278,9 @@ const spacesCreateCanvas: ToolDef = {
   name: "spaces-create-canvas",
   description:
     "Create a new canvas in Xyne Spaces from markdown content. " +
+    "Use it for documents the user should keep: notes, specs, summaries and architecture write-ups. " +
+    "A ```mermaid fenced block renders as a live diagram in the canvas, so put flowcharts, sequence diagrams and " +
+    "architecture diagrams in one. " +
     "Returns the canvas URL and viewAccessId. " +
     "The user will be set as an OWNER of the canvas.",
   inputSchema: {
@@ -5210,6 +5299,16 @@ const spacesCreateCanvas: ToolDef = {
         enum: ["PUBLIC", "PRIVATE"],
         description: "Visibility: PUBLIC (team-visible) or PRIVATE (invite-only). Default: PRIVATE",
       },
+      channelId: {
+        type: "string",
+        description:
+          "Hub channel to file the canvas in. Use the channelId from the run's open-surface context when the user is working in a hub, so the canvas lands where they are rather than unfiled.",
+      },
+      sdlcFolderId: {
+        type: "string",
+        description:
+          "Folder inside that hub to file the canvas in. Use the folderId from the run's open-surface context; requires channelId.",
+      },
     },
     required: ["title", "markdown"],
   },
@@ -5217,6 +5316,8 @@ const spacesCreateCanvas: ToolDef = {
       const title = String(args["title"] ?? "").trim();
       const markdown = String(args["markdown"] ?? "");
       const visibility = String(args["visibility"] ?? "PRIVATE");
+      const channelId = String(args["channelId"] ?? "").trim();
+      const sdlcFolderId = String(args["sdlcFolderId"] ?? "").trim();
 
       if (!title) return err("Title is required");
       if (!markdown) return err("Markdown content is required");
@@ -5227,6 +5328,8 @@ const spacesCreateCanvas: ToolDef = {
           title,
           markdown,
           visibility: visibility === "PUBLIC" ? "PUBLIC" : "PRIVATE",
+          ...(channelId ? { channelId } : {}),
+          ...(channelId && sdlcFolderId ? { sdlcFolderId } : {}),
         }),
       })) as {
         id: string;
@@ -5242,6 +5345,7 @@ const spacesCreateCanvas: ToolDef = {
         prefixChunk(1, "Canvas created successfully!", [
           ``,
           `Title: ${data.title}`,
+          ...(channelId && sdlcFolderId ? [`Filed in the hub folder the user is working in.`] : []),
           `URL: ${data.url}`,
           `Visibility: ${data.visibility}`,
           `View Access ID: ${data.viewAccessId}`,
@@ -9009,6 +9113,7 @@ export const tools: ToolDef[] = [
   spacesUpdateTicket,
   spacesUpdateBulkTickets,
   spacesScheduleCall,
+  spacesStartCall,
   spacesReadCanvas,
   spacesEditCanvas,
   spacesTriggerAgent,

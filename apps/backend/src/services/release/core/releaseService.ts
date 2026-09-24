@@ -53,8 +53,8 @@ export interface ApplicationMatchSummaryRow {
 export interface ReleaseResult {
 	results: CommitAnalysisResult[];
 	affectedApplications: AffectedApplicationInfo[];
-	migrationLinks: Array<{ filePath: string; diffUrl: string }>;
-	envChanges: Array<{ fileName: string; filePath: string; newValue: string; commitId?: string }>;
+	migrationLinks: Array<{ filePath: string; diffUrl: string; applicationId?: string }>;
+	envChanges: Array<{ fileName: string; filePath: string; newValue: string; commitId?: string; applicationId?: string }>;
 	/** Empty when commit range has no file changes; otherwise one row per app. */
 	appMatchSummary: ApplicationMatchSummaryRow[];
 }
@@ -232,23 +232,13 @@ export class ReleaseService {
 		logger.info(`[Release] Provisioned ${provisionedCount} of ${apps.length} affected applications`);
 
 		// Step 4: ART rows (only for app × dev-ticket pairs the PR actually touched).
-		// On a hotfix delta run, every non-boundary dev ticket is flagged isHotfix
-		// (the boundary = the frozen release head, a main PR). Release-scoped: the
-		// dev ticket's own type stays untouched.
-		const hotfixBoundaryCommits =
-			isHotFix && 'deployedCommitId' in analyzeRequest
-				? new Set(
-						analyzeRequest.deployedCommitId
-							.split(',')
-							.map(c => c.trim())
-							.filter(Boolean),
-					)
-				: null;
+		// On a hotfix delta run every dev ticket is flagged isHotfix; the dev
+		// ticket's own type stays untouched.
 		const recordsToCreate = buildApplicationReleaseTicketMappings(
 			results,
 			affectedApplications,
 			currentTicketId,
-			hotfixBoundaryCommits,
+			Boolean(isHotFix),
 		);
 		if (recordsToCreate.length > 0) {
 			try {

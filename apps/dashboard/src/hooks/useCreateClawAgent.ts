@@ -118,7 +118,7 @@ export const useCreateClawAgent = (): UseMutationResult<Agent, Error, WizardSubm
     onSuccess: agent => {
       void queryClient.invalidateQueries({ queryKey: ['claw-auth-agents', userId] });
       toast.success('Agent created');
-      void navigate(detailPath(agent.slug));
+      void navigate(detailPath(agent.slug), { state: { justCreated: true } });
     },
     onError: err => {
       // Agent exists but config failed: land the user on the detail screen so

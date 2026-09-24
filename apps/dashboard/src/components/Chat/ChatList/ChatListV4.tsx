@@ -63,6 +63,8 @@ export type ChatListProps = {
    * makes the middle state indistinguishable from the first.
    */
   loadingFallback?: React.ReactNode;
+  // Reports the virtualizer's real total content height (px) whenever it changes.
+  onTotalHeightChange?: (height: number) => void;
 };
 
 type Anchor = {
@@ -221,6 +223,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
   unreadsOnly,
   onThreadClick,
   loadingFallback,
+  onTotalHeightChange,
 }) => {
   // Save scroll position when unmounting due to /browser fullscreen navigation.
   useEffect(() => {
@@ -434,6 +437,15 @@ const ChatListV4: React.FC<ChatListProps> = ({
     const isLastFewItems = item.index >= instance.options.count - 5;
     return (isNearBottom && isLastFewItems) || virtualizer.scrollDirection === 'backward';
   };
+
+  const lastReportedTotalHeightRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!onTotalHeightChange) return;
+    const totalHeight = virtualizer.getTotalSize();
+    if (lastReportedTotalHeightRef.current === totalHeight) return;
+    lastReportedTotalHeightRef.current = totalHeight;
+    onTotalHeightChange(totalHeight);
+  });
 
   const virtualItems = virtualizer.getVirtualItems();
   const isConversationFullyVisible = useCallback(

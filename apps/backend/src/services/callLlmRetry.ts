@@ -45,6 +45,11 @@ export interface ExecuteStreamingLlmOptions {
   systemPrompt?: string;
   operation: string;
   callId?: string;
+  /**
+   * Resolve org LLM credentials for this user instead of the call's creator. Needed
+   * when there is no real call behind the request (e.g. a template-selection preview).
+   */
+  userId?: string;
   abortSignal?: AbortSignal;
   /**
    * Which model tier to use for this request: 'fast' (default) or 'thinking'.
@@ -222,10 +227,13 @@ export async function executeCallLlmWithRetry(
  * Returns null when no credential is available (service's env fallback
  * also empty).
  */
-async function resolveStreamingLlmCreds(callId?: string): Promise<StreamingLlmCreds | null> {
-  let userId: string | null = null;
+async function resolveStreamingLlmCreds(
+  callId?: string,
+  requestUserId?: string,
+): Promise<StreamingLlmCreds | null> {
+  let userId: string | null = requestUserId ?? null;
 
-  if (callId) {
+  if (!userId && callId) {
     try {
       userId =
         (await repositories.calls.findByExternalId(callId))?.createdByUserId ?? null;
@@ -300,7 +308,7 @@ export async function executeStreamingLlmRequest(
     return { ok: false, reason: 'cancelled' };
   }
 
-  const creds = await resolveStreamingLlmCreds(options.callId);
+  const creds = await resolveStreamingLlmCreds(options.callId, options.userId);
 
   if (!creds) {
     logger.warn(`[${callId}] ${options.operation}_skipped`, {

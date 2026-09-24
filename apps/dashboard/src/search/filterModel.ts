@@ -47,6 +47,8 @@ export interface SearchResultsFilters {
   // Bare @user / #channel mention filters (no prefix) — searched as message mentions.
   mentionUserIds: string[];
   mentionChannelIds: string[];
+  // Picked @user-group mention filter — searched as message group-mentions (Vespa `groupMentions`).
+  mentionUserGroupIds: string[];
   // Ticket power-filters. Typed syntax (`status:`, `board:`, …) still works and feeds the
   // same backend fields; these carry the values picked in the Filters popover.
   priority: string;
@@ -78,6 +80,7 @@ export const DEFAULT_SEARCH_FILTERS: SearchResultsFilters = {
   withUserIds: [],
   mentionUserIds: [],
   mentionChannelIds: [],
+  mentionUserGroupIds: [],
   priority: '',
   statuses: [],
   boardIds: [],

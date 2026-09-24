@@ -5,7 +5,8 @@ import Tooltip from '../../ui/Tooltip';
 import { HoverCard } from '../../ui/HoverCard/HoverCard';
 import { TicketHoverCard } from './TicketHoverCard';
 import { PriorityPicker } from '../TicketListView/PriorityPicker';
-import { AssigneePicker } from '../TicketListView/AssigneePicker';
+import { UserSelector } from '../CreateTicketModal/UserSelector';
+import { useTicketAssignee, resolveAssigneeRef } from '../../../hooks/useTicketAssignee';
 import { StatusPicker, DueDatePicker, LabelPicker } from './TicketListRowPickers';
 
 export type SubTicketProgress = { done: number; total: number };
@@ -58,6 +59,8 @@ export const TicketListRow: React.FC<TicketListRowProps> = ({
   onOpen,
 }) => {
   const createdShort = shortDate(ticket.createdAt);
+  const assignee = resolveAssigneeRef(ticket.assignedTo, ticket.userGroupId);
+  const onAssign = useTicketAssignee(ticket.id, assignee);
   const ageDays = (() => {
     if (!visibleColumns.has('age') || !ticket.createdAt) return null;
     const created = new Date(ticket.createdAt);
@@ -184,6 +187,14 @@ export const TicketListRow: React.FC<TicketListRowProps> = ({
           </HoverCard>
         )}
 
+        {visibleColumns.has('merchantId') && ticket.merchantId && (
+          <Tooltip content={`Merchant ID: ${ticket.merchantId}`}>
+            <span className='max-w-[140px] truncate rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground'>
+              {ticket.merchantId}
+            </span>
+          </Tooltip>
+        )}
+
         {ageDays !== null && ageDays > 0 && (
           <Tooltip content={`Age: ${ageDays} day${ageDays === 1 ? '' : 's'} since created`}>
             <span className='text-xs text-muted-foreground'>{ageDays}d</span>
@@ -200,12 +211,12 @@ export const TicketListRow: React.FC<TicketListRowProps> = ({
         )}
 
         {visibleColumns.has('assignee') && (
-          <AssigneePicker
-            ticketId={ticket.id}
-            assignedTo={
-              ticket.assignedTo ?? (ticket.userGroupId ? `group:${ticket.userGroupId}` : null)
-            }
+          <UserSelector
+            selectedUserId={assignee.userId}
+            assignedGroupId={assignee.groupId}
+            onUserSelect={onAssign}
             channelId={ticket.channelId}
+            variant='compact'
           />
         )}
 

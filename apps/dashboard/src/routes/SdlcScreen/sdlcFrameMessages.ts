@@ -17,6 +17,8 @@ export const SDLC_FRAME_MESSAGE = {
   embedControl: 'xyne:sdlc-frame:embed-control',
   embedRelease: 'xyne:sdlc-frame:embed-release',
   embedState: 'xyne:sdlc-frame:embed-state',
+  embedScript: 'xyne:sdlc-frame:embed-script',
+  embedEvent: 'xyne:sdlc-frame:embed-event',
 } as const;
 
 export interface SdlcFrameNavigateMessage {
@@ -33,7 +35,7 @@ export interface SdlcFrameReadyMessage {
   type: typeof SDLC_FRAME_MESSAGE.ready;
 }
 
-/** Frame → parent: destroy this frame and mount a fresh one at the SDLC root. */
+/** Frame → parent: destroy this frame and mount a fresh one; the host picks the boot path. */
 export interface SdlcFrameResetMessage {
   type: typeof SDLC_FRAME_MESSAGE.reset;
 }
@@ -63,7 +65,9 @@ export type SdlcFrameMessage =
   | SdlcFrameEmbedPageMessage
   | SdlcFrameEmbedControlMessage
   | SdlcFrameEmbedReleaseMessage
-  | SdlcFrameEmbedStateMessage;
+  | SdlcFrameEmbedStateMessage
+  | SdlcFrameEmbedScriptMessage
+  | SdlcFrameEmbedEventMessage;
 
 /**
  * Frame → parent: open this url the way the app opens links. The lane is an
@@ -107,6 +111,24 @@ export interface SdlcFrameEmbedControlMessage {
   url?: string;
   /** Present for 'select' and 'close'. */
   tabId?: string;
+}
+
+/**
+ * Frame → parent: drive the annotator inside the held page. The page is the
+ * host's web contents, so only the host can evaluate in it; the lane sends the
+ * same messages the annotator's in-page script already understands.
+ */
+export interface SdlcFrameEmbedScriptMessage {
+  type: typeof SDLC_FRAME_MESSAGE.embedScript;
+  /** An `xyne-doc-host` message, forwarded verbatim into the page. */
+  payload: Record<string, unknown>;
+}
+
+/** Parent → frame: something the annotator in the held page reported. */
+export interface SdlcFrameEmbedEventMessage {
+  type: typeof SDLC_FRAME_MESSAGE.embedEvent;
+  /** An `xyne-doc` message from the page, or `{ type: 'ready' }`. */
+  payload: Record<string, unknown>;
 }
 
 /**
@@ -212,6 +234,12 @@ export function parseSdlcFrameMessage(data: unknown): SdlcFrameMessage | null {
 
   if (type === SDLC_FRAME_MESSAGE.embedRelease) {
     return { type };
+  }
+
+  if (type === SDLC_FRAME_MESSAGE.embedScript || type === SDLC_FRAME_MESSAGE.embedEvent) {
+    const { payload } = data;
+    if (!isRecord(payload) || typeof payload['type'] !== 'string') return null;
+    return { type, payload };
   }
 
   if (type === SDLC_FRAME_MESSAGE.embedControl) {
