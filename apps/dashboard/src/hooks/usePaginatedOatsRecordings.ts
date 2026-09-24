@@ -9,9 +9,7 @@ export type OatsRecordingScope = 'all' | 'created' | 'shared';
  * A row from either tab. `shares` only comes down on the shared tab — a created
  * recording is owned outright, so its level never depends on a grant.
  */
-export type OatsRecordingEntry = QueryResultType<
-  typeof queries.createdOatsRecordings
->[number] & {
+export type OatsRecordingEntry = QueryResultType<typeof queries.createdOatsRecordings>[number] & {
   shares?: QueryResultType<typeof queries.sharedOatsRecordings>[number]['shares'];
 };
 
