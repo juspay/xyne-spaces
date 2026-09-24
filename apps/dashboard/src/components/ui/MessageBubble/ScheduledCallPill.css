@@ -1,0 +1,31 @@
+/* Palette tokens for ScheduledCallPill (Oats design system). Not mapped to
+   Tailwind theme tokens because this surface has its own neutral ramp and
+   call-green family; mapping onto --foreground/--muted loses the look.
+   All layout uses Tailwind classes directly on the elements. */
+.xs-cc-scope {
+  --cc-bg: #ffffff;
+  --cc-bg2: #f7f8f9;
+  --cc-bd: #e4e7ea;
+  --cc-t1: #1f2329;
+  --cc-t2: #3a4048;
+  --cc-t4: #858c95;
+  --cc-t5: #9ca3ab;
+  --cc-t6: #b3b9c0;
+  /* Call green — the design system's --call family, not --status-success. */
+  --cc-call: #57ab03;
+  --cc-call-hover: #4a9103;
+  --cc-call-text: #3f7a05;
+  --cc-call-bg: rgba(87, 171, 3, 0.07);
+  --cc-call-bd: rgba(87, 171, 3, 0.3);
+}
+
+[data-theme="midnight"] .xs-cc-scope {
+  --cc-bg: #1b1e22;
+  --cc-bg2: #24282d;
+  --cc-bd: #363b42;
+  --cc-t1: #e8eaed;
+  --cc-t2: #c6cbd1;
+  --cc-t4: #7f868e;
+  --cc-t5: #6a7178;
+  --cc-t6: #575e66;
+}
