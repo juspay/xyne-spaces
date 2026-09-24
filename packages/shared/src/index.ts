@@ -2,7 +2,14 @@
 export * from './zero/schema';
 export * from './zero/audit';
 export { defineQuery } from './zero/acl';
-export { EncryptedFieldQueryError, validateQueryWhereClause, type EncryptedTableConfig } from './zero/query-validation';
+export {
+  EncryptedFieldQueryError,
+  validateQueryWhereClause,
+  encryptionScopeNeedsChannelId,
+  isChannelInEncryptionScope,
+  type EncryptedChannelScope,
+  type EncryptedTableConfig,
+} from './zero/query-validation';
 export * from './ai';
 export * from './dashboard';
 export * from './types/activity';

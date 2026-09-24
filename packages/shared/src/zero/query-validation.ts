@@ -9,10 +9,34 @@ interface QueryAST {
   where?: Condition;
 }
 
+/**
+ * Which channels a table's fields are encrypted at rest for:
+ * `null` = never, `'all'` = every channel, `string[]` = only rows in those channels.
+ * Encryption-side only: decryption is driven by the `ENC:` prefix on the value,
+ * so narrowing the scope leaves already-encrypted rows readable.
+ */
+export type EncryptedChannelScope = 'all' | string[] | null;
+
 /** Per-table encrypted-fields config, as served by the backend's /encryption/public-key. */
 export interface EncryptedTableConfig {
   fields: string[];
   enforceClientEncryption: boolean;
+  channelIds: EncryptedChannelScope;
+}
+
+/** True when deciding needs the row's channelId, i.e. the scope is a channel list. */
+export function encryptionScopeNeedsChannelId(scope: EncryptedChannelScope): boolean {
+  return Array.isArray(scope);
+}
+
+/** Whether a row in `channelId` falls inside the table's encryption scope. */
+export function isChannelInEncryptionScope(
+  scope: EncryptedChannelScope,
+  channelId: string | null | undefined,
+): boolean {
+  if (scope === null) return false;
+  if (scope === 'all') return true;
+  return typeof channelId === 'string' && scope.includes(channelId);
 }
 
 export class EncryptedFieldQueryError extends Error {

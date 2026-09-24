@@ -4,7 +4,14 @@ export * from './audit';
 export { schema, type Schema, type Context } from './schema';
 export { DelayedMessageStatus, AttachmentUploadStatus } from './schema';
 export { zql } from './builder';
-export { EncryptedFieldQueryError, validateQueryWhereClause, type EncryptedTableConfig } from './query-validation';
+export {
+  EncryptedFieldQueryError,
+  validateQueryWhereClause,
+  encryptionScopeNeedsChannelId,
+  isChannelInEncryptionScope,
+  type EncryptedChannelScope,
+  type EncryptedTableConfig,
+} from './query-validation';
 export { queries } from './queries';
 export { mutators, type AuthData } from './mutators';
 export { stringFromFormValue } from '../tickets/utils';
