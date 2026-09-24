@@ -4773,7 +4773,11 @@ export const mutators = defineMutators({
           .optional(),
         // Full desired set of group roles per user. Multiple roles supported: each roleId
         // becomes a user_role_mappings row scoped entityType=USER_GROUP/entityId=userGroupId.
-        userRoleUpdates: z.record(z.string(), z.array(z.string())).optional(),
+        // Backward compatible: accepts the legacy single-role shape (userId -> roleId) and the
+        // new multi-role shape (userId -> roleId[]); both are normalized to an array below.
+        userRoleUpdates: z
+          .record(z.string(), z.union([z.string(), z.array(z.string())]))
+          .optional(),
         timestamp: z.number(),
       }),
       async ({
@@ -4806,7 +4810,12 @@ export const mutators = defineMutators({
           // Reads union user_role_mappings(USER_GROUP) with the legacy ugm.roleId; adds go to
           // user_role_mappings only; removes delete the URM row AND clear a matching legacy
           // ugm.roleId/responsibility so it can't linger in the union as a ghost role.
-          const allDesiredRoleIds = [...new Set(Object.values(userRoleUpdates).flat())];
+          // Normalize both the legacy (string) and new (string[]) shapes to an array.
+          const normalizedUpdates: Record<string, string[]> = {};
+          for (const [uid, val] of Object.entries(userRoleUpdates)) {
+            normalizedUpdates[uid] = Array.isArray(val) ? val : [val];
+          }
+          const allDesiredRoleIds = [...new Set(Object.values(normalizedUpdates).flat())];
           const validRoles = allDesiredRoleIds.length
             ? await tx.run(
                 zql.roles.where('id', 'IN', allDesiredRoleIds).where('workspaceId', ctx.workspaceId),
@@ -4814,7 +4823,7 @@ export const mutators = defineMutators({
             : [];
           const validRoleIds = new Set(validRoles.map(r => r.id));
 
-          for (const [userId, desiredRaw] of Object.entries(userRoleUpdates)) {
+          for (const [userId, desiredRaw] of Object.entries(normalizedUpdates)) {
             const desired = new Set(desiredRaw.filter(rid => validRoleIds.has(rid)));
 
             const mapping = await tx.run(

@@ -12,9 +12,10 @@ import { aclAuditService } from '@/services/aclAuditService';
 
 export interface CreateUserGroupWithUsersInput extends CreateUserGroupInput {
   userIds?: string[];
-  // userId -> the roleIds to assign that user in this group. Written to user_role_mappings
-  // (entityType=USER_GROUP), NOT to the legacy user_group_mappings.roleId column.
-  userRoleUpdates?: Record<string, string[]>;
+  // userId -> the roleId(s) to assign that user in this group. Written to user_role_mappings
+  // (entityType=USER_GROUP), NOT to the legacy user_group_mappings.roleId column. Backward
+  // compatible: a value may be a single roleId (legacy) or an array of roleIds.
+  userRoleUpdates?: Record<string, string | string[]>;
 }
 
 export class UserGroupRepository extends BaseRepository<UserGroup, CreateUserGroupInput, UpdateUserGroupInput> {
@@ -94,8 +95,10 @@ export class UserGroupRepository extends BaseRepository<UserGroup, CreateUserGro
         // Assign roles via user_role_mappings(entityType=USER_GROUP). One row per (user, role).
         if (data.userRoleUpdates) {
           const now = new Date();
-          const roleRows = memberUserIds.flatMap(userId =>
-            (data.userRoleUpdates?.[userId] ?? []).map(roleId => ({
+          const roleRows = memberUserIds.flatMap(userId => {
+            const raw = data.userRoleUpdates?.[userId];
+            const roleIds = raw === undefined ? [] : Array.isArray(raw) ? raw : [raw];
+            return roleIds.map(roleId => ({
               workspaceId: userGroup.workspaceId,
               userId,
               roleId,
@@ -103,8 +106,8 @@ export class UserGroupRepository extends BaseRepository<UserGroup, CreateUserGro
               entityId: userGroup.id,
               createdAt: now,
               updatedAt: now,
-            })),
-          );
+            }));
+          });
           if (roleRows.length > 0) {
             await tx.userRoleMapping.createMany({ data: roleRows, skipDuplicates: true });
           }
