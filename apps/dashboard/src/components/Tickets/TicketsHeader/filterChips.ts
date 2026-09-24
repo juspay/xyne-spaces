@@ -127,11 +127,13 @@ const dynamicValue = (
 ): { operator: string; value: string; mono?: boolean } => {
   if (!raw) return { operator: 'is', value: 'any' };
   if (!Array.isArray(raw)) return { ...dateClause(raw.start, raw.end), mono: true };
-  if (field.fieldType === FormFieldType.STRING) {
-    return { operator: 'contains', value: raw[0] ?? 'any', mono: true };
-  }
-  if (field.fieldType === FormFieldType.NUMBER) {
-    return { operator: 'equals', value: raw[0] ?? 'any', mono: true };
+  if (field.fieldType === FormFieldType.STRING || field.fieldType === FormFieldType.NUMBER) {
+    // Several values are exact picks matched as OR; a lone one is still the typed match.
+    if (raw.length > 1) {
+      return { operator: 'is any of', value: summarize(raw, 'values'), mono: true };
+    }
+    const operator = field.fieldType === FormFieldType.STRING ? 'contains' : 'equals';
+    return { operator, value: raw[0] ?? 'any', mono: true };
   }
   if (field.fieldType === FormFieldType.BOOLEAN) {
     return {

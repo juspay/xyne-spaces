@@ -200,6 +200,7 @@ import { decryptRequestBodyMiddleware, encryptResponseBodyMiddleware } from './m
 import internalRoutes from '@/routes/internal';
 import collectionsRoutes from '@/routes/collections';
 import merchantRoutes from '@/routes/merchants';
+import formFieldValuesRoutes from '@/routes/formFieldValues';
 import officeConversionRoutes from '@/routes/officeConversion';
 import sdlcRoutes from '@/routes/sdlc';
 import sdlcClawRoutes from '@/routes/sdlcClaw';
@@ -742,6 +743,7 @@ export class App {
     // Collections routes
     this.app.use('/api/collections', authMiddleware.authenticate, collectionsRoutes);
     this.app.use('/api/merchants', authMiddleware.authenticate, merchantRoutes);
+    this.app.use('/api/form-field-values', authMiddleware.authenticate, formFieldValuesRoutes);
 
     // Office document (pptx, docx, ...) -> PDF conversion, via LibreOffice.
     // Stateless: takes uploaded bytes, returns converted bytes, touches no stored data.

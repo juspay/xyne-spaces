@@ -3,6 +3,7 @@ import * as PopoverPrimitive from '@radix-ui/react-popover';
 import {
   CheckTickSingle as Check,
   ChevronDown,
+  ChevronRight,
   DownloadDown as Download,
   LayerTwo as Layers,
   PlusDefault as Plus,
@@ -28,7 +29,7 @@ import {
   resolveDynamicFields,
   type FilterFieldDef,
 } from './filterChips';
-import { groupByChoices, groupByLabel, optionKey } from './groupBy';
+import { groupByLabel, optionKey, splitGroupByChoices } from './groupBy';
 import type { TicketsHeaderProps } from './TicketsHeader.types';
 
 const rowPillClass =
@@ -85,6 +86,7 @@ export const TicketsHeader = (props: TicketsHeaderProps): ReactElement => {
   const [openChipId, setOpenChipId] = useState<string | null>(null);
   const [pendingField, setPendingField] = useState<FilterFieldDef | null>(null);
   const [groupOpen, setGroupOpen] = useState(false);
+  const [groupCustomOpen, setGroupCustomOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
 
   const dynamicFields = useMemo(
@@ -153,6 +155,14 @@ export const TicketsHeader = (props: TicketsHeaderProps): ReactElement => {
 
   const groupLabel = groupByLabel(props.groupBy, props.groupingOptions);
   const activeGroupKey = optionKey(props.groupBy);
+  const {
+    standard: standardGroupChoices,
+    customFields: customGroupChoices,
+    activeCustom: activeCustomGroup,
+  } = useMemo(
+    () => splitGroupByChoices(props.groupingOptions, activeGroupKey),
+    [props.groupingOptions, activeGroupKey],
+  );
   const showGroupPill = showFilters && props.layoutView === 'kanban';
 
   const countLabel =
@@ -459,7 +469,13 @@ export const TicketsHeader = (props: TicketsHeaderProps): ReactElement => {
           )}
           <div className='flex-1' />
           {showGroupPill && (
-            <PopoverPrimitive.Root open={groupOpen} onOpenChange={setGroupOpen}>
+            <PopoverPrimitive.Root
+              open={groupOpen}
+              onOpenChange={next => {
+                setGroupOpen(next);
+                if (!next) setGroupCustomOpen(false);
+              }}
+            >
               <PopoverPrimitive.Trigger asChild>
                 <button
                   type='button'
@@ -484,7 +500,7 @@ export const TicketsHeader = (props: TicketsHeaderProps): ReactElement => {
                   sideOffset={6}
                   className={cn(menuClass, 'w-[196px] rounded-[9px]')}
                 >
-                  {groupByChoices(props.groupingOptions).map(choice => {
+                  {standardGroupChoices.map(choice => {
                     const active = choice.key === activeGroupKey;
                     return (
                       <button
@@ -493,6 +509,7 @@ export const TicketsHeader = (props: TicketsHeaderProps): ReactElement => {
                         onClick={() => {
                           props.onGroupByChange(choice.value);
                           setGroupOpen(false);
+                          setGroupCustomOpen(false);
                         }}
                         className={cn(menuRowClass, active && 'font-semibold text-foreground')}
                         data-testid={`group-by-${choice.testId}`}
@@ -504,6 +521,72 @@ export const TicketsHeader = (props: TicketsHeaderProps): ReactElement => {
                       </button>
                     );
                   })}
+                  {customGroupChoices.length > 0 && (
+                    <PopoverPrimitive.Root open={groupCustomOpen} onOpenChange={setGroupCustomOpen}>
+                      <PopoverPrimitive.Trigger asChild>
+                        <button
+                          type='button'
+                          className={cn(
+                            menuRowClass,
+                            (groupCustomOpen || activeCustomGroup) && 'text-foreground',
+                            activeCustomGroup && 'font-semibold',
+                          )}
+                          data-testid='group-by-custom-fields'
+                          data-track-category='Tickets'
+                          data-track-name='OpenGroupByCustomFields'
+                          data-track-metadata={JSON.stringify({
+                            fieldCount: customGroupChoices.length,
+                          })}
+                        >
+                          <span className='min-w-0 flex-1 truncate'>Custom fields</span>
+                          {activeCustomGroup && (
+                            <span className='max-w-[80px] truncate text-[11px] text-muted-foreground'>
+                              {activeCustomGroup.label}
+                            </span>
+                          )}
+                          <ChevronRight className='size-[11px] shrink-0 opacity-60' />
+                        </button>
+                      </PopoverPrimitive.Trigger>
+                      <PopoverPrimitive.Portal>
+                        <PopoverPrimitive.Content
+                          side='left'
+                          align='start'
+                          sideOffset={6}
+                          collisionPadding={12}
+                          onOpenAutoFocus={e => e.preventDefault()}
+                          // Opens left: this pill sits at the header's right edge.
+                          className={cn(menuClass, 'z-[70] w-[196px] rounded-[9px]')}
+                        >
+                          <div className='max-h-[306px] overflow-y-auto'>
+                            {customGroupChoices.map(choice => {
+                              const active = choice.key === activeGroupKey;
+                              return (
+                                <button
+                                  key={choice.key}
+                                  type='button'
+                                  onClick={() => {
+                                    props.onGroupByChange(choice.value);
+                                    setGroupCustomOpen(false);
+                                    setGroupOpen(false);
+                                  }}
+                                  className={cn(
+                                    menuRowClass,
+                                    active && 'font-semibold text-foreground',
+                                  )}
+                                  data-testid={`group-by-${choice.testId}`}
+                                  data-track-category='Tickets'
+                                  data-track-name='SetGroupBy'
+                                >
+                                  <span className='min-w-0 flex-1 truncate'>{choice.label}</span>
+                                  {active && <Check className='size-[13px]' />}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </PopoverPrimitive.Content>
+                      </PopoverPrimitive.Portal>
+                    </PopoverPrimitive.Root>
+                  )}
                 </PopoverPrimitive.Content>
               </PopoverPrimitive.Portal>
             </PopoverPrimitive.Root>

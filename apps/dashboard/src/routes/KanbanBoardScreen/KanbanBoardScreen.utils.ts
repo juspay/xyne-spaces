@@ -538,7 +538,12 @@ export const groupTicketsByFormField = (
   const groups: Record<string, Ticket[]> = {};
 
   tickets.forEach(ticket => {
-    const formValues = formValuesByTicketId.get(ticket.id) || [];
+    const formValues = formValuesByTicketId.get(ticket.id);
+    // No entry means the values were never loaded, which is "unknown", not "has no value".
+    // Grouping it under No Value would invent a membership — and since opening a group is
+    // what loads these rows, the bucket would gain a ticket per group opened. The group list
+    // and counts come from the server, so leaving it ungrouped costs nothing.
+    if (!formValues) return;
     const fieldEntry = formValues.find(v => v.fieldId === fieldId);
 
     // Use actualFieldValue which contains the properly typed value
@@ -637,7 +642,11 @@ export const extractBoardFormFields = (
 };
 
 /**
- * Extracts form fields eligible for grouping (SINGLE_SELECT, MULTI_SELECT, USER)
+ * Extracts form fields eligible for grouping (SINGLE_SELECT, MULTI_SELECT, USER, STRING).
+ *
+ * STRING groups through the same scalar path as SINGLE_SELECT — grouping, counts and the
+ * Vespa token treat the two identically. DATE and BOOLEAN stay out: a column per timestamp
+ * is no use, and BOOLEAN reads better as a filter.
  */
 export const extractGroupableFormFields = (
   filters: TicketFilters,
@@ -648,7 +657,8 @@ export const extractGroupableFormFields = (
     field =>
       field.fieldType === FormFieldType.SINGLE_SELECT ||
       field.fieldType === FormFieldType.MULTI_SELECT ||
-      field.fieldType === FormFieldType.USER,
+      field.fieldType === FormFieldType.USER ||
+      field.fieldType === FormFieldType.STRING,
   );
 };
 
