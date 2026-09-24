@@ -8,6 +8,8 @@ import {
 } from '../../../hooks/useChannels';
 import { useDragAndDropAreaRef } from '../../../hooks/useDragAndDropAreaRef';
 import { useConversationTabs } from './ConversationPannel.utils';
+import { appIdOf } from '../../../hooks/barItems';
+import { ArtifactAppHost } from '../../ArtifactApp/ArtifactAppHost';
 import { useChannelSubscription } from '../../../hooks/useChannelSubscription';
 import { useScope, useShortcutById } from '../../../shortcuts';
 import { ChannelVisibility, ChannelScopeType } from '@xyne/shared';
@@ -185,8 +187,12 @@ const ConversationPanelV2 = ({
     setSearchParams(next, { replace: true });
   }, [channelId, searchParams, setSearchParams]);
 
-  // Get dynamic tabs based on permissions and channel scope type
-  const { availableTabs, getDefaultTab, isValidTab } = useConversationTabs(channel?.scopeType);
+  // Get this channel's tabs — its own customized set where allowed, otherwise
+  // the built-in list.
+  const { availableTabs, getDefaultTab, isValidTab } = useConversationTabs(
+    channelId,
+    channel?.scopeType,
+  );
 
   const urlHashValue = location.hash.match(/origin=([^&#]+)/);
 
@@ -380,6 +386,23 @@ const ConversationPanelV2 = ({
           {tab === 'canvas' &&
             (canvasId ? <CanvasScreen canvasId={canvasId} /> : <CanvasTab channelId={channelId} />)}
           {tab === 'links' && <LinksTab channelId={channelId} />}
+          {appIdOf(tab) !== null && (
+            // An artifact app the user added as a tab. Keyed on the app so
+            // switching between two app tabs boots a fresh sandbox instead of
+            // handing one app's iframe another app's payload.
+            <ArtifactAppHost
+              key={tab}
+              appId={appIdOf(tab) ?? ''}
+              placement={{
+                surface: 'channel',
+                channel: {
+                  id: channelId,
+                  name: channel?.name ?? '',
+                  scopeType: channel?.scopeType ?? '',
+                },
+              }}
+            />
+          )}
         </div>
       </div>
     </ConversationTabContext.Provider>

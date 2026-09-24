@@ -5,6 +5,7 @@ import { artifactAppPayloadUrl } from '../../../services/claw/artifactAppsServic
 import { clawRequest } from '../../../services/claw/clawRequest';
 import { SHADCN_FILES, SHADCN_DEPENDENCIES } from './shadcnPreamble.generated';
 import { XYNE_DATA_RUNTIME_CODE, XYNE_DATA_RUNTIME_PATH } from './xyneDataRuntime';
+import { XYNE_CONTEXT_RUNTIME_CODE, XYNE_CONTEXT_RUNTIME_PATH } from './xyneContextRuntime';
 
 /** Bundler entry Sandpack boots from. Distinct from the artifact's `entry`,
  *  which names the root *component* file. */
@@ -155,6 +156,10 @@ export function toSandpackFiles(
   // Always injected: the synthesized entry imports it for the root boundary,
   // and a stray import from agent code can never break the build.
   files[XYNE_DATA_RUNTIME_PATH] = { code: XYNE_DATA_RUNTIME_CODE, hidden: true };
+  // Same rule for the context runtime: the CLI scaffolds its own dev copy of
+  // this path (a surface switcher, since there is no host locally), and the real
+  // one must win here.
+  files[XYNE_CONTEXT_RUNTIME_PATH] = { code: XYNE_CONTEXT_RUNTIME_CODE, hidden: true };
 
   if (!files[SANDPACK_ENTRY]) {
     files[SANDPACK_ENTRY] = {

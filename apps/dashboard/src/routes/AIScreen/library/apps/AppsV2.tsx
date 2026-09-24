@@ -8,7 +8,7 @@ import { Pin } from 'lucide-react';
 import { AppIcon } from '@/components/AppIcon/AppIcon';
 import UserAvatar, { AvatarShape, AvatarSize } from '@/components/UserAvatar/UserAvatar';
 import { LibraryCard, LibraryIconTile } from '../shared/components/LibraryCard';
-import { usePinnedArtifactApps } from '@/hooks/usePinnedArtifactApps';
+import { useToolbarApps } from '@/hooks/useToolbarApps';
 import {
   LibrarySections,
   LibraryTabShell,
@@ -26,7 +26,7 @@ const AppsV2 = ({ query }: { query: string }): ReactElement => {
   const { workspaceId } = useParams<{ workspaceId?: string }>();
   const prefixWs = (path: string): string => (workspaceId ? `/${workspaceId}${path}` : path);
   const { user } = useAuth();
-  const { isPinned, togglePin, isFull } = usePinnedArtifactApps();
+  const { isPinned, togglePin, isFull } = useToolbarApps();
 
   const mine = useQuery({
     queryKey: ['artifact-apps', 'mine'],
