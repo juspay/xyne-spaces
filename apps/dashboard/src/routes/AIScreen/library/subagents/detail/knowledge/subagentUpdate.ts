@@ -1,8 +1,9 @@
-import { useState } from 'react';
 import { toast } from 'sonner';
 import { useUpdateClawSubagent } from '@/hooks/useClawSubagents';
 import { clawErrorText } from '@/services/claw/clawRequest';
 import type { SubagentDef, SubagentInputBody } from '@/services/claw/clawSubagentsTypes';
+
+const TOAST_ID = 'subagent-save';
 
 export function toSubagentBody(
   def: SubagentDef,
@@ -23,28 +24,20 @@ export function toSubagentBody(
 }
 
 export interface SaveSubagent {
-  save: (patch: Partial<SubagentInputBody>, message: string) => Promise<boolean>;
-  saving: boolean;
+  save: (patch: Partial<SubagentInputBody>, message: string) => Promise<void>;
 }
 
 export function useSaveSubagent(def: SubagentDef): SaveSubagent {
   const update = useUpdateClawSubagent(def.name);
-  const [saving, setSaving] = useState(false);
 
-  const save = async (patch: Partial<SubagentInputBody>, message: string): Promise<boolean> => {
-    if (saving) return false;
-    setSaving(true);
+  const save = async (patch: Partial<SubagentInputBody>, message: string): Promise<void> => {
     try {
       await update.mutateAsync(toSubagentBody(def, patch));
-      toast.success(message);
-      return true;
+      toast.success(message, { id: TOAST_ID });
     } catch (err) {
-      toast.error(clawErrorText(err, 'Could not update this subagent'));
-      return false;
-    } finally {
-      setSaving(false);
+      toast.error(clawErrorText(err, 'Could not update this subagent'), { id: TOAST_ID });
     }
   };
 
-  return { save, saving };
+  return { save };
 }
