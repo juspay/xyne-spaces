@@ -77,6 +77,17 @@ router.post(
   route(async (req, res) => {
     const input = createAppSchema.parse(req.body);
 
+    // Defence-in-depth (same rule install enforces): the workspace the app is
+    // tenant-keyed to must belong to the org the app is scoped to. S2S-trusted
+    // callers should never send a mismatched pair, but the write is cross-org.
+    const workspace = await runAsServiceActor(SYSTEM_USER_ID, input.workspaceId, () =>
+      db.workspace.findUnique({ where: { id: input.workspaceId }, select: { orgId: true } }),
+    );
+    if (!workspace) throw new AppError('Workspace not found', 404);
+    if (workspace.orgId !== input.orgId) {
+      throw new AppError('workspaceId does not belong to orgId', 400);
+    }
+
     // Apps are org-level but carry the creator's workspace as their tenant key — the
     // idempotency lookup must span workspaces or a second workspace would recreate the app.
     const existing = await runAsSystem(() =>
@@ -158,6 +169,28 @@ router.post(
 
     logger.info(`[apps-internal] Created org app ${created.id} (${input.name}) for org ${input.orgId}`);
     res.status(201).json({ id: created.id, signingSecret: decrypt(created.signingSecret), created: true });
+  }),
+);
+
+/**
+ * GET /api/internal/apps/:appId/installations/:workspaceId
+ * Presence check — whether this app has an install row in the given workspace.
+ * Lets claw-auth install exactly the apps a workspace is missing instead of
+ * keying off the sync's `created` flag (which a transient failure can strand).
+ */
+router.get(
+  '/:appId/installations/:workspaceId',
+  route(async (req, res) => {
+    const { appId, workspaceId } = z
+      .object({ appId: z.string().min(1), workspaceId: z.string().min(1) })
+      .parse(req.params);
+
+    const installed = await runAsServiceActor(SYSTEM_USER_ID, workspaceId, () =>
+      repositories.installedApps.findFirst({
+        where: { appId, user: { workspaceId } },
+      }),
+    );
+    res.status(200).json({ installed: Boolean(installed) });
   }),
 );
 
