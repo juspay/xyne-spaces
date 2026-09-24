@@ -115,14 +115,6 @@ const envSchema = Joi.object({
   ENABLE_DELAYED_MESSAGE_WORKER: Joi.boolean().default(false),
   ENABLE_EMAIL_FETCH_WORKER: Joi.boolean().default(false),
   ENABLE_SYNC_ENGINE: Joi.boolean().default(false),
-  // Gates multi-pod materialization ownership (per-group lease + fence + interest). OFF = the
-  // sync engine materializes as a single unfenced owner (correct for exactly one replica); ON
-  // is required before running >1 sync-engine replica. Needs a non-evicting Redis (asserted).
-  ENABLE_SYNC_ENGINE_MULTIPOD: Joi.boolean().default(false),
-  // Per-query serve modes (CAC overlay): ship-with JSON default + optional remote (CAC) endpoint.
-  SYNC_ENGINE_QUERY_MODES: Joi.string().optional(),
-  SYNC_ENGINE_MODES_URL: Joi.string().uri().optional(),
-  SYNC_ENGINE_MODES_POLL_MS: Joi.number().default(30000),
   ENABLE_CALENDAR_SYNC_WORKER: Joi.boolean().default(false),
   ENABLE_SOCIAL_MEDIA_SYNC_WORKER: Joi.boolean().default(false),
 
@@ -789,12 +781,6 @@ export const config = {
   enableDelayedMessageWorker: envVars.ENABLE_DELAYED_MESSAGE_WORKER,
   enableEmailFetchWorker: envVars.ENABLE_EMAIL_FETCH_WORKER,
   enableSyncEngine: envVars.ENABLE_SYNC_ENGINE,
-  enableSyncEngineMultiPod: envVars.ENABLE_SYNC_ENGINE_MULTIPOD,
-  syncEngineModes: {
-    json: envVars.SYNC_ENGINE_QUERY_MODES,
-    url: envVars.SYNC_ENGINE_MODES_URL,
-    pollMs: envVars.SYNC_ENGINE_MODES_POLL_MS,
-  },
   enableCalendarSyncWorker: envVars.ENABLE_CALENDAR_SYNC_WORKER,
   enableSocialMediaSyncWorker: envVars.ENABLE_SOCIAL_MEDIA_SYNC_WORKER,
   deskTicketDebug: envVars.DESK_TICKET_DEBUG as boolean,

@@ -1,5 +1,4 @@
 import { createHash } from 'crypto';
-import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { hashOfNameAndArgs } from './protocol';
 import { PackConnection, type PackConnectionOptions } from './tapConnection';
@@ -98,12 +97,13 @@ interface Instance {
  * instance lands in a stable group across restarts. ACL and data queries are different
  * query-types → always different groups.
  *
- * MULTI-POD (config.enableSyncEngineMultiPod): materialization of a group runs on exactly
+ * MULTI-POD (`deps.multiPod`, default OFF): materialization of a group runs on exactly
  * ONE pod, guarded by a per-group Redis lease + fence (ownership.ts). A subscribing pod
  * registers per-instance INTEREST and only materializes locally if it wins the group lease;
- * every tap write carries the fence token so a zombie ex-owner can't corrupt Redis. With the
- * flag OFF (default) none of that runs — the pod is the sole unfenced owner, correct for a
- * single replica and byte-identical to the pre-multi-pod behavior.
+ * every tap write carries the fence token so a zombie ex-owner can't corrupt Redis. OFF
+ * (the prod topology: one sync-engine replica) runs none of that — the pod is the sole
+ * unfenced owner. The machinery stays test-injectable via `deps.multiPod`; there is no env
+ * toggle (a second replica is a deliberate, code-reviewed change, not a config flip).
  */
 export class InstanceManager {
   readonly #groups = new Map<string, Group>();
@@ -130,7 +130,7 @@ export class InstanceManager {
     this.#zeroCacheUrl = zeroCacheUrl;
     this.#ownership = deps.ownership ?? ownership;
     this.#createConnection = deps.createConnection ?? ((opts) => new PackConnection(opts));
-    this.#multiPod = deps.multiPod ?? config.enableSyncEngineMultiPod;
+    this.#multiPod = deps.multiPod ?? false;
     this.#graceMs = deps.graceMs ?? IDLE_GRACE_MS;
     this.#grantGraceMs = deps.grantGraceMs ?? GRANT_IDLE_GRACE_MS;
     this.#heartbeatMs = deps.heartbeatMs ?? HEARTBEAT_MS;
