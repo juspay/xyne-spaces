@@ -132,8 +132,11 @@ const serializeCanvasCommentMentionedUserIds = (mentionedUserIds: string[]): str
 async function getCanvasThreadCommentCount(
   tx: Transaction<Schema>,
   threadId: string,
+  workspaceId: string,
 ): Promise<number> {
-  const comments = await tx.run(zql.canvas_comments.where('threadId', threadId));
+  const comments = await tx.run(
+    zql.canvas_comments.where('workspaceId', workspaceId).where('threadId', threadId),
+  );
   return comments.filter(comment => comment.deletedAt == null).length;
 }
 
@@ -437,8 +440,11 @@ async function assertCanvasCommentEditAccess(
   tx: Transaction<Schema>,
   canvasId: string,
   userId: string,
+  workspaceId: string,
 ): Promise<{ id: string; createdBy: string }> {
-  const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
+  const canvas = await tx.run(
+    zql.canvases.where('workspaceId', workspaceId).where('id', canvasId).one(),
+  );
   if (!canvas) {
     throw new Error('Canvas not found');
   }
@@ -455,12 +461,13 @@ async function assertCanvasThreadManageAccess(
   tx: Transaction<Schema>,
   thread: { canvasId: string; createdBy: string },
   userId: string,
+  workspaceId: string,
 ): Promise<void> {
   if (thread.createdBy === userId) {
     return;
   }
 
-  await assertCanvasCommentEditAccess(tx, thread.canvasId, userId);
+  await assertCanvasCommentEditAccess(tx, thread.canvasId, userId, workspaceId);
 }
 
 /**
@@ -1399,6 +1406,50 @@ export const mutators = defineMutators({
           ...(sectionId ? { isStarred: false } : {}),
           updatedAt: timestamp,
         });
+      },
+    ),
+    // Link boards to a channel (channel_board_mappings). Additive only: this never
+    // removes a mapping, so a board that is already linked is silently skipped
+    // rather than erroring — the unique (channelId, boardId) index would reject it,
+    // and a partially-applied batch is worse than an idempotent one.
+    linkBoards: defineMutator(
+      z.object({
+        channelId: z.string(),
+        // Ids are generated client-side (uuid) so the mutation stays idempotent
+        // across optimistic apply + server replay.
+        boards: z
+          .array(z.object({ mappingId: z.string(), boardId: z.string() }))
+          .min(1)
+          .max(100),
+        timestamp: z.number(),
+      }),
+      // Permission and tenancy live in ChannelBoardMappingsACL.canInsert, which the
+      // server's transaction wrapper runs on every insert. This client-side copy is
+      // the optimistic apply only; anything it let through the server still rejects.
+      async ({ tx, ctx, args: { channelId, boards, timestamp } }) => {
+        const existing = await tx.run(zql.channel_board_mappings.where('channelId', channelId));
+        const linkedBoardIds = new Set(existing.map(mapping => mapping.boardId));
+        // At most one row per channel may carry isDefault (enforced by a partial
+        // unique index), so only claim it when the channel has none yet.
+        let claimDefault = !existing.some(mapping => mapping.isDefault);
+
+        for (const { mappingId, boardId } of boards) {
+          if (linkedBoardIds.has(boardId)) continue;
+
+          await tx.mutate.channel_board_mappings.insert({
+            id: mappingId,
+            channelId,
+            boardId,
+            workspaceId: ctx.workspaceId,
+            isDefault: claimDefault,
+            createdBy: ctx.userID,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+          });
+
+          claimDefault = false;
+          linkedBoardIds.add(boardId);
+        }
       },
     ),
     updateSelectedBoardId: defineMutator(
@@ -3398,13 +3449,34 @@ export const mutators = defineMutators({
         channelId: z.string(),
         conversationId: z.string().optional(),
         timestamp: z.number(),
+        /** Attachments handed to the queued message, re-pointed off the draft. */
+        claimedAttachmentIds: z.array(z.string()).optional(),
+        /** The message those attachments now belong to. */
+        messageId: z.string().optional(),
       }),
-      async ({ tx, ctx, args: { channelId, conversationId, timestamp } }) => {
+      async ({
+        tx,
+        ctx,
+        args: { channelId, conversationId, timestamp, claimedAttachmentIds, messageId },
+      }) => {
         // Called at send-time to detach the draft from the queued message:
         // zeroes content and hasAttachment so `markChannelAsViewed` can
-        // garbage-collect the row on channel exit. The DRAFT-typed attachment
-        // rows are left in place; the send mutator claims them by id when
-        // it fires (immediate or on retry).
+        // garbage-collect the row on channel exit.
+
+        // Transfer the attachments to the queued message. draft_messages relates
+        // to message_attachments on `entityId`, so re-pointing it detaches them
+        // from the composer while leaving them claimable by id.
+        //
+        // This runs in its OWN mutation, which is why it survives the send being
+        // rolled back. The send mutator's DRAFT -> CHAT claim is part of the send,
+        // so a server rejection reverts it and the files reappear in the composer —
+        // where a later message would promote them and the failed message's retry
+        // would reference attachments it no longer owns.
+        if (messageId && claimedAttachmentIds && claimedAttachmentIds.length > 0) {
+          for (const attachmentId of claimedAttachmentIds) {
+            await tx.mutate.message_attachments.update({ id: attachmentId, entityId: messageId });
+          }
+        }
         const channelDrafts = await tx.run(
           zql.draft_messages
             .where('channelId', channelId)
@@ -6642,7 +6714,7 @@ export const mutators = defineMutators({
         timestamp: z.number(),
       }),
       async ({ tx, ctx, args: { threadId, commentId, canvasId, blockId, anchorText, body, mentionedUserIds, timestamp } }) => {
-        await assertCanvasCommentEditAccess(tx, canvasId, ctx.userID);
+        await assertCanvasCommentEditAccess(tx, canvasId, ctx.userID, ctx.workspaceId);
 
         await tx.mutate.canvas_comment_threads.insert({
           id: threadId,
@@ -6684,12 +6756,17 @@ export const mutators = defineMutators({
         timestamp: z.number(),
       }),
       async ({ tx, ctx, args: { commentId, threadId, canvasId, body, mentionedUserIds, timestamp } }) => {
-        const thread = await tx.run(zql.canvas_comment_threads.where('id', threadId).one());
+        const thread = await tx.run(
+          zql.canvas_comment_threads
+            .where('workspaceId', ctx.workspaceId)
+            .where('id', threadId)
+            .one(),
+        );
         if (!thread || thread.canvasId !== canvasId) {
           throw new Error('Comment thread not found');
         }
 
-        await assertCanvasCommentEditAccess(tx, canvasId, ctx.userID);
+        await assertCanvasCommentEditAccess(tx, canvasId, ctx.userID, ctx.workspaceId);
 
         await tx.mutate.canvas_comments.insert({
           id: commentId,
@@ -6705,7 +6782,7 @@ export const mutators = defineMutators({
           createdAt: timestamp,
         });
 
-        const commentCount = await getCanvasThreadCommentCount(tx, threadId);
+        const commentCount = await getCanvasThreadCommentCount(tx, threadId, ctx.workspaceId);
 
         if (thread.status === CanvasCommentThreadStatus.RESOLVED) {
           await tx.mutate.canvas_comment_threads.update({
@@ -6732,7 +6809,10 @@ export const mutators = defineMutators({
       }),
       async ({ tx, ctx, args: { commentId, body, mentionedUserIds, timestamp } }) => {
         const comment = await tx.run(
-          zql.canvas_comments.where('id', commentId).one(),
+          zql.canvas_comments
+            .where('workspaceId', ctx.workspaceId)
+            .where('id', commentId)
+            .one(),
         );
         if (!comment) {
           throw new Error('Comment not found');
@@ -6759,7 +6839,10 @@ export const mutators = defineMutators({
       }),
       async ({ tx, ctx, args: { commentId, timestamp } }) => {
         const comment = await tx.run(
-          zql.canvas_comments.where('id', commentId).one(),
+          zql.canvas_comments
+            .where('workspaceId', ctx.workspaceId)
+            .where('id', commentId)
+            .one(),
         );
         if (!comment) {
           throw new Error('Comment not found');
@@ -6778,9 +6861,18 @@ export const mutators = defineMutators({
           deletedAt: timestamp,
         });
 
-        const thread = await tx.run(zql.canvas_comment_threads.where('id', comment.threadId).one());
+        const thread = await tx.run(
+          zql.canvas_comment_threads
+            .where('workspaceId', ctx.workspaceId)
+            .where('id', comment.threadId)
+            .one(),
+        );
         if (thread) {
-          const commentCount = await getCanvasThreadCommentCount(tx, comment.threadId);
+          const commentCount = await getCanvasThreadCommentCount(
+            tx,
+            comment.threadId,
+            ctx.workspaceId,
+          );
           await tx.mutate.canvas_comment_threads.update({
             id: comment.threadId,
             commentCount,
@@ -6795,12 +6887,17 @@ export const mutators = defineMutators({
         timestamp: z.number(),
       }),
       async ({ tx, ctx, args: { threadId, status, timestamp } }) => {
-        const thread = await tx.run(zql.canvas_comment_threads.where('id', threadId).one());
+        const thread = await tx.run(
+          zql.canvas_comment_threads
+            .where('workspaceId', ctx.workspaceId)
+            .where('id', threadId)
+            .one(),
+        );
         if (!thread) {
           throw new Error('Comment thread not found');
         }
 
-        await assertCanvasThreadManageAccess(tx, thread, ctx.userID);
+        await assertCanvasThreadManageAccess(tx, thread, ctx.userID, ctx.workspaceId);
 
         await tx.mutate.canvas_comment_threads.update({
           id: threadId,

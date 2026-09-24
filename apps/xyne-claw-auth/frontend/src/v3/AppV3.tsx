@@ -21,6 +21,7 @@ import { SubagentsPageV3 } from "./components/SubagentsPageV3";
 import { SubagentEditPageV3 } from "./components/SubagentEditPageV3";
 import { SkillsPageV3 } from "./components/SkillsPageV3";
 import { GatewaysPageV3 } from "./components/GatewaysPageV3";
+import { McpGatewayRegistryPageV3 } from "./components/McpGatewayRegistryPageV3";
 import { SettingsPageV3 } from "./components/SettingsPageV3";
 import { OrganizationsPageV3 } from "./components/OrganizationsPageV3";
 import { ChatPageV3 } from "./components/ChatPageV3";
@@ -184,6 +185,11 @@ export function AppV3() {
             <Route path="/v3/gateways" element={
               <div className="flex flex-1 flex-col overflow-hidden rounded-xl bg-xyne-surface shadow-sm">
                 <GatewaysPageV3 />
+              </div>
+            } />
+            <Route path="/v3/gateway-registry" element={
+              <div className="flex flex-1 flex-col overflow-hidden rounded-xl bg-xyne-surface shadow-sm">
+                <McpGatewayRegistryPageV3 isAdmin={isAdmin} />
               </div>
             } />
             <Route path="/v3/settings" element={

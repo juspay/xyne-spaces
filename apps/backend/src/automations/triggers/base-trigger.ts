@@ -2,6 +2,12 @@ import { z } from 'zod';
 import type { TriggerType } from '../types/trigger-types';
 import { TriggerCategory } from '../types/categories';
 
+/** Filter verdict; `failed` names the filter that rejected, for the skip log. */
+export interface FilterMatchResult {
+  matched: boolean;
+  failed?: string;
+}
+
 export abstract class BaseTrigger<TConfig extends z.ZodSchema> {
   abstract readonly type: TriggerType;
   abstract readonly configSchema: TConfig;
@@ -33,6 +39,18 @@ export abstract class BaseTrigger<TConfig extends z.ZodSchema> {
     void filter;
     void payload;
     return true;
+  }
+
+  /**
+   * The same verdict as matchFilters, plus the name of the filter that rejected.
+   * A trigger that does not override this reports no reason, and the skip log
+   * says `unspecified` rather than guessing.
+   */
+  matchFiltersDetailed(
+    filter: Record<string, unknown>,
+    payload: Record<string, unknown>,
+  ): FilterMatchResult {
+    return { matched: this.matchFilters(filter, payload) };
   }
 
   decorateConfigSchema(jsonSchema: Record<string, unknown>): Record<string, unknown> {

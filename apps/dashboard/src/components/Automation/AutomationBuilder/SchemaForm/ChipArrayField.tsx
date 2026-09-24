@@ -40,15 +40,18 @@ export function ChipArrayField({
   return (
     <div
       className={cn(
-        'flex flex-wrap items-center gap-1.5 rounded-md border bg-background px-2 py-1.5 min-h-[36px]',
-        'focus-within:ring-2 focus-within:ring-ring',
-        error ? 'border-destructive' : 'border-border',
+        'flex w-full flex-wrap items-center gap-1.5 rounded-md border bg-background px-3 py-2 min-h-[40px] text-sm',
+        'focus-within:border-ring focus-within:ring-1 focus-within:ring-ring',
+        error ? 'border-destructive' : 'border-input',
       )}
     >
       {value.map((item, index) => (
         <span
           key={`${item}-${index}`}
-          className='inline-flex items-center gap-1 rounded-md bg-accent/40 px-2 py-0.5 text-xs text-foreground'
+          className={cn(
+            'inline-flex items-center gap-1 rounded-md bg-muted px-2 py-0.5 text-xs font-medium text-foreground',
+            'transition-colors hover:bg-accent',
+          )}
         >
           <span className='break-all'>{item}</span>
           <button
@@ -59,7 +62,11 @@ export function ChipArrayField({
             }}
             data-track-category='automation-builder'
             data-track-name='chip-array-remove'
-            className='rounded-sm p-0.5 text-muted-foreground hover:text-foreground hover:bg-accent/60'
+            className={cn(
+              'ml-0.5 rounded-full p-0.5 text-muted-foreground',
+              'hover:bg-accent hover:text-foreground',
+              'focus:outline-hidden focus:ring-2 focus:ring-ring',
+            )}
             aria-label={`Remove ${item}`}
           >
             <X className='size-3' />

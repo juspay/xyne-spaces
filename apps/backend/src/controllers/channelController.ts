@@ -57,6 +57,7 @@ import { userActivityTrackingService } from '@/services/userActivityTrackingServ
 import { vespaQueue } from '@/queues/vespaQueue';
 import { channelSchema } from '@/vespa/src/types';
 import { db } from '@/database/client';
+import { hasProjectAdminAccess } from '@/database/acl/admin-access';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import {logger} from '@/utils/logger';
 import { messageMetadataService } from '@/services/messageMetadataService';
@@ -1755,6 +1756,29 @@ export class ChannelController {
       res.status(500).json({ success: false, error: 'Internal server error' });
     }
   };
+  
+  canLinkChannelBoards = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const userId = req.user!.id;
+      const { channelId } = req.params;
+      if (!channelId) {
+        res.status(400).json({ success: false, error: 'channelId is required' });
+        return;
+      }
+
+      const role = await this.channelParticipantRepository.getParticipantRole(channelId, userId);
+      if (role === ChannelRole.ADMIN) {
+        res.status(200).json({ success: true, data: { canLinkBoards: true } });
+        return;
+      }
+
+      const isProjectAdmin = await hasProjectAdminAccess(db, userId);
+      res.status(200).json({ success: true, data: { canLinkBoards: isProjectAdmin } });
+    } catch (error) {
+      logger.error('Error in canLinkChannelBoards:', error);
+      res.status(500).json({ success: false, error: 'Internal server error' });
+    }
+  };
 
   // GET /api/channels/search - Unified search for users and groups
   searchForMentions = async (req: Request, res: Response): Promise<void> => {
@@ -2612,13 +2636,14 @@ export class ChannelController {
           orgRole: req.user!.orgRole,
           memberId: req.user!.memberId,
         });
-        for (const participant of result.addedParticipants) {
+        // Awaited so "added" lands before the mention the client's prompt delete delivers next.
+        await Promise.all(result.addedParticipants.map(participant =>
           handler.onInsert({
             entityId: participant.participantId,
             entityType: 'channel_participants',
             operation: 'insert'
-          }).catch(err => logger.error('Side-effect handler error: channel_participants onInsert', err));
-        }
+          }).catch(err => logger.error('Side-effect handler error: channel_participants onInsert', err))
+        ));
       }
 
       const response: AddGroupDmParticipantsResponse = {

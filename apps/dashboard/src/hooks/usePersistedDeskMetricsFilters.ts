@@ -102,6 +102,7 @@ const isPerKeyValues = (v: unknown): v is Record<string, string[]> =>
 export const CHART_VIEW_LABELS = {
   priority: 'Priority',
   trend: 'Created vs Resolved',
+  resolutionTrend: 'Avg Resolution Time',
   assignee: 'Assignee',
   tags: 'Tags',
   csat: 'CSAT',

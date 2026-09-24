@@ -1,0 +1,6 @@
+terraform {
+  backend "gcs" {
+    bucket = "example-project-tfstate"
+    prefix = "xyne/01-infra"
+  }
+}

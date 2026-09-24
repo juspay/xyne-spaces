@@ -1,3 +1,5 @@
+import { resolve } from "node:path";
+
 export const SERVER = {
   port: Number(process.env["XYNE_CLAW_PORT"] ?? 3002),
   s2sKey: process.env["XYNE_CLAW_S2S_KEY"] ?? "",
@@ -32,8 +34,17 @@ export function isAllowedCallbackUrl(raw: string | undefined | null): boolean {
   }
 }
 
+const rawDataDir = process.env["XYNE_CLAW_DATA_DIR"]?.trim();
+
+/** True when the data dir was configured explicitly rather than defaulted. */
+export const DATA_DIR_IS_EXPLICIT = Boolean(rawDataDir);
+
+// Resolved to an absolute path at import time: the old relative "./data"
+// bound session storage to whatever cwd the process happened to start in,
+// so a container whose volume is mounted elsewhere silently wrote sessions
+// to its own writable layer and filled the node's disk (prod, 2026-09).
 export const PATHS = {
-  dataDir: process.env["XYNE_CLAW_DATA_DIR"] ?? "./data",
+  dataDir: resolve(rawDataDir || "./data"),
   agentDir: process.env["XYNE_CLAW_AGENT_DIR"] ?? "",
 } as const;
 

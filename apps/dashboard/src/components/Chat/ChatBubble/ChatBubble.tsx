@@ -10,6 +10,7 @@ import { TicketActivityMessage } from '../TicketActivityMessage/TicketActivityMe
 import { ConversationTabContext } from '../ConversationTabContext';
 
 import { hoveredMessage } from './hoveredMessageRef';
+import { usePendingByMessageId } from '@xyne/shared/messages';
 import {
   registerMessageHoverActions,
   unregisterMessageHoverActions,
@@ -186,7 +187,9 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   const location = useLocation();
   const { conversationId } = useParams<{ conversationId?: string }>();
   const { isEditingMessage, requestEdit, stopEditing } = useMessageEdit();
-  const { setSkipMarkAsRead } = React.useContext(ConversationTabContext);
+  // channelHasBoards rides on the context rather than a per-bubble query: it is
+  // constant per channel and this component renders once per message.
+  const { setSkipMarkAsRead, channelHasBoards } = React.useContext(ConversationTabContext);
   const { isMobile } = usePlatform();
   const channel = useChannel(channelId);
   // Get sender info from useUser hook
@@ -978,6 +981,10 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
 
   const hoverToolbarKey = useId();
 
+  // Non-null while this message still has a pending entry, i.e. the server has
+  // not confirmed it (in flight, or failed and awaiting retry/discard).
+  const hasPendingCopy = usePendingByMessageId(message?.messageId ?? '') !== null;
+
   const appliedThreadTypes = useMemo(
     () => parseThreadTypes(conversation?.threadType),
     [conversation?.threadType],
@@ -1058,6 +1065,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         !isSystemMessage &&
         !isMessageDeleted &&
         !hasTicket &&
+        // No linked boards means nowhere to put a ticket, so don't offer it.
+        channelHasBoards &&
         channelScopeType === ChannelScopeType.DEFAULT && {
           onCreateTicket: handleCreateTicket,
         }),
@@ -1130,6 +1139,16 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
           onShowAllShortcuts: () => setShortcutModalOpen(true),
         }),
     };
+
+    // Nothing in the hover toolbar works on a message the server has not
+    // confirmed — reply, edit, ticket, pin, bookmark, forward and the rest all
+    // target a row that does not exist yet. Registering nothing means the shared
+    // overlay renders no toolbar at all (MessageHoverToolbar bails on an
+    // unregistered key). Retry and discard live on the line under the bubble.
+    if (hasPendingCopy) {
+      unregisterMessageHoverActions(hoverToolbarKey);
+      return;
+    }
 
     registerMessageHoverActions(hoverToolbarKey, actions);
   });
@@ -1395,6 +1414,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                 !isSystemMessage &&
                 !isMessageDeleted &&
                 !hasTicket &&
+                // No linked boards means nowhere to put a ticket, so don't offer it.
+                channelHasBoards &&
                 channelScopeType === ChannelScopeType.DEFAULT && {
                   onCreateTicket: handleCreateTicket,
                 })}

@@ -1,0 +1,346 @@
+global:
+  cloud: gcp
+  domain: spaces.example.com
+  namespace: xyne
+  repoURL: https://github.com/juspay/xyne-spaces.git
+  chartRevision: chart-1.356.0
+  imageRegistry: ""
+  imageTag: ""
+
+platformRevision: main
+
+argocd:
+  project: xyne
+  sourceRepos:
+    - "*"
+  extraDestinations: []
+  sync:
+    retry:
+      limit: 10
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 10m
+
+infra:
+  cluster:
+    name: ""
+    region: ""
+    networkId: ""
+  postgres:
+    mode: managed
+    host: ""
+    roHost: ""
+    directHost: ""
+    port: 5432
+    username: xyne
+    sslmode: require
+    databases:
+      app: xyne
+      common: xyne_common
+      zeroCvr: zero_cvr
+      zeroCdb: zero_cdb
+      clawAuth: claw_auth
+  redis:
+    mode: managed
+    host: ""
+    port: 6379
+    tls: false
+  storage:
+    mode: managed
+    provider: s3
+    endpoint: ""
+    region: ""
+    account: ""
+    staticCredentials: false
+    buckets:
+      main: ""
+      docs: ""
+      canvas: ""
+      recordings: ""
+      workflows: ""
+      transcription: ""
+      bundles: ""
+      claw: ""
+  identities:
+    backend:
+      annotations: {}
+      labels: {}
+    worker:
+      annotations: {}
+      labels: {}
+    dashboardEdge:
+      annotations: {}
+      labels: {}
+    ysweet:
+      annotations: {}
+      labels: {}
+    claw:
+      annotations: {}
+      labels: {}
+    clawAuth:
+      annotations: {}
+      labels: {}
+    transcription:
+      annotations: {}
+      labels: {}
+    lbController:
+      annotations: {}
+      labels: {}
+    externalDns:
+      annotations: {}
+      labels: {}
+  nodePools:
+    general:
+      enabled: false
+      nodeSelector: {}
+      tolerations: []
+    zero:
+      enabled: false
+      nodeSelector: {}
+      tolerations: []
+    vespa:
+      enabled: false
+      nodeSelector: {}
+      tolerations: []
+    sandbox:
+      enabled: false
+      nodeSelector: {}
+      tolerations: []
+  ingress:
+    domain: ""
+    mode: gateway
+    staticIp: ""
+    lbAnnotations: {}
+    dnsZone: ""
+    serviceType: ""
+    externalTrafficPolicy: ""
+    nodePorts: {}
+    tls: ""
+    tlsSecret: xyne-gateway-tls
+    edge:
+      ip: ""
+      hostname: ""
+  livekit:
+    enabled: false
+    url: ""
+    httpUrl: ""
+    turnHost: ""
+  hindsight:
+    url: ""
+    tenant: default
+    provider: hindsight
+
+addons:
+  lbController:
+    enabled: null
+    version: 3.5.0
+    namespace: kube-system
+    serviceAccountName: aws-load-balancer-controller
+    values: {}
+  externalDns:
+    enabled: null
+    version: 1.19.0
+    namespace: external-dns
+    serviceAccountName: external-dns
+    provider: aws
+    policy: sync
+    sources:
+      - service
+    values: {}
+  istio:
+    enabled: true
+    version: 1.30.5
+    namespace: istio-system
+    gatewayNamespace: istio-ingress
+    peerAuthentication: STRICT
+    values:
+      base: {}
+      istiod: {}
+      gateway: {}
+  platformConfig:
+    storageClass:
+      enabled: null
+    values: {}
+  certManager:
+    enabled: true
+    version: v1.21.2
+    namespace: cert-manager
+    email: ""
+    issuer: letsencrypt
+    server: https://acme-v02.api.letsencrypt.org/directory
+    wildcard: false
+    values: {}
+  cnpg:
+    enabled: false
+    version: 0.29.0
+    namespace: cnpg-system
+    cluster:
+      instances: 2
+      imageName: ""
+      storage:
+        size: 50Gi
+        storageClass: ""
+      pooler:
+        instances: 2
+        maxClientConn: 1000
+        defaultPoolSize: 20
+      backup:
+        enabled: false
+        destinationPath: ""
+        endpointURL: ""
+        credentialsSecret: xyne-pg-backup
+        schedule: "0 0 2 * * *"
+        retentionPolicy: 14d
+    values: {}
+  redis:
+    enabled: false
+    persistence:
+      size: 10Gi
+      storageClass: ""
+    values: {}
+  minio:
+    enabled: false
+    version: 5.4.0
+    persistence:
+      size: 200Gi
+      storageClass: ""
+    resources:
+      requests:
+        memory: 2Gi
+    values: {}
+  hindsight:
+    enabled: false
+    repoURL: https://github.com/vectorize-io/hindsight
+    targetRevision: v0.10.1
+    path: helm/hindsight
+    namespace: hindsight
+    service: hindsight-api
+    port: 8888
+    existingSecret: ""
+    values: {}
+  vespa:
+    enabled: false
+    image:
+      registry: ""
+      repository: vespaengine/vespa
+      tag: ""
+    proxyImage:
+      registry: ""
+      repository: xyne-spaces-tei-batch-proxy
+      tag: ""
+    storageClass: ""
+    configserverStorage: 50Gi
+    contentStorage: 200Gi
+    embedder:
+      enabled: true
+    values:
+      configserver: {}
+      content: {}
+      feed: {}
+      search: {}
+      embedder: {}
+      proxy: {}
+  monitoring:
+    enabled: false
+    namespace: monitoring
+    metricsEndpoint: http://vmsingle-vm.monitoring.svc:8428/opentelemetry
+    victoriaMetrics:
+      version: 0.93.0
+    otelCollector:
+      version: 0.173.1
+    values:
+      victoriaMetrics: {}
+      otelCollector: {}
+  sandbox:
+    enabled: false
+    kata:
+      version: 4.1.0
+      imageTag: 4.1.0
+      namespace: kube-system
+      shim: qemu
+      shims:
+        - qemu
+        - qemu-runtime-rs
+      hypervisorAnnotations:
+        - default_memory
+        - default_vcpus
+        - enable_iothreads
+        - enable_mem_prealloc
+        - virtio_fs_cache
+        - block_device_driver
+        - block_device_cache_direct
+        - enable_vhost_net
+        - enable_nested_virtualization
+    controller:
+      repoURL: https://github.com/kubernetes-sigs/agent-sandbox
+      targetRevision: v0.4.5
+      path: helm
+      namespace: agent-sandbox-system
+      image: registry.k8s.io/agent-sandbox/agent-sandbox-controller
+      tag: v0.4.5
+      values: {}
+    template:
+      name: kata-workspace-template
+      image: ""
+      vcpus: "2"
+      memory: "5120"
+      resources:
+        requests:
+          cpu: "2"
+          memory: 5Gi
+        limits:
+          cpu: "2"
+          memory: 5Gi
+    warmPool:
+      replicas: 1
+    policy:
+      allowedEgress: []
+    values:
+      kata: {}
+      policy: {}
+      router: {}
+      egressProxy: {}
+
+apps:
+  xyne-backend:
+    enabled: true
+    values: {}
+  xyne-dashboard:
+    enabled: true
+    values: {}
+  xyne-zero:
+    enabled: true
+    values: {}
+  xyne-zero-replication:
+    enabled: true
+    values: {}
+  xyne-ysweet:
+    enabled: true
+    storeUrl: ""
+    values: {}
+  xyne-dashboard-external:
+    enabled: false
+    values: {}
+  xyne-dashboard-edge:
+    enabled: false
+    values: {}
+  xyne-claw:
+    enabled: false
+    values: {}
+  xyne-claw-auth:
+    enabled: false
+    values: {}
+  xyne-claw-auth-frontend:
+    enabled: false
+    values: {}
+  xyne-transcription-agent:
+    enabled: false
+    values: {}
+  xyne-lighton-ocr:
+    enabled: false
+    values: {}
+  workers: []
+
+overlay:
+  sources: []
