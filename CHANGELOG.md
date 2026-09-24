@@ -3,6 +3,14 @@
 
 ### Features
 
+* added ticket duplication scoping ([#2281](https://github.com/juspay/xyne-spaces/issues/2281)) ([c4b76b4](https://github.com/juspay/xyne-spaces/commit/c4b76b4a2fea16a7daf4536026d6b8c881b4afab))
+* Customizable UI Tabs - Toolbar, Inbox Menubar, and Channel Navbar with Apps support ([#2271](https://github.com/juspay/xyne-spaces/issues/2271)) ([54ac493](https://github.com/juspay/xyne-spaces/commit/54ac493f89150fe6b4b1ba951d91b830d4279fb2))
+
+## [1.373.0-release-20260923.3](https://github.com/juspay/xyne-spaces/compare/v1.373.0-release-20260923.2...v1.373.0-release-20260923.3) (2026-09-24)
+
+
+### Features
+
 * Customizable UI Tabs - Toolbar, Inbox Menubar, and Channel Navbar with Apps support ([#2271](https://github.com/juspay/xyne-spaces/issues/2271)) ([54ac493](https://github.com/juspay/xyne-spaces/commit/54ac493f89150fe6b4b1ba951d91b830d4279fb2))
 
 ## [1.373.0-release-20260923.2](https://github.com/juspay/xyne-spaces/compare/v1.373.0-release-20260923.1...v1.373.0-release-20260923.2) (2026-09-23)
