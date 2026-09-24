@@ -8,8 +8,12 @@ import {
   DeskType,
   isDeskChannelType,
   parseDeskMetricsGuestVisibility,
+  MAX_DUPLICATE_SCOPE_FIELDS,
 } from '@xyne/shared';
-import { useEmailChannelPreference } from '../../../hooks/useEmailChannelPreference';
+import {
+  useEmailChannelPreference,
+  parseDuplicateScopeConfig,
+} from '../../../hooks/useEmailChannelPreference';
 import {
   useDeskChannelPreferenceAutoSave,
   type ChannelPreferencePatch,
@@ -40,7 +44,7 @@ export const parseDefaultCc = (val: string | undefined | null): string[] =>
         .filter(Boolean)
     : [];
 
-export const parseDlAliases = (val: string | undefined | null): string[] => {
+const parseStringArray = (val: string | undefined | null): string[] => {
   if (!val) return [];
   try {
     const parsed: unknown = JSON.parse(val);
@@ -50,15 +54,11 @@ export const parseDlAliases = (val: string | undefined | null): string[] => {
   }
 };
 
-const parseFrtStageNames = (val: string | undefined | null): string[] => {
-  if (!val) return [];
-  try {
-    const parsed: unknown = JSON.parse(val);
-    return Array.isArray(parsed) ? parsed.filter((s): s is string => typeof s === 'string') : [];
-  } catch {
-    return [];
-  }
-};
+export const parseDlAliases = parseStringArray;
+
+const parseFrtStageNames = parseStringArray;
+
+const parseDuplicateScopeFieldIds = parseStringArray;
 
 type DraftShape = Record<string, string | number | boolean | null>;
 
@@ -218,6 +218,10 @@ export function useDeskSettingsForm(
     error: priorityError,
   } = usePriorityClassification(channelId ?? '');
 
+  const duplicateScopeServer = parseDuplicateScopeConfig(
+    emailChannelPreference?.duplicateScopeConfig,
+  );
+
   const pref = useDraft({
     ownerUserId: emailChannelPreference?.ownerUserId ?? '',
     sendAsEmail: emailChannelPreference?.sendAsEmail ?? '',
@@ -235,6 +239,8 @@ export function useDeskSettingsForm(
     deskReportEnabled: emailChannelPreference?.deskReportEnabled ?? false,
     deskReportAgentSlug: emailChannelPreference?.deskReportAgentSlug ?? null,
     deskReportRangeDays: emailChannelPreference?.deskReportRangeDays ?? 1,
+    duplicateDetectionEnabled: duplicateScopeServer?.enabled ?? false,
+    duplicateScopeFieldIds: JSON.stringify(duplicateScopeServer?.scopeFieldGlobalIds ?? []),
   });
   const cls = useDraft({
     enabled: classificationConfig?.enabled ?? false,
@@ -266,6 +272,8 @@ export function useDeskSettingsForm(
   const frtStageNames = parseFrtStageNames(pref.draft.frtStageNames);
   const guestVisibility = parseDeskMetricsGuestVisibility(pref.draft.metricsGuestVisibility);
   const appWebhookDeliveryEnabled = pref.draft.appWebhookDeliveryEnabled;
+  const duplicateDetectionEnabled = pref.draft.duplicateDetectionEnabled;
+  const duplicateScopeFieldIds = parseDuplicateScopeFieldIds(pref.draft.duplicateScopeFieldIds);
   const deskReportEnabled = pref.draft.deskReportEnabled;
   const deskReportAgentSlug = pref.draft.deskReportAgentSlug;
   const deskReportRangeDays = pref.draft.deskReportRangeDays;
@@ -313,6 +321,17 @@ export function useDeskSettingsForm(
   const setAppWebhookDeliveryEnabled = (checked: boolean) => {
     if (!canManage) return;
     pref.setField('appWebhookDeliveryEnabled', checked);
+  };
+  const setDuplicateDetectionEnabled = (checked: boolean) => {
+    if (!canManage) return;
+    pref.setField('duplicateDetectionEnabled', checked);
+  };
+  const setDuplicateScopeFieldIds = (values: string[]) => {
+    if (!canManage) return;
+    pref.setField(
+      'duplicateScopeFieldIds',
+      JSON.stringify(values.slice(0, MAX_DUPLICATE_SCOPE_FIELDS)),
+    );
   };
   const setDeskReportEnabled = (checked: boolean) => {
     if (!canManage) return;
@@ -462,6 +481,15 @@ export function useDeskSettingsForm(
       if (d.deskReportRangeDays !== s.deskReportRangeDays) {
         patch.deskReportRangeDays = d.deskReportRangeDays;
       }
+      if (
+        d.duplicateDetectionEnabled !== s.duplicateDetectionEnabled ||
+        d.duplicateScopeFieldIds !== s.duplicateScopeFieldIds
+      ) {
+        patch.duplicateScopeConfig = {
+          enabled: d.duplicateDetectionEnabled,
+          scopeFieldGlobalIds: parseDuplicateScopeFieldIds(d.duplicateScopeFieldIds),
+        };
+      }
 
       if (cls.dirty) {
         await saveClassificationConfig({
@@ -596,6 +624,11 @@ export function useDeskSettingsForm(
     toggleGuestVisibility,
     appWebhookDeliveryEnabled,
     setAppWebhookDeliveryEnabled,
+    duplicateDetectionEnabled,
+    setDuplicateDetectionEnabled,
+    duplicateScopeFieldIds,
+    setDuplicateScopeFieldIds,
+    projectId: selectedChannelForSettings?.projectId,
     deskReportEnabled,
     setDeskReportEnabled,
     deskReportAgentSlug,
