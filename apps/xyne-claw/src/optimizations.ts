@@ -31,11 +31,15 @@ export const OPTIMIZATIONS = {
     defaultOn: false,
   },
   subagent_read_tools: {
-    summary: "the read tools inside an agent's own subagents are also loadable directly through search-tools/load-tools, so it can skip the subagent round trip; write tools stay behind the subagent, and nothing outside the agent's grant is added",
+    summary: "the tools inside an agent's own subagents, writes included, are also loadable directly through search-tools/load-tools, so it can skip the subagent round trip; each tool keeps its permission and approval, and nothing outside the agent's grant is added",
     defaultOn: false,
   },
   lean_palette: {
     summary: "with the open palette on, tools it admitted (not ones the agent was granted) stay hidden in the catalog — including write tools — and under a reads+writes palette the forced `spaces` wrapper is dropped since its tools are loadable directly",
+    defaultOn: false,
+  },
+  active_tool_cap: {
+    summary: "when an agent starts with more active tools than its cap (25 by default), only its most-used tools of the last 7 days stay active; the rest move to the catalog, are named in the tool index and load with one load-tools call — nothing is removed from the grant",
     defaultOn: false,
   },
 } as const satisfies Record<string, OptimizationSpec>;
