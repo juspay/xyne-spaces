@@ -441,6 +441,12 @@ const ChatListV4: React.FC<ChatListProps> = ({
   const lastReportedTotalHeightRef = useRef<number | null>(null);
   useEffect(() => {
     if (!onTotalHeightChange) return;
+    // Mirrors the loading-overlay guard at the bottom of this component: while
+    // there's no cached or loaded content yet, getTotalSize() reflects an empty
+    // list, not the row's real height. Reporting that would be indistinguishable
+    // from "genuinely short" to a caller sizing a collapsed row (UnreadsInbox),
+    // so hold off until there's something real to measure.
+    if (!isInitialLoadComplete && cachedConversations.length === 0) return;
     const totalHeight = virtualizer.getTotalSize();
     if (lastReportedTotalHeightRef.current === totalHeight) return;
     lastReportedTotalHeightRef.current = totalHeight;
