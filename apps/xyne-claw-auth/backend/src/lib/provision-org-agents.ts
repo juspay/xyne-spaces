@@ -4,12 +4,12 @@ import { createLogger } from "../logger.js";
 
 const log = createLogger("provision-org-agents");
 
-const DEFAULT_AGENT_SLUGS = ["ask-ai", "xyne-spaces-architect"] as const;
+export const DEFAULT_AGENT_SLUGS = ["ask-ai", "xyne-spaces-architect", "xyne"] as const;
 
 /**
- * Idempotent: copies `ask-ai` and `xyne-spaces-architect` into `orgId` from
- * the oldest org that already has them. Safe to call multiple times — skips
- * slugs that already exist, and exits immediately when both are present.
+ * Idempotent: copies `ask-ai`, `xyne-spaces-architect` and `xyne` into `orgId`
+ * from the oldest org that already has them. Safe to call multiple times —
+ * skips slugs that already exist, and exits immediately when all are present.
  *
  * Copies: agent row, skills (with content), AgentSkill links, AgentTool links.
  * Does NOT copy: AgentProviderCredentials, spacesAppId/Token, signingSecret,
