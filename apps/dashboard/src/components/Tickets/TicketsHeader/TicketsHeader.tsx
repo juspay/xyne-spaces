@@ -298,6 +298,7 @@ export const TicketsHeader = (props: TicketsHeaderProps): ReactElement => {
               <Layers className='size-[14px]' strokeWidth={2} />
               Link boards
             </button>
+          )}
           {onBulkCreateTicket && (
             <Tooltip content='Bulk create tickets'>
               <button

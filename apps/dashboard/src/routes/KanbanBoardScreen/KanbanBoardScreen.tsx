@@ -4669,7 +4669,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         }
         linkBoardsMetadata={JSON.stringify({ channelId, source: 'kanban_header' })}
         onBulkCreateTicket={
-          isTableLayout && canCreateTicket && effectiveProjectId && channel && !channel.isArchived
+          isTableLayout && canCreateTicket && scopedProjectId && channel && !channel.isArchived
             ? (): void => setIsBulkCreateModalOpen(true)
             : null
         }
@@ -5774,14 +5774,14 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       )}
 
       {/* Bulk Create Tickets Modal */}
-      {effectiveProjectId && channel && (
+      {scopedProjectId && channel && (
         <BulkCreateTicketsModal
           isOpen={isBulkCreateModalOpen}
           onClose={() => setIsBulkCreateModalOpen(false)}
           mode={BulkTicketMode.ALL_PARENTS}
           fromTicketsTab={true}
           channelId={channel.id}
-          projectId={effectiveProjectId}
+          projectId={scopedProjectId}
           boardId={currentBoardId ?? ''}
           boardName={selectedBoardDetail?.name}
         />
