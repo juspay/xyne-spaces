@@ -9,6 +9,7 @@ import { storageService } from '@/services/storage';
 import { decodeCursor, paginateResults } from './paginationUtils';
 import { MessagesSideEffectHandler } from '@/zero/side-effects/tables/messages-handler';
 import { buildUserQueryContext } from '@/utils/queryContext';
+import { deleteMessageSearchRow } from '@/bypassAcl/searchIndexServices';
 
 /**
  * Find or create a conversation and add a message
@@ -215,7 +216,7 @@ export async function deleteConversationMessage(
       });
       await tx.reaction.deleteMany({ where: { messageId } });
       await tx.reactionCount.deleteMany({ where: { messageId } });
-      await tx.$executeRawUnsafe('DELETE FROM message_search WHERE "messageId" = $1', messageId);
+      await deleteMessageSearchRow(tx, messageId);
 
       if (shouldSoftDelete) {
         const updateResult = await tx.message.updateMany({

@@ -3977,6 +3977,7 @@ export const queries = defineQueries({
             ),
           ),
         )
+        .whereExists('participants', p => p.where('userId', ctx.userID), { flip: true })
         .orderBy('lastActivityAt', isBackward ? 'asc' : 'desc')
         .orderBy('channelId', isBackward ? 'asc' : 'desc');
 

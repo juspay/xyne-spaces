@@ -1,3 +1,50 @@
+## [1.391.2](https://github.com/juspay/xyne-spaces/compare/v1.391.1...v1.391.2) (2026-09-24)
+
+
+### Bug Fixes
+
+* bound the DM list scan to the caller's channels; unpin calls ACL flip ([#2269](https://github.com/juspay/xyne-spaces/issues/2269)) ([67733a6](https://github.com/juspay/xyne-spaces/commit/67733a69acfc5352f585204af1b76a91d6888fc0)), closes [#1867](https://github.com/juspay/xyne-spaces/issues/1867)
+
+## [1.391.1](https://github.com/juspay/xyne-spaces/compare/v1.391.0...v1.391.1) (2026-09-24)
+
+
+### Bug Fixes
+
+* route local harness calls through net.fetch so mTLS hosts work ([#2277](https://github.com/juspay/xyne-spaces/issues/2277)) ([e725e90](https://github.com/juspay/xyne-spaces/commit/e725e90ebafb123190ae12cc11a9247cc752be98))
+
+## [1.391.0](https://github.com/juspay/xyne-spaces/compare/v1.390.0...v1.391.0) (2026-09-24)
+
+
+### Features
+
+* show recently used labels first in the create-ticket modal ([#2274](https://github.com/juspay/xyne-spaces/issues/2274)) ([41f67e5](https://github.com/juspay/xyne-spaces/commit/41f67e5ca71ffa086f3641ecaea3a2047568373f))
+
+
+### Bug Fixes
+
+* enforce raw SQL ACL bypass boundary ([#2229](https://github.com/juspay/xyne-spaces/issues/2229)) ([3218ba6](https://github.com/juspay/xyne-spaces/commit/3218ba623a56b35f11a0da3848baae7db3298aaa))
+* send a current Claude Code client version on Claude OAuth requests ([#2276](https://github.com/juspay/xyne-spaces/issues/2276)) ([cf413e1](https://github.com/juspay/xyne-spaces/commit/cf413e1943cab3c8e3045620a389b0a63af33e69))
+
+## [1.390.0](https://github.com/juspay/xyne-spaces/compare/v1.389.1...v1.390.0) (2026-09-24)
+
+
+### Features
+
+* add automation MCP tools for claw ([#2265](https://github.com/juspay/xyne-spaces/issues/2265)) ([61f9e60](https://github.com/juspay/xyne-spaces/commit/61f9e60aabf9b3ea7fcb291ca6abe6796e7cd994))
+* added ticket duplication scoping ([#2226](https://github.com/juspay/xyne-spaces/issues/2226)) ([daa57a4](https://github.com/juspay/xyne-spaces/commit/daa57a475327ea4e267e7c82d8240cdacd6926d1))
+
+
+### Bug Fixes
+
+* Passing automation creator ID to claw for privacy checks ([#2251](https://github.com/juspay/xyne-spaces/issues/2251)) ([516d7a2](https://github.com/juspay/xyne-spaces/commit/516d7a2d3d4fb2d83b2fca82baef03830b8ca19a))
+
+## [1.389.1](https://github.com/juspay/xyne-spaces/compare/v1.389.0...v1.389.1) (2026-09-24)
+
+
+### Bug Fixes
+
+* Prompt change ([#2270](https://github.com/juspay/xyne-spaces/issues/2270)) ([c3e3752](https://github.com/juspay/xyne-spaces/commit/c3e3752073b13c0249306814bdca1604718f0da0))
+
 ## [1.389.0](https://github.com/juspay/xyne-spaces/compare/v1.388.0...v1.389.0) (2026-09-24)
 
 

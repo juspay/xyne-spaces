@@ -5,6 +5,7 @@ import { AppError } from '@/middleware/errorHandler';
 import { decryptCredentialPayload, encryptCredentialPayload } from './credentialEnvelope';
 import type { CredentialEnvelope } from './credentialEnvelope';
 import type { VcsProvider } from './types';
+import { lockExternalSourceRow, type RawQueryMethod } from '@/bypassAcl/rowLockServices';
 
 export const SDLC_VCS_EXTERNAL_SOURCE_TYPE = 'sdlc_vcs_credential';
 
@@ -31,7 +32,7 @@ export interface StoredSdlcVcsCredential {
   updatedAt: string;
 }
 
-type CredentialClient = Pick<PrismaClient, 'externalSource' | '$queryRaw'> | Prisma.TransactionClient;
+type CredentialClient = Pick<PrismaClient, 'externalSource' | RawQueryMethod> | Prisma.TransactionClient;
 type StoredPayload = Omit<StoredSdlcVcsCredential, 'id'>;
 
 const SOURCE_SELECT = { id: true, workspaceId: true, externalIdentifier: true, credentials: true } as const;
@@ -120,7 +121,7 @@ export class SdlcVcsCredentialStore {
   }
 
   async lock(client: CredentialClient, credentialId: string): Promise<void> {
-    await client.$queryRaw`SELECT "id" FROM "workflow"."external_sources" WHERE "id" = ${credentialId} FOR UPDATE`;
+    await lockExternalSourceRow(client, credentialId);
   }
 
   async save(

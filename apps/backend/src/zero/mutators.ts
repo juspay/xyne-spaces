@@ -128,6 +128,7 @@ import {
   withSlashCommandArtifactClosed,
 } from '@xyne/shared';
 import { SDLC_HUB_KNOWLEDGE_FOLDER, sdlcTrackStatusSchema } from '@xyne/shared';
+import { MAX_DUPLICATE_SCOPE_FIELDS } from '@xyne/shared';
 import {
   evaluateEta,
   buildEtaActivityIntents,
@@ -16554,6 +16555,14 @@ export function createMutators(
           deskReportEnabled: z.boolean().optional(),
           deskReportAgentSlug: z.string().optional().nullable(),
           deskReportRangeDays: z.number().optional(),
+          // Scoped duplicate detection config (see EmailChannelPreference.duplicateScopeConfig)
+          duplicateScopeConfig: z
+            .object({
+              enabled: z.boolean(),
+              scopeFieldGlobalIds: z.array(z.string()).max(MAX_DUPLICATE_SCOPE_FIELDS),
+            })
+            .nullable()
+            .optional(),
         }),
         async ({
           tx,
@@ -16575,6 +16584,7 @@ export function createMutators(
             deskReportEnabled,
             deskReportAgentSlug,
             deskReportRangeDays,
+            duplicateScopeConfig,
           },
         }) => {
           // One address routes to one desk; channelController enforces the same
@@ -16619,6 +16629,9 @@ export function createMutators(
               ...(deskReportEnabled !== undefined ? { deskReportEnabled } : {}),
               ...(deskReportAgentSlug !== undefined ? { deskReportAgentSlug } : {}),
               ...(deskReportRangeDays !== undefined ? { deskReportRangeDays } : {}),
+              ...(duplicateScopeConfig !== undefined
+                ? { duplicateScopeConfig: duplicateScopeConfig == null ? null : JSON.stringify(duplicateScopeConfig) }
+                : {}),
             });
           } else {
             const channel = await tx.run(zql.channels.where('id', channelId).one());
@@ -16651,6 +16664,7 @@ export function createMutators(
               deskReportEnabled: deskReportEnabled ?? false,
               deskReportAgentSlug: deskReportAgentSlug ?? null,
               deskReportRangeDays: deskReportRangeDays ?? 1,
+              duplicateScopeConfig: duplicateScopeConfig ? JSON.stringify(duplicateScopeConfig) : null,
             });
           }
         },

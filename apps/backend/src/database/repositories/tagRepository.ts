@@ -2,6 +2,7 @@ import { DatabaseClient } from '../client';
 import { Prisma, Tag, TagsConfig } from '@prisma/client';
 import { TagMethod } from '@xyne/shared';
 import { logger } from '../../utils/logger';
+import { queryConversationIdsByEmailTags } from '@/bypassAcl/tagRawServices';
 
 export type TxClient = Prisma.TransactionClient;
 
@@ -350,21 +351,7 @@ export class TagRepository {
     );
     const whereClause = Prisma.join(conditions, ' OR ');
 
-    const rows = await this.db.$queryRaw<{ conversationId: string }[]>`
-      SELECT e."conversationId", MAX(e."createdAt") AS latest
-      FROM public.emails e
-      WHERE e."channelId" = ${channelId}
-        AND EXISTS (
-          SELECT 1 FROM non_zero.tags t
-          WHERE t."sourceId" = e.id
-            AND t."sourceType" = 'desk-email'
-            AND t."isDeleted" = false
-            AND (${whereClause})
-        )
-      GROUP BY e."conversationId"
-      ORDER BY latest DESC
-      LIMIT 1000
-    `;
+    const rows = await queryConversationIdsByEmailTags(this.db, channelId, whereClause);
 
     logger.info('[TAG-REPO] findConversationIdsByEmailTags success', { channelId, count: rows.length });
 

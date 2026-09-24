@@ -17,6 +17,7 @@ import { CacConfigService } from '@/services/cacConfigService';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { messageSchema } from '@/vespa/src/types';
 import { NAMESPACE } from '@/vespa/vespaConfig';
+import { advisoryXactLockExtended } from '@/bypassAcl/lockServices';
 
 const channelParticipantRepository = new ChannelParticipantRepository();
 
@@ -586,7 +587,9 @@ export async function shareAgentConversationToChannel(input: ShareInput): Promis
 
   const persisted = await db.$transaction(async (tx) => {
     const lockKey = `${workspaceId}:${sourceConversationId}:${targetChannelId}`;
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`;
+    await advisoryXactLockExtended(tx, ['AgentConversationShare'],
+      'agent conversation share: serialize share creation per (workspace, conversation, channel)',
+      lockKey);
 
     const operation = await tx.agentConversationShare.findUnique({
       where: {
