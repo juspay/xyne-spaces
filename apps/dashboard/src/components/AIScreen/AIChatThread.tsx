@@ -95,6 +95,9 @@ import { CitationLink } from '../Chat/XyneAISidebar/components/CitationLink';
 
 import { useCitationDocs, panelDocFromCitation } from './citationDocs';
 import { MessageReactArtifacts, toArtifactRef } from './ReactArtifact';
+import { FlowScreenManager } from '../flowUI/FlowScreenManager';
+import { useFlowActionComplete } from '../../hooks/useFlowActionComplete';
+import { flowMessageId } from '../Chat/XyneAISidebar/utils/XyneAITypes';
 import { OpenUrlActions } from './OpenUrlActions';
 import { ArtifactRestoreNotice } from './ReactArtifact/ArtifactRestoreNotice';
 import { PromptMarkerRail, type PromptMarker } from './PromptMarkerRail';
@@ -812,8 +815,13 @@ function ChatMessageBubble({
   trackContext,
   agentSlug,
   onPendingActionResolved,
+  conversationId,
+  onFlowActionComplete,
 }: {
   message: Message;
+  /** FlowUI actions are dispatched against (messageId, conversationId). */
+  conversationId?: string | undefined;
+  onFlowActionComplete?: (() => void) | undefined;
   /** Run dimensions merged into every act-on-answer click (joins to the run). */
   trackContext?: Record<string, unknown> | undefined;
   agentSlug?: string | undefined;
@@ -1344,6 +1352,20 @@ function ChatMessageBubble({
           {!isUser && message.planTodos && message.planTodos.length > 0 && (
             <PlanCard todos={message.planTodos} title={message.planTitle} />
           )}
+
+          {!isUser &&
+            message.uiFlows?.map(flow => (
+              <div key={flow.screenId} className='mt-1.5'>
+                <FlowScreenManager
+                  flow={flow}
+                  // The card's own chatMessageId, NOT message.id — mid-run the
+                  // latter is a client-side placeholder and every action 403s.
+                  messageId={flowMessageId(flow, message.id)}
+                  conversationId={conversationId ?? ''}
+                  {...(onFlowActionComplete ? { onClose: onFlowActionComplete } : {})}
+                />
+              </div>
+            ))}
 
           {!isUser && message.pendingActions && message.pendingActions.length > 0 && (
             <PendingActionBlock
@@ -2408,6 +2430,27 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     [setMessages],
   );
 
+  const detachFlowLiveViewer = useCallback((): void => {
+    liveViewerRef.current?.detach();
+  }, []);
+  const storeFlowLiveViewer = useCallback(
+    (detach: () => void): void => {
+      liveViewerRef.current = { sessionId: conversationId, detach };
+    },
+    [conversationId],
+  );
+
+  const handleFlowActionComplete = useFlowActionComplete({
+    conversationId,
+    agentSlug: effectiveAgentSlug,
+    threadId,
+    enabled: Boolean(isV2),
+    messages,
+    setMessages,
+    detachLiveViewer: detachFlowLiveViewer,
+    storeLiveViewer: storeFlowLiveViewer,
+  });
+
   const isAnyMessageStreaming = messages.some(m => m.isStreaming);
 
   const streamingBotTurnIndex = useMemo(() => {
@@ -2563,6 +2606,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
                       <ChatMessageBubble
                         trackContext={messageTrackContext}
                         message={message}
+                        conversationId={conversationId || undefined}
                         agentSlug={effectiveAgentSlug ?? undefined}
                         onPendingActionResolved={() => {
                           if (!conversationId) return;
@@ -2585,6 +2629,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
                             ),
                           };
                         }}
+                        onFlowActionComplete={handleFlowActionComplete}
                         onCopy={() => {
                           void navigator.clipboard.writeText(
                             message.content || message.streamingContent || '',

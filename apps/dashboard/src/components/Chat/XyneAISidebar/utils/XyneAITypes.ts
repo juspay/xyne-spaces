@@ -1,3 +1,4 @@
+import type { FlowDefinition } from '@xyne/shared';
 import type { ToolOutput as GeniusToolOutput } from '../../../../types/toolOutput';
 import type { AttachedContextItem } from '../components/ContextPickerPanel';
 
@@ -475,6 +476,36 @@ export interface SelectionContext {
   preview: string; // Truncated preview for display
 }
 
+const hasFlowToken = (flow: FlowDefinition): boolean => {
+  const token = flow.data?.['__xyneFlowToken'];
+  return typeof token === 'string' && token.length > 0;
+};
+
+/**
+ * Add a card to a message's list, keyed by `screenId`. Last write wins (pending
+ * → answered), except that an untokenized copy never overwrites a tokenized one
+ * — only the Spaces hop mints `__xyneFlowToken`, so a `/live` replay would
+ * otherwise strip the card's ability to submit.
+ */
+export function mergeUiFlows(
+  existing: FlowDefinition[] | undefined,
+  incoming: FlowDefinition,
+): FlowDefinition[] {
+  const list = existing ?? [];
+  const at = list.findIndex(flow => flow.screenId === incoming.screenId);
+  if (at < 0) return [...list, incoming];
+  const current = list[at];
+  if (current && hasFlowToken(current) && !hasFlowToken(incoming)) return list;
+  return list.map((flow, index) => (index === at ? incoming : flow));
+}
+
+/** Server-side chat_messages id the card's token was minted against. Mid-run
+ *  a Message.id is a client-side placeholder, and using it 403s every action. */
+export function flowMessageId(flow: FlowDefinition, fallback: string): string {
+  const stored = flow.data?.['chatMessageId'];
+  return typeof stored === 'string' && stored ? stored : fallback;
+}
+
 export interface PlanTodo {
   id?: string;
   title: string;
@@ -484,6 +515,8 @@ export interface PlanTodo {
 export interface Message {
   planTodos?: PlanTodo[];
   planTitle?: string;
+  /** FlowUI artifact cards posted on this message, deduped by `screenId`. */
+  uiFlows?: FlowDefinition[];
   id: string;
   type: 'user' | 'bot';
   content: string;

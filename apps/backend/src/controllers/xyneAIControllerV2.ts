@@ -33,6 +33,7 @@ import {
   CMDK_ANSWER_AGENT_SLUG,
   type ClawRunRequest,
 } from '@/services/clawAgentService';
+import { attachXyneAiFlowToken } from '@/apps/core/flowToken';
 import { resolveAuthorizedSdlcLinkedContext } from '@/sdlc/SdlcLinkedContextResolver';
 import {
   buildSdlcAskAiContext,
@@ -869,8 +870,22 @@ export class XyneAIControllerV2 {
         convId,
         agentSlug
       );
+      const data = Array.isArray((result as { data?: unknown }).data)
+        ? ((result as { data: Array<Record<string, unknown>> }).data).map((message) =>
+            Array.isArray(message['uiFlows'])
+              ? {
+                  ...message,
+                  uiFlows: (message['uiFlows'] as unknown[]).map((flow) =>
+                    attachXyneAiFlowToken(flow, userId),
+                  ),
+                }
+              : message,
+          )
+        : (result as { data?: unknown }).data;
+
       res.json({
         ...result,
+        ...(data !== undefined && { data }),
         ...(result.toolInvocations && { toolInvocations: result.toolInvocations }),
         ...(result.invocationsByMsgId && { invocationsByMsgId: result.invocationsByMsgId }),
         ...(result.runByMsgId && { runByMsgId: result.runByMsgId }),

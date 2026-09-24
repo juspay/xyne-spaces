@@ -10,6 +10,7 @@ import { db } from '@/database/client';
 import type { Response } from 'express';
 import { randomUUID } from 'crypto';
 import { sendWebhookNotification, signWebhookPayload } from '@/apps/core/eventSubscriptionUtils';
+import { attachXyneAiFlowToken } from '@/apps/core/flowToken';
 import { BaseAppEvent, AppEventType } from '@/apps/types';
 import { decrypt } from '@/services/encryptionService';
 import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
@@ -741,6 +742,14 @@ export async function runClawAgentStream(
                 `data: ${JSON.stringify({
                   type: 'attachment',
                   attachment: parsed,
+                })}\n\n`
+              );
+              if (typeof (res as any).flush === 'function') (res as any).flush();
+            } else if (eventType === 'ui-flow') {
+              res.write(
+                `data: ${JSON.stringify({
+                  type: 'ui_flow',
+                  flow: attachXyneAiFlowToken(parsed.flow, request.userId),
                 })}\n\n`
               );
               if (typeof (res as any).flush === 'function') (res as any).flush();

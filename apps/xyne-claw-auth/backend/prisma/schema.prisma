@@ -1316,6 +1316,10 @@ model ChatMessage {
 
   pendingActions Json?
 
+  /// FlowUI artifact cards posted on this message, as a FlowDefinition[].
+  /// Stored without __xyneFlowToken — that is minted per fetch.
+  uiFlows Json?
+
   runProvider String?
 
   attachments ChatAttachment[]
