@@ -702,7 +702,9 @@ export class SdlcHubService implements SdlcHub {
       const inHub = await isTrackInChannel(this.prisma, input.trackId, channelId);
       if (!inHub) throw new AppError('SDLC track not found in this hub', 404);
     }
-    if (input.trackFolderId && (!input.trackId || (await resolveFolderTrackId(this.prisma, input.trackFolderId)) !== input.trackId)) {
+    // The hub UI names a track's own page by the track id, so that means the track's top level.
+    const trackFolderId = input.trackFolderId === input.trackId ? undefined : input.trackFolderId;
+    if (trackFolderId && (!input.trackId || (await resolveFolderTrackId(this.prisma, trackFolderId)) !== input.trackId)) {
       throw new AppError('Track folder not found in this track', 404);
     }
 
@@ -737,8 +739,8 @@ export class SdlcHubService implements SdlcHub {
               data: {
                 workspaceId: actor.workspaceId,
                 channelId,
-                sourceType: input.trackFolderId ? 'FOLDER' : 'TRACK',
-                sourceId: input.trackFolderId ?? input.trackId,
+                sourceType: trackFolderId ? 'FOLDER' : 'TRACK',
+                sourceId: trackFolderId ?? input.trackId,
                 targetType: 'CANVAS',
                 targetId: canvas.id,
                 relationType: SDLC_CONTAINMENT_RELATION,

@@ -71,7 +71,7 @@ export class SdlcAgentContextService {
       },
       execution: {
         conversationId: input.conversationId,
-        linked: await this.linkedItem(input.conversationId),
+        linked: await this.linkedItem(membership.channelId, input.conversationId),
       },
       generationCommit: input.generationCommit ?? null,
     };
@@ -104,18 +104,19 @@ export class SdlcAgentContextService {
       actorUserId: actor.userId,
       execution: {
         conversationId: input.conversationId,
-        linked: await this.linkedItem(input.conversationId),
+        linked: await this.linkedItem(channelId, input.conversationId),
       },
       generationCommit: input.generationCommit ?? null,
     };
   }
 
   /** A conversation is the discussion of at most one hub item; the agent fetches more with the SDLC tools. */
-  private async linkedItem(conversationId: string): Promise<SdlcLinkedItem | null> {
-    const owner = await resolveInheritedOwner(this.prisma, conversationId);
+  // Scoped to the hub: a conversation id from another hub or workspace resolves to nothing.
+  private async linkedItem(channelId: string, conversationId: string): Promise<SdlcLinkedItem | null> {
+    const owner = await resolveInheritedOwner(this.prisma, conversationId, channelId);
     if (!owner) {
       const ticket = await this.prisma.ticket.findFirst({
-        where: { conversationId },
+        where: { conversationId, channelId },
         select: { id: true, title: true },
       });
       return ticket
