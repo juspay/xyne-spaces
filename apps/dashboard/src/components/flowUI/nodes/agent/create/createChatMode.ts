@@ -347,8 +347,10 @@ export function sectionCompleteChatLine(args: {
   field: CreateTurnField;
   hubRow?: AgentCreateHubRow | null;
   name?: string | null;
+  /** Human labels from catalog select — never invent email/X. */
+  toolLabels?: readonly string[] | null;
 }): string | null {
-  const { field, hubRow = null, name = null } = args;
+  const { field, hubRow = null, name = null, toolLabels = null } = args;
   if (field === 'name') {
     const trimmed = name?.trim();
     return trimmed ? `Name set to ${trimmed}.` : 'Name is on the canvas.';
@@ -359,7 +361,11 @@ export function sectionCompleteChatLine(args: {
   if (field === 'tools') {
     if (hubRow === 'builtin') return 'Also suggested tools on the canvas.';
     if (hubRow === 'subagent') return 'Also suggested a subagent on the canvas.';
-    return 'Also suggested MCP for email / X.';
+    const labels = (toolLabels ?? []).map(label => label.trim()).filter(Boolean);
+    if (labels.length > 0) {
+      return `Also suggested MCP: ${labels.join(', ')}.`;
+    }
+    return 'Also suggested MCP on the canvas.';
   }
   if (field === 'skills') return 'Also suggested skills on the canvas.';
   if (field === 'knowledge') return 'Also suggested knowledge on the canvas.';
@@ -629,7 +635,7 @@ export async function applyCreateHubDraft(args: {
     options: { highlight: boolean },
   ) => AgentCreateField[];
   sleep: (ms: number) => Promise<void>;
-  fillTools?: (incoming: AgentCreateChatPatch) => Promise<void>;
+  fillTools?: (incoming: AgentCreateChatPatch) => Promise<string[] | void>;
   fillSkills?: (incoming: AgentCreateChatPatch) => Promise<void>;
   fillKnowledge?: (incoming: AgentCreateChatPatch) => Promise<void>;
   toolsHubRow?: AgentCreateHubRow;
@@ -639,6 +645,7 @@ export async function applyCreateHubDraft(args: {
   const { action, canvasEmpty } = args;
   const toolsHubRow = args.toolsHubRow ?? 'mcp';
   const generateInstructions = action.fields.includes('systemPrompt') || canvasEmpty;
+  let toolLabels: string[] = [];
   const preludeFields = CREATE_REVEAL_FIELD_ORDER.filter(
     field =>
       action.fields.includes(field) &&
@@ -678,6 +685,7 @@ export async function applyCreateHubDraft(args: {
         field,
         hubRow,
         name: typeof preludePatch.name === 'string' ? preludePatch.name : null,
+        toolLabels,
       });
       if (line) args.onSectionComplete?.(line);
     };
@@ -711,7 +719,10 @@ export async function applyCreateHubDraft(args: {
     });
     args.setWritingField('tools', toolsHubRow);
     await args.sleep(Math.max(48, Math.min(args.writeMs, 120)));
-    await args.fillTools(incoming);
+    const labels = await args.fillTools(incoming);
+    if (Array.isArray(labels)) {
+      toolLabels = labels.map(label => label.trim()).filter(Boolean);
+    }
   }
 
   if (action.fields.includes('skills') && args.fillSkills) {
@@ -804,6 +815,7 @@ export async function applyCreateHubDraft(args: {
         field,
         hubRow,
         name: typeof incoming.name === 'string' ? incoming.name : null,
+        toolLabels,
       });
       if (line) args.onSectionComplete?.(line);
     };

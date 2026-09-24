@@ -47,7 +47,14 @@ void describe('parseCreateChatAction', () => {
     );
     assert.equal(sectionCompleteChatLine({ field: 'name', name: 'Standup Scribe' }), 'Name set to Standup Scribe.');
     assert.equal(sectionCompleteChatLine({ field: 'systemPrompt' }), 'Instructions are on the canvas.');
-    assert.equal(sectionCompleteChatLine({ field: 'tools', hubRow: 'mcp' }), 'Also suggested MCP for email / X.');
+    assert.equal(
+      sectionCompleteChatLine({ field: 'tools', hubRow: 'mcp', toolLabels: ['Slack'] }),
+      'Also suggested MCP: Slack.',
+    );
+    assert.equal(
+      sectionCompleteChatLine({ field: 'tools', hubRow: 'mcp' }),
+      'Also suggested MCP on the canvas.',
+    );
   });
 
   void it('strips draft markers from the visible reply', () => {

@@ -91,4 +91,21 @@ void describe('hubCatalogSelect', () => {
     });
     assert.ok(selection.direct.includes('gh_list'));
   });
+
+  void it('does not bind a blind first gateway when named product misses catalog', () => {
+    const catalog = catalogWithSlackGithub();
+    const emptySuggestion: ToolSuggestion = {
+      subagents: [],
+      integrations: [],
+      reasoning: {},
+    };
+    const selection = selectionFromCatalogSuggestion({
+      current: { ...EMPTY_TOOLS, callableAgents: [] },
+      suggestion: emptySuggestion,
+      catalog,
+      intent: 'add Notion MCP',
+    });
+    assert.equal(selection.direct.length, 0);
+    assert.equal((selection.gateway ?? []).length, 0);
+  });
 });

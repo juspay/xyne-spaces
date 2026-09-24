@@ -261,14 +261,19 @@ export function AgentCreateSplitPage({
                       }
                       return;
                     }
+                    // Prefer userText — model draftIntent often drops “Slack”/“GitHub”.
+                    const selectIntent = [userText.trim(), action.intent.trim()]
+                      .filter(Boolean)
+                      .join('\n');
                     const selected = await selectHubToolsForIntent({
-                      intent: action.intent,
+                      intent: selectIntent,
                       current: createForm.form.tools,
                       systemPrompt:
                         incoming.systemPrompt || createForm.form.systemPrompt || undefined,
                     });
                     if (selected) {
                       incoming.tools = selected.selection;
+                      return selected.labels;
                     }
                   } catch {
                     // Prompt still applies if tool suggest fails.

@@ -76,9 +76,20 @@ export function matchNamedMcpEntries(
   return matched;
 }
 
+/** True when the utterance names a product we try to bind (Slack, GitHub, …). */
+export function intentNamesProduct(intent: string): boolean {
+  if (PRODUCT_ALIASES.some(alias => alias.re.test(intent))) return true;
+  return Boolean(
+    intent.match(
+      /\b(?:add|use|pick|choose|select|enable|attach)\s+(?:the\s+)?([a-z0-9][\w.-]{1,40})\s+(?:mcp|integration|server|tool)\b/i,
+    ) ?? intent.match(/\b([a-z0-9][\w.-]{1,40})\s+mcp\b/i),
+  );
+}
+
 /**
  * Resolve suggest-tools + named-product matches into a toolbox selection.
- * Prefer explicit name matches over a blind first-gateway fallback.
+ * Prefer explicit name matches. Never bind a blind first-gateway / first
+ * selectable row — that produced fake “email / X” hub fills.
  */
 export function selectionFromCatalogSuggestion(args: {
   current: AgentToolboxSelection;
@@ -99,26 +110,15 @@ export function selectionFromCatalogSuggestion(args: {
     }
     return selection;
   }
-  // Suggestion already bound real ids — keep it. Only if still empty, prefer
-  // a selectable gateway that appears in the suggestion, else first selectable.
-  const beforeEmpty =
-    selection.direct.length === 0 &&
-    selection.custom.length === 0 &&
-    (selection.gateway?.length ?? 0) === 0 &&
-    selection.subagents.length === 0;
-  if (!beforeEmpty) return selection;
-
-  const mcpCatalog = buildMcpCatalog(catalog, []);
-  const suggestedSlugs = new Set((suggestion.integrations ?? []).map(row => row.slug));
-  const pick =
-    mcpCatalog.find(entry => suggestedSlugs.has(entry.slug) && entry.selectable) ??
-    mcpCatalog.find(entry => entry.isGateway && entry.selectable) ??
-    mcpCatalog.find(entry => entry.selectable);
-  if (!pick) return selection;
-  return {
-    ...enableEntry(mcpCatalog, selection, pick),
-    callableAgents: selection.callableAgents ?? [],
-  };
+  // Named product in utterance but nothing in catalog → leave empty (honest miss).
+  if (intentNamesProduct(intent)) {
+    return {
+      ...current,
+      callableAgents: current.callableAgents ?? [],
+    };
+  }
+  // Suggestion already bound real ids — keep it. No first-gateway fallback.
+  return selection;
 }
 
 /** Human labels for selected hubs — fed into generate-prompt after hubs land. */
@@ -155,10 +155,30 @@ export function describeSelectedTools(
   return [...new Set(labels)];
 }
 
+const CATALOG_MS = 4_000;
+const SUGGEST_MS = 4_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    promise.then(
+      value => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      error => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
 /**
- * Shared Hub catalog select: suggest-tools (catalog-grounded LLM) + named
- * product resolve against `getAvailableTools` (same catalog list_available_tools
- * exposes). Returns null when catalog cannot be loaded.
+ * Shared Hub catalog select: prefer named product resolve against
+ * `getAvailableTools` (same catalog list_available_tools exposes). Only call
+ * suggest-tools when no named product matched — suggest hangs often.
+ * Returns null when catalog cannot be loaded.
  */
 export async function selectHubToolsForIntent(args: {
   intent: string;
@@ -171,12 +191,40 @@ export async function selectHubToolsForIntent(args: {
   labels: string[];
 } | null> {
   const { getAvailableTools, suggestTools } = await import('@/services/claw/clawToolsService');
-  const catalog = args.catalog ?? (await getAvailableTools().catch(() => null));
+  const catalog =
+    args.catalog ??
+    (await withTimeout(getAvailableTools(), CATALOG_MS, 'getAvailableTools').catch(() => null));
   if (!catalog) return null;
-  const suggestion = await suggestTools({
-    description: args.intent,
-    ...(args.systemPrompt ? { systemPrompt: args.systemPrompt } : {}),
-  }).catch(
+
+  // Named products first — do not wait on suggest-tools for Slack/GitHub.
+  const named = matchNamedMcpEntries(args.intent, catalog);
+  if (named.length > 0) {
+    const mcpCatalog = buildMcpCatalog(catalog, []);
+    let selection: AgentToolboxSelection = {
+      ...args.current,
+      callableAgents: args.current.callableAgents ?? [],
+    };
+    for (const entry of named) {
+      selection = {
+        ...enableEntry(mcpCatalog, selection, entry),
+        callableAgents: selection.callableAgents ?? [],
+      };
+    }
+    return {
+      selection,
+      catalog,
+      labels: describeSelectedTools(selection, catalog),
+    };
+  }
+
+  const suggestion = await withTimeout(
+    suggestTools({
+      description: args.intent,
+      ...(args.systemPrompt ? { systemPrompt: args.systemPrompt } : {}),
+    }),
+    SUGGEST_MS,
+    'suggestTools',
+  ).catch(
     (): ToolSuggestion => ({
       subagents: [],
       integrations: [],
