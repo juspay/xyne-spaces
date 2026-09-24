@@ -41,7 +41,8 @@ import {
 } from '@/services/googleCalendarApi';
 import { buildGoogleEventBody, hashEventBody } from '@/services/calendarEventPayload';
 import { normalizeCalendarOwnerEmail } from '@/services/calendarCallStore.utils';
-import { runAsServiceActor, runAsSystem } from '@/database/tenant/context';
+import { runAsServiceActor } from '@/database/tenant/context';
+import { findCallForCalendarPush } from '@/bypassAcl/callServices';
 import { buildCallInviteUrl } from '@/utils/urlUtils';
 import { logger } from '@/utils/logger';
 
@@ -154,7 +155,7 @@ async function removePushedEvent(
 export async function syncCallToGoogleCalendar(callId: string): Promise<Date | null> {
   // The job carries only a call id, so the row's own workspaceId is read
   // cross-workspace first and every later query runs inside that scope.
-  const call = await runAsSystem(() => repositories.calls.findForCalendarPush(callId));
+  const call = await findCallForCalendarPush(callId);
 
   if (!call) {
     logger.warn(`${TAG} Call not found; nothing to sync`, { callId });

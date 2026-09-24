@@ -654,6 +654,9 @@ export const ThreadMessages = ({
       setActiveTab: (): void => undefined,
       setSkipMarkAsRead: setSkipMarkAsReadThread,
       skipMarkAsReadRef: skipMarkAsReadThreadRef,
+      // Thread bubbles render with context 'thread', where the create-ticket
+      // action is never offered, so this value is not read on this path.
+      channelHasBoards: false,
     }),
     [setSkipMarkAsReadThread],
   );
@@ -1121,7 +1124,7 @@ export const ThreadMessages = ({
                     {/* Subscription Button */}
                     {derivedConversationId && (
                       <Tooltip content='Toggle notification subscription'>
-                        <div className='p-2 border border-border rounded-lg h-8 w-8'>
+                        <div className='flex h-8 w-8 items-center justify-center rounded-lg transition-colors hover:bg-muted'>
                           <ConversationSubscription
                             conversationId={derivedConversationId}
                             {...(conversation && { conversation })}

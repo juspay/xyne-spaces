@@ -9,3 +9,4 @@ export type {
   ReactArtifactPayload,
   ReactArtifactViewProps,
 } from './ReactArtifact.types';
+export type { XyneAppContext, XyneContextChannel, XyneSurface } from './artifactData.constants';

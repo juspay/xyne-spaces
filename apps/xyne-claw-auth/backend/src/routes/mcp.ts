@@ -11,9 +11,12 @@ import type { McpToolInfo, McpServerTools } from "../mcp/types.js";
 import { hasConnectorDefinition, resolveConnectorDefinition } from "../mcp/connector-definitions.js";
 import { BITBUCKET_CUSTOM_TOOLS, handleUploadPrScreenshot, handleGetPrComments, handleGetPrTemplate, handleListPullRequests, buildUpstreamBitbucketCitation } from "../mcp/adapters/bitbucket.js";
 import { GITHUB_CUSTOM_TOOLS, handleUploadPrAttachment } from "../mcp/adapters/github.js";
+import { GITHUB_INSIGHTS_TOOLS, isGithubInsightsTool, handleGithubInsightsTool } from "../mcp/adapters/github-insights.js";
 import { GRAFANA_CUSTOM_TOOLS, handleGrafanaQueryLogs, handleGrafanaListMetrics, handleGrafanaQueryMetrics, handleGrafanaQueryDatabase, buildUpstreamGrafanaCitation, prefixChunk } from "../mcp/adapters/grafana.js";
 import { type Citation } from "xyne-claw-shared";
 import { SLACK_CUSTOM_TOOLS, handleSlackFindChannel } from "../mcp/adapters/slack.js";
+import { channelAgentTools, handleChannelAgentTool, isChannelAgentTool } from "../surfaces/messaging/agent-tools.js";
+import { getChannel, isMessagingChannelKey, MESSAGING_CHANNEL_KEYS } from "../surfaces/messaging/plugin.js";
 import { POSTMAN_CUSTOM_TOOLS, handleRunMonitor } from "../mcp/adapters/postman.js";
 import {
   WEBFETCH_SERVER_TYPE,
@@ -656,11 +659,20 @@ const CUSTOM_TOOL_INJECTIONS: ReadonlyArray<{
   createIfMissing: boolean;
 }> = [
   { match: (t) => t === "bitbucket", tools: BITBUCKET_CUSTOM_TOOLS, createIfMissing: false },
-  // upload-pr-attachment hits GitHub's REST + uploads API directly, so it works
-  // even when the upstream github MCP server fails to spawn.
-  { match: (t) => t === "github", tools: GITHUB_CUSTOM_TOOLS, createIfMissing: true },
+  // upload-pr-attachment and the growth tools hit GitHub's REST/GraphQL APIs
+  // directly, so they work even when the upstream github MCP server fails to
+  // spawn.
+  { match: (t) => t === "github", tools: [...GITHUB_CUSTOM_TOOLS, ...GITHUB_INSIGHTS_TOOLS], createIfMissing: true },
   { match: (t) => t === "postman", tools: POSTMAN_CUSTOM_TOOLS, createIfMissing: false },
   { match: (t) => t === "slack", tools: SLACK_CUSTOM_TOOLS, createIfMissing: true },
+  // Messaging channels (WhatsApp over Baileys, WhatsApp Cloud API, …): fully
+  // virtual — no upstream MCP server, every tool executes in claw-auth against
+  // the account's connection.
+  ...MESSAGING_CHANNEL_KEYS.map((key) => ({
+    match: (t: string) => t === key,
+    tools: channelAgentTools(key),
+    createIfMissing: true,
+  })),
   { match: isGrafanaFamilyType, tools: GRAFANA_CUSTOM_TOOLS, createIfMissing: true },
 ];
 
@@ -793,6 +805,9 @@ export async function withSurfaceDefaultToolsConfig(
   if (runCtx?.slackDelivery?.surfaceAgentId && runCtx.slackDelivery.teamId) {
     effective = withSubagent(effective, "slack");
   }
+  if (runCtx?.channelDelivery) {
+    effective = withSubagent(effective, runCtx.channelDelivery.channel);
+  }
 
   // Spaces-originated runs already carry the agent's Spaces app/user context in
   // the session and credential fallback. Give those runs the Spaces subagent by
@@ -801,7 +816,7 @@ export async function withSurfaceDefaultToolsConfig(
   // jobs post their result into a Spaces channel, so a scheduled run that
   // carries Spaces app context counts as a Spaces surface too and gets the same
   // default (a non-Spaces scheduled run, lacking that context, does not).
-  const hasSpacesContext = !!runCtx?.spacesAppId && !!runCtx?.spacesAppUserId && !runCtx?.slackDelivery;
+  const hasSpacesContext = !!runCtx?.spacesAppId && !!runCtx?.spacesAppUserId && !runCtx?.slackDelivery && !runCtx?.channelDelivery;
   // The run-context (`getSession`) can come back empty or partial at tool-list
   // time — a Redis miss or a race — and that silently strips a Spaces-app
   // agent's Spaces tools (prod 2026-08-24: agent `xyne` kept only its hand-
@@ -814,6 +829,7 @@ export async function withSurfaceDefaultToolsConfig(
   const sessionIsSpacesApp =
     !!sessionSpacesAppId &&
     !runCtx?.slackDelivery &&
+    !runCtx?.channelDelivery &&
     runCtx?.triggerSource !== "api" &&
     runCtx?.triggerSource !== "chat";
   const isSpacesSurface =
@@ -1104,6 +1120,14 @@ router.get("/:sessionId/mcp/tools", async (req: Request<{ sessionId: string }>, 
           log.info(`[mcp/tools] added virtual slack entry (surface bot token) for userId=${userId}`);
         }
       }
+    }
+
+    // Messaging-channel runs get their channel's action tools (send, react,
+    // list groups) as a virtual server; execution is local (agent-tools.ts).
+    if (runCtx?.channelDelivery && !entries.some((entry) => entry.serverType === runCtx.channelDelivery?.channel)) {
+      const channel = runCtx.channelDelivery.channel;
+      entries.push({ type: "user", serverType: channel, serverName: getChannel(channel)?.displayName ?? channel, enforcementType: "virtual" });
+      log.info(`[mcp/tools] added virtual ${channel} entry (channel account) for userId=${userId}`);
     }
 
     log.info(`[mcp/tools] final entries=${entries.map((e) => `${e.serverType}:${e.type}`).join(",")}`);
@@ -1588,6 +1612,27 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
       return;
     }
 
+    // Messaging-channel action tools — virtual server, no connector / no
+    // credentials; the account's live connection is the credential. Only a run
+    // that ORIGINATED on that channel account may use them (the session ctx
+    // is the authority), and per-account gates decide what the agent may do.
+    if (isMessagingChannelKey(serverType)) {
+      const { getSession } = await import("./webhook.js");
+      const channelCtx = await getSession(req.params.sessionId).catch(() => null);
+      const delivery = channelCtx?.channelDelivery;
+      if (!delivery || delivery.channel !== serverType) {
+        res.status(403).json({ success: false, error: `${serverType} tools are only available to runs started from a ${serverType} account` });
+        return;
+      }
+      if (!isChannelAgentTool(serverType, tool)) {
+        res.status(400).json({ success: false, error: `Unknown ${serverType} tool: ${tool}` });
+        return;
+      }
+      const content = await handleChannelAgentTool({ target: delivery, tool, params: (params ?? {}) as Record<string, unknown> });
+      res.json({ success: true, data: { content } });
+      return;
+    }
+
     // Built-in webfetch — virtual server, no connector / no credentials. Like
     // the knowledge-base branch, short-circuit BEFORE the connector + credential
     // checks. The tool is read-only (fetch → markdown), so it does not go
@@ -1905,6 +1950,16 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
     // is decrypted server-side and never leaves this process.
     if (serverType === "github" && tool === "upload-pr-attachment") {
       const result = await handleUploadPrAttachment(credentials, params ?? {});
+      res.json({ success: true, data: result });
+      return;
+    }
+
+    // GitHub growth & audience tools (stargazers, star history, traffic,
+    // forks, releases, contributor activity, community pulse). All read-only,
+    // all served here against the connection's PAT — the upstream github MCP
+    // server exposes none of these.
+    if (serverType === "github" && isGithubInsightsTool(tool)) {
+      const result = await handleGithubInsightsTool(tool, credentials, params ?? {});
       res.json({ success: true, data: result });
       return;
     }

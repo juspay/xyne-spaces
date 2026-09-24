@@ -69,6 +69,7 @@ export const searchQuerySchema = z.object({
   in: csv.optional(),
   mentions: csv.optional(),
   channelMentions: csv.optional(),
+  groupMentions: csv.optional(),
 
   // Work-item filters.
   projectId: csv.optional(),

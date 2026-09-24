@@ -1341,12 +1341,12 @@ const spacesTickets: ToolDef = {
   description:
     "PRIMARY tool for all ticket queries. ALWAYS use this when the user asks about tickets, ticket status, ticket lists, " +
     "or anything ticket-related. Covers every filter the Spaces tickets UI offers: status, priority, assignee, creator, " +
-    "board, project, tags/labels, stage, channel, user group, ticket type, AI category, PR reviewer, QA assignee, " +
+    "board, project, tags/labels, stage, channel, merchant id (MID), user group, ticket type, AI category, PR reviewer, QA assignee, " +
     "due-date (ETA) range, and creation-date range. Every people filter (assignee, creator, PR reviewer, QA) accepts an " +
     "EMAIL or a userId. Most filters have a multi-select array form (statusIn, priorityIn, boardIdIn, stageNameIn, " +
-    "assignedToIn, createdByIn, userGroupIds, ticketTypes, aiCategory, prReviewers, qaAssigned) that matches ANY of the " +
+    "assignedToIn, createdByIn, userGroupIds, ticketTypes, aiCategory, prReviewers, qaAssigned, merchantIdIn) that matches ANY of the " +
     "given values. Returns structured ticket details including assignee, tags, stage, channel ID, conversation ID, " +
-    "createdAt, and updatedAt, plus (when set) the resolver + close time, last editor, first-response time, ticket type, " +
+    "createdAt, and updatedAt, plus (when set) the merchant id (MID), resolver + close time, last editor, first-response time, ticket type, " +
     "AI triage labels, owning group, due date (ETA), archived status, and related/duplicate tickets — the full lifecycle in one call. " +
     "Archived tickets are EXCLUDED from every filtered query (matching the Spaces UI); only a direct `ticketId`/`xyneId` " +
     "lookup can return one. " +
@@ -1401,6 +1401,16 @@ const spacesTickets: ToolDef = {
         description: "Filter by tag name(s), comma-separated (e.g. 'April-Launch,Q2')",
       },
       channelId: { type: "string", description: "Filter to tickets in this channel only" },
+      merchantId: {
+        type: "string",
+        description:
+          "Filter by merchant id (MID) — the ticket's merchantId column, matched exactly (e.g. 'merchant_1234'). Use when the user asks for tickets of a specific merchant.",
+      },
+      hasMerchantId: {
+        type: "boolean",
+        description:
+          "When true, return ONLY tickets that are linked to a merchant (merchantId is set); when false, only tickets with NO merchant. Ignored if `merchantId`/`merchantIdIn` is given.",
+      },
       // ── Multi-select variants (mirror the Spaces tickets UI, which is multi-select
       //    on every dropdown). Each is an array → Prisma `in`; when both a singular
       //    field above and its plural form are passed, the plural (array) wins. ──
@@ -1418,6 +1428,12 @@ const spacesTickets: ToolDef = {
         type: "array",
         items: { type: "string" },
         description: "Filter by MULTIPLE board ids (matches any). Multi-select form of `boardId`.",
+      },
+      merchantIdIn: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Filter by MULTIPLE merchant ids / MIDs (matches any). Multi-select form of `merchantId`.",
       },
       stageNameIn: {
         type: "array",
@@ -1567,6 +1583,7 @@ const spacesTickets: ToolDef = {
       if (args["projectId"]) baseWhere["projectId"] = { equals: args["projectId"] };
       if (args["stageName"]) baseWhere["stageName"] = { equals: args["stageName"] };
       if (args["channelId"]) baseWhere["channelId"] = { equals: args["channelId"] };
+      if (args["merchantId"]) baseWhere["merchantId"] = { equals: args["merchantId"] };
       if (args["tags"]) {
         const tagNames = (args["tags"] as string)
           .split(",")
@@ -1606,6 +1623,13 @@ const spacesTickets: ToolDef = {
       if (boardIdIn.length) baseWhere["boardId"] = { in: boardIdIn };
       const stageNameIn = asStrArr(args["stageNameIn"]);
       if (stageNameIn.length) baseWhere["stageName"] = { in: stageNameIn };
+      const merchantIdIn = asStrArr(args["merchantIdIn"]);
+      if (merchantIdIn.length) baseWhere["merchantId"] = { in: merchantIdIn };
+      // Presence filter — only when no explicit id was given, so a concrete MID
+      // always wins over "any merchant" (mirrors the Spaces tickets API).
+      if (!merchantIdIn.length && !args["merchantId"] && typeof args["hasMerchantId"] === "boolean") {
+        baseWhere["merchantId"] = args["hasMerchantId"] ? { not: null } : { equals: null };
+      }
       const userGroupIds = asStrArr(args["userGroupIds"]);
       if (userGroupIds.length) baseWhere["userGroupId"] = { in: userGroupIds };
       const ticketTypes = asStrArr(args["ticketTypes"]);
@@ -2131,6 +2155,7 @@ async function formatTickets(rows: TicketRow[], opts: FormatOptions = {}): Promi
     }
     if (t.updatedBy && t.updatedBy !== t.createdBy) parts.push(`  Last edited by: ${userLabel(t.updatedBy)}`);
     if (t.ticketType) parts.push(`  Type: ${t.ticketType}`);
+    if (t.merchantId) parts.push(`  Merchant ID: ${t.merchantId}`);
     if (t.aiCategory || t.aiSubCategory) {
       parts.push(`  AI triage: ${[t.aiCategory, t.aiSubCategory].filter(Boolean).join(" / ")}`);
     }
@@ -2373,6 +2398,7 @@ interface TicketRow {
   firstRespondedAt?: string; // SLA: first response
   userGroupId?: string; // owning group (id; name is gateway-blocked)
   ticketType?: string; // categorization (e.g. Bug/Fix)
+  merchantId?: string; // linked merchant (MID), when the ticket has one
   isArchived?: boolean; // live PG archived state
   aiCategory?: string; // AI triage label
   aiSubCategory?: string; // AI triage sub-label

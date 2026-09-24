@@ -8,6 +8,8 @@ import { Check, ChevronDown, Hash, X } from 'lucide-react';
 import Avatar from '../../../ui/Avatar/Avatar';
 import { cn } from '../../../../utils/classNames';
 import { useUserSearch, useUsers } from '../../../../hooks/useUsers';
+import { useUserGroups } from '../../../../hooks/useUserGroup';
+import { useUserGroupSearch } from '@xyne/shared/hooks';
 import { useAllChannels, useAllVisibleChannels } from '../../../../hooks/useChannels';
 import { getUserDisplayName } from '../../../../utils/userDisplayName';
 import { useAuthContextValues } from '../../../../hooks/useAuth';
@@ -320,19 +322,23 @@ export function BoardTokenField({
 export function MentionTargetsField({
   users,
   channels,
+  userGroups,
   onChange,
   placeholder,
   track,
 }: {
   users: string[];
   channels: string[];
-  onChange: (next: { users: string[]; channels: string[] }) => void;
+  userGroups: string[];
+  onChange: (next: { users: string[]; channels: string[]; userGroups: string[] }) => void;
   placeholder: string;
   track: string;
 }): ReactElement {
   const [query, setQuery] = useState('');
   const userMatches = useUserSearch(query, 10) ?? [];
+  const userGroupMatches = useUserGroupSearch(query, 10) ?? [];
   const allUsers = useUsers();
+  const allUserGroups = useUserGroups();
   const allChannels = useAllVisibleChannels();
   const knownChannels = useAllChannels();
   const { userID: currentUserId } = useAuthContextValues();
@@ -355,6 +361,8 @@ export function MentionTargetsField({
   const labelFor = (id: string): string => {
     const channel = channelLabel(id);
     if (channel) return channel;
+    const group = allUserGroups.find(g => g.id === id);
+    if (group) return `@${group.alias ?? group.name}`;
     const user = allUsers.find(u => u.id === id);
     return user ? getUserDisplayName(user) : id;
   };
@@ -362,21 +370,25 @@ export function MentionTargetsField({
   const options = [
     ...userMatches.map(u => ({ id: u.id, label: `@${getUserDisplayName(u)}` })),
     ...channelMatches.map(c => ({ id: c.id, label: `#${c.name}` })),
+    ...userGroupMatches.map(g => ({ id: g.id, label: `@${g.alias ?? g.name}` })),
   ];
 
-  // Ids only — the two channel hooks return slightly different row shapes.
+  // Ids only — the two channel hooks return slightly different row shapes. A picked id is
+  // classified back to its field: a known channel, then a known group, else a person.
   const channelIds = new Set([...allChannels.map(c => c.id), ...knownChannels.map(c => c.id)]);
+  const userGroupIds = new Set(allUserGroups.map(g => g.id));
   return (
     <TokenBox
-      selected={[...users, ...channels]}
+      selected={[...users, ...channels, ...userGroups]}
       options={options}
       labelFor={labelFor}
       query={query}
       onQueryChange={setQuery}
       onChange={next =>
         onChange({
-          users: next.filter(id => !channelIds.has(id)),
           channels: next.filter(id => channelIds.has(id)),
+          userGroups: next.filter(id => userGroupIds.has(id)),
+          users: next.filter(id => !channelIds.has(id) && !userGroupIds.has(id)),
         })
       }
       placeholder={placeholder}

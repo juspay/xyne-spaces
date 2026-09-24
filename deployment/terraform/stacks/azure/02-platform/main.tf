@@ -76,6 +76,8 @@ module "platform" {
   enable_vespa              = var.enable_vespa
   enable_monitoring         = var.enable_monitoring
   enable_sandbox            = var.enable_sandbox
+  enable_hindsight          = var.enable_hindsight
+  hindsight                 = var.hindsight
   apps                      = var.apps
   workers                   = var.workers
   addon_values              = var.addon_values

@@ -12,6 +12,7 @@ import { redisService } from "../redis.js";
 import { getRecoveryContextForSession } from "../queue/run-recovery-worker.js";
 import type { ExternalResultCallbackConfig } from "../surfaces/external-api/delivery.js";
 import type { SlackDeliveryTarget } from "../surfaces/slack/delivery.js";
+import type { ChannelDeliveryTarget, MessagingChannelKey } from "../surfaces/messaging/plugin.js";
 
 
 export interface SessionContext {
@@ -49,6 +50,10 @@ export interface SessionContext {
   /** Display name shown in Spaces transient progress surfaces. */
   agentName?: string | undefined;
   responseMode: "conversation" | "approval";
+  /** Prepended to this run's delivered reply. Set when several runs answer the
+   *  same thread and the reader needs to tell them apart — /eval fans one
+   *  question out across providers, so each answer says which one produced it. */
+  replyPrefix?: string;
   /**
    * Suppress the thread reply for this run entirely.
    *
@@ -115,9 +120,12 @@ export interface SessionContext {
   externalResultCallback?: ExternalResultCallbackConfig;
   /** Terminal result target for a run dispatched from a per-agent Slack app. */
   slackDelivery?: SlackDeliveryTarget;
+  /** Terminal result target for a run dispatched from a messaging channel
+   *  account (WhatsApp, Telegram, …) — see surfaces/messaging. */
+  channelDelivery?: ChannelDeliveryTarget;
   /** Surface that dispatched this run. Used by MCP tool filtering to apply
    *  surface-scoped default tools without mutating the stored agent config. */
-  triggerSource?: "spaces" | "scheduled" | "chat" | "api" | "automation" | "slack" | "heartbeat" | "reflex";
+  triggerSource?: "spaces" | "scheduled" | "chat" | "api" | "automation" | "slack" | "heartbeat" | "reflex" | MessagingChannelKey;
   /**
    * When true, the result-forward branch resolves the agent's plain `@Name`
    * mentions into clickable/notifying Spaces mentions (name→userId via

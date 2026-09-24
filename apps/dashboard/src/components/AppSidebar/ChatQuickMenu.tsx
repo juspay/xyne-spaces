@@ -2,7 +2,7 @@ import { type ReactElement } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 import { useRadarEnabled } from '../../hooks/radarCacConfig';
-import { chatNavItems } from './navigationConfig';
+import { useInboxNavItems } from '../../hooks/useInboxNavItems';
 import { QUICK_NAV_ROW_CLASS, QuickNavList } from './RailQuickNav';
 
 export const ChatQuickMenu = ({
@@ -16,10 +16,11 @@ export const ChatQuickMenu = ({
 }): ReactElement => {
   const auth = useAuth();
   const radarEnabled = useRadarEnabled(auth.user?.email);
+  const items = useInboxNavItems(radarEnabled);
 
   return (
     <QuickNavList heading='Chat'>
-      {chatNavItems(radarEnabled).map(item => {
+      {items.map(item => {
         const Icon = item.icon;
         return (
           <Link

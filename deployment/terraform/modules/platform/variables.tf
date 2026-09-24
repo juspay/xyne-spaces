@@ -61,6 +61,8 @@ variable "app_secrets" {
     ysweet_server_token         = string
     transcription_agent_api_key = string
     litellm_api_key             = optional(string, "")
+    hindsight_api_key           = optional(string, "")
+    hindsight_llm_api_key       = optional(string, "")
     google_client_id            = optional(string, "")
     google_client_secret        = optional(string, "")
   })
@@ -291,6 +293,11 @@ variable "enable_vespa" {
   default = false
 }
 
+variable "enable_hindsight" {
+  type    = bool
+  default = false
+}
+
 variable "enable_monitoring" {
   type    = bool
   default = false
@@ -368,6 +375,24 @@ variable "livekit" {
     http_url  = ""
     turn_host = ""
     group     = ""
+  }
+}
+
+variable "hindsight_namespace" {
+  type    = string
+  default = "hindsight"
+}
+
+variable "hindsight" {
+  type = object({
+    url    = optional(string, "")
+    tenant = optional(string, "default")
+  })
+  default = {}
+
+  validation {
+    condition     = var.hindsight.url == "" || can(regex("^https?://", var.hindsight.url))
+    error_message = "hindsight.url must be an http(s) URL."
   }
 }
 

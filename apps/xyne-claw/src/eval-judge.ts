@@ -13,6 +13,8 @@
  */
 import { LITELLM } from "./config.js";
 import { withLlmSlot, pauseLlmGate, retryAfterMs } from "./llm-gate.js";
+import { jevAskOn, judgeBackendConfigured, type JevQuestion } from "./jev.js";
+import { isJudgeBackend, type JudgeBackendName } from "./judge-backend.js";
 
 import { createLogger } from "./logger.js";
 const log = createLogger("eval-judge");
@@ -83,7 +85,106 @@ const SCORE_TOOL = {
   },
 };
 
+export interface JevJudgeProbabilities {
+  same: number;
+  minor: number;
+  misses: number;
+  contradicts: number;
+  empty: number;
+}
+
+const JEV_JUDGE_TIMEOUT_MS = Math.max(1000, Number(process.env["EVAL_JEV_TIMEOUT_MS"] ?? 15_000));
+
+const JEV_CONFIDENT = 0.5;
+const JEV_CONTRADICTS_CONFIDENT = 0.6;
+const JEV_EMPTY_NOISE_FLOOR = 0.3;
+
+function unit(value: unknown): number {
+  const n = typeof value === "number" && Number.isFinite(value) ? value : 0;
+  return Math.max(0, Math.min(1, n));
+}
+
+function jevBandScore(p: JevJudgeProbabilities): number | null {
+  if (p.contradicts >= JEV_CONTRADICTS_CONFIDENT) return 1 + 38 * (1 - p.contradicts);
+  if (p.same >= JEV_CONFIDENT) return 90 + 10 * p.same * (1 - p.minor / 2);
+  if (p.minor >= JEV_CONFIDENT) return 70 + 19 * p.minor * (1 - p.misses);
+  if (p.misses >= JEV_CONFIDENT) return 40 + 29 * (1 - p.contradicts) * (1 - p.misses / 2);
+  const signals: Array<[number, number]> = [
+    [p.same, 95],
+    [p.minor, 78],
+    [p.misses, 52],
+    [p.contradicts, 20],
+  ];
+  const total = signals.reduce((sum, [prob]) => sum + prob, 0);
+  if (total < 0.01) return null;
+  return signals.reduce((sum, [prob, band]) => sum + prob * band, 0) / total;
+}
+
+export function jevScoreFromProbabilities(raw: Partial<JevJudgeProbabilities>): number | null {
+  const p: JevJudgeProbabilities = {
+    same: unit(raw.same),
+    minor: unit(raw.minor),
+    misses: unit(raw.misses),
+    contradicts: unit(raw.contradicts),
+    empty: unit(raw.empty),
+  };
+  if (p.empty >= JEV_CONFIDENT) return 0;
+  const band = jevBandScore(p);
+  if (band === null) return null;
+  const penalty = p.empty >= JEV_EMPTY_NOISE_FLOOR ? 1 - p.empty : 1;
+  return Math.max(0, Math.min(100, Math.round(band * penalty)));
+}
+
+const JEV_JUDGE_QUESTIONS: Record<keyof JevJudgeProbabilities, string> = {
+  same: "The GENERATED answer conveys the same meaning and intent as the EXPECTED answer; any differences are purely stylistic.",
+  minor: "The GENERATED answer is mostly correct but leaves out minor information or shifts emphasis slightly.",
+  misses: "The GENERATED answer misses or misstates important parts of the EXPECTED answer.",
+  contradicts: "The GENERATED answer contradicts the EXPECTED answer or is largely wrong or off-topic.",
+  empty: "The GENERATED answer is empty, is a refusal, or is completely unrelated to the EXPECTED answer.",
+};
+
+async function judgeViaJev(backend: JudgeBackendName, input: EvalJudgeInput): Promise<EvalJudgeResult> {
+  if (!judgeBackendConfigured(backend)) return { score: null, reasoning: "judge_unavailable" };
+  const rubric = (input.prompt && input.prompt.trim()) || DEFAULT_JUDGE_PROMPT;
+  const state = [
+    rubric,
+    "",
+    ...(input.message ? [`User message:\n${input.message.slice(0, 4000)}`, ""] : []),
+    "--- EXPECTED answer ---",
+    (input.expected || "(empty)").slice(0, 8000),
+    "",
+    "--- GENERATED answer ---",
+    (input.generated || "(empty)").slice(0, 8000),
+  ].join("\n");
+
+  const questions: Record<string, JevQuestion> = {};
+  for (const [key, instructions] of Object.entries(JEV_JUDGE_QUESTIONS)) {
+    questions[key] = { type: "noul", instructions };
+  }
+
+  const answers = await jevAskOn(backend, state, questions, {
+    purpose: "eval-judge",
+    timeoutMs: JEV_JUDGE_TIMEOUT_MS,
+  });
+  if (!answers) return { score: null, reasoning: "judge_unavailable" };
+
+  const probs: Partial<JevJudgeProbabilities> = {};
+  for (const key of Object.keys(JEV_JUDGE_QUESTIONS) as Array<keyof JevJudgeProbabilities>) {
+    probs[key] = unit(answers[key]?.noul);
+  }
+  const score = jevScoreFromProbabilities(probs);
+  if (score === null) return { score: null, reasoning: "judge_unavailable" };
+  const parts = (Object.keys(JEV_JUDGE_QUESTIONS) as Array<keyof JevJudgeProbabilities>)
+    .map((key) => `${key}=${(probs[key] ?? 0).toFixed(2)}`)
+    .join(" ");
+  return { score, reasoning: `${backend}: ${parts}`.slice(0, 200) };
+}
+
 export async function judgeSemanticMatch(input: EvalJudgeInput): Promise<EvalJudgeResult> {
+  const requested = input.model?.trim().toLowerCase();
+  if (!input.copilot?.token && isJudgeBackend(requested) && requested !== "llm") {
+    return judgeViaJev(requested, input);
+  }
   const viaCopilot = !!input.copilot?.token;
   if (!viaCopilot && !LITELLM.apiKey) {
     return { score: null, reasoning: "judge_unavailable" };

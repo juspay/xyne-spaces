@@ -4,9 +4,46 @@
  */
 
 import { LITELLM } from "./config.js";
+import { jevAsk, jevEnabled, jevThreshold } from "./jev.js";
 
 import { createLogger } from "./logger.js";
 const log = createLogger("chain-judge");
+
+const JEV_CONTINUE_THRESHOLD_ENV = "JEV_CHAIN_CONTINUE_THRESHOLD";
+
+async function judgeViaJev(
+  state: string,
+  sourceAgent: string,
+  targetAgent: string,
+  judgeContext?: string,
+): Promise<{ action: "continue" | "stop"; reason: string } | null> {
+  if (!jevEnabled()) return null;
+  const instructions = judgeContext
+    ? [
+        `An agent chain hands work from "${sourceAgent}" to "${targetAgent}".`,
+        `The chain owner defined the rule for this hand-off. It is the ONLY criterion — apply it literally to the output and tool calls below, and do not substitute your own view of whether the work is complete or whether a human is involved:`,
+        `"""${judgeContext}"""`,
+        `Give the probability that "${targetAgent}" SHOULD be triggered next.`,
+        `HIGH when the rule's CONTINUE condition is met. LOW when its STOP condition is met, when the rule is not clearly satisfied, or when the output is an error or empty.`,
+      ].join("\n")
+    : [
+        `An agent chain hands work from "${sourceAgent}" to "${targetAgent}". Both are automated agents; there is no human between them.`,
+        `Give the probability that "${targetAgent}" SHOULD be triggered next.`,
+        `HIGH when the source produced actionable work the target must act on, the task is not yet complete, and the target can proceed with no human input.`,
+        `LOW when the request is already complete, the output is an error or empty, or the agent is asking a human or waiting on human input — chains are agent-to-agent only.`,
+      ].join("\n");
+  const answers = await jevAsk(
+    state,
+    { continue: { type: "noul", instructions } },
+    { purpose: "chain-continuation" },
+  );
+  const noul = answers?.["continue"]?.noul;
+  if (typeof noul !== "number") return null;
+  const threshold = jevThreshold(JEV_CONTINUE_THRESHOLD_ENV, 0.5);
+  const action: "continue" | "stop" = noul >= threshold ? "continue" : "stop";
+  log.info(`[chain-judge] ${sourceAgent} → ${targetAgent}: ${action} via jev (${noul.toFixed(2)} vs ${threshold})`);
+  return { action, reason: `jev ${noul.toFixed(2)}≥${threshold}? ${action}` };
+}
 
 export interface ChainJudgeToolInvocation {
   toolName?: string;
@@ -22,8 +59,7 @@ const JUDGE_INVOCATION_BLOCK_LIMIT = 4000;
 function summarizeInvocations(invocations: ChainJudgeToolInvocation[] | undefined): string {
   if (!invocations?.length) return "";
   const lines: string[] = [];
-  let used = 0;
-  for (const inv of invocations.slice(0, JUDGE_INVOCATION_LIMIT)) {
+  for (const inv of invocations.slice(-JUDGE_INVOCATION_LIMIT)) {
     const name = typeof inv?.toolName === "string" ? inv.toolName : "";
     if (!name) continue;
     const rawCommand = typeof inv?.command === "string" ? inv.command.replace(/\s+/g, " ").trim() : "";
@@ -31,15 +67,27 @@ function summarizeInvocations(invocations: ChainJudgeToolInvocation[] | undefine
       rawCommand.length > JUDGE_COMMAND_EXCERPT_LIMIT
         ? `${rawCommand.slice(0, JUDGE_COMMAND_EXCERPT_LIMIT)}…`
         : rawCommand;
-    const line = `- ${name}${command ? `: ${command}` : ""}${inv?.isError ? " [error]" : ""}`;
+    lines.push(`- ${name}${command ? `: ${command}` : ""}${inv?.isError ? " [error]" : ""}`);
+  }
+  let used = 0;
+  const kept: string[] = [];
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i] ?? "";
     if (used + line.length > JUDGE_INVOCATION_BLOCK_LIMIT) {
-      lines.push("- … (truncated)");
+      kept.unshift("- … (earlier calls truncated)");
       break;
     }
     used += line.length;
-    lines.push(line);
+    kept.unshift(line);
   }
-  return lines.join("\n");
+  return kept.join("\n");
+}
+
+function windowResult(text: string, limit: number): string {
+  if (text.length <= limit) return text;
+  const head = Math.floor(limit * 0.35);
+  const tail = limit - head;
+  return `${text.slice(0, head)}\n… [${text.length - limit} chars truncated] …\n${text.slice(-tail)}`;
 }
 
 export async function judgeChainContinuation(
@@ -67,8 +115,11 @@ export async function judgeChainContinuation(
         : []),
       "",
       `--- ${sourceAgent} Output ---`,
-      agentResult.slice(0, JUDGE_RESULT_LIMIT),
+      windowResult(agentResult, JUDGE_RESULT_LIMIT),
     ].join("\n");
+
+    const jevDecision = await judgeViaJev(userContent, sourceAgent, targetAgent, judgeContext);
+    if (jevDecision) return jevDecision;
 
     const res = await fetch(`${LITELLM.url}/v1/chat/completions`, {
       method: "POST",

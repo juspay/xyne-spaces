@@ -577,6 +577,8 @@ identical on the three clouds; only the state and provider variables differ.
 | `argocd_namespace` | string | `argocd` | |
 | `argocd_values` | string (YAML) | `""` | extra values for the `argo-cd` chart (merged after `fullnameOverride: argocd`, `configs.params.server.insecure: true`) |
 | `enable_vespa` | bool | `false` | `addons.vespa.enabled` |
+| `enable_hindsight` | bool | `false` | `addons.hindsight.enabled`; deploys the upstream Hindsight chart and points claw's long-term memory at it |
+| `hindsight` | object{url, tenant} | `{}` | point claw at a Hindsight you run elsewhere instead. `url` wins over the deployed addon; empty with the addon off disables memory entirely |
 | `enable_monitoring` | bool | `false` | `addons.monitoring.enabled` |
 | `enable_sandbox` | bool | `false` | `addons.sandbox.enabled`; also registers the `quay.io/kata-containers/kata-deploy-charts` OCI repository in Argo CD |
 | `apps` | map(object{enabled, values}) | `{}` | per-chart switch and YAML value overrides, see below |
@@ -642,9 +644,10 @@ reachable:
 | `cnpg` | `enabled`, `version` 0.29.0, `namespace` cnpg-system, `cluster.instances` 2, `cluster.imageName`, `cluster.storage.size` 50Gi, `cluster.storage.storageClass`, `cluster.pooler.{instances 2, maxClientConn 1000, defaultPoolSize 20}`, `cluster.backup.{enabled, destinationPath, endpointURL, credentialsSecret xyne-pg-backup, schedule, retentionPolicy 14d}`, `values` |
 | `redis` | `enabled`, `persistence.size` 10Gi, `persistence.storageClass`, `values` |
 | `minio` | `enabled`, `version` 5.4.0, `persistence.size` 200Gi, `persistence.storageClass`, `resources.requests.memory` 2Gi, `values` |
+| `hindsight` | `enabled`, `repoURL` github.com/vectorize-io/hindsight, `targetRevision` v0.10.1, `path` helm/hindsight, `namespace` hindsight, `service` hindsight-api, `port` 8888, `values` (any upstream chart value: `postgresql.*`, `worker.*`, `tei.*`, `api.env`, `existingSecret`) |
 | `vespa` | `enabled`, `image.{registry, repository vespaengine/vespa, tag}`, `proxyImage.{registry, repository, tag}`, `storageClass`, `configserverStorage` 50Gi, `contentStorage` 200Gi, `embedder.enabled` true, `values.{configserver, content, feed, search, embedder, proxy}` |
 | `monitoring` | `enabled`, `namespace` monitoring, `metricsEndpoint`, `victoriaMetrics.version` 0.93.0, `otelCollector.version` 0.173.1, `values.{victoriaMetrics, otelCollector}` |
-| `sandbox` | `enabled`, `kata.{version 4.1.0, namespace kube-system}`, `controller.{repoURL, targetRevision, path}`, `template.{name, image, vcpus, memory, resources}`, `warmPool.replicas`, `policy.allowedEgress`, `values.{kata, policy, router, egressProxy}` |
+| `sandbox` | `enabled`, `kata.{version 4.1.0, imageTag 4.1.0, namespace kube-system, shim qemu, shims [qemu, qemu-runtime-rs], hypervisorAnnotations}`, `controller.{repoURL, targetRevision v0.4.5, path helm, namespace, image, tag, values}`, `template.{name, image, vcpus, memory, resources}`, `warmPool.replicas`, `policy.{allowedEgress, dns.cidrs}`, `values.{kata, policy, router, egressProxy}` |
 
 `cnpg`, `redis` and `minio` are switched on by the component modes, not by hand. `externalDns`
 follows `dns_zone` and `external_dns_enabled` in `01-infra`, which today means AWS only; the same
@@ -808,9 +811,27 @@ addon_values = {
 - **Monitoring** installs `victoria-metrics-k8s-stack` (release `vm`) and an OpenTelemetry
   collector in `monitoring`; every app gets `ENABLE_OTEL_METRICS=true` and
   `OTEL_BASE_URL=http://otel-collector.monitoring.svc:4318`.
-- **Sandbox** installs `kata-deploy` (QEMU shim, on the sandbox pool), the agent-sandbox
-  controller from `controller.repoURL` (skipped when empty), the `SandboxTemplate`, warm pool,
-  NetworkPolicy and RBAC from `deployment/argocd/addons/sandbox`, `xyne-sandbox-router` and
+- **Sandbox** installs `kata-deploy` on the sandbox pool. `kata.shims` lists the shims to
+  install (`qemu` and `qemu-runtime-rs`) and `kata.shim` picks which one the workload runs,
+  defaulting to `qemu`, the Go runtime. That single value sets kata-deploy's `defaultShim` and
+  the `SandboxTemplate`'s `runtimeClassName` to `kata-<shim>` together, so the two cannot drift
+  and switching runtime is a one-field edit. The Rust runtime is installed but unused by
+  default: the sandbox image runs dockerd inside the microVM, and upstream tests Docker only
+  against QEMU. `kata.hypervisorAnnotations` is the allowlist of
+  `io.katacontainers.config.hypervisor.*` annotations a sandbox may set; an annotation missing
+  from it is silently rejected and the microVM boots at kata's own defaults rather than the
+  `template.vcpus` and `template.memory` you asked for. It also installs the agent-sandbox
+  controller and its four CRDs from the upstream chart at `controller.repoURL` (pinned to
+  `v0.4.5`, with `controller.extensions` on so the `SandboxTemplate`, `SandboxWarmPool` and
+  `SandboxClaim` workers run; clear `repoURL` if you install it yourself), the `SandboxTemplate`, warm pool,
+  NetworkPolicy and RBAC from `deployment/argocd/addons/sandbox`. `policy.dns.cidrs` is empty
+  by default and only matters when the cluster runs NodeLocal DNSCache: that DaemonSet binds
+  its addresses on every node, so a lookup never reaches a kube-dns pod and the pod selector
+  rule never matches. Put both addresses from its `-localip` flag in `policy.dns.cidrs`, the
+  link-local one and the kube-dns ClusterIP, or every name lookup inside a sandbox hangs. Read
+  them with
+  `kubectl -n kube-system get ds node-local-dns -o jsonpath='{.spec.template.spec.containers[0].args}'`.
+  It also installs `xyne-sandbox-router` and
   `xyne-egress-proxy`. `xyne-claw` then gets `KATA_ROUTER_URL`, `KATA_NAMESPACE`,
   `KATA_TEMPLATE` and a mounted ServiceAccount token. `template.image` is required.
 

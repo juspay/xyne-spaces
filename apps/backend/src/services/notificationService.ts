@@ -1,5 +1,5 @@
 import { logger } from '@/utils/logger';
-import { runAsSystem } from '@/database/tenant/context';
+import { getWorkspaceNotificationCountsQuery } from '@/bypassAcl/notificationServices';
 import { repositories } from '@/database/repositories';
 import { websocketService } from './websocketService';
 import {
@@ -23,7 +23,7 @@ import { buildInitialMessageMd,
   type InitialMessageSummary,
   ChannelScopeType,
   NotificationDeliveryMethod,
-  NotificationType, MessageType, NotificationStatus, UserStatus, ActivityClassification, TicketStatusV2 } from '@xyne/shared';
+  NotificationType, MessageType, ActivityClassification, TicketStatusV2 } from '@xyne/shared';
 import { activityService } from '@/services/activity/activityService';
 
 const prisma = DatabaseClient.getInstance();
@@ -1939,54 +1939,7 @@ class NotificationService {
       count: number;
     }>
   > {
-    // Spans the caller's own identities across workspaces.
-    return runAsSystem(async () => {
-      // Step 1: Get all active users for this member across workspaces
-      const users = await prisma.user.findMany({
-        where: {
-          orgMemberId: memberId,
-          leftAt: null,
-          status: UserStatus.ACTIVE,
-        },
-        select: {
-          id: true,
-          workspaceId: true,
-        },
-      });
-
-      if (users.length === 0) {
-        return [];
-      }
-
-      const userIds = users.map(u => u.id);
-
-      // Step 2: Count unread+delivered notifications per user
-      const notificationCounts = await prisma.notification.groupBy({
-        by: ['userId'],
-        where: {
-          userId: { in: userIds },
-          status: { in: [NotificationStatus.UNREAD, NotificationStatus.DELIVERED] },
-          readAt: null,
-          dismissedAt: null,
-        },
-        _count: {
-          id: true,
-        },
-      });
-
-      // Build a map: userId -> count
-      const countMap = new Map<string, number>();
-      for (const nc of notificationCounts) {
-        countMap.set(nc.userId, nc._count.id);
-      }
-
-      // Step 3: Merge users with their counts
-      return users.map(u => ({
-        workspaceId: u.workspaceId,
-        userId: u.id,
-        count: countMap.get(u.id) ?? 0,
-      }));
-    });
+    return getWorkspaceNotificationCountsQuery(memberId);
   }
 
   async getUserPreferences(userId: string): Promise<UserPreferences> {

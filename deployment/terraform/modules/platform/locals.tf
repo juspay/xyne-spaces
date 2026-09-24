@@ -79,6 +79,7 @@ locals {
       XYNE_CLAW_S2S_KEY = var.app_secrets.claw_s2s_key
       INTERNAL_S2S_KEY  = var.app_secrets.internal_s2s_key
       LITELLM_API_KEY   = var.app_secrets.litellm_api_key
+      HINDSIGHT_API_KEY = var.app_secrets.hindsight_api_key
       REDIS_PASSWORD    = local.redis_auth
     }
     "xyne-claw-auth-secrets" = {
@@ -160,14 +161,23 @@ locals {
     vespa        = var.enable_vespa
     monitoring   = var.enable_monitoring
     sandbox      = var.enable_sandbox
+    hindsight    = var.enable_hindsight
   }
 
-  addon_extra = {
-    certManager = {
-      email  = var.acme_email
-      issuer = "letsencrypt"
-    }
-  }
+  addon_extra = merge(
+    {
+      certManager = {
+        email  = var.acme_email
+        issuer = "letsencrypt"
+      }
+    },
+    local.hindsight_secret ? {
+      hindsight = {
+        namespace      = var.hindsight_namespace
+        existingSecret = "hindsight-secrets"
+      }
+    } : {},
+  )
 
   addons = merge(
     {
@@ -262,6 +272,10 @@ locals {
         url      = var.livekit.url
         httpUrl  = var.livekit.http_url
         turnHost = var.livekit.turn_host
+      }
+      hindsight = {
+        url    = var.hindsight.url
+        tenant = var.hindsight.tenant
       }
     }
     addons = local.addons

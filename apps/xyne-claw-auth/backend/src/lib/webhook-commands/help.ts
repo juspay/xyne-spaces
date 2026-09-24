@@ -34,6 +34,8 @@ export async function handleHelp(ctx: WebhookCommandCtx): Promise<void> {
     "- `/status` — debug panel for this thread's current run: what it's doing now, tool activity in the last 5 minutes, and whether it's stuck or just slow",
     "- `/debug` — one HTML file with the full execution trace of this thread's current run: every tool call and LLM turn with timings (no tool outputs)",
     "- `/debug all` — the same trace for every earlier session in this thread, newest first, each expandable — for tracking an issue across runs",
+    "- `/debug chain` — why the agent workflow bound to this channel did or did not hand off to the next agent: bindings, published state, outgoing edges and plan mode",
+    "- `/eval <question>` — run the question once on every configured provider; each answers in this thread, then an HTML comparison of their timings is attached. `providers=claude,codex` narrows it",
     "- `/help` — show this list",
   ].join("\n"), "Failed to post /help reply");
 }

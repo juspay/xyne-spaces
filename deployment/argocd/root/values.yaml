@@ -126,6 +126,10 @@ infra:
     url: ""
     httpUrl: ""
     turnHost: ""
+  hindsight:
+    url: ""
+    tenant: default
+    provider: hindsight
 
 addons:
   lbController:
@@ -205,6 +209,16 @@ addons:
       requests:
         memory: 2Gi
     values: {}
+  hindsight:
+    enabled: false
+    repoURL: https://github.com/vectorize-io/hindsight
+    targetRevision: v0.10.1
+    path: helm/hindsight
+    namespace: hindsight
+    service: hindsight-api
+    port: 8888
+    existingSecret: ""
+    values: {}
   vespa:
     enabled: false
     image:
@@ -242,11 +256,30 @@ addons:
     enabled: false
     kata:
       version: 4.1.0
+      imageTag: 4.1.0
       namespace: kube-system
+      shim: qemu
+      shims:
+        - qemu
+        - qemu-runtime-rs
+      hypervisorAnnotations:
+        - default_memory
+        - default_vcpus
+        - enable_iothreads
+        - enable_mem_prealloc
+        - virtio_fs_cache
+        - block_device_driver
+        - block_device_cache_direct
+        - enable_vhost_net
+        - enable_nested_virtualization
     controller:
-      repoURL: ""
-      targetRevision: ""
-      path: ""
+      repoURL: https://github.com/kubernetes-sigs/agent-sandbox
+      targetRevision: v0.4.5
+      path: helm
+      namespace: agent-sandbox-system
+      image: registry.k8s.io/agent-sandbox/agent-sandbox-controller
+      tag: v0.4.5
+      values: {}
     template:
       name: kata-workspace-template
       image: ""

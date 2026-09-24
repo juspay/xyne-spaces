@@ -302,9 +302,48 @@ model ConnectedSurface {
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 
+  channelAuthState ChannelAuthState[]
+
   @@unique([orgId, surfaceId, surfaceTenantId])
   @@index([orgId])
   @@map("connected_surfaces")
+}
+
+/// Encrypted key/value state a messaging-channel plugin must persist for one
+/// account (a ConnectedSurface row): WhatsApp Web creds + Signal keys, a
+/// Telegram bot token, ... `category`/`keyId` are plugin-defined (Baileys uses
+/// its key-store types as categories; single-valued entries use keyId ""). The
+/// value is AES-GCM `ciphertext:iv:authTag` via encryptSurfaceSecret — never
+/// plaintext. Rows die with the account (Cascade) and on logout.
+
+/// A pairing request from a sender a messaging-channel account does not know
+/// yet (dmPolicy "pairing"): the sender is handed a short code and an org
+/// admin (or the sender themself, once signed in to claw) links the code to a
+/// claw user, which creates the UserSurfaceIdentity row. One live request per
+/// (account, sender); codes expire after an hour.
+/// Everything needed to authenticate as one channel account: the Cloud API's
+/// tokens, and for Baileys the full Signal AuthenticationState — creds plus its
+/// pre-key/session/sender-key entries. Named for what it holds rather than
+/// "secrets", because most of it is protocol state that cannot be reissued,
+/// not a credential you could paste. One row per key so a write touches only
+/// that key: the Signal store rewrites these constantly, and it would
+/// otherwise share connected_surfaces.config with unlocked config merges.
+// workspace-check:ignore — tenant scope inherited via connectedSurfaceId -> ConnectedSurface.orgId (FK, onDelete: Cascade); never queried cross-tenant.
+model ChannelAuthState {
+  id                 String           @id @default(cuid())
+  connectedSurfaceId String
+  connectedSurface   ConnectedSurface @relation(fields: [connectedSurfaceId], references: [id], onDelete: Cascade)
+  /// Plugin-defined: "creds" | "pre-key" | "session" | "access-token" | ...
+  category           String
+  /// "" when the category holds a single value.
+  keyId              String           @default("")
+  encryptedValue     String
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  @@unique([connectedSurfaceId, category, keyId])
+  @@index([connectedSurfaceId])
+  @@map("channel_auth_state")
 }
 
 model UserSurfaceIdentity {
@@ -1186,8 +1225,18 @@ model AgentRun {
   /// runs ↔ assistant messages is ambiguous. Populated in the chat-callback.
   chatMessageId    String?
   orgId            String
+  /// Set when another run spawned this one through A2A `call-agent`: the
+  /// caller's sessionId. Null for a user-invoked run.
+  parentSessionId  String?
+  /// The caller's slug, denormalized so listing child runs needs no second
+  /// lookup per row.
+  parentAgentSlug  String?
+  /// The `call-agent` tool call that spawned this run, lining a child row up
+  /// with its row in the caller's trace.
+  parentToolCallId String?
 
   @@index([userId, status, startedAt])
+  @@index([parentSessionId])
   @@index([agentSlug, startedAt])
   @@index([provider, completedAt])
   @@index([chatMessageId])
@@ -2695,6 +2744,34 @@ model ServiceRegistry {
   @@index([serviceName])
   @@index([tenantUniqueId, serviceName])
   @@map("service_registry")
+}
+
+/// Pending self-service MCP-gateway registrations awaiting admin approval.
+/// A UI registration lands here as `pending`; on approval it is written to
+/// `service_registry` (which is therefore always "approved and live").
+/// Scoped by `tenantUniqueId` (the gateway tenant), like `service_registry` —
+/// this is platform gateway config, not spaces workspace/org data.
+// workspace-check:ignore
+model GatewayServiceRequest {
+  id                String    @id @default(uuid())
+  tenantUniqueId    String    @map("tenant_unique_id")
+  orgId             String?   @map("org_id")
+  serviceName       String    @map("service_name")
+  backendId         String    @map("backend_id")
+  backendUrl        String    @map("backend_url")
+  tokenEndpointUrl  String?   @map("token_endpoint_url")
+  xAuthHeaderName   String?   @map("x_auth_header_name")
+  tools             Json
+  status            String    @default("pending") // pending | approved | rejected
+  requestedByUserId String    @map("requested_by_user_id")
+  reviewedByUserId  String?   @map("reviewed_by_user_id")
+  reviewedAt        DateTime? @map("reviewed_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  @@index([tenantUniqueId, status])
+  @@index([requestedByUserId])
+  @@map("gateway_service_requests")
 }
 
 // Error-pipeline bucket taxonomy + routing rules (Grafana → Claw auto-fix).
