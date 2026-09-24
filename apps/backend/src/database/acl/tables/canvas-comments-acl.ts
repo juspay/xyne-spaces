@@ -27,11 +27,11 @@ export class CanvasCommentsACL extends BaseQueryACL<
   }
 
   async getWhereClause(): Promise<Prisma.CanvasCommentWhereInput> {
-    return { workspaceId: this.ctx.workspaceId }
+    return this.reachWhere('read')
   }
 
   async getMutateWhere(): Promise<Prisma.CanvasCommentWhereInput> {
-    return { workspaceId: this.ctx.workspaceId }
+    return this.reachWhere('write')
   }
 
   async canCreate(data: Prisma.CanvasCommentUncheckedCreateInput): Promise<boolean> {
