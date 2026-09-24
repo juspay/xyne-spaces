@@ -5,6 +5,7 @@ import { prisma, type AppPrismaClient, type AppTransactionClient } from "../db.j
 import { asyncHandler, badRequest, conflict, ok } from "../lib/http.js";
 import { resolveSurfacePerson } from "../lib/identity-resolution.js";
 import { provisionDefaultAgents } from "../lib/provision-org-agents.js";
+import { ensureDefaultAgentSpacesApps, installDefaultAgentsToWorkspace } from "../lib/provision-workspace-agents.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("spaces-sync");
@@ -365,9 +366,21 @@ router.post("/workspace", asyncHandler(async (req: Request, res: Response) => {
       metadata: body["metadata"],
     });
   });
-  provisionDefaultAgents(result.orgId).catch((err) => {
-    log.error("[spaces-sync] provisionDefaultAgents failed", { orgId: result.orgId, err });
-  });
+  provisionDefaultAgents(result.orgId)
+    .then(() => ensureDefaultAgentSpacesApps({
+      orgId: result.orgId,
+      spacesOrgId,
+      spacesWorkspaceId,
+      createdBySpacesUserId: optionalString(body, "createdBySpacesUserId"),
+    }))
+    // Install only into workspaces this sync actually created — installs are
+    // per-workspace; re-running them on every sync would churn the stored JWT.
+    .then(() => result.created
+      ? installDefaultAgentsToWorkspace({ orgId: result.orgId, spacesWorkspaceId })
+      : undefined)
+    .catch((err) => {
+      log.error("[spaces-sync] default-agent provisioning failed", { orgId: result.orgId, err });
+    });
   ok(res, result);
 }));
 
@@ -470,11 +483,27 @@ router.post("/user", asyncHandler(async (req: Request, res: Response) => {
       userId: canonicalUser.id,
       spacesUserId,
       reusedExistingUser: resolution.kind === "reuse",
+      workspaceCreated: workspace.created,
     };
   });
-  provisionDefaultAgents(result.orgId).catch((err) => {
-    log.error("[spaces-sync] provisionDefaultAgents failed", { orgId: result.orgId, err });
-  });
+  // Plain user syncs do nothing agent-related — agent provisioning belongs to
+  // org and workspace creation. The one exception: a user sync can be the first
+  // contact that materializes a workspace (e.g. flows that only enqueue a user
+  // sync), in which case IT is the workspace-creation moment and runs the full
+  // org-agents → apps → install pipeline.
+  if (result.workspaceCreated) {
+    provisionDefaultAgents(result.orgId)
+      .then(() => ensureDefaultAgentSpacesApps({
+        orgId: result.orgId,
+        spacesOrgId,
+        spacesWorkspaceId,
+        createdBySpacesUserId: optionalString(body, "createdBySpacesUserId") ?? spacesUserId,
+      }))
+      .then(() => installDefaultAgentsToWorkspace({ orgId: result.orgId, spacesWorkspaceId }))
+      .catch((err) => {
+        log.error("[spaces-sync] default-agent provisioning failed", { orgId: result.orgId, err });
+      });
+  }
   ok(res, result);
 }));
 
