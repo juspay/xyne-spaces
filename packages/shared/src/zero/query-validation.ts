@@ -10,39 +10,31 @@ interface QueryAST {
 }
 
 /**
- * Which channels a table's fields are encrypted at rest for:
- * `'all'` = every channel, `string[]` = only rows in those channels (`[]` = never).
+ * Which workspaces a table's fields are encrypted at rest for:
+ * `'all'` = every workspace, `string[]` = only rows owned by those workspaces (`[]` = never).
  * `null` is accepted for wire compatibility and means the same as `[]`.
  * Encryption-side only: decryption is driven by the `ENC:` prefix on the value,
  * so narrowing the scope leaves already-encrypted rows readable.
  */
-export type EncryptedChannelScope = 'all' | string[] | null;
+export type EncryptedWorkspaceScope = 'all' | string[] | null;
 
 /** Per-table encrypted-fields config, as served by the backend's /encryption/public-key. */
 export interface EncryptedTableConfig {
   fields: string[];
   enforceClientEncryption: boolean;
-  channelIds: EncryptedChannelScope;
+  workspaceIds: EncryptedWorkspaceScope;
 }
 
-/** True when the scope encrypts nothing: `null` or an empty channel list. */
-export function isEncryptionScopeEmpty(scope: EncryptedChannelScope): boolean {
+/** True when the scope encrypts nothing: `null` or an empty workspace list. */
+export function isEncryptionScopeEmpty(scope: EncryptedWorkspaceScope): boolean {
   return scope === null || (Array.isArray(scope) && scope.length === 0);
 }
 
-/** True when deciding needs the row's channelId, i.e. the scope is a non-empty channel list. */
-export function encryptionScopeNeedsChannelId(scope: EncryptedChannelScope): boolean {
-  return Array.isArray(scope) && scope.length > 0;
-}
-
-/** Whether a row in `channelId` falls inside the table's encryption scope. */
-export function isChannelInEncryptionScope(
-  scope: EncryptedChannelScope,
-  channelId: string | null | undefined,
-): boolean {
+/** Whether a row owned by `workspaceId` falls inside the table's encryption scope. */
+export function isWorkspaceInEncryptionScope(scope: EncryptedWorkspaceScope, workspaceId: string): boolean {
   if (scope === null) return false;
   if (scope === 'all') return true;
-  return typeof channelId === 'string' && scope.includes(channelId);
+  return scope.includes(workspaceId);
 }
 
 export class EncryptedFieldQueryError extends Error {

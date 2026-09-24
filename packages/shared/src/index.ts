@@ -5,10 +5,9 @@ export { defineQuery } from './zero/acl';
 export {
   EncryptedFieldQueryError,
   validateQueryWhereClause,
-  encryptionScopeNeedsChannelId,
-  isChannelInEncryptionScope,
   isEncryptionScopeEmpty,
-  type EncryptedChannelScope,
+  isWorkspaceInEncryptionScope,
+  type EncryptedWorkspaceScope,
   type EncryptedTableConfig,
 } from './zero/query-validation';
 export * from './ai';

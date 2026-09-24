@@ -7,10 +7,9 @@ export { zql } from './builder';
 export {
   EncryptedFieldQueryError,
   validateQueryWhereClause,
-  encryptionScopeNeedsChannelId,
-  isChannelInEncryptionScope,
   isEncryptionScopeEmpty,
-  type EncryptedChannelScope,
+  isWorkspaceInEncryptionScope,
+  type EncryptedWorkspaceScope,
   type EncryptedTableConfig,
 } from './query-validation';
 export { queries } from './queries';
