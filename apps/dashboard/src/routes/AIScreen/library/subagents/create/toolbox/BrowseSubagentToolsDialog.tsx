@@ -6,7 +6,7 @@ import {
   BROWSE_CARD_IDLE,
   BROWSE_CARD_SELECTED,
 } from '../../../shared/primitives/browseCard';
-import { ChevronRight, MultipleCrossCancelDefault, PlusDefault } from '@xyne/icons';
+import { MultipleCrossCancelDefault, PlusDefault } from '@xyne/icons';
 import {
   BrowseDialog,
   handleBrowseDialogOpenChange,
@@ -54,7 +54,7 @@ const GroupCard = ({
       data-track-name='Create subagent v2: open tool group detail'
       className={cn(BROWSE_CARD, enabled ? BROWSE_CARD_SELECTED : BROWSE_CARD_IDLE)}
     >
-      <span className='flex w-full items-center justify-between gap-2'>
+      <span className='flex w-full items-center gap-2'>
         <span className='flex min-w-0 items-center gap-2'>
           <span className='truncate text-sm font-medium leading-5 text-foreground'>
             {humanizeSource(group.source)}
@@ -64,9 +64,6 @@ const GroupCard = ({
               Enabled
             </Pill>
           )}
-        </span>
-        <span className='flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground'>
-          <ChevronRight className='size-4' aria-hidden />
         </span>
       </span>
       <span className='w-full truncate text-xs leading-4 tracking-[-0.24px] text-muted-foreground'>
@@ -87,7 +84,7 @@ const GroupCard = ({
       }
       data-track-category='Claw Agents'
       data-track-name='Create subagent v2: quick toggle tool group'
-      className='absolute right-11 top-4 flex size-7 items-center justify-center rounded-lg text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100'
+      className='absolute right-4 top-4 flex size-7 items-center justify-center rounded-lg text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100'
     >
       {enabled ? (
         <MultipleCrossCancelDefault className='size-4' aria-hidden />

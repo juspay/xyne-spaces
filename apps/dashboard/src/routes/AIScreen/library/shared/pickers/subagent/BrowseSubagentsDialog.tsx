@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type ReactElement } from 'react';
 import { cn } from '@/utils/classNames';
 import { searchByNameThenDescription } from '../../librarySearch';
 import { BROWSE_CARD, BROWSE_CARD_IDLE, BROWSE_CARD_SELECTED } from '../../primitives/browseCard';
-import { ChevronRight, MultipleCrossCancelDefault, PlusDefault } from '@xyne/icons';
+import { MultipleCrossCancelDefault, PlusDefault } from '@xyne/icons';
 import {
   BrowseDialog,
   handleBrowseDialogOpenChange,
@@ -56,7 +56,7 @@ const SubagentCard = ({
       data-track-name='Create agent v2: open subagent detail'
       className={cn(BROWSE_CARD, selected ? BROWSE_CARD_SELECTED : BROWSE_CARD_IDLE)}
     >
-      <span className='flex w-full items-center justify-between gap-2'>
+      <span className='flex w-full items-center gap-2'>
         <span className='flex min-w-0 items-center gap-2'>
           <span className='truncate text-sm font-medium leading-5 text-foreground'>
             {entry.name}
@@ -71,9 +71,6 @@ const SubagentCard = ({
             </Pill>
           )}
         </span>
-        <span className='flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground'>
-          <ChevronRight className='size-4' aria-hidden />
-        </span>
       </span>
       <span className='w-full truncate text-xs leading-4 tracking-[-0.24px] text-muted-foreground'>
         {entry.description || 'No description added'}
@@ -87,7 +84,7 @@ const SubagentCard = ({
       title={`${selected ? 'Remove' : 'Add'} ${entry.name}`}
       data-track-category='Claw Agents'
       data-track-name='Create agent v2: quick toggle subagent'
-      className='absolute right-11 top-4 flex size-7 items-center justify-center rounded-lg text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100'
+      className='absolute right-4 top-4 flex size-7 items-center justify-center rounded-lg text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100'
     >
       {selected ? (
         <MultipleCrossCancelDefault className='size-4' aria-hidden />

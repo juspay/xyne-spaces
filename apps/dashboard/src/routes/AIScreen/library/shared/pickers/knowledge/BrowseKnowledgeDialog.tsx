@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactElement } from 'react';
-import { ChevronRight, MultipleCrossCancelDefault, UserCheck } from '@xyne/icons';
+import { MultipleCrossCancelDefault, UserCheck } from '@xyne/icons';
 import { cn } from '@/utils/classNames';
 import { useClawKnowledgeBaseTree } from '@/hooks/useClawKnowledgeBaseTree';
 import type { KbCollectionNode, KbSelection } from '@/services/claw/clawKnowledgeBaseTypes';
@@ -214,11 +214,8 @@ function CollectionCard({
     >
       <KbFolderTile size='lg' />
       <span className='flex min-w-0 flex-1 flex-col gap-1.5 overflow-hidden'>
-        <span className='flex min-w-0 items-center gap-2'>
-          <span className='min-w-0 flex-1 truncate text-sm font-medium leading-5 text-foreground'>
-            {node.name}
-          </span>
-          <ChevronRight className='size-4 shrink-0 text-muted-foreground' aria-hidden />
+        <span className='min-w-0 truncate text-sm font-medium leading-5 text-foreground'>
+          {node.name}
         </span>
         <KbCollectionMeta node={node} />
       </span>
