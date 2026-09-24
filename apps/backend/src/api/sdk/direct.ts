@@ -19,6 +19,10 @@
 import { Router, type Request, type RequestHandler, type Response } from 'express';
 import { z, type ZodTypeAny } from 'zod';
 import { searchQuerySchema, searchSchemaQuerySchema } from './schemas/search';
+import {
+  notificationListQuerySchema,
+  notificationReadBodySchema,
+} from './schemas/notifications';
 import { db } from '@/database/client';
 import type { AuthData } from '@/zero/mutators';
 import { ChannelController } from '@/controllers/channelController';
@@ -26,6 +30,7 @@ import { ConversationController } from '@/controllers/conversationController';
 import { TicketController } from '@/controllers/ticketController';
 import { AttachmentController } from '@/controllers/attachmentController';
 import { DraftAttachmentController } from '@/controllers/draftAttachmentController';
+import { notificationController } from '@/controllers/notificationController';
 import { searchHandler } from '@/services/vespaSearch';
 import { schemaHandler } from '@/services/vespaSearch/schemaHandler';
 import {
@@ -106,7 +111,13 @@ type Controller = (req: Request, res: Response) => Promise<void> | void;
 type Service = (req: Request, authData: AuthData) => Promise<unknown>;
 
 interface BaseRoute {
-  readonly method: 'get' | 'post';
+  /**
+   * `patch` is here for the notification routes, whose product endpoints are
+   * PATCH. Express types every verb method as `IRouterMatcher<this, Verb>` and
+   * never references that parameter in the call signatures, so the union stays
+   * callable as `router[route.method]` without a cast.
+   */
+  readonly method: 'get' | 'post' | 'patch';
   /** Express path relative to the /api/sdk mount. */
   readonly path: string;
   /** Route-local parsing, such as multipart handling. */
@@ -201,6 +212,75 @@ const ROUTES: readonly DirectRoute[] = [
     controller: schemaHandler,
     query: searchSchemaQuerySchema,
     unwrap: unwrapEnvelope,
+  },
+
+  /*
+   * Notification delivery records.
+   *
+   * A different kind of gap from the rest of this table. The others are
+   * operations the catalog could hold but does not — allocation, uploads,
+   * search. `workflow.notifications` has no Zero query, no Zero mutator, and no
+   * case in `acl-factory.ts`, so a raw Zero write against it throws: these
+   * routes are not a shortcut past the catalog, they are the only way in.
+   *
+   * Deliberately not exposed, recorded here because `v1/exclusions.json` records
+   * withheld *catalog* operations and has nowhere to put a REST route:
+   *   - `/subscribe`, `/unsubscribe` — browser web-push. The rows are written and
+   *     nothing ever reads them; there is no `web-push` dependency and no sender.
+   *     Exposing it would ship a no-op with a promising name.
+   *   - `/mobile/register`, `/mobile/unregister` — device tokens bound to a
+   *     session, meaningless to an API caller.
+   *   - `/preferences` — per-type browser/email/slack toggles. The global levels
+   *     are already `preferences.setNotificationSettings`.
+   *   - `/queue-stats`, `/test` — operator diagnostics.
+   *
+   * `.bind()` is not decoration. Every other controller in this table is an
+   * arrow property carrying its own `this`; these six are prototype methods.
+   * They happen not to touch `this` today, and binding keeps that from being
+   * load-bearing.
+   *
+   * The path parameter must stay `:id`. The controller reads `req.params.id`,
+   * and `callController` forwards `req.params` verbatim — so renaming it leaves
+   * the id `undefined`, which Prisma drops from the `where`, turning
+   * `markAsRead` into "mark every notification this user has read".
+   */
+  {
+    method: 'get',
+    path: '/notifications',
+    controller: notificationController.getNotifications.bind(notificationController),
+    // The controller reads `page`/`limit` back through `parseInt`, which is a
+    // no-op on the numbers zod produces here. No mapQuery needed.
+    query: notificationListQuerySchema,
+  },
+  {
+    method: 'get',
+    path: '/notifications/unread-count',
+    controller: notificationController.getUnreadCount.bind(notificationController),
+  },
+  {
+    method: 'get',
+    path: '/notifications/workspace-counts',
+    controller:
+      notificationController.getWorkspaceNotificationCounts.bind(notificationController),
+  },
+  // Registered before `/:id/read` so a literal segment always wins. They cannot
+  // collide at three segments versus two, but the order costs nothing and holds
+  // if a bare `PATCH /notifications/:id` is ever added.
+  {
+    method: 'patch',
+    path: '/notifications/mark-all-read',
+    controller: notificationController.markAllAsRead.bind(notificationController),
+  },
+  {
+    method: 'patch',
+    path: '/notifications/:id/read',
+    controller: notificationController.markAsRead.bind(notificationController),
+    body: notificationReadBodySchema,
+  },
+  {
+    method: 'patch',
+    path: '/notifications/:id/dismiss',
+    controller: notificationController.dismiss.bind(notificationController),
   },
 
   /**
@@ -373,6 +453,13 @@ export async function callController(
     ? (route.query.parse(req.query) as Record<string, unknown>)
     : (req.query as Record<string, unknown>);
 
+  // `body` was declared on BaseRoute but only ever honoured on the `service`
+  // branch, so a schema on a controller route validated nothing. Parsing here
+  // is what makes the field mean the same thing on both kinds of route. The
+  // ZodError propagates to `handle`, which turns it into a 400 with per-field
+  // details — the same treatment `query` already gets.
+  const parsedBody = route.body ? route.body.parse(req.body) : req.body;
+
   const proxyReq = Object.create(req) as Request;
   Object.defineProperties(proxyReq, {
     user: { value: user, writable: true, configurable: true },
@@ -383,7 +470,7 @@ export async function callController(
       configurable: true,
     },
     body: {
-      value: route.mapBody ? route.mapBody(req.body) : req.body,
+      value: route.mapBody ? route.mapBody(parsedBody) : parsedBody,
       writable: true,
       configurable: true,
     },

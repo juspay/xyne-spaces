@@ -26,6 +26,7 @@ same function within a few frames of stack.
 | `handler.ts` | Request id, and the one error envelope |
 | `errors.ts` | The error catalog, and `SdkApiError` |
 | `schemas/search.ts` | The search request schema |
+| `schemas/notifications.ts` | The notification list and mark-read request schemas |
 | `index.ts` | Router assembly |
 
 `v1/` is the half that matters. Everything else is plumbing shared with the
@@ -45,6 +46,13 @@ There is none here beyond identity. The SDK acts as the logged-in user, and
 transaction — decides what that user may read and write. It is the same boundary
 the app runs behind, which is the point: a second authorization model would be a
 second thing to keep correct.
+
+That holds for everything reached by operation id. It does **not** hold for the
+direct routes, which never enter a Zero transaction: search filters by permission
+inside Vespa, Claw is scoped by the identity relayed to claw-auth, and the
+notification routes are bounded by `userId = req.user.id` inside
+`NotificationRepository`. Each is a real boundary, but each is its own — so a new
+direct route owns its authorization rather than inheriting one.
 
 ---
 
@@ -100,6 +108,43 @@ multipart uploads, search, and identity:
 | `POST /api/sdk/v1/draft-attachments` | Upload draft attachments |
 | `GET /api/sdk/v1/search` | Vespa search |
 | `GET /api/sdk/v1/search/schema` | Field definitions for a search index |
+
+### Notifications
+
+Delivery records — one row per notification the server handed to one of a user's
+devices.
+
+These are a different kind of gap from the ones above. The others are operations
+the catalog *could* hold and does not. `workflow.notifications` has no Zero query,
+no Zero mutator, and no case in `acl-factory.ts` — a raw Zero write against it
+throws — so these routes are not a shortcut past the catalog, they are the only
+way to reach the table at all. Nothing about it appears in `v1/mapper.ts` or
+`v1/exclusions.json`, and nothing should: those partition the *catalog*.
+
+| | |
+|---|---|
+| `GET /api/sdk/v1/notifications` | List, paged (`page`, `limit`, `status`) |
+| `GET /api/sdk/v1/notifications/unread-count` | Count of `UNREAD` rows |
+| `GET /api/sdk/v1/notifications/workspace-counts` | Undismissed counts, every workspace the caller belongs to |
+| `PATCH /api/sdk/v1/notifications/mark-all-read` | Mark every `UNREAD` row read |
+| `PATCH /api/sdk/v1/notifications/:id/read` | Mark one row read |
+| `PATCH /api/sdk/v1/notifications/:id/dismiss` | Dismiss one row |
+
+The product router at `/api/notifications` carries five more that are
+deliberately withheld: `/subscribe` and `/unsubscribe` write browser web-push
+rows that nothing reads (there is no `web-push` dependency and no sender), 
+`/mobile/register` and `/mobile/unregister` bind device tokens to a session,
+`/preferences` duplicates settings already reachable as
+`preferences.setNotificationSettings`, and `/queue-stats` and `/test` are
+operator diagnostics. The reasons are recorded in `direct.ts` beside the routes,
+since `exclusions.json` has nowhere to put a REST route.
+
+Two behaviours are worth knowing before building on these, because neither is
+visible from the route table. A row is written **per delivery target** — once per
+connected socket and once per mobile session — so one event can produce several
+rows, or none at all if the user was offline. And the rows carry **no display
+text**: `title` and `message` were dropped from the table, leaving `type`,
+`relatedEntityType`/`relatedEntityId`, and `actionUrl`.
 
 ### Claw
 
@@ -266,7 +311,14 @@ the versioned surface is for.
 
 **A new direct route** is one entry in `ROUTES` in `direct.ts`, backed by either a
 `controller` (writes an Express response, gets captured) or a `service` (returns a
-value). Never both — the type enforces it.
+value). Never both — the type enforces it. `method` covers `get`, `post` and
+`patch`; adding another verb is one member on that union, since Express types all
+of them identically.
+
+A route's `query` and `body` schemas now both apply on either kind of route.
+`body` used to be read only on the `service` branch, so a schema on a controller
+route validated nothing and failed silently — worth knowing if you are reading an
+older route and wondering why it has none.
 
 **Changing the error envelope** means `handler.ts` and `errors.ts` together.
 The SDK's `npm run contract-check` reads `errors.ts` and `schemas/search.ts`
