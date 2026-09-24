@@ -88,7 +88,12 @@ const TOOL_DISCOVERY_OPTIMIZATIONS = [
   {
     key: "subagent_read_tools",
     label: "Direct subagent tools",
-    description: "Let the agent load its subagents' read tools and call them itself first, instead of waiting on a slow nested subagent run. Writes still go through the subagent.",
+    description: "Let the agent search and load its subagents' tools, writes included, and call them itself first instead of waiting on a slow nested subagent run. Writes keep their approval settings.",
+  },
+  {
+    key: "active_tool_cap",
+    label: "Top-25 active tools",
+    description: "Start each run with only the agent's 25 most-used tools of the last 7 days. The rest stay listed by name and load with one call, so every request is smaller. Nothing is removed from the agent.",
   },
 ] as const;
 
