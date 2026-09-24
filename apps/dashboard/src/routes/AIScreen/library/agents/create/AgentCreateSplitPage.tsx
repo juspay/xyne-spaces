@@ -17,13 +17,8 @@ import {
   generateAgentPrompt,
   updateAgent,
 } from '@/services/claw/clawAgentWizardService';
-import { getAvailableTools, suggestTools } from '@/services/claw/clawToolsService';
+import { getAvailableTools } from '@/services/claw/clawToolsService';
 import { effectiveSlug, slugify } from '@/routes/ClawAgentsScreen/create/wizardState';
-import { parseGatewaySource } from '@/components/ClawAgents/gatewayKeys';
-import {
-  buildMcpCatalog,
-  enableEntry,
-} from '@/routes/AIScreen/library/shared/pickers/mcp/mcpCatalog';
 import { AgentCreateCanvas } from '@/components/flowUI/nodes/agent/create/AgentCreateCanvas';
 import {
   AgentCreateChatPanel,
@@ -47,8 +42,7 @@ import {
 import { listAccessibleKnowledgeBase } from '@/services/claw/clawKnowledgeBaseService';
 import { listSkills } from '@/services/claw/clawSkillsService';
 import { sanitizeAgentCanvasName } from '@/components/flowUI/nodes/agent/create/canvasFromIdentity';
-import { toolboxFromSuggestion } from '@/components/flowUI/nodes/agent/create/toolboxFromSuggestion';
-import { toolIdsFromForm } from '@/components/flowUI/nodes/agent/create/types';
+import { selectHubToolsForIntent } from '@/components/flowUI/nodes/agent/create/hubCatalogSelect';
 import {
   EMPTY_CREATE_FORM,
   type AgentCreateChatPatch,
@@ -267,58 +261,14 @@ export function AgentCreateSplitPage({
                       }
                       return;
                     }
-                    const [suggestion, catalog] = await Promise.all([
-                      suggestTools({
-                        systemPrompt:
-                          incoming.systemPrompt || createForm.form.systemPrompt || undefined,
-                        description: action.intent,
-                      }),
-                      getAvailableTools().catch(() => null),
-                    ]);
-                    const beforeIds = toolIdsFromForm(createForm.form);
-                    let selection = toolboxFromSuggestion(
-                      createForm.form.tools,
-                      suggestion,
-                      catalog,
-                    );
-                    if (catalog) {
-                      const mcpCatalog = buildMcpCatalog(catalog, []);
-                      const pick =
-                        mcpCatalog.find(entry => entry.isGateway && entry.selectable) ??
-                        mcpCatalog.find(entry => entry.selectable);
-                      if (pick) {
-                        selection = {
-                          ...enableEntry(mcpCatalog, selection, pick),
-                          callableAgents: selection.callableAgents ?? [],
-                        };
-                      }
-                    }
-                    incoming.tools = selection;
-                    const afterIds = toolIdsFromForm({ tools: incoming.tools });
-                    if (
-                      afterIds.length === beforeIds.length &&
-                      afterIds.every((id, index) => id === beforeIds[index]) &&
-                      catalog
-                    ) {
-                      const fallbackGateway = catalog.integrations.find(
-                        integration =>
-                          integration.kind === 'gateway' &&
-                          integration.writeTools.length + integration.readTools.length > 0,
-                      );
-                      if (fallbackGateway) {
-                        const parsed = parseGatewaySource(fallbackGateway.slug);
-                        if (parsed?.serviceName) {
-                          incoming.tools = {
-                            ...incoming.tools,
-                            gateway: [
-                              ...new Set([
-                                ...(incoming.tools.gateway ?? []),
-                                parsed.serviceName,
-                              ]),
-                            ],
-                          };
-                        }
-                      }
+                    const selected = await selectHubToolsForIntent({
+                      intent: action.intent,
+                      current: createForm.form.tools,
+                      systemPrompt:
+                        incoming.systemPrompt || createForm.form.systemPrompt || undefined,
+                    });
+                    if (selected) {
+                      incoming.tools = selected.selection;
                     }
                   } catch {
                     // Prompt still applies if tool suggest fails.

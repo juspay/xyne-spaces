@@ -1,4 +1,4 @@
-/** Phase labels for the live create working/reasoning row (not chat bubbles). */
+/** Phase labels for the live create canvas build row (not model thoughts). */
 
 import type { CreateTurnField } from './classifyCreateTurn.ts';
 import type { AgentCreateHubRow } from './types.ts';
@@ -9,24 +9,25 @@ export function progressLabelForField(
 ): string {
   switch (field) {
     case 'name':
-      return 'Drafting name…';
+      return 'Writing name on canvas…';
     case 'slug':
-      return 'Drafting handle…';
+      return 'Writing handle on canvas…';
     case 'description':
-      return 'Writing description…';
+      return 'Writing description on canvas…';
     case 'systemPrompt':
-      return 'Drafting instructions…';
+      return 'Writing instructions on canvas…';
     case 'tools':
-      if (hubRow === 'builtin') return 'Suggesting tools…';
-      if (hubRow === 'subagent') return 'Suggesting subagent…';
-      return 'Picking MCP…';
+      if (hubRow === 'builtin') return 'Selecting tools on canvas…';
+      if (hubRow === 'subagent') return 'Selecting subagent on canvas…';
+      return 'Selecting MCP on canvas…';
     case 'skills':
-      return 'Suggesting skills…';
+      return 'Selecting skills on canvas…';
     case 'knowledge':
-      return 'Suggesting knowledge…';
+      return 'Selecting knowledge on canvas…';
     default:
-      return 'Working…';
+      return 'Updating canvas…';
   }
 }
 
-export const PROGRESS_THINKING = 'Thinking…';
+/** Canvas pipeline status — not Ask AI model reasoning. */
+export const PROGRESS_THINKING = 'Updating canvas…';

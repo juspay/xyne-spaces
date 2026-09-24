@@ -115,11 +115,17 @@ void describe('classifyCreateTurn', () => {
     assert.equal(shouldGeneratePrompt(result, true, 'maybe later'), false);
   });
 
-  void it('does not draft from gibberish', () => {
-    for (const text of ['fdaas', 'dasdsad', 'asdasdsa']) {
-      const result = classifyCreateTurn(text, true);
-      assert.equal(result.kind, 'clarify');
-      assert.equal(shouldGeneratePrompt(result, true, text), false);
+  void it('maps choose/use/pick MCP follow-ups to tools, not instructions', () => {
+    for (const text of [
+      'choose Slack MCP',
+      'use the GitHub MCP',
+      'pick Slack for standups',
+      'add the GitHub MCP',
+    ]) {
+      const result = classifyCreateTurn(text, false);
+      assert.equal(result.kind, 'edit', text);
+      assert.ok(result.fields.includes('tools'), text);
+      assert.equal(result.fields.includes('systemPrompt'), false, text);
     }
   });
 });

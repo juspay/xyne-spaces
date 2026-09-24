@@ -20,6 +20,7 @@ import {
   BrailleLoader,
   useStableLabel,
 } from '@/components/AIScreen/ReasoningLoader';
+import { ActivityBlock } from '@/components/Chat/XyneAISidebar/components/ActivityBlock';
 import { type ComposerContext, toStreamOverrides } from '@/components/AIScreen/composerContext';
 import type { Message, MessageAttachment } from '@/components/Chat/XyneAISidebar/utils/XyneAITypes';
 import { useXyneAIStream } from '@/hooks/useXyneAIStream';
@@ -351,7 +352,8 @@ function LiveAgentCreateChatPanel({
           ...(trigger ? { trigger } : {}),
           instant: true,
           disableTools: true,
-          thinkingLevel: 'off',
+          // Ask AI default thinking — do not force 'off' (was synthetic phase labels only).
+          thinkingLevel: context?.thinkingLevel ?? 'low',
         },
       );
     },
@@ -511,10 +513,15 @@ function CreateChatLayout({
                 message.content || message.streamingContent || '',
                 Boolean(message.isStreaming),
               );
+              const hasReasoning =
+                message.type === 'bot' &&
+                typeof message.reasoning === 'string' &&
+                message.reasoning.trim().length > 0;
               const thinking =
                 message.type === 'bot' &&
                 Boolean(message.isStreaming) &&
                 streamingText.trim().length === 0 &&
+                !hasReasoning &&
                 !progressLabel;
               const thinkLabel =
                 typeof message.statusMessage === 'string' && message.statusMessage.trim().length > 0
@@ -562,22 +569,32 @@ function CreateChatLayout({
                         </p>
                       ) : null}
                     </div>
-                  ) : thinking ? (
-                    <WorkingProgressRow label={thinkLabel} />
                   ) : (
-                    <div>
+                    <div className='flex min-w-0 flex-col gap-2' data-testid='agent-create-chat-bot'>
+                      {hasReasoning || (message.isStreaming && !progressLabel) ? (
+                        <div data-testid='agent-create-chat-reasoning'>
+                          <ActivityBlock
+                            reasoning={message.reasoning ?? ''}
+                            streaming={Boolean(message.isStreaming)}
+                            toolInvocations={message.toolInvocations}
+                            messageAborted={Boolean(message.isAborted)}
+                          />
+                        </div>
+                      ) : thinking ? (
+                        <WorkingProgressRow label={thinkLabel} />
+                      ) : null}
                       {message.errorInfo ? (
                         <p className='text-sm leading-5 text-destructive' role='alert'>
                           {message.errorInfo.message || message.errorInfo.title}
                         </p>
-                      ) : (
+                      ) : streamingText.trim().length > 0 ? (
                         <p
                           className='whitespace-pre-wrap text-sm leading-relaxed text-foreground'
                           data-testid='agent-create-chat-reply'
                         >
                           {streamingText}
                         </p>
-                      )}
+                      ) : null}
                     </div>
                   )}
                 </li>

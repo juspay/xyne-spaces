@@ -129,6 +129,15 @@ function isHelpQuestion(text: string): boolean {
   return !isCanvasEditImperative(lower);
 }
 
+/** Imperative capability edits: add/use/pick/choose MCP, skill, knowledge, etc. */
+function isCapabilityEditImperative(lower: string): boolean {
+  // "how do I add MCP?" stays help, not a canvas patch.
+  if (/^(how|what|where|which|why)\b/.test(lower)) return false;
+  return /\b(add|drop|remove|attach|enable|disable|choose|use|pick|select|grant)\b.{0,48}\b(skills?|mcps?|tools?|integrations?|servers?|sub-?agents?|knowledge(?:\s+base)?|\bkb\b|slack|github|jira|notion|linear|gmail)\b/.test(
+    lower,
+  );
+}
+
 function isCanvasEditImperative(lower: string): boolean {
   if (/\b(rename|call it|name it)\b/.test(lower)) return true;
   if (
@@ -139,13 +148,7 @@ function isCanvasEditImperative(lower: string): boolean {
     return true;
   }
   if (/\b(instruction|prompt).{0,24}\b(shorter|longer|tighter)\b/.test(lower)) return true;
-  if (
-    /^(please\s+)?(add|drop|remove|attach|enable|disable)\b.{0,40}\b(skill|mcp|tool|integration|server|slack)\b/.test(
-      lower,
-    )
-  ) {
-    return true;
-  }
+  if (isCapabilityEditImperative(lower)) return true;
   return false;
 }
 
@@ -166,8 +169,21 @@ function fieldsForExplicitEdit(text: string): CreateTurnField[] {
     /\b(instruction|prompt)\b/.test(lower) || /\b(shorter|longer|tighten|rewrit)/.test(lower);
   if (touchesName && touchesPrompt) return ['name', 'slug', 'systemPrompt'];
   if (touchesName) return ['name', 'slug'];
+  const caps = namedCapabilityFields(text);
+  if (caps.length > 0 && !touchesPrompt) return caps;
   if (/\bskill/.test(lower) && !touchesPrompt) return ['skills'];
-  if (/\b(mcp|tool|integration|server|slack)\b/.test(lower) && !touchesPrompt) return ['tools'];
+  if (
+    /\b(mcp|tool|integration|server|slack|github|jira|notion|linear|gmail)\b/.test(lower) &&
+    !touchesPrompt
+  ) {
+    return ['tools'];
+  }
+  if (
+    /\bknowledge(?:\s+base)?\b|\bkb\b/.test(lower) &&
+    !touchesPrompt
+  ) {
+    return ['knowledge'];
+  }
   if (/\bdescription\b/.test(lower) && !touchesPrompt) return ['description'];
   if (touchesPrompt) return ['systemPrompt'];
   return ['systemPrompt'];
@@ -289,6 +305,13 @@ export function classifyCreateTurn(
   }
   if (isFirstDescribe(trimmed) || (canvasEmpty && planDescribe(trimmed) !== 'none')) {
     return { kind: 'edit', fields: firstDraftFields(trimmed) };
+  }
+  // Filled-canvas capability follow-ups ("use Slack MCP") even without verbs.
+  if (!canvasEmpty) {
+    const caps = namedCapabilityFields(trimmed);
+    if (caps.length > 0 && !isHelpQuestion(trimmed)) {
+      return { kind: 'edit', fields: caps };
+    }
   }
   const words = trimmed.split(/\s+/).filter(Boolean);
   if (words.length <= 6) {

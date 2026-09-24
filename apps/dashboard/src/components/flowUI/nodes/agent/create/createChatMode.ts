@@ -1,6 +1,7 @@
 import {
   classifyCreateTurn,
   firstDraftFields,
+  namedCapabilityFields,
   parseLocalRename,
   shouldGeneratePrompt,
   type CreateTurnClassification,
@@ -116,14 +117,15 @@ export type CreateCanvasAction =
       fields: CreateTurnField[];
     };
 
+/** Hubs before instructions so the prompt can reference selected capabilities. */
 export const CREATE_REVEAL_FIELD_ORDER: readonly CreateTurnField[] = [
   'name',
   'slug',
   'description',
-  'systemPrompt',
   'tools',
   'skills',
   'knowledge',
+  'systemPrompt',
 ];
 
 export function incomingPatchForCreateDraft(args: {
@@ -455,6 +457,9 @@ function fieldsForDraft(userText: string, canvasEmpty: boolean): CreateTurnField
   if (classification.kind === 'edit' && classification.fields.length > 0) {
     return classification.fields;
   }
+  // Capability nouns → hub patches, never instructions-only.
+  const caps = namedCapabilityFields(userText);
+  if (caps.length > 0) return caps;
   return ['systemPrompt'];
 }
 
@@ -695,36 +700,7 @@ export async function applyCreateHubDraft(args: {
 
   const incoming: AgentCreateChatPatch = {};
 
-  if (generateInstructions) {
-    await beginFieldAttention({
-      field: 'systemPrompt',
-      hubRow: null,
-      ...(args.setAttentionField ? { setAttentionField: args.setAttentionField } : {}),
-      ...(args.setProgressLabel ? { setProgressLabel: args.setProgressLabel } : {}),
-      sleep: args.sleep,
-    });
-    let generatedPrompt = '';
-    try {
-      generatedPrompt = await args.generateAgentPrompt(
-        action.intent,
-        args.existingSystemPrompt.trim() ? args.existingSystemPrompt.trim() : undefined,
-      );
-    } catch {
-      // Keep drafting from chat-stated Instructions/Rules or an intent fallback.
-      generatedPrompt = '';
-    }
-    Object.assign(
-      incoming,
-      incomingPatchForCreateDraft({
-        visibleReply: action.visibleReply,
-        intent: action.intent,
-        generatedPrompt,
-        fields: action.fields,
-        canvasEmpty,
-      }),
-    );
-  }
-
+  // Hubs first (channel/DM order): bind real catalog ids before instructions.
   if (action.fields.includes('tools') && args.fillTools) {
     await beginFieldAttention({
       field: 'tools',
@@ -762,6 +738,40 @@ export async function applyCreateHubDraft(args: {
     args.setWritingField('knowledge', 'knowledge');
     await args.sleep(Math.max(48, Math.min(args.writeMs, 120)));
     await args.fillKnowledge(incoming);
+  }
+
+  if (generateInstructions) {
+    await beginFieldAttention({
+      field: 'systemPrompt',
+      hubRow: null,
+      ...(args.setAttentionField ? { setAttentionField: args.setAttentionField } : {}),
+      ...(args.setProgressLabel ? { setProgressLabel: args.setProgressLabel } : {}),
+      sleep: args.sleep,
+    });
+    const selectedSummary = summarizeSelectedCapabilities(incoming);
+    const promptIntent = selectedSummary
+      ? `${action.intent}\n\nSelected capabilities: ${selectedSummary}. Write operating instructions that use these tools when relevant.`
+      : action.intent;
+    let generatedPrompt = '';
+    try {
+      generatedPrompt = await args.generateAgentPrompt(
+        promptIntent,
+        args.existingSystemPrompt.trim() ? args.existingSystemPrompt.trim() : undefined,
+      );
+    } catch {
+      // Keep drafting from chat-stated Instructions/Rules or an intent fallback.
+      generatedPrompt = '';
+    }
+    Object.assign(
+      incoming,
+      incomingPatchForCreateDraft({
+        visibleReply: action.visibleReply,
+        intent: action.intent,
+        generatedPrompt,
+        fields: action.fields,
+        canvasEmpty,
+      }),
+    );
   }
 
   const tailFields = CREATE_REVEAL_FIELD_ORDER.filter(
@@ -803,4 +813,21 @@ export async function applyCreateHubDraft(args: {
   args.setWritingField(null);
   args.setAttentionField?.(null);
   args.setProgressLabel?.(null);
+}
+
+function summarizeSelectedCapabilities(patch: AgentCreateChatPatch): string {
+  const parts: string[] = [];
+  if (patch.tools) {
+    for (const name of patch.tools.subagents ?? []) parts.push(`subagent ${name}`);
+    for (const name of patch.tools.gateway ?? []) parts.push(`MCP/gateway ${name}`);
+    for (const name of (patch.tools.direct ?? []).slice(0, 10)) parts.push(name);
+    for (const name of (patch.tools.custom ?? []).slice(0, 6)) parts.push(name);
+  }
+  if (Array.isArray(patch.selectedSkillIds) && patch.selectedSkillIds.length > 0) {
+    parts.push(`${patch.selectedSkillIds.length} skill(s)`);
+  }
+  if (Array.isArray(patch.selectedKbResources) && patch.selectedKbResources.length > 0) {
+    parts.push('knowledge base');
+  }
+  return parts.join(', ');
 }

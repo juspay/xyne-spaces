@@ -27,7 +27,7 @@ void describe('parseCreateChatAction', () => {
     assert.match(q, /also suggest the matching Hub rows/);
     assert.match(q, /# Agent authoring/);
     assert.match(q, /Ask AI chat/);
-    assert.doesNotMatch(q, /propose-agent/);
+    assert.match(q, /not propose-agent cards/);
     assert.doesNotMatch(q, /In chat, state them explicitly as \*\*Name\*\*/);
   });
 
@@ -205,6 +205,18 @@ void describe('decideCreateCanvasAction', () => {
       userText: 'Add one useful MCP integration to the agent hub for standups.',
       canvasEmpty: false,
       marker: parseCreateChatAction('Added Slack MCP for standups.\nXYNE_CREATE_IDLE'),
+    });
+    assert.equal(action.type, 'draft');
+    if (action.type === 'draft') {
+      assert.deepEqual(action.fields, ['tools']);
+    }
+  });
+
+  void it('routes choose Slack MCP follow-ups to tools via draft marker', () => {
+    const action = decideCreateCanvasAction({
+      userText: 'choose Slack MCP',
+      canvasEmpty: false,
+      marker: parseCreateChatAction('Selecting Slack.\nXYNE_CREATE_DRAFT: choose Slack MCP'),
     });
     assert.equal(action.type, 'draft');
     if (action.type === 'draft') {
