@@ -1,3 +1,16 @@
+## [1.391.0](https://github.com/juspay/xyne-spaces/compare/v1.390.0...v1.391.0) (2026-09-24)
+
+
+### Features
+
+* show recently used labels first in the create-ticket modal ([#2274](https://github.com/juspay/xyne-spaces/issues/2274)) ([41f67e5](https://github.com/juspay/xyne-spaces/commit/41f67e5ca71ffa086f3641ecaea3a2047568373f))
+
+
+### Bug Fixes
+
+* enforce raw SQL ACL bypass boundary ([#2229](https://github.com/juspay/xyne-spaces/issues/2229)) ([3218ba6](https://github.com/juspay/xyne-spaces/commit/3218ba623a56b35f11a0da3848baae7db3298aaa))
+* send a current Claude Code client version on Claude OAuth requests ([#2276](https://github.com/juspay/xyne-spaces/issues/2276)) ([cf413e1](https://github.com/juspay/xyne-spaces/commit/cf413e1943cab3c8e3045620a389b0a63af33e69))
+
 ## [1.390.0](https://github.com/juspay/xyne-spaces/compare/v1.389.1...v1.390.0) (2026-09-24)
 
 
