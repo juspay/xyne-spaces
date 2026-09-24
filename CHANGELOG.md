@@ -1,3 +1,10 @@
+## [1.389.1](https://github.com/juspay/xyne-spaces/compare/v1.389.0...v1.389.1) (2026-09-24)
+
+
+### Bug Fixes
+
+* Prompt change ([#2270](https://github.com/juspay/xyne-spaces/issues/2270)) ([c3e3752](https://github.com/juspay/xyne-spaces/commit/c3e3752073b13c0249306814bdca1604718f0da0))
+
 ## [1.389.0](https://github.com/juspay/xyne-spaces/compare/v1.388.0...v1.389.0) (2026-09-24)
 
 
