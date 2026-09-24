@@ -40,7 +40,7 @@ export const ThreadCallButton = ({
         <Button
           variant='ghost'
           size='sm'
-          className='group h-7 w-auto gap-0 rounded-lg border border-border p-0 text-muted-foreground hover:text-foreground data-[state=open]:bg-accent data-[state=open]:text-foreground'
+          className='group h-7 w-auto gap-0 rounded-lg bg-transparent px-0 text-muted-foreground group-hover:bg-muted hover:text-foreground group-focus-visible:bg-muted group-active:bg-muted data-[state=open]:bg-muted data-[state=open]:text-foreground'
           data-testid={testId}
           {...(trackCategory && { 'data-track-category': trackCategory })}
           {...(trackName && { 'data-track-name': trackName })}
@@ -50,13 +50,12 @@ export const ThreadCallButton = ({
         >
           <Tooltip content={hasActiveCall ? 'Call already in progress' : callTooltip}>
             <span className='flex h-full items-center'>
-              <span className='flex h-full items-center px-1.5'>
+              <span className='flex h-full items-center rounded-md px-1.5 hover:bg-accent'>
                 <PhoneDefault size={16} />
               </span>
-              <span className='h-full w-px bg-border' />
-              <span className='flex h-full items-center px-1.5'>
+              <span className='flex h-full items-center rounded-r-lg pl-1 pr-1.5 hover:bg-border group-focus-visible:bg-border group-active:bg-border group-data-[state=open]:bg-border'>
                 <ChevronDown
-                  size={16}
+                  size={12}
                   className='transition-transform duration-200 group-data-[state=open]:rotate-180'
                 />
               </span>
