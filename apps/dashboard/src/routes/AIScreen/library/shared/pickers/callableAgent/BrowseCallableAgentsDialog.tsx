@@ -28,8 +28,8 @@ const CallableAgentCard = ({
   onOpen: () => void;
   onToggle: () => void;
 }): ReactElement => {
-  const pill = statusPill(entry.status);
   const selected = entry.status !== null;
+  const pill = entry.status === 'approved' ? null : statusPill(entry.status);
 
   return (
     <div className='group relative min-w-0'>
@@ -49,7 +49,7 @@ const CallableAgentCard = ({
               <Pill tone={pill.tone} size='sm'>
                 {pill.label}
               </Pill>
-            ) : entry.needsApproval ? (
+            ) : !selected && entry.needsApproval ? (
               <Pill tone='neutral' size='sm'>
                 Needs approval
               </Pill>

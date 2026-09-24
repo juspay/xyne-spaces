@@ -49,11 +49,6 @@ const SkillCard = ({
           <span className='truncate text-sm font-medium leading-5 text-foreground'>
             {entry.label}
           </span>
-          {selected && (
-            <Pill tone='success' size='sm'>
-              Enabled
-            </Pill>
-          )}
           {!entry.enabled && (
             <Pill tone='neutral' size='sm'>
               Disabled

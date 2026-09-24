@@ -64,15 +64,9 @@ const BuiltinCard = ({
           <span className='truncate text-sm font-medium leading-5 text-foreground'>
             {entry.label}
           </span>
-          {enabled ? (
-            <Pill tone='success' size='sm'>
-              Enabled
-            </Pill>
-          ) : (
-            <Pill tone={RISK_TONE[entry.risk]} size='sm'>
-              {RISK_LABEL[entry.risk]}
-            </Pill>
-          )}
+          <Pill tone={RISK_TONE[entry.risk]} size='sm'>
+            {RISK_LABEL[entry.risk]}
+          </Pill>
         </span>
       </span>
       <span className='w-full truncate text-xs leading-4 tracking-[-0.24px] text-muted-foreground'>

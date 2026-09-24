@@ -12,7 +12,6 @@ import {
   handleBrowseDialogOpenChange,
   type FilterOption,
 } from '../../../shared/primitives/BrowseDialog';
-import { Pill } from '../../../shared/primitives/Pill';
 import { humanizeToolName } from '../../../shared/primitives/ToolRow';
 import { BuiltinChip } from '../../../shared/pickers/builtin/BuiltinChip';
 import { SubagentToolGroupPanel } from './SubagentToolGroupPanel';
@@ -54,17 +53,8 @@ const GroupCard = ({
       data-track-name='Create subagent v2: open tool group detail'
       className={cn(BROWSE_CARD, enabled ? BROWSE_CARD_SELECTED : BROWSE_CARD_IDLE)}
     >
-      <span className='flex w-full items-center gap-2'>
-        <span className='flex min-w-0 items-center gap-2'>
-          <span className='truncate text-sm font-medium leading-5 text-foreground'>
-            {humanizeSource(group.source)}
-          </span>
-          {enabled && (
-            <Pill tone='success' size='sm'>
-              Enabled
-            </Pill>
-          )}
-        </span>
+      <span className='w-full truncate text-sm font-medium leading-5 text-foreground'>
+        {humanizeSource(group.source)}
       </span>
       <span className='w-full truncate text-xs leading-4 tracking-[-0.24px] text-muted-foreground'>
         {enabled
