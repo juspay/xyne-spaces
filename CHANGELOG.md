@@ -1,3 +1,10 @@
+## [1.392.0](https://github.com/juspay/xyne-spaces/compare/v1.391.2...v1.392.0) (2026-09-24)
+
+
+### Features
+
+* Update test template output ([#2279](https://github.com/juspay/xyne-spaces/issues/2279)) ([70d279f](https://github.com/juspay/xyne-spaces/commit/70d279f75dd029d0f40e9c5fecda31c07f93cd03))
+
 ## [1.391.2](https://github.com/juspay/xyne-spaces/compare/v1.391.1...v1.391.2) (2026-09-24)
 
 
