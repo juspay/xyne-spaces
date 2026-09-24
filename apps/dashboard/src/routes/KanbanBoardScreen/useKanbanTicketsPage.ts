@@ -355,27 +355,23 @@ const hasFiltersVespaCannotApply = (
   return false;
 };
 
-export const useKanbanTicketsPage = (
+/**
+ * A kanban column's Vespa search. While searching (outside form-field grouping) the request
+ * leaves out the column and group, so the board calls this once too: the search then runs
+ * on every input even when every group is collapsed, and open columns reuse that call.
+ */
+export const useKanbanVespaSearch = (
   options: UseKanbanTicketsPageOptions,
-): UseKanbanTicketsPageResult => {
-  const [ticketsState, setTicketsState] = useState<TicketsState>({ queryKey: '', tickets: [] });
-  const [fetchCursorState, setFetchCursorState] = useState<FetchCursorState | null>(null);
-  // The page cursor is an INCLUSIVE createdAt bound (see kanbanTicketsPageV3), so the
-  // boundary tie group is re-fetched and de-duplicated below. If a whole page is
-  // nothing but already-seen rows the tie group is bigger than the page, and paging
-  // would stall — widen the page until it clears.
-  const [tieSlack, setTieSlack] = useState(0);
-  /** Index into WINDOW_STEPS_MS; === length means "no window bound". */
-  const [windowStep, setWindowStep] = useState(0);
-  const windowAnchorRef = useRef<{ queryKey: string; anchor: number } | null>(null);
-  // Mirrors ticketsState so the page merge can be computed in the effect body rather
-  // than inside a setState updater (updaters must stay pure — StrictMode calls them twice).
-  const ticketsStateRef = useRef<TicketsState>({ queryKey: '', tickets: [] });
-  const expectedCountRef = useRef<number | undefined>(undefined);
-  const [nextCursor, setNextCursor] = useState<KanbanCursor | null>(null);
-  const [hasMore, setHasMore] = useState(true);
-  const isLoadingMoreRef = useRef(false);
-  const overdueReferenceTimeRef = useRef<number | null>(null);
+  enabled = true,
+): {
+  hasSearchTerm: boolean;
+  requiresVespaTicketIds: boolean;
+  skipColumnFiltersForSearch: boolean;
+  /** Every active filter is in the Vespa query (group membership aside). */
+  filtersFitVespa: boolean;
+  shouldUseDirectVespaRows: boolean;
+  vespaTicketSearch: ReturnType<typeof useVespaTicketSearch>;
+} => {
   // Already the final query: any quotes were typed into the search box, and the backend
   // reads exactness off them (`isExactMatch` in the Vespa searchService).
   const trimmedSearchTerm = options.searchTerm?.trim() ?? '';
@@ -499,7 +495,7 @@ export const useKanbanTicketsPage = (
 
   // Declared after every pushdown value above, since it requires that each active filter
   // made it into the Vespa query — direct-Vespa rows are rendered without re-filtering.
-  const shouldUseDirectVespaRows =
+  const filtersFitVespa =
     requiresVespaTicketIds &&
     !hasZeroOnlyFilters(
       options.filters,
@@ -515,8 +511,9 @@ export const useKanbanTicketsPage = (
       tags: vespaTags,
       stage: vespaStage,
     }) &&
-    canRepresentGroupInVespa(options.groupBy, options.groupKey) &&
     !options.showOverdueOnly;
+  const shouldUseDirectVespaRows =
+    filtersFitVespa && canRepresentGroupInVespa(options.groupBy, options.groupKey);
 
   // Create a search key that changes when the group context changes
   // This forces the search to re-trigger when switching views
@@ -554,7 +551,7 @@ export const useKanbanTicketsPage = (
   const vespaTicketSearch = useVespaTicketSearch({
     searchTerm: trimmedSearchTerm,
     dynamicFieldValues: pageVespaTokens,
-    enabled: requiresVespaTicketIds,
+    enabled: requiresVespaTicketIds && enabled,
     limit: hasSearchTerm ? 400 : 200,
     fetchAllDynamicFieldMatches: true,
     maxFetchedResults: hasSearchTerm ? 800 : 400,
@@ -578,6 +575,45 @@ export const useKanbanTicketsPage = (
     // Skip group filters when searching (will segregate in frontend)
     ...(!skipColumnFiltersForSearch ? vespaGroupFilter : {}),
   });
+
+  return {
+    hasSearchTerm,
+    requiresVespaTicketIds,
+    skipColumnFiltersForSearch,
+    filtersFitVespa,
+    shouldUseDirectVespaRows,
+    vespaTicketSearch,
+  };
+};
+
+export const useKanbanTicketsPage = (
+  options: UseKanbanTicketsPageOptions,
+): UseKanbanTicketsPageResult => {
+  const [ticketsState, setTicketsState] = useState<TicketsState>({ queryKey: '', tickets: [] });
+  const [fetchCursorState, setFetchCursorState] = useState<FetchCursorState | null>(null);
+  // The page cursor is an INCLUSIVE createdAt bound (see kanbanTicketsPageV3), so the
+  // boundary tie group is re-fetched and de-duplicated below. If a whole page is
+  // nothing but already-seen rows the tie group is bigger than the page, and paging
+  // would stall — widen the page until it clears.
+  const [tieSlack, setTieSlack] = useState(0);
+  /** Index into WINDOW_STEPS_MS; === length means "no window bound". */
+  const [windowStep, setWindowStep] = useState(0);
+  const windowAnchorRef = useRef<{ queryKey: string; anchor: number } | null>(null);
+  // Mirrors ticketsState so the page merge can be computed in the effect body rather
+  // than inside a setState updater (updaters must stay pure — StrictMode calls them twice).
+  const ticketsStateRef = useRef<TicketsState>({ queryKey: '', tickets: [] });
+  const expectedCountRef = useRef<number | undefined>(undefined);
+  const [nextCursor, setNextCursor] = useState<KanbanCursor | null>(null);
+  const [hasMore, setHasMore] = useState(true);
+  const isLoadingMoreRef = useRef(false);
+  const overdueReferenceTimeRef = useRef<number | null>(null);
+  const {
+    hasSearchTerm,
+    requiresVespaTicketIds,
+    skipColumnFiltersForSearch,
+    shouldUseDirectVespaRows,
+    vespaTicketSearch,
+  } = useKanbanVespaSearch(options);
   const directVespaPage = useMemo(() => {
     if (!shouldUseDirectVespaRows) return null;
 
