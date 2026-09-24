@@ -120,12 +120,10 @@ export class CallsACL extends BaseQueryACL<'calls'> {
           cmp('visibility', CallVisibility.PUBLIC),
         ),
         exists('participants', (p) => p.where('userId', this.ctx.userID)),
-        // Pin the join direction — see tickets-acl.ts for the full rationale.
         exists('channel', (ch) =>
           ch
             .where('workspaceId', '=', this.ctx.workspaceId)
             .whereExists('participants', (p) => p.where('userId', this.ctx.userID)),
-          { flip: false },
         ),
       ),
     );
