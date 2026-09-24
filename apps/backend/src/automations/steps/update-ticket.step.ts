@@ -44,10 +44,11 @@ export class UpdateTicketStep extends BaseActionStep<typeof UpdateTicketConfigSc
   ): Promise<UpdateTicketOutput> {
     const ticketId = config.ticketId as string;
     const updatedBy = context.automation.createdById;
+    const prisma = DatabaseClient.getInstance();
 
     if (config.assignedTo !== undefined) {
       const assignedTo = config.assignedTo as string;
-      const prev = await DatabaseClient.getInstance().ticket.findUnique({ where: { id: ticketId }, select: { assignedTo: true, userGroupId: true, boardId: true } });
+      const prev = await prisma.ticket.findUnique({ where: { id: ticketId }, select: { assignedTo: true, userGroupId: true, boardId: true } });
       await repositories.tickets.updateTicketAssignee(ticketId, assignedTo, updatedBy);
 
       // Same as ASSIGN_TICKET: the repository does not touch the workload counters.
@@ -57,7 +58,6 @@ export class UpdateTicketStep extends BaseActionStep<typeof UpdateTicketConfigSc
     }
 
     if (config.stageName !== undefined) {
-      const prisma = DatabaseClient.getInstance();
       const ticket = await prisma.ticket.findUnique({
         where: { id: ticketId },
         select: { stageName: true, board: { select: { boardType: true } } },
