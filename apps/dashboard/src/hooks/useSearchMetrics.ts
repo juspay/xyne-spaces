@@ -3,7 +3,7 @@ import { useState, useCallback, useRef, useEffect, useMemo, useDeferredValue } f
 import { searchMetricsService } from '../services/searchMetricsService';
 import { useAuthContextValues } from './useAuth';
 import { searchService, clearVespaSearchCache } from '../services/searchService';
-import { DisplaySearchResult, VespaSearchFilters } from '../types/search';
+import { DisplaySearchResult, QueryIntent, VespaSearchFilters } from '../types/search';
 import {
   TabType,
   ChipType,
@@ -107,6 +107,9 @@ interface UseSearchMetricsOptions {
   // flat ranked list — lets the ALL tab show a few of each type at once.
   // Ignored when the `unified` rank profile is selected, which needs a flat list.
   groupByDocType?: boolean;
+  // Cmd-K palette only: also ask the backend whether the query needs AI, which drives the
+  // inline AI answer. Other search surfaces leave this off.
+  classifyIntent?: boolean;
   // Builds the highlight-only `mentionHighlights` phrases from the active mention chips (see
   // search/mentionHighlights). Injected by the surfaces that highlight results (full-screen +
   // cmd+K) so this hook stays decoupled from user/group data; when absent, the chip's name is used.
@@ -114,6 +117,7 @@ interface UseSearchMetricsOptions {
 }
 
 const BACKEND_RESULTS_LIMIT = 25;
+const INTENT_DEBOUNCE_MS = 300;
 // Load-more uses a fixed-size window (constant `limit`, advancing `offset`). Vespa caps the
 // query offset at maxOffset (1000), so stop paginating before `offset` would cross it.
 const MAX_BACKEND_OFFSET = 1000;
@@ -238,6 +242,13 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
 
   // New State moved from ChannelCommandMenu
   const [activeTab, setActiveTab] = useState<TabType>(TabType.ALL);
+  // Latest intent verdict, tied to the query it was computed for.
+  const [queryIntent, setQueryIntent] = useState<{
+    query: string;
+    intent: QueryIntent | null;
+  } | null>(null);
+  const intentAbortRef = useRef<AbortController | null>(null);
+  const lastClassifiedQueryRef = useRef('');
   // Per-tab CAC default; an explicit user pick (rankProfile) wins.
   const allDefaultRankProfile = defaultRankProfileFor(activeTab);
   const [selectedMentions, setSelectedMentions] = useState<
@@ -810,6 +821,9 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       [TabType.RECORDING]: { page: 1, hasMore: false, total: 0, offset: 0, cumulativeCount: 0 },
       [TabType.DESK]: { page: 1, hasMore: false, total: 0, offset: 0, cumulativeCount: 0 },
     });
+    setQueryIntent(null);
+    intentAbortRef.current?.abort();
+    lastClassifiedQueryRef.current = '';
     // Clear the dedup guard's text so reopening the palette and re-entering the same query
     // (notably a paste of the last search) isn't skipped as a duplicate and re-runs the search.
     lastSearchedParamsRef.current.text = '';
@@ -1450,6 +1464,36 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     structuredFiltersKey,
   ]);
 
+  // Intent classification for the inline AI answer: its own request and abort handle, so a
+  // slow classifier never holds up search and switching tabs never cancels it. Keyed on text only.
+  useEffect(() => {
+    if (!options.classifyIntent || options.mentionSearchType) return;
+
+    const query = text.trim();
+    if (query === lastClassifiedQueryRef.current) return;
+
+    const timer = setTimeout(() => {
+      lastClassifiedQueryRef.current = query;
+      intentAbortRef.current?.abort();
+      if (!query) {
+        setQueryIntent(null);
+        return;
+      }
+      const controller = new AbortController();
+      intentAbortRef.current = controller;
+      searchService
+        .getQueryIntent(query, controller.signal)
+        .then(intent => {
+          if (!controller.signal.aborted) setQueryIntent({ query, intent });
+        })
+        // Aborted or failed: no verdict, so the palette stays lexical.
+        .catch(() => undefined);
+    }, INTENT_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [text, options.classifyIntent, options.mentionSearchType]);
+
+  useEffect(() => () => intentAbortRef.current?.abort(), []);
+
   /**
    * Load More Results
    */
@@ -1765,9 +1809,19 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     };
   }, []); // Empty dependency array = only runs on mount/unmount
 
+  // Whether what is typed reads as a question, so the palette may show an AI overview for
+  // it. Stays true while the user keeps extending the classified query (no flicker per
+  // keystroke); the next settled classification re-decides.
+  const trimmedText = text.trim();
+  const isAiQuery =
+    queryIntent?.intent?.mode === 'ai' &&
+    trimmedText !== '' &&
+    trimmedText.startsWith(queryIntent.query);
+
   return {
     // Session state
     searchSessionId,
+    isAiQuery,
 
     // Actions
     onOpen,
