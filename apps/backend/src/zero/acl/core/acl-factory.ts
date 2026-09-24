@@ -1,8 +1,6 @@
 import type { QueryContext, TableName } from './types';
 import { BaseACL } from './base-acl';
 import { ActivitiesACL } from '../tables/activities-acl';
-import { AuditLogsACL } from '../tables/audit-logs-acl';
-import { AuditLogChangesACL } from '../tables/audit-log-changes-acl';
 import { GuestAccessACL } from '../tables/guest-access-acl';
 import { CallParticipantsACL } from '../tables/call-participants-acl';
 import { CallsACL } from '../tables/calls-acl';
@@ -441,10 +439,6 @@ export class ACLFactory {
         return new WorkspacesACL(ctx);
       case 'ticket_exports':
         return new BaseACL<any>(ctx);
-      case 'audit_logs':
-        return new AuditLogsACL(ctx);
-      case 'audit_log_changes':
-        return new AuditLogChangesACL(ctx);
       case 'guest_access':
         return new GuestAccessACL(ctx, table);
     }

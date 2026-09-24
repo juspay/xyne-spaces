@@ -578,7 +578,8 @@ export enum ACLAuditTargetType {
   USER_GROUP = 'USER_GROUP',
 }
 
-// Generalized audit trail types. See AuditLog / AuditLogChange tables.
+// Generalized audit trail types. The audit tables live in the non_zero schema —
+// written by the backend audit interceptors, read via REST (GET /api/audit-logs).
 // @ts-ignore TS1294
 export enum AuditAction {
   CREATE = 'CREATE',
@@ -586,7 +587,7 @@ export enum AuditAction {
   DELETE = 'DELETE',
 }
 
-// Logical context an audit log belongs to (audit_logs.entityType).
+// Logical context an audit log belongs to (non_zero.audit_logs.entityType).
 // Determines which screen an audit row is displayed on (audit_logs.entityId).
 // @ts-ignore TS1294
 export enum AuditEntityType {

@@ -429,36 +429,6 @@ export const userAssignmentStateTable = table('user_assignment_states')
   })
   .primaryKey('id');
 
-// Generalized audit trail - one parent row per mutation (e.g. a screen save)
-export const auditLogTable = table('audit_logs')
-  .columns({
-    workspaceId: string(), // denormalized tenant key (stamped on insert)
-    id: string(),
-    actorUserId: string().optional(), // null when the actor is a system process
-    action: string(), // AuditAction - coarse rollup for the feed badge
-    entityType: string(), // AuditEntityType - logical context
-    entityId: string(), // context id, e.g. userGroupId
-    summary: string(), // human-readable rollup for the audit feed
-    createdAt: number(),
-  })
-  .primaryKey('id');
-
-// Field-level audit detail - one row per changed field
-export const auditLogChangeTable = table('audit_log_changes')
-  .columns({
-    workspaceId: string(), // denormalized tenant key (stamped on insert)
-    id: string(),
-    auditLogId: string(),
-    action: string(), // AuditAction - INSERT/UPDATE/DELETE for this record
-    tableName: string(), // table that was mutated
-    recordId: string(), // PK of the mutated row
-    targetName: string(), // human label of the changed row, snapshotted at write time
-    field: string(),
-    oldValue: string().optional(), // stringified previous value
-    newValue: string().optional(), // stringified new value
-    createdAt: number(),
-  })
-  .primaryKey('id');
 
 export const boardComplexityScoreTable = table('board_complexity_scores')
   .columns({
@@ -2931,27 +2901,6 @@ export const userAssignmentStateTableRelationships = relationships(
   }),
 );
 
-export const auditLogTableRelationships = relationships(auditLogTable, ({ one, many }) => ({
-  actorUser: one({
-    sourceField: ['actorUserId'],
-    destField: ['id'],
-    destSchema: userTable,
-  }),
-  changes: many({
-    sourceField: ['id'],
-    destField: ['auditLogId'],
-    destSchema: auditLogChangeTable,
-  }),
-}));
-
-export const auditLogChangeTableRelationships = relationships(auditLogChangeTable, ({ one }) => ({
-  auditLog: one({
-    sourceField: ['auditLogId'],
-    destField: ['id'],
-    destSchema: auditLogTable,
-  }),
-}));
-
 export const boardComplexityScoreTableRelationships = relationships(
   boardComplexityScoreTable,
   ({ one }) => ({
@@ -4833,8 +4782,6 @@ export const schema = createSchema({
     rolesTable,
     userRoleMappingsTable,
     userAssignmentStateTable,
-    auditLogTable,
-    auditLogChangeTable,
     boardComplexityScoreTable,
     userWorkloadMappingTable,
     userExpertiseMappingTable,
@@ -4974,8 +4921,6 @@ export const schema = createSchema({
     rolesTableRelationships,
     userRoleMappingsTableRelationships,
     userAssignmentStateTableRelationships,
-    auditLogTableRelationships,
-    auditLogChangeTableRelationships,
     boardComplexityScoreTableRelationships,
     userWorkloadMappingTableRelationships,
     userExpertiseMappingTableRelationships,
@@ -5116,8 +5061,6 @@ export type UserGroupMapping = Row<typeof schema.tables.user_group_mappings>;
 export type Role = Row<typeof schema.tables.roles>;
 export type UserRoleMapping = Row<typeof schema.tables.user_role_mappings>;
 export type UserAssignmentState = Row<typeof schema.tables.user_assignment_states>;
-export type AuditLog = Row<typeof schema.tables.audit_logs>;
-export type AuditLogChange = Row<typeof schema.tables.audit_log_changes>;
 export type BoardComplexityScore = Row<typeof schema.tables.board_complexity_scores>;
 export type UserWorkloadMapping = Row<typeof schema.tables.user_workload_mappings>;
 export type UserExpertiseMapping = Row<typeof schema.tables.user_expertise_mappings>;

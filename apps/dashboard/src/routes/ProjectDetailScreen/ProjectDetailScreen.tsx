@@ -1022,7 +1022,11 @@ const ProjectDetailScreen = (): ReactElement => {
           title={`Change history — ${historyBoard.name}`}
           className='max-h-[80vh] overflow-y-auto sm:max-w-2xl'
         >
-          <AuditLogSection entityType={AuditEntityType.BOARD} entityId={historyBoard.id} />
+          <AuditLogSection
+            entityType={AuditEntityType.BOARD}
+            entityId={historyBoard.id}
+            entityName={historyBoard.name}
+          />
         </Dialog>
       )}
 

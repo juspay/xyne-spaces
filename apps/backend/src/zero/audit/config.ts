@@ -155,6 +155,8 @@ export const AUDIT_TABLE_CONFIG: Record<string, AuditTableConfig> = {
       ]);
     },
     jsonFields: { metadata: formatBoardMetadataValue },
+    // Inner toggles audited as individual rows -> rendered as a nested diff tree.
+    deepJsonFields: { metadata: ['ticketFormConfig'] },
     fieldFormatters: { flowPlan: value => formatFlowPlan(value) },
     deleteSummary: { field: 'name' },
   },
@@ -226,7 +228,14 @@ export const AUDIT_TABLE_CONFIG: Record<string, AuditTableConfig> = {
     },
     ignoreFields: ['stageId', 'transitionId'],
     createDefaults: { approverType: 'USER' },
-    deleteSummary: { field: 'approver', value: (row, res) => approverLabel(row, res) },
+    // Approver rows are deleted and reinserted (new ids) on board save — pair by
+    // natural key. The DELETE row's field name matches the CREATE diff's userId
+    // row so identical replacements reconcile away.
+    reconcileKey: row =>
+      [rowString(row, 'stageId') || rowString(row, 'transitionId'), rowString(row, 'userId')].join(
+        '|',
+      ),
+    deleteSummary: { field: 'userId', value: (row, res) => approverLabel(row, res) },
   },
 
   stage_pr_status_mappings: {
@@ -281,6 +290,9 @@ export const AUDIT_TABLE_CONFIG: Record<string, AuditTableConfig> = {
       formId: (value, res) => (value ? res.formName(String(value)) : null),
     },
     ignoreFields: ['contextId', 'contextType', 'entityType'],
+    // Board save rewrites the mapping row (delete + insert, same natural key).
+    reconcileKey: row =>
+      [rowString(row, 'contextId'), rowString(row, 'formId')].join('|'),
     deleteSummary: { field: 'formId' },
   },
 
@@ -304,7 +316,23 @@ export const AUDIT_TABLE_CONFIG: Record<string, AuditTableConfig> = {
         entityId,
       }));
     },
-    resolveTargetName: async row => rowString(row, 'fieldName') || rowString(row, 'id'),
+    prewarm: async (beforeRow, afterRow, res) => {
+      await Promise.all([
+        res.warmForms([beforeRow?.formId, afterRow?.formId].filter(Boolean).map(String)),
+        res.warmGlobalFields(
+          [beforeRow?.globalFieldId, afterRow?.globalFieldId].filter(Boolean).map(String),
+        ),
+      ]);
+    },
+    // fieldName is deprecated in favour of the shared global_fields definition —
+    // resolve through it and prefix the owning form so the change group reads
+    // "Ticket Form · Priority" instead of an opaque id.
+    resolveTargetName: async (row, res) => {
+      const fieldLabel =
+        rowString(row, 'fieldName') || res.globalFieldName(rowString(row, 'globalFieldId')) || rowString(row, 'id');
+      const formName = res.formName(rowString(row, 'formId'));
+      return formName ? `${formName} · ${fieldLabel}` : fieldLabel;
+    },
     fieldFormatters: {
       // fieldEnum arrives as a json() array; fieldOptions as a JSON-stringified
       // {id,value}[] in a string column — both collapse to their option labels.
@@ -393,14 +421,3 @@ export const AUDIT_TABLE_CONFIG: Record<string, AuditTableConfig> = {
   },
 };
 
-/** Parent-row summary metadata per entity type. */
-export const AUDIT_ENTITY_META: Record<
-  string,
-  { rootTable: string; noun: string }
-> = {
-  [AuditEntityType.BOARD]: { rootTable: 'boards', noun: 'board' },
-  [AuditEntityType.USER_GROUP_ASSIGNMENT_CONFIG]: {
-    rootTable: 'user_groups',
-    noun: 'assignment config',
-  },
-};

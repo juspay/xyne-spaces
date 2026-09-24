@@ -1536,6 +1536,7 @@ export const AssignmentConfigScreen = ({
               <AuditLogSection
                 entityType={AuditEntityType.USER_GROUP_ASSIGNMENT_CONFIG}
                 entityId={userGroupId}
+                entityName={userGroup?.name ?? undefined}
               />
             </>
           )}

@@ -4,8 +4,6 @@ import { BaseQueryACL } from './base-acl';
 
 import {
   ActivitiesACL,
-  AuditLogsACL,
-  AuditLogChangesACL,
   AppsACL,
   InstalledAppsACL,
   CollectionsACL,
@@ -139,10 +137,6 @@ export class QueryACLFactory {
     switch (table) {
       case 'activities':
         return new ActivitiesACL(ctx) as BaseQueryACL<TTable>;
-      case 'audit_logs':
-        return new AuditLogsACL(ctx) as BaseQueryACL<TTable>;
-      case 'audit_log_changes':
-        return new AuditLogChangesACL(ctx) as BaseQueryACL<TTable>;
       case 'apps':
         return new AppsACL(ctx) as BaseQueryACL<TTable>;
       case 'installed_apps':

@@ -32,6 +32,7 @@ import { NAMESPACE } from '@/vespa/vespaConfig';
 import { VespaOperationType } from './vespa-injection/core/mapper';
 import { wrapTransactionWithACL } from './acl';
 import { createZeroAuditJobs, flushAuditTrail } from './audit';
+import type { AuditJobsAccumulator } from './audit';
 import { config } from '@/config/env';
 import { checkRateLimit } from '@/services/zeroRateLimiter';
 import { superpositionClient } from '@/services/superpositionClient';
@@ -258,6 +259,7 @@ export async function handleMutate(request: Request): Promise<unknown> {
         const mutationAwaitedPostCommitTasks: (() => Promise<void>)[] = [];
         const mutationVespaJobs = createVespaJobsAccumulator();
         const mutationSideEffectJobs = createSideEffectJobsAccumulator();
+        let mutationAuditJobs: AuditJobsAccumulator | null = null;
 
         return transact(async (tx, mutatorName, args) => {
           capturedMutatorName = mutatorName;
@@ -266,7 +268,7 @@ export async function handleMutate(request: Request): Promise<unknown> {
             mutationAsyncTasks,
             mutationAwaitedPostCommitTasks,
           );
-          const mutationAuditJobs = createZeroAuditJobs(tx);
+          mutationAuditJobs = createZeroAuditJobs(tx);
           const wrappedTx = wrapTransactionWithACL(
             tx,
             context,
@@ -276,16 +278,28 @@ export async function handleMutate(request: Request): Promise<unknown> {
             mutationAuditJobs,
           );
           const mutator = mustGetMutator(mutators, mutatorName);
-          const mutatorResult = await mutator.fn({ tx: wrappedTx, args, ctx: context });
-          // Flush the audit trail on the raw transaction — same commit as the
-          // mutations it describes, still inside this callback so a mutator
-          // throw skips it entirely.
-          await flushAuditTrail(tx, { userId: context.userID, workspaceId: context.workspaceId }, mutationAuditJobs);
-          return mutatorResult;
-        }).then((mutatorResult) => {
+          return mutator.fn({ tx: wrappedTx, args, ctx: context });
+        }).then(async mutatorResult => {
           // Zero resolves application failures as mutation results after rolling
           // back the transaction. Do not dispatch work staged by that rollback.
           if (!('error' in mutatorResult.result)) {
+            if (mutationAuditJobs) {
+              // Audit tables live outside the Zero graph (non_zero schema), so
+              // the flush is its own commit — it runs here, after the mutation
+              // result is known successful, rather than on the Zero transaction.
+              try {
+                await flushAuditTrail(
+                  db,
+                  { userId: context.userID, workspaceId: context.workspaceId },
+                  mutationAuditJobs,
+                );
+              } catch (error) {
+                logger.error('[AuditTrail] failed to flush audit for mutation', {
+                  mutator: capturedMutatorName,
+                  error: error instanceof Error ? error.message : error,
+                });
+              }
+            }
             asyncTasks.push(...mutationAsyncTasks);
             awaitedPostCommitTasks.push(...mutationAwaitedPostCommitTasks);
             vespaJobs.push(...mutationVespaJobs);
@@ -732,10 +746,12 @@ export async function runCatalogMutation(
     // Args are validated by the mutator's own zod schema; the cast only satisfies
     // Zero's ReadonlyJSONValue parameter type.
     await mutator.fn({ tx: wrappedTx, args: args as never, ctx });
-    // Catalog mutations can run under service principals whose id is not a users
-    // row; audit failures here are logged rather than failing background work.
+    // Audit tables live outside the Zero graph (non_zero schema); the flush is
+    // its own commit via the shared Prisma client. Catalog mutations can run
+    // under service principals whose id is not a users row; audit failures here
+    // are logged rather than failing background work.
     try {
-      await flushAuditTrail(tx, { userId: ctx.userID, workspaceId: ctx.workspaceId }, auditJobs);
+      await flushAuditTrail(db, { userId: ctx.userID, workspaceId: ctx.workspaceId }, auditJobs);
     } catch (error) {
       logger.error('[AuditTrail] failed to flush audit for catalog mutation', {
         mutator: name,

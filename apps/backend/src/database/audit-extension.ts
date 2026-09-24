@@ -1,11 +1,9 @@
 import { Prisma } from '@prisma/client';
-import { rollupAuditAction } from '@xyne/shared';
 import { v4 as uuidv4 } from 'uuid';
 import { logger } from '@/utils/logger';
 import { getContextOrNull } from './tenant/context';
 import {
   AUDIT_TABLE_CONFIG,
-  buildAuditSummary,
   collectTableAudit,
   groupAuditJobs,
 } from '../zero/audit';
@@ -103,6 +101,8 @@ function createPrismaAuditLookup(prisma: PrismaAuditClient): AuditLookup {
       (await rowsByIds('Role', ids)) as unknown as { id: string; name: string }[],
     formsByIds: async ids =>
       (await rowsByIds('Form', ids)) as unknown as { id: string; formName: string }[],
+    globalFieldsByIds: async ids =>
+      (await rowsByIds('GlobalField', ids)) as unknown as { id: string; fieldName: string }[],
     boardIdsForFormIds: async formIds => {
       if (formIds.length === 0) return [];
       const mappings = (await prisma.formContextMapping.findMany({
@@ -304,7 +304,6 @@ async function emitPrismaAudit(
   const workspaceId = tenantCtx?.workspaceId ?? firstWorkspaceId(writes);
   if (!workspaceId) return;
 
-  const createdAt = new Date();
   for (const group of groups) {
     if (group.drafts.length === 0) continue;
     await prisma.auditLog.create({
@@ -312,14 +311,12 @@ async function emitPrismaAudit(
         id: uuidv4(),
         workspaceId,
         actorUserId,
-        action: rollupAuditAction(group.drafts),
         entityType: group.scope.entityType,
         entityId: group.scope.entityId,
-        summary: buildAuditSummary(group),
-        createdAt,
         changes: {
           create: group.drafts.map(draft => ({
             id: uuidv4(),
+            workspaceId,
             action: draft.action,
             tableName: draft.tableName,
             recordId: draft.recordId,
@@ -327,7 +324,6 @@ async function emitPrismaAudit(
             field: draft.field,
             oldValue: draft.oldValue,
             newValue: draft.newValue,
-            createdAt,
           })),
         },
       },
