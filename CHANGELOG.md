@@ -1,3 +1,15 @@
+## [1.387.0](https://github.com/juspay/xyne-spaces/compare/v1.386.0...v1.387.0) (2026-09-24)
+
+
+### Features
+
+* replace share view toasts with inline animations ([#2264](https://github.com/juspay/xyne-spaces/issues/2264)) ([deff9b6](https://github.com/juspay/xyne-spaces/commit/deff9b6380a12edd35f33f9fd4187adcea49cf0d))
+
+
+### Bug Fixes
+
+* compare and render date variables in automation conditions ([#1230](https://github.com/juspay/xyne-spaces/issues/1230)) ([f19e69f](https://github.com/juspay/xyne-spaces/commit/f19e69f2fbb8e7188cf581544f7cb58387a67ff9))
+
 ## [1.386.0](https://github.com/juspay/xyne-spaces/compare/v1.385.3...v1.386.0) (2026-09-24)
 
 
