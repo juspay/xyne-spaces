@@ -232,10 +232,16 @@ router.post(
     try {
       await assertChannelOwner(channelId, userId);
 
-      // Use findFirst (not findActiveSourceForChannel) — reconnect should
-      // also work when the source is currently inactive (post-disconnect).
+      // Reconnect should work even when the source is currently inactive
+      // (post-disconnect), but it must target the email integration itself.
+      // A channel can hold other source types (app-desk, slack, DL member
+      // sync); picking the newest unfiltered source would try to reconnect
+      // using a non-mailbox displayName and fail with "no recorded email".
       const source = await db.externalSource.findFirst({
-        where: { channelId },
+        where: {
+          channelId,
+          sourceType: { in: [ExternalSourcePlatform.GOOGLE, ExternalSourcePlatform.MICROSOFT] },
+        },
         select: { id: true, sourceType: true, displayName: true },
         orderBy: { createdAt: 'desc' },
       });
