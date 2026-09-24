@@ -140,7 +140,10 @@ export type FilterControl =
   | { kind: 'date' }
   // Toggles live in the bar as pills, not in the modal: `barLabel` is the short caption
   // the pill wears (`@Ch`, `Bot`, `"ab"`), `label` the sentence its tooltip spells out.
-  | { kind: 'toggle'; barLabel: string };
+  | { kind: 'toggle'; barLabel: string }
+  // A boolean that lives *inside* the Filters modal as a checkbox (never a bar pill), for
+  // toggles that would clutter the bar. Uses `label` for its caption.
+  | { kind: 'checkbox' };
 
 /** The shape `parseSearchFilters` returns — filter syntax found in free text. */
 export interface TypedFilters {
@@ -412,18 +415,23 @@ function toggleEntry(opts: {
   barLabel: string;
   explicitOff?: boolean;
   appliesTo?: (docType: DocType) => boolean;
+  /**
+   * Where the control lives. Default ('bar') renders a standalone pill and is never counted
+   * in the Filters badge. 'modal' renders a checkbox *inside* the Filters popover instead,
+   * and — since it then lives in the dialog like any other filter — is counted in the badge.
+   */
+  renderIn?: 'bar' | 'modal';
 }): FilterEntry {
+  const inModal = opts.renderIn === 'modal';
   return {
     id: opts.id,
     label: opts.label,
     params: [opts.param],
     ...(opts.appliesTo ? { appliesTo: opts.appliesTo } : {}),
-    // Never counted in the Filters badge. That badge counts what the *dialog* holds, and
-    // every toggle has its own lit pill in the bar — the same rule From and In follow.
-    // Counting one there too would report a filter the dialog doesn't contain, and for a
-    // default-on toggle it read as a lie: switching `onlyMyChannels` OFF *widens* the
-    // search, yet the badge announced "Filters 1" as though it had been narrowed.
-    hidden: false,
+    // Bar toggles are never counted in the Filters badge — that badge counts what the
+    // *dialog* holds, and every bar toggle has its own lit pill (the rule From and In
+    // follow). A modal checkbox, by contrast, lives in the dialog, so it *is* counted.
+    hidden: inModal ? true : false,
     isActive: f => f[opts.field] !== opts.defaultValue,
     cleared: { [opts.field]: opts.defaultValue } as Partial<SearchResultsFilters>,
     read: params => {
@@ -441,7 +449,7 @@ function toggleEntry(opts: {
     // token appeared only once it was switched OFF, captioned "Only my channels": the
     // exact opposite of the truth. Its checkbox in the dialog (and the Filters badge, for
     // the ones without their own bar control) is the honest representation.
-    control: { kind: 'toggle', barLabel: opts.barLabel },
+    control: inModal ? { kind: 'checkbox' } : { kind: 'toggle', barLabel: opts.barLabel },
     getValue: f => f[opts.field],
     setValue: next => ({ [opts.field]: next }) as Partial<SearchResultsFilters>,
   };
@@ -793,9 +801,10 @@ export const FILTER_REGISTRY: FilterEntry[] = [
     barLabel: 'Bot',
     appliesTo: isMessageType,
   }),
-  // Desk-only: by default archived tickets are hidden; this toggle brings them back.
+  // Desk-only: by default archived tickets are hidden; this checkbox brings them back.
   // Scoped to `desk` so it never appears on other tabs, and the registry is unused by
-  // cmd+k, so it is full-page-only.
+  // cmd+k, so it is full-page-only. Lives inside the Filters popover (renderIn: 'modal'),
+  // not as a standalone bar pill.
   toggleEntry({
     id: 'showArchived',
     label: 'Show archived',
@@ -804,6 +813,7 @@ export const FILTER_REGISTRY: FilterEntry[] = [
     defaultValue: false,
     barLabel: 'Archived',
     appliesTo: d => d === 'desk',
+    renderIn: 'modal',
   }),
   // Ticket-only filters last: they apply to one result type, so they sit below the
   // filters that work everywhere.
