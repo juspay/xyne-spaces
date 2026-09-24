@@ -6,11 +6,39 @@ import path from 'path';
 import { existsSync, mkdirSync } from 'fs';
 import Logger from 'electron-log';
 import { EnrollmentEvent } from './logger/enrollment-events';
+import { Logger as XyneLogger } from './logger/Logger';
+import ElectronEvent from './logger/electron-events';
 import { showScreenPicker } from './screen-picker';
 import Store from 'electron-store';
 
 let mainWindow: BrowserWindow | null = null;
 const store = new Store();
+
+/**
+ * Correlates, per default-session request id, whether the outgoing request
+ * carried a non-empty auth Cookie header. The 401 handler in
+ * `onHeadersReceived` reads this so it can distinguish a genuinely
+ * authenticated failure (session likely dead) from a cookieless subresource
+ * 401 (e.g. a sandboxed-iframe image load) that must NOT wipe the session.
+ *
+ * Populated in `onBeforeSendHeaders` (backend requests only) and drained in
+ * `onHeadersReceived`/`onErrorOccurred`, so it never accumulates.
+ */
+const requestCarriedCookie = new Map<number, boolean>();
+
+/**
+ * A 401 only means "the session is dead" when it comes from an auth-critical
+ * endpoint (validate, me, refresh-session, logout — all under `/api/auth/`).
+ * A 401 from `/claw`, `/zero`, `/api/users/<id>/picture` or any other
+ * resource is a per-resource failure, not an expired session.
+ */
+function isAuthCriticalUrl(rawUrl: string): boolean {
+  try {
+    return new URL(rawUrl).pathname.startsWith('/api/auth/');
+  } catch {
+    return false;
+  }
+}
 
 export function setMainWindow(window: BrowserWindow | null): void {
   mainWindow = window;
@@ -322,6 +350,18 @@ export function setupRequestInterceptor(): void {
       if (preProdEnabled === true) {
         details.requestHeaders['x-route-env'] = 'playground';
       }
+      // Record whether this backend request carried an auth Cookie, keyed by
+      // request id, so the 401 handler can correlate. Chromium adds the Cookie
+      // header before this listener runs, so it is visible here.
+      if (details.url.startsWith(config.BACKEND_URL)) {
+        const hadCookie = Object.entries(details.requestHeaders).some(
+          ([key, value]) =>
+            key.toLowerCase() === 'cookie' &&
+            typeof value === 'string' &&
+            value.trim().length > 0,
+        );
+        requestCarriedCookie.set(details.id, hadCookie);
+      }
       callback({ requestHeaders: details.requestHeaders });
     }
   );
@@ -331,14 +371,73 @@ export function setupRequestInterceptor(): void {
     (details, callback) => {
       if (details.statusCode === 401) {
         const contentType = details.responseHeaders?.['content-type']?.[0];
-        if (contentType?.includes('application/json')) {
-          void clearAllCookies();
-          mainWindow?.webContents.send('auth:token-expired');
+        const isJson = contentType?.includes('application/json') ?? false;
+        const authCritical = isAuthCriticalUrl(details.url);
+        const hadCookie = requestCarriedCookie.get(details.id) ?? false;
+        // Consume the correlation entry now that the response has arrived.
+        requestCarriedCookie.delete(details.id);
+
+        // A 401 only means the session is dead when ALL hold: it is a JSON
+        // response, from an auth-critical endpoint (/api/auth/*), on a request
+        // that actually carried the auth Cookie. This is the phantom-logout
+        // amplifier fix — config.BACKEND_URL is the whole origin, so the old
+        // check fired on /claw/*, /zero/*, media subresources and cookieless
+        // iframe img loads, logging users out for 401s that don't mean the
+        // session ended.
+        const shouldLogout = isJson && authCritical && hadCookie;
+
+        if (shouldLogout) {
+          // Snapshot the cookie jar BEFORE wiping it, then AWAIT the clear so
+          // cookie state is deterministic, and only then signal the renderer.
+          // (Race fix: the IPC used to fire before the fire-and-forget clear
+          // settled, so the renderer could observe half-wiped cookie state.)
+          void (async () => {
+            let jar: Electron.Cookie[] = [];
+            try {
+              jar = await session.defaultSession.cookies.get({ url: details.url });
+            } catch {
+              jar = [];
+            }
+            XyneLogger.warn(ElectronEvent.AUTH_401_INTERCEPTED, {
+              url: details.url,
+              method: details.method,
+              resource_type: details.resourceType,
+              referrer: details.referrer,
+              jar_cookie_count: jar.length,
+              jar_cookie_names: jar.map((cookie) => cookie.name).join(','),
+            });
+            await clearAllCookies('401_json_from_auth_endpoint');
+            mainWindow?.webContents.send('auth:token-expired', {
+              url: details.url,
+              resourceType: details.resourceType,
+            });
+            XyneLogger.info(ElectronEvent.AUTH_TOKEN_EXPIRED_SENT, {
+              url: details.url,
+              resource_type: details.resourceType,
+              main_window_present: !!mainWindow,
+            });
+          })();
+        } else {
+          // Observed-but-ignored 401: keep the record for future analysis but
+          // never tear the session down.
+          XyneLogger.info(ElectronEvent.AUTH_401_INTERCEPTED, {
+            url: details.url,
+            method: details.method,
+            resource_type: details.resourceType,
+            referrer: details.referrer,
+            ignored: true,
+            is_json: isJson,
+            auth_critical: authCritical,
+            had_cookie: hadCookie,
+          });
         }
+      } else {
+        // Release any correlation entry recorded for this backend request.
+        requestCarriedCookie.delete(details.id);
       }
 
       if (details.url.includes('/logout') && details.statusCode === 200) {
-        void clearAllCookies();
+        void clearAllCookies('logout_response');
       }
 
       callback({ responseHeaders: details.responseHeaders });
@@ -353,6 +452,9 @@ export function setupRequestInterceptor(): void {
   session.defaultSession.webRequest.onErrorOccurred(
     { urls: [`${config.BACKEND_URL}/*`] },
     (details) => {
+      // Drain the cookie-correlation entry for requests that never produced a
+      // response, so the map cannot leak.
+      requestCarriedCookie.delete(details.id);
       Logger.error(EnrollmentEvent.NETWORK_ERROR, {
         url: details.url,
         error: details.error,

@@ -457,7 +457,7 @@ export function setupIpcHandlers(): void {
 
   ipcMain.on('clear-all-cookies', (event) => {
     if (!isMainWindowSender(event)) return;
-    void clearAllCookies();
+    void clearAllCookies('renderer_ipc_request');
   });
 
   ipcMain.on('set-badge-count', (_event, count: number) => {

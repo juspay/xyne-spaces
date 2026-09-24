@@ -1,19 +1,30 @@
 import { session } from 'electron';
 import log from 'electron-log/main';
 import { Logger } from './logger/Logger';
+import ElectronEvent from './logger/electron-events';
 
 /**
- * Clears all cookies from the default session
+ * Clears all cookies from the default session.
+ *
+ * @param reason Why the session is being torn down — this runs in the main
+ *   process where no frontend telemetry exists, and an unattributed cookie
+ *   wipe is indistinguishable from an expired session in production logs.
  */
-export async function clearAllCookies(): Promise<void> {
+export async function clearAllCookies(reason: string = 'unspecified'): Promise<void> {
   try {
     const cookies = await session.defaultSession.cookies.get({});
     for (const cookie of cookies) {
       const url = `${cookie.secure ? 'https' : 'http'}://${cookie.domain}${cookie.path}`;
       await session.defaultSession.cookies.remove(url, cookie.name);
     }
+    Logger.info(ElectronEvent.COOKIES_CLEARED, {
+      reason,
+      cleared_count: cookies.length,
+      // Names only — never values.
+      cookie_names: cookies.map(cookie => cookie.name).join(','),
+    });
   } catch (error) {
-    Logger.logError('cookies.clear.failed', error);
+    Logger.logError(ElectronEvent.COOKIES_CLEAR_FAILED, error, { reason });
   }
 }
 
