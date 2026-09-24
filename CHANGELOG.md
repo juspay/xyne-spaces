@@ -1,3 +1,10 @@
+## [1.394.0](https://github.com/juspay/xyne-spaces/compare/v1.393.0...v1.394.0) (2026-09-24)
+
+
+### Features
+
+* classify cmd+K queries with Jev and answer them inline ([#2204](https://github.com/juspay/xyne-spaces/issues/2204)) ([5a41597](https://github.com/juspay/xyne-spaces/commit/5a41597ed01dc272457186a7e3db7aa665d4e4e4))
+
 ## [1.393.0](https://github.com/juspay/xyne-spaces/compare/v1.392.0...v1.393.0) (2026-09-24)
 
 
