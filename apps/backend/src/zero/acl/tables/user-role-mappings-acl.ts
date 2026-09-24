@@ -17,8 +17,8 @@ export class UserRoleMappingsACL extends BaseACL<'user_role_mappings'> {
    *   identified by `entityId` (`canManageUserGroup(..., 'members')`).
    */
   private async authorizeByEntity(
-    entityType: string | undefined,
-    entityId: string | undefined,
+    entityType: string | null | undefined,
+    entityId: string | null | undefined,
     tx: Transaction<Schema>,
   ): Promise<void> {
     if (entityType === 'USER_GROUP') {
