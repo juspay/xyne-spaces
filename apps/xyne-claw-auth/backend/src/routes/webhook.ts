@@ -156,7 +156,7 @@ import {
   isUiWidget,
 } from "xyne-claw-shared";
 import { scheduleProviderRetry } from "../queue/provider-retry-worker.js";
-import type { TwinDelivery, UiWidget, PrProvider, PrStatus } from "xyne-claw-shared";
+import type { TwinDelivery, UiWidget, PrProvider, PrStatus, FlowDefinition } from "xyne-claw-shared";
 import { isAgentInvocableBy } from "xyne-claw-shared";
 import { isSupportedInboundAttachment } from "xyne-claw-shared";
 import type { Todo } from "xyne-claw-shared";
@@ -6961,6 +6961,165 @@ async function finishCreateWidget(sessionId: string, widgetId: string, token: st
   }
 }
 
+export interface WidgetFlowContext {
+  agentSlug: string;
+  channelId: string;
+  conversationId: string;
+  userId: string;
+  spacesAppId?: string | null | undefined;
+  /** Omitted on the Spaces path, keeping its signature payload byte-identical
+   *  to cards minted before this existed. */
+  surface?: "xyne-ai";
+  /** Signed, so a tampered card can't redirect the continuation elsewhere. */
+  chatMessageId?: string;
+}
+
+/**
+ * UiWidget → signed FlowDefinition. Shared by both surfaces so the
+ * `user-answer` signature payload, which flow-action.ts rebuilds byte-for-byte,
+ * has one definition. Null for `plan` (its own path) and for empty payloads.
+ */
+export async function widgetToFlow(
+  widget: UiWidget,
+  ctx: WidgetFlowContext,
+): Promise<FlowDefinition | null> {
+  const withAppId = (flow: FlowDefinition): FlowDefinition =>
+    withSpacesAppId(flow, ctx.spacesAppId);
+
+  switch (widget.type) {
+    case "question": {
+      const { questionId, questions } = widget.payload;
+      if (!questionId || questions.length === 0) return null;
+      const { signAction } = await import("./mcp.js");
+      const flow = withAppId(buildUserQuestionFlow(questions, {
+        questionId,
+        agentSlug: ctx.agentSlug,
+        channelId: ctx.channelId,
+        conversationId: ctx.conversationId,
+        userId: ctx.userId,
+      }));
+      const surfaceFields = ctx.surface
+        ? { surface: ctx.surface, chatMessageId: ctx.chatMessageId ?? "" }
+        : {};
+      flow.data = {
+        ...(flow.data ?? {}),
+        ...surfaceFields,
+        signature: signAction({
+          actionType: "user-answer",
+          questionId,
+          userId: ctx.userId,
+          agentSlug: ctx.agentSlug,
+          spacesAppId: ctx.spacesAppId ?? "",
+          channelId: ctx.channelId,
+          conversationId: ctx.conversationId,
+          ...surfaceFields,
+        }),
+      };
+      return flow;
+    }
+    case "code":
+      if (!widget.payload.code.trim()) return null;
+      return withAppId(buildCodeFlow(widget.payload.code, widget.payload.language));
+    case "diff":
+      if (!widget.payload.path.trim() || !widget.payload.patch.trim()) return null;
+      return withAppId(buildDiffFlow(widget.payload.path.trim(), widget.payload.patch));
+    case "chart":
+      return withAppId(buildChartFlow(widget.payload));
+    default:
+      return null;
+  }
+}
+
+/**
+ * No-channel counterpart to renderUiWidget: persists the card onto its assistant
+ * row and publishes it to the live bus. Must stay reachable from both claw
+ * transports — SSE and the internal /progress handlers (the default).
+ */
+export async function deliverXyneAiWidget(args: {
+  widget: UiWidget;
+  agentSlug: string;
+  conversationId: string;
+  userId?: string | null | undefined;
+  orgId?: string | null | undefined;
+  assistantMessageId?: string | null | undefined;
+}): Promise<FlowDefinition | null> {
+  if (args.widget.type === "plan") return null;
+
+  // claw knows the conversation but not the row, and without a row the card
+  // can neither persist nor be answered (the token binds that id).
+  let assistantMessageId = args.assistantMessageId ?? null;
+  if (!assistantMessageId) {
+    assistantMessageId = (await prisma.chatMessage
+      .findFirst({
+        where: {
+          conversationId: args.conversationId,
+          agentSlug: args.agentSlug,
+          role: "assistant",
+          status: "running",
+        },
+        orderBy: { createdAt: "desc" },
+        select: { id: true },
+      })
+      .catch(() => null))?.id ?? null;
+  }
+
+  let userId = args.userId ?? null;
+  let orgId = args.orgId ?? null;
+  if ((!userId || !orgId) && assistantMessageId) {
+    const row = await prisma.chatMessage
+      .findUnique({ where: { id: assistantMessageId }, select: { userId: true, orgId: true } })
+      .catch(() => null);
+    userId = userId ?? row?.userId ?? null;
+    orgId = orgId ?? row?.orgId ?? null;
+  }
+  // Slugs are unique per ORG, so an unscoped findFirst could resolve another
+  // tenant's agent and mint this card's token against their Spaces app.
+  const agent = orgId
+    ? await prisma.agent
+        .findFirst({ where: { slug: args.agentSlug, orgId }, select: { spacesAppId: true } })
+        .catch(() => null)
+    : null;
+  if (!orgId) {
+    clog.warn(`[xyne-ai widget] no org scope for agent=${args.agentSlug} conv=${args.conversationId}; card will not be answerable`);
+  }
+
+  const flow = await widgetToFlow(args.widget, {
+    agentSlug: args.agentSlug,
+    channelId: "",
+    conversationId: args.conversationId,
+    userId: userId ?? "",
+    spacesAppId: agent?.spacesAppId,
+    surface: "xyne-ai",
+    chatMessageId: assistantMessageId ?? "",
+  });
+  if (!flow) return null;
+
+  if (args.widget.type === "question" && (!assistantMessageId || !agent?.spacesAppId || !userId)) {
+    clog.warn(
+      `[xyne-ai widget] question card not answerable conv=${args.conversationId} ` +
+        `(assistantRow=${assistantMessageId ? "yes" : "no"}, spacesAppId=${agent?.spacesAppId ? "yes" : "no"}, userId=${userId ? "yes" : "no"})`,
+    );
+  }
+
+  // Persist BEFORE the caller emits: replaceUiFlow finds the card by screenId.
+  if (assistantMessageId) {
+    await chatMessageRepository.appendUiFlow(assistantMessageId, flow).catch((err: unknown) => {
+      clog.warn(`[xyne-ai widget] persist failed: ${errMsg(err)}`);
+    });
+  }
+  if (CONFIG.liveToolCallsEnabled && userId) {
+    publishLiveEvent(args.conversationId, {
+      type: "ui-flow",
+      conversationId: args.conversationId,
+      agentSlug: args.agentSlug,
+      userId,
+      flow,
+      ts: Date.now(),
+    });
+  }
+  return flow;
+}
+
 async function renderUiWidget(
   sessionId: string,
   widget: UiWidget,
@@ -6983,46 +7142,15 @@ async function renderUiWidget(
     // clarification questions also support approval-mode agent runs.
     if (widget.type !== "question" && ctx.responseMode !== "conversation") return false;
     const log = createLogger("webhook/ui-widget", ctx.traceId ?? sessionId.slice(0, 8));
-    let flow;
 
-    switch (widget.type) {
-      case "question": {
-        const { questionId, questions } = widget.payload;
-        if (!questionId || questions.length === 0) return false;
-        const { signAction } = await import("./mcp.js");
-        flow = withSpacesAppId(buildUserQuestionFlow(questions, {
-          questionId,
-          agentSlug: ctx.agentSlug ?? "",
-          channelId: ctx.channelId,
-          conversationId: ctx.conversationId,
-          userId: ctx.senderId,
-        }), ctx.spacesAppId);
-        flow.data = {
-          ...(flow.data ?? {}),
-          signature: signAction({
-            actionType: "user-answer",
-            questionId,
-            userId: ctx.senderId,
-            agentSlug: ctx.agentSlug ?? "",
-            spacesAppId: ctx.spacesAppId ?? "",
-            channelId: ctx.channelId,
-            conversationId: ctx.conversationId,
-          }),
-        };
-        break;
-      }
-      case "code":
-        if (!widget.payload.code.trim()) return false;
-        flow = withSpacesAppId(buildCodeFlow(widget.payload.code, widget.payload.language), ctx.spacesAppId);
-        break;
-      case "diff":
-        if (!widget.payload.path.trim() || !widget.payload.patch.trim()) return false;
-        flow = withSpacesAppId(buildDiffFlow(widget.payload.path.trim(), widget.payload.patch), ctx.spacesAppId);
-        break;
-      case "chart":
-        flow = withSpacesAppId(buildChartFlow(widget.payload), ctx.spacesAppId);
-        break;
-    }
+    const flow = await widgetToFlow(widget, {
+      agentSlug: ctx.agentSlug ?? "",
+      channelId: ctx.channelId,
+      conversationId: ctx.conversationId,
+      userId: ctx.senderId,
+      spacesAppId: ctx.spacesAppId,
+    });
+    if (!flow) return false;
 
     await spacesAppFetch("/chat/postMessage", {
       channelId: ctx.channelId,

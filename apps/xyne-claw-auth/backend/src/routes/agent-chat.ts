@@ -2325,6 +2325,31 @@ internalRouter.post("/:slug/chat/:convId/progress", async (req: Request<{ slug: 
   if (attachment) events.push({ event: "attachment", data: { attachment } });
   if (debugEvent) events.push({ event: "debug", data: { debugEvent } });
 
+  // Artifact card over the default (non-SSE) transport — delivered out of
+  // band from `events` because converting + persisting is async.
+  const progressBody = req.body as Record<string, unknown>;
+  if (progressBody["kind"] === "ui-widget" && progressBody["widget"]) {
+    const assistantMessageId = req.query["assistantMessageId"] as string | undefined;
+    void (async () => {
+      try {
+        const { isUiWidget } = await import("xyne-claw-shared");
+        if (!isUiWidget(progressBody["widget"])) return;
+        const { deliverXyneAiWidget } = await import("./webhook.js");
+        const flow = await deliverXyneAiWidget({
+          widget: progressBody["widget"],
+          agentSlug: req.params.slug,
+          conversationId: req.params.convId,
+          assistantMessageId,
+        });
+        if (!flow) return;
+        if (stream) stream.sendEvent("ui-flow", { flow });
+        else if (callbackId) publishChatEvent({ kind: "progress", callbackId, events: [{ event: "ui-flow", data: { flow } }] });
+      } catch (err) {
+        log.warn(`[agent-chat] ui-flow progress delivery failed: ${errMsg(err)}`);
+      }
+    })();
+  }
+
   if (events.length > 0 && callbackId) {
     if (stream) {
       // `debug` is withheld unless the subscriber was resolved as elevated when
@@ -3006,12 +3031,21 @@ router.get("/:slug/chat/:convId/live", async (req: Request<{ slug: string; convI
     // that's already been generated, before the first live `delta` arrives.
     const runningMsg = visible.find((m) => m.role === "assistant" && m.status === "running");
 
+    // Redis pub/sub has no replay, so a mid-run joiner would otherwise miss
+    // every card emitted before it connected.
+    const uiFlowsByMsgId: Record<string, unknown[]> = {};
+    for (const m of visible) {
+      const flows = (m as { uiFlows?: unknown }).uiFlows;
+      if (Array.isArray(flows) && flows.length > 0) uiFlowsByMsgId[m.id] = flows;
+    }
+
     res.write(
       `event: snapshot\ndata: ${JSON.stringify({
         conversationId: convId,
         agentSlug: slug,
         invocationsByMsgId,
         inProgress,
+        ...(Object.keys(uiFlowsByMsgId).length > 0 ? { uiFlowsByMsgId } : {}),
         ...(runningMsg ? { partial: { msgId: runningMsg.id, content: runningMsg.content ?? "", reasoning: runningMsg.reasoning ?? "" } } : {}),
       })}\n\n`,
     );
@@ -3738,13 +3772,25 @@ async function runAgentChatViaSse(
               pendingStreams.get(callbackId)?.sendEvent("plan", { todos });
             },
             onUiWidget: (_sid, widget) => {
-              // Keep the existing plan event stable for current clients while
-              // exposing the generic envelope for every other widget type.
               if (widget.type === "plan") {
                 pendingStreams.get(callbackId)?.sendEvent("plan", { todos: widget.payload.todos });
-              } else {
-                pendingStreams.get(callbackId)?.sendEvent("ui-widget", { widget });
+                return;
               }
+              void (async () => {
+                try {
+                  const { deliverXyneAiWidget } = await import("./webhook.js");
+                  const flow = await deliverXyneAiWidget({
+                    widget,
+                    agentSlug: slug,
+                    conversationId,
+                    userId: liveUserId,
+                    assistantMessageId,
+                  });
+                  if (flow) pendingStreams.get(callbackId)?.sendEvent("ui-flow", { flow });
+                } catch (err) {
+                  log.warn(`[agent-chat/sse] ui-flow emit failed: ${err instanceof Error ? err.message : String(err)}`);
+                }
+              })();
             },
             onDebug: (_sid, debugEvent) => {
               // Same gate as the legacy /progress path (line ~325/1901): debug
