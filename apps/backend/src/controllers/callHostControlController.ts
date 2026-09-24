@@ -10,6 +10,7 @@ import {
   livekitService,
 } from '@/services/liveKitService';
 import { callHostControlService } from '@/services/callHostControlService';
+import { isHostOrActingHost } from '@/services/actingHost';
 import { logger } from '@/utils/logger';
 
 class CallHostControlController {
@@ -31,8 +32,8 @@ class CallHostControlController {
         return;
       }
 
-      if (call.createdByUserId !== userId) {
-        logger.warn(`[CallHostControlController] host-controls not host | callId=${callId}, userId=${userId}, hostId=${call.createdByUserId}`);
+      if (!(await isHostOrActingHost({ hostId: call.createdByUserId, userId, roomName: callId }))) {
+        logger.warn(`[CallHostControlController] host-controls not host/acting-host | callId=${callId}, userId=${userId}, hostId=${call.createdByUserId}`);
         res.status(403).json({ success: false, error: 'Only the call host can change host controls' });
         return;
       }
@@ -172,8 +173,8 @@ class CallHostControlController {
         return;
       }
 
-      if (call.createdByUserId !== userId) {
-        logger.warn(`[CallHostControlController] transcript-disposition not host | callId=${callId}, userId=${userId}, hostId=${call.createdByUserId}`);
+      if (!(await isHostOrActingHost({ hostId: call.createdByUserId, userId, roomName: callId }))) {
+        logger.warn(`[CallHostControlController] transcript-disposition not host/acting-host | callId=${callId}, userId=${userId}, hostId=${call.createdByUserId}`);
         res
           .status(403)
           .json({ success: false, error: 'Only the call host can set transcript disposition' });
@@ -199,9 +200,8 @@ class CallHostControlController {
 
   /**
    * PATCH /api/calls/:callId/transcription-state
-   * Mirrors the host's mid-call transcription on/off state into LiveKit room metadata
-   * so participants who join AFTER the host toggled it stay in sync (data messages
-   * only reach participants present at broadcast time).
+   * Mirrors the host/delegate's transcription on/off state into room metadata so
+   * later joiners see it (data messages only reach participants present at broadcast time).
    */
   setTranscriptionState = async (req: Request, res: Response): Promise<void> => {
     const userId = req.user?.id;
@@ -224,11 +224,11 @@ class CallHostControlController {
         return;
       }
 
-      if (call.createdByUserId !== userId) {
-        logger.warn(`[CallHostControlController] transcription-state not host | callId=${callId}, userId=${userId}, hostId=${call.createdByUserId}`);
+      if (!(await isHostOrActingHost({ hostId: call.createdByUserId, userId, roomName: callId }))) {
+        logger.warn(`[CallHostControlController] transcription-state not host/acting-host | callId=${callId}, userId=${userId}, hostId=${call.createdByUserId}`);
         res
           .status(403)
-          .json({ success: false, error: 'Only the call host can change transcription state' });
+          .json({ success: false, error: 'Only the call host or acting host can change transcription state' });
         return;
       }
 
@@ -263,8 +263,8 @@ class CallHostControlController {
         return;
       }
 
-      if (call.createdByUserId !== userId) {
-        logger.warn(`[CallHostControlController] remove-participant not host | callId=${callId}, userId=${userId}, hostId=${call.createdByUserId}`);
+      if (!(await isHostOrActingHost({ hostId: call.createdByUserId, userId, roomName: callId }))) {
+        logger.warn(`[CallHostControlController] remove-participant not host/acting-host | callId=${callId}, userId=${userId}, hostId=${call.createdByUserId}`);
         res.status(403).json({ success: false, error: 'Only the call host can remove participants' });
         return;
       }

@@ -16,6 +16,7 @@ import {
   DropdownMenuTrigger,
 } from '../../ui/dropdown-menu';
 import Tooltip from '../../ui/Tooltip';
+import { useHostAuthority } from '../hooks/useHostAuthority';
 
 /** What the local user needs to talk to / take control of the agent. */
 export interface AgentControls {
@@ -26,8 +27,6 @@ export interface AgentControls {
 
 interface AgentCardProps {
   callId: string;
-  isHost: boolean;
-  hostName?: string | null | undefined;
   /** Omitted where talk-back isn't offered (guests, mini window). */
   agentControls?: AgentControls | undefined;
 }
@@ -35,14 +34,10 @@ interface AgentCardProps {
 /**
  * Xyne Automatic, pinned to the top of the People panel: whether it is
  * transcribing, the talk-back / control button that used to live in the bar,
- * and the host's stop/resume switch that otherwise hides in the privacy popover.
+ * and the controller's (host or delegate) stop/resume switch.
  */
-export function AgentCard({
-  callId,
-  isHost,
-  hostName,
-  agentControls,
-}: AgentCardProps): React.ReactElement {
+export function AgentCard({ callId, agentControls }: AgentCardProps): React.ReactElement {
+  const { isHost: canControl, activeHostName: controllerName } = useHostAuthority();
   const isTranscriptionEnabled = useSelector(
     roomActor,
     state => state.context.isTranscriptionEnabled,
@@ -159,7 +154,7 @@ export function AgentCard({
           </Tooltip>
         )}
 
-        {isHost ? (
+        {canControl ? (
           <DropdownMenu modal={false}>
             <DropdownMenuTrigger asChild>
               <button
@@ -198,13 +193,10 @@ export function AgentCard({
           </DropdownMenu>
         ) : (
           isTranscriptionEnabled && (
-            <Tooltip
-              content={`Only ${hostName ?? 'the host'} (host) can stop transcription`}
-              side='bottom'
-            >
+            <Tooltip content={`Only ${controllerName ?? 'the host'} can stop transcription`} side='bottom'>
               <span
                 className='flex h-8 w-8 items-center justify-center text-muted-foreground'
-                aria-label={`Only ${hostName ?? 'the host'} can stop transcription`}
+                aria-label={`Only ${controllerName ?? 'the host'} can stop transcription`}
               >
                 <Info className='h-4 w-4' />
               </span>

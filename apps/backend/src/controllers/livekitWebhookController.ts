@@ -901,9 +901,10 @@ class LiveKitWebhookController {
       if (result.messageUpdated) {
         logger.info(`[LiveKit Webhook] Updated system message for call ${callId}`);
       }
-      // Notify remaining connected clients that participants changed
+      // Notify remaining clients. Exclude the leaver — LiveKit's list can briefly
+      // still include them, which would extend their delegate rights by one recompute.
       if (callId) {
-        void livekitService.sendParticipantsChanged(callId);
+        void livekitService.sendParticipantsChanged(callId, { excludeIdentity: participant.identity });
       }
     } catch (error) {
       logger.error(`[LiveKit Webhook] Error handling participant leave:`, error);

@@ -29,6 +29,8 @@ interface HostControlContextLike {
   callId: string | null;
   activeCalls: readonly ActiveCallLike[];
   hostControls: HostControls;
+  /** Acting host (stands in for an absent real host) — exempt from their own restrictions too. */
+  actingHostId?: string | null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -117,7 +119,11 @@ export function isHostControlTurnedOffForLocalWithControls(
   if (!localIdentity) return false;
   if (!currentCall?.createdByUserId) return isLocalExternalParticipant(context);
 
-  return currentCall.createdByUserId !== localIdentity;
+  const isHostOrActingHost =
+    currentCall.createdByUserId === localIdentity ||
+    (!!context.actingHostId && context.actingHostId === localIdentity);
+
+  return !isHostOrActingHost;
 }
 
 export function isHostControlTurnedOffForLocal(

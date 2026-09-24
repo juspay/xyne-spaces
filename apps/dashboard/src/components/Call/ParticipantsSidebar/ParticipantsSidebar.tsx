@@ -69,8 +69,6 @@ interface ParticipantsSidebarProps {
   onToggleHandRaise?: (() => void) | undefined;
   /** Talk-back / control for Xyne Automatic; omit where it isn't offered */
   agentControls?: AgentControls | undefined;
-  /** Host display name, for the "only the host can…" notes */
-  hostName?: string | null | undefined;
 }
 
 interface CallParticipant {
@@ -470,7 +468,6 @@ export function ParticipantsSidebar({
   raisedHands = [],
   onToggleHandRaise,
   agentControls,
-  hostName,
 }: ParticipantsSidebarProps): React.ReactElement {
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -844,14 +841,7 @@ export function ParticipantsSidebar({
 
         {/* Participants List */}
         <div className='flex-1 space-y-3 overflow-y-auto px-4 pb-4' data-testid='participants-list'>
-          {!searchQuery && (
-            <AgentCard
-              callId={callId}
-              isHost={isHost}
-              hostName={hostName}
-              agentControls={agentControls}
-            />
-          )}
+          {!searchQuery && <AgentCard callId={callId} agentControls={agentControls} />}
 
           {/* Requested Section — participants waiting for approval (host or any attendee) */}
           {canActOnLobbyRequests && requested.length > 0 && (
