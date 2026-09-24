@@ -18808,15 +18808,15 @@ export function createMutators(
             throw new Error('Cannot add members to an inactive role');
           }
 
-          // Scope the dedup to WORKSPACE bindings — a USER_GROUP row for the same
-          // (user, role) must not suppress a direct workspace-role assignment.
+          // De-dup against existing WORKSPACE bindings only — a USER_GROUP row for the same
+          // (user, role) must not suppress a direct workspace-role assignment. Workspace rows
+          // have a null entityType, so filter those out in JS (null == workspace).
           const existing = await tx.run(
-            zql.user_role_mappings
-              .where('roleId', roleId)
-              .where('entityType', 'WORKSPACE')
-              .where('userId', 'IN', userIds),
+            zql.user_role_mappings.where('roleId', roleId).where('userId', 'IN', userIds),
           );
-          const existingUserIds = new Set(existing.map(m => m.userId));
+          const existingUserIds = new Set(
+            existing.filter(m => m.entityType !== 'USER_GROUP').map(m => m.userId),
+          );
           const toAdd = userIds.filter(userId => !existingUserIds.has(userId));
 
           await Promise.all(

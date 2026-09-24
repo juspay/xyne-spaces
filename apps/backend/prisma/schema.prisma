@@ -832,8 +832,8 @@ model UserRoleMapping {
   id        String   @id @default(cuid())
   userId    String
   roleId    String
-  entityType String  @default("WORKSPACE") // 'WORKSPACE' | 'USER_GROUP' (BOARD/PROJECT reserved for future)
-  entityId   String  @default("")          // = workspaceId (WORKSPACE) | userGroupId (USER_GROUP)
+  entityType String? // null = workspace-level (legacy/default); 'USER_GROUP' for group-scoped
+  entityId   String? // null for workspace-level; = userGroupId for group-scoped
   createdAt DateTime
   updatedAt DateTime
 

@@ -501,8 +501,9 @@ export const RoleManagementScreen = (): ReactElement => {
   const displayDesc = selectedRole?.description ?? listRole?.description ?? null;
   // Role Management manages workspace-level role members; group-scoped bindings
   // (entityType='USER_GROUP') are managed from the user group screen, so exclude them here.
+  // Workspace rows have a null entityType (legacy/default), so match "not group" to keep them.
   const members = useMemo(
-    () => (selectedRole?.userMappings ?? []).filter(m => m.entityType === 'WORKSPACE'),
+    () => (selectedRole?.userMappings ?? []).filter(m => m.entityType !== 'USER_GROUP'),
     [selectedRole],
   );
 
