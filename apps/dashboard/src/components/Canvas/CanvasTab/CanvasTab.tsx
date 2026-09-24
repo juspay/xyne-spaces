@@ -28,7 +28,6 @@ import {
 } from '../CanvasVersionHistory';
 import { isHubKnowledgeArtifactType, CanvasRole, CanvasVisibility } from '@xyne/shared';
 import {
-  AudioLines,
   ArrowLeft,
   Archive,
   Folder,
@@ -37,6 +36,7 @@ import {
   History,
   Loader2,
   MessageSquare,
+  Phone,
   Plus,
   RotateCcw,
   Star,
@@ -1094,7 +1094,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
                     channelId,
                   })}
                 >
-                  <AudioLines size={16} strokeWidth={2.2} />
+                  <Phone size={16} strokeWidth={2.2} />
                 </Button>
               )}
               <Button
