@@ -518,6 +518,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     recordingRefs,
     contextFiles,
     additionalInstructions,
+    teamGuidance,
     researchContext,
     customSubagents,
     callableAgents,
@@ -775,6 +776,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
       recordingRefs,
       contextFiles,
       additionalInstructions,
+      teamGuidance,
       researchContext,
       customSubagents,
       callableAgents,
@@ -899,6 +901,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
         recordingRefs,
         contextFiles,
         additionalInstructions,
+        teamGuidance,
         researchContext,
         customSubagents,
         callableAgents,
@@ -1428,6 +1431,7 @@ export async function processTask(
     | undefined,
   contextFiles: Array<{ path: string; content: string }> | undefined,
   additionalInstructions: string | undefined,
+  teamGuidance: string | undefined,
   researchContext:
     | {
         type: string;
@@ -3081,6 +3085,22 @@ export async function processTask(
       );
     }
 
+    // Phase 3/6: after tool schemas are fixed, append team guidance as the next
+    // static tier. Persona (systemPrompt) stays persona-only; Vespa/tool output
+    // stays in dynamic context below.
+    let personaWithGuidance = systemPrompt;
+    if (typeof teamGuidance === "string" && teamGuidance.trim()) {
+      const { assembleStaticPrefix } = await import("xyne-claw-shared");
+      const withGuidance = assembleStaticPrefix({
+        platform: (systemPrompt ?? "").trim(),
+        tools: "",
+        guidance: `## Team guidance\n${teamGuidance.trim()}`,
+      });
+      if (withGuidance) {
+        personaWithGuidance = withGuidance;
+      }
+    }
+
     // Daily brief is read-only: the agent GATHERS and EMITS, it must never mutate
     // (post a message, create a ticket, write a doc). Strip every write-flagged
     // tool + mutating sandbox tool, but KEEP all read tools and subagents so the
@@ -3635,10 +3655,10 @@ export async function processTask(
     // bracket+resolve-ID format, which confused agents into guessing IDs or, per
     // its own rule, refusing to emit `@Name` at all — starving the resolver.
     // Only relevant in a chat thread (channelId present).
-    // Prompt tiers: persona (systemPrompt) includes team guidance compiled in
-    // claw-auth start-run. Dynamic Vespa/tool output stays outside the persona.
-    // compactBeforeRun is the compaction switch — no second compaction service yet.
-    const basePrompt = (systemPrompt ?? "").trimEnd();
+    // Prompt tiers: platform persona → sorted tool schemas (above) → P3
+    // teamGuidance (folded into personaWithGuidance) → dynamic Vespa/tools in
+    // fullContext. compactBeforeRun is the compaction switch — no second service.
+    const basePrompt = (personaWithGuidance ?? "").trimEnd();
     const citationGuide =
       agentSlug && CITATION_GUIDE_AGENT_SLUGS.has(agentSlug)
         ? CITATION_GUIDE
