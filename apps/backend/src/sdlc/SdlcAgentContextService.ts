@@ -1,12 +1,12 @@
-import { ChannelType, SDLC_AGENT_SLUG, type SdlcAgentContext } from '@xyne/shared';
+import { ChannelType, type SdlcAgentContext, type SdlcLinkedItem } from '@xyne/shared';
 import type { PrismaClient } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
 import { AppError } from '@/middleware/errorHandler';
-import { findSdlcMembershipForActor, repoIdsForChannel } from './sdlcChannelMembership';
+import { resolveInheritedOwner } from './entityLinkService';
+import { findSdlcMembershipForActor } from './sdlcChannelMembership';
 import { requireSdlcBaseBranch } from './sdlcRepositoryContext';
 import type { SdlcActor } from './types';
 import { sdlcVcs } from './vcs';
-import { issueSdlcInteractiveGrant } from './vcs/sdlcInteractiveGrant';
 
 export type { SdlcAgentContext };
 
@@ -14,10 +14,6 @@ export interface SdlcAgentContextInput {
   channelId?: string;
   conversationId: string;
   generationCommit?: string;
-}
-
-function grantSecret(): string {
-  return process.env['INTERNAL_S2S_KEY'] || process.env['XYNE_CLAW_S2S_KEY'] || '';
 }
 
 export class SdlcAgentContextService {
@@ -63,8 +59,6 @@ export class SdlcAgentContextService {
       select: { projectId: true },
     });
     return {
-      version: 1,
-      operation: 'interactive',
       workspaceId: actor.workspaceId,
       projectId: hub?.projectId ?? repo.projectId,
       channelId: membership.channelId,
@@ -75,17 +69,10 @@ export class SdlcAgentContextService {
         url: parsed.cloneUrl,
         baseBranch: requireSdlcBaseBranch(repo.baseBranch),
       },
-      execution: { conversationId: input.conversationId },
-      interactiveGrant: issueSdlcInteractiveGrant(
-        {
-          agentSlug: SDLC_AGENT_SLUG,
-          workspaceId: actor.workspaceId,
-          repoId: repo.id,
-          actorUserId: actor.userId,
-          conversationId: input.conversationId,
-        },
-        grantSecret()
-      ),
+      execution: {
+        conversationId: input.conversationId,
+        linked: await this.linkedItem(input.conversationId),
+      },
       generationCommit: input.generationCommit ?? null,
     };
   }
@@ -100,34 +87,67 @@ export class SdlcAgentContextService {
       where: { id: channelId, workspaceId: actor.workspaceId, type: ChannelType.SDLC },
       select: {
         projectId: true,
+        visibility: true,
         participants: { where: { userId: actor.userId }, select: { role: true }, take: 1 },
       },
     });
     if (!channel?.projectId) throw new AppError('SDLC hub not found', 404);
-    if (!channel.participants[0]) throw new AppError('You are not a member of this SDLC hub', 403);
-
-    const repoIds = await repoIdsForChannel(this.prisma, channelId);
+    // A public hub is readable by the whole workspace; SDLC writes still require membership.
+    if (channel.visibility !== 'PUBLIC' && !channel.participants[0]) {
+      throw new AppError('You are not a member of this SDLC hub', 403);
+    }
 
     return {
-      version: 1,
-      operation: 'interactive',
       workspaceId: actor.workspaceId,
       projectId: channel.projectId,
       channelId,
       actorUserId: actor.userId,
-      execution: { conversationId: input.conversationId },
-      interactiveGrant: issueSdlcInteractiveGrant(
-        {
-          agentSlug: SDLC_AGENT_SLUG,
-          workspaceId: actor.workspaceId,
-          repoIds,
-          actorUserId: actor.userId,
-          conversationId: input.conversationId,
-        },
-        grantSecret()
-      ),
+      execution: {
+        conversationId: input.conversationId,
+        linked: await this.linkedItem(input.conversationId),
+      },
       generationCommit: input.generationCommit ?? null,
     };
+  }
+
+  /** A conversation is the discussion of at most one hub item; the agent fetches more with the SDLC tools. */
+  private async linkedItem(conversationId: string): Promise<SdlcLinkedItem | null> {
+    const owner = await resolveInheritedOwner(this.prisma, conversationId);
+    if (!owner) {
+      const ticket = await this.prisma.ticket.findFirst({
+        where: { conversationId },
+        select: { id: true, title: true },
+      });
+      return ticket
+        ? { section: 'TICKET', id: ticket.id, name: ticket.title, relation: 'CONVERSATION' }
+        : null;
+    }
+    return {
+      section: owner.sourceType,
+      id: owner.sourceId,
+      name: await this.ownerName(owner.sourceType, owner.sourceId),
+      relation: 'DISCUSSION',
+    };
+  }
+
+  private async ownerName(type: string, id: string): Promise<string> {
+    switch (type) {
+      case 'CANVAS':
+        return (await this.prisma.canvas.findUnique({ where: { id }, select: { title: true } }))?.title ?? '';
+      case 'TRACK':
+        return (await this.prisma.sdlcTrack.findUnique({ where: { id }, select: { name: true } }))?.name ?? '';
+      case 'FOLDER':
+        return (await this.prisma.sdlcFolder.findUnique({ where: { id }, select: { name: true } }))?.name ?? '';
+      case 'LINK':
+        return (await this.prisma.link.findUnique({ where: { id }, select: { title: true } }))?.title ?? '';
+      case 'ATTACHMENT':
+        return (
+          (await this.prisma.messageAttachment.findUnique({ where: { id }, select: { originalFilename: true } }))
+            ?.originalFilename ?? ''
+        );
+      default:
+        return '';
+    }
   }
 }
 

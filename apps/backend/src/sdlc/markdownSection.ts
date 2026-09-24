@@ -1,9 +1,4 @@
-class WikiSectionMutationError extends Error {
-  constructor(message: string, readonly statusCode: number) {
-    super(message);
-    this.name = 'WikiSectionMutationError';
-  }
-}
+import { AppError } from '@/middleware/errorHandler';
 
 interface MarkdownSection {
   start: number;
@@ -40,7 +35,8 @@ function sections(markdown: string): MarkdownSection[] {
   }));
 }
 
-export function mutateWikiMarkdownSection(input: {
+/** Edits one heading's section of any SDLC artifact's markdown. */
+export function mutateMarkdownSection(input: {
   markdown: string;
   action: 'replace_section' | 'insert_section' | 'remove_section';
   heading: string;
@@ -50,10 +46,10 @@ export function mutateWikiMarkdownSection(input: {
     section => normalizedHeading(section.heading) === normalizedHeading(input.heading)
   );
   if (matches.length !== 1) {
-    throw new WikiSectionMutationError(
+    throw new AppError(
       matches.length === 0
-        ? `[SECTION_NOT_FOUND] Wiki section not found: ${input.heading}`
-        : `[SECTION_AMBIGUOUS] Wiki section heading is not unique: ${input.heading}`,
+        ? `[SECTION_NOT_FOUND] Section not found: ${input.heading}`
+        : `[SECTION_AMBIGUOUS] Section heading is not unique: ${input.heading}`,
       409
     );
   }
@@ -61,10 +57,10 @@ export function mutateWikiMarkdownSection(input: {
   const lines = input.markdown.split('\n');
   const replacement = input.sectionMarkdown?.trim();
   if (input.action !== 'remove_section') {
-    if (!replacement) throw new WikiSectionMutationError('Section Markdown is required', 400);
+    if (!replacement) throw new AppError('Section Markdown is required', 400);
     const replacementHeading = sections(replacement)[0];
     if (!replacementHeading || replacementHeading.start !== 0) {
-      throw new WikiSectionMutationError('Section Markdown must start with a Markdown heading', 400);
+      throw new AppError('Section Markdown must start with a Markdown heading', 400);
     }
   }
   const replacementLines = replacement?.split('\n') ?? [];

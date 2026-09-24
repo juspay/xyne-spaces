@@ -28,9 +28,9 @@ export function buildSdlcArtifactCreationPrompt(input: SdlcArtifactCreationPromp
       : '';
   const request =
     `Create a ${typeLabel} titled ${title} in ${repository}${trackClause}. ` +
-    `Pass folderId ${JSON.stringify(
+    `Pass artifactTypeId ${JSON.stringify(
       input.folderId,
-    )} in the spaces-sdlc-mutate-artifact create call so it is filed under the ${typeLabel} type.` +
+    )} in the spaces-sdlc-write-artifact create call so it is filed under the ${typeLabel} type.` +
     relatedClause;
   return direction ? `${request}\n\nUser direction: ${direction}` : request;
 }

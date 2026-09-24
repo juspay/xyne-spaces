@@ -53,7 +53,13 @@ import { transientProviderCallback } from "../transient-provider-callback.js";
 import { loadMcpToolsForUser,
   searchDeploymentTools,
 } from "../mcp.js";
-import { packSdlcRunMeta, SDLC_META_KEYS, trustedSdlcToolBindings } from "xyne-claw-shared";
+import {
+  buildSdlcRunContextSection,
+  packSdlcRunMeta,
+  SDLC_DIRECT_TOOL_NAMES,
+  SDLC_META_KEYS,
+  trustedSdlcToolBindings,
+} from "xyne-claw-shared";
 import { loadCustomTools } from "../custom-tools.js";
 import { buildCopilotTool } from "../copilot.js";
 import { pinRunJudgeBackend } from "../judge-backend.js";
@@ -2190,7 +2196,9 @@ export async function processTask(
     // should still expose that one tool to the parent. Without this, picking
     // individual tools from a subagent-backed connector was a silent no-op.
     const toolsConfigEarly = parseToolsConfig(effectiveConfig);
-    const directPickSuffixes = toolsConfigEarly?.direct ?? [];
+    // An agent with no tools selection still gets the SDLC tools out of the spaces wrapper in a hub;
+    // one with a selection already has them from claw-auth's per-run merge.
+    const directPickSuffixes = toolsConfigEarly?.direct ?? (trustedSdlcContext ? SDLC_DIRECT_TOOL_NAMES : []);
     // Hoisted above the catalog build: the palette decides what gets catalogued,
     // not just what survives filtering (see `includeSubagentTools` below).
     const paletteMode = openPaletteModeFromTools(toolsConfigEarly);
@@ -3643,7 +3651,7 @@ export async function processTask(
       const sandboxLines: string[] = [
         "## Sandbox usage",
         sdlcRepositoryAccessEnabled
-          ? "SDLC hub repositories: call `sandbox-create`, then `sdlc-repository-access` with the repoId and that sessionId, and clone with the exact cloneUrl it returns. Git then works normally for fetch, commit and push, with commits made as the repository's credential account. Capability is not authorization: inspect only unless the task explicitly requires implementation. Follow the repository's declared package manager and setup instructions. If a required package-manager command is unavailable, make one bounded attempt to install/enable it; use npm as a fallback only when the repository's scripts and lockfiles support npm. Do not loop on environment repair. If setup or verification still fails, stop cleanly and report the exact command/error, changes already completed, checks not run, and branch/commit/PR state. Open pull requests for these repositories with `spaces-sdlc-create-pull-request`, not a github or bitbucket subagent."
+          ? "SDLC hub repositories: follow the SDLC Run Context section for sandbox, repository access and pull requests. Capability is not authorization: inspect only unless the task explicitly requires implementation. Follow the repository's declared package manager and setup instructions. If a required package-manager command is unavailable, make one bounded attempt to install/enable it; use npm as a fallback only when the repository's scripts and lockfiles support npm. Do not loop on environment repair. If setup or verification still fails, stop cleanly and report the exact command/error, changes already completed, checks not run, and branch/commit/PR state."
           : "READ vs WRITE — this matters. For read-first repos (e.g. xyne-spaces) `sandbox-repo-setup` DEFAULTS to an instant READ-ONLY git sandbox (no wait): use it for reading, grepping, and inspecting code / PR review — which is almost everything. Only call `sandbox-repo-setup` with `write:true` when you must actually EDIT files, build, run tests, or commit — that claims a short-lived, auto-expiring writable dev sandbox. Do NOT request write just to look at code; default to read and escalate to write only when you're about to change something.",
         "Sandbox tools (sandbox-create, sandbox-run, sandbox-write-file, sandbox-read-file, sandbox-deliver-files, sandbox-pw-*) run code/commands in an isolated VM. Use them whenever you need execution, file generation, screenshots, or browser automation.",
         "- To send a file BACK to the user, you MUST call `sandbox-deliver-files` with the path(s). Returning file contents as text in your reply is NOT delivery — Spaces won't render it as an attachment.",
@@ -3958,9 +3966,7 @@ export async function processTask(
       : experiment
       ? `\n\n## Experiment mode\nYou are in a time-boxed experiment (epoch ${experiment.epoch}; deadline ${experiment.deadlineAt}; focus ${experiment.focus ?? "unspecified"}). You cannot finish early — end-experiment refuses before the deadline. Loop: read the ledger → declare a hypothesis (experiment-ledger action=hypothesis) → gather PROOF in the sandbox (failing test, benchmark delta, profile) → record the finding with its proof path. Never re-test refuted hypotheses. If your current lead dies, pick a different subsystem. Prose without a recorded finding is wasted time.`
       : "";
-    const authoritativeSdlcContext = trustedSdlcContext
-      ? `\n\n## Authoritative SDLC Run Context\n\nThe platform verified this immutable run context. Use these exact IDs and repository coordinates; never infer or replace them. Runtime credentials are intentionally absent.\n\n\`\`\`json\n${JSON.stringify({ ...trustedSdlcContext, interactiveGrant: undefined }, null, 2)}\n\`\`\``
-      : "";
+    const authoritativeSdlcContext = trustedSdlcContext ? buildSdlcRunContextSection(trustedSdlcContext) : "";
     const effectiveSystemPrompt = ((channelId
       ? `${basePrompt}${citationGuide}${SPACES_MENTION_GUIDE}`
       : `${basePrompt}${citationGuide}`) + authoritativeSdlcContext) + twinMandate + experimentGuide;
