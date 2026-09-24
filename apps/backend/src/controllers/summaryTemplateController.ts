@@ -3,7 +3,11 @@ import type { Prisma } from '@prisma/client';
 import z from 'zod';
 import { summaryTemplateService, SummaryTemplateError } from '@/services/summaryTemplateService';
 import { summaryTemplateAiService } from '@/services/summaryTemplateAiService';
-import { DefaultOutlet, SUMMARY_TEMPLATE_SELECTION_MAX_TRANSCRIPT_CHARS } from '@xyne/shared';
+import {
+  DefaultOutlet,
+  SUMMARY_MAX_INPUT_CHARS,
+  SUMMARY_TEMPLATE_SELECTION_MAX_TRANSCRIPT_CHARS,
+} from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { callDocumentService, DRAFT_SUMMARY_TEMPLATE_ID } from '@/services/callDocumentService';
 import {
@@ -87,14 +91,7 @@ const SummaryTemplateAiInputSchema = z.object({
 const SummaryTemplateDraftSchema = z.object({
   id: z.string().trim().max(LIMITS.id).nullable().optional(),
   name: z.string().trim().max(LIMITS.name),
-  autoTriggerPrompt: z
-    .string({
-      required_error: 'Add a Meeting Context to test template selection',
-      invalid_type_error: 'Add a Meeting Context to test template selection',
-    })
-    .trim()
-    .min(1, 'Add a Meeting Context to test template selection')
-    .max(LIMITS.meetingContext),
+  autoTriggerPrompt: z.string().trim().max(LIMITS.meetingContext).nullable().optional(),
   sections: z
     .array(
       z.object({
@@ -108,12 +105,29 @@ const SummaryTemplateDraftSchema = z.object({
   systemPrompt: z.string().trim().max(LIMITS.systemPrompt).optional(),
 });
 
+// Selection is decided by Meeting Context, so that test refuses drafts without one.
+const SummaryTemplateSelectionDraftSchema = SummaryTemplateDraftSchema.extend({
+  autoTriggerPrompt: z
+    .string({
+      required_error: 'Add a Meeting Context to test template selection',
+      invalid_type_error: 'Add a Meeting Context to test template selection',
+    })
+    .trim()
+    .min(1, 'Add a Meeting Context to test template selection')
+    .max(LIMITS.meetingContext),
+});
+
 const SummaryTemplateSelectionTestSchema = z.object({
   transcript: z
     .string()
     .trim()
     .min(1, 'Provide a transcript')
     .max(SUMMARY_TEMPLATE_SELECTION_MAX_TRANSCRIPT_CHARS),
+  draft: SummaryTemplateSelectionDraftSchema,
+});
+
+const SummaryTemplateOutputTestSchema = z.object({
+  transcript: z.string().trim().min(1, 'Provide a transcript').max(SUMMARY_MAX_INPUT_CHARS),
   draft: SummaryTemplateDraftSchema,
 });
 
@@ -309,6 +323,40 @@ export class SummaryTemplateController {
         selectedTemplateName: selection.template?.name ?? null,
         fellBack: selection.fellBack,
         reason: selection.reason,
+      });
+    } catch (error) {
+      sendError(res, error);
+    }
+  };
+
+  testOutput = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { transcript, draft } = SummaryTemplateOutputTestSchema.parse(req.body);
+      const { id: userId, workspaceId } = req.user!;
+      const preview = await callDocumentService.previewRecordingSummary(
+        transcript,
+        workspaceId,
+        userId,
+        {
+          name: draft.name || 'Untitled template',
+          autoTriggerPrompt: draft.autoTriggerPrompt ?? null,
+          sections: draft.sections as Prisma.JsonArray,
+          systemPrompt: draft.systemPrompt ?? '',
+        }
+      );
+      if (!preview) {
+        res.status(502).json({ success: false, error: 'Unable to generate a summary' });
+        return;
+      }
+      res.json({
+        success: true,
+        summary: preview.summary,
+        citationSegments: preview.segments.map(({ n, timestamp, speaker, text }) => ({
+          n,
+          timestamp,
+          speaker,
+          snippet: text,
+        })),
       });
     } catch (error) {
       sendError(res, error);
