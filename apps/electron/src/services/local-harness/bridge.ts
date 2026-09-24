@@ -1,7 +1,7 @@
 import { promises as fsp } from 'fs';
 import { basename, dirname, join, resolve, sep } from 'path';
 import { hostname } from 'os';
-import { app, safeStorage } from 'electron';
+import { app, net, safeStorage } from 'electron';
 import Store from 'electron-store';
 import log from 'electron-log/main';
 import { config } from '../../app/config';
@@ -27,7 +27,6 @@ import { containerSandbox } from './containerSandbox';
 import { isWorkspacePageTool, workspaceBrowserBridge } from './workspaceBrowser';
 import { isAppControlTool } from './appControl';
 import { SurfaceCallWatcher } from './surfaceCalls';
-import { harnessFetch } from './harnessFetch';
 import { callLocalSessionTool, isLocalSessionTool } from './sessionTools';
 import { localFileServer } from './localFileServer';
 import {
@@ -252,7 +251,7 @@ export class LocalHarnessBridge {
   }
 
   private async registerDevice(cookieHeader: string): Promise<void> {
-    const res = await harnessFetch(`${this.baseUrl()}/local-harness/devices`, {
+    const res = await net.fetch(`${this.baseUrl()}/local-harness/devices`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Cookie: cookieHeader },
       body: JSON.stringify({
@@ -282,7 +281,7 @@ export class LocalHarnessBridge {
   private async syncInstallations(): Promise<void> {
     const token = this.deviceToken();
     if (!token) return;
-    const res = await harnessFetch(`${this.baseUrl()}/local-harness-bridge/installations`, {
+    const res = await net.fetch(`${this.baseUrl()}/local-harness-bridge/installations`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify({
@@ -377,7 +376,7 @@ export class LocalHarnessBridge {
     const deviceId = this.store.get('deviceId');
     this.stop();
     if (deviceId) {
-      await harnessFetch(`${this.baseUrl()}/local-harness/devices/${encodeURIComponent(deviceId)}`, {
+      await net.fetch(`${this.baseUrl()}/local-harness/devices/${encodeURIComponent(deviceId)}`, {
         method: 'DELETE',
         headers: { Cookie: cookieHeader },
       }).catch((err) => log.warn('[LocalHarness] revoke failed (clearing locally anyway):', err));
@@ -429,7 +428,7 @@ export class LocalHarnessBridge {
         }
 
         try {
-          const res = await harnessFetch(`${this.baseUrl()}/local-harness-bridge/runs/next`, {
+          const res = await net.fetch(`${this.baseUrl()}/local-harness-bridge/runs/next`, {
             headers: { Authorization: `Bearer ${token}` },
           });
 
@@ -498,7 +497,7 @@ export class LocalHarnessBridge {
     });
 
     const heartbeat = setInterval(() => {
-      void harnessFetch(`${this.baseUrl()}/local-harness-bridge/runs/${encodeURIComponent(envelope.runId)}/status`, {
+      void net.fetch(`${this.baseUrl()}/local-harness-bridge/runs/${encodeURIComponent(envelope.runId)}/status`, {
         headers: { Authorization: `Bearer ${token}` },
       })
         .then(async (res) => {
@@ -686,7 +685,7 @@ export class LocalHarnessBridge {
     const saved: Array<{ path: string; fileName: string; mimeType: string }> = [];
     for (const attachment of attachments) {
       try {
-        const res = await harnessFetch(
+        const res = await net.fetch(
           `${this.baseUrl()}/local-harness-bridge/runs/${envelope.runId}/attachments/${attachment.id}`,
           { headers: { Authorization: `Bearer ${token}` } },
         );
@@ -735,7 +734,7 @@ export class LocalHarnessBridge {
     if (existing) return sessionId;
 
     try {
-      const res = await harnessFetch(
+      const res = await net.fetch(
         `${this.baseUrl()}/local-harness-bridge/runs/${encodeURIComponent(envelope.runId)}/session`,
         { headers: { Authorization: `Bearer ${token}` } },
       );
@@ -799,7 +798,7 @@ export class LocalHarnessBridge {
       const url =
         `${this.baseUrl()}/local-harness-bridge/runs/${encodeURIComponent(envelope.runId)}/session` +
         `?sessionId=${encodeURIComponent(sessionId)}`;
-      const res = await harnessFetch(url, {
+      const res = await net.fetch(url, {
         method: 'PUT',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/octet-stream' },
         body: new Uint8Array(body),
@@ -834,7 +833,7 @@ export class LocalHarnessBridge {
   }
 
   private async fetchTools(runId: string, token: string): Promise<LocalHarnessToolSpec[]> {
-    const res = await harnessFetch(`${this.baseUrl()}/local-harness-bridge/runs/${encodeURIComponent(runId)}/tools`, {
+    const res = await net.fetch(`${this.baseUrl()}/local-harness-bridge/runs/${encodeURIComponent(runId)}/tools`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!res.ok) throw new Error(`Tool listing failed (HTTP ${res.status})`);
@@ -878,7 +877,7 @@ export class LocalHarnessBridge {
     if (spec.local === true && isLocalSessionTool(spec.toolName)) {
       return callLocalSessionTool(spec.toolName, args);
     }
-    const res = await harnessFetch(`${this.baseUrl()}/local-harness-bridge/runs/${encodeURIComponent(runId)}/tools/call`, {
+    const res = await net.fetch(`${this.baseUrl()}/local-harness-bridge/runs/${encodeURIComponent(runId)}/tools/call`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify({ serverType: spec.serverType, toolName: spec.toolName, params: args }),
@@ -976,7 +975,7 @@ export class LocalHarnessBridge {
     }
 
     try {
-      const res = await harnessFetch(
+      const res = await net.fetch(
         `${this.baseUrl()}/local-harness-bridge/runs/${encodeURIComponent(runId)}/deliver`,
         {
           method: 'POST',
@@ -1084,7 +1083,7 @@ export class LocalHarnessBridge {
   }
 
   private async reportProgress(runId: string, token: string, event: LocalHarnessProgressEvent): Promise<void> {
-    await harnessFetch(`${this.baseUrl()}/local-harness-bridge/runs/${encodeURIComponent(runId)}/progress`, {
+    await net.fetch(`${this.baseUrl()}/local-harness-bridge/runs/${encodeURIComponent(runId)}/progress`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify(event),
@@ -1100,7 +1099,7 @@ export class LocalHarnessBridge {
   }
 
   private async reportResult(runId: string, token: string, result: LocalHarnessRunResult): Promise<void> {
-    await harnessFetch(`${this.baseUrl()}/local-harness-bridge/runs/${encodeURIComponent(runId)}/result`, {
+    await net.fetch(`${this.baseUrl()}/local-harness-bridge/runs/${encodeURIComponent(runId)}/result`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify(result),
