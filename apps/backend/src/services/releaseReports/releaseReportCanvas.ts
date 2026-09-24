@@ -297,7 +297,9 @@ export class ReleaseReportCanvasService {
         };
       }
 
-      const canvasId = uuidv4();
+      // NOTE: reuse the OUTER canvasId (line ~246) — syncToYSweet already wrote the content
+      // under it. A local `uuidv4()` here would shadow it, so the row/connect_group would be
+      // created under a different id than the Y-Sweet doc → the canvas opens empty.
       const connectId = newConnectId();
       await tx.canvas.create({
         data: {
