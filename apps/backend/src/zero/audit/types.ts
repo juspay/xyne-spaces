@@ -35,6 +35,7 @@ export interface AuditLookup {
   usersByIds(ids: string[]): Promise<{ id: string; displayName?: string | null; name?: string | null }[]>;
   rolesByIds(ids: string[]): Promise<{ id: string; name: string }[]>;
   formsByIds(ids: string[]): Promise<{ id: string; formName: string }[]>;
+  globalFieldsByIds(ids: string[]): Promise<{ id: string; fieldName: string }[]>;
   /** board ids a form is bound to, resolved through forms_context_mapping (BOARD + STAGE contexts). */
   boardIdsForFormIds(formIds: string[]): Promise<{ formId: string; boardIds: string[] }[]>;
 }
@@ -62,12 +63,24 @@ export interface AuditTableConfig {
   fieldFormatters?: Record<string, (value: unknown, res: AuditResolution) => string | null>;
   /** JSON columns diffed per sub-key: column -> (sub-key, value) formatter, sync after prewarm. */
   jsonFields?: Record<string, (key: string, value: unknown, res: AuditResolution) => string | null>;
+  /**
+   * Top-level keys of a JSON column diffed leaf-by-leaf instead of formatted into
+   * one value — for nested blobs whose inner toggles matter individually, e.g.
+   * `{ metadata: ['ticketFormConfig'] }` emits `metadata.ticketFormConfig.todo.enabled`.
+   */
+  deepJsonFields?: Record<string, string[]>;
   /** Fields never audited for this table (on top of the global ignores). */
   ignoreFields?: string[];
   /** INSERT baselines: fields equal to these defaults produce no CREATE drafts (first-save noise control). */
   createDefaults?: Record<string, unknown>;
   /** Single summary draft recorded for DELETE rows. */
   deleteSummary?: AuditDeleteSummary;
+  /**
+   * Natural-key fingerprint for tables whose mutators replace rows
+   * (delete + reinsert with a NEW id) instead of updating them — the flush
+   * pairs DELETE/CREATE drafts sharing a fingerprint and merges them.
+   */
+  reconcileKey?: (row: AuditRow) => string;
 }
 
 /**

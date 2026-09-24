@@ -99,6 +99,7 @@ import ticketReportRoutes from '@/routes/ticketReports';
 import boardRoutes from '@/routes/boards';
 import subTicketRoutes from '@/routes/subTickets';
 import boardConfigCopyRoutes from '@/routes/boardConfigCopy';
+import auditLogRoutes from '@/routes/auditLogs';
 import recordingPointerBackfillRoutes from '@/routes/recordingPointerBackfill';
 import sdlcRepoCredentialBackfillRoutes from '@/routes/sdlcRepoCredentialBackfill';
 import searchMetricsRoutes from '@/routes/searchMetrics';
@@ -443,6 +444,7 @@ export class App {
     this.app.use('/api/admin/migrate-tickets-xyneid', workspaceScopedRoute, ticketMigrationRoutes);
     this.app.use('/api/admin/gmail-watch-renewal', workspaceScopedRoute, gmailWatchRenewalRoutes);
     this.app.use('/api/admin/board-config-copy', workspaceScopedRoute, boardConfigCopyRoutes);
+    this.app.use('/api/audit-logs', workspaceScopedRoute, auditLogRoutes);
     // No workspaceScopedRoute: the controller opens its own runAsSystem scope, since
     // this one-off repair links summary canvases across every workspace. The
     // '-backfill' path suffix also puts it behind backfillMountGuard above.

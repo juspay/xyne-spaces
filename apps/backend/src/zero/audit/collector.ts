@@ -121,7 +121,14 @@ export async function collectTableAudit(params: {
   await config.prewarm?.(beforeRow, afterRow, accumulator.resolution);
   const targetName = await config.resolveTargetName(row, accumulator.resolution);
 
-  const ignore = new Set([...GLOBAL_IGNORE_FIELDS, ...(config.ignoreFields ?? [])]);
+  // jsonFields columns are diffed structurally below; leaving them in the plain
+  // row pass would stringify the whole blob — key-order-sensitive JSON.stringify
+  // even fabricates phantom changes on identical content.
+  const ignore = new Set([
+    ...GLOBAL_IGNORE_FIELDS,
+    ...(config.ignoreFields ?? []),
+    ...Object.keys(config.jsonFields ?? {}),
+  ]);
   const formatters = config.fieldFormatters ?? {};
   const drafts: AuditChangeDraft[] = [];
 
@@ -162,12 +169,20 @@ export async function collectTableAudit(params: {
           before: (beforeRow?.[column] as Record<string, unknown> | null) ?? null,
           after: (afterRow?.[column] as Record<string, unknown> | null) ?? null,
           formatValue: (key, value) => formatter(key, value, accumulator.resolution),
+          ...(config.deepJsonFields?.[column] && { deepKeys: config.deepJsonFields[column] }),
         }),
       );
     }
   }
 
   if (drafts.length === 0) return;
+
+  // Fingerprint replacements (delete + reinsert with a new id) so the flush can
+  // pair and merge them — see reconcileReplacePairs.
+  const pairKey = config.reconcileKey?.(row);
+  if (pairKey) {
+    for (const draft of drafts) draft.pairKey = pairKey;
+  }
 
   const scopeOrScopes = await config.resolveScope(row, accumulator.resolution);
   if (!scopeOrScopes) return;

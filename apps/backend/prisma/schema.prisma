@@ -1296,10 +1296,8 @@ model ACLAuditLog {
 model AuditLog {
   id            String           @id @default(cuid())
   actorUserId   String? // null when the actor is a system process, or after user deletion
-  action        String // coarse rollup for the feed badge (AuditAction).  /check
   entityType    String // logical context, e.g. USER_GROUP_ASSIGNMENT_CONFIG
   entityId      String // context id, e.g. userGroupId
-  summary       String // human-readable rollup for the audit feed
   createdAt     DateTime         @default(now())
   workspaceId   String // denormalized tenant key (stamped on insert)
 
@@ -1311,7 +1309,7 @@ model AuditLog {
   @@index([actorUserId])
   @@index([createdAt])
   @@map("audit_logs")
-  @@schema("public")
+  @@schema("non_zero")
 }
 
 model AuditLogChange {
@@ -1333,10 +1331,8 @@ model AuditLogChange {
   @@index([auditLogId])
   @@index([tableName, recordId])
   @@map("audit_log_changes")
-  @@schema("public")
+  @@schema("non_zero")
 }
-
-indexes
 
 // PR Analytics models
 model PullRequests {

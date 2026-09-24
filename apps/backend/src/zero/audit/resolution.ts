@@ -16,6 +16,7 @@ export class AuditResolution {
   private readonly userExistsById = new Map<string, boolean>();
   private readonly roleNameById = new Map<string, string>();
   private readonly formNameById = new Map<string, string>();
+  private readonly globalFieldNameById = new Map<string, string>();
   private readonly boardIdsByFormId = new Map<string, string[]>();
 
   constructor(private readonly lookup: AuditLookup) {}
@@ -153,6 +154,21 @@ export class AuditResolution {
   formName(formId: string | null | undefined): string {
     if (!formId) return '';
     return this.formNameById.get(formId) ?? formId;
+  }
+
+  async warmGlobalFields(ids: Iterable<string>): Promise<void> {
+    const missing = [...new Set(ids)].filter(id => !this.globalFieldNameById.has(id));
+    if (missing.length === 0) return;
+    const fields = await this.lookup.globalFieldsByIds(missing);
+    for (const id of missing) {
+      const field = fields.find(candidate => candidate.id === id);
+      this.globalFieldNameById.set(id, field?.fieldName ?? id);
+    }
+  }
+
+  globalFieldName(globalFieldId: string | null | undefined): string {
+    if (!globalFieldId) return '';
+    return this.globalFieldNameById.get(globalFieldId) ?? globalFieldId;
   }
 
   async warmFormBoards(formIds: Iterable<string>): Promise<void> {
