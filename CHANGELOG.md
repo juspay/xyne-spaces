@@ -1,3 +1,10 @@
+## [1.386.0](https://github.com/juspay/xyne-spaces/compare/v1.385.3...v1.386.0) (2026-09-24)
+
+
+### Features
+
+* Scheduled Call Channel Pill ([#1972](https://github.com/juspay/xyne-spaces/issues/1972)) ([6dbb379](https://github.com/juspay/xyne-spaces/commit/6dbb3792ce525b68f21c6ca33338548789358126))
+
 ## [1.385.3](https://github.com/juspay/xyne-spaces/compare/v1.385.2...v1.385.3) (2026-09-24)
 
 
