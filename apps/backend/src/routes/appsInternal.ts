@@ -96,7 +96,10 @@ router.post(
           WHERE id = ${existing.id} RETURNING "signingSecret"`;
         signingSecretEnc = rows[0]?.signingSecret ?? fresh;
       }
-      await runAsServiceActor(SYSTEM_USER_ID, input.workspaceId, async () => {
+      // Ensure-ups run under the APP'S OWN tenant key (its creator's workspace),
+      // not the caller's: the ACL extension gates updates by the enforced
+      // workspace, and this app may have been created under a different one.
+      await runAsServiceActor(SYSTEM_USER_ID, existing.workspaceId, async () => {
         if (input.webhookUrlTemplate) {
           const webhookUrl = substituteAppId(input.webhookUrlTemplate, existing.id);
           if (existing.webhookUrl !== webhookUrl) {
