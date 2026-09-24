@@ -260,7 +260,7 @@ export async function handleMutate(request: Request): Promise<unknown> {
         const mutationAwaitedPostCommitTasks: (() => Promise<void>)[] = [];
         const mutationVespaJobs = createVespaJobsAccumulator();
         const mutationSideEffectJobs = createSideEffectJobsAccumulator();
-        let mutationAuditJobs: AuditJobsAccumulator | null = null;
+        let mutationAuditJobs: AuditJobsAccumulator | undefined = undefined;
 
         return transact(async (tx, mutatorName, args) => {
           capturedMutatorName = mutatorName;

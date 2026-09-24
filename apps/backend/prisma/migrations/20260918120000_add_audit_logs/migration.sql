@@ -36,8 +36,3 @@ CREATE INDEX "audit_logs_actorUserId_idx" ON "non_zero"."audit_logs"("actorUserI
 -- CreateIndex (FK trigger + parent -> children include)
 CREATE INDEX "audit_log_changes_auditLogId_idx" ON "non_zero"."audit_log_changes"("auditLogId");
 
--- AddForeignKey
-ALTER TABLE "non_zero"."audit_logs" ADD CONSTRAINT "audit_logs_actorUserId_fkey" FOREIGN KEY ("actorUserId") REFERENCES "public"."users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "non_zero"."audit_log_changes" ADD CONSTRAINT "audit_log_changes_auditLogId_fkey" FOREIGN KEY ("auditLogId") REFERENCES "non_zero"."audit_logs"("id") ON DELETE CASCADE ON UPDATE CASCADE;
