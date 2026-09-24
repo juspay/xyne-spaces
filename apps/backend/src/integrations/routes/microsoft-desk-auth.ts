@@ -510,8 +510,10 @@ router.get('/callback', async (req: Request, res: Response) => {
         return;
       }
 
+      // This writes Graph credentials into the row it picks, so it must be a
+      // Microsoft row — not an app-desk/slack/google source on the same channel.
       const source = await db.externalSource.findFirst({
-        where: { channelId: channelData.channelId },
+        where: { channelId: channelData.channelId, sourceType: 'microsoft' },
         select: { id: true, name: true, credentials: true, isActive: true },
         orderBy: { createdAt: 'desc' },
       });
