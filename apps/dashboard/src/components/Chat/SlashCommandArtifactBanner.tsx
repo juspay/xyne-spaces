@@ -128,7 +128,7 @@ export const SlashCommandArtifactBanner = (): React.JSX.Element | null => {
         <button
           type='button'
           onClick={() => setIsOpen(open => !open)}
-          className='relative flex size-10 items-center justify-center rounded-xl border border-orange-300 bg-orange-50 text-orange-600 shadow-lg transition-colors hover:bg-orange-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 focus-visible:ring-offset-2 dark:border-orange-800 dark:bg-orange-950 dark:text-orange-300 dark:hover:bg-orange-900'
+          className='relative flex size-10 items-center justify-center rounded-xl border border-orange-300 bg-orange-50 text-orange-600 shadow-lg transition-colors hover:bg-orange-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 focus-visible:ring-offset-2 [[data-theme=midnight]_&]:border-orange-800 [[data-theme=midnight]_&]:bg-orange-950 [[data-theme=midnight]_&]:text-orange-300 [[data-theme=midnight]_&]:hover:bg-orange-900'
           aria-label={`${visibleItems.length} active slash command artifact${visibleItems.length === 1 ? '' : 's'}`}
           aria-expanded={isOpen}
           aria-controls='slash-command-artifact-banner-popover'
@@ -148,7 +148,7 @@ export const SlashCommandArtifactBanner = (): React.JSX.Element | null => {
           id='slash-command-artifact-banner-popover'
           role='dialog'
           aria-label={`${item.definition.badge} alert in ${channelLabel}`}
-          className='fixed bottom-4 left-[58px] z-[100] hidden h-[110px] w-[344px] max-w-[calc(100vw-70px)] flex-col rounded-2xl border border-orange-300 bg-orange-50 p-3 text-orange-800 shadow-2xl sm:flex dark:border-orange-800 dark:bg-orange-950 dark:text-orange-100'
+          className='fixed bottom-4 left-[58px] z-[100] hidden h-[110px] w-[344px] max-w-[calc(100vw-70px)] flex-col rounded-2xl border border-orange-300 bg-orange-50 p-3 text-orange-800 shadow-2xl sm:flex [[data-theme=midnight]_&]:border-orange-800 [[data-theme=midnight]_&]:bg-orange-950 [[data-theme=midnight]_&]:text-orange-100'
         >
           <div className='flex min-w-0 items-center gap-2'>
             <span className='relative flex size-2 shrink-0'>
@@ -159,13 +159,13 @@ export const SlashCommandArtifactBanner = (): React.JSX.Element | null => {
               {item.definition.badge}
             </span>
             <span className='min-w-0 flex-1 truncate text-sm font-semibold'>{channelLabel}</span>
-            <span className='shrink-0 text-xs text-orange-700/80 dark:text-orange-300/80'>
+            <span className='shrink-0 text-xs text-orange-700/80 [[data-theme=midnight]_&]:text-orange-300/80'>
               {formatMessageAge(item.messageCreatedAt)}
             </span>
             <button
               type='button'
               onClick={() => setIsOpen(false)}
-              className='-mr-1 flex size-5 shrink-0 items-center justify-center rounded-md text-orange-700/70 hover:bg-orange-100 hover:text-orange-900 dark:text-orange-300/70 dark:hover:bg-orange-900 dark:hover:text-orange-100'
+              className='-mr-1 flex size-5 shrink-0 items-center justify-center rounded-md text-orange-700/70 hover:bg-orange-100 hover:text-orange-900 [[data-theme=midnight]_&]:text-orange-300/70 [[data-theme=midnight]_&]:hover:bg-orange-900 [[data-theme=midnight]_&]:hover:text-orange-100'
               aria-label='Close slash command artifact alerts'
               data-track-category='SLASH_COMMAND_ARTIFACT'
               data-track-name='CLOSE_BANNER_POPOVER'
@@ -174,7 +174,7 @@ export const SlashCommandArtifactBanner = (): React.JSX.Element | null => {
             </button>
           </div>
 
-          <p className='mt-2 min-w-0 truncate text-sm text-foreground' title={messagePreview}>
+          <p className='mt-2 min-w-0 truncate text-sm text-orange-800 [[data-theme=midnight]_&]:text-orange-100' title={messagePreview}>
             {messagePreview}
           </p>
 
@@ -183,7 +183,7 @@ export const SlashCommandArtifactBanner = (): React.JSX.Element | null => {
               <button
                 type='button'
                 onClick={viewArtifact}
-                className='flex h-[30px] shrink-0 items-center gap-1.5 rounded-lg border border-orange-300 bg-white/70 px-3 text-xs font-semibold hover:bg-white dark:border-orange-800 dark:bg-orange-950 dark:hover:bg-orange-900'
+                className='flex h-[30px] shrink-0 items-center gap-1.5 rounded-lg border border-orange-300 bg-white/70 px-3 text-xs font-semibold hover:bg-white [[data-theme=midnight]_&]:border-orange-800 [[data-theme=midnight]_&]:bg-orange-950 [[data-theme=midnight]_&]:hover:bg-orange-900'
                 data-track-category='SLASH_COMMAND_ARTIFACT'
                 data-track-name='VIEW_FROM_BANNER'
                 data-track-metadata={JSON.stringify({
@@ -227,11 +227,11 @@ export const SlashCommandArtifactBanner = (): React.JSX.Element | null => {
             </div>
 
             {showPagination && (
-              <div className='flex h-[30px] shrink-0 items-center overflow-hidden rounded-lg border border-orange-300 bg-white/60 dark:border-orange-800 dark:bg-orange-950'>
+              <div className='flex h-[30px] shrink-0 items-center overflow-hidden rounded-lg border border-orange-300 bg-white/60 [[data-theme=midnight]_&]:border-orange-800 [[data-theme=midnight]_&]:bg-orange-950'>
                 <button
                   type='button'
                   onClick={() => paginate(-1)}
-                  className='flex h-full w-7 items-center justify-center hover:bg-orange-100 dark:hover:bg-orange-900'
+                  className='flex h-full w-7 items-center justify-center hover:bg-orange-100 [[data-theme=midnight]_&]:hover:bg-orange-900'
                   aria-label='Previous slash command artifact banner'
                   data-track-category='SLASH_COMMAND_ARTIFACT'
                   data-track-name='PREVIOUS_BANNER'
@@ -244,7 +244,7 @@ export const SlashCommandArtifactBanner = (): React.JSX.Element | null => {
                 <button
                   type='button'
                   onClick={() => paginate(1)}
-                  className='flex h-full w-7 items-center justify-center hover:bg-orange-100 dark:hover:bg-orange-900'
+                  className='flex h-full w-7 items-center justify-center hover:bg-orange-100 [[data-theme=midnight]_&]:hover:bg-orange-900'
                   aria-label='Next slash command artifact banner'
                   data-track-category='SLASH_COMMAND_ARTIFACT'
                   data-track-name='NEXT_BANNER'
