@@ -35,10 +35,13 @@ export function createWithUsersTx(self: UserGroupRepository, data: CreateUserGro
       });
 
       // Assign roles via user_role_mappings(entityType=USER_GROUP). One row per (user, role).
+      // Backward compatible: a value may be a single roleId (legacy) or an array of roleIds.
       if (data.userRoleUpdates) {
         const now = new Date();
-        const roleRows = memberUserIds.flatMap(userId =>
-          (data.userRoleUpdates?.[userId] ?? []).map(roleId => ({
+        const roleRows = memberUserIds.flatMap(userId => {
+          const raw = data.userRoleUpdates?.[userId];
+          const roleIds = raw === undefined ? [] : Array.isArray(raw) ? raw : [raw];
+          return roleIds.map(roleId => ({
             workspaceId: userGroup.workspaceId,
             userId,
             roleId,
@@ -46,8 +49,8 @@ export function createWithUsersTx(self: UserGroupRepository, data: CreateUserGro
             entityId: userGroup.id,
             createdAt: now,
             updatedAt: now,
-          })),
-        );
+          }));
+        });
         if (roleRows.length > 0) {
           await tx.userRoleMapping.createMany({ data: roleRows, skipDuplicates: true });
         }
