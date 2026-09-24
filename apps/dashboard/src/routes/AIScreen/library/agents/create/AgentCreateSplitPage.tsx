@@ -44,6 +44,11 @@ import { listSkills } from '@/services/claw/clawSkillsService';
 import { sanitizeAgentCanvasName } from '@/components/flowUI/nodes/agent/create/canvasFromIdentity';
 import { selectHubToolsForIntent } from '@/components/flowUI/nodes/agent/create/hubCatalogSelect';
 import {
+  capabilityGapMessage,
+  jobIntentFromForm,
+  validateCanvasCapabilities,
+} from '@/components/flowUI/nodes/agent/create/capabilityValidation';
+import {
   EMPTY_CREATE_FORM,
   type AgentCreateChatPatch,
   type AgentCreatePhase,
@@ -81,7 +86,9 @@ export function AgentCreateSplitPage({
   const [createdSlug, setCreatedSlug] = useState<string | null>(null);
   const [skeletonIdentity, setSkeletonIdentity] = useState(false);
   const [progressLabel, setProgressLabel] = useState<string | null>(null);
+  const [capabilityBlock, setCapabilityBlock] = useState(false);
   const canvasTurnChainRef = useRef(Promise.resolve());
+  const lastJobIntentRef = useRef('');
 
   const slug = effectiveSlug({
     name: createForm.form.name,
@@ -125,9 +132,95 @@ export function AgentCreateSplitPage({
     slug.length > 0 &&
     createForm.form.systemPrompt.trim().length > 0 &&
     createForm.conflicts.length === 0 &&
+    !capabilityBlock &&
     (scripted ||
       !nameCheck.checking ||
       (nameCheck.nameError === null && nameCheck.slugError === null));
+
+  /** Heal missing hubs from catalog once; returns validation after heal. */
+  const healMissingCapabilities = useCallback(
+    async (intent: string): Promise<ReturnType<typeof validateCanvasCapabilities>> => {
+      const liveForm = createForm.getForm();
+      const jobIntent = jobIntentFromForm(intent, liveForm);
+      let catalog = await getAvailableTools().catch(() => null);
+      let skillCount = 0;
+      let knowledgeCount = 0;
+      try {
+        if (user?.id) skillCount = (await listSkills(user.id)).length;
+      } catch {
+        skillCount = 0;
+      }
+      try {
+        knowledgeCount = (await listAccessibleKnowledgeBase()).collections.length;
+      } catch {
+        knowledgeCount = 0;
+      }
+
+      let result = validateCanvasCapabilities({
+        intent: jobIntent,
+        form: liveForm,
+        catalog,
+        skillCount,
+        knowledgeCount,
+      });
+      if (result.healable.length === 0) return result;
+
+      const patch: AgentCreateChatPatch = {};
+      const toolsGap = result.healable.some(
+        cls => cls === 'mcp' || cls === 'builtin' || cls === 'subagent',
+      );
+      if (toolsGap) {
+        const selected = await selectHubToolsForIntent({
+          intent: jobIntent,
+          current: liveForm.tools,
+          systemPrompt: liveForm.systemPrompt || undefined,
+          catalog,
+        });
+        if (selected) {
+          patch.tools = selected.selection;
+          catalog = selected.catalog;
+        }
+      }
+      if (result.healable.includes('skills') && user?.id) {
+        try {
+          const skills = await listSkills(user.id);
+          skillCount = skills.length;
+          const pick = skills.find(skill => skill.id) ?? skills[0];
+          if (pick?.id) {
+            patch.selectedSkillIds = [...new Set([...liveForm.selectedSkillIds, pick.id])];
+          }
+        } catch {
+          /* keep gap */
+        }
+      }
+      if (result.healable.includes('knowledge')) {
+        try {
+          const { collections } = await listAccessibleKnowledgeBase();
+          knowledgeCount = collections.length;
+          const pick = collections.find(c => c.id.trim()) ?? collections[0];
+          if (pick?.id) {
+            patch.selectedKbScope = 'COLLECTIONS';
+            patch.selectedKbResources = [{ collectionId: pick.id, fileId: null }];
+          }
+        } catch {
+          /* keep gap */
+        }
+      }
+      if (Object.keys(patch).length > 0) {
+        createForm.applyChatPatch(`hub-cap-heal-${Date.now()}`, patch, { highlight: false });
+      }
+
+      result = validateCanvasCapabilities({
+        intent: jobIntent,
+        form: createForm.getForm(),
+        catalog,
+        skillCount,
+        knowledgeCount,
+      });
+      return result;
+    },
+    [createForm, user?.id],
+  );
 
   const canvasSnapshot: CreateCanvasSnapshot = {
     empty: canvasIsEmpty(createForm.form),
@@ -162,6 +255,7 @@ export function AgentCreateSplitPage({
       }
 
       setCreateError(null);
+      setCapabilityBlock(false);
       createForm.clearHighlightMarks();
       setProgressLabel(PROGRESS_THINKING);
 
@@ -254,9 +348,10 @@ export function AgentCreateSplitPage({
                       const built = buildBuiltinCatalog(catalog);
                       const pick = built.find(entry => entry.tools.length > 0);
                       if (pick) {
+                        const live = createForm.getForm();
                         incoming.tools = {
-                          ...enableBuiltinEntry(createForm.form.tools, pick),
-                          callableAgents: createForm.form.tools.callableAgents,
+                          ...enableBuiltinEntry(live.tools, pick),
+                          callableAgents: live.tools.callableAgents,
                         };
                       }
                       return;
@@ -267,9 +362,9 @@ export function AgentCreateSplitPage({
                       .join('\n');
                     const selected = await selectHubToolsForIntent({
                       intent: selectIntent,
-                      current: createForm.form.tools,
+                      current: createForm.getForm().tools,
                       systemPrompt:
-                        incoming.systemPrompt || createForm.form.systemPrompt || undefined,
+                        incoming.systemPrompt || createForm.getForm().systemPrompt || undefined,
                     });
                     if (selected) {
                       incoming.tools = selected.selection;
@@ -358,6 +453,21 @@ export function AgentCreateSplitPage({
               }
             : {}),
         });
+        lastJobIntentRef.current = [userText.trim(), action.intent.trim()]
+          .filter(Boolean)
+          .join('\n');
+        // Post-bind validation: heal missing hubs the job needs, then gate Create.
+        const capResult = await healMissingCapabilities(lastJobIntentRef.current);
+        if (capResult.healable.length > 0) {
+          setCapabilityBlock(true);
+          setCreateError(capabilityGapMessage(capResult));
+        } else {
+          setCapabilityBlock(false);
+          const miss = capabilityGapMessage(capResult);
+          if (miss && capResult.catalogMiss.length > 0) {
+            setCreateError(miss);
+          }
+        }
         await sleep(WRITE_MS * 2);
         createForm.setWritingField(null);
         createForm.setAttentionField(null);
@@ -369,14 +479,14 @@ export function AgentCreateSplitPage({
         createForm.setAttentionField(null);
         setProgressLabel(null);
         setSkeletonIdentity(false);
-        setPhase(canvasIsEmpty(createForm.form) ? 'empty' : 'draft');
+        setPhase(canvasIsEmpty(createForm.getForm()) ? 'empty' : 'draft');
         throw err;
       }
       });
       canvasTurnChainRef.current = run.catch(() => {});
       return run;
     },
-    [createForm, scripted, user?.id],
+    [createForm, healMissingCapabilities, scripted, user?.id],
   );
 
 
@@ -384,7 +494,22 @@ export function AgentCreateSplitPage({
     if (scripted || !canCreate || creating) return;
     setCreating(true);
     setCreateError(null);
-    const form = { ...createForm.form, slug };
+    const intent =
+      lastJobIntentRef.current ||
+      jobIntentFromForm('', createForm.getForm());
+    const capResult = await healMissingCapabilities(intent);
+    if (capResult.healable.length > 0) {
+      setCapabilityBlock(true);
+      setCreateError(capabilityGapMessage(capResult));
+      setCreating(false);
+      return;
+    }
+    setCapabilityBlock(false);
+    if (capResult.catalogMiss.length > 0) {
+      // Honest miss only — catalog cannot satisfy; allow create to proceed.
+      setCreateError(capabilityGapMessage(capResult));
+    }
+    const form = { ...createForm.getForm(), slug };
     try {
       const agent = await createAgent({
         slug: form.slug,
@@ -449,7 +574,16 @@ export function AgentCreateSplitPage({
     } finally {
       setCreating(false);
     }
-  }, [canCreate, createForm.form, creating, queryClient, scripted, slug, user?.id]);
+  }, [
+    canCreate,
+    createForm,
+    creating,
+    healMissingCapabilities,
+    queryClient,
+    scripted,
+    slug,
+    user?.id,
+  ]);
 
   const canvasDirty = createForm.canvasDirty;
   const resetFrom = createForm.resetFrom;
@@ -461,7 +595,9 @@ export function AgentCreateSplitPage({
     resetFrom(EMPTY_CREATE_FORM);
     setPhase('empty');
     setCreateError(null);
+    setCapabilityBlock(false);
     setSkeletonIdentity(false);
+    lastJobIntentRef.current = '';
   }, [canvasDirty, resetFrom]);
 
   const footer = useMemo(

@@ -152,7 +152,7 @@ void describe('decideCreateCanvasAction', () => {
     assert.equal(ask.type, 'idle');
   });
 
-  void it('drafts a thin job when the model emits XYNE_CREATE_DRAFT', () => {
+  void it('drafts a thin standup job with inferred tools when the model emits XYNE_CREATE_DRAFT', () => {
     const action = decideCreateCanvasAction({
       userText: 'standup bot',
       canvasEmpty: true,
@@ -163,11 +163,17 @@ void describe('decideCreateCanvasAction', () => {
     assert.equal(action.type, 'draft');
     if (action.type === 'draft') {
       assert.equal(action.intent, 'standup bot');
-      assert.deepEqual(action.fields, ['name', 'slug', 'description', 'systemPrompt']);
+      assert.deepEqual(action.fields, [
+        'name',
+        'slug',
+        'description',
+        'systemPrompt',
+        'tools',
+      ]);
     }
   });
 
-  void it('does not fill tools unless the user named them', () => {
+  void it('infers tools from job semantics; skips when no capability cues', () => {
     const unnamed = decideCreateCanvasAction({
       userText: 'I wanna do A',
       canvasEmpty: true,
@@ -188,6 +194,19 @@ void describe('decideCreateCanvasAction', () => {
     assert.equal(named.type, 'draft');
     if (named.type === 'draft') {
       assert.deepEqual(named.fields, ['name', 'slug', 'description', 'systemPrompt', 'tools']);
+    }
+
+    const soft = decideCreateCanvasAction({
+      userText:
+        'Create a scribe that posts daily summaries to the eng channel and researches competitors on the web.',
+      canvasEmpty: true,
+      marker: parseCreateChatAction(
+        'Drafting.\nXYNE_CREATE_DRAFT: channel scribe that researches competitors',
+      ),
+    });
+    assert.equal(soft.type, 'draft');
+    if (soft.type === 'draft') {
+      assert.ok(soft.fields.includes('tools'));
     }
   });
 

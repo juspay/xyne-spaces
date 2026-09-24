@@ -20,6 +20,12 @@ import type {
   ToolSuggestion,
 } from '@/services/claw/clawToolsTypes';
 import { toolboxFromSuggestion } from './toolboxFromSuggestion.ts';
+import {
+  intentImpliesBuiltin as jobImpliesBuiltin,
+  intentImpliesSubagent as jobImpliesSubagent,
+  softProductNeedles,
+  SOFT_PRODUCT_CUES,
+} from './capabilityInference.ts';
 
 const PRODUCT_ALIASES: ReadonlyArray<{ re: RegExp; needles: readonly string[] }> = [
   { re: /\bslack\b/i, needles: ['slack'] },
@@ -45,7 +51,7 @@ function entryMatchesNeedles(entry: McpCatalogEntry, needles: readonly string[])
   return needles.some(needle => hay.includes(normalizeToken(needle)));
 }
 
-/** Match named products in the utterance to org MCP/gateway catalog rows. */
+/** Match named + soft job-cue products in the utterance to org MCP/gateway rows. */
 export function matchNamedMcpEntries(
   intent: string,
   catalog: AvailableTools,
@@ -53,15 +59,28 @@ export function matchNamedMcpEntries(
   const mcpCatalog = buildMcpCatalog(catalog, []);
   const matched: McpCatalogEntry[] = [];
   const seen = new Set<string>();
-  for (const alias of PRODUCT_ALIASES) {
-    if (!alias.re.test(intent)) continue;
+
+  const pushNeedles = (needles: readonly string[]): void => {
     for (const entry of mcpCatalog) {
       if (!entry.selectable || seen.has(entry.slug)) continue;
-      if (!entryMatchesNeedles(entry, alias.needles)) continue;
+      if (!entryMatchesNeedles(entry, needles)) continue;
       seen.add(entry.slug);
       matched.push(entry);
     }
+  };
+
+  for (const alias of PRODUCT_ALIASES) {
+    if (!alias.re.test(intent)) continue;
+    pushNeedles(alias.needles);
   }
+  // Soft cues: standup/channel → Slack, inbox/digest → email, PR → GitHub, …
+  for (const cue of SOFT_PRODUCT_CUES) {
+    if (!cue.re.test(intent)) continue;
+    pushNeedles(cue.needles);
+  }
+  const soft = softProductNeedles(intent);
+  if (soft.length > 0) pushNeedles(soft);
+
   // Free-form: "… MCP" / "… integration" after a word that matches a label/slug.
   const named =
     intent.match(
@@ -80,9 +99,10 @@ export function matchNamedMcpEntries(
   return matched;
 }
 
-/** True when the utterance names a product we try to bind (Slack, GitHub, …). */
+/** True when the utterance names a product or soft-cues one we try to bind. */
 export function intentNamesProduct(intent: string): boolean {
   if (PRODUCT_ALIASES.some(alias => alias.re.test(intent))) return true;
+  if (softProductNeedles(intent).length > 0) return true;
   return Boolean(
     intent.match(
       /\b(?:add|use|pick|choose|select|enable|attach)\s+(?:the\s+)?([a-z0-9][\w.-]{1,40})\s+(?:mcp|integration|server|tool)\b/i,
@@ -90,15 +110,14 @@ export function intentNamesProduct(intent: string): boolean {
   );
 }
 
-/** User asked for a subagent / delegate (not only MCP). */
+/** User asked for / job implies a subagent / delegate (not only MCP). */
 export function intentImpliesSubagent(intent: string): boolean {
-  return /\b(sub-?agents?|delegate|delegat(?:e|ion))\b/i.test(intent);
+  return jobImpliesSubagent(intent);
 }
 
-/** User asked for built-in search / browse / filesystem tools. */
+/** User asked for / job implies built-in search / browse / research tools. */
 export function intentImpliesBuiltin(intent: string): boolean {
-  return /\b(built-?ins?|browse|web\s*search|filesystem|terminal)\b/i.test(intent) ||
-    /\b(search|code)\s+tools?\b/i.test(intent);
+  return jobImpliesBuiltin(intent) || /\b(search|code)\s+tools?\b/i.test(intent);
 }
 
 function scoreNameAgainstIntent(name: string, intent: string): number {
@@ -217,8 +236,10 @@ export function selectionFromCatalogSuggestion(args: {
     }
     return selection;
   }
-  // Named product in utterance but nothing in catalog → leave empty (honest miss).
-  if (intentNamesProduct(intent)) {
+  // Hard-named product in utterance but nothing in catalog → leave empty (honest miss).
+  // Soft job cues alone still keep suggest-tools ids when present.
+  const hardNamed = PRODUCT_ALIASES.some(alias => alias.re.test(intent));
+  if (hardNamed && intentNamesProduct(intent)) {
     return {
       ...current,
       callableAgents: current.callableAgents ?? [],
@@ -294,11 +315,9 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
 }
 
 /**
- * Shared Hub catalog select: prefer named product resolve against
- * `getAvailableTools` (same catalog list_available_tools exposes). Always apply
- * local subagent / builtin binds when the utterance asks for them — even when a
- * named MCP match short-circuits suggest-tools. Only call suggest-tools when no
- * named product matched and local binds left tools empty.
+ * Shared Hub catalog select: prefer named / soft-cue product resolve against
+ * `getAvailableTools`. Always apply local subagent / builtin binds when the
+ * job implies them. Call suggest-tools when local binds leave needed hubs empty.
  * Returns null when catalog cannot be loaded.
  */
 export async function selectHubToolsForIntent(args: {
@@ -317,13 +336,19 @@ export async function selectHubToolsForIntent(args: {
     (await withTimeout(getAvailableTools(), CATALOG_MS, 'getAvailableTools').catch(() => null));
   if (!catalog) return null;
 
-  // Named MCP + local subagent/builtin picks first — do not wait on suggest-tools.
+  // Named/soft MCP + local subagent/builtin picks first — do not wait on suggest-tools.
   let selection = applyLocalHubBinds(args.intent, catalog, args.current);
   const named = matchNamedMcpEntries(args.intent, catalog);
 
-  // Suggest only when no named product and we still lack tools (or need more
-  // integration ids). Never drop already-bound local chips.
-  if (named.length === 0 && !selectionHasTools(selection)) {
+  const needsSuggest =
+    !selectionHasTools(selection) ||
+    (jobImpliesBuiltin(args.intent) && selection.custom.length === 0) ||
+    (jobImpliesSubagent(args.intent) && selection.subagents.length === 0) ||
+    (named.length === 0 && softProductNeedles(args.intent).length > 0 &&
+      selection.direct.length === 0 &&
+      (selection.gateway ?? []).length === 0);
+
+  if (needsSuggest) {
     const suggestion = await withTimeout(
       suggestTools({
         description: args.intent,
@@ -346,13 +371,15 @@ export async function selectHubToolsForIntent(args: {
     });
     // Re-apply local binds so suggest cannot wipe subagent/builtin intent picks.
     selection = applyLocalHubBinds(args.intent, catalog, selection);
-  } else if (named.length === 0) {
-    // Local binds already filled something; optionally enrich via suggest without
-    // blocking forever — skip to keep Hub snappy (named-MCP path already skips).
   }
 
-  // Named product in utterance but nothing matched and no other binds → empty.
-  if (named.length === 0 && intentNamesProduct(args.intent) && !selectionHasTools(selection)) {
+  // Hard-named product with no catalog match and no other binds → empty.
+  const hardNamed = PRODUCT_ALIASES.some(alias => alias.re.test(args.intent));
+  if (
+    hardNamed &&
+    named.length === 0 &&
+    !selectionHasTools(selection)
+  ) {
     selection = {
       ...args.current,
       callableAgents: args.current.callableAgents ?? [],

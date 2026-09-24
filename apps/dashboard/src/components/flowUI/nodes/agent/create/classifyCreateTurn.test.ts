@@ -47,16 +47,23 @@ void describe('classifyCreateTurn', () => {
     assert.equal(result.kind, 'clarify');
   });
 
-  void it('maps a thin named job to identity fields, not tools', () => {
+  void it('infers tools for a thin standup job (channel/standup cue)', () => {
     const result = classifyCreateTurn('build a standup agent', true);
     assert.equal(result.kind, 'edit');
-    assert.deepEqual(result.fields, ['name', 'slug', 'description', 'systemPrompt']);
+    assert.deepEqual(result.fields, [
+      'name',
+      'slug',
+      'description',
+      'systemPrompt',
+      'tools',
+    ]);
     assert.equal(shouldGeneratePrompt(result, true, 'build a standup agent'), true);
     assert.deepEqual(firstDraftFields('standup bot'), [
       'name',
       'slug',
       'description',
       'systemPrompt',
+      'tools',
     ]);
   });
 
@@ -86,12 +93,20 @@ void describe('classifyCreateTurn', () => {
     assert.equal(result.kind, 'clarify');
   });
 
-  void it('adds tools only when the user named them', () => {
+  void it('adds tools when the job names Slack (or soft-cues it)', () => {
     const text = 'Build a standup scribe that posts a Slack summary every morning.';
     const result = classifyCreateTurn(text, true);
     assert.equal(result.kind, 'edit');
     assert.deepEqual(result.fields, ['name', 'slug', 'description', 'systemPrompt', 'tools']);
     assert.equal(shouldGeneratePrompt(result, true, text), true);
+  });
+
+  void it('infers tools + knowledge from job semantics without MCP nouns', () => {
+    const text =
+      'Create a scribe that posts daily summaries to the eng channel, emails the lead, and researches competitors on the web using our product docs.';
+    const fields = firstDraftFields(text);
+    assert.ok(fields.includes('tools'), JSON.stringify(fields));
+    assert.ok(fields.includes('knowledge'), JSON.stringify(fields));
   });
 
   void it('keeps follow-up handle Q&A as reply-only', () => {

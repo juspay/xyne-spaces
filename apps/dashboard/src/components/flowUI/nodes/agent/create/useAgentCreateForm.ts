@@ -194,6 +194,7 @@ export function useAgentCreateForm(initial: AgentCreateFormState = EMPTY_CREATE_
     attentionField,
     attentionHubRow,
     canvasDirty: isFormDirty(form, baseline),
+    getForm: () => formRef.current,
     patchForm,
     applyChatPatch,
     resolveConflict,

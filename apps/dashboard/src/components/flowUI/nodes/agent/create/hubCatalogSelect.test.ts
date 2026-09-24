@@ -157,4 +157,40 @@ void describe('hubCatalogSelect', () => {
     assert.ok(selection.subagents.includes('web-research'));
     assert.ok(selection.custom.includes('web_search'));
   });
+
+  void it('soft-cues Slack + builtin from standup/channel/research without MCP nouns', () => {
+    const catalog: AvailableTools = {
+      ...catalogWithSlackGithub(),
+      customGroups: [
+        {
+          source: 'custom:web-search',
+          tools: [{ slug: 'web_search', name: 'web_search' }],
+        },
+      ],
+      integrations: [
+        ...catalogWithSlackGithub().integrations,
+        {
+          slug: 'custom:web-search',
+          label: 'Web Search',
+          kind: 'custom',
+          connected: true,
+          readTools: [
+            { slug: 'web_search', name: 'web_search', description: '', riskLevel: 'read' },
+          ],
+          writeTools: [],
+          usageCount: 2,
+        },
+      ],
+    };
+    const selection = applyLocalHubBinds(
+      'Create a scribe that posts daily summaries to the eng channel and researches competitors on the web',
+      catalog,
+      { ...EMPTY_TOOLS, callableAgents: [] },
+    );
+    assert.ok(
+      selection.direct.includes('slack_list') || selection.direct.includes('slack_post'),
+      JSON.stringify(selection),
+    );
+    assert.ok(selection.custom.includes('web_search'), JSON.stringify(selection));
+  });
 });

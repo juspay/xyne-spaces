@@ -1,3 +1,11 @@
+import {
+  inferNeededCapabilities,
+  inferredCapabilityFields,
+  intentImpliesBuiltin,
+  intentImpliesMcp,
+  intentImpliesSubagent,
+} from './capabilityInference.ts';
+
 export type CreateTurnKind = 'reply' | 'edit' | 'clarify' | 'intake';
 
 export type CreateTurnField =
@@ -25,47 +33,24 @@ export const IDENTITY_FIELDS: CreateTurnField[] = ['name', 'slug', 'description'
 export const FIRST_DESCRIBE_FIELDS: CreateTurnField[] = IDENTITY_FIELDS;
 
 /**
- * Hub capabilities implied by the user request (not vague “make a bot”).
+ * Hub capabilities implied by the user request / job semantics.
+ * Named product nouns OR soft job cues (standup→Slack, research→builtin).
  * Order: tools (MCP / builtin / subagent) → skills → knowledge.
  */
 export function namedCapabilityFields(text: string): CreateTurnField[] {
-  const lower = text.toLowerCase();
-  const extra: CreateTurnField[] = [];
-  const impliesTools =
-    /\b(mcp|tools?|integrations?|servers?|slack|github|jira|notion|linear|gmail|outlook|email|e-?mail|discord|teams|calendars?|browse|search|web\s*search|x\.com|\btwitter\b)\b/i.test(
-      lower,
-    ) ||
-    /\b(sub-?agents?|delegate|delegat(?:e|ion))\b/i.test(lower);
-  if (/\bskills?\b/.test(lower) || /\b(workflow|recipe|playbook)\b/.test(lower)) {
-    extra.push('skills');
-  }
-  if (impliesTools) {
-    extra.push('tools');
-  }
-  if (
-    /\bknowledge(?:\s+base)?\b|\bkb\b/.test(lower) ||
-    /\b(my\s+docs?|our\s+docs?|documentation|confluence|wiki)\b/.test(lower)
-  ) {
-    extra.push('knowledge');
-  }
-  return extra;
+  return inferredCapabilityFields(text);
 }
 
 /** Preferred Hub row when tools are implied (MCP vs builtin vs subagent). */
 export function preferredToolsHubRow(text: string): 'mcp' | 'builtin' | 'subagent' {
-  const lower = text.toLowerCase();
-  if (/\b(sub-?agents?|delegate|delegat(?:e|ion))\b/i.test(lower)) {
-    return 'subagent';
-  }
-  const mcpCue =
-    /\b(mcp|integrations?|servers?|slack|github|jira|notion|linear|gmail|outlook|email|e-?mail|discord|teams|x\.com|\btwitter\b)\b/i.test(
-      lower,
-    );
-  const builtinCue =
-    /\b(browse|search|web\s*search|calendars?|code|terminal|filesystem)\b/i.test(lower);
+  if (intentImpliesSubagent(text)) return 'subagent';
+  const mcpCue = intentImpliesMcp(text);
+  const builtinCue = intentImpliesBuiltin(text);
   if (builtinCue && !mcpCue) return 'builtin';
   return 'mcp';
 }
+
+export { inferNeededCapabilities, inferredCapabilityFields };
 
 export function firstDraftFields(text: string): CreateTurnField[] {
   return [...IDENTITY_FIELDS, ...namedCapabilityFields(text)];
