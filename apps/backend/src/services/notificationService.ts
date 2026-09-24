@@ -1511,6 +1511,10 @@ class NotificationService {
           type: 'VIEW_SHARED' as NotificationType,
           relatedEntityType: 'saved_view',
           relatedEntityId: viewId,
+          // Opens the view directly (ProjectViewBuilder). NotificationHandler
+          // prefixes the workspace and navigates here on click; without it the
+          // popup falls back to /chat.
+          actionUrl: `/projects/views/${viewId}`,
           metadata: {
             viewId,
             actorId,

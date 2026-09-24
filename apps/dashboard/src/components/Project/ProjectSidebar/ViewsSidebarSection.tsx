@@ -198,13 +198,21 @@ const ViewsSidebarSection = ({ searchQuery = '' }: ViewsSidebarSectionProps): Re
   const query = searchQuery.trim();
 
   const allViews = useMemo(() => (views ?? []) as readonly SavedView[], [views]);
-  const allSharedViews = useMemo(
-    () =>
-      (sharedViews ?? [])
-        .map(va => va.view)
-        .filter((v): v is NonNullable<typeof v> => Boolean(v)) as readonly SavedView[],
-    [sharedViews],
-  );
+  const allSharedViews = useMemo(() => {
+    // A view can reach a user through more than one grant (a direct USER share
+    // AND a CHANNEL share of a channel they're in), so dedupe by view id. Also
+    // drop views the user owns — a channel share to a channel the owner is in
+    // would otherwise surface their own view under "Shared with me".
+    const seen = new Set<string>();
+    const out: SavedView[] = [];
+    for (const va of sharedViews ?? []) {
+      const v = va.view as SavedView | undefined;
+      if (!v || v.userId === user?.id || seen.has(v.id)) continue;
+      seen.add(v.id);
+      out.push(v);
+    }
+    return out as readonly SavedView[];
+  }, [sharedViews, user?.id]);
 
   const matching = useMemo(
     () => (list: readonly SavedView[]) =>
