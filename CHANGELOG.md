@@ -1,3 +1,10 @@
+## [1.385.3](https://github.com/juspay/xyne-spaces/compare/v1.385.2...v1.385.3) (2026-09-24)
+
+
+### Bug Fixes
+
+* build KB citation deep-links for workspace-scoped collections ([#2257](https://github.com/juspay/xyne-spaces/issues/2257)) ([7adfcbe](https://github.com/juspay/xyne-spaces/commit/7adfcbe4f472f65b91488a1cd67da8819cc66141))
+
 ## [1.385.2](https://github.com/juspay/xyne-spaces/compare/v1.385.1...v1.385.2) (2026-09-24)
 
 
