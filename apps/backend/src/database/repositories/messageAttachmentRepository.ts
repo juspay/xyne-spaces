@@ -1,5 +1,5 @@
 import { DatabaseClient } from '../client';
-import { MessageAttachment } from '@prisma/client';
+import { MessageAttachment, type Prisma } from '@prisma/client';
 import { AttachmentEntityType } from '@xyne/shared';
 
 export interface CreateMessageAttachmentInput {
@@ -172,6 +172,43 @@ export class MessageAttachmentRepository {
       },
       orderBy: {
         createdAt: 'desc',
+      },
+    });
+  }
+
+  /**
+   * Remove every transcript attachment (plain and identified) posted for a call and
+   * return the ids of the messages they hung off, so the caller can re-check each
+   * message's hasAttachment flag.
+   */
+  async deleteTranscriptsByCallId(callId: string): Promise<string[]> {
+    const where: Prisma.MessageAttachmentWhereInput = {
+      entityType: AttachmentEntityType.CHAT,
+      AND: [
+        { metadata: { path: ['callId'], equals: callId } },
+        {
+          OR: [
+            { metadata: { path: ['type'], equals: 'transcript' } },
+            { metadata: { path: ['type'], equals: 'identified_transcript' } },
+          ],
+        },
+      ],
+    };
+    const attachments = await this.db.messageAttachment.findMany({
+      where,
+      select: { entityId: true },
+    });
+    if (attachments.length === 0) return [];
+
+    await this.db.messageAttachment.deleteMany({ where });
+    return [...new Set(attachments.map((attachment) => attachment.entityId))];
+  }
+
+  async countByMessageId(messageId: string): Promise<number> {
+    return await this.db.messageAttachment.count({
+      where: {
+        entityId: messageId,
+        entityType: AttachmentEntityType.CHAT,
       },
     });
   }

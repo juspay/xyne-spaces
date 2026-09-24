@@ -27,6 +27,7 @@ import { normalizeStoragePath } from '@xyne/storage';
 import { sdlcCallLinkSchema, type SdlcCallLink } from '@xyne/shared';
 import { callRecordingService } from '@/services/callRecordingService';
 import { isRecording, isRecordingType } from '@/utils/callTypeUtils';
+import { isTranscriptUnlinked } from '@/utils/transcriptUnlink';
 import { config } from '@/config/env';
 import { callDocumentService, numberTranscriptSegments, buildParticipantMap } from '@/services/callDocumentService';
 import {
@@ -1396,11 +1397,14 @@ export class CallController {
         }
       }
 
-      // Fetch real-time identified transcript (written during call by the Python agent)
-      try {
-        identifiedTranscriptContent = await transcriptService.getIdentifiedTranscriptContent(call.externalId);
-      } catch (fetchError) {
-        logger.warn(`Failed to fetch identified transcript: ${fetchError}`);
+      // Fetch real-time identified transcript (written during call by the Python agent).
+      // Read straight from storage by call id, so an admin-unlinked transcript is skipped here.
+      if (!isTranscriptUnlinked(call)) {
+        try {
+          identifiedTranscriptContent = await transcriptService.getIdentifiedTranscriptContent(call.externalId);
+        } catch (fetchError) {
+          logger.warn(`Failed to fetch identified transcript: ${fetchError}`);
+        }
       }
 
       // Determine AI summary format (markdown if starts with ## or has no HTML tags)
@@ -2088,7 +2092,9 @@ export class CallController {
       }
 
       // 3. Get transcript content
-      const transcriptContent = await transcriptService.getTranscriptContent(call.externalId);
+      const transcriptContent = isTranscriptUnlinked(call)
+        ? null
+        : await transcriptService.getTranscriptContent(call.externalId);
       if (!transcriptContent) {
         res.status(404).json({ success: false, error: 'Transcript not available for this call' });
         return;
@@ -2192,7 +2198,9 @@ export class CallController {
       }
 
       // 3. Get transcript content
-      const transcriptContent = await transcriptService.getTranscriptContent(call.externalId);
+      const transcriptContent = isTranscriptUnlinked(call)
+        ? null
+        : await transcriptService.getTranscriptContent(call.externalId);
       if (!transcriptContent) {
         res.status(404).json({ success: false, error: 'Transcript not available for this call' });
         return;

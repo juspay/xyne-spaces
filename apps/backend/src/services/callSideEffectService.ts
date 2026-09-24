@@ -1,5 +1,7 @@
+import type { Call } from '@prisma/client';
 import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
+import { updateCallSystemMessageIfNeeded } from '@/zero/utils/systemMessagesUtils';
 import { logger } from '@/utils/logger';
 import { notificationService } from '@/services/notificationService';
 import { livekitService } from '@/services/liveKitService';
@@ -270,6 +272,44 @@ class CallSideEffectService {
                 throw error;
             }
         }
+    }
+
+    /**
+     * Ends a call whose LiveKit room is gone (or empty) without anyone having hung up:
+     * marks it ENDED, closes out the call system message in the same transaction, then
+     * emits the Calls-dashboard analytics. Shared by the CallValidationWorker sweep and
+     * the calls admin panel's force-end, so both leave the call in the same state.
+     */
+    async endOrphanedCall(call: Call, reason: string): Promise<Date> {
+        const endedAt = new Date();
+
+        await db.$transaction(async (tx) => {
+            await repositories.calls.endCall(call.id, endedAt, tx);
+
+            this.logger.info(
+                `[${call.externalId}] call_status_updated | from=${call.status}, to=ENDED, reason=${reason}`,
+            );
+
+            const messageUpdated = await updateCallSystemMessageIfNeeded({
+                call,
+                callId: call.externalId,
+                endedAt,
+                tx,
+            });
+
+            if (messageUpdated) {
+                this.logger.info(`Updated system message for call ${call.externalId}`);
+            }
+        });
+
+        // Emit analytics events (call_ended + per-participant) for the Calls dashboards
+        try {
+            await this.logCallAnalytics({ ...call, callOrigin: call.callOrigin as CallOrigin }, endedAt);
+        } catch (analyticsError) {
+            this.logger.error(`Failed to log call analytics for ${call.externalId}:`, analyticsError);
+        }
+
+        return endedAt;
     }
 
     /**
