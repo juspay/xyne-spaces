@@ -192,7 +192,6 @@ function applyWindowPolicy(win: BrowserWindow): void {
         contextIsolation: true,
         webviewTag: true,
         preload: path.join(__dirname, '..', 'preload.js'),
-        backgroundThrottling: false,
         spellcheck: true,
       };
 
@@ -399,7 +398,6 @@ export async function createMainWindow(options?: { inactive?: boolean }): Promis
       contextIsolation: true,
       webviewTag: true,
       preload: path.join(__dirname, '..', 'preload.js'),
-      backgroundThrottling: false,
       spellcheck: true,
     },
   });
