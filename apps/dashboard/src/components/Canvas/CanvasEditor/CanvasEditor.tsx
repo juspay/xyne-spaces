@@ -88,6 +88,7 @@ import { CanvasWidthHandles } from '../CanvasWidthHandles';
 import { useCanvasCommentEditorBridge } from '../useCanvasCommentEditorBridge';
 import { useCanvasTicketEditorBridge } from '../useCanvasTicketEditorBridge';
 import { CanvasTicketCreationFlow } from '../CanvasTicketCreationFlow/CanvasTicketCreationFlow';
+import { CanvasTicketLinkFlow } from '../CanvasTicketLinkFlow/CanvasTicketLinkFlow';
 
 const canvasDictionary = {
   ...en,
@@ -423,8 +424,10 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
     });
     const {
       activeTicketAnchor,
+      activeTicketAction,
       isTicketChannelArchived,
       openTicketForCurrentSelection,
+      openTicketLinkForCurrentSelection,
       closeTicketModal,
       handleTicketCreated,
     } = useCanvasTicketEditorBridge({
@@ -565,6 +568,7 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
           canComment: editable,
           canCreateTicket: editable && !isTicketChannelArchived,
           onCreateTicket: openTicketForCurrentSelection,
+          onLinkTicket: openTicketLinkForCurrentSelection,
         }),
       [
         _canvasTitle,
@@ -572,6 +576,7 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
         editable,
         isTicketChannelArchived,
         openCommentsForCurrentBlock,
+        openTicketLinkForCurrentSelection,
         openTicketForCurrentSelection,
       ],
     );
@@ -676,10 +681,15 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
         </div>
 
         <CanvasTicketCreationFlow
-          anchor={activeTicketAnchor}
+          anchor={activeTicketAction === 'create' ? activeTicketAnchor : null}
           channelId={channelId}
           onClose={closeTicketModal}
           onTicketCreated={handleTicketCreated}
+        />
+        <CanvasTicketLinkFlow
+          anchor={activeTicketAction === 'link' ? activeTicketAnchor : null}
+          onClose={closeTicketModal}
+          onTicketSelected={handleTicketCreated}
         />
 
         {/* Presentation Modal */}
