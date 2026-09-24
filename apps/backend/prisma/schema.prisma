@@ -3229,7 +3229,7 @@ model CanvasCommentThread {
   createdByUser       User            @relation("CanvasCommentThreadCreatedBy", fields: [createdBy], references: [id])
   statusUpdatedByUser User?           @relation("CanvasCommentThreadStatusUpdatedBy", fields: [statusUpdatedBy], references: [id])
 
-  @@index([ canvasId, createdAt])
+  @@index([workspaceId, canvasId, createdAt])
   @@index([connectId])
   @@map("canvas_comment_threads")
   @@schema("public")
