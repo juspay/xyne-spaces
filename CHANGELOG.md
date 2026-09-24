@@ -1,3 +1,11 @@
+## [1.388.0](https://github.com/juspay/xyne-spaces/compare/v1.387.0...v1.388.0) (2026-09-24)
+
+
+### Features
+
+* copy the ticket ID from the ticket details header ([#2266](https://github.com/juspay/xyne-spaces/issues/2266)) ([d31fec4](https://github.com/juspay/xyne-spaces/commit/d31fec4b9a7b8a748f4efd162ab6c73e31eee8f2))
+* Test template functionality ([#2234](https://github.com/juspay/xyne-spaces/issues/2234)) ([0c4e12b](https://github.com/juspay/xyne-spaces/commit/0c4e12b718d7d23ebd306b05761d230a98310776))
+
 ## [1.387.0](https://github.com/juspay/xyne-spaces/compare/v1.386.0...v1.387.0) (2026-09-24)
 
 
