@@ -1,4 +1,5 @@
 import {
+  type CSSProperties,
   ReactElement,
   memo,
   startTransition,
@@ -20,6 +21,7 @@ import {
 // *verb* across the two places it lives beats matching the icon family within one
 // row, because the two buttons do the identical thing to the identical state.
 import { Tooltip } from '../../../ui/Tooltip/Tooltip';
+import ColumnIcon from '../ColumnIcon/ColumnIcon';
 import StreamRouterScope from '../StreamRouterScope/StreamRouterScope';
 import { ActivityDot } from '../ActivityDot/ActivityDot';
 import { columnIntentFor } from '../ColumnIntent/ColumnIntent';
@@ -36,7 +38,6 @@ import {
   COLUMN_CLOSE_MS,
   COLUMN_OPEN_MS,
   FOCUS_EASE,
-  FOCUS_PEEK,
   STREAMS_EASE,
   STREAM_PRESS,
 } from '../Streams/Streams.types';
@@ -127,7 +128,7 @@ export interface StreamColumnProps {
    * prevent it, because there is nothing to prevent — no JS assigns the scroll,
    * so there is no call to intercept.
    */
-  onSurfaceMount?: () => void;
+  onSurfaceMount?: (columnId: string) => void;
   focused: boolean;
   /** Briefly lit, to answer "where is it" when you asked for one you already have. */
   flash: boolean;
@@ -143,8 +144,15 @@ export interface StreamColumnProps {
   dragging: boolean;
   workspaceId: string;
   onFocus: () => void;
-  /** Whether the stream is currently showing one column at a time. */
-  focusMode: boolean;
+  /**
+   * This column is the one focus mode is holding: `focusMode && focused`.
+   *
+   * Resolved by the stream rather than derived here from the raw mode, because
+   * the mode changes for every column at once and the posture changes for one.
+   * See `data-streams-focus`, which carries the mode itself to CSS.
+   */
+  focusHeld: boolean;
+
   /**
    * Focus mode, aimed at this column.
    *
@@ -177,21 +185,6 @@ export interface StreamColumnProps {
   seed?: ColumnSeed | undefined;
   /** Take a conversation dragged from elsewhere in the stream. */
   onDropItem: (item: StreamItem) => void;
-  /**
-   * Take the whole scroller, less a sliver of the next column.
-   *
-   * Expressed as a percentage rather than a measured pixel width, and that is a
-   * correctness fix rather than a tidy-up. The measured version read the strip's
-   * width from a `ResizeObserver` — but the rail *shrinks the strip* as it slides
-   * in, so the column grew to the pre-rail width first and then shrank back by
-   * the rail's 208px once it landed. Two moves where the user asked for one, and
-   * the second one backwards.
-   *
-   * A percentage resolves against the flex container's content box every frame,
-   * which for an overflow scroller is the scrollport. So it simply tracks the
-   * rail instead of racing it, and no measurement is involved at all.
-   */
-  fill: boolean;
   /**
    * This column's share of the focus-mode page, 0–1. One unless it is half of
    * an attached pair, in which case the two halves split the page between them
@@ -230,12 +223,6 @@ export interface StreamColumnProps {
    */
 
   /**
-   * How long a width change should take, in ms. Zero at rest — a resize drag
-   * rewrites the width every frame and must stay glued to the cursor — and
-   * `dev.focusMs` only while the stream is changing focus mode.
-   */
-  widthMs: number;
-  /**
    * Make this column a stop on the carousel.
    *
    * Focus mode is not "one column is wider" — it is one column *at a time*. Snap
@@ -272,7 +259,7 @@ const StreamColumn = ({
   dragging,
   workspaceId,
   onFocus,
-  focusMode,
+  focusHeld,
   onToggleFocus,
   joinRight = false,
   joinLeft = false,
@@ -284,16 +271,14 @@ const StreamColumn = ({
   onClearActivity,
   seed,
   onDropItem,
-  fill,
   fillShare = 1,
   snapExtendPx = 0,
   snap,
-  widthMs,
 }: StreamColumnProps): ReactElement => {
   const surface = surfaceFor(column.source);
   const dev = DEV_DEFAULTS;
   const { openBeside } = actions;
-  const { Title, Body, icon: Icon } = surface;
+  const { Title, Body } = surface;
   const hasActivity = isUnread(activity);
 
   // Two paints are what an entrance costs: one at zero so there is a value to
@@ -435,11 +420,11 @@ const StreamColumn = ({
     const frame = requestAnimationFrame(() => {
       // Before the build, not after: the surface scrolls the strip on its very
       // first commit, so the stream has to be holding its position already.
-      onSurfaceMount?.();
+      onSurfaceMount?.(column.id);
       startTransition(() => setSurfaceReady(true));
     });
     return (): void => cancelAnimationFrame(frame);
-  }, [opening, scrolling, surfaceReady, onSurfaceMount]);
+  }, [opening, scrolling, surfaceReady, onSurfaceMount, column.id]);
 
   // Whether a drag is currently hovering this column. Local, because it changes
   // several times a second while a drag crosses the stream and nothing outside
@@ -498,10 +483,11 @@ const StreamColumn = ({
     controlsShown ? 'opacity-100' : 'opacity-0 group-hover/column:opacity-100',
   );
 
-  // Not `focusMode` alone: in focus mode every column still renders, and a
+  // Not the mode alone: in focus mode every column still renders, and a
   // neighbour peeking in at the edge of the scroller would claim the posture for
-  // a column that is not the one being shown.
-  const held = focusMode && focused;
+  // a column that is not the one being shown. Resolved in the stream now, so
+  // that flipping the mode is not a prop change on every column.
+  const held = focusHeld;
 
   // Declared once and placed at whichever end the dial names. Written out twice
   // in the row instead, the two copies drift the moment one of them is touched
@@ -561,6 +547,11 @@ const StreamColumn = ({
         // surface does not cover. Invisible in the light theme, where `--card`
         // and `--background` are both `0 0% 100%`, and 4 points of lightness
         // apart in the dark one, which is why it only ever showed there.
+        // `stream-column` carries no appearance. It is the hook the two width
+        // rules in global.css need — the wide-stream width, and the focus-mode
+        // one under `[data-streams-focus='on']` — so that changing mode never
+        // touches this component.
+        'stream-column',
         'group/column relative flex h-full shrink-0 flex-col overflow-hidden bg-background',
         // Centre rather than start: every column is the same width in focus mode
         // and a sliver of the neighbours shows on both sides, which is what says
@@ -600,124 +591,118 @@ const StreamColumn = ({
         dragging && 'relative z-30 cursor-grabbing',
         closing && 'pointer-events-none',
       )}
-      style={{
-        // Per-corner rather than one radius, because a column in an attached
-        // pair is half a box: the side that continues into its neighbour has to
-        // be square, or the pair reads as two cards touching instead of as one
-        // panel with a divider down it.
-        borderTopLeftRadius: joinLeft ? 0 : dev.columnRadius,
-        borderBottomLeftRadius: joinLeft ? 0 : dev.columnRadius,
-        borderTopRightRadius: joinRight ? 0 : dev.columnRadius,
-        borderBottomRightRadius: joinRight ? 0 : dev.columnRadius,
-        // Zero in flat mode, so the columns read as panes of one surface rather
-        // than as cards on it. The width is what changes, not just the colour:
-        // see the note on the class list.
-        borderTopWidth: dev.columnBorders ? 1 : 0,
-        borderBottomWidth: dev.columnBorders ? 1 : 0,
-        // Dropped entirely on a joined edge. Keeping it would put two 1px lines
-        // either side of the gutter — a double rule where the design calls for
-        // a single seam, which the gutter itself draws.
-        borderLeftWidth: dev.columnBorders && !joinLeft ? 1 : 0,
-        borderRightWidth: dev.columnBorders && !joinRight ? 1 : 0,
-        borderStyle: 'solid',
-        // Positive: `scroll-margin` *adds* outsets to the snap area, so this
-        // grows it rightward over the pane rather than trimming it.
-        ...(snapExtendPx > 0 && { scrollMarginRight: `${snapExtendPx}px` }),
-        // A percentage in focus mode, so the width tracks the rail sliding in
-        // rather than being measured against a strip the rail is still shrinking.
-        // See the `fill` prop.
-        // A fixed pixel target while the transition runs, the percentage only
-        // at rest. Both resolve to the same number, so the handover at the end
-        // is invisible — but a percentage *during* the tween is a target that
-        // moves whenever anything else on the row resizes, and that is what
-        // made the column overshoot and come back.
-        // The page, less the peek at the next column, less the 8px gutter a pair
-        // spends on its seam — then split by share. At `fillShare` 1 the gutter
-        // term is the separation to the next page and comes out of the peek
-        // anyway, so a lone column lands where it always did.
-        width:
-          closing || arriving
-            ? 0
-            : fill
-              ? // `peek` is the sliver of the next column left showing at the
-                // page edge. Dialled to zero the focused page is the whole
-                // width, and focus mode stops hinting that there is a stream
-                // around it.
-                (peek =>
-                  fillShare === 1
-                    ? `calc(100% - ${peek}px)`
-                    : `calc((100% - ${peek}px - 8px) * ${fillShare})`)(
-                  dev.focusPeek ? FOCUS_PEEK : 0,
-                )
-              : // `var(--col-w, …)` is what keeps a resize drag off the React
-                // path entirely. `ColumnResizeHandle` writes `--col-w` straight
-                // onto this node once per frame, so the width the eye follows
-                // never goes through a commit; React's `width` stays the
-                // fallback and takes over the moment the drag commits and the
-                // property is removed.
-                //
-                // Measured by S-3add: 24 width changes cost 0ms blocked written
-                // to the DOM, against 2,055ms and 25 long tasks through React —
-                // because a width change is a *real* change, so the resized
-                // column legitimately re-renders, and one un-memoised chat panel
-                // re-render is ~85ms.
-                //
-                // Deliberately NOT registered via `@property`. A registered
-                // `<length>` becomes animatable and can pick up the `width`
-                // transition below; unregistered, it is substituted as a raw
-                // token and stays inert.
-                `var(--col-w, ${width}px)`,
-        ...(fill && !closing && !arriving && { minWidth: `${surface.minWidth}px` }),
-        ...(closing && { opacity: 0, minWidth: 0 }),
-        ...(arriving && { opacity: 0, minWidth: 0 }),
-        boxShadow: `${ringShadow}, ${dragging ? DRAG_SHADOW : lit ? CARD_SHADOW : CARD_SHADOW_OFF}`,
-        // A lifted pair is one card, so it casts one shadow — but it is drawn by
-        // two boxes, and `DRAG_SHADOW` has a 50px blur, so each half was throwing
-        // ~25px of it sideways into the 8px seam. Two shadows meeting in the
-        // middle is a dark band down the centre of something that should read as
-        // solid.
-        //
-        // Clipping flush at the joined edge and 120px past the other three keeps
-        // every outward shadow and removes only the pair's own interior. Gated on
-        // `dragging` because a clip also clips overflow — a menu opened from this
-        // header would be cut off — and nothing is open mid-drag.
-        ...(dragging &&
-          (joinLeft || joinRight) && {
-            clipPath: joinLeft ? 'inset(-120px -120px -120px 0)' : 'inset(-120px 0 -120px -120px)',
-          }),
-        // `width` is in the transition list at 0ms even at rest, and only its
-        // *duration* changes when the column closes. Adding the property and
-        // changing the value in one commit is the case where a browser is
-        // entitled to skip the transition entirely — changing a duration on a
-        // property that was already declared is not.
-        //
-        // 0ms at rest is what keeps the resize drag honest: that writes a new
-        // width every frame, and easing toward a target that moves every frame
-        // is how a resize handle ends up trailing the cursor.
-        //
-        // `transform` is deliberately absent — the drag writes it directly.
-        transition: [
-          `opacity 150ms ${STREAMS_EASE}`,
-          `border-color ${lit ? RING_IN_MS : RING_OUT_MS}ms ${STREAMS_EASE}`,
-          // Asymmetric, and the direction is the point: the ring arriving is a
-          // thing settling into place, the ring leaving is a thing letting go.
-          `box-shadow ${lit ? RING_IN_MS : RING_OUT_MS}ms ${STREAMS_EASE}`,
-          // Closing wins, then whatever the stream asked for, then zero.
-          // Closing wins, then opening, then whatever the stream asked for, then
-          // zero. Opening cannot use `widthMs` — that is 0 at rest, which is the
-          // whole reason a freshly inserted column snapped to size.
-          `width ${closing ? COLUMN_CLOSE_MS : opening ? COLUMN_OPEN_MS : widthMs}ms ${
-            closing ? STREAMS_EASE : FOCUS_EASE
-          }`,
-          // The corners square off when a pane arrives and round back when it
-          // leaves, and both used to be instant — a snap landing *after* the
-          // pane had finished shrinking, which is what made one event read as a
-          // sequence. On the close clock they round back *while* the pane goes,
-          // so the box reforms in the same gesture that empties it.
-          `border-radius ${COLUMN_CLOSE_MS}ms ${STREAMS_EASE}`,
-          `border-color ${COLUMN_CLOSE_MS}ms ${STREAMS_EASE}`,
-        ].join(', '),
-      }}
+      style={
+        {
+          // Per-corner rather than one radius, because a column in an attached
+          // pair is half a box: the side that continues into its neighbour has to
+          // be square, or the pair reads as two cards touching instead of as one
+          // panel with a divider down it.
+          borderTopLeftRadius: joinLeft ? 0 : dev.columnRadius,
+          borderBottomLeftRadius: joinLeft ? 0 : dev.columnRadius,
+          borderTopRightRadius: joinRight ? 0 : dev.columnRadius,
+          borderBottomRightRadius: joinRight ? 0 : dev.columnRadius,
+          // Zero in flat mode, so the columns read as panes of one surface rather
+          // than as cards on it. The width is what changes, not just the colour:
+          // see the note on the class list.
+          borderTopWidth: dev.columnBorders ? 1 : 0,
+          borderBottomWidth: dev.columnBorders ? 1 : 0,
+          // Dropped entirely on a joined edge. Keeping it would put two 1px lines
+          // either side of the gutter — a double rule where the design calls for
+          // a single seam, which the gutter itself draws.
+          borderLeftWidth: dev.columnBorders && !joinLeft ? 1 : 0,
+          borderRightWidth: dev.columnBorders && !joinRight ? 1 : 0,
+          borderStyle: 'solid',
+          // Positive: `scroll-margin` *adds* outsets to the snap area, so this
+          // grows it rightward over the pane rather than trimming it.
+          ...(snapExtendPx > 0 && { scrollMarginRight: `${snapExtendPx}px` }),
+          // Collapse only. Every other width now comes from `.stream-column` in
+          // global.css, and that is what makes focus mode free: the focused width
+          // is a rule under `[data-streams-focus='on']`, so entering the mode is
+          // one attribute on an ancestor rather than a new `width` on eighteen
+          // columns — which React can only deliver by re-rendering all of them.
+          //
+          // An inline `width` would out-specify both rules, so there must not be
+          // one except in the case that genuinely wants to win over focus mode: a
+          // column collapsing while the mode is on.
+          //
+          // The two numbers the rules need, published as variables because both
+          // are per-column and neither changes when the mode does:
+          //
+          // `--col-base` is the wide-stream width. `--col-w` still shadows it and
+          // still keeps a resize drag off the React path entirely —
+          // `ColumnResizeHandle` writes it straight onto this node once per frame,
+          // so the width the eye follows never goes through a commit. Measured by
+          // S-3add: 24 width changes cost 0ms blocked written to the DOM, against
+          // 2,055ms and 25 long tasks through React.
+          //
+          // Deliberately NOT registered via `@property`. A registered `<length>`
+          // becomes animatable and can pick up the `width` transition below;
+          // unregistered, it is substituted as a raw token and stays inert.
+          ...(closing || arriving ? { width: 0 } : null),
+          '--col-base': `${width}px`,
+          // A pair splits one page, so its halves also split the 8px seam between
+          // them; a lone column has no seam and the whole page less the peek.
+          '--col-share': fillShare,
+          '--col-seam': fillShare === 1 ? '0px' : '8px',
+          '--col-min': `${surface.minWidth}px`,
+          ...(closing && { opacity: 0, minWidth: 0 }),
+          ...(arriving && { opacity: 0, minWidth: 0 }),
+          boxShadow: `${ringShadow}, ${dragging ? DRAG_SHADOW : lit ? CARD_SHADOW : CARD_SHADOW_OFF}`,
+          // A lifted pair is one card, so it casts one shadow — but it is drawn by
+          // two boxes, and `DRAG_SHADOW` has a 50px blur, so each half was throwing
+          // ~25px of it sideways into the 8px seam. Two shadows meeting in the
+          // middle is a dark band down the centre of something that should read as
+          // solid.
+          //
+          // Clipping flush at the joined edge and 120px past the other three keeps
+          // every outward shadow and removes only the pair's own interior. Gated on
+          // `dragging` because a clip also clips overflow — a menu opened from this
+          // header would be cut off — and nothing is open mid-drag.
+          ...(dragging &&
+            (joinLeft || joinRight) && {
+              clipPath: joinLeft
+                ? 'inset(-120px -120px -120px 0)'
+                : 'inset(-120px 0 -120px -120px)',
+            }),
+          // `width` is in the transition list at 0ms even at rest, and only its
+          // *duration* changes when the column closes. Adding the property and
+          // changing the value in one commit is the case where a browser is
+          // entitled to skip the transition entirely — changing a duration on a
+          // property that was already declared is not.
+          //
+          // 0ms at rest is what keeps the resize drag honest: that writes a new
+          // width every frame, and easing toward a target that moves every frame
+          // is how a resize handle ends up trailing the cursor.
+          //
+          // `transform` is deliberately absent — the drag writes it directly.
+          transition: [
+            `opacity 150ms ${STREAMS_EASE}`,
+            `border-color ${lit ? RING_IN_MS : RING_OUT_MS}ms ${STREAMS_EASE}`,
+            // Asymmetric, and the direction is the point: the ring arriving is a
+            // thing settling into place, the ring leaving is a thing letting go.
+            `box-shadow ${lit ? RING_IN_MS : RING_OUT_MS}ms ${STREAMS_EASE}`,
+            // Closing wins, then opening, then the stream's focus clock, which is
+            // 0ms at rest. Opening cannot use that clock for the same reason: at
+            // rest it is 0, which is what made a freshly inserted column snap.
+            // `var(--col-anim)` rather than a number: the stream publishes the
+            // focus clock once, on the run, and every column picks it up during
+            // style recalculation. A duration passed as a prop meant `0 →
+            // dev.focusMs → 0` was two renders of every mounted column per flip.
+            `width ${closing ? `${COLUMN_CLOSE_MS}ms` : opening ? `${COLUMN_OPEN_MS}ms` : 'var(--col-anim, 0ms)'} ${
+              closing ? STREAMS_EASE : FOCUS_EASE
+            }`,
+            // The corners square off when a pane arrives and round back when it
+            // leaves, and both used to be instant — a snap landing *after* the
+            // pane had finished shrinking, which is what made one event read as a
+            // sequence. On the close clock they round back *while* the pane goes,
+            // so the box reforms in the same gesture that empties it.
+            `border-radius ${COLUMN_CLOSE_MS}ms ${STREAMS_EASE}`,
+            `border-color ${COLUMN_CLOSE_MS}ms ${STREAMS_EASE}`,
+          ].join(', '),
+          // Cast because CSSProperties has no index signature for the `--col-*`
+          // custom properties above.
+        } as CSSProperties
+      }
       data-column={column.id}
       onPointerDownCapture={onFocus}
       onDragOver={onDragOver}
@@ -752,7 +737,7 @@ const StreamColumn = ({
             that says *what kind* of column this is — a thread, a ticket, a file
             — so it carries as much as the title does. Greyed, it read as
             decoration sitting in front of the label rather than as half of it. */}
-        <Icon className='size-3.5 shrink-0 text-foreground' aria-hidden />
+        <ColumnIcon source={column.source} className='size-3.5 shrink-0 text-foreground' />
 
         {/* Weight tracks activity, never focus. Toggling between semibold and
             medium changes the text's measured width, which reflows the header —

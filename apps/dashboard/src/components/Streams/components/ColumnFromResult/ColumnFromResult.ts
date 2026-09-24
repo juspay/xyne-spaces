@@ -1,5 +1,5 @@
-import type { ChannelScopeType } from '@xyne/shared';
-import { isDMChannel } from '../../../Chat/ChatDirectory/ChatDirectory.utils';
+import { ChannelScopeType } from '@xyne/shared';
+import { parseDMParticipantIds } from '../../../Chat/ChatDirectory/ChatDirectory.utils';
 import type { DisplayEntityType, DisplaySearchResult } from '../../../../types/search';
 import type { ColumnSource } from '../Streams/Streams.types';
 
@@ -17,10 +17,8 @@ import type { ColumnSource } from '../Streams/Streams.types';
  * below is deliberately shaped like `computeSearchResultPath`'s, case for case,
  * so a change there is easy to mirror.
  *
- * Returns null when the result cannot become a column *yet* — a person you have
- * never DM'd is the only real case, because opening that DM is an async create
- * and this is a pure function. The caller says so out loud rather than dropping
- * the click on the floor.
+ * Returns null for a person you have no DM with yet: opening that DM is an async
+ * create, and this is a pure function. The palette creates it and then opens it.
  */
 /**
  * Only what the DM lookup reads.
@@ -32,13 +30,14 @@ import type { ColumnSource } from '../Streams/Streams.types';
  */
 interface ChannelLike {
   id: string;
+  name: string;
   scopeType: ChannelScopeType;
-  participants?: readonly { userId: string }[] | undefined;
 }
 
 export const columnFromResult = (
   result: DisplaySearchResult,
   channels: readonly ChannelLike[],
+  currentUserId: string,
 ): ColumnSource | null => {
   const ctx = result.searchContext;
 
@@ -49,18 +48,21 @@ export const columnFromResult = (
     /**
      * A person is not a column; their DM is.
      *
-     * Matched the same way `computeSearchResultPath` matches it — a two-party DM
-     * containing them — so the palette lands on exactly the conversation cmd+K
-     * would have opened. No DM yet means there is nothing to open without
-     * creating one, which is a write, and a picker should not write.
+     * Matched by the channel's name, not its participants. A DM is named by its
+     * members' ids, sorted and comma-joined, which is how the backend finds one
+     * (`getDMChannel`) and how the sidebar reads one (`parseDMParticipantIds`).
+     * `participants` looks like the obvious field, but neither channel query
+     * loads that relation, so it is always undefined and matching on it found
+     * no DM at all, ever. A DM with yourself is named by your id alone.
      */
     case 'user': {
-      const dm = channels.find(
-        channel =>
-          isDMChannel(channel.scopeType) &&
-          channel.participants?.length === 2 &&
-          channel.participants.some(participant => participant.userId === result.id),
-      );
+      const dm = channels.find(channel => {
+        if (channel.scopeType !== ChannelScopeType.DM) return false;
+        const ids = parseDMParticipantIds(channel);
+        return result.id === currentUserId
+          ? ids.length === 1 && ids[0] === currentUserId
+          : ids.length === 2 && ids.includes(currentUserId) && ids.includes(result.id);
+      });
       return dm ? { kind: 'channel', channelId: dm.id } : null;
     }
 

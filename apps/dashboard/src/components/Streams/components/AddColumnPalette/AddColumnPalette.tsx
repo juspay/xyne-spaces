@@ -1,16 +1,18 @@
 import { STREAM_PRESS_ROW } from '../Streams/Streams.types';
-import { ReactElement, useCallback, useMemo, useState } from 'react';
+import { ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { SparkleAi } from '../../../icons/SparkleAi';
 import { toast } from 'sonner';
 import GlobalCommandMenu from '../../../GlobalCommandMenu/GlobalCommandMenu';
 import { TabType } from '../../../Chat/ChatDirectory/ChannelCommandMenu.types';
 import type { ContextItem } from '../../../Chat/ThreadContextPanel/ThreadContextPanel.types';
 import { useAllChannels } from '../../../../hooks/useChannels';
+import { useAuthContextValues } from '../../../../hooks/useAuth';
 import { useIntersectionObserver } from '../../../../hooks/useIntersectionObserver';
 import { DEV_DEFAULTS } from '../StreamsDev/StreamsDev';
-import { allowsDuplicates, sourceKey } from '../Streams/Streams.utils';
+import { sourceKey } from '../Streams/Streams.utils';
 import { columnFromResult, contextIdForKey } from '../ColumnFromResult/ColumnFromResult';
 import { cn } from '../../../../utils/classNames';
+import { resolveOrCreateDmChannelId } from '../../../../utils/searchNavigation';
 import type { ColumnSource } from '../Streams/Streams.types';
 
 /**
@@ -142,6 +144,7 @@ const AddColumnPalette = ({
   onDismiss,
 }: AddColumnPaletteProps): ReactElement => {
   const channels = useAllChannels();
+  const { userID } = useAuthContextValues();
   const dev = DEV_DEFAULTS;
 
   /**
@@ -198,25 +201,59 @@ const AddColumnPalette = ({
     return items;
   }, [present]);
 
+  /**
+   * A DM being created, so a second click on the same person waits for the
+   * first instead of creating twice and adding two columns.
+   */
+  const creatingDmRef = useRef(false);
+  // A create that resolves after the palette closed must not add a column you
+  // walked away from.
+  const mountedRef = useRef(true);
+  useEffect(
+    () => (): void => {
+      mountedRef.current = false;
+    },
+    [],
+  );
+
+  /**
+   * A column you already have is not refused here. It goes to `onPick` like any
+   * other, and the stream travels to it and lights it up (`revealExisting`).
+   * Saying "already in this stream" answered the question with a fact and left
+   * you to go and find it.
+   */
   const handleResultPick = useCallback(
     (item: ContextItem): void => {
-      const source = columnFromResult(item.searchResult, channels);
-      // The one result that cannot become a column: a person with no DM yet.
-      // Opening one is a write, and a picker does not write — so say why rather
-      // than swallowing the click.
-      if (!source) {
-        toast.info('Nothing to open as a column yet', {
-          description: 'Start a conversation with them first.',
-        });
+      const result = item.searchResult;
+      const source = columnFromResult(result, channels, userID);
+      if (source) {
+        onPick(source);
         return;
       }
-      if (!allowsDuplicates(source) && present.has(sourceKey(source))) {
-        toast.info('Already in this stream');
+      // A person you have never messaged. Clicking them anywhere else in the app
+      // opens a DM, creating it if it does not exist yet, so this does the same,
+      // through the same call cmd+K makes. The endpoint returns the existing DM
+      // when there is one, so a DM the lookup above missed still opens.
+      if (result.type === 'user') {
+        if (creatingDmRef.current) return;
+        creatingDmRef.current = true;
+        resolveOrCreateDmChannelId(result.id, channels)
+          .then(channelId => {
+            if (mountedRef.current) onPick({ kind: 'channel', channelId });
+          })
+          .catch(() => {
+            toast.error("Couldn't open this DM");
+          })
+          .finally(() => {
+            creatingDmRef.current = false;
+          });
         return;
       }
-      onPick(source);
+      // What is left has no column surface at all: a knowledge-base collection,
+      // or a message whose channel the index did not record.
+      toast.info("This can't open as a column");
     },
-    [channels, present, onPick],
+    [channels, userID, onPick],
   );
 
   const handleOpenChange = useCallback(

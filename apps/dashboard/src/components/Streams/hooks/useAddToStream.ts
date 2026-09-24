@@ -16,6 +16,26 @@ import {
   saveLayout,
 } from '../components/StreamsLayout/StreamsLayout';
 
+/**
+ * Router state asking Streams to open on one column.
+ *
+ * Carried by the "View" on the toast below. Streams otherwise opens where it
+ * always does, at the start of the active stream, which after an add is the one
+ * place the column you just filed is not: it went on the end, and possibly into a
+ * stream that is not the active one at all.
+ */
+export interface StreamsReveal {
+  streamId: string;
+  columnId: string;
+}
+
+export const readStreamsReveal = (state: unknown): StreamsReveal | null => {
+  const reveal = (state as { streamsReveal?: Partial<StreamsReveal> } | null)?.streamsReveal;
+  return typeof reveal?.streamId === 'string' && typeof reveal.columnId === 'string'
+    ? { streamId: reveal.streamId, columnId: reveal.columnId }
+    : null;
+};
+
 /** A stream as the picker needs it: something to name and something to add to. */
 export interface StreamTarget {
   id: string;
@@ -73,9 +93,14 @@ export const useAddToStream = (): AddToStream => {
   const navigate = useNavigate();
   const { workspaceId } = useParams<{ workspaceId?: string }>();
 
-  const openStreams = useCallback((): void => {
-    void navigate(workspaceId ? `/${workspaceId}/streams` : '/streams');
-  }, [navigate, workspaceId]);
+  const openStreams = useCallback(
+    (reveal: StreamsReveal): void => {
+      void navigate(workspaceId ? `/${workspaceId}/streams` : '/streams', {
+        state: { streamsReveal: reveal },
+      });
+    },
+    [navigate, workspaceId],
+  );
 
   const has = useCallback(
     (source: ColumnSource): boolean => {
@@ -109,12 +134,15 @@ export const useAddToStream = (): AddToStream => {
    */
   const commit = useCallback(
     (source: ColumnSource, stream: Stream, streams: readonly Stream[], activeId: string): void => {
-      if (
-        !allowsDuplicates(source) &&
-        stream.columns.some(c => sourceKey(c.source) === sourceKey(source))
-      ) {
+      const existing = allowsDuplicates(source)
+        ? undefined
+        : stream.columns.find(c => sourceKey(c.source) === sourceKey(source));
+      if (existing) {
         toast.info(`Already in ${stream.name}`, {
-          action: { label: 'View', onClick: openStreams },
+          action: {
+            label: 'View',
+            onClick: () => openStreams({ streamId: stream.id, columnId: existing.id }),
+          },
         });
         return;
       }
@@ -137,7 +165,10 @@ export const useAddToStream = (): AddToStream => {
         workspaceId,
       );
       toast.success(`Added to ${next.name}`, {
-        action: { label: 'View', onClick: openStreams },
+        action: {
+          label: 'View',
+          onClick: () => openStreams({ streamId: next.id, columnId: column.id }),
+        },
       });
     },
     [openStreams, workspaceId],

@@ -5405,3 +5405,11 @@ img.inline-emoji,
 [data-ticket-context-row] [role="combobox"] {
   height: 34px !important;
 }
+
+.stream-column {
+  width: var(--col-w, var(--col-base, auto));
+}
+[data-streams-focus="on"] .stream-column {
+  width: calc((100% - var(--focus-peek, 0px) - var(--col-seam, 0px)) * var(--col-share, 1));
+  min-width: var(--col-min, 0px);
+}

@@ -10,6 +10,7 @@ import {
 import { Tooltip } from '../../../ui/Tooltip/Tooltip';
 import { ChevronLeft, ChevronRight, PlusDefault } from '@xyne/icons';
 import { Button } from '../../../ui/Button/Button';
+import ColumnIcon from '../ColumnIcon/ColumnIcon';
 import { surfaceFor } from '../Surfaces/Surfaces';
 import { ActivityDot } from '../ActivityDot/ActivityDot';
 import { type ColumnActivity, IDLE, isUnread } from '../../hooks/useColumnActivity';
@@ -37,6 +38,15 @@ export interface StreamTopNavProps {
   currentId?: string | undefined;
   /** The scroller every variant reads its state from. */
   stripRef: React.RefObject<HTMLElement | null>;
+  /**
+   * Where each scrolling column sits in the strip's scroll space, keyed by id.
+   *
+   * Computed by the stream from its strides rather than measured here, because
+   * the strip is windowed: most columns have no node at any given moment, and a
+   * map measured from nodes could only ever be built while every column was
+   * mounted, which is mid-flip. See `measure`.
+   */
+  columnSpans: ReadonlyMap<string, { start: number; end: number }>;
   onJump: (columnId: string) => void;
   /**
    * Add a column, rendered at the end of the tabs.
@@ -169,7 +179,7 @@ const NavPill = ({
   sidebarStyle: boolean;
   onJump: () => void;
 }): ReactElement => {
-  const { icon: Icon, Title } = surfaceFor(column.source);
+  const { Title } = surfaceFor(column.source);
   const state = activity[column.id] ?? IDLE;
   return (
     <button
@@ -210,7 +220,7 @@ const NavPill = ({
       data-track-category='Streams'
       data-track-name='JumpFromTopNav'
     >
-      <Icon className='size-3.5 shrink-0' aria-hidden />
+      <ColumnIcon source={column.source} className='size-3.5 shrink-0' />
       {/* Bold for a column that simply moved — the sidebar's ambient tier. The
           dot is *replaced* by it rather than joined to it, which is the whole
           point of the convention: one signal per tier, not two.
@@ -397,6 +407,7 @@ const StreamTopNav = ({
   scrolling,
   activity,
   stripRef,
+  columnSpans,
   onJump,
   onAdd,
   currentId,
@@ -427,27 +438,30 @@ const StreamTopNav = ({
    * at a constant, invisible bias.
    */
   const measure = useCallback((): void => {
-    const strip = stripRef.current;
     const track = trackRef.current;
-    if (!strip || !track) return;
+    if (!track) return;
 
-    const stripRect = strip.getBoundingClientRect();
     const trackRect = track.getBoundingClientRect();
     const spans: Span[] = [];
 
     for (const column of scrolling) {
-      const node = strip.querySelector<HTMLElement>(`[data-column="${column.id}"]`);
+      // The strip side comes from the stream's arithmetic, not from a node. It
+      // used to be measured, and since the strip was windowed a column without a
+      // node made this abandon the whole map and keep the previous one. The only
+      // moment every column had a node was a focus flip, mid-tween, so the row
+      // followed a map of a half-finished layout until the next flip: it drifted
+      // off on its own and lost the column you were on, and "it stops following
+      // until focus mode is toggled" was the same bug seen from the other side.
+      const span = columnSpans.get(column.id);
       const chip = track.querySelector<HTMLElement>(`[data-nav-column="${column.id}"]`);
-      // One commit can land a column in the strip before its tab, or the other
-      // way round. A half-built map is worse than the previous one, so it is
-      // abandoned rather than stored — the observer fires again immediately.
-      if (!node || !chip) return;
+      // One commit can land a column before its tab. A half-built map is worse
+      // than the previous one, so it is abandoned; the observer fires again.
+      if (!span || !chip) return;
 
-      const rect = node.getBoundingClientRect();
       const pill = chip.getBoundingClientRect();
       spans.push({
-        scrollStart: rect.left - stripRect.left + strip.scrollLeft,
-        scrollEnd: rect.right - stripRect.left + strip.scrollLeft,
+        scrollStart: span.start,
+        scrollEnd: span.end,
         pillStart: pill.left - trackRect.left + track.scrollLeft,
         pillEnd: pill.right - trackRect.left + track.scrollLeft,
         node: chip,
@@ -456,7 +470,7 @@ const StreamTopNav = ({
     }
 
     spansRef.current = spans;
-  }, [scrolling, stripRef]);
+  }, [scrolling, columnSpans]);
 
   /**
    * Light the run, follow it, and settle toward both rather than snapping.

@@ -9,7 +9,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useSelector } from '@xstate/react';
 import { v4 as uuidv4 } from 'uuid';
 // The header's own icons come from the app's set, not lucide. Two icon families
@@ -30,6 +30,7 @@ import { useColumnDrag, type MarkerRect } from './hooks/useColumnDrag';
 import { useStreamActivity } from './hooks/useStreamActivity';
 import { useAttachmentColumns } from './hooks/useAttachmentColumns';
 import { IDLE, type ColumnActivity } from './hooks/useColumnActivity';
+import { readStreamsReveal } from './hooks/useAddToStream';
 import { DEV_DEFAULTS } from './components/StreamsDev/StreamsDev';
 import { surfaceFor } from './components/Surfaces/Surfaces';
 import { toast } from 'sonner';
@@ -41,6 +42,7 @@ import {
   createStream,
   deleteStream,
   insertStream,
+  isLive,
   liveStreams,
   loadFocusMode,
   loadLayout,
@@ -131,6 +133,40 @@ const FOCUS_SCROLL_GUARD_MS = 400;
 
 /** A scroll this soon after a real gesture belongs to the user, not to a mount. */
 const INPUT_GRACE_MS = 200;
+
+/**
+ * How long after a real gesture the focus-mode carousel may still move focus.
+ *
+ * Longer than `INPUT_GRACE_MS` because a swipe's wheel events stop when the
+ * fingers lift, but the snap animation that finishes it keeps scrolling for a few
+ * hundred milliseconds more, and the page it lands on is still the user's choice.
+ */
+const CAROUSEL_GESTURE_MS = 1000;
+
+/**
+ * How many built columns stay mounted after they leave the window.
+ *
+ * The virtualiser unmounts anything past the overscan band, and `surfaceReady`
+ * is component state — so an unmount throws the built surface away, and coming
+ * back rebuilds it from a skeleton. Measured in production 2026-09-22: a column
+ * built at 688 nodes scrolled away, returned as a 23-node skeleton at 671ms,
+ * stayed one for 1.3s and showed content at 1,990ms, costing 382ms of blocked
+ * main thread. One round trip across a 17-column stream destroyed 21 surfaces.
+ *
+ * Sized to hold a whole stream rather than a sliding window, because the rule
+ * people actually expect is "a column I have already opened does not reload".
+ * At 8 this failed exactly that way: on a 16-column stream every column built
+ * during a crawl and four were skeletons again by the end. Past the column
+ * count, built-then-skeleton regressions measured **zero** across two full
+ * traversals.
+ *
+ * The cost is DOM, and it is not small — that same stream went from 2,226 nodes
+ * to 7,303 with every column held. Every style recalculation walks the whole
+ * document, and style recalculation is already the biggest single cost here, so
+ * this trades a visible stall for a diffuse one. 20 is a ceiling for
+ * pathological streams, not a target.
+ */
+const KEEP_BUILT = 20;
 
 /**
  * Where a dragged column will land — one marker for the whole stream.
@@ -262,6 +298,7 @@ const isTypingTarget = (target: EventTarget | null): boolean => {
 const StreamsScreen = (): ReactElement => {
   const { workspaceId } = useParams<{ workspaceId?: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const [layout, setLayout] = useState<StreamsLayout>(() => loadLayout(workspaceId));
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -1492,6 +1529,26 @@ const StreamsScreen = (): ReactElement => {
   }, [scrolling]);
 
   /**
+   * Each tab's column in the strip's scroll space, for the top nav to follow.
+   *
+   * The same arithmetic `columnBox` uses, and `assertStridesMatchDom` holds it
+   * to the DOM at rest: a column's left edge on screen is
+   * `toClientX(strides.left[i], strip, stripLead)`, so in scroll space it is
+   * `strides.left[i] + stripLead`. Handed over rather than measured, because a
+   * windowed strip has no node for most columns.
+   */
+  const navSpans = useMemo(() => {
+    const spans = new Map<string, { start: number; end: number }>();
+    for (const column of navScrolling) {
+      const at = scrollingIndexOf.get(column.id);
+      if (at === undefined) continue;
+      const start = (scrollingStrides.left[at] ?? 0) + stripLead;
+      spans.set(column.id, { start, end: start + (scrollingStrides.width[at] ?? 0) });
+    }
+    return spans;
+  }, [navScrolling, scrollingIndexOf, scrollingStrides, stripLead]);
+
+  /**
    * Where a column is on screen, for anything that has to answer that about a
    * column it cannot see.
    *
@@ -1642,6 +1699,47 @@ const StreamsScreen = (): ReactElement => {
   }, [jumpTo]);
 
   /**
+   * Open on the column the "Added to …" toast's "View" asked for.
+   *
+   * Arriving at Streams deliberately does not travel to the focused column (see
+   * the centring effect), so a column added from elsewhere, which goes on the
+   * end, was the one thing you could not see when you got here. The request
+   * rides in router state rather than in the layout, because it is about this
+   * one arrival and not about the stream.
+   *
+   * Two steps, because the column may be in a stream that is not the active one:
+   * switch first, then jump once that stream is the one rendered.
+   */
+  const revealRef = useRef(readStreamsReveal(location.state));
+
+  useEffect(() => {
+    // Consumed once. Replacing the entry drops the request, so a reload or a
+    // Back into Streams does not replay the jump.
+    if (revealRef.current) void navigate(location.pathname, { replace: true, state: null });
+    // Mount only: the request is read once, into the ref above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const reveal = revealRef.current;
+    if (!reveal) return;
+    if (stream.id !== reveal.streamId) {
+      const target = layout.streams.find(candidate => candidate.id === reveal.streamId);
+      // Archived or deleted since the toast: stay where Streams opened.
+      if (!target || !isLive(target)) {
+        revealRef.current = null;
+        return;
+      }
+      chooseStream(reveal.streamId);
+      return;
+    }
+    revealRef.current = null;
+    if (!columnOrder.includes(reveal.columnId)) return;
+    jumpTo(reveal.columnId);
+    flashColumn(reveal.columnId);
+  }, [stream.id, layout.streams, columnOrder, chooseStream, jumpTo, flashColumn]);
+
+  /**
    * A pair is one landing site, not two.
    *
    * `moveColumn` already steps past a slot that would tear a pair apart, but it
@@ -1691,6 +1789,26 @@ const StreamsScreen = (): ReactElement => {
   const virtualize = widthMs === 0;
 
   /**
+   * Column ids that have built a surface, most recent first, capped at
+   * `KEEP_BUILT`.
+   *
+   * State rather than a ref because `keepMounted` has to recompute when it
+   * changes — a ref would hold the ids and never widen the window.
+   */
+  const [builtOrder, setBuiltOrder] = useState<string[]>([]);
+
+  const noteBuilt = useCallback((columnId: string): void => {
+    setBuiltOrder(previous => {
+      // Same-value bail. Without it every surface mount allocates a new array,
+      // which rebuilds `keepMounted`, then `rangeExtractor`, then the
+      // virtualiser — for a list that did not change.
+      if (previous[0] === columnId) return previous;
+      const next = [columnId, ...previous.filter(id => id !== columnId)];
+      return next.length > KEEP_BUILT ? next.slice(0, KEEP_BUILT) : next;
+    });
+  }, []);
+
+  /**
    * Indexes that stay mounted whatever the scroll position says.
    *
    * A dragged column cannot be allowed to unmount: `useColumnDrag` caches the
@@ -1732,8 +1850,17 @@ const StreamsScreen = (): ReactElement => {
     // Measured before the fix: a draft typed into an Ask AI column at index 0
     // of fifteen was gone after scrolling to the far end and back.
     for (const column of columns) if (column.source.kind === 'agent') add(column.id);
+    // Everything else that has already been built, most recent first. The Ask AI
+    // rule above is this same rule with an unbounded budget, and for the reason
+    // stated: its state has no source to rebuild from. The others do rebuild —
+    // they just take two seconds and 382ms of blocked main thread to do it, and
+    // show a skeleton throughout, so the user pays for the scroll twice.
+    //
+    // `withPartner`, not `add`: a channel and the pane it holds are one page
+    // here too, and half a held pair still rebuilds visibly.
+    for (const id of builtOrder) withPartner(id);
     return keep;
-  }, [drag, columns, stream.focus, scrollingIndexOf]);
+  }, [drag, columns, stream.focus, scrollingIndexOf, builtOrder]);
 
   /**
    * The columns actually on screen, as opposed to merely mounted.
@@ -2025,6 +2152,39 @@ const StreamsScreen = (): ReactElement => {
   }, []);
 
   /**
+   * One last centring, once the flip's clock has run out and the layout is final.
+   *
+   * `trackFocusedColumn` runs for a fixed `focusMs + 32`, measured in wall-clock
+   * time, so on a heavy stream the frames it was counting on never arrive: at 37
+   * columns an exit spent 250–800ms per frame, the loop got one or two tries and
+   * stopped with the widths still moving. Whatever it left behind stood, and the
+   * strip settled on some other column (0 of 2 exits landed, measured). This runs
+   * on the commit that ends the flip, when windowing is back and every width is
+   * final, so it cannot be early however slow the frames were.
+   */
+  const flipWidthRef = useRef(widthMs);
+  useLayoutEffect(() => {
+    const was = flipWidthRef.current;
+    flipWidthRef.current = widthMs;
+    if (!(was > 0 && widthMs === 0)) return;
+    const strip = stripRef.current;
+    const id = focusedIdRef.current;
+    if (!strip || !id) return;
+    const box = pageBoxFor(strip, id);
+    if (!box) return;
+    const stripRect = strip.getBoundingClientRect();
+    const target = Math.max(
+      0,
+      strip.scrollLeft + box.left + box.width / 2 - (stripRect.left + stripRect.width / 2),
+    );
+    intendStripScroll(target);
+    const previous = strip.style.scrollBehavior;
+    strip.style.scrollBehavior = 'auto';
+    strip.scrollLeft = target;
+    strip.style.scrollBehavior = previous;
+  }, [widthMs, pageBoxFor, intendStripScroll]);
+
+  /**
    * The carousel reports where it came to rest.
    *
    * Without this the rail highlights whatever you last *clicked*, while the
@@ -2107,6 +2267,12 @@ const StreamsScreen = (): ReactElement => {
       // loop is the other half of why the stream ended up somewhere random.
       if (transitioningRef.current) return;
       if (best < 0 || best === focusRef.current) return;
+      // And not when the user didn't scroll. A column finishing its load, the
+      // strip pin restoring, or a layout shift all scroll the strip too, and
+      // reading those as a swipe moved focus to a neighbour, so leaving focus mode
+      // landed on a column nobody chose. Measured: nudging the strip from code,
+      // with no gesture, moved focus from column 12 to 13.
+      if (performance.now() - lastInputRef.current > CAROUSEL_GESTURE_MS) return;
       // Claim the centring mark too. The effect below would otherwise see focus
       // change, decide the strip needs to travel, and scroll to the column the
       // user is in the middle of scrolling to themselves.
@@ -2280,10 +2446,16 @@ const StreamsScreen = (): ReactElement => {
    * now arrive after a scroll settles, so the stray scroll arrives with them,
    * several hundred milliseconds after the user has come to rest.
    */
-  const holdStripThroughMount = useCallback((): void => {
-    restoreUntilRef.current = performance.now() + FOCUS_SCROLL_GUARD_MS;
-    pinStrip();
-  }, [pinStrip]);
+  const holdStripThroughMount = useCallback(
+    (columnId: string): void => {
+      restoreUntilRef.current = performance.now() + FOCUS_SCROLL_GUARD_MS;
+      pinStrip();
+      // The same call is the stream's only notice that this column now holds a
+      // built surface worth keeping.
+      noteBuilt(columnId);
+    },
+    [pinStrip, noteBuilt],
+  );
 
   // The trap this creates: anything Streams opens on purpose must carry
   // `data-streams-input` or its autofocused field is blurred the instant it
@@ -2635,6 +2807,13 @@ const StreamsScreen = (): ReactElement => {
     const offScreen =
       at !== undefined && (at < onScreenRef.current.start || at > onScreenRef.current.end);
 
+    // Through the pair. Focus lands on whichever half you opened, but a pair is
+    // one page — so the parent reading as unfocused while its own pane held
+    // focus is what left its focus button offering to *enter* a mode it was
+    // already in.
+    const isFocused =
+      hostFor(columns, columns[stream.focus]?.id ?? '')?.id === hostFor(columns, column.id)?.id;
+
     return (
       <Fragment key={column.id}>
         <StreamColumn
@@ -2667,19 +2846,8 @@ const StreamsScreen = (): ReactElement => {
           // away dragged the viewport twenty thousand pixels to reach itself —
           // the same cause as the deck's 1,700px nudge, an order of magnitude
           // further.
-          scrolling={
-            (windowScrolling || offScreen) &&
-            hostFor(columns, columns[stream.focus]?.id ?? '')?.id !==
-              hostFor(columns, column.id)?.id
-          }
-          // Through the pair. Focus lands on whichever half you opened, but a
-          // pair is one page — so the parent reading as unfocused while its own
-          // pane held focus is what left its focus button offering to *enter* a
-          // mode it was already in.
-          focused={
-            hostFor(columns, columns[stream.focus]?.id ?? '')?.id ===
-            hostFor(columns, column.id)?.id
-          }
+          scrolling={(windowScrolling || offScreen) && !isFocused}
+          focused={isFocused}
           flash={flashId === column.id}
           activity={streamActivity[column.id] ?? IDLE}
           actions={actions}
@@ -2691,7 +2859,11 @@ const StreamsScreen = (): ReactElement => {
           }
           workspaceId={workspaceId ?? ''}
           onFocus={handlers.onFocus}
-          focusMode={focusMode}
+          // `focusMode && focused`, resolved here rather than passed as the raw
+          // mode. The mode flips for every column at once; the *posture* flips
+          // for the one you are entering on. Passing the mode made a focus
+          // toggle a prop change on all of them — see `--col-anim` below.
+          focusHeld={focusMode && isFocused}
           joinRight={holds}
           joinLeft={isHeld}
           onToggleFocus={handlers.onToggleFocus}
@@ -2707,8 +2879,11 @@ const StreamsScreen = (): ReactElement => {
           // carousel could come to rest on the attachment alone, which is the
           // split panel torn down the middle — the state this grouping exists
           // to make unreachable.
-          snap={focusMode && !isHeld}
-          fill={focusMode}
+          // Not gated on `focusMode`. `scroll-snap-align` is inert unless the
+          // scroller declares `scroll-snap-type`, which only focus mode does —
+          // so declaring it always is free, and keeps the mode out of the
+          // column's props.
+          snap={!isHeld}
           fillShare={fillShare}
           // Only the parent, only in focus mode, only when it is holding a pane.
           // The pane itself carries no snap at all, so the pair has exactly one
@@ -2726,7 +2901,6 @@ const StreamsScreen = (): ReactElement => {
               ? (stripWidth - (dev.focusPeek ? FOCUS_PEEK : 0) - 8) * (1 - fillShare) + 8
               : 0
           }
-          widthMs={widthMs}
         />
         {/* Pixels in, pixels out — no viewport in the conversion. The previous
             version divided the dragged pixels by the measured viewport to get a
@@ -2890,6 +3064,7 @@ const StreamsScreen = (): ReactElement => {
               scrolling={navScrolling}
               activity={navActivity}
               stripRef={stripRef}
+              columnSpans={navSpans}
               onJump={jumpTo}
               onAdd={openAdd}
               // Only in focus mode. The wide stream shows five columns at
@@ -2934,7 +3109,27 @@ const StreamsScreen = (): ReactElement => {
               ends in a resize handle, so an extra gap here stacked handle +
               padding + gap + padding into a dead band wide enough to read as the
               scrolling column being clipped. The handle is the separator. */}
-        <div className='relative flex min-h-0 flex-1'>
+        <div
+          className='relative flex min-h-0 flex-1'
+          // The mode, and the clock a width change runs on, published once for
+          // both column runs to inherit.
+          //
+          // A focus flip used to change four props on every mounted column —
+          // `fill`, `focusMode`, `snap` and `widthMs`, the last one twice — so
+          // eighteen columns re-rendered thirty-six times for a change that is
+          // entirely presentational. Measured at one 1,001ms task. None of the
+          // four is anything but CSS, and a custom property re-resolves during
+          // style recalculation without React touching the element at all: the
+          // flip is now one attribute and one variable on this node, and the
+          // columns below do not re-render for it.
+          data-streams-focus={focusMode ? 'on' : 'off'}
+          style={
+            {
+              '--col-anim': `${widthMs}ms`,
+              '--focus-peek': `${dev.focusPeek ? FOCUS_PEEK : 0}px`,
+            } as CSSProperties
+          }
+        >
           {/* Pinned columns sit outside the scroller, so they cannot drift.
               Gap is 0 within a column run: the resize handle between each pair
               supplies the spacing, so grabbing it never means aiming at a gap.
