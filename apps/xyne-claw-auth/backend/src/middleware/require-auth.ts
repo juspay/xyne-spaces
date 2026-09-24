@@ -216,8 +216,14 @@ export async function optionalAuth(
       req.headers["x-user-id"] = userId;
       await attachOrgContext(req, userId);
     } else {
-      const pinnedUserId = typeof req.headers["x-user-id"] === "string" ? req.headers["x-user-id"].trim() : "";
-      if (pinnedUserId) await attachOrgContext(req, pinnedUserId);
+      // No verified identity: strip the client-supplied x-user-id so downstream
+      // getRequesterId()/getOrgId() see an anonymous caller instead of an
+      // attacker-chosen one. Mirrors stripClientOrgHeaders (fail-closed). The
+      // review_room org gate on the public design-share router relied on this
+      // header being trustworthy — it is client-controlled until a verified
+      // session/CLI token overwrites it, so an unauthenticated spoof must not
+      // survive optionalAuth.
+      delete req.headers["x-user-id"];
     }
   } catch (err) {
     log.warn("[optional-auth] identity resolution failed:", err instanceof Error ? err.message : err);
