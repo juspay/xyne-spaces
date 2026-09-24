@@ -1,3 +1,10 @@
+## [1.385.2](https://github.com/juspay/xyne-spaces/compare/v1.385.1...v1.385.2) (2026-09-24)
+
+
+### Bug Fixes
+
+* run ticket search on every input regardless of expanded groups and show search match counts in group headers ([#2142](https://github.com/juspay/xyne-spaces/issues/2142)) ([2b58e0d](https://github.com/juspay/xyne-spaces/commit/2b58e0d6f9ce526b81b2746027e0ab37968bacca))
+
 ## [1.385.1](https://github.com/juspay/xyne-spaces/compare/v1.385.0...v1.385.1) (2026-09-24)
 
 
