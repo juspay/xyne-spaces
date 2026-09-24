@@ -119,6 +119,20 @@ export async function collectSideEffectJobs(
     }
   }
 
+  // Capture the share row before it is deleted so the handler can notify the
+  // (now removed) recipient user/channel that their view access was revoked.
+  if (operation === 'delete' && table === 'view_access') {
+    const grant = await tx.run(zql.view_access.where('id', entityId).one());
+    if (grant) {
+      previousValue = {
+        viewId: grant.viewId,
+        entityType: grant.entityType,
+        entityId: grant.entityId,
+        sharedBy: grant.sharedBy,
+      };
+    }
+  }
+
   // Capture the group of a membership row before it is deleted, so the canvas ACL
   // fan-out (refreshCanvasPermissionsForGroup) can find the canvases shared to it.
   if (operation === 'delete' && table === 'user_group_mappings') {
@@ -365,6 +379,7 @@ function extractEntityId(table: TableName, args: any): string | null {
     case 'links':
     case 'link_access':
     case 'rcas':
+    case 'view_access':
     case 'ticket_stage_requests': {
       const typedArgs = args as { id: string };
       return typedArgs.id;

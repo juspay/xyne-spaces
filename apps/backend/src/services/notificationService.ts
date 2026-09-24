@@ -1480,6 +1480,55 @@ class NotificationService {
     return { deliveredUserIds };
   }
 
+  async createViewSharedNotifications(
+    recipientUserIds: string[],
+    viewId: string,
+    viewName: string,
+    actorId: string,
+    actorName: string,
+    actorAction: 'view_shared' | 'view_access_revoked',
+  ): Promise<{ deliveredUserIds: string[] }> {
+    const recipientIds = recipientUserIds.filter(id => id !== actorId);
+
+    if (recipientIds.length === 0) {
+      return { deliveredUserIds: [] };
+    }
+
+    getNotificationJobsExpected().add(recipientIds.length, { platform: 'desktop', message_type: 'saved_view' });
+
+    const title = actorAction === 'view_shared'
+      ? `${actorName} shared a view with you`
+      : `Your access to a view was revoked`;
+    const message = actorAction === 'view_shared'
+      ? `${actorName} shared "${viewName}" with you`
+      : `Your access to "${viewName}" was revoked by ${actorName}`;
+
+    const results = await Promise.allSettled(
+      recipientIds.map(async userId => {
+        await this.createNotification(userId, {
+          title,
+          message,
+          type: 'VIEW_SHARED' as NotificationType,
+          relatedEntityType: 'saved_view',
+          relatedEntityId: viewId,
+          metadata: {
+            viewId,
+            actorId,
+            actorName,
+            actorAction,
+          },
+        });
+        return userId;
+      })
+    );
+
+    const deliveredUserIds = results
+      .filter((r): r is PromiseFulfilledResult<string> => r.status === 'fulfilled')
+      .map(r => r.value);
+
+    return { deliveredUserIds };
+  }
+
   async createRecordingSharedNotifications(
     recipientUserIds: string[],
     callId: string,
