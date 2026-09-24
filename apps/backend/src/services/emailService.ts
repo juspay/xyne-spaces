@@ -71,7 +71,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { marked } from 'marked';
 import { findDuplicateEmailConversation } from '@/utils/vespaDuplicateDetector';
 import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
-import { ticketDuplicateService } from '@/services/ticketDuplicateService';
+import { ticketDuplicateService, type DuplicateScopeFieldValue } from '@/services/ticketDuplicateService';
 import { tagGenerationPipeline } from '@/tags/pipeline';
 import { DESK_EMAIL_SOURCE_TYPE, deskEmailConfigKey } from '@/tags';
 import { buildDraftEmailClawTask } from '@/agents/xyne-ai/prompts/draft';
@@ -138,6 +138,11 @@ export interface CreateConversationWithEmailParams {
   rating?: number;
   clientVersionName?: string;
   clientVersionCode?: string;
+  // Scope-field values for per-channel duplicate detection: the caller's raw
+  // custom-field write payload entries (fieldId + actualFieldValue), normalized and
+  // expanded inside ticketDuplicateService. Undefined → falls back to project-wide
+  // detection when the channel's duplicateScopeConfig has no matching values.
+  scopeFieldValues?: DuplicateScopeFieldValue[];
 }
 
 export interface AddEmailToConversationParams {
@@ -1129,6 +1134,7 @@ export class EmailService {
       rating,
       clientVersionName,
       clientVersionCode,
+      scopeFieldValues,
     } = params;
     const normalizedRfcMessageId = normalizeRfcMessageId(rfcMessageId);
 
@@ -1344,6 +1350,8 @@ export class EmailService {
         description: ticket.description,
         projectId: ticket.projectId,
         userId,
+        channelId,
+        scopeFieldValues,
       }).catch((error: unknown) => {
         logger.error('[EmailService] Failed to persist duplicate references for ticket', {
           ticketId: ticket.id,
@@ -2599,6 +2607,7 @@ export class EmailService {
           description: firstEmail.body,
           projectId,
           userId,
+          channelId,
         }).catch((error: unknown) => {
           logger.error('[EmailService] Failed to persist duplicate references for ingested ticket', {
             ticketId: txResult.ticketId,

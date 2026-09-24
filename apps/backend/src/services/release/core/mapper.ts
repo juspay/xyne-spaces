@@ -1,6 +1,5 @@
 import { CommitAnalysisResult } from '@/services/commitAnalysisService';
 import { logger } from '@/utils/logger';
-import { isSameCommit } from '@/utils/commitIds';
 
 export interface ApplicationMappingInput {
 	id: string;
@@ -73,21 +72,14 @@ export function buildApplicationReleaseTicketMappings(
 	results: CommitAnalysisResult[],
 	affectedApplications: ApplicationWithSubTicket[],
 	releaseId: string,
-	// Present ⇒ this is a hotfix-delta run; every commit NOT in this set is a
-	// hotfix (the set holds the boundary/frozen-head commits, which are main PRs).
-	// Absent/null ⇒ a normal main run: nothing is a hotfix.
-	hotfixBoundaryCommits?: ReadonlySet<string> | null,
+	// Hotfix-delta run ⇒ every analysed commit is a hotfix (the range excludes the frozen head).
+	isHotfixRun = false,
 ): ApplicationReleaseTicketMapping[] {
 	const matchedFileSets = buildMatchedFileSets(affectedApplications);
 	const recordsToCreate: ApplicationReleaseTicketMapping[] = [];
 
 	for (const result of results) {
 		if (!result.ticket || !result.filePaths) continue;
-
-		// prefix compare, not Set.has — boundary ids may be abbreviated SHAs
-		const isHotfix =
-			hotfixBoundaryCommits != null &&
-			![...hotfixBoundaryCommits].some(boundary => isSameCommit(boundary, result.commitId));
 
 		for (const app of affectedApplications) {
 			if (!app.subTicketId) continue;
@@ -98,10 +90,10 @@ export function buildApplicationReleaseTicketMappings(
 				applicationReleaseId: app.subTicketId,
 				releaseId,
 				devTicketId: result.ticket.id,
-				isHotfix,
+				isHotfix: isHotfixRun,
 			});
 			logger.info(
-				`Prepared ART row: applicationRelease=${app.subTicketId} → devTicket=${result.ticket.xyneId}${isHotfix ? ' (hotfix)' : ''}`
+				`Prepared ART row: applicationRelease=${app.subTicketId} → devTicket=${result.ticket.xyneId}${isHotfixRun ? ' (hotfix)' : ''}`
 			);
 		}
 	}

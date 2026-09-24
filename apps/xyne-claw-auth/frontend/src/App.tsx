@@ -11,6 +11,7 @@ import { DigitalTwinPage } from "./components/DigitalTwinPage";
 import { AppV2 } from "./v2/AppV2";
 import { AppV3 } from "./v3/AppV3";
 import { PublicDesignSharePage } from "./v3/components/PublicDesignSharePage";
+import { LinkChannelPage } from "./v3/components/LinkChannelPage";
 import { checkIsAdmin } from "./lib/api";
 
 function AdminLink() {
@@ -127,6 +128,10 @@ export function App() {
         <Routes>
           {/* V3 is the main surface — root drops users into the V3 home. */}
           <Route path="/" element={<Navigate to="/v3/home" replace />} />
+          {/* Landing page for the "connect your account" link a messaging
+              channel sends to an unknown sender. Sits outside /v3 because it
+              is the first page such a person ever opens. */}
+          <Route path="/link" element={<LinkChannelPage userEmail={auth.user.email} />} />
           {/* V1 dashboard kept reachable for the "Switch to v1" affordance
               in the V3 top nav. Other V1 sub-routes below are unchanged. */}
           <Route path="/v1" element={<DashboardPage userId={auth.user.id} isAdmin={isAdmin} />} />

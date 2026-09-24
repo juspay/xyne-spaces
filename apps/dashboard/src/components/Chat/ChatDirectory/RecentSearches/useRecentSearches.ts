@@ -3,6 +3,7 @@ import { TabType, ChipType } from '../ChannelCommandMenu.types';
 import type { ChipData } from '../ChannelCommandMenu.types';
 import { useUsers, useUsersById } from '../../../../hooks/useUsers';
 import { useAllChannels } from '../../../../hooks/useChannels';
+import { useUserGroups } from '../../../../hooks/useUserGroup';
 import { getUserDisplayName } from '../../../../utils/userDisplayName';
 import { resolveChannelLabel } from '../ChatDirectory.utils';
 import {
@@ -64,6 +65,7 @@ export function useRecentSearches(params: UseRecentSearchesParams): UseRecentSea
   const allUsers = useUsers();
   const usersById = useUsersById();
   const allChannels = useAllChannels();
+  const allUserGroups = useUserGroups();
 
   // Load fresh on open (the util prunes >30-day entries).
   useEffect(() => {
@@ -86,9 +88,14 @@ export function useRecentSearches(params: UseRecentSearchesParams): UseRecentSea
           name: channel ? resolveChannelLabel(channel, userId, allUsers) : stored.id,
         };
       }
+      // A user-group mention reads by its handle (`alias ?? name`), matching every other chip surface.
+      if (stored.type === ChipType.USER_GROUP) {
+        const group = allUserGroups.find(candidate => candidate.id === stored.id);
+        return { ...stored, name: group ? (group.alias ?? group.name) : stored.id };
+      }
       return { ...stored, name: stored.name ?? stored.id };
     },
-    [usersById, allChannels, allUsers, userId],
+    [usersById, allChannels, allUsers, allUserGroups, userId],
   );
 
   // Layer live display names over the stored identity, re-resolving only when the history or

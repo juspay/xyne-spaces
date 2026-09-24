@@ -72,13 +72,19 @@ const envSchema = Joi.object({
   FORCE_LOGOUT_BEFORE: Joi.number().optional(), // Unix timestamp (seconds) - reject tokens issued before this time
   SESSION_EXPIRY_DAYS: Joi.number().default(180), // Session + refresh-cookie expiry in days (default 1 year); also drives the xyne_last_workspace pointer
   // File Storage Configuration
-  STORAGE_PROVIDER: Joi.string().valid('gcs', 'local', 's3').default('gcs'),
+  STORAGE_PROVIDER: Joi.string().valid('gcs', 'local', 's3', 'azure').default('gcs'),
   // AWS S3 Configuration
   AWS_REGION: Joi.string().default('ap-south-1'),
   AWS_ACCESS_KEY_ID: Joi.string().allow('').default(''),
   AWS_SECRET_ACCESS_KEY: Joi.string().allow('').default(''),
   S3_BUCKET_NAME: Joi.string().allow('').default(''),
   S3_ENDPOINT: Joi.string().allow('').default(''), // for MinIO/LocalStack in dev
+  // Azure Blob Storage Configuration (Workload Identity)
+  AZURE_STORAGE_ACCOUNT: Joi.string().allow('').default(''),
+  AZURE_STORAGE_CONTAINER: Joi.string().allow('').default(''),
+  AZURE_STORAGE_ENDPOINT: Joi.string().allow('').default(''),
+  AZURE_STORAGE_CONNECTION_STRING: Joi.string().allow('').default(''),
+  AZURE_STORAGE_SAS_TOKEN: Joi.string().allow('').default(''),
   // Google Cloud Storage Configuration (Workload Identity)
   GCS_PROJECT_ID: Joi.string().allow('').default(''),
   GCS_BUCKET_NAME: Joi.string().allow('').default(''),
@@ -282,7 +288,7 @@ const envSchema = Joi.object({
   RECAP_GENERATION_CRON: Joi.string().default('15 0 * * *'), //5:45 IST daily
   RECAP_CLEANUP_CRON: Joi.string().default('30 23 * * *'), //5:00 IST daily
   RECAP_RETENTION_DAYS: Joi.number().default(30),
-  ENABLE_DESK_REPORT_SCHEDULER: Joi.boolean().default(true),
+  ENABLE_DESK_REPORT_SCHEDULER: Joi.boolean().default(false),
   DESK_REPORT_GENERATION_CRON: Joi.string().default('30 22 * * *'), //4:00 IST daily
   DESK_REPORT_CLEANUP_CRON: Joi.string().default('30 21 * * *'), //3:00 IST daily
   DESK_REPORT_RETENTION_DAYS: Joi.number().default(3),
@@ -311,6 +317,12 @@ const envSchema = Joi.object({
   LANGFUSE_BASE_URL: Joi.string().allow('').default(''),
   MESSAGE_CLASSIFIER_URL: Joi.string().uri().default('http://localhost:8082'),
   MESSAGE_CLASSIFIER_TIMEOUT_MS: Joi.number().default(5000),
+  // Jev — the typed classifier behind the cmd+K AI overview (services/queryIntent).
+  // Unset key => never called. URL/model default to TypeSafe's hosted Jev; point them at
+  // any service that speaks the same wire format (e.g. a LiteLLM-hosted jev).
+  JEV_API_KEY: Joi.string().allow('').default(''),
+  JEV_URL: Joi.string().allow('').default(''),
+  JEV_MODEL: Joi.string().allow('').default(''),
   // Genius Bot API Configuration
   GENIUS_API_URL: Joi.string().uri().default('http://localhost:8000'),
   GENIUS_API_KEY: Joi.string().allow('').default(''),
@@ -708,6 +720,13 @@ export const config = {
     bucketName: envVars.S3_BUCKET_NAME,
     endpoint: envVars.S3_ENDPOINT,
   },
+  azure: {
+    accountName: envVars.AZURE_STORAGE_ACCOUNT,
+    containerName: envVars.AZURE_STORAGE_CONTAINER,
+    endpoint: envVars.AZURE_STORAGE_ENDPOINT,
+    connectionString: envVars.AZURE_STORAGE_CONNECTION_STRING,
+    sasToken: envVars.AZURE_STORAGE_SAS_TOKEN,
+  },
   llm: {
     litellmApiKey: envVars.LITELLM_API_KEY,
     litellmBaseUrl: envVars.LITELLM_BASE_URL,
@@ -947,6 +966,11 @@ export const config = {
   messageClassifier: {
     url: envVars.MESSAGE_CLASSIFIER_URL,
     timeoutMs: envVars.MESSAGE_CLASSIFIER_TIMEOUT_MS,
+  },
+  jev: {
+    apiKey: envVars.JEV_API_KEY,
+    url: envVars.JEV_URL,
+    model: envVars.JEV_MODEL,
   },
   genius: {
     apiUrl: envVars.GENIUS_API_URL,

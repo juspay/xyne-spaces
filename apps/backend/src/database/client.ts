@@ -12,6 +12,7 @@ import { setupTicketActivityChannelSync } from './middleware/ticketActivityChann
 import { setupTicketCreatedActivity } from './middleware/ticketCreatedActivity';
 import { setupUserVespaSync } from './middleware/userVespaSync';
 import { setupEnumTextValidation } from './middleware/enumTextValidation';
+import { pingDatabase } from '@/bypassAcl/healthServices';
 
 export class DatabaseClient {
   private static instance: PrismaClient | null = null;
@@ -137,7 +138,7 @@ export class DatabaseClient {
   static async healthCheck(): Promise<boolean> {
     try {
       const client = DatabaseClient.getInstance();
-      await client.$queryRaw`SELECT 1`;
+      await pingDatabase(client);
       return true;
     } catch (error) {
       logger.error('Database health check failed:', error);

@@ -35,11 +35,12 @@ import { useTheme } from '../../../hooks/useTheme';
 import { useChannel } from '../../../hooks/useChannels';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import { ChannelScopeType, ChannelVisibility } from '@xyne/shared';
+import { usePendingStatusByMessageId } from '@xyne/shared/messages';
 import ChatLock from '../../icons/ChatLock';
 import { useDebugSettings } from '../../../hooks/useDebugSettings';
 import { PinnedIcon } from '../../../assets/icons/PinnedIcon';
 import { usePlatform } from '../../../hooks/usePlatform';
-import { Bookmark, ChevronDown, ChevronRight, Hash, Trash2 } from 'lucide-react';
+import { AlertCircle, Bookmark, ChevronDown, ChevronRight, Hash, Trash2 } from 'lucide-react';
 import { MobileMessageMyBubble } from './MobileMessageMyBubble';
 import { Button } from '../Button/Button';
 import EmojiPicker, { EmojiStyle, Theme as EmojiTheme } from 'emoji-picker-react';
@@ -59,6 +60,7 @@ import { isSlashCommandArtifactMessage } from '../../Chat/SlashCommandArtifacts'
 import type { ToolInvocation } from '../../Chat/XyneAISidebar/utils/XyneAITypes';
 import { ExpandableMessage } from '../../Chat/ExpandableMessage/ExpandableMessage';
 import { MessageMetadata } from './MessageBubble.utils';
+import { ScheduledCallPill } from './ScheduledCallPill';
 import { MarkdownMessageRenderer } from './MarkdownMessageRenderer';
 import { SharedTranscriptCard } from '../../Chat/ShareAgentConversationModal/SharedTranscriptCard';
 import { NonParticipantActions } from './NonParticipantActions';
@@ -572,6 +574,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     !isWorkflowMessage;
   const ticketAttachments = isTicketCardMessage ? (conversation?.ticket?.attachments ?? []) : [];
   const isCallMessage = metadata?.isCallMessage === true;
+  // Read-only scheduled-call card. Kept off isCallMessage on purpose: that flag opts a
+  // SYSTEM message into reply/forward/Ask-AI/subscribe in ChatBubble, and the pill is inert.
+  const isScheduledCallPill = metadata?.['isScheduledCallPill'] === true;
   const isActiveCall = useIsCallActive(metadata?.callId);
   // Anchor message for a headless recording started from a thread (see
   // RecordingBubble) — deliberately independent of isCallMessage so it never
@@ -712,9 +717,14 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
 
   const { settings: debugSettings } = useDebugSettings();
 
+  // A send the server rejected. Unlike the in-flight clock this is never hidden
+  // behind the debug toggle — a failure the user has to act on must always show.
+  const pendingStatus = usePendingStatusByMessageId(message.messageId ?? '');
+  const hasFailedToSend = pendingStatus === 'failed';
+
   const shouldShowPending = useMemo(() => {
-    return debugSettings.showSendIndicators && isMe && !message.isSent;
-  }, [debugSettings.showSendIndicators, isMe, message.isSent]);
+    return hasFailedToSend || (debugSettings.showSendIndicators && isMe && !message.isSent);
+  }, [hasFailedToSend, debugSettings.showSendIndicators, isMe, message.isSent]);
 
   // Claw agent citations baked into the reply metadata (by claw-auth at
   // reply-time) so this thread message can render clickable citation chips
@@ -1042,10 +1052,17 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               >
                 {formatTime12HourNoAmPm(message.createdAt)}
                 {shouldShowPending && (
-                  <Tooltip content={'Sending message..'} side='top'>
+                  <Tooltip
+                    content={hasFailedToSend ? 'Failed to send' : 'Sending message..'}
+                    side='top'
+                  >
                     <div className='inline-flex items-center'>
                       {' '}
-                      <PendingIcon size={12} className='cursor-pointer' />{' '}
+                      {hasFailedToSend ? (
+                        <AlertCircle size={12} color='#e53935' className='cursor-pointer' />
+                      ) : (
+                        <PendingIcon size={12} className='cursor-pointer' />
+                      )}{' '}
                     </div>
                   </Tooltip>
                 )}
@@ -1226,7 +1243,12 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             )}
 
           {/* ================== MESSAGE CONTENT ================== */}
-          {isCallShareMessage && !isForwardedMessage && !message.isDeleted ? (
+          {isScheduledCallPill && metadata?.callId && !message.isDeleted ? (
+            <ScheduledCallPill
+              message={{ messageId: message.messageId, metadata }}
+              callId={metadata.callId}
+            />
+          ) : isCallShareMessage && !isForwardedMessage && !message.isDeleted ? (
             <CallShareBubble message={{ content: message.content, metadata }} />
           ) : isRecordingMessage &&
             metadata?.callId &&

@@ -3,7 +3,7 @@ import { useState, useCallback, useRef, useEffect, useMemo, useDeferredValue } f
 import { searchMetricsService } from '../services/searchMetricsService';
 import { useAuthContextValues } from './useAuth';
 import { searchService, clearVespaSearchCache } from '../services/searchService';
-import { DisplaySearchResult, VespaSearchFilters } from '../types/search';
+import { DisplaySearchResult, QueryIntent, VespaSearchFilters } from '../types/search';
 import {
   TabType,
   ChipType,
@@ -14,10 +14,12 @@ import {
   getRelevantAppsParam,
   filterChipToKind,
   type FilterKind,
+  type SelectedMention,
 } from '../components/Chat/ChatDirectory/ChannelCommandMenu.types';
 import { User } from '../machines/stateMachine';
 import { Channel } from '@xyne/shared';
 import { useUserSearch } from './useUsers';
+import type { MentionHighlightsBuilder } from '../search/mentionHighlights';
 import { ChannelCategory } from '../components/Chat/ChatDirectory/ChatDirectory.types';
 import { filterChannelsBySearchableNames } from '../utils/rankingUtils';
 import {
@@ -39,8 +41,6 @@ type SearchTrigger = 'keyboard_shortcut' | 'click' | 'auto_focus';
 type SearchLocation = 'global' | 'channel' | 'dm';
 type QuerySource = 'KEYBOARD' | 'CLIPBOARD_PASTE' | 'RECENT';
 
-type SelectedMention = { id: string; type: ChipType; prefix?: string; name?: string };
-
 type MentionBuckets = {
   from: SelectedMention[];
   with: SelectedMention[];
@@ -49,6 +49,7 @@ type MentionBuckets = {
   mentions: SelectedMention[];
   in: SelectedMention[];
   channelMentions: SelectedMention[];
+  userGroupMentions: SelectedMention[];
 };
 
 /**
@@ -63,6 +64,7 @@ const FILTER_KIND_TO_BUCKET: Partial<Record<FilterKind, keyof MentionBuckets>> =
   in: 'in',
   mention: 'mentions',
   channelMention: 'channelMentions',
+  userGroupMention: 'userGroupMentions',
 };
 
 /**
@@ -78,6 +80,7 @@ function deriveMentionBuckets(selectedMentions: SelectedMention[]): MentionBucke
     mentions: [],
     in: [],
     channelMentions: [],
+    userGroupMentions: [],
   };
   for (const mention of selectedMentions) {
     const kind = filterChipToKind(mention);
@@ -104,9 +107,17 @@ interface UseSearchMetricsOptions {
   // flat ranked list — lets the ALL tab show a few of each type at once.
   // Ignored when the `unified` rank profile is selected, which needs a flat list.
   groupByDocType?: boolean;
+  // Cmd-K palette only: also ask the backend whether the query needs AI, which drives the
+  // inline AI answer. Other search surfaces leave this off.
+  classifyIntent?: boolean;
+  // Builds the highlight-only `mentionHighlights` phrases from the active mention chips (see
+  // search/mentionHighlights). Injected by the surfaces that highlight results (full-screen +
+  // cmd+K) so this hook stays decoupled from user/group data; when absent, the chip's name is used.
+  buildMentionHighlights?: MentionHighlightsBuilder;
 }
 
 const BACKEND_RESULTS_LIMIT = 25;
+const INTENT_DEBOUNCE_MS = 300;
 // Load-more uses a fixed-size window (constant `limit`, advancing `offset`). Vespa caps the
 // query offset at maxOffset (1000), so stop paginating before `offset` would cross it.
 const MAX_BACKEND_OFFSET = 1000;
@@ -231,6 +242,13 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
 
   // New State moved from ChannelCommandMenu
   const [activeTab, setActiveTab] = useState<TabType>(TabType.ALL);
+  // Latest intent verdict, tied to the query it was computed for.
+  const [queryIntent, setQueryIntent] = useState<{
+    query: string;
+    intent: QueryIntent | null;
+  } | null>(null);
+  const intentAbortRef = useRef<AbortController | null>(null);
+  const lastClassifiedQueryRef = useRef('');
   // Per-tab CAC default; an explicit user pick (rankProfile) wins.
   const allDefaultRankProfile = defaultRankProfileFor(activeTab);
   const [selectedMentions, setSelectedMentions] = useState<
@@ -803,6 +821,9 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       [TabType.RECORDING]: { page: 1, hasMore: false, total: 0, offset: 0, cumulativeCount: 0 },
       [TabType.DESK]: { page: 1, hasMore: false, total: 0, offset: 0, cumulativeCount: 0 },
     });
+    setQueryIntent(null);
+    intentAbortRef.current?.abort();
+    lastClassifiedQueryRef.current = '';
     // Clear the dedup guard's text so reopening the palette and re-entering the same query
     // (notably a paste of the last search) isn't skipped as a duplicate and re-runs the search.
     lastSearchedParamsRef.current.text = '';
@@ -997,12 +1018,14 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
             const mentionUserMentions = buckets.mentions;
             const inChannels = buckets.in;
             const mentionChannels = buckets.channelMentions;
-            // Bare @user/#channel filters only exist on chat messages. `with:` also
-            // filters call participants on the Call History search page.
+            const mentionUserGroups = buckets.userGroupMentions;
+            // Bare @user/#channel and @user-group filters only exist on chat messages. `with:`
+            // also filters call participants on the Call History search page.
             const hasMessageOnlyMention =
               (!options.isCallSearchPage && withMentions.length > 0) ||
               mentionUserMentions.length > 0 ||
-              mentionChannels.length > 0;
+              mentionChannels.length > 0 ||
+              mentionUserGroups.length > 0;
 
             // Assignee filter doesn't apply to Messages/Attachments - return empty results
             if (
@@ -1125,12 +1148,23 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
               searchFilters.type = VespaDocTypes.MESSAGES;
               searchFilters.channelMentions = mentionChannels.map(m => m.id).join(',');
             }
+            // @user-group → messages that mention the group (message-only filter).
+            if (mentionUserGroups.length > 0) {
+              searchFilters.type = VespaDocTypes.MESSAGES;
+              searchFilters.groupMentions = mentionUserGroups.map(g => g.id).join(',');
+            }
 
-            // Mention names are highlight-only — sent separately from `q` (the id filters handle
-            // recall) so the backend can bold them without polluting the free-text query.
-            const mentionHighlights = [...mentionUserMentions, ...mentionChannels]
-              .map(m => m.name)
-              .filter((n): n is string => !!n);
+            // Highlight-only phrases: the injected builder resolves every display form a mention
+            // could render as; absent (ContextPicker/CallHistory), fall back to the chip's name.
+            const mentionHighlights = options.buildMentionHighlights
+              ? options.buildMentionHighlights(
+                  mentionUserMentions,
+                  mentionChannels,
+                  mentionUserGroups,
+                )
+              : [...mentionUserMentions, ...mentionChannels, ...mentionUserGroups]
+                  .map(m => m.name)
+                  .filter((n): n is string => !!n);
             if (mentionHighlights.length > 0) {
               searchFilters.mentionHighlights = mentionHighlights;
             }
@@ -1295,6 +1329,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       flatAllRankProfiles,
       includeDebugInfo,
       structuredFilters,
+      options.buildMentionHighlights,
     ],
   );
 
@@ -1429,6 +1464,36 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     structuredFiltersKey,
   ]);
 
+  // Intent classification for the inline AI answer: its own request and abort handle, so a
+  // slow classifier never holds up search and switching tabs never cancels it. Keyed on text only.
+  useEffect(() => {
+    if (!options.classifyIntent || options.mentionSearchType) return;
+
+    const query = text.trim();
+    if (query === lastClassifiedQueryRef.current) return;
+
+    const timer = setTimeout(() => {
+      lastClassifiedQueryRef.current = query;
+      intentAbortRef.current?.abort();
+      if (!query) {
+        setQueryIntent(null);
+        return;
+      }
+      const controller = new AbortController();
+      intentAbortRef.current = controller;
+      searchService
+        .getQueryIntent(query, controller.signal)
+        .then(intent => {
+          if (!controller.signal.aborted) setQueryIntent({ query, intent });
+        })
+        // Aborted or failed: no verdict, so the palette stays lexical.
+        .catch(() => undefined);
+    }, INTENT_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [text, options.classifyIntent, options.mentionSearchType]);
+
+  useEffect(() => () => intentAbortRef.current?.abort(), []);
+
   /**
    * Load More Results
    */
@@ -1525,12 +1590,14 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         const mentionUserMentions = buckets.mentions;
         const inChannels = buckets.in;
         const mentionChannels = buckets.channelMentions;
-        // Bare @user/#channel filters only exist on chat messages. `with:` also
-        // filters call participants on the Call History search page.
+        const mentionUserGroups = buckets.userGroupMentions;
+        // Bare @user/#channel and @user-group filters only exist on chat messages. `with:`
+        // also filters call participants on the Call History search page.
         const hasMessageOnlyMention =
           (!options.isCallSearchPage && withMentions.length > 0) ||
           mentionUserMentions.length > 0 ||
-          mentionChannels.length > 0;
+          mentionChannels.length > 0 ||
+          mentionUserGroups.length > 0;
 
         // Assignee filter doesn't apply to Messages/Attachments - return empty
         if (
@@ -1606,11 +1673,17 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
           searchFilters.type = VespaDocTypes.MESSAGES;
           searchFilters.channelMentions = mentionChannels.map(m => m.id).join(',');
         }
+        if (mentionUserGroups.length > 0) {
+          searchFilters.type = VespaDocTypes.MESSAGES;
+          searchFilters.groupMentions = mentionUserGroups.map(g => g.id).join(',');
+        }
 
-        // Highlight-only mention names — mirrors the initial search (see note there).
-        const mentionHighlights = [...mentionUserMentions, ...mentionChannels]
-          .map(m => m.name)
-          .filter((n): n is string => !!n);
+        // Highlight-only phrases — mirrors the initial search (injected builder, else chip name).
+        const mentionHighlights = options.buildMentionHighlights
+          ? options.buildMentionHighlights(mentionUserMentions, mentionChannels, mentionUserGroups)
+          : [...mentionUserMentions, ...mentionChannels, ...mentionUserGroups]
+              .map(m => m.name)
+              .filter((n): n is string => !!n);
         if (mentionHighlights.length > 0) {
           searchFilters.mentionHighlights = mentionHighlights;
         }
@@ -1652,6 +1725,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       setIsLoadingMore(false);
     }
   }, [
+    options.buildMentionHighlights,
     isLoadingMore,
     paginationState,
     searchSessionId,
@@ -1735,9 +1809,19 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     };
   }, []); // Empty dependency array = only runs on mount/unmount
 
+  // Whether what is typed reads as a question, so the palette may show an AI overview for
+  // it. Stays true while the user keeps extending the classified query (no flicker per
+  // keystroke); the next settled classification re-decides.
+  const trimmedText = text.trim();
+  const isAiQuery =
+    queryIntent?.intent?.mode === 'ai' &&
+    trimmedText !== '' &&
+    trimmedText.startsWith(queryIntent.query);
+
   return {
     // Session state
     searchSessionId,
+    isAiQuery,
 
     // Actions
     onOpen,

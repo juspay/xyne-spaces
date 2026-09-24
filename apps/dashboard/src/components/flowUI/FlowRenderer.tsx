@@ -132,7 +132,14 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
       if (props?.name) {
         const value = state.values[props.name];
         newTouched[props.name] = true;
-        if (props.required && (value === undefined || value === '' || value === null)) {
+        // An empty array counts as "no value" too — a required multi-select
+        // (multiselect, or a dropdown with multiple: true) submits [] otherwise.
+        const isEmpty =
+          value === undefined ||
+          value === '' ||
+          value === null ||
+          (Array.isArray(value) && value.length === 0);
+        if (props.required && isEmpty) {
           newErrors[props.name] = 'This field is required';
           isValid = false;
         } else if (props.validation) {

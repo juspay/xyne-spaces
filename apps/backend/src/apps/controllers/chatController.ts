@@ -284,7 +284,11 @@ export class ChatController {
         return;
       }
 
-      const resolvedChannelId = await resolveChannelId(channelId, conversationId, channelName);
+      // A `channelId` that names a user was turned into the bot's DM channel by
+      // validateChannelAccessForPostWithDm; the internal S2S postAsUser route
+      // skips that middleware and resolves here as before.
+      const resolvedChannelId =
+        req._resolvedChannelId ?? (await resolveChannelId(channelId, conversationId, channelName));
 
       let content: string;
       let isMarkdown = !!markdownText || contentFormat === ContentFormat.MARKDOWN;

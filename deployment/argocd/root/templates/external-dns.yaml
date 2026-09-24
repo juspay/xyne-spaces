@@ -1,0 +1,24 @@
+{{- $ed := .Values.addons.externalDns }}
+{{- $identity := (.Values.infra.identities | default dict).externalDns | default dict }}
+{{- $zone := (.Values.infra.ingress | default dict).dnsZone | default "" }}
+{{- $ing := include "xyne-root.ingress" . | fromYaml }}
+{{- $enabled := $ed.enabled }}
+{{- if kindIs "invalid" $enabled }}
+{{- $enabled = and (eq $ing.serviceType "LoadBalancer") (ne $zone "") (gt (len ($identity.annotations | default dict)) 0) }}
+{{- end }}
+{{- if $enabled }}
+{{- $base := dict
+  "provider" (dict "name" $ed.provider)
+  "domainFilters" (list .Values.global.domain)
+  "zoneIdFilters" (list $zone)
+  "policy" $ed.policy
+  "txtOwnerId" (printf "%s-%s" .Values.global.namespace .Values.global.domain | sha256sum | trunc 16)
+  "sources" $ed.sources
+  "serviceAccount" (dict "create" true "name" $ed.serviceAccountName "annotations" ($identity.annotations | default dict))
+}}
+{{- with $identity.labels }}
+{{- $_ := set $base "podLabels" . }}
+{{- end }}
+{{- $values := include "xyne-root.merge" (dict "base" $base "layers" (list $ed.values)) | fromYaml }}
+{{- include "xyne-root.application" (dict "root" $ "name" "external-dns" "namespace" $ed.namespace "wave" -3 "source" (include "xyne-root.helmSource" (dict "root" $ "repoURL" "https://kubernetes-sigs.github.io/external-dns/" "chart" "external-dns" "targetRevision" $ed.version "releaseName" "external-dns" "values" $values) | fromYaml) "ignoreDifferences" (include "xyne-root.deploymentIgnore" . | fromYamlArray)) }}
+{{- end }}

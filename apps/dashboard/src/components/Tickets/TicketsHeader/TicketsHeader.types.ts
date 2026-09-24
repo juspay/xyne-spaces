@@ -37,6 +37,12 @@ export interface FilterPickerContext {
   availableBoards?: string[] | undefined;
   availableBoardDetails?: BoardOption[] | undefined;
   sourceChannelProjectIds?: string[] | undefined;
+  /**
+   * Whether the board picker offers "All boards" (an empty selection). Channels
+   * pass false: their boards come from channel_board_mappings and an empty
+   * selection would leave the ticket query with no scope at all.
+   */
+  allowAllBoards?: boolean;
   availableTags?: string[] | undefined;
   onLoadMoreTags?: () => void;
   hasMoreTags?: boolean;
@@ -83,6 +89,9 @@ export interface TicketsHeaderProps {
   share?: { viewId: string; viewName: string } | null;
   onCreateTicket?: (() => void) | null;
   createTicketMetadata?: string;
+  /** Channel surfaces only: opens the dialog that links boards to the channel. */
+  onLinkBoards?: (() => void) | null;
+  linkBoardsMetadata?: string;
 
   layoutView: HeaderLayoutView;
   onLayoutChange: (layout: HeaderLayoutView) => void;

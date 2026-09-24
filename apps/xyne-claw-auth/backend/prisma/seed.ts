@@ -2223,11 +2223,34 @@ DRILL-DOWN: Use this path ONLY when the user wants to EXPLORE a focused tile's d
         update: {},
       });
       console.log("[seed] Pinned xyne-workflows MCP server to ask-ai");
+      // xyne-workflows is registered as pinned / not user-connectable, so it
+      // only reaches a session through an AgentMcpConnection row. The SDLC
+      // agent is granted the workflow tools in its generated profile, so it
+      // needs the same pin or those grants resolve to a server it cannot see.
+      await prisma.agentMcpConnection.upsert({
+        where: {
+          agentId_mcpServerId_slug: {
+            agentId: sdlcAgent.id,
+            mcpServerId: workflowsServerRow.id,
+            slug: "default",
+          },
+        },
+        create: {
+          agentId: sdlcAgent.id,
+          mcpServerId: workflowsServerRow.id,
+          slug: "default",
+          encryptedCreds: workflowsCredsPayload.encryptedCreds,
+          iv: workflowsCredsPayload.iv,
+          authTag: workflowsCredsPayload.authTag,
+        },
+        update: {},
+      });
+      console.log("[seed] Pinned xyne-workflows MCP server to sdlc-agent");
     } else {
-      console.warn("[seed] Skipped ask-ai workflows pin: xyne-workflows server row not found");
+      console.warn("[seed] Skipped workflows pins: xyne-workflows server row not found");
     }
   } else {
-    console.warn("[seed] Skipped ask-ai workflows pin: ENCRYPTION_KEY not set");
+    console.warn("[seed] Skipped workflows pins: ENCRYPTION_KEY not set");
   }
 
   // ── Claw concierge agent ─────────────────────────────────────────────────

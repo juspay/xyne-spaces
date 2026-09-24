@@ -54,6 +54,7 @@ import CanvasPanel from '../components/Canvas/CanvasPanel/CanvasPanel';
 import CallPage from './CallScreen/CallPage';
 import CanvasRedirectPage from './CanvasRedirect/CanvasRedirectPage';
 import { ClawOverlay } from '../components/Claw/ClawOverlay';
+import { ArtifactAppHostRoute } from '../components/ArtifactApp/ArtifactAppHostRoute';
 import AppSidebar from '../components/AppSidebar/AppSidebar';
 import { ReactElement, ReactNode, useRef, useEffect, useState } from 'react';
 import ZeroProvider from '../providers/ZeroProvider';
@@ -957,7 +958,7 @@ const AppRoot = (): ReactElement => {
                           <CallFromRecentsHandler />
                           <CloudAgentFloatingHost />
                           <BrowserPanelHandler />
-                          <GlobalCommandMenu />
+                          <GlobalCommandMenu aiOverview />
                           <ShortcutsHelpModal
                             isOpen={isShortcutsModalOpen}
                             onClose={() => setIsShortcutsModalOpen(false)}
@@ -1105,6 +1106,13 @@ export const router = createBrowserRouter(
                 {
                   index: true,
                   element: <HomeScreen />,
+                },
+                {
+                  // A saved artifact app on its own, opened from the toolbar.
+                  // Outside the /ai subtree on purpose: a workspace that has
+                  // disabled Xyne AI from the rail can still keep apps there.
+                  path: 'app/:appId',
+                  element: <ArtifactAppHostRoute placement={{ surface: 'toolbar' }} />,
                 },
                 {
                   path: 'slack-migration',
@@ -1295,6 +1303,12 @@ export const router = createBrowserRouter(
                         {
                           path: 'my-tickets',
                           element: <MyTicketsScreen />,
+                        },
+                        // An artifact app added to the Inbox menubar, shown in
+                        // the chat panel with the directory still alongside.
+                        {
+                          path: 'app/:appId',
+                          element: <ArtifactAppHostRoute placement={{ surface: 'inbox' }} />,
                         },
                         // Channel routes (must come after specific routes)
                         {

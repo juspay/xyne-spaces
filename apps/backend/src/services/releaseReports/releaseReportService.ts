@@ -18,6 +18,7 @@ import { unifiedBotUserService } from '@/bots/unified';
 import { userActivityTrackingService } from '@/services/userActivityTrackingService';
 import { logger } from '@/utils/logger';
 import { ReleaseReportCanvasService } from './releaseReportCanvas';
+import { advisoryXactLock } from '@/bypassAcl/lockServices';
 
 interface ReleaseReportTicketMetadata {
   releaseReportCanvasId?: string;
@@ -283,7 +284,9 @@ export class ReleaseReportService {
 
     return db.$transaction(
       async (tx) => {
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'release-report:' + ticketId}))`;
+        await advisoryXactLock(tx, ['Ticket'],
+          'release report: serialize publishing of one ticket\'s release report',
+          'release-report:' + ticketId);
         return this.publishLocked(ticketId, publisher, report);
       },
       { maxWait: 10_000, timeout: 60_000 }

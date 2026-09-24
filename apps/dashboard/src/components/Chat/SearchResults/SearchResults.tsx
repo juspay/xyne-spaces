@@ -62,6 +62,8 @@ import { useSearchMetrics } from '../../../hooks/useSearchMetrics';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
 import { useUser, useUsers } from '../../../hooks/useUsers';
+import { useUserGroups } from '../../../hooks/useUserGroup';
+import { makeMentionHighlightsBuilder } from '../../../search/mentionHighlights';
 import {
   getDMNames,
   isDMChannel,
@@ -293,6 +295,18 @@ const SearchResults = (): ReactElement => {
     return result;
   }, [starredChannels, regularChannels, dmChannels, allChannelsForNav, currentUserId, usersById]);
 
+  // Reuse this component's existing usersById + allUserGroups (no re-subscription) to resolve
+  // each mention chip's display forms for result highlighting.
+  const allUserGroups = useUserGroups();
+  const userGroupsById = useMemo(
+    () => new Map(allUserGroups.map(group => [group.id, group])),
+    [allUserGroups],
+  );
+  const buildMentionHighlights = useMemo(
+    () => makeMentionHighlightsBuilder(usersById, userGroupsById),
+    [usersById, userGroupsById],
+  );
+
   // Use the exact same hook as the popup modal — no separate search infrastructure
   const {
     searchResults: backendResults,
@@ -319,6 +333,7 @@ const SearchResults = (): ReactElement => {
     mentionSearchType: null,
     defaultOnlyMyChannels: filters.onlyMyChannels,
     groupByDocType: true,
+    buildMentionHighlights,
     // The URL follows the results: the hook hands back the query these were fetched for,
     // so the address bar is shareable without anyone pressing Enter.
     onSearchComplete: (_results, searchedQuery) => {
@@ -451,13 +466,23 @@ const SearchResults = (): ReactElement => {
       )?.name,
     [allBoardsList],
   );
+  // Prefer the `@`-handle (alias), matching the cmd+K picker — else the same group chip reads
+  // `@rockers` here but `@rock-team` in the popup.
+  const mentionUserGroupName = useCallback(
+    (id: string): string | undefined => {
+      const group = userGroupsById.get(id);
+      return group ? (group.alias ?? group.name) : undefined;
+    },
+    [userGroupsById],
+  );
   const filterResolvers = useMemo(
     (): FilterResolvers => ({
       userName: mentionUserName,
       channelName: mentionChannelName,
+      userGroupName: mentionUserGroupName,
       boardName,
     }),
-    [mentionUserName, mentionChannelName, boardName],
+    [mentionUserName, mentionChannelName, mentionUserGroupName, boardName],
   );
 
   // The active filter chips (from/to/with/in/assignee/priority + bare @/#), rebuilt only when a
@@ -474,9 +499,11 @@ const SearchResults = (): ReactElement => {
       filters.withUserIds,
       filters.mentionUserIds,
       filters.mentionChannelIds,
+      filters.mentionUserGroupIds,
       filters.priority,
       mentionUserName,
       mentionChannelName,
+      mentionUserGroupName,
     ],
   );
 

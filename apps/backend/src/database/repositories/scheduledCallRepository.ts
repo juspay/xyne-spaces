@@ -2,6 +2,7 @@ import { DatabaseClient } from '../client';
 import { type Prisma } from '@prisma/client';
 import { CallStatus, RecurringCallSeriesStatus } from '@xyne/shared';
 import { logger } from '@/utils/logger';
+import { queueScheduledCallPillSync } from '@/services/scheduledCallPillSync';
 
 export class ScheduledCallRepository {
   private client(tx?: Prisma.TransactionClient) {
@@ -16,6 +17,7 @@ export class ScheduledCallRepository {
       where: { id: callId },
       data: { status: CallStatus.CANCELLED },
     });
+    queueScheduledCallPillSync(callId, 'scheduledCallRepository.cancelCall');
   }
 
   async findFirstUpcomingSeriesInstance(params: {

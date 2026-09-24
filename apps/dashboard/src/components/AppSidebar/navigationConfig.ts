@@ -67,8 +67,11 @@ export type ChatNavKey =
   | 'recap'
   | 'radar';
 
+/** A built-in Inbox entry, or an artifact app the user added (`app:<id>`). */
+export type InboxItemKey = ChatNavKey | `app:${string}`;
+
 export interface ChatNavItem {
-  key: ChatNavKey;
+  key: InboxItemKey;
   label: string;
   to: string;
   icon: PikaIcon;
@@ -133,6 +136,8 @@ export const CHAT_NAV_ITEMS: ChatNavItem[] = [
   },
 ];
 
+// The full built-in set, radar-gated. The Inbox itself renders the user's
+// ordered selection — see useInboxNavItems — this is what the picker offers.
 export const chatNavItems = (radarEnabled: boolean): ChatNavItem[] =>
   CHAT_NAV_ITEMS.filter(item => !item.requiresRadar || radarEnabled);
 

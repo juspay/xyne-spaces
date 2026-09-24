@@ -807,6 +807,14 @@ export enum FormFieldType {
   TICKET = 'TICKET',
 }
 
+/**
+ * Max scope fields on EmailChannelPreference.duplicateScopeConfig. Enforced in the
+ * desk settings picker, both Zero mutators, and the duplicate service's parser —
+ * a config over the limit is treated as malformed and detection falls back to
+ * project-wide, so the three must agree.
+ */
+export const MAX_DUPLICATE_SCOPE_FIELDS = 5;
+
 // @ts-ignore TS1294
 export enum FormContextType {
   BOARD = 'BOARD',

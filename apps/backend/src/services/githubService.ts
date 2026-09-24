@@ -473,8 +473,7 @@ export class GitHubService implements VcsClient {
       logger.info(
         `GitHub: found ${ids.length} commit(s) between ${sinceCommitId}..${untilCommitId} in ${owner}/${repo}`,
       );
-      // Match Bitbucket's contract: include the since-commit at the tail.
-      return [...ids, sinceCommitId];
+      return ids;
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       logger.error(

@@ -26,6 +26,7 @@ import {
 } from '@xyne/shared';
 import { BLOCKED_EXTENSIONS } from '../../ui/utils/files';
 import { useChannel, useChannelSearch } from '../../../hooks/useChannels';
+import { ConversationTabContext } from '../ConversationTabContext';
 import { intentClassifier } from '../../../services/onDeviceIntent';
 import { useIntentSuggestionToast } from '../../../hooks/useIntentSuggestionToast';
 import { ScheduleCallModal } from '../../Call/ScheduleCallModal/ScheduleCallModal';
@@ -340,6 +341,9 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
       excludeSelf: false,
     });
     const channel = useChannel(channelId);
+    // Tickets need a board to land on, and a channel's boards come from
+    // channel_board_mappings — a channel with none can't create one.
+    const { channelHasBoards } = useContext(ConversationTabContext);
     const isSupportChannel = channel?.type === ChannelType.SUPPORT;
     // SDLC channels are hidden from the chat directory, so "also send to
     // channel" has no destination a user could ever see — hide the toggle.
@@ -774,18 +778,6 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
             });
         };
 
-        // Restores draft content back to both the state machine and the editor
-        const restoreDraft = () => {
-          const restoredHtml = artifactDraft ? bodyHtml : processedHtml;
-          saveDraft(lookupId, restoredHtml, '');
-          inputBoxRef.current?.clearContent();
-          inputBoxRef.current?.insertContent(restoredHtml);
-          if (artifactDraft) setActiveArtifactCommand(artifactDraft.definition.command);
-          toast.error('Failed to send message', {
-            description: 'Message restored as draft. Please try again.',
-          });
-        };
-
         // On-device intent classification. Fire-and-forget and never awaited — it must
         // not add a single millisecond to the send path. Gated inside the service on the
         // user preference and public-channel visibility, both fail closed. A detection
@@ -830,34 +822,43 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
           try {
             const messageCreatedAt = Date.now();
             const newMessageId = uuidv4();
-            const result = zero.mutate(
-              mutators.messages.send({
-                conversationId,
-                content: processedHtml,
-                type: MessageType.USER,
-                showInChannel: alsoSendToChannel,
-                timestamp: messageCreatedAt,
-                messageId: newMessageId,
-                ...(alsoSendToChannel && { childConversationId: uuidv4() }),
-              }),
-            );
+            // Thread replies go through the shared pending-message framework, the
+            // same as top-level channel sends below: sendMessage writes a durable
+            // pending entry, fires mutators.messages.send when Zero is connected
+            // (queueing it for auto-retry when it is not), and clears the entry
+            // once the server confirms. A reply the server rejects stays queued
+            // with a retry/discard affordance instead of being restored to the
+            // composer. sendMessage derives childConversationId itself when
+            // alsoSendToChannel is set.
+            const threadRef: ConversationRef = { kind: 'thread', channelId, conversationId };
+            // Carry already-uploaded draft attachments explicitly — sendMessage
+            // detaches the draft as part of queueing, so the mutator's legacy
+            // draft-scan fallback cannot be relied on. useDraftFromDB is keyed by
+            // (channelId, conversationId), so this is the thread's own draft.
+            const replyAttachments: PendingAttachment[] = (
+              channelDraftForSend?.attachments ?? []
+            ).map(a => ({
+              attachmentId: a.id,
+              originalFilename: a.originalFilename,
+              mimetype: a.mimetype,
+              size: a.size,
+              ...(a.width !== null && { width: a.width }),
+              ...(a.height !== null && { height: a.height }),
+            }));
+            sendMessage(zero as Parameters<typeof sendMessage>[0], threadRef, {
+              content: processedHtml,
+              type: MessageType.USER,
+              messageId: newMessageId,
+              timestamp: messageCreatedAt,
+              alsoSendToChannel,
+              ...(replyAttachments.length > 0 && { attachments: replyAttachments }),
+            });
             saveDraft(lookupId, '', '');
             if (artifactDraft) setActiveArtifactCommand(null);
-            handleMutationResult(
-              result,
-              restoreDraft,
-              undefined,
-              // onServerSuccess, NOT here — waiting for the server ack means we never
-              // classify a message that failed to send. (It also used to matter for the
-              // server suggestion path, which raced Zero's optimistic write and 404'd
-              // as `message-not-found`; that path is gone, this reason is not.)
-              () => classifyIntent(newMessageId),
-              {
-                channelId,
-                conversationId,
-                isReply: true,
-              },
-            );
+            // Called directly rather than from a server ack: sendMessage returns
+            // synchronously and there is no mutation handle to wait on (see the
+            // channel branch below for the same reasoning).
+            classifyIntent(newMessageId);
             // Sender has implicitly read up to their own message
             setThreadLastRead(conversationId, messageCreatedAt);
 
@@ -1212,6 +1213,8 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
                 })}
               {...(channel?.scopeType === ChannelScopeType.DEFAULT &&
                 canCreateTicket &&
+                // No linked boards means nowhere to put a ticket, so don't offer it.
+                channelHasBoards &&
                 !conversationId && {
                   onCreateTicket: (description: string | undefined) => {
                     void (async () => {

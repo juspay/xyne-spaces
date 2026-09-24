@@ -65,6 +65,7 @@ interface LexicalSearchInputProps {
   availableDates?: Array<{ id: string; name: string }>;
   availableBoards?: Array<{ id: string; name: string }>;
   availableMentionTargets?: Array<{ id: string; name: string; type: ChipType }>;
+  availableUserMentionItems?: Array<{ id: string; name: string; email?: string; type?: ChipType }>;
   className?: string;
   open?: boolean;
   mentionSearchType?: ChipType | null;
@@ -681,6 +682,7 @@ export function LexicalSearchInput({
   availableDates = [],
   availableBoards = [],
   availableMentionTargets = [],
+  availableUserMentionItems = [],
   enableToTrigger = false,
   className,
   open,
@@ -813,6 +815,7 @@ export function LexicalSearchInput({
             availableDates={availableDates}
             availableBoards={availableBoards}
             availableMentionTargets={availableMentionTargets}
+            availableUserMentionItems={availableUserMentionItems}
             {...(mentionSearchType !== undefined ? { mentionSearchType } : {})}
             {...(selectedMentionIndex !== undefined ? { selectedMentionIndex } : {})}
             {...(setSelectedMentionIndex ? { setSelectedMentionIndex } : {})}

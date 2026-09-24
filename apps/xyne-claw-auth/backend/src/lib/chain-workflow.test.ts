@@ -87,13 +87,26 @@ describe("commands mode", () => {
     ).toBe(false);
   });
 
-  it("requires every must-match entry to be hit by some invocation", () => {
+  it("matches when any must-match entry is hit by some invocation", () => {
     expect(
       evaluateChainCommandConditions({ commandsMustMatch: ["git commit", "ls -la"] }, [commit, listing]),
     ).toBe(true);
     expect(
       evaluateChainCommandConditions({ commandsMustMatch: ["git commit", "npm test"] }, [commit, listing]),
+    ).toBe(true);
+    expect(
+      evaluateChainCommandConditions({ commandsMustMatch: ["git push", "npm test"] }, [commit, listing]),
     ).toBe(false);
+  });
+
+  it("fires the reviewer edge on a PR-only turn when the commit happened in an earlier turn", () => {
+    const prOnly = { toolName: "bitbucket__create_pull_request", args: { title: "ECOFY lender integration" } };
+    expect(
+      evaluateChainCommandConditions(
+        { commandsMustMatch: ["git commit", "git push", "create_pull_request"] },
+        [listing, prOnly],
+      ),
+    ).toBe(true);
   });
 
   it("rejects when any must-not-match entry is hit", () => {

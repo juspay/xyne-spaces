@@ -1,0 +1,90 @@
+{{- $s := .Values.services }}
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: xyne
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "platform-config.labels" . | nindent 4 }}
+spec:
+  hosts:
+    - {{ .Values.domain }}
+  gateways:
+    - {{ .Values.gateway.namespace }}/{{ .Values.gateway.name }}
+  http:
+    {{- if .Values.routes.health }}
+    - name: health
+      match:
+        - uri:
+            exact: {{ .Values.routes.healthPath }}
+      directResponse:
+        status: 200
+        body:
+          string: "ok"
+    {{- end }}
+    {{- range .Values.routes.extra }}
+    - {{- toYaml . | nindent 6 }}
+    {{- end }}
+    - name: api
+      match:
+        - uri:
+            prefix: /api/
+      route:
+        - destination:
+            host: {{ $s.backend.host }}
+            port:
+              number: {{ $s.backend.port }}
+      timeout: {{ .Values.routes.apiTimeout }}
+    - name: zero
+      match:
+        - uri:
+            prefix: /zero/
+      rewrite:
+        uri: /
+      route:
+        - destination:
+            host: {{ $s.zero.host }}
+            port:
+              number: {{ $s.zero.port }}
+      timeout: 0s
+    - name: ysweet
+      match:
+        - uri:
+            prefix: /ysweet/
+      route:
+        - destination:
+            host: {{ $s.ysweet.host }}
+            port:
+              number: {{ $s.ysweet.port }}
+      timeout: 0s
+    {{- if .Values.routes.externalDashboard }}
+    - name: external
+      match:
+        - uri:
+            prefix: /external/
+      route:
+        - destination:
+            host: {{ $s.externalDashboard.host }}
+            port:
+              number: {{ $s.externalDashboard.port }}
+    {{- end }}
+    {{- if .Values.routes.clawAuthFrontend }}
+    - name: claw
+      match:
+        - uri:
+            prefix: /claw/
+      route:
+        - destination:
+            host: {{ $s.clawAuthFrontend.host }}
+            port:
+              number: {{ $s.clawAuthFrontend.port }}
+    {{- end }}
+    - name: dashboard
+      match:
+        - uri:
+            prefix: /
+      route:
+        - destination:
+            host: {{ $s.dashboard.host }}
+            port:
+              number: {{ $s.dashboard.port }}

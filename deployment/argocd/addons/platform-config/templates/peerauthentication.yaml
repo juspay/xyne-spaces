@@ -1,0 +1,12 @@
+{{- if .Values.peerAuthentication.enabled }}
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: default
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "platform-config.labels" . | nindent 4 }}
+spec:
+  mtls:
+    mode: {{ .Values.peerAuthentication.mode }}
+{{- end }}

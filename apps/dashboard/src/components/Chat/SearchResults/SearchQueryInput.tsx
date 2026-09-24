@@ -16,6 +16,7 @@ import {
   Search,
   SignalHigh,
   SlidersHorizontal,
+  Users,
   X,
 } from 'lucide-react';
 import { cn } from '../../../utils/classNames';
@@ -92,6 +93,7 @@ const GLYPH_BY_ICON_KIND: Partial<Record<TokenIcon['kind'], typeof CalendarDays>
   date: CalendarDays,
   board: LayoutGrid,
   entity: Building2,
+  userGroup: Users,
 };
 
 function TokenGlyph({ icon }: { icon?: TokenIcon | undefined }): ReactElement | null {
@@ -355,6 +357,8 @@ export function SearchQueryInput({
                   <Avatar userId={s.icon.userId} size='xs' showActiveStatus={false} />
                 ) : s.icon.kind === 'channel' ? (
                   <ChannelChipIcon id={s.icon.channelId} size={12} />
+                ) : s.icon.kind === 'userGroup' ? (
+                  <Users size={12} />
                 ) : (
                   <SlidersHorizontal size={12} />
                 )}

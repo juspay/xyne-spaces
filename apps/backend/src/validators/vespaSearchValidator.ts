@@ -139,6 +139,19 @@ export const vespaSearchQuerySchema = Joi.object({
       'alternatives.types': 'channelMentions must be a string or array of channel IDs'
     }),
 
+  // Group-mention filter (scoped search): messages that mention these user-group IDs (Vespa `groupMentions` field)
+  groupMentions: Joi.alternatives()
+    .try(
+      Joi.array().items(Joi.string()),
+      Joi.string().custom((value) => {
+        return value.split(',').map((id: string) => id.trim()).filter(Boolean);
+      })
+    )
+    .optional()
+    .messages({
+      'alternatives.types': 'groupMentions must be a string or array of user-group IDs'
+    }),
+
   // Highlight-only mention display name(s); JSON-encoded array since names can contain commas.
   mentionHighlights: Joi.alternatives()
     .try(
@@ -410,4 +423,15 @@ export const vespaSchemaQuerySchema = Joi.object({
     }),
 }).messages({
   'object.unknown': 'Unknown query parameter: {{#label}}',
+});
+
+/**
+ * Validation schema for cmd+K query intent classification (lexical vs AI)
+ */
+export const queryIntentQuerySchema = Joi.object({
+  q: Joi.string().trim().min(1).max(500).required().messages({
+    'string.empty': 'Query parameter "q" cannot be empty',
+    'string.max': 'Query cannot exceed 500 characters',
+    'any.required': 'Query parameter "q" is required'
+  }),
 });

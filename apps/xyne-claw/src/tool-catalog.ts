@@ -1,3 +1,7 @@
+import { jevEnabled, jevScoreItems, jevThreshold } from "./jev.js";
+import { recordJudgeOutcome } from "./judge-backend.js";
+import { optEnabled } from "./optimizations.js";
+import { metric } from "./metrics.js";
 import { Type } from "@sinclair/typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import {
@@ -110,7 +114,7 @@ function extractRuntimeToolName(name: string): string {
   return idx >= 0 ? name.slice(idx + 2) : name;
 }
 
-function oneLineDescription(tool: ToolDefinition): string {
+export function oneLineDescription(tool: ToolDefinition): string {
   const raw = (tool.description || tool.promptSnippet || tool.label || tool.name)
     .replace(/\s+/g, " ")
     .trim();
@@ -188,6 +192,15 @@ function resolveCustomSubagentTools(
   return out;
 }
 
+// Writes were skipped here so they could never be lazily loaded. With the
+// parent-level force unwrap gone they would otherwise be unreachable, and
+// prompt-residency was never the safety mechanism: every write queues a signed
+// pendingAction that a human approves in claw-auth before it executes. Set
+// XYNE_CATALOG_EXCLUDE_WRITES=1 to restore the old exclusion.
+function excludeWritesFromCatalog(): boolean {
+  return process.env["XYNE_CATALOG_EXCLUDE_WRITES"] === "1";
+}
+
 export function buildToolCatalog(params: {
   groups: McpToolGroup[];
   customTools?: ToolDefinition[];
@@ -195,11 +208,10 @@ export function buildToolCatalog(params: {
   /**
    * Whether to catalogue subagent-wrapped read tools.
    *
-   * Only meaningful when subagent delegation is OFF (fast mode) — there the
-   * catalog stands in for the wrappers, so the individual read tools belong in
-   * it. With delegation ON, the wrapper tool is already in the palette and
-   * cataloguing its members too would show the model both `spaces` and
-   * `Spaces__spaces-search`, which is duplication, not disclosure.
+   * With delegation OFF (fast mode) the catalog stands in for the wrappers.
+   * With delegation ON it is set by the open palette or `subagent_read_tools`,
+   * so the model can load a subagent's tools and call them itself instead of
+   * paying for a nested run.
    *
    * Presentation tools are catalogued either way: they're wrapped by nothing.
    */
@@ -213,6 +225,7 @@ export function buildToolCatalog(params: {
    * always-active names back out of the catalog.
    */
   catalogUnwrapped?: boolean;
+  catalogUnwrappedWrites?: boolean;
 }): ToolCatalogItem[] {
   const items: ToolCatalogItem[] = [];
   const seen = new Set<string>();
@@ -224,7 +237,7 @@ export function buildToolCatalog(params: {
       if (!def) continue;
       const writeSet = new Set(group.writeTools.map(String));
       for (const tool of group.tools) {
-        if (writeSet.has(extractRuntimeToolName(tool.name))) continue;
+        if (excludeWritesFromCatalog() && writeSet.has(extractRuntimeToolName(tool.name))) continue;
         addUnique(items, seen, tool, `subagent:${def.name}`, group.serverType);
       }
     }
@@ -233,7 +246,7 @@ export function buildToolCatalog(params: {
       for (const def of SUBAGENT_DEFINITIONS) {
         const matched = params.customTools.filter((tool) => customToolSource(tool) === def.serverType);
         for (const tool of matched) {
-          if (isCustomWriteTool(tool)) continue;
+          if (excludeWritesFromCatalog() && isCustomWriteTool(tool)) continue;
           addUnique(items, seen, tool, `subagent:${def.name}`, def.serverType);
         }
       }
@@ -268,7 +281,7 @@ export function buildToolCatalog(params: {
       if (findSubagentDefinitionForServer(group.serverType)) continue;
       const writeSet = new Set(group.writeTools.map(String));
       for (const tool of group.tools) {
-        if (writeSet.has(extractRuntimeToolName(tool.name))) continue;
+        if (!params.catalogUnwrappedWrites && writeSet.has(extractRuntimeToolName(tool.name))) continue;
         addUnique(items, seen, tool, `server:${group.serverType}`, group.serverType);
       }
     }
@@ -279,7 +292,7 @@ export function buildToolCatalog(params: {
     for (const tool of params.customTools ?? []) {
       const source = customToolSource(tool);
       if (!source || isPresentationToolSource(source)) continue;
-      if (isCustomWriteTool(tool)) continue;
+      if (!params.catalogUnwrappedWrites && isCustomWriteTool(tool)) continue;
       addUnique(items, seen, tool, source);
     }
   }
@@ -383,6 +396,50 @@ function matchScoped(entries: ToolCatalogEntry[], query: string): ToolCatalogEnt
     .filter((s) => s.hits > 0)
     .sort((a, b) => b.hits - a.hits || a.entry.name.localeCompare(b.entry.name))
     .map((s) => s.entry);
+}
+
+/**
+ * Keyword hits first, then anything Jev scores as relevant that the keywords
+ * missed. The union is deliberate: substring matching finds nothing for
+ * "average first response time" against `spaces-desk-metrics`, but dropping
+ * what it does catch would be a regression for the phrasings it handles.
+ */
+async function matchScopedSifted(
+  entries: ToolCatalogEntry[],
+  query: string,
+): Promise<ToolCatalogEntry[]> {
+  const keyword = matchScoped(entries, query);
+  if (!optEnabled("jev_tool_sift") || !jevEnabled()) return keyword;
+
+  const already = new Set(keyword.map((e) => e.name));
+  const scores = await jevScoreItems(query, entries, {
+    purpose: "tool-search",
+    key: (e) => e.name,
+    instructions: (e) =>
+      `Would calling this tool help with the request? \`${e.name}\`: ` +
+      `${e.oneLineDescription.slice(0, 300)}`,
+  });
+  if (!scores) return keyword;
+
+  const threshold = jevThreshold("JEV_TOOL_THRESHOLD", 0.4);
+  const added = entries
+    .filter((e) => !already.has(e.name) && (scores.get(e.name) ?? 0) >= threshold)
+    .sort((a, b) => (scores.get(b.name) ?? 0) - (scores.get(a.name) ?? 0));
+
+  if (added.length > 0) {
+    metric.count("tool_search_sift_added", { added: added.length, keyword: keyword.length });
+  }
+  recordJudgeOutcome(
+    "tool-search",
+    `scored ${scores.size} of ${entries.length} tools · keyword hits ${keyword.length} · added ${added.length} at ≥${threshold}`,
+    {
+      query,
+      threshold,
+      added: added.slice(0, 25).map((e) => ({ name: e.name, score: Number((scores.get(e.name) ?? 0).toFixed(3)) })),
+      keywordHits: keyword.slice(0, 25).map((e) => ({ name: e.name, score: Number((scores.get(e.name) ?? 0).toFixed(3)) })),
+    },
+  );
+  return [...keyword, ...added];
 }
 
 /**
@@ -525,6 +582,7 @@ export function buildFastModeMetaTools(options: {
   openPalette?: boolean;
   /** Connected MCP servers, for `scope:"mcp"`. Empty when none are wired. */
   mcpServers?: McpServerSummary[];
+  activeTools?: ToolCatalogEntry[];
 }): ToolDefinition[] {
   const catalog = [...options.catalog].sort((a, b) => a.name.localeCompare(b.name));
   const emptyCatalogMessage = [
@@ -568,7 +626,9 @@ export function buildFastModeMetaTools(options: {
         'scope="mcp" answers "which MCP servers am I connected to". On its own it lists them with their tool counts; add `mcp` to list one server\'s tools. Use it when the ask names a system ("anything from Heisenberg?") rather than a task.\n' +
         "Omit `query` to browse the whole scope. Pass `query` to narrow it, and describe what you are trying to DO rather than guessing a tool name — \"post a message to a channel\", \"fill in a pdf form\". Agent scope matches on words, so keywords work; claw scope is a semantic search, so a full phrase works better than a single noun.\n" +
         "`catalog` narrows the agent scope to one catalog; `integration` narrows the claw scope to one product (google, sandbox, github). `maxRisk` is a ceiling, not an exact match: \"read\" excludes everything that writes, \"write\" still excludes destructive. Use it when you only need to look something up.\n" +
-        "Call it before guessing a tool name. A wrong name costs a failed call; a search costs one cheap round trip.",
+        (options.activeTools
+          ? "Only for tools you do not already have: if a tool already in your tool list fits, call it directly — no search or load needed. When you do search, matching tools that are already active are listed first."
+          : "Call it before guessing a tool name. A wrong name costs a failed call; a search costs one cheap round trip."),
       parameters: Type.Unsafe({
         type: "object",
         additionalProperties: false,
@@ -692,7 +752,19 @@ export function buildFastModeMetaTools(options: {
 
         const scoped = scopeTo(input.catalog);
         if ("error" in scoped) return text(scoped.error);
+        const activeAllowed = maxRisk ? new Set(riskAtOrBelow(maxRisk as "read" | "write" | "destructive")) : null;
+        const activeHits =
+          query && options.activeTools && !input.catalog && !mcp
+            ? matchScoped(options.activeTools, query).filter((e) => !activeAllowed || activeAllowed.has(entryRisk(e)))
+            : [];
+        const activeSection = activeHits.length
+          ? [
+              `## already active — call directly, no search or load needed (${activeHits.length})`,
+              ...activeHits.slice(0, limit).map((e) => `  - ${e.name}: ${e.oneLineDescription}`),
+            ].join("\n")
+          : "";
         if (scoped.entries.length === 0) {
+          if (activeSection) return text(`${activeHits.length} tool(s) you already have match ${JSON.stringify(query)} — call them directly.\n\n${activeSection}`);
           return text(`The tool catalog is empty. ${emptyCatalogMessage}`);
         }
         if (mcp && !mcpServerTypes.includes(mcp)) {
@@ -702,7 +774,10 @@ export function buildFastModeMetaTools(options: {
 
         const allowed = maxRisk ? new Set(riskAtOrBelow(maxRisk as "read" | "write" | "destructive")) : null;
         const risked = allowed ? byServer.filter((e) => allowed.has(entryRisk(e))) : byServer;
-        const matched = query ? matchScoped(risked, query) : risked;
+        const matched = query ? await matchScopedSifted(risked, query) : risked;
+        if (matched.length === 0 && activeSection) {
+          return text(`Nothing to load matches ${JSON.stringify(query)}, but ${activeHits.length} tool(s) you already have do — call them directly.\n\n${activeSection}`);
+        }
         if (matched.length === 0) {
           return text(
             `No tool in this agent's catalog matches ${JSON.stringify(query)}. ` +
@@ -715,7 +790,8 @@ export function buildFastModeMetaTools(options: {
         const header =
           `${shown.length} of ${matched.length} matching tool(s)${query ? ` for ${JSON.stringify(query)}` : ""}. ` +
           'Pick the names you need and call load-tools({ names: [...] }), or load-tools({ catalog: "<name>" }) for a whole catalog.';
-        return text(renderGrouped(shown, header));
+        const grouped = renderGrouped(shown, header);
+        return text(activeSection ? `${activeSection}\n\n${grouped}` : grouped);
       },
     },
     {
@@ -797,9 +873,19 @@ export function buildFastModeMetaTools(options: {
         const resolved: string[] = [];
         const unknown: string[] = [];
         const ambiguous: string[] = [];
+        const alreadyActive: string[] = [];
+        const activeByName = new Map((options.activeTools ?? []).map((e) => [e.name, e]));
+        const activeMatch = (requested: string): string | null => {
+          if (activeByName.has(requested)) return requested;
+          const bare = requested.split("__").pop() ?? requested;
+          const hits = [...activeByName.keys()].filter((n) => (n.split("__").pop() ?? n) === bare);
+          return hits.length === 1 ? hits[0]! : null;
+        };
         for (const requested of names) {
           const hit = resolveCatalogName(requested, byName, catalog);
-          if (hit === null) unknown.push(requested);
+          const active = hit === null ? activeMatch(requested) : null;
+          if (active) alreadyActive.push(active);
+          else if (hit === null) unknown.push(requested);
           else if ("ambiguous" in hit) ambiguous.push(`${requested} (could be ${hit.ambiguous.join(" or ")})`);
           else resolved.push(hit.name);
         }
@@ -812,9 +898,12 @@ export function buildFastModeMetaTools(options: {
         const parts = [
           result.loaded.length > 0 ? `Loaded: ${result.loaded.join(", ")}` : "",
           result.alreadyLoaded.length > 0 ? `Already loaded: ${result.alreadyLoaded.join(", ")}` : "",
+          alreadyActive.length > 0 ? `Already active — nothing to load, call directly: ${alreadyActive.join(", ")}` : "",
           ambiguous.length > 0 ? `Ambiguous, name the server too: ${ambiguous.join("; ")}` : "",
           allUnknown.length > 0 ? unknownExplanation(allUnknown, catalog) : "",
-          `Active tools: ${result.activeToolSet.length}/${result.maxActiveTools}`,
+          options.activeTools
+            ? `Loaded on demand: ${result.activeToolSet.length}/${result.maxActiveTools} (the ${options.activeTools.length} tools you started with are separate and always callable)`
+            : `Active tools: ${result.activeToolSet.length}/${result.maxActiveTools}`,
           "Loaded tools are available starting with the next assistant turn.",
         ].filter(Boolean);
         return { content: [{ type: "text" as const, text: parts.join("\n") }], details: {} };
@@ -844,9 +933,61 @@ const INLINE_LISTING_MAX = 15;
  * replaces delegation and the model must call these tools itself, whereas with
  * delegation on the catalog is purely additive and the claim would be false.
  */
+const INDEX_CHAR_BUDGET_DEFAULT = 24_000;
+const INDEX_ONE_LINER_FULL = 300;
+const INDEX_ONE_LINER_SHORT = 110;
+
+type IndexTier = "full" | "short" | "names" | "header";
+
+function indexCharBudget(): number {
+  const raw = Number(process.env["XYNE_CATALOG_INDEX_BUDGET"]);
+  return Number.isFinite(raw) && raw >= 2_000 ? raw : INDEX_CHAR_BUDGET_DEFAULT;
+}
+
+function clip(text: string, max: number): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  return flat.length <= max ? flat : `${flat.slice(0, max - 1).trimEnd()}…`;
+}
+
+function renderCatalogSection(name: string, entries: ToolCatalogEntry[], tier: IndexTier): string[] {
+  const header = `- **${name}** (${entries.length} tool${entries.length === 1 ? "" : "s"})`;
+  if (tier === "header") return [`${header} — call search-tools with this catalog to see its tools.`];
+  if (tier === "names") return [`${header}: ${entries.map((e) => e.name).join(", ")}`];
+  const max = tier === "full" ? INDEX_ONE_LINER_FULL : INDEX_ONE_LINER_SHORT;
+  return [header, ...entries.map((e) => `    - ${e.name}: ${clip(e.oneLineDescription, max)}`)];
+}
+
+const TIER_ORDER: IndexTier[] = ["full", "short", "names", "header"];
+
+function fitIndexTiers(byCatalog: Array<[string, ToolCatalogEntry[]]>, budget: number): Map<string, IndexTier> {
+  const tiers = new Map<string, IndexTier>(byCatalog.map(([name]) => [name, "full"]));
+  const sizeAt = (name: string, entries: ToolCatalogEntry[], tier: IndexTier): number =>
+    renderCatalogSection(name, entries, tier).join("\n").length + 1;
+  const sizes = new Map<string, number>(byCatalog.map(([name, entries]) => [name, sizeAt(name, entries, "full")]));
+  let total = [...sizes.values()].reduce((sum, n) => sum + n, 0);
+  const entriesOf = new Map(byCatalog);
+  while (total > budget) {
+    let target: string | undefined;
+    let largest = -1;
+    for (const [name, size] of sizes) {
+      if (tiers.get(name) !== "header" && size > largest) {
+        largest = size;
+        target = name;
+      }
+    }
+    if (!target) break;
+    const next = TIER_ORDER[TIER_ORDER.indexOf(tiers.get(target)!) + 1]!;
+    tiers.set(target, next);
+    const resized = sizeAt(target, entriesOf.get(target)!, next);
+    total += resized - sizes.get(target)!;
+    sizes.set(target, resized);
+  }
+  return tiers;
+}
+
 export function renderToolCatalogForPrompt(
   catalog: ToolCatalogEntry[],
-  opts?: { subagentDelegationDisabled?: boolean },
+  opts?: { subagentDelegationDisabled?: boolean; fullIndex?: boolean; preferDirect?: boolean },
 ): string {
   if (catalog.length === 0) return "";
 
@@ -856,23 +997,43 @@ export function renderToolCatalogForPrompt(
     list.push(entry);
     byCatalog.set(entry.catalog, list);
   }
-
-  const sections = [...byCatalog.entries()]
+  const ordered = [...byCatalog.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
-    .flatMap(([name, entries]) => {
-      const sorted = entries.slice().sort((a, b) => a.name.localeCompare(b.name));
-      const header = `- **${name}** (${sorted.length} tool${sorted.length === 1 ? "" : "s"})`;
-      if (sorted.length > INLINE_LISTING_MAX) {
-        return [`${header} — call search-tools with this catalog to see its tools.`];
-      }
-      return [header, ...sorted.map((entry) => `    - ${entry.name}: ${entry.oneLineDescription}`)];
-    });
+    .map(([name, entries]): [string, ToolCatalogEntry[]] => [name, entries.slice().sort((a, b) => a.name.localeCompare(b.name))]);
+
+  const subagentCatalogs = [...new Set(catalog.filter((e) => e.source.startsWith("subagent:")).map((e) => e.catalog))].sort();
+  const directFirst =
+    opts?.preferDirect && !opts.subagentDelegationDisabled && subagentCatalogs.length
+      ? [`The ${subagentCatalogs.join(", ")} catalog${subagentCatalogs.length === 1 ? " holds" : "s hold"} the same tools your subagent${subagentCatalogs.length === 1 ? "" : "s"} of that name use${subagentCatalogs.length === 1 ? "s" : ""}, writes included. Call them yourself first: a subagent is a slow nested model run, so delegate only for open-ended research that needs many queries.`]
+      : [];
+  const intro = opts?.subagentDelegationDisabled
+    ? "Subagent delegation is disabled. The tools below are NOT loaded yet — use `load-tools` to pull in the ones you need, then call them yourself."
+    : "The tools below are NOT loaded yet — their full schemas arrive only when you ask for them.";
+
+  if (opts?.fullIndex) {
+    const tiers = fitIndexTiers(ordered, indexCharBudget());
+    return [
+      "## Tool Catalogs",
+      intro,
+      "Tools already in your tool list are ready to call — they are not listed here and never need searching or loading.",
+      ...directFirst,
+      "Every tool you can load is named below. Pick only the specific tools this task will call and pass their exact names to `load-tools` — no search needed. Do not load a whole catalog: each loaded tool adds its full schema to your context. Use `search-tools` only when nothing listed fits, or with `scope=\"claw\"` to look beyond this agent. Loaded tools are callable from your next turn, so request them in one call.",
+      ...ordered.flatMap(([name, entries]) => renderCatalogSection(name, entries, tiers.get(name)!)),
+    ].join("\n");
+  }
+
+  const sections = ordered.flatMap(([name, sorted]) => {
+    const header = `- **${name}** (${sorted.length} tool${sorted.length === 1 ? "" : "s"})`;
+    if (sorted.length > INLINE_LISTING_MAX) {
+      return [`${header} — call search-tools with this catalog to see its tools.`];
+    }
+    return [header, ...sorted.map((entry) => `    - ${entry.name}: ${entry.oneLineDescription}`)];
+  });
 
   return [
     "## Tool Catalogs",
-    opts?.subagentDelegationDisabled
-      ? "Subagent delegation is disabled. The tools below are NOT loaded yet — use `load-tools` to pull in the ones you need, then call them yourself."
-      : "The tools below are NOT loaded yet — their full schemas arrive only when you ask for them.",
+    intro,
+    ...directFirst,
     "Call `search-tools` to find one — no arguments lists everything here, a `query` narrows it, and `scope=\"claw\"` looks beyond this agent at every tool the deployment has. Then `load-tools` activates the ones you need. Loaded tools are callable from your next turn, so batch everything into one call.",
     ...sections,
   ].join("\n");

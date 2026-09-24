@@ -33,6 +33,7 @@ import type { AgentLight } from "../../../lib/types";
 import type { AgentRun } from "../../../lib/api";
 import { Skeleton } from "../ui/Skeleton";
 import { formatTimeAgo, getInitials } from "./homeUtils";
+import { runReplayPath } from "../../../lib/runReplay";
 
 const SPACES_APP_URL =
   import.meta.env.VITE_SPACES_APP_URL ||
@@ -71,6 +72,7 @@ const ORIGIN_META: Record<
   scheduled: { label: "Scheduled", icon: ClockIcon },
   automation: { label: "Automation", icon: LightningIcon },
   api: { label: "API", icon: LightningIcon },
+  delegation: { label: "Delegated", icon: WrenchIcon },
 };
 
 function replyPreviewFor(run: AgentRun): { text: string; tone: string } {
@@ -478,17 +480,16 @@ export function RecentRunsCard({
                 if (run.channelId && run.conversationId) {
                   window.open(spacesThreadUrl(run.channelId, run.conversationId), "_blank");
                 } else {
-                  const convId = run.conversationId;
-                  if (!convId) return;
-                  navigate(`/v3/chat?agent=${encodeURIComponent(s.agentSlug)}&conversation=${encodeURIComponent(convId)}`);
+                  const path = runReplayPath(run);
+                  if (path) navigate(path);
                 }
               }}
               onOpenRun={(run, s) => {
                 if (run.channelId && run.conversationId) {
                   window.open(spacesThreadUrl(run.channelId, run.conversationId), "_blank");
                 } else {
-                  if (!run.conversationId) return;
-                  navigate(`/v3/chat?agent=${encodeURIComponent(s.agentSlug)}&conversation=${encodeURIComponent(run.conversationId)}`);
+                  const path = runReplayPath(run);
+                  if (path) navigate(path);
                 }
               }}
             />

@@ -1,6 +1,7 @@
-import { useMemo } from 'react';
-import { useQuery } from './useQuery.js';
-import { queries } from '../zero/queries.js';
+import { useMemo } from "react";
+import { useQuery } from "./useQuery.js";
+import { queries } from "../zero/queries.js";
+import { matchesAllTokens } from "../utils/index.js";
 
 export interface UserGroupLike {
   id: string;
@@ -22,20 +23,23 @@ export const useUserGroupSearch = (
 ): UserGroupLike[] => {
   const [allUserGroups, details] = useQuery(queries.getAllUserGroups());
   return useMemo(() => {
-    if (details.type !== 'complete') return [];
+    if (details.type !== "complete") return [];
     if (!allUserGroups || allUserGroups.length === 0) return [];
 
     let filtered: UserGroupLike[];
     if (!searchQuery.trim()) {
-      filtered = [...allUserGroups].sort((a, b) => a.name.localeCompare(b.name));
+      filtered = [...allUserGroups].sort((a, b) =>
+        a.name.localeCompare(b.name),
+      );
     } else {
-      const q = searchQuery.toLowerCase();
+      // Token match (multi-word, order-independent) on name and alias — same matching people get,
+      // so "eng team" finds "Engineering Team".
       filtered = allUserGroups
-        .filter(g => {
-          const matchesName = g.name.toLowerCase().includes(q);
-          const matchesAlias = g.alias?.toLowerCase().includes(q);
-          return matchesName || matchesAlias;
-        })
+        .filter(
+          (g) =>
+            matchesAllTokens(g.name, searchQuery) ||
+            matchesAllTokens(g.alias ?? "", searchQuery),
+        )
         .sort((a, b) => a.name.localeCompare(b.name));
     }
     return filtered.slice(0, limit);

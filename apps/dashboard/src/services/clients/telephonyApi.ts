@@ -14,7 +14,8 @@ export interface OzonetelTicketRules {
   createTicketOnProgressive?: boolean;
   createTicketOnPredictive?: boolean;
   ticketSubjectTemplate?: string;
-  customerPhoneFieldName?: string;
+  phoneFieldNames?: string[];
+  customerPhoneFieldName?: string | undefined;
 }
 
 export interface OzonetelConfigView {
@@ -35,7 +36,19 @@ export interface OzonetelConfigView {
 export interface OzonetelToolbarView {
   configured: boolean;
   toolbarUrl: string | null;
-  customerPhoneFieldName: string | null;
+  phoneFieldNames?: string[];
+  customerPhoneFieldName?: string | null;
+}
+
+export function getPhoneFieldNames(
+  source?: {
+    phoneFieldNames?: string[];
+    customerPhoneFieldName?: string | null | undefined;
+  } | null,
+): string[] {
+  if (source?.phoneFieldNames) return source.phoneFieldNames;
+  const legacy = source?.customerPhoneFieldName?.trim();
+  return legacy ? [legacy] : [];
 }
 
 export interface SaveOzonetelConfigInput {

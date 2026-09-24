@@ -91,3 +91,15 @@ dependencies:
     version: 0.1.0
     repository: file://../xyne-tei-batch-proxy
     condition: xyne-tei-batch-proxy.enabled
+  - name: xyne-redis
+    version: 0.1.0
+    repository: file://../xyne-redis
+    condition: xyne-redis.enabled
+  - name: xyne-sandbox-router
+    version: 0.1.0
+    repository: file://../xyne-sandbox-router
+    condition: xyne-sandbox-router.enabled
+  - name: xyne-egress-proxy
+    version: 0.1.0
+    repository: file://../xyne-egress-proxy
+    condition: xyne-egress-proxy.enabled

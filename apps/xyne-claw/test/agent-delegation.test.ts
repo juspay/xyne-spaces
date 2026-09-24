@@ -13,6 +13,7 @@ import {
   type CallableAgentSpec,
   type NestedAgentRunner,
 } from "../src/agent-delegation.js";
+import { cancelChildTask, createChildTaskRegistry } from "../src/child-tasks.js";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -149,5 +150,136 @@ describe("clampMaxDelegationsPerRun (config → budget)", () => {
     const refused = await tool.execute("c6", { task: "t6" });
     expect(refused.isError).toBeTruthy();
     expect(refused.content[0].text).toMatch(/budget exhausted/);
+  });
+});
+
+describe("A2A delegation controls", () => {
+  const registry = () => createChildTaskRegistry();
+
+  it("exposes run_in_background only when a registry is wired", () => {
+    const g = () => new AgentDelegationGovernor({ ownerSlug: "xyne" });
+    const props = (tool: { parameters: unknown }) =>
+      Object.keys((tool.parameters as { properties: Record<string, unknown> }).properties);
+
+    const [withReg] = buildCallableAgentTools([infra], g(), runner([]), { registry: registry() });
+    const [without] = buildCallableAgentTools([infra], g(), runner([]));
+    expect(props(withReg!)).toContain("run_in_background");
+    expect(props(without!)).not.toContain("run_in_background");
+    // The follow-up handle is always available; it needs no run-level wiring.
+    expect(props(without!)).toContain("session_id");
+  });
+
+  it("run_in_background returns an ack and registers the task", async () => {
+    const g = new AgentDelegationGovernor({ ownerSlug: "xyne" });
+    const reg = registry();
+    const [tool] = buildCallableAgentTools([infra], g, runner([], 20), { registry: reg });
+
+    const res = await tool!.execute("call-1", { task: "slow", run_in_background: true });
+    expect(res.content[0]!.text).toContain("in the background");
+    expect(res.details["taskId"]).toBe("call-1");
+
+    const task = reg.get("call-1");
+    expect(task?.kind).toBe("agent");
+    expect(task?.name).toBe("infra-doctor");
+    await task!.promise;
+    await new Promise((r) => setTimeout(r, 0));
+    expect(task!.status).toBe("completed");
+    expect(task!.result).toContain("Infra Doctor:slow");
+  });
+
+  it("ignores run_in_background when no registry is wired and runs blocking", async () => {
+    const g = new AgentDelegationGovernor({ ownerSlug: "xyne" });
+    const [tool] = buildCallableAgentTools([infra], g, runner([], 5));
+    const res = await tool!.execute("call-1", { task: "x", run_in_background: true });
+    expect(res.content[0]!.text).toContain("Infra Doctor:x");
+  });
+
+  it("passes a valid session_id through and surfaces the returned handle", async () => {
+    const g = new AgentDelegationGovernor({ ownerSlug: "xyne" });
+    let seen: string | undefined = "unset";
+    const followUpRunner: NestedAgentRunner = async ({ followUpId }) => {
+      seen = followUpId;
+      return { text: "answer", followUpId: "handle-2" };
+    };
+    const [tool] = buildCallableAgentTools([infra], g, followUpRunner);
+
+    const res = await tool!.execute("c1", { task: "q", session_id: "handle-1" });
+    expect(seen).toBe("handle-1");
+    expect(res.details["session_id"]).toBe("handle-2");
+    expect(res.content[0]!.text).toContain('session_id: "handle-2"');
+  });
+
+  it("drops a malformed session_id instead of failing the call", async () => {
+    const g = new AgentDelegationGovernor({ ownerSlug: "xyne" });
+    let seen: string | undefined = "unset";
+    const followUpRunner: NestedAgentRunner = async ({ followUpId }) => {
+      seen = followUpId;
+      return { text: "answer" };
+    };
+    const [tool] = buildCallableAgentTools([infra], g, followUpRunner);
+
+    const res = await tool!.execute("c1", { task: "q", session_id: "../../etc/passwd" });
+    expect(seen).toBeUndefined();
+    expect(res.isError).toBeFalsy();
+    expect(res.content[0]!.text).toBe("answer");
+  });
+
+  it("omits the follow-up footer when the runner returns no handle", async () => {
+    const g = new AgentDelegationGovernor({ ownerSlug: "xyne" });
+    const [tool] = buildCallableAgentTools([infra], g, runner([]));
+    const res = await tool!.execute("c1", { task: "q" });
+    expect(res.content[0]!.text).not.toContain("Follow-up");
+    expect(res.details["session_id"]).toBeUndefined();
+  });
+
+  it("stopping a backgrounded delegation aborts that callee's signal", async () => {
+    const g = new AgentDelegationGovernor({ ownerSlug: "xyne" });
+    const reg = registry();
+    let aborted = false;
+    const watchingRunner: NestedAgentRunner = async ({ signal }) => {
+      signal?.addEventListener("abort", () => { aborted = true; });
+      await new Promise((r) => setTimeout(r, 30));
+      return { text: "late" };
+    };
+    const [tool] = buildCallableAgentTools([infra], g, watchingRunner, { registry: reg });
+
+    await tool!.execute("call-1", { task: "slow", run_in_background: true });
+    await new Promise((r) => setTimeout(r, 5));
+    cancelChildTask(reg, "call-1");
+    expect(aborted).toBe(true);
+    expect(reg.get("call-1")!.status).toBe("cancelled");
+  });
+
+  it("a backgrounded delegation still spends the run budget", async () => {
+    const g = new AgentDelegationGovernor({ ownerSlug: "xyne", maxDelegationsPerRun: 1 });
+    const reg = registry();
+    const [tool] = buildCallableAgentTools([infra], g, runner([], 5), { registry: reg });
+
+    await tool!.execute("call-1", { task: "one", run_in_background: true });
+    const second = await tool!.execute("call-2", { task: "two", run_in_background: true });
+    expect(second.isError).toBe(true);
+    expect(second.content[0]!.text).toMatch(/budget/i);
+  });
+});
+
+describe("A2A background failures stay observable", () => {
+  it("emits a failed event when a detached delegation throws", async () => {
+    const events: string[] = [];
+    const g = new AgentDelegationGovernor({
+      ownerSlug: "xyne",
+      onEvent: (ev) => events.push(ev.kind),
+    });
+    const reg = createChildTaskRegistry();
+    const boom: NestedAgentRunner = async () => { throw new Error("callee exploded"); };
+    const [tool] = buildCallableAgentTools([infra], g, boom, { registry: reg });
+
+    await tool!.execute("call-1", { task: "x", run_in_background: true });
+    const task = reg.get("call-1")!;
+    await task.promise.catch(() => {});
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(events).toContain("failed");
+    expect(task.status).toBe("error");
+    expect(task.error).toBe("callee exploded");
   });
 });

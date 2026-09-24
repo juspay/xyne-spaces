@@ -197,6 +197,59 @@ export interface HostRequestResultMessage {
   error?: string;
 }
 
+/**
+ * Where an app is running, as the host sees it.
+ *
+ * An app can be opened from several places now — the rail, the Inbox menubar, a
+ * channel tab, the Agent Hub — and the same build may reasonably want to lay
+ * itself out differently in each. Only the dashboard knows which one it is: the
+ * backend has no idea where an iframe is mounted, so this travels over
+ * postMessage rather than being fetched.
+ *
+ * NOT a permission. The app cannot forge it, but it must not be treated as
+ * proof of anything either: every call an app makes is still authorized as the
+ * viewer, so `channel.id` here says "you were opened here", never "you may read
+ * this channel".
+ *
+ * Mirrored BY HAND in xyneContextRuntime.source.ts (the app-side copy, compiled
+ * inside the sandbox where it cannot import from the dashboard bundle) and in
+ * the CLI's dev implementation. Additive changes only — an older app must not
+ * break on a surface it has never heard of.
+ */
+export type XyneSurface = 'toolbar' | 'inbox' | 'channel' | 'library' | 'chat' | 'standalone';
+
+export interface XyneContextChannel {
+  id: string;
+  name: string;
+  scopeType: string;
+}
+
+interface XyneAppContextBase {
+  v: number;
+  /** Absent for an artifact that has not been saved as an app yet. */
+  appId?: string;
+  workspaceId?: string;
+  /** A coarse hint: a full page, or a panel beside other chrome. CSS should
+   *  still do the real work — this is for choosing a layout, not a width. */
+  layout: 'fullscreen' | 'panel';
+}
+
+export type XyneAppContext =
+  | (XyneAppContextBase & { surface: 'channel'; channel: XyneContextChannel })
+  | (XyneAppContextBase & { surface: Exclude<XyneSurface, 'channel'>; channel?: never });
+
+/**
+ * Host → app: where this app is mounted. Sent in reply to `context-request` and
+ * again whenever it changes, so an app kept alive across a channel switch sees
+ * the new channel instead of being stranded on the old one.
+ */
+export interface HostContextMessage {
+  source: 'xyne-artifact-host';
+  v: number;
+  type: 'context';
+  context: XyneAppContext;
+}
+
 /** App → host. */
 export interface AppArtifactMessage {
   source: 'xyne-artifact';
@@ -209,7 +262,8 @@ export interface AppArtifactMessage {
     | 'agent-cancel'
     | 'agent-attach'
     | 'error'
-    | 'request';
+    | 'request'
+    | 'context-request';
   /** `refresh`: which requirement (omitted = all). */
   name?: string;
   /** `mutate` and `request`. */
@@ -236,7 +290,9 @@ export function isAppArtifactMessage(value: unknown): value is AppArtifactMessag
   if (!value || typeof value !== 'object') return false;
   const msg = value as Partial<AppArtifactMessage>;
   if (msg.source !== 'xyne-artifact') return false;
-  if (msg.type === 'ready' || msg.type === 'refresh') return true;
+  if (msg.type === 'ready' || msg.type === 'refresh' || msg.type === 'context-request') {
+    return true;
+  }
   if (msg.type === 'error') return typeof msg.message === 'string';
   if (msg.type === 'agent-attach' || msg.type === 'agent-cancel') {
     return typeof msg.runKey === 'string';

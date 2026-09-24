@@ -60,6 +60,8 @@ interface McpToolInfo {
   readonly serviceName?: string;
   readonly backendId?: string;
   readonly selectionKey?: string;
+  /** claw-auth says this tool cannot mutate — see the propagation below. */
+  readonly readOnly?: boolean;
 }
 
 interface McpServerTools {
@@ -367,9 +369,17 @@ export async function loadMcpToolsForUser(
       const acceptsFiles = isFileInputForwardingServer(server.serverType);
       const trustedBindings = trustedToolBindings?.[mcpTool.name];
       const baseDescription = mcpTool.description || `Tool ${mcpTool.name} from ${displayName}`;
-      const definition: ToolDefinition & { serviceName?: string; backendId?: string; selectionKey?: string; mcpToolName?: string } = {
+      const definition: ToolDefinition & { serviceName?: string; backendId?: string; selectionKey?: string; mcpToolName?: string; isWriteTool?: boolean } = {
         name: safeName,
         mcpToolName: mcpTool.name,
+        // A declared read-only tool carries `isWriteTool: false` so the open
+        // palette (routes/run.ts::admittedByOpenPalette) believes the
+        // declaration instead of guessing risk from the name. The guess leans
+        // write and reads "star" as a mutation, which silently kept
+        // github-list-stargazers / -star-history / -stargazer-profiles out of
+        // every read-palette run. Only `true` means write anywhere downstream,
+        // so `false` narrows nothing that was previously wide.
+        ...(mcpTool.readOnly === true ? { isWriteTool: false } : {}),
         label: `${displayName}/${mcpTool.name}`,
         ...(typeof mcpTool.serviceName === "string" && mcpTool.serviceName.length > 0
           ? { serviceName: mcpTool.serviceName }

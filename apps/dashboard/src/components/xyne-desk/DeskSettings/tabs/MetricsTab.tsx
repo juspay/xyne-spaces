@@ -117,6 +117,7 @@ export const MetricsTab: React.FC<MetricsTabProps> = ({ form }) => {
       'column:tags': 'Tags',
       ...Object.fromEntries(columnFieldNames.map(name => [`column:field:${name}`, name] as const)),
       'column:createdAt': 'Created at',
+      'column:resolvedAt': 'Resolved at',
       'column:age': 'Age',
     },
   };

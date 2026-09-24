@@ -2,7 +2,7 @@ import { logger, Event as LogEvent } from '../../../utils/logger';
 import React, { ReactElement, useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Command } from 'cmdk';
-import { CalendarDays, ChevronDown, LayoutGrid, SignalHigh, X } from 'lucide-react';
+import { CalendarDays, LayoutGrid, SignalHigh, X, ChevronDown } from 'lucide-react';
 import {
   ChatDefault,
   UserTwo,
@@ -84,6 +84,9 @@ import { useAffinityCallback } from '../../../hooks/useAffinityCallback';
 import { useDeskContacts } from '../../../hooks/useDeskContacts';
 import { useDeskPeople, ALL_DESK } from '../../../hooks/useDeskPeople';
 import { useUsers, useUserSearch, useUser } from '../../../hooks/useUsers';
+import { useUserGroups } from '../../../hooks/useUserGroup';
+import { makeMentionHighlightsBuilder } from '../../../search/mentionHighlights';
+import { useUserGroupSearch } from '@xyne/shared/hooks';
 import { QuickDmComposer } from './SlashCommands/QuickDmComposer';
 import type { CommandTarget } from './SlashCommands/QuickDmComposer';
 import { ResultActionsMenu } from './ResultActionsMenu';
@@ -137,6 +140,7 @@ import { apiInstance } from '../../../services/clients/apiClient';
 import { MergeTicketsDialog } from '../../Tickets/MergeTicketsDialog/MergeTicketsDialog';
 import { toast } from 'sonner';
 import Button from '../../ui/Button';
+import { AiAnswerCard } from './AiAnswerCard';
 
 type SearchResultsDocType = SearchResultsFilters['docType'];
 
@@ -344,6 +348,7 @@ const TEXT_FILTER_HINT_REGEX =
  */
 const MENTION_GROUPS = [
   { key: 'people', type: ChipType.USER, heading: 'People' },
+  { key: 'userGroups', type: ChipType.USER_GROUP, heading: 'User Groups' },
   { key: 'channels', type: ChipType.CHANNEL, heading: 'Channels' },
 ] as const;
 
@@ -391,6 +396,7 @@ const SeeMoreItem = ({
   trackCategory,
   trackName,
   trackMetadata,
+  onMouseEnter,
 }: {
   value: string;
   label: string;
@@ -399,10 +405,13 @@ const SeeMoreItem = ({
   trackCategory: string;
   trackName: string;
   trackMetadata: string;
+  // Lets mention lists clear their row highlight on hover so only this row greys (avoids a double).
+  onMouseEnter?: () => void;
 }): ReactElement => (
   <Command.Item
     value={value}
     onSelect={onSelect}
+    onMouseEnter={onMouseEnter}
     className={`w-full px-2 py-1.5 mt-1 text-sm text-muted-foreground rounded-lg text-left cursor-pointer transition-colors aria-selected:text-foreground aria-selected:bg-accent ${hoverable ? 'hover:text-foreground hover:bg-accent' : ''}`}
     style={{ WebkitTapHighlightColor: 'transparent', userSelect: 'none' }}
     data-track-category={trackCategory}
@@ -413,8 +422,121 @@ const SeeMoreItem = ({
   </Command.Item>
 );
 
+/**
+ * Expand-only "Show more" for the `@` / `mentions:` typeaheads. A real `<button>` (not a cmdk
+ * `Command.Item`) with `onMouseDown` → `preventDefault`, so clicking it never blurs the Lexical
+ * editor — the arrow-key mention commands are registered on that editor and stop firing the moment
+ * it loses focus. Expand-only: the caller hides it once its section is expanded, so there is no
+ * "See less" toggle.
+ */
+function MentionShowMoreButton({
+  onExpand,
+  trackName,
+}: {
+  onExpand: () => void;
+  trackName: string;
+}): ReactElement {
+  return (
+    <button
+      type='button'
+      onMouseDown={e => e.preventDefault()}
+      onClick={onExpand}
+      className='flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-[13px] text-muted-foreground hover:bg-muted hover:text-foreground'
+      data-track-category='SEARCH'
+      data-track-name={trackName}
+    >
+      <span className='flex h-4 w-5 flex-shrink-0 items-center justify-center'>
+        <ChevronDown size={14} />
+      </span>
+      Show more
+    </button>
+  );
+}
+
 /** The only sections whose "See more" expands in place — the valid keys for expandedCategories and toggleCategoryExpansion. */
 type ExpandableCategory = ChannelCategory | 'users' | typeof MERGED_CATEGORY;
+
+/** One flat `@`-typeahead row — a person or user-group; `type` drives which chip a pick lands. */
+interface AtMentionCandidate {
+  type: ChipType; // USER | USER_GROUP
+  id: string;
+  name: string;
+  alias?: string | null; // user-group `@`-handle; shown bold with `name` as the secondary line
+  email?: string;
+  isDeactivated?: boolean;
+}
+
+/** The user-group glyph — 👥 on a green tile, sized to match the xs avatars in people rows. */
+function UserGroupGlyph({ isDeactivated }: { isDeactivated?: boolean }): ReactElement {
+  return (
+    <span
+      className={`flex size-4 flex-shrink-0 items-center justify-center overflow-hidden rounded-sm border ${
+        isDeactivated ? 'bg-muted border-muted-foreground/30' : 'bg-green-50 border-green-200'
+      }`}
+    >
+      <span className='text-[14px] leading-none'>👥</span>
+    </span>
+  );
+}
+
+function AtMentionRow({
+  item,
+  index,
+  selectedMentionIndex,
+  onSelect,
+  onHover,
+  isMobile,
+}: {
+  item: AtMentionCandidate;
+  index: number;
+  selectedMentionIndex: number;
+  onSelect: (item: AtMentionCandidate) => void;
+  onHover: (index: number) => void;
+  isMobile: boolean;
+}): ReactElement {
+  const isUserGroup = item.type === ChipType.USER_GROUP;
+  // One line like the user rows: a name-sized foreground label + a muted secondary. A group
+  // reads `@alias` with its display name as the secondary; a user reads name + email.
+  const primaryLabel = isUserGroup ? (item.alias ?? item.name) : item.name;
+  const secondaryLabel = isUserGroup
+    ? item.alias && item.name !== item.alias
+      ? item.name
+      : undefined
+    : item.email;
+  return (
+    <Command.Item
+      key={`${item.type}-${item.id}`}
+      value={`mention-${item.type}-${item.id}`}
+      onSelect={() => onSelect(item)}
+      onMouseEnter={() => onHover(index)}
+      className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all duration-150 mt-1.5 ${
+        index === selectedMentionIndex ? 'cmdk-active-row' : ''
+      } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
+      style={{ WebkitTapHighlightColor: 'transparent' }}
+    >
+      {isUserGroup ? (
+        <UserGroupGlyph isDeactivated={item.isDeactivated ?? false} />
+      ) : (
+        <Avatar userId={item.id} size='xs' />
+      )}
+      <div className='flex-1 min-w-0 flex items-baseline gap-2'>
+        <span
+          className={`min-w-0 truncate text-[15px] leading-[1.2] tracking-[-0.1px] ${item.isDeactivated ? 'text-muted-foreground' : 'text-foreground'}`}
+        >
+          {primaryLabel}
+        </span>
+        {item.isDeactivated && (
+          <span className='self-center shrink-0 text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded'>
+            Deactivated
+          </span>
+        )}
+        {secondaryLabel && (
+          <span className='min-w-0 truncate text-xs text-muted-foreground'>{secondaryLabel}</span>
+        )}
+      </div>
+    </Command.Item>
+  );
+}
 
 const ChannelCommandMenu = ({
   channels,
@@ -434,6 +556,7 @@ const ChannelCommandMenu = ({
   initialToggles,
   restoreFromLastSearch,
   enabledTabs,
+  aiOverview = false,
   inline = false,
   compactTabs = false,
   onTabChange,
@@ -688,7 +811,19 @@ const ChannelCommandMenu = ({
   // Which `mentions:` sections have been expanded past their first five rows.
   const [expandedMentionGroups, setExpandedMentionGroups] = useState<
     Record<MentionGroupKey, boolean>
-  >({ people: false, channels: false });
+  >({ people: false, channels: false, userGroups: false });
+
+  // Reuse this component's existing usersById + allUserGroups (no re-subscription) to resolve
+  // each mention chip's display forms for result highlighting.
+  const allUserGroups = useUserGroups();
+  const userGroupsById = useMemo(
+    () => new Map(allUserGroups.map(group => [group.id, group])),
+    [allUserGroups],
+  );
+  const buildMentionHighlights = useMemo(
+    () => makeMentionHighlightsBuilder(usersById, userGroupsById),
+    [usersById, userGroupsById],
+  );
 
   const {
     searchResults: backendResults,
@@ -706,6 +841,7 @@ const ChannelCommandMenu = ({
     text: searchText,
     setText: setSearchText,
     inputRef,
+    isAiQuery,
     // New hookstate
     activeTab,
     setActiveTab,
@@ -732,6 +868,10 @@ const ChannelCommandMenu = ({
     // unless we're restoring a search that ran at a different scope.
     defaultOnlyMyChannels: initialToggles?.onlyMyChannels ?? true,
     defaultIncludeBotMessages: initialToggles?.includeBotMessages ?? false,
+    // Classifying costs a request per settled query, so only surfaces that can show the
+    // overview ask for it (the backend gates the feature itself on cmdk_ai_intent_config.enabled).
+    classifyIntent: aiOverview,
+    buildMentionHighlights,
   });
 
   // Aliases to match old usage if needed or just use new names
@@ -1244,6 +1384,10 @@ const ChannelCommandMenu = ({
       channelName: id => {
         const found = channels.find(c => c.channel.id === id);
         return found ? formatChannelLabel(found) : undefined;
+      },
+      userGroupName: id => {
+        const group = userGroupsById.get(id);
+        return group ? (group.alias ?? group.name) : undefined;
       },
     })
       // Prefix + value: the token splits them so the glyph can sit between, but the label
@@ -1985,15 +2129,62 @@ const ChannelCommandMenu = ({
     return [...availableRegularChannels, ...availableDMs];
   }, [availableRegularChannels, availableDMs]);
 
-  /**
-   * `mentions:` candidates — people first, then channels, in one flat list so Enter and the
-   * ghost text can index it directly. Only regular channels: a DM is never `#`-referenced
-   * in a message, so it can't be a channel mention.
-   */
+  // `mentions:` and the bare `@` typeahead both offer user-groups — picking one lands a
+  // `groupMentions` filter. The shared hook matches name + alias.
+  const availableUserGroups = useUserGroupSearch(mentionSearchQuery, MENTION_GROUP_MAX);
+
+  // The `@` typeahead's flat list: people, then user-groups (paged). Other USER triggers
+  // (from:/assignee:/…) are people-only. `type` tells the editor which chip to land.
+  const atMentionItems = useMemo<AtMentionCandidate[]>(() => {
+    const people: AtMentionCandidate[] = availableUsers.map(user => ({
+      type: ChipType.USER,
+      id: user.id,
+      name: getUserDisplayName(user),
+      isDeactivated: isUserDeactivated(user),
+      ...(user.email ? { email: user.email } : {}),
+    }));
+    // Only the bare `@` list is sectioned + paged; other user triggers stay one people list.
+    if (mentionSearchType !== ChipType.USER || userTrigger !== '@') return people;
+
+    // People first, then user-groups; each keeps its own order and pages independently.
+    const visiblePeople = people.slice(
+      0,
+      expandedMentionGroups.people ? MENTION_GROUP_MAX : MENTION_GROUP_PAGE,
+    );
+    const groups: AtMentionCandidate[] = availableUserGroups.map(group => ({
+      type: ChipType.USER_GROUP,
+      id: group.id,
+      name: group.name,
+      alias: group.alias ?? null,
+      isDeactivated: group.isActive === false,
+    }));
+    const visibleGroups = groups.slice(
+      0,
+      expandedMentionGroups.userGroups ? MENTION_GROUP_MAX : MENTION_GROUP_PAGE,
+    );
+    return [...visiblePeople, ...visibleGroups];
+  }, [availableUsers, availableUserGroups, mentionSearchType, userTrigger, expandedMentionGroups]);
+
+  // Commit a picked `@` row — person (may quick-switch to DM) or user-group chip; routed by type.
+  const handleAtMentionSelect = useCallback(
+    (item: AtMentionCandidate) =>
+      void handleMentionSelect({
+        id: item.id,
+        // A group's chip reads its `@`-handle (alias), like the compose box; users keep their name.
+        name: item.type === ChipType.USER_GROUP ? (item.alias ?? item.name) : item.name,
+        type: item.type,
+        ...(item.email ? { email: item.email } : {}),
+      }),
+    [handleMentionSelect],
+  );
+
+  /** `mentions:` candidates by section (people/user-groups/channels). Regular channels only (no DMs). */
   const mentionCandidates = useMemo<
     Record<MentionGroupKey, Array<{ id: string; name: string; type: ChipType }>>
   >(() => {
-    if (mentionSearchType !== ChipType.MENTIONS) return { people: [], channels: [] };
+    if (mentionSearchType !== ChipType.MENTIONS) {
+      return { people: [], channels: [], userGroups: [] };
+    }
     return {
       people: availableUsers
         .slice(0, MENTION_GROUP_MAX)
@@ -2005,17 +2196,18 @@ const ChannelCommandMenu = ({
           name: displayName,
           type: ChipType.CHANNEL,
         })),
+      userGroups: availableUserGroups
+        .slice(0, MENTION_GROUP_MAX)
+        // Show/commit the `@`-handle (alias) like the compose box, falling back to the name.
+        .map(g => ({ id: g.id, name: g.alias ?? g.name, type: ChipType.USER_GROUP })),
     };
-  }, [mentionSearchType, availableUsers, availableRegularChannels]);
+  }, [mentionSearchType, availableUsers, availableRegularChannels, availableUserGroups]);
 
   useEffect(() => {
-    setExpandedMentionGroups({ people: false, channels: false });
+    setExpandedMentionGroups({ people: false, channels: false, userGroups: false });
   }, [mentionSearchQuery, mentionSearchType]);
 
-  /**
-   * The flat, people-then-channels list the keyboard indexes. It holds exactly the rows on
-   * screen — expanding a section grows it — so arrow keys can never land on a hidden row.
-   */
+  /** The flat list the keyboard indexes — exactly the visible rows, so arrows never hit a hidden one. */
   const availableMentionTargets = useMemo<Array<{ id: string; name: string; type: ChipType }>>(
     () =>
       MENTION_GROUPS.flatMap(group =>
@@ -2078,8 +2270,10 @@ const ChannelCommandMenu = ({
   // Reads the same arrays the Enter handler indexes, so the ghost never disagrees with Enter.
   const mentionActiveLabel = useMemo<string | null>(() => {
     if (mentionSearchType === ChipType.USER) {
-      const user = availableUsers[selectedMentionIndex];
-      return user ? getUserDisplayName(user) : null;
+      // People + user-groups are one interleaved list under `@`. The ghost completes to the
+      // row's displayed primary — a group's `@`-handle (alias), a person's name.
+      const item = atMentionItems[selectedMentionIndex];
+      return item ? (item.alias ?? item.name) : null;
     }
     if (mentionSearchType === ChipType.CHANNEL) {
       return availableChannels[selectedMentionIndex]?.displayName ?? null;
@@ -2099,7 +2293,7 @@ const ChannelCommandMenu = ({
     return null;
   }, [
     mentionSearchType,
-    availableUsers,
+    atMentionItems,
     availableChannels,
     availablePriorities,
     availableDates,
@@ -2119,8 +2313,13 @@ const ChannelCommandMenu = ({
     if (justCommittedMentionRef.current) return '';
     if (!mentionSearchType || !mentionActiveLabel) return '';
     const query = mentionSearchQuery.trim();
-    // @/# navigate on select; every other prefix builds a filter chip (a "select").
-    const action = userTrigger === '@' || channelTrigger === '#' ? 'Open' : 'Select';
+    // @/# navigate on select; every other prefix builds a filter chip (a "select"). A user-group
+    // under `@` has no open target — picking it builds a groupMentions chip — so it reads "Select".
+    const activeAtGroupRow =
+      mentionSearchType === ChipType.USER &&
+      atMentionItems[selectedMentionIndex]?.type === ChipType.USER_GROUP;
+    const action =
+      (userTrigger === '@' || channelTrigger === '#') && !activeAtGroupRow ? 'Open' : 'Select';
     // No value typed yet: at rest show only the action word ("from: - Select"), not the first
     // candidate's name - the resting highlight is arbitrary, so previewing it reads as if it were
     // already chosen. Once the user navigates, preview the actually-highlighted name.
@@ -2142,6 +2341,8 @@ const ChannelCommandMenu = ({
     userTrigger,
     channelTrigger,
     mentionActiveLabel,
+    atMentionItems,
+    selectedMentionIndex,
     // Not read by the memo body — forces a recompute when a chip lands; a ref change alone
     // never re-renders, so without this the memo could serve the stale pre-commit suffix.
     selectedMentions.length,
@@ -3612,15 +3813,13 @@ const ChannelCommandMenu = ({
       return;
     }
 
-    // Handle regular user mention search (@, from:, with:, assignee:)
-    if (mentionSearchType === ChipType.USER && availableUsers[selectedMentionIndex]) {
-      const user = availableUsers[selectedMentionIndex];
-      void handleMentionSelect({
-        id: user.id,
-        name: getUserDisplayName(user),
-        type: ChipType.USER,
-        ...(user.email ? { email: user.email } : {}),
-      });
+    // Regular user mention search (@, from:, with:, assignee:) — plus user-groups under `@`.
+    // People and groups share one interleaved list; the item's own type decides the chip.
+    if (mentionSearchType === ChipType.USER) {
+      // Reuse the click handler so keyboard, click, and ghost all commit the same label —
+      // a group's `@`-handle (alias), a person's name.
+      const item = atMentionItems[selectedMentionIndex];
+      if (item) handleAtMentionSelect(item);
     } else if (mentionSearchType === ChipType.CHANNEL && availableChannels[selectedMentionIndex]) {
       const { channel, displayName } = availableChannels[selectedMentionIndex];
       void handleMentionSelect({
@@ -4003,32 +4202,36 @@ const ChannelCommandMenu = ({
     !contextSelectionMode &&
     !mentionSearchType &&
     (searchText.trim() || selectedMentions.length > 0) ? (
-      <Command.Item
-        value='__show-results-for__'
-        data-show-results-item='true'
-        onPointerDown={() => {
-          showResultsTriggerRef.current = 'click';
-        }}
-        // Both paths are wired on purpose: cmdk's onSelect covers keyboard activation,
-        // and the plain onClick covers the mouse without depending on cmdk's selection
-        // state. goToSearchResults de-dupes when a click fires both.
-        onClick={() => goToSearchResults('click')}
-        onSelect={() => goToSearchResults(showResultsTriggerRef.current)}
-        className={`flex items-center gap-2 px-2 py-2 rounded-md cursor-pointer text-sm text-foreground ${!isMobile && 'hover:bg-muted'} aria-selected:bg-muted`}
-        data-track-category='SEARCH'
-        data-track-name='SHOW_RESULTS_FOR'
-      >
-        <SearchDefault size={14} className='text-muted-foreground shrink-0' />
-        <span className='flex items-center flex-wrap gap-1'>
-          <span className='text-sm'>Show detailed results for:</span>
-          <QueryFilterChips
-            mentions={selectedMentions as ChipData[]}
-            currentUserID={currentUserID}
-            resolveName={resolveChipDisplayName}
-          />
-          {searchText.trim() && <span className='font-semibold text-sm'>{searchText.trim()}</span>}
-        </span>
-      </Command.Item>
+      <div className='mb-4'>
+        <Command.Item
+          value='__show-results-for__'
+          data-show-results-item='true'
+          onPointerDown={() => {
+            showResultsTriggerRef.current = 'click';
+          }}
+          // Both paths are wired on purpose: cmdk's onSelect covers keyboard activation,
+          // and the plain onClick covers the mouse without depending on cmdk's selection
+          // state. goToSearchResults de-dupes when a click fires both.
+          onClick={() => goToSearchResults('click')}
+          onSelect={() => goToSearchResults(showResultsTriggerRef.current)}
+          className={`flex items-center gap-2 px-2 py-2 rounded-md cursor-pointer text-sm text-foreground ${!isMobile && 'hover:bg-muted'} aria-selected:bg-muted`}
+          data-track-category='SEARCH'
+          data-track-name='SHOW_RESULTS_FOR'
+        >
+          <SearchDefault size={14} className='text-muted-foreground shrink-0' />
+          <span className='flex items-center flex-wrap gap-1'>
+            <span className='text-sm'>Show detailed results for:</span>
+            <QueryFilterChips
+              mentions={selectedMentions as ChipData[]}
+              currentUserID={currentUserID}
+              resolveName={resolveChipDisplayName}
+            />
+            {searchText.trim() && (
+              <span className='font-semibold text-sm'>{searchText.trim()}</span>
+            )}
+          </span>
+        </Command.Item>
+      </div>
     ) : null;
 
   const commandBody = (
@@ -4075,6 +4278,7 @@ const ChannelCommandMenu = ({
             availableDates={availableDates}
             availableBoards={availableBoards}
             availableMentionTargets={availableMentionTargets}
+            availableUserMentionItems={atMentionItems}
             className='flex-1 px-1.5'
             open={open}
             mentionSearchType={mentionSearchType}
@@ -4382,6 +4586,17 @@ const ChannelCommandMenu = ({
               <SlashCommandPalette command={slash} onItemMouseDown={handleItemMouseDown} />
             ) : (
               <>
+                {/* AI answer above the current tab's results when the query needs AI
+                    (Google "AI Overview" style). Not a cmdk item, so the results below
+                    keep arrow keys and the Enter target. */}
+                {aiOverview && (
+                  <AiAnswerCard
+                    query={searchText}
+                    tab={activeTab}
+                    active={isAiQuery && !mentionSearchType}
+                  />
+                )}
+
                 {/* Popup palette: the row is pinned here, directly under the tabs, so it
                     sits in the same place no matter what matched. It is skipped by the
                     first-row auto-select, so the top result keeps the Enter target. */}
@@ -4489,74 +4704,6 @@ const ChannelCommandMenu = ({
                           mentionSearchQuery && (
                             <Command.Empty className='py-6 text-center text-sm text-muted-foreground'>
                               No results found for &quot;{mentionSearchQuery}&quot;
-                            </Command.Empty>
-                          )}
-
-                        {/* Regular USER mention search (@, from:, assignee:) - Show only Users */}
-                        {mentionSearchType === ChipType.USER &&
-                          (userTrigger === '@' ||
-                            userTrigger === 'from:' ||
-                            userTrigger === 'to:' ||
-                            userTrigger === 'assignee:') &&
-                          availableUsers.length > 0 && (
-                            <Command.Group
-                              heading='Users'
-                              className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
-                            >
-                              {availableUsers.map((user, index) => {
-                                const isDeactivated = isUserDeactivated(user);
-                                return (
-                                  <Command.Item
-                                    key={user.id}
-                                    value={`mention-user-${user.id}`}
-                                    onSelect={() => {
-                                      void handleMentionSelect({
-                                        id: user.id,
-                                        name: getUserDisplayName(user),
-                                        type: ChipType.USER,
-                                        ...(user.email ? { email: user.email } : {}),
-                                      });
-                                    }}
-                                    onMouseEnter={() => {
-                                      selectMention(index);
-                                    }}
-                                    className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all duration-150 mt-1.5 ${
-                                      index === selectedMentionIndex ? 'cmdk-active-row' : ''
-                                    } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
-                                    style={{ WebkitTapHighlightColor: 'transparent' }}
-                                  >
-                                    <Avatar userId={user.id} size='xs' />
-                                    <div className='flex-1 min-w-0 flex items-center gap-2'>
-                                      <span
-                                        className={`min-w-0 truncate text-[15px] leading-[1.2] tracking-[-0.1px] ${isDeactivated ? 'text-muted-foreground' : 'text-foreground'}`}
-                                      >
-                                        {getUserDisplayName(user)}
-                                      </span>
-                                      {isDeactivated && (
-                                        <span className='shrink-0 text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded'>
-                                          Deactivated
-                                        </span>
-                                      )}
-                                      {user.email && (
-                                        <span className='min-w-0 truncate text-xs text-muted-foreground'>
-                                          {user.email}
-                                        </span>
-                                      )}
-                                    </div>
-                                  </Command.Item>
-                                );
-                              })}
-                            </Command.Group>
-                          )}
-                        {mentionSearchType === ChipType.USER &&
-                          (userTrigger === '@' ||
-                            userTrigger === 'from:' ||
-                            userTrigger === 'to:' ||
-                            userTrigger === 'assignee:') &&
-                          availableUsers.length === 0 &&
-                          mentionSearchQuery && (
-                            <Command.Empty className='py-6 text-center text-sm text-muted-foreground'>
-                              No users found for &quot;{mentionSearchQuery}&quot;
                             </Command.Empty>
                           )}
                       </>
@@ -4705,70 +4852,76 @@ const ChannelCommandMenu = ({
                         </Command.Empty>
                       )}
 
-                    {/* Regular USER mention search (@, from:, with:, assignee:) - Show only Users */}
+                    {/* USER typeahead — people (all USER triggers), then user-groups under `@`.
+                        Both sections share one render; only the descriptor fields differ. */}
                     {mentionSearchType === ChipType.USER &&
                       (userTrigger === '@' ||
                         userTrigger === 'from:' ||
                         userTrigger === 'to:' ||
                         userTrigger === 'with:' ||
                         userTrigger === 'assignee:') &&
-                      availableUsers.length > 0 && (
-                        <Command.Group
-                          heading='Users'
-                          className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
-                        >
-                          {availableUsers.map((user, index) => {
-                            const isDeactivated = isUserDeactivated(user);
-                            return (
-                              <Command.Item
-                                key={user.id}
-                                value={`mention-user-${user.id}`}
-                                onSelect={() => {
-                                  void handleMentionSelect({
-                                    id: user.id,
-                                    name: getUserDisplayName(user),
-                                    type: ChipType.USER,
-                                    ...(user.email ? { email: user.email } : {}),
-                                  });
-                                }}
-                                onMouseEnter={() => {
-                                  selectMention(index);
-                                }}
-                                className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all duration-150 mt-1.5 ${
-                                  index === selectedMentionIndex ? 'cmdk-active-row' : ''
-                                } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
-                                style={{ WebkitTapHighlightColor: 'transparent' }}
-                              >
-                                <Avatar userId={user.id} size='xs' />
-                                <div className='flex-1 min-w-0 flex items-center gap-2'>
-                                  <span
-                                    className={`min-w-0 truncate text-[15px] leading-[1.2] tracking-[-0.1px] ${isDeactivated ? 'text-muted-foreground' : 'text-foreground'}`}
-                                  >
-                                    {getUserDisplayName(user)}
-                                  </span>
-                                  {isDeactivated && (
-                                    <span className='shrink-0 text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded'>
-                                      Deactivated
-                                    </span>
-                                  )}
-                                  {user.email && (
-                                    <span className='min-w-0 truncate text-xs text-muted-foreground'>
-                                      {user.email}
-                                    </span>
-                                  )}
-                                </div>
-                              </Command.Item>
-                            );
-                          })}
-                        </Command.Group>
-                      )}
+                      atMentionItems.length > 0 &&
+                      [
+                        {
+                          type: ChipType.USER,
+                          heading: userTrigger === '@' ? 'People' : 'Users',
+                          stateKey: 'people' as const,
+                          total: availableUsers.length,
+                          trackName: 'AT_MENTION_SHOW_MORE_PEOPLE',
+                        },
+                        {
+                          type: ChipType.USER_GROUP,
+                          heading: 'User Groups',
+                          stateKey: 'userGroups' as const,
+                          total: availableUserGroups.length,
+                          trackName: 'AT_MENTION_SHOW_MORE_USER_GROUPS',
+                        },
+                      ]
+                        .filter(section => atMentionItems.some(item => item.type === section.type))
+                        .map(section => (
+                          <Command.Group
+                            key={section.stateKey}
+                            heading={section.heading}
+                            className='mb-4 [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
+                          >
+                            {atMentionItems
+                              .map((item, index) => ({ item, index }))
+                              .filter(({ item }) => item.type === section.type)
+                              .map(({ item, index }) => (
+                                <AtMentionRow
+                                  key={`${item.type}-${item.id}`}
+                                  item={item}
+                                  index={index}
+                                  selectedMentionIndex={selectedMentionIndex}
+                                  onSelect={handleAtMentionSelect}
+                                  onHover={selectMention}
+                                  isMobile={isMobile}
+                                />
+                              ))}
+                            {userTrigger === '@' &&
+                              !expandedMentionGroups[section.stateKey] &&
+                              section.total > MENTION_GROUP_PAGE && (
+                                <MentionShowMoreButton
+                                  onExpand={() => {
+                                    setExpandedMentionGroups(prev => ({
+                                      ...prev,
+                                      [section.stateKey]: true,
+                                    }));
+                                    // Expanding shifts later rows' indices, so reset to the top.
+                                    setSelectedMentionIndex(0);
+                                  }}
+                                  trackName={section.trackName}
+                                />
+                              )}
+                          </Command.Group>
+                        ))}
                     {mentionSearchType === ChipType.USER &&
                       (userTrigger === '@' ||
                         userTrigger === 'from:' ||
                         userTrigger === 'to:' ||
                         userTrigger === 'with:' ||
                         userTrigger === 'assignee:') &&
-                      availableUsers.length === 0 &&
+                      atMentionItems.length === 0 &&
                       mentionSearchQuery && (
                         <Command.Empty className='py-6 text-center text-sm text-muted-foreground'>
                           No users found for &quot;{mentionSearchQuery}&quot;
@@ -4832,7 +4985,7 @@ const ChannelCommandMenu = ({
                           <Command.Group
                             key={group.type}
                             heading={group.heading}
-                            className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
+                            className='mb-4 [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
                           >
                             {rows.map(({ target, index }) => (
                               <Command.Item
@@ -4860,6 +5013,8 @@ const ChannelCommandMenu = ({
                                 <div className='flex items-center justify-center h-4 w-5 flex-shrink-0 text-muted-foreground'>
                                   {target.type === ChipType.USER ? (
                                     <Avatar userId={target.id} size='xs' />
+                                  ) : target.type === ChipType.USER_GROUP ? (
+                                    <UserGroupGlyph />
                                   ) : (
                                     <ChannelChipIcon id={target.id} size={16} />
                                   )}
@@ -4871,29 +5026,20 @@ const ChannelCommandMenu = ({
                                 </div>
                               </Command.Item>
                             ))}
-                            {mentionCandidates[group.key].length > rows.length && (
-                              <button
-                                type='button'
-                                onMouseDown={e => e.preventDefault()}
-                                onClick={() => {
-                                  setExpandedMentionGroups(prev => ({
-                                    ...prev,
-                                    [group.key]: true,
-                                  }));
-                                  // Expanding People shifts every Channels row's index, so
-                                  // the old highlight would point at a different row.
-                                  setSelectedMentionIndex(0);
-                                }}
-                                className='flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-[13px] text-muted-foreground hover:bg-muted hover:text-foreground'
-                                data-track-category='SEARCH'
-                                data-track-name={`MENTIONS_SHOW_MORE_${group.key.toUpperCase()}`}
-                              >
-                                <span className='flex h-4 w-5 flex-shrink-0 items-center justify-center'>
-                                  <ChevronDown size={14} />
-                                </span>
-                                Show more
-                              </button>
-                            )}
+                            {!expandedMentionGroups[group.key] &&
+                              mentionCandidates[group.key].length > MENTION_GROUP_PAGE && (
+                                <MentionShowMoreButton
+                                  onExpand={() => {
+                                    setExpandedMentionGroups(prev => ({
+                                      ...prev,
+                                      [group.key]: true,
+                                    }));
+                                    // Expanding shifts later rows' indices, so reset to the top.
+                                    setSelectedMentionIndex(0);
+                                  }}
+                                  trackName={`MENTIONS_SHOW_MORE_${group.key.toUpperCase()}`}
+                                />
+                              )}
                           </Command.Group>
                         );
                       })}

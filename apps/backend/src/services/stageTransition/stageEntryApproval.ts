@@ -13,6 +13,7 @@ import { db } from '@/database/client';
 import { activityService } from '@/services/activity/activityService';
 import { notificationService } from '@/services/notificationService';
 import { logger } from '@/utils/logger';
+import { lockTicketStageName } from '@/bypassAcl/rowLockServices';
 
 const LOG_PREFIX = '[StageApprovalNotify]';
 
@@ -177,9 +178,7 @@ async function claimEntryApprovalRequest(
   actorId: string,
   actorName: string,
 ): Promise<boolean> {
-  const [row] = await tx.$queryRaw<{ stageName: string }[]>`
-    SELECT "stageName" FROM "tickets" WHERE "id" = ${ticket.id} FOR UPDATE
-  `;
+  const row = await lockTicketStageName(tx, ticket.id);
   if (!row || row.stageName !== landedStageName) return false;
 
   const existing = await tx.ticketStageRequest.findUnique({

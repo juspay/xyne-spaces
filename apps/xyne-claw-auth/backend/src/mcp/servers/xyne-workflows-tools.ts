@@ -17,6 +17,7 @@
  * supplies them, and cannot override them.
  */
 
+import { WORKFLOW_MCP_TOOL_NAMES } from "xyne-claw-shared";
 import { spacesFetch } from "./xyne-spaces-client.js";
 import { errMsg } from "../../lib/errors.js";
 
@@ -593,3 +594,20 @@ export const tools: ToolDef[] = [
 ];
 
 export const WORKFLOW_TOOL_NAMES: string[] = tools.map((tool) => tool.name);
+
+// The SDLC agent profile grants these by name from xyne-claw-shared, which
+// cannot import this module. Fail the build if the two lists drift apart.
+{
+  const granted = new Set<string>(WORKFLOW_MCP_TOOL_NAMES);
+  const served = new Set(WORKFLOW_TOOL_NAMES);
+  const missing = [...served].filter((name) => !granted.has(name));
+  const stale = [...granted].filter((name) => !served.has(name));
+  if (missing.length > 0 || stale.length > 0) {
+    throw new Error(
+      `WORKFLOW_MCP_TOOL_NAMES is out of sync with the xyne-workflows server: ` +
+        `${missing.length > 0 ? `missing ${missing.join(", ")}` : ""}` +
+        `${missing.length > 0 && stale.length > 0 ? "; " : ""}` +
+        `${stale.length > 0 ? `no longer served ${stale.join(", ")}` : ""}`,
+    );
+  }
+}

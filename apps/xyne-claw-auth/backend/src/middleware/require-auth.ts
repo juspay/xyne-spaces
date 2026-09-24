@@ -398,6 +398,69 @@ export function requireNoAccessToken(_req: Request, res: Response, next: NextFun
 }
 
 /**
+ * Write-capable variant. An access token passes ONLY when ALL hold:
+ *   1. the method is POST,
+ *   2. the path is one of `paths` (matched against the router-relative path,
+ *      so "/" is the collection create and nothing else), and
+ *   3. the token carries `scope`.
+ *
+ * Everything else with a token in the registry is rejected exactly as
+ * requireNoAccessToken would. The path allowlist is the point: `agents:write`
+ * must not also unlock POST /:slug/promote, /:slug/shares or /:slug/tools,
+ * which are far more dangerous than creating a new personal agent.
+ *
+ * `read` is optional and covers GET/HEAD on the same mount, so a router
+ * needing both barriers uses this one alone rather than stacking two.
+ */
+export function allowScopedAccessToken(opts: {
+  read?: string;
+  write: string;
+  writePaths?: readonly string[];
+}) {
+  const allowedPaths = new Set(opts.writePaths ?? ["/"]);
+  return function allowScopedAccessTokenMw(req: Request, res: Response, next: NextFunction): void {
+    const token = accessTokenRegistry.get(res);
+    if (!token) {
+      next();
+      return;
+    }
+    const routerPath = req.path === "" ? "/" : req.path;
+    if (opts.read && (req.method === "GET" || req.method === "HEAD")) {
+      if (token.scopes.includes(opts.read)) {
+        next();
+        return;
+      }
+      res.status(403).json({
+        success: false,
+        error: `This token does not have the ${opts.read} scope.`,
+        code: "ACCESS_TOKEN_NOT_ALLOWED",
+      });
+      return;
+    }
+    const isAllowedWrite = req.method === "POST" && allowedPaths.has(routerPath);
+    const scope = opts.write;
+    if (isAllowedWrite && token.scopes.includes(scope)) {
+      log.info(
+        `[require-auth] access-token (${token.client ?? "unknown"}) accepted scope=${scope} ${req.method} ${routerPath} userId=${token.userId}`,
+      );
+      next();
+      return;
+    }
+    log.warn(
+      `[require-auth] access-token (${token.client ?? "unknown"}) rejected: ` +
+        `${req.method} ${routerPath} needs ${isAllowedWrite ? `scope ${scope}` : "a browser session"} userId=${token.userId}`,
+    );
+    res.status(403).json({
+      success: false,
+      error: isAllowedWrite
+        ? `This token does not have the ${scope} scope.`
+        : "CLI/service access tokens may only create here; other writes need a browser session.",
+      code: "ACCESS_TOKEN_NOT_ALLOWED",
+    });
+  };
+}
+
+/**
  * Scope-aware variant of the barrier for routers that have READ endpoints the
  * CLI legitimately needs. Browser sessions and S2S pass untouched (no token in
  * the registry). An access token passes ONLY when BOTH hold:

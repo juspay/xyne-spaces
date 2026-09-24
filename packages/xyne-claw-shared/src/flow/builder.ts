@@ -264,6 +264,8 @@ export class FlowBuilder {
       placeholder?: string;
       options: SelectOption[];
       required?: boolean;
+      /** true → multi-select; the submitted value is a string[] instead of a string */
+      multiple?: boolean;
       action?: FlowAction;
     },
   ): this {

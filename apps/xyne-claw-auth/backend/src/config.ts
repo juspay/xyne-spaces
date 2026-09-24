@@ -106,6 +106,9 @@ export const CONFIG = {
   localHarnessPollTimeoutMs: Number(process.env["LOCAL_HARNESS_POLL_TIMEOUT_MS"] ?? 25_000),
   localHarnessRunTimeoutMs: Number(process.env["LOCAL_HARNESS_RUN_TIMEOUT_MS"] ?? 900_000),
   xyneSpacesCallbackUrl: process.env["XYNE_SPACES_CALLBACK_URL"] ?? "",
+  // Python agent (Azure STT behind /transcribe-audio). Same service the Spaces
+  // voice input proxies to; empty disables voice-note transcription.
+  pythonAgentUrl: (process.env["PYTHON_AGENT_URL"] ?? "").replace(/\/+$/, ""),
   spacesBackendUrl: process.env["SPACES_BACKEND_URL"] ?? "http://localhost:3001",
   // Cluster-internal Spaces URL — used for high-volume server-to-server API
   // calls (auth/me on every authenticated request, chat/postMessage on every

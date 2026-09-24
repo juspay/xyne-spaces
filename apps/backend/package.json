@@ -1,6 +1,6 @@
 {
   "name": "xyne-spaces-backend",
-  "version": "1.368.0",
+  "version": "1.395.0",
   "description": "Backend server for Xyne Spaces application",
   "main": "dist/index.js",
   "type": "module",
@@ -12,6 +12,7 @@
     "#zero-internal/sql": "./node_modules/@rocicorp/zero/out/z2s/src/sql.js"
   },
   "scripts": {
+    "prebuild": "bash ../../scripts/validate-no-acl-bypass.sh",
     "build": "tsc",
     "build:watch": "tsc -w",
     "start": "tsx dist/index.js",

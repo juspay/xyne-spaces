@@ -1,6 +1,6 @@
 import { readFromYSweetStrict } from '@/utils/ysweetUtils';
 import { extractMentionsFromContent } from '@/utils/mentionUtils';
-import { extractChannelMentions } from '@/utils/mentionParser';
+import { extractChannelMentions, extractGroupMentions } from '@/utils/mentionParser';
 import { appSchema, callSchema, channelSchema, InsertDocument, mailSchema, messageSchema, projectSchema, schemaToDocType, SubApp, ticketSchema, userSchema, VespaAppDocument, VespaCallDocument, VespaChatContainerDocument, VespaChatMessageDocument, VespaDocType, VespaFileDocument, VespaMailDocument, VespaProjectDocument, VespaSchema, VespaTicketDocument, samTranscriptSchema } from '@/vespa/src/types';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import type { InsertValue } from '@rocicorp/zero';
@@ -14,10 +14,10 @@ import {
   AttachmentEntityType,
   VespaOperationType as VespaOpType,
 } from '@xyne/shared';
-import { FormFieldType } from '@xyne/shared';
 import { indexableTagNames, parseAppliedTags } from '@xyne/shared';
 import { VespaJobType, VespaPayload } from './types';
 import { db } from '@/database/client';
+import { resolveFieldDefinitionsByIds } from '@/utils/fieldDefinition';
 import {
   Channel,
   Message,
@@ -67,20 +67,17 @@ const loadTicketFormFields = async (ticketId: string) => {
     },
   }) as TicketDynamicFieldValue[];
 
+  // FormEntityValues.fieldId holds the GlobalField id for global-backed fields and
+  // the FormFields id only for legacy ones (resolveFormFieldDefinitionsForForm
+  // returns `globalFieldId ?? id`), so a formFields-only lookup misses every modern
+  // field and leaves fieldType undefined — which silently costs DATE values their
+  // `fieldValueLong`, breaking dynamicFieldDateRanges filters on those fields.
+  // resolveFieldDefinitionsByIds looks in global_fields first, then falls back to
+  // legacy form_fields, covering both.
   const fieldIds = [...new Set(formEntityValues.map(value => value.fieldId))];
-  const formFieldRows = fieldIds.length > 0
-    ? await db.formFields.findMany({
-      where: {
-        id: { in: fieldIds },
-      },
-      select: {
-        id: true,
-        fieldType: true,
-      },
-    })
-    : [];
+  const fieldDefinitions = await resolveFieldDefinitionsByIds(db, fieldIds);
   const fieldTypeByFieldId = new Map(
-    formFieldRows.map(field => [field.id, field.fieldType as FormFieldType]),
+    [...fieldDefinitions].map(([fieldId, definition]) => [fieldId, definition.fieldType]),
   );
 
   return buildFormFields(formEntityValues, fieldTypeByFieldId);
@@ -525,6 +522,7 @@ export const mapMessage = async (
     replyUsersCount: 0, // TODO
     mentions: mentions?.map(v => v.userId) || [],
     channelMentions: extractChannelMentions(args.content || ''),
+    groupMentions: extractGroupMentions(args.content || ''),
     metadata: JSON.stringify(args.metadata || {}),
     threadMentions: threadInfo.threadMentions,
     threadSenders: threadInfo.threadSenders,

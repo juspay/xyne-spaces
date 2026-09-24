@@ -50,6 +50,7 @@ import { EntityLinkContext, type EntityLinkScope } from '../../../contexts/Entit
 import { useAllVisibleChannels } from '../../../hooks/useChannels';
 import { useTitleGenerator } from '../../../hooks/useTitleGenerator';
 import { useChannelAssignGate } from '../../../hooks/useChannelAssignGate';
+import { useChannelBoards } from '../../../hooks/useChannelBoards';
 import { useActiveUsers, useUsers, useSelf } from '../../../hooks/useUsers';
 import { channelMembersFirst, currentUserFirst } from '../../../utils/channelMembersFirst';
 import { useUserGroups } from '../../../hooks/useUserGroup';
@@ -112,6 +113,7 @@ interface CreateTicketModalProps {
   };
   enableUrlSync?: boolean;
   channelId: string;
+  initialChannelId?: string | undefined;
   projectId?: string;
   defaultStageId?: string | undefined;
   selectedBoardId?: string | null;
@@ -125,6 +127,8 @@ interface CreateTicketModalProps {
   initialStatus?: TicketStatusV2 | null;
   initialStageName?: string | null;
   initialTags?: string[];
+  initialMerchantId?: string | undefined;
+  initialDynamicFields?: Record<string, string | string[]> | undefined;
   initialTicketKind?: 'task' | 'release';
   releaseOnly?: boolean;
   releaseChannelIds?: string[];
@@ -179,6 +183,8 @@ type SubTicketDraft = {
 };
 
 const EMPTY_TAGS: string[] = [];
+const RECENT_LABELS_STORAGE_KEY = 'xyne_recent_labels';
+const RECENT_LABELS_LIMIT = 20;
 
 const PRIMARY_RANGE_FIELD_NAMES = ['branch', 'deployedCommitId', 'newCommitId'];
 
@@ -212,6 +218,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   isOpen,
   onClose,
   channelId,
+  initialChannelId,
   projectId,
   selectedBoardId,
   initialTitle = '',
@@ -223,6 +230,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   initialStatus = null,
   initialStageName = null,
   initialTags = EMPTY_TAGS,
+  initialMerchantId,
+  initialDynamicFields,
   initialTicketKind = 'task',
   releaseOnly = false,
   releaseChannelIds,
@@ -428,10 +437,14 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     }
   }, [usesLocalAttachments, providerClearDroppedFiles, channelId, sourceConversation]);
 
+  // Not filtered by whether the channel has boards: that lives in
+  // channel_board_mappings and cannot be evaluated cheaply for every channel.
+  // Picking a channel with no linked boards falls through to the "no boards are
+  // configured" empty state on the board field instead.
   const channels = useAllVisibleChannels().filter(
     channel =>
       channel.scopeType === ChannelScopeType.DEFAULT &&
-      (!allowChannelSelection || (!channel.isArchived && Boolean(channel.projectId))),
+      (!allowChannelSelection || !channel.isArchived),
   );
 
   // Track if title has been auto-generated for this modal session
@@ -481,11 +494,11 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       assignee: initialAssignee,
       userGroupId: null,
       boardId: selectedBoardId || '',
-      channelId: channelId,
+      channelId: initialChannelId || channelId,
       workflowType: standaloneSeed?.workflowType ?? '',
       files: [],
-      dynamicFields: {},
-      merchantId: '',
+      dynamicFields: initialDynamicFields ?? {},
+      merchantId: initialMerchantId ?? '',
       ticketType: BaseTicketType.Fix,
     } as CreateTicketFormData,
     onSubmit: async ({ value }) => {
@@ -504,33 +517,59 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     gatedAssign: gatedAssignUser,
   } = useChannelAssignGate(selectedChannelId);
 
-  // Find selected channel to get its projectId
-  const selectedChannel = useMemo(
-    () => channels?.find(c => c.id === selectedChannelId),
-    [channels, selectedChannelId],
-  );
-
-  // Fetch boards for the selected channel's project (or default projectId)
-  const selectedChannelProjectId =
-    canSelectChannel && selectedChannel?.projectId ? selectedChannel.projectId : projectId;
   const effectiveChannelId = canSelectChannel ? (selectedChannelId ?? channelId) : channelId;
-  // Boards for ticket creation come from the selected channel's PROJECT (all of the
-  // project's boards). A projectless channel resolves to no project → no boards, and
-  // the UI shows the "no boards are configured" empty state.
-  const [projectBoards] = useCachedQuery(
-    queries.boardsListByProject({ projectId: selectedChannelProjectId ?? '' }),
-    { enabled: !!selectedChannelProjectId },
-  );
-  const boards = useMemo(() => projectBoards ?? [], [projectBoards]);
+  // Boards for ticket creation are the boards LINKED to the selected channel
+  // (channel_board_mappings), which may span projects. A channel with no linked
+  // boards yields none, and the board field renders an empty state instead.
+  const { boards } = useChannelBoards(effectiveChannelId);
 
   // Read by the open-reset effect without adding `boards` to its deps.
   const boardsRef = useRef(boards);
   boardsRef.current = boards;
 
+  // Get selected board's metadata for ticket form configuration
+  const selectedBoard = useMemo(
+    () => boards?.find(b => b.id === formValues.boardId),
+    [boards, formValues.boardId],
+  );
+  const isFlowRootTicket = selectedBoard?.boardType === BoardType.FLOW && !parentTicketId;
+  const isReleaseLine = ticketKind === 'release';
+  // Only main release boards are selectable (repos); services show as chips below.
+  // Keep the currently-primary board even if it lacks a provider.
+  const releaseBoards = useMemo(
+    () =>
+      (boards ?? [])
+        .filter(b => isMainReleaseBoard(b) || b.id === formValues.boardId)
+        .filter(b => isReleaseBoard(b.boardType)),
+    [boards, formValues.boardId],
+  );
+
+  const releaseBoardOptions = useMemo(
+    () =>
+      releaseBoards.map(b => ({
+        label: b.name,
+        value: b.id,
+        icon: <RepoDot color={repoColor(b.id)} />,
+      })),
+    [releaseBoards],
+  );
+
+  // Services are looked up per repo, so only the RELEASE boards' projects matter —
+  // not every project the channel's linked boards happen to span. A channel's boards
+  // can cross projects now, so this is a set rather than the channel's own
+  // (deprecated) projectId, but it stays as narrow as the repos on screen.
+  const releaseProjectIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const board of releaseBoards) {
+      if (board.projectId) ids.add(board.projectId);
+    }
+    return Array.from(ids).sort();
+  }, [releaseBoards]);
+
   // Services grouped by main release board → read-only chips under each repo.
   const [releaseApplications] = useCachedQuery(
-    queries.applicationsByProjectId({ projectId: selectedChannelProjectId ?? '' }),
-    { enabled: !!selectedChannelProjectId },
+    queries.applicationsByProjectIds({ projectIds: releaseProjectIds }),
+    { enabled: isReleaseLine && releaseProjectIds.length > 0 },
   );
   const servicesByMainBoard = useMemo(() => {
     const map = new Map<string, string[]>();
@@ -544,24 +583,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     }
     return map;
   }, [releaseApplications]);
-
-  // Get selected board's metadata for ticket form configuration
-  const selectedBoard = useMemo(
-    () => boards?.find(b => b.id === formValues.boardId),
-    [boards, formValues.boardId],
-  );
-  const isFlowRootTicket = selectedBoard?.boardType === BoardType.FLOW && !parentTicketId;
-  const isReleaseLine = ticketKind === 'release';
-  // Only main release boards are selectable (repos); services show as chips below.
-  // Keep the currently-primary board even if it lacks a provider.
-  const releaseBoardOptions = useMemo(
-    () =>
-      (boards ?? [])
-        .filter(b => isMainReleaseBoard(b) || b.id === formValues.boardId)
-        .filter(b => isReleaseBoard(b.boardType))
-        .map(b => ({ label: b.name, value: b.id, icon: <RepoDot color={repoColor(b.id)} /> })),
-    [boards, formValues.boardId],
-  );
 
   const boardMetadata = selectedBoard?.metadata as BoardMetadata | null;
 
@@ -607,13 +628,21 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   useEffect(() => {
     if (ticketKind === 'release') return;
     if (formValues.boardId) {
-      form.setFieldValue('dynamicFields', {});
-      markAutoApplied({ dynamicFields: serializeDynamicFields({}) });
+      const seeded = formValues.boardId === selectedBoardId ? (initialDynamicFields ?? {}) : {};
+      form.setFieldValue('dynamicFields', seeded);
+      markAutoApplied({ dynamicFields: serializeDynamicFields(seeded) });
     }
     setSelectedRepoBoardIds([]);
     setRepoRanges({});
     hasPopulatedRepoDeployed.current = new Set();
-  }, [formValues.boardId, form, markAutoApplied, ticketKind]);
+  }, [
+    formValues.boardId,
+    form,
+    markAutoApplied,
+    ticketKind,
+    selectedBoardId,
+    initialDynamicFields,
+  ]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -1551,6 +1580,20 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         processTicketCreationResponse(response, formData.workflowType, effectiveChannelId);
         trackCreateSucceeded(formData, response.data, effectiveChannelId);
       }
+      if (formData.tags && formData.tags.length > 0) {
+        const recentLabelsKey = `${RECENT_LABELS_STORAGE_KEY}:${user.id}:${formData.boardId}`;
+        try {
+          const stored = JSON.parse(localStorage.getItem(recentLabelsKey) ?? '[]') as string[];
+          const recent = [...new Set([...formData.tags, ...stored])].slice(0, RECENT_LABELS_LIMIT);
+          localStorage.setItem(recentLabelsKey, JSON.stringify(recent));
+        } catch (error) {
+          logger.warn(LogEvent.FRONTEND_ERROR, {
+            type: 'recent_labels_save_failed',
+            message: 'Failed to save recent labels',
+            error: error,
+          });
+        }
+      }
       const subticketsToCreate = normalizeSubTicketDrafts(subTickets);
       if (createdTicketResponse?.id && subticketsToCreate.length > 0) {
         const baseTimestamp = Date.now();
@@ -1968,10 +2011,24 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     selfId,
   ]);
 
+  const recentTags = useMemo(() => {
+    if (!isOpen || !user?.id || !formValues.boardId) return EMPTY_TAGS;
+    const recentLabelsKey = `${RECENT_LABELS_STORAGE_KEY}:${user.id}:${formValues.boardId}`;
+    try {
+      return JSON.parse(localStorage.getItem(recentLabelsKey) ?? '[]') as string[];
+    } catch {
+      return EMPTY_TAGS;
+    }
+  }, [isOpen, user?.id, formValues.boardId]);
+
   // Get tag options
   const tagOptions = useMemo(() => {
     const selectedTags = formValues.tags ?? [];
-    const allTags = [...new Set([...availableTags, ...newTags, ...initialTags, ...selectedTags])];
+    const allTags = [
+      ...new Set([...availableTags, ...newTags, ...initialTags, ...selectedTags, ...recentTags]),
+    ];
+    const recentRank = new Map(recentTags.map((tag, index) => [tag, index]));
+    const rankOf = (tag: string): number => recentRank.get(tag) ?? recentTags.length;
 
     return allTags
       .filter(tag => typeof tag === 'string' && tag.trim().length > 0)
@@ -1979,8 +2036,9 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         label: tag,
         value: tag,
         icon: <span className={cn('size-2 rounded-full', TAG_COLORS[index % TAG_COLORS.length])} />,
-      }));
-  }, [availableTags, newTags, initialTags, formValues.tags]);
+      }))
+      .sort((a, b) => rankOf(a.value) - rankOf(b.value));
+  }, [availableTags, newTags, initialTags, formValues.tags, recentTags]);
 
   const requiredDynamicFields = useMemo(() => {
     const visibilityMap = boardMetadata?.customFieldVisibility;
@@ -2479,6 +2537,18 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
               >
                 {field => {
                   if (ticketKind === 'release') return null;
+                  // A channel with no linked boards would otherwise render an empty
+                  // picker and only explain itself via "Board is required" on submit.
+                  // Guarded on a channel actually being chosen — in the pick-a-channel
+                  // variant there is none yet, and the boards are empty for that reason.
+                  if (effectiveChannelId && boardOptions.length === 0) {
+                    return (
+                      <p className='text-xs text-muted-foreground'>
+                        No boards are configured for this channel. Link a board to it before
+                        creating tickets.
+                      </p>
+                    );
+                  }
                   return (
                     <EntitySelector
                       options={boardOptions}
