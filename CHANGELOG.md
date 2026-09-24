@@ -1,3 +1,10 @@
+## [1.385.1](https://github.com/juspay/xyne-spaces/compare/v1.385.0...v1.385.1) (2026-09-24)
+
+
+### Bug Fixes
+
+* link existing sub-tickets from any project in the workspace ([#2248](https://github.com/juspay/xyne-spaces/issues/2248)) ([fbb45fa](https://github.com/juspay/xyne-spaces/commit/fbb45faf41205b00519ea32a40d478c0133b3603))
+
 ## [1.385.0](https://github.com/juspay/xyne-spaces/compare/v1.384.1...v1.385.0) (2026-09-23)
 
 
