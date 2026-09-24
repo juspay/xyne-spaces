@@ -32,6 +32,7 @@ import {
 import {
   ActivityClassification,
   AttachmentEntityType,
+  AuditEntityType,
   CallStatus,
   CanvasVisibility,
   ChannelRole,
@@ -4103,6 +4104,26 @@ export const queries = defineQueries({
       return zql.user_expertise_mappings
         .where('userGroupId', userGroupId)
         .where('boardId', boardId);
+    },
+  ),
+  // Audit trail for any entity context (keyset-paginated)
+  getEntityAuditLogs: defineQuery(
+    z.object({
+      entityType: z.nativeEnum(AuditEntityType),
+      entityId: z.string(),
+      limit: z.number(),
+      start: z.object({ createdAt: z.number(), id: z.string() }).nullable(),
+    }),
+    ({ args: { entityType, entityId, limit, start } }) => {
+      let query = zql.audit_logs
+        .where('entityType', entityType)
+        .where('entityId', entityId)
+        .orderBy('createdAt', 'desc')
+        .orderBy('id', 'desc');
+      if (start) {
+        query = query.start({ createdAt: start.createdAt, id: start.id }, { inclusive: false });
+      }
+      return query.limit(limit).related('changes').related('actorUser');
     },
   ),
   getAllRepos: defineQuery(() => zql.repos.orderBy('name', 'asc')),
