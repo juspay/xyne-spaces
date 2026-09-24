@@ -1703,6 +1703,7 @@ export const emailChannelPreferenceTable = table('email_channel_preferences')
     deskReportEnabled: boolean().optional(),
     deskReportAgentSlug: string().optional(),
     deskReportRangeDays: number().optional(),
+    duplicateScopeConfig: string().optional(),
   })
   .primaryKey('channelId');
 
@@ -3401,6 +3402,11 @@ export const channelTableRelationships = relationships(channelTable, ({ one, man
     sourceField: ['id'],
     destField: ['channelId'],
     destSchema: channelBoardMappingTable,
+  }),
+  ticketDescriptions: many({
+    sourceField: ['id'],
+    destField: ['channelId'],
+    destSchema: ticketDescriptionTable,
   }),
 }));
 
@@ -5105,6 +5111,7 @@ export type Model = Row<typeof schema.tables.models>;
 export type Tool = Row<typeof schema.tables.tools>;
 export type AgentToolsMapping = Row<typeof schema.tables.agent_tools_mappings>;
 export type Ticket = Row<typeof schema.tables.tickets>;
+export type TicketDescription = Row<typeof schema.tables.ticket_descriptions>;
 export type SubTicket = Row<typeof schema.tables.sub_tickets>;
 export type TicketSubTicketMapping = Row<typeof schema.tables.ticket_sub_ticket_mappings>;
 export type TicketActivity = Row<typeof schema.tables.ticket_activities>;

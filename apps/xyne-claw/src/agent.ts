@@ -92,6 +92,8 @@ import type { FastToolRuntimeController } from "./tool-catalog.js";
 
 const log = createLogger("agent");
 
+const CLAUDE_CODE_CLIENT_VERSION = process.env["CLAUDE_CODE_CLIENT_VERSION"]?.trim() || "2.1.280";
+
 export interface Attachment {
   fileName: string;
   mimeType: string;
@@ -995,6 +997,7 @@ export function resolveModel(
       api: "anthropic-messages",
       // api_key → x-api-key (authHeader: false). oauth_token → Authorization: Bearer (authHeader: true).
       authHeader: isOauthToken,
+      ...(isOauthToken ? { headers: { "user-agent": `claude-cli/${CLAUDE_CODE_CLIENT_VERSION}` } } : {}),
       models: [
         {
           id: providerConfig.model,

@@ -21,6 +21,7 @@ import { commitAndSyncCanvasArtifact } from '../sdlcCanvasSync';
 import { sdlcChannelCanvasParticipant } from '../sdlcCanvasAccess';
 import { ensureHubWikiFolder, ensureRepositoryWikiFolder, placeHubItem } from '../hubFolders';
 import { mutateWikiMarkdownSection } from './wikiSectionMutation';
+import { advisoryXactLock } from '@/bypassAcl/lockServices';
 
 export interface WikiScopeInput {
   workspaceId: string;
@@ -210,7 +211,9 @@ export class SdlcWikiPageStore {
       const parent = parentId;
       parentId = await this.prisma.$transaction(async (tx) => {
         // Parallel page writes into a new path would each create the folder.
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`sdlc-wiki-folder:${parent}/${name}`}))`;
+        await advisoryXactLock(tx, ['SdlcEntityLink'],
+          'sdlc wiki: serialize get-or-create of a folder node so parallel page writes do not duplicate it',
+          `sdlc-wiki-folder:${parent}/${name}`);
         const children = await tx.sdlcEntityLink.findMany({
           where: {
             channelId: scope.channelId,

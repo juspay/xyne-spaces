@@ -112,6 +112,7 @@ import {
   normalizeNotificationKeywords,
 } from '../utils/notificationKeywords.js';
 import { isDeskChannelType, deskTypeForChannelType } from '../utils/channel.js';
+import { MAX_DUPLICATE_SCOPE_FIELDS } from './types.js';
 import { DEFAULT_ROLE_NAME_TO_ENUM } from '../utils/roleFrameworkUtils.js';
 import { SUMMARY_PROMPT_MAX_LENGTH } from '../templates/callSummary.js';
 import { z } from 'zod';
@@ -10468,6 +10469,14 @@ export const mutators = defineMutators({
         deskReportEnabled: z.boolean().optional(),
         deskReportAgentSlug: z.string().optional().nullable(),
         deskReportRangeDays: z.number().optional(),
+        // Scoped duplicate detection config (see EmailChannelPreference.duplicateScopeConfig)
+        duplicateScopeConfig: z
+          .object({
+            enabled: z.boolean(),
+            scopeFieldGlobalIds: z.array(z.string()).max(MAX_DUPLICATE_SCOPE_FIELDS),
+          })
+          .nullable()
+          .optional(),
       }),
       async ({
         tx,
@@ -10490,6 +10499,7 @@ export const mutators = defineMutators({
           deskReportEnabled,
           deskReportAgentSlug,
           deskReportRangeDays,
+          duplicateScopeConfig,
         },
       }) => {
         const existing = await tx.run(
@@ -10514,6 +10524,9 @@ export const mutators = defineMutators({
             ...(deskReportEnabled !== undefined ? { deskReportEnabled } : {}),
             ...(deskReportAgentSlug !== undefined ? { deskReportAgentSlug } : {}),
             ...(deskReportRangeDays !== undefined ? { deskReportRangeDays } : {}),
+            ...(duplicateScopeConfig !== undefined
+              ? { duplicateScopeConfig: duplicateScopeConfig == null ? null : JSON.stringify(duplicateScopeConfig) }
+              : {}),
           });
         } else {
           const channel = await tx.run(zql.channels.where('id', channelId).one());
@@ -10545,6 +10558,7 @@ export const mutators = defineMutators({
             deskReportEnabled: deskReportEnabled ?? false,
             deskReportAgentSlug: deskReportAgentSlug ?? null,
             deskReportRangeDays: deskReportRangeDays ?? 1,
+            duplicateScopeConfig: duplicateScopeConfig ? JSON.stringify(duplicateScopeConfig) : null,
           });
         }
       },

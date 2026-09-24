@@ -183,6 +183,8 @@ type SubTicketDraft = {
 };
 
 const EMPTY_TAGS: string[] = [];
+const RECENT_LABELS_STORAGE_KEY = 'xyne_recent_labels';
+const RECENT_LABELS_LIMIT = 20;
 
 const PRIMARY_RANGE_FIELD_NAMES = ['branch', 'deployedCommitId', 'newCommitId'];
 
@@ -1578,6 +1580,20 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         processTicketCreationResponse(response, formData.workflowType, effectiveChannelId);
         trackCreateSucceeded(formData, response.data, effectiveChannelId);
       }
+      if (formData.tags && formData.tags.length > 0) {
+        const recentLabelsKey = `${RECENT_LABELS_STORAGE_KEY}:${user.id}:${formData.boardId}`;
+        try {
+          const stored = JSON.parse(localStorage.getItem(recentLabelsKey) ?? '[]') as string[];
+          const recent = [...new Set([...formData.tags, ...stored])].slice(0, RECENT_LABELS_LIMIT);
+          localStorage.setItem(recentLabelsKey, JSON.stringify(recent));
+        } catch (error) {
+          logger.warn(LogEvent.FRONTEND_ERROR, {
+            type: 'recent_labels_save_failed',
+            message: 'Failed to save recent labels',
+            error: error,
+          });
+        }
+      }
       const subticketsToCreate = normalizeSubTicketDrafts(subTickets);
       if (createdTicketResponse?.id && subticketsToCreate.length > 0) {
         const baseTimestamp = Date.now();
@@ -1995,10 +2011,24 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     selfId,
   ]);
 
+  const recentTags = useMemo(() => {
+    if (!isOpen || !user?.id || !formValues.boardId) return EMPTY_TAGS;
+    const recentLabelsKey = `${RECENT_LABELS_STORAGE_KEY}:${user.id}:${formValues.boardId}`;
+    try {
+      return JSON.parse(localStorage.getItem(recentLabelsKey) ?? '[]') as string[];
+    } catch {
+      return EMPTY_TAGS;
+    }
+  }, [isOpen, user?.id, formValues.boardId]);
+
   // Get tag options
   const tagOptions = useMemo(() => {
     const selectedTags = formValues.tags ?? [];
-    const allTags = [...new Set([...availableTags, ...newTags, ...initialTags, ...selectedTags])];
+    const allTags = [
+      ...new Set([...availableTags, ...newTags, ...initialTags, ...selectedTags, ...recentTags]),
+    ];
+    const recentRank = new Map(recentTags.map((tag, index) => [tag, index]));
+    const rankOf = (tag: string): number => recentRank.get(tag) ?? recentTags.length;
 
     return allTags
       .filter(tag => typeof tag === 'string' && tag.trim().length > 0)
@@ -2006,8 +2036,9 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         label: tag,
         value: tag,
         icon: <span className={cn('size-2 rounded-full', TAG_COLORS[index % TAG_COLORS.length])} />,
-      }));
-  }, [availableTags, newTags, initialTags, formValues.tags]);
+      }))
+      .sort((a, b) => rankOf(a.value) - rankOf(b.value));
+  }, [availableTags, newTags, initialTags, formValues.tags, recentTags]);
 
   const requiredDynamicFields = useMemo(() => {
     const visibilityMap = boardMetadata?.customFieldVisibility;

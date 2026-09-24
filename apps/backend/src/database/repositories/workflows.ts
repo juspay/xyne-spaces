@@ -25,6 +25,7 @@ import {
 } from './workflowExecutionStateUtils';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { GENERIC_RECOVERY_EXCLUDED_WORKFLOW_TYPES } from '@/workflows/polling/workflowRecoveryPolicy';
+import { claimNextPendingExecutionRow } from '@/bypassAcl/workflowServices';
 
 function getDescriptionFromTicketUpdateInput(
   description: Prisma.TicketUpdateInput['description'],
@@ -521,9 +522,7 @@ export class WorkflowExecutionRepository extends BaseRepository<WorkflowExecutio
   }
 
   async claimNextPendingExecution(workflowType?: string, tags?: string[]): Promise<WorkflowExecutionWithState | null> {
-    const claimed = await this.db.$queryRawUnsafe<Array<{ id: string }>>(
-      buildClaimQuery(workflowType, tags)
-    )
+    const claimed = await claimNextPendingExecutionRow(this.db, buildClaimQuery(workflowType, tags))
 
     if (claimed.length === 0) return null
 

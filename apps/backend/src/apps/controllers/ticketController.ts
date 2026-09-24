@@ -8,7 +8,7 @@ import { repositories } from '@/database/repositories';
 import { evaluateAssignmentRule } from '@/utils/assignmentEngine';
 import { ticketService } from '@/services/ticketService';
 import { ticketAssignmentService, primaryUserIdOf } from '@/services/ticketAssignmentService';
-import { ticketDuplicateService } from '@/services/ticketDuplicateService';
+import { ticketDuplicateService, type DuplicateScopeFieldValue } from '@/services/ticketDuplicateService';
 import { DatabaseClient } from '@/database/client';
 import type { BoardMetadata } from '@xyne/shared';
 import {
@@ -73,6 +73,7 @@ import {
   etaSignalsFromResult,
   writeEtaActivitiesPrisma,
 } from '@/services/etaManagement';
+import { lockTicketMetadataAndEta } from '@/bypassAcl/rowLockServices';
 
 const externalSourceRepo = new ExternalSourceRepository();
 const externalMessageRepo = new ExternalMessageRepository();
@@ -471,12 +472,7 @@ const transferTicketToBoard = async (params: {
     // FOR UPDATE locks the row so that can't happen. Both locked values feed evaluateEta:
     // eta is the extend-only baseline and a fingerprint input, so a stale one could decide
     // against - and then overwrite - a due date someone else just moved.
-    const [lockedTicket] = await tx.$queryRaw<{ metadata: unknown; eta: Date | null }[]>`
-      SELECT "metadata", "eta"
-      FROM "tickets"
-      WHERE "id" = ${ticketId}
-      FOR UPDATE
-    `;
+    const lockedTicket = await lockTicketMetadataAndEta(tx, ticketId);
     const lockedEta = lockedTicket?.eta ?? null;
     const boardEtaCtx = await loadBoardEtaContext(tx, targetBoardId);
     const currentTicketEtaManagement = parseTicketEtaManagement(lockedTicket?.metadata);
@@ -757,6 +753,11 @@ export class TicketController {
         return;
       }
 
+      const duplicateScopeValues: DuplicateScopeFieldValue[] | undefined =
+        customFieldValues && customFieldValues.fieldValues.length > 0
+          ? customFieldValues.fieldValues.map(fv => ({ fieldId: fv.fieldId, value: fv.actualFieldValue }))
+          : undefined;
+
       // Resolve channelId from channelName if not provided
       const resolvedChannelId = await resolveChannelId(channelId, undefined, channelName);
 
@@ -847,6 +848,8 @@ export class TicketController {
           description,
           projectId,
           userId,
+          channelId: resolvedChannelId,
+          scopeFieldValues: duplicateScopeValues,
         }).catch(error => {
           logger.error('[Apps Ticket Creation] Failed to persist duplicate references for ticket', {
             ticketId: result.ticketId,
@@ -2788,6 +2791,13 @@ export class TicketController {
         additionalFormFieldValidationErrors.push(...partialResult.validationErrors);
       }
 
+      // Duplicate detection fires inside createConversationWithEmail BEFORE the
+      // field sync below (timing constraint) — hand it the precomputed payload.
+      const scopeFieldValues: DuplicateScopeFieldValue[] | undefined =
+        customFieldValues && customFieldValues.fieldValues.length > 0
+          ? customFieldValues.fieldValues.map(fv => ({ fieldId: fv.fieldId, value: fv.actualFieldValue }))
+          : undefined;
+
       const result = await emailService.createConversationWithEmail({
         channelId,
         userId,
@@ -2812,6 +2822,7 @@ export class TicketController {
         },
         receivedAt: new Date(),
         boardId: effectiveBoardId,
+        scopeFieldValues,
       });
 
       if (result && 'blocked' in result && result.blocked) {

@@ -3855,9 +3855,24 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 >
                   <ChevronLeft size={16} />
                 </button>
-                <span className='truncate font-mono text-[13px] font-medium text-muted-foreground'>
-                  {ticket.xyneId}
-                </span>
+                <Tooltip content='Copy ticket ID'>
+                  <button
+                    type='button'
+                    onClick={() => {
+                      void navigator.clipboard.writeText(ticket.xyneId);
+                      toast.success('Copied', {
+                        description: 'Ticket ID copied to clipboard',
+                        duration: 2000,
+                      });
+                    }}
+                    aria-label={`Copy ticket ID ${ticket.xyneId}`}
+                    className='truncate font-mono text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground'
+                    data-track-category='Tickets'
+                    data-track-name='COPY_TICKET_ID'
+                  >
+                    {ticket.xyneId}
+                  </button>
+                </Tooltip>
               </>
             )}
           </div>
