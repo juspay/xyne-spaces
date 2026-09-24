@@ -13,9 +13,10 @@ import { createWithUsersTx } from '@/bypassAcl/transactions/userGroups';
 
 export interface CreateUserGroupWithUsersInput extends CreateUserGroupInput {
   userIds?: string[];
-  // userId -> the roleIds to assign that user in this group. Written to user_role_mappings
-  // (entityType=USER_GROUP), NOT to the legacy user_group_mappings.roleId column.
-  userRoleUpdates?: Record<string, string[]>;
+  // userId -> the roleId(s) to assign that user in this group. Written to user_role_mappings
+  // (entityType=USER_GROUP), NOT to the legacy user_group_mappings.roleId column. Backward
+  // compatible: a value may be a single roleId (legacy) or an array of roleIds.
+  userRoleUpdates?: Record<string, string | string[]>;
 }
 
 export class UserGroupRepository extends BaseRepository<UserGroup, CreateUserGroupInput, UpdateUserGroupInput> {
