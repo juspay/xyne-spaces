@@ -175,7 +175,12 @@ class EventRouter {
             }),
         );
 
-        await automationQueue.enqueueRun({ executionId: execution.id });
+        // Priority runs get put near the front of the queue. Normal runs pass no
+        // priority, so they just join the back of the line like always.
+        await automationQueue.enqueueRun(
+          { executionId: execution.id },
+          metadata.priority ? { priority: 1 } : {},
+        );
         enqueued += 1;
       } catch (err) {
         logger.error(

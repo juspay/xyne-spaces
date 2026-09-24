@@ -12,6 +12,7 @@ interface EntityMultiSelectorProps extends EntitySelectorProps {
   showSearch?: boolean;
   collapseSelectedAfter?: number;
   collapsedLabel?: string;
+  previewIcons?: number;
 }
 
 export const EntityMultiSelector: React.FC<EntityMultiSelectorProps> = ({
@@ -31,6 +32,7 @@ export const EntityMultiSelector: React.FC<EntityMultiSelectorProps> = ({
   showSearch = false,
   collapseSelectedAfter,
   collapsedLabel = 'items',
+  previewIcons,
   matchTriggerWidth = false,
   onOpenChange,
 }) => {
@@ -213,14 +215,16 @@ export const EntityMultiSelector: React.FC<EntityMultiSelectorProps> = ({
           <Popover.Trigger asChild>
             <span className='flex items-center gap-1.5 rounded-md bg-background border px-2 text-xs h-7 cursor-pointer'>
               <span className='flex items-center -space-x-2.5'>
-                {selectedOptions.slice(0, collapseSelectedAfter).map(opt => (
+                {selectedOptions.slice(0, previewIcons ?? collapseSelectedAfter).map(opt => (
                   <span key={opt.value} className='flex items-center justify-center size-4'>
                     {opt.icon}
                   </span>
                 ))}
               </span>
               <span className='text-xs font-medium text-foreground'>
-                {selectedOptions.length} {collapsedLabel} selected
+                {previewIcons === undefined
+                  ? `${selectedOptions.length} ${collapsedLabel} selected`
+                  : `${selectedOptions.length} ${collapsedLabel}${selectedOptions.length === 1 ? '' : 's'}`}
               </span>
               <button
                 type='button'
@@ -256,6 +260,8 @@ export const EntityMultiSelector: React.FC<EntityMultiSelectorProps> = ({
             onTouchMove={e => {
               e.stopPropagation();
             }}
+            onClick={e => e.stopPropagation()}
+            onKeyDown={e => e.stopPropagation()}
             className='z-[100] w-auto max-w-64 max-h-96 overflow-y-auto no-scrollbar rounded-lg border border-border bg-background shadow-lg'
             // Never narrower than the trigger, matching EntitySelector. A compact
             // trigger still lets the content size the popover as before.

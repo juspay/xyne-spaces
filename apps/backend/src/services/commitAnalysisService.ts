@@ -1062,13 +1062,13 @@ export class CommitAnalysisService {
   ): Promise<{
     envChangeCount: number;
     migrationChangeCount: number;
-    migrationLinks: Array<{ filePath: string; diffUrl: string }>;
-    envChanges: Array<{ fileName: string; filePath: string; newValue: string }>
+    migrationLinks: Array<{ filePath: string; diffUrl: string; applicationId: string }>;
+    envChanges: Array<{ fileName: string; filePath: string; newValue: string; applicationId: string }>
   }> {
     let totalEnvChanges = 0;
     let totalMigrationChanges = 0;
-    const allMigrationLinks: Array<{ filePath: string; diffUrl: string }> = [];
-    const allEnvChanges: Array<{ fileName: string; filePath: string; newValue: string }> = [];
+    const allMigrationLinks: Array<{ filePath: string; diffUrl: string; applicationId: string }> = [];
+    const allEnvChanges: Array<{ fileName: string; filePath: string; newValue: string; applicationId: string }> = [];
 
     for (const result of results) {
       if (result.filePaths.length === 0) continue;
@@ -1087,8 +1087,8 @@ export class CommitAnalysisService {
 
         totalEnvChanges += envChangeCount;
         totalMigrationChanges += migrationChangeCount;
-        allMigrationLinks.push(...migrationLinks);
-        allEnvChanges.push(...envChanges);
+        allMigrationLinks.push(...migrationLinks.map(link => ({ ...link, applicationId })));
+        allEnvChanges.push(...envChanges.map(change => ({ ...change, applicationId })));
       } catch (error) {
         logger.warn(`Failed to save release changes for commit ${result.commitId}:`, error);
       }
@@ -1184,8 +1184,8 @@ export class CommitAnalysisService {
   ): Promise<{
     envChangeCount: number;
     migrationChangeCount: number;
-    migrationLinks: Array<{ filePath: string; diffUrl: string }>;
-    envChanges: Array<{ fileName: string; filePath: string; newValue: string; commitId?: string }>;
+    migrationLinks: Array<{ filePath: string; diffUrl: string; applicationId: string }>;
+    envChanges: Array<{ fileName: string; filePath: string; newValue: string; commitId?: string; applicationId: string }>;
   }> {
     const db = DatabaseClient.getInstance();
     // Scope to this repo's applications — release_change_types is releaseId-wide, so
@@ -1200,8 +1200,8 @@ export class CommitAnalysisService {
       orderBy: { createdAt: 'asc' },
     });
 
-    const migrationLinks: Array<{ filePath: string; diffUrl: string }> = [];
-    const envChanges: Array<{ fileName: string; filePath: string; newValue: string; commitId?: string }> = [];
+    const migrationLinks: Array<{ filePath: string; diffUrl: string; applicationId: string }> = [];
+    const envChanges: Array<{ fileName: string; filePath: string; newValue: string; commitId?: string; applicationId: string }> = [];
     // Cache diffs within this build so a file touched by multiple change rows is
     // fetched once.
     const diffCache = new Map<string, string>();
@@ -1211,7 +1211,7 @@ export class CommitAnalysisService {
 
       if (change.changeType === XyneChangeType.MIGRATION) {
         const diffUrl = this.bitbucketService.buildCommitFileUrl(projectKey, repositorySlug, change.commitId, change.filePath);
-        migrationLinks.push({ filePath: change.filePath, diffUrl });
+        migrationLinks.push({ filePath: change.filePath, diffUrl, applicationId: change.applicationId });
         continue;
       }
 
@@ -1238,7 +1238,7 @@ export class CommitAnalysisService {
         const fileName = change.filePath.split('/').pop() || change.filePath;
         // Carry commitId so the canvas can key env changes by (commit, path) —
         // otherwise two commits touching the same env file collapse to one.
-        envChanges.push({ fileName, filePath: change.filePath, newValue: diff, commitId: change.commitId });
+        envChanges.push({ fileName, filePath: change.filePath, newValue: diff, commitId: change.commitId, applicationId: change.applicationId });
       }
     }
 

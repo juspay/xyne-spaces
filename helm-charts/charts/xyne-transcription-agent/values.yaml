@@ -1,0 +1,290 @@
+global:
+  imageRegistry: ""
+  imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+image:
+  registry: ghcr.io
+  repository: juspay/xyne-spaces-transcription-agent
+  tag: ""
+  digest: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+version: ""
+versionedName: false
+
+replicaCount: 2
+revisionHistoryLimit: 3
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 1
+    maxUnavailable: 0
+
+command: []
+args: []
+
+containerPorts:
+  - name: http
+    containerPort: 8080
+    protocol: TCP
+
+service:
+  enabled: true
+  type: ClusterIP
+  annotations: {}
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+    - name: http-app
+      port: 8080
+      targetPort: http
+
+env:
+  NODE_ENV: production
+  HEALTH_PORT: "8080"
+  LIVEKIT_URL: ws://livekit:7880
+  LIVEKIT_TRANSCRIPTION_AGENT_NAME: xyne-automatic
+  BACKEND_URL: http://xyne-backend
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  REDIS_TLS: "false"
+  STT_PROVIDER: azure
+  STT_MODEL: azure
+  VOICE_INPUT_STT_MODEL: google
+  AZURE_OPENAI_STT_ENDPOINT: ""
+  AZURE_OPENAI_STT_API_VERSION: 2025-03-01-preview
+  AZURE_OPENAI_STT_MODEL: gpt-4o-transcribe
+  GOOGLE_STT_MODEL: chirp_3
+  GOOGLE_STT_LANGUAGE: en-US
+  GOOGLE_STT_STREAM_MODEL: chirp_2
+  GOOGLE_STT_STREAM_LOCATION: us-central1
+  DEEPGRAM_MODEL: nova-3
+  DEEPGRAM_LANGUAGE: en-US
+  VAD_ACTIVATION_THRESHOLD: "0.45"
+  VAD_MIN_SPEECH_DURATION: "0.15"
+  VAD_MIN_SILENCE_DURATION: "0.4"
+  VAD_MAX_BUFFERED_SPEECH: "5.0"
+  AI_VOICE_ENABLED_DEFAULT: "false"
+  DIARIZATION_ENABLED: "false"
+  AZURE_OPENAI_ENDPOINT: ""
+  AZURE_OPENAI_API_VERSION: "2024-10-21"
+  AZURE_OPENAI_MODEL: gpt-4.1
+  AZURE_OPENAI_TTS_ENDPOINT: ""
+  AZURE_OPENAI_TTS_API_VERSION: 2025-03-01-preview
+  AZURE_OPENAI_TTS_DEPLOYMENT: gpt-4o-mini-tts
+  AZURE_OPENAI_TTS_VOICE: shimmer
+  STORAGE_PROVIDER: s3
+  GCS_PROJECT_ID: ""
+  TRANSCRIPTION_BUCKET_NAME: ""
+
+secretEnv:
+  LIVEKIT_API_KEY:
+    name: xyne-transcription-agent-secrets
+    key: LIVEKIT_API_KEY
+  LIVEKIT_API_SECRET:
+    name: xyne-transcription-agent-secrets
+    key: LIVEKIT_API_SECRET
+  TRANSCRIPTION_AGENT_API_KEY:
+    name: xyne-transcription-agent-secrets
+    key: TRANSCRIPTION_AGENT_API_KEY
+  REDIS_PASSWORD:
+    name: xyne-transcription-agent-secrets
+    key: REDIS_PASSWORD
+    optional: true
+  AZURE_OPENAI_STT_API_KEY:
+    name: xyne-transcription-agent-secrets
+    key: AZURE_OPENAI_STT_API_KEY
+    optional: true
+  AZURE_OPENAI_API_KEY:
+    name: xyne-transcription-agent-secrets
+    key: AZURE_OPENAI_API_KEY
+    optional: true
+  AZURE_OPENAI_TTS_API_KEY:
+    name: xyne-transcription-agent-secrets
+    key: AZURE_OPENAI_TTS_API_KEY
+    optional: true
+  DEEPGRAM_API_KEY:
+    name: xyne-transcription-agent-secrets
+    key: DEEPGRAM_API_KEY
+    optional: true
+  CHUTES_STT_API_KEY:
+    name: xyne-transcription-agent-secrets
+    key: CHUTES_STT_API_KEY
+    optional: true
+  GOOGLE_VOICE_CREDENTIALS_JSON:
+    name: xyne-transcription-agent-secrets
+    key: GOOGLE_VOICE_CREDENTIALS_JSON
+    optional: true
+  AWS_ACCESS_KEY_ID:
+    name: xyne-transcription-agent-secrets
+    key: AWS_ACCESS_KEY_ID
+    optional: true
+  AWS_SECRET_ACCESS_KEY:
+    name: xyne-transcription-agent-secrets
+    key: AWS_SECRET_ACCESS_KEY
+    optional: true
+
+envFromSecrets: []
+envFromConfigMaps: []
+extraEnv: []
+
+startupProbe: {}
+livenessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 60
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 5
+readinessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 20
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+lifecycle: {}
+
+resources:
+  requests:
+    cpu: "1"
+    memory: 2Gi
+  limits:
+    memory: 4Gi
+
+podSecurityContext:
+  fsGroup: 1001
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1001
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  seccompProfile:
+    type: RuntimeDefault
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+  automount: false
+
+commonLabels: {}
+podLabels: {}
+podAnnotations: {}
+deploymentAnnotations: {}
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+podAntiAffinityPreset: soft
+topologySpreadConstraints: []
+priorityClassName: ""
+runtimeClassName: ""
+terminationGracePeriodSeconds: 600
+hostAliases: []
+dnsPolicy: ""
+dnsConfig: {}
+
+initContainers: []
+sidecars: []
+
+volumes:
+  - name: transcriptions
+    emptyDir: {}
+volumeMounts:
+  - name: transcriptions
+    mountPath: /app/transcriptions
+
+persistence:
+  enabled: false
+  existingClaim: ""
+  storageClass: ""
+  accessModes:
+    - ReadWriteOnce
+  size: 10Gi
+  mountPath: /data
+  subPath: ""
+  annotations: {}
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+  metrics: []
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      selectPolicy: Max
+      policies:
+        - type: Pods
+          value: 2
+          periodSeconds: 30
+        - type: Percent
+          value: 100
+          periodSeconds: 30
+    scaleDown:
+      stabilizationWindowSeconds: 600
+      selectPolicy: Min
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 600
+
+pdb:
+  enabled: true
+  maxUnavailable: 1
+  unhealthyPodEvictionPolicy: ""
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: transcription.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+istio:
+  virtualService:
+    enabled: false
+    hosts: []
+    gateways: []
+    timeout: 50s
+    retries: {}
+    http: []
+  destinationRule:
+    enabled: false
+    exportTo: []
+    trafficPolicy: {}
+    subsets: []
+
+networkPolicy:
+  enabled: false
+  policyTypes:
+    - Ingress
+  ingress: []
+  egress: []
+
+serviceMonitor:
+  enabled: false
+  namespace: ""
+  labels: {}
+  port: http
+  path: /metrics
+  interval: 30s
+  scrapeTimeout: ""
+
+extraObjects: []

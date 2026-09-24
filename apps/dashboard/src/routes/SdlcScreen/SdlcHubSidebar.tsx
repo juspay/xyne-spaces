@@ -17,6 +17,7 @@ const SECTION_SEPARATOR_HEIGHT = 7;
 export const SDLC_SECTIONS: ReadonlyArray<{ id: string; defaultHeight: number }> = [
   { id: 'sdlc-sidebar-tracks', defaultHeight: 200 },
   { id: 'sdlc-sidebar-artifacts', defaultHeight: 180 },
+  { id: 'sdlc-sidebar-repositories', defaultHeight: 150 },
 ];
 
 export interface SdlcHubRepository {
@@ -161,7 +162,7 @@ interface SdlcSidebarSectionHeaderProps {
   id: string;
   title: string;
   count?: number | undefined;
-  action?: { label: string; onClick: () => void; trackName: string } | undefined;
+  action?: { label: string; onClick: () => void; trackName: string; icon?: ReactNode } | undefined;
 }
 
 function SdlcSidebarSectionHeader(
@@ -201,7 +202,7 @@ function SdlcSidebarSectionHeader(
           data-track-category='SdlcHub'
           data-track-name={props.action.trackName}
         >
-          <Plus className='size-3.5' />
+          {props.action.icon ?? <Plus className='size-3.5' />}
         </button>
       )}
     </div>

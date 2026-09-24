@@ -1,4 +1,5 @@
 import React, { useContext, useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { MaximizeTwoArrow, Spinner } from '@xyne/icons';
 import type { AgentDraftProps, FlowComponent } from '@xyne/shared';
 import { useFlow } from '../../FlowContext';
@@ -7,6 +8,7 @@ import { AuditLine, CardShell, Mention, StatusChip } from '../cardPrimitives';
 import Avatar from '../../../ui/Avatar/Avatar';
 import { AgentPreview, InsideAgentPreviewContext } from './AgentPreview';
 import { ChatWithAgentButton } from './ChatWithAgentButton';
+import { useDraftAgentEditor } from './useDraftAgentEditor';
 
 /**
  * The `agent` artifact's DRAFT variant — an agent an agent proposed, awaiting
@@ -33,7 +35,7 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
   node,
   props,
 }) => {
-  const { state, updateFieldValue, executeAction, conversationId, messageId } = useFlow();
+  const { state, updateFieldValue, executeAction, conversationId } = useFlow();
   const [pending, setPending] = useState<'approve' | 'reject' | null>(null);
   const [expanded, setExpanded] = useState(false);
   // A copy of this card lives inside its own AgentPreview thread panel; hide the
@@ -42,14 +44,7 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
 
   const capabilities = props.agent.capabilities ?? [];
   const decided = props.phase !== 'pending';
-
-  // Seed once from props, then flow-state owns it (the plan card's pattern) —
-  // props stay the server's view, state stays the user's edits.
-  const stored = state.values[node.id];
-  const seeded = Array.isArray(stored);
-  const selected = new Set<string>(
-    seeded ? (stored as string[]) : (props.selected ?? capabilities.map(c => c.id)),
-  );
+  const editor = useDraftAgentEditor(props, node.id);
 
   useEffect(() => {
     if (state.values[node.id] === undefined) {
@@ -59,19 +54,6 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
   }, [node.id]);
 
   const locked = state.submitting || decided || pending !== null;
-
-  const toggle = (id: string): void => {
-    if (locked) {
-      return;
-    }
-    const next = new Set(selected);
-    if (next.has(id)) {
-      next.delete(id);
-    } else {
-      next.add(id);
-    }
-    updateFieldValue(node.id, Array.from(next));
-  };
 
   const submit = async (actionId: 'agent-draft-approve' | 'agent-draft-decline'): Promise<void> => {
     if (locked) {
@@ -127,8 +109,6 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
 
   const approveLabel = pending === 'approve' ? 'Creating…' : 'Create Agent';
 
-  const interactive = decided ? undefined : { selected, onToggle: toggle, disabled: locked };
-
   // Footer button shapes from the frame: text-only for the secondary actions, a
   // bordered surface for the primary one.
   const ghostButton = cn(
@@ -145,34 +125,19 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
   // Decline / Edit / Create Agent — shared by the compact footer AND the
   // expanded preview footer (submit() closes the preview on a decision).
   const actionControls = (
-    <div className='flex w-full items-center justify-between gap-3'>
-      <button
-        type='button'
-        onClick={() => void submit('agent-draft-decline')}
-        disabled={locked}
-        className={cn(ghostButton, 'px-2.5')}
-        data-track-category='AGENT_ARTIFACT'
-        data-track-name='CLICK_DECLINE'
-        data-ph-capture-attribute-track-id='agent_draft_decline'
-      >
-        {pending === 'reject' && <Spinner size={14} className='animate-spin' />}
-        {pending === 'reject' ? 'Declining…' : 'Decline'}
-      </button>
-
+    <div className='flex w-full items-center justify-end gap-3'>
       <div className='flex shrink-0 items-center gap-2'>
-        {/* Placeholder from the frame — no edit flow exists yet. Rendered so the
-            layout matches the design; wire it up when the behaviour is decided. */}
         <button
           type='button'
-          onClick={() => {
-            /* TODO: no edit flow yet — see the Agent Create frame. */
-          }}
+          onClick={() => void submit('agent-draft-decline')}
           disabled={locked}
           className={cn(ghostButton, 'px-2.5')}
           data-track-category='AGENT_ARTIFACT'
-          data-track-name='CLICK_EDIT'
+          data-track-name='CLICK_DECLINE'
+          data-ph-capture-attribute-track-id='agent_draft_decline'
         >
-          Edit
+          {pending === 'reject' && <Spinner size={14} className='animate-spin' />}
+          {pending === 'reject' ? 'Declining…' : 'Decline'}
         </button>
         <button
           type='button'
@@ -209,18 +174,31 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
             </span>
             {statePill}
           </div>
-          {!insidePreview && (
-            <button
-              type='button'
-              onClick={(): void => setExpanded(true)}
-              aria-label='Expand agent'
-              className='shrink-0 rounded-[10px] p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
-              data-track-category='AGENT_ARTIFACT'
-              data-track-name='EXPAND_ARTIFACT'
-            >
-              <MaximizeTwoArrow size={16} className='shrink-0' />
-            </button>
-          )}
+          {!insidePreview &&
+            (props.phase === 'created' ? (
+              // The agent exists now, so its detail page shows everything the
+              // preview dialog only summarises. While still a draft there is no
+              // page to open, so the dialog stays the way to see the spec.
+              <Link
+                to={`/ai/library/agent/${encodeURIComponent(props.agent.slug)}?tab=persona`}
+                className='shrink-0 rounded-[10px] px-2 py-1 text-sm font-medium leading-5 !text-muted-foreground !no-underline transition-colors hover:bg-accent hover:!text-foreground'
+                data-track-category='AGENT_ARTIFACT'
+                data-track-name='VIEW_AGENT_FROM_DRAFT_CARD'
+              >
+                View
+              </Link>
+            ) : (
+              <button
+                type='button'
+                onClick={(): void => setExpanded(true)}
+                aria-label='Expand agent'
+                className='shrink-0 rounded-[10px] p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
+                data-track-category='AGENT_ARTIFACT'
+                data-track-name='EXPAND_ARTIFACT'
+              >
+                <MaximizeTwoArrow size={16} className='shrink-0' />
+              </button>
+            ))}
         </div>
 
         <div className='flex flex-col gap-3'>
@@ -271,9 +249,8 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
       <AgentPreview
         open={expanded}
         onOpenChange={setExpanded}
-        messageId={messageId ?? ''}
         agent={props.agent}
-        interactive={interactive}
+        editor={editor}
         note={props.note}
         statePill={statePill}
         conversationId={conversationId ?? undefined}

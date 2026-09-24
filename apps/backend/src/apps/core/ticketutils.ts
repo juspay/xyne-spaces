@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { logger } from '@/utils/logger';
 import { findOrCreateConversation } from './conversationUtils';
-import { TicketRepository } from '@/database/repositories/ticketRepository';
+import { TicketRepository, emitTicketCreated } from '@/database/repositories/ticketRepository';
 import { DatabaseClient } from '@/database/client';
 import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import type { Prisma } from '@prisma/client';
@@ -45,6 +45,7 @@ const CreateTicketParamsSchema = z.object({
   stageName: z.string().trim().optional(),
   eta: z.date().optional(),
   ticketType: z.string().trim().optional(),
+  merchantId: z.string().trim().min(1).optional(),
   customFieldValues: z.object({
     formId: z.string().min(1, 'Form ID is required').trim(),
     contextId: z.string().min(1, 'Context ID is required').trim(),
@@ -133,6 +134,7 @@ export async function createTicketWithConversation(
       stageName,
       eta,
       ticketType,
+      merchantId,
       customFieldValues,
     } = paramsResult.data;
 
@@ -209,6 +211,7 @@ export async function createTicketWithConversation(
         stageName,
         eta,
         ticketType,
+        merchantId,
         formFieldChanges,
       }, tx);
 
@@ -256,6 +259,10 @@ export async function createTicketWithConversation(
 
       return createdTicket;
     });
+
+    // Automations re-read the ticket on their own connection, so the event must
+    // not be published before the transaction above commits.
+    void emitTicketCreated(ticket, undefined, ticket.createdBy);
 
     logger.info(`[CREATE-TICKET] Created ticket ${ticket.id} (${ticket.xyneId}) in conversation ${finalConversationId}`);
 

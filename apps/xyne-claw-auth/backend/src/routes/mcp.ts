@@ -11,9 +11,12 @@ import type { McpToolInfo, McpServerTools } from "../mcp/types.js";
 import { hasConnectorDefinition, resolveConnectorDefinition } from "../mcp/connector-definitions.js";
 import { BITBUCKET_CUSTOM_TOOLS, handleUploadPrScreenshot, handleGetPrComments, handleGetPrTemplate, handleListPullRequests, buildUpstreamBitbucketCitation } from "../mcp/adapters/bitbucket.js";
 import { GITHUB_CUSTOM_TOOLS, handleUploadPrAttachment } from "../mcp/adapters/github.js";
+import { GITHUB_INSIGHTS_TOOLS, isGithubInsightsTool, handleGithubInsightsTool } from "../mcp/adapters/github-insights.js";
 import { GRAFANA_CUSTOM_TOOLS, handleGrafanaQueryLogs, handleGrafanaListMetrics, handleGrafanaQueryMetrics, handleGrafanaQueryDatabase, buildUpstreamGrafanaCitation, prefixChunk } from "../mcp/adapters/grafana.js";
 import { type Citation } from "xyne-claw-shared";
 import { SLACK_CUSTOM_TOOLS, handleSlackFindChannel } from "../mcp/adapters/slack.js";
+import { channelAgentTools, handleChannelAgentTool, isChannelAgentTool } from "../surfaces/messaging/agent-tools.js";
+import { getChannel, isMessagingChannelKey, MESSAGING_CHANNEL_KEYS } from "../surfaces/messaging/plugin.js";
 import { POSTMAN_CUSTOM_TOOLS, handleRunMonitor } from "../mcp/adapters/postman.js";
 import {
   WEBFETCH_SERVER_TYPE,
@@ -77,6 +80,7 @@ import {
   subagentReferencingTool,
   type SubagentToolRefs,
 } from "./mcp-agent-tools.js";
+import { listTools, searchTools } from "../services/tool-index/index.js";
 
 const log = createLogger("mcp");
 
@@ -412,12 +416,46 @@ async function resolveServerNameForMcpCall(serverType: string, backendId?: strin
   return server?.name ?? serverType;
 }
 
-export function signAction(action: Record<string, unknown>): string {
-  return crypto.createHmac("sha256", CONFIG.actionSigningKey).update(JSON.stringify(action)).digest("hex");
+function canonicalize(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return Object.keys(record)
+      .sort()
+      .reduce<Record<string, unknown>>((acc, key) => {
+        acc[key] = canonicalize(record[key]);
+        return acc;
+      }, {});
+  }
+  return value;
 }
 
-function signLegacyAction(action: Record<string, unknown>): string {
-  return crypto.createHmac("sha256", CONFIG.legacyActionSigningKey).update(JSON.stringify(action)).digest("hex");
+export function canonicalActionPayload(action: Record<string, unknown>): string {
+  return JSON.stringify(canonicalize(action));
+}
+
+function hmac(key: string | Buffer, payload: string): string {
+  return crypto.createHmac("sha256", key).update(payload).digest("hex");
+}
+
+export function signAction(action: Record<string, unknown>): string {
+  return hmac(CONFIG.actionSigningKey, canonicalActionPayload(action));
+}
+
+function candidateSignatures(action: Record<string, unknown>): string[] {
+  const canonical = canonicalActionPayload(action);
+  const raw = JSON.stringify(action);
+  const payloads = canonical === raw ? [canonical] : [canonical, raw];
+  const keys = [CONFIG.actionSigningKey, CONFIG.legacyActionSigningKey].filter((k) => Boolean(k));
+  return keys.flatMap((key) => payloads.map((payload) => hmac(key, payload)));
+}
+
+function matchesAny(action: Record<string, unknown>, signature: string): boolean {
+  const given = Buffer.from(signature, "hex");
+  return candidateSignatures(action).some((candidate) => {
+    const current = Buffer.from(candidate, "hex");
+    return current.length === given.length && crypto.timingSafeEqual(current, given);
+  });
 }
 
 /**
@@ -621,11 +659,20 @@ const CUSTOM_TOOL_INJECTIONS: ReadonlyArray<{
   createIfMissing: boolean;
 }> = [
   { match: (t) => t === "bitbucket", tools: BITBUCKET_CUSTOM_TOOLS, createIfMissing: false },
-  // upload-pr-attachment hits GitHub's REST + uploads API directly, so it works
-  // even when the upstream github MCP server fails to spawn.
-  { match: (t) => t === "github", tools: GITHUB_CUSTOM_TOOLS, createIfMissing: true },
+  // upload-pr-attachment and the growth tools hit GitHub's REST/GraphQL APIs
+  // directly, so they work even when the upstream github MCP server fails to
+  // spawn.
+  { match: (t) => t === "github", tools: [...GITHUB_CUSTOM_TOOLS, ...GITHUB_INSIGHTS_TOOLS], createIfMissing: true },
   { match: (t) => t === "postman", tools: POSTMAN_CUSTOM_TOOLS, createIfMissing: false },
   { match: (t) => t === "slack", tools: SLACK_CUSTOM_TOOLS, createIfMissing: true },
+  // Messaging channels (WhatsApp over Baileys, WhatsApp Cloud API, …): fully
+  // virtual — no upstream MCP server, every tool executes in claw-auth against
+  // the account's connection.
+  ...MESSAGING_CHANNEL_KEYS.map((key) => ({
+    match: (t: string) => t === key,
+    tools: channelAgentTools(key),
+    createIfMissing: true,
+  })),
   { match: isGrafanaFamilyType, tools: GRAFANA_CUSTOM_TOOLS, createIfMissing: true },
 ];
 
@@ -758,6 +805,9 @@ export async function withSurfaceDefaultToolsConfig(
   if (runCtx?.slackDelivery?.surfaceAgentId && runCtx.slackDelivery.teamId) {
     effective = withSubagent(effective, "slack");
   }
+  if (runCtx?.channelDelivery) {
+    effective = withSubagent(effective, runCtx.channelDelivery.channel);
+  }
 
   // Spaces-originated runs already carry the agent's Spaces app/user context in
   // the session and credential fallback. Give those runs the Spaces subagent by
@@ -766,7 +816,7 @@ export async function withSurfaceDefaultToolsConfig(
   // jobs post their result into a Spaces channel, so a scheduled run that
   // carries Spaces app context counts as a Spaces surface too and gets the same
   // default (a non-Spaces scheduled run, lacking that context, does not).
-  const hasSpacesContext = !!runCtx?.spacesAppId && !!runCtx?.spacesAppUserId && !runCtx?.slackDelivery;
+  const hasSpacesContext = !!runCtx?.spacesAppId && !!runCtx?.spacesAppUserId && !runCtx?.slackDelivery && !runCtx?.channelDelivery;
   // The run-context (`getSession`) can come back empty or partial at tool-list
   // time — a Redis miss or a race — and that silently strips a Spaces-app
   // agent's Spaces tools (prod 2026-08-24: agent `xyne` kept only its hand-
@@ -779,6 +829,7 @@ export async function withSurfaceDefaultToolsConfig(
   const sessionIsSpacesApp =
     !!sessionSpacesAppId &&
     !runCtx?.slackDelivery &&
+    !runCtx?.channelDelivery &&
     runCtx?.triggerSource !== "api" &&
     runCtx?.triggerSource !== "chat";
   const isSpacesSurface =
@@ -849,9 +900,8 @@ async function loadEffectiveCredentialsWithSpacesFallback(
 }
 
 export function verifyActionSignature(action: Record<string, unknown>, signature: string): boolean {
-  const expected = signAction(action);
   try {
-    return crypto.timingSafeEqual(Buffer.from(expected, "hex"), Buffer.from(signature, "hex"));
+    return matchesAny(action, signature);
   } catch {
     return false;
   }
@@ -862,13 +912,7 @@ export function verifyActionSignatureAny(
   signature: string,
 ): boolean {
   try {
-    const given = Buffer.from(signature, "hex");
-    return actions.some((action) => {
-      const current = Buffer.from(signAction(action), "hex");
-      if (current.length === given.length && crypto.timingSafeEqual(current, given)) return true;
-      const legacy = Buffer.from(signLegacyAction(action), "hex");
-      return legacy.length === given.length && crypto.timingSafeEqual(legacy, given);
-    });
+    return actions.some((action) => matchesAny(action, signature));
   } catch {
     return false;
   }
@@ -1076,6 +1120,14 @@ router.get("/:sessionId/mcp/tools", async (req: Request<{ sessionId: string }>, 
           log.info(`[mcp/tools] added virtual slack entry (surface bot token) for userId=${userId}`);
         }
       }
+    }
+
+    // Messaging-channel runs get their channel's action tools (send, react,
+    // list groups) as a virtual server; execution is local (agent-tools.ts).
+    if (runCtx?.channelDelivery && !entries.some((entry) => entry.serverType === runCtx.channelDelivery?.channel)) {
+      const channel = runCtx.channelDelivery.channel;
+      entries.push({ type: "user", serverType: channel, serverName: getChannel(channel)?.displayName ?? channel, enforcementType: "virtual" });
+      log.info(`[mcp/tools] added virtual ${channel} entry (channel account) for userId=${userId}`);
     }
 
     log.info(`[mcp/tools] final entries=${entries.map((e) => `${e.serverType}:${e.type}`).join(",")}`);
@@ -1544,6 +1596,9 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
         callServerName,
         tool,
         parseGatewayServerType,
+        // Connector is the source of record for write tools, so the call gate's
+        // open-palette check matches what the listing already showed.
+        (await resolveConnectorDefinition(serverType).catch(() => undefined))?.writeTools?.includes(tool),
       ) &&
       // Custom-subagent escape hatch: tools referenced by the agent's enabled
       // subagent definitions are callable even though the agent's own config
@@ -1554,6 +1609,27 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
       !subagentReferencingTool(sessionAgentTools?.subagentToolRefs ?? [], { name: tool })
     ) {
       res.status(403).json({ success: false, error: "MCP tool is not enabled for this agent" });
+      return;
+    }
+
+    // Messaging-channel action tools — virtual server, no connector / no
+    // credentials; the account's live connection is the credential. Only a run
+    // that ORIGINATED on that channel account may use them (the session ctx
+    // is the authority), and per-account gates decide what the agent may do.
+    if (isMessagingChannelKey(serverType)) {
+      const { getSession } = await import("./webhook.js");
+      const channelCtx = await getSession(req.params.sessionId).catch(() => null);
+      const delivery = channelCtx?.channelDelivery;
+      if (!delivery || delivery.channel !== serverType) {
+        res.status(403).json({ success: false, error: `${serverType} tools are only available to runs started from a ${serverType} account` });
+        return;
+      }
+      if (!isChannelAgentTool(serverType, tool)) {
+        res.status(400).json({ success: false, error: `Unknown ${serverType} tool: ${tool}` });
+        return;
+      }
+      const content = await handleChannelAgentTool({ target: delivery, tool, params: (params ?? {}) as Record<string, unknown> });
+      res.json({ success: true, data: { content } });
       return;
     }
 
@@ -1874,6 +1950,16 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
     // is decrypted server-side and never leaves this process.
     if (serverType === "github" && tool === "upload-pr-attachment") {
       const result = await handleUploadPrAttachment(credentials, params ?? {});
+      res.json({ success: true, data: result });
+      return;
+    }
+
+    // GitHub growth & audience tools (stargazers, star history, traffic,
+    // forks, releases, contributor activity, community pulse). All read-only,
+    // all served here against the connection's PAT — the upstream github MCP
+    // server exposes none of these.
+    if (serverType === "github" && isGithubInsightsTool(tool)) {
+      const result = await handleGithubInsightsTool(tool, credentials, params ?? {});
       res.json({ success: true, data: result });
       return;
     }
@@ -2347,6 +2433,43 @@ router.post("/:sessionId/actions/sign", async (req: Request<{ sessionId: string 
     res.json({ success: true, data: { ...signedAction, signature: signedSignature } });
   } catch (err) {
     log.error("[actions/sign] error:", err);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
+/**
+ * GET /:sessionId/mcp/tools/search
+ *
+ * Backs the `search-tools` meta-tool for whole-deployment queries. Org comes
+ * from the session, not a query param a caller could set.
+ *
+ * Must stay nested under `/mcp/`: `requireStrictS2S` + `requireSessionToken`
+ * are registered on that prefix — a sibling path would be unauthenticated.
+ */
+router.get("/:sessionId/mcp/tools/search", async (req: Request<{ sessionId: string }>, res: Response) => {
+  try {
+    const userId = req.session!.userId;
+    const orgId = await resolveSessionAgentOrgId(userId, req.session?.spacesAppId);
+
+    const query = typeof req.query["q"] === "string" ? req.query["q"].trim() : "";
+    const integrations = typeof req.query["integrations"] === "string"
+      ? req.query["integrations"].split(",").map((s) => s.trim()).filter(Boolean)
+      : [];
+    const rawRisk = typeof req.query["maxRisk"] === "string" ? req.query["maxRisk"] : "";
+    const maxRisk = (["read", "write", "destructive"] as const).find((r) => r === rawRisk);
+    const limit = Number(req.query["limit"]) || 10;
+
+    const opts = {
+      ...(integrations.length ? { integrations } : {}),
+      ...(maxRisk ? { maxRisk } : {}),
+      ...(orgId ? { orgId } : {}),
+      limit,
+    };
+
+    const matches = query ? await searchTools(query, opts) : await listTools(opts);
+    res.json({ success: true, data: { mode: query ? "search" : "list", matches } });
+  } catch (err) {
+    log.error("[tools/search] error:", err);
     res.status(500).json({ success: false, error: "Internal server error" });
   }
 });

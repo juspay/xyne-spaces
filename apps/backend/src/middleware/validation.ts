@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import Joi from 'joi';
 import { ZodSchema } from 'zod';
 import { AppError } from './errorHandler';
-import { validateProjectIds, validateChannelIds, validateUserIds, validateBoardIds, validateTicketIds, validateDocTypes, parseIds } from '@/utils/idValidator';
+import { validateProjectIds, validateChannelIds, validateUserIds, validateUserGroupIds, validateBoardIds, validateTicketIds, validateDocTypes, parseIds } from '@/utils/idValidator';
 import { parseDateToTimestamp, parseTimeKeyword } from '@/vespa/src/utils/dateParser';
 
 export const validate = (schema: Joi.ObjectSchema) => {
@@ -74,6 +74,7 @@ export const validateSearchFilters = () => {
       withUser,
       mentions,
       channelMentions,
+      groupMentions,
       on,
       after,
       before,
@@ -262,6 +263,15 @@ export const validateSearchFilters = () => {
         const validation = await validateChannelIds(channelIds);
         if (validation.invalid.length > 0) {
           return next(new AppError(`Invalid channel-mention IDs: ${validation.invalid.join(', ')}`, 400));
+        }
+      }
+
+      // Validate group-mention IDs (@user-group chips → "groupMentions contains <userGroupId>")
+      if (groupMentions) {
+        const userGroupIds = parseIds(groupMentions as string);
+        const validation = await validateUserGroupIds(userGroupIds);
+        if (validation.invalid.length > 0) {
+          return next(new AppError(`Invalid group-mention IDs: ${validation.invalid.join(', ')}`, 400));
         }
       }
     } catch (error) {

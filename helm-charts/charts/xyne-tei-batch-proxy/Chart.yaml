@@ -1,0 +1,17 @@
+apiVersion: v2
+name: xyne-tei-batch-proxy
+description: Batching proxy in front of the GPU embedder
+type: application
+version: 0.1.0
+appVersion: "0.0.0"
+keywords:
+  - xyne
+  - vespa
+  - embeddings
+home: https://github.com/juspay/xyne-spaces
+sources:
+  - https://github.com/juspay/xyne-spaces
+dependencies:
+  - name: xyne-common
+    version: 0.1.0
+    repository: file://../xyne-common

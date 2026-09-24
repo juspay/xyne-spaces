@@ -405,7 +405,11 @@ export class RecordingSharingService {
       tx.reactionCount.deleteMany({ where: { messageId: post.messageId } }),
     ]);
 
-    if (replyCount === 0) {
+    // Ticket.conversation is a required relation: a conversation carrying a ticket can't be
+    // hard-deleted (Prisma Client throws P2014), so it falls through to the tombstone below.
+    const hasTicket = (await tx.ticket.count({ where: { conversationId: post.conversationId } })) > 0;
+
+    if (replyCount === 0 && !hasTicket) {
       await tx.conversationParticipant.deleteMany({
         where: { conversationId: post.conversationId },
       });

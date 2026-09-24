@@ -25,8 +25,11 @@ import {
   type CreateSdlcClawArtifactInput,
   type CreateSdlcLinkInput,
   type CreateSdlcTrackInput,
+  type ListSdlcEntityLinksInput,
+  type ResolveSdlcRepositoryLinkInput,
   type UpdateSdlcClawArtifactInput,
 } from '@xyne/shared';
+import type { SdlcNavTarget } from '@xyne/shared/sdlc';
 import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { DatabaseClient } from '@/database/client';
 import { AppError } from '@/middleware/errorHandler';
@@ -44,6 +47,7 @@ import {
 } from './sdlcChannelMembership';
 import { sdlcChannelCanvasParticipant } from './sdlcCanvasAccess';
 import { ensureLink } from './entityLinkService';
+import { resolveSdlcNavTarget } from './sdlcNavTarget';
 import type {
   SdlcActor,
   SdlcArtifact,
@@ -56,7 +60,7 @@ import type {
 import { requireSdlcBaseBranch } from './sdlcRepositoryContext';
 import { sdlcAgentContext } from './SdlcAgentContextService';
 import { resolveSdlcSourceReferenceTokens, type SdlcSourceReference } from './sdlcSourceReferences';
-import { sdlcVcs } from './vcs';
+import { sdlcVcs, type ParsedRepository } from './vcs';
 import {
   ensureHubKnowledgeFolder,
   ensureHubWikiFolder,
@@ -71,12 +75,125 @@ type TransactionClient = Prisma.TransactionClient;
 export class SdlcHubService implements SdlcHub {
   constructor(private readonly prisma: PrismaClient = DatabaseClient.getInstance()) {}
 
+  async resolveRepositoryLink(actor: SdlcActor, input: ResolveSdlcRepositoryLinkInput) {
+    const project = await this.prisma.project.findFirst({
+      where: { id: input.projectId, workspaceId: actor.workspaceId },
+      select: { id: true },
+    });
+    if (!project) throw new AppError('Project not found', 404);
+    await this.requireProjectBoardAccess(this.prisma, actor, project.id);
+    const repository = sdlcVcs.parseRepositoryUrl(input.url);
+    const [existing, credentials] = await Promise.all([
+      this.prisma.repo.findFirst({
+        where: { workspaceId: actor.workspaceId, canonicalUrl: repository.canonicalUrl },
+        select: { id: true, name: true, projectId: true },
+      }),
+      sdlcVcs.credentialsForRepository(actor.workspaceId, repository),
+    ]);
+    // Refuse before any request: only github.com and hosts a credential serves are ever contacted.
+    if (repository.provider !== 'GITHUB' && credentials.length === 0) {
+      throw new AppError(
+        `No repository credential serves ${repository.host}. Ask a workspace admin to add one.`,
+        400
+      );
+    }
+    const defaultBranch =
+      (await sdlcVcs.defaultBranch(
+        actor.workspaceId,
+        repository,
+        credentials.length === 1 ? credentials[0]!.id : null
+      )) ?? 'main';
+    return {
+      provider: repository.provider,
+      host: repository.host,
+      name: repository.name,
+      canonicalUrl: repository.canonicalUrl,
+      defaultBranch,
+      existingRepository: existing,
+      credentials,
+    };
+  }
+
+  async searchProjectRepositories(
+    actor: SdlcActor,
+    projectId: string,
+    scope: { provider: 'GITHUB' | 'BITBUCKET_SERVER'; host: string },
+    query: string
+  ) {
+    const project = await this.prisma.project.findFirst({
+      where: { id: projectId, workspaceId: actor.workspaceId },
+      select: { id: true },
+    });
+    if (!project) throw new AppError('Project not found', 404);
+    await this.requireProjectBoardAccess(this.prisma, actor, project.id);
+    const needle = query.trim();
+    const limit = 20;
+    const [registered, reachable] = await Promise.all([
+      this.prisma.repo.findMany({
+        where: {
+          workspaceId: actor.workspaceId,
+          projectId: { not: null },
+          canonicalUrl: { startsWith: `https://${scope.host}/`, mode: 'insensitive' },
+          OR: [
+            { name: { contains: needle, mode: 'insensitive' } },
+            { canonicalUrl: { contains: needle, mode: 'insensitive' } },
+          ],
+        },
+        orderBy: { name: 'asc' },
+        take: limit,
+        select: { id: true, name: true, canonicalUrl: true, url: true, projectId: true },
+      }),
+      // One character matches too much to be useful; empty lists the first few.
+      needle.length !== 1
+        ? sdlcVcs.searchCredentialRepositories(actor.workspaceId, scope, needle, limit)
+        : Promise.resolve([]),
+    ]);
+    const existing = await this.prisma.repo.findMany({
+      where: {
+        workspaceId: actor.workspaceId,
+        canonicalUrl: { in: reachable.map((item) => item.repository.canonicalUrl) },
+      },
+      select: { id: true, name: true, canonicalUrl: true, projectId: true },
+    });
+    const registeredIds = new Set(registered.map((repo) => repo.id));
+    return [
+      ...registered.map((repo) => ({
+        status: repo.projectId === project.id ? ('LINKED' as const) : ('OTHER_PROJECT' as const),
+        id: repo.id,
+        projectId: repo.projectId,
+        name: repo.name,
+        canonicalUrl: repo.canonicalUrl || repo.url,
+        cloneUrl: null,
+        credentials: [],
+      })),
+      ...reachable.flatMap(({ repository, credentials }) => {
+        const match = existing.find((repo) => repo.canonicalUrl === repository.canonicalUrl);
+        if (match && registeredIds.has(match.id)) return [];
+        return [
+          {
+            status: match
+              ? match.projectId === project.id
+                ? ('LINKED' as const)
+                : ('OTHER_PROJECT' as const)
+              : ('NOT_LINKED' as const),
+            id: match?.id ?? null,
+            projectId: match?.projectId ?? null,
+            name: repository.name,
+            canonicalUrl: repository.canonicalUrl,
+            cloneUrl: repository.cloneUrl,
+            credentials,
+          },
+        ];
+      }),
+    ];
+  }
+
   /** Register a repository. It joins no hub here; hubs pick their repositories. */
   async createRepository(
     actor: SdlcActor,
     input: AttachSdlcRepositoryInput
   ): Promise<SdlcRepository> {
-    const parsedRepository = sdlcVcs.parseRepository('GITHUB', input.url);
+    const parsedRepository = sdlcVcs.parseRepositoryUrl(input.url);
     const canonicalUrl = parsedRepository.canonicalUrl;
     const name = (input.name?.trim() || parsedRepository.name).slice(0, 120);
     if (!name) {
@@ -93,6 +210,11 @@ export class SdlcHubService implements SdlcHub {
           throw new AppError('Project not found', 404);
         }
         await this.requireProjectBoardAccess(tx, actor, project.id);
+        const vcsCredentialId = await this.chooseCredential(actor, parsedRepository, input.credentialId);
+        const baseBranch =
+          input.baseBranch ??
+          (await sdlcVcs.defaultBranch(actor.workspaceId, parsedRepository, vcsCredentialId)) ??
+          'main';
 
         const duplicate = await tx.repo.findFirst({
           where: { workspaceId: actor.workspaceId, canonicalUrl },
@@ -109,12 +231,13 @@ export class SdlcHubService implements SdlcHub {
             name,
             url: input.url.trim(),
             canonicalUrl,
-            baseBranch: [input.baseBranch],
+            baseBranch: [baseBranch],
             // Legacy required column. SDLC branch naming comes from approved
             // repository conventions, never this compatibility placeholder.
             prefix: '',
             createdBy: actor.userId,
             projectId: project.id,
+            vcsCredentialId,
           },
         });
 
@@ -141,6 +264,32 @@ export class SdlcHubService implements SdlcHub {
       }
       throw error;
     }
+  }
+
+  private async chooseCredential(
+    actor: SdlcActor,
+    repository: ParsedRepository,
+    requestedId: string | undefined
+  ): Promise<string | null> {
+    const candidates = await sdlcVcs.credentialsForRepository(actor.workspaceId, repository);
+    if (requestedId) {
+      if (!candidates.some((candidate) => candidate.id === requestedId)) {
+        throw new AppError(`That credential does not serve ${repository.host}`, 400);
+      }
+      return requestedId;
+    }
+    if (candidates.length === 1) return candidates[0]!.id;
+    if (candidates.length > 1) {
+      throw new AppError(`Several credentials serve ${repository.host}; choose one`, 409);
+    }
+    // Public GitHub repositories work anonymously; any other host needs a credential to be recognised.
+    if (repository.provider !== 'GITHUB') {
+      throw new AppError(
+        `No repository credential serves ${repository.host}. Ask a workspace admin to add one.`,
+        400
+      );
+    }
+    return null;
   }
 
   /** The private channel a hub lives in, plus its starting artifact-type folders. */
@@ -201,6 +350,30 @@ export class SdlcHubService implements SdlcHub {
         },
       },
     });
+
+    // Dual-write: mirror the channel→project board set into ChannelBoardMapping so
+    // downstream consumers resolve boards via the mapping, not channel.projectId.
+    // SDLC channels always have a project; default = oldest board.
+    const boards = await tx.board.findMany({
+      where: { projectId: input.projectId },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true },
+    });
+    if (boards.length > 0) {
+      await tx.channelBoardMapping.createMany({
+        data: boards.map((board, index) => ({
+          id: randomUUID(),
+          channelId,
+          boardId: board.id,
+          workspaceId: actor.workspaceId,
+          isDefault: index === 0,
+          createdBy: actor.userId,
+          createdAt: now,
+          updatedAt: now,
+        })),
+        skipDuplicates: true,
+      });
+    }
 
     await tx.canvasFolder.createMany({
       data: SDLC_FOLDERS.map((folderName) => ({
@@ -276,14 +449,6 @@ export class SdlcHubService implements SdlcHub {
         409
       );
     }
-    // With no repositories a hub renders nothing and cannot be deleted, since
-    // membership is what blocks channel deletion.
-    const remaining = await this.prisma.sdlcEntityLink.count({
-      where: { channelId, relationType: SDLC_MEMBERSHIP_RELATION },
-    });
-    if (remaining <= 1) {
-      throw new AppError('A hub must keep at least one repository', 409);
-    }
     const removed = await this.prisma.sdlcEntityLink.deleteMany({
       where: {
         channelId,
@@ -321,8 +486,6 @@ export class SdlcHubService implements SdlcHub {
     const unique = [...new Set(repoIds)];
     if (unique.length === 0) return [];
 
-    // The hub's canvas folders are project-scoped, so a repository from another
-    // project would render its artifacts into folders that are not its own.
     const channel = await tx.channel.findFirst({
       where: { id: channelId, workspaceId: actor.workspaceId },
       select: { projectId: true },
@@ -331,14 +494,11 @@ export class SdlcHubService implements SdlcHub {
       throw new AppError('SDLC hub not found', 404);
     }
     const repos = await tx.repo.findMany({
-      where: { id: { in: unique }, workspaceId: actor.workspaceId, projectId: channel.projectId },
+      where: { id: { in: unique }, workspaceId: actor.workspaceId, projectId: { not: null } },
       select: { id: true, name: true },
     });
     if (repos.length !== unique.length) {
-      throw new AppError(
-        'One or more repositories were not found in this hub\'s project',
-        404
-      );
+      throw new AppError('One or more repositories were not found in this workspace', 404);
     }
 
     await tx.sdlcEntityLink.createMany({
@@ -378,7 +538,7 @@ export class SdlcHubService implements SdlcHub {
       repoId: repo.id,
       channelId: repo.channelId,
       name: repo.name,
-      url: sdlcVcs.parseRepository('GITHUB', repo.canonicalUrl || repo.url).cloneUrl,
+      url: sdlcVcs.parseRepositoryUrl(repo.canonicalUrl || repo.url).cloneUrl,
       baseBranch: requireSdlcBaseBranch(repo.baseBranch),
       agentContext,
     };
@@ -427,7 +587,7 @@ export class SdlcHubService implements SdlcHub {
       },
       orderBy: { name: 'asc' },
       take: safeLimit,
-      select: { id: true, name: true, canonicalUrl: true, baseBranch: true },
+      select: { id: true, name: true, url: true, canonicalUrl: true, baseBranch: true },
     });
 
     return repos.flatMap((repo) => {
@@ -439,7 +599,7 @@ export class SdlcHubService implements SdlcHub {
             repoId: repo.id,
             channelId: repoChannelId,
             name: repo.name,
-            url: sdlcVcs.parseRepository('GITHUB', repo.canonicalUrl || '').cloneUrl,
+            url: sdlcVcs.parseRepositoryUrl(repo.canonicalUrl || repo.url).cloneUrl,
             baseBranch: requireSdlcBaseBranch(repo.baseBranch),
           },
         ];
@@ -837,6 +997,19 @@ export class SdlcHubService implements SdlcHub {
     }
   }
 
+  /**
+   * Where a hub conversation opens. Null when it has no place of its own.
+   * The rule lives in sdlc_entity_links, so a client cannot derive it from the message.
+   */
+  async navTarget(
+    actor: SdlcActor,
+    channelId: string,
+    ids: { conversationId: string; messageId?: string }
+  ): Promise<SdlcNavTarget | null> {
+    await this.requireChannelRole(actor, channelId, false);
+    return resolveSdlcNavTarget({ channelId, ...ids });
+  }
+
   async listTracks(actor: SdlcActor, channelId: string) {
     await this.requireChannelRole(actor, channelId, false);
     // Tracks carry no scope column; the CHANNEL -> TRACK edges name the hub's tracks.
@@ -976,8 +1149,170 @@ export class SdlcHubService implements SdlcHub {
     }
   }
 
+  async listEntityLinks(actor: SdlcActor, input: ListSdlcEntityLinksInput) {
+    await this.requireChannelRole(actor, input.channelId, false);
+    const scope = {
+      channelId: input.channelId,
+      workspaceId: actor.workspaceId,
+      ...(input.relationType ? { relationType: input.relationType } : {}),
+    };
+    const select = {
+      id: true,
+      sourceType: true,
+      sourceId: true,
+      targetType: true,
+      targetId: true,
+      relationType: true,
+      createdAt: true,
+    } as const;
+    const [outgoing, incoming] = await Promise.all([
+      this.prisma.sdlcEntityLink.findMany({
+        where: {
+          ...scope,
+          sourceType: input.entityType,
+          sourceId: input.entityId,
+          ...(input.otherType ? { targetType: input.otherType } : {}),
+        },
+        orderBy: { createdAt: 'asc' },
+        take: input.limit,
+        select,
+      }),
+      this.prisma.sdlcEntityLink.findMany({
+        where: {
+          ...scope,
+          targetType: input.entityType,
+          targetId: input.entityId,
+          ...(input.otherType ? { sourceType: input.otherType } : {}),
+        },
+        orderBy: { createdAt: 'asc' },
+        take: input.limit,
+        select,
+      }),
+    ]);
+    const edges = [
+      ...outgoing.map((link) => ({
+        linkId: link.id,
+        direction: 'OUTGOING' as const,
+        relationType: link.relationType,
+        otherType: link.targetType,
+        otherId: link.targetId,
+        createdAt: link.createdAt,
+      })),
+      ...incoming.map((link) => ({
+        linkId: link.id,
+        direction: 'INCOMING' as const,
+        relationType: link.relationType,
+        otherType: link.sourceType,
+        otherId: link.sourceId,
+        createdAt: link.createdAt,
+      })),
+    ].slice(0, input.limit);
+    const names = await this.entityNames(actor, input.channelId, edges);
+    return edges.map((edge) => ({
+      ...edge,
+      otherName: names.get(`${edge.otherType}:${edge.otherId}`) ?? null,
+    }));
+  }
+
+  // Channel-scoped names only when the actor can see that channel: a link can point outside the hub.
+  private async entityNames(
+    actor: SdlcActor,
+    hubId: string,
+    edges: ReadonlyArray<{ otherType: string; otherId: string }>
+  ): Promise<Map<string, string>> {
+    const idsOf = (type: string) => [
+      ...new Set(edges.filter((edge) => edge.otherType === type).map((edge) => edge.otherId)),
+    ];
+    const workspaceId = actor.workspaceId;
+    const [canvases, tickets, channels, calls, messages, emails, repos, tracks, folders, pullRequests, workflows] =
+      await Promise.all([
+        this.prisma.canvas.findMany({
+          where: { id: { in: idsOf('CANVAS') }, workspaceId },
+          select: { id: true, title: true, channelId: true },
+        }),
+        this.prisma.ticket.findMany({
+          where: { id: { in: idsOf('TICKET') }, workspaceId },
+          select: { id: true, title: true, channelId: true },
+        }),
+        this.prisma.channel.findMany({
+          where: { id: { in: idsOf('CHANNEL') }, workspaceId },
+          select: { id: true, name: true },
+        }),
+        this.prisma.call.findMany({
+          where: { id: { in: idsOf('CALL') }, workspaceId },
+          select: { id: true, title: true, channelId: true },
+        }),
+        this.prisma.message.findMany({
+          where: { messageId: { in: idsOf('MESSAGE') }, workspaceId },
+          select: { messageId: true, content: true, conversation: { select: { channelId: true } } },
+        }),
+        this.prisma.email.findMany({
+          where: { id: { in: idsOf('EMAIL') }, workspaceId },
+          select: { id: true, subject: true, channelId: true },
+        }),
+        this.prisma.repo.findMany({
+          where: { id: { in: idsOf('REPOSITORY') }, workspaceId },
+          select: { id: true, name: true },
+        }),
+        this.prisma.sdlcTrack.findMany({
+          where: { id: { in: idsOf('TRACK') }, workspaceId },
+          select: { id: true, name: true },
+        }),
+        this.prisma.canvasFolder.findMany({
+          where: { id: { in: idsOf('FOLDER') }, workspaceId },
+          select: { id: true, name: true },
+        }),
+        this.prisma.pullRequests.findMany({
+          where: { id: { in: idsOf('PULL_REQUEST') }, workspaceId },
+          select: { id: true, repoName: true, prId: true },
+        }),
+        this.prisma.workflow.findMany({
+          where: { id: { in: idsOf('WORKFLOW') }, workspaceId },
+          select: { id: true, workflowName: true, summary: true },
+        }),
+      ]);
+
+    const channelIds = new Set<string>();
+    for (const row of [...canvases, ...tickets, ...calls, ...emails]) {
+      if (row.channelId && row.channelId !== hubId) channelIds.add(row.channelId);
+    }
+    for (const row of messages) {
+      if (row.conversation.channelId !== hubId) channelIds.add(row.conversation.channelId);
+    }
+    const visible = new Set(
+      channelIds.size === 0
+        ? []
+        : (
+            await this.prisma.channelParticipant.findMany({
+              where: { userId: actor.userId, channelId: { in: [...channelIds] } },
+              select: { channelId: true },
+            })
+          ).map((row) => row.channelId)
+    );
+    const canSee = (channelId: string | null) => !channelId || channelId === hubId || visible.has(channelId);
+
+    const names = new Map<string, string>();
+    const put = (type: string, id: string, name: string | null | undefined) => {
+      if (name) names.set(`${type}:${id}`, name.slice(0, 200));
+    };
+    canvases.forEach((row) => canSee(row.channelId) && put('CANVAS', row.id, row.title));
+    tickets.forEach((row) => canSee(row.channelId) && put('TICKET', row.id, row.title));
+    calls.forEach((row) => canSee(row.channelId) && put('CALL', row.id, row.title));
+    emails.forEach((row) => canSee(row.channelId) && put('EMAIL', row.id, row.subject));
+    messages.forEach(
+      (row) => canSee(row.conversation.channelId) && put('MESSAGE', row.messageId, row.content)
+    );
+    channels.forEach((row) => put('CHANNEL', row.id, row.name));
+    repos.forEach((row) => put('REPOSITORY', row.id, row.name));
+    tracks.forEach((row) => put('TRACK', row.id, row.name));
+    folders.forEach((row) => put('FOLDER', row.id, row.name));
+    pullRequests.forEach((row) => put('PULL_REQUEST', row.id, `${row.repoName} #${row.prId}`));
+    workflows.forEach((row) => put('WORKFLOW', row.id, row.workflowName ?? row.summary));
+    return names;
+  }
+
   private async requireProjectBoardAccess(
-    tx: TransactionClient,
+    tx: TransactionClient | PrismaClient,
     actor: SdlcActor,
     projectId: string
   ): Promise<void> {

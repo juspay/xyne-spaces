@@ -26,6 +26,7 @@ export async function replayTurn(
   userId: string,
   providerOverride?: { provider: string; model?: string },
   abortSignal?: AbortSignal,
+  switches: { optimizations?: string | undefined; judgeBackend?: string | undefined } = {},
 ): Promise<ReplayResult> {
   const url = `${CONFIG.internalUrl.replace(/\/$/, "")}/claw/api/v1/agent-chat/${encodeURIComponent(slug)}/chat`;
   const timeout = AbortSignal.timeout(REPLAY_TIMEOUT_MS);
@@ -37,7 +38,14 @@ export async function replayTurn(
       "x-s2s-key": CONFIG.xyneClawS2sKey,
       "x-user-id": userId,
     },
-    body: JSON.stringify({ message, conversationId, userId, ...(providerOverride ? { providerOverride } : {}) }),
+    body: JSON.stringify({
+      message,
+      conversationId,
+      userId,
+      ...(providerOverride ? { providerOverride } : {}),
+      ...(switches.optimizations ? { optimizations: switches.optimizations } : {}),
+      ...(switches.judgeBackend ? { judgeBackend: switches.judgeBackend } : {}),
+    }),
     signal,
   });
   if (!res.ok || !res.body) {

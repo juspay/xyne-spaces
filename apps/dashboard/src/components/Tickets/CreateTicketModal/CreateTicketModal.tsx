@@ -5,7 +5,6 @@ import {
   trackTicketCreateSucceeded,
 } from '../../../services/Analytics/ticketTracking';
 import { useCallback, useContext } from 'react';
-import { SelectMenuAlignment, SingleSelect } from '@juspay/blend-design-system';
 import { useForm } from '@tanstack/react-form';
 import { useStore } from '@tanstack/react-store';
 import { useZero } from '../../../hooks/useZero';
@@ -23,7 +22,6 @@ import {
   TicketStatusV2,
   isFieldActive,
   orderFieldsWithBranchChildrenAfterParent,
-  toSelectOptions,
   type User as UserType,
 } from '@xyne/shared';
 import { KanbanBoard as SquareKanban, TicketToken as Ticket, PauseCircle } from '@xyne/icons';
@@ -52,6 +50,7 @@ import { EntityLinkContext, type EntityLinkScope } from '../../../contexts/Entit
 import { useAllVisibleChannels } from '../../../hooks/useChannels';
 import { useTitleGenerator } from '../../../hooks/useTitleGenerator';
 import { useChannelAssignGate } from '../../../hooks/useChannelAssignGate';
+import { useChannelBoards } from '../../../hooks/useChannelBoards';
 import { useActiveUsers, useUsers, useSelf } from '../../../hooks/useUsers';
 import { channelMembersFirst, currentUserFirst } from '../../../utils/channelMembersFirst';
 import { useUserGroups } from '../../../hooks/useUserGroup';
@@ -71,10 +70,7 @@ import { AttachmentPreview } from '../../ui/files/AttachmentPreview';
 import type { UploadedFile } from '../../ui/files/Files.types';
 import Input from '../../ui/Input';
 import { ConversationWithTicket } from '../../ui/MessageBubble/MessageBubble.types';
-import MultiSelect from '../../ui/MultiSelect';
-import RadioGroup, { Radio } from '../../ui/RadioGroup';
 import Textarea from '../../ui/Textarea';
-import Tooltip from '../../ui/Tooltip';
 import { getFilesDimensions } from '../../ui/utils/files';
 import {
   buildCreateTicketShareLink,
@@ -93,7 +89,6 @@ import {
 } from './createTicket.utils';
 import { DatePicker } from '../../ui/DatePicker/DatePicker';
 import { TextShimmer } from '../../ui/ShimmerText';
-import { SearchUserV2 } from '../../ui/SearchUser/SearchUserV2';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import type { BoardMetadata } from '../../Board/BoardTicketFormConfig';
 import { isReleaseBoard, isMainReleaseBoard } from '../../../utils/boardUtils';
@@ -105,6 +100,8 @@ import {
   resolveDisplayFormFields,
   type ResolvedDisplayFormField,
 } from '../../../utils/board/resolveDisplayFormFields';
+import { BoardFieldsPanel, orderFieldsRequiredFirst } from './BoardFieldsPanel';
+import { FieldError } from '../../ui/Field/Field';
 
 interface CreateTicketModalProps {
   isOpen: boolean;
@@ -116,6 +113,7 @@ interface CreateTicketModalProps {
   };
   enableUrlSync?: boolean;
   channelId: string;
+  initialChannelId?: string | undefined;
   projectId?: string;
   defaultStageId?: string | undefined;
   selectedBoardId?: string | null;
@@ -129,6 +127,8 @@ interface CreateTicketModalProps {
   initialStatus?: TicketStatusV2 | null;
   initialStageName?: string | null;
   initialTags?: string[];
+  initialMerchantId?: string | undefined;
+  initialDynamicFields?: Record<string, string | string[]> | undefined;
   initialTicketKind?: 'task' | 'release';
   releaseOnly?: boolean;
   releaseChannelIds?: string[];
@@ -177,16 +177,14 @@ interface TicketResponse {
   xyneId?: string;
 }
 
-interface FieldErrorProps {
-  error?: string | undefined;
-}
-
 type SubTicketDraft = {
   title: string;
   description?: string;
 };
 
 const EMPTY_TAGS: string[] = [];
+const RECENT_LABELS_STORAGE_KEY = 'xyne_recent_labels';
+const RECENT_LABELS_LIMIT = 20;
 
 const PRIMARY_RANGE_FIELD_NAMES = ['branch', 'deployedCommitId', 'newCommitId'];
 
@@ -220,6 +218,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   isOpen,
   onClose,
   channelId,
+  initialChannelId,
   projectId,
   selectedBoardId,
   initialTitle = '',
@@ -231,6 +230,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   initialStatus = null,
   initialStageName = null,
   initialTags = EMPTY_TAGS,
+  initialMerchantId,
+  initialDynamicFields,
   initialTicketKind = 'task',
   releaseOnly = false,
   releaseChannelIds,
@@ -339,6 +340,15 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const titleInputRef = useRef<HTMLInputElement>(null);
   const descriptionTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const boardFieldsScrollRef = useRef<HTMLDivElement | null>(null);
+  const dynamicFieldRefs = useRef<Record<string, HTMLDivElement | null>>({});
+
+  const registerDynamicFieldRef = useCallback(
+    (fieldName: string, el: HTMLDivElement | null): void => {
+      dynamicFieldRefs.current[fieldName] = el;
+    },
+    [],
+  );
   const { isMobile } = usePlatform();
 
   // Dynamic field USER search state
@@ -427,10 +437,14 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     }
   }, [usesLocalAttachments, providerClearDroppedFiles, channelId, sourceConversation]);
 
+  // Not filtered by whether the channel has boards: that lives in
+  // channel_board_mappings and cannot be evaluated cheaply for every channel.
+  // Picking a channel with no linked boards falls through to the "no boards are
+  // configured" empty state on the board field instead.
   const channels = useAllVisibleChannels().filter(
     channel =>
       channel.scopeType === ChannelScopeType.DEFAULT &&
-      (!allowChannelSelection || (!channel.isArchived && Boolean(channel.projectId))),
+      (!allowChannelSelection || !channel.isArchived),
   );
 
   // Track if title has been auto-generated for this modal session
@@ -480,11 +494,11 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       assignee: initialAssignee,
       userGroupId: null,
       boardId: selectedBoardId || '',
-      channelId: channelId,
+      channelId: initialChannelId || channelId,
       workflowType: standaloneSeed?.workflowType ?? '',
       files: [],
-      dynamicFields: {},
-      merchantId: '',
+      dynamicFields: initialDynamicFields ?? {},
+      merchantId: initialMerchantId ?? '',
       ticketType: BaseTicketType.Fix,
     } as CreateTicketFormData,
     onSubmit: async ({ value }) => {
@@ -503,67 +517,59 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     gatedAssign: gatedAssignUser,
   } = useChannelAssignGate(selectedChannelId);
 
-  // Find selected channel to get its projectId
-  const selectedChannel = useMemo(
-    () => channels?.find(c => c.id === selectedChannelId),
-    [channels, selectedChannelId],
-  );
-
-  // Fetch boards for the selected channel's project (or default projectId)
-  const selectedChannelProjectId =
-    canSelectChannel && selectedChannel?.projectId ? selectedChannel.projectId : projectId;
   const effectiveChannelId = canSelectChannel ? (selectedChannelId ?? channelId) : channelId;
-  const [channelBoardMappings, mappingDetails] = useCachedQuery(
-    queries.boardsByChannel({ channelId: effectiveChannelId }),
-    { enabled: !!effectiveChannelId },
-  );
-  // main's board resolution (channel-board-mapping with a project-boards fallback)
-  // must define `boards` before the release additions below read it.
-  const [projectBoards] = useCachedQuery(
-    queries.boardsListByProject({ projectId: selectedChannelProjectId ?? '' }),
-    { enabled: !!selectedChannelProjectId },
-  );
-  const boards = useMemo(() => {
-    // Release repos are project-scoped (its release boards), not channel-mapped.
-    if (ticketKind === 'release') return projectBoards ?? [];
-    const mappingSynced = mappingDetails.type === 'complete';
-    const mappedBoards = channelBoardMappings?.map(m => m.board) ?? [];
-    const filtered = mappedBoards.filter((b): b is NonNullable<typeof b> => Boolean(b));
-    const projectBoardsList = projectBoards ?? [];
-    if (filtered.length > 0) {
-      logger.debug(LogEvent.KANBAN_ENTITY_LOADED, {
-        source: 'CreateTicketModal',
-        resolution: 'channel-board-mapping',
-        channelId: effectiveChannelId,
-        mappedCount: filtered.length,
-        projectBoardsCount: projectBoardsList.length,
-      });
-      return filtered;
-    }
-    // Only fall back to project boards once the mapping query has fully synced —
-    // an empty result before that is just the zero cache warming up, not a truly
-    // unmapped channel.
-    if (!mappingSynced) {
-      return projectBoardsList;
-    }
-    logger.debug(LogEvent.KANBAN_ENTITY_LOADED, {
-      source: 'CreateTicketModal',
-      resolution: 'project-boards-fallback',
-      channelId: effectiveChannelId,
-      mappedCount: 0,
-      projectBoardsCount: projectBoardsList.length,
-    });
-    return projectBoardsList;
-  }, [channelBoardMappings, mappingDetails.type, projectBoards, effectiveChannelId, ticketKind]);
+  // Boards for ticket creation are the boards LINKED to the selected channel
+  // (channel_board_mappings), which may span projects. A channel with no linked
+  // boards yields none, and the board field renders an empty state instead.
+  const { boards } = useChannelBoards(effectiveChannelId);
 
   // Read by the open-reset effect without adding `boards` to its deps.
   const boardsRef = useRef(boards);
   boardsRef.current = boards;
 
+  // Get selected board's metadata for ticket form configuration
+  const selectedBoard = useMemo(
+    () => boards?.find(b => b.id === formValues.boardId),
+    [boards, formValues.boardId],
+  );
+  const isFlowRootTicket = selectedBoard?.boardType === BoardType.FLOW && !parentTicketId;
+  const isReleaseLine = ticketKind === 'release';
+  // Only main release boards are selectable (repos); services show as chips below.
+  // Keep the currently-primary board even if it lacks a provider.
+  const releaseBoards = useMemo(
+    () =>
+      (boards ?? [])
+        .filter(b => isMainReleaseBoard(b) || b.id === formValues.boardId)
+        .filter(b => isReleaseBoard(b.boardType)),
+    [boards, formValues.boardId],
+  );
+
+  const releaseBoardOptions = useMemo(
+    () =>
+      releaseBoards.map(b => ({
+        label: b.name,
+        value: b.id,
+        icon: <RepoDot color={repoColor(b.id)} />,
+      })),
+    [releaseBoards],
+  );
+
+  // Services are looked up per repo, so only the RELEASE boards' projects matter —
+  // not every project the channel's linked boards happen to span. A channel's boards
+  // can cross projects now, so this is a set rather than the channel's own
+  // (deprecated) projectId, but it stays as narrow as the repos on screen.
+  const releaseProjectIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const board of releaseBoards) {
+      if (board.projectId) ids.add(board.projectId);
+    }
+    return Array.from(ids).sort();
+  }, [releaseBoards]);
+
   // Services grouped by main release board → read-only chips under each repo.
   const [releaseApplications] = useCachedQuery(
-    queries.applicationsByProjectId({ projectId: selectedChannelProjectId ?? '' }),
-    { enabled: !!selectedChannelProjectId },
+    queries.applicationsByProjectIds({ projectIds: releaseProjectIds }),
+    { enabled: isReleaseLine && releaseProjectIds.length > 0 },
   );
   const servicesByMainBoard = useMemo(() => {
     const map = new Map<string, string[]>();
@@ -577,24 +583,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     }
     return map;
   }, [releaseApplications]);
-
-  // Get selected board's metadata for ticket form configuration
-  const selectedBoard = useMemo(
-    () => boards?.find(b => b.id === formValues.boardId),
-    [boards, formValues.boardId],
-  );
-  const isFlowRootTicket = selectedBoard?.boardType === BoardType.FLOW && !parentTicketId;
-  const isReleaseLine = ticketKind === 'release';
-  // Only main release boards are selectable (repos); services show as chips below.
-  // Keep the currently-primary board even if it lacks a provider.
-  const releaseBoardOptions = useMemo(
-    () =>
-      (boards ?? [])
-        .filter(b => isMainReleaseBoard(b) || b.id === formValues.boardId)
-        .filter(b => isReleaseBoard(b.boardType))
-        .map(b => ({ label: b.name, value: b.id, icon: <RepoDot color={repoColor(b.id)} /> })),
-    [boards, formValues.boardId],
-  );
 
   const boardMetadata = selectedBoard?.metadata as BoardMetadata | null;
 
@@ -640,13 +628,21 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   useEffect(() => {
     if (ticketKind === 'release') return;
     if (formValues.boardId) {
-      form.setFieldValue('dynamicFields', {});
-      markAutoApplied({ dynamicFields: serializeDynamicFields({}) });
+      const seeded = formValues.boardId === selectedBoardId ? (initialDynamicFields ?? {}) : {};
+      form.setFieldValue('dynamicFields', seeded);
+      markAutoApplied({ dynamicFields: serializeDynamicFields(seeded) });
     }
     setSelectedRepoBoardIds([]);
     setRepoRanges({});
     hasPopulatedRepoDeployed.current = new Set();
-  }, [formValues.boardId, form, markAutoApplied, ticketKind]);
+  }, [
+    formValues.boardId,
+    form,
+    markAutoApplied,
+    ticketKind,
+    selectedBoardId,
+    initialDynamicFields,
+  ]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -1244,15 +1240,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     repoRanges,
   ]);
 
-  const submitGateMessage = missingMandatoryFieldMessage ?? releaseGateMessage;
-
-  const isFormReadyForSubmit = useMemo(() => {
-    if (!form.state.isValid || !form.state.isDirty) return false;
-    if (submitGateMessage) return false;
-    if (Object.keys(dynamicFieldErrors).length > 0) return false;
-    return true;
-  }, [form.state.isValid, form.state.isDirty, submitGateMessage, dynamicFieldErrors]);
-
   // CREATE_TICKET_SUCCEEDED: the "it exists now" row. SUBMIT_CREATE_TICKET_MODAL is
   // the click; this fires only after POST /tickets returned an id, with the shape
   // of what was created and the surface that opened the form. Counts and
@@ -1368,6 +1355,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         for (const field of allFields) {
           // Only validate required fields (isOptional must be true to skip, otherwise validate)
           if (field.isOptional === true) continue;
+          if (field.fieldType === FormFieldType.DOC) continue;
           // Inactive branch fields were never shown to fill in — same rule the backend uses.
           if (!isFieldActive(field, allFields, getFieldEffectiveValue)) continue;
 
@@ -1592,6 +1580,20 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         processTicketCreationResponse(response, formData.workflowType, effectiveChannelId);
         trackCreateSucceeded(formData, response.data, effectiveChannelId);
       }
+      if (formData.tags && formData.tags.length > 0) {
+        const recentLabelsKey = `${RECENT_LABELS_STORAGE_KEY}:${user.id}:${formData.boardId}`;
+        try {
+          const stored = JSON.parse(localStorage.getItem(recentLabelsKey) ?? '[]') as string[];
+          const recent = [...new Set([...formData.tags, ...stored])].slice(0, RECENT_LABELS_LIMIT);
+          localStorage.setItem(recentLabelsKey, JSON.stringify(recent));
+        } catch (error) {
+          logger.warn(LogEvent.FRONTEND_ERROR, {
+            type: 'recent_labels_save_failed',
+            message: 'Failed to save recent labels',
+            error: error,
+          });
+        }
+      }
       const subticketsToCreate = normalizeSubTicketDrafts(subTickets);
       if (createdTicketResponse?.id && subticketsToCreate.length > 0) {
         const baseTimestamp = Date.now();
@@ -1803,17 +1805,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     return value;
   };
 
-  const getStringArrayValue = (value: string | string[]): string[] => {
-    if (Array.isArray(value)) {
-      return value;
-    }
-    // Only wrap non-empty strings in array
-    if (typeof value === 'string' && value.trim()) {
-      return [value];
-    }
-    return []; // Return empty array for empty/undefined values
-  };
-
   const getRepoRange = (
     id: string,
   ): { branch: string; deployedCommit: string; newCommit: string } => {
@@ -2020,10 +2011,24 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     selfId,
   ]);
 
+  const recentTags = useMemo(() => {
+    if (!isOpen || !user?.id || !formValues.boardId) return EMPTY_TAGS;
+    const recentLabelsKey = `${RECENT_LABELS_STORAGE_KEY}:${user.id}:${formValues.boardId}`;
+    try {
+      return JSON.parse(localStorage.getItem(recentLabelsKey) ?? '[]') as string[];
+    } catch {
+      return EMPTY_TAGS;
+    }
+  }, [isOpen, user?.id, formValues.boardId]);
+
   // Get tag options
   const tagOptions = useMemo(() => {
     const selectedTags = formValues.tags ?? [];
-    const allTags = [...new Set([...availableTags, ...newTags, ...initialTags, ...selectedTags])];
+    const allTags = [
+      ...new Set([...availableTags, ...newTags, ...initialTags, ...selectedTags, ...recentTags]),
+    ];
+    const recentRank = new Map(recentTags.map((tag, index) => [tag, index]));
+    const rankOf = (tag: string): number => recentRank.get(tag) ?? recentTags.length;
 
     return allTags
       .filter(tag => typeof tag === 'string' && tag.trim().length > 0)
@@ -2031,8 +2036,9 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         label: tag,
         value: tag,
         icon: <span className={cn('size-2 rounded-full', TAG_COLORS[index % TAG_COLORS.length])} />,
-      }));
-  }, [availableTags, newTags, initialTags, formValues.tags]);
+      }))
+      .sort((a, b) => rankOf(a.value) - rankOf(b.value));
+  }, [availableTags, newTags, initialTags, formValues.tags, recentTags]);
 
   const requiredDynamicFields = useMemo(() => {
     const visibilityMap = boardMetadata?.customFieldVisibility;
@@ -2068,24 +2074,85 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     [activeDynamicFields, isReleaseLine],
   );
 
-  // Field error
-  const FieldError: React.FC<FieldErrorProps> = ({ error }) => {
-    const errorMessage = typeof error === 'string' ? error : undefined;
+  const handleDynamicFieldChange = useCallback(
+    (fieldName: string, value: string | string[]): void => {
+      form.setFieldValue('dynamicFields', {
+        ...form.state.values.dynamicFields,
+        [fieldName]: value,
+      });
+      const filled = Array.isArray(value) ? value.length > 0 : !!value.trim();
+      if (!filled) return;
+      setDynamicFieldErrors(prev => {
+        if (!(fieldName in prev)) return prev;
+        const next = { ...prev };
+        delete next[fieldName];
+        return next;
+      });
+    },
+    [form],
+  );
 
-    return (
-      <div
-        id='field-error'
-        role='alert'
-        aria-live='polite'
-        className={cn(
-          'overflow-hidden transition-[max-height,opacity] duration-200 ease-out',
-          error ? 'max-h-10 opacity-100 mt-1' : 'max-h-0 opacity-0',
-        )}
-      >
-        <p className='text-xs text-red-600'>{errorMessage}</p>
-      </div>
+  const stableAllUsers = useMemo(() => allUsers ?? [], [allUsers]);
+
+  const handleDynamicSearchChange = useCallback((fieldName: string, q: string): void => {
+    setDynamicFieldSearchQueries(prev => ({ ...prev, [fieldName]: q }));
+  }, []);
+
+  const handleDynamicOpenChange = useCallback((fieldName: string, open: boolean): void => {
+    setDynamicFieldOpenStates(prev => ({ ...prev, [fieldName]: open }));
+  }, []);
+
+  const handleSubmitAttempt = useCallback((): void => {
+    const values = form.state.values;
+
+    const missing: Record<string, string> = {};
+    for (const field of visibleDynamicFields) {
+      if (field.isOptional === true) continue;
+      if (field.fieldType === FormFieldType.DOC) continue;
+      const value = values.dynamicFields?.[field.fieldName];
+      const empty =
+        !value ||
+        (typeof value === 'string' && !value.trim()) ||
+        (Array.isArray(value) && value.length === 0);
+      if (empty) missing[field.fieldName] = 'Required to create this ticket';
+    }
+    setDynamicFieldErrors(missing);
+
+    if (!values.title?.trim()) {
+      void form.validateAllFields('submit');
+      titleInputRef.current?.focus();
+      return;
+    }
+    if (!values.description || values.description.trim().length < 5) {
+      void form.validateAllFields('submit');
+      descriptionTextareaRef.current?.focus();
+      return;
+    }
+
+    const firstMissing = orderFieldsRequiredFirst(visibleDynamicFields).find(
+      field => missing[field.fieldName] !== undefined,
     );
-  };
+    if (firstMissing) {
+      const el = dynamicFieldRefs.current[firstMissing.fieldName];
+      const pane = boardFieldsScrollRef.current;
+      if (el && pane) {
+        const delta = el.getBoundingClientRect().top - pane.getBoundingClientRect().top - 12;
+        pane.scrollTop = Math.max(0, pane.scrollTop + delta);
+      }
+      el?.querySelector<HTMLElement>('input, textarea, button')?.focus();
+      return;
+    }
+
+    const gateMessage = missingMandatoryFieldMessage ?? releaseGateMessage;
+    if (gateMessage) {
+      toast.error(gateMessage);
+      return;
+    }
+
+    void form.handleSubmit();
+  }, [form, visibleDynamicFields, missingMandatoryFieldMessage, releaseGateMessage]);
+
+  // Field error
 
   if (!isOpen) {
     return null;
@@ -2097,7 +2164,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       onDragEnter={handleModalDragEnter}
       onDragLeave={handleModalDragLeave}
       onDrop={handleModalDrop}
-      className={cn('relative', standalone ? '' : 'overflow-y-auto max-h-[80vh]')}
+      className={cn('relative', standalone ? '' : 'flex min-h-0 flex-1 flex-col overflow-hidden')}
     >
       {/* Drag overlay */}
       {isDraggingOverModal && (
@@ -2109,8 +2176,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         </div>
       )}
 
-      <div className='w-full px-4 pt-4 pb-3 flex items-center justify-between'>
-        <h2 className='text-xs leading-5 font-medium text-foreground/80 select-none'>
+      <div className='flex w-full shrink-0 items-center justify-between border-b border-border/60 px-[18px] pb-3.5 pt-[15px]'>
+        <h2 className='select-none text-[13.5px] font-medium leading-5 text-foreground/90'>
           {ticketSequence
             ? `${ticketKind === 'release' ? 'New Release' : 'New Ticket'} (${ticketSequence.current}/${ticketSequence.total})`
             : ticketKind === 'release'
@@ -2143,6 +2210,25 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
               <LinkIcon strokeWidth={2.33} className='size-3.5' />
             </Button>
           )}
+          <Button
+            type='button'
+            onClick={handlePaperclipClick}
+            variant='ghost'
+            size='icon'
+            title='Attach a file'
+            disabled={form.state.isSubmitting}
+            className='size-6'
+            data-testid='ticket-attachment-button'
+            data-track-category='Tickets'
+            data-track-name='ATTACH_FILE'
+            data-track-metadata={JSON.stringify({
+              boardId: selectedBoardId,
+              channelId,
+              fileCount: allAttachments.length,
+            })}
+          >
+            <Paperclip strokeWidth={2.33} className='size-3.5 text-muted-foreground' />
+          </Button>
           {canPopOut && (
             <Button
               variant='ghost'
@@ -2157,7 +2243,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
             >
               <SquareArrowOutUpRight strokeWidth={2.33} className='size-3.5' />
             </Button>
-          )}
+          )}{' '}
           <Button
             variant='ghost'
             size='icon'
@@ -2176,630 +2262,472 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         onSubmit={e => {
           e.preventDefault();
           e.stopPropagation();
-          void form.handleSubmit();
+          handleSubmitAttempt();
         }}
-        className='px-4 pt-1.5 space-y-0'
+        className={cn('px-5 pt-1.5', standalone ? '' : 'flex min-h-0 flex-1 flex-col')}
       >
-        {/* Title Field */}
-        <form.Field
-          name='title'
-          validators={{
-            onChange: ({ value }) => {
-              if (!value?.trim()) return 'Title is required';
-              if (value.length < 3) return 'Title must be at least 3 characters';
-              if (value.length > 100) return 'Title must be 100 characters or less';
-              return undefined;
-            },
-          }}
-        >
-          {field => (
-            <div className='space-y-1'>
-              {isTitleGenerating ? (
-                <div className='flex h-8 items-center'>
-                  <TextShimmer
-                    glassEffect={false}
-                    className='text-left leading-tight font-bold text-[20px]'
-                  >
-                    Adding AI generated title
-                  </TextShimmer>
-                </div>
-              ) : (
-                <Input
-                  ref={titleInputRef}
-                  value={field.state.value}
-                  required={true}
-                  onChange={e => {
-                    // If user starts typing, cancel the ongoing generation
-                    if (isTitleGenerating) {
-                      cancelGeneration();
-                    }
-                    field.handleChange(e.target.value);
-                  }}
-                  aria-label='Ticket Title'
-                  placeholder={
-                    ticketKind === 'release' ? 'Enter Release Title...' : 'Enter Ticket Title...'
-                  }
-                  data-testid='ticket-title-input'
-                  data-track-category='Tickets'
-                  data-track-name='EDIT_TICKET_TITLE'
-                  data-track-metadata={JSON.stringify({ boardId: selectedBoardId, channelId })}
-                  className={cn(
-                    '!text-xl !leading-tight truncate',
-                    'px-0 border-none focus-visible:ring-0',
-                    'font-bold text-foreground placeholder:text-xl placeholder:text-muted-foreground/50',
-                    field.state.meta.errors.length > 0 && 'text-red-600',
-                  )}
-                />
-              )}
-              <FieldError error={field.state.meta.errors[0]} />
-            </div>
-          )}
-        </form.Field>
-
-        {/* Description Field */}
-        <form.Field
-          name='description'
-          validators={{
-            onChange: ({ value }) => {
-              if (!value?.trim()) return 'Description is required';
-              if (value.length < 5) return 'Description must be at least 5 characters';
-              return undefined;
-            },
-          }}
-        >
-          {field => (
-            <div className='space-y-1'>
-              <Textarea
-                ref={descriptionTextareaRef}
-                rows={2}
-                required={true}
-                aria-required='true'
-                id='ticket-description'
-                value={field.state.value || ''}
-                aria-invalid={field.state.meta.errors.length > 0}
-                placeholder='Enter Ticket Description...'
-                aria-label='Ticket Description'
-                data-testid='ticket-description-input'
-                data-track-category='Tickets'
-                data-track-name='EDIT_TICKET_DESCRIPTION'
-                data-track-metadata={JSON.stringify({ boardId: selectedBoardId, channelId })}
-                onChange={e => {
-                  const newValue = e.target.value;
-                  field.handleChange(newValue);
-                  // Dynamically adjust the height
-                  const target = e.target;
-                  target.style.height = 'auto'; // Reset height to recalculate
-                  target.style.height = `${target.scrollHeight}px`; // Set to scroll height
-                }}
-                className={cn(
-                  'border-none focus-visible:ring-0 focus-visible:border-none rounded-none p-0 min-h-16',
-                  'max-h-[25vh]', // can occupy max 25% of vertical height
-                  'resize-none overflow-y-auto',
-                  'placeholder:text-muted-foreground/50 text-foreground/80 leading-5 font-semibold',
-                  field.state.meta.errors.length > 0 && 'text-red-600',
-                )}
-              />
-              <FieldError error={field.state.meta.errors[0]} />
-            </div>
-          )}
-        </form.Field>
-
-        {subTickets.length > 0 && (
-          <div className='mt-2 rounded-md border border-border bg-muted p-3'>
-            <div className='mb-2 flex items-center gap-1.5 text-sm font-semibold text-foreground'>
-              <SubTicketCountIcon className='shrink-0 text-foreground' />
-              <span>{subTickets.length} Sub-tickets</span>
-            </div>
-            <div className='space-y-2'>
-              {subTickets.map((subTicket, index) => {
-                const isEditing = editingSubTicketIndex === index;
-                return (
-                  <div
-                    key={`subticket-${index}`}
-                    className='rounded-lg border border-border bg-background p-[11px]'
-                  >
-                    {isEditing ? (
-                      <div className='flex flex-col gap-2'>
-                        <div className='flex items-center justify-between gap-2'>
-                          <div className='flex min-w-0 items-center gap-2'>
-                            <span className='font-mono text-[12px] font-medium leading-[1.1] text-muted-foreground'>
-                              {index + 1}
-                            </span>
-                            <Input
-                              value={editingSubTicketTitle}
-                              onChange={e => setEditingSubTicketTitle(e.target.value)}
-                              placeholder='Sub-ticket title'
-                              className='h-auto border-none p-0 text-[14px] font-medium leading-[18px] text-foreground focus-visible:ring-0'
-                            />
-                          </div>
-                          <button
-                            type='button'
-                            onClick={saveEditedSubTicket}
-                            className='text-[14px] leading-[18px] text-muted-foreground hover:text-muted-foreground'
-                            data-track-category='Tickets'
-                            data-track-name='SaveEditedSubTicket'
-                            data-track-metadata={JSON.stringify({ subTicketId: subTicket.title })}
-                          >
-                            Done
-                          </button>
-                        </div>
-                        <Textarea
-                          value={editingSubTicketDescription}
-                          onChange={e => setEditingSubTicketDescription(e.target.value)}
-                          placeholder='Sub-ticket description (optional)'
-                          rows={2}
-                          className='min-h-0 resize-none border-none p-0 text-[14px] leading-[18px] text-muted-foreground focus-visible:ring-0'
-                        />
-                      </div>
-                    ) : (
-                      <div className='flex items-start justify-between gap-3'>
-                        <div className='min-w-0 flex-1'>
-                          <div className='flex min-w-0 items-center gap-2'>
-                            <span className='font-mono text-[12px] font-medium leading-[1.1] text-muted-foreground'>
-                              {index + 1}
-                            </span>
-                            <div className='truncate text-[14px] font-medium leading-[18px] text-foreground'>
-                              {subTicket.title}
-                            </div>
-                          </div>
-                          {subTicket.description && (
-                            <div className='mt-1 text-[14px] leading-[18px] text-muted-foreground'>
-                              {subTicket.description}
-                            </div>
-                          )}
-                        </div>
-                        <div className='flex shrink-0 items-center gap-4'>
-                          <button
-                            type='button'
-                            onClick={() => beginEditSubTicket(index)}
-                            className='text-[14px] leading-[18px] text-muted-foreground hover:text-muted-foreground'
-                            data-track-category='Tickets'
-                            data-track-name='EditSubTicket'
-                            data-track-metadata={JSON.stringify({ subTicketId: subTicket.title })}
-                          >
-                            Edit
-                          </button>
-                          <button
-                            type='button'
-                            onClick={() => deleteSubTicket(index)}
-                            aria-label={`Delete subticket ${index + 1}`}
-                            className='text-muted-foreground hover:text-muted-foreground'
-                            data-track-category='Tickets'
-                            data-track-name='DeleteSubTicket'
-                            data-track-metadata={JSON.stringify({ subTicketId: subTicket.title })}
-                          >
-                            <Trash2 className='size-[14px]' />
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* Channel and Board Selection */}
-        <div className={cn('flex items-center gap-2.5 pb-2', subTickets.length > 0 && 'pt-4')}>
-          {/* Optional channel selection for subtickets, AI, and context-free entry points. */}
-          {canSelectChannel && (
+        <div className='flex min-h-0 flex-1 gap-5'>
+          <div
+            className={cn(
+              'flex min-w-0 flex-1 flex-col',
+              standalone ? '' : 'overflow-y-auto no-scrollbar pr-1',
+            )}
+          >
+            {/* Title Field */}
             <form.Field
-              name='channelId'
+              name='title'
               validators={{
                 onChange: ({ value }) => {
-                  if (!value?.trim())
-                    return releaseOnly ? 'Release channel is required' : 'Channel is required';
+                  if (!value?.trim()) return 'Title is required';
+                  if (value.length < 3) return 'Title must be at least 3 characters';
+                  if (value.length > 100) return 'Title must be 100 characters or less';
                   return undefined;
                 },
               }}
             >
               {field => (
-                <EntitySelector
-                  variant='inline'
-                  options={releaseOnly ? releaseChannelOptions : channelOptions}
-                  selectedValue={field.state.value || ''}
-                  onSelect={(value: string | null) => {
-                    field.handleChange(value as CreateTicketFormData['channelId']);
-                    if (allowChannelSelection) form.setFieldValue('boardId', '');
-                  }}
-                  searchPlaceholder={releaseOnly ? 'release channel' : 'channel'}
-                  placeholder={releaseOnly ? 'Select release channel' : 'channel'}
-                  inputIcon={<Hash className='size-3.5' strokeWidth={2.33} />}
-                />
+                <div className='space-y-1'>
+                  {isTitleGenerating ? (
+                    <div className='flex h-8 items-center'>
+                      <TextShimmer
+                        glassEffect={false}
+                        className='text-left leading-tight font-bold text-[20px]'
+                      >
+                        Adding AI generated title
+                      </TextShimmer>
+                    </div>
+                  ) : (
+                    <Input
+                      ref={titleInputRef}
+                      value={field.state.value}
+                      required={true}
+                      onChange={e => {
+                        // If user starts typing, cancel the ongoing generation
+                        if (isTitleGenerating) {
+                          cancelGeneration();
+                        }
+                        field.handleChange(e.target.value);
+                      }}
+                      aria-label='Ticket Title'
+                      placeholder={
+                        ticketKind === 'release'
+                          ? 'Enter Release Title...'
+                          : 'Enter Ticket Title...'
+                      }
+                      data-testid='ticket-title-input'
+                      data-track-category='Tickets'
+                      data-track-name='EDIT_TICKET_TITLE'
+                      data-track-metadata={JSON.stringify({ boardId: selectedBoardId, channelId })}
+                      className={cn(
+                        '!text-[21px] !leading-tight truncate tracking-[-0.4px]',
+                        'rounded-none border-0 border-b-[1.5px] px-0 pb-0.5 focus-visible:ring-0',
+                        'font-semibold text-foreground placeholder:text-[21px] placeholder:text-muted-foreground/50',
+                        'transition-colors duration-150',
+                        field.state.meta.errors.length > 0
+                          ? '!border-b-destructive'
+                          : '!border-b-transparent',
+                      )}
+                    />
+                  )}
+                  <FieldError error={field.state.meta.errors[0]} />
+                </div>
               )}
             </form.Field>
-          )}
 
-          {/* Board Selection */}
-          <form.Field
-            name='boardId'
-            validators={{
-              onChange: ({ value }) => {
-                if (ticketKind === 'release') return undefined;
-                if (!value?.trim()) return 'Board is required';
-                return undefined;
-              },
-            }}
-          >
-            {field => {
-              if (ticketKind === 'release') return null;
-              return (
-                <EntitySelector
-                  showSearch={false}
-                  options={boardOptions}
-                  selectedValue={field.state.value || ''}
-                  onSelect={(value: string | null) => {
-                    field.handleChange(value as CreateTicketFormData['boardId']);
-                    setBoardSelectorOpen(false);
+            {/* Description Field */}
+            <form.Field
+              name='description'
+              validators={{
+                onChange: ({ value }) => {
+                  if (!value?.trim()) return 'Description is required';
+                  if (value.length < 5) return 'Description must be at least 5 characters';
+                  return undefined;
+                },
+              }}
+            >
+              {field => (
+                <div className='space-y-1'>
+                  <Textarea
+                    ref={descriptionTextareaRef}
+                    rows={2}
+                    required={true}
+                    aria-required='true'
+                    id='ticket-description'
+                    value={field.state.value || ''}
+                    aria-invalid={field.state.meta.errors.length > 0}
+                    placeholder='Enter Ticket Description...'
+                    aria-label='Ticket Description'
+                    data-testid='ticket-description-input'
+                    data-track-category='Tickets'
+                    data-track-name='EDIT_TICKET_DESCRIPTION'
+                    data-track-metadata={JSON.stringify({ boardId: selectedBoardId, channelId })}
+                    onChange={e => {
+                      const newValue = e.target.value;
+                      field.handleChange(newValue);
+                      // Dynamically adjust the height
+                      const target = e.target;
+                      target.style.height = 'auto'; // Reset height to recalculate
+                      target.style.height = `${target.scrollHeight}px`; // Set to scroll height
+                    }}
+                    className={cn(
+                      'rounded-[10px] border px-0 py-1 focus-visible:ring-0 min-h-[150px] transition-colors duration-150',
+                      'max-h-[280px] text-[14px] !leading-[22.4px] font-normal text-foreground',
+                      field.state.meta.errors.length > 0
+                        ? '!border-destructive bg-destructive/5 px-2'
+                        : '!border-transparent',
+                      'resize-none overflow-y-auto',
+                      'placeholder:text-muted-foreground/50 text-foreground',
+                      field.state.meta.errors.length > 0 && 'text-red-600',
+                    )}
+                  />
+                  <FieldError error={field.state.meta.errors[0]} />
+                </div>
+              )}
+            </form.Field>
+
+            {subTickets.length > 0 && (
+              <div className='mt-2 rounded-md border border-border bg-muted p-3'>
+                <div className='mb-2 flex items-center gap-1.5 text-sm font-semibold text-foreground'>
+                  <SubTicketCountIcon className='shrink-0 text-foreground' />
+                  <span>{subTickets.length} Sub-tickets</span>
+                </div>
+                <div className='space-y-2'>
+                  {subTickets.map((subTicket, index) => {
+                    const isEditing = editingSubTicketIndex === index;
+                    return (
+                      <div
+                        key={`subticket-${index}`}
+                        className='rounded-lg border border-border bg-background p-[11px]'
+                      >
+                        {isEditing ? (
+                          <div className='flex flex-col gap-2'>
+                            <div className='flex items-center justify-between gap-2'>
+                              <div className='flex min-w-0 items-center gap-2'>
+                                <span className='font-mono text-[12px] font-medium leading-[1.1] text-muted-foreground'>
+                                  {index + 1}
+                                </span>
+                                <Input
+                                  value={editingSubTicketTitle}
+                                  onChange={e => setEditingSubTicketTitle(e.target.value)}
+                                  placeholder='Sub-ticket title'
+                                  className='h-auto border-none p-0 text-[14px] font-medium leading-[18px] text-foreground focus-visible:ring-0'
+                                />
+                              </div>
+                              <button
+                                type='button'
+                                onClick={saveEditedSubTicket}
+                                className='text-[14px] leading-[18px] text-muted-foreground hover:text-muted-foreground'
+                                data-track-category='Tickets'
+                                data-track-name='SaveEditedSubTicket'
+                                data-track-metadata={JSON.stringify({
+                                  subTicketId: subTicket.title,
+                                })}
+                              >
+                                Done
+                              </button>
+                            </div>
+                            <Textarea
+                              value={editingSubTicketDescription}
+                              onChange={e => setEditingSubTicketDescription(e.target.value)}
+                              placeholder='Sub-ticket description (optional)'
+                              rows={2}
+                              className='min-h-0 resize-none border-none p-0 text-[14px] leading-[18px] text-muted-foreground focus-visible:ring-0'
+                            />
+                          </div>
+                        ) : (
+                          <div className='flex items-start justify-between gap-3'>
+                            <div className='min-w-0 flex-1'>
+                              <div className='flex min-w-0 items-center gap-2'>
+                                <span className='font-mono text-[12px] font-medium leading-[1.1] text-muted-foreground'>
+                                  {index + 1}
+                                </span>
+                                <div className='truncate text-[14px] font-medium leading-[18px] text-foreground'>
+                                  {subTicket.title}
+                                </div>
+                              </div>
+                              {subTicket.description && (
+                                <div className='mt-1 text-[14px] leading-[18px] text-muted-foreground'>
+                                  {subTicket.description}
+                                </div>
+                              )}
+                            </div>
+                            <div className='flex shrink-0 items-center gap-4'>
+                              <button
+                                type='button'
+                                onClick={() => beginEditSubTicket(index)}
+                                className='text-[14px] leading-[18px] text-muted-foreground hover:text-muted-foreground'
+                                data-track-category='Tickets'
+                                data-track-name='EditSubTicket'
+                                data-track-metadata={JSON.stringify({
+                                  subTicketId: subTicket.title,
+                                })}
+                              >
+                                Edit
+                              </button>
+                              <button
+                                type='button'
+                                onClick={() => deleteSubTicket(index)}
+                                aria-label={`Delete subticket ${index + 1}`}
+                                className='text-muted-foreground hover:text-muted-foreground'
+                                data-track-category='Tickets'
+                                data-track-name='DeleteSubTicket'
+                                data-track-metadata={JSON.stringify({
+                                  subTicketId: subTicket.title,
+                                })}
+                              >
+                                <Trash2 className='size-[14px]' />
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Channel and Board Selection */}
+            <div
+              data-ticket-context-row
+              className={cn(
+                'mt-auto flex shrink-0 items-center gap-2.5 pb-2 pt-3',
+                subTickets.length > 0 && 'pt-4',
+              )}
+            >
+              {/* Optional channel selection for subtickets, AI, and context-free entry points. */}
+              {canSelectChannel && (
+                <form.Field
+                  name='channelId'
+                  validators={{
+                    onChange: ({ value }) => {
+                      if (!value?.trim())
+                        return releaseOnly ? 'Release channel is required' : 'Channel is required';
+                      return undefined;
+                    },
                   }}
-                  searchPlaceholder='board'
-                  placeholder='Select board'
-                  inputIcon={<SquareKanban className='size-3.5' strokeWidth={2.33} />}
-                  inputClassName='!h-8 rounded-lg'
-                  showIndicator={true}
-                  testId='ticket-board-selector'
-                  isOpen={boardSelectorOpen}
-                  onOpenChange={setBoardSelectorOpen}
-                />
-              );
-            }}
-          </form.Field>
-        </div>
+                >
+                  {field => (
+                    <EntitySelector
+                      variant='inline'
+                      options={releaseOnly ? releaseChannelOptions : channelOptions}
+                      selectedValue={field.state.value || ''}
+                      onSelect={(value: string | null) => {
+                        field.handleChange(value as CreateTicketFormData['channelId']);
+                        if (allowChannelSelection) form.setFieldValue('boardId', '');
+                      }}
+                      searchPlaceholder={releaseOnly ? 'release channel' : 'channel'}
+                      placeholder={releaseOnly ? 'Select release channel' : 'channel'}
+                      inputIcon={<Hash className='size-3.5' strokeWidth={2.33} />}
+                    />
+                  )}
+                </form.Field>
+              )}
 
-        {isReleaseLine && (
-          <div className='space-y-2'>
-            <div className='flex items-baseline justify-between'>
-              <span className='font-mono text-[10px] uppercase tracking-wide text-muted-foreground'>
-                Repositories
-              </span>
-              <span className='font-mono text-[11px] text-muted-foreground'>
-                {(formValues?.boardId ? 1 : 0) + selectedRepoBoardIds.length} selected
-              </span>
+              {/* Board Selection */}
+              <form.Field
+                name='boardId'
+                validators={{
+                  onChange: ({ value }) => {
+                    if (ticketKind === 'release') return undefined;
+                    if (!value?.trim()) return 'Board is required';
+                    return undefined;
+                  },
+                }}
+              >
+                {field => {
+                  if (ticketKind === 'release') return null;
+                  // A channel with no linked boards would otherwise render an empty
+                  // picker and only explain itself via "Board is required" on submit.
+                  // Guarded on a channel actually being chosen — in the pick-a-channel
+                  // variant there is none yet, and the boards are empty for that reason.
+                  if (effectiveChannelId && boardOptions.length === 0) {
+                    return (
+                      <p className='text-xs text-muted-foreground'>
+                        No boards are configured for this channel. Link a board to it before
+                        creating tickets.
+                      </p>
+                    );
+                  }
+                  return (
+                    <EntitySelector
+                      options={boardOptions}
+                      selectedValue={field.state.value || ''}
+                      onSelect={(value: string | null) => {
+                        field.handleChange(value as CreateTicketFormData['boardId']);
+                        setBoardSelectorOpen(false);
+                      }}
+                      searchPlaceholder='Search boards'
+                      placeholder='Select a board'
+                      inputIcon={<SquareKanban className='size-3.5' strokeWidth={2.33} />}
+                      inputClassName='!h-8 rounded-lg'
+                      showIndicator={true}
+                      testId='ticket-board-selector'
+                      isOpen={boardSelectorOpen}
+                      onOpenChange={setBoardSelectorOpen}
+                    />
+                  );
+                }}
+              </form.Field>
             </div>
 
-            {releaseBoardOptions.map(o => {
-              const id = o.value;
-              const isPrimary = id === formValues?.boardId;
-              const selected = isPrimary || selectedRepoBoardIds.includes(id);
-              const range = getRepoRange(id);
-              const setField = (key: 'branch' | 'deployedCommit' | 'newCommit', value: string) =>
-                setRepoRangeField(id, key, value);
-              const toggle = () => toggleRepoBoard(id);
-              return (
-                <div
-                  key={id}
-                  className={cn(
-                    'rounded-xl border px-3 py-2.5 transition-colors',
-                    selected ? 'border-primary/40 bg-primary/5' : 'border-border bg-muted/20',
-                  )}
-                >
-                  <div className='flex items-center gap-3'>
-                    <button
-                      type='button'
-                      onClick={toggle}
-                      aria-pressed={selected}
-                      aria-label={selected ? `Remove ${o.label}` : `Add ${o.label}`}
-                      data-track-category='CreateTicket'
-                      data-track-name='ToggleReleaseRepo'
-                      className={cn(
-                        'grid size-[18px] shrink-0 place-items-center rounded-[5px] border text-[11px] font-semibold transition-colors',
-                        selected
-                          ? 'border-primary bg-primary text-primary-foreground'
-                          : 'border-border text-transparent hover:border-primary/60',
-                      )}
-                    >
-                      ✓
-                    </button>
-                    <RepoDot color={repoColor(id)} className={selected ? '' : 'opacity-50'} />
-                    <button
-                      type='button'
-                      onClick={toggle}
-                      data-track-category='CreateTicket'
-                      data-track-name='ToggleReleaseRepoLabel'
-                      className={cn(
-                        'min-w-0 flex-1 truncate text-left text-sm font-semibold',
-                        selected ? 'text-foreground' : 'text-muted-foreground',
-                      )}
-                    >
-                      {o.label}
-                    </button>
-                    {isPrimary && (
-                      <span className='shrink-0 rounded-md bg-primary/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary'>
-                        Primary
-                      </span>
-                    )}
-                    {selected ? (
-                      <div className='flex shrink-0 items-center gap-1.5'>
-                        <input
-                          value={range.deployedCommit}
-                          onChange={e => setField('deployedCommit', e.target.value)}
-                          placeholder='deployed'
-                          className='w-[92px] rounded-md border border-border bg-background px-2 py-1 font-mono text-[11px] text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none'
-                          data-track-category='CreateTicket'
-                          data-track-name='RepoDeployedCommit'
-                        />
-                        <span className='text-muted-foreground'>→</span>
-                        <input
-                          value={range.newCommit}
-                          onChange={e => setField('newCommit', e.target.value)}
-                          placeholder='new'
-                          className='w-[92px] rounded-md border border-border bg-background px-2 py-1 font-mono text-[11px] text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none'
-                          data-track-category='CreateTicket'
-                          data-track-name='RepoNewCommit'
-                        />
-                      </div>
-                    ) : (
-                      <div className='flex shrink-0 items-center gap-1.5 opacity-40'>
-                        <span className='w-[92px] rounded-md border border-border px-2 py-1 text-center font-mono text-[11px] text-muted-foreground'>
-                          —
-                        </span>
-                        <span className='text-muted-foreground'>→</span>
-                        <span className='w-[92px] rounded-md border border-border px-2 py-1 text-center font-mono text-[11px] text-muted-foreground'>
-                          —
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                  {selected && (
-                    <div className='mt-2 flex items-center gap-2 pl-[30px]'>
-                      <label
-                        htmlFor={`repo-branch-${id}`}
-                        className='font-mono text-[10px] uppercase tracking-wide text-muted-foreground'
-                      >
-                        Branch
-                      </label>
-                      <input
-                        id={`repo-branch-${id}`}
-                        value={range.branch}
-                        onChange={e => setField('branch', e.target.value)}
-                        placeholder='main'
-                        className='w-40 rounded-md border border-border bg-background px-2 py-1 text-[12px] text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none'
-                        data-track-category='CreateTicket'
-                        data-track-name='RepoBranch'
-                      />
-                    </div>
-                  )}
-                  {(servicesByMainBoard.get(id)?.length ?? 0) > 0 && (
-                    <div className='mt-2 flex flex-wrap items-center gap-1.5 pl-[30px]'>
-                      <span className='font-mono text-[10px] uppercase tracking-wide text-muted-foreground'>
-                        Services
-                      </span>
-                      {servicesByMainBoard.get(id)!.map(name => (
-                        <span
-                          key={name}
-                          className='rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground'
-                        >
-                          {name}
-                        </span>
-                      ))}
-                    </div>
-                  )}
+            {isReleaseLine && (
+              <div className='space-y-2'>
+                <div className='flex items-baseline justify-between'>
+                  <span className='font-mono text-[10px] uppercase tracking-wide text-muted-foreground'>
+                    Repositories
+                  </span>
+                  <span className='font-mono text-[11px] text-muted-foreground'>
+                    {(formValues?.boardId ? 1 : 0) + selectedRepoBoardIds.length} selected
+                  </span>
                 </div>
-              );
-            })}
-          </div>
-        )}
 
-        {/* Dynamic Form Fields */}
-        {visibleDynamicFields.length > 0 && (
-          <div className='space-y-2'>
-            <div className='text-sm font-bold text-foreground pb-2'>Additional Information</div>
-            <div className='space-y-2 h-full max-h-56 overflow-scroll -mx-4 px-4'>
-              {visibleDynamicFields.map(field => {
-                const fieldName = field.fieldName;
-                const fieldType = field.fieldType;
-                const rawValue = formValues?.dynamicFields?.[fieldName] || '';
-                const error = dynamicFieldErrors[fieldName];
-                const isOptional = field.isOptional === true;
-
-                // Normalize value based on field type
-                const stringValue = getSingleStringValue(rawValue);
-                const arrayValue = getStringArrayValue(rawValue);
-
-                return (
-                  <div key={field.id} className='mb-1'>
-                    {(fieldType === FormFieldType.STRING || fieldType === FormFieldType.NUMBER) && (
-                      <>
-                        <label className='text-sm font-medium text-foreground'>{`${fieldName}${!isOptional ? '*' : ''}`}</label>
-                        <Input
-                          value={stringValue}
-                          onChange={e => {
-                            const value = e.target.value;
-                            form.setFieldValue('dynamicFields', {
-                              ...formValues?.dynamicFields,
-                              [fieldName]: value,
-                            });
-                            if (value.trim() && error) {
-                              setDynamicFieldErrors(prev => {
-                                const newErrors = { ...prev };
-                                delete newErrors[fieldName];
-                                return newErrors;
-                              });
-                            }
-                          }}
-                          type={fieldType === FormFieldType.NUMBER ? 'number' : 'text'}
-                          placeholder={`Enter ${fieldName.toLowerCase()}`}
+                {releaseBoardOptions.map(o => {
+                  const id = o.value;
+                  const isPrimary = id === formValues?.boardId;
+                  const selected = isPrimary || selectedRepoBoardIds.includes(id);
+                  const range = getRepoRange(id);
+                  const setField = (
+                    key: 'branch' | 'deployedCommit' | 'newCommit',
+                    value: string,
+                  ) => setRepoRangeField(id, key, value);
+                  const toggle = () => toggleRepoBoard(id);
+                  return (
+                    <div
+                      key={id}
+                      className={cn(
+                        'rounded-xl border px-3 py-2.5 transition-colors',
+                        selected ? 'border-primary/40 bg-primary/5' : 'border-border bg-muted/20',
+                      )}
+                    >
+                      <div className='flex items-center gap-3'>
+                        <button
+                          type='button'
+                          onClick={toggle}
+                          aria-pressed={selected}
+                          aria-label={selected ? `Remove ${o.label}` : `Add ${o.label}`}
+                          data-track-category='CreateTicket'
+                          data-track-name='ToggleReleaseRepo'
                           className={cn(
-                            'px-0 border-none focus-visible:ring-0',
-                            'font-semibold text-muted-foreground placeholder:text-muted-foreground/80',
-                            error && 'text-red-600',
+                            'grid size-[18px] shrink-0 place-items-center rounded-[5px] border text-[11px] font-semibold transition-colors',
+                            selected
+                              ? 'border-primary bg-primary text-primary-foreground'
+                              : 'border-border text-transparent hover:border-primary/60',
                           )}
-                        />
-                        <FieldError error={error} />
-                      </>
-                    )}
-                    {fieldType === FormFieldType.DATE && (
-                      <>
-                        <label className='text-sm font-medium text-foreground'>{fieldName} *</label>
-                        <Input
-                          value={stringValue}
-                          onChange={e => {
-                            const value = e.target.value ?? '';
-                            form.setFieldValue('dynamicFields', {
-                              ...formValues?.dynamicFields,
-                              [fieldName]: value,
-                            });
-                            if (value && error) {
-                              setDynamicFieldErrors(prev => {
-                                const newErrors = { ...prev };
-                                delete newErrors[fieldName];
-                                return newErrors;
-                              });
-                            }
-                          }}
-                          type='date'
+                        >
+                          ✓
+                        </button>
+                        <RepoDot color={repoColor(id)} className={selected ? '' : 'opacity-50'} />
+                        <button
+                          type='button'
+                          onClick={toggle}
+                          data-track-category='CreateTicket'
+                          data-track-name='ToggleReleaseRepoLabel'
                           className={cn(
-                            'px-0 border-none focus-visible:ring-0',
-                            'font-semibold text-muted-foreground',
-                            error && 'text-red-600',
+                            'min-w-0 flex-1 truncate text-left text-sm font-semibold',
+                            selected ? 'text-foreground' : 'text-muted-foreground',
                           )}
-                        />
-                        <FieldError error={error} />
-                      </>
-                    )}
-                    {fieldType === FormFieldType.BOOLEAN && (
-                      <RadioGroup
-                        label={`${fieldName}${!isOptional ? '*' : ''}`}
-                        value={stringValue}
-                        className='text-xs'
-                        onChange={value => {
-                          form.setFieldValue('dynamicFields', {
-                            ...formValues?.dynamicFields,
-                            [fieldName]: value,
-                          });
-                          if (value && error) {
-                            setDynamicFieldErrors(prev => {
-                              const newErrors = { ...prev };
-                              delete newErrors[fieldName];
-                              return newErrors;
-                            });
-                          }
-                        }}
-                      >
-                        <div className='flex gap-3'>
-                          <Radio value='true'>Yes</Radio>
-                          <Radio value='false'>No</Radio>
-                        </div>
-                      </RadioGroup>
-                    )}
-                    {fieldType === FormFieldType.SINGLE_SELECT && (
-                      <SingleSelect
-                        label={`${fieldName}${!isOptional ? ' *' : ''}`}
-                        placeholder={`Select ${fieldName.toLowerCase()}`}
-                        items={[
-                          {
-                            items: toSelectOptions(field.fieldEnum),
-                          },
-                        ]}
-                        selected={stringValue}
-                        onSelect={selected => {
-                          form.setFieldValue('dynamicFields', {
-                            ...formValues?.dynamicFields,
-                            [fieldName]: selected ?? '',
-                          });
-                          if (selected && error) {
-                            setDynamicFieldErrors(prev => {
-                              const newErrors = { ...prev };
-                              delete newErrors[fieldName];
-                              return newErrors;
-                            });
-                          }
-                        }}
-                        enableSearch
-                        searchPlaceholder='Search...'
-                        alignment={SelectMenuAlignment.START}
-                        error={!!error}
-                        {...(error && { errorMessage: error })}
-                      />
-                    )}
-                    {fieldType === FormFieldType.MULTI_SELECT && (
-                      <MultiSelect
-                        label={`${fieldName}${!isOptional ? ' *' : ''}`}
-                        placeholder={`Select ${fieldName.toLowerCase()}`}
-                        options={toSelectOptions(field.fieldEnum)}
-                        selectedValues={arrayValue}
-                        onChange={newValues => {
-                          const cleanedValues = (newValues ?? []).filter(
-                            v => !!v && v.trim().length > 0,
-                          );
-
-                          form.setFieldValue('dynamicFields', {
-                            ...formValues?.dynamicFields,
-                            [fieldName]: cleanedValues,
-                          });
-                          if (!isOptional && cleanedValues.length === 0) {
-                            setDynamicFieldErrors(prev => ({
-                              ...prev,
-                              [fieldName]: `${fieldName} is required`,
-                            }));
-                          } else {
-                            setDynamicFieldErrors(prev => {
-                              const next = { ...prev };
-                              delete next[fieldName];
-                              return next;
-                            });
-                          }
-                        }}
-                        error={error || ''}
-                      />
-                    )}
-                    {fieldType === FormFieldType.USER && (
-                      <>
-                        <label className='text-sm font-medium text-foreground'>{`${fieldName}${!isOptional ? ' *' : ''}`}</label>
-                        <div className='border border-input rounded'>
-                          <SearchUserV2
-                            options={allUsers || []}
-                            selectedUsers={arrayValue
-                              .map(userId => userMap.get(userId))
-                              .filter((user): user is UserType => user !== undefined)}
-                            searchQuery={dynamicFieldSearchQueries[fieldName] || ''}
-                            onSearchChange={query => {
-                              setDynamicFieldSearchQueries(prev => ({
-                                ...prev,
-                                [fieldName]: query,
-                              }));
-                            }}
-                            onSelect={selectedUsers => {
-                              const cleanedValues = selectedUsers
-                                .map(u => u.id)
-                                .filter(v => !!v && v.trim().length > 0);
-
-                              form.setFieldValue('dynamicFields', {
-                                ...formValues?.dynamicFields,
-                                [fieldName]: cleanedValues,
-                              });
-                              if (!isOptional && cleanedValues.length === 0) {
-                                setDynamicFieldErrors(prev => ({
-                                  ...prev,
-                                  [fieldName]: `${fieldName} is required`,
-                                }));
-                              } else {
-                                setDynamicFieldErrors(prev => {
-                                  const next = { ...prev };
-                                  delete next[fieldName];
-                                  return next;
-                                });
-                              }
-                            }}
-                            isOpen={dynamicFieldOpenStates[fieldName] || false}
-                            setIsOpen={isOpen => {
-                              setDynamicFieldOpenStates(prev => ({
-                                ...prev,
-                                [fieldName]: isOpen,
-                              }));
-                            }}
+                        >
+                          {o.label}
+                        </button>
+                        {isPrimary && (
+                          <span className='shrink-0 rounded-md bg-primary/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary'>
+                            Primary
+                          </span>
+                        )}
+                        {selected ? (
+                          <div className='flex shrink-0 items-center gap-1.5'>
+                            <input
+                              value={range.deployedCommit}
+                              onChange={e => setField('deployedCommit', e.target.value)}
+                              placeholder='deployed'
+                              className='w-[92px] rounded-md border border-border bg-background px-2 py-1 font-mono text-[11px] text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none'
+                              data-track-category='CreateTicket'
+                              data-track-name='RepoDeployedCommit'
+                            />
+                            <span className='text-muted-foreground'>→</span>
+                            <input
+                              value={range.newCommit}
+                              onChange={e => setField('newCommit', e.target.value)}
+                              placeholder='new'
+                              className='w-[92px] rounded-md border border-border bg-background px-2 py-1 font-mono text-[11px] text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none'
+                              data-track-category='CreateTicket'
+                              data-track-name='RepoNewCommit'
+                            />
+                          </div>
+                        ) : (
+                          <div className='flex shrink-0 items-center gap-1.5 opacity-40'>
+                            <span className='w-[92px] rounded-md border border-border px-2 py-1 text-center font-mono text-[11px] text-muted-foreground'>
+                              —
+                            </span>
+                            <span className='text-muted-foreground'>→</span>
+                            <span className='w-[92px] rounded-md border border-border px-2 py-1 text-center font-mono text-[11px] text-muted-foreground'>
+                              —
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                      {selected && (
+                        <div className='mt-2 flex items-center gap-2 pl-[30px]'>
+                          <label
+                            htmlFor={`repo-branch-${id}`}
+                            className='font-mono text-[10px] uppercase tracking-wide text-muted-foreground'
+                          >
+                            Branch
+                          </label>
+                          <input
+                            id={`repo-branch-${id}`}
+                            value={range.branch}
+                            onChange={e => setField('branch', e.target.value)}
+                            placeholder='main'
+                            className='w-40 rounded-md border border-border bg-background px-2 py-1 text-[12px] text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none'
+                            data-track-category='CreateTicket'
+                            data-track-name='RepoBranch'
                           />
                         </div>
-                        {error && <p className='text-xs text-red-600 mt-1'>{error}</p>}
-                      </>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+                      )}
+                      {(servicesByMainBoard.get(id)?.length ?? 0) > 0 && (
+                        <div className='mt-2 flex flex-wrap items-center gap-1.5 pl-[30px]'>
+                          <span className='font-mono text-[10px] uppercase tracking-wide text-muted-foreground'>
+                            Services
+                          </span>
+                          {servicesByMainBoard.get(id)!.map(name => (
+                            <span
+                              key={name}
+                              className='rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground'
+                            >
+                              {name}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
-        )}
+
+          {visibleDynamicFields.length > 0 && (
+            <div className='-mr-5 -mt-1.5 flex min-h-0 w-[348px] shrink-0 flex-col border-l border-border bg-muted'>
+              <BoardFieldsPanel
+                fields={visibleDynamicFields}
+                values={formValues?.dynamicFields ?? {}}
+                errors={dynamicFieldErrors}
+                onFieldChange={handleDynamicFieldChange}
+                registerFieldRef={registerDynamicFieldRef}
+                scrollRef={boardFieldsScrollRef}
+                {...(projectId !== undefined && { projectId })}
+                allUsers={stableAllUsers}
+                userMap={userMap}
+                searchQueries={dynamicFieldSearchQueries}
+                onSearchQueryChange={handleDynamicSearchChange}
+                openStates={dynamicFieldOpenStates}
+                onOpenStateChange={handleDynamicOpenChange}
+              />
+            </div>
+          )}
+        </div>
 
         {allAttachments.length > 0 && (
           <div
@@ -2879,290 +2807,249 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           </div>
         )}
 
-        <div className='flex flex-wrap items-center gap-2.5 mt-2'>
-          {/* Assignee Selection */}
-          {!releaseOnly && (
-            <form.Field name='assignee'>
-              {field => (
-                <EntitySelector
-                  options={assigneeOptions}
-                  selectedValue={
-                    field.state.value
-                      ? field.state.value.type === 'assigneeTo'
-                        ? `user:${field.state.value.value}`
-                        : `${field.state.value.type}:${field.state.value.value}`
-                      : null
-                  }
-                  onSelect={(value: string | null) => {
-                    const applyAssignee = (val: string | null): void => {
-                      field.handleChange(parseAssignee(val));
-                      if (val) {
-                        const picked = assigneeOptions.find(o => o.value === val);
-                        setSelectedAssigneeOption(
-                          picked
-                            ? { value: picked.value, label: picked.label, icon: picked.icon }
-                            : null,
-                        );
-                      } else {
-                        setSelectedAssigneeOption(null);
-                      }
-                    };
-                    // Gate individual users by channel membership; groups pass through.
-                    if (value && value.startsWith('user:')) {
-                      const uid = value.slice('user:'.length);
-                      const name =
-                        assigneeOptions.find(o => o.value === value)?.label ?? 'This user';
-                      gatedAssignUser({
-                        userId: uid,
-                        userName: name,
-                        assign: () => applyAssignee(value),
-                      });
-                    } else {
-                      applyAssignee(value);
+        <div className='-mx-5 mt-auto flex shrink-0 items-center gap-3 border-t border-border/60 px-5 pb-4 pt-3.5'>
+          <div
+            data-ticket-chip-row
+            className='no-scrollbar flex min-w-0 flex-1 items-center gap-[9px] overflow-x-auto [&>*]:shrink-0 [&>*:first-child]:min-w-0 [&>*:first-child]:max-w-[220px] [&_*]:whitespace-nowrap'
+          >
+            {/* Assignee Selection */}
+            {!releaseOnly && (
+              <form.Field name='assignee'>
+                {field => (
+                  <EntitySelector
+                    options={assigneeOptions}
+                    selectedValue={
+                      field.state.value
+                        ? field.state.value.type === 'assigneeTo'
+                          ? `user:${field.state.value.value}`
+                          : `${field.state.value.type}:${field.state.value.value}`
+                        : null
                     }
-                  }}
-                  onSearchChange={setAssigneeSearchValue}
-                  searchPlaceholder={
-                    showUserGroupsOnly
-                      ? `User Groups${mandatoryUserGroupsOnly ? ' *' : ''}`
-                      : `Select assignee${mandatoryAssignee ? ' *' : ''}`
-                  }
-                  placeholder={
-                    showUserGroupsOnly
-                      ? `User Groups${mandatoryUserGroupsOnly ? ' *' : ''}`
-                      : `Assignee${mandatoryAssignee ? ' *' : ''}`
-                  }
-                  inputIcon={
-                    showUserGroupsOnly ? (
-                      <Users className='size-3.5' strokeWidth={2.33} />
-                    ) : (
-                      <User className='size-3.5' strokeWidth={2.33} />
-                    )
-                  }
-                  inputClassName='rounded-md h-7'
-                  disableClientFiltering={true}
-                  showIndicator={false}
-                  testId='ticket-assignee-selector'
-                />
-              )}
-            </form.Field>
-          )}
-
-          {/* Status Selection (Todo) - conditionally rendered */}
-          {showTodo && (
-            <form.Field name='status'>
-              {field => (
-                <EntitySelector
-                  showSearch={false}
-                  options={statusOptions}
-                  selectedValue={field.state.value}
-                  onSelect={(value: string | null) =>
-                    field.handleChange(value as CreateTicketFormData['status'])
-                  }
-                  searchPlaceholder={`status${mandatoryTodo ? ' *' : ''}`}
-                  placeholder={`status${mandatoryTodo ? ' *' : ''}`}
-                  inputIcon={<Ellipsis className='size-3.5' strokeWidth={2.33} />}
-                  inputClassName='rounded-md h-7'
-                  showClearButton={true}
-                  showIndicator={false}
-                  testId='ticket-status-selector'
-                />
-              )}
-            </form.Field>
-          )}
-
-          {/* Due Date - conditionally rendered */}
-          {showDueDate && !releaseOnly && (
-            <form.Field name='eta'>
-              {field => {
-                const yesterday = new Date(new Date().setDate(new Date().getDate() - 1));
-                return (
-                  <DatePicker
-                    selectedDate={field.state.value}
-                    onSelect={date => field.handleChange(date)}
-                    placeholder={`Due Date${mandatoryDueDate ? ' *' : ''}`}
-                    minDate={yesterday}
-                    showClearButton
+                    onSelect={(value: string | null) => {
+                      const applyAssignee = (val: string | null): void => {
+                        field.handleChange(parseAssignee(val));
+                        if (val) {
+                          const picked = assigneeOptions.find(o => o.value === val);
+                          setSelectedAssigneeOption(
+                            picked
+                              ? { value: picked.value, label: picked.label, icon: picked.icon }
+                              : null,
+                          );
+                        } else {
+                          setSelectedAssigneeOption(null);
+                        }
+                      };
+                      // Gate individual users by channel membership; groups pass through.
+                      if (value && value.startsWith('user:')) {
+                        const uid = value.slice('user:'.length);
+                        const name =
+                          assigneeOptions.find(o => o.value === value)?.label ?? 'This user';
+                        gatedAssignUser({
+                          userId: uid,
+                          userName: name,
+                          assign: () => applyAssignee(value),
+                        });
+                      } else {
+                        applyAssignee(value);
+                      }
+                    }}
+                    onSearchChange={setAssigneeSearchValue}
+                    searchPlaceholder={
+                      showUserGroupsOnly
+                        ? `User Groups${mandatoryUserGroupsOnly ? ' *' : ''}`
+                        : `Select assignee${mandatoryAssignee ? ' *' : ''}`
+                    }
+                    placeholder={
+                      showUserGroupsOnly
+                        ? `User Groups${mandatoryUserGroupsOnly ? ' *' : ''}`
+                        : `Assignee${mandatoryAssignee ? ' *' : ''}`
+                    }
+                    inputIcon={
+                      showUserGroupsOnly ? (
+                        <Users className='size-3.5' strokeWidth={2.33} />
+                      ) : (
+                        <User className='size-3.5' strokeWidth={2.33} />
+                      )
+                    }
+                    inputClassName='rounded-md h-7'
+                    disableClientFiltering={true}
+                    showIndicator={false}
+                    testId='ticket-assignee-selector'
                   />
-                );
-              }}
-            </form.Field>
-          )}
+                )}
+              </form.Field>
+            )}
 
-          {/* Priority Selection */}
-          {!releaseOnly && (
-            <form.Field name='priority'>
-              {field => {
-                return (
+            {/* Status Selection (Todo) - conditionally rendered */}
+            {showTodo && (
+              <form.Field name='status'>
+                {field => (
                   <EntitySelector
                     showSearch={false}
-                    options={getPriorityOptions()}
+                    options={statusOptions}
                     selectedValue={field.state.value}
                     onSelect={(value: string | null) =>
-                      field.handleChange(value as CreateTicketFormData['priority'])
+                      field.handleChange(value as CreateTicketFormData['status'])
                     }
-                    searchPlaceholder='priority'
-                    placeholder='priority'
+                    searchPlaceholder={`status${mandatoryTodo ? ' *' : ''}`}
+                    placeholder={`status${mandatoryTodo ? ' *' : ''}`}
                     inputIcon={<Ellipsis className='size-3.5' strokeWidth={2.33} />}
                     inputClassName='rounded-md h-7'
                     showClearButton={true}
                     showIndicator={false}
-                    testId='ticket-priority-selector'
+                    testId='ticket-status-selector'
                   />
-                );
-              }}
-            </form.Field>
-          )}
-
-          {/* Tags Selection - conditionally rendered */}
-          {showLabels && !releaseOnly && (
-            <form.Field name='tags'>
-              {field => (
-                <EntityMultiSelector
-                  options={tagOptions}
-                  selectedValues={field.state.value}
-                  onMultiSelect={(tags: string[]) => field.handleChange(tags)}
-                  allowCreate={true}
-                  onCreateOption={(value: string) => {
-                    setNewTags(prev => [...prev, value]);
-                    field.handleChange([...field.state.value, value]);
-                  }}
-                  onOpenChange={open => {
-                    if (open && !tagsQueried) setTagsQueried(true);
-                  }}
-                  placeholder={`Label${mandatoryLabels ? ' *' : ''}`}
-                  searchPlaceholder='Search labels'
-                  showSearch={true}
-                  collapseSelectedAfter={3}
-                  collapsedLabel='labels'
-                  inputIcon={<Tag strokeWidth={2.33} className='size-3.5' />}
-                />
-              )}
-            </form.Field>
-          )}
-
-          {/* Ticket Type Selection - conditionally rendered */}
-          {showTicketType && !releaseOnly && (
-            <form.Field name='ticketType'>
-              {field => {
-                const typeOptions = isFlowRootTicket
-                  ? [
-                      {
-                        label: BaseTicketType.Epic,
-                        value: BaseTicketType.Epic,
-                        icon: <Ticket className='size-3.5' strokeWidth={2.33} />,
-                      },
-                    ]
-                  : (ticketTypeOptions?.map(type => ({
-                      label: type.value,
-                      value: type.value,
-                      icon: <Ticket className='size-3.5' strokeWidth={2.33} />,
-                    })) ?? []);
-
-                return (
-                  <EntitySelector
-                    showSearch={false}
-                    options={typeOptions}
-                    selectedValue={field.state.value || ''}
-                    onSelect={(value: string | null) =>
-                      field.handleChange(value as CreateTicketFormData['ticketType'])
-                    }
-                    searchPlaceholder='ticket type'
-                    placeholder={`ticket type${mandatoryTicketType ? ' *' : ''}`}
-                    inputIcon={<Ticket className='size-3.5' strokeWidth={2.33} />}
-                    inputClassName='rounded-md h-7'
-                    showClearButton={!isFlowRootTicket}
-                    showIndicator={false}
-                  />
-                );
-              }}
-            </form.Field>
-          )}
-
-          {/* Merchant ID - conditionally rendered */}
-          {showMerchantId && (
-            <form.Field name='merchantId'>
-              {field => (
-                <Input
-                  type='text'
-                  value={field.state.value || ''}
-                  onChange={e => field.handleChange(e.target.value)}
-                  placeholder={`Merchant ID${mandatoryMerchantId ? ' *' : ''}`}
-                  className='text-sm'
-                />
-              )}
-            </form.Field>
-          )}
-        </div>
-        <div className='flex justify-between items-center pt-6 pb-4'>
-          <Button
-            type='button'
-            onClick={handlePaperclipClick}
-            variant='ghost'
-            size='icon'
-            title='Attach files'
-            disabled={form.state.isSubmitting}
-            className='size-6'
-            data-testid='ticket-attachment-button'
-            data-track-category='Tickets'
-            data-track-name='ATTACH_FILE'
-            data-track-metadata={JSON.stringify({
-              boardId: selectedBoardId,
-              channelId,
-              fileCount: allAttachments.length,
-            })}
-          >
-            <Paperclip strokeWidth={2.33} className='size-3.5 text-muted-foreground' />
-          </Button>
-          <div className='flex items-center gap-3'>
-            {submitGateMessage ? (
-              <Tooltip content={submitGateMessage} side='top'>
-                <span className='cursor-not-allowed'>
-                  <Button
-                    type='submit'
-                    loading={form.state.isSubmitting}
-                    disabled={form.state.isSubmitting || !isFormReadyForSubmit}
-                    className='pointer-events-none'
-                    data-testid='ticket-submit-button'
-                    data-track-category='Tickets'
-                    data-track-name='SUBMIT_CREATE_TICKET_MODAL'
-                    data-track-metadata={JSON.stringify({
-                      boardId: selectedBoardId,
-                      channelId,
-                      hasAttachments: allAttachments.length > 0,
-                      isFromAI,
-                    })}
-                  >
-                    {form.state.isSubmitting
-                      ? 'Creating...'
-                      : ticketKind === 'release'
-                        ? 'Create Release'
-                        : 'Create Ticket'}
-                  </Button>
-                </span>
-              </Tooltip>
-            ) : (
-              <Button
-                type='submit'
-                loading={form.state.isSubmitting}
-                disabled={form.state.isSubmitting || !isFormReadyForSubmit}
-                data-testid='ticket-submit-button'
-                data-track-category='Tickets'
-                data-track-name='SUBMIT_CREATE_TICKET_MODAL'
-                data-track-metadata={JSON.stringify({
-                  boardId: selectedBoardId,
-                  channelId,
-                  hasAttachments: allAttachments.length > 0,
-                  isFromAI,
-                })}
-              >
-                {form.state.isSubmitting
-                  ? 'Creating...'
-                  : ticketKind === 'release'
-                    ? 'Create Release'
-                    : 'Create Ticket'}
-              </Button>
+                )}
+              </form.Field>
             )}
+
+            {/* Due Date - conditionally rendered */}
+            {showDueDate && !releaseOnly && (
+              <form.Field name='eta'>
+                {field => {
+                  const yesterday = new Date(new Date().setDate(new Date().getDate() - 1));
+                  return (
+                    <DatePicker
+                      selectedDate={field.state.value}
+                      onSelect={date => field.handleChange(date)}
+                      placeholder={`Due Date${mandatoryDueDate ? ' *' : ''}`}
+                      minDate={yesterday}
+                      showClearButton
+                    />
+                  );
+                }}
+              </form.Field>
+            )}
+
+            {/* Priority Selection */}
+            {!releaseOnly && (
+              <form.Field name='priority'>
+                {field => {
+                  return (
+                    <EntitySelector
+                      showSearch={false}
+                      options={getPriorityOptions()}
+                      selectedValue={field.state.value}
+                      onSelect={(value: string | null) =>
+                        field.handleChange(value as CreateTicketFormData['priority'])
+                      }
+                      searchPlaceholder='priority'
+                      placeholder='priority'
+                      inputIcon={<Ellipsis className='size-3.5' strokeWidth={2.33} />}
+                      inputClassName='rounded-md h-7'
+                      showClearButton={true}
+                      showIndicator={false}
+                      testId='ticket-priority-selector'
+                    />
+                  );
+                }}
+              </form.Field>
+            )}
+
+            {/* Tags Selection - conditionally rendered */}
+            {showLabels && !releaseOnly && (
+              <form.Field name='tags'>
+                {field => (
+                  <EntityMultiSelector
+                    options={tagOptions}
+                    selectedValues={field.state.value}
+                    onMultiSelect={(tags: string[]) => field.handleChange(tags)}
+                    allowCreate={true}
+                    onCreateOption={(value: string) => {
+                      setNewTags(prev => [...prev, value]);
+                      field.handleChange([...field.state.value, value]);
+                    }}
+                    onOpenChange={open => {
+                      if (open && !tagsQueried) setTagsQueried(true);
+                    }}
+                    placeholder={`Label${mandatoryLabels ? ' *' : ''}`}
+                    searchPlaceholder='Search labels'
+                    showSearch={true}
+                    collapseSelectedAfter={0}
+                    previewIcons={3}
+                    collapsedLabel='label'
+                    inputIcon={<Tag strokeWidth={2.33} className='size-3.5' />}
+                  />
+                )}
+              </form.Field>
+            )}
+
+            {/* Ticket Type Selection - conditionally rendered */}
+            {showTicketType && !releaseOnly && (
+              <form.Field name='ticketType'>
+                {field => {
+                  const typeOptions = isFlowRootTicket
+                    ? [
+                        {
+                          label: BaseTicketType.Epic,
+                          value: BaseTicketType.Epic,
+                          icon: <Ticket className='size-3.5' strokeWidth={2.33} />,
+                        },
+                      ]
+                    : (ticketTypeOptions?.map(type => ({
+                        label: type.value,
+                        value: type.value,
+                        icon: <Ticket className='size-3.5' strokeWidth={2.33} />,
+                      })) ?? []);
+
+                  return (
+                    <EntitySelector
+                      showSearch={false}
+                      options={typeOptions}
+                      selectedValue={field.state.value || ''}
+                      onSelect={(value: string | null) =>
+                        field.handleChange(value as CreateTicketFormData['ticketType'])
+                      }
+                      searchPlaceholder='ticket type'
+                      placeholder={`ticket type${mandatoryTicketType ? ' *' : ''}`}
+                      inputIcon={<Ticket className='size-3.5' strokeWidth={2.33} />}
+                      inputClassName='rounded-md h-7'
+                      showClearButton={!isFlowRootTicket}
+                      showIndicator={false}
+                    />
+                  );
+                }}
+              </form.Field>
+            )}
+
+            {/* Merchant ID - conditionally rendered */}
+            {showMerchantId && (
+              <form.Field name='merchantId'>
+                {field => (
+                  <Input
+                    type='text'
+                    value={field.state.value || ''}
+                    onChange={e => field.handleChange(e.target.value)}
+                    placeholder={`Merchant ID${mandatoryMerchantId ? ' *' : ''}`}
+                    className='text-sm'
+                  />
+                )}
+              </form.Field>
+            )}
+          </div>
+
+          <div className='flex items-center gap-3'>
+            <Button
+              type='submit'
+              loading={form.state.isSubmitting}
+              disabled={form.state.isSubmitting}
+              className='h-[38px] rounded-[9px] px-[18px] text-[13.5px] font-semibold'
+              data-testid='ticket-submit-button'
+              data-track-category='Tickets'
+              data-track-name='SUBMIT_CREATE_TICKET_MODAL'
+              data-track-metadata={JSON.stringify({
+                boardId: selectedBoardId,
+                channelId,
+                hasAttachments: allAttachments.length > 0,
+                isFromAI,
+              })}
+            >
+              {form.state.isSubmitting
+                ? 'Creating...'
+                : ticketKind === 'release'
+                  ? 'Create Release'
+                  : 'Create Ticket'}
+            </Button>
             {/* Hidden file input */}
             <input
               ref={fileInputRef}
@@ -3251,7 +3138,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         : {})}
       data-testid='create-ticket-modal'
       className={cn(
-        'w-full max-w-screen-md max-h-1/2 rounded-xl border border-border',
+        'flex max-h-[85vh] w-full flex-col overflow-hidden rounded-2xl border border-border p-0',
+        visibleDynamicFields.length > 0 ? 'max-w-[1060px]' : 'max-w-[880px]',
         'top-1/3 !-translate-y-1/3',
       )}
     >

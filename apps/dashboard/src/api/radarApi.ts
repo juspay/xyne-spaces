@@ -1,4 +1,5 @@
 import { apiInstance } from '../services/clients/apiClient';
+import type { RadarRule, RadarRuleCondition } from '@xyne/shared';
 
 interface SuccessEnvelope<T> {
   success: true;
@@ -16,6 +17,10 @@ export interface RadarFeedItem {
   pendingOn: string[];
   createdAt: string;
   updatedAt: string;
+  /** True when one of THIS viewer's rules mutes it. Decided per read, so
+   *  editing a rule re-answers for every item, and it is this viewer's answer
+   *  alone — the same item reaches somebody else by their own rules. */
+  muted: boolean;
 }
 
 export interface RadarThreadCard {
@@ -80,6 +85,49 @@ export function fetchRadarPendingOthers(): Promise<RadarThreadCard[]> {
   ).then(d => d.threads);
 }
 
+export interface RadarPendingOthersPageParams {
+  page: number;
+  mutedPage: number;
+  pageSize: number;
+  holderIds: string[];
+  channelIds: string[];
+  createdFrom: Date | null;
+  createdTo: Date | null;
+}
+
+export interface RadarPendingOthersPage {
+  threads: RadarThreadCard[];
+  totalThreads: number;
+  page: number;
+  mutedThreads: RadarThreadCard[];
+  mutedTotalThreads: number;
+  mutedItemCount: number;
+  mutedPage: number;
+  /** Unmuted open items before any filter — the tab's badge. */
+  openItemCount: number;
+  facets: { holderIds: string[]; channelIds: string[] };
+}
+
+/** Pending Others one page at a time, filtered on the server — the feed is
+ *  workspace-wide, so it is never shipped whole to be paged in the browser. */
+export function fetchRadarPendingOthersPage(
+  params: RadarPendingOthersPageParams,
+): Promise<RadarPendingOthersPage> {
+  return unwrap(
+    apiInstance.get<SuccessEnvelope<RadarPendingOthersPage>>('/radar/feed/pending-others', {
+      params: {
+        page: params.page,
+        mutedPage: params.mutedPage,
+        pageSize: params.pageSize,
+        ...(params.holderIds.length ? { holders: params.holderIds.join(',') } : {}),
+        ...(params.channelIds.length ? { channels: params.channelIds.join(',') } : {}),
+        ...(params.createdFrom ? { createdFrom: params.createdFrom.toISOString() } : {}),
+        ...(params.createdTo ? { createdTo: params.createdTo.toISOString() } : {}),
+      },
+    }),
+  );
+}
+
 export interface RadarItemMutation {
   id: string;
   itemId: string;
@@ -104,6 +152,9 @@ export interface RadarItemTrail {
   sourceMessages: Record<string, RadarTrailMessage>;
   threadState: { watermarkCreatedAt: string; watermarkMsgId: string; updatedAt: string } | null;
   latestMessage: { messageId: string; createdAt: string } | null;
+  /** The ASKING viewer's answer and the rules behind it — somebody else opening
+   *  the same trail gets their own, since rules are per reader. */
+  rules: { muted: boolean; matched: RadarRule[] };
 }
 
 export function fetchRadarItemTrail(itemId: string): Promise<RadarItemTrail> {
@@ -168,4 +219,33 @@ export function dismissAllRadarItems(scopeKey: string): Promise<RadarApplyResult
       `/radar/threads/${encodeURIComponent(scopeKey)}/dismiss-all`,
     ),
   );
+}
+
+/** A reader's own rules. Always the caller's — the API has no route that reads
+ *  anyone else's, so there is no id to pass here. */
+export function fetchRadarRules(): Promise<RadarRule[]> {
+  return unwrap(apiInstance.get<SuccessEnvelope<{ rules: RadarRule[] }>>('/radar/rules')).then(
+    d => d.rules,
+  );
+}
+
+export function createRadarRule(conditions: RadarRuleCondition[]): Promise<RadarRule> {
+  return unwrap(
+    apiInstance.post<SuccessEnvelope<{ rule: RadarRule }>>('/radar/rules', { conditions }),
+  ).then(d => d.rule);
+}
+
+export function updateRadarRule(id: string, conditions: RadarRuleCondition[]): Promise<RadarRule> {
+  return unwrap(
+    apiInstance.patch<SuccessEnvelope<{ rule: RadarRule }>>(
+      `/radar/rules/${encodeURIComponent(id)}`,
+      { conditions },
+    ),
+  ).then(d => d.rule);
+}
+
+export function deleteRadarRule(id: string): Promise<void> {
+  return unwrap(
+    apiInstance.delete<SuccessEnvelope<{ id: string }>>(`/radar/rules/${encodeURIComponent(id)}`),
+  ).then(() => undefined);
 }

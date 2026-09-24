@@ -2,6 +2,7 @@ import { ReactElement, useEffect, useId, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
+  AlertCircle,
   Bot,
   CheckCircle2,
   ChevronRight,
@@ -30,7 +31,7 @@ import {
   SelectValue,
 } from '@/components/ui/Select';
 import { useAuth } from '@/hooks/useAuth';
-import { clawSettingsKey, useClawSettings } from '@/hooks/useClawSettings';
+import { invalidateClawSettings, useClawSettings } from '@/hooks/useClawSettings';
 import {
   deleteProviderCredential,
   deleteSubagentRouting,
@@ -45,9 +46,15 @@ import {
   startClaudeOauth,
   startCodexOauth,
   type ClaudeOauthFlow,
+  type CredentialHealth,
   upsertProviderCredential,
   upsertSubagentRouting,
 } from '@/services/claw/clawSettingsService';
+import { userCredentialScope } from '@/routes/AIScreen/library/agents/detail/persona/credentials/credentialScope';
+import {
+  credentialHealthKey,
+  useCredentialHealth,
+} from '@/routes/AIScreen/library/agents/detail/persona/credentials/useCredentialHealth';
 import type {
   AuthType,
   ClaudeModelInfo,
@@ -155,17 +162,23 @@ const SectionHeader = ({
 const ProviderCard = ({
   id,
   credential,
+  health,
+  checking,
   isDefault,
   onOpenDialog,
 }: {
   id: ProviderId;
   credential: ProviderCredential | undefined;
+  health: CredentialHealth | undefined;
+  checking: boolean;
   isDefault: boolean;
   onOpenDialog: () => void;
 }): ReactElement => {
   const meta = PROVIDER_META[id];
   const Icon = meta.icon;
-  const isConnected = credential?.hasApiKey ?? false;
+  const hasKey = credential?.hasApiKey ?? false;
+  const isConnected = hasKey && health?.status !== 'invalid';
+  const isBroken = hasKey && health?.status === 'invalid';
 
   return (
     <div
@@ -195,13 +208,21 @@ const ProviderCard = ({
             <p className='truncate text-xs text-muted-foreground'>{meta.description}</p>
           </div>
         </div>
-        {isConnected && (
+        {hasKey && checking && <Badge variant='secondary'>Checking…</Badge>}
+        {hasKey && !checking && isBroken && <Badge variant='destructive'>Invalid key</Badge>}
+        {hasKey && !checking && !isBroken && (
           <Badge variant='success' className='gap-1'>
             <span className='size-1.5 rounded-full bg-white' />
             Connected
           </Badge>
         )}
       </div>
+
+      {isBroken && health?.message && (
+        <p className='line-clamp-2 text-xs text-destructive' title={health.message}>
+          {health.message}
+        </p>
+      )}
 
       {isConnected && credential?.model && (
         <p className='text-xs text-muted-foreground'>
@@ -242,6 +263,13 @@ const AIProvidersSection = ({
     () => new Map(credentials.map(credential => [credential.provider, credential])),
     [credentials],
   );
+  const scope = useMemo(() => userCredentialScope(userId), [userId]);
+  const keyedProviders = useMemo(
+    () =>
+      credentials.filter(credential => credential.hasApiKey).map(credential => credential.provider),
+    [credentials],
+  );
+  const health = useCredentialHealth(scope, keyedProviders, !loading);
 
   return (
     <section>
@@ -264,6 +292,8 @@ const AIProvidersSection = ({
               key={provider}
               id={provider}
               credential={credentialMap.get(provider)}
+              health={health.byProvider.get(provider)}
+              checking={health.checking.has(provider)}
               isDefault={provider === defaultProvider}
               onOpenDialog={() => setActiveDialog(provider)}
             />
@@ -622,6 +652,10 @@ const GenericProviderConfigForm = ({
   }, [provider, userId]);
 
   const hasKey = existing?.hasApiKey ?? false;
+  const dialogScope = useMemo(() => userCredentialScope(userId), [userId]);
+  const dialogHealth = useCredentialHealth(dialogScope, hasKey ? [provider] : [], hasKey);
+  const keyHealth = dialogHealth.byProvider.get(provider);
+  const healthChecking = dialogHealth.checking.has(provider);
   const isOauth = authType === 'oauth_token';
 
   useEffect(() => {
@@ -754,11 +788,21 @@ const GenericProviderConfigForm = ({
 
   return (
     <div className='flex flex-col gap-4'>
-      {hasKey && (
-        <div className='flex items-center gap-2 text-sm text-emerald-600'>
-          <CheckCircle2 className='size-4' />
-          <span>Connected</span>
+      {hasKey && keyHealth?.status === 'invalid' ? (
+        <div className='flex flex-col gap-1'>
+          <div className='flex items-center gap-2 text-sm text-destructive'>
+            <AlertCircle className='size-4' />
+            <span>Invalid key</span>
+          </div>
+          {keyHealth.message && <p className='text-xs text-destructive'>{keyHealth.message}</p>}
         </div>
+      ) : (
+        hasKey && (
+          <div className='flex items-center gap-2 text-sm text-emerald-600'>
+            <CheckCircle2 className='size-4' />
+            <span>{healthChecking ? 'Checking…' : 'Connected'}</span>
+          </div>
+        )
       )}
 
       {hasOauthOption && (
@@ -946,7 +990,9 @@ const GenericProviderConfigForm = ({
           <Input value={model} onChange={event => setModel(event.target.value)} />
         )}
         {modelsError && (
-          <p className='mt-1 text-xs text-amber-600'>Could not fetch models: {modelsError}</p>
+          <p className='mt-1 line-clamp-2 text-xs text-amber-600' title={modelsError}>
+            Could not fetch models — {modelsError}
+          </p>
         )}
       </div>
 
@@ -1380,7 +1426,11 @@ const ClawSettingsScreen = (): ReactElement => {
   );
 
   const invalidateSettings = async (): Promise<void> => {
-    await queryClient.invalidateQueries({ queryKey: clawSettingsKey(userId) });
+    await invalidateClawSettings(queryClient, userId);
+    await queryClient.invalidateQueries({
+      queryKey: credentialHealthKey(userCredentialScope(userId)),
+    });
+    await queryClient.invalidateQueries({ queryKey: ['claw-provider-models'] });
   };
 
   return (

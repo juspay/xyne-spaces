@@ -5,6 +5,8 @@ export interface AutomationBuilderProps {
   initialConfig?: AutomationConfig;
   initialName?: string;
   initialDescription?: string;
+  /** Starting value for the toggle when copying an automation. Without it, a copy would quietly lose its priority. */
+  initialPriority?: boolean;
   forkFromSeriesId?: string;
   forkSourceAutomationId?: string;
   onSaved?: (result: { automation: Automation; validation: ValidationResult }) => void;

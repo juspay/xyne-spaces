@@ -8,7 +8,7 @@ export interface GcsStorageConfig {
 export interface S3StorageConfig {
   region: string;
   bucketName: string;
-  /** MinIO/LocalStack endpoint for dev/test */
+  /** RustFS/MinIO/LocalStack endpoint for dev/test */
   endpoint?: string;
   accessKeyId?: string;
   secretAccessKey?: string;

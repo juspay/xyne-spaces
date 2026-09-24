@@ -97,7 +97,7 @@ export const McpConnectDialog = ({
             data-track-category='Claw MCP'
             data-track-name='SubmitConnectMcp'
           >
-            {submitting ? 'Connecting…' : 'Connect'}
+            {submitting ? 'Verifying…' : 'Connect'}
           </Button>
         </>
       }
@@ -113,6 +113,13 @@ export const McpConnectDialog = ({
           )}
         </div>
       </div>
+
+      {submitting && (
+        <p className='text-xs leading-4 text-muted-foreground'>
+          Checking these details with {label}. A connector being started for the first time can take
+          a few moments.
+        </p>
+      )}
 
       {fields.length === 0 ? (
         <p className='text-sm text-muted-foreground'>

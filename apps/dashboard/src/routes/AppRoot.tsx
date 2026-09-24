@@ -22,31 +22,10 @@ import TicketView from '../components/Tickets/TicketView/TicketView';
 import { BrowserTabsScreen } from './BrowserTabsScreen';
 import { getLastActiveWorkspaceId } from '../machines/authMachine';
 import AgentsScreen from './AgentsScreen/AgentScreen';
-import ClawAgentsScreen from './ClawAgentsScreen';
-import AgentsTab from './ClawAgentsScreen/tabs/AgentsTab';
-import McpTab from './ClawAgentsScreen/tabs/McpTab';
-import SkillsTab from './ClawAgentsScreen/tabs/SkillsTab';
-import ClawAgentDetailScreen from './ClawAgentsScreen/ClawAgentDetailScreen';
-import ClawAgentCreateScreen from './ClawAgentsScreen/ClawAgentCreateScreen';
-import ClawMcpDetailScreen from './ClawAgentsScreen/ClawMcpDetailScreen';
-import ClawSkillDetailScreen from './ClawAgentsScreen/ClawSkillDetailScreen';
-import ClawSkillCreateScreen from './ClawAgentsScreen/ClawSkillCreateScreen';
 import ClawSettingsScreen from './ClawAgentsScreen/ClawSettingsScreen';
 import ClawMetricsScreen from './ClawAgentsScreen/ClawMetricsScreen';
 import { RequireClawAdmin } from './AIScreen/screens/RequireClawAdmin';
 import { RequireOrgManager } from './AIScreen/screens/RequireOrgManager';
-import SubagentsTab from './ClawAgentsScreen/tabs/SubagentsTab';
-import ClawSubagentDetailScreen from './ClawAgentsScreen/ClawSubagentDetailScreen';
-import ClawSubagentCreateScreen from './ClawAgentsScreen/ClawSubagentCreateScreen';
-import ClawOrganizationScreen from './ClawAgentsScreen/ClawOrganizationScreen';
-import ClawDigitalTwinScreen from './ClawAgentsScreen/ClawDigitalTwinScreen';
-import ClawDigitalTwinMetricsScreen from './ClawAgentsScreen/ClawDigitalTwinMetricsScreen';
-import DigitalTwinMemoriesTab from './ClawAgentsScreen/tabs/DigitalTwinMemoriesTab';
-import DigitalTwinHotTab from './ClawAgentsScreen/tabs/DigitalTwinHotTab';
-import DigitalTwinProposalsTab from './ClawAgentsScreen/tabs/DigitalTwinProposalsTab';
-import DigitalTwinRecallTab from './ClawAgentsScreen/tabs/DigitalTwinRecallTab';
-import DigitalTwinGraphTab from './ClawAgentsScreen/tabs/DigitalTwinGraphTab';
-import DigitalTwinSettingsTab from './ClawAgentsScreen/tabs/DigitalTwinSettingsTab';
 import { KnowledgeBaseV2Layout } from '../components/knowledgeBaseV2/KnowledgeBaseV2Layout';
 import KnowledgeBaseV2Screen from '../components/knowledgeBaseV2/KnowledgeBaseV2Screen';
 import { LegacyKbRedirect } from '../components/knowledgeBaseV2/LegacyKbRedirect';
@@ -75,6 +54,7 @@ import CanvasPanel from '../components/Canvas/CanvasPanel/CanvasPanel';
 import CallPage from './CallScreen/CallPage';
 import CanvasRedirectPage from './CanvasRedirect/CanvasRedirectPage';
 import { ClawOverlay } from '../components/Claw/ClawOverlay';
+import { ArtifactAppHostRoute } from '../components/ArtifactApp/ArtifactAppHostRoute';
 import AppSidebar from '../components/AppSidebar/AppSidebar';
 import { ReactElement, ReactNode, useRef, useEffect, useState } from 'react';
 import ZeroProvider from '../providers/ZeroProvider';
@@ -127,7 +107,7 @@ import { RouterErrorFallback } from '../components/ErrorBoundary';
 import NotFoundScreen from './NotFoundScreen/NotFoundScreen';
 import ChatRedirect from '../components/Chat/ChatRedirect/ChatRedirect';
 import DirectoryRedirect from '../components/Chat/DirectoryRedirect/DirectoryRedirect';
-import CallsRoute from './CallsRoute/CallsRoute';
+import CallHistoryScreen from './CallHistoryScreen/CallHistoryScreen';
 import CallDetailScreen from './CallDetailScreen/CallDetailScreen';
 import RecordingsRoute from './RecordingsRoute/RecordingsRoute';
 import RecordingDetailRoute from './RecordingDetailRoute/RecordingDetailRoute';
@@ -135,12 +115,10 @@ import { RecordingOverlay } from '../components/Recording/RecordingOverlay/Recor
 import { RecordingCameraBubble } from '../components/Recording/RecordingCameraBubble/RecordingCameraBubble';
 import { ScreenPickerHost } from '../components/ScreenPicker/ScreenPickerHost';
 import { useRecordingVersion } from '../hooks/useRecordingVersion';
+import { useWorkspacePageTools } from '../components/AIScreen/Workspace';
 import { stopRecordingForTeardown } from '../hooks/useRecordingStore';
 import { isElectronApp } from '../utils/electronApp';
-import {
-  confirmRecordingInterrupt,
-  isRecordingInterruptible,
-} from '../components/Recording/RecordingInterruptGuard/RecordingInterruptGuard';
+import { confirmInterrupt, isInterruptible } from '../components/InterruptGuard/InterruptGuard';
 import { NoteTakerOverlayHost } from './RecordingsV2Screen/components/NoteTakerOverlayHost';
 import FormScreen from './FormScreen/FormScreen';
 import ScheduledMessageScreen from './ScheduledMessageScreen/ScheduledMessageScreen';
@@ -234,7 +212,6 @@ import { RoleManagementScreen } from './RoleManagementScreen';
 import { TagReviewView } from '../components/tags/TagReview/TagReviewView';
 import { ResourceProtectedRoute } from '../components/Auth/ResourceProtectedRoute';
 import { WorkflowScreen } from './WorkflowScreen';
-import { GuestBlockedRoute } from '../components/Auth/GuestBlockedRoute';
 import { ToolbarProtectedRoute } from '../components/Auth/ToolbarProtectedRoute';
 import { WorkspaceManagementScreen } from './WorkspaceManagementScreen';
 import OrganisationsScreen from './OrganisationsScreen/OrganisationsScreen';
@@ -248,6 +225,7 @@ import Drawer from '../components/ui/Drawer';
 import { reactNativeBridge, NativeOutboundMessageType } from '../utils/reactNativeBridge';
 import RCADetailScreen from './RCAScreen/RCAScreen.tsx';
 import RCAListScreen from './RCAScreen/RCAListScreen.tsx';
+import StreamsScreen from '../components/Streams/StreamsScreen';
 import { useAuth } from '../hooks/useAuth';
 import { ShareRecordingHandler } from '../components/Chat/ShareRecordingHandler/ShareRecordingHandler';
 import { GlobalUploadProgress } from '../components/knowledgeBase/upload/GlobalUploadProgress';
@@ -357,6 +335,7 @@ const WorkspaceRedirect = (): ReactElement => {
 };
 
 const AppRoot = (): ReactElement => {
+  useWorkspacePageTools();
   const { recordingVersion } = useRecordingVersion();
   // Create panel refs for WebView
   const leftPanelRef = useRef<PanelImperativeHandle>(null);
@@ -405,7 +384,7 @@ const AppRoot = (): ReactElement => {
   useEffect(() => {
     const warnBeforeUnload = (event: BeforeUnloadEvent): void => {
       if (isElectronApp()) return;
-      if (!isRecordingInterruptible()) return;
+      if (!isInterruptible()) return;
       event.preventDefault();
     };
     window.addEventListener('beforeunload', warnBeforeUnload);
@@ -419,9 +398,9 @@ const AppRoot = (): ReactElement => {
       if (isElectronApp()) return;
       const isReloadCombo = (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'r';
       if (!isReloadCombo && event.key !== 'F5') return;
-      if (!isRecordingInterruptible()) return;
+      if (!isInterruptible()) return;
       event.preventDefault();
-      void confirmRecordingInterrupt('reload').then(proceed => {
+      void confirmInterrupt('reload').then(proceed => {
         if (proceed) window.location.reload();
       });
     };
@@ -571,6 +550,10 @@ const AppRoot = (): ReactElement => {
   // XyneAISidebar drawer /knowledge-base uses, or clicking it does nothing.
   const isOnAIKnowledgePage = /^\/[^/]+\/ai\/knowledge(\/|$)/.test(location.pathname);
   const isOnAIChatExperiencePage = isOnAIPage && !isOnAIKnowledgePage;
+  // Streams turns Ask AI into a column in the stream, so the floating drawer must
+  // not also appear — otherwise one trigger produces two chats. Same suppression
+  // shape as the /ai page, which has the same "already showing this" problem.
+  const isOnStreamsPage = /^\/[^/]+\/streams(\/|$)/.test(location.pathname);
 
   useEffect(() => {
     if (!reactNativeBridge.isAvailable()) {
@@ -605,7 +588,11 @@ const AppRoot = (): ReactElement => {
   // On SDLC routes the framed lane renders its own Ask AI panel inside the iframe,
   // so the host must not also show one (covers both /sdlc and /sdlc/<channelId>).
   const showXyneAIPanel =
-    isXyneAIDrawerOpen && !isMobile && !isOnAIChatExperiencePage && !isSdlcRoute;
+    isXyneAIDrawerOpen &&
+    !isMobile &&
+    !isOnAIChatExperiencePage &&
+    !isOnStreamsPage &&
+    !isSdlcRoute;
 
   const showCalendarPanel = isCalendarOpen && !isMobile && !isSdlcRoute && !showXyneAIPanel;
   // The SDLC lane ships Ask AI inside its own frame (see the isInPanelWebview
@@ -1027,40 +1014,43 @@ const AppRoot = (): ReactElement => {
                         </div>
                       )}
                       {/* XyneAI Mobile Drawer */}
-                      {isMobile && !isInPanelWebview && !isOnAIChatExperiencePage && (
-                        <Drawer
-                          open={isXyneAIDrawerOpen}
-                          onOpenChange={open => {
-                            // Don't allow closing during AI onboarding
-                            if (!open && isAIOnboardingActive()) return;
-                            xyneAIActor.send({ type: open ? 'OPEN' : 'CLOSE' });
-                          }}
-                          title='Xyne AI'
-                          description='Ask questions about your channel'
-                        >
-                          <XyneAISidebar
-                            channelId={xyneAIChannelId}
-                            threadInfo={xyneAIThreadInfo}
-                            startFreshChat={xyneAIStartFreshChat}
-                            canvasInfo={xyneAICanvasInfo}
-                            initialContextSelections={xyneAIInitialContextSelections}
-                            contextOpenNonce={xyneAIContextOpenNonce}
-                            kbCollectionId={xyneAIKbCollectionId ?? ''}
-                            kbChannelId={xyneAIKbChannelId ?? ''}
-                            kbDocId={xyneAIKbDocId ?? ''}
-                            workflowInfo={xyneAIWorkflowInfo}
-                            workflowDismissed={xyneAIWorkflowDismissed}
-                            kbDocName={xyneAIKbDocName ?? ''}
-                            kbFolderId={xyneAIKbFolderId ?? ''}
-                            kbFolderName={xyneAIKbFolderName ?? ''}
-                            kbOpenNonce={xyneAIKbOpenNonce}
-                            researchContext={xyneAIResearchContext}
-                            initialQuery={xyneAIInitialQuery ?? undefined}
-                            autoSendNonce={xyneAIAutoSendNonce}
-                            onDebuggerOpenChange={setIsXyneDebuggerOpen}
-                          />
-                        </Drawer>
-                      )}
+                      {isMobile &&
+                        !isInPanelWebview &&
+                        !isOnAIChatExperiencePage &&
+                        !isOnStreamsPage && (
+                          <Drawer
+                            open={isXyneAIDrawerOpen}
+                            onOpenChange={open => {
+                              // Don't allow closing during AI onboarding
+                              if (!open && isAIOnboardingActive()) return;
+                              xyneAIActor.send({ type: open ? 'OPEN' : 'CLOSE' });
+                            }}
+                            title='Xyne AI'
+                            description='Ask questions about your channel'
+                          >
+                            <XyneAISidebar
+                              channelId={xyneAIChannelId}
+                              threadInfo={xyneAIThreadInfo}
+                              startFreshChat={xyneAIStartFreshChat}
+                              canvasInfo={xyneAICanvasInfo}
+                              initialContextSelections={xyneAIInitialContextSelections}
+                              contextOpenNonce={xyneAIContextOpenNonce}
+                              kbCollectionId={xyneAIKbCollectionId ?? ''}
+                              kbChannelId={xyneAIKbChannelId ?? ''}
+                              kbDocId={xyneAIKbDocId ?? ''}
+                              workflowInfo={xyneAIWorkflowInfo}
+                              workflowDismissed={xyneAIWorkflowDismissed}
+                              kbDocName={xyneAIKbDocName ?? ''}
+                              kbFolderId={xyneAIKbFolderId ?? ''}
+                              kbFolderName={xyneAIKbFolderName ?? ''}
+                              kbOpenNonce={xyneAIKbOpenNonce}
+                              researchContext={xyneAIResearchContext}
+                              initialQuery={xyneAIInitialQuery ?? undefined}
+                              autoSendNonce={xyneAIAutoSendNonce}
+                              onDebuggerOpenChange={setIsXyneDebuggerOpen}
+                            />
+                          </Drawer>
+                        )}
                     </SdlcFrameProvider>
                   </EditProvider>
                 </SlashCommandArtifactSideEffectProvider>
@@ -1116,6 +1106,13 @@ export const router = createBrowserRouter(
                 {
                   index: true,
                   element: <HomeScreen />,
+                },
+                {
+                  // A saved artifact app on its own, opened from the toolbar.
+                  // Outside the /ai subtree on purpose: a workspace that has
+                  // disabled Xyne AI from the rail can still keep apps there.
+                  path: 'app/:appId',
+                  element: <ArtifactAppHostRoute placement={{ surface: 'toolbar' }} />,
                 },
                 {
                   path: 'slack-migration',
@@ -1214,6 +1211,10 @@ export const router = createBrowserRouter(
                   element: <RCADetailScreen />,
                 },
                 {
+                  path: 'streams',
+                  element: <StreamsScreen />,
+                },
+                {
                   path: 'chat',
                   element: <ChatScreen />,
                   children: [
@@ -1302,6 +1303,12 @@ export const router = createBrowserRouter(
                         {
                           path: 'my-tickets',
                           element: <MyTicketsScreen />,
+                        },
+                        // An artifact app added to the Inbox menubar, shown in
+                        // the chat panel with the directory still alongside.
+                        {
+                          path: 'app/:appId',
+                          element: <ArtifactAppHostRoute placement={{ surface: 'inbox' }} />,
                         },
                         // Channel routes (must come after specific routes)
                         {
@@ -1493,45 +1500,6 @@ export const router = createBrowserRouter(
                   ),
                 },
                 {
-                  path: 'claw-agents',
-                  element: (
-                    <ToolbarProtectedRoute path='/claw-agents'>
-                      <GuestBlockedRoute>
-                        <ClawAgentsScreen />
-                      </GuestBlockedRoute>
-                    </ToolbarProtectedRoute>
-                  ),
-                  children: [
-                    { index: true, element: <AgentsTab /> },
-                    { path: 'create', element: <ClawAgentCreateScreen /> },
-                    { path: 'agents/:agentSlug', element: <ClawAgentDetailScreen /> },
-                    { path: 'mcp', element: <McpTab /> },
-                    { path: 'mcp/:mcpId', element: <ClawMcpDetailScreen /> },
-                    { path: 'skills', element: <SkillsTab /> },
-                    { path: 'skills/create', element: <ClawSkillCreateScreen /> },
-                    { path: 'skills/:skillSlug', element: <ClawSkillDetailScreen /> },
-                    { path: 'subagents', element: <SubagentsTab /> },
-                    { path: 'subagents/create', element: <ClawSubagentCreateScreen /> },
-                    { path: 'subagents/:subagentName', element: <ClawSubagentDetailScreen /> },
-                    { path: 'organization', element: <ClawOrganizationScreen /> },
-                    {
-                      path: 'digital-twin',
-                      element: <ClawDigitalTwinScreen />,
-                      children: [
-                        { index: true, element: <DigitalTwinMemoriesTab /> },
-                        { path: 'hot', element: <DigitalTwinHotTab /> },
-                        { path: 'proposals', element: <DigitalTwinProposalsTab /> },
-                        { path: 'recall', element: <DigitalTwinRecallTab /> },
-                        { path: 'graph', element: <DigitalTwinGraphTab /> },
-                        { path: 'metrics', element: <ClawDigitalTwinMetricsScreen /> },
-                        { path: 'settings', element: <DigitalTwinSettingsTab /> },
-                      ],
-                    },
-                    { path: 'metrics', element: <ClawMetricsScreen /> },
-                    { path: 'settings', element: <ClawSettingsScreen /> },
-                  ],
-                },
-                {
                   path: 'knowledge-base',
                   element: (
                     <ToolbarProtectedRoute path='/knowledge-base'>
@@ -1720,7 +1688,7 @@ export const router = createBrowserRouter(
                   path: 'calls',
                   element: (
                     <ToolbarProtectedRoute path='/calls'>
-                      <CallsRoute />
+                      <CallHistoryScreen />
                     </ToolbarProtectedRoute>
                   ),
                   children: [

@@ -554,6 +554,10 @@
     background-image: var(--wallpaper-image);
   }
 
+  [data-stream-ground="bleed"] .app-sidenav-frame {
+    border-color: transparent;
+  }
+
   [data-theme="midnight"] input[type="date"]::-webkit-calendar-picker-indicator {
     filter: brightness(0) invert(1);
     opacity: 0.85;
@@ -1929,6 +1933,7 @@ mark.chat-text-highlight,
   margin: 0 !important;
   border: none !important;
   background: transparent !important;
+  color: inherit !important;
 }
 
 [data-message-preview="true"] .message-html-root br {
@@ -2259,6 +2264,28 @@ mark.chat-text-highlight,
 
 .step-enter {
   animation: claw-step-enter 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Cmd+K search: ease a recent/restored query into the input instead of an abrupt pop. */
+@keyframes search-seed-fill-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.search-seed-fill-in {
+  animation: search-seed-fill-in 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .search-seed-fill-in {
+    animation: none;
+  }
 }
 
 .dot-animate span {
@@ -5240,4 +5267,141 @@ img.inline-emoji,
    can render over the following message rows.  */
 [data-testid="virtuoso-item-list"] [data-index]:has([data-input-id]) {
   z-index: 10;
+}
+
+@property --tab-on {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 1;
+}
+@property --tab-hover {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+
+:root {
+  --tab-off: 0.4;
+}
+
+.streams-nav {
+  --tab-hover: 0;
+  transition: --tab-hover 0s;
+}
+
+.streams-nav:hover,
+.streams-nav:has(:focus-visible) {
+  --tab-hover: 1;
+  transition: --tab-hover 140ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .streams-nav {
+    transition: none;
+  }
+}
+
+.streams-nav-tab {
+  color: hsl(var(--muted-foreground) / var(--tab-off));
+  color: color-mix(
+    in oklab,
+    hsl(var(--muted-foreground) / var(--tab-off)),
+    hsl(var(--foreground)) calc(max(var(--tab-on), var(--tab-hover)) * 100%)
+  );
+  transition-property: transform;
+}
+
+@property --fade-x-start {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 32px;
+}
+@property --fade-x-end {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 32px;
+}
+@property --streams-fade-start {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@property --streams-fade-end {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+.streams-fade-x {
+  --fade-x: 32px;
+  --fade-x-start: var(--fade-x);
+  --fade-x-end: var(--fade-x);
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 var(--streams-fade-start),
+    #000 calc(100% - var(--streams-fade-end)),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 var(--streams-fade-start),
+    #000 calc(100% - var(--streams-fade-end)),
+    transparent 100%
+  );
+}
+@supports (animation-timeline: scroll()) {
+  .streams-fade-x {
+    animation:
+      streams-fade-start linear both,
+      streams-fade-end linear both;
+    animation-timeline: scroll(self inline), scroll(self inline);
+    animation-range:
+      0 var(--fade-x-start),
+      calc(100% - var(--fade-x-end)) 100%;
+  }
+  @keyframes streams-fade-start {
+    from {
+      --streams-fade-start: 0px;
+    }
+    to {
+      --streams-fade-start: var(--fade-x-start);
+    }
+  }
+  @keyframes streams-fade-end {
+    from {
+      --streams-fade-end: var(--fade-x-end);
+    }
+    to {
+      --streams-fade-end: 0px;
+    }
+  }
+}
+
+/* Create-ticket footer chips render through EntitySelector's shared trigger, which is
+   rounded-[6px] h-7 everywhere else in the product. The canvas specifies fully-rounded
+   28px pills for this row only, so scope the override instead of restyling the trigger. */
+[data-ticket-chip-row] button,
+[data-ticket-chip-row] [role="button"],
+[data-ticket-chip-row] button > div,
+[data-ticket-chip-row] > div > div {
+  border-radius: 9999px;
+}
+
+/* Canvas shows the channel/board pickers with a chevron-DOWN (dropdown affordance).
+   EntitySelector hardcodes ChevronRight for every selector in the product, so rotate
+   it for this row only rather than changing the shared trigger. */
+[data-ticket-context-row] button > svg:last-child,
+[data-ticket-context-row] [role="button"] > svg:last-child,
+[data-ticket-context-row] [role="combobox"] > svg:last-child {
+  transform: rotate(90deg);
+}
+
+/* Canvas gives the channel/board pickers a 34px pill; EntitySelector's shared
+   trigger is h-7 (28px) for the rest of the product. */
+[data-ticket-context-row] button,
+[data-ticket-context-row] [role="button"],
+[data-ticket-context-row] [role="combobox"] {
+  height: 34px !important;
 }

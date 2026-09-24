@@ -5,6 +5,21 @@ export interface McpToolInfo {
   readonly serviceName?: string;
   readonly backendId?: string;
   readonly selectionKey?: string;
+  /**
+   * The tool DECLARES that it never mutates anything.
+   *
+   * Without a declaration, claw's open-palette gate falls back to guessing
+   * risk from the name (`classifyToolRisk`), which leans write on purpose —
+   * and that heuristic reads "star" as a mutation, so read-only tools like
+   * `github-list-stargazers` get refused by a read palette. Set this only for
+   * tools that genuinely cannot write; it is the source of record that
+   * overrides the guess.
+   *
+   * NOT inferable from a connector's `writeTools`: that list is the
+   * human-approval allowlist (GitHub gates 3 tools), so "absent from it"
+   * would wrongly mark `create_issue` read-only.
+   */
+  readonly readOnly?: boolean;
 }
 
 export interface McpServerTools {

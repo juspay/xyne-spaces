@@ -1,6 +1,11 @@
+import type {
+  CreateSdlcPullRequestInput,
+  CreateSdlcVcsCredentialInput,
+  UpdateSdlcVcsCredentialInput,
+} from '@xyne/shared';
 import type { SdlcActor } from '../types';
 
-export type VcsProvider = 'GITHUB';
+export type VcsProvider = 'GITHUB' | 'BITBUCKET_SERVER';
 export type VcsCapability = 'READ_REPOSITORY' | 'PUSH_BRANCH' | 'CREATE_PULL_REQUEST';
 export type CapabilityState =
   | 'PROVEN'
@@ -22,6 +27,8 @@ export interface CapabilityEvidence {
 
 export interface ParsedRepository {
   provider: VcsProvider;
+  host: string;
+  /** GitHub owner, or Bitbucket project key. */
   owner: string;
   name: string;
   canonicalUrl: string;
@@ -30,6 +37,8 @@ export interface ParsedRepository {
 
 export interface ValidatedCredential {
   identityLogin: string;
+  accountName: string;
+  accountEmail: string;
 }
 
 export interface RepositoryReach {
@@ -51,16 +60,17 @@ export interface GitAuthentication {
   password: string;
 }
 
-export interface DraftPullRequestInput {
+export interface PullRequestInput {
   owner: string;
   repository: string;
   title: string;
   body: string;
   head: string;
   base: string;
+  draft: boolean;
 }
 
-export interface DraftPullRequestResult {
+export interface PullRequestResult {
   url: string;
   number: number;
   draft: boolean;
@@ -99,16 +109,14 @@ export interface VcsProviderAdapter {
   parseRepositoryUrl(url: string): ParsedRepository;
   validateCredential(token: string): Promise<ValidatedCredential>;
   repositoryReach(token: string): Promise<RepositoryReach>;
+  searchRepositories(token: string, query: string, limit: number): Promise<ParsedRepository[]>;
   inspectRepository(input: {
     repository: ParsedRepository;
     baseBranch?: string;
     token?: string;
   }): Promise<RepositoryInspection>;
-  buildGitAuthentication(token: string): GitAuthentication;
-  createDraftPullRequest(
-    token: string,
-    input: DraftPullRequestInput
-  ): Promise<DraftPullRequestResult>;
+  buildGitAuthentication(credential: { token: string; identityLogin: string | null }): GitAuthentication;
+  createPullRequest(token: string, input: PullRequestInput): Promise<PullRequestResult>;
   inspectPullRequest(
     token: string,
     repository: ParsedRepository,
@@ -155,13 +163,14 @@ export interface RepositoryAccessCheckResult {
 
 export interface SdlcVcs {
   listCredentials(actor: SdlcActor): Promise<unknown[]>;
-  configureCredential(
+  createCredential(actor: SdlcActor, input: CreateSdlcVcsCredentialInput): Promise<unknown>;
+  updateCredential(
     actor: SdlcActor,
-    provider: VcsProvider,
-    input: { token: string }
+    credentialId: string,
+    input: UpdateSdlcVcsCredentialInput
   ): Promise<unknown>;
-  revalidateCredential(actor: SdlcActor, provider: VcsProvider): Promise<unknown>;
-  disconnectCredential(actor: SdlcActor, provider: VcsProvider): Promise<void>;
+  revalidateCredential(actor: SdlcActor, credentialId: string): Promise<unknown>;
+  deleteCredential(actor: SdlcActor, credentialId: string): Promise<void>;
   checkRepositoryAccess(
     actor: SdlcActor,
     repoId: string,
@@ -177,16 +186,7 @@ export interface SdlcVcs {
     repoId: string,
     capabilities: VcsCapability[]
   ): Promise<void>;
-  createDraftPullRequest(input: {
-    repoId: string;
-    title: string;
-    body: string;
-    head: string;
-    base: string;
-    commitHash: string;
-    interactiveGrant: string;
-    conversationId: string;
-  }): Promise<DraftPullRequestResult>;
+  createPullRequest(input: CreateSdlcPullRequestInput): Promise<PullRequestResult>;
   inspectPullRequest(repoId: string, number: number): Promise<PullRequestInspection>;
   resolveBaseBranchHead(repoId: string): Promise<string>;
   listBaseBranchFirstParentHistory(repoId: string): Promise<FirstParentHistory>;

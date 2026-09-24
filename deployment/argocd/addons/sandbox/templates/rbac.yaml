@@ -1,0 +1,44 @@
+{{- if .Values.rbac.enabled }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ .Values.claw.name }}-sandboxclaims
+  labels:
+    {{- include "sandbox.labels" . | nindent 4 }}
+rules:
+  - apiGroups:
+      - extensions.agents.x-k8s.io
+    resources:
+      - sandboxclaims
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - delete
+      - patch
+      - update
+  - apiGroups:
+      - agents.x-k8s.io
+    resources:
+      - sandboxes
+    verbs:
+      - get
+      - list
+      - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .Values.claw.name }}-sandboxclaims
+  labels:
+    {{- include "sandbox.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ .Values.claw.name }}-sandboxclaims
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.claw.serviceAccount }}
+    namespace: {{ .Values.namespace }}
+{{- end }}

@@ -2,7 +2,7 @@ import { Server as SocketIOServer, Socket } from 'socket.io';
 import { NotificationDeliveryMethod, NotificationType, UserPresenceStatus } from '@xyne/shared';
 import { Server as HttpServer } from 'http';
 
-import { redisService, ChatMessage, PresenceEvent, OrgMemberEvent, TicketCountsEvent } from './redisService';
+import { redisService, ChatMessage, PresenceEvent, OrgMemberEvent, TicketCountsEvent, LabelUnreadCountsEvent } from './redisService';
 import { typingService, TypingUser } from './typingService';
 import { userStatusService } from './userStatusService';
 import { ChannelRepository } from '../database/repositories/channelRepository';
@@ -44,6 +44,10 @@ interface SubscribeToChannelsData {
 type TicketCountsRoomType = 'project' | 'board' | 'user' | 'group';
 
 interface TicketCountsRoomSubscriptionData {
+  room: string;
+}
+
+interface LabelUnreadCountsRoomSubscriptionData {
   room: string;
 }
 
@@ -205,6 +209,8 @@ class WebSocketService {
     this.setupPresenceSubscription();
 
     void this.setupTicketCountsSubscription();
+
+    void this.setupLabelUnreadCountsSubscription();
 
     logger.info('WebSocket server initialized');
   }
@@ -416,6 +422,16 @@ class WebSocketService {
     // Handle ticket count room unsubscription
     socket.on('unsubscribe_from_ticket_counts', (data: TicketCountsRoomSubscriptionData) => {
       this.handleTicketCountsUnsubscription(socket, data.room);
+    });
+
+    // Handle label unread count room subscription (desk label badges)
+    socket.on('subscribe_to_label_unread_counts', (data: LabelUnreadCountsRoomSubscriptionData) => {
+      void this.handleLabelUnreadCountsSubscription(socket, data?.room);
+    });
+
+    // Handle label unread count room unsubscription
+    socket.on('unsubscribe_from_label_unread_counts', (data: LabelUnreadCountsRoomSubscriptionData) => {
+      this.handleLabelUnreadCountsUnsubscription(socket, data.room);
     });
 
     // Handle user status update (ONLINE/AWAY/OFFLINE)
@@ -1639,6 +1655,163 @@ class WebSocketService {
     const members = this.io?.sockets.adapter.rooms.get(room)?.size ?? 0;
     logger.info(
       `[TICKET-COUNTS] Socket ${socket.id} (user ${socket.userId}) left "${room}" — room now has ${members} member(s)`,
+    );
+  }
+
+  // Desk label unread badges: one room per channel. The payload carries no user data,
+  // but joining still requires channel participation — the same gate as the
+  // GET/POST /conversation-labels/unread-counts endpoints — so a socket can't watch
+  // another desk's activity.
+  private getLabelUnreadCountsRoomName(channelId: string): string {
+    return `label-unread-counts:channel:${channelId}`;
+  }
+
+  /**
+   * Per-process coalescing window for label-unread publishes. A single write fans out to
+   * several producers (ticketService, ticketRepository, the tickets side-effect handler,
+   * email ingest), and every publish makes every socket in the room refetch the grouped
+   * count. Collapsing a channel's calls into one trailing publish per window bounds that
+   * refetch rate per desk regardless of write volume.
+   */
+  private static readonly LABEL_UNREAD_COUNTS_COALESCE_MS = 1_000;
+  private pendingLabelUnreadCountsPublishes = new Set<string>();
+
+  broadcastLabelUnreadCountsUpdate(channelId: string): void {
+    if (!channelId) return;
+    // Already scheduled for this window: the trailing publish covers this write too, since
+    // clients refetch the full count rather than applying a delta.
+    if (this.pendingLabelUnreadCountsPublishes.has(channelId)) return;
+    this.pendingLabelUnreadCountsPublishes.add(channelId);
+
+    const timer = setTimeout(() => {
+      this.pendingLabelUnreadCountsPublishes.delete(channelId);
+      this.publishLabelUnreadCountsUpdate(channelId);
+    }, WebSocketService.LABEL_UNREAD_COUNTS_COALESCE_MS);
+    // Don't hold a worker or test process open just to deliver a badge refresh.
+    timer.unref?.();
+  }
+
+  private publishLabelUnreadCountsUpdate(channelId: string): void {
+    // Published, not emitted — mirrors broadcastTicketCountsUpdate. Room
+    // membership lives in each pod's in-memory Socket.IO adapter, and many
+    // producers run in the worker process (desk auto-label automations, label
+    // backfill) where `this.io` is null. The event goes out on Redis and comes
+    // back to EVERY pod through setupLabelUnreadCountsSubscription, which does
+    // the local emit.
+    const event: LabelUnreadCountsEvent = {
+      channelId,
+      timestamp: new Date().toISOString(),
+    };
+
+    logger.debug(
+      `[LABEL-UNREAD-COUNTS] Publishing update for channel ${channelId} to room ${this.getLabelUnreadCountsRoomName(channelId)}`,
+    );
+
+    void redisService.broadcastLabelUnreadCountsEvent(event);
+  }
+
+  private async setupLabelUnreadCountsSubscription(): Promise<void> {
+    try {
+      logger.info('[LABEL-UNREAD-COUNTS] Setting up global label unread counts subscription...');
+
+      await redisService.subscribeToLabelUnreadCountsEvents((event: LabelUnreadCountsEvent) => {
+        this.handleLabelUnreadCountsEvent(event);
+      });
+
+      logger.info('[LABEL-UNREAD-COUNTS] Global label unread counts subscription active');
+    } catch (error) {
+      logger.error('[LABEL-UNREAD-COUNTS] Error setting up label unread counts subscription:', error);
+    }
+  }
+
+  private handleLabelUnreadCountsEvent(event: LabelUnreadCountsEvent): void {
+    // Worker processes subscribe too but hold no sockets — nothing to deliver to.
+    if (!this.io) {
+      logger.debug(
+        `[LABEL-UNREAD-COUNTS] Received event for channel ${event.channelId} but this process has no websocket server — nothing to deliver`,
+      );
+      return;
+    }
+
+    const room = this.getLabelUnreadCountsRoomName(event.channelId);
+
+    // Counted before emitting, so the log says how many sockets actually
+    // received it (mirrors handleTicketCountsEvent).
+    const recipients = this.io.sockets.adapter.rooms.get(room)?.size ?? 0;
+    this.io.to(room).emit('label_unread_counts_updated', event);
+
+    if (recipients > 0) {
+      logger.debug(
+        `[LABEL-UNREAD-COUNTS] Delivered update for channel ${event.channelId} to ${recipients} socket(s) [${room}=${recipients}]`,
+      );
+      return;
+    }
+
+    logger.debug(
+      `[LABEL-UNREAD-COUNTS] No local subscribers for channel ${event.channelId} [${room}=0]`,
+    );
+  }
+
+  private async handleLabelUnreadCountsSubscription(
+    socket: AuthenticatedSocket,
+    room: string,
+  ): Promise<void> {
+    if (!room || typeof room !== 'string') {
+      logger.warn(
+        `[LABEL-UNREAD-COUNTS] Ignored subscribe with no room from user ${socket.userId} (socket ${socket.id})`,
+      );
+      return;
+    }
+
+    // Only allow well-formed label-unread-counts rooms — never an arbitrary room string.
+    if (!/^label-unread-counts:channel:[^:]+$/.test(room)) {
+      logger.warn(`[LABEL-UNREAD-COUNTS] Rejected malformed room "${room}" from user ${socket.userId}`);
+      return;
+    }
+
+    const channelId = room.slice('label-unread-counts:channel:'.length);
+    if (!(await this.isLabelUnreadCountsChannelMember(socket, channelId))) {
+      logger.warn(
+        `[LABEL-UNREAD-COUNTS] Rejected subscribe to "${room}" from user ${socket.userId}: not a member of the channel`,
+      );
+      return;
+    }
+
+    socket.join(room);
+
+    // Logged because its ABSENCE is the whole diagnosis (same reason as
+    // ticket-counts): a subscribe frame can leave the browser and never reach
+    // this handler, leaving the client subscribed-in-name-only forever.
+    const members = this.io?.sockets.adapter.rooms.get(room)?.size ?? 0;
+    logger.info(
+      `[LABEL-UNREAD-COUNTS] Socket ${socket.id} (user ${socket.userId}) joined "${room}" — room now has ${members} member(s)`,
+    );
+  }
+
+  /** Mirrors assertChannelMembership: same workspace AND a channel participant (fail-closed). */
+  private async isLabelUnreadCountsChannelMember(
+    socket: AuthenticatedSocket,
+    channelId: string,
+  ): Promise<boolean> {
+    try {
+      if (!socket.workspaceId) return false;
+      const channel = await repositories.channels.findById(channelId);
+      if (!channel || channel.workspaceId !== socket.workspaceId) return false;
+      return await repositories.channelParticipants.isParticipant(channelId, socket.userId);
+    } catch (error) {
+      logger.error(`[LABEL-UNREAD-COUNTS] Membership check failed for channel ${channelId}:`, error);
+      return false;
+    }
+  }
+
+  private handleLabelUnreadCountsUnsubscription(socket: AuthenticatedSocket, room: string): void {
+    if (!room) return;
+
+    socket.leave(room);
+
+    const members = this.io?.sockets.adapter.rooms.get(room)?.size ?? 0;
+    logger.info(
+      `[LABEL-UNREAD-COUNTS] Socket ${socket.id} (user ${socket.userId}) left "${room}" — room now has ${members} member(s)`,
     );
   }
 

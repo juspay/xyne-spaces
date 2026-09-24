@@ -18,6 +18,7 @@ import {
   $createParagraphNode,
   PASTE_COMMAND,
   COMMAND_PRIORITY_LOW,
+  type LexicalEditor,
 } from 'lexical';
 import {
   FilterChipNode,
@@ -64,6 +65,7 @@ interface LexicalSearchInputProps {
   availableDates?: Array<{ id: string; name: string }>;
   availableBoards?: Array<{ id: string; name: string }>;
   availableMentionTargets?: Array<{ id: string; name: string; type: ChipType }>;
+  availableUserMentionItems?: Array<{ id: string; name: string; email?: string; type?: ChipType }>;
   className?: string;
   open?: boolean;
   mentionSearchType?: ChipType | null;
@@ -114,6 +116,31 @@ function $isEditorSeedable(): boolean {
   const root = $getRoot();
   if ($rootHasFilterChip(root)) return false;
   return root.getTextContent().trim().length === 0;
+}
+
+const SEED_FILL_ANIMATION_CLASS = 'search-seed-fill-in';
+const SEED_FILL_MAX_FRAMES = 5;
+
+// One-shot fade/slide when a restored query seeds the input, so the chips + text ease in instead
+// of popping. Runs on every seed path — recents replay and history-back restore alike. On a fresh
+// open (history-back) the editor root can attach a frame late, so wait briefly for it rather than
+// dropping the animation. Never runs on normal typing.
+function playSeedFillAnimation(editor: LexicalEditor, framesWaited = 0): void {
+  const rootElement = editor.getRootElement();
+  if (!rootElement) {
+    if (framesWaited < SEED_FILL_MAX_FRAMES) {
+      requestAnimationFrame(() => playSeedFillAnimation(editor, framesWaited + 1));
+    }
+    return;
+  }
+  rootElement.classList.remove(SEED_FILL_ANIMATION_CLASS);
+  void rootElement.offsetWidth; // restart the animation if a prior one is still running
+  rootElement.classList.add(SEED_FILL_ANIMATION_CLASS);
+  const handleAnimationEnd = (): void => {
+    rootElement.classList.remove(SEED_FILL_ANIMATION_CLASS);
+    rootElement.removeEventListener('animationend', handleAnimationEnd);
+  };
+  rootElement.addEventListener('animationend', handleAnimationEnd);
 }
 
 function InitialMentionPlugin({
@@ -179,9 +206,13 @@ function InitialQueryPlugin({
     }
 
     const queryKey = `${initialQuery.mentions.map(m => `${m.id}-${m.prefix}`).join('|')}::${initialQuery.text}`;
-    if (appliedRef.current === queryKey) return;
+    // Skip only when the seeded content is still in the editor. If the user cleared it and then
+    // reselected the same query (same key), the editor is empty again and must be re-seeded.
+    const editorAlreadyHasContent = editor.getEditorState().read(() => !$isEditorSeedable());
+    if (appliedRef.current === queryKey && editorAlreadyHasContent) return;
 
     const timeoutId = setTimeout(() => {
+      let didSeed = false;
       editor.update(() => {
         // Non-destructive: never wipe user input on re-run (e.g. a parent
         // re-render that re-triggers this effect after the user has typed).
@@ -190,6 +221,7 @@ function InitialQueryPlugin({
           return;
         }
         appliedRef.current = queryKey;
+        didSeed = true;
 
         const root = $getRoot();
         root.clear();
@@ -207,6 +239,7 @@ function InitialQueryPlugin({
         const lastChild = paragraph.getLastChild();
         lastChild?.selectEnd();
       });
+      if (didSeed) playSeedFillAnimation(editor);
     }, 50);
 
     return () => clearTimeout(timeoutId);
@@ -223,22 +256,28 @@ function PlaceholderPlugin({
   offsetClass?: string;
 }) {
   const [editor] = useLexicalComposerContext();
-  const [showPlaceholder, setShowPlaceholder] = useState(true);
+  const placeholderRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    return editor.registerUpdateListener(() => {
+    // Toggle visibility directly on the node (not via React state) so a seeded query hides the
+    // placeholder in the same commit its content appears. An async re-render would let the
+    // placeholder linger under the fill animation and overlap the text.
+    const syncVisibility = (): void => {
       editor.getEditorState().read(() => {
-        const root = $getRoot();
-        const isEmpty = root.getTextContent().trim().length === 0;
-        setShowPlaceholder(isEmpty);
+        const isEmpty = $getRoot().getTextContent().trim().length === 0;
+        const element = placeholderRef.current;
+        if (element) element.style.visibility = isEmpty ? 'visible' : 'hidden';
       });
-    });
+    };
+    syncVisibility();
+    return editor.registerUpdateListener(syncVisibility);
   }, [editor]);
 
-  if (!showPlaceholder || !placeholder) return null;
+  if (!placeholder) return null;
 
   return (
     <div
+      ref={placeholderRef}
       className={`absolute ${offsetClass} top-1/2 -translate-y-1/2 text-sm text-muted-foreground pointer-events-none`}
     >
       {placeholder}
@@ -477,11 +516,7 @@ function SetTextPlugin({
   return null;
 }
 
-function CursorPositionPlugin({
-  onPositionChange,
-}: {
-  onPositionChange: (pos: { left: number; top: number }) => void;
-}) {
+function CursorPositionPlugin({ onPositionChange }: { onPositionChange: (left: number) => void }) {
   const [editor] = useLexicalComposerContext();
 
   useEffect(() => {
@@ -495,10 +530,13 @@ function CursorPositionPlugin({
         const containerRect = editorEl.closest('[data-suffix-anchor]')?.getBoundingClientRect();
         if (!containerRect) return;
 
-        // Anchor the suffix to the RIGHT EDGE of the typed text, not the caret \u2014 keying off
-        // the caret made the suffix collapse onto the text when the caret moved off the end.
-        // Measure the last rendered text node (collapsing a range over the block element
-        // lands on a line boundary, not the inline text end).
+        // Only the horizontal offset is measured. The suffix is single-line ghost text pinned to
+        // the row center in CSS (top-1/2), exactly like the placeholder. Measuring a vertical
+        // anchor from the caret or text drifts, because a chip inflates the line box and shifts the
+        // text's vertical center between a plain-text query and a chip query.
+        // Hug the RIGHT EDGE of the typed text; getClientRects() yields one rect per visual line,
+        // and the LAST is the end of the last wrapped line. Chips-only (no trailing text) uses the
+        // caret's x, which sits right after the chip.
         const walker = document.createTreeWalker(editorEl, NodeFilter.SHOW_TEXT);
         let lastTextNode: Node | null = null;
         while (walker.nextNode()) lastTextNode = walker.currentNode;
@@ -506,29 +544,18 @@ function CursorPositionPlugin({
         if (lastTextNode && (lastTextNode.textContent ?? '').length > 0) {
           const range = document.createRange();
           range.selectNodeContents(lastTextNode);
-          // getClientRects() yields one rect per visual line; the LAST is the end of the last
-          // wrapped line. The node's bounding box would span every line and drop the suffix in
-          // the middle of a multi-line (wrapped) query. Center on that line's own vertical mid.
           const rects = range.getClientRects();
           const lastRect = rects.length > 0 ? rects[rects.length - 1] : undefined;
           const rect = lastRect ?? range.getBoundingClientRect();
-          onPositionChange({
-            left: rect.right - containerRect.left,
-            top: rect.top + rect.height / 2 - containerRect.top,
-          });
+          onPositionChange(rect.right - containerRect.left);
           return;
         }
 
-        // No text yet (e.g. only mention chips) \u2014 fall back to the caret position.
         const selection = window.getSelection();
         if (!selection || selection.rangeCount === 0) return;
         const caret = selection.getRangeAt(0).cloneRange();
         caret.collapse(false);
-        const caretRect = caret.getBoundingClientRect();
-        onPositionChange({
-          left: caretRect.left - containerRect.left,
-          top: caretRect.top + caretRect.height / 2 - containerRect.top,
-        });
+        onPositionChange(caret.getBoundingClientRect().left - containerRect.left);
       });
     });
   }, [editor, onPositionChange]);
@@ -655,6 +682,7 @@ export function LexicalSearchInput({
   availableDates = [],
   availableBoards = [],
   availableMentionTargets = [],
+  availableUserMentionItems = [],
   enableToTrigger = false,
   className,
   open,
@@ -681,9 +709,10 @@ export function LexicalSearchInput({
 }: LexicalSearchInputProps) {
   const { isMobile } = usePlatform();
   const showLeadingIcon = !hideSearchIcon && !isMobile;
-  const [suffixPos, setSuffixPos] = useState({ left: 0, top: 0 });
-  const handlePositionChange = useCallback((pos: { left: number; top: number }) => {
-    setSuffixPos(pos);
+  // Only the horizontal offset is dynamic; the suffix is pinned to the row center in CSS.
+  const [suffixLeft, setSuffixLeft] = useState(0);
+  const handlePositionChange = useCallback((left: number) => {
+    setSuffixLeft(left);
   }, []);
 
   const initialConfig = {
@@ -718,8 +747,8 @@ export function LexicalSearchInput({
                 />
                 {autocompleteSuffix && (
                   <span
-                    className='text-muted-foreground pointer-events-none text-sm absolute -translate-y-1/2 whitespace-nowrap'
-                    style={{ left: `${suffixPos.left}px`, top: `${suffixPos.top}px` }}
+                    className='text-muted-foreground pointer-events-none text-sm absolute top-1/2 -translate-y-1/2 whitespace-nowrap'
+                    style={{ left: `${suffixLeft}px` }}
                   >
                     {autocompleteSuffix}
                   </span>
@@ -786,6 +815,7 @@ export function LexicalSearchInput({
             availableDates={availableDates}
             availableBoards={availableBoards}
             availableMentionTargets={availableMentionTargets}
+            availableUserMentionItems={availableUserMentionItems}
             {...(mentionSearchType !== undefined ? { mentionSearchType } : {})}
             {...(selectedMentionIndex !== undefined ? { selectedMentionIndex } : {})}
             {...(setSelectedMentionIndex ? { setSelectedMentionIndex } : {})}

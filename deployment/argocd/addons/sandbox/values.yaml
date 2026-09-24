@@ -1,0 +1,62 @@
+namespace: xyne
+
+template:
+  enabled: true
+  name: kata-workspace-template
+  image: ""
+  imagePullPolicy: IfNotPresent
+  runtimeClassName: kata-qemu
+  vcpus: "2"
+  memory: "5120"
+  port: 8888
+  privileged: true
+  resources:
+    requests:
+      cpu: "2"
+      memory: 5Gi
+    limits:
+      cpu: "2"
+      memory: 5Gi
+  readinessProbe:
+    tcpSocket:
+      port: 8888
+    initialDelaySeconds: 10
+    periodSeconds: 3
+    failureThreshold: 20
+  env: {}
+  noProxy: localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.svc,.cluster.local
+  annotations:
+    sidecar.istio.io/inject: "false"
+
+warmPool:
+  enabled: true
+  name: kata-workspace-warmpool
+  replicas: 1
+
+policy:
+  enabled: true
+  allowedEgress: []
+  dns:
+    namespace: kube-system
+    podSelector:
+      k8s-app: kube-dns
+    cidrs: []
+
+rbac:
+  enabled: true
+
+router:
+  name: xyne-sandbox-router
+  port: 8080
+
+egressProxy:
+  name: xyne-egress-proxy
+  port: 3128
+
+claw:
+  name: xyne-claw
+  serviceAccount: xyne-claw
+
+scheduling:
+  nodeSelector: {}
+  tolerations: []

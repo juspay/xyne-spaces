@@ -14,11 +14,35 @@ import { useMutation } from '@tanstack/react-query';
 import { appsService } from '../../services/Apps/appsService';
 import { mutators } from '../../zero/mutators';
 import { toast } from 'sonner';
-import { Plus, AppWindow, ChevronLeft, ChevronRight, Search } from 'lucide-react';
+import {
+  Plus,
+  AppWindow,
+  ChevronLeft,
+  ChevronRight,
+  Search,
+  Info,
+  X,
+  ExternalLink,
+} from 'lucide-react';
 import Input from '../../components/ui/Input/Input';
 import { AccessType } from '@xyne/shared';
+import { ResizableGroup, Panel, Separator } from '../../components/ui/Resizable/Resizable';
+import CanvasScreen from '../../components/Canvas/CanvasScreen';
 
 const ITEMS_PER_PAGE = 15;
+
+// Guide canvas opened by the info button next to the view tabs. The panel renders it with
+// `CanvasScreen` — the same component the /chat/canvas route mounts — so it reads as part of
+// this screen rather than a second app in a frame. The canvas loads through the normal
+// access-checked query, so it has to stay shared workspace-wide or it renders empty for others.
+const APPS_GUIDE_CANVAS_ID = 'bb06b839-d64e-4a96-a2eb-33bbf7f57c9f';
+const APPS_GUIDE_CANVAS_PATH = `/chat/canvas/${APPS_GUIDE_CANVAS_ID}`;
+
+// Guide panel width, in pixels. Pixels rather than percentages so the width the user drags to
+// survives the surrounding container resizing; paired with `preserve-pixel-size` on the Panel.
+const APPS_GUIDE_DEFAULT_WIDTH = 520;
+const APPS_GUIDE_MIN_WIDTH = 360;
+const APPS_GUIDE_MAX_WIDTH = 900;
 
 type AppsView = 'installed' | 'org' | 'marketplace';
 
@@ -42,6 +66,9 @@ const AppsScreen = (): ReactElement => {
     : 'org';
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [isGuideOpen, setIsGuideOpen] = useState(false);
+
+  const handleToggleGuide = (): void => setIsGuideOpen(open => !open);
 
   // Per-view cursor history so paging in one tab doesn't corrupt another.
   const cursorKey = `appsCursorHistory_${view}`;
@@ -369,169 +396,247 @@ const AppsScreen = (): ReactElement => {
       className='h-full w-full bg-background md:rounded-2xl overflow-hidden shadow-md'
     >
       <div className='h-full overflow-hidden'>
-        <div className='flex flex-col h-full'>
-          <div className='flex items-center justify-between p-6 border-b border-border bg-background'>
-            <div>
-              <h2 className='text-lg font-bold text-foreground'>Xyne Apps</h2>
-              <p className='text-xs text-muted-foreground mt-1'>
-                Manage your xyne-apps and their configurations
-              </p>
-            </div>
-            {canCreateApp && (
-              <Button
-                onClick={() => setIsCreateModalOpen(true)}
-                data-track-category='Apps'
-                data-track-name='OpenCreateAppModal'
-              >
-                <Plus size={16} className='mr-1' />
-                Create App
-              </Button>
-            )}
-          </div>
-
-          <Dialog
-            open={isCreateModalOpen}
-            onOpenChange={setIsCreateModalOpen}
-            title='Create New App'
-            description='Create a new xyne-app to integrate with your workspace'
-            className='max-w-lg max-h-[85vh]'
-          >
-            <CreateAppForm
-              onSuccess={() => setIsCreateModalOpen(false)}
-              onCancel={() => setIsCreateModalOpen(false)}
-            />
-          </Dialog>
-
-          {/* View tabs */}
-          <div className='flex items-center gap-1 px-6 pt-3 border-b border-border bg-background'>
-            {VIEW_TABS.map(tab => (
-              <button
-                key={tab.value}
-                type='button'
-                onClick={() => handleSelectView(tab.value)}
-                className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
-                  view === tab.value
-                    ? 'border-primary text-foreground'
-                    : 'border-transparent text-muted-foreground hover:text-foreground'
-                }`}
-                data-track-category='Apps'
-                data-track-name={`AppsView_${tab.value}`}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </div>
-
-          {/* Search Bar */}
-          <div className='px-6 py-3 border-b border-border bg-muted/50'>
-            <div className='relative max-w-md'>
-              <Search className='absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground' />
-              <Input
-                type='text'
-                placeholder='Search apps by name, description or created by...'
-                value={searchQuery}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                  setSearchQuery(e.target.value)
-                }
-                className='pl-10 h-9'
-                data-track-category='Apps'
-                data-track-name='SearchApps'
-              />
-            </div>
-          </div>
-
-          <div className='flex-1 overflow-y-auto p-4'>
-            {loading ? (
-              <div className='h-full flex items-center justify-center'>
-                <p className='text-muted-foreground'>Loading...</p>
-              </div>
-            ) : filteredApps && filteredApps.length > 0 ? (
-              <AppsTable
-                apps={filteredApps as ComponentProps<typeof AppsTable>['apps']}
-                currentUserId={user?.id ?? ''}
-                onInstall={handleInstallApp}
-                onReinstall={handleInstallApp}
-                onUpdateApp={handleUpdateApp}
-                onUpdateInstall={handleUpdateInstall}
-                onGetJwtToken={getJwtToken}
-                onGetSigningSecret={getSigningSecret}
-                onUploadPicture={handleUploadPicture}
-                userPermissions={permissions}
-                isInstalling={installAppMutation.isPending}
-                dataSource={view === 'installed' ? 'install' : 'app'}
-                installedVersionByAppId={effectiveInstalledVersionByAppId}
-                orgNamesById={effectiveOrgNamesById}
-                {...(view === 'org' ? { onPromote: handlePromoteApp } : {})}
-                canPromote={isXyneAppsAdmin}
-                isPromoting={isPromoting}
-              />
-            ) : (
-              <div className='text-center py-16'>
-                <div className='text-muted-foreground text-5xl mb-4'>
-                  <AppWindow size={48} className='mx-auto opacity-50' />
+        <ResizableGroup
+          orientation='horizontal'
+          className='flex h-full w-full'
+          id='apps-screen-group'
+          autoSaveId='apps-screen-guide'
+          panelIds={isGuideOpen ? ['apps-list', 'apps-guide'] : ['apps-list']}
+        >
+          <Panel id='apps-list' className='min-w-0'>
+            <div className='flex flex-col h-full'>
+              <div className='flex items-center justify-between p-6 border-b border-border bg-background'>
+                <div>
+                  <h2 className='text-lg font-bold text-foreground'>Xyne Apps</h2>
+                  <p className='text-xs text-muted-foreground mt-1'>
+                    Manage your xyne-apps and their configurations
+                  </p>
                 </div>
-                <h3 className='text-xl font-semibold text-foreground mb-2'>
-                  {searchQuery ? 'No matching apps found' : emptyCopy[view].title}
-                </h3>
-                <p className='text-muted-foreground'>
-                  {searchQuery ? 'Try adjusting your search query' : emptyCopy[view].subtitle}
-                </p>
+                {canCreateApp && (
+                  <Button
+                    onClick={() => setIsCreateModalOpen(true)}
+                    data-track-category='Apps'
+                    data-track-name='OpenCreateAppModal'
+                  >
+                    <Plus size={16} className='mr-1' />
+                    Create App
+                  </Button>
+                )}
               </div>
-            )}
-          </div>
 
-          {/* Search results count + load more */}
-          {isSearchMode && filteredApps.length > 0 && (
-            <div className='flex items-center justify-between px-6 py-3 border-t border-border bg-muted'>
-              <span className='text-sm text-muted-foreground'>
-                Showing {filteredApps.length} of {searchTotal}
-              </span>
-              {hasMore && (
-                <Button
-                  variant='outline'
-                  size='sm'
-                  onClick={loadMore}
+              <Dialog
+                open={isCreateModalOpen}
+                onOpenChange={setIsCreateModalOpen}
+                title='Create New App'
+                description='Create a new xyne-app to integrate with your workspace'
+                className='max-w-lg max-h-[85vh]'
+              >
+                <CreateAppForm
+                  onSuccess={() => setIsCreateModalOpen(false)}
+                  onCancel={() => setIsCreateModalOpen(false)}
+                />
+              </Dialog>
+
+              {/* View tabs */}
+              <div className='flex items-center gap-1 px-6 pt-3 border-b border-border bg-background'>
+                {VIEW_TABS.map(tab => (
+                  <button
+                    key={tab.value}
+                    type='button'
+                    onClick={() => handleSelectView(tab.value)}
+                    className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                      view === tab.value
+                        ? 'border-primary text-foreground'
+                        : 'border-transparent text-muted-foreground hover:text-foreground'
+                    }`}
+                    data-track-category='Apps'
+                    data-track-name={`AppsView_${tab.value}`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+                <button
+                  type='button'
+                  onClick={handleToggleGuide}
+                  aria-label='About Xyne Apps'
+                  aria-pressed={isGuideOpen}
+                  title='About Xyne Apps'
+                  className={`ml-auto -mb-px flex items-center justify-center rounded-md px-1.5 py-2 transition-colors ${
+                    isGuideOpen
+                      ? 'bg-muted text-foreground'
+                      : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                  }`}
                   data-track-category='Apps'
-                  data-track-name='LOAD_MORE_APPS'
-                  disabled={isSearching}
+                  data-track-name='ToggleAppsGuide'
                 >
-                  {isSearching ? 'Loading…' : 'Load more'}
-                </Button>
+                  <Info size={16} />
+                </button>
+              </div>
+
+              {/* Search Bar */}
+              <div className='px-6 py-3 border-b border-border bg-muted/50'>
+                <div className='relative max-w-md'>
+                  <Search className='absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground' />
+                  <Input
+                    type='text'
+                    placeholder='Search apps by name, description or created by...'
+                    value={searchQuery}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                      setSearchQuery(e.target.value)
+                    }
+                    className='pl-10 h-9'
+                    data-track-category='Apps'
+                    data-track-name='SearchApps'
+                  />
+                </div>
+              </div>
+
+              <div className='flex-1 overflow-y-auto p-4'>
+                {loading ? (
+                  <div className='h-full flex items-center justify-center'>
+                    <p className='text-muted-foreground'>Loading...</p>
+                  </div>
+                ) : filteredApps && filteredApps.length > 0 ? (
+                  <AppsTable
+                    apps={filteredApps as ComponentProps<typeof AppsTable>['apps']}
+                    currentUserId={user?.id ?? ''}
+                    onInstall={handleInstallApp}
+                    onReinstall={handleInstallApp}
+                    onUpdateApp={handleUpdateApp}
+                    onUpdateInstall={handleUpdateInstall}
+                    onGetJwtToken={getJwtToken}
+                    onGetSigningSecret={getSigningSecret}
+                    onUploadPicture={handleUploadPicture}
+                    userPermissions={permissions}
+                    isInstalling={installAppMutation.isPending}
+                    dataSource={view === 'installed' ? 'install' : 'app'}
+                    installedVersionByAppId={effectiveInstalledVersionByAppId}
+                    orgNamesById={effectiveOrgNamesById}
+                    {...(view === 'org' ? { onPromote: handlePromoteApp } : {})}
+                    canPromote={isXyneAppsAdmin}
+                    isPromoting={isPromoting}
+                  />
+                ) : (
+                  <div className='text-center py-16'>
+                    <div className='text-muted-foreground text-5xl mb-4'>
+                      <AppWindow size={48} className='mx-auto opacity-50' />
+                    </div>
+                    <h3 className='text-xl font-semibold text-foreground mb-2'>
+                      {searchQuery ? 'No matching apps found' : emptyCopy[view].title}
+                    </h3>
+                    <p className='text-muted-foreground'>
+                      {searchQuery ? 'Try adjusting your search query' : emptyCopy[view].subtitle}
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* Search results count + load more */}
+              {isSearchMode && filteredApps.length > 0 && (
+                <div className='flex items-center justify-between px-6 py-3 border-t border-border bg-muted'>
+                  <span className='text-sm text-muted-foreground'>
+                    Showing {filteredApps.length} of {searchTotal}
+                  </span>
+                  {hasMore && (
+                    <Button
+                      variant='outline'
+                      size='sm'
+                      onClick={loadMore}
+                      data-track-category='Apps'
+                      data-track-name='LOAD_MORE_APPS'
+                      disabled={isSearching}
+                    >
+                      {isSearching ? 'Loading…' : 'Load more'}
+                    </Button>
+                  )}
+                </div>
+              )}
+
+              {/* Pagination Controls */}
+              {(hasPreviousPage || hasNextPage) && !searchQuery && (
+                <div className='flex items-center justify-between px-6 py-3 border-t border-border bg-muted'>
+                  <Button
+                    variant='outline'
+                    size='sm'
+                    onClick={handlePreviousPage}
+                    data-track-category='Apps'
+                    data-track-name='APPS_PREV_PAGE'
+                    disabled={!hasPreviousPage}
+                    className='gap-1'
+                  >
+                    <ChevronLeft className='h-4 w-4' />
+                    Prev
+                  </Button>
+                  <span className='text-sm text-muted-foreground'>Page {currentPage}</span>
+                  <Button
+                    variant='outline'
+                    size='sm'
+                    onClick={handleNextPage}
+                    data-track-category='Apps'
+                    data-track-name='APPS_NEXT_PAGE'
+                    disabled={!hasNextPage}
+                    className='gap-1'
+                  >
+                    Next
+                    <ChevronRight className='h-4 w-4' />
+                  </Button>
+                </div>
               )}
             </div>
-          )}
+          </Panel>
 
-          {/* Pagination Controls */}
-          {(hasPreviousPage || hasNextPage) && !searchQuery && (
-            <div className='flex items-center justify-between px-6 py-3 border-t border-border bg-muted'>
-              <Button
-                variant='outline'
-                size='sm'
-                onClick={handlePreviousPage}
-                data-track-category='Apps'
-                data-track-name='APPS_PREV_PAGE'
-                disabled={!hasPreviousPage}
-                className='gap-1'
-              >
-                <ChevronLeft className='h-4 w-4' />
-                Prev
-              </Button>
-              <span className='text-sm text-muted-foreground'>Page {currentPage}</span>
-              <Button
-                variant='outline'
-                size='sm'
-                onClick={handleNextPage}
-                data-track-category='Apps'
-                data-track-name='APPS_NEXT_PAGE'
-                disabled={!hasNextPage}
-                className='gap-1'
-              >
-                Next
-                <ChevronRight className='h-4 w-4' />
-              </Button>
-            </div>
+          {/* Guide canvas, docked to the right of the apps list and drag-resizable */}
+          {isGuideOpen && (
+            <Separator className='group flex w-[2px] cursor-col-resize items-center justify-center transition-colors'>
+              <div className='h-full w-[2px] bg-border group-hover:bg-primary group-active:bg-primary' />
+            </Separator>
           )}
-        </div>
+          {isGuideOpen && (
+            <Panel
+              id='apps-guide'
+              defaultSize={APPS_GUIDE_DEFAULT_WIDTH}
+              minSize={APPS_GUIDE_MIN_WIDTH}
+              maxSize={APPS_GUIDE_MAX_WIDTH}
+              groupResizeBehavior='preserve-pixel-size'
+            >
+              <aside className='flex h-full w-full flex-col bg-background'>
+                <div className='flex items-center justify-between gap-2 px-4 py-3 border-b border-border'>
+                  <h3 className='text-sm font-semibold text-foreground truncate'>
+                    About Xyne Apps
+                  </h3>
+                  <div className='flex items-center gap-1'>
+                    <a
+                      href={APPS_GUIDE_CANVAS_PATH}
+                      target='_blank'
+                      rel='noreferrer'
+                      aria-label='Open guide in a new tab'
+                      title='Open in a new tab'
+                      className='rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground'
+                      data-track-category='Apps'
+                      data-track-name='OpenAppsGuideInNewTab'
+                    >
+                      <ExternalLink size={14} />
+                    </a>
+                    <button
+                      type='button'
+                      onClick={() => setIsGuideOpen(false)}
+                      aria-label='Close guide'
+                      title='Close'
+                      className='rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground'
+                      data-track-category='Apps'
+                      data-track-name='CloseAppsGuide'
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
+                </div>
+                <div className='min-h-0 flex-1 overflow-hidden'>
+                  <CanvasScreen canvasId={APPS_GUIDE_CANVAS_ID} showAskAiAction={false} />
+                </div>
+              </aside>
+            </Panel>
+          )}
+        </ResizableGroup>
       </div>
     </div>
   );

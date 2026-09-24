@@ -23,10 +23,11 @@ import {
   AlertCircle,
   ClipboardCheck,
   ArrowRight,
+  ArrowTurnLeftUp,
   ExternalLink as SquareArrowOutUpRight,
   GitBranch,
-  LockClose as Lock,
   LinkBrokenSlant as Unlink,
+  ThreeDotsMenuHorizontal,
 } from '@xyne/icons';
 import type { QueryResultType } from '@rocicorp/zero';
 import type {
@@ -64,6 +65,7 @@ import {
   deriveEtaManagementView,
   parseTicketEtaManagement,
   parseBoardEtaManagement,
+  resolveTicketDescription,
 } from '@xyne/shared';
 import { useNavigate, Link, useLocation, useNavigationType } from 'react-router-dom';
 import { usePlatform } from '../../../hooks/usePlatform';
@@ -72,6 +74,7 @@ import { useRouteContext } from '../../../hooks/useRouteContext';
 import { TicketActivity } from '../TicketActivity';
 import { buildStageVisitFormValues } from '../TicketActivity/formSubmission';
 import { UserSelector } from '../CreateTicketModal/UserSelector';
+import { resolveAssigneeRef } from '../../../hooks/useTicketAssignee';
 import { UserGroupSelector } from '../CreateTicketModal/UserGroupSelector';
 import { SubTicketModal } from '../SubTicketModal/SubTicketModal';
 import { CreateTicketModal } from '../CreateTicketModal/CreateTicketModal';
@@ -82,6 +85,8 @@ import { useChannel, useAllChannels } from '../../../hooks/useChannels';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import UserAvatar, { AvatarShape, AvatarSize } from '../../UserAvatar/UserAvatar';
 import { Selector } from './Selector';
+import { DetailChip, DetailChipButton, DetailChipLabel, DetailChipMarker } from './DetailChip';
+import { DetailFieldRow, DetailRowGate, DetailSection, DetailSectionGate } from './DetailSection';
 import { TicketPriorityIcon } from '../../../assets/icons';
 import { StageIndicator } from '../../../utils/board/stageStatusIcon';
 import { mutators } from '../../../zero/mutators';
@@ -91,9 +96,9 @@ import { useUsers } from '../../../hooks/useUsers';
 import { useUserGroups } from '../../../hooks/useUserGroup';
 import { useAuth } from '../../../hooks/useAuth';
 import {
-  useProjectTicketSearch,
+  useSubTicketLinkSearch,
   VESPA_MAX_BOARD_FILTER_VALUES,
-} from '../../../hooks/useProjectTicketSearch';
+} from '../../../hooks/useSubTicketLinkSearch';
 import { getSubTicketLinkErrorMessage, subTicketService } from '../../../services/subTicketService';
 import { globalClickTracker } from '../../../services/Analytics/globalClickTracker';
 import {
@@ -102,7 +107,6 @@ import {
 } from '../../../services/Analytics/ticketTracking';
 import { readTrackSource } from '../../../services/Analytics/trackSource';
 import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
-import { TicketTagsBadge } from '../../xyne-desk/EmailBody/TagsBadgePopover';
 import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
 import type { SelectorOption } from '../../ui/EntitySelector/EntitySelector.types';
 import {
@@ -118,6 +122,7 @@ import { getApiErrorMessage } from '../../../utils/apiError';
 import { surfaceMutationError } from '../../../utils/zeroMutationToast';
 import Button from '../../ui/Button';
 import { Dialog } from '../../ui/Dialog';
+import { Popover } from '../../ui/Popover/Popover';
 import { FileBubble } from '../../ui/FileBubble/FileBubble';
 import { StageFormModal } from '../StageFormModal/StageFormModal';
 import { StageFormInlinePanel } from '../StageFormInlinePanel/StageFormInlinePanel';
@@ -139,6 +144,8 @@ import {
   type ResolvedBoardAdditionalField,
   type LeftoverFieldValue,
 } from '../../../utils/board/boardFormEntityValues';
+import { resolveDisplayFormFields } from '../../../utils/board/resolveDisplayFormFields';
+import { AddToStreamButton } from '../../Streams/components/AddToStreamMenu/AddToStreamMenu';
 
 type SubTicketTreeMapping = QueryResultType<typeof queries.subTicketMappingsForTickets>[number];
 type SubTicketTreeSubTicket = NonNullable<SubTicketTreeMapping['subTicket']>;
@@ -449,6 +456,9 @@ const StageFormSubmissions: React.FC<StageFormSubmissionsProps> = ({ stageVisitF
 };
 const TICKET_ATTACHMENT_PREVIEW_LIMIT = 5;
 
+const EXPANDED_HEADER_ICON_BUTTON =
+  'size-[30px] rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground';
+
 // Debounce window for title/description auto-save while the user is typing.
 const FIELD_AUTOSAVE_DEBOUNCE_MS = 600;
 
@@ -456,11 +466,22 @@ interface TicketDetailsProps {
   ticketId: string;
   onNavigateToTicket?: (ticketId: string) => void;
   expandedView?: boolean;
+  /**
+   * Drop the back chevron and the ticket id from the expanded header.
+   *
+   * For hosts that already name the ticket in their own chrome and have no
+   * "back" to offer — a Streams column is the ticket, so the id would read
+   * twice and the chevron would point nowhere.
+   */
+  hideBackNav?: boolean;
+  onMinimize?: () => void;
   onFillRCA?: () => void;
   /** Display the current stage without exposing manual lifecycle transitions. */
   stageReadOnly?: boolean;
-  /** Show only the Sub-Tickets section, for hosts that give it its own tab. */
-  subTicketsOnly?: boolean;
+  /** Show only the Relationships section, for hosts that give it its own tab. */
+  relationshipsOnly?: boolean;
+  /** Drop the Relationships section — for hosts that render it in a sibling tab. */
+  hideRelationships?: boolean;
   /**
    * Where the open came from, for hosts that show a ticket without navigating
    * (the SDLC track list). Route-driven hosts leave it unset and TICKET_VIEWED
@@ -468,23 +489,6 @@ interface TicketDetailsProps {
    */
   trackSource?: string;
 }
-
-const TicketKeyValuePair = ({
-  ticketKey,
-  value,
-  className,
-}: {
-  ticketKey: string;
-  value: React.ReactElement;
-  className?: string;
-}): React.ReactElement => {
-  return (
-    <div className='flex flex-wrap items-center gap-2 w-fit'>
-      <span className='text-sm text-foreground w-[85px]'>{ticketKey}</span>
-      <div className={`text-sm text-foreground break-all ${className}`}>{value}</div>
-    </div>
-  );
-};
 
 interface ReleaseNotesButtonProps {
   metadata: { releaseNotesCanvasUrl?: string; isGeneratingReleaseNotes?: boolean } | null;
@@ -579,9 +583,12 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   ticketId,
   onNavigateToTicket,
   expandedView = false,
+  hideBackNav = false,
+  onMinimize,
   onFillRCA,
   stageReadOnly = false,
-  subTicketsOnly = false,
+  relationshipsOnly = false,
+  hideRelationships = false,
   trackSource,
 }) => {
   const zero = useZero();
@@ -589,7 +596,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   const shareableOrigin = useShareableOrigin();
   const location = useLocation();
   const navigationType = useNavigationType();
-  const { isMobile } = usePlatform();
+  const { isMobile, isMac: isMacPlatform } = usePlatform();
   const { baseRoute, buildChannelRoute } = useRouteContext();
 
   // State declarations
@@ -1349,7 +1356,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   const [boards] = useCachedQuery(
     queries.boardsListByProject({ projectId: ticket?.projectId || '' }),
     {
-      // Also needed by the sub-ticket picker, which must know each board's type.
+      // Eager on manual boards too: TicketActivity names boards from this list.
       enabled:
         !!ticket?.projectId &&
         (hasBoardDropdownOpened || isManualSubTicketBoard(boardData?.boardType)),
@@ -1365,6 +1372,26 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   const currentStageInfo = useMemo(() => {
     return stages?.find(s => s.name === ticket?.stageName);
   }, [stages, ticket?.stageName]);
+
+  const stageRingLabel = useMemo(() => {
+    if (!stages || stages.length === 0 || !ticket?.stageName) return '';
+    const index = stages.findIndex(s => s.name === ticket.stageName);
+    if (index < 0) return '';
+    return `${index + 1}/${stages.length}`;
+  }, [stages, ticket?.stageName]);
+
+  const isDeadlineLive =
+    ticket?.statusV2 !== TicketStatusV2.COMPLETED && ticket?.statusV2 !== TicketStatusV2.CANCELLED;
+
+  const isTicketOverdue = Boolean(
+    ticket?.eta && new Date(ticket.eta) < new Date() && isDeadlineLive,
+  );
+
+  const isStageOverdue = Boolean(
+    currentStageEntry?.stageEta &&
+    new Date(currentStageEntry.stageEta) < new Date() &&
+    isDeadlineLive,
+  );
 
   // Query ticket attachments
   const [ticketAttachments] = useCachedQuery(queries.attachmentsByTicket({ ticketId }));
@@ -1484,10 +1511,6 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   const [parentSubTickets] = useCachedQuery(
     queries.subTicketsByMappedTicketId({ mappedTicketId: ticketId }),
   );
-  // Gates the Create Sub-Ticket button only, mirroring subTicket.create's row-existence
-  // guard. linkExisting has no depth limit, so the picker below is deliberately not gated.
-  const canCreateNestedSubTicket =
-    (parentSubTickets?.length ?? 0) === 0 || boardData?.boardType === BoardType.FLOW;
 
   // Query parent tickets through the mappings
   const parentTicketIds = useMemo(
@@ -1573,6 +1596,66 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       return isFieldActive({ parentOptionId }, allFieldDefs, getFieldEffectiveValue);
     });
   }, [formMapping, formEntityValues, ticketId, ticket?.boardId, ticket?.workspaceId]);
+
+  const gateFormId = nextStageDetailsConfig?.formId ?? null;
+  const gateStageName = nextStageDetailsConfig?.targetStage.name ?? null;
+
+  const [gateMembershipRows] = useCachedQuery(
+    queries.getFormFieldsByFormId({ formId: gateFormId ?? '' }),
+    { enabled: !!gateFormId },
+  );
+
+  // Fields the board says must be filled before this ticket can enter the next stage:
+  // the transition form's non-optional, branch-active fields that have no value yet.
+  const gateMissingFields = useMemo(() => {
+    if (!gateFormId) return [];
+    const rows = Array.isArray(gateMembershipRows) ? gateMembershipRows : [];
+    const fields = resolveDisplayFormFields(gateFormId, rows);
+    const valueByFieldId = new Map<string, unknown>();
+    (formEntityValues ?? []).forEach(value => {
+      const raw = value.actualFieldValue ?? value.fieldValue;
+      if (raw === null || raw === undefined || raw === '') return;
+      valueByFieldId.set(value.fieldId, raw);
+    });
+    const getFieldEffectiveValue = (fieldId: string): string | undefined => {
+      const raw = valueByFieldId.get(fieldId);
+      return typeof raw === 'string' ? raw : undefined;
+    };
+    return fields.filter(
+      field =>
+        !field.isOptional &&
+        isFieldActive(field, fields, getFieldEffectiveValue) &&
+        !valueByFieldId.has(field.id),
+    );
+  }, [gateFormId, gateMembershipRows, formEntityValues]);
+
+  // An archived ticket is read-only everywhere (the archived-guard overlay blocks clicks),
+  // so the field rows should say so rather than look editable and swallow the click.
+  const fieldsAreReadOnly = Boolean(ticket?.isArchived);
+
+  const [showEmptyFields, setShowEmptyFields] = useState(false);
+
+  const isFormFieldEmpty = (fieldValue: (typeof allFormFields)[number]): boolean => {
+    const raw = fieldValue.actualFieldValue ?? fieldValue.fieldValue;
+    if (raw === null || raw === undefined) return true;
+    if (typeof raw === 'string') return raw.trim() === '';
+    if (Array.isArray(raw)) {
+      return raw.every(
+        entry => entry === null || entry === undefined || String(entry).trim() === '',
+      );
+    }
+    return false;
+  };
+
+  const hiddenEmptyFieldCount = allFormFields.filter(isFormFieldEmpty).length;
+
+  const orderedFormFields = [...allFormFields].sort(
+    (a, b) => Number(isFormFieldEmpty(a)) - Number(isFormFieldEmpty(b)),
+  );
+
+  const visibleFormFields = showEmptyFields
+    ? orderedFormFields
+    : orderedFormFields.filter(fieldValue => !isFormFieldEmpty(fieldValue));
 
   // Values this ticket has saved for fields no longer part of the board's current form —
   // e.g. left behind by a "Copy Board Configuration" run that swapped in another board's
@@ -1726,6 +1809,83 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     stageTransitions,
   ]);
 
+  // A stage-change request that is waiting on THIS user — the banner the design puts at the
+  // very top of the panel, so an approver never has to scroll to find the thing blocking them.
+  const pendingApprovalForMe = useMemo(() => {
+    const submitted = formsToShow.filter(
+      item => item.type === 'request' && item.status === TicketStageRequestStatus.SUBMITTED,
+    );
+    for (const item of submitted) {
+      const stage = stagesWithFormInfo?.find(s => s.id === item.stageId);
+      const approvers = isNonLinearBoard
+        ? stageTransitions
+            .filter(t => t.toStageId === item.stageId)
+            .flatMap(t => t.transitionApprovers ?? [])
+        : (stage?.approvers ?? []);
+      const isApprover = approvers.some(approver => {
+        const type = (approver.approverType ?? ApproverType.USER) as string;
+        if (type === String(ApproverType.ROLE)) {
+          return !!approver.roleId && currentUserRoleIds.includes(approver.roleId);
+        }
+        return approver.userId === currentUser?.id;
+      });
+      if (isApprover) {
+        const previousStage = stagesWithFormInfo?.find(
+          s => s.sequenceNumber === (stage?.sequenceNumber ?? 0) - 1,
+        );
+        return { item, stage, previousStage, stageName: stage?.name ?? 'the next stage' };
+      }
+    }
+    return null;
+  }, [
+    formsToShow,
+    stagesWithFormInfo,
+    isNonLinearBoard,
+    stageTransitions,
+    currentUserRoleIds,
+    currentUser?.id,
+  ]);
+
+  const workflowActionableCount =
+    formsToShow.length +
+    (flowStepForm ? 1 : 0) +
+    (!stageReadOnly && nextStageDetailsConfig ? 1 : 0);
+
+  const [approvalBannerOpen, setApprovalBannerOpen] = useState(false);
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const [relationshipsOpen, setRelationshipsOpen] = useState(false);
+
+  const moreMenuItems: {
+    label: string;
+    icon: React.ReactElement;
+    trackName: string;
+    disabled?: boolean;
+    run: () => void;
+  }[] = [
+    {
+      label: 'Copy link',
+      icon: <LinkIcon size={18} />,
+      trackName: 'COPY_TICKET_LINK',
+      run: () => handleCopyTicketViewLink(),
+    },
+    {
+      label: 'Summarize thread',
+      icon: <Sparkles size={18} />,
+      trackName: 'SUMMARIZE_THREAD',
+      run: () => {
+        if (!ticket) return;
+        void navigate(`${baseRoute}/${ticket.channelId}/${ticket.conversationId}#thread-summary`);
+      },
+    },
+    {
+      label: 'Archive ticket',
+      icon: <Archive size={18} />,
+      trackName: 'OPEN_ARCHIVE_TICKET_CONFIRM',
+      disabled: ticket?.isArchived ?? false,
+      run: () => setShowArchiveConfirmDialog(true),
+    },
+  ];
+
   const tags = ticket?.tagMappings;
   // Available tags from project_tags
   const availableTags = useMemo(() => {
@@ -1867,7 +2027,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   }, [ticket, editingTitle]);
   useEffect(() => {
     if (ticket && !editingDescription) {
-      setDescriptionValue(ticket.description);
+      setDescriptionValue(resolveTicketDescription(ticket));
     }
   }, [ticket, editingDescription]);
   // Initialize stage ETA edit value when current stage changes
@@ -2038,7 +2198,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   useEffect(() => {
     if (!ticket || !editingDescription) return;
     const next = descriptionValue.trim();
-    if (next === ticket.description) return;
+    if (next === resolveTicketDescription(ticket)) return;
     const ticketId = ticket.id;
     const timeoutId = setTimeout(() => {
       void applyTicketUpdate(
@@ -2052,7 +2212,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   // Auto-focus tag input when dropdown opens
   useEffect(() => {
     if (showTagDropdown && tagInputRef.current) {
-      tagInputRef.current.focus();
+      tagInputRef.current.focus({ preventScroll: true });
     }
   }, [showTagDropdown]);
 
@@ -2144,10 +2304,18 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
 
   const canManageSubTicketLinks = isManualSubTicketBoard(boardData?.boardType);
 
+  // Workspace-wide, like Create Sub-Ticket: a linked sub-ticket may live in any project.
+  const [workspaceBoards] = useCachedQuery(queries.getAllBoardsList(), {
+    enabled: canManageSubTicketLinks,
+  });
+
   // FLOW/RELEASE boards own their mappings, so their tickets are never linkable by hand.
   const manualBoardIds = useMemo(
-    () => (boards ?? []).filter(board => isManualSubTicketBoard(board.boardType)).map(b => b.id),
-    [boards],
+    () =>
+      (workspaceBoards ?? [])
+        .filter(board => isManualSubTicketBoard(board.boardType))
+        .map(b => b.id),
+    [workspaceBoards],
   );
   // Past the API's cap the filter is dropped; subTicketPickerOptions filters instead.
   const manualBoardIdsFilter = useMemo(
@@ -2162,8 +2330,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   const [isAddSubTicketMenuOpen, setIsAddSubTicketMenuOpen] = useState(false);
   const [isLinkingSubTicket, setIsLinkingSubTicket] = useState(false);
   const [unlinkingMappingIds, setUnlinkingMappingIds] = useState<Set<string>>(new Set());
-  const subTicketSearch = useProjectTicketSearch({
-    projectId: ticket?.projectId ?? undefined,
+  const subTicketSearch = useSubTicketLinkSearch({
     boardIds: manualBoardIdsFilter,
     isActive: isAddSubTicketMenuOpen,
   });
@@ -2363,7 +2530,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   };
 
   const handleSaveDescription = (): void => {
-    if (descriptionValue !== ticket.description) {
+    if (descriptionValue !== resolveTicketDescription(ticket)) {
       void applyTicketUpdate(
         {
           id: ticket.id,
@@ -3159,118 +3326,128 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       : undefined;
     const assigneeId = relatedTicket?.assignedTo?.replace(/^(user:|group:)/, '') || '';
     const priorityIcon = relatedTicket?.priority ? getPriorityIcon(relatedTicket.priority) : null;
+    const title = getReferenceTitle(relatedTicket);
 
     return (
-      <div key={reference.id} className='flex flex-col gap-2'>
-        <div>
-          {allowEdit ? (
-            <div className='relative inline-flex items-center'>
-              <select
-                className='appearance-none pl-3 pr-8 py-2 text-sm font-medium text-foreground bg-background border border-border rounded-lg shadow-sm'
-                value={reference.relationType}
-                onChange={event =>
-                  handleReferenceRelationChange(
-                    reference.id,
-                    event.target.value as TicketReferenceRelation,
-                  )
-                }
-                data-track-category='Tickets'
-                data-track-name='ChangeReferenceRelation'
-                data-track-metadata={JSON.stringify({ referenceId: reference.id })}
-              >
-                {referenceRelationOptions.map(option => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown className='pointer-events-none absolute right-3 h-4 w-4 text-muted-foreground' />
-            </div>
-          ) : isFlowRunPaused ? (
-            <div className='my-4 rounded-lg border border-border bg-muted/40 p-4 text-sm text-muted-foreground'>
-              Flow run is paused. Resume main ticket before completing this step.
-            </div>
-          ) : (
-            <span className='inline-flex items-center px-3 py-2 rounded-lg border border-border text-sm font-medium text-foreground bg-background shadow-sm'>
-              {label}
-            </span>
-          )}
-        </div>
-
-        <div className='relative group flex items-center justify-between gap-4 rounded-lg border border-border bg-muted px-3 py-2.5 shadow-sm'>
-          <div className='flex items-center gap-3 min-w-0'>
-            <StageIndicator stages={boardStages} stageName={relatedTicket?.stageName} size={18} />
-            <div className='flex items-center gap-4 min-w-0'>
-              <span className='text-sm font-medium text-muted-foreground font-mono shrink-0'>
-                {relatedTicket?.xyneId || relatedTicket?.id || '—'}
-              </span>
-              {link ? (
-                onNavigateToTicket ? (
-                  <button
-                    type='button'
-                    onClick={() => onNavigateToTicket(relatedTicket!.id!)}
-                    className='text-sm font-normal text-foreground truncate hover:underline text-left'
-                    data-track-category='Tickets'
-                    data-track-name='NavigateToRelatedTicket'
-                  >
-                    {getReferenceTitle(relatedTicket)}
-                  </button>
-                ) : (
-                  <Link
-                    className='text-sm font-normal text-foreground truncate'
-                    to={link}
-                    state={{ trackSource: 'related_ticket' }}
-                  >
-                    {getReferenceTitle(relatedTicket)}
-                  </Link>
+      <div
+        key={reference.id}
+        className='group flex h-11 items-center gap-3 rounded-[11px] border border-border bg-background px-3 transition-[border-color,box-shadow] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] hover:border-muted-foreground/40 hover:shadow-[0_1px_3px_rgba(20,22,26,0.06)]'
+      >
+        {allowEdit ? (
+          <div className='relative inline-flex shrink-0 items-center'>
+            <select
+              className='h-[21px] cursor-pointer appearance-none rounded-[5px] border border-border bg-muted pl-2 pr-5 text-[10.5px] font-semibold uppercase tracking-[0.3px] text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring'
+              value={reference.relationType}
+              onChange={event =>
+                handleReferenceRelationChange(
+                  reference.id,
+                  event.target.value as TicketReferenceRelation,
                 )
-              ) : (
-                <span className='text-sm font-normal text-foreground truncate'>
-                  {getReferenceTitle(relatedTicket)}
-                </span>
-              )}
-            </div>
-          </div>
-          <div className='flex items-center gap-3 shrink-0'>
-            {priorityIcon && <span className='flex items-center'>{priorityIcon}</span>}
-            {assigneeId ? (
-              <UserAvatar
-                userId={assigneeId}
-                size={AvatarSize.SM}
-                shape={AvatarShape.ROUNDED}
-                showActiveStatus={false}
-              />
-            ) : (
-              <div className='h-7 w-7 rounded-lg border border-border bg-muted' />
-            )}
-          </div>
-          {onUnmerge && (
-            <button
-              type='button'
-              onClick={onUnmerge}
-              data-ph-capture-attribute-track-id='unmerge_ticket'
-              className='text-sm text-primary hover:text-primary/80 font-medium whitespace-nowrap'
+              }
+              aria-label='Relation type'
               data-track-category='Tickets'
-              data-track-name='UnmergeTicket'
-            >
-              Unmerge
-            </button>
-          )}
-          {allowEdit && (
-            <button
-              type='button'
-              className='absolute right-[-20px] top-1/2 -translate-y-1/2 text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100'
-              onClick={() => handleRemoveReference(reference.id)}
-              data-ph-capture-attribute-track-id='remove_ticket_reference'
-              aria-label='Remove reference'
-              data-track-category='Tickets'
-              data-track-name='RemoveReference'
+              data-track-name='ChangeReferenceRelation'
               data-track-metadata={JSON.stringify({ referenceId: reference.id })}
             >
-              <X size={14} />
+              {referenceRelationOptions.map(option => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <ChevronDown className='pointer-events-none absolute right-1 h-3 w-3 text-muted-foreground' />
+          </div>
+        ) : isFlowRunPaused ? (
+          <span
+            className='inline-flex h-[21px] shrink-0 items-center rounded-[5px] border border-border bg-muted px-2 text-[10.5px] font-semibold uppercase tracking-[0.3px] text-muted-foreground'
+            title='Flow run is paused. Resume main ticket before completing this step.'
+          >
+            Paused
+          </span>
+        ) : (
+          <span className='inline-flex h-[21px] shrink-0 items-center rounded-[5px] border border-border bg-muted px-2 text-[10.5px] font-semibold uppercase tracking-[0.3px] text-muted-foreground'>
+            {label}
+          </span>
+        )}
+
+        <span className='shrink-0 font-mono text-[12.5px] tracking-[0.2px] text-muted-foreground'>
+          {relatedTicket?.xyneId || relatedTicket?.id || '—'}
+        </span>
+
+        {link ? (
+          onNavigateToTicket ? (
+            <button
+              type='button'
+              onClick={() => onNavigateToTicket(relatedTicket!.id!)}
+              className='min-w-0 flex-1 truncate text-left text-[13.5px] font-semibold text-foreground hover:underline'
+              data-track-category='Tickets'
+              data-track-name='NavigateToRelatedTicket'
+            >
+              {title}
             </button>
-          )}
-        </div>
+          ) : (
+            <Link
+              className='min-w-0 flex-1 truncate text-[13.5px] font-semibold text-foreground'
+              to={link}
+              state={{ trackSource: 'related_ticket' }}
+            >
+              {title}
+            </Link>
+          )
+        ) : (
+          <span className='min-w-0 flex-1 truncate text-[13.5px] font-semibold text-foreground'>
+            {title}
+          </span>
+        )}
+
+        <span className='flex shrink-0 items-center gap-1.5'>
+          <StageIndicator stages={boardStages} stageName={relatedTicket?.stageName} size={16} />
+          <span className='text-[11px] font-semibold uppercase tracking-[0.3px] text-muted-foreground'>
+            {relatedTicket?.stageName ?? '—'}
+          </span>
+        </span>
+
+        {priorityIcon && <span className='flex shrink-0 items-center'>{priorityIcon}</span>}
+
+        {assigneeId ? (
+          <UserAvatar
+            userId={assigneeId}
+            size={AvatarSize.SM}
+            shape={AvatarShape.ROUNDED}
+            showActiveStatus={false}
+          />
+        ) : (
+          <span className='h-[22px] w-[22px] shrink-0 rounded-md border border-border bg-muted' />
+        )}
+
+        {onUnmerge && (
+          <button
+            type='button'
+            onClick={onUnmerge}
+            data-ph-capture-attribute-track-id='unmerge_ticket'
+            className='shrink-0 whitespace-nowrap text-[12px] font-medium text-primary hover:text-primary/80'
+            data-track-category='Tickets'
+            data-track-name='UnmergeTicket'
+          >
+            Unmerge
+          </button>
+        )}
+
+        {allowEdit && (
+          <button
+            type='button'
+            className='flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-[7px] text-muted-foreground opacity-0 transition-[opacity,background-color,color] duration-150 hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100'
+            onClick={() => handleRemoveReference(reference.id)}
+            data-ph-capture-attribute-track-id='remove_ticket_reference'
+            aria-label={`Unlink ${relatedTicket?.xyneId ?? 'ticket'}`}
+            title='Unlink'
+            data-track-category='Tickets'
+            data-track-name='RemoveReference'
+            data-track-metadata={JSON.stringify({ referenceId: reference.id })}
+          >
+            <X size={15} />
+          </button>
+        )}
       </div>
     );
   };
@@ -3379,7 +3556,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
             mappedTicketId: subTicket.mappedTicketId,
             depth: node.depth,
           })}
-          className='flex items-center justify-between gap-3 rounded-lg bg-muted p-3 transition-colors hover:bg-muted/80 cursor-pointer'
+          className='flex h-11 cursor-pointer items-center justify-between gap-3 rounded-[11px] border border-border bg-background px-3 transition-[border-color,box-shadow] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] hover:border-muted-foreground/40 hover:shadow-[0_1px_3px_rgba(20,22,26,0.06)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
           style={{ marginLeft: node.depth * 18 }}
         >
           <div className='flex items-center gap-2 flex-1 min-w-0'>
@@ -3405,10 +3582,12 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
             ) : (
               <span className='h-5 w-5 shrink-0' />
             )}
-            <span className='text-xs font-medium text-muted-foreground whitespace-nowrap'>
+            <span className='shrink-0 whitespace-nowrap font-mono text-[12.5px] tracking-[0.2px] text-muted-foreground'>
               {displayId}
             </span>
-            <span className='text-sm text-foreground truncate'>{displayTitle}</span>
+            <span className='truncate text-[13.5px] font-semibold text-foreground'>
+              {displayTitle}
+            </span>
           </div>
           <div className='flex items-center gap-3 shrink-0'>
             {mappedTicketId && (
@@ -3469,7 +3648,10 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                   stageName={mappedTicket?.stageName}
                   size={18}
                 />
-                <span className='text-xs font-medium text-foreground whitespace-nowrap'>
+                <span className='whitespace-nowrap text-[11px] font-semibold uppercase tracking-[0.3px] text-foreground'>
+                  {mappedTicket?.stageName ?? '—'}
+                </span>
+                <span className='whitespace-nowrap font-mono text-[11px] tabular-nums text-muted-foreground/80'>
                   {boardStages.findIndex(stage => stage.name === mappedTicket?.stageName) + 1}/
                   {boardStages.length}
                 </span>
@@ -3484,7 +3666,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 showActiveStatus={false}
               />
             ) : (
-              <div className='h-7 w-7 rounded-lg border border-border bg-muted' />
+              <span className='h-[22px] w-[22px] shrink-0 rounded-md border border-border bg-muted' />
             )}
           </div>
         </div>
@@ -3492,6 +3674,118 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           <div className='space-y-2'>{node.children.map(renderSubTicketNode)}</div>
         )}
       </React.Fragment>
+    );
+  };
+
+  const renderParentTicketRow = (
+    parentTicket: NonNullable<typeof parentTickets>[number],
+  ): React.ReactElement => {
+    const boardStages = parentTicket.boardId
+      ? stagesByBoardId.get(parentTicket.boardId)
+      : undefined;
+    const stageIndex = boardStages?.findIndex(stage => stage.name === parentTicket.stageName) ?? -1;
+    const priorityIcon = parentTicket.priority ? getPriorityIcon(parentTicket.priority) : null;
+    const assigneeId = parentTicket.assignedTo?.replace(/^(user:|group:)/, '') || '';
+
+    const navigateToParentTicket = (): void => {
+      const channelType = channelTypeMap.get(parentTicket.channelId);
+      if (isDeskChannelType(channelType) && parentTicket.xyneId) {
+        const pathParts = location.pathname.split('/');
+        const workspaceId = pathParts[1];
+        void navigate(
+          `/${workspaceId}/support/${parentTicket.channelId}/${parentTicket.xyneId}?selectedTab=thread`,
+          { state: { trackSource: 'ticket_details' } },
+        );
+      } else {
+        const workspaceId = location.pathname.split('/')[1];
+        const base = buildChannelRoute(
+          `${parentTicket.channelId}/${parentTicket.conversationId}/${parentTicket.id}`,
+          { selectedTab: 'thread' },
+        );
+        void navigate(`/${workspaceId}${base}#origin=${parentTicket.conversationId}`, {
+          state: { trackSource: 'parent_ticket' },
+        });
+      }
+    };
+
+    const openParentTicket = (): void => {
+      if (onNavigateToTicket) {
+        onNavigateToTicket(parentTicket.id);
+      } else {
+        setMappedTicketId(parentTicket.id);
+      }
+    };
+
+    return (
+      <div
+        key={parentTicket.id}
+        role='button'
+        tabIndex={0}
+        onClick={navigateToParentTicket}
+        onKeyDown={event => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            navigateToParentTicket();
+          }
+        }}
+        data-testid={`parent-ticket-item-${parentTicket.id}`}
+        className='flex h-11 cursor-pointer items-center justify-between gap-3 rounded-[11px] border border-border bg-background px-3 transition-[border-color,box-shadow] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] hover:border-muted-foreground/40 hover:shadow-[0_1px_3px_rgba(20,22,26,0.06)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+        data-track-category='Tickets'
+        data-track-name='ViewParentTicket'
+        data-track-metadata={JSON.stringify({ parentTicketId: parentTicket.id })}
+      >
+        <div className='flex min-w-0 flex-1 items-center gap-2'>
+          <span className='flex h-5 w-5 shrink-0 items-center justify-center text-muted-foreground/70'>
+            <ArrowTurnLeftUp size={14} />
+          </span>
+          <span className='shrink-0 whitespace-nowrap font-mono text-[12.5px] tracking-[0.2px] text-muted-foreground'>
+            {parentTicket.xyneId || parentTicket.id.substring(0, 8).toUpperCase()}
+          </span>
+          <span className='truncate text-[13.5px] font-semibold text-foreground'>
+            {parentTicket.title || 'Untitled Ticket'}
+          </span>
+        </div>
+        <div className='flex shrink-0 items-center gap-3'>
+          <Tooltip content='Open ticket'>
+            <button
+              type='button'
+              className='flex h-7 w-7 items-center justify-center rounded-md text-blue-600 transition-colors hover:bg-background'
+              onClick={event => {
+                event.stopPropagation();
+                openParentTicket();
+              }}
+              aria-label='Open parent ticket'
+              data-track-category='Tickets'
+              data-track-name='OpenParentTicket'
+              data-track-metadata={JSON.stringify({ parentTicketId: parentTicket.id })}
+            >
+              <FileText size={14} />
+            </button>
+          </Tooltip>
+          {boardStages && boardStages.length > 0 && (
+            <div className='flex items-center gap-1.5'>
+              <StageIndicator stages={boardStages} stageName={parentTicket.stageName} size={18} />
+              <span className='whitespace-nowrap text-[11px] font-semibold uppercase tracking-[0.3px] text-foreground'>
+                {parentTicket.stageName ?? '—'}
+              </span>
+              <span className='whitespace-nowrap font-mono text-[11px] tabular-nums text-muted-foreground/80'>
+                {stageIndex + 1}/{boardStages.length}
+              </span>
+            </div>
+          )}
+          {priorityIcon && <span className='flex items-center'>{priorityIcon}</span>}
+          {assigneeId ? (
+            <UserAvatar
+              userId={assigneeId}
+              size={AvatarSize.SM}
+              shape={AvatarShape.ROUNDED}
+              showActiveStatus={false}
+            />
+          ) : (
+            <span className='h-[22px] w-[22px] shrink-0 rounded-md border border-border bg-muted' />
+          )}
+        </div>
+      </div>
     );
   };
 
@@ -3529,17 +3823,12 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     boardData?.boardType === BoardType.FLOW ? null : (
       <button
         onClick={() => setIsSubTicketModalOpen(true)}
-        disabled={!canCreateNestedSubTicket}
         data-testid='create-sub-ticket-button'
         data-track-event='BUTTON_CLICK'
         data-track-category='Tickets'
         data-track-name='CREATE_SUB_TICKET'
         data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
-        title={canCreateNestedSubTicket ? undefined : 'Sub-tickets cannot be nested on this board'}
-        className={cn(
-          'flex items-center gap-2 mt-3 text-sm text-muted-foreground transition-colors',
-          canCreateNestedSubTicket ? 'hover:text-foreground' : 'cursor-not-allowed opacity-50',
-        )}
+        className='flex items-center gap-2 mt-3 pl-2.5 text-sm text-muted-foreground transition-colors hover:text-foreground'
       >
         <Plus size={16} />
         Create Sub-Ticket
@@ -3547,42 +3836,82 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     );
 
   return (
-    <div className='mx-auto px-[24px] py-[20px] h-full overflow-auto no-scrollbar bg-background'>
+    <div className='mx-auto px-[20px] pb-[72px] h-full overflow-auto no-scrollbar bg-background'>
       {expandedView && (
-        <div className='flex items-center justify-between mb-6'>
-          <div className='flex items-center gap-x-1/2'>
-            <button
-              onClick={handleBackFromExpandedView}
-              data-track-category='Tickets'
-              data-track-name='BackFromExpandedView'
-            >
-              <ChevronLeft size={18} className='text-foreground' />
-            </button>
-            <span className='text-[14px] font-medium text-foreground px-2 py-0.5'>
-              {ticket.xyneId}
-            </span>
+        <div className='flex h-14 items-center justify-between gap-3'>
+          <div className='-ml-3 flex min-w-0 items-center gap-1'>
+            {!hideBackNav && (
+              <>
+                <button
+                  type='button'
+                  onClick={handleBackFromExpandedView}
+                  aria-label='Back'
+                  className={cn(
+                    'flex shrink-0 items-center justify-center transition-colors',
+                    EXPANDED_HEADER_ICON_BUTTON,
+                  )}
+                  data-track-category='Tickets'
+                  data-track-name='BackFromExpandedView'
+                >
+                  <ChevronLeft size={16} />
+                </button>
+                <Tooltip content='Copy ticket ID'>
+                  <button
+                    type='button'
+                    onClick={() => {
+                      void navigator.clipboard.writeText(ticket.xyneId);
+                      toast.success('Copied', {
+                        description: 'Ticket ID copied to clipboard',
+                        duration: 2000,
+                      });
+                    }}
+                    aria-label={`Copy ticket ID ${ticket.xyneId}`}
+                    className='truncate font-mono text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground'
+                    data-track-category='Tickets'
+                    data-track-name='COPY_TICKET_ID'
+                  >
+                    {ticket.xyneId}
+                  </button>
+                </Tooltip>
+              </>
+            )}
           </div>
-          <div className='flex items-center gap-x-2'>
+          <div className='-mr-2 flex shrink-0 items-center gap-0.5'>
             <BoardTicketNav ticketId={ticketId} />
+            {/* A control of its own rather than an item in an overflow menu,
+                because this header has no overflow menu to put it in. Carries
+                the channel and conversation so the column has a way across to
+                the discussion under the ticket — a ticket column without them
+                renders fine and dead-ends, which is the thing a stream exists
+                not to be. */}
+            <AddToStreamButton
+              source={{
+                kind: 'ticket',
+                ticketId,
+                ...(ticket.channelId ? { channelId: ticket.channelId } : {}),
+                ...(ticket.conversationId ? { conversationId: ticket.conversationId } : {}),
+              }}
+              className='h-[30px] w-[30px] rounded-lg hover:bg-muted'
+            />
             <Tooltip content='Copy Ticket Link'>
               <Button
-                className='p-2 border border-border rounded-lg h-8 w-8'
+                className={EXPANDED_HEADER_ICON_BUTTON}
                 variant='ghost'
-                size='sm'
+                size='iconSm'
                 onClick={handleCopyTicketViewLink}
                 data-track-category='Tickets'
                 data-track-name='COPY_TICKET_LINK'
                 data-track-metadata={JSON.stringify(ticketTrackingMetadata(ticket))}
                 aria-label='Copy Ticket'
               >
-                <LinkIcon size={20} />
+                <LinkIcon size={16} />
               </Button>
             </Tooltip>
             <Tooltip content='Summarize thread'>
               <Button
                 variant='ghost'
-                size='sm'
-                className='p-2 border border-border rounded-lg h-8 w-8'
+                size='iconSm'
+                className={EXPANDED_HEADER_ICON_BUTTON}
                 onClick={() => {
                   void navigate(
                     `${baseRoute}/${ticket.channelId}/${ticket.conversationId}#thread-summary`,
@@ -3596,14 +3925,14 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 })}
                 title='Summarize thread'
               >
-                <Sparkles size={20} />
+                <Sparkles size={16} />
               </Button>
             </Tooltip>
             <Tooltip content={'Archive Ticket'}>
               <Button
-                className='p-2 border border-border rounded-lg h-8 w-8'
+                className={EXPANDED_HEADER_ICON_BUTTON}
                 variant='ghost'
-                size='sm'
+                size='iconSm'
                 onClick={() => setShowArchiveConfirmDialog(true)}
                 data-track-category='Tickets'
                 data-track-name='OPEN_ARCHIVE_TICKET_CONFIRM'
@@ -3611,21 +3940,21 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 disabled={ticket?.isArchived}
                 aria-label='Archive Ticket'
               >
-                <Archive size={20} />
+                <Archive size={16} />
               </Button>
             </Tooltip>
             <Tooltip content='Minimize View'>
               <Button
-                className='p-2 border border-border rounded-lg h-8 w-8'
+                className={EXPANDED_HEADER_ICON_BUTTON}
                 variant='ghost'
-                size='sm'
-                onClick={handleMinimizeExpandedView}
+                size='iconSm'
+                onClick={onMinimize ?? handleMinimizeExpandedView}
                 data-track-category='Tickets'
                 data-track-name='MINIMIZE_EXPANDED_VIEW'
                 data-track-metadata={JSON.stringify({ ticketId: ticket?.id })}
-                aria-label='Copy Ticket'
+                aria-label='Minimize View'
               >
-                <Minimize2 size={20} />
+                <Minimize2 size={16} />
               </Button>
             </Tooltip>
           </div>
@@ -3635,9 +3964,9 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       <div
         className={cn(
           'relative',
-          // Hide the sibling sections instead of re-parenting the sub-tickets one.
-          subTicketsOnly &&
-            '[&>*:not([data-testid=sub-tickets-section]):not(.archived-guard)]:hidden',
+          // Hide the sibling sections instead of re-parenting the relationships one.
+          relationshipsOnly &&
+            '[&>*:not([data-testid=relationships-section]):not(.archived-guard)]:hidden',
         )}
       >
         {/* Archived overlay - blocks all interactions on content */}
@@ -3659,8 +3988,111 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           </div>
         )}
 
+        {/* Approval banner — the one thing an approver must act on, above the fold. */}
+        {pendingApprovalForMe && (
+          <div className='mt-4 overflow-hidden rounded-[11px] border border-amber-500/40 bg-amber-500/[0.09]'>
+            <button
+              type='button'
+              onClick={() => setApprovalBannerOpen(prev => !prev)}
+              aria-expanded={approvalBannerOpen}
+              className='flex min-h-[38px] w-full items-center gap-[9px] px-[11px] py-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+              data-track-category='Tickets'
+              data-track-name='ToggleApprovalBanner'
+            >
+              <Clock
+                size={15}
+                className='shrink-0 text-amber-700 [[data-theme=midnight]_&]:text-amber-400'
+              />
+              <span className='whitespace-nowrap text-[12.5px] font-medium text-foreground'>
+                Move to {pendingApprovalForMe.stageName}
+              </span>
+              <span className='min-w-0 truncate text-[12.5px] text-muted-foreground'>
+                needs your approval
+              </span>
+              <div className='min-w-[6px] flex-1' />
+              <ChevronDown
+                size={14}
+                className={cn(
+                  'shrink-0 text-muted-foreground transition-transform duration-150',
+                  approvalBannerOpen && 'rotate-180',
+                )}
+              />
+            </button>
+            {approvalBannerOpen && (
+              <div className='px-[11px] pb-[11px] duration-150 animate-in fade-in slide-in-from-top-1'>
+                <p className='mb-[11px] text-[13px] leading-[1.6] text-muted-foreground [text-wrap:pretty]'>
+                  Approve to move this ticket into {pendingApprovalForMe.stageName}, or request
+                  changes to send it back to the requester.
+                </p>
+                <div className='flex flex-wrap gap-2'>
+                  {pendingApprovalForMe.item.formId ? (
+                    <Button
+                      onClick={() =>
+                        setStageFormModal({
+                          ticket,
+                          targetStage: pendingApprovalForMe.stage ?? {
+                            id: pendingApprovalForMe.item.stageId,
+                            name: 'Unknown Stage',
+                            sequenceNumber: 0,
+                            boardId: ticket.boardId || '',
+                            eta: null,
+                          },
+                          sourceStageName:
+                            pendingApprovalForMe.previousStage?.name || 'Unknown Stage',
+                          formId: pendingApprovalForMe.item.formId,
+                          isReviewer: true,
+                          hasApprovers: true,
+                          existingRequest: pendingApprovalForMe.item.request!,
+                        })
+                      }
+                      data-track-category='Tickets'
+                      data-track-name='ReviewStageFormFromBanner'
+                    >
+                      Review request
+                    </Button>
+                  ) : (
+                    <>
+                      <Button
+                        onClick={() => {
+                          setNonFormReviewComment('');
+                          setNonFormReviewDialog({
+                            requestId: pendingApprovalForMe.item.id,
+                            stageId: pendingApprovalForMe.item.stageId,
+                            kind: 'APPROVE',
+                            stageName: pendingApprovalForMe.stageName,
+                          });
+                        }}
+                        data-track-category='Tickets'
+                        data-track-name='ApproveFromBanner'
+                      >
+                        Approve
+                      </Button>
+                      <Button
+                        variant='secondary'
+                        onClick={() => {
+                          setNonFormReviewComment('');
+                          setNonFormReviewDialog({
+                            requestId: pendingApprovalForMe.item.id,
+                            stageId: pendingApprovalForMe.item.stageId,
+                            kind: 'REJECT',
+                            stageName: pendingApprovalForMe.stageName,
+                          });
+                        }}
+                        data-track-category='Tickets'
+                        data-track-name='RequestChangesFromBanner'
+                      >
+                        Request changes
+                      </Button>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Title Section */}
-        <div className='flex items-start gap-3'>
+        <div className={cn('flex items-start gap-3', expandedView ? 'pt-[8px]' : 'pt-[24px]')}>
           {editingTitle ? (
             <div className='flex-1 flex items-center gap-2'>
               <input
@@ -3676,7 +4108,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                     setEditingTitle(false);
                   }
                 }}
-                className='flex-1 text-2xl font-semibold text-foreground outline-none bg-transparent'
+                className='flex-1 -mx-[7px] rounded-lg bg-muted/50 px-[7px] py-[3px] text-[20px] font-semibold leading-[1.34] tracking-[-0.35px] text-foreground outline-none ring-1 ring-inset ring-border'
                 data-track-category='Tickets'
                 data-track-name='EditTicketTitle'
                 data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
@@ -3686,7 +4118,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
             <div
               role='button'
               tabIndex={0}
-              className='text-[20px] font-semibold text-foreground flex-1 cursor-text px-2 -mx-2 break-all'
+              className='flex-1 -mx-[7px] cursor-text rounded-lg px-[7px] py-[3px] text-[20px] font-semibold leading-[1.34] tracking-[-0.35px] text-foreground break-words hover:bg-muted/50'
               onClick={() => setEditingTitle(true)}
               onKeyDown={e => {
                 if (e.key === 'Enter' || e.key === ' ') {
@@ -3701,31 +4133,656 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
             </div>
           )}
         </div>
-        <div>
+
+        <div className='mt-[6px] -mx-[5px] flex flex-wrap items-center gap-2 text-[13.5px] text-muted-foreground'>
+          <span className='px-[5px]'>
+            Created {formatTimestamp(ticket.createdAt)} by{' '}
+            {getUserDisplayName(createdByUser) || 'Merchant User'}
+          </span>
+          <span className='text-muted-foreground/50'>·</span>
+          <span className='flex items-center rounded-[5px] px-[5px] hover:bg-muted'>
+            <EntitySelector
+              options={(boards ?? []).map(board => ({
+                value: board.id,
+                label: board.name,
+                icon: <SquareKanban size={15} className='text-purple-600' />,
+              }))}
+              selectedValue={ticket.boardId ?? null}
+              onSelect={handleBoardChange}
+              placeholder='Select board'
+              searchPlaceholder='Search boards...'
+              isLoading={hasBoardDropdownOpened && !boards}
+              width='auto'
+              noBorder={true}
+              isOpen={boardDropdownOpen}
+              onOpenChange={open => {
+                setBoardDropdownOpen(open);
+                if (open && !hasBoardDropdownOpened) {
+                  setHasBoardDropdownOpened(true);
+                }
+              }}
+            />
+          </span>
+          <span className='text-muted-foreground/50'>·</span>
+          {channel ? (
+            <button
+              type='button'
+              onClick={() => void navigate(buildChannelRoute(channel.id))}
+              className='rounded-[5px] px-[5px] transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+              title='Source channel · created from a message here'
+              data-track-category='Tickets'
+              data-track-name='OpenSourceChannel'
+              data-track-metadata={JSON.stringify({
+                ticketId: ticket.id,
+                channelId: channel.id,
+              })}
+            >
+              #{channel.name}
+            </button>
+          ) : (
+            <span className='rounded-[5px] px-[5px]'>XyneSpace</span>
+          )}
+        </div>
+        {/* Ticket MetaData Key Value */}
+        <div className='mt-[6px] mb-[8px] flex w-full flex-wrap items-center gap-2'>
+          <DetailChip
+            className='pl-2 pr-[11px]'
+            data-testid='ticket-detail-status-selector'
+            data-track-event='SELECTOR_CHANGE'
+            data-track-category='Tickets'
+            data-track-name='CHANGE_STATUS'
+            data-track-metadata={JSON.stringify({
+              ticketId: ticket.id,
+              boardId: ticket.boardId,
+              currentStatus: ticket.stageName,
+            })}
+          >
+            {stageReadOnly ? (
+              <span className='inline-flex items-center gap-2'>
+                <StageIndicator
+                  stages={stages}
+                  stageName={ticket.stageName}
+                  fallbackStatus={ticket.statusV2}
+                  isNonLinearBoard={isNonLinearBoard}
+                />
+                <span className='text-[11px] font-semibold uppercase tracking-[0.3px]'>
+                  {ticket.stageName || 'Not set'}
+                </span>
+              </span>
+            ) : (
+              <Selector
+                items={selectorStages}
+                selectedValue={ticket.stageName}
+                onValueChange={handleStageChange}
+                placeholder='Set Status'
+                icon={
+                  <StageIndicator
+                    stages={stages}
+                    stageName={ticket.stageName}
+                    fallbackStatus={ticket.statusV2}
+                    isNonLinearBoard={isNonLinearBoard}
+                  />
+                }
+                getItemIcon={item => (
+                  <StageIndicator
+                    stages={stages}
+                    stageName={item.name}
+                    isNonLinearBoard={isNonLinearBoard}
+                  />
+                )}
+                noBorder={true}
+                inputClassName='bg-transparent text-[11px] font-semibold uppercase tracking-[0.3px]'
+                isItemDisabled={item => item.name === ticket.stageName}
+              />
+            )}
+            {stageRingLabel && (
+              <span className='font-mono text-[11px] font-normal text-muted-foreground/80'>
+                {stageRingLabel}
+              </span>
+            )}
+            {((): React.ReactElement | null => {
+              if (!ticket.ticketStageRequests || !stagesWithFormInfo) return null;
+              const currentStage = stagesWithFormInfo.find(s => s.name === ticket.stageName);
+              if (!currentStage) return null;
+              const nextStage = stagesWithFormInfo.find(
+                s => s.sequenceNumber === currentStage.sequenceNumber + 1,
+              );
+              if (!nextStage) return null;
+              const hasPendingRequest = ticket.ticketStageRequests.some(
+                req =>
+                  req.status === TicketStageRequestStatus.SUBMITTED && req.stageId === nextStage.id,
+              );
+              return hasPendingRequest ? (
+                <Tooltip content='Pending Status Approval'>
+                  <AlertCircle size={14} className='text-orange-500' />
+                </Tooltip>
+              ) : null;
+            })()}
+          </DetailChip>
+
+          <DetailChip className='pl-[6px] pr-2'>
+            <UserSelector
+              selectedUserId={resolveAssigneeRef(ticket.assignedTo).userId}
+              onUserSelect={handleAssigneeChange}
+              channelId={ticket.channelId ?? undefined}
+              noBorder={true}
+            />
+          </DetailChip>
+
+          <DetailChip
+            className='pl-2 pr-[10px]'
+            data-testid='ticket-detail-priority-selector'
+            data-track-event='SELECTOR_CHANGE'
+            data-track-category='Tickets'
+            data-track-name='CHANGE_PRIORITY'
+            data-track-metadata={JSON.stringify({
+              ticketId: ticket.id,
+              currentPriority: ticket.priority,
+            })}
+          >
+            <Selector
+              items={priorityItems}
+              selectedValue={ticket.priority}
+              onValueChange={handlePriorityChange}
+              placeholder='Set Priority'
+              icon={<TicketPriorityIcon size={14} />}
+              noBorder={true}
+              inputClassName='bg-transparent'
+            />
+          </DetailChip>
+
+          {Boolean(currentStageInfo?.eta) &&
+            (editingStageETA ? (
+              <div className='flex items-center gap-2' data-testid='ticket-detail-stage-eta-input'>
+                <input
+                  ref={stageEtaInputRef}
+                  type='datetime-local'
+                  value={stageEtaValue}
+                  onChange={e => setStageEtaValue(e.target.value)}
+                  min={new Date().toISOString().slice(0, 16)}
+                  onBlur={handleStageETAChange}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') handleStageETAChange();
+                    if (e.key === 'Escape') {
+                      setStageEtaValue(
+                        currentStageEntry?.stageEta
+                          ? getLocalISOString(currentStageEntry.stageEta)
+                          : '',
+                      );
+                      setEditingStageETA(false);
+                    }
+                  }}
+                  className='h-[27px] rounded-full border border-input bg-background px-3 text-[12.5px] outline-none focus:border-border'
+                  data-track-category='Tickets'
+                  data-track-name='StageETAInput'
+                  data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
+                />
+              </div>
+            ) : (
+              <DetailChipButton
+                className={cn(
+                  'pl-2 pr-[10px] gap-[7px]',
+                  isStageOverdue && 'border-destructive/25',
+                )}
+                dashed={!currentStageEntry?.stageEta}
+                data-testid='ticket-detail-stage-eta-display'
+                data-track-category='Tickets'
+                data-track-name='EditStageDeadline'
+                data-track-metadata={JSON.stringify({
+                  ticketId: ticket.id,
+                  stageId: currentStageEntry?.stageId,
+                })}
+                title={
+                  currentStageEntry?.stageEta
+                    ? `Stage ETA · when ${ticket.stageName ?? 'this stage'} should be done`
+                    : `Stage ETA · not set for ${ticket.stageName ?? 'this stage'}`
+                }
+                onClick={() => {
+                  if (currentStageEntry?.stageEta) {
+                    setStageEtaValue(getLocalISOString(currentStageEntry.stageEta));
+                  }
+                  setEditingStageETA(true);
+                }}
+              >
+                <Clock
+                  size={14}
+                  className={isStageOverdue ? 'text-destructive' : 'text-muted-foreground'}
+                />
+                {currentStageEntry?.stageEta ? (
+                  <>
+                    <DetailChipLabel>Stage</DetailChipLabel>
+                    <span className={isStageOverdue ? 'text-destructive' : 'text-foreground'}>
+                      {formatETADisplay(currentStageEntry.stageEta)}
+                    </span>
+                    {isStageOverdue && <DetailChipMarker tone='danger'>Breached</DetailChipMarker>}
+                  </>
+                ) : (
+                  <span className='text-muted-foreground'>Stage ETA</span>
+                )}
+              </DetailChipButton>
+            ))}
+
+          {editingETA ? (
+            <div className='flex items-center gap-2' data-testid='ticket-detail-eta-input'>
+              <input
+                ref={etaInputRef}
+                type='datetime-local'
+                value={etaValue}
+                min={new Date().toISOString().slice(0, 16)}
+                onChange={e => setEtaValue(e.target.value)}
+                onBlur={handleETAChange}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') handleETAChange();
+                  if (e.key === 'Escape') {
+                    setEtaValue(ticket.eta ? getLocalISOString(ticket.eta) : '');
+                    setEditingETA(false);
+                  }
+                }}
+                className='h-[27px] rounded-full border border-input bg-background px-3 text-[12.5px] text-foreground outline-none focus:border-border'
+                data-track-category='Tickets'
+                data-track-name='StageETAInput'
+                data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
+              />
+            </div>
+          ) : (
+            <DetailChipButton
+              className={cn('pl-2 pr-[10px] gap-[7px]', isTicketOverdue && 'border-destructive/25')}
+              dashed={!ticket.eta}
+              data-testid='ticket-detail-eta-display'
+              data-track-category='TicketDetails'
+              data-track-name='EditStageETA'
+              data-track-metadata={JSON.stringify({
+                ticketId: ticket.id,
+                stageId: currentStageEntry?.stageId,
+              })}
+              title={
+                ticket.eta
+                  ? etaManagementView?.autoEnabled
+                    ? 'Ticket ETA · derived from the stage ETA'
+                    : 'Ticket ETA · set manually'
+                  : 'Ticket ETA · not set'
+              }
+              onClick={() => {
+                if (ticket.eta) {
+                  setEtaValue(getLocalISOString(ticket.eta));
+                }
+                setEditingETA(true);
+              }}
+            >
+              <Calendar
+                size={14}
+                className={isTicketOverdue ? 'text-destructive' : 'text-muted-foreground'}
+              />
+              {ticket.eta ? (
+                <>
+                  <DetailChipLabel>Ticket</DetailChipLabel>
+                  <span className={isTicketOverdue ? 'text-destructive' : 'text-foreground'}>
+                    {formatETADisplay(ticket.eta)}
+                  </span>
+                  {isTicketOverdue && <DetailChipMarker tone='danger'>Breached</DetailChipMarker>}
+                  {etaManagementView?.severity === 'PLANNING_RISK' && (
+                    <DetailChipMarker tone='warning'>
+                      Planning Risk{etaManagementView.isPaused ? ' (paused)' : ''}
+                    </DetailChipMarker>
+                  )}
+                  {etaManagementView?.forecastStatus === 'INCOMPLETE' && (
+                    <DetailChipMarker>Estimate Incomplete</DetailChipMarker>
+                  )}
+                </>
+              ) : (
+                <span className='text-muted-foreground'>Ticket ETA</span>
+              )}
+            </DetailChipButton>
+          )}
+
+          {ticket.statusV2 === TicketStatusV2.PAUSED && ticket.statusUpdatedAt && (
+            <DetailChip className='gap-[7px] pl-2 pr-[10px]'>
+              <Clock size={14} className='text-muted-foreground' />
+              <DetailChipLabel>Projected</DetailChipLabel>
+              <span className='text-foreground'>
+                {((): string => {
+                  const pausedDurationMs = calculateWorkingDurationMs(
+                    new Date(ticket.statusUpdatedAt),
+                    new Date(Date.now()),
+                  );
+                  const projectedEta =
+                    ticket.eta && pausedDurationMs > 0
+                      ? calculateETADeadline(
+                          new Date(Math.max(ticket.eta, ticket.statusUpdatedAt)),
+                          pausedDurationMs / (60 * 60 * 1000),
+                        ).getTime()
+                      : (ticket.eta ?? null);
+                  return formatETADisplay(projectedEta ?? undefined);
+                })()}
+              </span>
+            </DetailChip>
+          )}
+
+          {ticket?.ticketType === BaseTicketType.Fix && (
+            <DetailChipButton
+              className='gap-[7px] pl-2 pr-[10px]'
+              data-testid='fill-rca-button'
+              title={rcaButtonSubtitle}
+              onClick={handleOpenRcaPanel}
+              data-track-category='Tickets'
+              data-track-name={rcaTrackName}
+            >
+              <ClipboardCheck size={14} className='text-muted-foreground' />
+              {rcaButtonTitle}
+            </DetailChipButton>
+          )}
+
+          {tags?.map((tag, index) => {
+            const labelDot = [
+              'bg-cyan-400',
+              'bg-yellow-400',
+              'bg-purple-400',
+              'bg-green-400',
+              'bg-pink-400',
+              'bg-blue-400',
+            ] as const;
+            const dot = labelDot[index % labelDot.length]!;
+
+            return (
+              <DetailChip key={tag.id} className='gap-[7px]'>
+                <span className={cn('h-2 w-2 shrink-0 rounded-full', dot)} />
+                {tag.tagName}
+                <button
+                  onClick={() => void handleRemoveTag(tag.id)}
+                  data-ph-capture-attribute-track-id='remove_ticket_tag'
+                  className='-mr-1 rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground'
+                  aria-label='Remove label'
+                  data-track-category='Tickets'
+                  data-track-name='RemoveTag'
+                  data-track-metadata={JSON.stringify({
+                    tagId: tag.id,
+                    tagName: tag.tagName,
+                  })}
+                >
+                  <X size={12} />
+                </button>
+              </DetailChip>
+            );
+          })}
+
+          <div className='relative flex items-center' ref={tagDropdownRef}>
+            <DetailChipButton
+              dashed
+              className='gap-[7px]'
+              aria-label='Add label'
+              onClick={() => setShowTagDropdown(!showTagDropdown)}
+              data-track-category='Tickets'
+              data-track-name='ToggleTagDropdown'
+              data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
+            >
+              <Plus size={14} />
+              <span>{tags && tags.length > 0 ? 'Label' : 'Add label'}</span>
+            </DetailChipButton>
+
+            {showTagDropdown && (
+              <div className='absolute top-full left-0 mt-1 bg-background border border-border rounded-lg shadow-lg z-50 min-w-[250px] max-h-64 overflow-hidden'>
+                {/* Search Input */}
+                <div className='p-2 border-b border-border'>
+                  <input
+                    ref={tagInputRef}
+                    type='text'
+                    value={tagSearchQuery}
+                    onChange={e => setTagSearchQuery(e.target.value)}
+                    onKeyDown={handleTagKeyDown}
+                    placeholder='Search or create label...'
+                    className='w-full px-2.5 py-1.5 text-sm border text-foreground bg-background border-input rounded outline-none focus:border-border'
+                    data-track-category='Tickets'
+                    data-track-name='SearchTags'
+                  />
+                </div>
+
+                {/* Tag List */}
+                <div className='max-h-48 overflow-y-auto'>
+                  {tagSearchQuery.trim() && !exactMatch && (
+                    <button
+                      onClick={() => void handleToggleTag(tagSearchQuery)}
+                      data-ph-capture-attribute-track-id='create_ticket_tag'
+                      className='w-full text-left px-3 py-2 text-sm hover:bg-muted flex items-center gap-2 border-b border-border'
+                      data-track-category='Tickets'
+                      data-track-name='CreateTag'
+                      data-track-metadata={JSON.stringify({ tagName: tagSearchQuery.trim() })}
+                    >
+                      <Plus size={14} className='text-foreground' />
+                      <span className='text-foreground font-medium'>
+                        Create &quot;{tagSearchQuery.trim()}&quot;
+                      </span>
+                    </button>
+                  )}
+
+                  {filteredTags.map(tagName => {
+                    const isSelected = selectedTagNames.has(tagName);
+
+                    return (
+                      <button
+                        key={tagName}
+                        onClick={() => void handleToggleTag(tagName)}
+                        data-ph-capture-attribute-track-id='toggle_ticket_tag'
+                        className='w-full px-3 py-2 text-sm flex items-center justify-between hover:bg-muted'
+                        data-track-category='Tickets'
+                        data-track-name='ToggleTag'
+                        data-track-metadata={JSON.stringify({
+                          tagName,
+                          isSelected: !isSelected,
+                        })}
+                      >
+                        <div className='flex items-center gap-2'>
+                          <Tag size={14} className='text-muted-foreground' />
+                          <span>{tagName}</span>
+                        </div>
+
+                        {isSelected && (
+                          <span className='text-sm'>
+                            <Check size={14} />
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <Popover
+            open={moreMenuOpen}
+            onOpenChange={setMoreMenuOpen}
+            align='end'
+            sideOffset={6}
+            className='w-[226px] rounded-xl border border-border bg-background p-1.5 shadow-[0_16px_44px_rgba(20,22,26,0.2)]'
+            trigger={
+              <button
+                type='button'
+                aria-label='More actions'
+                title='More actions'
+                className='flex h-[27px] w-[27px] shrink-0 items-center justify-center rounded-[9px] border border-border bg-background text-muted-foreground transition-colors duration-150 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+                data-track-category='Tickets'
+                data-track-name='OpenTicketMoreMenu'
+              >
+                <ThreeDotsMenuHorizontal className='size-[17px]' />
+              </button>
+            }
+          >
+            {moreMenuItems.map(item => (
+              <button
+                key={item.label}
+                type='button'
+                onClick={() => {
+                  setMoreMenuOpen(false);
+                  item.run();
+                }}
+                disabled={item.disabled ?? false}
+                className='flex h-9 w-full items-center gap-[11px] rounded-lg px-[9px] text-left transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-50'
+                data-track-category='Tickets'
+                data-track-name={item.trackName}
+              >
+                <span className='flex w-[22px] items-center justify-center text-muted-foreground'>
+                  {item.icon}
+                </span>
+                <span className='flex-1 text-[13px] text-foreground'>{item.label}</span>
+              </button>
+            ))}
+          </Popover>
+        </div>
+
+        {roleGroups.length > 0 && (
+          <div className='mb-[18px] flex flex-wrap items-center gap-x-5 gap-y-2'>
+            {roleGroups.map(group => (
+              <div key={group.label} className='flex items-center gap-2'>
+                <span className='text-[11px] font-semibold uppercase tracking-[0.45px] text-muted-foreground/80'>
+                  {group.userIds.length > 1 ? `${group.label}s` : group.label}
+                </span>
+                {group.userIds.map(userId => {
+                  const user = users?.find(
+                    (u: { id: string; name: string; displayName?: string | null }) =>
+                      u.id === userId,
+                  );
+                  return (
+                    <span key={userId} className='flex items-center gap-1.5 text-[12.5px]'>
+                      <UserAvatar
+                        userId={userId}
+                        size={AvatarSize.SM}
+                        shape={AvatarShape.CIRCULAR}
+                        showActiveStatus={false}
+                      />
+                      {getUserDisplayName(user) || 'Unknown'}
+                    </span>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {etaManagementView?.severity === 'PLANNING_RISK' &&
+          etaManagementView.planningRiskState === 'ACTIVE' && (
+            <div className='mx-0 mb-4 px-3 py-2.5 rounded-md border border-amber-200 bg-amber-50 text-sm'>
+              <div className='flex items-start justify-between gap-2'>
+                <div className='text-amber-800'>
+                  <p className='font-medium'>Planning risk</p>
+                  <p className='text-xs text-amber-700 mt-0.5'>
+                    The current stage deadline
+                    {etaManagementView.stageDeadline
+                      ? ` (${formatETADisplay(etaManagementView.stageDeadline)})`
+                      : ''}{' '}
+                    is later than the ticket due date
+                    {etaManagementView.ticketDue
+                      ? ` (${formatETADisplay(etaManagementView.ticketDue)})`
+                      : ''}
+                    .
+                    {etaManagementView.autoEnabled
+                      ? ' Automatic recalculation is active for this board.'
+                      : ' Automatic recalculation is off for this board.'}
+                  </p>
+                </div>
+                {!showAcknowledgeInput && (
+                  <Button
+                    variant='secondary'
+                    onClick={() => setShowAcknowledgeInput(true)}
+                    data-track-category='TicketDetails'
+                    data-track-name='OpenAcknowledgeEtaRisk'
+                  >
+                    Acknowledge
+                  </Button>
+                )}
+              </div>
+              {showAcknowledgeInput && (
+                <div className='mt-2 flex items-center gap-2'>
+                  <input
+                    type='text'
+                    value={acknowledgeReason}
+                    onChange={e => setAcknowledgeReason(e.target.value)}
+                    placeholder='Reason for keeping the current dates...'
+                    className='flex-1 text-sm bg-background border border-input rounded px-2 py-1 outline-none focus:border-border'
+                    data-testid='acknowledge-eta-risk-reason'
+                    data-track-category='TicketDetails'
+                    data-track-name='AcknowledgeEtaRiskReasonInput'
+                  />
+                  <Button
+                    variant='secondary'
+                    onClick={() => void handleAcknowledgeRisk()}
+                    disabled={submittingAcknowledge || !acknowledgeReason.trim()}
+                    data-track-category='TicketDetails'
+                    data-track-name='SubmitAcknowledgeEtaRisk'
+                  >
+                    {submittingAcknowledge ? 'Saving...' : 'Confirm'}
+                  </Button>
+                  <Button
+                    variant='ghost'
+                    onClick={() => {
+                      setShowAcknowledgeInput(false);
+                      setAcknowledgeReason('');
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+        <div className='-mx-[9px] rounded-xl border border-transparent bg-background transition-colors hover:border-border'>
           {editingDescription ? (
-            <div className='bg-muted rounded-lg p-4 border border-input'>
+            <div className='rounded-xl border border-border bg-background'>
               <textarea
                 ref={descriptionTextareaRef}
                 value={descriptionValue}
                 onChange={e => setDescriptionValue(e.target.value)}
                 onBlur={handleSaveDescription}
                 onKeyDown={e => {
+                  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+                    e.preventDefault();
+                    handleSaveDescription();
+                    return;
+                  }
                   if (e.key === 'Escape') {
-                    setDescriptionValue(ticket.description);
+                    setDescriptionValue(resolveTicketDescription(ticket));
                     setEditingDescription(false);
                   }
                 }}
-                className='w-full text-sm text-foreground leading-relaxed outline-none bg-transparent resize-none min-h-[150px] overflow-y-auto'
+                className='min-h-[150px] w-full resize-none overflow-y-auto bg-transparent px-[15px] py-[11px] text-[14px] leading-[1.7] text-foreground outline-none'
                 data-track-category='Tickets'
                 data-track-name='EditDescription'
                 data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
               />
+              <div className='flex items-center gap-[9px] border-t border-border/60 px-[14px] py-2.5'>
+                <Button
+                  onClick={handleSaveDescription}
+                  data-track-category='Tickets'
+                  data-track-name='SaveDescription'
+                >
+                  Save
+                </Button>
+                <button
+                  type='button'
+                  onMouseDown={e => e.preventDefault()}
+                  onClick={() => {
+                    setDescriptionValue(resolveTicketDescription(ticket));
+                    setEditingDescription(false);
+                  }}
+                  className='text-[12.5px] font-medium text-muted-foreground transition-colors hover:text-foreground'
+                  data-track-category='Tickets'
+                  data-track-name='CancelDescription'
+                >
+                  Cancel
+                </button>
+                <div className='flex-1' />
+                <span className='flex items-center gap-1.5 text-[11.5px] text-muted-foreground'>
+                  <span className='rounded-[5px] border border-border bg-background px-[5px] py-0.5 font-mono text-[11px] font-medium'>
+                    {isMacPlatform ? '⌘↵' : 'Ctrl↵'}
+                  </span>
+                  to save
+                </span>
+              </div>
             </div>
           ) : (
             <div
               role='button'
               tabIndex={0}
-              className='cursor-text my-3 text-foreground flex flex-col'
+              className='flex cursor-text flex-col px-[15px] py-[11px] text-foreground'
               onClick={() => setEditingDescription(true)}
               onKeyDown={e => {
                 if (e.key === 'Enter' || e.key === ' ') {
@@ -3736,1073 +4793,395 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
               data-track-category='Tickets'
               data-track-name='StartEditDescription'
             >
-              {!ticket.description ? (
+              {!resolveTicketDescription(ticket) ? (
                 <p className='text-sm text-muted-foreground italic'>Add description</p>
               ) : (
                 <>
-                  <p
-                    ref={descriptionRef}
-                    className={cn(
-                      'whitespace-pre-wrap text-foreground break-all text-sm',
-                      !showFullDescription && 'overflow-hidden line-clamp-3 sm:line-clamp-3',
+                  <div className='relative'>
+                    <p
+                      ref={descriptionRef}
+                      className={cn(
+                        'whitespace-pre-wrap break-words text-[14px] leading-[1.7] text-muted-foreground [text-wrap:pretty]',
+                        !showFullDescription && 'overflow-hidden line-clamp-5 sm:line-clamp-5',
+                      )}
+                    >
+                      <RenderMessageWithHTML message={resolveTicketDescription(ticket)} />
+                    </p>
+                    {!showFullDescription && needsReadMore && (
+                      <div className='pointer-events-none absolute inset-x-0 bottom-0 h-[62px] bg-gradient-to-b from-transparent to-background' />
                     )}
-                  >
-                    <RenderMessageWithHTML message={ticket.description} />
-                  </p>
-                  {!showFullDescription && needsReadMore && (
+                  </div>
+                  {(needsReadMore || showFullDescription) && (
                     <button
-                      className='text-xs font-semibold cursor-pointer self-start underline py-1'
+                      className='w-fit cursor-pointer self-start py-[5px] text-[12.5px] font-semibold text-muted-foreground transition-colors hover:text-foreground'
                       onClick={event => {
                         event.stopPropagation();
-                        setShowFullDescription(true);
+                        setShowFullDescription(prev => !prev);
                       }}
                       data-track-category='Tickets'
-                      data-track-name='ReadMoreDescription'
+                      data-track-name={
+                        showFullDescription ? 'ViewLessDescription' : 'ReadMoreDescription'
+                      }
                     >
-                      Read More
-                    </button>
-                  )}
-                  {showFullDescription && (
-                    <button
-                      className='text-xs font-semibold cursor-pointer self-start underline py-1'
-                      onClick={event => {
-                        event.stopPropagation();
-                        setShowFullDescription(false);
-                      }}
-                      data-track-category='Tickets'
-                      data-track-name='ViewLessDescription'
-                    >
-                      View Less
+                      {showFullDescription ? 'Show less' : 'Show more'}
                     </button>
                   )}
                 </>
               )}
             </div>
           )}
-        </div>
-        {/* Display Ticket Files */}
-        {ticketAttachments && ticketAttachments.length > 0 && (
-          <div className='flex flex-col gap-2'>
-            <div className='flex flex-wrap items-center gap-2'>
-              {(showAllAttachments
-                ? ticketAttachments
-                : ticketAttachments.slice(0, TICKET_ATTACHMENT_PREVIEW_LIMIT)
-              ).map(attachment => (
-                <FileBubble
-                  key={attachment.id}
-                  compact
-                  createdBy={attachment.createdBy}
-                  createdAt={attachment.createdAt}
-                  attachment={attachment}
-                  siblings={ticketAttachments}
-                />
-              ))}
+          {/* Display Ticket Files */}
+          {ticketAttachments && ticketAttachments.length > 0 && (
+            <div className='flex flex-col gap-2 px-[13px] pb-[11px] pt-0.5'>
+              <div className='flex flex-wrap items-center gap-2'>
+                {(showAllAttachments
+                  ? ticketAttachments
+                  : ticketAttachments.slice(0, TICKET_ATTACHMENT_PREVIEW_LIMIT)
+                ).map(attachment => (
+                  <FileBubble
+                    key={attachment.id}
+                    compact
+                    createdBy={attachment.createdBy}
+                    createdAt={attachment.createdAt}
+                    attachment={attachment}
+                    siblings={ticketAttachments}
+                  />
+                ))}
+              </div>
+              {ticketAttachments.length > TICKET_ATTACHMENT_PREVIEW_LIMIT && (
+                <button
+                  className='text-xs font-semibold cursor-pointer self-start underline py-1'
+                  onClick={() => setShowAllAttachments(prev => !prev)}
+                  data-track-category='Tickets'
+                  data-track-name={
+                    showAllAttachments ? 'ViewLessAttachments' : 'ViewMoreAttachments'
+                  }
+                  data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
+                >
+                  {showAllAttachments
+                    ? 'View less'
+                    : `View more (${ticketAttachments.length - TICKET_ATTACHMENT_PREVIEW_LIMIT})`}
+                </button>
+              )}
             </div>
-            {ticketAttachments.length > TICKET_ATTACHMENT_PREVIEW_LIMIT && (
-              <button
-                className='text-xs font-semibold cursor-pointer self-start underline py-1'
-                onClick={() => setShowAllAttachments(prev => !prev)}
-                data-track-category='Tickets'
-                data-track-name={showAllAttachments ? 'ViewLessAttachments' : 'ViewMoreAttachments'}
-                data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
-              >
-                {showAllAttachments
-                  ? 'View less'
-                  : `View more (${ticketAttachments.length - TICKET_ATTACHMENT_PREVIEW_LIMIT})`}
-              </button>
-            )}
-          </div>
-        )}
-        {/* Ticket MetaData Key Value */}
-        <div className='flex flex-col gap-y-4 mt-8 mb-4 w-full'>
-          {/* Left Column */}
+          )}
+        </div>
 
-          <div className='space-y-4'>
-            {/* Assignee */}
-            <TicketKeyValuePair
-              ticketKey='Assignee'
-              value={
-                <UserSelector
-                  selectedUserId={ticket.assignedTo ?? null}
-                  onUserSelect={handleAssigneeChange}
-                  channelId={ticket.channelId ?? undefined}
-                  noBorder={true}
-                />
+        <DetailSection
+          title='Fields'
+          {...(gateMissingFields.length > 0 && gateStageName
+            ? {
+                badge: (
+                  <DetailSectionGate>
+                    {gateMissingFields.length} required to reach {gateStageName}
+                  </DetailSectionGate>
+                ),
               }
-            />
-
-            {/* Role assignments — one row per role on the ticket. Replaces the
-                old hardcoded Manager / PR Reviewer / QA sections so any role
-                (including custom ones) shows up with its own name. */}
-            {roleGroups.map(group => (
-              <TicketKeyValuePair
-                key={group.label}
-                ticketKey={group.userIds.length > 1 ? `${group.label}s` : group.label}
-                value={
-                  <div
-                    className={
-                      group.userIds.length > 1 ? 'flex flex-col gap-2' : 'flex items-center gap-2'
+            : {})}
+        >
+          <div className='flex flex-col gap-px pt-2 pl-[21px]'>
+            {ticket.ticketType && (
+              <DetailFieldRow label='Type' locked={fieldsAreReadOnly}>
+                <Selector
+                  items={ticketTypeOptions}
+                  selectedValue={ticket.ticketType}
+                  onValueChange={handleTicketTypeChange}
+                  placeholder='Set Type'
+                  noBorder={true}
+                  isLoading={isTicketTypeLoading}
+                  inputClassName='bg-transparent text-[13px] font-medium'
+                  onOpenChange={open => {
+                    if (open && !ticketTypeDropdownOpened) {
+                      setTicketTypeDropdownOpened(true);
                     }
-                  >
-                    {group.userIds.map(userId => {
-                      const user = users?.find(
-                        (u: { id: string; name: string; displayName?: string | null }) =>
-                          u.id === userId,
-                      );
-                      return (
-                        <div key={userId} className='flex items-center gap-2'>
-                          <UserAvatar
-                            userId={userId}
-                            size={AvatarSize.SM}
-                            shape={AvatarShape.CIRCULAR}
-                            showActiveStatus={false}
-                          />
-                          {getUserDisplayName(user) || 'Unknown'}
-                        </div>
-                      );
-                    })}
-                  </div>
+                  }}
+                />
+              </DetailFieldRow>
+            )}
+
+            <DetailFieldRow label='User Group' locked={fieldsAreReadOnly}>
+              <UserGroupSelector
+                selectedGroupId={ticket.userGroupId ?? null}
+                onGroupSelect={handleUserGroupChange}
+                noBorder
+              />
+            </DetailFieldRow>
+
+            {ticket.merchantId && (
+              <DetailFieldRow label='Merchant ID' locked>
+                <span className='text-[13px] font-medium text-foreground'>{ticket.merchantId}</span>
+              </DetailFieldRow>
+            )}
+
+            {visibleFormFields.map(fieldValue => (
+              <EditableFormField
+                key={fieldValue.resolvedFieldId}
+                readOnly={fieldsAreReadOnly}
+                fieldName={getFormEntityFieldName(fieldValue)}
+                fieldValue={fieldValue.actualFieldValue ?? fieldValue.fieldValue}
+                fieldType={getFormEntityFieldType(fieldValue)}
+                fieldEnum={getFormEntityFieldEnum(fieldValue)}
+                onSave={newValue =>
+                  handleFormFieldSave(
+                    fieldValue.id,
+                    newValue,
+                    fieldValue.isPlaceholder,
+                    fieldValue.formId,
+                  )
                 }
               />
             ))}
 
-            {/* Created At */}
-            <TicketKeyValuePair
-              ticketKey='Created at'
-              value={<span>{formatTimestamp(ticket.createdAt)}</span>}
-            />
+            {leftoverFieldValues.map(field => (
+              <DetailFieldRow
+                key={field.resolvedFieldId}
+                label={field.fieldName}
+                locked
+                note='no longer defined on this board'
+              >
+                <span className='break-words text-[13px] font-medium text-muted-foreground'>
+                  {formatLeftoverFieldValue(field, leftoverFieldUserById)}
+                </span>
+              </DetailFieldRow>
+            ))}
 
-            {/* Board */}
-            <TicketKeyValuePair
-              ticketKey='Board'
-              value={
-                <EntitySelector
-                  options={(boards ?? []).map(board => ({
-                    value: board.id,
-                    label: board.name,
-                    icon: <SquareKanban size={18} className='text-purple-600' />,
-                  }))}
-                  selectedValue={ticket.boardId ?? null}
-                  onSelect={handleBoardChange}
-                  placeholder='Select board'
-                  searchPlaceholder='Search boards...'
-                  isLoading={hasBoardDropdownOpened && !boards}
-                  width='auto'
-                  noBorder={true}
-                  isOpen={boardDropdownOpen}
-                  onOpenChange={open => {
-                    setBoardDropdownOpen(open);
-                    if (open && !hasBoardDropdownOpened) {
-                      setHasBoardDropdownOpened(true);
-                    }
-                  }}
-                />
-              }
-            />
+            {gateMissingFields
+              .filter(
+                field =>
+                  !visibleFormFields.some(
+                    shown => getFormEntityFieldName(shown) === field.fieldName,
+                  ),
+              )
+              .map(field => (
+                <DetailFieldRow
+                  key={`gate-${field.id}`}
+                  label={field.fieldName}
+                  gate={
+                    gateStageName ? (
+                      <DetailRowGate>required to reach {gateStageName}</DetailRowGate>
+                    ) : undefined
+                  }
+                >
+                  <span className='text-[13px] text-muted-foreground/60'>Empty</span>
+                </DetailFieldRow>
+              ))}
 
-            {/* Add Tag Button */}
-            <TicketKeyValuePair
-              ticketKey='Labels'
-              value={
-                <div className='relative flex items-center' ref={tagDropdownRef}>
-                  {/* Tags */}
-                  <div className='flex items-center gap-2 flex-wrap'>
-                    {tags &&
-                      tags.length > 0 &&
-                      tags.map((tag, index) => {
-                        const colors = [
-                          {
-                            bg: 'bg-cyan-400',
-                            text: 'text-cyan-700',
-                            icon: 'text-cyan-600',
-                            hoverBg: 'hover:bg-cyan-200',
-                          },
-                          {
-                            bg: 'bg-yellow-400',
-                            text: 'text-yellow-700',
-                            icon: 'text-yellow-600',
-                            hoverBg: 'hover:bg-yellow-200',
-                          },
-                          {
-                            bg: 'bg-purple-400',
-                            text: 'text-purple-700',
-                            icon: 'text-purple-600',
-                            hoverBg: 'hover:bg-purple-200',
-                          },
-                          {
-                            bg: 'bg-green-400',
-                            text: 'text-green-700',
-                            icon: 'text-green-600',
-                            hoverBg: 'hover:bg-green-200',
-                          },
-                          {
-                            bg: 'bg-pink-400',
-                            text: 'text-pink-700',
-                            icon: 'text-pink-600',
-                            hoverBg: 'hover:bg-pink-200',
-                          },
-                          {
-                            bg: 'bg-blue-400',
-                            text: 'text-blue-700',
-                            icon: 'text-blue-600',
-                            hoverBg: 'hover:bg-blue-200',
-                          },
-                        ] as const;
-                        const color = colors[index % colors.length]!;
-
-                        return (
-                          <span
-                            key={tag.id}
-                            className={`inline-flex items-center gap-1.5 px-2 py-1 text-sm font-medium group relative rounded-[6px] border border-border bg-muted`}
-                          >
-                            {/* <Tag size={14} className={color.icon} /> */}
-                            <div className={`w-2 h-2 rounded-full ${color.bg}`}></div>
-                            {tag.tagName}
-                            {
-                              <button
-                                onClick={() => void handleRemoveTag(tag.id)}
-                                data-ph-capture-attribute-track-id='remove_ticket_tag'
-                                className={`ml-1 p-0.5 rounded transition-colors`}
-                                aria-label='Remove label'
-                                data-track-category='Tickets'
-                                data-track-name='RemoveTag'
-                                data-track-metadata={JSON.stringify({
-                                  tagId: tag.id,
-                                  tagName: tag.tagName,
-                                })}
-                              >
-                                <X size={12} />
-                              </button>
-                            }
-                          </span>
-                        );
-                      })}
-                    <button
-                      onClick={() => setShowTagDropdown(!showTagDropdown)}
-                      className='inline-flex items-center justify-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors'
-                      aria-label='Add label'
-                      data-track-category='Tickets'
-                      data-track-name='ToggleTagDropdown'
-                      data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
-                    >
-                      <Plus size={14} />
-                      <span>Add</span>
-                    </button>
-                  </div>
-
-                  {showTagDropdown && (
-                    <div className='absolute top-full left-0 mt-1 bg-background border border-border rounded-lg shadow-lg z-50 min-w-[250px] max-h-64 overflow-hidden'>
-                      {/* Search Input */}
-                      <div className='p-2 border-b border-border'>
-                        <input
-                          ref={tagInputRef}
-                          type='text'
-                          value={tagSearchQuery}
-                          onChange={e => setTagSearchQuery(e.target.value)}
-                          onKeyDown={handleTagKeyDown}
-                          placeholder='Search or create label...'
-                          className='w-full px-2.5 py-1.5 text-sm border text-foreground bg-background border-input rounded outline-none focus:border-border'
-                          data-track-category='Tickets'
-                          data-track-name='SearchTags'
-                        />
-                      </div>
-
-                      {/* Tag List */}
-                      <div className='max-h-48 overflow-y-auto'>
-                        {tagSearchQuery.trim() && !exactMatch && (
-                          <button
-                            onClick={() => void handleToggleTag(tagSearchQuery)}
-                            data-ph-capture-attribute-track-id='create_ticket_tag'
-                            className='w-full text-left px-3 py-2 text-sm hover:bg-muted flex items-center gap-2 border-b border-border'
-                            data-track-category='Tickets'
-                            data-track-name='CreateTag'
-                            data-track-metadata={JSON.stringify({ tagName: tagSearchQuery.trim() })}
-                          >
-                            <Plus size={14} className='text-foreground' />
-                            <span className='text-foreground font-medium'>
-                              Create &quot;{tagSearchQuery.trim()}&quot;
-                            </span>
-                          </button>
-                        )}
-
-                        {filteredTags.map(tagName => {
-                          const isSelected = selectedTagNames.has(tagName);
-
-                          return (
-                            <button
-                              key={tagName}
-                              onClick={() => void handleToggleTag(tagName)}
-                              data-ph-capture-attribute-track-id='toggle_ticket_tag'
-                              className='w-full px-3 py-2 text-sm flex items-center justify-between hover:bg-muted'
-                              data-track-category='Tickets'
-                              data-track-name='ToggleTag'
-                              data-track-metadata={JSON.stringify({
-                                tagName,
-                                isSelected: !isSelected,
-                              })}
-                            >
-                              <div className='flex items-center gap-2'>
-                                <Tag size={14} className='text-muted-foreground' />
-                                <span>{tagName}</span>
-                              </div>
-
-                              {isSelected && (
-                                <span className='text-sm'>
-                                  <Check size={14} />
-                                </span>
-                              )}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              }
-            />
+            {(hiddenEmptyFieldCount > 0 || showEmptyFields) && (
+              <div className='flex items-center gap-4 pt-[11px]'>
+                <button
+                  type='button'
+                  onClick={() => setShowEmptyFields(prev => !prev)}
+                  className='text-[12.5px] font-medium text-muted-foreground transition-colors hover:text-foreground'
+                  data-track-category='Tickets'
+                  data-track-name='ToggleEmptyFields'
+                >
+                  {showEmptyFields
+                    ? 'Hide empty fields'
+                    : `Show ${hiddenEmptyFieldCount} empty field${hiddenEmptyFieldCount === 1 ? '' : 's'}`}
+                </button>
+              </div>
+            )}
           </div>
+        </DetailSection>
 
-          {/* Right Column */}
-          <div className='space-y-4'>
-            {/* Stage */}
-            <TicketKeyValuePair
-              ticketKey='Status'
-              value={
-                <div
-                  data-testid='ticket-detail-status-selector'
-                  className='flex items-center gap-2'
-                  data-track-event='SELECTOR_CHANGE'
-                  data-track-category='Tickets'
-                  data-track-name='CHANGE_STATUS'
-                  data-track-metadata={JSON.stringify({
-                    ticketId: ticket.id,
-                    boardId: ticket.boardId,
-                    currentStatus: ticket.stageName,
-                  })}
-                >
-                  {stageReadOnly ? (
-                    <span className='inline-flex items-center gap-2 rounded-md bg-muted px-2 py-1 text-sm'>
-                      <StageIndicator
-                        stages={stages}
-                        stageName={ticket.stageName}
-                        fallbackStatus={ticket.statusV2}
-                        isNonLinearBoard={isNonLinearBoard}
-                      />
-                      {ticket.stageName || 'Not set'}
-                    </span>
-                  ) : (
-                    <Selector
-                      items={selectorStages}
-                      selectedValue={ticket.stageName}
-                      onValueChange={handleStageChange}
-                      placeholder='Set Status'
-                      icon={
-                        <StageIndicator
-                          stages={stages}
-                          stageName={ticket.stageName}
-                          fallbackStatus={ticket.statusV2}
-                          isNonLinearBoard={isNonLinearBoard}
-                        />
-                      }
-                      getItemIcon={item => (
-                        <StageIndicator
-                          stages={stages}
-                          stageName={item.name}
-                          isNonLinearBoard={isNonLinearBoard}
-                        />
-                      )}
-                      noBorder={true}
-                      isItemDisabled={item => item.name === ticket.stageName}
-                    />
-                  )}
-                  {/* Show alert icon if there's a pending request for the next stage */}
-                  {((): React.ReactElement | null => {
-                    if (!ticket.ticketStageRequests || !stagesWithFormInfo) return null;
-                    const currentStage = stagesWithFormInfo.find(s => s.name === ticket.stageName);
-                    if (!currentStage) return null;
-                    const nextStage = stagesWithFormInfo.find(
-                      s => s.sequenceNumber === currentStage.sequenceNumber + 1,
-                    );
-                    if (!nextStage) return null;
-                    const hasPendingRequest = ticket.ticketStageRequests.some(
-                      req =>
-                        req.status === TicketStageRequestStatus.SUBMITTED &&
-                        req.stageId === nextStage.id,
-                    );
-                    return hasPendingRequest ? (
-                      <Tooltip content='Pending Status Approval'>
-                        <AlertCircle size={14} className='text-orange-500' />
-                      </Tooltip>
-                    ) : null;
-                  })()}
-                </div>
-              }
-            />
-
-            {/* Created By */}
-            <TicketKeyValuePair
-              ticketKey='Created by'
-              value={
-                <div className='items-center flex gap-2'>
-                  <UserAvatar userId={createdByUser?.id || ''} shape={AvatarShape.CIRCULAR} />
-                  {getUserDisplayName(createdByUser) || 'Merchant User'}
-                </div>
-              }
-            />
-
-            {/* Priority */}
-            <TicketKeyValuePair
-              ticketKey='Priority'
-              value={
-                <div
-                  data-testid='ticket-detail-priority-selector'
-                  data-track-event='SELECTOR_CHANGE'
-                  data-track-category='Tickets'
-                  data-track-name='CHANGE_PRIORITY'
-                  data-track-metadata={JSON.stringify({
-                    ticketId: ticket.id,
-                    currentPriority: ticket.priority,
-                  })}
-                >
-                  <Selector
-                    items={priorityItems}
-                    selectedValue={ticket.priority}
-                    onValueChange={handlePriorityChange}
-                    placeholder='Set Priority'
-                    icon={<TicketPriorityIcon size={14} />}
-                    noBorder={true}
-                  />
-                </div>
-              }
-            />
-
-            {/* Generated Tags (from the latest email reply) */}
-            {isEmailDeskTicket && (
-              <TicketKeyValuePair
-                ticketKey='Generated Tags'
-                value={<TicketTagsBadge ticketId={ticket.id} />}
-              />
-            )}
-
-            {/* Ticket Type */}
-            {ticket.ticketType && (
-              <TicketKeyValuePair
-                ticketKey='Type'
-                value={
-                  <Selector
-                    items={ticketTypeOptions}
-                    selectedValue={ticket.ticketType}
-                    onValueChange={handleTicketTypeChange}
-                    placeholder='Set Type'
-                    noBorder={true}
-                    isLoading={isTicketTypeLoading}
-                    onOpenChange={open => {
-                      if (open && !ticketTypeDropdownOpened) {
-                        setTicketTypeDropdownOpened(true);
-                      }
-                    }}
-                  />
+        {ticket?.classificationData && channelId && (
+          <DetailSection title='AI Classification' defaultOpen={false}>
+            <div className='pt-2 pl-[21px]'>
+              <AIClassificationPanel
+                ticketId={ticket.id}
+                channelId={channelId}
+                classificationData={
+                  ticket.classificationData as unknown as TicketClassificationData
                 }
+                userGroups={userGroups.map(g => ({ id: g.id, name: g.name }))}
+                hasFormFields={!!(allFormFields && allFormFields.length > 0)}
               />
-            )}
+            </div>
+          </DetailSection>
+        )}
 
-            {/* Channel */}
-            <TicketKeyValuePair
-              ticketKey='Channel'
-              value={<p>{channel ? `${channel.name}` : 'XyneSpace'}</p>}
-            />
+        <DetailSection
+          title='Workflow'
+          defaultOpen={workflowActionableCount > 0}
+          summary={
+            workflowActionableCount > 0 ? `${workflowActionableCount} pending` : 'nothing pending'
+          }
+        >
+          <div className='flex flex-col gap-2 pt-2 pl-[21px]'>
+            {/* Flow step gate form — prefillable by default on flow boards; same
+            inline panel as linear-board prefillable forms */}
+            {flowStepForm &&
+              ticket &&
+              (flowStepForm.settled ? (
+                <StageFormInlinePanel
+                  ticket={ticket}
+                  targetStage={{ id: flowStepForm.planNodeId, name: flowStepForm.stepTitle }}
+                  sourceStageName=''
+                  formId={flowStepForm.formId}
+                  hasApprovers={false}
+                  isNonLinearBoard={false}
+                  headerTitle={flowFormName ?? 'Form'}
+                  headerSubtitle={`${flowStepForm.stepTitle} form · Submitted answers`}
+                  saveOnly
+                  saveSuccessMessage='Submitted form updated'
+                  editableOnDemand
+                />
+              ) : (
+                <StageFormInlinePanel
+                  ticket={ticket}
+                  targetStage={{ id: flowStepForm.planNodeId, name: flowStepForm.stepTitle }}
+                  sourceStageName=''
+                  formId={flowStepForm.formId}
+                  hasApprovers={false}
+                  isNonLinearBoard={false}
+                  headerTitle={flowFormName ?? 'Form'}
+                  headerSubtitle={`${flowStepForm.stepTitle} form`}
+                  onCommit={completeFlowStep}
+                  commitSuccessMessage='Step completed'
+                />
+              ))}
 
-            {/* ETA */}
-            <TicketKeyValuePair
-              ticketKey='Due Date'
-              value={
-                editingETA ? (
-                  <div className='flex items-center gap-2' data-testid='ticket-detail-eta-input'>
-                    <input
-                      ref={etaInputRef}
-                      type='datetime-local'
-                      value={etaValue}
-                      min={new Date().toISOString().slice(0, 16)}
-                      onChange={e => setEtaValue(e.target.value)}
-                      onBlur={handleETAChange}
-                      onKeyDown={e => {
-                        if (e.key === 'Enter') handleETAChange();
-                        if (e.key === 'Escape') {
-                          setEtaValue(ticket.eta ? getLocalISOString(ticket.eta) : '');
-                          setEditingETA(false);
-                        }
-                      }}
-                      className='text-sm text-foreground bg-background border border-input rounded px-2 py-1 outline-none focus:border-border'
-                      data-track-category='Tickets'
-                      data-track-name='StageETAInput'
-                      data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
-                    />
-                  </div>
-                ) : (
-                  <div
-                    role='button'
-                    tabIndex={0}
-                    data-testid='ticket-detail-eta-display'
-                    className='inline-flex items-center gap-1.5 text-sm text-foreground cursor-pointer hover:bg-muted px-2 py-1 -mx-2 rounded-md border border-transparent hover:border-border transition-colors'
-                    data-track-category='TicketDetails'
-                    data-track-name='EditStageETA'
-                    data-track-metadata={JSON.stringify({
-                      ticketId: ticket.id,
-                      stageId: currentStageEntry?.stageId,
-                    })}
-                    onClick={() => {
-                      if (ticket.eta) {
-                        setEtaValue(getLocalISOString(ticket.eta));
-                      }
-                      setEditingETA(true);
-                    }}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        if (ticket.eta) {
-                          setEtaValue(getLocalISOString(ticket.eta));
-                        }
-                        setEditingETA(true);
-                      }
-                    }}
-                  >
-                    <Calendar
-                      size={14}
-                      className={
-                        ticket.eta &&
-                        new Date(ticket.eta) < new Date() &&
-                        ticket.statusV2 !== TicketStatusV2.COMPLETED &&
-                        ticket.statusV2 !== TicketStatusV2.CANCELLED
-                          ? 'text-destructive'
-                          : 'text-muted-foreground'
-                      }
-                    />
-                    <span>{ticket.eta ? formatETADisplay(ticket.eta) : 'Set Due Date'}</span>
-                    {ticket.eta &&
-                      new Date(ticket.eta) < new Date() &&
-                      ticket.statusV2 !== TicketStatusV2.COMPLETED &&
-                      ticket.statusV2 !== TicketStatusV2.CANCELLED && (
-                        <span className='inline-flex items-center px-1.5 py-0.5 text-xs font-medium bg-destructive/10 text-destructive rounded'>
-                          Overdue
+            {!stageReadOnly &&
+              nextStageDetailsConfig &&
+              (nextStageDetailsConfig.formId ? (
+                <StageFormInlinePanel
+                  ticket={ticket}
+                  targetStage={nextStageDetailsConfig.targetStage}
+                  sourceStageName={nextStageDetailsConfig.sourceStageName}
+                  formId={nextStageDetailsConfig.formId}
+                  hasApprovers={nextStageDetailsConfig.hasApprovers}
+                  isNonLinearBoard={isNonLinearBoard}
+                  reenterMode={nextStageDetailsConfig.reenterMode}
+                  targetStageEtas={nextStageEtas}
+                />
+              ) : (
+                <div className='my-4 rounded-lg border border-border bg-background p-4'>
+                  <div className='flex items-center justify-between gap-4'>
+                    <div>
+                      <p className='text-base font-semibold text-foreground'>Next stage</p>
+                      <p className='mt-1 text-sm text-muted-foreground'>
+                        <span className='font-medium text-foreground'>
+                          {nextStageDetailsConfig.sourceStageName}
                         </span>
-                      )}
-                    {etaManagementView?.severity === 'PLANNING_RISK' && (
-                      <span
-                        className='inline-flex items-center gap-1 px-1.5 py-0.5 text-xs font-medium bg-amber-100 text-amber-700 rounded'
-                        title='The current stage deadline is later than this due date'
-                      >
-                        <AlertCircle size={11} />
-                        Planning Risk{etaManagementView.isPaused ? ' (paused)' : ''}
-                      </span>
-                    )}
-                    {etaManagementView?.forecastStatus === 'INCOMPLETE' && (
-                      <span
-                        className='inline-flex items-center px-1.5 py-0.5 text-xs font-medium bg-muted text-muted-foreground rounded'
-                        title={
-                          etaManagementView.forecastIncompleteReason ?? 'Missing a stage estimate'
-                        }
-                      >
-                        Estimate Incomplete
-                      </span>
-                    )}
-                  </div>
-                )
-              }
-            />
-            {etaManagementView?.severity === 'PLANNING_RISK' &&
-              etaManagementView.planningRiskState === 'ACTIVE' && (
-                <div className='mx-0 mb-2 px-3 py-2.5 rounded-md border border-amber-200 bg-amber-50 text-sm'>
-                  <div className='flex items-start justify-between gap-2'>
-                    <div className='text-amber-800'>
-                      <p className='font-medium'>Planning risk</p>
-                      <p className='text-xs text-amber-700 mt-0.5'>
-                        The current stage deadline
-                        {etaManagementView.stageDeadline
-                          ? ` (${formatETADisplay(etaManagementView.stageDeadline)})`
-                          : ''}{' '}
-                        is later than the ticket due date
-                        {etaManagementView.ticketDue
-                          ? ` (${formatETADisplay(etaManagementView.ticketDue)})`
-                          : ''}
-                        .
-                        {etaManagementView.autoEnabled
-                          ? ' Automatic recalculation is active for this board.'
-                          : ' Automatic recalculation is off for this board.'}
+                        <span className='mx-2'>→</span>
+                        <span className='font-medium text-foreground'>
+                          {nextStageDetailsConfig.targetStage.name}
+                        </span>
                       </p>
                     </div>
-                    {!showAcknowledgeInput && (
-                      <Button
-                        variant='secondary'
-                        onClick={() => setShowAcknowledgeInput(true)}
-                        data-track-category='TicketDetails'
-                        data-track-name='OpenAcknowledgeEtaRisk'
-                      >
-                        Acknowledge
-                      </Button>
-                    )}
-                  </div>
-                  {showAcknowledgeInput && (
-                    <div className='mt-2 flex items-center gap-2'>
-                      <input
-                        type='text'
-                        value={acknowledgeReason}
-                        onChange={e => setAcknowledgeReason(e.target.value)}
-                        placeholder='Reason for keeping the current dates...'
-                        className='flex-1 text-sm bg-background border border-input rounded px-2 py-1 outline-none focus:border-border'
-                        data-testid='acknowledge-eta-risk-reason'
-                        data-track-category='TicketDetails'
-                        data-track-name='AcknowledgeEtaRiskReasonInput'
-                      />
-                      <Button
-                        variant='secondary'
-                        onClick={() => void handleAcknowledgeRisk()}
-                        disabled={submittingAcknowledge || !acknowledgeReason.trim()}
-                        data-track-category='TicketDetails'
-                        data-track-name='SubmitAcknowledgeEtaRisk'
-                      >
-                        {submittingAcknowledge ? 'Saving...' : 'Confirm'}
-                      </Button>
-                      <Button
-                        variant='ghost'
-                        onClick={() => {
-                          setShowAcknowledgeInput(false);
-                          setAcknowledgeReason('');
-                        }}
-                      >
-                        Cancel
-                      </Button>
-                    </div>
-                  )}
-                </div>
-              )}
-            {/* Status Deadline - only show if current stage has eta configured */}
-            {currentStageInfo?.eta && (
-              <TicketKeyValuePair
-                ticketKey='Status Deadline'
-                value={
-                  editingStageETA ? (
-                    <div
-                      className='flex items-center gap-2'
-                      data-testid='ticket-detail-stage-eta-input'
+                    <Tooltip
+                      content={
+                        nextStageDetailsConfig.hasApprovers
+                          ? 'Submit the form for approval'
+                          : 'Move to the next stage'
+                      }
                     >
-                      <input
-                        ref={stageEtaInputRef}
-                        type='datetime-local'
-                        value={stageEtaValue}
-                        onChange={e => setStageEtaValue(e.target.value)}
-                        min={new Date().toISOString().slice(0, 16)}
-                        onBlur={handleStageETAChange}
-                        onKeyDown={e => {
-                          if (e.key === 'Enter') handleStageETAChange();
-                          if (e.key === 'Escape') {
-                            setStageEtaValue(
-                              currentStageEntry?.stageEta
-                                ? getLocalISOString(currentStageEntry.stageEta)
-                                : '',
-                            );
-                            setEditingStageETA(false);
-                          }
-                        }}
-                        className='text-sm border border-input rounded px-2 py-1 outline-none focus:border-border'
+                      <Button
+                        onClick={() => handleStageChange(nextStageDetailsConfig.targetStage.name)}
                         data-track-category='Tickets'
-                        data-track-name='StageETAInput'
-                        data-track-metadata={JSON.stringify({ ticketId: ticket.id })}
-                      />
-                    </div>
-                  ) : (
-                    <div
-                      role='button'
-                      tabIndex={0}
-                      data-testid='ticket-detail-stage-eta-display'
-                      className='inline-flex items-center gap-1.5 text-sm text-foreground cursor-pointer hover:bg-muted px-2 py-1 -mx-2 rounded-md border border-transparent hover:border-border transition-colors'
-                      onClick={() => {
-                        if (currentStageEntry?.stageEta) {
-                          setStageEtaValue(getLocalISOString(currentStageEntry.stageEta));
-                        }
-                        setEditingStageETA(true);
-                      }}
-                      onKeyDown={e => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault();
-                          if (currentStageEntry?.stageEta) {
-                            setStageEtaValue(getLocalISOString(currentStageEntry.stageEta));
-                          }
-                          setEditingStageETA(true);
-                        }
-                      }}
-                      data-track-category='Tickets'
-                      data-track-name='EditStageDeadline'
-                      data-track-metadata={JSON.stringify({
-                        ticketId: ticket.id,
-                        stageId: currentStageEntry?.stageId,
-                      })}
-                    >
-                      <Clock
-                        size={14}
-                        className={
-                          currentStageEntry?.stageEta &&
-                          new Date(currentStageEntry.stageEta) < new Date() &&
-                          ticket.statusV2 !== TicketStatusV2.COMPLETED &&
-                          ticket.statusV2 !== TicketStatusV2.CANCELLED
-                            ? 'text-destructive'
-                            : 'text-muted-foreground'
-                        }
-                      />
-                      <span>
-                        {currentStageEntry?.stageEta
-                          ? formatETADisplay(currentStageEntry.stageEta)
-                          : 'Set Stage Deadline'}
-                      </span>
-                      {currentStageEntry?.stageEta &&
-                        new Date(currentStageEntry.stageEta) < new Date() &&
-                        ticket.statusV2 !== TicketStatusV2.COMPLETED &&
-                        ticket.statusV2 !== TicketStatusV2.CANCELLED && (
-                          <span className='inline-flex items-center px-1.5 py-0.5 text-xs font-medium bg-destructive/10 text-destructive rounded'>
-                            Stage Overdue
-                          </span>
-                        )}
-                    </div>
-                  )
-                }
-              />
-            )}
-
-            {/* Projected deadline (while PAUSED) */}
-            {ticket.statusV2 === TicketStatusV2.PAUSED && (
-              <TicketKeyValuePair
-                ticketKey='projected deadline'
-                value={
-                  ticket.statusUpdatedAt ? (
-                    ((): React.ReactElement => {
-                      const pausedDurationMs = calculateWorkingDurationMs(
-                        new Date(ticket.statusUpdatedAt),
-                        new Date(Date.now()),
-                      );
-
-                      const projectedEta =
-                        ticket.eta && pausedDurationMs > 0
-                          ? calculateETADeadline(
-                              new Date(Math.max(ticket.eta, ticket.statusUpdatedAt)),
-                              pausedDurationMs / (60 * 60 * 1000),
-                            ).getTime()
-                          : (ticket.eta ?? null);
-
-                      return (
-                        <div className='inline-flex items-center gap-2 text-sm text-foreground'>
-                          <span>{formatETADisplay(projectedEta ?? undefined)}</span>
-                        </div>
-                      );
-                    })()
-                  ) : (
-                    <span className='text-sm text-muted-foreground'>-</span>
-                  )
-                }
-              />
-            )}
-
-            {/* User Group */}
-            <TicketKeyValuePair
-              ticketKey='User Group'
-              value={
-                <UserGroupSelector
-                  selectedGroupId={ticket.userGroupId ?? null}
-                  onGroupSelect={handleUserGroupChange}
-                />
-              }
-            />
-          </div>
-        </div>
-
-        {/* Merchant ID */}
-        {ticket.merchantId && (
-          <TicketKeyValuePair
-            ticketKey='Merchant ID'
-            value={<span className='text-sm text-muted-foreground'>{ticket.merchantId}</span>}
-          />
-        )}
-
-        {/* AI Classification Panel */}
-        {ticket?.classificationData && channelId && (
-          <div className='my-4'>
-            <AIClassificationPanel
-              ticketId={ticket.id}
-              channelId={channelId}
-              classificationData={ticket.classificationData as unknown as TicketClassificationData}
-              userGroups={userGroups.map(g => ({ id: g.id, name: g.name }))}
-              hasFormFields={!!(allFormFields && allFormFields.length > 0)}
-            />
-          </div>
-        )}
-
-        {/* Additional Form Fields — current, editable fields plus (marked with a trailing
-            "*") any values the ticket has for fields no longer part of the board's current
-            configuration (e.g. left behind by a config copy from another board). Those are
-            read-only rather than editable, since the field itself no longer exists in the
-            board's schema. */}
-        {(allFormFields.length > 0 || leftoverFieldValues.length > 0) && (
-          <div className='border border-border bg-muted rounded-lg p-4 my-4'>
-            <h3 className='text-base font-semibold text-foreground mb-4'>Additional Form Fields</h3>
-            <div className='space-y-4'>
-              {allFormFields.map(fieldValue => (
-                <EditableFormField
-                  key={fieldValue.resolvedFieldId}
-                  fieldName={getFormEntityFieldName(fieldValue)}
-                  fieldValue={fieldValue.actualFieldValue ?? fieldValue.fieldValue}
-                  fieldType={getFormEntityFieldType(fieldValue)}
-                  fieldEnum={getFormEntityFieldEnum(fieldValue)}
-                  onSave={newValue =>
-                    handleFormFieldSave(
-                      fieldValue.id,
-                      newValue,
-                      fieldValue.isPlaceholder,
-                      fieldValue.formId,
-                    )
-                  }
-                />
-              ))}
-              {leftoverFieldValues.map(field => (
-                <div key={field.resolvedFieldId} className='flex items-start gap-2 w-full'>
-                  <span
-                    className='flex items-center gap-1 text-sm text-muted-foreground w-[120px] flex-shrink-0 pt-0.5 overflow-x-auto whitespace-nowrap'
-                    title={`${field.fieldName} — no longer part of this board's configuration, read-only`}
-                  >
-                    {field.fieldName}
-                    <Lock size={11} className='flex-shrink-0 text-muted-foreground' />
-                  </span>
-                  <span className='flex-1 text-sm text-foreground break-all pt-0.5'>
-                    {formatLeftoverFieldValue(field, leftoverFieldUserById)}
-                  </span>
+                        data-track-name='MoveToNextStageFromDetails'
+                        data-track-metadata={JSON.stringify({
+                          stageId: nextStageDetailsConfig.targetStage.id,
+                        })}
+                      >
+                        {nextStageDetailsConfig.hasApprovers ? 'Submit for approval' : 'Submit'}
+                      </Button>
+                    </Tooltip>
+                  </div>
                 </div>
               ))}
-            </div>
-          </div>
-        )}
 
-        {/* Flow step gate form — prefillable by default on flow boards; same
-            inline panel as linear-board prefillable forms */}
-        {flowStepForm &&
-          ticket &&
-          (flowStepForm.settled ? (
-            <StageFormInlinePanel
-              ticket={ticket}
-              targetStage={{ id: flowStepForm.planNodeId, name: flowStepForm.stepTitle }}
-              sourceStageName=''
-              formId={flowStepForm.formId}
-              hasApprovers={false}
-              isNonLinearBoard={false}
-              headerTitle={flowFormName ?? 'Form'}
-              headerSubtitle={`${flowStepForm.stepTitle} form · Submitted answers`}
-              saveOnly
-              saveSuccessMessage='Submitted form updated'
-              editableOnDemand
-            />
-          ) : (
-            <StageFormInlinePanel
-              ticket={ticket}
-              targetStage={{ id: flowStepForm.planNodeId, name: flowStepForm.stepTitle }}
-              sourceStageName=''
-              formId={flowStepForm.formId}
-              hasApprovers={false}
-              isNonLinearBoard={false}
-              headerTitle={flowFormName ?? 'Form'}
-              headerSubtitle={`${flowStepForm.stepTitle} form`}
-              onCommit={completeFlowStep}
-              commitSuccessMessage='Step completed'
-            />
-          ))}
-
-        {!stageReadOnly &&
-          nextStageDetailsConfig &&
-          (nextStageDetailsConfig.formId ? (
-            <StageFormInlinePanel
-              ticket={ticket}
-              targetStage={nextStageDetailsConfig.targetStage}
-              sourceStageName={nextStageDetailsConfig.sourceStageName}
-              formId={nextStageDetailsConfig.formId}
-              hasApprovers={nextStageDetailsConfig.hasApprovers}
-              isNonLinearBoard={isNonLinearBoard}
-              reenterMode={nextStageDetailsConfig.reenterMode}
-              targetStageEtas={nextStageEtas}
-            />
-          ) : (
-            <div className='my-4 rounded-lg border border-border bg-background p-4'>
-              <div className='flex items-center justify-between gap-4'>
-                <div>
-                  <p className='text-base font-semibold text-foreground'>Next stage</p>
-                  <p className='mt-1 text-sm text-muted-foreground'>
-                    <span className='font-medium text-foreground'>
-                      {nextStageDetailsConfig.sourceStageName}
-                    </span>
-                    <span className='mx-2'>→</span>
-                    <span className='font-medium text-foreground'>
-                      {nextStageDetailsConfig.targetStage.name}
-                    </span>
-                  </p>
+            {/* Stage Forms Section */}
+            {formsToShow.length > 0 && (
+              <div className='my-4'>
+                <div className='flex items-center gap-3 mb-4'>
+                  <p className='text-base font-semibold text-foreground'>Status Change Requests</p>
+                  <span className='inline-flex items-center justify-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground'>
+                    {formsToShow.length}
+                  </span>
                 </div>
-                <Tooltip
-                  content={
-                    nextStageDetailsConfig.hasApprovers
-                      ? 'Submit the form for approval'
-                      : 'Move to the next stage'
-                  }
-                >
-                  <Button
-                    onClick={() => handleStageChange(nextStageDetailsConfig.targetStage.name)}
-                    data-track-category='Tickets'
-                    data-track-name='MoveToNextStageFromDetails'
-                    data-track-metadata={JSON.stringify({
-                      stageId: nextStageDetailsConfig.targetStage.id,
-                    })}
-                  >
-                    {nextStageDetailsConfig.hasApprovers ? 'Submit for approval' : 'Submit'}
-                  </Button>
-                </Tooltip>
-              </div>
-            </div>
-          ))}
 
-        {/* Stage Forms Section */}
-        {formsToShow.length > 0 && (
-          <div className='my-4'>
-            <div className='flex items-center gap-3 mb-4'>
-              <p className='text-base font-semibold text-foreground'>Status Change Requests</p>
-              <span className='inline-flex items-center justify-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground'>
-                {formsToShow.length}
-              </span>
-            </div>
-
-            <div className='space-y-1'>
-              {formsToShow
-                .sort((a, b) => b.createdAt - a.createdAt)
-                .map(item => {
-                  const stage = stagesWithFormInfo?.find(s => s.id === item.stageId);
-                  const isSubmitted = item.status === TicketStageRequestStatus.SUBMITTED;
-                  const isRejected = item.status === TicketStageRequestStatus.REJECTED;
-                  const isApproved = item.status === TicketStageRequestStatus.APPROVED;
-                  const isDraft = item.status === TicketStageRequestStatus.DRAFT;
-                  // For NON_LINEAR boards approvers live on the transition, not the stage.
-                  const isApprover = isNonLinearBoard
-                    ? stageTransitions.some(
-                        t =>
-                          t.toStageId === item.stageId &&
-                          t.transitionApprovers?.some(a => {
-                            const type = (a.approverType ?? ApproverType.USER) as 'USER' | 'ROLE';
+                <div className='space-y-1'>
+                  {formsToShow
+                    .sort((a, b) => b.createdAt - a.createdAt)
+                    .map(item => {
+                      const stage = stagesWithFormInfo?.find(s => s.id === item.stageId);
+                      const isSubmitted = item.status === TicketStageRequestStatus.SUBMITTED;
+                      const isRejected = item.status === TicketStageRequestStatus.REJECTED;
+                      const isApproved = item.status === TicketStageRequestStatus.APPROVED;
+                      const isDraft = item.status === TicketStageRequestStatus.DRAFT;
+                      // For NON_LINEAR boards approvers live on the transition, not the stage.
+                      const isApprover = isNonLinearBoard
+                        ? stageTransitions.some(
+                            t =>
+                              t.toStageId === item.stageId &&
+                              t.transitionApprovers?.some(a => {
+                                const type = (a.approverType ?? ApproverType.USER) as
+                                  | 'USER'
+                                  | 'ROLE';
+                                if (type === 'ROLE')
+                                  return !!a.roleId && currentUserRoleIds.includes(a.roleId);
+                                return a.userId === currentUser?.id;
+                              }),
+                          )
+                        : (stage?.approvers?.some(a => {
+                            const type = (a.approverType ?? 'USER') as 'USER' | 'ROLE';
                             if (type === 'ROLE')
                               return !!a.roleId && currentUserRoleIds.includes(a.roleId);
                             return a.userId === currentUser?.id;
-                          }),
-                      )
-                    : (stage?.approvers?.some(a => {
-                        const type = (a.approverType ?? 'USER') as 'USER' | 'ROLE';
-                        if (type === 'ROLE')
-                          return !!a.roleId && currentUserRoleIds.includes(a.roleId);
-                        return a.userId === currentUser?.id;
-                      }) ?? false);
-                  const hasApprovers = isNonLinearBoard
-                    ? stageTransitions.some(
-                        t =>
-                          t.toStageId === item.stageId && (t.transitionApprovers?.length ?? 0) > 0,
-                      )
-                    : stage?.approvers && stage.approvers.length > 0;
+                          }) ?? false);
+                      const hasApprovers = isNonLinearBoard
+                        ? stageTransitions.some(
+                            t =>
+                              t.toStageId === item.stageId &&
+                              (t.transitionApprovers?.length ?? 0) > 0,
+                          )
+                        : stage?.approvers && stage.approvers.length > 0;
 
-                  // Find previous stage
-                  const currentStageSeq = stage?.sequenceNumber ?? 0;
-                  const previousStage = stagesWithFormInfo?.find(
-                    s => s.sequenceNumber === currentStageSeq - 1,
-                  );
-                  return (
-                    <div key={item.id} className='py-2'>
-                      <div className='flex items-center justify-between gap-4'>
-                        <div className='flex items-center gap-4 flex-1 min-w-0'>
-                          {/* Form Name or Stage Name */}
-                          <p className='text-base font-medium text-foreground'>
-                            {item.formId
-                              ? (item.form?.formName ?? 'Form')
-                              : `Stage: ${stage?.name || 'Unknown Stage'}`}
-                          </p>
+                      // Find previous stage
+                      const currentStageSeq = stage?.sequenceNumber ?? 0;
+                      const previousStage = stagesWithFormInfo?.find(
+                        s => s.sequenceNumber === currentStageSeq - 1,
+                      );
+                      return (
+                        <div key={item.id} className='py-2'>
+                          <div className='flex items-center justify-between gap-4'>
+                            <div className='flex items-center gap-4 flex-1 min-w-0'>
+                              {/* Form Name or Stage Name */}
+                              <p className='text-base font-medium text-foreground'>
+                                {item.formId
+                                  ? (item.form?.formName ?? 'Form')
+                                  : `Stage: ${stage?.name || 'Unknown Stage'}`}
+                              </p>
 
-                          {/* Old Stage -> New Stage */}
-                          <p className='text-sm text-muted-foreground'>
-                            {previousStage?.name || 'Start'} &rarr; {stage?.name || 'Unknown Stage'}
-                          </p>
+                              {/* Old Stage -> New Stage */}
+                              <p className='text-sm text-muted-foreground'>
+                                {previousStage?.name || 'Start'} &rarr;{' '}
+                                {stage?.name || 'Unknown Stage'}
+                              </p>
 
-                          {/* Status Badge - only show for stages with approvers */}
-                          {hasApprovers &&
-                            item.status &&
-                            ((): React.ReactElement | null => {
-                              const config = getStatusBadgeConfig(item.status);
-                              return config ? (
-                                <span className={config.className.replace('text-xs', 'text-sm')}>
-                                  {config.label}
-                                </span>
-                              ) : null;
-                            })()}
-                        </div>
+                              {/* Status Badge - only show for stages with approvers */}
+                              {hasApprovers &&
+                                item.status &&
+                                ((): React.ReactElement | null => {
+                                  const config = getStatusBadgeConfig(item.status);
+                                  return config ? (
+                                    <span
+                                      className={config.className.replace('text-xs', 'text-sm')}
+                                    >
+                                      {config.label}
+                                    </span>
+                                  ) : null;
+                                })()}
+                            </div>
 
-                        {/* Action Buttons */}
-                        <div className='flex items-center gap-2 shrink-0'>
-                          {hasApprovers ? (
-                            // Stages WITH approvers: Show approval workflow buttons
-                            <>
-                              {/* Draft status - allow user to continue/edit the form */}
-                              {isDraft && item.formId && (
-                                <button
-                                  onClick={() =>
-                                    setStageFormModal({
-                                      ticket,
-                                      targetStage: stage ?? {
-                                        id: item.stageId,
-                                        name: 'Unknown Stage',
-                                        sequenceNumber: 0,
-                                        boardId: ticket.boardId || '',
-                                        eta: null,
-                                      },
-                                      sourceStageName: previousStage?.name || 'Unknown Stage',
-                                      formId: item.formId,
-                                      isReviewer: false,
-                                      hasApprovers: true,
-                                      existingRequest: item.request!,
-                                    })
-                                  }
-                                  className='text-sm text-foreground hover:text-muted-foreground font-medium whitespace-nowrap'
-                                  data-track-category='Tickets'
-                                  data-track-name='ContinueDraftStageForm'
-                                  data-track-metadata={JSON.stringify({
-                                    stageId: item.stageId,
-                                    formId: item.formId,
-                                  })}
-                                >
-                                  Continue Draft
-                                </button>
-                              )}
-                              {isDraft && !item.formId && (
-                                <button
-                                  onClick={() => {
-                                    void zero.mutate(
-                                      mutators.ticketStageRequest.upsert({
-                                        id: item.id,
-                                        ticketId: ticket.id,
-                                        stageId: item.stageId,
-                                        status: TicketStageRequestStatus.SUBMITTED,
-                                        updatedBy: currentUser?.id || '',
-                                        updatedAt: Date.now(),
-                                        requestActivityId: uuidv4(),
-                                      }),
-                                    );
-                                    toast.success('Request submitted for approval');
-                                  }}
-                                  data-ph-capture-attribute-track-id='submit_stage_request'
-                                  className='text-sm text-foreground hover:text-muted-foreground font-medium whitespace-nowrap'
-                                  data-track-category='Tickets'
-                                  data-track-name='SubmitStageRequest'
-                                  data-track-metadata={JSON.stringify({ stageId: item.stageId })}
-                                >
-                                  Submit Request
-                                </button>
-                              )}
-                              {isSubmitted && item.formId && (
+                            {/* Action Buttons */}
+                            <div className='flex items-center gap-2 shrink-0'>
+                              {hasApprovers ? (
+                                // Stages WITH approvers: Show approval workflow buttons
                                 <>
-                                  {!isApprover && (
+                                  {/* Draft status - allow user to continue/edit the form */}
+                                  {isDraft && item.formId && (
                                     <button
                                       onClick={() =>
                                         setStageFormModal({
@@ -4818,21 +5197,114 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                           formId: item.formId,
                                           isReviewer: false,
                                           hasApprovers: true,
+                                          existingRequest: item.request!,
                                         })
                                       }
-                                      className='text-muted-foreground hover:text-foreground transition-colors border border-input rounded-md p-1.5'
-                                      aria-label='View form'
+                                      className='text-sm text-foreground hover:text-muted-foreground font-medium whitespace-nowrap'
                                       data-track-category='Tickets'
-                                      data-track-name='ViewStageForm'
+                                      data-track-name='ContinueDraftStageForm'
                                       data-track-metadata={JSON.stringify({
                                         stageId: item.stageId,
                                         formId: item.formId,
                                       })}
                                     >
-                                      <Eye size={16} />
+                                      Continue Draft
                                     </button>
                                   )}
-                                  {isApprover && (
+                                  {isDraft && !item.formId && (
+                                    <button
+                                      onClick={() => {
+                                        void zero.mutate(
+                                          mutators.ticketStageRequest.upsert({
+                                            id: item.id,
+                                            ticketId: ticket.id,
+                                            stageId: item.stageId,
+                                            status: TicketStageRequestStatus.SUBMITTED,
+                                            updatedBy: currentUser?.id || '',
+                                            updatedAt: Date.now(),
+                                            requestActivityId: uuidv4(),
+                                          }),
+                                        );
+                                        toast.success('Request submitted for approval');
+                                      }}
+                                      data-ph-capture-attribute-track-id='submit_stage_request'
+                                      className='text-sm text-foreground hover:text-muted-foreground font-medium whitespace-nowrap'
+                                      data-track-category='Tickets'
+                                      data-track-name='SubmitStageRequest'
+                                      data-track-metadata={JSON.stringify({
+                                        stageId: item.stageId,
+                                      })}
+                                    >
+                                      Submit Request
+                                    </button>
+                                  )}
+                                  {isSubmitted && item.formId && (
+                                    <>
+                                      {!isApprover && (
+                                        <button
+                                          onClick={() =>
+                                            setStageFormModal({
+                                              ticket,
+                                              targetStage: stage ?? {
+                                                id: item.stageId,
+                                                name: 'Unknown Stage',
+                                                sequenceNumber: 0,
+                                                boardId: ticket.boardId || '',
+                                                eta: null,
+                                              },
+                                              sourceStageName:
+                                                previousStage?.name || 'Unknown Stage',
+                                              formId: item.formId,
+                                              isReviewer: false,
+                                              hasApprovers: true,
+                                            })
+                                          }
+                                          className='text-muted-foreground hover:text-foreground transition-colors border border-input rounded-md p-1.5'
+                                          aria-label='View form'
+                                          data-track-category='Tickets'
+                                          data-track-name='ViewStageForm'
+                                          data-track-metadata={JSON.stringify({
+                                            stageId: item.stageId,
+                                            formId: item.formId,
+                                          })}
+                                        >
+                                          <Eye size={16} />
+                                        </button>
+                                      )}
+                                      {isApprover && (
+                                        <button
+                                          onClick={() =>
+                                            setStageFormModal({
+                                              ticket,
+                                              targetStage: stage ?? {
+                                                id: item.stageId,
+                                                name: 'Unknown Stage',
+                                                sequenceNumber: 0,
+                                                boardId: ticket.boardId || '',
+                                                eta: null,
+                                              },
+                                              sourceStageName:
+                                                previousStage?.name || 'Unknown Stage',
+                                              formId: item.formId,
+                                              isReviewer: true,
+                                              hasApprovers: true,
+                                              existingRequest: item.request!,
+                                            })
+                                          }
+                                          className='text-sm font-medium whitespace-nowrap px-3 py-1.5 rounded-lg flex items-center gap-2 bg-blue-500 text-white hover:bg-blue-600'
+                                          data-track-category='Tickets'
+                                          data-track-name='ReviewStageForm'
+                                          data-track-metadata={JSON.stringify({
+                                            stageId: item.stageId,
+                                            formId: item.formId,
+                                          })}
+                                        >
+                                          View request
+                                        </button>
+                                      )}
+                                    </>
+                                  )}
+                                  {isApproved && item.formId && (
                                     <button
                                       onClick={() =>
                                         setStageFormModal({
@@ -4846,27 +5318,129 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                           },
                                           sourceStageName: previousStage?.name || 'Unknown Stage',
                                           formId: item.formId,
-                                          isReviewer: true,
+                                          isReviewer: false,
                                           hasApprovers: true,
                                           existingRequest: item.request!,
                                         })
                                       }
-                                      className='text-sm font-medium whitespace-nowrap px-3 py-1.5 rounded-lg flex items-center gap-2 bg-blue-500 text-white hover:bg-blue-600'
+                                      className='text-muted-foreground hover:text-foreground transition-colors border border-input rounded-md p-1.5'
+                                      aria-label='View form'
                                       data-track-category='Tickets'
-                                      data-track-name='ReviewStageForm'
+                                      data-track-name='ViewApprovedStageForm'
                                       data-track-metadata={JSON.stringify({
                                         stageId: item.stageId,
                                         formId: item.formId,
                                       })}
                                     >
-                                      View request
+                                      <Eye size={16} />
+                                    </button>
+                                  )}
+                                  {isSubmitted && !item.formId && isApprover && (
+                                    <>
+                                      <button
+                                        onClick={() => {
+                                          setNonFormReviewComment('');
+                                          setNonFormReviewDialog({
+                                            requestId: item.id,
+                                            stageId: item.stageId,
+                                            kind: 'APPROVE',
+                                            stageName: stage?.name ?? 'Unknown Stage',
+                                          });
+                                        }}
+                                        className='text-sm font-medium whitespace-nowrap px-3 py-1.5 rounded-lg bg-green-500 text-white hover:bg-green-600'
+                                        data-track-category='Tickets'
+                                        data-track-name='ApproveStageRequest'
+                                        data-track-metadata={JSON.stringify({
+                                          stageId: item.stageId,
+                                        })}
+                                      >
+                                        Approve
+                                      </button>
+                                      <button
+                                        onClick={() => {
+                                          setNonFormReviewComment('');
+                                          setNonFormReviewDialog({
+                                            requestId: item.id,
+                                            stageId: item.stageId,
+                                            kind: 'REJECT',
+                                            stageName: stage?.name ?? 'Unknown Stage',
+                                          });
+                                        }}
+                                        className='text-sm font-medium whitespace-nowrap px-3 py-1.5 rounded-lg bg-red-500 text-white hover:bg-red-600'
+                                        data-track-category='Tickets'
+                                        data-track-name='RejectStageRequest'
+                                        data-track-metadata={JSON.stringify({
+                                          stageId: item.stageId,
+                                        })}
+                                      >
+                                        Reject
+                                      </button>
+                                    </>
+                                  )}
+                                  {isRejected && item.formId && (
+                                    <button
+                                      onClick={() =>
+                                        setStageFormModal({
+                                          ticket,
+                                          targetStage: stage ?? {
+                                            id: item.stageId,
+                                            name: 'Unknown Stage',
+                                            sequenceNumber: 0,
+                                            boardId: ticket.boardId || '',
+                                            eta: null,
+                                          },
+                                          sourceStageName: previousStage?.name || 'Unknown Stage',
+                                          formId: item.formId,
+                                          isReviewer: isApprover,
+                                          hasApprovers: true,
+                                          existingRequest: item.request!,
+                                        })
+                                      }
+                                      className='text-sm text-foreground hover:text-muted-foreground font-medium whitespace-nowrap'
+                                      data-track-category='Tickets'
+                                      data-track-name='ResubmitStageForm'
+                                      data-track-metadata={JSON.stringify({
+                                        stageId: item.stageId,
+                                        formId: item.formId,
+                                      })}
+                                    >
+                                      Resubmit
+                                    </button>
+                                  )}
+                                  {isRejected && !item.formId && (
+                                    <button
+                                      onClick={() => {
+                                        void zero.mutate(
+                                          mutators.ticketStageRequest.upsert({
+                                            id: item.id,
+                                            ticketId: ticket.id,
+                                            stageId: item.stageId,
+                                            status: TicketStageRequestStatus.SUBMITTED,
+                                            updatedBy: currentUser?.id || '',
+                                            updatedAt: Date.now(),
+                                            requestActivityId: uuidv4(),
+                                          }),
+                                        );
+                                        toast.success(
+                                          'Stage change request resubmitted for approval',
+                                        );
+                                      }}
+                                      data-ph-capture-attribute-track-id='resubmit_stage_request'
+                                      className='text-sm text-foreground hover:text-muted-foreground font-medium whitespace-nowrap'
+                                      data-track-category='Tickets'
+                                      data-track-name='ResubmitStageRequest'
+                                      data-track-metadata={JSON.stringify({
+                                        stageId: item.stageId,
+                                      })}
+                                    >
+                                      Resubmit request
                                     </button>
                                   )}
                                 </>
-                              )}
-                              {isApproved && item.formId && (
+                              ) : (
+                                // Stages WITHOUT approvers: Just show View Form button
                                 <button
-                                  onClick={() =>
+                                  onClick={() => {
                                     setStageFormModal({
                                       ticket,
                                       targetStage: stage ?? {
@@ -4879,14 +5453,15 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                       sourceStageName: previousStage?.name || 'Unknown Stage',
                                       formId: item.formId,
                                       isReviewer: false,
-                                      hasApprovers: true,
+                                      hasApprovers: false,
                                       existingRequest: item.request!,
-                                    })
-                                  }
+                                      showPersistedDocValues: item.type === 'form',
+                                    });
+                                  }}
                                   className='text-muted-foreground hover:text-foreground transition-colors border border-input rounded-md p-1.5'
                                   aria-label='View form'
                                   data-track-category='Tickets'
-                                  data-track-name='ViewApprovedStageForm'
+                                  data-track-name='ViewStageFormNoApprovers'
                                   data-track-metadata={JSON.stringify({
                                     stageId: item.stageId,
                                     formId: item.formId,
@@ -4895,166 +5470,16 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                                   <Eye size={16} />
                                 </button>
                               )}
-                              {isSubmitted && !item.formId && isApprover && (
-                                <>
-                                  <button
-                                    onClick={() => {
-                                      setNonFormReviewComment('');
-                                      setNonFormReviewDialog({
-                                        requestId: item.id,
-                                        stageId: item.stageId,
-                                        kind: 'APPROVE',
-                                        stageName: stage?.name ?? 'Unknown Stage',
-                                      });
-                                    }}
-                                    className='text-sm font-medium whitespace-nowrap px-3 py-1.5 rounded-lg bg-green-500 text-white hover:bg-green-600'
-                                    data-track-category='Tickets'
-                                    data-track-name='ApproveStageRequest'
-                                    data-track-metadata={JSON.stringify({ stageId: item.stageId })}
-                                  >
-                                    Approve
-                                  </button>
-                                  <button
-                                    onClick={() => {
-                                      setNonFormReviewComment('');
-                                      setNonFormReviewDialog({
-                                        requestId: item.id,
-                                        stageId: item.stageId,
-                                        kind: 'REJECT',
-                                        stageName: stage?.name ?? 'Unknown Stage',
-                                      });
-                                    }}
-                                    className='text-sm font-medium whitespace-nowrap px-3 py-1.5 rounded-lg bg-red-500 text-white hover:bg-red-600'
-                                    data-track-category='Tickets'
-                                    data-track-name='RejectStageRequest'
-                                    data-track-metadata={JSON.stringify({ stageId: item.stageId })}
-                                  >
-                                    Reject
-                                  </button>
-                                </>
-                              )}
-                              {isRejected && item.formId && (
-                                <button
-                                  onClick={() =>
-                                    setStageFormModal({
-                                      ticket,
-                                      targetStage: stage ?? {
-                                        id: item.stageId,
-                                        name: 'Unknown Stage',
-                                        sequenceNumber: 0,
-                                        boardId: ticket.boardId || '',
-                                        eta: null,
-                                      },
-                                      sourceStageName: previousStage?.name || 'Unknown Stage',
-                                      formId: item.formId,
-                                      isReviewer: isApprover,
-                                      hasApprovers: true,
-                                      existingRequest: item.request!,
-                                    })
-                                  }
-                                  className='text-sm text-foreground hover:text-muted-foreground font-medium whitespace-nowrap'
-                                  data-track-category='Tickets'
-                                  data-track-name='ResubmitStageForm'
-                                  data-track-metadata={JSON.stringify({
-                                    stageId: item.stageId,
-                                    formId: item.formId,
-                                  })}
-                                >
-                                  Resubmit
-                                </button>
-                              )}
-                              {isRejected && !item.formId && (
-                                <button
-                                  onClick={() => {
-                                    void zero.mutate(
-                                      mutators.ticketStageRequest.upsert({
-                                        id: item.id,
-                                        ticketId: ticket.id,
-                                        stageId: item.stageId,
-                                        status: TicketStageRequestStatus.SUBMITTED,
-                                        updatedBy: currentUser?.id || '',
-                                        updatedAt: Date.now(),
-                                        requestActivityId: uuidv4(),
-                                      }),
-                                    );
-                                    toast.success('Stage change request resubmitted for approval');
-                                  }}
-                                  data-ph-capture-attribute-track-id='resubmit_stage_request'
-                                  className='text-sm text-foreground hover:text-muted-foreground font-medium whitespace-nowrap'
-                                  data-track-category='Tickets'
-                                  data-track-name='ResubmitStageRequest'
-                                  data-track-metadata={JSON.stringify({ stageId: item.stageId })}
-                                >
-                                  Resubmit request
-                                </button>
-                              )}
-                            </>
-                          ) : (
-                            // Stages WITHOUT approvers: Just show View Form button
-                            <button
-                              onClick={() => {
-                                setStageFormModal({
-                                  ticket,
-                                  targetStage: stage ?? {
-                                    id: item.stageId,
-                                    name: 'Unknown Stage',
-                                    sequenceNumber: 0,
-                                    boardId: ticket.boardId || '',
-                                    eta: null,
-                                  },
-                                  sourceStageName: previousStage?.name || 'Unknown Stage',
-                                  formId: item.formId,
-                                  isReviewer: false,
-                                  hasApprovers: false,
-                                  existingRequest: item.request!,
-                                  showPersistedDocValues: item.type === 'form',
-                                });
-                              }}
-                              className='text-muted-foreground hover:text-foreground transition-colors border border-input rounded-md p-1.5'
-                              aria-label='View form'
-                              data-track-category='Tickets'
-                              data-track-name='ViewStageFormNoApprovers'
-                              data-track-metadata={JSON.stringify({
-                                stageId: item.stageId,
-                                formId: item.formId,
-                              })}
-                            >
-                              <Eye size={16} />
-                            </button>
-                          )}
+                            </div>
+                          </div>
                         </div>
-                      </div>
-                    </div>
-                  );
-                })}
-            </div>
+                      );
+                    })}
+                </div>
+              </div>
+            )}
           </div>
-        )}
-
-        {/* Fill RCA Button - shown for Fix tickets */}
-        {ticket?.ticketType === BaseTicketType.Fix && (
-          <div className='mt-6'>
-            <button
-              type='button'
-              onClick={handleOpenRcaPanel}
-              data-track-category='Tickets'
-              data-track-name={rcaTrackName}
-              data-testid='fill-rca-button'
-              className='group flex items-center justify-between gap-3 w-full px-4 py-3 rounded-xl border border-border bg-background text-foreground shadow-sm hover:shadow-md hover:border-input transition-all'
-            >
-              <span className='inline-flex items-center gap-3'>
-                <span className='flex h-9 w-9 items-center justify-center rounded-full bg-muted text-foreground'>
-                  <ClipboardCheck size={18} />
-                </span>
-                <span className='flex flex-col text-left'>
-                  <span className='text-sm font-semibold text-foreground'>{rcaButtonTitle}</span>
-                  <span className='text-xs text-muted-foreground'>{rcaButtonSubtitle}</span>
-                </span>
-              </span>
-              <ArrowRight className='h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-0.5' />
-            </button>
-          </div>
-        )}
+        </DetailSection>
 
         {ticket && isReleaseTicket(ticket.ticketType as BaseTicketType) && ticket.projectId && (
           <div className='mt-4'>
@@ -5105,176 +5530,100 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
             </div>
           )}
 
-        {parentTickets && parentTickets.length > 0 && (
-          <div className='mt-6 space-y-4' data-testid='parent-tickets-section'>
-            <div className='flex items-center gap-3'>
-              <p className='text-base font-semibold text-foreground'>Parent Tickets</p>
-              <span className='inline-flex items-center justify-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground'>
-                {parentTickets.length}
-              </span>
-            </div>
-            <div className='space-y-2'>
-              {parentTickets.map(parentTicket => {
-                const priorityIcon = parentTicket.priority
-                  ? getPriorityIcon(parentTicket.priority)
-                  : null;
-                const boardStages = parentTicket.boardId
-                  ? stagesByBoardId.get(parentTicket.boardId)
-                  : undefined;
-                const stageIndex =
-                  boardStages?.findIndex(stage => stage.name === parentTicket.stageName) ?? -1;
-                const assigneeId = parentTicket.assignedTo?.replace(/^(user:|group:)/, '') || '';
-                const navigateToParentTicket = (): void => {
-                  const channelType = channelTypeMap.get(parentTicket.channelId);
-                  if (isDeskChannelType(channelType) && parentTicket.xyneId) {
-                    const pathParts = location.pathname.split('/');
-                    const workspaceId = pathParts[1];
-                    void navigate(
-                      `/${workspaceId}/support/${parentTicket.channelId}/${parentTicket.xyneId}?selectedTab=thread`,
-                      { state: { trackSource: 'ticket_details' } },
-                    );
-                  } else {
-                    const workspaceId = location.pathname.split('/')[1];
-                    const base = buildChannelRoute(
-                      `${parentTicket.channelId}/${parentTicket.conversationId}/${parentTicket.id}`,
-                      { selectedTab: 'thread' },
-                    );
-                    void navigate(`/${workspaceId}${base}#origin=${parentTicket.conversationId}`, {
-                      state: { trackSource: 'parent_ticket' },
-                    });
-                  }
-                };
+        {/* Relationships — sub-tickets and linked tickets, the panel's own tab. */}
+        {!hideRelationships && (
+          <div className={relationshipsOnly ? '' : 'pt-6'} data-testid='relationships-section'>
+            {/* When Relationships IS the tab, the tab strip already names it. */}
+            {!relationshipsOnly && (
+              <div className='flex h-[34px] items-center gap-[9px]'>
+                <button
+                  type='button'
+                  onClick={() => setRelationshipsOpen(prev => !prev)}
+                  aria-expanded={relationshipsOpen}
+                  className='flex items-center gap-[9px] rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+                  data-track-category='Tickets'
+                  data-track-name='ToggleRelationshipsSection'
+                >
+                  <ChevronRight
+                    size={12}
+                    className={cn(
+                      'w-3 shrink-0 text-muted-foreground/70 transition-transform duration-150 ease-[cubic-bezier(0.23,1,0.32,1)]',
+                      relationshipsOpen && 'rotate-90',
+                    )}
+                  />
+                  <span className='text-[11px] font-semibold uppercase tracking-[0.45px] text-muted-foreground'>
+                    Relationships
+                  </span>
+                  <span className='font-mono text-[11px] tabular-nums text-muted-foreground/70'>
+                    {subTickets.length +
+                      (parentTickets?.length ?? 0) +
+                      referencesOut.length +
+                      referencesIn.length}
+                  </span>
+                </button>
+                <div className='h-px flex-1 bg-border/60' />
+              </div>
+            )}
 
-                const openParentTicket = (): void => {
-                  if (onNavigateToTicket) {
-                    onNavigateToTicket(parentTicket.id);
-                  } else {
-                    setMappedTicketId(parentTicket.id);
-                  }
-                };
-
-                return (
-                  <div
-                    key={parentTicket.id}
-                    role='button'
-                    tabIndex={0}
-                    onClick={navigateToParentTicket}
-                    onKeyDown={event => {
-                      if (event.key === 'Enter' || event.key === ' ') {
-                        event.preventDefault();
-                        navigateToParentTicket();
-                      }
-                    }}
-                    className='flex cursor-pointer items-center justify-between gap-3 rounded-lg bg-muted p-3 transition-colors hover:bg-muted/80'
-                    data-track-category='Tickets'
-                    data-track-name='ViewParentTicket'
-                    data-track-metadata={JSON.stringify({ parentTicketId: parentTicket.id })}
+            {(relationshipsOnly || relationshipsOpen) && (
+              <div className='flex flex-col gap-1.5 pt-2'>
+                {parentTickets && parentTickets.length > 0 && (
+                  <>
+                    <div className='flex items-center gap-2 py-0.5'>
+                      <span className='text-[10px] font-semibold uppercase tracking-[0.4px] text-muted-foreground/80'>
+                        Parent
+                      </span>
+                      <span
+                        className='font-mono text-[10.5px] tabular-nums text-muted-foreground/60'
+                        data-testid='parent-tickets-count'
+                      >
+                        {parentTickets.length}
+                      </span>
+                    </div>
+                    <div className='flex flex-col gap-1.5' data-testid='parent-tickets-section'>
+                      {parentTickets.map(renderParentTicketRow)}
+                    </div>
+                  </>
+                )}
+                <div
+                  className={cn(
+                    'flex items-center gap-2 py-0.5',
+                    parentTickets && parentTickets.length > 0 && 'pt-2.5',
+                  )}
+                >
+                  <span className='text-[10px] font-semibold uppercase tracking-[0.4px] text-muted-foreground/80'>
+                    Sub-tickets
+                  </span>
+                  <span
+                    className='font-mono text-[10.5px] tabular-nums text-muted-foreground/60'
+                    data-testid='sub-tickets-count'
                   >
-                    <div className='flex min-w-0 flex-1 items-center gap-2'>
-                      <span className='h-5 w-5 shrink-0' />
-                      <span className='shrink-0 whitespace-nowrap text-xs font-medium text-muted-foreground'>
-                        {parentTicket.xyneId || parentTicket.id.substring(0, 8).toUpperCase()}
-                      </span>
-                      <span className='truncate text-sm text-foreground'>
-                        {parentTicket.title || 'Untitled Ticket'}
-                      </span>
-                    </div>
-                    <div className='flex shrink-0 items-center gap-3'>
-                      <Tooltip content='Open ticket'>
-                        <button
-                          type='button'
-                          className='flex h-7 w-7 items-center justify-center rounded-md text-blue-600 transition-colors hover:bg-background'
-                          onClick={event => {
-                            event.stopPropagation();
-                            openParentTicket();
-                          }}
-                          aria-label='Open parent ticket'
-                          data-track-category='Tickets'
-                          data-track-name='OpenParentTicket'
-                          data-track-metadata={JSON.stringify({
-                            parentTicketId: parentTicket.id,
-                          })}
-                        >
-                          <FileText size={14} />
-                        </button>
-                      </Tooltip>
-                      {boardStages && boardStages.length > 0 && (
-                        <div className='flex items-center gap-1.5'>
-                          <StageIndicator
-                            stages={boardStages}
-                            stageName={parentTicket.stageName}
-                            size={18}
-                          />
-                          <span className='whitespace-nowrap text-xs font-medium text-foreground'>
-                            {stageIndex + 1}/{boardStages.length}
-                          </span>
-                        </div>
-                      )}
-                      {priorityIcon && <span className='flex items-center'>{priorityIcon}</span>}
-                      {assigneeId ? (
-                        <UserAvatar
-                          userId={assigneeId}
-                          size={AvatarSize.SM}
-                          shape={AvatarShape.ROUNDED}
-                          showActiveStatus={false}
-                        />
-                      ) : (
-                        <div className='h-7 w-7 rounded-lg border border-border bg-muted' />
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* Sub-Tickets Section */}
-        <div className='mt-6 space-y-6' data-testid='sub-tickets-section'>
-          <div>
-            <div className='flex items-center gap-3'>
-              <p className='text-base font-semibold text-foreground'>Sub-Tickets</p>
-              <span
-                className='inline-flex items-center justify-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground'
-                data-testid='sub-tickets-count'
-              >
-                {subTickets.length}
-              </span>
-              {boardData?.boardType !== BoardType.FLOW && (
-                <span className='inline-flex items-center gap-1 rounded-md bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground'>
-                  <GitBranch size={12} />
-                  Tree
-                </span>
-              )}
-            </div>
-
-            <div className='mt-4 space-y-3' data-testid='sub-tickets-list'>
-              {subTickets.length > 0 ? (
-                <div className='space-y-2'>{subTicketTreeNodes.map(renderSubTicketNode)}</div>
-              ) : (
-                <div className='rounded-lg border border-border bg-muted px-3 py-2 text-sm text-muted-foreground'>
-                  No sub-tickets yet.
+                    {subTickets.length}
+                  </span>
+                  {subTickets.length > 0 && boardData?.boardType !== BoardType.FLOW && (
+                    <span className='inline-flex items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-[10.5px] font-medium text-muted-foreground'>
+                      <GitBranch size={11} />
+                      Tree
+                    </span>
+                  )}
                 </div>
-              )}
-              {createSubTicketButton}
-              {addSubTicketPicker}
-            </div>
-          </div>
-        </div>
-        {/* Related Tickets Section */}
-        <div className='border-t border-border pt-6 mt-6'>
-          <div>
-            <div className='flex items-center gap-3'>
-              <p className='text-base font-semibold text-foreground'>Related Tickets</p>
-              <span className='inline-flex items-center justify-center rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground'>
-                {referencesOut.length + referencesIn.length}
-              </span>
-            </div>
 
-            <div className='mt-4 space-y-3'>
-              {/* Regular Related Tickets */}
-              {referencesOut.length + referencesIn.length > 0 && (
-                <>
+                <div className='flex flex-col gap-1.5' data-testid='sub-tickets-list'>
+                  {subTickets.length > 0 && subTicketTreeNodes.map(renderSubTicketNode)}
+                  {createSubTicketButton}
+                  {addSubTicketPicker}
+                </div>
+
+                <div className='flex items-center gap-2 pt-2.5 pb-0.5'>
+                  <span className='text-[10px] font-semibold uppercase tracking-[0.4px] text-muted-foreground/80'>
+                    Linked
+                  </span>
+                  <span className='font-mono text-[10.5px] tabular-nums text-muted-foreground/60'>
+                    {referencesOut.length + referencesIn.length}
+                  </span>
+                </div>
+
+                <div className='flex flex-col gap-1.5'>
                   {referencesOut.map(reference =>
                     renderRelatedTicketRow(
                       reference,
@@ -5301,41 +5650,40 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                         : undefined,
                     );
                   })}
-                </>
-              )}
 
-              {referencesOut.length + referencesIn.length === 0 && (
-                <p className='text-sm text-muted-foreground'>No related tickets yet.</p>
-              )}
-
-              <div
-                className={`rounded-lg border border-border px-3 py-2 flex items-center ${
-                  isReferenceSaving ? 'opacity-60 pointer-events-none' : ''
-                }`}
-              >
-                <EntitySelector
-                  options={referenceTicketOptions}
-                  selectedValue={null}
-                  onSelect={value => handleAddReference(value)}
-                  placeholder='+ Add ticket'
-                  searchPlaceholder='Search by ID or name'
-                  isOpen={isAddTicketMenuOpen}
-                  onOpenChange={handleAddTicketMenuOpenChange}
-                  onSearchChange={handleAddTicketMenuSearchChange}
-                  onScrollEnd={handleAddTicketMenuScrollEnd}
-                  hasMore={projectTicketHasMore}
-                  isLoading={
-                    isLoadingProjectTickets && (!projectTickets || projectTickets.length === 0)
-                  }
-                  disableClientFiltering={true}
-                  width='100%'
-                  noBorder
-                />
+                  <div
+                    className={cn(
+                      'flex items-center rounded-[11px] border border-border px-3 py-2 transition-colors hover:border-muted-foreground/40',
+                      isReferenceSaving && 'pointer-events-none opacity-60',
+                    )}
+                  >
+                    <EntitySelector
+                      options={referenceTicketOptions}
+                      selectedValue={null}
+                      onSelect={value => handleAddReference(value)}
+                      placeholder='+ Link a ticket'
+                      searchPlaceholder='Search by ID or name'
+                      isOpen={isAddTicketMenuOpen}
+                      onOpenChange={handleAddTicketMenuOpenChange}
+                      onSearchChange={handleAddTicketMenuSearchChange}
+                      onScrollEnd={handleAddTicketMenuScrollEnd}
+                      hasMore={projectTicketHasMore}
+                      isLoading={
+                        isLoadingProjectTickets && (!projectTickets || projectTickets.length === 0)
+                      }
+                      disableClientFiltering={true}
+                      width='100%'
+                      noBorder
+                    />
+                  </div>
+                  {referenceError && (
+                    <p className='text-[12px] text-destructive'>{referenceError}</p>
+                  )}
+                </div>
               </div>
-              {referenceError && <p className='text-xs text-destructive'>{referenceError}</p>}
-            </div>
+            )}
           </div>
-        </div>
+        )}
         {/* Stage Form Submissions — per-stage-visit forms are a NON_LINEAR concept.
             On linear boards the single board-level form lives in the form panel above,
             so hide this panel entirely rather than rendering an empty state. */}

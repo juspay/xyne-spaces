@@ -119,7 +119,7 @@ jobs:
 
   test:
     name: Automation tests
-    if: vars.RUN_TEST_CASE == 'true'
+    if: github.event_name == 'merge_group' && vars.RUN_TEST_CASE == 'true'
     runs-on: ci-cluster-github-runners
     env:
       TEST_ENV: test

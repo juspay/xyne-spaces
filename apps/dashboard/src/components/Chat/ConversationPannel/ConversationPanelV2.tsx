@@ -6,8 +6,12 @@ import {
   getChannelConversationsSnapshot,
   useGetChannelUserStatus,
 } from '../../../hooks/useChannels';
+import { useChannelHasBoards } from '../../../hooks/useChannelBoards';
+import { ChannelNoBoardsEmptyState } from '../ChannelInformation/ChannelNoBoardsEmptyState';
 import { useDragAndDropAreaRef } from '../../../hooks/useDragAndDropAreaRef';
 import { useConversationTabs } from './ConversationPannel.utils';
+import { appIdOf } from '../../../hooks/barItems';
+import { ArtifactAppHost } from '../../ArtifactApp/ArtifactAppHost';
 import { useChannelSubscription } from '../../../hooks/useChannelSubscription';
 import { useScope, useShortcutById } from '../../../shortcuts';
 import { ChannelVisibility, ChannelScopeType } from '@xyne/shared';
@@ -20,14 +24,12 @@ import JoinChannel from '../JoinChannel/JoinChannel';
 import { ChatInput } from '../ChatInput';
 import FileListV2 from '../FileListV2';
 import PinListV2 from '../PinListV2';
-import { ThreadMessages } from '../ThreadPannel';
 import KanbanBoardScreen from '../../../routes/KanbanBoardScreen';
 import CanvasTab from '../../Canvas/CanvasTab';
 import CanvasScreen from '../../Canvas/CanvasScreen';
-import { Panel, ResizableGroup, Separator } from '../../ui/Resizable/Resizable';
 import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
-import { TicketDetails } from '../../Tickets/TicketDetails/TicketDetails';
+import { ExpandedTicketView } from '../../Tickets/ExpandedTicketView/ExpandedTicketView';
 import ChatListV4 from '../ChatList/ChatListV4';
 import LinksTab from '../LinksTab/LinksTab';
 import { Archive } from 'lucide-react';
@@ -41,34 +43,6 @@ import { parseDMParticipantIds } from '../ChatDirectory/ChatDirectory.utils';
 // the websocket channel on each render (measured as constant subscribe churn).
 const NO_CONVERSATION_IDS: string[] = [];
 
-const ExpandedTicketView = ({
-  ticketId,
-  channelId,
-  conversationId,
-}: {
-  ticketId: string;
-  channelId: string;
-  conversationId: string;
-}): ReactElement => {
-  return (
-    <ResizableGroup orientation='horizontal'>
-      <Panel minSize='60%'>
-        <TicketDetails ticketId={ticketId} expandedView={true} />
-      </Panel>
-      <Separator className='w-1 hover:bg-sidebar-divider active:bg-sidebar-divider transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
-        <div id='panel-resize-divider' className='w-[1px] h-full bg-border'></div>
-      </Separator>
-      <Panel minSize='40%'>
-        <ThreadMessages
-          channelId={channelId}
-          conversationId={conversationId}
-          underTicketView={true}
-        />
-      </Panel>
-    </ResizableGroup>
-  );
-};
-
 const DeactivatedDmArchiveBanner = (): ReactElement => {
   return (
     <div className='px-4 pt-4 pb-4 bg-background'>
@@ -80,6 +54,24 @@ const DeactivatedDmArchiveBanner = (): ReactElement => {
   );
 };
 
+// Channel Tickets tab. Boards come from channel_board_mappings — the channel's own
+// linked boards, which may span projects. A channel with no linked boards has nothing
+// to show and, more importantly, nothing to scope a ticket query by, so render a
+// graceful empty state (no board view, no ticket creation) instead of the Kanban
+// board. Waiting for isSynced matters: an unsynced empty mapping is indistinguishable
+// from a genuinely empty one, and acting early would flash this state over a channel
+// that does have boards.
+const ChannelTicketsTab = ({ channelId }: { channelId: string }): ReactElement => {
+  const { isSynced, hasBoards } = useChannelHasBoards(channelId);
+
+  // KanbanBoardScreen renders the same empty state for hosts that mount it with a
+  // channelId directly; this short-circuit just avoids mounting the whole screen.
+  if (isSynced && !hasBoards) {
+    return <ChannelNoBoardsEmptyState channelId={channelId} />;
+  }
+  return <KanbanBoardScreen channelId={channelId} />;
+};
+
 const ConversationPanelV2 = ({
   channelId,
   previousChannelId,
@@ -89,11 +81,15 @@ const ConversationPanelV2 = ({
   showHeader = true,
   hideComposer = false,
   skipMarkAsRead = false,
+  suppressInputAutoFocus = false,
+  listLoadingFallback,
+  skipSubscription = false,
   conversationIds,
   onOpenThread,
   useLocalTabState = false,
   unreadsOnly,
   onThreadClick,
+  onTotalHeightChange,
 }: {
   channelId: string;
   previousChannelId: string | null;
@@ -109,22 +105,52 @@ const ConversationPanelV2 = ({
   // Used by read-only surfaces such as the Unreads inbox.
   hideComposer?: boolean;
   skipMarkAsRead?: boolean;
+  // Never take the keyboard on mount.
+  //
+  // The composer's autofocus is not just a focus: TipTap's focus command runs
+  // ProseMirror's `scrollRectIntoView`, which writes `scrollLeft` on every
+  // scrollable ancestor to reveal the caret. In a single-panel screen that
+  // ancestor is the page and the write is a no-op. Inside a Streams column it is
+  // the strip, and the write drags the whole stream sideways by however much of
+  // that column the viewport was clipping — hundreds of pixels, once per column,
+  // arriving whenever each channel happens to resolve.
+  //
+  // Streams mounts six of these at once and the user picked none of them, so
+  // there is nothing here for the keyboard to claim.
+  suppressInputAutoFocus?: boolean;
+  /**
+   * Placeholder for the message list's first load, passed straight through to
+   * `ChatListV4`. For hosts that already painted their own placeholder before
+   * this panel mounted — see `loadingFallback` there.
+   */
+  listLoadingFallback?: React.ReactNode;
+  // Skips the websocket channel subscription — messages render via Zero regardless.
+  skipSubscription?: boolean;
   // When true (e.g. rendered in the search-results pane, which owns its own `?tab=`
   // for the doc-type filter), keep the active tab in local state instead of the URL —
   // otherwise a foreign `tab=all` matches no conversation tab and blanks the body.
   useLocalTabState?: boolean;
   unreadsOnly?: boolean;
   onThreadClick?: (channelId: string, conversationId: string) => void;
+  // Reports the message list's real total content height (px).
+  onTotalHeightChange?: (height: number) => void;
 }): ReactElement => {
   const { baseRoute } = useRouteContext();
   const channel = useChannel(channelId);
+  // Resolved once here and handed down through ConversationTabContext: it is
+  // constant per channel, and ChatBubble renders once per message, so subscribing
+  // per bubble would put hundreds of identical queries on a long conversation.
+  // Only DEFAULT channels can create tickets, so DMs skip the query entirely.
+  const { hasBoards: channelHasBoards } = useChannelHasBoards(
+    channel?.scopeType === ChannelScopeType.DEFAULT ? channelId : undefined,
+  );
   const channelParticipation = useGetChannelUserStatus(channelId);
   const { dragAndDropAreaRef, inputRef, isDragging } = useDragAndDropAreaRef(channelId);
 
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const routerLocation = useLocation();
-  const skipInputAutoFocus = searchParams.get('nofocus') === '1';
+  const skipInputAutoFocus = suppressInputAutoFocus || searchParams.get('nofocus') === '1';
 
   // Strip the `nofocus` param from the URL after each channel navigation so it
   // doesn't persist on subsequent interactions (composing, tab switches).
@@ -137,8 +163,12 @@ const ConversationPanelV2 = ({
     setSearchParams(next, { replace: true });
   }, [channelId, searchParams, setSearchParams]);
 
-  // Get dynamic tabs based on permissions and channel scope type
-  const { availableTabs, getDefaultTab, isValidTab } = useConversationTabs(channel?.scopeType);
+  // Get this channel's tabs — its own customized set where allowed, otherwise
+  // the built-in list.
+  const { availableTabs, getDefaultTab, isValidTab } = useConversationTabs(
+    channelId,
+    channel?.scopeType,
+  );
 
   const urlHashValue = location.hash.match(/origin=([^&#]+)/);
 
@@ -210,7 +240,7 @@ const ConversationPanelV2 = ({
     skipMarkAsReadRef.current = skip;
   }, []);
 
-  useChannelSubscription(channelId, NO_CONVERSATION_IDS);
+  useChannelSubscription(skipSubscription ? undefined : channelId, NO_CONVERSATION_IDS);
   useScope('channel', !!channelId);
   useShortcutById('global.openCanvasTab', () => {
     handleTabChange('canvas');
@@ -244,8 +274,13 @@ const ConversationPanelV2 = ({
   );
 
   const conversationTabContextValue = useMemo(
-    () => ({ setActiveTab: handleTabChange, setSkipMarkAsRead, skipMarkAsReadRef }),
-    [handleTabChange, setSkipMarkAsRead],
+    () => ({
+      setActiveTab: handleTabChange,
+      setSkipMarkAsRead,
+      skipMarkAsReadRef,
+      channelHasBoards,
+    }),
+    [handleTabChange, setSkipMarkAsRead, channelHasBoards],
   );
 
   return (
@@ -280,6 +315,9 @@ const ConversationPanelV2 = ({
                 </div>
               ) : (
                 <ChatListV4
+                  {...(listLoadingFallback !== undefined && {
+                    loadingFallback: listLoadingFallback,
+                  })}
                   {...(urlConversationId && { linkedConversationId: urlConversationId })}
                   {...(urlCreatedAt && { linkedItemCreatedAt: { createdAt: urlCreatedAt } })}
                   {...(stateLinkedCutoffCreatedAt && {
@@ -287,13 +325,14 @@ const ConversationPanelV2 = ({
                   })}
                   cachedConversations={cachedConversations}
                   channelId={channelId}
-                  projectId={channel?.projectId}
+                  projectId={channel?.projectId ?? undefined}
                   channelScopeType={channel?.scopeType}
                   skipMarkAsReadRef={skipMarkAsReadRef}
                   {...(conversationIds && { conversationIds })}
                   {...(onOpenThread && { onOpenThread })}
                   unreadsOnly={unreadsOnly ?? false}
                   {...(onThreadClick && { onThreadClick })}
+                  {...(onTotalHeightChange && { onTotalHeightChange })}
                 />
               )}
               {hideComposer ? null : shouldShowJoinChannel ? (
@@ -323,11 +362,28 @@ const ConversationPanelV2 = ({
                 conversationId={conversationId}
               />
             ) : (
-              <KanbanBoardScreen channelId={channelId} />
+              <ChannelTicketsTab channelId={channelId} />
             ))}
           {tab === 'canvas' &&
             (canvasId ? <CanvasScreen canvasId={canvasId} /> : <CanvasTab channelId={channelId} />)}
           {tab === 'links' && <LinksTab channelId={channelId} />}
+          {appIdOf(tab) !== null && (
+            // An artifact app the user added as a tab. Keyed on the app so
+            // switching between two app tabs boots a fresh sandbox instead of
+            // handing one app's iframe another app's payload.
+            <ArtifactAppHost
+              key={tab}
+              appId={appIdOf(tab) ?? ''}
+              placement={{
+                surface: 'channel',
+                channel: {
+                  id: channelId,
+                  name: channel?.name ?? '',
+                  scopeType: channel?.scopeType ?? '',
+                },
+              }}
+            />
+          )}
         </div>
       </div>
     </ConversationTabContext.Provider>

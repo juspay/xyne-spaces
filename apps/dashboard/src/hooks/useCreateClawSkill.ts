@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient, type UseMutationResult } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useAuth } from './useAuth';
 import { createSkill, replaceSkillFiles } from '../services/claw/clawSkillsService';
@@ -24,6 +24,8 @@ export const useCreateClawSkill = (): UseMutationResult<Skill, Error, SkillCreat
   const userId = user?.id;
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const { workspaceId } = useParams<{ workspaceId?: string }>();
+  const libraryPath = workspaceId ? `/${workspaceId}/ai/library` : '/ai/library';
 
   return useMutation<Skill, Error, SkillCreateSubmission>({
     mutationFn: async s => {
@@ -56,7 +58,7 @@ export const useCreateClawSkill = (): UseMutationResult<Skill, Error, SkillCreat
     onSuccess: skill => {
       void queryClient.invalidateQueries({ queryKey: ['claw-skills'] });
       toast.success('Skill created');
-      void navigate(`/claw-agents/skills/${skill.slug}`);
+      void navigate(`${libraryPath}/skill/${skill.slug}`);
     },
   });
 };

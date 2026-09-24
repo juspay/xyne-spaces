@@ -465,6 +465,13 @@ export enum InvitationResponse {
 }
 
 // @ts-ignore TS1294
+export enum RingStatus {
+  CALLING = 'CALLING',
+  RINGING = 'RINGING',
+  BUSY = 'BUSY',
+}
+
+// @ts-ignore TS1294
 export enum MeetingStatus {
   PENDING = 'PENDING',
   ACCEPTED = 'ACCEPTED',
@@ -797,7 +804,16 @@ export enum FormFieldType {
   MULTI_SELECT = 'MULTI_SELECT',
   USER = 'USER',
   DOC = 'DOC',
+  TICKET = 'TICKET',
 }
+
+/**
+ * Max scope fields on EmailChannelPreference.duplicateScopeConfig. Enforced in the
+ * desk settings picker, both Zero mutators, and the duplicate service's parser —
+ * a config over the limit is treated as malformed and detection falls back to
+ * project-wide, so the three must agree.
+ */
+export const MAX_DUPLICATE_SCOPE_FIELDS = 5;
 
 // @ts-ignore TS1294
 export enum FormContextType {
@@ -1072,6 +1088,7 @@ export enum AppPermissionType {
   READ = 'READ',
   WRITE = 'WRITE',
   DELETE = 'DELETE',
+  START = 'START',
 }
 
 // @ts-ignore TS1294
@@ -1207,6 +1224,7 @@ export const ShareableEntityType = {
   NOTE_TAKER: 'NOTE_TAKER',
   SUMMARY_TEMPLATE: 'SUMMARY_TEMPLATE',
   CALL: 'CALL',
+  WORKFLOW: 'WORKFLOW',
 } as const;
 
 export type ShareableEntityType = typeof ShareableEntityType[keyof typeof ShareableEntityType];

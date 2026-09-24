@@ -285,12 +285,12 @@ import { PrismaClient } from '@prisma/client';
       .map(c => c.scopeId);
 
     if (channelScopeIds.length > 0) {
-      const scopeChannels: { id: string; projectId: string }[] = await prisma.channel.findMany({
+      const scopeChannels: { id: string; projectId: string | null }[] = await prisma.channel.findMany({
         where: { id: { in: channelScopeIds } },
         select: { id: true, projectId: true },
       });
       const channelProjectMap: Record<string, string> = {};
-      scopeChannels.forEach(ch => { channelProjectMap[ch.id] = ch.projectId; });
+      scopeChannels.forEach(ch => { if (ch.projectId) channelProjectMap[ch.id] = ch.projectId; });
 
       collections.forEach(collection => {
         if (collection.scopeType === 'CHANNEL') {

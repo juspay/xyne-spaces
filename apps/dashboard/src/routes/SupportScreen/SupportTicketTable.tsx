@@ -1,21 +1,12 @@
-import { ReactElement, useCallback, useEffect, useMemo, useRef } from 'react';
-import { toast } from 'sonner';
-import { v4 as uuidv4 } from 'uuid';
+import { ReactElement, useEffect, useMemo, useRef } from 'react';
 import type { Ticket, TicketTag } from '@xyne/shared';
-import { FormEntityType, type TicketPriority } from '@xyne/shared';
+import { type TicketPriority } from '@xyne/shared';
 import { queries } from '../../zero/queries';
-import { mutators } from '../../zero/mutators';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { useGetChannelUserStatus } from '../../hooks/useChannels';
-import { useZero } from '../../hooks/useZero';
-import { surfaceMutationError } from '../../utils/zeroMutationToast';
 import { dataLoadDuration, safeRecordMetric } from '../../services/otel';
 import { logger, Event } from '../../utils/logger';
 import { TicketTable } from '../../components/Tickets/TicketTable/TicketTable';
-import {
-  buildDynamicFieldColumns,
-  type DynamicFieldSaveParams,
-} from '../../components/Tickets/TicketTable/dynamicFieldColumns';
 import {
   ticketMatchesDynamicFieldEntries,
   type DynamicFieldFilterEntry,
@@ -201,51 +192,6 @@ export const SupportTicketTable = ({
     return Array.from(new Set(projectTags.map(tag => tag.name))).sort();
   }, [projectTags]);
 
-  const zero = useZero();
-  const handleDynamicFieldSave = useCallback(
-    ({ ticket, field, valueId, newValue }: DynamicFieldSaveParams): void => {
-      const fallback = `Failed to update ${field.fieldName}`;
-      try {
-        const mutation = valueId
-          ? zero.mutate(
-              mutators.formEntityValue.update({
-                formEntityValueId: valueId,
-                newValue,
-                updatedAt: Date.now(),
-              }),
-            )
-          : zero.mutate(
-              mutators.formEntityValue.createV2({
-                id: uuidv4(),
-                entityId: ticket.id,
-                entityType: FormEntityType.TICKET,
-                fieldId: field.id,
-                formId: field.formId,
-                newValue,
-                timestamp: Date.now(),
-                ...(ticket.boardId ? { contextId: ticket.boardId } : {}),
-              }),
-            );
-        void surfaceMutationError(mutation, fallback);
-      } catch (error) {
-        logger.error(Event.ZERO_MUTATION_ERROR, {
-          source: 'SupportTicketTable',
-          message: 'Dynamic field save rejected by the client mutator',
-          fieldId: field.id,
-          ticketId: ticket.id,
-          error: error instanceof Error ? error.message : String(error),
-        });
-        toast.error(error instanceof Error ? error.message : fallback);
-      }
-    },
-    [zero],
-  );
-
-  const extraColumns = useMemo(
-    () => buildDynamicFieldColumns(dynamicFieldColumns ?? [], handleDynamicFieldSave),
-    [dynamicFieldColumns, handleDynamicFieldSave],
-  );
-
   return (
     <TicketTable
       tickets={(dynamicallyFilteredTickets ?? []) as Ticket[]}
@@ -255,7 +201,7 @@ export const SupportTicketTable = ({
       {...(selectedIds !== undefined ? { selectedIds } : {})}
       {...(onSelectionChange !== undefined ? { onSelectionChange } : {})}
       {...(visibleColumns ? { visibleColumns } : {})}
-      extraColumns={extraColumns}
+      paginationMode='pages'
     />
   );
 };

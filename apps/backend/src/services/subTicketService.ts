@@ -44,20 +44,6 @@ export async function createSubTicket(
     throw new Error(`Parent ticket "${input.parentTicketId}" not found`);
   }
 
-  // Normal boards retain the historical one-level sub-ticket limit. FLOW is
-  // the sole override because its materialized run graph can be arbitrarily deep.
-  if (parent.board.boardType !== BoardType.FLOW) {
-    const parentAsSubTicket = await db.subTicket.findFirst({
-      where: { mappedTicketId: parent.id },
-      select: { id: true },
-    });
-    if (parentAsSubTicket) {
-      throw new Error(
-        `Cannot create a sub-ticket under a sub-ticket. Parent ticket ${parent.id} is already a sub-ticket.`,
-      );
-    }
-  }
-
   await db.$transaction(async (tx: Prisma.TransactionClient) => {
     await tx.subTicket.create({
       data: {

@@ -21,6 +21,7 @@ export interface AppCreationModeSignal {
   active: boolean;
   /** The app the pane is showing; cards for THIS app become references. */
   appId: string | null;
+  shownAppId: string | null;
   /** The build currently in the pane, so a card can show itself as selected. */
   viewingVersionId: string | null;
   /** The build that IS the app right now — what the agent's next update builds
@@ -60,6 +61,7 @@ export interface AppCreationModeSignal {
 const AppCreationModeContext = createContext<AppCreationModeSignal>({
   active: false,
   appId: null,
+  shownAppId: null,
   viewingVersionId: null,
   headVersionId: null,
   icon: null,
@@ -79,6 +81,6 @@ export function useAppCreationModeSignal(): AppCreationModeSignal {
 
 /** Whether this card should become a reference instead of running its own copy. */
 export function useIsShownInPane(cardAppId: string | undefined): boolean {
-  const { active, appId } = useContext(AppCreationModeContext);
-  return active && Boolean(cardAppId) && cardAppId === appId;
+  const { shownAppId } = useContext(AppCreationModeContext);
+  return Boolean(cardAppId) && cardAppId === shownAppId;
 }

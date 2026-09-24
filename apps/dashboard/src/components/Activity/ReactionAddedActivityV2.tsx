@@ -2,12 +2,21 @@ import { ReactElement } from 'react';
 import type { ActivityWithRelated } from '../../types/activity';
 import { MessageBubble } from '../ui/MessageBubble/MessageBubble';
 import { ActivityItemCard } from './ActivityItemCard';
+import {
+  SlashCommandArtifactActivityBody,
+  SlashCommandArtifactBadge,
+} from './SlashCommandArtifactActivity';
 import { RenderMessageWithHTML } from '../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import { getFlowJsonPreviewText } from '../../utils/flowPreview';
 import { useUser } from '../../hooks/useUsers';
 import { getUserDisplayName } from '../../utils/userDisplayName';
 import { useRouteContext } from '../../hooks/useRouteContext';
-import { parseReactionsMd, ReactionsData, getMostRecentEmoji } from '@xyne/shared';
+import {
+  parseSlashCommandArtifactMessage,
+  parseReactionsMd,
+  ReactionsData,
+  getMostRecentEmoji,
+} from '@xyne/shared';
 import { renderEmoji } from '../../utils/customEmojiUtils';
 import { getReactionMessagePreview } from './reactionMessagePreview';
 
@@ -52,6 +61,7 @@ export const ReactionAddedActivityV2 = ({
   }
 
   const reactionPreview = getReactionMessagePreview(message.content);
+  const artifact = parseSlashCommandArtifactMessage(message.content);
 
   // Format description text
   let descriptionText: string;
@@ -74,6 +84,9 @@ export const ReactionAddedActivityV2 = ({
       channelId={message.conversation?.channelId}
       badgeIcon={renderEmoji(latestEmoji)}
       badgeColorClass='bg-muted'
+      {...(artifact && {
+        titlePrefix: <SlashCommandArtifactBadge badge={artifact.definition.badge} />,
+      })}
       description={<span className='text-muted-foreground text-sm'>{descriptionText}</span>}
       targetPath={targetPath}
       focusThread={isThreadReply}
@@ -81,7 +94,9 @@ export const ReactionAddedActivityV2 = ({
       useActivityCutoff
       isExpanded={isExpanded}
     >
-      {isExpanded ? (
+      {artifact ? (
+        <SlashCommandArtifactActivityBody messageId={message.messageId} body={artifact.body} />
+      ) : isExpanded ? (
         <MessageBubble
           message={message}
           showAvatar={false}

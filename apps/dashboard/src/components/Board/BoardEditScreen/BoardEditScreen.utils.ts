@@ -37,6 +37,8 @@ export const getFieldTypeLabel = (fieldType: TicketField['type']): string => {
       return 'Boolean';
     case 'doc':
       return 'Document';
+    case 'ticket':
+      return 'Ticket';
     default:
       return 'String';
   }

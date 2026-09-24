@@ -176,6 +176,9 @@ function findRequireAuthMountsMissingBarrier(mounts: string[]): string[] {
     // Scope-aware read barrier counts too: it rejects token WRITES outright
     // and token READS without the named scope (see allowReadAccessToken).
     && !mount.includes("allowReadAccessToken(")
+    // Scope-aware read+write barrier: token writes are limited to POST on the
+    // allowlisted paths AND the named scope (see allowScopedAccessToken).
+    && !mount.includes("allowScopedAccessToken(")
     && !mount.includes("runRouter")
   );
 }

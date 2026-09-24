@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactElement } from 'react';
+import { useEffect, useMemo, useState, type ReactElement } from 'react';
 import { ChevronRight, MultipleCrossCancelDefault, PlusDefault } from '@xyne/icons';
 import { cn } from '@/utils/classNames';
 import { searchByNameThenDescription } from '../../librarySearch';
@@ -95,6 +95,7 @@ interface BrowseCallableAgentsDialogProps {
   isError: boolean;
   onRetry: () => void;
   busySlug: string | null;
+  initialSlug?: string | null;
   onAdd: (slug: string, requestReason: string) => void;
   onRemove: (slug: string) => void;
 }
@@ -107,12 +108,17 @@ export function BrowseCallableAgentsDialog({
   isError,
   onRetry,
   busySlug,
+  initialSlug,
   onAdd,
   onRemove,
 }: BrowseCallableAgentsDialogProps): ReactElement {
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<string | null>(null);
   const [openSlug, setOpenSlug] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (open) setOpenSlug(initialSlug ?? null);
+  }, [open, initialSlug]);
 
   const openEntry = catalog.find(entry => entry.slug === openSlug) ?? null;
   const q = query.trim();

@@ -14,6 +14,7 @@ import { UserRepository } from '@/database/repositories/users';
 import type { User } from '@prisma/client';
 import { ProjectRepository } from '@/database/repositories/projectRepository';
 import { AppError } from '@/middleware/errorHandler';
+import { websocketService } from '@/services/websocketService';
 import { logger } from '@/utils/logger';
 
 export interface AddGroupDmParticipantsParams {
@@ -301,6 +302,13 @@ export class GroupDmParticipantService {
       targetChannelId,
       cutoff,
     );
+
+    // Refresh label unread counts for both channels once the move is done (moved out of the repository so the
+    // data layer doesn't depend on websocketService).
+    if (result.moved > 0) {
+      websocketService.broadcastLabelUnreadCountsUpdate(sourceChannelId);
+      websocketService.broadcastLabelUnreadCountsUpdate(targetChannelId);
+    }
 
     logger.info('group_dm_history_moved', {
       sourceChannelId,

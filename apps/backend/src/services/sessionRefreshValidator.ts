@@ -223,6 +223,18 @@ export async function isRefreshAllowed(session: LoadedSession | null): Promise<b
     userId: session?.user?.id,
   });
 
+  // A still-ACTIVE session denied here is the moment the user gets logged out,
+  // and the server is the only side that sees it — the client just receives a
+  // 401. This only writes to the activity log, never to the session row (no
+  // cookie/JWT/session-state side effects, same as validateSessionForRefresh
+  // above) — so a client that keeps retrying with the same stale refresh
+  // token logs a LOGOUT on every such request, not just the first. Accepted
+  // trade-off: logging without changing what this function already decides.
+  // provider_revoked is recorded by the deactivation cleanup below instead.
+  if (session && verdict.reason === 'refresh_token_expired') {
+    userSessionService.trackLogout(session, 'TOKEN_EXPIRED');
+  }
+
   if (verdict.deactivate && session?.user) {
     const { id: userId, email } = session.user;
     void accountDeactivationService

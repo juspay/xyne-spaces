@@ -1,6 +1,5 @@
 import { logger } from '@/utils/logger';
 import { recapGenerationService } from '@/services/recapGenerationService';
-import { projectRecapGenerationService } from '@/services/projectRecapGenerationService';
 import { redisService } from '@/services/redisService';
 import { db } from '@/database/client';
 import Bull from 'bull';
@@ -37,11 +36,6 @@ export class RecapWorker {
     successful: number;
     failed: number;
     results: any[];
-    projectRecapResults?: {
-      totalProjects: number;
-      successful: number;
-      failed: number;
-    };
   }> {
     logger.info(`[RECAP_WORKER] Processing generation job ${job.id || 'manual'}...`);
 
@@ -69,22 +63,7 @@ export class RecapWorker {
         })));
       }
 
-      // Step 2: Generate project recaps (runs after channel recaps complete)
-      logger.info(`[RECAP_WORKER] Starting project recap generation...`);
-      const projectRecapResults = await projectRecapGenerationService.generateRecapsForDate(targetDate);
-
-      logger.info(
-        `[RECAP_WORKER] Project recap generation completed: ${projectRecapResults.successful}/${projectRecapResults.totalProjects} successful, ${projectRecapResults.failed} failed`
-      );
-
-      return {
-        ...result,
-        projectRecapResults: {
-          totalProjects: projectRecapResults.totalProjects,
-          successful: projectRecapResults.successful,
-          failed: projectRecapResults.failed,
-        },
-      };
+      return result;
     } catch (error) {
       logger.error(`[RECAP_WORKER] Generation job failed:`, error);
       throw error;

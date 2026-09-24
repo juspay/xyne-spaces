@@ -3,6 +3,7 @@ import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { AutomationStatus } from '../types/status';
 import { DESK_AUTOMATION_WORKFLOW_TYPE } from '../types/workflow-adapter';
+import { websocketService } from '@/services/websocketService';
 
 export interface ConversationLabelDeleteImpact {
   label: {
@@ -45,10 +46,10 @@ class ConversationLabelLifecycleService {
     auth: { userId: string; workspaceId: string },
     labelId: string,
   ): Promise<ConversationLabelDeleteResult> {
-    await this.requireOwnedLabel(db, auth, labelId);
+    const ownedLabel = await this.requireOwnedLabel(db, auth, labelId);
 
     try {
-      return await db.$transaction(async tx => {
+      const result = await db.$transaction(async tx => {
         const label = await this.requireOwnedLabel(tx, auth, labelId);
         const impact = await this.calculateImpact(tx, label);
 
@@ -92,6 +93,8 @@ class ConversationLabelLifecycleService {
           removedMappingCount: impact.mappingCount,
         };
       });
+      websocketService.broadcastLabelUnreadCountsUpdate(ownedLabel.channelId);
+      return result;
     } catch (err) {
       if (err instanceof ConversationLabelLifecycleError) throw err;
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2003') {

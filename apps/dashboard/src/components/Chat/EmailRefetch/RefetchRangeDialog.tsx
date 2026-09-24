@@ -69,6 +69,10 @@ interface RefetchRangeDialogProps {
   onOpenChange: (open: boolean) => void;
   onConfirm: (range?: { startDate: string; endDate: string }) => void;
   isPending?: boolean;
+  /** Defaults to the email wording; review desks pass their own. */
+  title?: string;
+  subtitle?: string;
+  summaryLabel?: string;
 }
 
 export const RefetchRangeDialog: React.FC<RefetchRangeDialogProps> = ({
@@ -76,6 +80,9 @@ export const RefetchRangeDialog: React.FC<RefetchRangeDialogProps> = ({
   onOpenChange,
   onConfirm,
   isPending = false,
+  title = 'Fetch emails',
+  subtitle = 'Pull new mail or backfill a specific time range from the connected inbox.',
+  summaryLabel = 'Will fetch emails received',
 }) => {
   const [mode, setMode] = useState<Mode>('last-7d');
   const [customStart, setCustomStart] = useState<Date | null>(null);
@@ -142,17 +149,15 @@ export const RefetchRangeDialog: React.FC<RefetchRangeDialogProps> = ({
     <Dialog
       open={open}
       onOpenChange={onOpenChange}
-      title='Fetch emails'
-      description='Choose how much history to pull from the inbox.'
+      title={title}
+      description='Choose how much history to pull.'
       className='max-w-lg'
     >
       <div className='p-6 space-y-5'>
         {/* Header */}
         <div>
-          <div className='text-lg font-semibold text-foreground'>Fetch emails</div>
-          <p className='text-sm text-muted-foreground mt-0.5'>
-            Pull new mail or backfill a specific time range from the connected inbox.
-          </p>
+          <div className='text-lg font-semibold text-foreground'>{title}</div>
+          <p className='text-sm text-muted-foreground mt-0.5'>{subtitle}</p>
         </div>
 
         {/* Quick presets */}
@@ -209,7 +214,7 @@ export const RefetchRangeDialog: React.FC<RefetchRangeDialogProps> = ({
         {/* Resolved-range summary for presets */}
         {mode !== 'custom' && resolved && (
           <div className='rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground'>
-            Will fetch emails received{' '}
+            {summaryLabel}{' '}
             <span className='text-foreground font-medium'>
               {formatRange(resolved.startDate, resolved.endDate)}
             </span>

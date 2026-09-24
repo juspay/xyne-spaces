@@ -605,12 +605,26 @@ router.get('/google-play/oauth/callback', async (req: Request, res: Response): P
         select: { id: true },
       });
       if (mappingBoards.length > 0) {
+        // Resolve the default board: honour the requested boardId only when it
+        // actually belongs to this project's board set, otherwise fall back to
+        // the oldest board. Without this guard a requested boardId outside the
+        // project yields a mapping set with NO default row.
+        const defaultBoardId =
+          state.boardId && mappingBoards.some((b) => b.id === state.boardId)
+            ? state.boardId
+            : mappingBoards[0].id;
+        if (state.boardId && state.boardId !== defaultBoardId) {
+          logger.warn(
+            `[CBM_DEFAULT] Requested boardId ${state.boardId} is not in project ${state.projectId} for channel ${channel.id}; ` +
+              `defaulting to oldest board ${defaultBoardId}.`,
+          );
+        }
         await tx.channelBoardMapping.createMany({
-          data: mappingBoards.map((b, index) => ({
+          data: mappingBoards.map((b) => ({
             channelId: channel.id,
             boardId: b.id,
             workspaceId: state.workspaceId,
-            isDefault: state.boardId ? b.id === state.boardId : index === 0,
+            isDefault: b.id === defaultBoardId,
             createdBy: state.userId,
             createdAt: now,
             updatedAt: now,

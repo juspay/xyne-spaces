@@ -22,4 +22,5 @@ export interface OzonetelPreprocessedPayload {
   event: TelephonyEvent;
   channelId: string;
   creatorUserId?: string;
+  targetConversationId?: string;
 }

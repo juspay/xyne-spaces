@@ -18,12 +18,15 @@
  */
 import { useState } from "react";
 import { Loader2, Trash2 } from "lucide-react";
+import { BrainIcon, DatabaseIcon } from "@phosphor-icons/react";
 import type { Agent } from "../../../../lib/types";
 import { updateAgent } from "../../../../lib/api";
 import { MemoryTab as MemoryTabV2 } from "../../../../v2/components/MemoryTab";
 import { Button } from "../../ui/Button";
 import { Dialog } from "../../ui/Dialog";
 import { Switch } from "../../ui/Switch";
+import { Tabs, type TabItem } from "../../ui/Tabs";
+import { AgentIndexPanel } from "./AgentIndexPanel";
 
 interface Props {
   agent: Agent;
@@ -31,6 +34,13 @@ interface Props {
 }
 
 const DEFAULT_MIN_CONFIDENCE = 0.8;
+
+type SubView = "memories" | "index";
+
+const SUB_VIEWS: TabItem<SubView>[] = [
+  { id: "memories", label: "Memories", icon: BrainIcon },
+  { id: "index", label: "Index", icon: DatabaseIcon },
+];
 
 function readMinConfidence(config: Record<string, unknown>): number {
   const value = config.memoryAutoApproveMinConfidence;
@@ -53,6 +63,7 @@ export function MemoryTab({ agent, canDelete = false }: Props) {
   const [clearing, setClearing] = useState(false);
   const [notice, setNotice] = useState<{ kind: "success" | "error"; text: string } | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [subView, setSubView] = useState<SubView>("memories");
 
   async function persistSettings(nextAutoApprove: boolean, nextMinConfidence: number): Promise<void> {
     setSavingSettings(true);
@@ -200,7 +211,15 @@ export function MemoryTab({ agent, canDelete = false }: Props) {
         </div>
       )}
 
-      <MemoryTabV2 key={refreshKey} agentSlug={agentSlug} canDelete={canDelete} />
+      <div className="px-4 pt-3">
+        <Tabs items={SUB_VIEWS} selected={subView} onSelect={setSubView} />
+      </div>
+
+      {subView === "memories" ? (
+        <MemoryTabV2 key={refreshKey} agentSlug={agentSlug} canDelete={canDelete} />
+      ) : (
+        <AgentIndexPanel agentSlug={agentSlug} />
+      )}
 
       <Dialog
         open={showClearConfirm}

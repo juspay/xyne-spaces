@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState, type ReactElement } from 'react';
+import { Fragment, useEffect, useMemo, useState, type ReactElement } from 'react';
 import { cn } from '@/utils/classNames';
 import { searchByNameThenDescription } from '../../librarySearch';
 import { BROWSE_CARD, BROWSE_CARD_IDLE, BROWSE_CARD_SELECTED } from '../../primitives/browseCard';
@@ -70,7 +70,6 @@ const McpCard = ({
         <McpIdentity
           label={entry.label}
           iconType={entry.iconType}
-          verified={entry.verified}
           {...(state.enabled ? { trailing: <EnabledBadge /> } : {})}
         />
         <span className='flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground'>
@@ -107,6 +106,8 @@ interface BrowseMcpsDialogProps {
   onOpenChange: (open: boolean) => void;
   catalog: readonly McpCatalogEntry[];
   connectedServerIds: ReadonlySet<string>;
+  orgCoveredServerIds?: ReadonlySet<string>;
+  initialSlug?: string | null;
   loading: boolean;
   isError: boolean;
   onRetry: () => void;
@@ -120,6 +121,8 @@ export function BrowseMcpsDialog({
   onOpenChange,
   catalog,
   connectedServerIds,
+  orgCoveredServerIds,
+  initialSlug,
   loading,
   isError,
   onRetry,
@@ -130,6 +133,10 @@ export function BrowseMcpsDialog({
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState<string | null>(null);
   const [openSlug, setOpenSlug] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (open) setOpenSlug(initialSlug ?? null);
+  }, [open, initialSlug]);
 
   const openEntry = catalog.find(entry => entry.slug === openSlug) ?? null;
 
@@ -228,6 +235,7 @@ export function BrowseMcpsDialog({
               selection={selection}
               onSelectionChange={onSelectionChange}
               connected={!!openEntry.server && connectedServerIds.has(openEntry.server.id)}
+              orgCovered={!!openEntry.server && !!orgCoveredServerIds?.has(openEntry.server.id)}
             />
           ),
         },
@@ -246,7 +254,7 @@ export function BrowseMcpsDialog({
                 label={entry.label}
                 iconType={entry.iconType}
                 selected
-                verified={entry.verified}
+                onOpen={() => setOpenSlug(entry.slug)}
                 onToggle={() => onSelectionChange(disableEntry(catalog, selection, entry))}
               />
             ))}
@@ -256,7 +264,6 @@ export function BrowseMcpsDialog({
                 label={match.entry.label}
                 iconType={match.entry.iconType}
                 selected={false}
-                verified={match.entry.verified}
                 onToggle={() =>
                   onSelectionChange(enableEntry(catalog, selection, match.entry, match.tools))
                 }

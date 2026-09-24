@@ -16,6 +16,10 @@ FROM ghcr.io/xynehq/y-sweet:sha-dceb9d1 AS ysweet-src
 RUN find / -name "y-sweet" -type f -executable 2>/dev/null | head -1 \
       | xargs -I{} cp {} /tmp/y-sweet
 
+# RustFS (S3-compatible, Apache-2.0) replaces MinIO, whose binaries are no
+# longer published (dl.min.io returns 410). The image ships a static musl build.
+FROM rustfs/rustfs:latest AS rustfs-src
+
 FROM ghcr.io/juspay/superposition-demo:latest AS superposition-src
 RUN cp /app/superposition /tmp/superposition
 
@@ -115,15 +119,10 @@ COPY --from=zero-src /tmp/litestream.yml /etc/litestream.yml
 RUN chmod +x /usr/local/bin/litestream /usr/local/bin/litestream-v5
 
 # ---------------------------------------------------------------------------
-# 6. MinIO  (single binary download)
+# 6. RustFS  (S3-compatible storage; binary copied from the upstream image)
 # ---------------------------------------------------------------------------
-RUN case "$TARGETARCH" in \
-      arm64) MINIO_ARCH=arm64 ;; \
-      *)     MINIO_ARCH=amd64 ;; \
-    esac && \
-    fetch "https://dl.min.io/server/minio/release/linux-${MINIO_ARCH}/minio" \
-      /usr/local/bin/minio && \
-    chmod +x /usr/local/bin/minio
+COPY --from=rustfs-src /usr/bin/rustfs /usr/local/bin/rustfs
+RUN chmod +x /usr/local/bin/rustfs
 
 # ---------------------------------------------------------------------------
 # 7. Fake GCS Server  (GitHub release binary)

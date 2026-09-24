@@ -235,7 +235,7 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
         onOpenChange={onClose}
         title={isReviewer ? `${targetStage.name} Form Review` : `${targetStage.name} Form`}
       >
-        <div className='max-h-[80vh] overflow-y-auto p-6'>
+        <div className='max-h-[80vh] overflow-x-hidden overflow-y-auto p-6'>
           <div className='mb-6 flex items-center justify-between gap-4 border-b border-border pb-4'>
             <div className='flex items-center gap-3'>
               <span className='rounded bg-muted px-2 py-0.5 text-xs text-muted-foreground'>
@@ -304,6 +304,7 @@ export const StageFormModal: React.FC<StageFormModalProps> = ({
             setLocalDocChanges={setLocalDocChanges}
             valuesForRender={valuesForRender}
             targetStageId={targetStage.id}
+            parentTicketId={ticket.id}
             disabled={isFormReadOnly}
             readOnlyDocs={isReviewer}
             showPersistedDocValues={shouldShowPersistedDocValues}

@@ -71,7 +71,7 @@ export class RunAgentStep extends BaseActionStep<typeof RunAgentConfigSchema, Ru
     const agentSlug = cfg.agentSlug as string;
     const prompt = cfg.prompt as string;
     const spacesAppId = await resolveSpacesAppId(cfg, agentSlug, context.automation.workspaceId);
-    const runUserId = await resolveRunUserId(spacesAppId, context.automation.createdById);
+    const runUserId = await resolveRunUserId(spacesAppId, context.automation.createdById, context.automation.workspaceId);
     const identityContext = await resolveHeadlessIdentityContext(runUserId, context.automation.workspaceId);
     const visibleContext = resolveVisibleConversationContext(context);
 
@@ -180,7 +180,7 @@ export class RunAgentStep extends BaseActionStep<typeof RunAgentConfigSchema, Ru
       cfg.outputSchema ?? {},
     );
     const spacesAppId = await resolveSpacesAppId(cfg, agentSlug, context.automation.workspaceId);
-    const runUserId = await resolveRunUserId(spacesAppId, context.automation.createdById);
+    const runUserId = await resolveRunUserId(spacesAppId, context.automation.createdById, context.automation.workspaceId);
     const identityContext = await resolveHeadlessIdentityContext(runUserId, context.automation.workspaceId);
     const callbackUrl = buildCallbackUrl(store.runId, stepName);
     const visibleContext = resolveVisibleConversationContext(context);
@@ -312,15 +312,16 @@ async function appBelongsToWorkspace(appId: string, workspaceId: string): Promis
   return Boolean(member);
 }
 
-async function resolveRunUserId(spacesAppId: string, fallbackUserId: string): Promise<string> {
+async function resolveRunUserId(spacesAppId: string, creatorId: string, workspaceId: string): Promise<string> {
+  if (creatorId) return creatorId;
   try {
     const install = await db.installedApps.findFirst({
-      where: { appId: spacesAppId },
+      where: { appId: spacesAppId, workspaceId },
       select: { userId: true },
     });
     if (install?.userId) return install.userId;
     logger.info(
-      `[RUN_AGENT] app ${spacesAppId} has no installation — attributing to automation creator ${fallbackUserId}`,
+      `[RUN_AGENT] app ${spacesAppId} has no installation — attributing to automation creator ${creatorId}`,
     );
   } catch (err) {
     logger.warn(
@@ -328,7 +329,7 @@ async function resolveRunUserId(spacesAppId: string, fallbackUserId: string): Pr
       err,
     );
   }
-  return fallbackUserId;
+  return creatorId;
 }
 
 /**

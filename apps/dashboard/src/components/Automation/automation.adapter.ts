@@ -12,6 +12,7 @@ export function triggerTypeToEventType(triggerType: string): WorkflowEventType {
 interface AutomationMetadata {
   description: string | null;
   createdById: string;
+  priority?: boolean;
 }
 
 function parseMetadata(raw: string | null | undefined): AutomationMetadata {
@@ -21,6 +22,7 @@ function parseMetadata(raw: string | null | undefined): AutomationMetadata {
     return {
       description: parsed.description ?? null,
       createdById: parsed.createdById ?? '',
+      priority: parsed.priority === true,
     };
   } catch {
     return { description: null, createdById: '' };
@@ -58,6 +60,7 @@ export function workflowToAutomation(workflow: Workflow): Automation {
     eventType: isWorkflowEventType(workflow.eventType)
       ? workflow.eventType
       : WorkflowEventType.NO_OP,
+    priority: metadata.priority === true,
   };
 }
 

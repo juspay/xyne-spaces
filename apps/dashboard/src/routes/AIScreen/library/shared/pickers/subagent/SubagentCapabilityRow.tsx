@@ -27,6 +27,7 @@ export function SubagentCapabilityRow({
   suggestContext,
 }: SubagentCapabilityRowProps): ReactElement {
   const [browseOpen, setBrowseOpen] = useState(false);
+  const [browseName, setBrowseName] = useState<string | null>(null);
   const { entries, loading, isError, refetch } = useSubagentCatalog();
   const suggestions = useSubagentSuggestions(entries, suggestContext);
 
@@ -112,7 +113,10 @@ export function SubagentCapabilityRow({
 
         <button
           type='button'
-          onClick={() => setBrowseOpen(true)}
+          onClick={() => {
+            setBrowseName(null);
+            setBrowseOpen(true);
+          }}
           aria-label='Browse subagents'
           data-track-category='Claw Agents'
           data-track-name='Create agent v2: browse subagents'
@@ -131,6 +135,10 @@ export function SubagentCapabilityRow({
               key={`selected-${entry.name}`}
               label={entry.name}
               selected
+              onOpen={() => {
+                setBrowseName(entry.name);
+                setBrowseOpen(true);
+              }}
               onToggle={() => onSelectionChange(disableSubagent(selection, entry))}
             />
           ))}
@@ -153,7 +161,11 @@ export function SubagentCapabilityRow({
 
       <BrowseSubagentsDialog
         open={browseOpen}
-        onOpenChange={setBrowseOpen}
+        onOpenChange={next => {
+          setBrowseOpen(next);
+          if (!next) setBrowseName(null);
+        }}
+        initialName={browseName}
         catalog={entries}
         loading={loading}
         isError={isError}

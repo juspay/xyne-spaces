@@ -113,6 +113,10 @@ function inferTelephonyDirection(callType?: string): TelephonyMetadata['directio
   return 'OUTBOUND';
 }
 
+export function isCallEmailBody(body: string | null | undefined): body is string {
+  return !!body && parseTelephonyMetadata(body) !== null;
+}
+
 function parseTelephonyMetadata(body: string): TelephonyMetadata | null {
   if (!body) return null;
   try {
@@ -192,7 +196,13 @@ function buildTelephonyFields(
   ];
 }
 
-function CallBodyContent({ body }: { body: string }): ReactElement {
+export function CallEntry({
+  body,
+  variant = 'full',
+}: {
+  body: string;
+  variant?: 'full' | 'compact';
+}): ReactElement {
   const telephonyMeta = useMemo(() => parseTelephonyMetadata(body), [body]);
 
   if (!telephonyMeta) {
@@ -201,6 +211,37 @@ function CallBodyContent({ body }: { body: string }): ReactElement {
 
   const number =
     telephonyMeta.direction === 'OUTBOUND' ? telephonyMeta.toNumber : telephonyMeta.fromNumber;
+
+  if (variant === 'compact') {
+    const summary = [
+      telephonyStatusLabel(telephonyMeta),
+      formatTelephonyDuration(telephonyMeta.talkTimeSec),
+      formatTelephonyTimestamp(telephonyMeta.startedAt),
+    ]
+      .filter(Boolean)
+      .join(' · ');
+    return (
+      <div className='max-w-lg rounded-xl border border-border bg-muted/30 px-3 py-2.5 text-sm'>
+        <div className='flex items-center gap-2'>
+          <span className='font-medium text-foreground'>
+            {telephonyMeta.direction === 'OUTBOUND' ? 'Outbound call' : 'Inbound call'}
+          </span>
+          {number ? <span className='truncate text-muted-foreground'>· {number}</span> : null}
+        </div>
+        {summary ? <div className='mt-0.5 text-xs text-muted-foreground'>{summary}</div> : null}
+        {telephonyMeta.recordingUrl ? (
+          <audio controls className='mt-2 h-8 w-full' src={telephonyMeta.recordingUrl}>
+            <track kind='captions' />
+          </audio>
+        ) : (
+          <div className='mt-1.5 text-xs italic text-muted-foreground'>
+            Recording not available yet
+          </div>
+        )}
+      </div>
+    );
+  }
+
   const fields = buildTelephonyFields(telephonyMeta);
 
   return (
@@ -273,7 +314,7 @@ const CallThreadItem = ({
         {!isCollapsed && (
           <div>
             {email.body ? (
-              <CallBodyContent body={email.body} />
+              <CallEntry body={email.body} />
             ) : (
               <span className='text-muted-foreground italic'>No content</span>
             )}

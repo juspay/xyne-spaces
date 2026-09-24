@@ -2,6 +2,7 @@ import type {
   CredentialAuthType,
   CredentialStatus,
   CredentialSummary,
+  ExecutionOrigin,
   ExecutionRecord,
   FolderRecord,
   StepRecord,
@@ -66,6 +67,8 @@ export const toExecutionRecord = (
     tag: string;
   },
   workflowMetadata: string | null,
+  /** The scheduling columns from the run's state row, for a run that waited. */
+  scheduling?: SchedulingColumns | null,
 ): ExecutionRecord => ({
   id: row.id,
   workflowId: row.workflowId,
@@ -75,8 +78,45 @@ export const toExecutionRecord = (
   ...(row.tag === 'rerun' && row.parentWorkflowExecutionId
     ? { sourceExecutionId: row.parentWorkflowExecutionId }
     : {}),
+  ...schedulingFacts(scheduling),
   workflowName: readNameFromMetadata(workflowMetadata) ?? row.workflowId,
 });
+
+interface SchedulingColumns {
+  fireAt: Date | null;
+  origin: string | null;
+  endReason: string | null;
+}
+
+const schedulingFacts = (
+  scheduling: SchedulingColumns | null | undefined,
+): Partial<Pick<ExecutionRecord, 'fireAt' | 'origin' | 'endReason'>> => {
+  if (!scheduling) return {};
+  const origin = parseOrigin(scheduling.origin);
+  return {
+    ...(scheduling.fireAt ? { fireAt: scheduling.fireAt } : {}),
+    ...(origin ? { origin } : {}),
+    ...(scheduling.endReason ? { endReason: scheduling.endReason } : {}),
+  };
+};
+
+const parseOrigin = (raw: string | null): ExecutionOrigin | null => {
+  if (!raw) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return isExecutionOrigin(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+};
+
+const isExecutionOrigin = (value: unknown): value is ExecutionOrigin => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const event = (value as { event?: unknown }).event;
+  if (typeof event !== 'object' || event === null) return false;
+  const { type, payload } = event as { type?: unknown; payload?: unknown };
+  return typeof type === 'string' && typeof payload === 'object' && payload !== null;
+};
 
 /** `stepName` is nullable on the shared table but always set on rows the adapter writes. */
 export const toStepRecord = (row: {

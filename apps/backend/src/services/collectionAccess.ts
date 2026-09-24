@@ -172,7 +172,7 @@ export async function listAccessibleRootCollections(
     const channelIds = [...new Set(
         rows.filter(r => r.scopeType === 'CHANNEL').map(r => r.scopeId).filter(Boolean)
     )];
-    const channelMeta = new Map<string, { name: string; projectId: string; projectName: string }>();
+    const channelMeta = new Map<string, { name: string; projectId: string | null; projectName: string }>();
     if (channelIds.length > 0) {
         // NOTE: do NOT select the required `channel.project` relation here.
         // Projects are hard-deleted with no FK cascade (relationMode = "prisma"),
@@ -191,7 +191,7 @@ export async function listAccessibleRootCollections(
             },
         });
 
-        const projectIds = [...new Set(channels.map(c => c.projectId).filter(Boolean))];
+        const projectIds = [...new Set(channels.map(c => c.projectId).filter((p): p is string => Boolean(p)))];
         const projectNames = new Map<string, string>();
         if (projectIds.length > 0) {
             const projects = await db.project.findMany({
@@ -207,9 +207,9 @@ export async function listAccessibleRootCollections(
             channelMeta.set(c.id, {
                 name: c.name,
                 projectId: c.projectId,
-                // Orphaned channel (project hard-deleted): fall back to a blank
-                // project name instead of throwing.
-                projectName: projectNames.get(c.projectId) ?? '',
+                // Orphaned channel (project hard-deleted) or a channel with no project
+                // (decoupled): fall back to a blank project name instead of throwing.
+                projectName: c.projectId ? projectNames.get(c.projectId) ?? '' : '',
             });
         }
     }

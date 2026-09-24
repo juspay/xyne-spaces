@@ -19,6 +19,9 @@ export interface SocialMediaFetchJobData {
   channelId: string;
   requesterUserId: string;
   workspaceId: string;
+  /** ISO dates, set only for a user-chosen backfill range. */
+  startDate?: string;
+  endDate?: string;
 }
 
 export interface CursorCatchupJobData {

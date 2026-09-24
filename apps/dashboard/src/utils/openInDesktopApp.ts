@@ -82,19 +82,6 @@ function buildDeepLink(scheme: string): string {
   return `${scheme}://${pathname.replace(/^\//, '')}${search}${hash}`;
 }
 
-/**
- * Auto-attempt: navigate a hidden iframe to the deep link. Using an iframe (vs
- * `location.href`) avoids replacing the top document with a browser error page
- * when the app isn't installed.
- */
-function attemptViaIframe(deepLink: string): void {
-  const iframe = document.createElement('iframe');
-  iframe.style.display = 'none';
-  iframe.src = deepLink;
-  document.body.appendChild(iframe);
-  window.setTimeout(() => iframe.remove(), 2000);
-}
-
 /** One-time injection of keyframes used by the spinner. */
 function ensureKeyframes(): void {
   if (document.getElementById('xyne-open-app-keyframes')) return;
@@ -372,14 +359,16 @@ export function maybeOpenInDesktopApp(): void {
       armedUntil = Date.now() + HANDOFF_ARM_MS;
     };
 
-    const triggerOpen = (viaIframe: boolean): void => {
+    // Fire the deep link via a TOP-LEVEL navigation, not a hidden iframe. Prod
+    // serves a CSP (`default-src 'self' http: https: ws: wss: data: blob:`) that
+    // has no `xyne-spaces:` source, so an iframe to the custom scheme is blocked
+    // ("Framing '' violates … Content Security Policy"). Top-level navigation is
+    // not governed by frame-src/default-src, so it goes through — and once the
+    // user has granted Chrome's "always allow", it auto-launches even without a
+    // fresh gesture (this is how the auto-open works, Slack-style).
+    const triggerOpen = (): void => {
       arm();
-      if (viaIframe) {
-        attemptViaIframe(deepLink);
-      } else {
-        // A real user gesture makes the OS "Open Xyne Spaces?" prompt reliable.
-        window.location.href = deepLink;
-      }
+      window.location.href = deepLink;
     };
 
     let controls: OverlayControls | null = null;
@@ -422,7 +411,7 @@ export function maybeOpenInDesktopApp(): void {
     };
 
     controls = buildOverlay({
-      onOpen: () => triggerOpen(false),
+      onOpen: () => triggerOpen(),
       onContinue: () => dismiss(),
     });
 
@@ -432,9 +421,10 @@ export function maybeOpenInDesktopApp(): void {
     // Move focus to the primary action so keyboard users can act immediately.
     controls.focusables[0]?.focus();
 
-    // Best-effort silent auto-attempt on load; the interstitial stays either way
-    // so the user can click "Open Xyne Spaces" or "Continue in browser".
-    triggerOpen(true);
+    // Auto-attempt on load. With Chrome's "always allow" granted this opens the
+    // app immediately; otherwise the browser blocks the gesture-less launch and
+    // the interstitial stays so the user can click "Open Xyne Spaces".
+    triggerOpen();
 
     // Never leave the spinner running forever — advance to the optimistic state
     // if we haven't confirmed a handoff by then. A later confirmation still

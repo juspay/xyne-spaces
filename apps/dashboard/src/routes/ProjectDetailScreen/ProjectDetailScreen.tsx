@@ -1,12 +1,7 @@
 import { ReactElement, useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
-import {
-  BoardType,
-  deserializeFlowPlan,
-  inferRepositoryNameFromUrl,
-  type FlowPlan,
-  type VCSProviderType,
-} from '@xyne/shared';
+import { BoardType, deserializeFlowPlan, type FlowPlan, type VCSProviderType } from '@xyne/shared';
+import { formatDateNumeric } from '../../utils/dateUtils';
 import { useCanManageRelease } from '../../hooks/usePermissions';
 import {
   ArrowLeft,
@@ -35,13 +30,13 @@ import { ReleasesSection } from './ReleasesSection';
 import { CreateTicketModal } from '../../components/Tickets/CreateTicketModal/CreateTicketModal';
 import { Button } from '../../components/ui/Button';
 import { Dialog } from '../../components/ui/Dialog/Dialog';
+import { SdlcRegisterRepositoryForm } from '../SdlcScreen/SdlcRegisterRepositoryForm';
 import { queries } from '../../zero/queries';
 import { mutators } from '../../zero/mutators';
 import { useZero } from '../../hooks/useZero';
 import { toast } from 'sonner';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { cn } from '../../utils/classNames';
-import { apiInstance } from '../../services/clients/apiClient';
 import { ProjectRepositoriesSection } from './ProjectRepositoriesSection';
 import {
   RepoDot,
@@ -96,7 +91,8 @@ const ProjectDetailScreen = (): ReactElement => {
   const initialTab = navState?.tab ?? 'boards';
   // Entry point gates the tab set: Release Manager shows release-repo config,
   // List Projects shows the SDLC repositories view.
-  const fromReleaseManager = navState?.from === 'releaseManager';
+  const fromReleaseManager =
+    navState?.from === 'releaseManager' || searchParams.get('from') === 'releaseManager';
   // Gate Create Release like the backend: admin/owner role, or a RELEASE-MANAGER WRITE grant.
   const canCreateRelease = useCanManageRelease();
   const backTo = fromReleaseManager
@@ -105,11 +101,6 @@ const ProjectDetailScreen = (): ReactElement => {
   const [activeTab, setActiveTab] = useState<TabValue>(initialTab);
   const [showEditProjectModal, setShowEditProjectModal] = useState(false);
   const [showAddRepositoryModal, setShowAddRepositoryModal] = useState(false);
-  const [repositoryUrl, setRepositoryUrl] = useState('');
-  const [repositoryName, setRepositoryName] = useState('');
-  const [repositoryNameEdited, setRepositoryNameEdited] = useState(false);
-  const [repositoryBranch, setRepositoryBranch] = useState('main');
-  const [addingRepository, setAddingRepository] = useState(false);
   const [repositoryRefreshKey, setRepositoryRefreshKey] = useState(0);
   const [showCreateBoardModal, setShowCreateBoardModal] = useState(false);
   const [showBoardTypeChooser, setShowBoardTypeChooser] = useState(false);
@@ -189,6 +180,27 @@ const ProjectDetailScreen = (): ReactElement => {
   const applicationBoardIds = useMemo(
     () => new Set(applicationByBoardId.keys()),
     [applicationByBoardId],
+  );
+
+  const visibleBoards = useMemo(() => {
+    const list = boards ?? [];
+    return list.filter(board => {
+      const isReleaseBoard =
+        board.boardType === BoardType.RELEASE || applicationBoardIds.has(board.id);
+      return fromReleaseManager ? isReleaseBoard : !isReleaseBoard;
+    });
+  }, [boards, fromReleaseManager, applicationBoardIds]);
+
+  const visibleApplicationByBoardId = useMemo(
+    () =>
+      fromReleaseManager
+        ? applicationByBoardId
+        : new Map<string, (typeof applicationList)[number]>(),
+    [fromReleaseManager, applicationByBoardId],
+  );
+  const visibleApplicationBoardIds = useMemo(
+    () => (fromReleaseManager ? applicationBoardIds : new Set<string>()),
+    [fromReleaseManager, applicationBoardIds],
   );
   const boardNamesById = useMemo(
     () => Object.fromEntries((boards ?? []).map(board => [board.id, board.name])),
@@ -383,44 +395,7 @@ const ProjectDetailScreen = (): ReactElement => {
     }
   };
 
-  // A repository label, not a channel name: repositories no longer create a
-  // channel, and a space names itself when it is created.
-  const repositoryNameError =
-    repositoryName && repositoryName.length > 120 ? 'Keep the name under 120 characters' : null;
-
-  const handleRepositoryUrlChange = (value: string): void => {
-    setRepositoryUrl(value);
-    if (repositoryNameEdited) return;
-    setRepositoryName(inferRepositoryNameFromUrl(value) ?? '');
-  };
-
-  const closeAddRepositoryModal = (): void => {
-    setShowAddRepositoryModal(false);
-    setRepositoryUrl('');
-    setRepositoryName('');
-    setRepositoryNameEdited(false);
-  };
-
-  const handleAddRepository = async (): Promise<void> => {
-    if (!repositoryUrl.trim() || repositoryNameError || !repositoryName) return;
-    setAddingRepository(true);
-    try {
-      await apiInstance.post('/sdlc/repositories', {
-        projectId,
-        url: repositoryUrl.trim(),
-        name: repositoryName,
-        baseBranch: repositoryBranch.trim() || 'main',
-      });
-      toast.success('Repository attached');
-      closeAddRepositoryModal();
-      setActiveTab('repos');
-      setRepositoryRefreshKey(value => value + 1);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to attach repository');
-    } finally {
-      setAddingRepository(false);
-    }
-  };
+  const closeAddRepositoryModal = (): void => setShowAddRepositoryModal(false);
 
   if (loading) {
     return (
@@ -473,7 +448,7 @@ const ProjectDetailScreen = (): ReactElement => {
                   <p className='text-muted-foreground mb-4'>{project.description}</p>
                 )}
                 <div className='text-sm text-muted-foreground'>
-                  Created: {new Date(project.createdAt).toLocaleDateString()}
+                  Created: {formatDateNumeric(project.createdAt)}
                 </div>
               </div>
               <div className='flex gap-2'>
@@ -526,7 +501,7 @@ const ProjectDetailScreen = (): ReactElement => {
                         ? 'Repositories'
                         : 'Releases'}
                 </h2>
-                {activeTab === 'boards' && (
+                {activeTab === 'boards' && !fromReleaseManager && (
                   <Button
                     variant='default'
                     onClick={() => setShowBoardTypeChooser(true)}
@@ -571,13 +546,14 @@ const ProjectDetailScreen = (): ReactElement => {
               {/* Boards Tab Content */}
               <Tabs.Content value='boards' className='outline-none'>
                 <BoardsTable
-                  boards={boards}
+                  boards={visibleBoards}
+                  showTypeColumn={!fromReleaseManager}
                   loading={boardsDetails.type !== 'complete' && (boards?.length ?? 0) === 0}
                   onEdit={handleEditBoard}
                   onClone={board => setCloningFlowBoard(board)}
                   onCopyConfig={board => setCopyConfigTargetBoard(board)}
-                  applicationBoardIds={applicationBoardIds}
-                  applicationByBoardId={applicationByBoardId}
+                  applicationBoardIds={visibleApplicationBoardIds}
+                  applicationByBoardId={visibleApplicationByBoardId}
                   {...(fromReleaseManager ? { onWorkflowFields: setEditingBoard } : {})}
                   {...(workspaceId && projectId
                     ? {
@@ -1110,85 +1086,20 @@ const ProjectDetailScreen = (): ReactElement => {
         open={showAddRepositoryModal}
         onOpenChange={open => (open ? setShowAddRepositoryModal(true) : closeAddRepositoryModal())}
         title='Add Repository'
-        description='Create a private SDLC hub for this repository'
+        description='Register a repository in this project'
       >
-        <form
-          className='p-6'
-          onSubmit={event => {
-            event.preventDefault();
-            void handleAddRepository();
-          }}
-        >
-          <h2 className='text-lg font-semibold'>Add Repository</h2>
-          <p className='mt-1 text-sm text-muted-foreground'>
-            Creates the hub, then runs a non-mutating access check.
-          </p>
-          <label htmlFor='sdlc-repository-url' className='mt-5 block text-sm font-medium'>
-            Repository URL
-          </label>
-          <input
-            id='sdlc-repository-url'
-            autoFocus
-            required
-            value={repositoryUrl}
-            onChange={event => handleRepositoryUrlChange(event.target.value)}
-            className='mt-2 h-10 w-full rounded-md border bg-background px-3 outline-none focus:ring-2 focus:ring-ring'
-            placeholder='https://github.com/org/repository.git'
-            data-track-category='ProjectDetail'
-            data-track-name='RepositoryUrlChanged'
-          />
-          <label htmlFor='sdlc-repository-name' className='mt-4 block text-sm font-medium'>
-            Repository name
-          </label>
-          <input
-            id='sdlc-repository-name'
-            required
-            value={repositoryName}
-            onChange={event => {
-              setRepositoryNameEdited(true);
-              setRepositoryName(event.target.value);
+        {showAddRepositoryModal && projectId && (
+          <SdlcRegisterRepositoryForm
+            initial={{ projectId, providerKey: null, url: '', name: '', credentials: [] }}
+            cancelLabel='Cancel'
+            onCancel={closeAddRepositoryModal}
+            onRegistered={() => {
+              closeAddRepositoryModal();
+              setActiveTab('repos');
+              setRepositoryRefreshKey(value => value + 1);
             }}
-            className={cn(
-              'mt-2 h-10 w-full rounded-md border bg-background px-3 outline-none focus:ring-2 focus:ring-ring',
-              repositoryNameError && 'border-destructive focus:ring-destructive',
-            )}
-            data-track-category='ProjectDetail'
-            data-track-name='RepositoryNameChanged'
           />
-          <p
-            className={cn(
-              'mt-1 text-xs',
-              repositoryNameError ? 'text-destructive' : 'text-muted-foreground',
-            )}
-          >
-            {repositoryNameError ?? 'How this repository is labelled in SDLC spaces.'}
-          </p>
-          <div className='mt-4'>
-            <label htmlFor='sdlc-repository-branch' className='block text-sm font-medium'>
-              Base branch
-            </label>
-            <input
-              id='sdlc-repository-branch'
-              value={repositoryBranch}
-              onChange={event => setRepositoryBranch(event.target.value)}
-              className='mt-2 h-10 w-full rounded-md border bg-background px-3'
-              data-track-category='ProjectDetail'
-              data-track-name='RepositoryBranchChanged'
-            />
-          </div>
-          <div className='mt-6 flex justify-end gap-2'>
-            <Button type='button' variant='outline' onClick={closeAddRepositoryModal}>
-              Cancel
-            </Button>
-            <Button
-              type='submit'
-              loading={addingRepository}
-              disabled={!repositoryUrl.trim() || !repositoryName || Boolean(repositoryNameError)}
-            >
-              Add repository
-            </Button>
-          </div>
-        </form>
+        )}
       </Dialog>
     </div>
   );

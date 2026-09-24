@@ -1,0 +1,6 @@
+dependencies:
+- name: xyne-common
+  repository: file://../xyne-common
+  version: 0.1.0
+digest: sha256:8cf8168b969fb0f8f6ac80eca70315cb81e338d5a4994d68bc2fd11a0e03ff3c
+generated: "2026-09-22T16:58:40.717951+05:30"

@@ -66,7 +66,8 @@ export const SearchResultMessageCard = memo(function SearchResultMessageCard({
   onCardClick,
   searchThread,
 }: SearchResultMessageCardProps): ReactElement | null {
-  const { onSelectThread, onSelectUser, onSelectChannelContext } = useContext(SearchResultsContext);
+  const { onSelectThread, onSelectUser, onSelectMessageContext, onResultOpen } =
+    useContext(SearchResultsContext);
   const channel = useChannel(channelId);
   const navigate = useNavigate();
   const [isExpanded, setIsExpanded] = useState(false);
@@ -243,6 +244,8 @@ export const SearchResultMessageCard = memo(function SearchResultMessageCard({
 
   const navigateToMessage = (): void => {
     if (!targetMessage) return;
+    // Jumping to home still leaves from this search — record it before routing away.
+    onResultOpen?.();
     void navigate(
       isMatchRoot
         ? `/chat/dir/${channelId}#origin=${conversationId}`
@@ -254,7 +257,7 @@ export const SearchResultMessageCard = memo(function SearchResultMessageCard({
     if (replyCount > 0) {
       onSelectThread?.({ channelId, conversationId, matchedMessageId });
     } else {
-      onSelectChannelContext?.(channelId, conversationId, undefined, matchedMessageId);
+      onSelectMessageContext?.(channelId, conversationId, undefined, matchedMessageId);
     }
   };
 

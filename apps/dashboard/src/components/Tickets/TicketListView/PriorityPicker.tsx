@@ -1,6 +1,7 @@
 import { ReactElement, useState } from 'react';
 import { TicketPriority } from '@xyne/shared';
 import { Popover } from '../../ui/Popover/Popover';
+import Tooltip from '../../ui/Tooltip';
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { getPriorityIcon } from '../TicketCard/TicketCard.utils';
@@ -65,7 +66,6 @@ export function PriorityPicker({
         setOpen(prev => !prev);
       }}
       onKeyDown={e => e.stopPropagation()}
-      title={`Priority: ${label(current)}`}
       className={cn(
         'inline-flex items-center rounded-md transition-colors whitespace-nowrap',
         compact
@@ -76,8 +76,12 @@ export function PriorityPicker({
       data-track-category='Tickets'
       data-track-name='ToggleRowPriority'
     >
-      {getPriorityIcon(current)}
-      {!compact && <span>{label(current)}</span>}
+      <Tooltip content={`Priority: ${label(current)}`}>
+        <span className='inline-flex items-center gap-1'>
+          {getPriorityIcon(current)}
+          {!compact && <span>{label(current)}</span>}
+        </span>
+      </Tooltip>
     </button>
   );
 
@@ -87,6 +91,7 @@ export function PriorityPicker({
       open={open}
       onOpenChange={setOpen}
       modal
+      onCloseAutoFocus={event => event.preventDefault()}
       align='start'
       sideOffset={4}
       className='p-1 w-40'

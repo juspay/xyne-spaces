@@ -37,6 +37,7 @@ export type FlowComponentType =
   | 'slash_command_artifact'
   | 'agent_summary'
   | 'mcp_suggest'
+  | 'provider_suggest'
 
 
 export interface FlowComponent {

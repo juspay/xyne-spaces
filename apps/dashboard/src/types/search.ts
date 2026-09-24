@@ -113,6 +113,7 @@ export interface VespaSearchFilters {
   in?: string; // Channel IDs (scope: within channel/DM)
   mentions?: string; // User IDs the message mentions (scoped mention search; bare @user chip)
   channelMentions?: string; // Channel IDs the message references (scoped mention search; bare #channel chip)
+  groupMentions?: string; // User-group IDs the message mentions (scoped mention search; @user-group chip)
   mentionHighlights?: string[]; // Display name(s) of bare mention chips — highlighted in results, not in YQL
   offset?: number;
   limit?: number;

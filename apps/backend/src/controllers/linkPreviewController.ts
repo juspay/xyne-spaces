@@ -41,11 +41,13 @@ export class LinkPreviewController {
         data: metadata,
       });
     } catch (error: any) {
+      // Log the detail server-side; return a static message rather than echoing
+      // error.message (keeps the response shape, avoids reflecting internals).
       logger.error('Error fetching link preview:', error);
       res.status(500).json({
         success: false,
         error: 'Failed to fetch link preview',
-        message: error.message,
+        message: 'Failed to fetch link preview',
       });
     }
   }

@@ -86,8 +86,8 @@ export function useCanvasListGroupedData({
   const projectIds = useMemo(() => lazyProjects.map(project => project.id), [lazyProjects]);
   const allProjectChannels = useMemo(
     () =>
-      allVisibleChannels.filter(channel =>
-        projectIds.includes(channel.projectId),
+      allVisibleChannels.filter(
+        channel => channel.projectId !== null && projectIds.includes(channel.projectId),
       ) as CanvasChannel[],
     [allVisibleChannels, projectIds],
   );

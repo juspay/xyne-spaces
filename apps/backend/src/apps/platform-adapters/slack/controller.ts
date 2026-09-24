@@ -26,6 +26,7 @@ import {
 	uploadFiles,
 } from "@/services/fileUploadService";
 import { redisService } from "@/services/redisService";
+import { classifyUpload, screenUploadBuffer, MAX_FILE_SIZE_BYTES } from "@/middleware/upload";
 import { deliverEphemeralMessage } from "@/apps/core/ephemeralDelivery";
 import { wrapSlackHandler } from "./error-transformer";
 import {
@@ -942,6 +943,20 @@ export class SlackController {
 			return;
 		}
 
+		// Server-side content validation: reject disallowed types and executable
+		// content even when the extension/MIME look benign.
+		for (const f of uploadedFiles) {
+			const verdict = await screenUploadBuffer(f.buffer, f.originalname, f.mimetype);
+			if (!verdict.ok) {
+				logger.warn("[SLACK-FILES-UPLOAD] File rejected by content screening", {
+					filename: f.originalname,
+					reason: verdict.reason,
+				});
+				res.status(200).json({ ok: false, error: "file_type_not_allowed" });
+				return;
+			}
+		}
+
 		const result = await ingestAttachment({
 			files: uploadedFiles,
 			channelId,
@@ -1006,7 +1021,19 @@ export class SlackController {
 				return;
 			}
 
-			const { filename } = parsed.data;
+			const { filename, length } = parsed.data;
+			// Fail fast: reject a disallowed file type by name before issuing an upload
+			// URL. The binary step re-checks name and content once the bytes arrive.
+			if (classifyUpload(undefined, filename) !== "allowed") {
+				res.status(200).json({ ok: false, error: "file_type_not_allowed" });
+				return;
+			}
+			// Bound the declared size server-side rather than trusting the client value;
+			// the binary step enforces the actual byte length as the authoritative check.
+			if (length > MAX_FILE_SIZE_BYTES) {
+				res.status(200).json({ ok: false, error: "file_too_large" });
+				return;
+			}
 			const { userId, appId } = getSlackAuthContext(req);
 			const fileId = uuidv4();
 
@@ -1069,7 +1096,26 @@ export class SlackController {
 				return;
 			}
 
+			// Authoritative size check on the actual bytes received (not a client-declared
+			// length).
+			if (fileBuffer.length > MAX_FILE_SIZE_BYTES) {
+				res.status(200).json({ ok: false, error: "file_too_large" });
+				return;
+			}
+
 			const mimeType = req.get("content-type") || "application/octet-stream";
+
+			// Server-side validation for the binary upload step, which does not pass
+			// through multer: reject disallowed types and executable content.
+			const verdict = await screenUploadBuffer(fileBuffer, state.filename, mimeType);
+			if (!verdict.ok) {
+				logger.warn("[SLACK-FILES-UPLOAD-V2] File rejected by content screening", {
+					filename: state.filename,
+					reason: verdict.reason,
+				});
+				res.status(200).json({ ok: false, error: "file_type_not_allowed" });
+				return;
+			}
 
 			const syntheticFile = {
 				fieldname: "file",

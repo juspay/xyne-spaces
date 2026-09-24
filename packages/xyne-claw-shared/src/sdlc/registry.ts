@@ -1,6 +1,8 @@
+import { WORKFLOW_MCP_TOOL_NAMES, WORKFLOW_MCP_WRITE_TOOL_NAMES } from "../tools/workflow-tool-names.js";
+
 export type SdlcToolTransport = "direct" | "custom" | "subagent";
 export type SdlcMutationLevel = "read" | "write";
-export type SdlcTrustedBinding = "none" | "hub" | "repository" | "interactive";
+export type SdlcTrustedBinding = "none" | "hub" | "repository" | "actor";
 
 export interface SdlcToolCapability {
   name: string;
@@ -23,6 +25,7 @@ export const SDLC_TOOL_NAMES = {
   createTrack: "spaces-sdlc-create-track",
   listArtifactTypes: "spaces-sdlc-list-artifact-types",
   listRepositories: "spaces-sdlc-list-repositories",
+  listEntityLinks: "spaces-sdlc-list-entity-links",
 } as const;
 
 export type SdlcToolName = (typeof SDLC_TOOL_NAMES)[keyof typeof SDLC_TOOL_NAMES];
@@ -33,11 +36,12 @@ export const SDLC_TOOL_CAPABILITIES: readonly SdlcToolCapability[] = [
   { name: SDLC_TOOL_NAMES.mutateArtifact, transport: "direct", group: "sdlc", mutation: "write", trustedBinding: "repository" },
   { name: SDLC_TOOL_NAMES.listArtifactVersions, transport: "direct", group: "sdlc", mutation: "read", trustedBinding: "hub" },
   { name: SDLC_TOOL_NAMES.readArtifactVersion, transport: "direct", group: "sdlc", mutation: "read", trustedBinding: "hub" },
-  { name: SDLC_TOOL_NAMES.createPullRequest, transport: "direct", group: "sdlc", mutation: "write", trustedBinding: "interactive" },
+  { name: SDLC_TOOL_NAMES.createPullRequest, transport: "direct", group: "sdlc", mutation: "write", trustedBinding: "actor" },
   { name: SDLC_TOOL_NAMES.listTracks, transport: "direct", group: "sdlc", mutation: "read", trustedBinding: "repository" },
   { name: SDLC_TOOL_NAMES.createTrack, transport: "direct", group: "sdlc", mutation: "write", trustedBinding: "repository" },
   { name: SDLC_TOOL_NAMES.listArtifactTypes, transport: "direct", group: "sdlc", mutation: "read", trustedBinding: "repository" },
   { name: SDLC_TOOL_NAMES.listRepositories, transport: "direct", group: "sdlc", mutation: "read", trustedBinding: "none" },
+  { name: SDLC_TOOL_NAMES.listEntityLinks, transport: "direct", group: "sdlc", mutation: "read", trustedBinding: "hub" },
 ] as const;
 
 export const SDLC_GENERIC_SANDBOX_TOOLS = [
@@ -51,7 +55,7 @@ export const SDLC_GENERIC_SANDBOX_TOOLS = [
   "sandbox-read-file",
   "sandbox-deliver-files",
   "sandbox-destroy",
-  "sandbox-repo-setup",
+  "sdlc-repository-access",
   "git-read",
 ] as const;
 
@@ -107,7 +111,7 @@ export function buildSdlcAgentToolProfile(spacesMcpToolNames: readonly string[])
   if (retired.length > 0) {
     throw new Error(`Retired SDLC tools remain exported: ${retired.join(", ")}`);
   }
-  const direct = [...uniqueToolNames];
+  const direct = [...uniqueToolNames, ...WORKFLOW_MCP_TOOL_NAMES];
   const missing = SDLC_DIRECT_TOOL_NAMES.filter((name) => !direct.includes(name));
   if (missing.length > 0) {
     throw new Error(`SDLC MCP tools missing from Xyne Spaces server: ${missing.join(", ")}`);
@@ -118,6 +122,12 @@ export function buildSdlcAgentToolProfile(spacesMcpToolNames: readonly string[])
   }
   for (const tool of SDLC_TOOL_CAPABILITIES) {
     if (tool.transport === "direct") toolPermissions[`xyne-spaces__${tool.name}`] = "allow";
+  }
+  // Workflow writes are "allow", not "ask": SDLC runs are also triggered BY
+  // workflows (sessions like wf-…), where nobody is in a thread to approve, so
+  // an "ask" would fail closed and stall the run. Matches ask-ai's seeded config.
+  for (const name of WORKFLOW_MCP_WRITE_TOOL_NAMES) {
+    toolPermissions[`xyne-workflows__${name}`] = "allow";
   }
   return {
     tools: {

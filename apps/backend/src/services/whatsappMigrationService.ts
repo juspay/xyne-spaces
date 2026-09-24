@@ -942,6 +942,19 @@ export class WhatsAppMigrationService {
           },
         }))
       : [];
+    // Ticket.conversation is a required relation: a conversation carrying a ticket can't be
+    // hard-deleted (Prisma Client throws P2014), so its root is tombstoned instead.
+    const ticketedConversationIds = new Set(
+      conversationIds.length
+        ? (
+            await withWorkspaceScope(async () => await db.ticket.findMany({
+              where: { conversationId: { in: conversationIds } },
+              select: { conversationId: true },
+            }))
+          ).map(ticket => ticket.conversationId)
+        : [],
+    );
+
     const messagesByConversationId = new Map<string, string[]>();
     for (const row of allConversationMessages) {
       const existing = messagesByConversationId.get(row.conversationId) || [];
@@ -965,8 +978,10 @@ export class WhatsAppMigrationService {
       for (const messageId of importedMessageIdsInConversation) {
         await waitForNextMutation();
         const otherMessages = conversationMessageIds.filter(id => id !== messageId);
+        const hasTicket = ticketedConversationIds.has(conversation.conversationId);
         const shouldSoftDelete =
-          conversation.initialMessageId === messageId && otherMessages.length > 0;
+          conversation.initialMessageId === messageId && (otherMessages.length > 0 || hasTicket);
+        const shouldDeleteConversation = otherMessages.length === 0 && !hasTicket;
         const attachments = attachmentsByMessageId.get(messageId) || [];
 
         await db.$transaction(async tx => {
@@ -995,7 +1010,7 @@ export class WhatsAppMigrationService {
           } else {
             await tx.message.deleteMany({ where: { messageId } });
 
-            if (otherMessages.length === 0) {
+            if (shouldDeleteConversation) {
               await tx.conversationParticipant.deleteMany({
                 where: { conversationId: conversation.conversationId },
               });
@@ -1029,7 +1044,7 @@ export class WhatsAppMigrationService {
           softDeletedMessages += 1;
         } else {
           hardDeletedMessages += 1;
-          if (otherMessages.length === 0) {
+          if (shouldDeleteConversation) {
             deletedConversations += 1;
           }
         }

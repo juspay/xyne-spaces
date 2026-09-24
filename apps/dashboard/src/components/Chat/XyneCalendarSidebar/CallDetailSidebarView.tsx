@@ -6,7 +6,6 @@ import {
   ChevronLeft,
   CopyDefault,
   DownloadDown,
-  ExternalLink,
   ChatDefault,
   Hashtag,
   Headphones,
@@ -19,6 +18,7 @@ import {
   Translate,
   VideoCallDefault,
   CopyCopied,
+  LinkSlant,
 } from '@xyne/icons';
 import { CallStatus, ChannelScopeType, ChannelVisibility, MeetingStatus } from '@xyne/shared';
 import { useCachedQuery } from '@xyne/shared/hooks';
@@ -452,10 +452,10 @@ function CallLocationSection({
           rel='noopener noreferrer'
           data-track-category='Calendar'
           data-track-name='CALL_DETAIL_OPEN_EXTERNAL'
-          className='mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground'
+          className='mt-2 flex h-9 w-full items-center justify-center gap-2 rounded-lg bg-foreground text-sm font-semibold text-background hover:bg-foreground/90'
         >
-          <ExternalLink className='size-3.5' aria-hidden='true' />
           {externalLinkLabel}
+          <LinkSlant className='size-4' aria-hidden='true' />
         </a>
       )}
     </section>

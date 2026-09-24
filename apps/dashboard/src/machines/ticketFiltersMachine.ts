@@ -51,6 +51,14 @@ export type TicketFiltersEvent =
       viewId?: string | undefined;
       enabled?: boolean | undefined;
       selectedBoardIdFromDb?: string | null | undefined;
+      /**
+       * Board to fall back to when nothing else picks one. Channels pass their
+       * first linked board here so the tickets tab always has exactly one board
+       * selected — a channel has no "All Boards" state, and an empty
+       * `filters.boards` would leave the query with no scope at all now that
+       * channel.projectId is no longer read.
+       */
+      defaultBoardId?: string | null | undefined;
       searchParams: URLSearchParams;
       setSearchParams: (
         params: URLSearchParams | ((prev: URLSearchParams) => URLSearchParams),
@@ -69,7 +77,7 @@ export type TicketFiltersEvent =
 /**
  * Generate a unique storage key based on channelId or boardId or ProjectId or viewMode
  */
-const getStorageKey = (
+export const getStorageKey = (
   channelId?: string,
   viewMode?: string,
   projectId?: string,
@@ -147,6 +155,9 @@ const readFiltersFromUrl = (params: URLSearchParams): TicketFilters => {
 
   const ticketTypes = params.getAll('ticketTypes');
   if (ticketTypes.length) filters.ticketTypes = ticketTypes;
+
+  const merchantIds = params.getAll('merchantIds');
+  if (merchantIds.length) filters.merchantIds = merchantIds;
 
   const sourceChannels = params.getAll('sourceChannels');
   if (sourceChannels.length) filters.sourceChannels = sourceChannels;
@@ -236,6 +247,7 @@ const FILTER_PARAM_KEYS = [
   'tags',
   'stages',
   'ticketTypes',
+  'merchantIds',
   'sourceChannels',
   'aiCategory',
   'generatedTags',
@@ -281,6 +293,7 @@ const writeFiltersToUrl = (params: URLSearchParams, filters: TicketFilters): voi
   filters.tags?.forEach((t: string) => params.append('tags', t));
   filters.stages?.forEach((s: string) => params.append('stages', s));
   filters.ticketTypes?.forEach((t: string) => params.append('ticketTypes', t));
+  filters.merchantIds?.forEach((m: string) => params.append('merchantIds', m));
   filters.sourceChannels?.forEach((c: string) => params.append('sourceChannels', c));
   filters.aiCategory?.forEach((c: string) => params.append('aiCategory', c));
   filters.generatedTags?.forEach((t: string) => params.append('generatedTags', t));
@@ -487,7 +500,10 @@ export const ticketFiltersMachine = setup({
         // the boardId is in the route params (not query params), so we use it as a fallback.
         const boardFromPath =
           event.viewMode === 'board' && event.boardId ? [event.boardId] : undefined;
-        const boardFilter = boardFromUrl ?? boardFromDb ?? boardFromPath;
+        // Last resort only: the URL, the user's persisted board, and the route
+        // path all outrank it, so seeding never overrides an explicit choice.
+        const boardFromDefault = event.defaultBoardId ? [event.defaultBoardId] : undefined;
+        const boardFilter = boardFromUrl ?? boardFromDb ?? boardFromPath ?? boardFromDefault;
 
         if (Object.keys(urlFilters).length > 0) {
           filters = { ...urlFilters };

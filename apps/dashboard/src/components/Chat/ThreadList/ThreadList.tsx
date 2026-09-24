@@ -4,6 +4,7 @@ import { QueryResultType } from '@rocicorp/zero';
 import { useAuthContext } from '../../../providers/AuthProvider';
 import { useLocation } from 'react-router-dom';
 import { ChatBubble } from '../ChatBubble/ChatBubble';
+import { PendingSendStatus } from '../PendingSendStatus/PendingSendStatus';
 import { MessageHoverToolbar } from '../HoverActionsToolbar/MessageHoverToolbar';
 import { useThreadListInitialScroll } from './useThreadListInitialScroll';
 import type { ThreadListItemWithSeparator } from '../../../utils/chatUtils';
@@ -17,8 +18,6 @@ import { findLastEditableMessage, isEventFromEmptyInput } from '../../../utils/c
 import { ArrowDown, ArrowUp, ChevronUp } from 'lucide-react';
 import { AttachmentRef } from '../../../machines/attachmentViewerMachine';
 import { useThreadReadTracking } from '../../../hooks/useThreadReadTracking';
-import { useCachedQuery } from '../../../hooks/useCachedQuery';
-import { getInitialMessageFromConversation } from '../../../utils/conversationMessageHelpers';
 
 type ThreadListProps = {
   channelId: string;
@@ -27,7 +26,6 @@ type ThreadListProps = {
   initialScrollOffset?: number;
   onScrollPositionChange?: (position: number) => void;
   isTicketThread?: boolean;
-  isFlowStep?: boolean;
   messagesWithSeparators?: ThreadListItemWithSeparator[] | undefined;
   channelScopeType?: ChannelScopeType | undefined;
   conversation?: ConversationWithTicket | undefined;
@@ -60,7 +58,6 @@ const ThreadList = ({
   initialScrollOffset,
   onScrollPositionChange,
   isTicketThread = false,
-  isFlowStep = false,
   messagesWithSeparators,
   channelScopeType,
   conversation,
@@ -161,19 +158,6 @@ const ThreadList = ({
   }, [isEditingHere]);
 
   const lastAutoScrolledMessageIdRef = useRef<string | null>(null);
-
-  const threadTicketId = useMemo(() => {
-    if (!isTicketThread || !conversation) return '';
-    const initMsg = getInitialMessageFromConversation(conversation) ?? conversation.initialMessage;
-    return ((initMsg?.metadata as Record<string, unknown>)?.['ticketId'] as string) || '';
-  }, [isTicketThread, conversation]);
-
-  // Subtickets cannot be nested: hide the action when the thread's ticket is itself a subticket.
-  const [threadTicketParentSubTicket] = useCachedQuery(
-    queries.subTicketByMappedTicketId({ mappedTicketId: threadTicketId }),
-    { enabled: !!threadTicketId },
-  );
-  const isThreadTicketSubTicket = !!threadTicketParentSubTicket;
 
   const {
     firstUnreadIndex,
@@ -525,8 +509,6 @@ const ThreadList = ({
                       {...(spawnedTicketMessageIds && { spawnedTicketMessageIds })}
                       isFirstInThread={messageIndex === 0}
                       isTicketThread={isTicketThread}
-                      isFlowStep={isFlowStep}
-                      isThreadTicketSubTicket={isThreadTicketSubTicket}
                       channelScopeType={channelScopeType}
                       allThreadAttachments={allThreadAttachments}
                       workflowNumber={workflowNumberMap?.get(threadMessage.messageId)}
@@ -627,8 +609,6 @@ const ThreadList = ({
                     {...(spawnedTicketMessageIds && { spawnedTicketMessageIds })}
                     isFirstInThread={index === 0}
                     isTicketThread={isTicketThread}
-                    isFlowStep={isFlowStep}
-                    isThreadTicketSubTicket={isThreadTicketSubTicket}
                     channelScopeType={channelScopeType}
                     allThreadAttachments={allThreadAttachments}
                     workflowNumber={workflowNumberMap?.get(threadMessage.messageId)}
@@ -637,6 +617,7 @@ const ThreadList = ({
                     highlightMessageId={matchedMessageId ?? null}
                     inspectedTag={inspectedTag}
                   />
+                  <PendingSendStatus messageId={threadMessage.messageId} className='pl-10' />
                 </div>
                 {!enableCollapsing &&
                   !isThreadsRoute &&

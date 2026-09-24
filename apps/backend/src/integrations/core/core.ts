@@ -137,6 +137,16 @@ export class ExternalSourceCore {
       }
     }
 
+    if (source && adapter.onIngestFailures) {
+      // Before the throw below, so an adapter can count attempts per item. Never let bookkeeping
+      // mask the real ingestion error.
+      try {
+        await adapter.onIngestFailures(source, failedExternalIds);
+      } catch (error) {
+        logger.error('Failed to record ingest failures', { sourceName, error });
+      }
+    }
+
     if (failedExternalIds.length > 0) {
       logger.error(
         `[INGEST_INCOMPLETE] ${failedExternalIds.length} message(s) not ingested from ${sourceName}`,
@@ -412,7 +422,8 @@ export class ExternalSourceCore {
       if (!channelId) return [];
 
       const channel = await this.channelRepo.findById(channelId);
-      return channel?.workspaceId === workspaceId && channel.type === ChannelType.CALL
+      // Not just CALL: a call linked to a ticket is appended to that ticket's app desk.
+      return channel?.workspaceId === workspaceId && isDeskChannelType(channel.type)
         ? [channelId]
         : [];
     }
@@ -523,6 +534,55 @@ export class ExternalSourceCore {
           return { conversation, message: undefined, email: existingEmail, isNew: false };
         }
       }
+    }
+
+    // The target conversation may have no email to thread-match against, so it is named outright.
+    const targetConversationId =
+      typeof normalizedData.metadata.targetConversationId === 'string'
+        ? normalizedData.metadata.targetConversationId.trim()
+        : '';
+    if (targetConversationId && isDeskChannel && normalizedData.emailData) {
+      const conversation = await this.conversationRepo.findById(targetConversationId);
+      if (conversation) {
+        const rootEmail = await this.emailRepo.findFirstByConversationId(conversation.conversationId);
+        const uploadedFilesForTarget =
+          AttachmentConversionService.convertDownloadedToUploaded(downloadedAttachments);
+        const { email } = await emailService.addEmailToConversation({
+          conversationId: conversation.conversationId,
+          emailSubject: normalizedData.emailData.subject || '',
+          emailBody: normalizedData.content,
+          emailTo: normalizedData.emailData.to || [],
+          emailFrom: normalizedData.emailData.from || '',
+          emailCc: normalizedData.emailData.cc || [],
+          emailBcc: normalizedData.emailData.bcc || [],
+          emailReplyTo: normalizedData.emailData.replyTo || [],
+          externalThreadId: rootEmail?.externalThreadId || normalizedData.externalThreadId,
+          externalMessageId: normalizedData.externalId,
+          rfcMessageId: normalizedData.rfcMessageId,
+          uploadedFiles: uploadedFilesForTarget,
+          receivedAt: normalizedData.metadata.timestamp,
+          ...this.getEmailIntegrationFields(normalizedData),
+        });
+        logger.info('[TARGET_CONVERSATION] Appended to linked conversation', {
+          conversationId: conversation.conversationId,
+          externalId: normalizedData.externalId,
+          channelId: source.channelId,
+        });
+        return { conversation, message: undefined, email, isNew: false };
+      }
+      // Falling through would thread-match and could open a new ticket instead.
+      logger.warn('[TARGET_CONVERSATION] Linked conversation not found', {
+        targetConversationId,
+        externalId: normalizedData.externalId,
+      });
+      return {
+        conversation: undefined,
+        message: undefined,
+        email: undefined,
+        isNew: false,
+        blocked: true,
+        blockedReason: 'target_conversation_missing',
+      };
     }
 
     // Keep merge scoped to the configured external source. All providers share

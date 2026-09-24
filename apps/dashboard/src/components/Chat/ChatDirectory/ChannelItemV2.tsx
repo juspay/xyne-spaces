@@ -39,6 +39,7 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuSubContent,
 } from '../../ui/dropdown-menu';
+import { AddToStreamMenuItem } from '../../Streams/components/AddToStreamMenu/AddToStreamMenu';
 import { stripHtml } from '../../xyne-desk/EmailComposer/helpers';
 import { cn } from '../../../utils/classNames';
 import { renderEmoji } from '../../../utils/customEmojiUtils';
@@ -225,7 +226,7 @@ const ChannelItemV2 = memo(
               />
             )}
           </span>
-          {hasActiveCall && (
+          {hasActiveCall && !isDM && (
             <span className='shrink-0 rounded-full bg-status-success px-2 py-1 text-background'>
               <Headphones size={14} />
             </span>
@@ -268,6 +269,7 @@ const ChannelItemV2 = memo(
                 onCloseAutoFocus={e => e.preventDefault()}
                 className='min-w-[180px]'
               >
+                <AddToStreamMenuItem source={{ kind: 'channel', channelId: channel.id }} />
                 <DropdownMenuSub>
                   <DropdownMenuSubTrigger className='gap-2'>
                     <FolderArrowRight size={14} className='shrink-0' />

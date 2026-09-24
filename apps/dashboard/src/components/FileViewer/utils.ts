@@ -16,6 +16,13 @@ export interface ZoomState {
 }
 
 export interface BaseViewerProps {
+  /**
+   * Draw the viewer's own frame — its header bar, border and the margin that
+   * clears the modal's floating top bar. Default true, which is the modal. A
+   * surface that already provides the frame (the SDLC file tab) passes false so
+   * the preview sits flush rather than as a card inside a card.
+   */
+  chrome?: boolean;
   source: File | null;
   fileName?: string;
   attachmentId?: string;
@@ -60,7 +67,22 @@ export const FILE_TYPE_CONFIG: Record<string, FileTypeConfig<BaseViewerProps>> =
   },
   image: {
     mimeTypes: ['image/'],
-    extensions: ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg'],
+    // .heic/.heif extension fallback: some browsers report HEIC files as
+    // application/octet-stream, and the image/ prefix alone would leave those
+    // unclassified (null) — the HEIC render path (WebP rendition fetch) needs
+    // them classified as images.
+    extensions: [
+      '.jpg',
+      '.jpeg',
+      '.png',
+      '.gif',
+      '.bmp',
+      '.webp',
+      '.svg',
+      '.heic',
+      '.heif',
+      '.hif',
+    ],
     component: ImageViewer,
     wrapperClass: 'h-full w-full',
     displayName: 'Image',

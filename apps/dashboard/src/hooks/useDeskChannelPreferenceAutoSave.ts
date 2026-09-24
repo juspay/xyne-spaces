@@ -1,7 +1,10 @@
 import { logger, Event as LogEvent } from '../utils/logger';
 import { useCallback } from 'react';
 import { EmailMergeMode, AutoDraftMode } from '@xyne/shared';
-import { useUpdateEmailChannelPreference } from './useEmailChannelPreference';
+import {
+  useUpdateEmailChannelPreference,
+  type DuplicateScopeConfig,
+} from './useEmailChannelPreference';
 
 export type ChannelPreferencePatch = {
   ownerUserId?: string;
@@ -20,6 +23,7 @@ export type ChannelPreferencePatch = {
   deskReportEnabled?: boolean;
   deskReportAgentSlug?: string | null;
   deskReportRangeDays?: number;
+  duplicateScopeConfig?: DuplicateScopeConfig | null;
 };
 
 /**

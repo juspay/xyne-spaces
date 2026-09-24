@@ -1,7 +1,12 @@
 import { ReactElement } from 'react';
+import { parseSlashCommandArtifactMessage } from '@xyne/shared';
 import type { ActivityWithRelated } from '../../types/activity';
 import { MessageBubble } from '../ui/MessageBubble/MessageBubble';
 import { ActivityItemCard } from './ActivityItemCard';
+import {
+  SlashCommandArtifactActivityBody,
+  SlashCommandArtifactBadge,
+} from './SlashCommandArtifactActivity';
 import { RenderMessageWithHTML } from '../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import { getFlowJsonPreviewText } from '../../utils/flowPreview';
 import { useUser } from '../../hooks/useUsers';
@@ -17,6 +22,7 @@ export const KeywordMatchActivity = ({
 }): ReactElement | null => {
   const message = activity.message;
   const sender = useUser(message?.senderId ?? '');
+  const artifact = parseSlashCommandArtifactMessage(message?.content);
 
   const { baseRoute } = useRouteContext();
 
@@ -38,6 +44,9 @@ export const KeywordMatchActivity = ({
       channelId={message.conversation?.channelId}
       badgeIcon={<Hashtag className='size-3 text-primary' />}
       badgeColorClass='bg-muted'
+      {...(artifact && {
+        titlePrefix: <SlashCommandArtifactBadge badge={artifact.definition.badge} />,
+      })}
       description={<span className='text-muted-foreground text-sm'>matched a keyword in</span>}
       targetPath={targetPath}
       focusThread={isThreadReply}
@@ -48,7 +57,9 @@ export const KeywordMatchActivity = ({
       showUnreadDot
       className='flex items-start'
     >
-      {isExpanded ? (
+      {artifact ? (
+        <SlashCommandArtifactActivityBody messageId={message.messageId} body={artifact.body} />
+      ) : isExpanded ? (
         <MessageBubble
           message={message}
           showAvatar={false}

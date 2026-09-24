@@ -873,7 +873,7 @@ const XyneCalendarDayView = memo(
         onDragEnd={onDragEnd}
         onDragCancel={onDragCancel}
       >
-        <div ref={scrollContainerRef} className='min-h-0 flex-1 overflow-y-auto px-3 py-4'>
+        <div ref={scrollContainerRef} className='min-h-0 flex-1 overflow-y-auto px-3 pb-7'>
           <div
             className='relative min-w-0'
             style={{ height: TIMELINE_HOUR_HEIGHT * 24 }}
@@ -1099,7 +1099,7 @@ const XyneCalendarSidebarTimeline = memo(
       deleteModalCall,
       handleDeleteConfirm,
       closeDeleteModal,
-    } = useCallHistory(user?.id);
+    } = useCallHistory(user?.id, { isCalendarView: true });
     const visibleChannels = useAllVisibleChannels();
     const currentRoomExternalId = useSelector(roomActor, state => state.context.externalId);
     const isRoomSessionActive = useSelector(

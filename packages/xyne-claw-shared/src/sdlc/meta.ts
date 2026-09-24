@@ -3,11 +3,9 @@ export const SDLC_META_KEYS = {
   channelId: "sdlcChannelId",
   repositoryId: "sdlcRepositoryId",
   repositoryName: "sdlcRepositoryName",
-  repositoryUrl: "sdlcRepositoryUrl",
-  repositoryBaseBranch: "sdlcRepositoryBaseBranch",
-  conversationId: "sdlcConversationId",
-  runtimeCredentialOperation: "sdlcRuntimeCredentialOperation",
-  interactiveGrant: "sdlcInteractiveGrant",
+  // The Actor, from backend context only: sdlc-repository-access sends these for the access check.
+  workspaceId: "sdlcWorkspaceId",
+  actorUserId: "sdlcActorUserId",
 } as const;
 
 function record(value: unknown): Record<string, unknown> | undefined {
@@ -24,29 +22,20 @@ export function packSdlcRunMeta(sdlcContext: unknown): Record<string, string> {
   const context = record(sdlcContext);
   if (!context) return {};
   const repository = record(context["repository"]);
-  const execution = record(context["execution"]);
   const meta: Record<string, string> = {};
 
   const channelId = str(context["channelId"]);
+  const workspaceId = str(context["workspaceId"]);
+  const actorUserId = str(context["actorUserId"]);
   if (channelId) meta[SDLC_META_KEYS.channelId] = channelId;
+  if (workspaceId) meta[SDLC_META_KEYS.workspaceId] = workspaceId;
+  if (actorUserId) meta[SDLC_META_KEYS.actorUserId] = actorUserId;
 
   if (repository) {
     const id = str(repository["id"]);
     const name = str(repository["name"]);
-    const url = str(repository["url"]);
-    const baseBranch = str(repository["baseBranch"]);
     if (id) meta[SDLC_META_KEYS.repositoryId] = id;
     if (name) meta[SDLC_META_KEYS.repositoryName] = name;
-    if (url) meta[SDLC_META_KEYS.repositoryUrl] = url;
-    if (baseBranch) meta[SDLC_META_KEYS.repositoryBaseBranch] = baseBranch;
-  }
-
-  const conversationId = str(execution?.["conversationId"]);
-  const interactiveGrant = str(context["interactiveGrant"]);
-  if (conversationId) meta[SDLC_META_KEYS.conversationId] = conversationId;
-  if (interactiveGrant) {
-    meta[SDLC_META_KEYS.runtimeCredentialOperation] = "INTERACTIVE";
-    meta[SDLC_META_KEYS.interactiveGrant] = interactiveGrant;
   }
 
   return meta;

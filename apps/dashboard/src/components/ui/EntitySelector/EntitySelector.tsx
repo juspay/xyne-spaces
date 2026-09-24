@@ -4,6 +4,7 @@ import * as Popover from '@radix-ui/react-popover';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import type { EntitySelectorProps, SelectorOption } from './EntitySelector.types';
 import { cn } from '../../../utils/classNames';
+import Tooltip from '../Tooltip';
 
 /**
  * EntitySelector - A generic, reusable single-select dropdown component
@@ -49,6 +50,11 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
   // Only virtualize (opt-in) once the list is large enough to matter.
   virtualizeThreshold = 30,
   virtualizedHeight = 300,
+  renderTrigger,
+  triggerTooltip,
+  align = 'start',
+  allowDeselect = true,
+  analytics,
 }) => {
   // ==================== STATE ====================
   const [internalOpen, setInternalOpen] = useState(false);
@@ -59,6 +65,12 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
   const virtuosoRef = useRef<VirtuosoHandle>(null);
 
   const open = isOpen ?? internalOpen;
+
+  // Autocapture naming: generic by default, overridable per surface.
+  const trackCategory = analytics?.category ?? 'ENTITY_PICKER';
+  const optionTrackName = analytics?.optionName ?? 'SELECT_OPTION';
+  const clearTrackName = analytics?.clearName ?? 'CLEAR_SELECTION';
+
   // ==================== COMPUTED VALUES ====================
 
   /**
@@ -100,10 +112,11 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
    * Handle selecting an option
    */
   const handleSelect = (value: string): void => {
-    // If user clicks the already selected value, deselect it (toggle behavior)
     if (onSelect) {
+      // Re-clicking the current value clears it, unless the caller opted out
+      // (it has its own clear row, and a stray click must not mutate).
       if (value === selectedValue) {
-        onSelect(null);
+        if (allowDeselect) onSelect(null);
       } else {
         onSelect(value);
       }
@@ -182,8 +195,9 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
         handleOpenChange(false);
         setSearchValue('');
       }}
-      data-track-category='ENTITY_PICKER'
-      data-track-name='CLEAR_SELECTION'
+      data-ph-capture-attribute-track-id={analytics?.clearTrackId}
+      data-track-category={trackCategory}
+      data-track-name={clearTrackName}
     >
       <span className='flex h-5 w-5 flex-none items-center justify-center'>
         <div className='w-5 h-5 rounded-full bg-border flex items-center justify-center'>
@@ -212,8 +226,9 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
               : 'cursor-pointer text-foreground hover:bg-accent'
         }`}
         onClick={() => !option.disabled && handleSelect(option.value)}
-        data-track-category='ENTITY_PICKER'
-        data-track-name='SELECT_OPTION'
+        data-ph-capture-attribute-track-id={analytics?.optionTrackId}
+        data-track-category={trackCategory}
+        data-track-name={optionTrackName}
         onKeyDown={(e): void => {
           if ((e.key === 'Enter' || e.key === ' ') && !option.disabled) {
             e.preventDefault();
@@ -285,8 +300,8 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
         {showClearButton && selectedOption ? (
           <button
             onClick={handleClear}
-            data-track-category='ENTITY_PICKER'
-            data-track-name='CLEAR_SELECTION'
+            data-track-category={trackCategory}
+            data-track-name={clearTrackName}
             className='flex-shrink-0 hover:bg-accent rounded p-0.5 transition-colors'
           >
             <X className='w-3 h-3 text-muted-foreground' />
@@ -384,8 +399,8 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
         {showClearButton && selectedOption ? (
           <button
             onClick={handleClear}
-            data-track-category='ENTITY_PICKER'
-            data-track-name='CLEAR_SELECTION'
+            data-track-category={trackCategory}
+            data-track-name={clearTrackName}
             className='flex-shrink-0 hover:bg-accent rounded p-0.5 transition-colors'
           >
             <X className='w-3 h-3 text-muted-foreground' />
@@ -397,18 +412,28 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
     );
   };
 
+  const triggerElement = renderTrigger
+    ? renderTrigger({ selectedOption, open })
+    : variant === 'default'
+      ? renderDefaultButtonTrigger()
+      : renderInLineInputTrigger();
+
   return (
     <Popover.Root open={open} onOpenChange={handleOpenChange}>
       {/* ========== TRIGGER BUTTON ========== */}
-      <Popover.Trigger asChild>
-        {variant === 'default' ? renderDefaultButtonTrigger() : renderInLineInputTrigger()}
-      </Popover.Trigger>
+      {triggerTooltip ? (
+        <Tooltip content={triggerTooltip}>
+          <Popover.Trigger asChild>{triggerElement}</Popover.Trigger>
+        </Tooltip>
+      ) : (
+        <Popover.Trigger asChild>{triggerElement}</Popover.Trigger>
+      )}
 
       {/* ========== POPOVER CONTENT ========== */}
       <Popover.Portal>
         <Popover.Content
           side='bottom'
-          align='start'
+          align={align}
           sideOffset={4}
           className='z-[100] w-auto max-w-96 max-h-96 overflow-y-auto overflow-x-hidden rounded-lg border border-border bg-background shadow-lg'
           style={{
@@ -430,10 +455,14 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
             }),
             // Virtuoso rows are absolutely positioned and can't size the popover;
             // lock it to the plain list's max width so widths stay consistent.
-            ...(isVirtualized && { width: 'max(24rem, var(--radix-popover-trigger-width))' }),
+            // matchTriggerWidth still wins — it is an explicit width contract.
+            ...(isVirtualized &&
+              !matchTriggerWidth && { width: 'max(24rem, var(--radix-popover-trigger-width))' }),
           }}
           onWheel={e => e.stopPropagation()}
           onTouchMove={e => e.stopPropagation()}
+          onClick={e => e.stopPropagation()}
+          onKeyDown={e => e.stopPropagation()}
           onOpenAutoFocus={e => {
             e.preventDefault();
             inputRef.current?.focus();
@@ -448,6 +477,10 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
                   ref={inputRef}
                   type='text'
                   data-testid={testId ? `${testId}-input` : undefined}
+                  data-track-category={
+                    analytics?.searchName === undefined ? undefined : trackCategory
+                  }
+                  data-track-name={analytics?.searchName}
                   placeholder={searchPlaceholder}
                   value={searchValue}
                   onChange={e => {
@@ -504,9 +537,7 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
               onTouchMove={e => e.stopPropagation()}
             >
               {/* Unassign — pinned above the list, never virtualized */}
-              {showUnassignOption && selectedValue && (
-                <div className='p-1 pb-0'>{renderUnassignRow()}</div>
-              )}
+              {showUnassignOption && <div className='p-1 pb-0'>{renderUnassignRow()}</div>}
               <Virtuoso
                 ref={virtuosoRef}
                 data={filteredOptions}
@@ -517,10 +548,7 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
                 // No padding on the scroller (it adds a spurious horizontal bar);
                 // `- 48` leaves room for the pinned unassign row.
                 style={{
-                  height:
-                    showUnassignOption && selectedValue
-                      ? virtualizedHeight - 48
-                      : virtualizedHeight,
+                  height: showUnassignOption ? virtualizedHeight - 48 : virtualizedHeight,
                   width: '100%',
                   overflowX: 'hidden',
                 }}
@@ -552,7 +580,7 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
                   data-testid={testId ? `${testId}-options` : undefined}
                   className='p-1 space-y-1'
                 >
-                  {showUnassignOption && selectedValue && <li>{renderUnassignRow()}</li>}
+                  {showUnassignOption && <li>{renderUnassignRow()}</li>}
                   {filteredOptions.map((option, index) => (
                     <li
                       role='option'

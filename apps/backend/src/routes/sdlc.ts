@@ -7,8 +7,10 @@ import {
   createSdlcChannelSchema,
   checkSdlcRepositoryAccessSchema,
   createSdlcLinkSchema,
-  configureSdlcVcsCredentialSchema,
+  createSdlcVcsCredentialSchema,
+  resolveSdlcRepositoryLinkSchema,
   sdlcVcsProviderSchema,
+  updateSdlcVcsCredentialSchema,
 } from '@xyne/shared';
 import { authorize } from '@/middleware/authorize';
 import { AppError } from '@/middleware/errorHandler';
@@ -20,6 +22,7 @@ import {
 } from '@/sdlc/seedHubWorkflow';
 import { cleanupLegacySdlc } from '@/sdlc/cleanupLegacy';
 import { SdlcHubService, type SdlcActor } from '@/sdlc';
+import { sdlcAgentContext } from '@/sdlc/SdlcAgentContextService';
 import { requireSdlcProjectAccess } from '@/sdlc/sdlcProjectAccess';
 import { sdlcVcs } from '@/sdlc/vcs';
 import { deriveAccessStatus } from '@/sdlc/vcs/accessStatus';
@@ -38,11 +41,10 @@ function actorFromRequest(req: Request): SdlcActor {
   return { userId, workspaceId };
 }
 
-const hubWorkflowScopeSchema = z.object({ channelId: z.string().min(1).optional() });
-
-function channelIdFromBody(req: Request): string | undefined {
-  return hubWorkflowScopeSchema.parse(req.body ?? {}).channelId;
-}
+const hubWorkflowScopeSchema = z.object({
+  channelId: z.string().min(1).optional(),
+  dryRun: z.boolean().default(true),
+});
 
 function route(
   handler: (req: Request, res: Response) => Promise<void>
@@ -58,6 +60,15 @@ router.post(
     const input = attachSdlcRepositorySchema.parse(req.body);
     const repository = await sdlcHub.createRepository(actorFromRequest(req), input);
     res.status(201).json({ success: true, repository });
+  })
+);
+
+router.post(
+  '/repositories/resolve-link',
+  route(async (req, res) => {
+    const input = resolveSdlcRepositoryLinkSchema.parse(req.body);
+    const link = await sdlcHub.resolveRepositoryLink(actorFromRequest(req), input);
+    res.status(200).json({ success: true, link });
   })
 );
 
@@ -82,7 +93,7 @@ router.post(
   route(async (req, res) => {
     res.status(200).json({
       success: true,
-      ...(await backfillHubWorkflows(actorFromRequest(req), channelIdFromBody(req))),
+      ...(await backfillHubWorkflows(actorFromRequest(req), hubWorkflowScopeSchema.parse(req.body ?? {}))),
     });
   })
 );
@@ -93,7 +104,7 @@ router.post(
   route(async (req, res) => {
     res.status(200).json({
       success: true,
-      ...(await resetHubWorkflows(actorFromRequest(req), channelIdFromBody(req))),
+      ...(await resetHubWorkflows(actorFromRequest(req), hubWorkflowScopeSchema.parse(req.body ?? {}))),
     });
   })
 );
@@ -154,30 +165,51 @@ router.get(
   })
 );
 
-router.put(
-  '/vcs/credentials/:provider',
+router.get(
+  '/vcs/providers',
   route(async (req, res) => {
-    const provider = sdlcVcsProviderSchema.parse(req.params.provider.toUpperCase());
-    const input = configureSdlcVcsCredentialSchema.parse(req.body);
-    const credential = await sdlcVcs.configureCredential(actorFromRequest(req), provider, input);
+    const providers = await sdlcVcs.providerHosts(actorFromRequest(req).workspaceId);
+    res.status(200).json({ success: true, providers });
+  })
+);
+
+router.post(
+  '/vcs/credentials',
+  route(async (req, res) => {
+    const input = createSdlcVcsCredentialSchema.parse(req.body);
+    const credential = await sdlcVcs.createCredential(actorFromRequest(req), input);
+    res.status(201).json({ success: true, credential });
+  })
+);
+
+router.patch(
+  '/vcs/credentials/:credentialId',
+  route(async (req, res) => {
+    const input = updateSdlcVcsCredentialSchema.parse(req.body);
+    const credential = await sdlcVcs.updateCredential(
+      actorFromRequest(req),
+      req.params.credentialId,
+      input
+    );
     res.status(200).json({ success: true, credential });
   })
 );
 
 router.post(
-  '/vcs/credentials/:provider/validate',
+  '/vcs/credentials/:credentialId/validate',
   route(async (req, res) => {
-    const provider = sdlcVcsProviderSchema.parse(req.params.provider.toUpperCase());
-    const credential = await sdlcVcs.revalidateCredential(actorFromRequest(req), provider);
+    const credential = await sdlcVcs.revalidateCredential(
+      actorFromRequest(req),
+      req.params.credentialId
+    );
     res.status(200).json({ success: true, credential });
   })
 );
 
 router.delete(
-  '/vcs/credentials/:provider',
+  '/vcs/credentials/:credentialId',
   route(async (req, res) => {
-    const provider = sdlcVcsProviderSchema.parse(req.params.provider.toUpperCase());
-    await sdlcVcs.disconnectCredential(actorFromRequest(req), provider);
+    await sdlcVcs.deleteCredential(actorFromRequest(req), req.params.credentialId);
     res.status(204).send();
   })
 );
@@ -202,19 +234,25 @@ router.get(
         canonicalUrl: true,
         baseBranch: true,
         accessCapabilities: true,
+        vcsCredentialId: true,
       },
       orderBy: { name: 'asc' },
     });
     res.status(200).json({
       success: true,
       repositories: repositories.map((repository) => {
-        const parsed = sdlcVcs.parseRepository('GITHUB', repository.canonicalUrl || repository.url);
+        let provider: string | null = null;
+        try {
+          provider = sdlcVcs.parseRepositoryUrl(repository.canonicalUrl || repository.url).provider;
+        } catch {
+          // A row whose link no Provider parses still lists, so an admin can remove it.
+        }
         const access = deriveAccessStatus(repository.accessCapabilities);
         return {
           ...repository,
           accessJobStatus: access.status,
           accessJobErrorMessage: access.errorMessage,
-          provider: parsed.provider,
+          provider,
           visibility: access.visibility,
           configuredBaseBranch:
             Array.isArray(repository.baseBranch) && typeof repository.baseBranch[0] === 'string'
@@ -223,6 +261,23 @@ router.get(
         };
       }),
     });
+  })
+);
+
+router.get(
+  '/projects/:projectId/repositories/search',
+  route(async (req, res) => {
+    const query = typeof req.query.q === 'string' ? req.query.q.slice(0, 120) : '';
+    const scope = z
+      .object({ provider: sdlcVcsProviderSchema, host: z.string().trim().toLowerCase().min(1) })
+      .parse({ provider: req.query.provider, host: req.query.host });
+    const repositories = await sdlcHub.searchProjectRepositories(
+      actorFromRequest(req),
+      req.params.projectId,
+      scope,
+      query
+    );
+    res.status(200).json({ success: true, repositories });
   })
 );
 
@@ -247,6 +302,43 @@ router.get(
     const limit = Number.isFinite(requestedLimit) ? requestedLimit : 20;
     const contexts = await sdlcHub.listRepositoryRunContexts(actorFromRequest(req), query, limit);
     res.status(200).json({ success: true, contexts });
+  })
+);
+
+router.get(
+  '/channels/:channelId/context',
+  route(async (req, res) => {
+    const conversationId =
+      typeof req.query.conversationId === 'string' ? req.query.conversationId.trim() : '';
+    if (!conversationId) throw new AppError('conversationId is required', 400);
+    try {
+      const context = await sdlcAgentContext.buildForHub(
+        actorFromRequest(req),
+        req.params.channelId,
+        { conversationId }
+      );
+      res.status(200).json({ success: true, context });
+    } catch (error) {
+      if (error instanceof AppError && [403, 404, 409].includes(error.statusCode)) {
+        res.status(200).json({ success: true, context: null });
+        return;
+      }
+      throw error;
+    }
+  })
+);
+
+router.get(
+  '/channels/:channelId/nav-target',
+  route(async (req, res) => {
+    const ids = z
+      .object({
+        conversationId: z.string().min(1),
+        messageId: z.string().min(1).optional(),
+      })
+      .parse(req.query);
+    const target = await sdlcHub.navTarget(actorFromRequest(req), req.params.channelId, ids);
+    res.status(200).json({ success: true, target });
   })
 );
 

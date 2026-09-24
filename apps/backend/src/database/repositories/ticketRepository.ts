@@ -46,6 +46,8 @@ import {
   etaSignalsFromResult,
   writeEtaActivitiesPrisma,
 } from '@/services/etaManagement';
+import { lockTicketMetadataAndEta } from '@/bypassAcl/rowLockServices';
+import { lockTicketStatusV2 } from '@/bypassAcl/rowLockServices';
 //import { queueTicketIngestion } from '@/queues/vespaQueue';
 
 const prisma = DatabaseClient.getInstance();
@@ -55,6 +57,28 @@ type PrismaTransaction = Omit<
   PrismaClient,
   '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'
 >;
+
+async function upsertTicketDescription(
+  db: PrismaTransaction | typeof prisma,
+  ticketId: string,
+  workspaceId: string,
+  channelId: string,
+  description: string,
+  createdAt: Date,
+): Promise<void> {
+  await db.ticketDescription.upsert({
+    where: { ticketId },
+    update: { description, updatedAt: createdAt },
+    create: {
+      ticketId,
+      workspaceId,
+      channelId,
+      description,
+      createdAt,
+      updatedAt: createdAt,
+    },
+  });
+}
 
 const makeFallbackCountsSnapshot = (ticket: {
   id: string;
@@ -69,6 +93,7 @@ const makeFallbackCountsSnapshot = (ticket: {
   createdBy: string;
   userGroupId: string | null;
   ticketType: string | null;
+  merchantId?: string | null;
   isStageOverdue?: boolean | null;
   eta: Date | null;
   createdAt: Date;
@@ -85,6 +110,7 @@ const makeFallbackCountsSnapshot = (ticket: {
   createdBy: ticket.createdBy,
   userGroupId: ticket.userGroupId,
   ticketType: ticket.ticketType,
+  merchantId: ticket.merchantId ?? null,
   isStageOverdue: ticket.isStageOverdue ?? false,
   eta: ticket.eta?.getTime() ?? null,
   createdAt: ticket.createdAt.getTime(),
@@ -92,6 +118,34 @@ const makeFallbackCountsSnapshot = (ticket: {
   qaAssigned: [],
   roleAssignments: [],
 });
+
+/**
+ * Publish TICKET_CREATED. Must run *after* the creating transaction commits:
+ * the automation worker re-reads the ticket on another connection, and an
+ * uncommitted row is invisible to it, which makes every configured
+ * board/project/channel filter fail closed and the run get SKIPPED.
+ */
+export async function emitTicketCreated(
+  ticket: { id: string; workspaceId: string },
+  formFieldChanges: FormFieldChanges | undefined,
+  createdBy: string,
+): Promise<void> {
+  try {
+    await eventRouter.emit(
+      {
+        type: TICKET_CREATED_EVENT,
+        payload: {
+          ticketId: ticket.id,
+          formFieldChanges,
+          performedBy: { id: createdBy },
+        },
+      },
+      ticket.workspaceId,
+    );
+  } catch (err) {
+    logger.error(`[automations] TICKET_CREATED emit failed for ticket ${ticket.id}:`, err);
+  }
+}
 
 export class TicketRepository {
 
@@ -311,6 +365,8 @@ export class TicketRepository {
       : await prisma.$transaction((innerTx) => runCreate(innerTx));
     const ticket = createResult.finalTicket;
 
+    await upsertTicketDescription(db, ticket.id, ticket.workspaceId, ticket.channelId, data.description, new Date());
+
     // Post-commit notification dispatch - best-effort, must never affect the already-
     // committed response. suppressed if the ticket was created already paused.
     if (ticket.statusV2 !== TicketStatusV2.PAUSED) {
@@ -344,25 +400,19 @@ export class TicketRepository {
       operation: 'insert',
       ticket: createdSnapshot,
     });
+    if (createdSnapshot.channelId) {
+      // Desk label unread badges: a new ticket can enter filtered label views.
+      websocketService.broadcastLabelUnreadCountsUpdate(createdSnapshot.channelId);
+    }
 
 
-    void (async (): Promise<void> => {
-      try {
-        await eventRouter.emit(
-          {
-            type: TICKET_CREATED_EVENT,
-            payload: {
-              ticketId: ticket.id,
-              formFieldChanges: data.formFieldChanges,
-              performedBy: { id: data.createdBy },
-            },
-          },
-          ticket.workspaceId,
-        );
-      } catch (err) {
-        logger.error(`[automations] TICKET_CREATED emit failed for ticket ${ticket.id}:`, err);
-      }
-    })();
+    // Automations read the ticket back on their own connection, so the event may
+    // only be published once the row is committed. When `tx` was supplied the
+    // caller still owns the transaction and nothing is committed yet — that
+    // caller emits after its transaction resolves (see emitTicketCreated).
+    if (!tx) {
+      void emitTicketCreated(ticket, data.formFieldChanges, data.createdBy);
+    }
 
     return ticket;
   }
@@ -413,6 +463,7 @@ export class TicketRepository {
         createdBy: true,
         userGroupId: true,
         ticketType: true,
+        merchantId: true,
         eta: true,
         createdAt: true,
         metadata: true,
@@ -467,12 +518,7 @@ export class TicketRepository {
           ? await updateWhileFlowRunActive({
               runTransaction: operation => prisma.$transaction(operation),
               lockAndReadRootStatus: async tx => {
-                const [root] = await tx.$queryRaw<{ statusV2: TicketStatusV2 }[]>`
-                  SELECT "statusV2"
-                  FROM "tickets"
-                  WHERE "id" = ${options.requiredActiveFlowRootId}
-                  FOR UPDATE
-                `;
+                const root = await lockTicketStatusV2(tx, options.requiredActiveFlowRootId!);
                 return root?.statusV2 ?? null;
               },
               update,
@@ -636,12 +682,7 @@ export class TicketRepository {
       // FOR UPDATE locks the row so that can't happen. Both locked values feed evaluateEta:
       // eta is the extend-only baseline and a fingerprint input, so a stale one could decide
       // against - and then overwrite - a due date someone else just moved.
-      const [lockedTicket] = await tx.$queryRaw<{ metadata: unknown; eta: Date | null }[]>`
-        SELECT "metadata", "eta"
-        FROM "tickets"
-        WHERE "id" = ${ticketId}
-        FOR UPDATE
-      `;
+      const lockedTicket = await lockTicketMetadataAndEta(tx, ticketId);
       const lockedEta = lockedTicket?.eta ?? null;
       const boardEtaCtx = await loadBoardEtaContext(tx, currentTicket.boardId);
       const currentTicketEtaManagement = parseTicketEtaManagement(lockedTicket?.metadata);
@@ -893,6 +934,9 @@ export class TicketRepository {
         assignedTo: currentTicket.assignedTo,
       },
     });
+    if (updatedSnapshot.channelId) {
+      websocketService.broadcastLabelUnreadCountsUpdate(updatedSnapshot.channelId);
+    }
 
     // Thread system message for the status change (activity rows for PR/STAGE_NAME/STATUS/ETA
     // were already written inside the transaction above). Messages are posted post-commit,
@@ -1142,6 +1186,10 @@ export class TicketRepository {
         assignedTo: previousAssigneeId,
       },
     });
+    if (assigneeSnapshot.channelId) {
+      // Desk payloads filter on assignedTo, so label badges invalidate on reassign.
+      websocketService.broadcastLabelUnreadCountsUpdate(assigneeSnapshot.channelId);
+    }
   }
 
   async assignUserGroupToTicket(ticketId: string, groupId: string, updatedBy: string): Promise<void> {
@@ -1254,6 +1302,7 @@ export class TicketRepository {
       closedAt?: Date | null;
       closedBy?: string | null;
       aiPriority?: string;
+      merchantId?: string | null;
     },
     updatedBy: string,
     options: { cascadeFlow?: boolean } = {},
@@ -1269,6 +1318,7 @@ export class TicketRepository {
     if (fields.closedAt !== undefined) data.closedAt = fields.closedAt;
     if (fields.closedBy !== undefined) data.closedBy = fields.closedBy;
     if (fields.aiPriority !== undefined) data.aiPriority = fields.aiPriority;
+    if (fields.merchantId !== undefined) data.merchantId = fields.merchantId;
 
     if (Object.keys(data).length <= 2) {
       return;
@@ -1319,7 +1369,26 @@ export class TicketRepository {
     }
     const previousStatus: TicketStatusV2 | null = prevSnapshot?.statusV2 ?? null;
 
+    // Same as createTicket: make sure the merchant row exists before linking to it.
+    if (fields.merchantId) {
+      await prisma.merchant.upsert({
+        where: { mid: fields.merchantId },
+        update: {},
+        create: { mid: fields.merchantId },
+      });
+    }
+
     const updatedTicket = await prisma.ticket.update({ where: { id: ticketId }, data });
+    if (fields.description !== undefined) {
+      await upsertTicketDescription(
+        prisma,
+        updatedTicket.id,
+        updatedTicket.workspaceId,
+        updatedTicket.channelId,
+        fields.description,
+        updatedTicket.updatedAt,
+      );
+    }
 
     if (
       fields.statusV2 !== undefined
@@ -1480,6 +1549,9 @@ export class TicketRepository {
           priority: prevSnapshot.priority,
         },
       });
+      if (metadataSnapshot.channelId) {
+        websocketService.broadcastLabelUnreadCountsUpdate(metadataSnapshot.channelId);
+      }
     }
   }
 

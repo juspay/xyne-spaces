@@ -1,8 +1,9 @@
-import { ipcMain, shell, app, session, BrowserView, BrowserWindow, desktopCapturer, dialog } from 'electron';
+import { ipcMain, shell, app, session, BrowserView, BrowserWindow, desktopCapturer, dialog, clipboard } from 'electron';
 import type { IpcMainEvent, IpcMainInvokeEvent } from 'electron';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import { clearAllCookies, clearBrowserTabsData, syncXyneCookiesToBrowserPanel } from '../services/cookies';
+import { chromeProfileAvailable, importChromeCookies } from '../services/browser-import';
 import { showNotification, NotificationData, showCallNotification, closeCallNotification, CallNotificationData } from '../services/notifications';
 import { getMainWindow, loadApp, toggleWindowCompactMode } from '../window/manager';
 import { setupMTLSIpcHandlers } from './mtls-handlers';
@@ -714,6 +715,48 @@ export function setupIpcHandlers(): void {
     return browserSettingsService.setSettings(settings);
   });
 
+  ipcMain.handle('app-window:capture', async (event, maxWidth: unknown) => {
+    if (!isMainWindowSender(event)) throw new Error('Unauthorized sender');
+    const win = getMainWindow();
+    if (!win || win.isDestroyed()) return { data: '' };
+    const image = await win.webContents.capturePage();
+    const width = typeof maxWidth === 'number' && maxWidth > 200 ? Math.floor(maxWidth) : 1280;
+    const size = image.getSize();
+    const resized = size.width > width ? image.resize({ width }) : image;
+    return { data: resized.toPNG().toString('base64') };
+  });
+
+  ipcMain.handle('clipboard:read-text', (event) => {
+    if (!isMainWindowSender(event)) throw new Error('Unauthorized sender');
+    return clipboard.readText();
+  });
+
+  ipcMain.handle('clipboard:write-text', (event, text: unknown) => {
+    if (!isMainWindowSender(event)) throw new Error('Unauthorized sender');
+    clipboard.writeText(typeof text === 'string' ? text : '');
+    return { success: true };
+  });
+
+  ipcMain.handle('browser-import:available', async (event) => {
+    if (!isMainWindowSender(event)) throw new Error('Unauthorized sender');
+    if (process.platform !== 'darwin') return { available: false };
+    return { available: await chromeProfileAvailable() };
+  });
+
+  ipcMain.handle('browser-import:chrome', async (event) => {
+    if (!isMainWindowSender(event)) throw new Error('Unauthorized sender');
+    if (process.platform !== 'darwin') {
+      return { success: false, error: 'unsupported-platform' };
+    }
+    try {
+      const result = await importChromeCookies();
+      return { success: true, ...result };
+    } catch (error) {
+      Logger.logError('browser-import.chrome.failed', error);
+      return { success: false, error: 'import-failed' };
+    }
+  });
+
   ipcMain.handle('clear-site-data', async (event) => {
     if (!isMainWindowSender(event)) throw new Error('Unauthorized sender');
     await clearBrowserTabsData();
@@ -777,6 +820,25 @@ export function setupIpcHandlers(): void {
   ipcMain.handle('local-harness:disconnect', async (event) => {
     requireLocalHarness(event);
     return localHarnessBridge.disconnect(await xyneCookieHeader());
+  });
+
+  ipcMain.handle('local-harness:pick-folder', async (event) => {
+    requireLocalHarness(event);
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win || win.isDestroyed()) throw new Error('Unauthorized sender');
+
+    const picked = await dialog.showOpenDialog(win, {
+      properties: ['openDirectory', 'createDirectory'],
+    });
+    const selected = picked.canceled ? undefined : picked.filePaths[0];
+    if (!selected) return null;
+
+    return localHarnessBridge.addWorkspace(selected);
+  });
+
+  ipcMain.handle('local-harness:list-folders', async (event) => {
+    requireLocalHarness(event);
+    return localHarnessBridge.listWorkspaces();
   });
 }
 

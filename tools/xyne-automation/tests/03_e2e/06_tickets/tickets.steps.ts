@@ -174,6 +174,11 @@ export default class TicketsSteps {
     await testContext.activePage.locator("[data-testid='clear-filters-btn']").first().click();
   }
 
+  @Step('clicking on "[data-testid=\'customise-view-btn\']"')
+  public async clickCustomiseViewBtn(): Promise<void> {
+    await testContext.activePage.locator("[data-testid='customise-view-btn']").first().click();
+  }
+
   @Step('clicking on "[data-testid=\'table-view-btn\']"')
   public async clickTableViewBtn(): Promise<void> {
     await testContext.activePage.locator("[data-testid='table-view-btn']").first().click();

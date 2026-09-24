@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Search, Plus } from 'lucide-react';
 import { Dialog } from '../../ui/Dialog/Dialog';
@@ -17,6 +17,7 @@ export const AddAgentModal: React.FC<AddAgentModalProps> = ({
   onSelectAgent,
 }) => {
   const navigate = useNavigate();
+  const { workspaceId } = useParams<{ workspaceId?: string }>();
   const [query, setQuery] = useState('');
 
   const { data: agents = [], isLoading } = useQuery({
@@ -41,7 +42,9 @@ export const AddAgentModal: React.FC<AddAgentModalProps> = ({
 
   const handleCreateNew = (): void => {
     onOpenChange(false);
-    void navigate('/claw-agents/create');
+    void navigate(
+      workspaceId ? `/${workspaceId}/ai/library/agent/create` : '/ai/library/agent/create',
+    );
   };
 
   return (

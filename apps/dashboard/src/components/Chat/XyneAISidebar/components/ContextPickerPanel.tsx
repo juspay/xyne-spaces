@@ -1,5 +1,7 @@
 import type { ReactElement } from 'react';
-import { useState, useCallback, useMemo, useRef } from 'react';
+import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
+import { FolderGit2, FolderPlus } from 'lucide-react';
+import { isElectronApp } from '../../../../utils/electronApp';
 import GlobalCommandMenu from '../../../GlobalCommandMenu/GlobalCommandMenu';
 import type { ContextItem } from '../../ThreadContextPanel/ThreadContextPanel.types';
 import { TabType } from '../../ChatDirectory/ChannelCommandMenu.types';
@@ -59,20 +61,43 @@ export interface SelectedRecording {
   externalId?: string;
 }
 
+export interface SelectedLocalFolder {
+  path: string;
+  name: string;
+  branch?: string;
+  remote?: string;
+}
+
 export interface ContextSelections {
   channels: SelectedChannel[];
   tickets: SelectedTicket[];
   canvases: SelectedCanvas[];
   transcripts: SelectedTranscript[];
   recordings: SelectedRecording[];
+  /** KB files scoped from the composer's "+" picker or the KB file viewer's Ask AI chip. */
+  files?: { id: string; name: string }[];
+  /** KB sub-folders (non-root collection nodes) scoped the same way. */
+  folders?: { id: string; name: string }[];
+  /** KB root collections scoped from the composer's collection picker. */
+  collections?: { id: string; name: string }[];
+  localFolders: SelectedLocalFolder[];
 }
 
-// Attached context item for v2 API. The KB types ('collection' | 'folder' |
-// 'file') are not sent by the composer directly — the Spaces backend merges
-// them into attachedContext from collectionIds/folderIds/fileIds (see
-// xyneAIControllerV2.ts) and persists them, so a reloaded message carries them.
+// Attached context item for v2 API. 'collection'/'folder'/'file' are all sent
+// by the composer directly (via ContextSelections.collections/folders/files
+// above) — every KB picker stores CollectionItem.id (cuid) for files, the
+// same id shape kb-* tools expect server-side (see xyneAIControllerV2.ts).
 export interface AttachedContextItem {
-  type: 'channel' | 'ticket' | 'canvas' | 'call' | 'activity' | 'collection' | 'folder' | 'file';
+  type:
+    | 'channel'
+    | 'ticket'
+    | 'canvas'
+    | 'call'
+    | 'activity'
+    | 'collection'
+    | 'folder'
+    | 'file'
+    | 'local-folder';
   id: string;
   title: string;
   threadId?: string;
@@ -91,6 +116,22 @@ export interface AttachedContextItem {
  */
 export function toAttachedContext(selections: ContextSelections): AttachedContextItem[] {
   const items: AttachedContextItem[] = [];
+
+  // KB file/folder/collection ids are the CollectionItem.id (cuid) the agent's
+  // kb-read-file / kb-list-files tools expect directly — see claw-auth's
+  // agentChatContextService.ts resolveFileSection / resolveFolderSection /
+  // resolveCollectionSection, which this shape is built to match exactly.
+  for (const file of selections.files ?? []) {
+    items.push({ type: 'file', id: file.id, title: file.name });
+  }
+
+  for (const folder of selections.folders ?? []) {
+    items.push({ type: 'folder', id: folder.id, title: folder.name });
+  }
+
+  for (const collection of selections.collections ?? []) {
+    items.push({ type: 'collection', id: collection.id, title: collection.name });
+  }
 
   for (const channel of selections.channels) {
     items.push({
@@ -136,6 +177,19 @@ export function toAttachedContext(selections: ContextSelections): AttachedContex
     });
   }
 
+  for (const folder of selections.localFolders) {
+    items.push({
+      type: 'local-folder',
+      id: folder.path,
+      title: folder.name,
+      metadata: {
+        path: folder.path,
+        ...(folder.branch ? { branch: folder.branch } : {}),
+        ...(folder.remote ? { remote: folder.remote } : {}),
+      },
+    });
+  }
+
   return items;
 }
 
@@ -167,6 +221,7 @@ export function attachedContextToSelections(items: AttachedContextItem[]): Reusa
     canvases: [],
     transcripts: [],
     recordings: [],
+    localFolders: [],
     collections: [],
     fileScopes: [],
     folderScopes: [],
@@ -193,6 +248,19 @@ export function attachedContextToSelections(items: AttachedContextItem[]): Reusa
           ...(item.threadId ? { conversationId: item.threadId } : {}),
         });
         break;
+      case 'local-folder': {
+        const metadata: Record<string, unknown> = item.metadata ?? {};
+        const path = typeof metadata['path'] === 'string' ? metadata['path'] : item.id;
+        const branch = typeof metadata['branch'] === 'string' ? metadata['branch'] : undefined;
+        const remote = typeof metadata['remote'] === 'string' ? metadata['remote'] : undefined;
+        result.localFolders.push({
+          path,
+          name: item.title,
+          ...(branch ? { branch } : {}),
+          ...(remote ? { remote } : {}),
+        });
+        break;
+      }
       case 'collection':
         result.collections.push({ id: item.id, name: item.title });
         break;
@@ -257,6 +325,42 @@ export const ContextPickerPanel = ({
   const [selectedRecordings, setSelectedRecordings] = useState<Map<string, SelectedRecording>>(
     () => new Map(initialSelections.recordings.map(r => [r.id, r])),
   );
+  const [selectedLocalFolder, setSelectedLocalFolder] = useState<SelectedLocalFolder | null>(
+    () => initialSelections.localFolders[0] ?? null,
+  );
+  const [recentFolders, setRecentFolders] = useState<Array<{ path: string; name: string }>>([]);
+
+  const localHarness = isElectronApp() ? window.electronAPI?.localHarness : undefined;
+  const canPickFolder = typeof localHarness?.pickFolder === 'function';
+
+  useEffect(() => {
+    let cancelled = false;
+    const listFolders = window.electronAPI?.localHarness?.listFolders;
+    if (canPickFolder && typeof listFolders === 'function') {
+      void listFolders()
+        .then(folders => {
+          if (!cancelled) setRecentFolders(Array.isArray(folders) ? folders.slice(0, 5) : []);
+        })
+        .catch(() => {
+          if (!cancelled) setRecentFolders([]);
+        });
+    }
+    return (): void => {
+      cancelled = true;
+    };
+  }, [canPickFolder]);
+
+  const chooseFolder = useCallback((): void => {
+    const pickFolder = window.electronAPI?.localHarness?.pickFolder;
+    if (typeof pickFolder !== 'function') return;
+    void pickFolder()
+      .then(folder => {
+        if (folder?.path) setSelectedLocalFolder(folder);
+      })
+      .catch(() => {
+        toast.error('Could not open that folder', { duration: 2000 });
+      });
+  }, []);
 
   // Tracks the active tab inside GlobalCommandMenu to disambiguate call vs recording
   // (both use subApp='transcript' so we rely on which tab was active when toggled)
@@ -469,7 +573,8 @@ export const ContextPickerPanel = ({
     selectedTickets.size +
     selectedCanvases.size +
     selectedTranscripts.size +
-    selectedRecordings.size;
+    selectedRecordings.size +
+    (selectedLocalFolder ? 1 : 0);
 
   const handleConfirm = useCallback((): void => {
     const newChannels = Array.from(selectedChannels.values());
@@ -512,6 +617,7 @@ export const ContextPickerPanel = ({
       canvases: newCanvases,
       transcripts: newTranscripts,
       recordings: newRecordings,
+      localFolders: selectedLocalFolder ? [selectedLocalFolder] : [],
     });
     onClose();
   }, [
@@ -520,6 +626,7 @@ export const ContextPickerPanel = ({
     selectedCanvases,
     selectedTranscripts,
     selectedRecordings,
+    selectedLocalFolder,
     onConfirm,
     onClose,
   ]);
@@ -544,6 +651,71 @@ export const ContextPickerPanel = ({
           disableAutoFocus
         />
       </div>
+
+      {canPickFolder && (
+        <div className='flex-shrink-0 border-t border-border px-3 py-2'>
+          <div className='flex items-center justify-between gap-2'>
+            <span className='text-[11px] font-medium uppercase tracking-wide text-muted-foreground'>
+              Local folder
+            </span>
+            <button
+              type='button'
+              onClick={chooseFolder}
+              className='flex h-6 flex-shrink-0 items-center gap-1 rounded-md border border-border px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
+              data-track-category='XyneAI'
+              data-track-name='CONTEXT_PICKER_CHOOSE_LOCAL_FOLDER'
+            >
+              <FolderPlus className='h-3.5 w-3.5 shrink-0' aria-hidden />
+              Choose folder…
+            </button>
+          </div>
+          {selectedLocalFolder && (
+            <div
+              className='mt-1.5 flex items-center gap-1.5 rounded-md border border-border bg-muted/60 px-2 py-1'
+              title={selectedLocalFolder.path}
+            >
+              <FolderGit2 className='h-3.5 w-3.5 shrink-0 text-muted-foreground' aria-hidden />
+              <span className='truncate text-xs font-medium text-foreground'>
+                {selectedLocalFolder.name}
+              </span>
+              {selectedLocalFolder.branch && (
+                <span className='flex-shrink-0 text-[11px] text-muted-foreground'>
+                  {selectedLocalFolder.branch}
+                </span>
+              )}
+              <button
+                type='button'
+                onClick={() => setSelectedLocalFolder(null)}
+                className='ml-auto flex-shrink-0 rounded px-1 text-[11px] text-muted-foreground hover:bg-secondary hover:text-foreground'
+                aria-label='Remove local folder'
+                data-track-category='XyneAI'
+                data-track-name='CONTEXT_PICKER_REMOVE_LOCAL_FOLDER'
+              >
+                Remove
+              </button>
+            </div>
+          )}
+          {recentFolders.length > 0 && (
+            <div className='mt-1.5 flex max-h-20 flex-col gap-0.5 overflow-y-auto'>
+              {recentFolders.map(folder => (
+                <button
+                  key={folder.path}
+                  type='button'
+                  onClick={() => setSelectedLocalFolder({ path: folder.path, name: folder.name })}
+                  title={folder.path}
+                  className='flex items-center gap-1.5 rounded-md px-1.5 py-1 text-left hover:bg-accent'
+                  data-track-category='XyneAI'
+                  data-track-name='CONTEXT_PICKER_RECENT_LOCAL_FOLDER'
+                >
+                  <FolderGit2 className='h-3.5 w-3.5 shrink-0 text-muted-foreground' aria-hidden />
+                  <span className='truncate text-xs text-foreground'>{folder.name}</span>
+                  <span className='truncate text-[11px] text-muted-foreground'>{folder.path}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Confirm footer */}
       <div className='flex-shrink-0 border-t border-border px-4 py-2 flex items-center justify-between bg-muted/50 rounded-b-2xl'>

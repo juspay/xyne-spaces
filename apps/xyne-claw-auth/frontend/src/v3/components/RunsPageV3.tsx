@@ -29,6 +29,7 @@ import { RunRow } from "./runs/RunRow";
 import { RunDateRangeFilter } from "./runs/RunDateRangeFilter";
 import { RunListFooter } from "./runs/RunListFooter";
 import { looksLikeSessionId, runOwnerLabel, rangeToIso, type RunRangePreset } from "../lib/runFormat";
+import { runReplayPath } from "../../lib/runReplay";
 import {
   listAgents,
   listRunsPaged,
@@ -429,16 +430,10 @@ export function RunsPageV3({ userId }: { userId: string }) {
                 // API/scheduled runs without one stay non-clickable. Another
                 // user's run carries &allRuns=1 so the chat view opts into the
                 // cross-user read path (the backend gates that on admin + flag).
-                onOpen={
-                  run.conversationId
-                    ? () =>
-                        navigate(
-                          `/v3/chat?agent=${encodeURIComponent(run.agentSlug)}&conversation=${encodeURIComponent(run.conversationId!)}${
-                            run.userId !== userId ? "&allRuns=1" : ""
-                          }`,
-                        )
-                    : undefined
-                }
+                onOpen={(() => {
+                  const path = runReplayPath(run, { allRuns: run.userId !== userId });
+                  return path ? () => navigate(path) : undefined;
+                })()}
               />
             </div>
           </div>

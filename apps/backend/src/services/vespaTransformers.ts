@@ -177,7 +177,7 @@ export interface VespaChatContainerDocument {
   isPrivate: boolean;
   createdBy: string;
   ownerId: string;
-  projectId: string;
+  projectId?: string;
   metadata: string;
   lastActivityAt: number;
   createdAt: number;
@@ -232,7 +232,7 @@ export function transformChannelToVespa(
     isPrivate: channel.visibility === 'PRIVATE',
     createdBy: channel.creator, // Should be email (same as creator)
     ownerId: channel.createdBy, // Should be user ID
-    projectId: channel.projectId,
+    projectId: channel.projectId ?? undefined,
     metadata: JSON.stringify(metadata),
     lastActivityAt: lastActivityAtTime,
     createdAt: createdAtTime,

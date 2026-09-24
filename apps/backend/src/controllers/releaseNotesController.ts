@@ -1,3 +1,4 @@
+import { syncToYSweet } from '@/utils/ysweetUtils';
 import { Request, Response } from 'express';
 import { ReleaseNotesService } from '@/services/releaseNotes/releaseNotesService';
 import { conversationService } from '@/services/conversationService';
@@ -215,17 +216,21 @@ Release notes have been generated for **${ticket.title}**
       const finalTitle = `📝 Release Notes: ${context.release.title} - ${dateStr}`;
 
       const blocks = this.buildReleaseNotesBlocks(markdown, context);
+      const synced = await syncToYSweet(canvasId, blocks, botUser.id);
+      if (!synced) {
+        throw new Error(`Failed to save release notes canvas ${canvasId} to Y-Sweet`);
+      }
 
       await prisma.canvas.create({
         data: {
           id: canvasId,
           title: finalTitle,
-          content: blocks as any,
+          content: [],
           workspaceId,
           createdBy: botUser.id,
           visibility: CanvasVisibility.PUBLIC,
           isTemplate: false,
-          isCollaborative: false,
+          isCollaborative: true,
           lastEditedBy: botUser.id,
           lastEditedAt: now,
           createdAt: now,

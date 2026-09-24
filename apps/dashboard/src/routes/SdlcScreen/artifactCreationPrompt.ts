@@ -2,7 +2,7 @@ export interface SdlcArtifactCreationPromptInput {
   typeLabel: string;
   folderId: string;
   title: string;
-  repositoryName: string;
+  repositoryName?: string;
   direction?: string;
   relatedArtifacts?: Array<{ canvasId: string; title: string }>;
   track?: { id: string; name: string };
@@ -10,7 +10,9 @@ export interface SdlcArtifactCreationPromptInput {
 
 export function buildSdlcArtifactCreationPrompt(input: SdlcArtifactCreationPromptInput): string {
   const direction = input.direction?.trim();
-  const repository = JSON.stringify(input.repositoryName);
+  const repository = input.repositoryName
+    ? `repository ${JSON.stringify(input.repositoryName)}`
+    : 'this SDLC hub';
   const title = JSON.stringify(input.title);
   const typeLabel = input.typeLabel;
   const trackClause = input.track
@@ -25,7 +27,7 @@ export function buildSdlcArtifactCreationPrompt(input: SdlcArtifactCreationPromp
           .join(', ')}.`
       : '';
   const request =
-    `Create a ${typeLabel} titled ${title} in repository ${repository}${trackClause}. ` +
+    `Create a ${typeLabel} titled ${title} in ${repository}${trackClause}. ` +
     `Pass folderId ${JSON.stringify(
       input.folderId,
     )} in the spaces-sdlc-mutate-artifact create call so it is filed under the ${typeLabel} type.` +

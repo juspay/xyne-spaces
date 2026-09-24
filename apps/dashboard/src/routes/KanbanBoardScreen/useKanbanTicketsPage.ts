@@ -27,8 +27,10 @@ export type KanbanViewMode = 'project' | 'board' | 'my-tickets';
 export type KanbanPageGroupBy =
   | 'none'
   | 'assignee'
+  | 'createdBy'
   | 'status'
   | 'priority'
+  | 'merchantId'
   | {
       type: 'formField';
       fieldId: string;
@@ -194,6 +196,9 @@ const canRepresentGroupInVespa = (
   if (groupBy === 'priority') {
     return Boolean(groupKey) && groupKey !== 'No Priority';
   }
+  if (groupBy === 'createdBy') {
+    return Boolean(groupKey) && groupKey !== 'Unknown';
+  }
   if (groupBy === 'status') {
     return Boolean(groupKey);
   }
@@ -204,7 +209,7 @@ const canRepresentGroupInVespa = (
   return true;
 };
 
-const getDynamicFieldScalarFilters = (
+export const getDynamicFieldScalarFilters = (
   filters: TicketFilters | undefined,
   zeroOnlyDynamicFieldIds: string[] | undefined,
 ): DynamicFieldScalarFilter[] | undefined => {
@@ -226,7 +231,7 @@ const getDynamicFieldScalarFilters = (
   return scalarFilters.length > 0 ? scalarFilters : undefined;
 };
 
-const getFormFieldValue = (
+export const getFormFieldValue = (
   groupBy: KanbanPageGroupBy | undefined,
   groupKey: string | undefined,
 ): string | number | boolean | undefined => {
@@ -243,7 +248,7 @@ const getFormFieldValue = (
   return groupKey;
 };
 
-const toQueryFilters = (
+export const toQueryFilters = (
   filters: TicketFilters | undefined,
 ): KanbanTicketsPageQueryArgs['filters'] => {
   if (!filters) return undefined;
@@ -264,6 +269,7 @@ const toQueryFilters = (
     created: filters.created,
     stages: filters.stages,
     ticketTypes: filters.ticketTypes,
+    merchantIds: filters.merchantIds,
     sourceChannels: filters.sourceChannels,
   };
 };
@@ -333,6 +339,8 @@ const hasFiltersVespaCannotApply = (
   // (ticketTypes is absent on purpose: it is not indexed in Vespa either, but the Zero
   // overlay in overlaidDirectVespaPage applies it on top of the search results instead.)
   if (filters?.sourceChannels?.length) return true;
+  // merchantId is not indexed in Vespa (search rows carry merchantId: null).
+  if (filters?.merchantIds?.length) return true;
   // Sent only in representable cases (single board, non-inverted assignee, ...); when the
   // pushdown value is undefined the filter is active but absent from the query.
   if (filters?.boards?.length && !pushdown.boardId) return true;
@@ -347,27 +355,23 @@ const hasFiltersVespaCannotApply = (
   return false;
 };
 
-export const useKanbanTicketsPage = (
+/**
+ * A kanban column's Vespa search. While searching (outside form-field grouping) the request
+ * leaves out the column and group, so the board calls this once too: the search then runs
+ * on every input even when every group is collapsed, and open columns reuse that call.
+ */
+export const useKanbanVespaSearch = (
   options: UseKanbanTicketsPageOptions,
-): UseKanbanTicketsPageResult => {
-  const [ticketsState, setTicketsState] = useState<TicketsState>({ queryKey: '', tickets: [] });
-  const [fetchCursorState, setFetchCursorState] = useState<FetchCursorState | null>(null);
-  // The page cursor is an INCLUSIVE createdAt bound (see kanbanTicketsPageV3), so the
-  // boundary tie group is re-fetched and de-duplicated below. If a whole page is
-  // nothing but already-seen rows the tie group is bigger than the page, and paging
-  // would stall — widen the page until it clears.
-  const [tieSlack, setTieSlack] = useState(0);
-  /** Index into WINDOW_STEPS_MS; === length means "no window bound". */
-  const [windowStep, setWindowStep] = useState(0);
-  const windowAnchorRef = useRef<{ queryKey: string; anchor: number } | null>(null);
-  // Mirrors ticketsState so the page merge can be computed in the effect body rather
-  // than inside a setState updater (updaters must stay pure — StrictMode calls them twice).
-  const ticketsStateRef = useRef<TicketsState>({ queryKey: '', tickets: [] });
-  const expectedCountRef = useRef<number | undefined>(undefined);
-  const [nextCursor, setNextCursor] = useState<KanbanCursor | null>(null);
-  const [hasMore, setHasMore] = useState(true);
-  const isLoadingMoreRef = useRef(false);
-  const overdueReferenceTimeRef = useRef<number | null>(null);
+  enabled = true,
+): {
+  hasSearchTerm: boolean;
+  requiresVespaTicketIds: boolean;
+  skipColumnFiltersForSearch: boolean;
+  /** Every active filter is in the Vespa query (group membership aside). */
+  filtersFitVespa: boolean;
+  shouldUseDirectVespaRows: boolean;
+  vespaTicketSearch: ReturnType<typeof useVespaTicketSearch>;
+} => {
   // Already the final query: any quotes were typed into the search box, and the backend
   // reads exactness off them (`isExactMatch` in the Vespa searchService).
   const trimmedSearchTerm = options.searchTerm?.trim() ?? '';
@@ -432,7 +436,12 @@ export const useKanbanTicketsPage = (
 
   // Compute group-specific filter for Vespa based on groupBy/groupKey
   // This ensures search results are filtered to only show in the correct group
-  const vespaGroupFilter: { priority?: string; assignee?: string; status?: string } = (() => {
+  const vespaGroupFilter: {
+    priority?: string;
+    assignee?: string;
+    createdBy?: string;
+    status?: string;
+  } = (() => {
     if (!options.groupBy || options.groupBy === 'none' || !options.groupKey) {
       return {};
     }
@@ -447,6 +456,10 @@ export const useKanbanTicketsPage = (
       // Send bare ID - the backend expands to all identity forms for Vespa matching.
       const bareId = options.groupKey.replace(/^(user:|group:|userGroup:)/, '');
       return { assignee: bareId };
+    }
+    if (options.groupBy === 'createdBy') {
+      if (options.groupKey === 'Unknown') return {};
+      return { createdBy: options.groupKey.replace(/^(user:|group:|userGroup:)/, '') };
     }
     if (options.groupBy === 'status') {
       // Filter by the group's status value
@@ -482,7 +495,7 @@ export const useKanbanTicketsPage = (
 
   // Declared after every pushdown value above, since it requires that each active filter
   // made it into the Vespa query — direct-Vespa rows are rendered without re-filtering.
-  const shouldUseDirectVespaRows =
+  const filtersFitVespa =
     requiresVespaTicketIds &&
     !hasZeroOnlyFilters(
       options.filters,
@@ -498,8 +511,9 @@ export const useKanbanTicketsPage = (
       tags: vespaTags,
       stage: vespaStage,
     }) &&
-    canRepresentGroupInVespa(options.groupBy, options.groupKey) &&
     !options.showOverdueOnly;
+  const shouldUseDirectVespaRows =
+    filtersFitVespa && canRepresentGroupInVespa(options.groupBy, options.groupKey);
 
   // Create a search key that changes when the group context changes
   // This forces the search to re-trigger when switching views
@@ -522,6 +536,7 @@ export const useKanbanTicketsPage = (
         boards: options.filters?.boards ?? [],
         stages: options.filters?.stages ?? [],
         ticketTypes: options.filters?.ticketTypes ?? [],
+        merchantIds: options.filters?.merchantIds ?? [],
         sourceChannels: options.filters?.sourceChannels ?? [],
         userGroups: options.filters?.userGroups ?? [],
         dynamicFields: options.filters?.dynamicFields ?? {},
@@ -536,7 +551,7 @@ export const useKanbanTicketsPage = (
   const vespaTicketSearch = useVespaTicketSearch({
     searchTerm: trimmedSearchTerm,
     dynamicFieldValues: pageVespaTokens,
-    enabled: requiresVespaTicketIds,
+    enabled: requiresVespaTicketIds && enabled,
     limit: hasSearchTerm ? 400 : 200,
     fetchAllDynamicFieldMatches: true,
     maxFetchedResults: hasSearchTerm ? 800 : 400,
@@ -560,6 +575,45 @@ export const useKanbanTicketsPage = (
     // Skip group filters when searching (will segregate in frontend)
     ...(!skipColumnFiltersForSearch ? vespaGroupFilter : {}),
   });
+
+  return {
+    hasSearchTerm,
+    requiresVespaTicketIds,
+    skipColumnFiltersForSearch,
+    filtersFitVespa,
+    shouldUseDirectVespaRows,
+    vespaTicketSearch,
+  };
+};
+
+export const useKanbanTicketsPage = (
+  options: UseKanbanTicketsPageOptions,
+): UseKanbanTicketsPageResult => {
+  const [ticketsState, setTicketsState] = useState<TicketsState>({ queryKey: '', tickets: [] });
+  const [fetchCursorState, setFetchCursorState] = useState<FetchCursorState | null>(null);
+  // The page cursor is an INCLUSIVE createdAt bound (see kanbanTicketsPageV3), so the
+  // boundary tie group is re-fetched and de-duplicated below. If a whole page is
+  // nothing but already-seen rows the tie group is bigger than the page, and paging
+  // would stall — widen the page until it clears.
+  const [tieSlack, setTieSlack] = useState(0);
+  /** Index into WINDOW_STEPS_MS; === length means "no window bound". */
+  const [windowStep, setWindowStep] = useState(0);
+  const windowAnchorRef = useRef<{ queryKey: string; anchor: number } | null>(null);
+  // Mirrors ticketsState so the page merge can be computed in the effect body rather
+  // than inside a setState updater (updaters must stay pure — StrictMode calls them twice).
+  const ticketsStateRef = useRef<TicketsState>({ queryKey: '', tickets: [] });
+  const expectedCountRef = useRef<number | undefined>(undefined);
+  const [nextCursor, setNextCursor] = useState<KanbanCursor | null>(null);
+  const [hasMore, setHasMore] = useState(true);
+  const isLoadingMoreRef = useRef(false);
+  const overdueReferenceTimeRef = useRef<number | null>(null);
+  const {
+    hasSearchTerm,
+    requiresVespaTicketIds,
+    skipColumnFiltersForSearch,
+    shouldUseDirectVespaRows,
+    vespaTicketSearch,
+  } = useKanbanVespaSearch(options);
   const directVespaPage = useMemo(() => {
     if (!shouldUseDirectVespaRows) return null;
 
@@ -609,8 +663,20 @@ export const useKanbanTicketsPage = (
             if ((ticket.priority as string) !== options.groupKey) return false;
           }
         }
+        if (options.groupBy === 'createdBy' && options.groupKey) {
+          if (normalizeIdentity(ticket.createdBy) !== normalizeIdentity(options.groupKey)) {
+            return false;
+          }
+        }
         if (options.groupBy === 'status' && options.groupKey) {
           if ((ticket.statusV2 as string) !== options.groupKey) return false;
+        }
+        if (options.groupBy === 'merchantId' && options.groupKey) {
+          if (options.groupKey === 'No Merchant') {
+            if (ticket.merchantId) return false;
+          } else {
+            if (ticket.merchantId !== options.groupKey) return false;
+          }
         }
 
         return true;

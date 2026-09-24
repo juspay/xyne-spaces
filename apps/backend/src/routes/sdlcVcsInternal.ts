@@ -1,5 +1,6 @@
 import { Router, type NextFunction, type Request, type Response } from 'express';
 import { bootstrapSdlcRuntimeCredentialSchema, createSdlcPullRequestSchema } from '@xyne/shared';
+import { AppError } from '@/middleware/errorHandler';
 import { sdlcVcs } from '@/sdlc/vcs';
 
 const router = Router();
@@ -14,9 +15,11 @@ router.post(
   '/runtime-credentials/bootstrap',
   route(async (req, res) => {
     const binding = bootstrapSdlcRuntimeCredentialSchema.parse(req.body);
-    const envelope = await sdlcVcs.bootstrapSandboxCredential(binding);
+    const { envelope, repository } = await sdlcVcs.bootstrapSandboxCredential(binding);
     res.status(200).json(
-      envelope ? { success: true, envelope } : { success: true, anonymous: true }
+      envelope
+        ? { success: true, envelope, repository }
+        : { success: true, anonymous: true, repository }
     );
   }),
 );
@@ -25,7 +28,11 @@ router.post(
   '/pull-requests',
   route(async (req, res) => {
     const input = createSdlcPullRequestSchema.parse(req.body);
-    const pullRequest = await sdlcVcs.createDraftPullRequest(input);
+    // Without hub context the model fills actorUserId, so the signed session's user decides.
+    if (input.actorUserId && String(req.headers['x-xyne-acting-user-id'] ?? '').trim() !== input.actorUserId) {
+      throw new AppError('SDLC pull request binding mismatch', 403);
+    }
+    const pullRequest = await sdlcVcs.createPullRequest(input);
     res.status(201).json({ success: true, pullRequest });
   }),
 );

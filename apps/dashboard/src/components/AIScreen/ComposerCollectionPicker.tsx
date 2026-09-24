@@ -114,12 +114,18 @@ export function ComposerCollectionPicker({
   }, [allSubfolders, currentFolderId, fileQuery]);
 
   const currentFiles = useMemo(() => {
+    // CollectionItem.id (cuid, "rowId" here) is the id attached_context 'file'
+    // items carry — see toAttachedContext in ContextPickerPanel.tsx. Filter on
+    // fileId (the stable UUID) existing so folders/placeholder rows are
+    // excluded, but store rowId as the scope's id.
     return (currentFolderItems ?? [])
       .map(it => ({
+        rowId: (it as { id?: string }).id ?? '',
         fileId: (it as { fileId?: string }).fileId ?? '',
         name: (it as { name: string }).name,
       }))
-      .filter(it => it.fileId && (!fileQuery || it.name.toLowerCase().includes(fileQuery)));
+      .filter(it => it.fileId && (!fileQuery || it.name.toLowerCase().includes(fileQuery)))
+      .map(({ rowId, name }) => ({ rowId, name }));
   }, [currentFolderItems, fileQuery]);
 
   // Reset navigation + search whenever the picker closes.
@@ -171,14 +177,14 @@ export function ComposerCollectionPicker({
   );
 
   const handleToggleFile = useCallback(
-    (file: { fileId: string; name: string }) => {
+    (file: { rowId: string; name: string }) => {
       // Toggle this file in/out of the multi-select set — keep the picker open
       // so several files (across folders) can be picked in one pass.
-      const isSelected = fileScopes.some(f => f.id === file.fileId);
+      const isSelected = fileScopes.some(f => f.id === file.rowId);
       onFileScopesChange(
         isSelected
-          ? fileScopes.filter(f => f.id !== file.fileId)
-          : [...fileScopes, { id: file.fileId, name: file.name }],
+          ? fileScopes.filter(f => f.id !== file.rowId)
+          : [...fileScopes, { id: file.rowId, name: file.name }],
       );
       // Keep the file's root collection in scope so the backend can resolve it.
       const root = navStack[0];
@@ -299,10 +305,10 @@ export function ComposerCollectionPicker({
                     );
                   })}
                   {currentFiles.map(file => {
-                    const isSelected = fileScopes.some(f => f.id === file.fileId);
+                    const isSelected = fileScopes.some(f => f.id === file.rowId);
                     return (
                       <button
-                        key={file.fileId}
+                        key={file.rowId}
                         type='button'
                         onClick={() => handleToggleFile(file)}
                         className={cn(

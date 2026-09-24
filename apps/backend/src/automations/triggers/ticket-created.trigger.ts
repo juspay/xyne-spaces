@@ -16,14 +16,14 @@ import {
 export const TICKET_CREATED_EVENT = 'TICKET_CREATED';
 
 const TicketCreatedConfigSchema = z.object({
-  boardIds: z
-    .array(z.string())
-    .optional()
-    .describe('Limit to tickets on these boards. Empty matches every board you can see.'),
   projectIds: z
     .array(z.string())
     .optional()
     .describe('Limit to tickets on these projects. Empty matches every project.'),
+  boardIds: z
+    .array(z.string())
+    .optional()
+    .describe('Limit to tickets on these boards. Empty matches every board you can see.'),
   channelIds: z
     .array(z.string())
     .optional()

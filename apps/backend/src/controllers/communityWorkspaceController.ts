@@ -381,6 +381,8 @@ export class CommunityWorkspaceController {
           appVersion: req.headers['x-app-version'],
         }),
         ipAddress: req.ip || req.connection.remoteAddress || undefined,
+        // Already signed in — a session for the community workspace they just joined.
+        loginMethod: 'WORKSPACE_JOINED',
       });
 
       return session.id;

@@ -36,6 +36,7 @@ export type ResultsMention = {
 export interface FilterResolvers {
   userName: (id: string) => string | undefined;
   channelName: (id: string) => string | undefined;
+  userGroupName?: (id: string) => string | undefined;
   boardName?: (id: string) => string | undefined;
 }
 
@@ -49,6 +50,8 @@ export type TokenIcon =
   // Carries the id so the renderer can pick hash / lock / person from the channel's
   // visibility and scope, the way the palette's chips do.
   | { kind: 'channel'; channelId: string }
+  // A user-group always reads as the same people glyph — no id-dependent variant like a channel.
+  | { kind: 'userGroup' }
   | { kind: 'priority'; value: string }
   | { kind: 'date' }
   | { kind: 'board' }
@@ -529,18 +532,23 @@ export const FILTER_REGISTRY: FilterEntry[] = [
   {
     id: 'mentions',
     label: 'Mentions',
-    params: ['mentions', 'channelMentions'],
+    params: ['mentions', 'channelMentions', 'groupMentions'],
     syntax: 'mentions:',
     appliesTo: isMessageType,
-    isActive: f => f.mentionUserIds.length > 0 || f.mentionChannelIds.length > 0,
-    cleared: { mentionUserIds: [], mentionChannelIds: [] },
+    isActive: f =>
+      f.mentionUserIds.length > 0 ||
+      f.mentionChannelIds.length > 0 ||
+      f.mentionUserGroupIds.length > 0,
+    cleared: { mentionUserIds: [], mentionChannelIds: [], mentionUserGroupIds: [] },
     read: params => ({
       mentionUserIds: csv(params.get('mentions')),
       mentionChannelIds: csv(params.get('channelMentions')),
+      mentionUserGroupIds: csv(params.get('groupMentions')),
     }),
     write: (f, params) => {
       setOrDelete(params, 'mentions', f.mentionUserIds.join(','));
       setOrDelete(params, 'channelMentions', f.mentionChannelIds.join(','));
+      setOrDelete(params, 'groupMentions', f.mentionUserGroupIds.join(','));
     },
     chips: (f, resolve) => [
       ...f.mentionUserIds.map(id => ({
@@ -555,14 +563,22 @@ export const FILTER_REGISTRY: FilterEntry[] = [
         prefix: 'mentions:' as const,
         name: resolve.channelName(id) ?? id,
       })),
+      ...f.mentionUserGroupIds.map(id => ({
+        id,
+        type: ChipType.USER_GROUP,
+        prefix: 'mentions:' as const,
+        name: resolve.userGroupName?.(id) ?? id,
+      })),
     ],
     // Prefix-less chips are still accepted: `hi @vishal` produced them before `mentions:`
-    // existed, and a saved URL can still bring one back.
+    // existed, and a saved URL can still bring one back. Groups are always picked, so they
+    // only ever arrive with the `mentions:` prefix.
     fromChips: mentions => {
       const mine = mentions.filter(m => m.prefix === 'mentions:' || !m.prefix);
       return {
         mentionUserIds: mine.filter(m => m.type === ChipType.USER).map(m => m.id),
         mentionChannelIds: mine.filter(m => m.type === ChipType.CHANNEL).map(m => m.id),
+        mentionUserGroupIds: mine.filter(m => m.type === ChipType.USER_GROUP).map(m => m.id),
       };
     },
     tokens: (f, resolve) => [
@@ -582,8 +598,15 @@ export const FILTER_REGISTRY: FilterEntry[] = [
         patch: { mentionChannelIds: f.mentionChannelIds.filter(v => v !== id) },
         icon: { kind: 'channel', channelId: id } as const,
       })),
+      ...f.mentionUserGroupIds.map(id => ({
+        key: `mentions-group-${id}`,
+        prefix: 'mentions:',
+        label: `@${resolve.userGroupName?.(id) ?? id}`,
+        patch: { mentionUserGroupIds: f.mentionUserGroupIds.filter(v => v !== id) },
+        icon: { kind: 'userGroup' } as const,
+      })),
     ],
-    control: { kind: 'mentions', placeholder: 'e.g. Emily Anderson or general' },
+    control: { kind: 'mentions', placeholder: 'e.g. Emily Anderson, general or Frontend Team' },
   },
   {
     id: 'date',

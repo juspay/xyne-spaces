@@ -76,6 +76,7 @@ const kanbanTicketPageFiltersSchema = z.object({
   created: z.boolean().optional(),
   stages: z.array(z.string()).optional(),
   ticketTypes: z.array(z.string()).optional(),
+  merchantIds: z.array(z.string()).optional(),
   sourceChannels: z.array(z.string()).optional(),
 });
 
@@ -97,7 +98,7 @@ const kanbanTicketsPageArgsSchema = z.object({
     .nullable(),
   groupBy: z
     .union([
-      z.enum(['none', 'assignee', 'status', 'priority']),
+      z.enum(['none', 'assignee', 'createdBy', 'status', 'priority', 'merchantId']),
       z.object({
         type: z.literal('formField'),
         fieldId: z.string(),
@@ -146,6 +147,14 @@ const kanbanTicketsPageV3ArgsSchema = kanbanTicketsPageV2ArgsSchema.extend({
 });
 
 type KanbanTicketsPageV3Args = z.infer<typeof kanbanTicketsPageV3ArgsSchema>;
+
+// Table list view paging: kanban's page args minus the column dimension,
+// forward-only, with a real exclusive keyset cursor.
+const tableTicketsPageArgsSchema = kanbanTicketsPageV3ArgsSchema.omit({
+  stageName: true,
+  columnType: true,
+  dir: true,
+});
 
 const prefixedKanbanIdentityValues = (id: string): string[] => [
   id,
@@ -418,6 +427,10 @@ const applyKanbanTicketPageConditions = (
     query = query.where('ticketType', 'IN', filters.ticketTypes);
   }
 
+  if (filters?.merchantIds?.length) {
+    query = query.where('merchantId', 'IN', filters.merchantIds);
+  }
+
   if (filters?.sourceChannels?.length) {
     query = query.where('channelId', 'IN', filters.sourceChannels);
   }
@@ -472,10 +485,19 @@ const applyKanbanTicketPageConditions = (
       groupKey === 'Unassigned'
         ? query.where('assignedTo', 'IS', null)
         : query.where('assignedTo', groupKey);
+  } else if (groupBy === 'createdBy' && groupKey) {
+    query = query.where('createdBy', groupKey);
   } else if (groupBy === 'status' && groupKey) {
     query = query.where('statusV2', groupKey as TicketStatusV2);
   } else if (groupBy === 'priority' && groupKey) {
     query = query.where('priority', groupKey as TicketPriority);
+  } else if (groupBy === 'merchantId' && groupKey) {
+    // merchantId is nullable, so the catch-all bucket maps to IS NULL rather
+    // than an equality match — same shape as the 'Unassigned' assignee bucket.
+    query =
+      groupKey === 'No Merchant'
+        ? query.where('merchantId', 'IS', null)
+        : query.where('merchantId', groupKey);
   } else if (typeof groupBy === 'object' && groupBy.type === 'formField' && formFieldValue !== undefined) {
     query = query.whereExists('formEntityValues', (formEntityValue: any) =>
       formEntityValue
@@ -1203,6 +1225,44 @@ export const queries: AnyQueryRegistry = defineQueries({
     },
   ),
 
+  tableTicketsPage: defineQuery(tableTicketsPageArgsSchema, ({ ctx, args }) => {
+    // Empty stageName = no stage pin; the page spans every stage.
+    let query = applyKanbanTicketPageV3Conditions(zql.tickets, ctx, {
+      ...args,
+      stageName: '',
+    } as KanbanTicketsPageV3Args)
+      .orderBy('createdAt', 'desc')
+      // id tiebreak keeps the (createdAt, id) keyset cursor deterministic on ties.
+      .orderBy('id', 'desc');
+
+    if (args.start) {
+      query = query.start(
+        { createdAt: args.start.createdAt, id: args.start.id },
+        { inclusive: false },
+      );
+    }
+
+    if (args.createdAfter !== undefined) {
+      query = query.where('createdAt', '>=', args.createdAfter);
+    }
+
+    let finalQuery = query
+      .limit(args.limit)
+      .related('assignments', (a: any) => a.related('role'))
+      .related('tagMappings');
+
+    if (args.formEntityValueFieldIds?.length) {
+      finalQuery = finalQuery.related('formEntityValues', (fev: any) =>
+        fev
+          .where('fieldId', 'IN', args.formEntityValueFieldIds ?? [])
+          .related('formField')
+          .related('globalField'),
+      );
+    }
+
+    return finalQuery;
+  }),
+
   workflowsPaginated: defineQuery(
     z.object({
       limit: z.number(),
@@ -1502,7 +1562,34 @@ export const queries: AnyQueryRegistry = defineQueries({
       }
 
       if (assignedTo && assignedTo.length > 0) {
-        query = query.where('assignedTo', 'IN', assignedTo);
+        // Desk tickets store a raw user id in assignedTo (no user:/group: prefixing).
+        // The shared 'Unassigned' sentinel filters tickets with no assignee
+        // (zero stores nullable strings, so unassigned = IS null OR '').
+        const { inverted, includeUnassigned, ids } = parseAssigneeFilter(assignedTo);
+        if (!inverted) {
+          query = query.where(({ or, cmp }) =>
+            or(
+              ...(ids.length ? [cmp('assignedTo', 'IN', ids)] : []),
+              ...(includeUnassigned ? [cmp('assignedTo', 'IS', null), cmp('assignedTo', '')] : []),
+            ),
+          );
+        } else if (includeUnassigned) {
+          query = query.where(({ and, cmp }) =>
+            and(
+              ...(ids.length ? [cmp('assignedTo', 'NOT IN', ids)] : []),
+              cmp('assignedTo', 'IS NOT', null),
+              cmp('assignedTo', '!=', ''),
+            ),
+          );
+        } else {
+          query = query.where(({ or, cmp }) =>
+            or(
+              cmp('assignedTo', 'NOT IN', ids),
+              cmp('assignedTo', 'IS', null),
+              cmp('assignedTo', ''),
+            ),
+          );
+        }
       }
 
       if (createdBy && createdBy.length > 0) {
@@ -2055,7 +2142,34 @@ export const queries: AnyQueryRegistry = defineQueries({
       query = query.where('isArchived', false);
 
       if (assignedTo && assignedTo.length > 0) {
-        query = query.where('assignedTo', 'IN', assignedTo);
+        // Desk tickets store a raw user id in assignedTo (no user:/group: prefixing).
+        // The shared 'Unassigned' sentinel filters tickets with no assignee
+        // (zero stores nullable strings, so unassigned = IS null OR '').
+        const { inverted, includeUnassigned, ids } = parseAssigneeFilter(assignedTo);
+        if (!inverted) {
+          query = query.where(({ or, cmp }) =>
+            or(
+              ...(ids.length ? [cmp('assignedTo', 'IN', ids)] : []),
+              ...(includeUnassigned ? [cmp('assignedTo', 'IS', null), cmp('assignedTo', '')] : []),
+            ),
+          );
+        } else if (includeUnassigned) {
+          query = query.where(({ and, cmp }) =>
+            and(
+              ...(ids.length ? [cmp('assignedTo', 'NOT IN', ids)] : []),
+              cmp('assignedTo', 'IS NOT', null),
+              cmp('assignedTo', '!=', ''),
+            ),
+          );
+        } else {
+          query = query.where(({ or, cmp }) =>
+            or(
+              cmp('assignedTo', 'NOT IN', ids),
+              cmp('assignedTo', 'IS', null),
+              cmp('assignedTo', ''),
+            ),
+          );
+        }
       }
 
       if (createdBy && createdBy.length > 0) {
@@ -2366,6 +2480,7 @@ export const queries: AnyQueryRegistry = defineQueries({
   ticketByIdV2: defineQuery(z.object({ ticketId: z.string() }), ({ args: { ticketId } }) => {
     return zql.tickets
       .where('id', ticketId)
+      .related('ticketDescription')
       .related('project')
       .related('tagMappings')
       .related('assignments', a => a.related('role'))
@@ -2396,6 +2511,7 @@ export const queries: AnyQueryRegistry = defineQueries({
   ticketDetailsByIdV2: defineQuery(z.object({ ticketId: z.string() }), ({ args: { ticketId } }) => {
     return zql.tickets
       .where('id', ticketId)
+      .related('ticketDescription')
       .related('project')
       .related('tagMappings')
       .related('assignments', a => a.related('role'))
@@ -2437,6 +2553,7 @@ export const queries: AnyQueryRegistry = defineQueries({
     return zql.tickets
       .where('xyneId', xyneId)
       .where('workspaceId', workspaceId)
+      .related('ticketDescription')
       .related('project')
       .related('tagMappings')
       .related('referencesOut', (ref) => ref.related('targetTicket'))
@@ -2449,7 +2566,9 @@ export const queries: AnyQueryRegistry = defineQueries({
   ticketsByIds: defineQuery(
     z.object({ ticketIds: z.array(z.string()) }),
     ({ args: { ticketIds } }) => {
-      return zql.tickets.where((helpers) => helpers.cmp('id', 'IN', ticketIds));
+      return zql.tickets
+        .where((helpers) => helpers.cmp('id', 'IN', ticketIds))
+        .related('tagMappings');
     }
   ),
 
@@ -2882,6 +3001,24 @@ export const queries: AnyQueryRegistry = defineQueries({
       .related('participants', p => p.where('userId', ctx.userID));
   }),
 
+  /**
+   * Scheduled calls within a time window (normal view optimization).
+   * Used by the upcoming calls list which only shows 2 days.
+   * Pass startsBefore as epoch ms - calls with startsAt < startsBefore are returned.
+   */
+  userUpcomingScheduledCalls: defineQuery(
+    z.object({
+      startsBefore: z.number(),
+    }),
+    ({ ctx, args: { startsBefore } }) => {
+      return zql.calls
+        .where('status', CallStatus.SCHEDULED)
+        .where(helpers => helpers.cmp('startsAt', '<', startsBefore))
+        .orderBy('startsAt', 'asc')
+        .related('participants', p => p.where('userId', ctx.userID));
+    },
+  ),
+
   userCallHistory: defineQuery(
     z.object({
       limit: z.number(),
@@ -2919,6 +3056,40 @@ export const queries: AnyQueryRegistry = defineQueries({
             CallStatus.CANCELLED,
           ]),
         )
+        .orderBy('startedAt', 'desc')
+        .orderBy('id', 'desc');
+
+      if (start) {
+        query = query.start({ id: start.id, startedAt: start.startedAt }, { inclusive: false });
+      }
+
+      return query
+        .limit(limit)
+        .related('participants', p => p.where('userId', ctx.userID));
+    },
+  ),
+
+  /**
+   * Call history filtered to only calls where user is an explicit participant.
+   * Used when "Include all channel calls" toggle is OFF (default).
+   * More efficient than userCallHistoryV2 as it skips channel-level access calls.
+   */
+  userCallHistoryParticipantOnly: defineQuery(
+    z.object({
+      limit: z.number(),
+      start: z.object({ id: z.string(), startedAt: z.number() }).nullable(),
+    }),
+    ({ ctx, args: { limit, start } }) => {
+      let query = zql.calls
+        .where(helpers => helpers.cmp('callType', 'NOT IN', [CallType.HEADLESS]))
+        .where(helpers =>
+          helpers.cmp('status', 'NOT IN', [
+            CallStatus.ACTIVE,
+            CallStatus.SCHEDULED,
+            CallStatus.CANCELLED,
+          ]),
+        )
+        .whereExists('participants', p => p.where('userId', ctx.userID))
         .orderBy('startedAt', 'desc')
         .orderBy('id', 'desc');
 
@@ -3578,18 +3749,22 @@ export const queries: AnyQueryRegistry = defineQueries({
 
   canvasCommentThreads: defineQuery(
     z.object({ canvasId: z.string() }),
-    ({ args: { canvasId } }) => {
+    ({ ctx, args: { canvasId } }) => {
       return zql.canvas_comment_threads
+        .where('workspaceId', ctx.workspaceId)
         .where('canvasId', canvasId)
         .orderBy('createdAt', 'asc')
-        .related('initialComment');
+        .related('initialComment', comment =>
+          comment.where('workspaceId', ctx.workspaceId),
+        );
     },
   ),
 
   canvasThreadComments: defineQuery(
     z.object({ threadId: z.string() }),
-    ({ args: { threadId } }) => {
+    ({ ctx, args: { threadId } }) => {
       return zql.canvas_comments
+        .where('workspaceId', ctx.workspaceId)
         .where('threadId', threadId)
         .orderBy('createdAt', 'asc');
     },
@@ -3738,12 +3913,25 @@ export const queries: AnyQueryRegistry = defineQueries({
   // Boards mapped to a channel via ChannelBoardMapping.
   // Preferred path for resolving channel → boards; consumer falls back to
   // boardsListByProject if the mapping is empty.
+  // Existence probe for "does this channel have any boards". Deliberately does not
+  // load the related board rows: chat surfaces ask this on every channel just to
+  // decide whether to render a control, and boardsByChannel would pull the whole
+  // mapping set with its joins for a question a single row answers.
+  channelHasBoards: defineQuery(z.object({ channelId: z.string() }), ({ args: { channelId } }) => {
+    return zql.channel_board_mappings.where('channelId', channelId).limit(1);
+  }),
+
   boardsByChannel: defineQuery(
     z.object({ channelId: z.string() }),
     ({ args: { channelId } }) => {
+      // isDefault first, then oldest link — identical to the server-side resolver
+      // resolveChannelDefaultBoard (channelDefaultBoard.ts). Consumers treat the
+      // first row as the channel's default board, so the two must agree or the UI
+      // opens on a different board than inbound email/Slack flows write to.
       return zql.channel_board_mappings
         .where('channelId', channelId)
         .related('board')
+        .orderBy('isDefault', 'desc')
         .orderBy('createdAt', 'asc');
     },
   ),
@@ -3787,6 +3975,42 @@ export const queries: AnyQueryRegistry = defineQueries({
             ),
           ),
         );
+    }
+  ),
+
+  // All app/bot participants of a channel — used at the parent for the
+  // Agents & Apps tab count.
+  channelAppParticipants: defineQuery(
+    z.object({ channelId: z.string() }),
+    ({ args: { channelId } }) => {
+      return zql.channel_participants
+        .where('channelId', channelId)
+        .whereExists('user', (u) =>
+          u.where('userType', 'IN', [UserType.APP, UserType.BOT]),
+        );
+    }
+  ),
+
+  // Paginated human members of a channel — excludes apps/bots server-side so
+  // the Members tab never leaks them into its list.
+  channelHumanParticipantsPaginated: defineQuery(
+    z.object({
+      channelId: z.string(),
+      limit: z.number(),
+      start: z.object({ role: z.nativeEnum(ChannelRole), userId: z.string() }).nullable(),
+    }),
+    ({ args: { channelId, limit, start } }) => {
+      let query = zql.channel_participants
+        .where('channelId', channelId)
+        .whereExists('user', (u) => u.where('userType', '=', UserType.USER))
+        .orderBy('role', 'asc')
+        .orderBy('userId', 'asc');
+
+      if (start) {
+        query = query.start({ role: start.role, userId: start.userId }, { inclusive: false });
+      }
+
+      return query.limit(limit);
     }
   ),
 
@@ -4701,6 +4925,25 @@ dmChannelsLatestMessagesPaginated: defineQuery(
         link.where('channelId', channelId).where('relationType', SDLC_TRACK_FLAT_RELATION),
       ),
   ),
+  /** Every comment left on one hub entity, oldest first.
+   *  Scoped the way SdlcItemCommentsACL scopes writes: the commented entity
+   *  must sit in a hub the caller belongs to. Without this an entity id is
+   *  enough to read another workspace's comments. */
+  getSdlcItemComments: defineQuery(
+    z.object({ entityType: z.string(), entityId: z.string() }),
+    ({ ctx, args: { entityType, entityId } }) =>
+      zql.sdlc_item_comments
+        .where('entityType', entityType)
+        .where('entityId', entityId)
+        .whereExists('sdlcEntityLinks', link =>
+          link.whereExists('channel', channel =>
+            channel.whereExists('participants', participant =>
+              participant.where('userId', ctx.userID),
+            ),
+          ),
+        )
+        .orderBy('createdAt', 'asc'),
+  ),
   getSdlcHubLinks: defineQuery(
     z.object({ channelId: z.string() }),
     // Same visibility rule channelLinks applies: LinksACL checks workspace and
@@ -5221,6 +5464,17 @@ dmChannelsLatestMessagesPaginated: defineQuery(
       return zql.applications.where('projectId', projectId);
     },
   ),
+  // Multi-project variant, for callers whose boards can span projects (a channel's
+  // linked boards come from channel_board_mappings and are not confined to one
+  // project). The IN-list stays stable for the same reason the single-arg version
+  // above does: it is keyed on the caller's board set, not on the user's current
+  // board selection.
+  applicationsByProjectIds: defineQuery(
+    z.object({ projectIds: z.array(z.string()) }),
+    ({ args: { projectIds } }) => {
+      return zql.applications.where(helpers => helpers.cmp('projectId', 'IN', projectIds));
+    },
+  ),
 
   releaseTicketsSearch: defineQuery(
     z.object({
@@ -5593,18 +5847,6 @@ dmChannelsLatestMessagesPaginated: defineQuery(
   ),
 
   // Recap Queries
-  projectRecaps: defineQuery(
-    z.object({
-      recapDate: z.number(),
-    }),
-    ({ ctx, args: { recapDate } }) => {
-      return zql.recaps
-        .where('recapDate', recapDate)
-        .where('entityType', RecapEntityType.PROJECT)
-        .where('userId', '=', ctx.userID);
-    },
-  ),
-
   channelRecaps: defineQuery(
     z.object({
       channelIds: z.array(z.string()),

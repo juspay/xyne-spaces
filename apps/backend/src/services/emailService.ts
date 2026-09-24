@@ -11,6 +11,7 @@ import {
 import { MessageRepository, CreateMessageInput } from '@/database/repositories/messageRepository';
 import { EmailRepository } from '@/database/repositories/emailRepository';
 import { syncTicketEmailCount } from '@/database/syncTicketEmailCount';
+import { advanceLastEmailAt } from '@/database/ticketLastEmailAt';
 import {
   MessageAttachmentRepository,
   CreateMessageAttachmentInput,
@@ -70,7 +71,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { marked } from 'marked';
 import { findDuplicateEmailConversation } from '@/utils/vespaDuplicateDetector';
 import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
-import { ticketDuplicateService } from '@/services/ticketDuplicateService';
+import { ticketDuplicateService, type DuplicateScopeFieldValue } from '@/services/ticketDuplicateService';
 import { tagGenerationPipeline } from '@/tags/pipeline';
 import { DESK_EMAIL_SOURCE_TYPE, deskEmailConfigKey } from '@/tags';
 import { buildDraftEmailClawTask } from '@/agents/xyne-ai/prompts/draft';
@@ -137,6 +138,11 @@ export interface CreateConversationWithEmailParams {
   rating?: number;
   clientVersionName?: string;
   clientVersionCode?: string;
+  // Scope-field values for per-channel duplicate detection: the caller's raw
+  // custom-field write payload entries (fieldId + actualFieldValue), normalized and
+  // expanded inside ticketDuplicateService. Undefined → falls back to project-wide
+  // detection when the channel's duplicateScopeConfig has no matching values.
+  scopeFieldValues?: DuplicateScopeFieldValue[];
 }
 
 export interface AddEmailToConversationParams {
@@ -1128,6 +1134,7 @@ export class EmailService {
       rating,
       clientVersionName,
       clientVersionCode,
+      scopeFieldValues,
     } = params;
     const normalizedRfcMessageId = normalizeRfcMessageId(rfcMessageId);
 
@@ -1307,6 +1314,10 @@ export class EmailService {
     }
     const { conversation, ticket, email } = txResult;
 
+    // Direct DB ticket create bypasses Zero side-effects — invalidate the
+    // channel's label unread counts so sidebar badges refresh.
+    websocketService.broadcastLabelUnreadCountsUpdate(channelId);
+
     // --- Side effects (outside transaction) ---
 
     // Direct DB insert bypasses Zero side-effects, so dispatch the EMAIL app event ourselves.
@@ -1339,6 +1350,8 @@ export class EmailService {
         description: ticket.description,
         projectId: ticket.projectId,
         userId,
+        channelId,
+        scopeFieldValues,
       }).catch((error: unknown) => {
         logger.error('[EmailService] Failed to persist duplicate references for ticket', {
           ticketId: ticket.id,
@@ -1563,13 +1576,11 @@ export class EmailService {
 
       if (ticketRow) {
         if (receivedAt && receivedAt > ticketRow.lastEmailAt) {
-          await this.prisma.ticket.update({
-            where: { id: ticketRow.id },
-            data: { lastEmailAt: receivedAt },
-          });
+          await advanceLastEmailAt(this.prisma, { ticketId: ticketRow.id }, receivedAt);
         }
 
         await syncTicketEmailCount(this.prisma, conversationId);
+        websocketService.broadcastLabelUnreadCountsUpdate(conversation.channelId);
 
         const previousLatest = await this.prisma.email.findFirst({
           where: { conversationId, id: { not: email.id } },
@@ -1762,6 +1773,8 @@ export class EmailService {
         }
       });
     });
+
+    websocketService.broadcastLabelUnreadCountsUpdate(channelId);
 
     this.pushVespaJobForTicket(ticket.id, userId, channel.workspaceId).catch(error => {
       logger.error(`[EmailService] Error pushing Vespa job for ticket ${ticket.id}:`, error);
@@ -2463,10 +2476,7 @@ export class EmailService {
         }, null);
         if (ticketId && latestReceived) {
           if (!vespaMatchConversationId || !existingTicketLastEmailAt || latestReceived > existingTicketLastEmailAt) {
-            await tx.ticket.update({
-              where: { id: ticketId },
-              data: { lastEmailAt: latestReceived },
-            });
+            await advanceLastEmailAt(tx, { ticketId }, latestReceived);
           }
         }
 
@@ -2508,6 +2518,11 @@ export class EmailService {
         };
       }
       throw error;
+    }
+
+    // Post-commit so refetched label unread counts see the new emails.
+    if (txResult.ticketId) {
+      websocketService.broadcastLabelUnreadCountsUpdate(channelId);
     }
 
     const insertedIdSet = new Set(txResult.insertedEmailIds);
@@ -2592,6 +2607,7 @@ export class EmailService {
           description: firstEmail.body,
           projectId,
           userId,
+          channelId,
         }).catch((error: unknown) => {
           logger.error('[EmailService] Failed to persist duplicate references for ingested ticket', {
             ticketId: txResult.ticketId,

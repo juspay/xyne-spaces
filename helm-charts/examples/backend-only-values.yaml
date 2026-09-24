@@ -1,0 +1,77 @@
+image:
+  registry: ghcr.io
+  repository: juspay/xyne-spaces-backend
+  tag: ""
+
+replicaCount: 2
+
+env:
+  FRONTEND_URL: https://spaces.example.com
+  BACKEND_URL: https://spaces.example.com
+  CORS_ORIGIN: https://spaces.example.com
+  REDIS_HOST: redis.example.internal
+  REDIS_PORT: "6379"
+  REDIS_TLS: "false"
+  Y_SWEET_URL: http://xyne-ysweet:8080
+  ZERO_MUTATE_URL: http://xyne-backend/api/zero/push
+  ZERO_QUERY_URL: http://xyne-backend/api/zero/query
+  STORAGE_PROVIDER: gcs
+  GCS_PROJECT_ID: my-project
+  GCS_BUCKET_NAME: xyne-main
+  GCS_DOCS_BUCKET_NAME: xyne-docs
+  GCS_CANVAS_BUCKET_NAME: xyne-canvas
+  GCS_SESSION_RECORDING_BUCKET_NAME: xyne-recordings
+  GCS_WORKFLOW_STEPS_BUCKET_NAME: xyne-workflows
+  TRANSCRIPTION_BUCKET_NAME: xyne-transcription
+  GCS_BUNDLE_BUCKET_NAME: xyne-bundles
+
+secretEnv:
+  REDIS_PASSWORD:
+    name: xyne-backend-secrets
+    key: REDIS_PASSWORD
+    optional: true
+  Y_SWEET_SERVER_TOKEN:
+    name: xyne-backend-secrets
+    key: Y_SWEET_SERVER_TOKEN
+  GOOGLE_CLIENT_ID:
+    name: xyne-backend-secrets
+    key: GOOGLE_CLIENT_ID
+    optional: true
+  GOOGLE_CLIENT_SECRET:
+    name: xyne-backend-secrets
+    key: GOOGLE_CLIENT_SECRET
+    optional: true
+
+serviceAccount:
+  create: true
+  annotations: {}
+
+resources:
+  requests:
+    cpu: "1"
+    memory: 3Gi
+  limits:
+    memory: 8Gi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 6
+
+pdb:
+  enabled: true
+  minAvailable: 1
+
+ingress:
+  enabled: true
+  className: ""
+  annotations: {}
+  hosts:
+    - host: spaces.example.com
+      paths:
+        - path: /api/
+          pathType: Prefix
+  tls:
+    - secretName: spaces-example-com-tls
+      hosts:
+        - spaces.example.com

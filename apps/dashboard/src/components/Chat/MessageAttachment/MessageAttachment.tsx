@@ -22,6 +22,7 @@ import {
   Video,
 } from 'lucide-react';
 import { Menu } from '@base-ui/react/menu';
+import { AddToStreamBaseUiMenuItem } from '../../Streams/components/AddToStreamMenu/AddToStreamMenu';
 import {
   formatFileSize,
   getFileExtension,
@@ -33,6 +34,7 @@ import {
   buildAttachmentViewerPayload,
 } from './utils';
 import { isPreviewableDocument } from '../../../services/documentThumbnailService';
+import { isHeicAttachment } from '../../../services/heicAttachmentService';
 import { createPreviewUrl } from '../../../services/clients/fileFetchService';
 import { queryClient } from '../../../services/clients/queryClient';
 import { AttachmentRef } from '../../../machines/attachmentViewerMachine';
@@ -51,7 +53,6 @@ import { DeleteButton } from './DeleteButton';
 
 import { CopyCopied, CopyDefault } from '@xyne/icons';
 import { useClipboard } from '../../../hooks/useClipboard';
-import axios from 'axios';
 import { cn } from '../../../utils/classNames';
 import { useSelector } from '@xstate/react';
 import {
@@ -119,7 +120,7 @@ const Preview: React.FC<{
   fullSize?: boolean | undefined;
   isInMultiImageGroup?: boolean;
   onLoadingChange?: (isLoading: boolean) => void;
-  onImageBlobUrlChange?: (blobUrl: string | null) => void;
+  onImageBlobChange?: (blob: Blob | null) => void;
 }> = ({
   attachmentId,
   mimeType,
@@ -132,18 +133,20 @@ const Preview: React.FC<{
   isInGrid,
   fullSize,
   isInMultiImageGroup,
-  onImageBlobUrlChange,
+  onImageBlobChange,
 }) => {
-  const isImage = isImageFile(mimeType);
   const isVideo = isVideoFile(mimeType);
   const isDocumentWithThumbnail = isPreviewableDocument(mimeType) && !!thumbnailUrl;
+  const isHeic = isHeicAttachment(mimeType, fileName);
+  const isImage = isImageFile(mimeType) || isHeic;
 
   const [imageBlobUrl, setImageBlobUrl] = useState<string | null>(null);
+  const [imageBlob, setImageBlob] = useState<Blob | null>(null);
 
-  // Notify parent when imageBlobUrl changes
+  // Notify parent when the preview blob changes
   useEffect(() => {
-    onImageBlobUrlChange?.(imageBlobUrl);
-  }, [imageBlobUrl, onImageBlobUrlChange]);
+    onImageBlobChange?.(imageBlob);
+  }, [imageBlob, onImageBlobChange]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<boolean>(false);
 
@@ -183,11 +186,13 @@ const Preview: React.FC<{
 
     // For images: Check React Query cache first (local-first behavior)
     // This prevents "No Preview" flash while waiting for server sync
-    if (isImage) {
+    // (HEIC skipped: the cached blob would be the unrenderable original)
+    if (isImage && !isHeic) {
       const cachedBlob = queryClient.getQueryData<Blob>(['preview-blob', attachmentId]);
       if (cachedBlob) {
         const localBlobUrl = URL.createObjectURL(cachedBlob);
         setImageBlobUrl(localBlobUrl);
+        setImageBlob(cachedBlob);
         setIsLoading(false);
         return (): void => {
           URL.revokeObjectURL(localBlobUrl);
@@ -199,10 +204,11 @@ const Preview: React.FC<{
       setIsLoading(true);
       setError(false);
       try {
-        // For videos/documents with thumbnails, use the thumbnail endpoint
-        // For images, use download endpoint (pass ID, createPreviewUrl will resolve it)
+        // For videos/documents with thumbnails and for HEIC, use the thumbnail
+        // endpoint (HEIC thumbnails are generated server-side on demand);
+        // for images, use download endpoint (pass ID, createPreviewUrl will resolve it)
         const source =
-          (isVideo || isDocumentWithThumbnail) && thumbnailUrl
+          ((isVideo || isDocumentWithThumbnail) && thumbnailUrl) || isHeic
             ? `/attachments/${attachmentId}/thumbnail`
             : attachmentId;
 
@@ -213,6 +219,7 @@ const Preview: React.FC<{
         // Only recalculate if we don't have stored dimensions
         // Use stored dimensions - no need to wait for image load
         setImageBlobUrl(blobUrl);
+        setImageBlob(blob);
         setIsLoading(false);
       } catch {
         setError(true);
@@ -233,6 +240,7 @@ const Preview: React.FC<{
     isImage,
     isVideo,
     isDocumentWithThumbnail,
+    isHeic,
     thumbnailUrl,
     compact,
     calculatedWidth,
@@ -451,30 +459,29 @@ const ActionTray: React.FC<{
   fileName: string;
   canDelete: boolean;
   onDelete: () => void | Promise<void>;
-  imageBlobUrl?: string | null;
-}> = ({ attachmentId, fileName, canDelete, onDelete, imageBlobUrl }) => {
+  imageBlob?: Blob | null;
+}> = ({ attachmentId, fileName, canDelete, onDelete, imageBlob }) => {
   const { isMobile } = usePlatform();
   const { copyImage } = useClipboard();
   const [copied, setCopied] = useState(false);
 
   const handleCopyImage = async (): Promise<void> => {
-    if (!imageBlobUrl) return;
-    try {
-      const response = await axios.get<Blob>(imageBlobUrl, { responseType: 'blob' });
-      const blob = response.data;
-      await copyImage(blob);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1200);
-    } catch {
-      toast.error('Failed to copy image');
-    }
+    if (!imageBlob) return;
+    // Copy the bytes we already hold rather than re-reading the object URL:
+    // connect-src has no `blob:`, so XHR-ing it back is blocked by CSP (and the
+    // URL may already be revoked while the <img> keeps showing its decoded frame).
+    // copyImage owns the success/failure toast.
+    const copied = await copyImage(imageBlob);
+    if (!copied) return;
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1200);
   };
 
   return (
     <div className='absolute top-2 right-2 z-10 opacity-0 group-hover/attachment:opacity-100 transition-opacity duration-200'>
       {!isMobile && (
         <div className='flex items-center justify-between bg-background/90 backdrop-blur-sm rounded-lg p-1 shadow-lg border border-border'>
-          {imageBlobUrl && (
+          {imageBlob && (
             <button
               onClick={e => {
                 e.stopPropagation();
@@ -1050,6 +1057,12 @@ const InlineVideoPlayer: React.FC<{
                   <DeleteButton fileName={fileName} onDelete={handleDelete} showLabel />
                 </Menu.Item>
               )}
+              {/* Name and mime type are stored on the column rather than looked
+                  up, because the file viewer picks a renderer before anything is
+                  fetched — see the `file` case in Streams.types. */}
+              <AddToStreamBaseUiMenuItem
+                source={{ kind: 'file', attachmentId, fileName, mimeType, fileSize }}
+              />
             </div>
           </Menu.Popup>
         </Menu.Positioner>
@@ -1247,8 +1260,8 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
     attachment.uploadedByUserId,
   );
 
-  // Track image blob URL for copy functionality
-  const [imageBlobUrl, setImageBlobUrl] = useState<string | null>(null);
+  // Track the decoded preview blob for copy functionality
+  const [imageBlob, setImageBlob] = useState<Blob | null>(null);
 
   // Tombstone: render a "this file was deleted" card when the attachment is soft-deleted
   if ((attachment as { isDeleted?: boolean }).isDeleted) {
@@ -1264,7 +1277,9 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
     attachment.mimetype === 'text/plain' || attachment.originalFilename.endsWith('.txt');
   const isCodeFile = isCodeFileByName(attachment.originalFilename);
   const isVideo = isVideoFile(attachment.mimetype);
-  const isImage = isImageFile(attachment.mimetype);
+  const isImage =
+    isImageFile(attachment.mimetype) ||
+    isHeicAttachment(attachment.mimetype, attachment.originalFilename);
 
   const handleCardClick = (): void => {
     const fallback: AttachmentRef = {
@@ -1413,7 +1428,7 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
             isInGrid={isInGrid}
             fullSize={fullSize}
             {...(isInMultiImageGroup && { isInMultiImageGroup: true })}
-            onImageBlobUrlChange={setImageBlobUrl}
+            onImageBlobChange={setImageBlob}
           />
 
           {/* Slack-style hover action tray */}
@@ -1423,7 +1438,7 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
               fileName={attachment.originalFilename}
               canDelete={canDelete}
               onDelete={handleDelete}
-              imageBlobUrl={isImage ? imageBlobUrl : null}
+              imageBlob={isImage ? imageBlob : null}
             />
           )}
         </div>

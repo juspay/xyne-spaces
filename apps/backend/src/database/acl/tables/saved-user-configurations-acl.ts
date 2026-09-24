@@ -62,14 +62,8 @@ export class SavedUserConfigurationsACL extends BaseQueryACL<
     if (!project) return false
     if (project.createdBy === this.ctx.userId) return true
 
-    const adminParticipant = await this.prisma.channelParticipant.findFirst({
-      where: {
-        userId: this.ctx.userId,
-        role: 'ADMIN',
-        channel: { projectId: project.id },
-      },
-      select: { id: true },
-    })
-    return adminParticipant !== null
+    // channel.projectId is decoupled — the former "channel admin in this project"
+    // fallback is removed; only the board creator or project creator may publish.
+    return false
   }
 }

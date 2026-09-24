@@ -188,21 +188,23 @@ export const RecordingShareModal: React.FC<RecordingShareModalProps> = ({
           />
         )}
       </div>
-      {isPublic && (
-        <div className='flex justify-end'>
-          <button
-            type='button'
-            onClick={() => void handleCopyLink()}
-            className='inline-flex items-center gap-2 text-sm font-medium text-foreground rounded-md px-2.5 py-1.5 -mr-2.5 transition-colors hover:bg-accent hover:text-primary'
-            data-testid='recording-copy-link-button'
-            data-track-category='RecordingDetailV2'
-            data-track-name='copy_recording_link'
-          >
-            <Link2 className='w-4 h-4' />
-            Copy link
-          </button>
-        </div>
-      )}
+      {/* Copy link is always available, regardless of visibility: a restricted
+          recording is still reachable by everyone who was explicitly granted
+          access, so the owner needs the URL to send them. Link access only
+          controls WHO the URL works for, not whether a URL exists. */}
+      <div className='flex justify-end'>
+        <button
+          type='button'
+          onClick={() => void handleCopyLink()}
+          className='inline-flex items-center gap-2 text-sm font-medium text-foreground rounded-md px-2.5 py-1.5 -mr-2.5 transition-colors hover:bg-accent hover:text-primary'
+          data-testid='recording-copy-link-button'
+          data-track-category='RecordingDetailV2'
+          data-track-name='copy_recording_link'
+        >
+          <Link2 className='w-4 h-4' />
+          Copy link
+        </button>
+      </div>
     </div>
   );
 

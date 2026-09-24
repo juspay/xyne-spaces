@@ -34,6 +34,8 @@ interface BulkActionToolbarProps {
   onStageChange: (stage: string) => void;
   onDueDateChange: (date: Date | null) => void;
   onClearSelection: () => void;
+  /** Shown as a "Select all" action when the host view has no header checkbox. */
+  onSelectAll?: () => void;
   availableTags: string[];
   onTagsChange: (tags: string[]) => void;
 }
@@ -49,6 +51,7 @@ export const BulkActionToolbar: React.FC<BulkActionToolbarProps> = ({
   onStageChange,
   onDueDateChange,
   onClearSelection,
+  onSelectAll,
   onTagsChange,
   availableTags,
 }) => {
@@ -93,6 +96,16 @@ export const BulkActionToolbar: React.FC<BulkActionToolbarProps> = ({
           <span className='text-xs sm:text-sm font-semibold text-foreground whitespace-nowrap overflow-hidden text-ellipsis'>
             {selectedCount} {selectedCount === 1 ? 'ticket' : 'tickets'} selected
           </span>
+          {onSelectAll && (
+            <button
+              onClick={onSelectAll}
+              className='text-xs sm:text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors whitespace-nowrap flex-shrink-0'
+              data-track-category='Tickets'
+              data-track-name='ToggleSelectAll'
+            >
+              Select all
+            </button>
+          )}
         </div>
         <div className='flex flex-wrap items-center gap-3 sm:gap-1 justify-start w-full sm:w-auto'>
           {/* Assignee Selector */}

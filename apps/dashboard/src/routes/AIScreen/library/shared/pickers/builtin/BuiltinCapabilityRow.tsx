@@ -22,6 +22,7 @@ export function BuiltinCapabilityRow({
   suggestContext,
 }: BuiltinCapabilityRowProps): ReactElement {
   const [browseOpen, setBrowseOpen] = useState(false);
+  const [browseSource, setBrowseSource] = useState<string | null>(null);
   const { entries, loading, isError, refetch } = useBuiltinCatalog();
   const suggestions = useBuiltinSuggestions(entries, suggestContext);
 
@@ -107,7 +108,10 @@ export function BuiltinCapabilityRow({
 
         <button
           type='button'
-          onClick={() => setBrowseOpen(true)}
+          onClick={() => {
+            setBrowseSource(null);
+            setBrowseOpen(true);
+          }}
           aria-label='Browse built in tools'
           data-track-category='Claw Agents'
           data-track-name='Create agent v2: browse built-in tools'
@@ -126,6 +130,10 @@ export function BuiltinCapabilityRow({
               key={`selected-${entry.source}`}
               label={entry.label}
               selected
+              onOpen={() => {
+                setBrowseSource(entry.source);
+                setBrowseOpen(true);
+              }}
               onToggle={() => onSelectionChange(disableEntry(selection, entry))}
             />
           ))}
@@ -148,7 +156,11 @@ export function BuiltinCapabilityRow({
 
       <BrowseBuiltinToolsDialog
         open={browseOpen}
-        onOpenChange={setBrowseOpen}
+        onOpenChange={next => {
+          setBrowseOpen(next);
+          if (!next) setBrowseSource(null);
+        }}
+        initialSource={browseSource}
         catalog={entries}
         loading={loading}
         isError={isError}

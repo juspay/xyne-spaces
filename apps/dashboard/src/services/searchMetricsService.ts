@@ -68,7 +68,7 @@ class SearchMetricsService {
     facetCounts: Record<string, number>;
     searchTrigger: 'keyboard_shortcut' | 'click' | 'auto_focus';
     searchLocation?: 'global' | 'channel' | 'dm';
-    querySource: 'KEYBOARD' | 'CLIPBOARD_PASTE';
+    querySource: 'KEYBOARD' | 'CLIPBOARD_PASTE' | 'RECENT';
     isModified: boolean;
     tab: TabType;
   }): void {
@@ -183,7 +183,7 @@ class SearchMetricsService {
     dwellTimeMs: number;
     endReason: 'click' | 'abandon' | 'clear' | 'blur';
     totalSessionDurationMs: number;
-    querySource: 'KEYBOARD' | 'CLIPBOARD_PASTE';
+    querySource: 'KEYBOARD' | 'CLIPBOARD_PASTE' | 'RECENT';
     isModified: boolean;
     tab: TabType;
   }): void {

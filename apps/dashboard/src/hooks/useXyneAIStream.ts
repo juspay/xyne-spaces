@@ -24,6 +24,8 @@ import {
   trackCanvasModeQuery,
   trackAttachmentsAdded,
 } from '../services/otel/xyneAIMetrics';
+import type { DesignSelectionPayload } from '../components/AIScreen/Workspace/design/designStudioContext';
+import type { PageSelectionPayload } from '../components/AIScreen/Workspace/pageSelectionContext';
 
 /**
  * Per-submit overrides for the stream options. When provided, each field takes
@@ -33,16 +35,10 @@ import {
  */
 export interface StreamOverrides {
   channelIds?: string[];
-  collectionIds?: string[];
-  fileIds?: string[];
-  /** Folder scopes from the composer picker. Sent to claw-auth as a single
-   *  'folder' attached_context pointer per id — xyneAIControllerV2.ts does
-   *  NOT expand this to a recursive file list; claw-auth resolves it itself,
-   *  at Vespa-query time. */
-  folderIds?: string[];
   webSearchEnabled?: boolean;
   deepResearchEnabled?: boolean;
   createCanvasEnabled?: boolean;
+  voiceMode?: boolean;
   /** Single search + single answer pass instead of the full agentic tool
    *  loop — see xyne-claw-auth's run-stream.ts POST / instant branch. */
   instant?: boolean;
@@ -53,7 +49,7 @@ export interface StreamOverrides {
   /** Which provider a model pin rides — the models endpoint's pinProvider
    *  ("litellm" = the agent's shared credential, "spaces" = the keyless
    *  platform provider). Only sent alongside `model`. */
-  modelProvider?: 'litellm' | 'spaces' | null;
+  modelProvider?: 'litellm' | 'spaces' | 'local-harness' | null;
   /** Per-run thinking level. Absent = the agent's configured default. */
   thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high';
   researchContext?: ResearchContext | null;
@@ -68,6 +64,11 @@ export interface StreamOverrides {
   /** What caused this send, for the SEND_MESSAGE event. Regenerate and edit are
    *  derived from their flags; pass 'auto_send' / 'suggestion' from those paths. */
   trigger?: XyneAiSendTrigger;
+  sandboxMode?: 'remote' | 'local' | 'container';
+  studioMode?: 'design';
+  designArtifactAttachmentId?: string;
+  designSelection?: DesignSelectionPayload;
+  pageSelection?: PageSelectionPayload;
 }
 
 interface UseXyneAIStreamParams {
@@ -85,14 +86,8 @@ interface UseXyneAIStreamParams {
   webSearchEnabled?: boolean;
   deepResearchEnabled?: boolean;
   researchContext?: ResearchContext | null;
-  collectionIds?: string[];
-  fileIds?: string[];
-  /** Folder scopes from the composer picker. Sent to claw-auth as a single
-   *  'folder' attached_context pointer per id — xyneAIControllerV2.ts does
-   *  NOT expand this to a recursive file list; claw-auth resolves it itself,
-   *  at Vespa-query time. */
-  folderIds?: string[];
   createCanvasEnabled?: boolean;
+  voiceMode?: boolean;
   instant?: boolean;
   isV2?: boolean;
   channelId?: string | undefined; // Added for thread ID construction
@@ -109,7 +104,7 @@ interface UseXyneAIStreamParams {
   /** Per-run model pin from the composer's model picker. Null = agent default. */
   model?: string | null;
   /** pinProvider for the hook-level `model` (see StreamOverrides.modelProvider). */
-  modelProvider?: 'litellm' | 'spaces' | null;
+  modelProvider?: 'litellm' | 'spaces' | 'local-harness' | null;
   /** Hook-level thinking pick (the sidebar's menu). Null = agent default. */
   thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | null;
   /** Skip the global "response ready" toast for this stream (embedded/preview instances). */
@@ -137,6 +132,8 @@ function activitiesToAttachedContext(activities: UserActivity[]): AttachedContex
     relatedData: (activity.relatedData ?? {}) as Record<string, unknown>,
   }));
 }
+
+const VOICE_MODE_INSTRUCTION = `Voice mode: keep your spoken reply concise — 100 words or fewer, in a natural conversational style. You can still use tools, browse, and create artifacts as usual; put any long or detailed output (code, tables, lists, documents) into an artifact instead of the message text, and briefly summarize it in your spoken reply.`;
 
 // Canvas creation instruction appended when createCanvasEnabled is true
 const CANVAS_CREATION_INSTRUCTION = `
@@ -168,9 +165,6 @@ export const useXyneAIStream = ({
   webSearchEnabled = false,
   deepResearchEnabled = false,
   researchContext,
-  collectionIds,
-  fileIds,
-  folderIds,
   createCanvasEnabled = false,
   instant = false,
   isV2 = false,
@@ -348,6 +342,7 @@ export const useXyneAIStream = ({
         ov && 'deepResearchEnabled' in ov ? !!ov.deepResearchEnabled : deepResearchEnabled;
       const eCreateCanvasEnabled =
         ov && 'createCanvasEnabled' in ov ? !!ov.createCanvasEnabled : createCanvasEnabled;
+      const eVoiceMode = ov && 'voiceMode' in ov ? !!ov.voiceMode : false;
       const eInstant = ov && 'instant' in ov ? !!ov.instant : instant;
       const eModel = ov && 'model' in ov ? (ov.model ?? null) : model;
       const eModelProvider = ov && 'model' in ov ? (ov.modelProvider ?? null) : modelProvider;
@@ -355,9 +350,6 @@ export const useXyneAIStream = ({
       const eResearchContext =
         ov && 'researchContext' in ov ? (ov.researchContext ?? null) : researchContext;
       const eChannelIds = ov?.channelIds ?? channelIds;
-      const eCollectionIds = ov?.collectionIds ?? collectionIds ?? [];
-      const eFileIds = ov?.fileIds ?? fileIds ?? [];
-      const eFolderIds = ov?.folderIds ?? folderIds ?? [];
       const eTicketIds = ov?.ticketIds ?? ticketIds;
       const eCanvasIds = ov?.canvasIds ?? canvasIds;
       const eCallIds = ov?.callIds ?? callIds;
@@ -384,6 +376,10 @@ export const useXyneAIStream = ({
       // For v2, canvas creation is handled via additionalInstructions in the backend
       if (eCreateCanvasEnabled && !isV2) {
         internalQuery = internalQuery + '\n\n' + CANVAS_CREATION_INSTRUCTION;
+      }
+
+      if (eVoiceMode) {
+        internalQuery = internalQuery + '\n\n' + VOICE_MODE_INSTRUCTION;
       }
 
       // Get current messages synchronously
@@ -438,6 +434,7 @@ export const useXyneAIStream = ({
             timestamp: new Date(),
             ...(attachments.length > 0 && { attachments }),
             ...(selectionContexts && selectionContexts.length > 0 && { selectionContexts }),
+            ...(ov?.pageSelection ? { pageSelection: ov.pageSelection } : {}),
             ...(parentMessageId && { parentId: parentMessageId }),
             ...(userTags && Object.keys(userTags).length > 0 && { userTags }),
             ...(displayContextForMessage && displayContextForMessage.length > 0
@@ -486,6 +483,12 @@ export const useXyneAIStream = ({
           ? 'edit'
           : (ov?.trigger ?? 'submit');
       if (trigger !== 'button') {
+        // Files/folders/collections ride in combinedAttachedContext (no
+        // separate id arrays) — count by type for the tracking metadata.
+        const eFileCount = combinedAttachedContext?.filter(i => i.type === 'file').length ?? 0;
+        const eFolderCount = combinedAttachedContext?.filter(i => i.type === 'folder').length ?? 0;
+        const eCollectionCount =
+          combinedAttachedContext?.filter(i => i.type === 'collection').length ?? 0;
         globalClickTracker.trackManualEvent('XyneAI', 'SEND_MESSAGE', undefined, {
           ...aiRunTrackingMetadata({
             surface,
@@ -500,9 +503,9 @@ export const useXyneAIStream = ({
             instant: eInstant,
             attachmentsCount: attachments.length,
             channelCount: eChannelIds.length,
-            fileCount: eFileIds.length,
-            folderCount: eFolderIds.length,
-            collectionCount: eCollectionIds.length,
+            fileCount: eFileCount,
+            folderCount: eFolderCount,
+            collectionCount: eCollectionCount,
             canvasCount: eCanvasIds?.length ?? 0,
             ticketCount: eTicketIds?.length ?? 0,
             callCount: eCallIds?.length ?? 0,
@@ -532,9 +535,6 @@ export const useXyneAIStream = ({
           query: internalQuery,
           displayQuery: displayContent ?? query,
           channelIds: eChannelIds,
-          collectionIds: eCollectionIds,
-          fileIds: eFileIds,
-          folderIds: eFolderIds,
           conversationId,
           threadConversationId,
           attachmentIds,
@@ -563,6 +563,15 @@ export const useXyneAIStream = ({
           ...(isV2 && eModel && eModelProvider ? { modelProvider: eModelProvider } : {}),
           ...(eThinkingLevel ? { thinkingLevel: eThinkingLevel } : {}),
           ...(suppressCompletionToast && { suppressCompletionToast: true }),
+          ...(ov?.sandboxMode && ov.sandboxMode !== 'remote'
+            ? { sandboxMode: ov.sandboxMode }
+            : {}),
+          ...(ov?.studioMode ? { studioMode: ov.studioMode } : {}),
+          ...(ov?.designArtifactAttachmentId
+            ? { designArtifactAttachmentId: ov.designArtifactAttachmentId }
+            : {}),
+          ...(ov?.designSelection ? { designSelection: ov.designSelection } : {}),
+          ...(ov?.pageSelection ? { pageSelection: ov.pageSelection } : {}),
           version: isV2 ? 'v2' : 'v1',
         },
         allMessages,
@@ -573,14 +582,11 @@ export const useXyneAIStream = ({
     [
       threadId,
       channelIds,
-      collectionIds,
       conversationId,
       threadConversationId,
       attachmentIds,
       canvasId,
       workflowContext,
-      fileIds,
-      folderIds,
       researchContext,
       webSearchEnabled,
       deepResearchEnabled,

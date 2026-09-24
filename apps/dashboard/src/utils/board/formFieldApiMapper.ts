@@ -120,6 +120,8 @@ export const getFieldTypeLabel = (fieldType: FormFieldType): string => {
       return 'User';
     case FormFieldType.DOC:
       return 'Document';
+    case FormFieldType.TICKET:
+      return 'Ticket';
     default:
       return fieldType;
   }

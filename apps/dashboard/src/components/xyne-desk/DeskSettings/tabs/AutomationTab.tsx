@@ -52,6 +52,7 @@ export const AutomationTab: React.FC<AutomationTabProps> = ({ channelId }) => {
               ...(view.forkFrom.description
                 ? { initialDescription: view.forkFrom.description }
                 : {}),
+              initialPriority: view.forkFrom.priority,
               ...(view.isClone
                 ? {}
                 : {

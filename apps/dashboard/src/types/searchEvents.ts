@@ -59,8 +59,9 @@ export interface SearchImpressionEvent extends CommonEventFields {
    * Source of the query text
    * - KEYBOARD: Default state for manual typing
    * - CLIPBOARD_PASTE: Triggered when content enters via paste event (Cmd+V / Ctrl+V)
+   * - RECENT: Query was populated by replaying a saved recent search
    */
-  query_source: 'KEYBOARD' | 'CLIPBOARD_PASTE';
+  query_source: 'KEYBOARD' | 'CLIPBOARD_PASTE' | 'RECENT';
   /**
    * Whether the pasted content was modified after pasting
    * - true: User performed manual keystrokes (additions, deletions, backspaces) after paste
@@ -142,8 +143,9 @@ export interface SearchSessionEndEvent extends CommonEventFields {
    * Source of the query text
    * - KEYBOARD: Default state for manual typing
    * - CLIPBOARD_PASTE: Triggered when content enters via paste event (Cmd+V / Ctrl+V)
+   * - RECENT: Query was populated by replaying a saved recent search
    */
-  query_source: 'KEYBOARD' | 'CLIPBOARD_PASTE';
+  query_source: 'KEYBOARD' | 'CLIPBOARD_PASTE' | 'RECENT';
   /**
    * Whether the pasted content was modified after pasting
    * - true: User performed manual keystrokes (additions, deletions, backspaces) after paste

@@ -36,7 +36,7 @@ export interface ConfluenceMigrationPreviewResponse {
     destination: ConfluenceSectionMapping;
   }>;
   targetProject: { id: string; name: string; code: string | null } | null;
-  targetChannel: { id: string; name: string; projectId: string } | null;
+  targetChannel: { id: string; name: string; projectId: string | null } | null;
   projectChannels: Array<{ id: string; name: string }>;
   visibilitySummary?: {
     publicCanvases: number;

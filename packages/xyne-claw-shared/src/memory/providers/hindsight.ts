@@ -28,6 +28,7 @@ import type {
   RecalledMemory,
   ReflectResult,
   RetainItem,
+  RetainOpts,
   RetainedMemory,
   TagGroup,
 } from "../types.js";
@@ -67,7 +68,10 @@ interface HindsightRecallResponse {
     fact_type?: string;
     type?: string;
     tags?: string[];
-    score?: number;
+    metadata?: Record<string, unknown>;
+    chunk_id?: string;
+    // Hindsight returns a per-arm breakdown under `scores`, never a scalar `score`.
+    scores?: { final?: number; semantic?: number; reranker?: number };
   }>;
 }
 
@@ -173,15 +177,30 @@ export class HindsightProvider implements MemoryProvider {
         this.bankCache.set(bankId, tuningKey);
         return;
       }
-      const createRes = await fetch(`${this.baseUrl}/v1/${this.tenant}/banks`, {
-        method: "POST",
+      // Create is PUT /banks/:id and is idempotent. Older builds exposed
+      // POST /banks instead and answer 405 here, so fall back to it — without
+      // the fallback a 405 skips applyBankTuning entirely and the bank runs on
+      // defaults, which is how banks end up unconfigured despite a clean boot.
+      const mission = opts.mission ?? `Memory bank ${bankId}`;
+      let createRes = await fetch(`${this.baseUrl}/v1/${this.tenant}/banks/${bankId}`, {
+        method: "PUT",
         headers: this.headers,
-        body: JSON.stringify({ id: bankId, mission: opts.mission ?? `Memory bank ${bankId}` }),
+        body: JSON.stringify({ mission }),
         signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS.ensure),
       });
+      if (createRes.status === 405) {
+        createRes = await fetch(`${this.baseUrl}/v1/${this.tenant}/banks`, {
+          method: "POST",
+          headers: this.headers,
+          body: JSON.stringify({ id: bankId, mission }),
+          signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS.ensure),
+        });
+      }
       if (createRes.ok || createRes.status === 409) {
         await this.applyBankTuning(bankId, opts);
         this.bankCache.set(bankId, tuningKey);
+      } else {
+        log.warn(`[hindsight] ensureBank(${bankId}) create returned ${createRes.status}; bank left untuned`);
       }
     } catch (err) {
       log.warn(`[hindsight] ensureBank(${bankId}) failed: ${errMsg(err)}`);
@@ -209,11 +228,24 @@ export class HindsightProvider implements MemoryProvider {
    */
   /** The bank config this caller wants. Also the cache key — see bankCache. */
   private desiredTuning(opts: EnsureBankOpts): Record<string, unknown> {
+    const extractionMode = opts.retainExtractionMode;
     return {
       // Per-bank: the Digital Twin opts INTO observations (evolution tracking),
       // scoped per-user via observationScopes; every other bank stays OFF.
       enable_observations: opts.enableObservations === true,
-      retain_extraction_mode: "verbose",
+      // Only sent when a caller explicitly asks for a mode. This tuning was
+      // unreachable for a long time (create returned 405, so the branch that
+      // applies it never ran), which means every existing bank is on the
+      // provider default. Asserting a mode here would silently re-extract every
+      // one of them on the first call after that gap closes — and the comment
+      // above is explicit that verbose over a small dense blob yields no facts
+      // at all. A bank changes extraction mode only when someone has decided it
+      // should.
+      ...(extractionMode ? { retain_extraction_mode: extractionMode } : {}),
+      // `chunks` means no facts to consolidate; leaving auto-consolidation on
+      // would schedule passes that can only churn.
+      ...(extractionMode === "chunks" ? { enable_auto_consolidation: false } : {}),
+      ...(opts.retainChunkSize ? { retain_chunk_size: opts.retainChunkSize } : {}),
       ...(opts.retainMission ? { retain_mission: opts.retainMission } : {}),
       ...(opts.retainStrategies ? { retain_strategies: opts.retainStrategies } : {}),
     };
@@ -256,6 +288,21 @@ export class HindsightProvider implements MemoryProvider {
   }
 
   /** True when every desired key is visible in the bank's stored overrides. */
+  /** Resolved bank settings and the subset explicitly overridden for this bank.
+   *  Lets callers verify a bank is configured the way they asked rather than
+   *  assuming the tuning stuck. */
+  async getBankConfig(bankId: string): Promise<{ config: Record<string, unknown>; overrides: Record<string, unknown> }> {
+    if (!this.enabled) return { config: {}, overrides: {} };
+    const res = await fetch(this.bankPath(bankId, "/config"), {
+      method: "GET",
+      headers: this.headers,
+      signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS.ensure),
+    });
+    if (!res.ok) throw new Error(`Hindsight bank config ${res.status}`);
+    const data = (await res.json()) as { config?: Record<string, unknown>; overrides?: Record<string, unknown> };
+    return { config: data.config ?? {}, overrides: data.overrides ?? {} };
+  }
+
   private async tuningPersisted(bankId: string, desired: Record<string, unknown>): Promise<boolean> {
     try {
       const res = await fetch(this.bankPath(bankId, "/config"), {
@@ -272,7 +319,7 @@ export class HindsightProvider implements MemoryProvider {
     }
   }
 
-  async retain(bankId: string, items: RetainItem[]): Promise<RetainedMemory[]> {
+  async retain(bankId: string, items: RetainItem[], opts: RetainOpts = {}): Promise<RetainedMemory[]> {
     if (!this.enabled || items.length === 0) return [];
 
     const body: { items: HindsightRetainItem[]; async: boolean } = {
@@ -293,7 +340,9 @@ export class HindsightProvider implements MemoryProvider {
       // path easily exceeds 30s waiting for entity + fact extraction +
       // embedding. Memories surface in recall once the operation completes
       // (typically <2 min, watch /operations/{id} if you want to poll).
-      async: true,
+      // Callers that must read their own write pass waitForIndex — only sane
+      // on banks with no extraction step to wait for.
+      async: opts.waitForIndex !== true,
     };
 
     // Hindsight's retain endpoint is POST /memories (not /memories/retain).
@@ -322,8 +371,14 @@ export class HindsightProvider implements MemoryProvider {
     const body: Record<string, unknown> = {
       query: query.slice(0, 1000),
       budget: opts.budget ?? "low",
-      ...(opts.tags?.length ? { tags: opts.tags } : {}),
-      ...(opts.tagGroups ? { tag_groups: serializeTagGroup(opts.tagGroups) } : {}),
+      // `tag_groups` takes a LIST of groups, and the API rejects it alongside
+      // `tags` as mutually exclusive — so a caller passing both gets the
+      // compound filter, which is the more specific of the two.
+      ...(opts.tagGroups
+        ? { tag_groups: [serializeTagGroup(opts.tagGroups)] }
+        : opts.tags?.length
+          ? { tags: opts.tags }
+          : {}),
       ...(opts.types?.length ? { types: opts.types } : {}),
       ...(opts.maxTokens ? { max_tokens: opts.maxTokens } : {}),
       ...(opts.preferObservations ? { prefer_observations: true } : {}),
@@ -344,12 +399,19 @@ export class HindsightProvider implements MemoryProvider {
     const data = (await res.json()) as HindsightRecallResponse;
     return (data.results ?? []).map((m) => {
       const factType = m.fact_type ?? m.type;
+      const scores = m.scores;
+      // `final` is the fused ranking; fall back to `semantic` when the reranker
+      // arm is absent. Callers wanting the unfused signal read `scores.semantic`.
+      const score = scores?.final ?? scores?.semantic;
       return {
         id: m.id ?? "",
         text: m.text ?? m.content ?? "",
         ...(factType ? { factType } : {}),
         ...(m.tags ? { tags: m.tags } : {}),
-        ...(typeof m.score === "number" ? { score: m.score } : {}),
+        ...(m.metadata ? { metadata: stringValues(m.metadata) } : {}),
+        ...(m.chunk_id ? { chunkId: m.chunk_id } : {}),
+        ...(scores ? { scores } : {}),
+        ...(typeof score === "number" ? { score } : {}),
       };
     });
   }
@@ -778,6 +840,7 @@ function mapMemory(m: Record<string, unknown>): Memory {
     content: String(m["text"] ?? m["content"] ?? ""),
     ...(m["tags"] ? { tags: m["tags"] as string[] } : {}),
     ...(m["metadata"] ? { metadata: m["metadata"] as Record<string, string> } : {}),
+    ...(m["chunk_id"] ? { chunkId: String(m["chunk_id"]) } : {}),
     ...((m["fact_type"] ?? m["type"]) ? { factType: (m["fact_type"] ?? m["type"]) as string } : {}),
     ...(createdAt ? { createdAt } : {}),
     ...(entities.length ? { entities } : {}),
@@ -792,6 +855,14 @@ function serializeTagGroup(g: TagGroup): Record<string, unknown> {
   if ("and" in g) return { and: g.and.map(serializeTagGroup) };
   if ("or" in g) return { or: g.or.map(serializeTagGroup) };
   return { not: serializeTagGroup(g.not) };
+}
+
+function stringValues(raw: Record<string, unknown>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(raw)) {
+    if (v !== null && v !== undefined) out[k] = String(v);
+  }
+  return out;
 }
 
 function errMsg(err: unknown): string {

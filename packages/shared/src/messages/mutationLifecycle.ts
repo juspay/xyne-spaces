@@ -18,7 +18,7 @@ const isTransientError = (error: unknown): boolean =>
   'type' in error &&
   (error as { type: unknown }).type === 'zero';
 
-type SendOutcome = 'ok' | 'app-error';
+type SendOutcome = 'client-applied' | 'app-error';
 
 export function subscribeSendLifecycle(
   mutation: PromiseWithServerResult,
@@ -41,9 +41,11 @@ export function subscribeSendLifecycle(
         }
         return;
       }
-      // Successful client apply — server may still reject; onSettled runs
-      // when we know for sure.
-      if (!handled) onSettled?.('ok');
+      // The optimistic apply landed locally. This says nothing about the
+      // server — the mutation can still be rejected or retried — so it must
+      // never remove the pending entry. Removal is driven solely by the
+      // `isSent` reconcile in usePendingQueue.
+      if (!handled) onSettled?.('client-applied');
     })
     .catch(() => fireAppError());
 

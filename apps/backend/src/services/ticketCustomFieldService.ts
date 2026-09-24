@@ -505,6 +505,11 @@ const emitCustomFieldWriteSideEffects = async (
         ticket: currentSnapshot,
         previousTicket: previousSnapshot,
       });
+      // Custom-field values feed dynamicFieldFilters in desk payloads, so label
+      // badges need invalidation on every custom-field write too.
+      if (currentSnapshot.channelId) {
+        websocketService.broadcastLabelUnreadCountsUpdate(currentSnapshot.channelId);
+      }
     }
   } catch (error) {
     logger.error('[TicketCustomFieldService] Failed to broadcast ticket counts after custom-field write:', {

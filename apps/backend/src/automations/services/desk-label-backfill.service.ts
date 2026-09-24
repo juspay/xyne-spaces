@@ -1,6 +1,7 @@
 import { AttachmentEntityType, EmailType } from '@xyne/shared';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
+import { websocketService } from '@/services/websocketService';
 import { AutomationStatus } from '../types/status';
 import {
   DESK_AUTOMATION_WORKFLOW_TYPE,
@@ -377,8 +378,11 @@ export async function runDeskLabelBackfill(
 
         // null when the label was skipped as already present — counted up front.
         if (labelResult) {
-          if (labelResult.applied) progress.labeled += 1;
-          else progress.alreadyLabeled += 1;
+          if (labelResult.applied) {
+            progress.labeled += 1;
+            // Post-commit so refetched label unread counts see the new mapping.
+            websocketService.broadcastLabelUnreadCountsUpdate(rule.channelId);
+          } else progress.alreadyLabeled += 1;
         }
         if (!rule.keepInInbox) progress.archived += 1;
 

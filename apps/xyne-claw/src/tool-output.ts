@@ -27,12 +27,17 @@
  *     downstream invocation persistence. Stripped before anything stores them.
  */
 
+import { basename } from "node:path";
+import { gcsUploadSessionFile } from "./storage.js";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join as joinPath, resolve as resolvePath } from "node:path";
 import { randomUUID } from "node:crypto";
 import { metric } from "./metrics.js";
 
 import { createLogger } from "./logger.js";
+import { optEnabled } from "./optimizations.js";
+import { siftToolResult } from "./result-sift.js";
+import { currentRunTask } from "./run-context.js";
 const log = createLogger("tool-output");
 
 // MCP/custom tool results are often structure-heavy JSON, so we use a tighter
@@ -190,6 +195,53 @@ export function lineifyForSpill(content: string, maxLineChars: number = SPILL_MA
  * read/grep tools. On a disk-write failure, falls back to an inline head with a
  * clear truncation note rather than dropping silently.
  */
+
+async function siftIntoContext(
+  outputBaseDir: string,
+  category: string,
+  toolName: string,
+  clean: string,
+  cap: number,
+): Promise<string | null> {
+  const outcome = await siftToolResult({
+    toolName,
+    content: clean,
+    task: currentRunTask(),
+    charBudget: cap,
+  }).catch(() => null);
+  if (!outcome) return null;
+
+  const safeCategory = category.replace(/[^a-zA-Z0-9_-]/g, "_");
+  const safeTool = toolName.replace(/[^a-zA-Z0-9_-]/g, "_");
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const dir = resolvePath(outputBaseDir, ".context", "tool-results");
+  const fileName = `${safeCategory}-${safeTool}-${stamp}-${randomUUID().slice(0, 8)}.json`;
+  const absPath = joinPath(dir, fileName);
+  const lined = lineifyForSpill(clean);
+  try {
+    await mkdir(dir, { recursive: true });
+    await writeFile(absPath, lined, { encoding: "utf8" });
+    void gcsUploadSessionFile(basename(outputBaseDir), joinPath(".context", "tool-results", fileName), lined);
+  } catch (err) {
+    log.warn(`[tool-output] ${safeCategory}/${safeTool} sift skipped — full result could not be saved: ${err instanceof Error ? err.message : String(err)}`);
+    return null;
+  }
+
+  metric.count("tool_output_sifted", { category: safeCategory, tool: safeTool });
+  log.info(
+    `[tool-output] ${safeCategory}/${safeTool} sifted ${outcome.total} → ${outcome.kept} items, ` +
+    `${outcome.charsBefore}b → ${outcome.charsAfter}b (full at ${absPath})`,
+  );
+  return [
+    `[Relevance filter: showing ${outcome.kept} of ${outcome.total} items from this result — the ones relevant to the user's request. ` +
+      `The other ${outcome.total - outcome.kept} were left out to save context, NOT because they don't exist: ` +
+      `counts and totals must use ${outcome.total}, not ${outcome.kept}.`,
+    `The complete, unfiltered result is saved at ${absPath} — read or grep that file if you need an item that isn't shown.]`,
+    ``,
+    outcome.text,
+  ].join("\n");
+}
+
 export async function promoteIfOversized(
   outputBaseDir: string,
   category: string,
@@ -206,6 +258,10 @@ export async function promoteIfOversized(
 ): Promise<string> {
   const cap = inlineCapBytes ?? inlineCapForTool(toolName);
   const clean = stripControlChars(rawContent);
+  if (optEnabled("jev_result_sift") && isRetrievalTool(toolName)) {
+    const sifted = await siftIntoContext(outputBaseDir, category, toolName, clean, cap);
+    if (sifted) return sifted;
+  }
   if (clean.length <= cap) {
     if (!forceFile) return clean;
     // Persist the RAW bytes (not the control-stripped inline copy) so a sandbox-copy-in
@@ -253,6 +309,11 @@ export async function promoteIfOversized(
   try {
     await mkdir(dir, { recursive: true });
     await writeFile(absPath, lined, { encoding: "utf8" });
+    void gcsUploadSessionFile(
+      basename(outputBaseDir),
+      joinPath(".context", "tool-results", `${baseName}.json`),
+      lined,
+    );
   } catch (err) {
     const truncated = lined.slice(0, cap);
     return [
@@ -273,6 +334,15 @@ export async function promoteIfOversized(
     const rawFileName = `${baseName}-raw.json`;
     try {
       await writeFile(joinPath(dir, rawFileName), rawContent, { encoding: "utf8" });
+      // Awaited, unlike the lined copy above: this is the path the model is
+      // told to forward with sandbox-copy-in, and that call lands on whichever
+      // pod claims the NEXT turn. If it is not in the archive by then, that pod
+      // restores a session without it.
+      await gcsUploadSessionFile(
+        basename(outputBaseDir),
+        joinPath(".context", "tool-results", rawFileName),
+        rawContent,
+      );
       rawRelPath = joinPath("tool-results", rawFileName);
     } catch (err) {
       log.warn(`[tool-output] ${safeCategory}/${safeTool} raw sibling write failed: ${err instanceof Error ? err.message : String(err)}`);

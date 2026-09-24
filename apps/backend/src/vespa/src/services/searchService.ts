@@ -389,7 +389,7 @@ export class SearchService {
       // For mail's involvement rank terms (from/to hold email addresses)
       let personalizationUserEmail: string | undefined;
 
-      if (rankProfile === RankProfile.personalizedRank) {
+      if (rankProfile === RankProfile.personalizedRank || rankProfile === RankProfile.unifiedRank ) {
         try {
           const userDoc = await this.vespa.getDocument({docId:userId,schema:userSchema,namespace:config.namespace});
           channelWeights = userDoc?.fields?.channelWeights || {};
@@ -461,7 +461,7 @@ export class SearchService {
           // Exact match turns off the default searchrules.sr rewriting (stopword removal + ranking
           // boosts): stripping a word like "is"/"the" mid-query silently breaks phrase adjacency.
           ...(isExactMatch ? { "rules.off": true } : {}),
-          ...(rankProfile === RankProfile.personalizedRank && {
+          ...((rankProfile === RankProfile.personalizedRank || rankProfile === RankProfile.unifiedRank) && {
             "input.query(channel_personalization_weights)": channelWeights,
             "input.query(user_personalization_weights)": userWeights,
             "input.query(saturation_point)": 100.0,

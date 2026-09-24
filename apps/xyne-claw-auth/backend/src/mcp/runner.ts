@@ -10,6 +10,7 @@ import { extForMime, fileNameFromResource } from "./attachment-filename.js";
 import { STATIC_ADAPTERS } from "./static-adapters.js";
 import { resolveConnectorDefinition } from "./connector-definitions.js";
 import { getSpacesAuthForUser, getWorkspaceIdForUser } from "../lib/spaces-db.js";
+import { SPACES_SESSION_CREDENTIAL_SERVER_TYPES } from "../lib/spaces-session-server-types.js";
 import { provisionStdioCommand } from "./provision.js";
 import { prisma } from "../db.js";
 import { decrypt } from "../crypto.js";
@@ -127,6 +128,23 @@ const inflight = new Map<string, Promise<Client>>();
  */
 const MCP_REQUEST_TIMEOUT_MS = 600_000;
 
+/**
+ * Timeout for the `initialize` handshake inside `client.connect()`. The SDK
+ * applies DEFAULT_REQUEST_TIMEOUT_MSEC (60s) to every request that does not
+ * pass one, and connect was the single call site still inheriting it — so a
+ * server that needed >60s to come up failed the handshake while the generous
+ * per-call ceiling above never got a chance to apply.
+ *
+ * 60s is not enough for a cold stdio server: the child may still be fetching
+ * its package (npx/uvx) or minting a first token. Sessions are evicted after
+ * SESSION_IDLE_TTL_MS, so this is paid on the first call after any idle gap,
+ * which is why the failures looked intermittent.
+ *
+ * Kept well under a typical caller-side budget (Birbal cuts off at 200s) so a
+ * genuinely stuck server surfaces OUR error, not theirs.
+ */
+const MCP_CONNECT_TIMEOUT_MS = Number(process.env["MCP_CONNECT_TIMEOUT_MS"] ?? 180_000);
+
 // Idle eviction. A cached session pins a child process (stdio) or an HTTP
 // client plus its buffers in claw-auth's heap. Previously sessions were only
 // dropped on token rotation / OAuth events / transport close — never on idle —
@@ -192,13 +210,7 @@ async function getOrCreateSession(
 ): Promise<Client> {
   const key = sessionKey(userId, serverType, agentSlug, credentials);
 
-  // For xyne-spaces: ALWAYS read fresh creds from the Spaces DB FIRST, before
-  // any cache lookup. The cached child process has its token baked into env
-  // at spawn time; we must compare that against the live token and evict the
-  // session if Spaces' middleware has rotated the JWT. Without this, the
-  // creds-loader's "live-first hit" is computed and then thrown away — the
-  // child keeps calling Spaces with a stale env-baked token and 401s.
-  if (serverType === "xyne-spaces" || serverType === "xyne-dashboard") {
+  if (SPACES_SESSION_CREDENTIAL_SERVER_TYPES.has(serverType)) {
     // Benchmark lane: the onyx-ask-ai agent ALWAYS routes to the benchmark Vespa
     // cluster, regardless of whether a live login session exists. The agent's
     // app token is resolved so the spaces tools authenticate via /api/apps/*
@@ -361,7 +373,9 @@ async function spawnSession(
     { jsonSchemaValidator: tolerantSchemaValidator },
   );
   try {
-    await client.connect(transport as Parameters<typeof client.connect>[0]);
+    await client.connect(transport as Parameters<typeof client.connect>[0], {
+      timeout: MCP_CONNECT_TIMEOUT_MS,
+    });
   } catch (err) {
     // Connect failed (timeout, server crash on startup, bad creds). The child
     // process is already spawned — reap it (close() does SIGTERM→SIGKILL) so a

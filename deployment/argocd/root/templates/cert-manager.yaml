@@ -1,0 +1,5 @@
+{{- $cm := .Values.addons.certManager }}
+{{- if $cm.enabled }}
+{{- $values := include "xyne-root.merge" (dict "base" (dict "crds" (dict "enabled" true "keep" true)) "layers" (list $cm.values)) | fromYaml }}
+{{- include "xyne-root.application" (dict "root" $ "name" "cert-manager" "namespace" $cm.namespace "wave" -3 "source" (include "xyne-root.helmSource" (dict "root" $ "repoURL" "https://charts.jetstack.io" "chart" "cert-manager" "targetRevision" $cm.version "releaseName" "cert-manager" "values" $values) | fromYaml)) }}
+{{- end }}

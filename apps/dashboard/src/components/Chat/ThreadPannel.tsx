@@ -42,6 +42,7 @@ import {
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
 } from '../ui/dropdown-menu';
+import { AddToStreamMenuItem } from '../Streams/components/AddToStreamMenu/AddToStreamMenu';
 import { ChatInput } from './ChatInput';
 import ThreadList from './ThreadList/ThreadList';
 import { useDragAndDropAreaRef } from '../../hooks/useDragAndDropAreaRef';
@@ -66,9 +67,9 @@ import {
   ChannelScopeType,
   ChannelType,
   BaseTicketType,
-  isDeskChannelType,
   parseTicketMd,
 } from '@xyne/shared';
+import { usePendingForThread, buildPendingThreadMessage } from '@xyne/shared/messages';
 import { RCAPanelView } from '../Tickets/RCAPanelView';
 import { ReleasePanelView } from '../Tickets/ReleasePanelView';
 import Tooltip from '../ui/Tooltip';
@@ -110,7 +111,8 @@ import { sendRecordingEvent, useRecordingStore } from '../../hooks/useRecordingS
 import { getRecordingDefaultLayout } from '../../hooks/useRecordingDefaultLayout';
 import { ConversationTabContext } from './ConversationTabContext';
 
-type TabType = 'thread' | 'details' | 'files' | 'rca' | 'subtickets' | 'release';
+const VALID_TABS = ['thread', 'details', 'files', 'rca', 'relationships', 'release'] as const;
+type TabType = (typeof VALID_TABS)[number];
 type UnderTicketTabType = 'replies' | 'rca';
 
 interface ThreadMessagesProps {
@@ -210,10 +212,9 @@ export const ThreadMessages = ({
 
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedTabParam = searchParams.get('selectedTab');
-  const validTabs: TabType[] = ['thread', 'details', 'files', 'rca', 'release'];
   const selectedTab: TabType =
     defaultTab ??
-    (validTabs.includes(selectedTabParam as TabType) ? (selectedTabParam as TabType) : 'thread');
+    (VALID_TABS.includes(selectedTabParam as TabType) ? (selectedTabParam as TabType) : 'thread');
 
   const isFocusedThread = searchParams.get('focusThread') === '1';
   const skipInputAutoFocus = propSkipInputAutoFocus || searchParams.get('nofocus') === '1';
@@ -274,10 +275,6 @@ export const ThreadMessages = ({
 
   const ticket = useMemo(() => parseTicketMd(conversation?.ticket_md), [conversation?.ticket_md]);
   const derivedTicketId = ticketId || conversation?.ticketId || '';
-  const [threadTicket] = useCachedQuery(queries.ticketRowById({ ticketId: derivedTicketId }), {
-    enabled: !!derivedTicketId,
-  });
-  const isFlowStep = !!threadTicket?.rootId;
 
   const [threadSubTicketMappings] = useCachedQuery(
     queries.subTicketsForTicket({ ticketId: derivedTicketId }),
@@ -320,14 +317,31 @@ export const ThreadMessages = ({
   // is stored, so they disappear on reload.
   const ephemeralThreadMessages = useEphemeralThreadMessages(derivedConversationId);
 
+  // Replies the server has not confirmed yet. A failed send has had its
+  // optimistic Zero row rolled back, so the pending entry is the only thing
+  // keeping the message on screen — mirrors useThreadMessagesImpl in
+  // @xyne/shared and ChatListV4's channel-side overlay.
+  const pendingReplies = usePendingForThread(derivedConversationId ?? '');
+
   // Use pre-fetched messages if provided, otherwise use queried
   const messages = useMemo(() => {
     const base = propThreadMessages ?? queriedMessages ?? [];
-    if (ephemeralThreadMessages.length === 0) return base;
     // Appended, not merged by timestamp: they arrive live, so they are always the
     // newest thing in the thread at the moment they show up.
-    return [...base, ...(ephemeralThreadMessages as typeof base)];
-  }, [propThreadMessages, queriedMessages, ephemeralThreadMessages]);
+    const withEphemeral =
+      ephemeralThreadMessages.length === 0
+        ? base
+        : [...base, ...(ephemeralThreadMessages as typeof base)];
+    if (pendingReplies.length === 0) return withEphemeral;
+    // A pending row SHADOWS its Zero counterpart by messageId rather than
+    // appending, so an in-flight reply is not rendered twice.
+    const pendingIds = new Set(pendingReplies.map(entry => entry.messageId));
+    const confirmed = withEphemeral.filter(m => !pendingIds.has(m.messageId));
+    const pendingRows = [...pendingReplies]
+      .sort((a, b) => a.timestamp - b.timestamp)
+      .map(buildPendingThreadMessage);
+    return [...confirmed, ...(pendingRows as unknown as typeof withEphemeral)];
+  }, [propThreadMessages, queriedMessages, ephemeralThreadMessages, pendingReplies]);
   const messagesDetails = propThreadMessages ? { type: 'complete' as const } : queryDetails;
   const isMessagesLoaded = messagesDetails.type === 'complete' || messagesDetails.type === 'error';
 
@@ -640,6 +654,9 @@ export const ThreadMessages = ({
       setActiveTab: (): void => undefined,
       setSkipMarkAsRead: setSkipMarkAsReadThread,
       skipMarkAsReadRef: skipMarkAsReadThreadRef,
+      // Thread bubbles render with context 'thread', where the create-ticket
+      // action is never offered, so this value is not read on this path.
+      channelHasBoards: false,
     }),
     [setSkipMarkAsReadThread],
   );
@@ -691,6 +708,10 @@ export const ThreadMessages = ({
         showInChannel: false,
         timestamp: ts,
         messageId: uuidv4(),
+        // Explicitly none. Omitting this drops the mutator into its legacy
+        // draft-scan, which would claim whatever the user has attached in this
+        // thread's composer onto this context summary.
+        attachmentIds: [],
       }),
     );
     // Sender has implicitly read up to their own message
@@ -812,7 +833,7 @@ export const ThreadMessages = ({
     setUnderTicketActiveTab('replies');
   }, [underTicketView, selectedTab, isFixTicket, hideTabBar]);
 
-  const showSubTicketsTab = isDeskChannelType(channel?.type);
+  const showRelationshipsTab = Boolean(derivedTicketId);
   // The panel is reused across threads, so this tab can vanish while still selected.
   // A tab can be selected and then vanish, because the panel is reused across
   // threads: subtickets when the channel type changes, release when the next
@@ -821,7 +842,7 @@ export const ThreadMessages = ({
   // fall back to the one tab every thread has.
   const ticketOnlyTab = activeTab === 'details' || activeTab === 'rca' || activeTab === 'release';
   const currentTab =
-    (!showSubTicketsTab && activeTab === 'subtickets') ||
+    (!showRelationshipsTab && activeTab === 'relationships') ||
     (!isReleaseDevTicket && activeTab === 'release') ||
     (!derivedTicketId && ticketOnlyTab)
       ? 'thread'
@@ -837,8 +858,14 @@ export const ThreadMessages = ({
         count: files.length,
         icon: <FolderDefault size={14} />,
       },
-      ...(showSubTicketsTab
-        ? [{ value: 'subtickets' as const, label: 'Sub-tickets', icon: <GitBranch size={14} /> }]
+      ...(showRelationshipsTab
+        ? [
+            {
+              value: 'relationships' as const,
+              label: 'Relationships',
+              icon: <GitBranch size={14} />,
+            },
+          ]
         : []),
       ...(isFixTicket
         ? [{ value: 'rca' as const, label: 'RCA', icon: <ClipboardCheckIcon size={14} /> }]
@@ -850,7 +877,14 @@ export const ThreadMessages = ({
 
     // Filter out Details tab when ticketId doesn't exist
     return !derivedTicketId ? allTabs.filter(tab => tab.value !== 'details') : allTabs;
-  }, [files.length, ticketId, derivedTicketId, isFixTicket, showSubTicketsTab, isReleaseDevTicket]);
+  }, [
+    files.length,
+    ticketId,
+    derivedTicketId,
+    isFixTicket,
+    showRelationshipsTab,
+    isReleaseDevTicket,
+  ]);
 
   const handleCreateTicket = (): void => {
     setIsCreateTicketModalOpen(true);
@@ -1090,7 +1124,7 @@ export const ThreadMessages = ({
                     {/* Subscription Button */}
                     {derivedConversationId && (
                       <Tooltip content='Toggle notification subscription'>
-                        <div className='p-2 border border-border rounded-lg h-8 w-8'>
+                        <div className='flex h-8 w-8 items-center justify-center rounded-lg transition-colors hover:bg-muted'>
                           <ConversationSubscription
                             conversationId={derivedConversationId}
                             {...(conversation && { conversation })}
@@ -1308,6 +1342,19 @@ export const ThreadMessages = ({
           onCloseAutoFocus={e => e.preventDefault()}
           className='min-w-[180px]'
         >
+          {/* A `thread` column, not a channel scrolled to a message — the same
+              distinction Streams.types draws. Only offered once both ids are known,
+              since a thread column is meaningless without the conversation it is a
+              thread of. */}
+          {derivedChannelId && derivedConversationId && (
+            <AddToStreamMenuItem
+              source={{
+                kind: 'thread',
+                channelId: derivedChannelId,
+                conversationId: derivedConversationId,
+              }}
+            />
+          )}
           {derivedConversationId && (
             <DropdownMenuItem className='p-0' onSelect={e => e.preventDefault()}>
               <ConversationSubscription
@@ -1558,6 +1605,19 @@ export const ThreadMessages = ({
                       <span className='flex-1'>Expand view</span>
                     </DropdownMenuItem>
                   )}
+                  {/* A `thread` column, not a channel scrolled to a message —
+                      the same distinction Streams.types draws. Only offered once
+                      both ids are known, since a thread column is meaningless
+                      without the conversation it is a thread of. */}
+                  {derivedChannelId && derivedConversationId && (
+                    <AddToStreamMenuItem
+                      source={{
+                        kind: 'thread',
+                        channelId: derivedChannelId,
+                        conversationId: derivedConversationId,
+                      }}
+                    />
+                  )}
                   {showThreadTags && !channel?.isArchived && (
                     <DropdownMenuSub>
                       <DropdownMenuSubTrigger
@@ -1745,7 +1805,6 @@ export const ThreadMessages = ({
                     initialScrollOffset={0}
                     isTicketThread={true}
                     spawnedTicketMessageIds={spawnedTicketMessageIds}
-                    isFlowStep={isFlowStep}
                     channelScopeType={channel?.scopeType}
                     conversation={conversation}
                     enableCollapsing={previewCardMode}
@@ -1787,17 +1846,21 @@ export const ThreadMessages = ({
                 value='details'
                 className='flex-1 min-h-0 bg-background overflow-hidden data-[state=inactive]:hidden'
               >
-                <TicketDetails ticketId={derivedTicketId} onFillRCA={() => setActiveTab('rca')} />
+                <TicketDetails
+                  ticketId={derivedTicketId}
+                  hideRelationships
+                  onFillRCA={() => setActiveTab('rca')}
+                />
               </Tabs.Content>
             )}
 
-            {/* Sub-tickets Tab Content */}
-            {showSubTicketsTab && (
+            {/* Relationships Tab Content */}
+            {showRelationshipsTab && (
               <Tabs.Content
-                value='subtickets'
+                value='relationships'
                 className='flex-1 min-h-0 bg-background overflow-hidden data-[state=inactive]:hidden'
               >
-                <TicketDetails ticketId={derivedTicketId} subTicketsOnly />
+                <TicketDetails ticketId={derivedTicketId} relationshipsOnly />
               </Tabs.Content>
             )}
 

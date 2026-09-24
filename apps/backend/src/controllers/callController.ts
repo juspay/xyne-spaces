@@ -38,6 +38,7 @@ import {
   CallStatus,
   CallType,
   InvitationResponse,
+  RingStatus,
   MeetingStatus,
   NotificationType,
   RecordingType,
@@ -46,6 +47,7 @@ import {
 import { storageService } from '@/services/storage';
 import { CallVespaFeedSource, queueCallVespaFeed } from '@/services/callVespaQueue';
 import { callShareService } from '@/services/callShareService';
+import { callNotesCanvasService } from '@/services/callNotesCanvasService';
 import { noteTakerTranscriptService } from '@/services/noteTakerTranscriptService';
 import { summaryTemplateService } from '@/services/summaryTemplateService';
 import { canvasAuthService } from '@/services/canvasAuthService';
@@ -1080,21 +1082,15 @@ export class CallController {
           queueCallVespaFeed(call.id, { source: CallVespaFeedSource.CallControllerJoinCallClearRemovedByHost });
         }
 
-        // Who belongs to a call: the host, anyone invited, and the members of the
-        // channel it is happening in — a channel call is offered to the channel, so
-        // membership is the invitation. Matches assertCanViewCallRecordings. Anyone
-        // else holds a link they were never given access by, and is turned away.
+        // The call link is the invitation: anyone in the call's workspace who holds
+        // it may join, invited or not. The workspace check above is the boundary;
+        // people outside the workspace go through the lobby and are admitted by the
+        // host. The webhook creates the participant row on join, which is what makes
+        // a link joiner part of the call's audience (see isCallAudience) afterwards.
         if (!participant && call.createdByUserId !== user.id) {
-          const isChannelMember = call.channelId
-            ? await repositories.channelParticipants.isParticipant(call.channelId, user.id)
-            : false;
-          if (!isChannelMember) {
-            logger.warn(
-              `[CallController] join denied, no invitation or channel membership | callId=${callId}, userId=${user.id}`,
-            );
-            res.status(403).json({ success: false, error: 'You do not have access to this call' });
-            return;
-          }
+          logger.info(
+            `[CallController] link join without invitation | callId=${callId}, userId=${user.id}`,
+          );
         }
       }
 
@@ -2002,6 +1998,38 @@ export class CallController {
    * POST /api/calls/:callId/generate-prd
    * Generate PRD from call transcript and post to conversation as Canvas
    */
+  // POST /api/calls/:callId/notes-canvas - Get or lazily create the call's collaborative notes canvas.
+  // Recurring series share one canvas across all occurrences.
+  getOrCreateNotesCanvas = async (req: Request, res: Response): Promise<void> => {
+    const userId = req.user?.id;
+    const { callId } = req.params;
+
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    try {
+      const call = await repositories.calls.findByExternalId(callId);
+      if (!call || isRecording(call)) {
+        res.status(404).json({ success: false, error: 'Call not found' });
+        return;
+      }
+      if (call.workspaceId !== req.user!.workspaceId || !(await callShareService.isCallAudience(call, userId))) {
+        res.status(403).json({ success: false, error: 'You do not have access to this call' });
+        return;
+      }
+
+      const canvasId = await callNotesCanvasService.getOrCreate(call, userId);
+      res.json({ success: true, canvasId, isSeriesCanvas: Boolean(call.recurringSeriesId) });
+    } catch (error) {
+      logger.error(`[${callId}] call_notes_canvas_get_or_create_failed`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      res.status(500).json({ success: false, error: 'Failed to open call notes' });
+    }
+  };
+
   generatePRD = async (req: Request, res: Response): Promise<void> => {
     const userId = req.user?.id;
     const { callId } = req.params;
@@ -2328,6 +2356,7 @@ export class CallController {
               where: { id: existingParticipant.id },
               data: {
                 response: InvitationResponse.INVITED,
+                ringStatus: RingStatus.CALLING,
                 invitedBy: userId,
                 invitedAt: now,
                 respondedAt: null,
@@ -2348,6 +2377,7 @@ export class CallController {
             invitedBy: userId,
             invitedAt: now,
             response: InvitationResponse.INVITED,
+            ringStatus: RingStatus.CALLING,
           });
           invitedUserIds.push(targetUserId);
         }

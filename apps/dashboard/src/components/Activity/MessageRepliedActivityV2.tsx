@@ -2,12 +2,16 @@ import { ReactElement } from 'react';
 import type { ActivityWithRelated } from '../../types/activity';
 import { MessageBubble } from '../ui/MessageBubble/MessageBubble';
 import { ActivityItemCard } from './ActivityItemCard';
+import {
+  SlashCommandArtifactActivityBody,
+  SlashCommandArtifactBadge,
+} from './SlashCommandArtifactActivity';
 import { RenderMessageWithHTML } from '../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import { getFlowJsonPreviewText } from '../../utils/flowPreview';
 import { useUser } from '../../hooks/useUsers';
 import { getUserDisplayName } from '../../utils/userDisplayName';
 import { useRouteContext } from '../../hooks/useRouteContext';
-import { parseRepliesMd, RepliesData } from '@xyne/shared';
+import { parseSlashCommandArtifactMessage, parseRepliesMd, RepliesData } from '@xyne/shared';
 import { ChatTyping } from '@xyne/icons';
 
 export const MessageRepliedActivityV2 = ({
@@ -24,6 +28,7 @@ export const MessageRepliedActivityV2 = ({
   if (!message || !message.conversation) return null;
   const conversation = message.conversation;
   const latestReplyMessage = message;
+  const artifact = parseSlashCommandArtifactMessage(latestReplyMessage.content);
 
   const isV2 = activity.actorAction === 'replied_v2';
 
@@ -87,6 +92,9 @@ export const MessageRepliedActivityV2 = ({
       channelId={conversation.channelId}
       badgeIcon={<ChatTyping className='size-3 text-yellow-600' />}
       badgeColorClass='bg-accent'
+      {...(artifact && {
+        titlePrefix: <SlashCommandArtifactBadge badge={artifact.definition.badge} />,
+      })}
       description={<span className='text-muted-foreground text-sm'>{descriptionText}</span>}
       targetPath={targetPath}
       focusThread
@@ -95,7 +103,12 @@ export const MessageRepliedActivityV2 = ({
       useActivityCutoff
       isExpanded={isExpanded}
     >
-      {isExpanded ? (
+      {artifact ? (
+        <SlashCommandArtifactActivityBody
+          messageId={latestReplyMessage.messageId}
+          body={artifact.body}
+        />
+      ) : isExpanded ? (
         <MessageBubble
           message={latestReplyMessage}
           showAvatar={false}

@@ -2,6 +2,7 @@ import { Router, type NextFunction, type Request, type Response } from 'express'
 import {
   UserType,
   createSdlcClawLinkSchema,
+  listSdlcEntityLinksSchema,
   sdlcRepoIds,
   createSdlcClawArtifactSchema,
   createSdlcTrackSchema,
@@ -72,6 +73,15 @@ router.post(
       channelId
     );
     res.status(201).json({ success: true, link });
+  }),
+);
+
+router.post(
+  '/entity-links/list',
+  route(async (req, res) => {
+    const input = listSdlcEntityLinksSchema.parse(req.body);
+    const links = await sdlcHub.listEntityLinks(await actorFromRequest(req), input);
+    res.status(200).json({ success: true, links });
   }),
 );
 

@@ -85,6 +85,27 @@ export async function resolveSdlcRepositoryForUser(
   }
 }
 
+export async function resolveSdlcHubContextForUser(
+  userId: string,
+  channelId: string | undefined,
+  conversationId: string | undefined,
+): Promise<Record<string, unknown> | undefined> {
+  if (!channelId || !conversationId) return undefined;
+  const auth = await getSpacesAuthForUser(userId, "agent-chat");
+  if (!auth) return undefined;
+  try {
+    const response = (await spacesFetch(
+      `/api/sdlc/channels/${encodeURIComponent(channelId)}/context?conversationId=${encodeURIComponent(conversationId)}`,
+      // Runs at the start of every channel run, which the 30 s default would stall.
+      { signal: AbortSignal.timeout(5_000) },
+      { ...auth, baseUrl: CONFIG.spacesInternalUrl },
+    )) as { context?: Record<string, unknown> | null };
+    return response.context ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function loadSdlcHubKnowledge(channelId: string, userId: string): Promise<string | undefined> {
   const s2sKey = process.env["INTERNAL_S2S_KEY"] ?? process.env["XYNE_CLAW_S2S_KEY"] ?? "";
   if (!s2sKey) return undefined;

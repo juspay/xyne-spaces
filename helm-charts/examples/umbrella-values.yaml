@@ -1,0 +1,165 @@
+global:
+  imageRegistry: ""
+  imagePullSecrets: []
+
+xyne-backend:
+  enabled: true
+  env:
+    FRONTEND_URL: https://spaces.example.com
+    BACKEND_URL: https://spaces.example.com
+    CORS_ORIGIN: https://spaces.example.com
+    REDIS_HOST: xyne-redis
+    REDIS_PORT: "6379"
+    REDIS_TLS: "false"
+    STORAGE_PROVIDER: s3
+    AWS_REGION: us-east-1
+    S3_ENDPOINT: ""
+    S3_BUCKET_NAME: xyne-main
+    GCS_DOCS_BUCKET_NAME: xyne-docs
+    GCS_CANVAS_BUCKET_NAME: xyne-canvas
+    GCS_SESSION_RECORDING_BUCKET_NAME: xyne-recordings
+    GCS_WORKFLOW_STEPS_BUCKET_NAME: xyne-workflows
+    TRANSCRIPTION_BUCKET_NAME: xyne-transcription
+    GCS_BUNDLE_BUCKET_NAME: xyne-bundles
+  secretEnv:
+    REDIS_PASSWORD:
+      name: xyne-backend-secrets
+      key: REDIS_PASSWORD
+      optional: true
+    Y_SWEET_SERVER_TOKEN:
+      name: xyne-backend-secrets
+      key: Y_SWEET_SERVER_TOKEN
+    AWS_ACCESS_KEY_ID:
+      name: xyne-backend-secrets
+      key: AWS_ACCESS_KEY_ID
+    AWS_SECRET_ACCESS_KEY:
+      name: xyne-backend-secrets
+      key: AWS_SECRET_ACCESS_KEY
+    GOOGLE_CLIENT_ID:
+      name: xyne-backend-secrets
+      key: GOOGLE_CLIENT_ID
+      optional: true
+    GOOGLE_CLIENT_SECRET:
+      name: xyne-backend-secrets
+      key: GOOGLE_CLIENT_SECRET
+      optional: true
+  ingress:
+    enabled: true
+    className: ""
+    annotations: {}
+    hosts:
+      - host: spaces.example.com
+        paths:
+          - path: /api/
+            pathType: Prefix
+    tls:
+      - secretName: spaces-example-com-tls
+        hosts:
+          - spaces.example.com
+
+xyne-worker:
+  enabled: true
+  fullnameOverride: xyne-worker-notifications
+  env:
+    REDIS_HOST: xyne-redis
+    REDIS_PORT: "6379"
+    REDIS_TLS: "false"
+    STORAGE_PROVIDER: s3
+    AWS_REGION: us-east-1
+    S3_ENDPOINT: ""
+    S3_BUCKET_NAME: xyne-main
+    GCS_DOCS_BUCKET_NAME: xyne-docs
+    GCS_CANVAS_BUCKET_NAME: xyne-canvas
+    GCS_SESSION_RECORDING_BUCKET_NAME: xyne-recordings
+    GCS_WORKFLOW_STEPS_BUCKET_NAME: xyne-workflows
+    TRANSCRIPTION_BUCKET_NAME: xyne-transcription
+    GCS_BUNDLE_BUCKET_NAME: xyne-bundles
+    ENABLE_NOTIFICATION_WORKER: "true"
+    ENABLE_WORKFLOW_RECOVERY: "true"
+  secretEnv:
+    REDIS_PASSWORD:
+      name: xyne-backend-secrets
+      key: REDIS_PASSWORD
+      optional: true
+    AWS_ACCESS_KEY_ID:
+      name: xyne-backend-secrets
+      key: AWS_ACCESS_KEY_ID
+    AWS_SECRET_ACCESS_KEY:
+      name: xyne-backend-secrets
+      key: AWS_SECRET_ACCESS_KEY
+  autoscaling:
+    enabled: false
+  replicaCount: 1
+
+xyne-dashboard:
+  enabled: true
+  ingress:
+    enabled: true
+    className: ""
+    annotations: {}
+    hosts:
+      - host: spaces.example.com
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: spaces-example-com-tls
+        hosts:
+          - spaces.example.com
+
+xyne-zero:
+  enabled: true
+  ingress:
+    enabled: true
+    className: ""
+    annotations: {}
+    hosts:
+      - host: spaces.example.com
+        paths:
+          - path: /zero/
+            pathType: Prefix
+    tls:
+      - secretName: spaces-example-com-tls
+        hosts:
+          - spaces.example.com
+
+xyne-zero-replication:
+  enabled: true
+  persistence:
+    enabled: true
+    storageClass: ""
+    size: 50Gi
+
+xyne-ysweet:
+  enabled: true
+  secretEnv:
+    Y_SWEET_AUTH:
+      name: xyne-ysweet-secrets
+      key: Y_SWEET_AUTH
+  persistence:
+    enabled: true
+    storageClass: ""
+    size: 20Gi
+  ingress:
+    enabled: true
+    className: ""
+    annotations: {}
+    hosts:
+      - host: spaces.example.com
+        paths:
+          - path: /ysweet/
+            pathType: Prefix
+    tls:
+      - secretName: spaces-example-com-tls
+        hosts:
+          - spaces.example.com
+
+xyne-redis:
+  enabled: true
+  persistence:
+    enabled: true
+    storageClass: ""
+    size: 8Gi
+  auth:
+    existingSecret: xyne-redis-auth
+    existingSecretKey: password

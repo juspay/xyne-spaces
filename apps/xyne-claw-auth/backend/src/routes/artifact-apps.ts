@@ -18,6 +18,7 @@
  */
 
 import { Router, type Request, type Response } from "express";
+import { ingestDeliveredArtifact } from "../lib/conversation-artifact-signals.js";
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import { Prisma } from "@prisma/client";
@@ -25,7 +26,6 @@ import { prisma } from "../db.js";
 import { gcsService } from "../services/storageService.js";
 import { getRequesterId } from "../middleware/agent-acl.js";
 import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
-import { chatAttachmentRepository } from "../repositories/index.js";
 import { buildReactArtifact } from "xyne-claw-shared/tools/react-artifact";
 import { ICON_META } from "@xyne/icons/meta";
 import { createLogger } from "../logger.js";
@@ -80,6 +80,35 @@ function badRequest(res: Response, parsed: z.ZodSafeParseError<unknown>): void {
   });
 }
 
+interface AttachmentMessage {
+  id: string;
+  conversationId: string | null;
+  orgId: string | null;
+}
+
+async function recordArtifactAppInLedger(
+  message: AttachmentMessage | null | undefined,
+  requesterId: string,
+  appId: string,
+  versionId: string,
+  title: string,
+): Promise<void> {
+  try {
+    if (!message?.conversationId) return;
+    await ingestDeliveredArtifact(
+      {
+        conversationId: message.conversationId,
+        userId: requesterId,
+        orgId: message.orgId,
+        messageId: message.id,
+      },
+      { kind: "REACT_APP", refId: appId, title, latestVersionRef: versionId },
+    );
+  } catch (err) {
+    log.warn(`artifact-app ledger write failed appId=${appId}: ${String(err)}`);
+  }
+}
+
 /**
  * Read the project JSON out of an attachment the caller owns, and re-validate it
  * through the tool's own validator. Stored bytes are not trusted: a save must not
@@ -88,8 +117,14 @@ function badRequest(res: Response, parsed: z.ZodSafeParseError<unknown>): void {
 async function readAttachmentPayload(
   attachmentId: string,
   requesterId: string,
-): Promise<{ ok: true; buffer: Buffer; manifest: unknown } | { ok: false; status: number; error: string }> {
-  const att = await chatAttachmentRepository.findById(attachmentId);
+): Promise<
+  | { ok: true; buffer: Buffer; manifest: unknown; message: AttachmentMessage | null }
+  | { ok: false; status: number; error: string }
+> {
+  const att = await prisma.chatAttachment.findUnique({
+    where: { id: attachmentId },
+    include: { chatMessage: { select: { id: true, conversationId: true, orgId: true } } },
+  });
   if (!att) return { ok: false, status: 404, error: "Attachment not found" };
   if (att.uploaderUserId !== requesterId) {
     return { ok: false, status: 403, error: "You can only save your own artifacts" };
@@ -118,6 +153,7 @@ async function readAttachmentPayload(
       ok: true,
       buffer: Buffer.from(JSON.stringify(built.payload), "utf8"),
       manifest: built.manifest,
+      message: att.chatMessage,
     };
   } catch (err) {
     return {
@@ -388,6 +424,8 @@ artifactAppsRouter.post("/", async (req: Request, res: Response): Promise<void> 
     },
   });
 
+  await recordArtifactAppInLedger(payload.message, requesterId, app.id, version.id, app.title);
+
   res.status(201).json({ success: true, app: { ...app, versions: [version] } });
 });
 
@@ -457,6 +495,8 @@ artifactAppsRouter.post("/:id/versions", async (req: Request<{ id: string }>, re
       createdBy: requesterId,
     },
   });
+
+  await recordArtifactAppInLedger(payload.message, requesterId, app.id, version.id, app.title);
 
   res.status(201).json({ success: true, version });
 });

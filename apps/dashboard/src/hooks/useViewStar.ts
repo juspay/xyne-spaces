@@ -7,7 +7,7 @@ import { mutators } from '../zero/mutators';
 // Toggling is a single-field update — it never touches the view's filter value rows.
 export interface StarViewConfig {
   id: string;
-  isStarred?: boolean;
+  isStarred?: boolean | null;
 }
 
 export const isViewStarred = (view: StarViewConfig): boolean => view.isStarred === true;

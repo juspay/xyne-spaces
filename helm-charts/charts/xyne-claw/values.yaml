@@ -1,0 +1,245 @@
+global:
+  imageRegistry: ""
+  imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+image:
+  registry: ghcr.io
+  repository: juspay/xyne-spaces-claw
+  tag: ""
+  digest: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+version: ""
+versionedName: false
+
+replicaCount: 1
+revisionHistoryLimit: 3
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 1
+    maxUnavailable: 1
+
+command: []
+args: []
+
+containerPorts:
+  - name: http
+    containerPort: 3002
+    protocol: TCP
+
+service:
+  enabled: true
+  type: ClusterIP
+  annotations: {}
+  ports:
+    - name: http
+      port: 8081
+      targetPort: http
+    - name: http-80
+      port: 80
+      targetPort: http
+
+env:
+  NODE_ENV: production
+  PORT: "3002"
+  XYNE_CLAW_PORT: "3002"
+  XYNE_CLAW_THINKING: medium
+  XYNE_CLAW_AUTH_URL: http://xyne-claw-auth:3003
+  SPACES_BACKEND_URL: http://xyne-backend
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  XYNE_CLAW_DATA_DIR: /repo/apps/xyne-claw/data
+  XYNE_PGM_DATA_PATH: /repo/apps/xyne-claw/data/pgm
+  LITELLM_URL: http://litellm:4000
+  LITELLM_MODEL: claude-sonnet-4-20250514
+  STORAGE_PROVIDER: s3
+  KATA_ROUTER_URL: ""
+  KATA_NAMESPACE: "{{ .Release.Namespace }}"
+  KATA_TEMPLATE: kata-workspace-template
+  DRAIN_TIMEOUT: "900"
+
+secretEnv:
+  XYNE_CLAW_S2S_KEY:
+    name: xyne-claw-secrets
+    key: XYNE_CLAW_S2S_KEY
+  INTERNAL_S2S_KEY:
+    name: xyne-claw-secrets
+    key: INTERNAL_S2S_KEY
+    optional: true
+  LITELLM_API_KEY:
+    name: xyne-claw-secrets
+    key: LITELLM_API_KEY
+  REDIS_PASSWORD:
+    name: xyne-claw-secrets
+    key: REDIS_PASSWORD
+    optional: true
+  AWS_ACCESS_KEY_ID:
+    name: xyne-claw-secrets
+    key: AWS_ACCESS_KEY_ID
+    optional: true
+  AWS_SECRET_ACCESS_KEY:
+    name: xyne-claw-secrets
+    key: AWS_SECRET_ACCESS_KEY
+    optional: true
+
+envFromSecrets: []
+envFromConfigMaps: []
+extraEnv: []
+
+startupProbe: {}
+livenessProbe:
+  tcpSocket:
+    port: http
+  initialDelaySeconds: 60
+  periodSeconds: 10
+  timeoutSeconds: 10
+  failureThreshold: 10
+readinessProbe:
+  tcpSocket:
+    port: http
+  initialDelaySeconds: 45
+  periodSeconds: 5
+  timeoutSeconds: 20
+  failureThreshold: 10
+lifecycle: {}
+
+resources:
+  requests:
+    cpu: "1"
+    memory: 2Gi
+  limits:
+    memory: 4Gi
+
+podSecurityContext:
+  fsGroup: 1001
+securityContext:
+  allowPrivilegeEscalation: false
+  seccompProfile:
+    type: RuntimeDefault
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+  automount: false
+
+rbac:
+  create: false
+
+commonLabels: {}
+podLabels: {}
+podAnnotations: {}
+deploymentAnnotations: {}
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+podAntiAffinityPreset: soft
+topologySpreadConstraints: []
+priorityClassName: ""
+runtimeClassName: ""
+terminationGracePeriodSeconds: 1020
+hostAliases: []
+dnsPolicy: ""
+dnsConfig: {}
+
+initContainers: []
+sidecars: []
+
+volumes:
+  - name: repos
+    emptyDir: {}
+  - name: claw-data
+    emptyDir: {}
+volumeMounts:
+  - name: repos
+    mountPath: /repos
+  - name: claw-data
+    mountPath: /repo/apps/xyne-claw/data
+
+persistence:
+  enabled: false
+  existingClaim: ""
+  storageClass: ""
+  accessModes:
+    - ReadWriteOnce
+  size: 20Gi
+  mountPath: /repo/apps/xyne-claw/data/sessions
+  subPath: ""
+  annotations: {}
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 3
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+  metrics: []
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      selectPolicy: Max
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 900
+      selectPolicy: Max
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 300
+
+pdb:
+  enabled: false
+  minAvailable: 1
+  unhealthyPodEvictionPolicy: ""
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: claw.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+istio:
+  virtualService:
+    enabled: false
+    hosts: []
+    gateways: []
+    timeout: 3600s
+    retries: {}
+    http: []
+  destinationRule:
+    enabled: false
+    exportTo: []
+    trafficPolicy: {}
+    subsets: []
+
+networkPolicy:
+  enabled: false
+  policyTypes:
+    - Ingress
+  ingress: []
+  egress: []
+
+serviceMonitor:
+  enabled: false
+  namespace: ""
+  labels: {}
+  port: http
+  path: /metrics
+  interval: 30s
+  scrapeTimeout: ""
+
+extraObjects: []

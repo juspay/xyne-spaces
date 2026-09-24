@@ -1,0 +1,55 @@
+{{- $sb := .Values.addons.sandbox }}
+{{- if $sb.enabled }}
+{{- $ns := .Values.global.namespace }}
+{{- $sandboxPool := .Values.infra.nodePools.sandbox | default dict }}
+{{- $scheduling := dict "nodeSelector" ($sandboxPool.nodeSelector | default dict) "tolerations" ($sandboxPool.tolerations | default list) }}
+{{- $generalPool := include "xyne-root.pool" (dict "root" $ "pool" "general") | fromYaml }}
+{{- $global := dict }}
+{{- with .Values.global.imageRegistry }}
+{{- $global = dict "global" (dict "imageRegistry" .) }}
+{{- end }}
+{{- $shim := $sb.kata.shim | default "qemu" }}
+{{- $annotations := $sb.kata.hypervisorAnnotations | default (list "default_vcpus" "default_memory") }}
+{{- $shims := dict "disableAll" true }}
+{{- range (concat (list $shim) ($sb.kata.shims | default list) | uniq) }}
+{{- $_ := set $shims . (dict "enabled" true "allowedHypervisorAnnotations" $annotations) }}
+{{- end }}
+{{- $kataBase := dict
+  "shims" $shims
+  "defaultShim" (dict "amd64" $shim "arm64" $shim)
+  "nodeSelector" $scheduling.nodeSelector
+  "tolerations" $scheduling.tolerations
+}}
+{{- with $sb.kata.imageTag }}
+{{- $_ := set $kataBase "image" (dict "tag" .) }}
+{{- end }}
+{{- $kataValues := include "xyne-root.merge" (dict "base" $kataBase "layers" (list $sb.values.kata)) | fromYaml }}
+{{- include "xyne-root.application" (dict "root" $ "name" "kata-deploy" "namespace" $sb.kata.namespace "wave" 1 "source" (include "xyne-root.helmSource" (dict "root" $ "repoURL" "quay.io/kata-containers/kata-deploy-charts" "chart" "kata-deploy" "targetRevision" $sb.kata.version "releaseName" "kata-deploy" "values" $kataValues) | fromYaml)) }}
+{{- if $sb.controller.repoURL }}
+{{- $controllerNs := $sb.controller.namespace | default "agent-sandbox-system" }}
+{{- $controllerBase := dict
+  "namespace" (dict "create" true "name" $controllerNs)
+  "image" (dict "repository" $sb.controller.image "tag" $sb.controller.tag)
+  "controller" (dict "extensions" true)
+}}
+{{- $controllerValues := include "xyne-root.merge" (dict "base" $controllerBase "layers" (list $sb.controller.values)) | fromYaml }}
+{{- include "xyne-root.application" (dict "root" $ "name" "agent-sandbox-controller" "namespace" $controllerNs "wave" 1 "source" (include "xyne-root.helmSource" (dict "root" $ "repoURL" $sb.controller.repoURL "targetRevision" $sb.controller.targetRevision "path" $sb.controller.path "releaseName" "agent-sandbox" "values" $controllerValues) | fromYaml)) }}
+{{- end }}
+{{- $policyBase := dict
+  "namespace" $ns
+  "template" (merge (deepCopy ($sb.template | default dict)) (dict "runtimeClassName" (printf "kata-%s" $shim)))
+  "warmPool" $sb.warmPool
+  "policy" $sb.policy
+  "router" (dict "name" "xyne-sandbox-router" "port" 8080)
+  "egressProxy" (dict "name" "xyne-egress-proxy" "port" 3128)
+  "claw" (dict "name" "xyne-claw")
+  "scheduling" $scheduling
+}}
+{{- $policyValues := include "xyne-root.merge" (dict "base" $policyBase "layers" (list $sb.values.policy)) | fromYaml }}
+{{- include "xyne-root.application" (dict "root" $ "name" "sandbox" "namespace" $ns "wave" 2 "source" (include "xyne-root.helmSource" (dict "root" $ "path" "deployment/argocd/addons/sandbox" "targetRevision" .Values.platformRevision "releaseName" "sandbox" "values" $policyValues) | fromYaml)) }}
+{{- $svcBase := mergeOverwrite (dict "istio" (dict "destinationRule" (dict "enabled" true) "virtualService" (dict "enabled" false))) $global }}
+{{- $routerValues := include "xyne-root.merge" (dict "base" $svcBase "layers" (list $generalPool $sb.values.router)) | fromYaml }}
+{{- include "xyne-root.application" (dict "root" $ "name" "xyne-sandbox-router" "namespace" $ns "wave" 1 "source" (include "xyne-root.helmSource" (dict "root" $ "path" "helm-charts/charts/xyne-sandbox-router" "releaseName" "xyne-sandbox-router" "values" $routerValues) | fromYaml) "ignoreDifferences" (include "xyne-root.deploymentIgnore" . | fromYamlArray)) }}
+{{- $proxyValues := include "xyne-root.merge" (dict "base" $svcBase "layers" (list $generalPool $sb.values.egressProxy)) | fromYaml }}
+{{- include "xyne-root.application" (dict "root" $ "name" "xyne-egress-proxy" "namespace" $ns "wave" 1 "source" (include "xyne-root.helmSource" (dict "root" $ "path" "helm-charts/charts/xyne-egress-proxy" "releaseName" "xyne-egress-proxy" "values" $proxyValues) | fromYaml) "ignoreDifferences" (include "xyne-root.deploymentIgnore" . | fromYamlArray)) }}
+{{- end }}

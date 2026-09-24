@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import { z } from "zod";
 import { repositories } from "@/database/repositories";
+import { runAsServiceActor } from "@/database/tenant/context";
 import { logger } from "@/utils/logger";
 
 const ChannelValidationSchema = z.object({
@@ -238,4 +239,84 @@ export async function validateChannelAccessForPost(
     logger.error('[CHANNEL-VALIDATION] Unexpected error in POST channel validation middleware:', error);
     sendError(res, 500, 'Internal Server Error', 'Failed to validate channel access');
   }
+}
+
+/**
+ * Resolve a `channelId` that is really a *user* id into the bot's DM channel
+ * with that user — the native counterpart of what the Slack adapter does when
+ * chat.postMessage's `channel` carries a user id instead of a channel id.
+ *
+ * Only runs when the id names no channel, so every request that already
+ * resolved to a real channel keeps taking exactly the same path. Returns null
+ * when the value is not a user of the bot's own workspace, which leaves the
+ * usual "Channel not found" response to the caller.
+ */
+async function resolveBotDmChannelId(
+  channelId: string | undefined,
+  botUserId: string,
+  workspaceId: string | undefined,
+): Promise<string | null> {
+  if (!channelId || !workspaceId) return null;
+
+  const channel = await repositories.channels.findById(channelId);
+  if (channel) return null;
+
+  // Tenant isolation, same rule as POST /channel/openDm: a user from another
+  // workspace must be indistinguishable from an unknown id.
+  const targetUser = await repositories.users.findById(channelId);
+  if (!targetUser || targetUser.workspaceId !== workspaceId) return null;
+
+  const { unifiedDMService } = await import('@/bots/unified/services/unified-dm-service');
+  // Opening a bot's DM is work done on behalf of the workspace, not by a member
+  // on their own behalf, so it runs as a service actor — the same actor the
+  // app-token webhook paths use for app-triggered writes. Under the request's
+  // own `user` actor the per-table ACLs refuse it twice over: ChannelsACL
+  // rejects the create, and ChannelParticipantsACL then refuses to let the bot
+  // add the human to a brand-new private channel it isn't yet a member of.
+  // The channel and user lookups above stay under the request's own actor, so
+  // workspace scoping still decides what this app is allowed to address.
+  const dmChannel = await runAsServiceActor(botUserId, workspaceId, () =>
+    unifiedDMService.getOrCreateBotDM(targetUser.id, botUserId, workspaceId),
+  );
+  logger.info(
+    `[CHANNEL-VALIDATION] Resolved user ${targetUser.id} to bot DM channel ${dmChannel.id}`,
+  );
+  return dmChannel.id;
+}
+
+/**
+ * Channel validation for POST routes that also accept a user id as `channelId`,
+ * addressing the bot's DM with that user (chat/postMessage).
+ *
+ * The DM is opened if it doesn't exist yet, and the participant check is skipped
+ * for it — the bot is a participant of its own DM by construction. The resolved
+ * DM channel id is handed to the controller on `req._resolvedChannelId`;
+ * anything that is not a DM target falls through to validateChannelAccessForPost
+ * unchanged.
+ */
+export async function validateChannelAccessForPostWithDm(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const channelId = typeof req.body?.channelId === 'string' ? req.body.channelId.trim() : undefined;
+    const dmChannelId = await resolveBotDmChannelId(
+      channelId,
+      req.user?.id ?? '',
+      req.user?.workspaceId,
+    );
+
+    if (dmChannelId) {
+      req._resolvedChannelId = dmChannelId;
+      next();
+      return;
+    }
+  } catch (error) {
+    logger.error('[CHANNEL-VALIDATION] Failed to resolve DM target:', error);
+    sendError(res, 500, 'Internal Server Error', 'Failed to validate channel access');
+    return;
+  }
+
+  await validateChannelAccessForPost(req, res, next);
 }

@@ -44,6 +44,8 @@ import {
   type RecordingSummaryMarkedItem,
 } from './recordingSummaryMarkedItems';
 import { summaryTemplateService } from './summaryTemplateService';
+import { callNotesCanvasService } from './callNotesCanvasService';
+import { isRecording } from '@/utils/callTypeUtils';
 
 // PRD Document structure
 interface PRDDocument {
@@ -73,6 +75,15 @@ interface CanvasSideEffectContext {
 
 import { executeStreamingLlmRequest, type SummaryModelType } from './callLlmRetry';
 import { initializeYSweetDoc, syncToYSweet } from '@/utils/ysweetUtils.js';
+import { lockMessageMetadata } from '@/bypassAcl/rowLockServices';
+
+export interface RecordingSummaryTemplateSelection<T extends SummaryTemplateCandidate = SummaryTemplate> {
+  template: T | null;
+  fellBack: boolean;
+  reason: string | null;
+}
+
+export const DRAFT_SUMMARY_TEMPLATE_ID = 'draft';
 
 /**
  * Sanitize input strings to prevent injection attacks
@@ -983,18 +994,93 @@ export class CallDocumentService {
     userId: string,
     callId: string,
   ): Promise<SummaryTemplate | null> {
-    const templates = await summaryTemplateService.list(workspaceId, userId);
-    const defaultTemplate = await summaryTemplateService.findAccessibleById(
-      DEFAULT_RECORDING_SUMMARY_TEMPLATE.id,
+    const { templates, defaultTemplate } = await this.loadRecordingSummaryTemplateCandidates(
       workspaceId,
       userId,
     );
-    if (templates.length === 0) return defaultTemplate;
+    const selection = await this.pickRecordingSummaryTemplate(
+      transcript,
+      templates,
+      defaultTemplate,
+      callId,
+    );
+    return selection.template;
+  }
+
+  /**
+   * Same selection as production, but with an unsaved draft standing in for its saved
+   * version (or added as a new candidate). A draft id the user can't see is treated as new.
+   */
+  async previewRecordingSummaryTemplateSelection(
+    transcript: string,
+    workspaceId: string,
+    userId: string,
+    callId: string,
+    draft: SummaryTemplateCandidate,
+  ): Promise<RecordingSummaryTemplateSelection<SummaryTemplateCandidate>> {
+    const { templates, defaultTemplate } = await this.loadRecordingSummaryTemplateCandidates(
+      workspaceId,
+      userId,
+    );
+    const saved = templates.find(template => template.id === draft.id);
+    const draftCandidate: SummaryTemplateCandidate = saved
+      ? { ...draft, id: saved.id, version: saved.version }
+      : { ...draft, id: DRAFT_SUMMARY_TEMPLATE_ID };
+    const others: SummaryTemplateCandidate[] = templates.filter(
+      template => template.id !== draftCandidate.id,
+    );
+    // Slot the draft where summaryTemplateService.list's ordering (name asc, version desc,
+    // id asc) would put it, since candidate order in the prompt can sway the pick.
+    const insertAt = others.findIndex(
+      template =>
+        draftCandidate.name.localeCompare(template.name) < 0 ||
+        (draftCandidate.name === template.name &&
+          (draftCandidate.version > template.version ||
+            (draftCandidate.version === template.version &&
+              draftCandidate.id < template.id))),
+    );
+    const candidates = [...others];
+    candidates.splice(insertAt === -1 ? candidates.length : insertAt, 0, draftCandidate);
+    return this.pickRecordingSummaryTemplate(
+      transcript,
+      candidates,
+      defaultTemplate,
+      callId,
+      userId,
+    );
+  }
+
+  private async loadRecordingSummaryTemplateCandidates(
+    workspaceId: string,
+    userId: string,
+  ): Promise<{ templates: SummaryTemplate[]; defaultTemplate: SummaryTemplate | null }> {
+    const [templates, defaultTemplate] = await Promise.all([
+      summaryTemplateService.list(workspaceId, userId),
+      summaryTemplateService.findAccessibleById(
+        DEFAULT_RECORDING_SUMMARY_TEMPLATE.id,
+        workspaceId,
+        userId,
+      ),
+    ]);
+    return { templates, defaultTemplate };
+  }
+
+  private async pickRecordingSummaryTemplate<T extends SummaryTemplateCandidate>(
+    transcript: string,
+    templates: T[],
+    defaultTemplate: T | null,
+    callId: string,
+    credentialUserId?: string,
+  ): Promise<RecordingSummaryTemplateSelection<T>> {
+    if (templates.length === 0) {
+      return { template: defaultTemplate, fellBack: true, reason: 'no_templates' };
+    }
 
     const result = await executeStreamingLlmRequest({
       userPrompt: buildSummaryTemplateSelectionPrompt(transcript, templates),
       operation: 'recording_summary_template_selection',
       callId,
+      ...(credentialUserId ? { userId: credentialUserId } : {}),
     });
 
     if (result.ok) {
@@ -1007,15 +1093,16 @@ export class CallDocumentService {
           template_id: template.id,
           template_name: template.name,
         });
-        return template;
+        return { template, fellBack: false, reason: null };
       }
     }
 
+    const reason = result.ok ? 'invalid_selection' : result.reason;
     logger.warn(`[${callId}] recording_summary_template_selection_fallback`, {
       template_id: defaultTemplate?.id,
-      reason: result.ok ? 'invalid_selection' : result.reason,
+      reason,
     });
-    return defaultTemplate;
+    return { template: defaultTemplate, fellBack: true, reason };
   }
 
   /** Generate a headless-recording summary using a saved or code-backed template. */
@@ -1141,6 +1228,13 @@ export class CallDocumentService {
       })
       .join('\n');
 
+    // Participants' shared notes canvas (series-wide for recurring calls) is extra
+    // context for the summary. Recordings keep their own summary inputs.
+    const notesMarkdown = call && !isRecording(call)
+      ? await callNotesCanvasService.getNotesMarkdown(call)
+      : null;
+    const sanitizedNotes = notesMarkdown ? sanitizeInput(notesMarkdown) : '';
+
     const sanitizedTranscript = sanitizeInput(transcript);
     const sanitizedCustomPrompt = customPrompt ? sanitizeInput(customPrompt) : '';
     const sanitizedFields = summaryFields?.trim() ? sanitizeInput(summaryFields) : '';
@@ -1160,6 +1254,10 @@ MANDATORY OUTPUT CONTRACT:
         participants: participantList || '- No participants found',
         transcript: sanitizedTranscript,
       });
+
+      if (sanitizedNotes) {
+        prompt += `\n\nPARTICIPANT NOTES:\nNotes written by participants in the shared notes canvas${call?.recurringSeriesId ? ' for this recurring meeting series (may include notes from earlier sessions)' : ''}. Use them as additional context: honour agenda items, decisions, and action items captured here, but treat the transcript as the source of truth for what was said in this session. Do not cite notes as transcript segments.\n"""\n${sanitizedNotes}\n"""\n`;
+      }
 
       if (sanitizedCustomPrompt) {
         prompt += `\n\nADDITIONAL USER INSTRUCTIONS:\nThe user has provided specific instructions for this summary. Please prioritize these instructions:\n"${sanitizedCustomPrompt}"\n`;
@@ -1837,7 +1935,8 @@ A Product Requirements Document has been generated from this call discussion.
     conversationId: string,
     callId: string,
     canvasUrl: string,
-    workspaceId: string
+    workspaceId: string,
+    subject: 'recording' | 'call' = 'recording',
   ): Promise<void> {
     try {
       // Idempotent: the automatic summary pipeline may run more than once per call
@@ -1852,9 +1951,10 @@ A Product Requirements Document has been generated from this call discussion.
         throw new Error('Xyne Automatic bot not found');
       }
 
-      const messageContent = `## 📝 Recording Notes
+      const subjectLabel = subject === 'recording' ? 'Recording' : 'Call';
+      const messageContent = `## 📝 ${subjectLabel} Notes
 
-Notes taken during this recording:
+Notes taken during this ${subject}:
 
 [📄 View Notes Canvas](${canvasUrl})`;
 
@@ -2007,12 +2107,7 @@ A comprehensive detailed summary has been generated from this call.
           // Title generation and first-chunk Canvas publication can now update
           // this message concurrently. Lock the row and merge from the latest
           // metadata so neither write erases the other's key.
-          const [lockedMessage] = await tx.$queryRaw<Array<{ metadata: unknown }>>`
-            SELECT "metadata"
-            FROM "messages"
-            WHERE "messageId" = ${callMessage.messageId}
-            FOR UPDATE
-          `;
+          const lockedMessage = await lockMessageMetadata(tx, callMessage.messageId);
           if (!lockedMessage) {
             return;
           }

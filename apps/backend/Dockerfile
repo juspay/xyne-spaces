@@ -38,6 +38,7 @@ COPY packages/shared    packages/shared
 COPY packages/storage   packages/storage
 COPY packages/framework packages/framework
 COPY apps/backend       apps/backend
+COPY scripts            scripts
 
 # backend consumes both from their built dist/
 RUN pnpm --filter @xyne/shared --filter @xyne/storage --filter agentic-framework run build

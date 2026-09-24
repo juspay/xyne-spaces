@@ -205,6 +205,7 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       in: inChannel, // Channel name or ID (renamed to avoid 'in' keyword)
       mentions,        // User ID(s) mentioned in the message (scoped mention search)
       channelMentions, // Channel ID(s) referenced in the message (scoped mention search)
+      groupMentions, // User-group ID(s) mentioned in the message (scoped mention search)
       mentionHighlights, // Display name(s) of bare mention chips — highlighted in results, not in YQL
       // Unified filters (work for both slack and ticket)
       projectId,   // Project ID(s) - comma-separated
@@ -319,19 +320,21 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
           // Access rule:
           //   - PRIVATE doc (isPrivate !== false): owner OR in `permissions`.
           //   - PUBLIC doc  (isPrivate === false): owner OR in `permissions`
-          //     OR a participant of the doc's chat channel (`channelRef`).
+          //     OR a participant of the doc's chat channel (`channelRef`)
+          //     OR, when the doc has no scoping channel at all, anyone —
+          //     matching collectionAccess.ts's resolveCollectionAccess,
+          //     where `!collection.isPrivate` grants every workspace member
+          //     implicit VIEWER with no channel gate. A KB collection created
+          //     directly (not tied to a channel) never gets a `channelRef`
+          //     (see mapper.ts's `if (rootCollection.scopeType === 'CHANNEL')`
+          //     guard), so without this branch every non-owner/non-permissions
+          //     user was permanently 403'd on a collection its own Share
+          //     dialog says is Public.
           const perms = Array.isArray(fields.permissions) ? fields.permissions : [];
           const isOwner = fields.ownerId === userId;
           const isShared = perms.includes(userId);
           const isPublic = fields.isPrivate === false;
-          // Private docs: owner or explicit `permissions` only.
-          // Public docs: owner, `permissions`, OR a participant of the doc's
-          // chat channel (via `channelRef`).
           let allowed = isOwner || isShared;
-          // Channel-participant access: a doc may belong to a chat channel via
-          // `channelRef` (format `id:namespace:chat_container::<channelId>`).
-          // Only consulted for public docs, and only when the cheaper checks
-          // above didn't already pass.
           if (!allowed && isPublic) {
             const channelRef =
               typeof fields.channelRef === 'string' ? fields.channelRef : '';
@@ -343,6 +346,8 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
                   userId,
                 );
               allowed = participant !== null;
+            } else {
+              allowed = true;
             }
           }
           if (!allowed) {
@@ -803,6 +808,9 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
     }
     if (channelMentions) {
       options.slack.mentionedChannelIds = channelMentions;
+    }
+    if (groupMentions) {
+      options.slack.mentionedGroupIds = groupMentions;
     }
     // Thread classification. threadType matches a thread's ROOT message, so it returns one
     // hit per thread; messageActs matches the individual messages the classifier cited as

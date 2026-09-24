@@ -1,10 +1,12 @@
-import { type ReactElement } from 'react';
+import { useCallback, useState, type ReactElement } from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { cn } from '@/utils/classNames';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { useClawAgentDetail } from '@/hooks/useClawAgentDetail';
 import { Pill } from '../../shared/primitives/Pill';
 import { LibraryIconTile } from '../../shared/components/LibraryCard';
+import { AgentCreatedBanner } from './AgentCreatedBanner';
+import { isSpacesRegistered } from './agentRegistration';
 import { AgentDetailHeaderV2 } from './AgentDetailHeaderV2';
 import { AgentPersonaTabV2 } from './persona/AgentPersonaTabV2';
 import { AgentActivityTabV2 } from './activity/AgentActivityTabV2';
@@ -15,6 +17,7 @@ import { AgentToolsTabV2 } from './tools/AgentToolsTabV2';
 import { AGENT_DETAIL_TABS, resolveTab, type AgentDetailTabId } from './detailTabs';
 import { AgentCallGraphTabV2 } from './callGraph/AgentCallGraphTabV2';
 import { useAgentDetailActions } from './useAgentDetailActions';
+import { useOpenAgentChat } from '@/hooks/useOpenAgentChat';
 
 const DATE = new Intl.DateTimeFormat('en-GB', {
   day: 'numeric',
@@ -45,9 +48,15 @@ const ClawAgentDetailV2 = (): ReactElement => {
       : null;
   const returnPath = navigationState?.returnTo ?? `${libraryPath}?tab=agents`;
   const tab = resolveTab(searchParams.get('tab'));
+  const justCreated = (location.state as { justCreated?: unknown } | null)?.justCreated === true;
+  const [bannerDismissed, setBannerDismissed] = useState(false);
+  const dismissBanner = useCallback(() => setBannerDismissed(true), []);
 
   const { data: agent, isLoading, isError } = useClawAgentDetail(slug);
+  const pendingRegistration = agent !== undefined && !isSpacesRegistered(agent);
+  const showBanner = !bannerDismissed && (justCreated || pendingRegistration);
   const actions = useAgentDetailActions(agent);
+  const { canOpenAgentChat, openAgentChat } = useOpenAgentChat();
 
   // Delegation approvals spend the callee's credentials and quota, so the
   // inbox is the owner's (or an admin's) — mirrors claw's canManageRequests.
@@ -71,8 +80,9 @@ const ClawAgentDetailV2 = (): ReactElement => {
             <AgentDetailHeaderV2
               agent={agent}
               actions={actions}
+              onChat={() => openAgentChat(agent.slug)}
+              canChat={canOpenAgentChat}
               onBack={() => void navigate(returnPath)}
-              onEdit={() => void navigate(`${libraryPath}/agent/${agent.slug}/edit`)}
             />
           )}
 
@@ -111,6 +121,14 @@ const ClawAgentDetailV2 = (): ReactElement => {
           </p>
         ) : (
           <>
+            {showBanner && (
+              <AgentCreatedBanner
+                agent={agent}
+                pendingRegistration={pendingRegistration}
+                onDismiss={dismissBanner}
+              />
+            )}
+
             <div className='flex w-full items-start gap-3'>
               <LibraryIconTile name={agent.name} color={agent.color || '#6366f1'} size='md' />
 
@@ -138,14 +156,6 @@ const ClawAgentDetailV2 = (): ReactElement => {
                       <span>Last updated on: {updated}</span>
                     </>
                   )}
-                  <button
-                    type='button'
-                    data-track-category='Claw Agents'
-                    data-track-name='Agent detail v2: version history'
-                    className='underline underline-offset-2'
-                  >
-                    Version history
-                  </button>
                 </div>
               </div>
             </div>

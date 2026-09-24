@@ -16,12 +16,12 @@ import { useAuthContextValues } from '../../../hooks/useAuth';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import { formatElapsedTime } from '../../../utils/dateUtils';
 import { usePlatform } from '../../../hooks/usePlatform';
-import { useUser } from '../../../hooks/useUsers';
+import { useUser, useUsersById } from '../../../hooks/useUsers';
 import { StatusIndicator } from '../../ui/StatusIndicator';
 import { getInitialMessageFromConversation } from '../../../utils/conversationMessageHelpers';
 import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import { sanitizeHtmlString, htmlToPlainText } from '../../../utils/sanitizer';
-import { getFlowJsonPreviewText } from '../../../utils/flowPreview';
+import { getFlowJsonPreviewText, stripFlowMarkup } from '../../../utils/flowPreview';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { getSlashCommandArtifactPreviewText } from '@xyne/shared';
 import { channelTrackingMetadata } from '../../../services/Analytics/channelTracking';
@@ -67,48 +67,63 @@ export const DmListItem = ({
   // Get the sender of the last message
   const lastMessageSender = useUser(lastMessage?.senderId ?? '');
 
-  // Memoize HTML sanitization for message preview (Issue #1)
-  const sanitizedHtml = useMemo(() => {
-    if (!lastMessage) return '';
+  // A forwarded message stores the original content inside an XML envelope. Unwrap it
+  // before deriving any preview so flow/artifact messages use the same compact summary
+  // as messages sent directly in the DM.
+  const previewSourceContent = useMemo(() => {
+    if (!lastMessage?.content) return '';
 
-    // Handle forwarded messages - content is XML, need to parse it
     if (
       'msgType' in lastMessage &&
       lastMessage.msgType === MessageType.FORWARDED &&
       isForwardedMessageXml(lastMessage.content)
     ) {
       const parsed = parseForwardedMessageXml(lastMessage.content);
-      if (parsed) {
-        const text = parsed.optionalText || parsed.content;
-        return sanitizeHtmlString(text || 'Forwarded a message');
-      }
+      if (parsed) return parsed.optionalText || parsed.content || 'Forwarded a message';
     }
+
+    return lastMessage.content;
+  }, [lastMessage]);
+
+  // Memoize HTML sanitization for message preview (Issue #1)
+  const sanitizedHtml = useMemo(() => {
+    if (!lastMessage) return '';
 
     // Attachment-only messages arrive as empty rich-text markup (e.g. '<p></p>'),
     // which is truthy but renders blank. Fall back to a label whenever the message
     // has no visible text, so an attachment preview is not shown as an empty line.
-    const hasVisibleText = htmlToPlainText(lastMessage.content).length > 0;
+    const hasVisibleText = htmlToPlainText(previewSourceContent).length > 0;
     const rawContent = hasVisibleText
-      ? lastMessage.content
+      ? previewSourceContent
       : lastMessage.hasAttachment
         ? 'Sent an attachment'
-        : lastMessage.content || 'Message';
+        : previewSourceContent || 'Message';
 
     return sanitizeHtmlString(rawContent);
-  }, [lastMessage]);
+  }, [lastMessage, previewSourceContent]);
 
   // FlowJSON messages carry the whole interactive flow in their content. Feeding
   // that to RenderMessageWithHTML mounts the full flow card (title, textarea,
   // buttons) inside the one-line preview, breaking row layout. Collapse it to a
   // short plain-text summary instead.
   const flowPreviewText = useMemo(
-    () => (lastMessage?.content ? getFlowJsonPreviewText(lastMessage.content) : null),
-    [lastMessage?.content],
+    () => (previewSourceContent ? getFlowJsonPreviewText(previewSourceContent) : null),
+    [previewSourceContent],
   );
-  const slashCommandArtifactPreviewText = useMemo(
-    () => (lastMessage?.content ? getSlashCommandArtifactPreviewText(lastMessage.content) : null),
-    [lastMessage?.content],
-  );
+  const usersById = useUsersById();
+  const slashCommandArtifactPreviewText = useMemo(() => {
+    const preview = previewSourceContent
+      ? getSlashCommandArtifactPreviewText(previewSourceContent)
+      : null;
+    // The artifact preview is the raw Flow body; resolve its tokens so the row
+    // never shows `<broadcast:channel>` / `<userid:…>` verbatim.
+    return preview
+      ? stripFlowMarkup(preview, userId => {
+          const user = usersById.get(userId);
+          return user ? getUserDisplayName(user) : undefined;
+        })
+      : null;
+  }, [previewSourceContent, usersById]);
 
   // Memoize message preview with RenderMessageWithHTML component
   const messagePreview = useMemo(() => {

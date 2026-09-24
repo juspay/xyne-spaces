@@ -5,6 +5,7 @@ import {
   FormEntityType,
   FormFieldType,
   isFieldActive,
+  isManualSubTicketBoard,
   ReenterMode,
   TicketStageRequestStatus,
 } from '@xyne/shared';
@@ -13,9 +14,11 @@ import type { Stage } from '../../../routes/KanbanBoardScreen/KanbanBoardScreen.
 import { useAuth } from '../../../hooks/useAuth';
 import { useZero } from '../../../hooks/useZero';
 import { apiInstance } from '../../../services/clients/apiClient';
+import { subTicketService } from '../../../services/subTicketService';
 import { mutators } from '../../../zero/mutators';
 import { queries } from '../../../zero/queries';
 import type { StageFormDocLocalChange } from './StageFormFields';
+import { isExternalHttpUrl, looksLikeXyneId } from '../TicketLinkField/ticketLinkUtils';
 import {
   resolveDisplayFormFields,
   type ResolvedDisplayFormField,
@@ -361,6 +364,83 @@ export const useStageForm = ({
     [shouldReuseExistingValueIds, targetStage.id, values],
   );
 
+  // TICKET-field values link the selected ticket as a sub-ticket of the desk ticket (the
+  // "Will be added as a sub-ticket of X" promise). Best-effort: never blocks or fails a save.
+  const linkTicketFieldSubTickets = useCallback(
+    (persistedData: Record<string, string[]>): void => {
+      void (async (): Promise<void> => {
+        try {
+          // Values are xyneIds ("TOKEN-4127"); values stored before that switch are ticket uuids.
+          const candidateValues = Array.from(
+            new Set(
+              fields
+                .filter(field => field.fieldType === FormFieldType.TICKET)
+                .map(field => persistedData[field.id]?.[0]?.trim())
+                .filter(
+                  (candidate): candidate is string =>
+                    Boolean(candidate) && !isExternalHttpUrl(candidate!),
+                ),
+            ),
+          );
+          if (candidateValues.length === 0) return;
+
+          const parentTicketRow = await zero.run(queries.ticketRowById({ ticketId: ticket.id }), {
+            type: 'complete',
+          });
+          if (!parentTicketRow) return;
+          const boardRow = parentTicketRow.boardId
+            ? await zero.run(queries.boardDetailById({ boardId: parentTicketRow.boardId }), {
+                type: 'complete',
+              })
+            : undefined;
+          if (!isManualSubTicketBoard(boardRow?.boardType)) return;
+
+          const resolvedCandidates: Array<{ id: string; label: string }> = [];
+          const seenIds = new Set<string>();
+          for (const candidateValue of candidateValues) {
+            const row = looksLikeXyneId(candidateValue)
+              ? await zero.run(
+                  queries.ticketByXyneIdV3({
+                    xyneId: candidateValue,
+                    workspaceId: parentTicketRow.workspaceId ?? '',
+                  }),
+                  { type: 'complete' },
+                )
+              : await zero.run(queries.ticketRowById({ ticketId: candidateValue }), {
+                  type: 'complete',
+                });
+            if (!row || row.id === ticket.id || seenIds.has(row.id)) continue;
+            seenIds.add(row.id);
+            resolvedCandidates.push({ id: row.id, label: row.xyneId || row.title || 'Sub-ticket' });
+          }
+          if (resolvedCandidates.length === 0) return;
+
+          const mappings = await zero.run(
+            queries.subTicketMappingsForTickets({ ticketIds: [ticket.id] }),
+            { type: 'complete' },
+          );
+          const alreadyLinked = new Set(
+            (mappings ?? [])
+              .map(mapping => mapping.subTicket?.mappedTicketId)
+              .filter((id): id is string => Boolean(id)),
+          );
+
+          for (const candidate of resolvedCandidates) {
+            if (alreadyLinked.has(candidate.id)) continue;
+            try {
+              await subTicketService.link(ticket.id, candidate.id, candidate.label);
+            } catch {
+              // Duplicate/concurrent links are rejected server-side; the stored value stands.
+            }
+          }
+        } catch {
+          // Best-effort wiring; a failed link never fails the form save itself.
+        }
+      })();
+    },
+    [fields, ticket.id, zero],
+  );
+
   const persistForm = useCallback(
     async (
       mode: PersistMode,
@@ -571,6 +651,7 @@ export const useStageForm = ({
           });
           return next;
         });
+        linkTicketFieldSubTickets(effectiveFormData);
         return effectiveFormData;
       } catch (error) {
         toast.error(error instanceof Error ? error.message : 'Failed to save form');
@@ -588,6 +669,7 @@ export const useStageForm = ({
       formData,
       formId,
       hasApprovers,
+      linkTicketFieldSubTickets,
       localDocChanges,
       requestForStage?.id,
       resolveDraftVisitVersion,

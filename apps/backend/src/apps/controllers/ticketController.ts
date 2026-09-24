@@ -8,7 +8,7 @@ import { repositories } from '@/database/repositories';
 import { evaluateAssignmentRule } from '@/utils/assignmentEngine';
 import { ticketService } from '@/services/ticketService';
 import { ticketAssignmentService, primaryUserIdOf } from '@/services/ticketAssignmentService';
-import { ticketDuplicateService } from '@/services/ticketDuplicateService';
+import { ticketDuplicateService, type DuplicateScopeFieldValue } from '@/services/ticketDuplicateService';
 import { DatabaseClient } from '@/database/client';
 import type { BoardMetadata } from '@xyne/shared';
 import {
@@ -73,6 +73,7 @@ import {
   etaSignalsFromResult,
   writeEtaActivitiesPrisma,
 } from '@/services/etaManagement';
+import { lockTicketMetadataAndEta } from '@/bypassAcl/rowLockServices';
 
 const externalSourceRepo = new ExternalSourceRepository();
 const externalMessageRepo = new ExternalMessageRepository();
@@ -95,6 +96,7 @@ const CreateTicketBodySchema = z.object({
   stageName: z.string().trim().optional(),
   eta: z.string().datetime({ message: 'ETA must be a valid ISO 8601 date string' }).optional(),
   ticketType: z.string().trim().optional(),
+  merchantId: z.string().trim().min(1, 'Merchant ID cannot be empty').optional(),
   dynamicFields: z.record(z.unknown()).optional(),
 }).refine(
   data => !!data.channelId || !!data.channelName,
@@ -123,6 +125,8 @@ const UpdateTicketBodySchema = z.object({
   boardId: z.string().min(1, 'Board ID cannot be empty').trim().optional(),
   isArchived: z.boolean().optional(),
   tags: z.array(z.string().trim().min(1, 'Tags cannot be empty')).optional(),
+  // null clears the merchant link
+  merchantId: z.string().trim().min(1, 'Merchant ID cannot be empty').nullable().optional(),
   dynamicFields: z.record(z.unknown()).optional(),
 }).refine(
   data => !!data.channelId || !!data.channelName || !!data.conversationId,
@@ -132,7 +136,8 @@ const UpdateTicketBodySchema = z.object({
     data.assigneeId || data.assignedToEmail || data.stageName || data.groupId ||
     data.title || data.description || data.priority || data.eta ||
     data.ticketType || data.statusV2 || data.boardId || data.assignedUserGroupAlias ||
-    data.isArchived !== undefined || data.tags || data.dynamicFields
+    data.isArchived !== undefined || data.tags || data.dynamicFields ||
+    data.merchantId !== undefined
   ),
   { message: 'At least one field to update is required', path: ['assigneeId'] }
 ).refine(
@@ -208,6 +213,8 @@ const TicketFiltersSchema = z
     createdBy: toArrayFilter(z.string().trim().min(1)).optional(),
     userGroupId: toArrayFilter(z.string().trim().min(1)).optional(),
     tags: toArrayFilter(z.string().trim().min(1)).optional(),
+    merchantId: toArrayFilter(z.string().trim().min(1)).optional(),
+    hasMerchantId: z.boolean().optional(),
     isArchived: z.boolean().optional(),
     createdAfter: z.string().datetime({ message: 'createdAfter must be an ISO 8601 date string' }).optional(),
     createdBefore: z.string().datetime({ message: 'createdBefore must be an ISO 8601 date string' }).optional(),
@@ -230,11 +237,16 @@ const SearchTicketsBodySchema = z.object({
   const hasChannel = typeof data.channelId === 'string' && data.channelId.length > 0;
   const hasBoards = Array.isArray(data.boardIds) && data.boardIds.length > 0;
   const hasProject = typeof data.projectId === 'string' && data.projectId.length > 0;
-  if (!hasChannel && !hasBoards && !hasProject) {
+  // A merchant filter is a narrow, indexed predicate, so it may stand in for a scope and
+  // search the whole workspace (still bounded by the workspaceId backstop in the handler).
+  const hasMerchantScope =
+    (Array.isArray(data.filters?.merchantId) && data.filters.merchantId.length > 0) ||
+    data.filters?.hasMerchantId === true;
+  if (!hasChannel && !hasBoards && !hasProject && !hasMerchantScope) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ['channelId'],
-      message: 'At least one of channelId, boardIds, or projectId is required',
+      message: 'At least one of channelId, boardIds, projectId, filters.merchantId, or filters.hasMerchantId: true is required',
     });
   }
   // customFields is an expensive post-filter — require a board/project scope to bound it.
@@ -460,12 +472,7 @@ const transferTicketToBoard = async (params: {
     // FOR UPDATE locks the row so that can't happen. Both locked values feed evaluateEta:
     // eta is the extend-only baseline and a fingerprint input, so a stale one could decide
     // against - and then overwrite - a due date someone else just moved.
-    const [lockedTicket] = await tx.$queryRaw<{ metadata: unknown; eta: Date | null }[]>`
-      SELECT "metadata", "eta"
-      FROM "tickets"
-      WHERE "id" = ${ticketId}
-      FOR UPDATE
-    `;
+    const lockedTicket = await lockTicketMetadataAndEta(tx, ticketId);
     const lockedEta = lockedTicket?.eta ?? null;
     const boardEtaCtx = await loadBoardEtaContext(tx, targetBoardId);
     const currentTicketEtaManagement = parseTicketEtaManagement(lockedTicket?.metadata);
@@ -689,6 +696,7 @@ export class TicketController {
         stageName: requestedStageName,
         eta: etaString,
         ticketType,
+        merchantId,
         dynamicFields,
       } = bodyResult.data;
 
@@ -744,6 +752,11 @@ export class TicketController {
         });
         return;
       }
+
+      const duplicateScopeValues: DuplicateScopeFieldValue[] | undefined =
+        customFieldValues && customFieldValues.fieldValues.length > 0
+          ? customFieldValues.fieldValues.map(fv => ({ fieldId: fv.fieldId, value: fv.actualFieldValue }))
+          : undefined;
 
       // Resolve channelId from channelName if not provided
       const resolvedChannelId = await resolveChannelId(channelId, undefined, channelName);
@@ -822,6 +835,7 @@ export class TicketController {
         stageName: resolvedStageName,
         eta: etaDate,
         ticketType,
+        merchantId,
         customFieldValues,
       });
 
@@ -834,6 +848,8 @@ export class TicketController {
           description,
           projectId,
           userId,
+          channelId: resolvedChannelId,
+          scopeFieldValues: duplicateScopeValues,
         }).catch(error => {
           logger.error('[Apps Ticket Creation] Failed to persist duplicate references for ticket', {
             ticketId: result.ticketId,
@@ -935,6 +951,7 @@ export class TicketController {
         boardId,
         isArchived,
         tags,
+        merchantId,
         dynamicFields,
       } = bodyResult.data;
 
@@ -1120,6 +1137,7 @@ export class TicketController {
       if (ticketType !== undefined) directUpdates.ticketType = ticketType;
       if (statusV2 !== undefined) directUpdates.statusV2 = statusV2;
       if (isArchived !== undefined) directUpdates.isArchived = isArchived;
+      if (merchantId !== undefined) directUpdates.merchantId = merchantId;
 
       if (Object.keys(directUpdates).length > 0) {
         await repositories.tickets.updateTicketFields(ticketId, directUpdates, userId);
@@ -1410,6 +1428,8 @@ export class TicketController {
           createdBy: filters.createdBy,
           userGroupId: filters.userGroupId,
           tags: filters.tags,
+          merchantId: filters.merchantId,
+          hasMerchantId: filters.hasMerchantId,
           isArchived: filters.isArchived,
           createdAfter: filters.createdAfter ? new Date(filters.createdAfter) : undefined,
           createdBefore: filters.createdBefore ? new Date(filters.createdBefore) : undefined,
@@ -1442,6 +1462,7 @@ export class TicketController {
         channelId: true,
         boardId: true,
         projectId: true,
+        merchantId: true,
       } as const;
 
       const hasCustomFieldFilters = !!(customFields && Object.keys(customFields).length > 0);
@@ -1536,6 +1557,7 @@ export class TicketController {
           channelId: ticket.channelId,
           boardId: ticket.boardId,
           projectId: ticket.projectId,
+          merchantId: ticket.merchantId,
           ...(includeCustomFields ? { customFormData: customFormDataByTicketId.get(ticket.id) ?? null } : {}),
         };
       });
@@ -2769,6 +2791,13 @@ export class TicketController {
         additionalFormFieldValidationErrors.push(...partialResult.validationErrors);
       }
 
+      // Duplicate detection fires inside createConversationWithEmail BEFORE the
+      // field sync below (timing constraint) — hand it the precomputed payload.
+      const scopeFieldValues: DuplicateScopeFieldValue[] | undefined =
+        customFieldValues && customFieldValues.fieldValues.length > 0
+          ? customFieldValues.fieldValues.map(fv => ({ fieldId: fv.fieldId, value: fv.actualFieldValue }))
+          : undefined;
+
       const result = await emailService.createConversationWithEmail({
         channelId,
         userId,
@@ -2793,6 +2822,7 @@ export class TicketController {
         },
         receivedAt: new Date(),
         boardId: effectiveBoardId,
+        scopeFieldValues,
       });
 
       if (result && 'blocked' in result && result.blocked) {
