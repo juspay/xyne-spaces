@@ -146,6 +146,7 @@ import sdlcArtifactVersionsInternalRoutes from '@/routes/sdlcArtifactVersionsInt
 import sdlcWikiInternalRoutes from '@/routes/sdlcWikiInternal';
 import { handleAutoDraftCallback } from '@/controllers/autodraftCallback.handler';
 import { handleDeskReportCallback } from '@/controllers/deskReportCallback.handler';
+import { handleDeskThreadCanvasCallback } from '@/controllers/deskThreadCanvasCallback.handler';
 import automationWebhookRoutes from '@/automations/routes/webhook-trigger.handler';
 import activityLogRoutes from '@/routes/activityLog';
 import userActivityRoutes from '@/routes/userActivity';
@@ -647,6 +648,11 @@ export class App {
       '/api/internal/desk-report/callback/:channelId/:attachmentId',
       validateS2SKey,
       handleDeskReportCallback,
+    );
+    this.app.post(
+      '/api/internal/desk-canvas/callback/:canvasId/:sessionId',
+      validateS2SKey,
+      handleDeskThreadCanvasCallback,
     );
 
     // Internal canvas read/update (S2S-only, used by MCP tools)
