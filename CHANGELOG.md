@@ -1,3 +1,10 @@
+## [1.389.0](https://github.com/juspay/xyne-spaces/compare/v1.388.0...v1.389.0) (2026-09-24)
+
+
+### Features
+
+* added ticket link flow for the canvas text ([#2225](https://github.com/juspay/xyne-spaces/issues/2225)) ([eb12012](https://github.com/juspay/xyne-spaces/commit/eb120129d8e43dd74ba905537796444b4e73d5f1))
+
 ## [1.388.0](https://github.com/juspay/xyne-spaces/compare/v1.387.0...v1.388.0) (2026-09-24)
 
 
