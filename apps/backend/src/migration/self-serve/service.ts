@@ -7,7 +7,7 @@ import { repositories } from '@/database/repositories';
 import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { isMigrationEncryptionConfigured } from './migrationCrypto';
 import { config } from '@/config/env';
-import { getWorkspaceIdByTeamId } from '@/migration/slack/slackMigrationBotConfig';
+import { getWorkspaceIdByTeamId, getBotConfigByWorkspaceId } from '@/migration/slack/slackMigrationBotConfig';
 import { SlackMigrationEngine } from './engine';
 import { MigrationStore } from './store';
 import { MigrationQueues } from './queues';
@@ -86,8 +86,8 @@ export class SlackMigrationService {
     if (await this.store.hasChannelMigration(actor.workspaceId, input.slackChannelId)) {
       throw new HttpError(409, 'CONFLICT', 'A migration for this channel is already in progress. You can request it again once it completes.');
     }
-    const token = config.slackBotToken;
-    if (!token) throw new HttpError(400, 'VALIDATION_ERROR', 'Central Slack workspace token is not configured');
+    const token = getBotConfigByWorkspaceId(actor.workspaceId).slackBotToken; // per-workspace bot (falls back to flat SLACK_BOT_TOKEN)
+    if (!token) throw new HttpError(400, 'VALIDATION_ERROR', 'Slack bot token is not configured for this workspace');
     const slack = new WebClient(token);
     const auth = await slack.auth.test().catch(() => null);
     if (!auth?.team_id) throw new HttpError(400, 'VALIDATION_ERROR', 'Central token auth.test failed');

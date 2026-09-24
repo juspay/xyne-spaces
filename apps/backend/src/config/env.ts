@@ -95,6 +95,7 @@ const envSchema = Joi.object({
   MIGRATION_INGEST_CONCURRENCY: Joi.number().default(3),          // conversations one worker ingests in parallel; total in-flight = processes × this. RESTART-required (Bull binds concurrency at .process())
   MIGRATION_WORKER_PROCESSES: Joi.number().default(1),            // worker PROCESSES forked inside the pod (the real CPU-parallelism knob). RESTART-required; 1 = single process (no fork)
   MIGRATION_INGEST_CONTROL: Joi.boolean().default(false), // kill-switch: gates the start/stop-ingestion routes (and the dashboard button). Off = ingestion queue can't be toggled.
+  MIGRATION_APP_CREATOR_EMAIL: Joi.string().allow('').default(''), // existing user's email to own bot/app rows created during migration (alert/webhook channels)
   GCS_BUNDLE_BUCKET_NAME: Joi.string().allow('').default(''),
   GCS_CANVAS_BUCKET_NAME: Joi.string().allow('').default(''),
   GCS_DOCS_BUCKET_NAME: Joi.string().allow('').default(''),
@@ -755,6 +756,7 @@ export const config = {
     ingestConcurrency: envVars.MIGRATION_INGEST_CONCURRENCY, // RESTART-required (Bull concurrency bound at .process())
     workerProcesses: envVars.MIGRATION_WORKER_PROCESSES,     // RESTART-required (fork count at boot)
     ingestControlEnabled: envVars.MIGRATION_INGEST_CONTROL, // gate for the start/stop-ingestion routes + dashboard button
+    appCreatorEmail: envVars.MIGRATION_APP_CREATOR_EMAIL, // createdBy for migrated bot/app rows
   },
   gcs: {
     projectId: envVars.GCS_PROJECT_ID,

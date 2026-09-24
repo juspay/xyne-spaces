@@ -171,6 +171,7 @@ export class MigrationWorkers {
         continue;
       }
       await this.store.addCollected(job.id, conv.id, isChannel ? 0 : result.messages); // channel count already live via setChannelProgress
+      await this.engine.collectConversationResources(token, conv.id, job.gcsPrefix).catch(() => undefined); // bookmarks/links/canvases
       if (result.newestTs > 0) cursors[conv.id] = result.newestTs; // remember the newest ts so refresh only fetches the delta
       collected += 1;
       messages += result.messages;
@@ -199,7 +200,8 @@ export class MigrationWorkers {
    * lookback are caught. Ingest reads base + snapshots as a union and dedups. Returns to AWAITING_APPROVAL.
    */
   private async refresh(job: MigrationJob): Promise<void> {
-    if (![MigrationStatus.AWAITING_APPROVAL, MigrationStatus.REFRESHING].includes(job.status)) return;
+    // Include QUEUED: reconcile re-enqueues an interrupted refresh as QUEUED; without it the job returns every pickup and thrashes forever.
+    if (![MigrationStatus.AWAITING_APPROVAL, MigrationStatus.REFRESHING, MigrationStatus.QUEUED].includes(job.status)) return;
     let token: string;
     try { token = this.engine.decryptToken(job); }
     catch { await this.store.update(job.id, { status: MigrationStatus.AWAITING_APPROVAL, refreshRequested: false, error: 'Refresh needs the Slack token, which is no longer available. Re-submit to migrate newer messages.' }); return; }
@@ -247,6 +249,7 @@ export class MigrationWorkers {
         continue;
       }
       if (result.newestTs > 0) cursors[conv.id] = Math.max(cursors[conv.id] ?? 0, result.newestTs);
+      await this.engine.collectConversationResources(token, conv.id, job.gcsPrefix).catch(() => undefined); // re-collect bookmarks/links/canvases
       newMessages += result.messages;
       if (result.messages > 0) refreshedConvs += 1;
       if (isNew) { newConvs += 1; await this.store.addCollected(job.id, conv.id, isChannel ? 0 : result.messages); }

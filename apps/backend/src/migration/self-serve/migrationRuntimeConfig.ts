@@ -24,7 +24,7 @@ export const MIGRATION_DEFAULTS: MigrationRuntimeConfig = {
   fileConcurrency: 5,
   pageDelayMs: 250,
   listDelayMs: 3000,
-  fileTimeoutMs: 600_000,
+  fileTimeoutMs: 120_000,  // keep well under stallLimitMs so one stuck attachment can't outlast the stall window
   requestTimeoutMs: 30_000,
   stallLimitMs: 600_000,
 };
