@@ -1,4 +1,4 @@
-import { UserResponsibility } from '@xyne/shared';
+import { UserResponsibility, UserRoleMappingEntityType } from '@xyne/shared';
 import { PrismaClient } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
 
@@ -20,7 +20,7 @@ export async function getGroupRoleIdsByUser(
 ): Promise<Map<string, Set<string>>> {
   const [urmRows, ugmRows] = await Promise.all([
     client.userRoleMapping.findMany({
-      where: { entityType: 'USER_GROUP', entityId: userGroupId },
+      where: { entityType: UserRoleMappingEntityType.USER_GROUP, entityId: userGroupId },
       select: { userId: true, roleId: true },
     }),
     client.userGroupMapping.findMany({
