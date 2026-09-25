@@ -1,3 +1,10 @@
+## [1.404.0](https://github.com/juspay/xyne-spaces/compare/v1.403.0...v1.404.0) (2026-09-25)
+
+
+### Features
+
+* dont-show-archived-tickets-in-desk-tab-by-default ([#2268](https://github.com/juspay/xyne-spaces/issues/2268)) ([903af21](https://github.com/juspay/xyne-spaces/commit/903af21caf904376236e0a30431a0893ac908d9c))
+
 ## [1.403.0](https://github.com/juspay/xyne-spaces/compare/v1.402.1...v1.403.0) (2026-09-25)
 
 
