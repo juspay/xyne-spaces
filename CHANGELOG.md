@@ -1,3 +1,10 @@
+## [1.398.0](https://github.com/juspay/xyne-spaces/compare/v1.397.0...v1.398.0) (2026-09-25)
+
+
+### Features
+
+* move encrypted-fields config to enc-owned DB table ([#2015](https://github.com/juspay/xyne-spaces/issues/2015)) ([4ab93b8](https://github.com/juspay/xyne-spaces/commit/4ab93b8518a243530e64b83ae09404c8e5547d99))
+
 ## [1.397.0](https://github.com/juspay/xyne-spaces/compare/v1.396.1...v1.397.0) (2026-09-25)
 
 
