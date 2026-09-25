@@ -34,7 +34,7 @@ import {
 import { PlusDefault } from '@xyne/icons';
 import { toast } from 'sonner';
 import { posthogService } from '../../services/Analytics/posthogService';
-import { useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { DANGEROUS_EXTENSIONS } from '@xyne/shared';
 import { AIAgentSelector } from './AIAgentSelector';
 import { ModelThinkingSelector, formatModelLabel } from './ModelThinkingSelector';
@@ -324,20 +324,24 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
   const instant = selectedAgent?.instantAgent === true;
 
   const modelAgentSlug = selectedAgentSlug ?? 'ask-ai';
-  const { data: agentModelsData } = useQuery({
+  const { data: agentModelsData, isPlaceholderData: modelsArePreviousAgent } = useQuery({
     queryKey: ['claw-agent-models', modelAgentSlug],
     queryFn: () => fetchClawAgentModels(modelAgentSlug),
     staleTime: 60_000,
+    placeholderData: keepPreviousData,
   });
   // Reset the pin/thinking picks when the AGENT changes — but not on mount,
   // where they may be seeded from initialExtras (landing → chat handoff).
   const prevModelAgentSlug = useRef(modelAgentSlug);
   useEffect(() => {
     if (prevModelAgentSlug.current === modelAgentSlug) return;
+    if (modelsArePreviousAgent) return;
     prevModelAgentSlug.current = modelAgentSlug;
     setSelectedModel(null);
     setThinkingLevel(null);
-  }, [modelAgentSlug]);
+  }, [modelAgentSlug, modelsArePreviousAgent]);
+
+  const effectiveModel = modelsArePreviousAgent ? null : selectedModel;
 
   const { data: configData } = useQuery<XyneAIConfigResponse>({
     queryKey: ['xyne-ai-config'],
@@ -370,10 +374,10 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
       voiceMode,
       voiceStudioMode,
       instant,
-      model: selectedModel,
-      modelProvider: !selectedModel
+      model: effectiveModel,
+      modelProvider: !effectiveModel
         ? null
-        : selectedModel.startsWith('local-harness:')
+        : effectiveModel.startsWith('local-harness:')
           ? 'local-harness'
           : modelPinProvider,
       thinkingLevel,
@@ -390,7 +394,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
       voiceMode,
       voiceStudioMode,
       instant,
-      selectedModel,
+      effectiveModel,
       sandboxMode,
       modelPinProvider,
       thinkingLevel,
@@ -1234,7 +1238,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
                   data-track-metadata={JSON.stringify(
                     aiSendButtonTrackingMetadata({
                       surface: 'page',
-                      model: selectedModel,
+                      model: effectiveModel,
                       thinkingLevel,
                       webSearchEnabled: webSearchAccessible ? webSearchEnabled : false,
                       deepResearchEnabled: deepResearchAccessible ? deepResearchEnabled : false,
@@ -1243,7 +1247,10 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
                     }),
                   )}
                   className={cn(
-                    'ai-send-btn inline-flex h-8 w-8 items-center justify-center rounded-full bg-[#e8e4dd] text-foreground transition enabled:hover:bg-[#ddd9d2] disabled:cursor-not-allowed disabled:bg-[#e8e4dd]/50 disabled:text-muted-foreground',
+                    'inline-flex h-8 w-8 items-center justify-center rounded-full transition disabled:cursor-not-allowed',
+                    canSend
+                      ? 'bg-primary text-primary-foreground hover:bg-primary/90'
+                      : 'ai-send-btn bg-[#e8e4dd]/50 text-muted-foreground',
                   )}
                 >
                   <ArrowUp className='h-4 w-4' aria-hidden strokeWidth={2.25} />

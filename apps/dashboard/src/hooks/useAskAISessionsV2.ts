@@ -6,6 +6,7 @@
  * so the sidebar can switch between versions seamlessly.
  */
 
+import { useCallback } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { fetchV2Conversations } from '../services/XyneAI/XyneAISessionsV2Service';
 
@@ -44,13 +45,19 @@ export function useV2SessionsList(agentSlug?: string | null, enabled = true) {
 export function useV2SessionInvalidator() {
   const queryClient = useQueryClient();
 
-  const invalidateSessions = (agentSlug?: string | null) => {
-    void queryClient.invalidateQueries({ queryKey: V2_SESSIONS_KEY(agentSlug) });
-  };
+  const invalidateSessions = useCallback(
+    (agentSlug?: string | null) => {
+      void queryClient.invalidateQueries({ queryKey: V2_SESSIONS_KEY(agentSlug) });
+    },
+    [queryClient],
+  );
 
-  const invalidateMessages = (convId: string, agentSlug?: string | null) => {
-    void queryClient.invalidateQueries({ queryKey: v2SessionMessagesKey(convId, agentSlug) });
-  };
+  const invalidateMessages = useCallback(
+    (convId: string, agentSlug?: string | null) => {
+      void queryClient.invalidateQueries({ queryKey: v2SessionMessagesKey(convId, agentSlug) });
+    },
+    [queryClient],
+  );
 
   return { invalidateSessions, invalidateMessages };
 }

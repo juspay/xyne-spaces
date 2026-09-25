@@ -20,7 +20,7 @@ import multer from "multer";
 import { existsSync, readdirSync } from "node:fs";
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
-import { agentRepository, chatMessageRepository, userRepository, agentRunRepository, chatAttachmentRepository, userAgentConfigRepository, userProviderCredentialsRepository, userSubagentConfigRepository, agentProviderCredentialsRepository } from "../repositories/index.js";
+import { agentRepository, chatMessageRepository, chatConversationMetaRepository, userRepository, agentRunRepository, chatAttachmentRepository, userAgentConfigRepository, userProviderCredentialsRepository, userSubagentConfigRepository, agentProviderCredentialsRepository } from "../repositories/index.js";
 import { getValidClaudeBearer } from "../lib/claude-oauth-refresh.js";
 import { prisma } from "../db.js";
 import { cancelRunRecovery } from "../queue/run-recovery-worker.js";
@@ -37,6 +37,10 @@ import { resolveFastMode } from "../lib/fast-mode.js";
 import { extractFollowUpSuggestionsFromInvocations } from "../lib/follow-up-suggestions.js";
 import { getRequesterId, getOrgId, getAgentEditAccess, isClawAdmin } from "../middleware/agent-acl.js";
 import { uploadChatAttachments } from "../services/chatAttachmentService.js";
+import {
+  maybeGenerateConversationTitle,
+  MANUAL_CHAT_TITLE_MAX_CHARS,
+} from "../services/chatTitleClient.js";
 import { gcsService } from "../services/storageService.js";
 import type { SpacesAuthContext } from "../mcp/servers/xyne-spaces-client.js";
 import {
@@ -586,6 +590,16 @@ async function persistAssistantResult(args: {
         log.error("[agent-chat] failed to persist assistant attachment:", e);
       }
     }
+  }
+
+  if (args.status === "completed") {
+    void maybeGenerateConversationTitle({
+      conversationId: args.conversationId,
+      agentSlug: args.agentSlug,
+      userId: args.userId,
+      orgId: args.orgId,
+      assistantReply: args.content,
+    }).catch((err) => log.warn("[agent-chat] chat title generation failed:", errMsg(err)));
   }
 
   return { messageId: finalAssistantMsg.id, persistedAttachments };
@@ -3451,6 +3465,65 @@ router.delete("/:slug/chat/:convId", async (req: Request<{ slug: string; convId:
   }
 });
 
+router.patch("/:slug/chat/:convId", async (req: Request<{ slug: string; convId: string }>, res: Response) => {
+  try {
+    const userId = getRequesterId(req);
+    if (!userId) {
+      res.status(401).json({ success: false, error: "Authentication required" });
+      return;
+    }
+
+    const { title, pinned } = (req.body ?? {}) as { title?: unknown; pinned?: unknown };
+    if (title === undefined && pinned === undefined) {
+      res.status(400).json({ success: false, error: "title or pinned is required" });
+      return;
+    }
+    if (title !== undefined && (typeof title !== "string" || !title.trim())) {
+      res.status(400).json({ success: false, error: "title must be a non-empty string" });
+      return;
+    }
+    if (pinned !== undefined && typeof pinned !== "boolean") {
+      res.status(400).json({ success: false, error: "pinned must be a boolean" });
+      return;
+    }
+
+    const messages = await chatMessageRepository.findByConversationAndAgent(
+      req.params.convId,
+      req.params.slug,
+    );
+    const owned = messages.find((message) => message.userId === userId);
+    if (!owned) {
+      res.status(404).json({ success: false, error: "Conversation not found" });
+      return;
+    }
+
+    const target = {
+      conversationId: req.params.convId,
+      userId,
+      agentSlug: req.params.slug,
+      orgId: owned.orgId,
+    };
+    if (typeof title === "string") {
+      await chatConversationMetaRepository.setTitle({
+        ...target,
+        title: title.trim().slice(0, MANUAL_CHAT_TITLE_MAX_CHARS),
+      });
+    }
+    if (typeof pinned === "boolean") {
+      await chatConversationMetaRepository.setPinned({ ...target, pinned });
+    }
+
+    const meta = await chatConversationMetaRepository.find(req.params.convId);
+    res.json({
+      success: true,
+      data: { title: meta?.title ?? null, pinned: meta?.pinned ?? false },
+    });
+  } catch (err) {
+    log.error("[agent-chat] patch conversation error:", err);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
+
 // GET /agents/:slug/conversations — list user's conversations with summaries
 router.get("/:slug/conversations", async (req: Request<{ slug: string }>, res: Response) => {
   try {
@@ -3488,17 +3561,28 @@ router.get("/:slug/conversations", async (req: Request<{ slug: string }>, res: R
       convMap.set(msg.conversationId, list);
     }
 
-    // Build summaries
+    const meta = await chatConversationMetaRepository
+      .byConversationIds([...convMap.keys()])
+      .catch(() => new Map<string, { title: string | null; pinned: boolean }>());
     const conversations = [...convMap.entries()].map(([conversationId, msgs]) => {
       const firstUserMsg = msgs.find((m) => m.role === "user");
       const lastMsg = msgs[msgs.length - 1]!;
+      const row = meta.get(conversationId);
       return {
         conversationId,
-        title: (firstUserMsg?.content ?? "").slice(0, 80),
+        title: row?.title ?? (firstUserMsg?.content ?? "").slice(0, 80),
+        titleGenerated: Boolean(row?.title),
+        pinned: row?.pinned ?? false,
         messageCount: msgs.length,
         lastMessageAt: lastMsg.createdAt,
       };
-    }).sort((a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime());
+    }).sort((a, b) =>
+      a.pinned === b.pinned
+        ? new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime()
+        : a.pinned
+          ? -1
+          : 1,
+    );
 
     res.json({ success: true, data: conversations });
   } catch (err) {

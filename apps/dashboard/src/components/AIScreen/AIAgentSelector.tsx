@@ -1,6 +1,6 @@
 import { ReactElement, useCallback, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ChevronDown, Bot, Search } from 'lucide-react';
+import { ChevronDown, Bot, Search, X } from 'lucide-react';
 import { Popover } from '../ui/Popover';
 import { cn } from '../../utils/classNames';
 import {
@@ -24,7 +24,36 @@ export interface AIAgentSelectorProps {
   hideTrigger?: boolean;
 }
 
-const MAX_VISIBLE_AGENTS = 6;
+export const SELECTOR_ROW_CLASS =
+  'flex w-full items-center gap-2.5 rounded-[10px] px-2.5 py-2 text-left text-sm text-foreground transition-colors hover:bg-accent';
+
+export function AgentGlyph({
+  color,
+  name,
+  size = 20,
+}: {
+  color?: string | undefined;
+  name: string;
+  size?: number;
+}): ReactElement {
+  return (
+    <span
+      aria-hidden
+      className={cn(
+        'inline-flex shrink-0 items-center justify-center rounded-full font-medium uppercase text-white',
+        !color && 'bg-muted-foreground',
+      )}
+      style={{
+        width: size,
+        height: size,
+        fontSize: Math.round(size * 0.45),
+        ...(color ? { backgroundColor: color } : {}),
+      }}
+    >
+      {name.trim().charAt(0) || '?'}
+    </span>
+  );
+}
 
 /**
  * Agent selector for the /ai page composer.
@@ -61,7 +90,10 @@ export function AIAgentSelector({
     const withoutAskAI = agents.filter((a: AccessibleClawAgent) => a.slug !== 'ask-ai');
     if (!query.trim()) return withoutAskAI;
     const q = query.toLowerCase();
-    return withoutAskAI.filter((a: AccessibleClawAgent) => a.name.toLowerCase().includes(q));
+    return withoutAskAI.filter(
+      (a: AccessibleClawAgent) =>
+        a.name.toLowerCase().includes(q) || (a.description ?? '').toLowerCase().includes(q),
+    );
   }, [agents, query]);
 
   const selectedAgent = useMemo(
@@ -71,6 +103,13 @@ export function AIAgentSelector({
 
   const displayText = selectedAgent?.name ?? 'Ask AI';
 
+  const clearAgent = useCallback(() => {
+    if (selectedAgentSlug !== null) {
+      setSelectedAgentSlug(null);
+      onAgentChange?.(null);
+    }
+  }, [selectedAgentSlug, setSelectedAgentSlug, onAgentChange]);
+
   // Zero-size anchor when the pill is hidden — Radix positions the popover
   // against the trigger, so it still needs an element in the toolbar.
   const trigger = hideTrigger ? (
@@ -79,30 +118,18 @@ export function AIAgentSelector({
     <button
       disabled={disabled}
       className={cn(
-        'flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm transition-colors',
-        disabled ? 'cursor-not-allowed opacity-60' : 'hover:bg-accent cursor-pointer',
+        'flex items-center gap-1.5 rounded-lg px-2 py-1 text-sm transition-colors',
+        disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer',
       )}
       data-track-category='XyneAI'
       data-track-name='OPEN_AGENT_SELECTOR'
     >
       {selectedAgent ? (
-        <span
-          className={cn(
-            'inline-block rounded-full shrink-0',
-            !selectedAgent.color && 'bg-muted-foreground',
-          )}
-          style={{
-            width: 10,
-            height: 10,
-            ...(selectedAgent.color ? { backgroundColor: selectedAgent.color } : {}),
-          }}
-        />
+        <AgentGlyph color={selectedAgent.color} name={selectedAgent.name} size={18} />
       ) : (
-        <Bot className='w-3.5 h-3.5 text-primary shrink-0' />
+        <Bot className='w-4 h-4 text-primary shrink-0' />
       )}
-      <span className='text-muted-foreground font-medium truncate max-w-[140px]'>
-        {displayText}
-      </span>
+      <span className='font-medium truncate max-w-[180px] text-foreground'>{displayText}</span>
       <ChevronDown
         className={cn(
           'text-muted-foreground transition-transform shrink-0 w-3.5 h-3.5',
@@ -112,45 +139,33 @@ export function AIAgentSelector({
     </button>
   );
 
-  return (
+  const popover = (
     <Popover
       open={open}
       onOpenChange={next => {
         setOpen(next);
         if (!next) setQuery('');
       }}
+      side='top'
       align='start'
-      sideOffset={4}
+      sideOffset={8}
       trigger={trigger}
-      className='w-60 p-0 ai-agent-selector border border-border rounded-lg shadow-lg overflow-hidden'
+      className='w-[290px] p-0 ai-agent-selector border border-border rounded-[14px] shadow-lg'
     >
-      <div className='flex flex-col max-h-[min(300px,70vh)]'>
-        {/* Search bar */}
-        <div className='sticky top-0 z-10 ai-agent-selector border-b border-border px-2.5 py-2'>
-          <div className='flex items-center gap-2 rounded-md bg-muted px-2.5 py-1.5'>
-            <Search size={13} className='text-muted-foreground shrink-0' />
-            <input
-              type='text'
-              value={query}
-              onChange={e => setQuery(e.target.value)}
-              placeholder='Search agents…'
-              className='flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/60'
-              autoFocus
-              data-track-category='XyneAI'
-              data-track-name='SearchAgentSelector'
-            />
-            {query && (
-              <button
-                type='button'
-                onClick={() => setQuery('')}
-                className='text-muted-foreground hover:text-foreground text-xs shrink-0'
-                data-track-category='XyneAI'
-                data-track-name='CLEAR_AGENT_SEARCH'
-              >
-                Clear
-              </button>
-            )}
-          </div>
+      <div className='flex flex-col max-h-[min(340px,70vh)] overflow-hidden rounded-[14px]'>
+        {/* Search bar*/}
+        <div className='sticky top-0 z-10 ai-agent-selector flex items-center gap-2.5 border-b border-border px-4 py-3'>
+          <Search size={15} className='text-muted-foreground shrink-0' />
+          <input
+            type='text'
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            placeholder='Search'
+            className='flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/60'
+            autoFocus
+            data-track-category='XyneAI'
+            data-track-name='SearchAgentSelector'
+          />
         </div>
 
         {/* Loading state */}
@@ -160,35 +175,8 @@ export function AIAgentSelector({
 
         {/* Scrollable list */}
         {!isLoading && (
-          <div className='overflow-auto py-1'>
-            {/* Ask AI option */}
-            <button
-              onClick={() => {
-                if (selectedAgentSlug !== null) {
-                  setSelectedAgentSlug(null);
-                  onAgentChange?.(null);
-                }
-                setOpen(false);
-              }}
-              className={cn(
-                'flex items-center gap-2.5 px-3 py-2 mx-1 rounded-md text-left text-sm transition-colors w-full',
-                selectedAgentSlug === null
-                  ? 'bg-primary/10 text-primary'
-                  : 'hover:bg-accent text-foreground',
-              )}
-              data-track-category='XyneAI'
-              data-track-name='SELECT_AGENT'
-              data-track-metadata={JSON.stringify({ agentSlug: 'ask-ai' })}
-            >
-              <Bot className='w-4 h-4 shrink-0' />
-              <span className='font-normal'>Ask AI</span>
-            </button>
-
-            {/* Divider if there are agents */}
-            {filteredAgents.length > 0 && <div className='my-1 h-px bg-border mx-2' />}
-
-            {/* Agent list */}
-            {filteredAgents.length === 0 && agents.length > 0 ? (
+          <div className='overflow-auto p-1.5'>
+            {filteredAgents.length === 0 && agents.length > 0 && query.trim() ? (
               <div className='px-3 py-4 text-sm text-muted-foreground text-center'>
                 No agents match &ldquo;{query}&rdquo;
               </div>
@@ -204,29 +192,67 @@ export function AIAgentSelector({
                     setOpen(false);
                   }}
                   className={cn(
-                    'flex items-center gap-2.5 px-3 py-2 mx-1 rounded-md text-left text-sm transition-colors w-full',
-                    selectedAgentSlug === agent.slug
-                      ? 'bg-primary/10 text-primary'
-                      : 'hover:bg-accent text-foreground',
+                    SELECTOR_ROW_CLASS,
+                    selectedAgentSlug === agent.slug && 'bg-accent',
                   )}
                   data-track-category='XyneAI'
                   data-track-name='SELECT_AGENT'
                   data-track-metadata={JSON.stringify({ agentSlug: agent.slug })}
                 >
-                  <span className='font-normal truncate'>{agent.name}</span>
+                  <AgentGlyph color={agent.color} name={agent.name} size={24} />
+                  <span className='min-w-0 flex-1 truncate font-normal'>{agent.name}</span>
                 </button>
               ))
             )}
-          </div>
-        )}
 
-        {/* Footer count */}
-        {filteredAgents.length > MAX_VISIBLE_AGENTS && (
-          <div className='sticky bottom-0 ai-agent-selector border-t border-border px-3 py-1.5 text-[11px] font-normal text-muted-foreground/60 text-center'>
-            {filteredAgents.length} agents
+            <button
+              onClick={() => {
+                if (selectedAgentSlug !== null) {
+                  setSelectedAgentSlug(null);
+                  onAgentChange?.(null);
+                }
+                setOpen(false);
+              }}
+              className={cn(SELECTOR_ROW_CLASS, selectedAgentSlug === null && 'bg-accent')}
+              data-track-category='XyneAI'
+              data-track-name='SELECT_AGENT'
+              data-track-metadata={JSON.stringify({ agentSlug: 'ask-ai' })}
+            >
+              <span className='grid size-6 shrink-0 place-items-center text-primary'>
+                <Bot className='size-[18px]' aria-hidden />
+              </span>
+              <span className='font-normal'>Ask AI</span>
+            </button>
           </div>
         )}
       </div>
     </Popover>
+  );
+
+  if (hideTrigger) return popover;
+
+  return (
+    <div className='flex min-w-0 items-center gap-0.5'>
+      {popover}
+      {selectedAgent && (
+        <button
+          type='button'
+          disabled={disabled}
+          onClick={clearAgent}
+          aria-label='Back to Ask AI'
+          title='Back to Ask AI'
+          className={cn(
+            'grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors',
+            disabled
+              ? 'cursor-not-allowed opacity-60'
+              : 'hover:bg-foreground/5 hover:text-foreground',
+          )}
+          data-track-category='XyneAI'
+          data-track-name='CLEAR_AGENT_SELECTION'
+        >
+          <X className='size-3.5' aria-hidden />
+        </button>
+      )}
+    </div>
   );
 }

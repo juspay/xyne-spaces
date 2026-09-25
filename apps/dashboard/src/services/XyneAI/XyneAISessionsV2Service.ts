@@ -24,6 +24,8 @@ import { getPendingActionId, getStoredPendingActionResolution } from './XyneAIPe
 interface ClawConversationSummary {
   conversationId: string;
   title: string;
+  titleGenerated?: boolean;
+  pinned?: boolean;
   messageCount: number;
   lastMessageAt: string;
 }
@@ -103,8 +105,9 @@ export async function fetchV2Conversations(
     id: conv.conversationId,
     sessionId: conv.conversationId,
     title: conv.title || 'New Chat',
+    titleGenerated: conv.titleGenerated === true && Boolean(conv.title),
     channelId: '',
-    isStarred: false,
+    isStarred: conv.pinned === true,
     lastUpdated: new Date(conv.lastMessageAt),
     createdAt: new Date(conv.lastMessageAt),
     messages: [],
@@ -316,6 +319,20 @@ export async function deleteV2Conversation(
   const query = `?agentSlug=${encodeURIComponent(agentSlug ?? 'ask-ai')}`;
   await apiInstance.delete(
     `/xyne-ai/v2/conversations/${encodeURIComponent(conversationId)}${query}`,
+  );
+}
+
+export const CHAT_TITLE_MAX_CHARS = 100;
+
+export async function updateV2Conversation(
+  conversationId: string,
+  patch: { title?: string; pinned?: boolean },
+  agentSlug?: string | null,
+): Promise<void> {
+  const query = `?agentSlug=${encodeURIComponent(agentSlug ?? 'ask-ai')}`;
+  await apiInstance.patch(
+    `/xyne-ai/v2/conversations/${encodeURIComponent(conversationId)}${query}`,
+    patch,
   );
 }
 

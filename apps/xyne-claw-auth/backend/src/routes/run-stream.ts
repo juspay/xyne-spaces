@@ -20,6 +20,7 @@ import {
   type LocalFolderContextItem,
 } from "../lib/local-folder-context.js";
 import { gcsService } from "../services/storageService.js";
+import { maybeGenerateConversationTitle } from "../services/chatTitleClient.js";
 import { appendCitations, hydrateInvocationIcons } from "../lib/citations.js";
 import { resolveAgentProviderConfigs, agentDefaultSpeed, parseFastModeProfile } from "../lib/agent-provider-config.js";
 import { resolveFastMode } from "../lib/fast-mode.js";
@@ -389,6 +390,16 @@ export async function persistRunStreamResult(args: {
     }
   }
 
+  if (args.status === "completed") {
+    void maybeGenerateConversationTitle({
+      conversationId: args.conversationId,
+      agentSlug: args.agentSlug,
+      userId: args.userId,
+      orgId: args.orgId,
+      assistantReply: args.content,
+    }).catch((err) => log.warn("[run-stream] chat title generation failed:", errMsg(err)));
+  }
+
   return { messageId: assistantMsg.id, persistedAttachments };
 }
 
@@ -487,7 +498,6 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       res.status(400).json({ success: false, error: "Invalid Design Studio artifact" });
       return;
     }
-
 
     const normalizedDesignSelection = (() => {
       if (studioMode !== "design" || !designSelection || typeof designSelection !== "object") return null;
@@ -864,6 +874,15 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
           log.warn("[run-stream] Failed to persist user message:", errMsg(msgErr));
         }
       }
+    }
+
+    if (convId && userId && createdUserMessageId) {
+      void maybeGenerateConversationTitle({
+        conversationId: convId,
+        agentSlug: slug,
+        userId,
+        orgId,
+      }).catch((err) => log.warn("[run-stream] chat title generation failed:", errMsg(err)));
     }
 
     // Pre-create the running assistant placeholder. Its id powers PI session

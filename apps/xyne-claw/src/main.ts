@@ -15,6 +15,7 @@ import { taskCommandsInternalRouter } from "./routes/task-commands-internal.js";
 import { evalJudgeRouter } from "./routes/eval-judge.js";
 import { evalExtractRouter } from "./routes/eval-extract.js";
 import { entityLlmRouter } from "./routes/entity-llm.js";
+import { chatTitleRouter } from "./routes/chat-title.js";
 import { attachmentsRouter } from "./routes/attachments.js";
 import { litellmModelsRouter } from "./routes/litellm-models.js";
 import { startSessionCleanup, flushAllActiveSessions } from "./session-store.js";
@@ -81,6 +82,7 @@ app.use(taskCommandsInternalRouter);
 app.use(evalJudgeRouter);
 app.use(evalExtractRouter);
 app.use(entityLlmRouter);
+app.use(chatTitleRouter);
 app.use(attachmentsRouter);
 app.use(litellmModelsRouter);
 
