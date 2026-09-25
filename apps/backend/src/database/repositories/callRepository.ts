@@ -366,9 +366,9 @@ export class CallRepository {
         where: { id: callId },
         data: {
           metadata: {
-            ...((metadata as CallMetadata | null) ?? {}),
+            ...((metadata as Record<string, Prisma.InputJsonValue> | null) ?? {}),
             artifactMessageId,
-          } as Prisma.InputJsonValue,
+          },
         },
       });
 
