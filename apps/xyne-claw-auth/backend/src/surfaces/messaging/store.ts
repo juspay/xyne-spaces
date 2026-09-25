@@ -354,8 +354,8 @@ export function unlinkOwnIdentity(input: { surfaceId: string; senderId: string; 
   });
 }
 
-export function unlinkIdentity(input: { surfaceId: string; accountKey: string; senderId: string }) {
+export function unlinkIdentity(input: { surfaceId: string; orgId: string; senderId: string }) {
   return prisma.userSurfaceIdentity.deleteMany({
-    where: { surfaceId: input.surfaceId, surfaceWorkspaceId: input.accountKey, surfaceUserId: input.senderId },
+    where: { surfaceId: input.surfaceId, orgId: input.orgId, surfaceUserId: input.senderId },
   });
 }

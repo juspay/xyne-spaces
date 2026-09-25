@@ -350,6 +350,9 @@ async function sendChunked(
   return firstRef;
 }
 
+/** Meta's wording when an upload's MIME type is not on its allowlist. */
+const UNSUPPORTED_TYPE_RE = /file of type|one of the following types/i;
+
 async function sendAttachments(
   plugin: AnyChannelPlugin,
   handle: unknown,
@@ -365,6 +368,8 @@ async function sendAttachments(
   const already = sent?.attachments ?? 0;
   const skipped: string[] = [];
   const empty: string[] = [];
+  const wrongType: string[] = [];
+  const failed: string[] = [];
   for (const [index, attachment] of attachments.entries()) {
     if (index < already) continue;
     try {
@@ -398,13 +403,24 @@ async function sendAttachments(
       if (sent) sent.attachments = index + 1;
     } catch (err) {
       // Per-file isolation: one bad attachment must not sink the rest.
-      log.warn(`[channel-delivery] attachment send failed`, { fileName: attachment.fileName, error: errMsg(err) });
-      skipped.push(attachment.fileName);
+      const error = errMsg(err);
+      log.warn(`[channel-delivery] attachment send failed`, { fileName: attachment.fileName, error });
+      (UNSUPPORTED_TYPE_RE.test(error) ? wrongType : failed).push(attachment.fileName);
     }
   }
   if (skipped.length > 0) {
     await plugin
       .sendText(handle, chatId, `⚠️ Too large to send here: ${skipped.join(", ")}.`)
+      .catch(() => undefined);
+  }
+  if (wrongType.length > 0) {
+    await plugin
+      .sendText(handle, chatId, `⚠️ This chat doesn't accept that file type, so I couldn't send: ${wrongType.join(", ")}.`)
+      .catch(() => undefined);
+  }
+  if (failed.length > 0) {
+    await plugin
+      .sendText(handle, chatId, `⚠️ Couldn't send: ${failed.join(", ")}.`)
       .catch(() => undefined);
   }
   if (empty.length > 0) {
