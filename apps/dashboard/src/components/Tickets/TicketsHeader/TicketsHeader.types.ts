@@ -92,6 +92,8 @@ export interface TicketsHeaderProps {
   /** Channel surfaces only: opens the dialog that links boards to the channel. */
   onLinkBoards?: (() => void) | null;
   linkBoardsMetadata?: string;
+  onBulkCreateTicket?: (() => void) | null;
+  bulkCreateTicketMetadata?: string;
 
   layoutView: HeaderLayoutView;
   onLayoutChange: (layout: HeaderLayoutView) => void;

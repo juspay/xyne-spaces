@@ -70,6 +70,73 @@ export class EntitySequenceService {
     return project.ticketSequence;
   }
 
+  /**
+   * Allocate `count` consecutive sequence numbers in one hop and return the
+   * inclusive range. Bulk creation needs N numbers up front so its rows can be
+   * inserted set-based rather than one allocation per row.
+   *
+   * Same guarantees as {@link getNextProjectTicketSequence}: the allocation is
+   * atomic and is NOT part of the caller's transaction, so a rollback afterwards
+   * skips the block — gaps are acceptable, uniqueness is not.
+   */
+  static async reserveProjectTicketSequenceBlock(
+    tx: MainPrismaTransaction,
+    projectId: string,
+    count: number
+  ): Promise<{ start: number; end: number }> {
+    if (count <= 0) {
+      throw new Error(
+        `reserveProjectTicketSequenceBlock requires a positive count, got ${count}`
+      );
+    }
+
+    if (this.isCommonProjectTicketSequenceEnabled()) {
+      try {
+        const commonDb = await CommonDatabaseClient.getConnectedInstance();
+        // One atomic increment of `count` hands this caller the whole block: the
+        // returned value is its last number, so no concurrent caller can be
+        // inside the range.
+        for (;;) {
+          try {
+            const result = await commonDb.entitySequence.upsert({
+              where: {
+                entityType_entityValue: {
+                  entityType: SequenceEntityType.PROJECT_TICKET,
+                  entityValue: projectId,
+                },
+              },
+              create: {
+                entityType: SequenceEntityType.PROJECT_TICKET,
+                entityValue: projectId,
+                sequenceNumber: count,
+              },
+              update: { sequenceNumber: { increment: count } },
+              select: { sequenceNumber: true },
+            });
+            return { start: result.sequenceNumber - count + 1, end: result.sequenceNumber };
+          } catch (error) {
+            // First-use race, same as getNextSequence: retry into the update branch.
+            if (isUniqueViolation(error)) continue;
+            throw error;
+          }
+        }
+      } catch (error) {
+        logger.error(
+          `[EntitySequenceService] Common DB block allocation failed for project ${projectId}; falling back to main DB:`,
+          error
+        );
+      }
+    }
+
+    const project = await tx.project.update({
+      where: { id: projectId },
+      data: { ticketSequence: { increment: count } },
+      select: { ticketSequence: true },
+    });
+
+    return { start: project.ticketSequence - count + 1, end: project.ticketSequence };
+  }
+
   private static async getNextScopedSequence(
     entityType: SequenceEntityType,
     entityValue: string,

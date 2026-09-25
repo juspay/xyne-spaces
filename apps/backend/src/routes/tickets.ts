@@ -9,6 +9,7 @@ import { uploadMultiple } from '../middleware/upload';
 import { validate } from '../middleware/validation';
 import { ticketDuplicateCheckSchema } from '../validators/ticketDuplicateValidator';
 import { ticketBoardSuggestionSchema } from '../validators/ticketBoardValidator';
+import { bulkTicketSchemaValidator } from '../validators/bulkTicketValidator';
 import { ReleaseReportController } from '@/controllers/releaseReportController';
 import { authorize, authorizePrivilegedOrResource } from '@/middleware/authorize';
 import { analyticsAuthMiddleware } from '@/middleware/analyticsAuth';
@@ -32,6 +33,14 @@ router.get('/my-board-ids', ticketController.getMyTicketBoardIds);
 
 // Create a new ticket
 router.post('/', uploadMultiple, ticketController.createTicket);
+// Create many tickets in one request (session identity; per-item access checked)
+// JSON only — no multipart consumer, and uploadMultiple would break array validation.
+router.post(
+  '/bulk-from-message',
+  authorize('TICKETS', AccessType.WRITE),
+  validate(bulkTicketSchemaValidator),
+  ticketController.createBulkTicket,
+);
 router.post(
   '/:ticketId/flow-groups/:groupId/backlog',
   authorize('TICKETS', AccessType.WRITE),
