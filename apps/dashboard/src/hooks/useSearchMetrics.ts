@@ -1003,9 +1003,10 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
               filterOnly: !searchText && !!hasFilters,
               includeBotMessages,
               onlyMyChannels,
-              // Only the Desk tab hides archived tickets; every other tab (Tickets, All, …)
-              // shows them, in both cmd+k and full-page search.
-              excludeArchived: excludeArchived && activeTab === TabType.DESK,
+              // The Desk and Tickets tabs hide archived tickets; every other tab (All,
+              // Messages, …) shows them, in both cmd+k and full-page search.
+              excludeArchived:
+                excludeArchived && (activeTab === TabType.DESK || activeTab === TabType.TICKETS),
               exactMatch,
               ...(effectiveRankProfile && { rankProfile: effectiveRankProfile }),
               ...(includeDebugInfo && { includeDebugInfo: true }),
@@ -1584,8 +1585,9 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
           filterOnly: !searchText && !!hasFilters,
           includeBotMessages,
           onlyMyChannels,
-          // Only the Desk tab hides archived tickets; every other tab shows them.
-          excludeArchived: excludeArchived && activeTab === TabType.DESK,
+          // The Desk and Tickets tabs hide archived tickets; every other tab shows them.
+          excludeArchived:
+            excludeArchived && (activeTab === TabType.DESK || activeTab === TabType.TICKETS),
           exactMatch,
           ...(effectiveRankProfile && { rankProfile: effectiveRankProfile }),
           ...(includeDebugInfo && { includeDebugInfo: true }),

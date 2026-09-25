@@ -333,9 +333,10 @@ const SearchResults = (): ReactElement => {
     allChannels: allChannelsWithCategory,
     mentionSearchType: null,
     defaultOnlyMyChannels: filters.onlyMyChannels,
-    // Desk hides archived tickets by default; the "Show archived" toggle turns exclusion off.
-    // Every other tab leaves archived untouched (flag stays false).
-    defaultExcludeArchived: filters.docType === 'desk' ? !filters.showArchived : false,
+    // The Desk and Tickets tabs hide archived tickets by default; the "Show archived" toggle
+    // turns exclusion off. Every other tab leaves archived untouched (flag stays false).
+    defaultExcludeArchived:
+      filters.docType === 'desk' || filters.docType === 'tickets' ? !filters.showArchived : false,
     groupByDocType: true,
     buildMentionHighlights,
     // The URL follows the results: the hook hands back the query these were fetched for,
@@ -401,10 +402,12 @@ const SearchResults = (): ReactElement => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters.onlyMyChannels]);
 
-  // Sync archived scope → hook. Only the Desk tab hides archived (and its "Show archived"
-  // toggle opts back in); other tabs never exclude, matching pre-existing behavior.
+  // Sync archived scope → hook. The Desk and Tickets tabs hide archived (and their "Show
+  // archived" toggle opts back in); other tabs never exclude, matching pre-existing behavior.
   useEffect(() => {
-    setExcludeArchived(filters.docType === 'desk' ? !filters.showArchived : false);
+    setExcludeArchived(
+      filters.docType === 'desk' || filters.docType === 'tickets' ? !filters.showArchived : false,
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters.docType, filters.showArchived]);
 

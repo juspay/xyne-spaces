@@ -801,20 +801,6 @@ export const FILTER_REGISTRY: FilterEntry[] = [
     barLabel: 'Bot',
     appliesTo: isMessageType,
   }),
-  // Desk-only: by default archived tickets are hidden; this checkbox brings them back.
-  // Scoped to `desk` so it never appears on other tabs, and the registry is unused by
-  // cmd+k, so it is full-page-only. Lives inside the Filters popover (renderIn: 'modal'),
-  // not as a standalone bar pill.
-  toggleEntry({
-    id: 'showArchived',
-    label: 'Show archived',
-    param: 'showArchived',
-    field: 'showArchived',
-    defaultValue: false,
-    barLabel: 'Archived',
-    appliesTo: d => d === 'desk',
-    renderIn: 'modal',
-  }),
   // Ticket-only filters last: they apply to one result type, so they sit below the
   // filters that work everywhere.
   chipListEntry({
@@ -927,6 +913,21 @@ export const FILTER_REGISTRY: FilterEntry[] = [
       prefix: 'entity:',
       label: value => value,
     },
+  }),
+  // Kept last so it renders at the bottom of the Filters popover, beneath the ticket
+  // filters. Desk and Tickets tabs hide archived tickets by default; this checkbox brings
+  // them back. Scoped to those two tabs so it never appears elsewhere, and the registry is
+  // unused by cmd+k, so it is full-page-only. Lives inside the Filters popover
+  // (renderIn: 'modal'), not as a standalone bar pill.
+  toggleEntry({
+    id: 'showArchived',
+    label: 'Show archived',
+    param: 'showArchived',
+    field: 'showArchived',
+    defaultValue: false,
+    barLabel: 'Archived',
+    appliesTo: d => d === 'desk' || d === 'tickets',
+    renderIn: 'modal',
   }),
 ];
 
