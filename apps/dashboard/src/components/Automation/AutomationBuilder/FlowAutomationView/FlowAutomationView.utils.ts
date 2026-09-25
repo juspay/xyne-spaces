@@ -6,6 +6,7 @@ import {
   type AutomationConfig,
   type AutomationStepConfig,
   type ConditionalStepConfig,
+  type JsonSchema,
   type StepCatalogItem,
   type StepSchema,
   type SwitchStepConfig,
@@ -615,7 +616,7 @@ export function getEdgeLabel(source: FlowItem, target: FlowItem): string | undef
   return branchLabel(source.step, String(target.path[source.path.length]));
 }
 
-/** Fields any step type may show on its node when it has no entry below. */
+/** Fields shown for a step or trigger type with no entry in the maps below. */
 const DEFAULT_SUMMARY_KEYS = [
   'to',
   'recipient',
@@ -641,17 +642,23 @@ const DEFAULT_SUMMARY_KEYS = [
 /**
  * Fields each step type may show on its canvas node, in priority order. Only
  * listed fields are ever displayed: a new config field stays off the canvas (and
- * out of tooltips and search) until someone adds it here.
+ * out of tooltips and search) until someone adds it here. Names must match the
+ * step's backend ConfigSchema (`apps/backend/src/automations/steps/*.step.ts`);
+ * `findUnknownSummaryKeys` flags drift in development.
  */
 const SUMMARY_KEYS_BY_TYPE: Record<string, string[]> = {
   APPLY_CONVERSATION_LABEL: ['labelName'],
+  ARCHIVE_TICKET: ['archived'],
   ASSIGN_TICKET: ['assigneeId'],
   ASSIGN_TICKET_TO_GROUP: ['groupId'],
   CHANGE_STAGE: ['stageName'],
+  // Only a ticket reference, which reads as noise on the node.
+  CLOSE_TICKET: [],
   CREATE_EMAIL_DRAFT: ['draftContent'],
   CREATE_SUB_TICKET: ['title'],
   CREATE_TICKET: ['title', 'boardId'],
-  DELAY: ['delayedUntil'],
+  DELAY: ['amount', 'unit', 'businessHoursOnly'],
+  MAKE_CALL: ['channelId', 'invitedUserIds', 'userGroupIds'],
   NOTIFY_GROUP: ['title', 'message'],
   NOTIFY_USER: ['title', 'message'],
   NOTIFY_USER_SOS: ['title', 'message'],
@@ -661,11 +668,74 @@ const SUMMARY_KEYS_BY_TYPE: Record<string, string[]> = {
   SEND_CSAT_REQUEST: ['question'],
   SEND_EMAIL_REPLY: ['body'],
   SEND_EMAIL_TO_USER: ['subject'],
-  SEND_MESSAGE: ['channelIds', 'channelId'],
+  SEND_MESSAGE: ['content', 'channelId', 'userIds'],
   TRIGGER_WEBHOOK: ['url'],
+  UPDATE_FORM_FIELDS: ['fields'],
   UPDATE_TAGS: ['tags'],
   UPDATE_TICKET: ['status', 'stageName', 'priority', 'title'],
 };
+
+/**
+ * Trigger filters shown on the trigger node. Empty means "matches everything",
+ * which the node renders as "No filters". WEBHOOK's config is a body/header
+ * schema, not a filter, and its endpoint is shown beside the canvas instead.
+ */
+const TRIGGER_SUMMARY_KEYS_BY_TYPE: Record<string, string[]> = {
+  CALL_EVENT: ['callEventType', 'channelIds', 'participantUserIds'],
+  EMAIL_RECEIVED: ['subjectContains', 'fromEmails', 'fromDomains', 'channelIds'],
+  EMAIL_SENT: ['subjectContains', 'toEmails', 'toDomains', 'channelIds'],
+  MESSAGE_RECEIVED: ['contentContains', 'channelIds', 'fromUserIds'],
+  TAG_GENERATED: ['categories', 'channelIds'],
+  TICKET_COMMENTED: ['contentContains', 'boardIds', 'projectIds', 'channelIds'],
+  TICKET_CREATED: ['boardIds', 'projectIds', 'channelIds'],
+  TICKET_UPDATED: ['boardIds', 'projectIds', 'channelIds'],
+  WEBHOOK: [],
+};
+
+/**
+ * Types whose summary reads several fields together. DELAY's `amount` and
+ * `unit` are sibling keys, so the per-field loop can't produce "2 hours".
+ */
+const SUMMARY_FORMATTERS: Record<string, (config: Record<string, unknown>) => string | undefined> =
+  {
+    DELAY: config => {
+      const amount = formatSummaryValue(config['amount']);
+      if (!amount) return undefined;
+      const unit = typeof config['unit'] === 'string' ? config['unit'] : 'seconds';
+      const shownUnit = config['amount'] === 1 ? unit.replace(/s$/, '') : unit;
+      const businessHours = config['businessHoursOnly'] === true ? ' (business hours)' : '';
+      return `wait: ${amount} ${shownUnit}${businessHours}`;
+    },
+    UPDATE_FORM_FIELDS: config => {
+      const fields = Array.isArray(config['fields']) ? (config['fields'] as unknown[]) : [];
+      const names = fields
+        .map(field =>
+          field && typeof field === 'object'
+            ? formatSummaryValue((field as Record<string, unknown>)['fieldName'])
+            : undefined,
+        )
+        .filter((name): name is string => Boolean(name));
+      return names.length ? `fields: ${names.join(', ')}` : undefined;
+    },
+  };
+
+function summaryKeysFor(type: string): string[] {
+  return SUMMARY_KEYS_BY_TYPE[type] ?? TRIGGER_SUMMARY_KEYS_BY_TYPE[type] ?? DEFAULT_SUMMARY_KEYS;
+}
+
+/**
+ * Allow-listed summary keys for `type` that its config schema doesn't declare.
+ * Returns `[]` for unlisted types or schemas without top-level properties.
+ */
+export function findUnknownSummaryKeys(
+  type: string,
+  configSchema: JsonSchema | undefined,
+): string[] {
+  const properties = configSchema?.properties;
+  const listed = SUMMARY_KEYS_BY_TYPE[type] ?? TRIGGER_SUMMARY_KEYS_BY_TYPE[type];
+  if (!properties || !listed) return [];
+  return listed.filter(key => !(key in properties));
+}
 
 const SENSITIVE_KEY = /secret|token|password|auth|apiKey/i;
 const ENCRYPTED_PREFIX = 'enc:';
@@ -717,7 +787,9 @@ export function summarizeStepConfig(
   config: Record<string, unknown> | undefined,
 ): string | undefined {
   if (!config) return undefined;
-  const keys = SUMMARY_KEYS_BY_TYPE[stepType] ?? DEFAULT_SUMMARY_KEYS;
+  const formatter = SUMMARY_FORMATTERS[stepType];
+  if (formatter) return formatter(config);
+  const keys = summaryKeysFor(stepType);
   for (const key of keys) {
     const formatted = formatSummaryValue(config[key]);
     if (!formatted) continue;

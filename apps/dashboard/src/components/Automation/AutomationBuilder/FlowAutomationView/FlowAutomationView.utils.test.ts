@@ -17,6 +17,7 @@ import {
   getStepAtPath,
   insertStepAtPath,
   isDescendantPath,
+  findUnknownSummaryKeys,
   summarizeStepConfig,
   issuesUnderPath,
   moveStepAtPath,
@@ -282,8 +283,37 @@ describe('summarizeStepConfig', () => {
 
   it('redacts encrypted values even when the field is allow-listed', () => {
     expect(summarizeStepConfig('RUN_AGENT', { agentSlug: 'enc:deadbeef' })).toBe('agent: ••••••');
-    expect(summarizeStepConfig('SEND_MESSAGE', { channelIds: ['c1', 'enc:x'] })).toBe(
-      'channel ids: c1, ••••••',
+    expect(summarizeStepConfig('SEND_MESSAGE', { userIds: ['u1', 'enc:x'] })).toBe(
+      'user ids: u1, ••••••',
     );
+  });
+
+  it('summarises a delay as its duration', () => {
+    expect(summarizeStepConfig('DELAY', { amount: 2, unit: 'hours' })).toBe('wait: 2 hours');
+    expect(summarizeStepConfig('DELAY', { amount: 1, unit: 'minutes' })).toBe('wait: 1 minute');
+    expect(summarizeStepConfig('DELAY', { amount: 30 })).toBe('wait: 30 seconds');
+    expect(summarizeStepConfig('DELAY', { unit: 'hours' })).toBeUndefined();
+  });
+
+  it('summarises a message with only content set', () => {
+    expect(summarizeStepConfig('SEND_MESSAGE', { content: 'Hello team' })).toBe(
+      'content: Hello team',
+    );
+  });
+
+  it('uses trigger filters for trigger types', () => {
+    expect(summarizeStepConfig('MESSAGE_RECEIVED', { channelIds: ['c1'], fireOnEdit: true })).toBe(
+      'channel ids: c1',
+    );
+    expect(summarizeStepConfig('WEBHOOK', { bodySchema: { a: 'string' } })).toBeUndefined();
+  });
+});
+
+describe('findUnknownSummaryKeys', () => {
+  it('flags allow-listed keys the config schema does not declare', () => {
+    const schema = { properties: { amount: {}, unit: {} } };
+    expect(findUnknownSummaryKeys('DELAY', schema)).toEqual(['businessHoursOnly']);
+    expect(findUnknownSummaryKeys('UNKNOWN_STEP', schema)).toEqual([]);
+    expect(findUnknownSummaryKeys('DELAY', undefined)).toEqual([]);
   });
 });

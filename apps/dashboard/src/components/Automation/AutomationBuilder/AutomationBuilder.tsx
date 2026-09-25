@@ -77,7 +77,11 @@ import type { AutomationBuilderProps } from './AutomationBuilder.types';
 import type { StepSchema } from '../Automation.types';
 import { FlowAutomationView } from './FlowAutomationView/FlowAutomationView';
 import type { ViewStepPath } from './FlowAutomationView/FlowAutomationView.types';
-import { ROOT_CONTAINER, insertStepAtPath } from './FlowAutomationView/FlowAutomationView.utils';
+import {
+  ROOT_CONTAINER,
+  findUnknownSummaryKeys,
+  insertStepAtPath,
+} from './FlowAutomationView/FlowAutomationView.utils';
 
 const MAX_AUTOMATION_NAME_LENGTH = 80;
 
@@ -280,6 +284,26 @@ export function AutomationBuilder({
     });
     return cache;
   }, [stepSchemaQueries, stepSchemaTypes]);
+
+  // Dev-only drift check: the flow view's node summaries allow-list config
+  // fields by name, so flag any listed field a fetched schema doesn't declare.
+  const checkedSummarySchemas = useRef(new Set<string>());
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    const schemas = [...Object.values(stepSchemaCache), triggerSchemaQuery.data];
+    for (const schema of schemas) {
+      if (!schema || checkedSummarySchemas.current.has(schema.type)) continue;
+      checkedSummarySchemas.current.add(schema.type);
+      const unknownKeys = findUnknownSummaryKeys(schema.type, schema.configSchema);
+      if (unknownKeys.length) {
+        logger.warn(LogEvent.FRONTEND_ERROR, {
+          message: 'Flow view summary allow-list names fields missing from the config schema',
+          type: schema.type,
+          unknownKeys,
+        });
+      }
+    }
+  }, [stepSchemaCache, triggerSchemaQuery.data]);
 
   const stepSchemaLoadingFor = useCallback(
     (type: string): boolean => {
