@@ -615,7 +615,8 @@ export function getEdgeLabel(source: FlowItem, target: FlowItem): string | undef
   return branchLabel(source.step, String(target.path[source.path.length]));
 }
 
-const SUMMARY_KEYS = [
+/** Fields any step type may show on its node when it has no entry below. */
+const DEFAULT_SUMMARY_KEYS = [
   'to',
   'recipient',
   'recipients',
@@ -637,6 +638,39 @@ const SUMMARY_KEYS = [
   'prompt',
 ];
 
+/**
+ * Fields each step type may show on its canvas node, in priority order. Only
+ * listed fields are ever displayed: a new config field stays off the canvas (and
+ * out of tooltips and search) until someone adds it here.
+ */
+const SUMMARY_KEYS_BY_TYPE: Record<string, string[]> = {
+  APPLY_CONVERSATION_LABEL: ['labelName'],
+  ASSIGN_TICKET: ['assigneeId'],
+  ASSIGN_TICKET_TO_GROUP: ['groupId'],
+  CHANGE_STAGE: ['stageName'],
+  CREATE_EMAIL_DRAFT: ['draftContent'],
+  CREATE_SUB_TICKET: ['title'],
+  CREATE_TICKET: ['title', 'boardId'],
+  DELAY: ['delayedUntil'],
+  NOTIFY_GROUP: ['title', 'message'],
+  NOTIFY_USER: ['title', 'message'],
+  NOTIFY_USER_SOS: ['title', 'message'],
+  PROMOTE_MESSAGE_TO_TICKET: ['title', 'boardId'],
+  REPLY_ON_MESSAGE: ['content'],
+  RUN_AGENT: ['agentSlug', 'prompt'],
+  SEND_CSAT_REQUEST: ['question'],
+  SEND_EMAIL_REPLY: ['body'],
+  SEND_EMAIL_TO_USER: ['subject'],
+  SEND_MESSAGE: ['channelIds', 'channelId'],
+  TRIGGER_WEBHOOK: ['url'],
+  UPDATE_TAGS: ['tags'],
+  UPDATE_TICKET: ['status', 'stageName', 'priority', 'title'],
+};
+
+const SENSITIVE_KEY = /secret|token|password|auth|apiKey/i;
+const ENCRYPTED_PREFIX = 'enc:';
+const REDACTED = '••••••';
+
 function shortenRefs(value: string): string {
   return value.replace(/\{\{\s*context\.([^}]+?)\s*\}\}/g, (_match, ref: string) => {
     const segments = ref.split('.').filter(s => s !== 'output' && s !== 'input');
@@ -646,7 +680,10 @@ function shortenRefs(value: string): string {
 
 function formatSummaryValue(value: unknown): string | undefined {
   if (value === null || value === undefined || value === '') return undefined;
-  if (typeof value === 'string') return shortenRefs(value.trim()) || undefined;
+  if (typeof value === 'string') {
+    if (value.startsWith(ENCRYPTED_PREFIX)) return REDACTED;
+    return shortenRefs(value.trim()) || undefined;
+  }
   if (typeof value === 'number' || typeof value === 'boolean') return String(value);
   if (Array.isArray(value)) {
     const parts = value.map(formatSummaryValue).filter((v): v is string => Boolean(v));
@@ -670,18 +707,21 @@ function humanizeKey(key: string): string {
     .toLowerCase();
 }
 
-/** One-line summary of an action step's config for its canvas node. */
+/**
+ * One-line summary of a step's config for its canvas node, built only from the
+ * fields allow-listed for its type. Sensitive-looking or encrypted values are
+ * redacted even when allow-listed. `undefined` renders as "Not configured yet".
+ */
 export function summarizeStepConfig(
+  stepType: string,
   config: Record<string, unknown> | undefined,
 ): string | undefined {
   if (!config) return undefined;
-  const keys = [
-    ...SUMMARY_KEYS.filter(k => k in config),
-    ...Object.keys(config).filter(k => !SUMMARY_KEYS.includes(k) && k !== 'outputSchema'),
-  ];
+  const keys = SUMMARY_KEYS_BY_TYPE[stepType] ?? DEFAULT_SUMMARY_KEYS;
   for (const key of keys) {
     const formatted = formatSummaryValue(config[key]);
-    if (formatted) return `${humanizeKey(key)}: ${formatted}`;
+    if (!formatted) continue;
+    return `${humanizeKey(key)}: ${SENSITIVE_KEY.test(key) ? REDACTED : formatted}`;
   }
   return undefined;
 }

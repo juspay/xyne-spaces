@@ -17,6 +17,7 @@ import {
   getStepAtPath,
   insertStepAtPath,
   isDescendantPath,
+  summarizeStepConfig,
   issuesUnderPath,
   moveStepAtPath,
   removeStepAtPath,
@@ -251,5 +252,38 @@ describe('isDescendantPath', () => {
     expect(isDescendantPath(path('c'), path('c'))).toBe(false);
     expect(isDescendantPath(path('c'), path('a'))).toBe(false);
     expect(isDescendantPath(path('n'), path('c'))).toBe(false);
+  });
+});
+
+describe('summarizeStepConfig', () => {
+  it('uses only the allow-listed fields for the step type, in priority order', () => {
+    expect(summarizeStepConfig('RUN_AGENT', { prompt: 'Hi', agentSlug: 'triage' })).toBe(
+      'agent: triage',
+    );
+    expect(summarizeStepConfig('UPDATE_TICKET', { ticketId: 't1', priority: 'HIGH' })).toBe(
+      'priority: HIGH',
+    );
+  });
+
+  it('never falls back to unlisted fields', () => {
+    expect(summarizeStepConfig('TRIGGER_WEBHOOK', { method: 'POST', body: 'x' })).toBeUndefined();
+    expect(summarizeStepConfig('UNKNOWN_STEP', { someField: 'value' })).toBeUndefined();
+    expect(summarizeStepConfig('CLOSE_TICKET', { ticketId: 't1' })).toBeUndefined();
+  });
+
+  it('keeps the webhook summary on the URL regardless of key order', () => {
+    const summary = summarizeStepConfig('TRIGGER_WEBHOOK', {
+      headers: { Authorization: 'enc:abc' },
+      secretHeaders: ['Authorization'],
+      url: 'https://example.com/hook',
+    });
+    expect(summary).toBe('url: https://example.com/hook');
+  });
+
+  it('redacts encrypted values even when the field is allow-listed', () => {
+    expect(summarizeStepConfig('RUN_AGENT', { agentSlug: 'enc:deadbeef' })).toBe('agent: ••••••');
+    expect(summarizeStepConfig('SEND_MESSAGE', { channelIds: ['c1', 'enc:x'] })).toBe(
+      'channel ids: c1, ••••••',
+    );
   });
 });

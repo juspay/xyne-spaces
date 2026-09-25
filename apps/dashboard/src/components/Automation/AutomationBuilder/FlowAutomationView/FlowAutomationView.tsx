@@ -755,14 +755,15 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
 
   const summaryById = useMemo(() => {
     const map = new Map<string, string | undefined>();
-    map.set(TRIGGER_NODE_ID, summarizeStepConfig(config.trigger.config));
+    map.set(TRIGGER_NODE_ID, summarizeStepConfig(config.trigger.type, config.trigger.config));
     for (const item of items) {
       if (item.nodeType === 'action') {
-        map.set(item.id, summarizeStepConfig((item.step as ActionStepConfig).config));
+        const step = item.step as ActionStepConfig;
+        map.set(item.id, summarizeStepConfig(step.type, step.config));
       }
     }
     return map;
-  }, [items, config.trigger.config]);
+  }, [items, config.trigger.type, config.trigger.config]);
 
   const searchMatches = useMemo(() => {
     const query = search.trim().toLowerCase();
