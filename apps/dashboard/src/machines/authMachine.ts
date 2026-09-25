@@ -739,14 +739,22 @@ export const authMachine = createMachine(
               }),
             },
           ],
-          onError: {
-            target: 'unauthenticated',
-            actions: [
-              'clearSessionCookies',
-              { type: 'notifySignOut', params: { reason: 'Token validation failed' } },
-              assign(() => createClearedContext()),
-            ],
-          },
+          onError: [
+            {
+              // Transient failure (network/timeout/5xx) with an existing session — don't strand.
+              guard: 'canKeepOptimisticSession',
+              target: 'authenticated',
+              actions: assign(({ context }) => ({ ...context, error: null })),
+            },
+            {
+              target: 'unauthenticated',
+              actions: [
+                'clearSessionCookies',
+                { type: 'notifySignOut', params: { reason: 'Token validation failed' } },
+                assign(() => createClearedContext()),
+              ],
+            },
+          ],
         },
       },
       authenticated: {
@@ -1197,6 +1205,12 @@ export const authMachine = createMachine(
       hasAutoLoginWorkspace: ({ event }) => {
         const e = event as { output?: OAuthCallbackOutput };
         return !!e.output?.autoLoginWorkspace;
+      },
+      // Transient validate failure (not a 401) with an optimistic user already in
+      // context — keep the session rather than strand a logged-in user on /auth.
+      canKeepOptimisticSession: ({ context, event }) => {
+        const status = (event as { error?: { status?: number } }).error?.status;
+        return status !== 401 && !!context.user?.id;
       },
     },
     actions: {
@@ -1674,11 +1688,15 @@ export const authMachine = createMachine(
           };
         } catch (error) {
           if (axios.isAxiosError(error)) {
+            const status = error.response?.status;
             const errorData = error.response?.data as ApiErrorResponse;
-            throw new Error(
-              errorData?.error ||
-                `Session validation failed: ${error.response?.status || 'unknown'}`,
-            );
+            // Preserve status so onError can tell a dead session (401) from a
+            // transient failure (network/timeout/5xx) and not strand a logged-in user.
+            const err = new Error(
+              errorData?.error || `Session validation failed: ${status ?? 'unknown'}`,
+            ) as Error & { status?: number };
+            if (status !== undefined) err.status = status;
+            throw err;
           }
           throw new Error('Session validation failed: unknown error');
         }
