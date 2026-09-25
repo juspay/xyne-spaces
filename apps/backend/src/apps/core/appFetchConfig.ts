@@ -413,18 +413,54 @@ function resolvePath(vars: AppFetchVariables, path: string): unknown {
 }
 
 /**
+ * How a substituted value must be escaped for the context it lands in.
+ *
+ * Only the *values* are escaped, never the surrounding template text — the
+ * template's own quotes, ampersands and separators are structure the author
+ * wrote deliberately.
+ */
+export type RenderEscape = 'none' | 'json' | 'url' | 'header';
+
+function escapeValue(raw: string, mode: RenderEscape): string {
+  switch (mode) {
+    // A channel named `Support "EU"` would otherwise close the JSON string and
+    // produce a body the app rejects as malformed.
+    case 'json':
+      return JSON.stringify(raw).slice(1, -1);
+    // A cursor containing `+` or `&` would otherwise arrive corrupted, and its
+    // `&` would inject extra query parameters into a request we then sign.
+    case 'url':
+      return encodeURIComponent(raw);
+    // CR/LF in a header value is header injection.
+    case 'header':
+      return raw.replace(/[\r\n]+/g, ' ');
+    default:
+      return raw;
+  }
+}
+
+/**
  * Interpolate `{{...}}` refs in a template string. An unresolved ref renders
  * empty, matching how the automations resolver treats a missing variable — so
  * `{{fetch.cursor}}` yields `""` on the first page and apps must read an empty
  * cursor as "start from the beginning".
+ *
+ * `escape` must match where the result is going; see RenderEscape. Values come
+ * from channel names and app-supplied cursors, so none of them can be assumed
+ * safe for the syntax they are being pasted into.
  */
-export function renderTemplate(template: string, vars: AppFetchVariables): string {
+export function renderTemplate(
+  template: string,
+  vars: AppFetchVariables,
+  escape: RenderEscape = 'none',
+): string {
   if (!template.includes('{{')) return template;
   return tokenize(template)
     .map(token => {
       if (token.kind === 'literal') return token.text;
       const resolved = resolvePath(vars, token.path);
-      return resolved === undefined || resolved === null ? '' : String(resolved);
+      const value = resolved === undefined || resolved === null ? '' : String(resolved);
+      return escapeValue(value, escape);
     })
     .join('');
 }
@@ -576,7 +612,8 @@ export function buildSignedFetchRequest(params: {
 }): SignedFetchRequest {
   const { config, vars, signingSecret } = params;
 
-  const renderedUrl = renderTemplate(config.url, vars);
+  // Query values are percent-encoded; the template's own separators are not.
+  const renderedUrl = renderTemplate(config.url, vars, 'url');
   let url: URL;
   try {
     url = new URL(renderedUrl);
@@ -589,7 +626,10 @@ export function buildSignedFetchRequest(params: {
   const isBodyless = config.method === 'GET';
   let body: string | undefined;
   if (!isBodyless && config.body !== undefined) {
-    const rendered = renderTemplate(config.body, vars);
+    // FORM is JSON-escaped too: toWebhookFormBody parses the rendered body as
+    // JSON before form-encoding it, so an unescaped quote breaks it there.
+    // RAW is the author's own syntax, so it is left alone.
+    const rendered = renderTemplate(config.body, vars, config.encoding === 'RAW' ? 'none' : 'json');
     body = config.encoding === 'FORM' ? toWebhookFormBody(rendered) : rendered;
   }
 
@@ -602,7 +642,7 @@ export function buildSignedFetchRequest(params: {
       : (decryptWebhookHeaders(config.headers) ?? {});
   const headers: Record<string, string> = {};
   for (const [name, value] of Object.entries(base)) {
-    headers[name] = renderTemplate(value, vars);
+    headers[name] = renderTemplate(value, vars, 'header');
   }
   headers['Accept'] = 'application/json';
 

@@ -8,7 +8,7 @@
  * worker actually sends.
  */
 
-import { prepareAppWebhookDispatch } from './appUrlResolver';
+import { isInternalMappedHost, prepareAppWebhookDispatch } from './appUrlResolver';
 import { safeWebhookFetch } from '@/utils/ssrfGuard';
 import type { SignedFetchRequest } from './appFetchConfig';
 
@@ -59,10 +59,30 @@ export async function readCappedText(response: Response): Promise<string> {
   return Buffer.concat(chunks).toString('utf8');
 }
 
+export class AppFetchForbiddenHostError extends Error {
+  constructor(host: string) {
+    super(
+      `"${host}" is an internal service host and cannot be used as a history fetch URL`,
+    );
+    this.name = 'AppFetchForbiddenHostError';
+  }
+}
+
 export async function dispatchAppFetch(
   request: SignedFetchRequest,
   timeoutMs: number,
 ): Promise<Response> {
+  const requestHost = (() => {
+    try {
+      return new URL(request.url).hostname.toLowerCase();
+    } catch {
+      return '';
+    }
+  })();
+  if (requestHost && isInternalMappedHost(requestHost)) {
+    throw new AppFetchForbiddenHostError(requestHost);
+  }
+
   const dispatch = await prepareAppWebhookDispatch(
     request.url,
     request.init.headers as Record<string, string>,

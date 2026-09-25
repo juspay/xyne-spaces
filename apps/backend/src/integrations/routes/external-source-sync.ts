@@ -261,12 +261,24 @@ router.get(
       const installs = installedAppIds.length
         ? await db.installedApps.findMany({
             where: { id: { in: installedAppIds } },
-            select: { id: true, app: { select: { name: true } } },
+            select: { id: true, fetchConfig: true, app: { select: { name: true } } },
           })
         : [];
       const appNameByInstallId = new Map(installs.map(i => [i.id, i.app.name] as const));
+      // An app connected to the desk but with no history-fetch config cannot be
+      // pulled from — the worker fails it with "has no history fetch
+      // configuration". Offering it in the picker only produces a failed run, so
+      // it is hidden here and skipped by the fan-out below.
+      const fetchableInstallIds = new Set(
+        installs.filter(i => i.fetchConfig?.trim()).map(i => i.id),
+      );
 
-      const appRows = appSources.map(source => {
+      const appRows = appSources
+        .filter(source => {
+          const id = resolveAppDeskInstalledAppId(source);
+          return id !== null && fetchableInstallIds.has(id);
+        })
+        .map(source => {
         const installedAppId = resolveAppDeskInstalledAppId(source);
         return {
           sourceId: source.id,
@@ -425,10 +437,31 @@ router.post(
             },
           });
         }
-        for (const appSource of await repo.listChannelAppSources(channelId, { activeOnly: true })) {
+        const appSources = await repo.listChannelAppSources(channelId, { activeOnly: true });
+        const appInstallIds = appSources
+          .map(resolveAppDeskInstalledAppId)
+          .filter((id): id is string => !!id);
+        // Same filter the listing applies: an install with no fetch config has
+        // no endpoint to call, so queueing it only produces a failed job — and
+        // with the stable job id that failure would block the whole range.
+        const configuredInstallIds = new Set(
+          appInstallIds.length
+            ? (
+                await db.installedApps.findMany({
+                  where: { id: { in: appInstallIds } },
+                  select: { id: true, fetchConfig: true },
+                })
+              )
+                .filter(i => i.fetchConfig?.trim())
+                .map(i => i.id)
+            : [],
+        );
+        for (const appSource of appSources) {
+          const appInstalledAppId = resolveAppDeskInstalledAppId(appSource);
+          if (!appInstalledAppId || !configuredInstallIds.has(appInstalledAppId)) continue;
           targets.push({
             source: appSource,
-            installedAppId: resolveAppDeskInstalledAppId(appSource),
+            installedAppId: appInstalledAppId,
             jobData: {},
           });
         }
@@ -527,7 +560,7 @@ router.post(
             endDate,
             ...jobData,
           },
-          { jobId: refetchJobIdFor(source.id, jobData), removeOnComplete: true },
+          { jobId: refetchJobIdFor(source.id, jobData), removeOnComplete: true, removeOnFail: true },
         );
         logger.info('Fetch enqueued', { jobId: job.id, sourceId: source.id, channelId });
         jobs.push({ sourceId: source.id, installedAppId, jobId: String(job.id) });
