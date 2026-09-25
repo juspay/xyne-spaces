@@ -604,6 +604,7 @@ router.post(
         const result = await db.externalSource.updateMany({
           where: {
             sourceType: ExternalSourcePlatform.INSTAGRAM,
+            externalIdentifier: igUserId,
             isActive: true,
           },
           data: { isActive: false, credentials: '' },
