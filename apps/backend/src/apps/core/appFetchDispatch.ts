@@ -62,7 +62,8 @@ export async function readCappedText(response: Response): Promise<string> {
 export class AppFetchForbiddenHostError extends Error {
   constructor(host: string) {
     super(
-      `"${host}" is an internal service host and cannot be used as a history fetch URL`,
+      `"${host}" is an internal service host and is not this app's own webhook host — ` +
+        'a history fetch may only reach the app it belongs to',
     );
     this.name = 'AppFetchForbiddenHostError';
   }
@@ -71,6 +72,7 @@ export class AppFetchForbiddenHostError extends Error {
 export async function dispatchAppFetch(
   request: SignedFetchRequest,
   timeoutMs: number,
+  options: { ownWebhookUrl?: string | null } = {},
 ): Promise<Response> {
   const requestHost = (() => {
     try {
@@ -80,7 +82,16 @@ export async function dispatchAppFetch(
     }
   })();
   if (requestHost && isInternalMappedHost(requestHost)) {
-    throw new AppFetchForbiddenHostError(requestHost);
+    const ownHost = (() => {
+      try {
+        return options.ownWebhookUrl ? new URL(options.ownWebhookUrl).hostname.toLowerCase() : '';
+      } catch {
+        return '';
+      }
+    })();
+    if (requestHost !== ownHost) {
+      throw new AppFetchForbiddenHostError(requestHost);
+    }
   }
 
   const dispatch = await prepareAppWebhookDispatch(

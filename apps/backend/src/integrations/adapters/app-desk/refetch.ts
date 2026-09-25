@@ -142,7 +142,12 @@ export class AppDeskRefetch extends BaseRefetch {
     }
     const installedApp = await db.installedApps.findUnique({
       where: { id: installedAppId },
-      select: { fetchConfig: true, appId: true, app: { select: { signingSecret: true } } },
+      select: {
+        fetchConfig: true,
+        appId: true,
+        webhookUrl: true,
+        app: { select: { signingSecret: true } },
+      },
     });
     if (!installedApp) {
       throw new AppDeskExportError(
@@ -335,6 +340,7 @@ export class AppDeskRefetch extends BaseRefetch {
             signingSecret,
             buildVars(cursor, offset),
             deadline,
+            installedApp.webhookUrl,
           );
         } catch (error) {
           // Throttled beyond what this run can wait out. Stop cleanly rather
@@ -440,6 +446,7 @@ export class AppDeskRefetch extends BaseRefetch {
     signingSecret: string,
     vars: AppFetchVariables,
     deadline: number,
+    ownWebhookUrl: string | null,
   ): Promise<AppDeskExportPage> {
     for (let attempt = 0; ; attempt += 1) {
       // Rebuilt every attempt rather than hoisted: X-Xyne-Timestamp ages while
@@ -458,6 +465,7 @@ export class AppDeskRefetch extends BaseRefetch {
         response = await dispatchAppFetch(
           request,
           Math.max(1_000, Math.min(fetchConfig.timeoutMs, remainingMs)),
+          { ownWebhookUrl },
         );
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
