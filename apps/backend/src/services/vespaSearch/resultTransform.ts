@@ -339,9 +339,9 @@ import { PrismaClient } from '@prisma/client';
        if (assigneeIds.length > 0) {
          const assignees = await prisma.user.findMany({
            where: { id: { in: assigneeIds } },
-           select: { id: true, name: true, email: true },
+           select: { id: true, name: true },
          });
-         for (const u of assignees) assigneeNameById.set(u.id, u.name || u.email || '');
+         for (const u of assignees) assigneeNameById.set(u.id, u.name);
        }
 
        for (const e of emails) {
