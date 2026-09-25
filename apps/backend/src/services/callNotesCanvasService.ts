@@ -2,6 +2,7 @@ import type { Call, Prisma } from '@prisma/client';
 import { v4 as uuidv4 } from 'uuid';
 import { CanvasRole } from '@xyne/shared';
 import { db } from '@/database/client';
+import { resolveCanvasConnectId } from '@/database/connectGroup';
 import { repositories } from '@/database/repositories';
 import { canvasAuthService } from '@/services/canvasAuthService';
 import { convertBlockNoteToMarkdown } from '@/services/canvasService';
@@ -78,12 +79,19 @@ class CallNotesCanvasService {
       await releaseLock(lock);
     }
 
+    // Slack Connect: stamp these EDITOR rows with the canvas's connectId (this write site is not
+    // covered by a canvas create-site stamp). Without it, both rows are NULL and vanish once
+    // connect_query_enabled_canvas flips on (queries.canvasParticipants → where('connectId')),
+    // dropping the channel-wide edit grant. NULL when the canvas predates backfill (matches the
+    // canvas row, which also still queries by canvasId).
+    const canvasConnectId = await resolveCanvasConnectId(db, canvasId);
+
     // Channel members edit through the channel share; invitees outside the channel get a direct share.
     await db.canvasParticipant.createMany({
       data: [
-        { id: uuidv4(), canvasId, workspaceId: call.workspaceId, userId, role: CanvasRole.EDITOR },
+        { id: uuidv4(), canvasId, connectId: canvasConnectId, workspaceId: call.workspaceId, userId, role: CanvasRole.EDITOR },
         ...(call.channelId
-          ? [{ id: uuidv4(), canvasId, workspaceId: call.workspaceId, channelId: call.channelId, role: CanvasRole.EDITOR }]
+          ? [{ id: uuidv4(), canvasId, connectId: canvasConnectId, workspaceId: call.workspaceId, channelId: call.channelId, role: CanvasRole.EDITOR }]
           : []),
       ],
       skipDuplicates: true,

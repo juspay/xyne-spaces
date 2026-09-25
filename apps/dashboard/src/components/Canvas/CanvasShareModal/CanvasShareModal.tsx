@@ -32,6 +32,7 @@ import { useUsers, useActiveUsers, searchUsers } from '../../../hooks/useUsers';
 import { useGuestInvite } from '../../../hooks/useGuestInvite';
 import Input from '../../ui/Input/Input';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { useCanvasConnectId } from '../../../hooks/useCanvasConnectId';
 import { useAllVisibleChannels } from '../../../hooks/useChannels';
 import { v4 as uuidv4 } from 'uuid';
 import { usePlatform } from '../../../hooks/usePlatform';
@@ -86,8 +87,9 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
   const [pendingRoles, setPendingRoles] = useState<Record<string, CanvasRole>>({});
   const searchInputRef = useRef<HTMLInputElement>(null);
 
+  const connectId = useCanvasConnectId(canvas.id);
   const [queriedParticipants] = useCachedQuery(
-    queries.canvasParticipants({ canvasId: canvas.id }),
+    queries.canvasParticipants({ canvasId: canvas.id, connectId }),
     {
       enabled: !preloadedParticipants?.length,
     },

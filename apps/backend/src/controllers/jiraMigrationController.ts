@@ -11,6 +11,7 @@ import {
 } from '@/services/jiraMigrationImportService';
 import { jiraMigrationProgressService } from '@/services/jiraMigrationProgressService';
 import { DatabaseClient } from '@/database/client';
+import { newConnectId, createConnectGroupForEntity } from '@/database/connectGroup';
 import { logger } from '@/utils/logger';
 import { EntitySequenceService } from '@/services/entitySequenceService';
 import { config } from '@/config/env';
@@ -1909,6 +1910,7 @@ export class JiraMigrationController {
       select: { workspaceId: true },
     });
     try {
+      const connectId = newConnectId();
       const blocks = this.buildMigrationReportCanvasBlocks(result) as BlockNoteBlock[];
       const synced = await syncToYSweet(canvasId, blocks, actorUserId);
       if (!synced) {
@@ -1930,6 +1932,7 @@ export class JiraMigrationController {
             lastEditedAt: now,
             createdAt: now,
             updatedAt: now,
+            connectId,
             metadata: {
               source: 'jira_migration_report',
               jiraProjectKey: result.jiraProjectKey,
@@ -1955,7 +1958,14 @@ export class JiraMigrationController {
             role: CanvasRole.OWNER,
             joinedAt: now,
             updatedAt: now,
+            connectId,
           },
+        });
+        await createConnectGroupForEntity(tx, {
+          entityType: 'canvas',
+          entityId: canvasId,
+          hostWorkspaceId: canvasChannel.workspaceId,
+          connectId,
         });
       });
     } catch (error) {

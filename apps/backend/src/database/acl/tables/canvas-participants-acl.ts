@@ -2,6 +2,7 @@ import { CanvasRole, CanvasVisibility } from '@xyne/shared';
 import { Prisma, PrismaClient } from '@prisma/client'
 import { BaseQueryACL, ACLContext } from '../base-acl'
 import { getGuestAccessibleCanvasIds, isGuestContext } from './channel-access-helper'
+import { connectReachWhere } from '../../connectGroup'
 
 export class CanvasParticipantsACL extends BaseQueryACL<
   Prisma.CanvasParticipantWhereInput,
@@ -21,10 +22,15 @@ export class CanvasParticipantsACL extends BaseQueryACL<
       )
 
       return {
-        workspaceId: ctx.workspaceId,
-        OR: [
-          { userId: this.ctx.userId },
-          { canvasId: { in: canvasIds } },
+        AND: [
+          // Slack Connect: connectId → connect_group workspace truth; else workspaceId.
+          await connectReachWhere(this.prisma, ctx.workspaceId ?? '', 'canvas_participants'),
+          {
+            OR: [
+              { userId: this.ctx.userId },
+              { canvasId: { in: canvasIds } },
+            ],
+          },
         ],
       }
     }
@@ -52,37 +58,42 @@ export class CanvasParticipantsACL extends BaseQueryACL<
     // workspace term this clause would reach rows in other workspaces. The sync
     // layer applies the same scope structurally after every canSelect.
     return {
-      workspaceId: this.ctx.workspaceId,
-      OR: [
-        { userId: this.ctx.userId },
-        ...(groupParticipantWhere ? [groupParticipantWhere] : []),
-        ...(channelParticipantWhere ? [channelParticipantWhere] : []),
+      AND: [
+        // Slack Connect: connectId → connect_group workspace truth; else workspaceId.
+        await connectReachWhere(this.prisma, this.ctx.workspaceId, 'canvas_participants'),
         {
-          canvas: {
-            OR: [
-              { createdBy: this.ctx.userId },
-              { visibility: 'PUBLIC' },
-              { participants: { some: { userId: this.ctx.userId } } },
-              ...(groupParticipantWhere
-                ? [
-                    {
-                      participants: {
-                        some: groupParticipantWhere,
-                      },
-                    },
-                  ]
-                : []),
-              ...(channelParticipantWhere
-                ? [
-                    {
-                      participants: {
-                        some: channelParticipantWhere,
-                      },
-                    },
-                  ]
-                : []),
-            ],
-          },
+          OR: [
+            { userId: this.ctx.userId },
+            ...(groupParticipantWhere ? [groupParticipantWhere] : []),
+            ...(channelParticipantWhere ? [channelParticipantWhere] : []),
+            {
+              canvas: {
+                OR: [
+                  { createdBy: this.ctx.userId },
+                  { visibility: 'PUBLIC' },
+                  { participants: { some: { userId: this.ctx.userId } } },
+                  ...(groupParticipantWhere
+                    ? [
+                        {
+                          participants: {
+                            some: groupParticipantWhere,
+                          },
+                        },
+                      ]
+                    : []),
+                  ...(channelParticipantWhere
+                    ? [
+                        {
+                          participants: {
+                            some: channelParticipantWhere,
+                          },
+                        },
+                      ]
+                    : []),
+                ],
+              },
+            },
+          ],
         },
       ],
     }
@@ -106,18 +117,23 @@ export class CanvasParticipantsACL extends BaseQueryACL<
     if (channelIds.length) managerFilters.push({ channelId: { in: channelIds } });
 
     return {
-      workspaceId,
-      OR: [
-        { userId: this.ctx.userId },
+      AND: [
+        // Slack Connect: update/delete scope follows the same connect_group reach as reads.
+        await connectReachWhere(this.prisma, workspaceId, 'canvas_participants', 'write'),
         {
-          canvas: {
-            participants: {
-              some: {
-                role: { in: [CanvasRole.OWNER, CanvasRole.EDITOR] },
-                OR: managerFilters,
+          OR: [
+            { userId: this.ctx.userId },
+            {
+              canvas: {
+                participants: {
+                  some: {
+                    role: { in: [CanvasRole.OWNER, CanvasRole.EDITOR] },
+                    OR: managerFilters,
+                  },
+                },
               },
             },
-          },
+          ],
         },
       ],
     };

@@ -397,6 +397,10 @@ export class QueryACLFactory {
         return new FormContextMappingsACL(ctx) as BaseQueryACL<TTable>;
       case 'guest_access':
         return new GuestAccessACL(ctx) as BaseQueryACL<TTable>;
+      case 'connect_group':
+        // Slack Connect reach table — no per-row ACL in Phase 1 (default pass-through).
+        // It has no workspaceId column, so it's also in WORKSPACE_SCOPE_OPT_OUT.
+        return new BaseQueryACL(ctx, 'connect_group') as BaseQueryACL<TTable>;
     }
   }
 }

@@ -4,6 +4,7 @@ import { CanvasRole, CanvasVisibility } from '@xyne/shared';
 import { v4 as uuidv4 } from 'uuid';
 import type { ReleaseReport, ReleaseReportChange } from '@xyne/shared';
 import { db } from '@/database/client';
+import { newConnectId, createConnectGroupForEntity, resolveCanvasConnectId } from '@/database/connectGroup';
 import type { BlockNoteBlock, BlockNoteInlineContent } from '@/types/blockNoteTypes';
 import { CanvasSideEffectHandler } from '@/zero/side-effects/tables/canvas-handler';
 import { vespaQueue } from '@/queues/vespaQueue';
@@ -266,6 +267,7 @@ export class ReleaseReportCanvasService {
             metadata,
           },
         });
+        const existingConnectId = await resolveCanvasConnectId(tx, existingCanvas.id);
         await tx.canvasParticipant.upsert({
           where: {
             canvasId_userId: {
@@ -281,6 +283,7 @@ export class ReleaseReportCanvasService {
             role: CanvasRole.VIEWER,
             joinedAt: now,
             updatedAt: now,
+            ...(existingConnectId ? { connectId: existingConnectId } : {}),
           },
           update: {
             role: CanvasRole.VIEWER,
@@ -294,6 +297,10 @@ export class ReleaseReportCanvasService {
         };
       }
 
+      // NOTE: reuse the OUTER canvasId (line ~246) — syncToYSweet already wrote the content
+      // under it. A local `uuidv4()` here would shadow it, so the row/connect_group would be
+      // created under a different id than the Y-Sweet doc → the canvas opens empty.
+      const connectId = newConnectId();
       await tx.canvas.create({
         data: {
           id: canvasId,
@@ -308,8 +315,15 @@ export class ReleaseReportCanvasService {
           isCollaborative: true,
           lastEditedBy: owner.id,
           lastEditedAt: now,
+          connectId,
           metadata,
         },
+      });
+      await createConnectGroupForEntity(tx, {
+        entityType: 'canvas',
+        entityId: canvasId,
+        hostWorkspaceId: report.release.workspaceId,
+        connectId,
       });
       await tx.canvasParticipant.create({
         data: {
@@ -320,6 +334,7 @@ export class ReleaseReportCanvasService {
           role: CanvasRole.VIEWER,
           joinedAt: now,
           updatedAt: now,
+          connectId,
         },
       });
 

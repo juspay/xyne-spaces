@@ -276,6 +276,7 @@ const CanvasPanel = (): ReactElement => {
             ...(resolvedProjectId ? { projectId: resolvedProjectId } : {}),
             timestamp: Date.now(),
             participantId: uuidv4(),
+            connectId: uuidv4(),
           }),
         );
 

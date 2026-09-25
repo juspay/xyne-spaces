@@ -6,6 +6,7 @@
 
 import { v4 as uuidv4 } from 'uuid';
 import { DatabaseClient } from '@/database/client';
+import { newConnectId, createConnectGroupForEntity, resolveCanvasConnectId } from '@/database/connectGroup';
 import { withWorkspaceScope } from '@/database/tenant/context';
 import { repositories } from '@/database/repositories';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
@@ -1386,6 +1387,8 @@ MANDATORY OUTPUT CONTRACT:
     },
   ): Promise<string> {
     const { canvasId, workspaceId, callId, createdByUserId, callCreatorUserId, channelId, now } = params;
+    // Slack Connect: participants inherit the parent canvas's connectId (null until backfilled).
+    const connectId = await resolveCanvasConnectId(tx, canvasId);
     const call = await tx.call.findUnique({
       where: { externalId: callId },
       select: { id: true, callOrigin: true },
@@ -1395,13 +1398,13 @@ MANDATORY OUTPUT CONTRACT:
     await tx.canvasParticipant.create({
       data: {
         id: uuidv4(), canvasId, workspaceId, userId: createdByUserId, role: CanvasRole.OWNER,
-        joinedAt: now, updatedAt: now,
+        joinedAt: now, updatedAt: now, ...(connectId ? { connectId } : {}),
       },
     });
     await tx.canvasParticipant.create({
       data: {
         id: uuidv4(), canvasId, workspaceId, userId: callCreatorUserId, role: CanvasRole.OWNER,
-        joinedAt: now, updatedAt: now,
+        joinedAt: now, updatedAt: now, ...(connectId ? { connectId } : {}),
       },
     });
 
@@ -1416,7 +1419,7 @@ MANDATORY OUTPUT CONTRACT:
         await tx.canvasParticipant.createMany({
           data: editorUserIds.map((userId) => ({
             id: uuidv4(), canvasId, workspaceId, userId, role: CanvasRole.EDITOR,
-            joinedAt: now, updatedAt: now,
+            joinedAt: now, updatedAt: now, ...(connectId ? { connectId } : {}),
           })),
         });
       }
@@ -1427,7 +1430,7 @@ MANDATORY OUTPUT CONTRACT:
         data: {
           id: uuidv4(), canvasId, workspaceId, channelId,
           role: isChannelThreadCall ? CanvasRole.VIEWER : CanvasRole.EDITOR,
-          joinedAt: now, updatedAt: now,
+          joinedAt: now, updatedAt: now, ...(connectId ? { connectId } : {}),
         },
       });
     }
@@ -1461,6 +1464,7 @@ MANDATORY OUTPUT CONTRACT:
       await prisma.$transaction(async (tx) => {
         // Keep PRD canvases private and grant the same explicit access as
         // detailed-summary canvases generated from this call.
+        const connectId = newConnectId();
         await tx.canvas.create({
           data: {
             id: canvasId,
@@ -1476,6 +1480,7 @@ MANDATORY OUTPUT CONTRACT:
             lastEditedAt: now,
             createdAt: now,
             updatedAt: now,
+            connectId,
             metadata: {
               source: 'call_prd',
               callId,
@@ -1483,6 +1488,12 @@ MANDATORY OUTPUT CONTRACT:
               generatedAt: now.toISOString(),
             },
           },
+        });
+        await createConnectGroupForEntity(tx, {
+          entityType: 'canvas',
+          entityId: canvasId,
+          hostWorkspaceId: workspaceId,
+          connectId,
         });
         accessMode = await this.createCallCanvasAccess(tx, {
           canvasId,
@@ -1571,6 +1582,7 @@ MANDATORY OUTPUT CONTRACT:
       // participant yet); regular canvas access after this stays ACL-gated.
       let accessMode = 'private access';
       await prisma.$transaction(async (tx) => {
+        const connectId = newConnectId();
         await tx.canvas.create({
           data: {
             id: canvasId,
@@ -1586,6 +1598,7 @@ MANDATORY OUTPUT CONTRACT:
             lastEditedAt: now,
             createdAt: now,
             updatedAt: now,
+            connectId,
             metadata: {
               source: 'call_detailed_summary',
               callId,
@@ -1602,6 +1615,12 @@ MANDATORY OUTPUT CONTRACT:
                 : {}),
             },
           },
+        });
+        await createConnectGroupForEntity(tx, {
+          entityType: 'canvas',
+          entityId: canvasId,
+          hostWorkspaceId: workspaceId,
+          connectId,
         });
 
         accessMode = await this.createCallCanvasAccess(tx, {

@@ -5,6 +5,7 @@
 import { defaultBlockSpecs, defaultStyleSpecs } from '@blocknote/core';
 import { v4 as uuidv4 } from 'uuid';
 import { DatabaseClient } from '@/database/client';
+import { newConnectId, createConnectGroupForEntity } from '@/database/connectGroup';
 import type { KnowledgeLearning } from '@/workflows/utils/knowledge-generator';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
@@ -240,7 +241,11 @@ export async function createKnowledgeCanvas(
     }
 
     // Create the canvas with PUBLIC visibility
-    await prisma.canvas.create({
+    const connectId = newConnectId();
+    // Atomic: a canvas with a connectId but no connect_group row is invisible to connectReach
+    // (matches neither branch) and unrepairable via the app. Create both or neither.
+    await prisma.$transaction(async (tx) => {
+    await tx.canvas.create({
       data: {
         id: canvasId,
         title: finalTitle,
@@ -254,6 +259,7 @@ export async function createKnowledgeCanvas(
         lastEditedAt: now,
         createdAt: now,
         updatedAt: now,
+        connectId,
         metadata: {
           source: 'workflow_knowledge',
           workflowExecutionId,
@@ -266,6 +272,13 @@ export async function createKnowledgeCanvas(
         },
       },
     });
+    await createConnectGroupForEntity(tx, {
+      entityType: 'canvas',
+      entityId: canvasId,
+      hostWorkspaceId: workspaceId,
+      connectId,
+    });
+    });
 
     // Add creator as OWNER participant
     await prisma.canvasParticipant.create({
@@ -277,6 +290,7 @@ export async function createKnowledgeCanvas(
         role: CanvasRole.OWNER,
         joinedAt: now,
         updatedAt: now,
+        connectId,
       },
     });
 

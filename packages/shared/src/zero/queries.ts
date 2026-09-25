@@ -2,6 +2,7 @@ import { createBuilder, defineQueries } from '@rocicorp/zero';
 import { BaseTicketType } from './types.js';
 import { flowStepVisibilitySchemaShape } from '../tickets/flow.js';
 import { defineQuery } from './acl/define-query.js';
+import { getConnectQueryEnabledCanvas } from './connect-flags.js';
 import {
   AccessType,
   BoardType,
@@ -59,6 +60,11 @@ import {
 } from './schema.js';
 
 export const zql = createBuilder(schema);
+
+// Slack Connect — canvas query-mode switch. The value comes from Superposition CAC
+// (key: connect_query_enabled_canvas, default false), pushed in from the backend at runtime.
+// See ./connect-flags for why shared holds only the getter. OFF → canvas child rows are looked
+// up by canvasId (legacy); ON + a known connectId → looked up by connectId.
 
 const kanbanTicketPageFiltersSchema = z.object({
   priority: z.array(z.nativeEnum(TicketPriority)).optional(),
@@ -3086,25 +3092,34 @@ export const queries = defineQueries({
       .orderBy('createdAt', 'desc');
   }),
 
-  canvasParticipants: defineQuery(z.object({ canvasId: z.string() }), ({ args: { canvasId } }) => {
-    return zql.canvas_participants.where('canvasId', canvasId).related('canvas');
-  }),
+  canvasParticipants: defineQuery(
+    z.object({ canvasId: z.string(), connectId: z.string().optional() }),
+    ({ args: { canvasId, connectId } }) => {
+      // Slack Connect: when enabled and the caller knows the connectId, scope by the
+      // connect group (returns the shared entity's full participant set); else by canvasId.
+      // Mode counted server-side in the backend's handleQueries (connect_query_mode metric).
+      const useConnect = getConnectQueryEnabledCanvas() && !!connectId;
+      return useConnect
+        ? zql.canvas_participants.where('connectId', connectId as string).related('canvas')
+        : zql.canvas_participants.where('canvasId', canvasId).related('canvas');
+    },
+  ),
 
   canvasCommentThreads: defineQuery(
-    z.object({ canvasId: z.string() }),
-    ({ ctx, args: { canvasId } }) => {
-      return zql.canvas_comment_threads
-        .where('workspaceId', ctx.workspaceId)
-        .where('canvasId', canvasId)
-        .orderBy('createdAt', 'asc')
-        .related('initialComment', comment =>
-          comment.where('workspaceId', ctx.workspaceId),
-        );
+    z.object({ canvasId: z.string(), connectId: z.string().optional() }),
+    ({ args: { canvasId, connectId } }) => {
+      const useConnect = getConnectQueryEnabledCanvas() && !!connectId;
+      const base = useConnect
+        ? zql.canvas_comment_threads.where('connectId', connectId as string)
+        : zql.canvas_comment_threads.where('canvasId', canvasId);
+      return base.orderBy('createdAt', 'asc').related('initialComment');
     },
   ),
 
   canvasThreadComments: defineQuery(
-    z.object({ threadId: z.string() }),
+    // threadId is already connect-group-agnostic (a thread belongs to one connect group),
+    // so this query is unchanged; connectId is accepted for signature symmetry only.
+    z.object({ threadId: z.string(), connectId: z.string().optional() }),
     ({ ctx, args: { threadId } }) => {
       return zql.canvas_comments
         .where('workspaceId', ctx.workspaceId)
@@ -3378,10 +3393,13 @@ export const queries = defineQueries({
   }),
 
   canvasVersions: defineQuery(
-    z.object({ canvasId: z.string() }),
-    ({ ctx, args: { canvasId } }) => {
-      return zql.canvas_versions
-        .where('canvasId', canvasId)
+    z.object({ canvasId: z.string(), connectId: z.string().optional() }),
+    ({ ctx, args: { canvasId, connectId } }) => {
+      const useConnect = getConnectQueryEnabledCanvas() && !!connectId;
+      const base = useConnect
+        ? zql.canvas_versions.where('connectId', connectId as string)
+        : zql.canvas_versions.where('canvasId', canvasId);
+      return base
         .whereExists('canvas', canvas =>
           applyCanvasVisibilityQueryFilter(canvas, ctx.userID),
         )

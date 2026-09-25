@@ -12,6 +12,7 @@ import {
 import { z } from 'zod';
 import { authV2Middleware } from '@/middleware/authV2Middleware';
 import { db } from '@/database/client';
+import { newConnectId, createConnectGroupForEntity } from '@/database/connectGroup';
 import { decrypt, encrypt } from '@/services/encryptionService';
 import { getBackendUrl, getFrontendUrl } from '@/utils/publicUrls';
 import { logger } from '@/utils/logger';
@@ -545,6 +546,7 @@ router.get('/google-play/oauth/callback', async (req: Request, res: Response): P
         };
       }
 
+      const connectId = newConnectId();
       const channel = await tx.channel.create({
         data: {
           name: state.channelName,
@@ -559,7 +561,14 @@ router.get('/google-play/oauth/callback', async (req: Request, res: Response): P
           workspaceId: state.workspaceId,
           participantCount: 1,
           lastActivityAt: now,
+          connectId,
         },
+      });
+      await createConnectGroupForEntity(tx, {
+        entityType: 'channel',
+        entityId: channel.id,
+        hostWorkspaceId: state.workspaceId,
+        connectId,
       });
       await tx.channelParticipant.create({
         data: {

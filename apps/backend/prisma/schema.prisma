@@ -1892,6 +1892,7 @@ model Channel {
   isArchived      Boolean                @default(false)
   showTicketsTabTicketsInChat Boolean?   @default(true)
   callSummaryPrompt String?              // Per-channel detailed call summary sections override; null = default
+  connectId       String?                // Slack Connect: this channel's connect_group handle (null until backfilled)
 
   // Relations
   conversations      Conversation[]
@@ -1921,6 +1922,7 @@ model Channel {
 
   @@index([workspaceId, id])
   @@index([workspaceId, name, id])
+  @@index([connectId])
   @@map("channels")
   @@schema("public")
 }
@@ -1943,6 +1945,31 @@ model ChannelBoardMapping {
   @@unique([channelId, boardId])
   @@index([channelId])
   @@map("channel_board_mappings")
+  @@schema("public")
+}
+
+// Slack Connect — one row per channel/canvas "connection".
+// Phase 1: always PRIVATE (a single workspace) — invitedEntityId / invitedWorkspaceId
+// are NULL and status is 'ACTIVE'. Multiple rows sharing a connectId = shared (later phases).
+model ConnectGroup {
+  id                 String   @id @default(cuid())
+  entityType         String   // 'channel' | 'canvas'
+  entityId           String   // the channel/canvas id (host-side)
+  hostWorkspaceId    String   // the workspace that owns the entity
+  invitedEntityId    String?  // guest-side proxy entity id (NULL until shared)
+  invitedWorkspaceId String?  // invited workspace (NULL until shared)
+  connectId          String   // shared handle linking all rows for this entity
+  status             String   // 'ACTIVE' | 'REVOKED'
+
+  createdAt          DateTime // set in code
+  updatedAt          DateTime // set in code
+
+  @@unique([connectId, invitedWorkspaceId])
+  @@index([connectId])
+  @@index([entityId])
+  @@index([hostWorkspaceId])
+  @@index([invitedWorkspaceId])
+  @@map("connect_group")
   @@schema("public")
 }
 
@@ -3180,6 +3207,7 @@ model Canvas {
   entryFile    String?          // Entry file path within the bundle
   quartoDocumentType String?    // "docs" | "book" | "slides" | "website" (type of Quarto document)
   gcsPath      String?          // Path in GCS where the bundle is stored
+  connectId    String?          // Slack Connect: this canvas's connect_group handle (null until backfilled)
 
   @@unique([userRepo]) // One doc per repo/branch combination (backward compatibility)
   @@unique([repoId, branchName]) // One doc per repo/branch combination (when repoId is set)
@@ -3195,6 +3223,7 @@ model Canvas {
 
   @@index([createdBy, updatedAt(sort: Desc), id])
   @@index([docType, updatedAt(sort: Desc), id])
+  @@index([connectId])
   @@map("canvases")
   @@schema("public")
 }
@@ -3209,12 +3238,14 @@ model CanvasVersion {
   createdBy   String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  connectId   String?  // Slack Connect: resolved from parent canvas (null until backfilled)
 
   canvas      Canvas   @relation(fields: [canvasId], references: [id], onDelete: Cascade)
 
   @@unique([canvasId, contentHash])
   @@index([canvasId, updatedAt])
   @@index([createdBy])
+  @@index([connectId])
 
   @@map("canvas_versions")
   @@schema("public")
@@ -3233,6 +3264,7 @@ model CanvasCommentThread {
   statusUpdatedAt DateTime?
   createdBy       String
   createdAt       DateTime                  @default(now())
+  connectId       String?                   // Slack Connect: resolved from parent canvas (null until backfilled)
 
   canvas              Canvas          @relation(fields: [canvasId], references: [id], onDelete: Cascade)
   comments            CanvasComment[] @relation("CanvasCommentThreadComments")
@@ -3241,6 +3273,7 @@ model CanvasCommentThread {
   statusUpdatedByUser User?           @relation("CanvasCommentThreadStatusUpdatedBy", fields: [statusUpdatedBy], references: [id])
 
   @@index([workspaceId, canvasId, createdAt])
+  @@index([connectId])
   @@map("canvas_comment_threads")
   @@schema("public")
 }
@@ -3257,11 +3290,13 @@ model CanvasComment {
   editedAt         DateTime?
   deletedAt        DateTime?
   createdAt        DateTime @default(now())
+  connectId        String?  // Slack Connect: resolved from parent canvas (null until backfilled)
 
   thread       CanvasCommentThread  @relation("CanvasCommentThreadComments", fields: [threadId], references: [id], onDelete: Cascade)
   initialForThreads CanvasCommentThread[] @relation("CanvasCommentThreadInitialComment")
   createdByUser User               @relation("CanvasCommentCreatedBy", fields: [createdBy], references: [id])
 
+  @@index([connectId])
   @@index([workspaceId, threadId, createdAt])
   @@map("canvas_comments")
   @@schema("public")
@@ -3277,6 +3312,7 @@ model CanvasParticipant {
   role        String     @default("VIEWER") // OWNER | EDITOR | VIEWER
   joinedAt    DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
+  connectId   String?    // Slack Connect: resolved from parent canvas (null until backfilled)
 
   // Relations (no FK constraints - consistent with userId and canvasId)
   canvas    Canvas     @relation(fields: [canvasId], references: [id])
@@ -3288,6 +3324,7 @@ model CanvasParticipant {
   @@index([userId])
   @@index([userGroupId])
   @@index([channelId])
+  @@index([connectId])
   @@map("canvas_participants")
   @@schema("public")
 }
@@ -3300,6 +3337,7 @@ model CanvasUserStatus {
   isStarred  Boolean   @default(false)
   createdAt  DateTime  @default(now())
   updatedAt  DateTime?
+  connectId  String?   // Slack Connect: resolved from parent canvas (null until backfilled)
 
   canvas Canvas @relation(fields: [canvasId], references: [id])
   user   User   @relation("CanvasUserStatusUser", fields: [userId], references: [id])
@@ -3308,6 +3346,7 @@ model CanvasUserStatus {
   @@index([canvasId])
   @@index([userId])
   @@index([userId, isStarred])
+  @@index([connectId])
   @@map("canvas_user_status")
   @@schema("public")
 }

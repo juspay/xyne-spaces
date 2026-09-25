@@ -1,6 +1,7 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import { sanitizeProjectCode, ProjectType, ChannelRole, ChannelScopeType, ChannelVisibility } from '@xyne/shared';
 import { repositories } from '@/database/repositories';
+import { newConnectId, createConnectGroupForEntity } from '@/database/connectGroup';
 
 type PrismaClientLike = PrismaClient | Prisma.TransactionClient;
 
@@ -63,17 +64,36 @@ export async function ensureGeneralChannelForWorkspace(
       });
     }
 
-    channel = await db.channel.create({
-      data: {
-        name: 'general',
-        scopeType: ChannelScopeType.DEFAULT,
-        visibility: ChannelVisibility.PUBLIC,
-        createdBy,
-        projectId: project.id,
-        workspaceId,
-      },
-      select: { id: true },
-    });
+    const connectId = newConnectId();
+    // Atomic: a channel with a connectId but no connect_group row is invisible to connectReach
+    // (matches neither branch) and unrepairable via the app. Create both or neither. `db` may be a
+    // full client OR an already-open tx (PrismaClientLike) — wrap only when we own the client;
+    // when the caller handed us a tx we are already inside their transaction.
+    const insertChannelWithGroup = async (client: Prisma.TransactionClient) => {
+      const created = await client.channel.create({
+        data: {
+          name: 'general',
+          scopeType: ChannelScopeType.DEFAULT,
+          visibility: ChannelVisibility.PUBLIC,
+          createdBy,
+          projectId: project.id,
+          workspaceId,
+          connectId,
+        },
+        select: { id: true },
+      });
+      await createConnectGroupForEntity(client, {
+        entityType: 'channel',
+        entityId: created.id,
+        hostWorkspaceId: workspaceId,
+        connectId,
+      });
+      return created;
+    };
+    channel =
+      typeof (db as PrismaClient).$transaction === 'function'
+        ? await (db as PrismaClient).$transaction(insertChannelWithGroup)
+        : await insertChannelWithGroup(db as Prisma.TransactionClient);
 
     // Dual-write: mirror the channel→project board set into ChannelBoardMapping.
     const boards = await db.board.findMany({

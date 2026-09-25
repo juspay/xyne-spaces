@@ -12,6 +12,7 @@ import { unifiedBotUserService } from '@/bots/unified';
 import { v4 as uuidv4 } from 'uuid';
 import type { BlockNoteBlock, BlockNoteInlineContent } from '@/types/blockNoteTypes';
 import { db } from '@/database/client';
+import { newConnectId, createConnectGroupForEntity } from '@/database/connectGroup';
 import { withWorkspaceScope } from '@/database/tenant/context';
 
 interface PRData {
@@ -221,7 +222,11 @@ Release notes have been generated for **${ticket.title}**
         throw new Error(`Failed to save release notes canvas ${canvasId} to Y-Sweet`);
       }
 
-      await prisma.canvas.create({
+      const connectId = newConnectId();
+      // Atomic: a canvas with a connectId but no connect_group row is invisible to connectReach
+      // (matches neither branch) and unrepairable via the app. Create both or neither.
+      await prisma.$transaction(async (tx) => {
+      await tx.canvas.create({
         data: {
           id: canvasId,
           title: finalTitle,
@@ -235,6 +240,7 @@ Release notes have been generated for **${ticket.title}**
           lastEditedAt: now,
           createdAt: now,
           updatedAt: now,
+          connectId,
           channelId: context.release.channelId || null,
           metadata: {
             source: 'release_notes',
@@ -244,6 +250,13 @@ Release notes have been generated for **${ticket.title}**
             ...(context.release.conversationId && { conversationId: context.release.conversationId }),
           },
         },
+      });
+      await createConnectGroupForEntity(tx, {
+        entityType: 'canvas',
+        entityId: canvasId,
+        hostWorkspaceId: workspaceId,
+        connectId,
+      });
       });
 
       await prisma.canvasParticipant.create({
@@ -255,6 +268,7 @@ Release notes have been generated for **${ticket.title}**
           role: CanvasRole.VIEWER,
           joinedAt: now,
           updatedAt: now,
+          connectId,
         },
       });
 

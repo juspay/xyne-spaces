@@ -10,6 +10,7 @@ import {
   type WriteSdlcWikiPageInput,
 } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
+import { newConnectId, createConnectGroupForEntity, resolveCanvasConnectId } from '@/database/connectGroup';
 import { AppError } from '@/middleware/errorHandler';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { convertBlockNoteToMarkdown, convertMarkdownToBlockNote } from '@/services/canvasService';
@@ -306,6 +307,8 @@ export class SdlcWikiPageStore {
     const canvasId = await commitAndSyncCanvasArtifact(
       () =>
         this.prisma.$transaction(async (tx) => {
+          // Slack Connect: mint the canvas's connectId, stamp it, and create the group row.
+          const connectId = newConnectId();
           const canvas = await tx.canvas.create({
             data: {
               workspaceId: scope.workspaceId,
@@ -320,12 +323,19 @@ export class SdlcWikiPageStore {
               viewAccessId: randomUUID(),
               visibility: CanvasVisibility.PRIVATE,
               isCollaborative: true,
+              connectId,
               metadata: {} as Prisma.InputJsonValue,
               participants: {
-                create: sdlcChannelCanvasParticipant(scope.workspaceId, scope.channelId),
+                create: sdlcChannelCanvasParticipant(scope.workspaceId, scope.channelId, connectId),
               },
             },
             select: { id: true },
+          });
+          await createConnectGroupForEntity(tx, {
+            entityType: 'canvas',
+            entityId: canvas.id,
+            hostWorkspaceId: scope.workspaceId,
+            connectId,
           });
           await this.recordVersion(tx, scope, canvas.id, page.markdown, content, 'created', commitSha);
           await tx.sdlcArtifact.create({
@@ -461,6 +471,8 @@ export class SdlcWikiPageStore {
     const contentHash = createHash('sha256')
       .update(`${markdown}\0${commitSha ?? ''}`)
       .digest('hex');
+    // Slack Connect: inherit the parent canvas's connectId (null until backfilled).
+    const connectId = await resolveCanvasConnectId(tx, canvasId);
     await tx.canvasVersion.upsert({
       where: { canvasId_contentHash: { canvasId, contentHash } },
       create: {
@@ -470,6 +482,7 @@ export class SdlcWikiPageStore {
         content: content as unknown as Prisma.InputJsonValue,
         contentHash,
         createdBy: scope.actorUserId,
+        ...(connectId ? { connectId } : {}),
       },
       update: { name: versionName(action, commitSha) },
     });
