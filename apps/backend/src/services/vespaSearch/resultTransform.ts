@@ -129,6 +129,8 @@ import { PrismaClient } from '@prisma/client';
      ticketId?: string;        // Postgres ticket id (if ticket exists for the conv)
      ticketXyneId?: string;    // URL-friendly ticket id
      channelId?: string;
+     isArchived?: boolean;     // archived state of the linked ticket (undefined => no ticket)
+     assigneeName?: string;    // display name of the linked ticket's assignee (if any)
    }
    interface MailMap {
      [externalMessageId: string]: MailLinkInfo;
@@ -141,17 +143,23 @@ import { PrismaClient } from '@prisma/client';
      hits: VespaSearchHit[],
      prisma: PrismaClient,
      includeDebugInfo = false,
+     // When true, drop results resolving to an archived ticket (cmd+k always; full-page Desk
+     // unless "Show archived" is on). Default false keeps every other caller unchanged.
+     excludeArchived = false,
    ): Promise<TransformedSearchResult[]> {
      if (!hits || hits.length === 0) {
        return [];
      }
-   
+
      // Collect all user IDs, channel IDs, and collection IDs we need to fetch
      const userIdsToFetch = new Set<string>();
      const channelIdsToFetch = new Set<string>();
      const mailDocIds = new Set<string>();
      const collectionIdsToFetch = new Set<string>();
      const formFieldIdsToFetch = new Set<string>();
+     // Ticket docIds (== Postgres ticket.id) — batch-resolved to isArchived when the caller
+     // asks to hide archived tickets.
+     const ticketDocIds = new Set<string>();
 
      hits.forEach((hit) => {
        const doc = hit.fields;
@@ -177,6 +185,9 @@ import { PrismaClient } from '@prisma/client';
          }
          if ('assignedTo' in doc && doc.assignedTo) {
            userIdsToFetch.add(doc.assignedTo as string);
+         }
+         if (excludeArchived && 'docId' in doc && doc.docId) {
+           ticketDocIds.add(doc.docId as string);
          }
        }
    
@@ -314,10 +325,24 @@ import { PrismaClient } from '@prisma/client';
        const tickets = conversationIds.length > 0
          ? await prisma.ticket.findMany({
              where: { conversationId: { in: conversationIds } },
-             select: { id: true, xyneId: true, conversationId: true, channelId: true },
+             select: { id: true, xyneId: true, conversationId: true, channelId: true, isArchived: true, assignedTo: true },
            })
          : [];
        const ticketByConv = new Map(tickets.map(t => [t.conversationId, t]));
+
+       // Resolve the assignee's display name for each desk ticket (assignedTo is a user id,
+       // same as ticket docs). Batched in one query.
+       const assigneeIds = Array.from(
+         new Set(tickets.map(t => t.assignedTo).filter((id): id is string => !!id)),
+       );
+       const assigneeNameById = new Map<string, string>();
+       if (assigneeIds.length > 0) {
+         const assignees = await prisma.user.findMany({
+           where: { id: { in: assigneeIds } },
+           select: { id: true, name: true },
+         });
+         for (const u of assignees) assigneeNameById.set(u.id, u.name);
+       }
 
        for (const e of emails) {
          const t = ticketByConv.get(e.conversationId);
@@ -327,8 +352,20 @@ import { PrismaClient } from '@prisma/client';
            ticketId: t?.id,
            ticketXyneId: t?.xyneId,
            channelId: t?.channelId,
+           isArchived: t?.isArchived,
+           assigneeName: t?.assignedTo ? assigneeNameById.get(t.assignedTo) || undefined : undefined,
          };
        }
+     }
+
+     // Batch-resolve archived state for ticket hits when the caller wants archived hidden.
+     const ticketArchivedMap = new Map<string, boolean>();
+     if (excludeArchived && ticketDocIds.size > 0) {
+       const ticketRows = await prisma.ticket.findMany({
+         where: { id: { in: Array.from(ticketDocIds) } },
+         select: { id: true, isArchived: true },
+       });
+       for (const t of ticketRows) ticketArchivedMap.set(t.id, t.isArchived);
      }
 
      // Resolve the stable Vespa field IDs to user-facing form labels in one query.
@@ -357,8 +394,25 @@ import { PrismaClient } from '@prisma/client';
          if (field.globalFieldId) formFieldNameMap[field.globalFieldId] = fieldName;
        }
      }
+     // Drop hits tied to an archived ticket. Ticket hits are keyed by docId; mail (Desk) hits
+     // carry the linked ticket's archived state on mailMap. Hits with no resolvable ticket
+     // (e.g. mail with no linked ticket) are treated as not archived and kept.
+     const visibleHits = excludeArchived
+       ? hits.filter((hit) => {
+           const doc = hit.fields;
+           const docType = doc.docType as string;
+           if (docType === 'ticket' && 'docId' in doc && doc.docId) {
+             return ticketArchivedMap.get(doc.docId as string) !== true;
+           }
+           if (docType === 'mail' && 'docId' in doc && doc.docId) {
+             return mailMap[doc.docId as string]?.isArchived !== true;
+           }
+           return true;
+         })
+       : hits;
+
      // Transform each hit
-     return hits.map((hit) =>
+     return visibleHits.map((hit) =>
        transformSingleHit(
          hit,
          userMap,
@@ -943,6 +997,7 @@ function transformCollection(
          senderName,
          senderEmail,
          recipientCount,
+         ...(link?.assigneeName && { assigneeName: link.assigneeName }),
          ...(formFieldMatches.length > 0 && { formFieldMatches }),
          subApp: 'DESK',
        },
