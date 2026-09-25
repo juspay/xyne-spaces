@@ -358,10 +358,10 @@ router.post(
       // desk for the DL fallback (equal to channelId there) and jobData.dlEmail
       // further separates DL desks bound to different lists.
       const refetchJobIdFor = (sourceId: string, jobData: FetchTarget['jobData']) =>
-        `refetch-${sourceId}-${crypto
-          .createHash('sha1')
+        `refetch-${sourceId}-${requesterUserId}-${crypto
+          .createHash('sha256')
           .update(
-            `${jobData.targetChannelId ?? channelId}|${jobData.dlEmail ?? ''}|${startDate}|${endDate}|${requesterUserId}`,
+            `${jobData.targetChannelId ?? channelId}|${jobData.dlEmail ?? ''}|${startDate}|${endDate}`,
           )
           .digest('hex')}`;
 
