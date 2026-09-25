@@ -5585,13 +5585,7 @@ export const SupportTicketDetail = ({
                 {showAdjacentNav && (
                   <button
                     type='button'
-                    onClick={() => {
-                      if (onBack) {
-                        onBack();
-                        return;
-                      }
-                      goBackToTicketList();
-                    }}
+                    onClick={() => void navigate(-1)}
                     className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0'
                     aria-label='Back to ticket list'
                     data-track-category='Support'
