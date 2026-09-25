@@ -83,6 +83,7 @@ export const ticketTable = table("tickets")
     createdAt: number(),
     updatedAt: number(),
     statusUpdatedAt: number(),
+    merchantId: string().optional(),
     conversationId: string(),
     messageId: string().optional(),
     channelId: string(),
@@ -299,9 +300,6 @@ export const workflowExecutionStateTable = table("workflow_execution_states")
     currentStepIndex: number(),
     pausePath: string().optional(),
     pauseType: string().optional(),
-    fireAt: number().optional(),
-    origin: string().optional(),
-    endReason: string().optional(),
   })
   .primaryKey("id");
 
@@ -1260,7 +1258,6 @@ export const emailReadTable = table("email_reads")
     userId: string(),
     lastReadEmailId: string(),
     lastReadEmailAt: number(),
-    hasNewEmail: boolean().optional(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -3004,7 +3001,6 @@ export const executionItemTable = table("execution_items")
     status: string(),
     requestedBy: json<string[]>(),
     pendingOn: json<string[]>(),
-    mentionedGroupIds: json<string[]>(),
     createdAt: number(),
     updatedAt: number(),
     resolvedAt: number().optional(),
@@ -3054,17 +3050,6 @@ export const executionRunLogTable = table("execution_run_logs")
     error: string().optional(),
     durationMs: number().optional(),
     createdAt: number(),
-  })
-  .primaryKey("id");
-
-export const radarRuleTable = table("radar_rules")
-  .columns({
-    workspaceId: string(),
-    id: string(),
-    userId: string(),
-    conditions: json(),
-    createdAt: number(),
-    updatedAt: number(),
   })
   .primaryKey("id");
 
@@ -3218,16 +3203,6 @@ export const ticketTableRelationships = relationships(ticketTable, ({ one, many 
     sourceField: ["id"],
     destField: ["ticketId"],
     destSchema: ticketAssignmentTable,
-  }),
-  conversation: one({
-    sourceField: ["conversationId"],
-    destField: ["conversationId"],
-    destSchema: conversationTable,
-  }),
-  emailReads: many({
-    sourceField: ["id"],
-    destField: ["ticketId"],
-    destSchema: emailReadTable,
   })
 }));
 
@@ -3392,11 +3367,6 @@ export const workflowExecutionTableRelationships = relationships(workflowExecuti
     destField: ["workflowExecutionId"],
     destSchema: workflowExecutionLockTable,
   }),
-  workflowExecutionState: one({
-    sourceField: ["id"],
-    destField: ["workflowExecutionId"],
-    destSchema: workflowExecutionStateTable,
-  }),
   externalStepResponses: many({
     sourceField: ["id"],
     destField: ["workflowExecutionId"],
@@ -3411,14 +3381,6 @@ export const workflowExecutionTableRelationships = relationships(workflowExecuti
     sourceField: ["id"],
     destField: ["sdlcSetupExecutionId"],
     destSchema: repoTable,
-  })
-}));
-
-export const workflowExecutionStateTableRelationships = relationships(workflowExecutionStateTable, ({ one }) => ({
-  workflowExecution: one({
-    sourceField: ["workflowExecutionId"],
-    destField: ["id"],
-    destSchema: workflowExecutionTable,
   })
 }));
 
@@ -4321,21 +4283,6 @@ export const conversationTableRelationships = relationships(conversationTable, (
     sourceField: ["conversationId"],
     destField: ["conversationId"],
     destSchema: messageAttachmentTable,
-  }),
-  tickets: many({
-    sourceField: ["conversationId"],
-    destField: ["conversationId"],
-    destSchema: ticketTable,
-  }),
-  labelMappings: many({
-    sourceField: ["conversationId"],
-    destField: ["conversationId"],
-    destSchema: conversationLabelMappingTable,
-  }),
-  emailDrafts: many({
-    sourceField: ["conversationId"],
-    destField: ["conversationId"],
-    destSchema: emailDraftTable,
   })
 }));
 
@@ -4365,35 +4312,11 @@ export const emailTableRelationships = relationships(emailTable, ({ one }) => ({
   })
 }));
 
-export const emailDraftTableRelationships = relationships(emailDraftTable, ({ one }) => ({
-  conversation: one({
-    sourceField: ["conversationId"],
-    destField: ["conversationId"],
-    destSchema: conversationTable,
-  })
-}));
-
-export const emailReadTableRelationships = relationships(emailReadTable, ({ one }) => ({
-  ticket: one({
-    sourceField: ["ticketId"],
-    destField: ["id"],
-    destSchema: ticketTable,
-  })
-}));
-
 export const conversationLabelTableRelationships = relationships(conversationLabelTable, ({ many }) => ({
   deskAutoLabelRuleReferences: many({
     sourceField: ["id"],
     destField: ["labelId"],
     destSchema: deskAutoLabelRuleReferenceTable,
-  })
-}));
-
-export const conversationLabelMappingTableRelationships = relationships(conversationLabelMappingTable, ({ one }) => ({
-  conversation: one({
-    sourceField: ["conversationId"],
-    destField: ["conversationId"],
-    destSchema: conversationTable,
   })
 }));
 
@@ -5340,7 +5263,6 @@ export const schema = createSchema(
       executionThreadStateTable,
       executionItemMutationTable,
       executionRunLogTable,
-      radarRuleTable,
     ],
     relationships: [
       agentTableRelationships,
@@ -5359,7 +5281,6 @@ export const schema = createSchema(
       ticketStageEtaTableRelationships,
       workflowTableRelationships,
       workflowExecutionTableRelationships,
-      workflowExecutionStateTableRelationships,
       workflowExecutionLockTableRelationships,
       workflowStepTableRelationships,
       agentStepTableRelationships,
@@ -5401,10 +5322,7 @@ export const schema = createSchema(
       conversationTableRelationships,
       conversationParticipantTableRelationships,
       emailTableRelationships,
-      emailDraftTableRelationships,
-      emailReadTableRelationships,
       conversationLabelTableRelationships,
-      conversationLabelMappingTableRelationships,
       deskAutoLabelRuleReferenceTableRelationships,
       messageTableRelationships,
       messageAttachmentTableRelationships,
@@ -5651,4 +5569,3 @@ export type ExecutionItem = Row<typeof schema.tables.execution_items>;
 export type ExecutionThreadState = Row<typeof schema.tables.execution_thread_states>;
 export type ExecutionItemMutation = Row<typeof schema.tables.execution_item_mutations>;
 export type ExecutionRunLog = Row<typeof schema.tables.execution_run_logs>;
-export type RadarRule = Row<typeof schema.tables.radar_rules>;

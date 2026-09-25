@@ -45,6 +45,8 @@ const buildTicketFromSummary = (summary: TicketCardSummary, workspaceId: string)
     createdAt: summary.createdAt ?? now,
     updatedAt: summary.createdAt ?? now,
     statusUpdatedAt: summary.createdAt ?? now,
+    // Deprecated column kept for Zero schema backward compatibility; no UI reads it.
+    merchantId: null,
     conversationId: summary.conversationId ?? '',
     channelId: summary.channelId ?? '',
     messageId: null,
