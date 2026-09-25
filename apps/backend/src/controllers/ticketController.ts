@@ -534,7 +534,6 @@ export class TicketController {
         excludedChatAttachmentIds,
         draftAttachmentIds,
         tags,
-        merchantId,
         parentTicketId,
         ticketType,
         stageName
@@ -922,7 +921,6 @@ export class TicketController {
             metadata,
             closedAt,
             closedBy,
-            merchantId,
             xyneId,
             sourceMessageId: sourceMessageId ?? existingConversation.initialMessageId ?? undefined,
             ticketType: effectiveTicketType,
@@ -1074,7 +1072,6 @@ export class TicketController {
             metadata,
             closedAt,
             closedBy,
-            merchantId,
             xyneId,
             sourceMessageId: sourceMessageId ?? initialMessageId,
             ticketType: effectiveTicketType,

@@ -1339,7 +1339,6 @@ export const queries: AnyQueryRegistry = defineQueries({
   supportTicketsFiltered: defineQuery(
     z.object({
       channelId: z.string().optional(),
-      merchantMid: z.string().optional(),
     }).optional(),
     ({ args }) => {
       let query = zql.tickets;
@@ -1350,11 +1349,6 @@ export const queries: AnyQueryRegistry = defineQueries({
         query = query.where('channelId', args.channelId);
       } else {
         query = query.whereExists('channel', (channel) => channel.where('type', ChannelType.EMAIL));
-      }
-
-      // Apply merchant filter using direct merchantId field
-      if (args?.merchantMid) {
-        query = query.where('merchantId', args.merchantMid);
       }
 
       return query
@@ -1370,20 +1364,15 @@ export const queries: AnyQueryRegistry = defineQueries({
     z.object({
       channelId: z.string(),
       isMember: z.boolean(),
-      merchantMid: z.string().optional(),
       assignedTo: z.array(z.string()).optional(),
       priority: z.array(z.nativeEnum(TicketPriority)).optional(),
       stageName: z.array(z.string()).optional(),
       aiCategory: z.array(z.string()).optional(),
       hasAiDraft: z.boolean().optional(),
     }),
-    ({ args: { channelId, merchantMid, assignedTo, priority, stageName, aiCategory, hasAiDraft } }) => {
+    ({ args: { channelId, assignedTo, priority, stageName, aiCategory, hasAiDraft } }) => {
       let query = zql.tickets.where('channelId', channelId);
       query = query.where('isArchived', false);
-
-      if (merchantMid) {
-        query = query.where('merchantId', merchantMid);
-      }
 
       if (assignedTo && assignedTo.length > 0) {
         query = query.where(({ or, cmp }) => or(...assignedTo.map((id) => cmp('assignedTo', id))));
@@ -1419,7 +1408,6 @@ export const queries: AnyQueryRegistry = defineQueries({
     z.object({
       channelId: z.string(),
       isMember: z.boolean(),
-      merchantMid: z.string().optional(),
       assignedTo: z.array(z.string()).optional(),
       createdBy: z.array(z.string()).optional(),
       priority: z.array(z.nativeEnum(TicketPriority)).optional(),
@@ -1439,12 +1427,8 @@ export const queries: AnyQueryRegistry = defineQueries({
       args => args.createdAtStart === undefined || args.createdAtEnd === undefined || args.createdAtStart <= args.createdAtEnd,
       'createdAtStart must be less than or equal to createdAtEnd',
     ),
-    ({ ctx, args: { channelId, merchantMid, assignedTo, createdBy, priority, stageName, aiCategory, hasAiDraft, hasSubTickets, userGroups, lastEmailAtStart, lastEmailAtEnd, createdAtStart, createdAtEnd, conversationLabelId, dynamicFieldFilters, formEntityValueFieldIds } }) => {
+    ({ ctx, args: { channelId, assignedTo, createdBy, priority, stageName, aiCategory, hasAiDraft, hasSubTickets, userGroups, lastEmailAtStart, lastEmailAtEnd, createdAtStart, createdAtEnd, conversationLabelId, dynamicFieldFilters, formEntityValueFieldIds } }) => {
       let query = zql.tickets.where('channelId', channelId);
-
-      if (merchantMid) {
-        query = query.where('merchantId', merchantMid);
-      }
 
       if (assignedTo && assignedTo.length > 0) {
         query = query.where(({ or, cmp }) => or(...assignedTo.map((id) => cmp('assignedTo', id))));
@@ -1520,7 +1504,6 @@ export const queries: AnyQueryRegistry = defineQueries({
     z.object({
       channelId: z.string(),
       isMember: z.boolean(),
-      merchantMid: z.string().optional(),
       assignedTo: z.array(z.string()).optional(),
       createdBy: z.array(z.string()).optional(),
       priority: z.array(z.nativeEnum(TicketPriority)).optional(),
@@ -1540,12 +1523,8 @@ export const queries: AnyQueryRegistry = defineQueries({
       args => args.createdAtStart === undefined || args.createdAtEnd === undefined || args.createdAtStart <= args.createdAtEnd,
       'createdAtStart must be less than or equal to createdAtEnd',
     ),
-    ({ ctx, args: { channelId, merchantMid, assignedTo, createdBy, priority, stageName, aiCategory, hasAiDraft, hasSubTickets, userGroups, lastEmailAtStart, lastEmailAtEnd, createdAtStart, createdAtEnd, conversationLabelId, dynamicFieldFilters, formEntityValueFieldIds } }) => {
+    ({ ctx, args: { channelId, assignedTo, createdBy, priority, stageName, aiCategory, hasAiDraft, hasSubTickets, userGroups, lastEmailAtStart, lastEmailAtEnd, createdAtStart, createdAtEnd, conversationLabelId, dynamicFieldFilters, formEntityValueFieldIds } }) => {
       let query = zql.tickets.where('channelId', channelId);
-
-      if (merchantMid) {
-        query = query.where('merchantId', merchantMid);
-      }
 
       if (assignedTo && assignedTo.length > 0) {
         query = query.where('assignedTo', 'IN', assignedTo);

@@ -2217,7 +2217,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           ticket.title || '',
           ticket.description || '',
           ticket.xyneId || '',
-          ticket.merchantId || '',
           ticket.statusV2 || '',
           ticket.priority || '',
         ].join(' ');

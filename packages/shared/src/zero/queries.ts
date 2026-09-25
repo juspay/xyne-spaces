@@ -1239,7 +1239,6 @@ export const queries = defineQueries({
     z.object({
       channelId: z.string(),
       isMember: z.boolean(),
-      merchantMid: z.string().optional(),
       assignedTo: z.array(z.string()).optional(),
       createdBy: z.array(z.string()).optional(),
       priority: z.array(z.nativeEnum(TicketPriority)).optional(),
@@ -1260,13 +1259,9 @@ export const queries = defineQueries({
       args => args.createdAtStart === undefined || args.createdAtEnd === undefined || args.createdAtStart <= args.createdAtEnd,
       'createdAtStart must be less than or equal to createdAtEnd',
     ),
-    ({ ctx, args: { channelId, merchantMid, assignedTo, createdBy, priority, stageName, aiCategory, conversationIds, hasAiDraft, hasSubTickets, userGroups, lastEmailAtStart, lastEmailAtEnd, createdAtStart, createdAtEnd, conversationLabelId, dynamicFieldFilters, formEntityValueFieldIds } }) => {
+    ({ ctx, args: { channelId, assignedTo, createdBy, priority, stageName, aiCategory, conversationIds, hasAiDraft, hasSubTickets, userGroups, lastEmailAtStart, lastEmailAtEnd, createdAtStart, createdAtEnd, conversationLabelId, dynamicFieldFilters, formEntityValueFieldIds } }) => {
       let query = zql.tickets.where('channelId', channelId);
       query = query.where('isArchived', false);
-
-      if (merchantMid) {
-        query = query.where('merchantId', merchantMid);
-      }
 
       if (assignedTo && assignedTo.length > 0) {
         query = query.where(({ or, cmp }) => or(...assignedTo.map((id) => cmp('assignedTo', id))));
@@ -1346,7 +1341,6 @@ export const queries = defineQueries({
     z.object({
       channelId: z.string(),
       isMember: z.boolean(),
-      merchantMid: z.string().optional(),
       assignedTo: z.array(z.string()).optional(),
       createdBy: z.array(z.string()).optional(),
       priority: z.array(z.nativeEnum(TicketPriority)).optional(),
@@ -1367,13 +1361,9 @@ export const queries = defineQueries({
       args => args.createdAtStart === undefined || args.createdAtEnd === undefined || args.createdAtStart <= args.createdAtEnd,
       'createdAtStart must be less than or equal to createdAtEnd',
     ),
-    ({ ctx, args: { channelId, merchantMid, assignedTo, createdBy, priority, stageName, aiCategory, conversationIds, hasAiDraft, hasSubTickets, userGroups, lastEmailAtStart, lastEmailAtEnd, createdAtStart, createdAtEnd, conversationLabelId, dynamicFieldFilters, formEntityValueFieldIds } }) => {
+    ({ ctx, args: { channelId, assignedTo, createdBy, priority, stageName, aiCategory, conversationIds, hasAiDraft, hasSubTickets, userGroups, lastEmailAtStart, lastEmailAtEnd, createdAtStart, createdAtEnd, conversationLabelId, dynamicFieldFilters, formEntityValueFieldIds } }) => {
       let query = zql.tickets.where('channelId', channelId);
       query = query.where('isArchived', false);
-
-      if (merchantMid) {
-        query = query.where('merchantId', merchantMid);
-      }
 
       if (assignedTo && assignedTo.length > 0) {
         query = query.where('assignedTo', 'IN', assignedTo);

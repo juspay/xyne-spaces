@@ -172,7 +172,6 @@ export const ticketTable = table('tickets')
     createdAt: number(),
     updatedAt: number(),
     statusUpdatedAt: number(),
-    merchantId: string().optional(),
     conversationId: string(),
     channelId: string(),
     eta: number().optional(),
@@ -2278,13 +2277,7 @@ export const merchantTable = table('merchants')
   .primaryKey('id');
 
 // Merchant table relationships
-export const merchantTableRelationships = relationships(merchantTable, ({ many }) => ({
-  tickets: many({
-    sourceField: ['mid'],
-    destField: ['merchantId'],
-    destSchema: ticketTable,
-  }),
-}));
+export const merchantTableRelationships = relationships(merchantTable, () => ({}));
 
 export const agentTableRelationships = relationships(agentTable, ({ one, many }) => ({
   model: one({
@@ -2403,11 +2396,6 @@ export const ticketTableRelationships = relationships(ticketTable, ({ one, many 
     sourceField: ['boardId'],
     destField: ['id'],
     destSchema: boardTable,
-  }),
-  merchant: one({
-    sourceField: ['merchantId'],
-    destField: ['mid'],
-    destSchema: merchantTable,
   }),
   ticketTypeLookup: one({
     sourceField: ['ticketType'],

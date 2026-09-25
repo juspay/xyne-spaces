@@ -76,7 +76,6 @@ const TicketSchema = z.object({
   closedAt: z.coerce.date().nullable(),
   closedBy: z.string().nullable(),
   eta: z.coerce.date().nullable(),
-  merchantId: z.string().nullable(),
   isArchived: z.boolean().nullable(),
   aiCategory: z.string().nullable(),
   aiSubCategory: z.string().nullable(),
@@ -179,7 +178,6 @@ export interface TicketLike {
   closedAt?: Date | null;
   closedBy?: string | null;
   eta?: Date | null;
-  merchantId?: string | null;
   isArchived?: boolean | null;
   aiCategory?: string | null;
   aiSubCategory?: string | null;
@@ -264,7 +262,6 @@ export async function buildTicketContext(ticket: TicketLike): Promise<TicketCont
     closedAt: ticket.closedAt ?? null,
     closedBy: ticket.closedBy ?? null,
     eta: ticket.eta ?? null,
-    merchantId: ticket.merchantId ?? null,
     isArchived: ticket.isArchived ?? null,
     aiCategory: ticket.aiCategory ?? null,
     aiSubCategory: ticket.aiSubCategory ?? null,

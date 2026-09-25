@@ -163,7 +163,6 @@ function toTicket(r: DisplaySearchResult): Ticket {
     kanbanPosition: null,
     lastEmailAt: 0,
     emailCount: null,
-    merchantId: null,
     eta: null,
     metadata: null,
     closedAt: null,

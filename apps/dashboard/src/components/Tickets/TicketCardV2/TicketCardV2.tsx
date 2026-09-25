@@ -45,7 +45,6 @@ const buildTicketFromSummary = (summary: TicketCardSummary, workspaceId: string)
     createdAt: summary.createdAt ?? now,
     updatedAt: summary.createdAt ?? now,
     statusUpdatedAt: summary.createdAt ?? now,
-    merchantId: null,
     conversationId: summary.conversationId ?? '',
     channelId: summary.channelId ?? '',
     messageId: null,

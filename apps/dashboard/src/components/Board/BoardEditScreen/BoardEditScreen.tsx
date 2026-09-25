@@ -1858,7 +1858,6 @@ const BoardEditScreen = ({
                                 {[
                                   'dueDate',
                                   'assignedTo',
-                                  'merchantId',
                                   'tags',
                                   'ticketType',
                                 ].includes(field.name) && (

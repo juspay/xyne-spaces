@@ -4533,14 +4533,6 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           </div>
         </div>
 
-        {/* Merchant ID */}
-        {ticket.merchantId && (
-          <TicketKeyValuePair
-            ticketKey='Merchant ID'
-            value={<span className='text-sm text-muted-foreground'>{ticket.merchantId}</span>}
-          />
-        )}
-
         {/* AI Classification Panel */}
         {ticket?.classificationData && channelId && (
           <div className='my-4'>

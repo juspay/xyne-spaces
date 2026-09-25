@@ -41,7 +41,6 @@ export interface TicketFormSnapshot {
   boardId: string;
   channelId: string;
   workflowType: string;
-  merchantId: string;
   ticketType: string;
   dynamicFields: string;
 }
@@ -70,7 +69,6 @@ export const snapshotTicketForm = (values: CreateTicketFormData): TicketFormSnap
   boardId: values.boardId ?? '',
   channelId: values.channelId ?? '',
   workflowType: (values.workflowType ?? '').trim(),
-  merchantId: (values.merchantId ?? '').trim(),
   ticketType: values.ticketType ?? '',
   dynamicFields: serializeDynamicFields(values.dynamicFields),
 });
@@ -102,14 +100,12 @@ interface MissingMandatoryFieldInput {
   showTodo: boolean;
   showDueDate: boolean;
   showLabels: boolean;
-  showMerchantId: boolean;
   showTicketType: boolean;
   mandatoryUserGroupsOnly: boolean;
   mandatoryAssignee: boolean;
   mandatoryTodo: boolean;
   mandatoryDueDate: boolean;
   mandatoryLabels: boolean;
-  mandatoryMerchantId: boolean;
   mandatoryTicketType: boolean;
   isRelease?: boolean;
   releaseOnly?: boolean;
@@ -127,14 +123,12 @@ export function getMissingMandatoryFieldMessage(input: MissingMandatoryFieldInpu
     showTodo,
     showDueDate,
     showLabels,
-    showMerchantId,
     showTicketType,
     mandatoryUserGroupsOnly,
     mandatoryAssignee,
     mandatoryTodo,
     mandatoryDueDate,
     mandatoryLabels,
-    mandatoryMerchantId,
     mandatoryTicketType,
     isRelease,
     releaseOnly,
@@ -146,8 +140,7 @@ export function getMissingMandatoryFieldMessage(input: MissingMandatoryFieldInpu
   if (!formValues?.title?.trim()) return 'Title is required';
   if (!formValues?.description?.trim()) return 'Description is required';
   // releaseOnly hides assignee/userGroups/dueDate/labels, so the gate must skip them
-  // (matching handleCreateTicket) or submit stays permanently disabled. Todo/merchantId
-  // remain visible, so they stay enforced.
+  // (matching handleCreateTicket) or submit stays permanently disabled.
   if (!releaseOnly && showUserGroupsOnly && mandatoryUserGroupsOnly && !formValues?.assignee?.value)
     return 'User Group is required';
   if (
@@ -168,8 +161,6 @@ export function getMissingMandatoryFieldMessage(input: MissingMandatoryFieldInpu
     (!formValues?.tags || formValues.tags.length === 0)
   )
     return 'Labels are required';
-  if (showMerchantId && mandatoryMerchantId && !formValues?.merchantId?.trim())
-    return 'Merchant ID is required';
   if (showTicketType && mandatoryTicketType && !formValues?.ticketType)
     return 'Ticket Type is required';
 

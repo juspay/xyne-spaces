@@ -33,10 +33,6 @@ export interface TicketFormConfig {
     enabled: boolean;
     mandatory?: boolean;
   };
-  merchantId?: {
-    enabled: boolean;
-    mandatory?: boolean;
-  };
   ticketType?: {
     enabled: boolean;
     mandatory?: boolean;

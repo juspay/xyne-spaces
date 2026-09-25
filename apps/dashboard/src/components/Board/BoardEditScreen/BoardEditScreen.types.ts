@@ -147,15 +147,6 @@ export const DEFAULT_TICKET_FIELDS: TicketField[] = [
     visibleInCreate: true,
   },
   {
-    id: '13',
-    name: 'merchantId',
-    type: 'text',
-    label: 'Merchant ID',
-    required: false,
-    order: 6,
-    visibleInCreate: false,
-  },
-  {
     id: '14',
     name: 'tags',
     type: 'tags',
