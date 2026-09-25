@@ -283,9 +283,33 @@ describe('summarizeStepConfig', () => {
 
   it('redacts encrypted values even when the field is allow-listed', () => {
     expect(summarizeStepConfig('RUN_AGENT', { agentSlug: 'enc:deadbeef' })).toBe('agent: ••••••');
-    expect(summarizeStepConfig('SEND_MESSAGE', { userIds: ['u1', 'enc:x'] })).toBe(
-      'user ids: u1, ••••••',
+  });
+
+  it('shows entity ids as a count, never the raw id', () => {
+    expect(summarizeStepConfig('SEND_MESSAGE', { userIds: ['u1', 'u2'] })).toBe(
+      'users: 2 selected',
     );
+    expect(summarizeStepConfig('ASSIGN_TICKET', { assigneeId: 'usr_123' })).toBe(
+      'assignee: 1 selected',
+    );
+    expect(
+      summarizeStepConfig('ASSIGN_TICKET', { assigneeId: '{{context.trigger.output.ownerId}}' }),
+    ).toBe('assignee: {trigger.ownerId}');
+    expect(summarizeStepConfig('ASSIGN_TICKET_TO_GROUP', { groupId: '' })).toBeUndefined();
+  });
+
+  it('strips editor HTML from rich-text fields', () => {
+    expect(
+      summarizeStepConfig('SEND_MESSAGE', { content: '<p>Hello&nbsp;<strong>team</strong></p>' }),
+    ).toBe('content: Hello team');
+    expect(summarizeStepConfig('SEND_EMAIL_REPLY', { body: '<p></p><p><br></p>' })).toBeUndefined();
+    expect(
+      summarizeStepConfig('CREATE_EMAIL_DRAFT', {
+        draftContent:
+          '<p>Hi <span data-variable-ref="x">{{context.trigger.output.name}}</span></p>',
+      }),
+    ).toBe('draft content: Hi {trigger.name}');
+    expect(summarizeStepConfig('SEND_MESSAGE', { content: 'a < b' })).toBe('content: a < b');
   });
 
   it('summarises a delay as its duration', () => {
@@ -303,7 +327,7 @@ describe('summarizeStepConfig', () => {
 
   it('uses trigger filters for trigger types', () => {
     expect(summarizeStepConfig('MESSAGE_RECEIVED', { channelIds: ['c1'], fireOnEdit: true })).toBe(
-      'channel ids: c1',
+      'channels: 1 selected',
     );
     expect(summarizeStepConfig('WEBHOOK', { bodySchema: { a: 'string' } })).toBeUndefined();
   });

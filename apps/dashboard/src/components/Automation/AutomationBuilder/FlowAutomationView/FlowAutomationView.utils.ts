@@ -748,11 +748,35 @@ function shortenRefs(value: string): string {
   });
 }
 
+const HTML_TAG = /<\/?[a-zA-Z][^>]*>/g;
+const HTML_ENTITIES = new Map([
+  ['&nbsp;', ' '],
+  ['&amp;', '&'],
+  ['&lt;', '<'],
+  ['&gt;', '>'],
+  ['&quot;', '"'],
+  ['&#39;', "'"],
+]);
+
+/**
+ * Rich-text fields (`content`, `body`, `draftContent`) are stored as editor
+ * HTML. Reduce them to their visible text; tag-only markup such as `<p></p>`
+ * becomes empty so the node reads "Not configured yet".
+ */
+function toPlainText(value: string): string {
+  if (!value.includes('<') && !value.includes('&')) return value.trim();
+  return value
+    .replace(HTML_TAG, ' ')
+    .replace(/&(nbsp|amp|lt|gt|quot|#39);/g, entity => HTML_ENTITIES.get(entity) ?? entity)
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function formatSummaryValue(value: unknown): string | undefined {
   if (value === null || value === undefined || value === '') return undefined;
   if (typeof value === 'string') {
     if (value.startsWith(ENCRYPTED_PREFIX)) return REDACTED;
-    return shortenRefs(value.trim()) || undefined;
+    return shortenRefs(toPlainText(value)) || undefined;
   }
   if (typeof value === 'number' || typeof value === 'boolean') return String(value);
   if (Array.isArray(value)) {
@@ -767,6 +791,37 @@ function formatSummaryValue(value: unknown): string | undefined {
       return `${obj['amount']} ${obj['unit']}`;
   }
   return undefined;
+}
+
+/**
+ * Fields holding entity ids (channels, boards, users, groups). The node has no
+ * name lookup for them, and a raw id means nothing to the reader, so they show
+ * as a count ("channels: 2 selected"). A `{{…}}` variable is shown as the
+ * variable, since that is what the author typed.
+ */
+const ID_KEY_LABELS: Record<string, string> = {
+  assigneeId: 'assignee',
+  boardId: 'board',
+  boardIds: 'boards',
+  channelId: 'channel',
+  channelIds: 'channels',
+  fromUserIds: 'senders',
+  groupId: 'group',
+  invitedUserIds: 'invitees',
+  participantUserIds: 'participants',
+  projectIds: 'projects',
+  userGroupIds: 'user groups',
+  userIds: 'users',
+};
+
+function formatIdSelection(value: unknown): string | undefined {
+  const values = (Array.isArray(value) ? value : [value]).filter(
+    (v): v is string => typeof v === 'string' && v.trim() !== '',
+  );
+  if (!values.length) return undefined;
+  const refs = values.filter(v => v.includes('{{')).map(v => shortenRefs(v.trim()));
+  if (refs.length === values.length) return refs.join(', ');
+  return `${values.length} selected`;
 }
 
 function humanizeKey(key: string): string {
@@ -791,6 +846,12 @@ export function summarizeStepConfig(
   if (formatter) return formatter(config);
   const keys = summaryKeysFor(stepType);
   for (const key of keys) {
+    const idLabel = ID_KEY_LABELS[key];
+    if (idLabel) {
+      const formatted = formatIdSelection(config[key]);
+      if (formatted) return `${idLabel}: ${formatted}`;
+      continue;
+    }
     const formatted = formatSummaryValue(config[key]);
     if (!formatted) continue;
     return `${humanizeKey(key)}: ${SENSITIVE_KEY.test(key) ? REDACTED : formatted}`;
