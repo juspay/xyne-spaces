@@ -545,10 +545,29 @@ export async function selectHubToolsForIntent(args: {
       (selection.gateway ?? []).length === 0);
 
   if (needsSuggest) {
+    // Real empty hubs — never spray every hub when local binds already filled some.
+    const emptyHubs: Array<'mcp' | 'builtin' | 'subagent' | 'skill'> = [];
+    if (
+      selection.direct.length === 0 &&
+      (selection.gateway ?? []).length === 0 &&
+      (named.length > 0 || softProductNeedles(args.intent).length > 0 || !selectionHasTools(selection))
+    ) {
+      emptyHubs.push('mcp');
+    }
+    if (jobImpliesBuiltin(args.intent) && selection.custom.length === 0) {
+      emptyHubs.push('builtin');
+    }
+    if (jobImpliesSubagent(args.intent) && selection.subagents.length === 0) {
+      emptyHubs.push('subagent');
+    }
+    // Skills go through fillSkills; still ask judge when nothing else is bound.
+    if (emptyHubs.length === 0) emptyHubs.push('mcp', 'builtin', 'subagent');
+
     const suggestion = await withTimeout(
       suggestTools({
         description: args.intent,
         ...(args.systemPrompt ? { systemPrompt: args.systemPrompt } : {}),
+        emptyHubs,
       }),
       SUGGEST_MS,
       'suggestTools',

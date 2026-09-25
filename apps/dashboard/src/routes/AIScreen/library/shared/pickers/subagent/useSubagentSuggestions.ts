@@ -25,7 +25,12 @@ function resolveSuggestion(
 
 function describeError(error: Error | null): string | null {
   if (!error) return null;
-  if (error instanceof ClawApiError && error.status >= 500) return 'the suggestion service is busy';
+  if (error instanceof ClawApiError && error.status >= 500) {
+    return 'No suggestions — browse to pick manually';
+  }
+  if (/timed out|abort/i.test(error.message)) {
+    return 'No suggestions — browse to pick manually';
+  }
   return error.message;
 }
 
@@ -50,6 +55,7 @@ export function useSubagentSuggestions(
     mutate({
       systemPrompt: systemPrompt || undefined,
       description: systemPrompt ? undefined : description || undefined,
+      emptyHubs: ['subagent'],
     });
   }, [canRun, isPending, mutate, systemPrompt, description]);
 

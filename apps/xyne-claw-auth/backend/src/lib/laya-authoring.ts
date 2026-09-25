@@ -1,12 +1,19 @@
 /**
  * Agent-creation authoring pack — gap shortlists for MCP / builtin / subagent / skill.
- * Laya re-ranks a lexical shortlist when available; otherwise lexical alone.
- * Closed pick happens by calling claw /suggest-tools with the truncated catalog.
+ * Stage C: BM25 over enriched docs → top 8 (empty when no score).
+ * Optional Laya re-rank when healthy; closed pick via claw /suggest-tools.
  */
 import { createHash } from "node:crypto";
 import { createLogger } from "../logger.js";
+import { bm25Rank } from "./bm25.js";
 import {
-  layaHealth,
+  enrichIntegrationDoc,
+  enrichSkillDoc,
+  enrichSubagentDoc,
+} from "./selection-docs.js";
+import { SHORTLIST_TOP_K } from "./selection-thresholds.js";
+import {
+  layaHealthCached,
   layaSuggestMode,
   layaSystemOne,
   type LayaSuggestMode,
@@ -14,7 +21,7 @@ import {
 
 const log = createLogger("laya-authoring");
 
-export const AUTHORING_PACK_VERSION = "authoring-pack-v1";
+export const AUTHORING_PACK_VERSION = "authoring-pack-v2";
 
 export interface SuggestCatalog {
   subagents: Array<{ name: string; description: string }>;
@@ -30,6 +37,7 @@ export interface SkillCandidate {
   slug: string;
   name: string;
   description: string;
+  content?: string;
 }
 
 export type EmptyHub = "mcp" | "builtin" | "subagent" | "skill";
@@ -46,7 +54,6 @@ export interface LayaDecisionAudit {
   stateHash: string;
 }
 
-/** In-memory ring for local audit / later fine-tune export. */
 const decisionRing: LayaDecisionAudit[] = [];
 const RING_MAX = 500;
 
@@ -54,54 +61,27 @@ export function recentLayaDecisions(limit = 50): LayaDecisionAudit[] {
   return decisionRing.slice(-limit);
 }
 
-function tokenize(text: string): string[] {
-  return text
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter((t) => t.length >= 2);
-}
-
-function scoreHay(hay: string, tokens: string[]): number {
-  const h = hay.toLowerCase();
-  let score = 0;
-  for (const t of tokens) {
-    if (h.includes(t)) score += Math.min(8, t.length);
-  }
-  return score;
-}
-
 function truncate(s: string, n: number): string {
   const t = (s ?? "").trim();
   return t.length <= n ? t : `${t.slice(0, n - 1)}…`;
 }
 
-const SHORTLIST_CAP = 12;
-
-function lexicalTop<T>(
-  items: T[],
-  scoreOf: (item: T) => number,
-  cap = SHORTLIST_CAP,
-): T[] {
-  return [...items]
-    .map((item) => ({ item, score: scoreOf(item) }))
-    .filter((row) => row.score > 0)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, cap)
-    .map((row) => row.item);
-}
-
 /**
- * When every score is 0, keep a small popularity-agnostic slice so the closed
- * pick still has something to choose from (conservative first N).
+ * BM25 top-K. Returns empty when nothing scores — never first-N spray.
  */
-function lexicalOrFallback<T>(
+function bm25TopById<T>(
+  intent: string,
   items: T[],
-  scoreOf: (item: T) => number,
-  cap = SHORTLIST_CAP,
+  idOf: (item: T) => string,
+  textOf: (item: T) => string,
+  cap = SHORTLIST_TOP_K,
 ): T[] {
-  const hit = lexicalTop(items, scoreOf, cap);
-  if (hit.length > 0) return hit;
-  return items.slice(0, Math.min(cap, items.length));
+  if (items.length === 0) return [];
+  const docs = items.map((item) => ({ id: idOf(item), text: textOf(item) }));
+  const hits = bm25Rank(intent, docs, { topK: cap });
+  if (hits.length === 0) return [];
+  const byId = new Map(items.map((item) => [idOf(item), item]));
+  return hits.map((h) => byId.get(h.id)).filter((x): x is T => !!x);
 }
 
 async function layaRerankChoice(
@@ -113,10 +93,9 @@ async function layaRerankChoice(
   if (candidates.length === 0) return [];
   if (candidates.length === 1) return [candidates[0]!.id];
   const criteria: Record<string, string> = {};
-  for (const c of candidates.slice(0, SHORTLIST_CAP)) {
+  for (const c of candidates.slice(0, SHORTLIST_TOP_K)) {
     criteria[c.id] = truncate(c.blurb, 80);
   }
-  // Always include a none option so thin agents stay thin.
   criteria["__none__"] = "none of these; leave this hub empty";
   const answers = await layaSystemOne(intent, {
     [questionKey]: { type: "choice", instructions, criteria },
@@ -125,13 +104,12 @@ async function layaRerankChoice(
   const choice = answers.answers[questionKey]?.choice;
   const probs = answers.answers[questionKey]?.probabilities ?? {};
   if (!choice || choice === "__none__") return [];
-  // Return chosen first, then other high-prob candidates (excluding none).
   const ranked = Object.entries(probs)
     .filter(([k]) => k !== "__none__")
     .sort((a, b) => b[1]! - a[1]!)
     .map(([k]) => k);
   if (!ranked.includes(choice)) ranked.unshift(choice);
-  return ranked.slice(0, SHORTLIST_CAP);
+  return ranked.slice(0, SHORTLIST_TOP_K);
 }
 
 export interface GapShortlistResult {
@@ -144,10 +122,186 @@ export interface GapShortlistResult {
   layaUp: boolean;
 }
 
+type HubWork = {
+  hub: EmptyHub;
+  shortlistIds: string[];
+  subagents?: SuggestCatalog["subagents"];
+  integrations?: SuggestCatalog["integrations"];
+  skillSlugs?: string[];
+  fallbackDown: boolean;
+};
+
+async function shortlistSubagent(
+  intent: string,
+  catalog: SuggestCatalog,
+  layaUp: boolean,
+): Promise<HubWork> {
+  const docs = catalog.subagents.map(enrichSubagentDoc);
+  let picked = bm25TopById(
+    intent,
+    catalog.subagents,
+    (s) => s.name,
+    (s) => docs.find((d) => d.id === s.name)?.text ?? `${s.name} ${s.description}`,
+  );
+  let fallbackDown = false;
+  if (layaUp && picked.length > 1) {
+    const ranked = await layaRerankChoice(
+      intent,
+      "subagent_shortlist",
+      "Which specialist subagent best matches this agent job? Prefer none if unclear.",
+      picked.map((s) => ({
+        id: s.name,
+        blurb: `${s.name}: ${s.description || "subagent"}`,
+      })),
+    );
+    if (ranked) {
+      if (ranked.length === 0) picked = [];
+      else {
+        const byName = new Map(picked.map((s) => [s.name, s]));
+        picked = ranked.map((id) => byName.get(id)).filter((s): s is (typeof picked)[0] => !!s);
+      }
+    } else {
+      fallbackDown = true;
+    }
+  }
+  return {
+    hub: "subagent",
+    shortlistIds: picked.map((s) => `subagent:${s.name}`),
+    subagents: picked,
+    fallbackDown,
+  };
+}
+
+async function shortlistMcp(
+  intent: string,
+  mcpIntegrations: SuggestCatalog["integrations"],
+  layaUp: boolean,
+): Promise<HubWork> {
+  let picked = bm25TopById(
+    intent,
+    mcpIntegrations,
+    (i) => i.slug,
+    (i) => enrichIntegrationDoc(i).text,
+  );
+  let fallbackDown = false;
+  if (layaUp && picked.length > 1) {
+    const ranked = await layaRerankChoice(
+      intent,
+      "mcp_shortlist",
+      "Which MCP or gateway integration best matches this agent job? Prefer none if unclear.",
+      picked.map((i) => ({
+        id: i.slug,
+        blurb: `${i.label}: ${i.readTools
+          .slice(0, 4)
+          .map((t) => t.name)
+          .join(", ")}`,
+      })),
+    );
+    if (ranked) {
+      if (ranked.length === 0) picked = [];
+      else {
+        const bySlug = new Map(picked.map((i) => [i.slug, i]));
+        picked = ranked.map((id) => bySlug.get(id)).filter((i): i is (typeof picked)[0] => !!i);
+      }
+    } else {
+      fallbackDown = true;
+    }
+  }
+  return {
+    hub: "mcp",
+    shortlistIds: picked.map((i) => `mcp:${i.slug}`),
+    integrations: picked,
+    fallbackDown,
+  };
+}
+
+async function shortlistBuiltin(
+  intent: string,
+  builtinIntegrations: SuggestCatalog["integrations"],
+  allIntegrations: SuggestCatalog["integrations"],
+  layaUp: boolean,
+): Promise<HubWork> {
+  const pool = builtinIntegrations.length > 0 ? builtinIntegrations : allIntegrations;
+  let picked = bm25TopById(intent, pool, (i) => i.slug, (i) => enrichIntegrationDoc(i).text);
+  let fallbackDown = false;
+  if (layaUp && picked.length > 1) {
+    const ranked = await layaRerankChoice(
+      intent,
+      "builtin_shortlist",
+      "Which built-in or custom tool group best matches this agent job? Prefer none if unclear.",
+      picked.map((i) => ({
+        id: i.slug,
+        blurb: `${i.label}: ${[...i.readTools, ...i.writeTools]
+          .slice(0, 6)
+          .map((t) => t.name)
+          .join(", ")}`,
+      })),
+    );
+    if (ranked) {
+      if (ranked.length === 0) picked = [];
+      else {
+        const bySlug = new Map(picked.map((i) => [i.slug, i]));
+        picked = ranked.map((id) => bySlug.get(id)).filter((i): i is (typeof picked)[0] => !!i);
+      }
+    } else {
+      fallbackDown = true;
+    }
+  }
+  return {
+    hub: "builtin",
+    shortlistIds: picked.map((i) => `builtin:${i.slug}`),
+    integrations: picked,
+    fallbackDown,
+  };
+}
+
+async function shortlistSkill(
+  intent: string,
+  skills: SkillCandidate[],
+  layaUp: boolean,
+): Promise<HubWork> {
+  let picked = bm25TopById(
+    intent,
+    skills,
+    (s) => s.slug,
+    (s) => enrichSkillDoc(s).text,
+  );
+  let fallbackDown = false;
+  if (layaUp && picked.length > 1) {
+    const ranked = await layaRerankChoice(
+      intent,
+      "skill_shortlist",
+      "Which org skill (procedure) should attach to this agent? Prefer none for a thin agent.",
+      picked.map((s) => ({
+        id: s.slug,
+        blurb: `${s.name}: ${s.description || s.slug}`,
+      })),
+    );
+    if (ranked) {
+      if (ranked.length === 0) picked = [];
+      else {
+        const bySlug = new Map(picked.map((s) => [s.slug, s]));
+        picked = ranked.map((id) => bySlug.get(id)).filter((s): s is (typeof picked)[0] => !!s);
+      }
+    } else {
+      fallbackDown = true;
+    }
+  }
+  // Cap shortlist at TOP_K; thresholding happens after judge.
+  const skillSlugs = picked.slice(0, SHORTLIST_TOP_K).map((s) => s.slug);
+  return {
+    hub: "skill",
+    shortlistIds: picked.map((s) => `skill:${s.slug}`),
+    skillSlugs,
+    fallbackDown,
+  };
+}
+
 /**
  * Build a truncated catalog for the closed LLM pick.
  * Hubs that are not "empty" should already be filled by Hub local binds —
  * callers pass which hubs still need suggest.
+ * Per-hub shortlists run in parallel when Laya is up.
  */
 export async function buildGapShortlist(args: {
   intent: string;
@@ -158,9 +312,7 @@ export async function buildGapShortlist(args: {
 }): Promise<GapShortlistResult> {
   const started = Date.now();
   const mode = layaSuggestMode();
-  const tokens = tokenize(args.intent);
   const empty = new Set(args.emptyHubs);
-  const shortlistIds: string[] = [];
 
   if (mode === "off" || args.emptyHubs.length === 0) {
     const audit: LayaDecisionAudit = {
@@ -186,170 +338,66 @@ export async function buildGapShortlist(args: {
     };
   }
 
-  const layaUp = await layaHealth();
+  const layaUp = await layaHealthCached();
   let fallback: LayaDecisionAudit["fallback"] = layaUp ? "none" : "down";
 
   const mcpIntegrations = args.catalog.integrations.filter(
     (i) =>
       !i.slug.startsWith("custom:") &&
+      !i.slug.startsWith("builtin:") &&
       i.readTools.length + i.writeTools.length > 0,
   );
-  // Treat gateway-looking + mcp-looking as mcp hub; custom:* sources as builtin.
-  const builtinIntegrations = args.catalog.integrations.filter((i) =>
-    i.slug.startsWith("custom:") || i.slug.startsWith("builtin:"),
+  const builtinIntegrations = args.catalog.integrations.filter(
+    (i) => i.slug.startsWith("custom:") || i.slug.startsWith("builtin:"),
   );
 
-  let shortSubagents = args.catalog.subagents;
-  let shortIntegrations = args.catalog.integrations;
-  let skillSlugs: string[] = [];
-
-  if (empty.has("subagent")) {
-    let picked = lexicalOrFallback(
-      args.catalog.subagents,
-      (s) => scoreHay(`${s.name} ${s.description}`, tokens),
-    );
-    if (layaUp && picked.length > 1) {
-      const ranked = await layaRerankChoice(
-        args.intent,
-        "subagent_shortlist",
-        "Which specialist subagent best matches this agent job? Prefer none if unclear.",
-        picked.map((s) => ({
-          id: s.name,
-          blurb: `${s.name}: ${s.description || "subagent"}`,
-        })),
-      );
-      if (ranked) {
-        if (ranked.length === 0) picked = [];
-        else {
-          const byName = new Map(picked.map((s) => [s.name, s]));
-          picked = ranked.map((id) => byName.get(id)).filter((s): s is (typeof picked)[0] => !!s);
-        }
-      } else {
-        fallback = "down";
-      }
-    }
-    shortSubagents = picked;
-    shortlistIds.push(...picked.map((s) => `subagent:${s.name}`));
-  }
-
-  if (empty.has("mcp")) {
-    let picked = lexicalOrFallback(
-      mcpIntegrations,
-      (i) =>
-        scoreHay(
-          `${i.slug} ${i.label} ${i.readTools.map((t) => t.name).join(" ")} ${i.writeTools.map((t) => t.name).join(" ")}`,
-          tokens,
-        ),
-    );
-    if (layaUp && picked.length > 1) {
-      const ranked = await layaRerankChoice(
-        args.intent,
-        "mcp_shortlist",
-        "Which MCP or gateway integration best matches this agent job? Prefer none if unclear.",
-        picked.map((i) => ({
-          id: i.slug,
-          blurb: `${i.label}: ${i.readTools
-            .slice(0, 4)
-            .map((t) => t.name)
-            .join(", ")}`,
-        })),
-      );
-      if (ranked) {
-        if (ranked.length === 0) picked = [];
-        else {
-          const bySlug = new Map(picked.map((i) => [i.slug, i]));
-          picked = ranked.map((id) => bySlug.get(id)).filter((i): i is (typeof picked)[0] => !!i);
-        }
-      } else {
-        fallback = "down";
-      }
-    }
-    shortlistIds.push(...picked.map((i) => `mcp:${i.slug}`));
-    // Keep builtins already in shortIntegrations path separate
-    const builtinKeep = empty.has("builtin")
-      ? []
-      : args.catalog.integrations.filter(
-          (i) => i.slug.startsWith("custom:") || i.slug.startsWith("builtin:"),
-        );
-    shortIntegrations = [...picked, ...builtinKeep];
-  }
-
+  const jobs: Array<Promise<HubWork>> = [];
+  if (empty.has("subagent")) jobs.push(shortlistSubagent(args.intent, args.catalog, layaUp));
+  if (empty.has("mcp")) jobs.push(shortlistMcp(args.intent, mcpIntegrations, layaUp));
   if (empty.has("builtin")) {
-    let picked = lexicalOrFallback(
-      builtinIntegrations.length > 0
-        ? builtinIntegrations
-        : args.catalog.integrations,
-      (i) =>
-        scoreHay(
-          `${i.slug} ${i.label} ${[...i.readTools, ...i.writeTools].map((t) => `${t.name} ${t.description}`).join(" ")}`,
-          tokens,
-        ),
-    );
-    // Prefer custom:/builtin: when present
-    if (builtinIntegrations.length > 0) {
-      picked = lexicalOrFallback(builtinIntegrations, (i) =>
-        scoreHay(
-          `${i.slug} ${i.label} ${[...i.readTools, ...i.writeTools].map((t) => t.name).join(" ")}`,
-          tokens,
-        ),
-      );
-    }
-    if (layaUp && picked.length > 1) {
-      const ranked = await layaRerankChoice(
-        args.intent,
-        "builtin_shortlist",
-        "Which built-in or custom tool group best matches this agent job? Prefer none if unclear.",
-        picked.map((i) => ({
-          id: i.slug,
-          blurb: `${i.label}: ${[...i.readTools, ...i.writeTools]
-            .slice(0, 6)
-            .map((t) => t.name)
-            .join(", ")}`,
-        })),
-      );
-      if (ranked) {
-        if (ranked.length === 0) picked = [];
-        else {
-          const bySlug = new Map(picked.map((i) => [i.slug, i]));
-          picked = ranked.map((id) => bySlug.get(id)).filter((i): i is (typeof picked)[0] => !!i);
-        }
-      } else {
-        fallback = "down";
-      }
-    }
-    shortlistIds.push(...picked.map((i) => `builtin:${i.slug}`));
-    const mcpKeep = shortIntegrations.filter(
-      (i) => !i.slug.startsWith("custom:") && !i.slug.startsWith("builtin:"),
-    );
-    shortIntegrations = [...mcpKeep, ...picked];
+    jobs.push(shortlistBuiltin(args.intent, builtinIntegrations, args.catalog.integrations, layaUp));
+  }
+  if (empty.has("skill") && args.skills && args.skills.length > 0) {
+    jobs.push(shortlistSkill(args.intent, args.skills, layaUp));
   }
 
-  if (empty.has("skill") && args.skills && args.skills.length > 0) {
-    let picked = lexicalOrFallback(args.skills, (s) =>
-      scoreHay(`${s.slug} ${s.name} ${s.description}`, tokens),
-    );
-    if (layaUp && picked.length > 1) {
-      const ranked = await layaRerankChoice(
-        args.intent,
-        "skill_shortlist",
-        "Which org skill (procedure) should attach to this agent? Prefer none for a thin agent.",
-        picked.map((s) => ({
-          id: s.slug,
-          blurb: `${s.name}: ${s.description || s.slug}`,
-        })),
-      );
-      if (ranked) {
-        if (ranked.length === 0) picked = [];
-        else {
-          const bySlug = new Map(picked.map((s) => [s.slug, s]));
-          picked = ranked.map((id) => bySlug.get(id)).filter((s): s is (typeof picked)[0] => !!s);
-        }
-      } else {
-        fallback = "down";
-      }
+  const results = await Promise.all(jobs);
+
+  let shortSubagents = args.catalog.subagents;
+  let shortIntegrations: SuggestCatalog["integrations"] = [];
+  let skillSlugs: string[] = [];
+  const shortlistIds: string[] = [];
+
+  for (const r of results) {
+    shortlistIds.push(...r.shortlistIds);
+    if (r.fallbackDown) fallback = "down";
+    if (r.hub === "subagent" && r.subagents) shortSubagents = r.subagents;
+    if (r.hub === "mcp" && r.integrations) {
+      shortIntegrations = [...shortIntegrations, ...r.integrations];
     }
-    skillSlugs = picked.slice(0, 1).map((s) => s.slug);
-    shortlistIds.push(...picked.map((s) => `skill:${s.slug}`));
+    if (r.hub === "builtin" && r.integrations) {
+      shortIntegrations = [...shortIntegrations, ...r.integrations];
+    }
+    if (r.hub === "skill" && r.skillSlugs) skillSlugs = r.skillSlugs;
+  }
+
+  // If mcp/builtin not empty, keep those integrations for claw context.
+  if (!empty.has("mcp") && !empty.has("builtin")) {
+    shortIntegrations = args.catalog.integrations.slice(0, SHORTLIST_TOP_K);
+  } else if (!empty.has("mcp")) {
+    shortIntegrations = [
+      ...args.catalog.integrations.filter(
+        (i) => !i.slug.startsWith("custom:") && !i.slug.startsWith("builtin:"),
+      ),
+      ...shortIntegrations,
+    ];
+  } else if (!empty.has("builtin")) {
+    shortIntegrations = [
+      ...shortIntegrations,
+      ...args.catalog.integrations.filter(
+        (i) => i.slug.startsWith("custom:") || i.slug.startsWith("builtin:"),
+      ),
+    ];
   }
 
   if (shortlistIds.length === 0 && args.emptyHubs.length > 0) {
@@ -357,14 +405,15 @@ export async function buildGapShortlist(args: {
   }
 
   const truncated: SuggestCatalog = {
-    subagents: empty.has("subagent") ? shortSubagents : args.catalog.subagents.slice(0, SHORTLIST_CAP),
+    subagents: empty.has("subagent")
+      ? shortSubagents
+      : args.catalog.subagents.slice(0, SHORTLIST_TOP_K),
     integrations:
       empty.has("mcp") || empty.has("builtin")
         ? shortIntegrations
-        : args.catalog.integrations.slice(0, SHORTLIST_CAP),
+        : args.catalog.integrations.slice(0, SHORTLIST_TOP_K),
   };
 
-  // Deduplicate integrations by slug
   const seen = new Set<string>();
   truncated.integrations = truncated.integrations.filter((i) => {
     if (seen.has(i.slug)) return false;
@@ -452,11 +501,13 @@ function pushAudit(row: LayaDecisionAudit): void {
 
 /**
  * Infer which hubs still need a suggest when the Hub client does not pass them.
- * Conservative: if catalog is large, treat all hubs as potentially empty.
+ * Prefer clients sending real emptyHubs.
  */
 export function defaultEmptyHubs(catalog: SuggestCatalog, hasSkills: boolean): EmptyHub[] {
   const hubs: EmptyHub[] = [];
-  if (catalog.integrations.some((i) => !i.slug.startsWith("custom:"))) hubs.push("mcp");
+  if (catalog.integrations.some((i) => !i.slug.startsWith("custom:") && !i.slug.startsWith("builtin:"))) {
+    hubs.push("mcp");
+  }
   if (
     catalog.integrations.some(
       (i) => i.slug.startsWith("custom:") || i.slug.startsWith("builtin:"),

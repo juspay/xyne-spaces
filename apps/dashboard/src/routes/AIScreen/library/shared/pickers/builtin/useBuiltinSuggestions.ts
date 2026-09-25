@@ -21,7 +21,13 @@ export interface BuiltinSuggestions {
 
 function describeError(error: Error | null): string | null {
   if (!error) return null;
-  if (error instanceof ClawApiError && error.status >= 500) return 'the suggestion service is busy';
+  // Never show "suggestion service is busy" — fallback is local stage-C / none.
+  if (error instanceof ClawApiError && error.status >= 500) {
+    return 'No suggestions — browse to pick manually';
+  }
+  if (/timed out|abort/i.test(error.message)) {
+    return 'No suggestions — browse to pick manually';
+  }
   return error.message;
 }
 
@@ -46,6 +52,7 @@ export function useBuiltinSuggestions(
     mutate({
       systemPrompt: systemPrompt || undefined,
       description: systemPrompt ? undefined : description || undefined,
+      emptyHubs: ['builtin'],
     });
   }, [canRun, isPending, mutate, systemPrompt, description]);
 

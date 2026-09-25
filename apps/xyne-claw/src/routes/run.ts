@@ -5748,7 +5748,7 @@ router.post(
 // proposal and the UI renders it as a diff for the user to accept.
 
 router.post("/suggest-tools", validateS2SKey, async (req, res: Response) => {
-  const { intent, catalog } = req.body as {
+  const { intent, catalog, emptyHubs: rawEmptyHubs, skillCandidates } = req.body as {
     intent?: string;
     catalog?: {
       subagents: Array<{ name: string; description: string }>;
@@ -5767,6 +5767,8 @@ router.post("/suggest-tools", validateS2SKey, async (req, res: Response) => {
         }>;
       }>;
     };
+    emptyHubs?: string[];
+    skillCandidates?: Array<{ slug: string; name: string; description: string }>;
   };
 
   if (!intent || typeof intent !== "string" || intent.trim().length === 0) {
@@ -5778,12 +5780,14 @@ router.post("/suggest-tools", validateS2SKey, async (req, res: Response) => {
     return;
   }
 
-  // Compress the catalog into a token-cheap form. Tool descriptions are
-  // truncated; an LLM doesn't need 500 chars per tool to recognise intent.
   const truncate = (s: string, n: number) => {
     const trimmed = (s ?? "").trim();
     return trimmed.length <= n ? trimmed : trimmed.slice(0, n - 1) + "…";
   };
+
+  const knownSubagentIds = new Set((catalog.subagents ?? []).map((s) => s.name));
+  const knownIntegrationIds = new Set((catalog.integrations ?? []).map((i) => i.slug));
+  const knownSkillIds = new Set((skillCandidates ?? []).map((s) => s.slug));
 
   const subagentList = (catalog.subagents ?? [])
     .map((s) => `- ${s.name}: ${truncate(s.description, 120)}`)
@@ -5813,34 +5817,56 @@ router.post("/suggest-tools", validateS2SKey, async (req, res: Response) => {
     })
     .join("\n\n");
 
+  const skillList = (skillCandidates ?? [])
+    .map((s) => `- ${s.slug}: ${truncate(s.name + " — " + (s.description || ""), 120)}`)
+    .join("\n");
+
+  const hubsHint =
+    Array.isArray(rawEmptyHubs) && rawEmptyHubs.length > 0
+      ? rawEmptyHubs.join(", ")
+      : "mcp, builtin, subagent, skill";
+
   const userMessage = [
-    "Select an appropriate, minimal set of tools for this agent based on its purpose.",
+    "Judge which catalog items this agent needs. One call covers every empty hub.",
     "",
     "Agent intent / system prompt:",
     "---",
     intent,
     "---",
     "",
-    "Available subagents (specialists this agent can delegate to):",
+    `Empty hubs to judge: ${hubsHint}`,
+    "",
+    "Available subagents (ids = name):",
     subagentList || "(none)",
     "",
-    "Available integrations and their tools:",
+    "Available integrations (ids = slug):",
     integrationBlocks || "(none)",
     "",
+    "Available skills (ids = slug):",
+    skillList || "(none)",
+    "",
     "Rules:",
-    "- Be conservative. Prefer read-only tools. Only include write/destructive tools when the intent clearly demands them.",
-    "- Prefer subagents (delegation) over a long list of raw integration tools when a matching specialist exists.",
-    "- Aim for under 15 individual tools across all integrations unless intent demands more.",
-    "- For each pick, give a one-sentence reason citing what in the intent justifies it.",
+    "- Choose ONLY from the ids listed above. Never invent ids.",
+    "- Prefer none when the job does not clearly need that hub.",
+    "- Be conservative. Prefer read-only tools. Only include write tools when intent demands them.",
+    "- Cap subagents at 2. Cap skills at 3.",
+    "- confidence is 0-1. Named catalog mentions should be 1.0.",
+    "- For each pick give a one-sentence reason.",
     "",
     "Return a strict JSON object matching this shape (no prose, no markdown wrapping):",
     `{
+  "hubs": {
+    "mcp": { "picks": [{"id":"integration-slug","confidence":0.0,"reason":"..."}], "none": false, "reason": "optional when none" },
+    "builtin": { "picks": [{"id":"custom:...","confidence":0.0,"reason":"..."}], "none": true, "reason": "No built-in tools needed" },
+    "subagent": { "picks": [{"id":"subagent-name","confidence":0.0,"reason":"..."}], "none": true, "reason": "..." },
+    "skill": { "picks": [{"id":"skill-slug","confidence":0.0,"reason":"..."}], "none": true, "reason": "..." }
+  },
   "subagents": ["subagent-name", ...],
   "integrations": [
-    { "slug": "integration-slug", "readTools": ["tool_name", ...], "writeTools": ["tool_name", ...] },
-    ...
+    { "slug": "integration-slug", "readTools": ["tool_name", ...], "writeTools": ["tool_name", ...] }
   ],
-  "reasoning": { "subagent-or-tool-name": "one-sentence why", ... }
+  "skillSlugs": ["skill-slug", ...],
+  "reasoning": { "id": "one-sentence why", ... }
 }`,
   ].join("\n");
 
@@ -5857,16 +5883,16 @@ router.post("/suggest-tools", validateS2SKey, async (req, res: Response) => {
           {
             role: "system",
             content:
-              "You select tools for AI agents. You return ONLY a JSON object — no prose, no markdown fences. Be conservative and prefer read-only tools.",
+              "You judge catalog picks for AI agents. Return ONLY JSON. Prefer none over guessing. Never invent catalog ids.",
           },
           { role: "user", content: userMessage },
         ],
-        // Response is a small JSON object; cap is mainly a safety bound.
-        max_tokens: 2000,
+        max_tokens: 2500,
         temperature: 0.2,
         response_format: { type: "json_object" },
       }),
-      signal: AbortSignal.timeout(45_000),
+      // Keep under dashboard SUGGEST_MS (4s) budget when possible; claw-auth wraps tighter.
+      signal: AbortSignal.timeout(12_000),
     });
 
     if (!llmRes.ok) {
@@ -5880,15 +5906,93 @@ router.post("/suggest-tools", validateS2SKey, async (req, res: Response) => {
       choices?: Array<{ message?: { content?: string } }>;
     };
     const raw = data.choices?.[0]?.message?.content?.trim() ?? "";
-    let parsed: unknown;
+    let parsed: Record<string, unknown>;
     try {
-      parsed = JSON.parse(raw);
+      parsed = JSON.parse(raw) as Record<string, unknown>;
     } catch {
       res.status(502).json({ success: false, error: "LLM returned non-JSON" });
       return;
     }
 
-    res.json({ success: true, data: parsed });
+    // Reject unknown ids from hubs / legacy arrays.
+    const hubsIn = (parsed["hubs"] ?? {}) as Record<
+      string,
+      { picks?: Array<{ id?: string; confidence?: number; reason?: string }>; none?: boolean; reason?: string }
+    >;
+    const scrubbedHubs: Record<string, unknown> = {};
+    for (const hub of ["mcp", "builtin", "subagent", "skill"] as const) {
+      const row = hubsIn[hub] ?? { picks: [], none: true };
+      const allowed =
+        hub === "subagent"
+          ? knownSubagentIds
+          : hub === "skill"
+            ? knownSkillIds
+            : knownIntegrationIds;
+      const picks = (row.picks ?? []).filter(
+        (p) => typeof p.id === "string" && (allowed.size === 0 || allowed.has(p.id)),
+      );
+      scrubbedHubs[hub] = {
+        picks: picks.map((p) => ({
+          id: p.id,
+          confidence: typeof p.confidence === "number" ? p.confidence : 0.5,
+          reason: typeof p.reason === "string" ? p.reason : "",
+        })),
+        none: picks.length === 0 ? true : Boolean(row.none),
+        ...(typeof row.reason === "string" ? { reason: row.reason } : {}),
+      };
+    }
+
+    const subagents = (Array.isArray(parsed["subagents"]) ? parsed["subagents"] : [])
+      .filter((n): n is string => typeof n === "string" && knownSubagentIds.has(n));
+    const integrations = (
+      Array.isArray(parsed["integrations"]) ? parsed["integrations"] : []
+    ).filter(
+      (row): row is { slug: string; readTools: string[]; writeTools: string[] } =>
+        !!row &&
+        typeof row === "object" &&
+        typeof (row as { slug?: string }).slug === "string" &&
+        knownIntegrationIds.has((row as { slug: string }).slug),
+    );
+    const skillSlugs = (Array.isArray(parsed["skillSlugs"]) ? parsed["skillSlugs"] : [])
+      .filter((s): s is string => typeof s === "string" && (knownSkillIds.size === 0 || knownSkillIds.has(s)));
+
+    // Derive legacy arrays from hubs when judge omitted them.
+    const hubSub = (scrubbedHubs["subagent"] as { picks: Array<{ id: string }> }).picks.map(
+      (p) => p.id,
+    );
+    const hubMcp = [
+      ...((scrubbedHubs["mcp"] as { picks: Array<{ id: string }> }).picks.map((p) => p.id)),
+      ...((scrubbedHubs["builtin"] as { picks: Array<{ id: string }> }).picks.map((p) => p.id)),
+    ];
+    const hubSkills = (scrubbedHubs["skill"] as { picks: Array<{ id: string }> }).picks.map(
+      (p) => p.id,
+    );
+
+    const reasoning =
+      parsed["reasoning"] && typeof parsed["reasoning"] === "object"
+        ? (parsed["reasoning"] as Record<string, string>)
+        : {};
+
+    res.json({
+      success: true,
+      data: {
+        hubs: scrubbedHubs,
+        subagents: subagents.length > 0 ? subagents : hubSub,
+        integrations:
+          integrations.length > 0
+            ? integrations
+            : hubMcp.map((slug) => {
+                const integ = (catalog.integrations ?? []).find((i) => i.slug === slug);
+                return {
+                  slug,
+                  readTools: (integ?.readTools ?? []).map((t) => t.name),
+                  writeTools: [],
+                };
+              }),
+        skillSlugs: skillSlugs.length > 0 ? skillSlugs : hubSkills,
+        reasoning,
+      },
+    });
   } catch (err) {
     clog.error("[suggest-tools] Failed:", err);
     res.status(500).json({ success: false, error: "Failed to suggest tools" });

@@ -1,6 +1,7 @@
 /**
  * HTTP client for laya-serve (`POST /v1/systemone`).
  * Loopback only — never expose outside claw-auth.
+ * Default LAYA_SUGGEST=shadow until golden eval beats stage C (see ship report).
  */
 import { createLogger } from "../logger.js";
 
@@ -9,9 +10,9 @@ const log = createLogger("laya-client");
 export type LayaSuggestMode = "off" | "shadow" | "fast";
 
 export function layaSuggestMode(): LayaSuggestMode {
-  const raw = (process.env["LAYA_SUGGEST"] ?? "fast").trim().toLowerCase();
+  const raw = (process.env["LAYA_SUGGEST"] ?? "shadow").trim().toLowerCase();
   if (raw === "off" || raw === "shadow" || raw === "fast") return raw;
-  return "fast";
+  return "shadow";
 }
 
 function layaUrl(): string {
@@ -60,11 +61,13 @@ function layaModel(): string {
   return (process.env["LAYA_MODEL"] ?? "laya").trim() || "laya";
 }
 
+const HEALTH_CACHE_MS = 30_000;
+let healthCache: { at: number; ok: boolean } | null = null;
+
 export async function layaHealth(): Promise<boolean> {
   if (layaSuggestMode() === "off") return false;
   try {
     const key = layaApiKey();
-    // Real `laya` package serves GET /health; standalone `laya-serve` serves /healthz.
     const headers = key ? { Authorization: `Bearer ${key}` } : {};
     let res = await fetch(`${layaUrl()}/health`, {
       method: "GET",
@@ -82,6 +85,20 @@ export async function layaHealth(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/** Cached health probe (30s) so parallel per-hub shortlists share one check. */
+export async function layaHealthCached(): Promise<boolean> {
+  const now = Date.now();
+  if (healthCache && now - healthCache.at < HEALTH_CACHE_MS) return healthCache.ok;
+  const ok = await layaHealth();
+  healthCache = { at: now, ok };
+  return ok;
+}
+
+/** Test helper — clear health cache between cases. */
+export function clearLayaHealthCache(): void {
+  healthCache = null;
 }
 
 export async function layaSystemOne(

@@ -55,9 +55,7 @@ export function SubagentCapabilityRow({
     if (suggestions.status === 'error') {
       return (
         <span className='flex items-center gap-2 text-xs leading-5 tracking-[-0.24px]'>
-          <span className='text-muted-foreground'>
-            Couldn&apos;t suggest subagents{suggestions.error ? ` — ${suggestions.error}` : ''}
-          </span>
+          <span className='text-muted-foreground'>None suggested</span>
           <button
             type='button'
             onClick={suggestions.run}
@@ -155,7 +153,7 @@ export function SubagentCapabilityRow({
 
       {suggestions.status === 'ready' && suggestions.suggested.length === 0 && (
         <p className='text-xs text-muted-foreground'>
-          No subagent matched this agent — browse the full list to pick one yourself.
+          None needed — browse the full list to pick one yourself.
         </p>
       )}
 

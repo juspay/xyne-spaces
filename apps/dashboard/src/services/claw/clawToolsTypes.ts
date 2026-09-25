@@ -39,6 +39,18 @@ export interface AvailableTools {
 // AI-suggested tool selection from an agent's intent (system prompt or short
 // description). Rendered as a proposal the user accepts/rejects before it
 // touches the selection.
+export interface HubJudgedPick {
+  id: string;
+  confidence: number;
+  reason: string;
+}
+
+export interface HubJudgement {
+  picks: HubJudgedPick[];
+  none: boolean;
+  reason?: string;
+}
+
 export interface ToolSuggestion {
   subagents: string[];
   integrations: Array<{
@@ -47,8 +59,15 @@ export interface ToolSuggestion {
     writeTools: string[];
   }>;
   reasoning: Record<string, string>;
-  /** Optional org skill slugs from Laya gap shortlist. */
+  /** Optional org skill slugs from Laya gap shortlist / judge. */
   skillSlugs?: string[];
+  /** Per-hub judge output (stage D). */
+  hubs?: {
+    mcp?: HubJudgement;
+    builtin?: HubJudgement;
+    subagent?: HubJudgement;
+    skill?: HubJudgement;
+  };
 }
 
 /** The wizard's tool selection, threaded through ToolboxPicker value/onChange. */

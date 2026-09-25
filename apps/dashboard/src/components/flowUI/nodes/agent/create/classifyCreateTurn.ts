@@ -102,6 +102,8 @@ function isHelpQuestion(text: string): boolean {
   if (!isQuestion(text)) return false;
   if (parseLocalRename(text)) return false;
   const lower = text.trim().toLowerCase();
+  // Capability follow-ups force a hub re-run — not help/chat-only.
+  if (isCapabilityNeedQuestion(lower)) return false;
   if (
     /^(can you|could you|please)\s+(rename|rewrite|shorten|make|add|drop|remove|attach)\b/.test(
       lower,
@@ -113,6 +115,21 @@ function isHelpQuestion(text: string): boolean {
     return true;
   }
   return !isCanvasEditImperative(lower);
+}
+
+/** "Do we need builtins / tools / skills?" → re-run that hub. */
+function isCapabilityNeedQuestion(lower: string): boolean {
+  return /\b(do\s+we\s+need|need\s+any|should\s+(we|i)\s+(add|use|enable)|any)\b.{0,40}\b(built-?\s*ins?|tools?|mcps?|sub-?agents?|skills?|knowledge|integrations?)\b/.test(
+    lower,
+  );
+}
+
+function capabilityFieldsFromNeedQuestion(text: string): CreateTurnField[] {
+  const lower = text.trim().toLowerCase();
+  if (!isCapabilityNeedQuestion(lower)) return [];
+  if (/\bskills?\b/.test(lower)) return ['skills'];
+  if (/\bknowledge|\bkb\b/.test(lower)) return ['knowledge'];
+  return ['tools'];
 }
 
 /** Imperative capability edits: add/use/pick/choose MCP, skill, knowledge, etc. */
@@ -327,6 +344,10 @@ export function classifyCreateTurn(
   }
   // Filled-canvas capability follow-ups ("use Slack MCP") even without verbs.
   if (!canvasEmpty) {
+    const needFields = capabilityFieldsFromNeedQuestion(trimmed);
+    if (needFields.length > 0) {
+      return { kind: 'edit', fields: needFields };
+    }
     const caps = namedCapabilityFields(trimmed);
     if (caps.length > 0 && !isHelpQuestion(trimmed)) {
       return { kind: 'edit', fields: caps };

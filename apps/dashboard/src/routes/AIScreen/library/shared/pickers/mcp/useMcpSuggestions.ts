@@ -22,7 +22,10 @@ export interface McpSuggestions {
 function describeError(error: Error | null): string | null {
   if (!error) return null;
   if (error instanceof ClawApiError && error.status >= 500) {
-    return 'the suggestion service is busy';
+    return 'No suggestions — browse to pick manually';
+  }
+  if (/timed out|abort/i.test(error.message)) {
+    return 'No suggestions — browse to pick manually';
   }
   return error.message;
 }
@@ -48,6 +51,7 @@ export function useMcpSuggestions(
     mutate({
       systemPrompt: systemPrompt || undefined,
       description: systemPrompt ? undefined : description || undefined,
+      emptyHubs: ['mcp'],
     });
   }, [canRun, isPending, mutate, systemPrompt, description]);
 

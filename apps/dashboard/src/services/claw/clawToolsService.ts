@@ -13,6 +13,8 @@ export async function getAvailableTools(): Promise<AvailableTools> {
 export async function suggestTools(payload: {
   systemPrompt?: string | undefined;
   description?: string | undefined;
+  /** Hubs still empty after local binds — omit to let auth infer. */
+  emptyHubs?: Array<'mcp' | 'builtin' | 'subagent' | 'skill'> | undefined;
 }): Promise<ToolSuggestion> {
   const data = await clawRequest<{ success: boolean; data: ToolSuggestion }>(
     '/api/v1/agents/suggest-tools',

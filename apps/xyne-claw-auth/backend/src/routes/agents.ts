@@ -290,8 +290,13 @@ router.post("/generate-output-format", async (req: Request, res: Response) => {
 // proposal; the UI renders it as a diff for the user to accept.
 
 router.post("/suggest-tools", async (req: Request, res: Response) => {
+  const started = Date.now();
   try {
-    const { systemPrompt, description, emptyHubs: rawEmptyHubs } = req.body as {
+    const {
+      systemPrompt,
+      description,
+      emptyHubs: rawEmptyHubs,
+    } = req.body as {
       systemPrompt?: string;
       description?: string;
       emptyHubs?: string[];
@@ -314,8 +319,6 @@ router.post("/suggest-tools", async (req: Request, res: Response) => {
     }
 
     const full = await buildAvailableToolsCatalog(undefined, orgId);
-    // Compress: drop fields the LLM doesn't need (mcpServers, customGroups,
-    // serverTools, writeTools — all derivable from `integrations`).
     const catalog = {
       subagents: full.subagents.map((s) => ({ name: s.name, description: s.description })),
       integrations: full.integrations.map((i) => ({
@@ -339,6 +342,8 @@ router.post("/suggest-tools", async (req: Request, res: Response) => {
       slug: s.slug,
       name: s.name,
       description: s.description ?? "",
+      // content summary for enriched docs (truncated for BM25)
+      content: typeof s.content === "string" ? s.content.slice(0, 400) : "",
     }));
 
     const allowedHubs = new Set(["mcp", "builtin", "subagent", "skill"]);
@@ -362,22 +367,32 @@ router.post("/suggest-tools", async (req: Request, res: Response) => {
         surface: "hub",
       });
       // fast + non-empty shortlist → closed pick on truncated catalog.
-      // Lexical shortlist works without laya-serve; Laya re-ranks when up.
-      // shadow → still shortlists for audit but returns today's full-catalog pick.
+      // shadow → still shortlists for audit but returns full-catalog pick.
       if (mode === "fast" && gap.shortlistIds.length > 0 && gap.fallback !== "empty") {
         catalogForClaw = gap.catalog as typeof catalog;
         skillSlugs = gap.skillSlugs;
       }
     }
 
+    // Keep whole suggest under ~3.5s before dashboard 4s SUGGEST_MS.
+    const remainingMs = Math.max(500, 3_500 - (Date.now() - started));
     const clawRes = await fetch(`${CONFIG.xyneClawUrl}/suggest-tools`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
       },
-      body: JSON.stringify({ intent, catalog: catalogForClaw }),
-      signal: AbortSignal.timeout(50_000),
+      body: JSON.stringify({
+        intent,
+        catalog: catalogForClaw,
+        emptyHubs,
+        skillCandidates: skillCandidates.map((s) => ({
+          slug: s.slug,
+          name: s.name,
+          description: s.description,
+        })),
+      }),
+      signal: AbortSignal.timeout(remainingMs),
     });
 
     const data = (await clawRes.json()) as {
@@ -386,12 +401,27 @@ router.post("/suggest-tools", async (req: Request, res: Response) => {
       error?: string;
     };
     if (clawRes.ok && data.success && data.data && typeof data.data === "object") {
-      if (skillSlugs.length > 0) {
+      if (skillSlugs.length > 0 && !Array.isArray(data.data["skillSlugs"])) {
         data.data = { ...data.data, skillSlugs };
       }
       if (gap) {
         recordClosedPick(gap, "hub", data.data);
       }
+      // Persist decision for shadow/fast gate (best-effort).
+      void persistToolDecision({
+        orgId,
+        userId: requesterId ?? null,
+        intent,
+        emptyHubs,
+        mode,
+        gap,
+        closedPick: data.data,
+        latencyMs: Date.now() - started,
+      }).catch((err) => {
+        log.warn(
+          `[agents/suggest-tools] persist decision failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      });
     }
     res.status(clawRes.status).json(data);
   } catch (err) {
@@ -399,6 +429,61 @@ router.post("/suggest-tools", async (req: Request, res: Response) => {
     res.status(500).json({ success: false, error: "Failed to suggest tools" });
   }
 });
+
+async function persistToolDecision(args: {
+  orgId: string;
+  userId: string | null;
+  intent: string;
+  emptyHubs: string[];
+  mode: string;
+  gap: Awaited<ReturnType<typeof buildGapShortlist>> | null;
+  closedPick: Record<string, unknown>;
+  latencyMs: number;
+}): Promise<void> {
+  // Prefer typed client; fall back to raw if generate hasn't run yet.
+  const client = prisma as typeof prisma & {
+    agentToolDecision?: {
+      create: (args: { data: Record<string, unknown> }) => Promise<unknown>;
+    };
+  };
+  if (client.agentToolDecision?.create) {
+    await client.agentToolDecision.create({
+      data: {
+        orgId: args.orgId,
+        userId: args.userId,
+        surface: "hub",
+        intent: args.intent.slice(0, 4000),
+        emptyHubs: args.emptyHubs,
+        shortlistIds: args.gap?.shortlistIds ?? [],
+        closedPick: args.closedPick,
+        latencyMs: args.latencyMs,
+        fallback: args.gap?.fallback ?? "none",
+        mode: args.mode,
+        packVersion: "authoring-pack-v2",
+      },
+    });
+    return;
+  }
+  await prisma.$executeRaw`
+    INSERT INTO agent_tool_decisions
+      (id, "orgId", "userId", surface, intent, "emptyHubs", "shortlistIds", "closedPick",
+       "latencyMs", fallback, mode, "packVersion", "createdAt")
+    VALUES (
+      ${crypto.randomUUID()},
+      ${args.orgId},
+      ${args.userId},
+      ${"hub"},
+      ${args.intent.slice(0, 4000)},
+      ${args.emptyHubs},
+      ${args.gap?.shortlistIds ?? []},
+      ${JSON.stringify(args.closedPick)}::jsonb,
+      ${args.latencyMs},
+      ${args.gap?.fallback ?? "none"},
+      ${args.mode},
+      ${"authoring-pack-v2"},
+      NOW()
+    )`;
+}
 
 // ── Name availability check ──────────────────────────────────────────
 

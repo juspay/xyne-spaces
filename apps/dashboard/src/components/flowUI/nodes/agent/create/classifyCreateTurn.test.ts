@@ -125,6 +125,12 @@ void describe('classifyCreateTurn', () => {
     assert.equal(shouldGeneratePrompt(result, true, 'maybe later'), false);
   });
 
+  void it('maps do-we-need builtins follow-ups to tools re-run', () => {
+    const result = classifyCreateTurn('do we need any Built in tools?', false);
+    assert.equal(result.kind, 'edit');
+    assert.ok(result.fields.includes('tools'));
+  });
+
   void it('maps choose/use/pick MCP follow-ups to tools, not instructions', () => {
     for (const text of [
       'choose Slack MCP',

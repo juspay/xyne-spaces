@@ -50,9 +50,7 @@ export function BuiltinCapabilityRow({
     if (suggestions.status === 'error') {
       return (
         <span className='flex items-center gap-2 text-xs leading-5 tracking-[-0.24px]'>
-          <span className='text-muted-foreground'>
-            Couldn&apos;t suggest tools{suggestions.error ? ` — ${suggestions.error}` : ''}
-          </span>
+          <span className='text-muted-foreground'>None suggested</span>
           <button
             type='button'
             onClick={suggestions.run}
@@ -125,6 +123,11 @@ export function BuiltinCapabilityRow({
 
       {(selectedEntries.length > 0 || suggestedChips.length > 0) && (
         <div className='flex flex-wrap items-start gap-2 pt-1'>
+          {selectedEntries.length > 0 && (
+            <span className='w-full text-[11px] uppercase tracking-wide text-muted-foreground'>
+              Bound
+            </span>
+          )}
           {selectedEntries.map(entry => (
             <BuiltinChip
               key={`selected-${entry.source}`}
@@ -137,6 +140,11 @@ export function BuiltinCapabilityRow({
               onToggle={() => onSelectionChange(disableEntry(selection, entry))}
             />
           ))}
+          {suggestedChips.length > 0 && (
+            <span className='w-full text-[11px] uppercase tracking-wide text-muted-foreground'>
+              Suggested
+            </span>
+          )}
           {suggestedChips.map(match => (
             <BuiltinChip
               key={`suggested-${match.entry.source}`}
@@ -148,9 +156,37 @@ export function BuiltinCapabilityRow({
         </div>
       )}
 
-      {suggestions.status === 'ready' && suggestions.suggested.length === 0 && (
+      {suggestions.status === 'ready' &&
+        suggestions.suggested.length === 0 &&
+        selectedEntries.length === 0 && (
+          <p className='text-xs text-muted-foreground'>
+            None needed —{' '}
+            <button
+              type='button'
+              onClick={() => {
+                setBrowseSource(null);
+                setBrowseOpen(true);
+              }}
+              className='underline underline-offset-2 hover:text-foreground'
+            >
+              Browse
+            </button>
+          </p>
+        )}
+
+      {suggestions.status === 'error' && (
         <p className='text-xs text-muted-foreground'>
-          No built-in tool matched this agent — browse the full list to pick one yourself.
+          {suggestions.error ?? 'None suggested'} —{' '}
+          <button
+            type='button'
+            onClick={() => {
+              setBrowseSource(null);
+              setBrowseOpen(true);
+            }}
+            className='underline underline-offset-2 hover:text-foreground'
+          >
+            Browse
+          </button>
         </p>
       )}
 

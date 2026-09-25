@@ -1809,6 +1809,28 @@ model Tool {
   @@map("tools")
 }
 
+
+/// Selection decisions from Hub /suggest-tools (Laya shadow/fast gate).
+model AgentToolDecision {
+  id           String   @id @default(cuid())
+  orgId        String
+  userId       String?
+  surface      String   @default("hub")
+  intent       String   @db.Text
+  emptyHubs    String[] @default([])
+  shortlistIds String[] @default([])
+  closedPick   Json     @default("{}")
+  latencyMs    Int      @default(0)
+  fallback     String   @default("none")
+  mode         String   @default("shadow")
+  packVersion  String   @default("authoring-pack-v2")
+  createdAt    DateTime @default(now())
+
+  @@index([orgId, createdAt])
+  @@index([mode, createdAt])
+  @@map("agent_tool_decisions")
+}
+
 model AgentTool {
   id         String @id @default(cuid())
   agentId    String
