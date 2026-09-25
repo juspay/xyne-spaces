@@ -1,3 +1,10 @@
+## [1.398.1](https://github.com/juspay/xyne-spaces/compare/v1.398.0...v1.398.1) (2026-09-25)
+
+
+### Bug Fixes
+
+* batch tool invocation appends to stop claw-auth OOM ([#2304](https://github.com/juspay/xyne-spaces/issues/2304)) ([16a853b](https://github.com/juspay/xyne-spaces/commit/16a853b43f8a2f98862edd867315a9b4d8549868))
+
 ## [1.398.0](https://github.com/juspay/xyne-spaces/compare/v1.397.0...v1.398.0) (2026-09-25)
 
 
