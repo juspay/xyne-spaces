@@ -19,6 +19,13 @@ import { logger, Event as LogEvent } from '../utils/logger';
  */
 const POLL_INTERVAL_MS = 30_000;
 
+/**
+ * Trailing debounce for `unread:refetch`. Read mutators fire it once each, so marking
+ * several items read (or leaving a channel that marks many) would otherwise send one
+ * request per mutation.
+ */
+const REFETCH_DEBOUNCE_MS = 400;
+
 interface WorkspaceCountItem {
   workspaceId: string;
   count: number;
@@ -53,7 +60,7 @@ const emptyCounts: WorkspaceUnreadCounts = {
  * and the dock badge consume it — rail badges are Zero-synced by design.
  *
  * Refreshes: mount, 30s interval, tab becoming visible, and the
- * `unread:refetch` window event (fired after read mutations). visibilitychange
+ * `unread:refetch` window event (fired after read mutations, debounced). visibilitychange
  * alone covers both tab switches and app switches; listening to window focus
  * as well would double-fire on returning to the app.
  */
@@ -108,11 +115,16 @@ export const WorkspaceUnreadCountsProvider: React.FC<{ children: React.ReactNode
     };
     document.addEventListener('visibilitychange', refreshWhenVisible);
 
-    const onRefetchEvent = (): void => void fetchCounts();
+    let refetchTimer: ReturnType<typeof setTimeout> | undefined;
+    const onRefetchEvent = (): void => {
+      clearTimeout(refetchTimer);
+      refetchTimer = setTimeout(() => void fetchCounts(), REFETCH_DEBOUNCE_MS);
+    };
     window.addEventListener(UNREAD_REFETCH_EVENT_NAME, onRefetchEvent);
 
     return () => {
       clearInterval(interval);
+      clearTimeout(refetchTimer);
       document.removeEventListener('visibilitychange', refreshWhenVisible);
       window.removeEventListener(UNREAD_REFETCH_EVENT_NAME, onRefetchEvent);
     };

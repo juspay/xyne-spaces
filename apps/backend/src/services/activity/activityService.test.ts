@@ -49,6 +49,7 @@ jest.mock('@xyne/shared', () => ({
   BELL_EXCLUDED_LEGACY_DIRECT_MESSAGE_ACTIONS: ['direct_message'],
   DM_SHELF_CHANNEL_SCOPES: ['DM', 'GROUP_DM'],
   DM_SHELF_MENTION_ACTOR_ACTIONS: ['mentioned_user', 'group_mention'],
+  DESK_CHANNEL_TYPES: new Set(['EMAIL', 'SLACK', 'APP', 'CALL', 'SOCIAL_MEDIA']),
 }));
 
 import { ActivityService } from './activityService';
@@ -67,7 +68,8 @@ interface Fixture {
   dmStatuses: StatusRow[];
   groupDmMentionCounts: GroupByRow[];
   bellChannelCounts: GroupByRow[];
-  closedStatuses: Array<{ userId: string; channelId: string }>;
+  /** (userId, channelId) pairs the visibility query returns: open status on a non-desk channel. */
+  visibleStatuses: Array<{ userId: string; channelId: string }>;
   callCounts: Array<{ userId: string; _count: { id: number } }>;
 }
 
@@ -86,11 +88,11 @@ function makeDb(fixture: Fixture) {
     channelUserStatus: {
       findMany: jest.fn().mockImplementation(({ where }) => {
         (whereClauses.channelUserStatus ??= []).push(where);
-        // The endpoint queries open statuses and closed statuses separately;
-        // the fixture's dmStatuses are the "open" set and closedStatuses the
-        // "closed" set. Distinguish by the OR: isClosed/isDeleted predicate.
-        const wantsClosed = Boolean((where as { OR?: unknown[] }).OR);
-        return Promise.resolve(wantsClosed ? fixture.closedStatuses : fixture.dmStatuses);
+        // The endpoint queries DM/GROUP_DM statuses (channel.scopeType filter) and the
+        // bell-visibility pairs (channel.type filter) separately. Distinguish by the
+        // channel filter's shape.
+        const wantsVisibility = Boolean((where as { channel?: { type?: unknown } }).channel?.type);
+        return Promise.resolve(wantsVisibility ? fixture.visibleStatuses : fixture.dmStatuses);
       }),
     },
     activity: {
@@ -131,7 +133,7 @@ describe('ActivityService.getWorkspaceActivityCounts', () => {
     dmStatuses: [],
     groupDmMentionCounts: [],
     bellChannelCounts: [],
-    closedStatuses: [],
+    visibleStatuses: [],
     callCounts: [],
   });
 
@@ -150,6 +152,7 @@ describe('ActivityService.getWorkspaceActivityCounts', () => {
         { userId: 'user-1', channelId: 'ch-other', _count: { id: 4 } },
         { userId: 'user-1', channelId: null, _count: { id: 2 } },
       ],
+      visibleStatuses: [{ userId: 'user-1', channelId: 'ch-other' }],
       callCounts: [{ userId: 'user-1', _count: { id: 1 } }],
     });
 
@@ -158,7 +161,7 @@ describe('ActivityService.getWorkspaceActivityCounts', () => {
     ]);
   });
 
-  it('excludes closed-channel rows from bellCount; ticket rows with null channelId always count', async () => {
+  it('counts bell rows only in visible channels; ticket rows with null channelId always count', async () => {
     const { service } = makeService({
       ...baseFixture(),
       bellChannelCounts: [
@@ -166,7 +169,8 @@ describe('ActivityService.getWorkspaceActivityCounts', () => {
         { userId: 'user-1', channelId: 'ch-closed', _count: { id: 5 } },
         { userId: 'user-1', channelId: null, _count: { id: 1 } },
       ],
-      closedStatuses: [{ userId: 'user-1', channelId: 'ch-closed' }],
+      // ch-closed has no visible status row (closed or deleted for this user).
+      visibleStatuses: [{ userId: 'user-1', channelId: 'ch-open' }],
     });
 
     await expect(service.getWorkspaceActivityCounts(MEMBER_ID)).resolves.toEqual([
@@ -174,7 +178,58 @@ describe('ActivityService.getWorkspaceActivityCounts', () => {
     ]);
   });
 
-  it("keeps another identity's rows when only this user closed the channel (per-user closed state)", async () => {
+  it('excludes rows in desk-type channels and channels with no status row (same rule as the bell)', async () => {
+    const { service, whereClauses } = makeService({
+      ...baseFixture(),
+      bellChannelCounts: [
+        { userId: 'user-1', channelId: 'ch-normal', _count: { id: 2 } },
+        // email/Slack/app/call/social channel — the visibility query filters it out
+        { userId: 'user-1', channelId: 'ch-slack', _count: { id: 6 } },
+        // no channel_user_status row at all
+        { userId: 'user-1', channelId: 'ch-orphan', _count: { id: 9 } },
+      ],
+      visibleStatuses: [{ userId: 'user-1', channelId: 'ch-normal' }],
+    });
+
+    await expect(service.getWorkspaceActivityCounts(MEMBER_ID)).resolves.toEqual([
+      { workspaceId: 'ws-1', count: 2 },
+    ]);
+
+    // The visibility query must carry the same rule as userVisibleChannelsV3:
+    // open status, and channel.type not in the desk types.
+    const visibilityWhere = (
+      whereClauses.channelUserStatus as Array<{
+        isClosed?: boolean;
+        isDeleted?: boolean;
+        channelId?: { in: string[] };
+        channel?: { type?: { notIn: string[] } };
+      }>
+    ).find(w => w.channel?.type);
+    expect(visibilityWhere?.isClosed).toBe(false);
+    expect(visibilityWhere?.isDeleted).toBe(false);
+    expect(visibilityWhere?.channel?.type?.notIn).toEqual(
+      expect.arrayContaining(['EMAIL', 'SLACK', 'APP', 'CALL', 'SOCIAL_MEDIA']),
+    );
+    // Scoped to the channels that actually have unread bell rows.
+    expect(visibilityWhere?.channelId?.in).toEqual(['ch-normal', 'ch-slack', 'ch-orphan']);
+  });
+
+  it('skips the visibility query when every bell row is a ticket row (null channelId)', async () => {
+    const { service, whereClauses } = makeService({
+      ...baseFixture(),
+      bellChannelCounts: [{ userId: 'user-1', channelId: null, _count: { id: 4 } }],
+    });
+
+    await expect(service.getWorkspaceActivityCounts(MEMBER_ID)).resolves.toEqual([
+      { workspaceId: 'ws-1', count: 4 },
+    ]);
+    const visibilityQueries = (
+      (whereClauses.channelUserStatus ?? []) as Array<{ channel?: { type?: unknown } }>
+    ).filter(w => w.channel?.type);
+    expect(visibilityQueries).toHaveLength(0);
+  });
+
+  it("keeps another identity's rows when only this user has no visible status (per-user state)", async () => {
     const { service } = makeService({
       ...baseFixture(),
       users: [
@@ -185,7 +240,8 @@ describe('ActivityService.getWorkspaceActivityCounts', () => {
         { userId: 'user-1', channelId: 'ch-shared', _count: { id: 2 } },
         { userId: 'user-2', channelId: 'ch-shared', _count: { id: 7 } },
       ],
-      closedStatuses: [{ userId: 'user-1', channelId: 'ch-shared' }],
+      // only user-2 still has ch-shared open; user-1 closed it
+      visibleStatuses: [{ userId: 'user-2', channelId: 'ch-shared' }],
     });
 
     await expect(service.getWorkspaceActivityCounts(MEMBER_ID)).resolves.toEqual([
@@ -229,6 +285,7 @@ describe('ActivityService.getWorkspaceActivityCounts', () => {
       bellChannelCounts: [
         { userId: 'user-2', channelId: 'ch-other', _count: { id: 4 } },
       ],
+      visibleStatuses: [{ userId: 'user-2', channelId: 'ch-other' }],
       callCounts: [{ userId: 'user-1', _count: { id: 1 } }],
     });
 

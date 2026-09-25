@@ -10,13 +10,13 @@ import { DOCK_BADGE_POLL_SOURCE } from '../config';
  *
  * Two sources, selected by the DOCK_BADGE_POLL_SOURCE flag:
  *
- * - Flag on (new): `useWorkspaceUnreadCounts` — the cross-workspace poll
+ * - Flag on (default): `useWorkspaceUnreadCounts` — the cross-workspace poll
  *   (GET /activity/workspace-counts). The badge reflects the unread badge
  *   invariant (dm + bell + call summed over every workspace the member
  *   belongs to), matching the workspace switcher exactly. Updates on the
  *   30s poll, tab-visible, and the unread:refetch event fired after read
  *   mutations.
- * - Flag off (default, legacy): `useAllUnreadCount` — the Zero-synced
+ * - Flag off (legacy, rollback): `useAllUnreadCount` — the Zero-synced
  *   per-channel counts of the active workspace only, summed.
  *
  * This is a no-op in the browser and in SSR: `window.electronAPI.setBadgeCount`

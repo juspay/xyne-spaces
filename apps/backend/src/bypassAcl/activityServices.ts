@@ -4,6 +4,7 @@ import {
   ActivityClassification,
   ActivityClassificationJobType,
   ChannelScopeType,
+  DESK_CHANNEL_TYPES,
   UserStatus,
   BELL_COUNT_RULES,
   BELL_EXCLUDED_ACTOR_ACTIONS,
@@ -145,11 +146,12 @@ export function getWorkspaceActivityCountsQuery(memberId: string): Promise<
       }
 
       // bellCount per the shared rules (excludes added_v2/removed, missed_call,
-      // SKIP, legacy direct_message; excludes closed channels; ERROR/PENDING count).
-      // Closed state is per-user on channel_user_status (userId+channelId), so
-      // group by that pair and post-filter against the closed pairs below —
-      // Activity has no Prisma channel relation, and a plain channelId notIn
-      // would over-exclude other identities' activities in the same channel.
+      // SKIP, legacy direct_message). The dashboard bell only lists activities in the
+      // user's *visible* channels (userVisibleChannelsV3): a status row that is not
+      // closed/deleted, on a channel that is not a desk type (email, Slack, app, call,
+      // social). The count must use the same rule or the switcher/dock show numbers the
+      // bell can never clear. Activity has no Prisma relation to Channel, so group by
+      // (userId, channelId) and post-filter against the visible pairs below.
       // channelId null (ticket activities) always counts.
       const bellChannelCounts = await db.activity.groupBy({
         by: ['userId', 'channelId'],
@@ -175,28 +177,42 @@ export function getWorkspaceActivityCountsQuery(memberId: string): Promise<
         },
       });
 
-      // Channels closed *for this user* (isClosed/isDeleted are per-user flags).
-      const closedStatuses = await db.channelUserStatus.findMany({
-        where: {
-          userId: { in: userIds },
-          OR: [{ isClosed: true }, { isDeleted: true }],
-        },
-        select: { userId: true, channelId: true },
-      });
+      // Visible (userId, channelId) pairs, limited to the channels that have unread
+      // bell rows so this stays small however many channels the user has closed.
+      const bellChannelIds = [
+        ...new Set(
+          bellChannelCounts
+            .map(row => row.channelId)
+            .filter((channelId): channelId is string => channelId !== null),
+        ),
+      ];
+      const visibleStatuses =
+        bellChannelIds.length > 0
+          ? await db.channelUserStatus.findMany({
+              where: {
+                userId: { in: userIds },
+                channelId: { in: bellChannelIds },
+                isClosed: false,
+                isDeleted: false,
+                channel: { type: { notIn: [...DESK_CHANNEL_TYPES] } },
+              },
+              select: { userId: true, channelId: true },
+            })
+          : [];
 
-      const closedChannelsByUser = new Map<string, Set<string>>();
-      for (const status of closedStatuses) {
-        let channels = closedChannelsByUser.get(status.userId);
+      const visibleChannelsByUser = new Map<string, Set<string>>();
+      for (const status of visibleStatuses) {
+        let channels = visibleChannelsByUser.get(status.userId);
         if (!channels) {
           channels = new Set();
-          closedChannelsByUser.set(status.userId, channels);
+          visibleChannelsByUser.set(status.userId, channels);
         }
         channels.add(status.channelId);
       }
 
       const bellByUser = new Map<string, number>();
       for (const row of bellChannelCounts) {
-        if (row.channelId && closedChannelsByUser.get(row.userId)?.has(row.channelId)) {
+        if (row.channelId && !visibleChannelsByUser.get(row.userId)?.has(row.channelId)) {
           continue;
         }
         bellByUser.set(row.userId, (bellByUser.get(row.userId) ?? 0) + row._count.id);
