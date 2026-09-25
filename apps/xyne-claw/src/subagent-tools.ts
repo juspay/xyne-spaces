@@ -55,6 +55,7 @@ import { takeCitations, recordCitations } from "./citations.js";
 import { writeSessionSkills, deleteSessionSkills } from "./session-skills.js";
 import { installLlmCallMetrics } from "./llm-call-metrics.js";
 import { installStreamModelFallback } from "./stream-model-fallback.js";
+import { pickSubagentLitellmModel } from "./subagent-model-split.js";
 import { installToolBudget, type ToolBudgetTracker } from "./tool-budget.js";
 import { metric } from "./metrics.js";
 import { track, type ChildTaskRegistry } from "./child-tasks.js";
@@ -788,8 +789,16 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
         envelope: { parentToolCallId: _toolCallId, subagentName: def.name, childRunId },
       });
       const childStartedIso = new Date(execStartedAt).toISOString();
+      const litellmPick = resolvedProvider
+        ? undefined
+        : pickSubagentLitellmModel({
+            key: progressCtx?.parentSessionId,
+            fastModel: LITELLM.subagentFastModel,
+            standardModel: LITELLM.model,
+            fastPercent: LITELLM.subagentFastModelPercent,
+          });
       const childProvider = resolvedProvider?.provider ?? "litellm";
-      const childModelId = resolvedProvider?.config.model ?? "shared";
+      const childModelId = resolvedProvider?.config.model ?? litellmPick?.model ?? LITELLM.model;
       const childTokenUsage: TokenUsage = emptyTokenUsage();
       let childTurns = 0;
       let childToolMs = 0;
@@ -998,8 +1007,8 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
 
         // Apply copilot proxy (no-op for other providers) then register model via the same helper the parent uses
         const effectiveConfig = await applyCopilotProxyIfNeeded(resolvedProvider?.provider, resolvedProvider?.config);
-        const useFastModel = !resolvedProvider;
-        const litellmFallbackModel = useFastModel ? LITELLM.subagentFastModel : LITELLM.model;
+        const useFastModel = litellmPick?.arm === "fast";
+        const litellmFallbackModel = litellmPick?.model ?? LITELLM.model;
         const model = resolveModel(modelRegistry, resolvedProvider?.provider, effectiveConfig, {
           model: resolvedProvider ? undefined : litellmFallbackModel,
         });
@@ -1007,7 +1016,7 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
           useFastModel && litellmFallbackModel !== LITELLM.model
             ? resolveModel(ModelRegistry.create(AuthStorage.create()), undefined, undefined, { model: LITELLM.model })
             : undefined;
-        log.info(`[${def.name}] Using provider=${resolvedProvider?.provider ?? "litellm"} model=${resolvedProvider?.config.model ?? litellmFallbackModel}`);
+        log.info(`[${def.name}] Using provider=${resolvedProvider?.provider ?? "litellm"} model=${resolvedProvider?.config.model ?? litellmFallbackModel}${litellmPick ? ` arm=${litellmPick.arm}` : ""}`);
 
         // Materialize skills onto disk so the child session loads them as
         // proper pi resources (same path the parent takes in agent.ts),
