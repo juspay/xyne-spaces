@@ -6,10 +6,9 @@
  * mutator catalog are free text, so clients must branch on `code`, never on
  * message content.
  *
- * There are five codes, one per status, and the mapping is total: every failure
- * the API can produce lands on exactly one of them. Adding a sixth means adding
- * a status. If two failures share a status, they share a code and differ in
- * `message`.
+ * There is one code per status, and the mapping is total: every failure the API
+ * can produce lands on exactly one of them. Adding a code means adding a status.
+ * If two failures share a status, they share a code and differ in `message`.
  */
 
 import { MutationACLError } from '@/zero/acl/core/types';
@@ -20,6 +19,7 @@ export const ERROR_CODES = [
   'unauthenticated',
   'forbidden',
   'not_found',
+  'not_connected',
   'internal',
 ] as const;
 
@@ -56,6 +56,12 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorDefinition>> = {
     description:
       'No such endpoint, catalog operation, or resource — or the resource is not visible to the acting user. Existence and visibility are deliberately indistinguishable.',
   },
+  not_connected: {
+    status: 409,
+    retryable: false,
+    description:
+      'The connector exists but the acting user has no usable connection to it (personal or org). `details.connector` names it; connect it, then retry.',
+  },
   internal: {
     status: 500,
     retryable: true,
@@ -69,11 +75,17 @@ export interface ErrorDetail {
   readonly issue: string;
 }
 
+/**
+ * Validation failures carry a list of issues; a few codes (connectors) carry a
+ * small structured object instead, e.g. `{ connector, tool, reason }`.
+ */
+export type ErrorDetails = readonly ErrorDetail[] | Readonly<Record<string, unknown>>;
+
 export interface ApiErrorBody {
   readonly error: {
     readonly code: ErrorCode;
     readonly message: string;
-    readonly details?: readonly ErrorDetail[];
+    readonly details?: ErrorDetails;
     readonly request_id: string;
     readonly retryable: boolean;
   };
@@ -90,7 +102,7 @@ export class SdkApiError extends Error {
   public readonly code: ErrorCode;
   public readonly status: number;
   public readonly retryable: boolean;
-  public readonly details?: readonly ErrorDetail[];
+  public readonly details?: ErrorDetails;
   /** Set when the underlying cause should be logged but never returned to the caller. */
   public readonly cause?: unknown;
 
@@ -98,7 +110,7 @@ export class SdkApiError extends Error {
     code: ErrorCode,
     message?: string,
     opts: {
-      details?: readonly ErrorDetail[];
+      details?: ErrorDetails;
       cause?: unknown;
     } = {},
   ) {

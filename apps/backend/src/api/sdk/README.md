@@ -117,6 +117,32 @@ deployment's service credential. `runS2SClawAgent` is used rather than
 `runClawAgent`: it takes an explicit identity that maps one-to-one onto
 `AuthData`, and returns a pollable session id.
 
+### Connectors
+
+External data through the **viewer's own** claw-auth connection (Pulse, GitHub,
+Grafana, …), relayed through Spaces by `clawConnectorsService`:
+
+| | |
+|---|---|
+| `GET /api/sdk/v1/connectors` | Connectors the viewer can see → `{ connectors }` |
+| `GET /api/sdk/v1/connectors/:type/tools` | The connector's tools, write ones flagged → `{ tools }` |
+| `POST /api/sdk/v1/connectors/:type/call` | `{ tool, args? }` → `{ content }` (raw MCP text) |
+| `POST /api/sdk/v1/connectors/:type/connect` | `{ returnTo? }` → `{ kind: 'oauth', authUrl }` or `{ kind: 'manual', settingsUrl }` |
+
+- **Runs as the viewer.** claw-auth resolves the viewer's personal connection, or
+  the org's shared one — never credentials pinned to an agent. The token stays in
+  claw-auth; the app only ever sees the tool's output.
+- **Read-only.** A write tool is refused with `403 forbidden`,
+  `details: { connector, tool, reason: 'write_tool' }`.
+- No connection yet is `409 not_connected`, `details: { connector }`; the app can
+  call `connect` and open the returned `authUrl` (or send the user to
+  `settingsUrl` for connectors set up with a credential form).
+- Claw's own plumbing (`xyne-spaces`, `xyne-dashboard`, `xyne-workflows`,
+  `xyne-spaces-app-tools`, `heisenberg`, `research-agent-mcp`) is never listed
+  and reads as `404`.
+- `:type` is the connector's `McpServer.type`, `/^[a-z0-9][a-z0-9_-]{0,63}$/`.
+  A tool the connector does not advertise is a `400`.
+
 ---
 
 ## Errors
@@ -135,8 +161,10 @@ One envelope, from `handler.ts`, the only place a status code is written:
 ```
 
 `code` is the stable field. Branch on it, never on `message`.
+`details`, when present, is a list of `{ path, issue }` for a validation failure,
+or a small object for a connector failure (see [Connectors](#connectors)).
 
-**Five codes, one per status.** The mapping is total: every failure this API can
+**One code per status.** The mapping is total: every failure this API can
 produce lands on exactly one of them.
 
 | Code | Status | Retryable | Means |
@@ -145,13 +173,15 @@ produce lands on exactly one of them.
 | `unauthenticated` | 401 | | Key missing, malformed, expired, or revoked |
 | `forbidden` | 403 | | The Zero ACL said no |
 | `not_found` | 404 | | No such endpoint, operation, or visible resource |
+| `not_connected` | 409 | | The viewer has no usable connection for this connector |
 | `internal` | 500 | ✓ | Everything else |
 
 This replaced a twelve-code vocabulary. Three of those codes had no producer
 anywhere in the codebase, `rate_limited` described a limiter that does not
 exist, and `retry_after_seconds` was declared, read, and never once set — so
 callers were branching on distinctions the server could not actually make.
-Adding a sixth code means adding a status; two failures that share a status
+`not_connected` was added as a sixth code with its own status, 409. Adding a
+code means adding a status; two failures that share a status
 share a code and differ in `message`.
 
 Three behaviours worth knowing:

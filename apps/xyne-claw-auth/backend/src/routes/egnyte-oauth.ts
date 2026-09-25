@@ -28,7 +28,7 @@ import { signOAuthState, verifyOAuthState, OAuthStateError } from "../lib/oauth-
 import { defaultOAuthReturn, resolveOAuthReturn, withOAuthResult } from "../lib/oauth-return.js";
 import { oauthLimiter } from "../middleware/rate-limiters.js";
 import { pinUserIdParam } from "../middleware/pin-user-id-param.js";
-import { type OAuthTokenProvider, TokenRefreshError } from "../lib/oauth-token-endpoint.js";
+import { type OAuthAuthorizeOptions, type OAuthTokenProvider, TokenRefreshError } from "../lib/oauth-token-endpoint.js";
 import { asyncHandler, ok, badRequest, forbidden, HttpError } from "../lib/http.js";
 
 import { createLogger } from "../logger.js";
@@ -107,6 +107,7 @@ router.use("/:userId", pinUserIdParam);
 export const egnyteOAuthProvider: OAuthTokenProvider = {
   serverType: "egnyte",
   label: "Egnyte",
+  authorize: authorizeEgnyte,
   responseData: (creds) => ({ accessToken: creds.accessToken, domain: creds.domain }),
   async refresh(creds) {
     const c = creds as unknown as EgnyteTokens;
@@ -153,7 +154,11 @@ export const egnyteOAuthProvider: OAuthTokenProvider = {
 router.post("/:userId/oauth/egnyte/authorize", oauthLimiter, asyncHandler(async (req: Request<{ userId: string }>, res: Response, next?: NextFunction) => {
   const { userId } = req.params;
   const { redirectUri, returnTo } = req.body as { redirectUri?: string; returnTo?: string };
+  ok(res, { authUrl: await authorizeEgnyte(userId, { redirectUri, returnTo }) });
+}));
 
+/** The consent URL the route above returns; also `egnyteOAuthProvider.authorize`. */
+async function authorizeEgnyte(userId: string, opts: OAuthAuthorizeOptions = {}): Promise<string> {
   const envDomain = process.env["EGNYTE_DOMAIN"];
   if (!envDomain || envDomain.trim().length === 0) {
     throw new HttpError(500, "EGNYTE_DOMAIN is not configured on the server");
@@ -166,19 +171,18 @@ router.post("/:userId/oauth/egnyte/authorize", oauthLimiter, asyncHandler(async 
     .replace(/\.egnyte\.com$/i, "");
 
   const { clientId } = getEgnyteCredentials();
-  const callbackUri = redirectUri ?? defaultCallbackUri();
+  const callbackUri = opts.redirectUri ?? defaultCallbackUri();
 
   // Encode the domain into the signed state so the callback can use it.
-  const state = signOAuthState(userId, { domain: normalizedDomain, redirectUri: callbackUri, returnTo: resolveOAuthReturn(returnTo) });
+  const state = signOAuthState(userId, { domain: normalizedDomain, redirectUri: callbackUri, returnTo: resolveOAuthReturn(opts.returnTo) });
 
   const authUrl = new URL(egnyteAuthUrl(normalizedDomain));
   authUrl.searchParams.set("client_id", clientId);
   authUrl.searchParams.set("redirect_uri", callbackUri);
   authUrl.searchParams.set("response_type", "code");
   authUrl.searchParams.set("state", state);
-
-  ok(res, { authUrl: authUrl.toString() });
-}));
+  return authUrl.toString();
+}
 
 // ── Programmatic callback (POST) ───────────────────────────────────────────
 
