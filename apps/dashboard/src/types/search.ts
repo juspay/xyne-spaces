@@ -172,6 +172,13 @@ export interface VespaSearchGroup {
   results: DisplaySearchResult[];
 }
 
+/** Backend verdict on how the cmd+K palette should treat a query. */
+export interface QueryIntent {
+  mode: 'lexical' | 'ai';
+  /** Probability that the query needs AI (from Jev). */
+  pAI: number;
+}
+
 export interface VespaSearchResponse {
   success: boolean;
   data: {

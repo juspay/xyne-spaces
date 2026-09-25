@@ -264,6 +264,14 @@ export interface ChannelCommandMenuProps {
    */
   enabledTabs?: TabType[];
   /**
+   * Show the inline AI overview: classify what the user typed and, when it reads as a
+   * question, answer it above the results. Only the desktop workspace search sets this;
+   * the pickers that reuse this palette (Ask AI context, Streams columns, Desk) leave it
+   * off — there you are choosing a thing, not asking a question — and so does mobile,
+   * where an answer above the results would push them off the viewport.
+   */
+  aiOverview?: boolean;
+  /**
    * When true, renders as a plain inline panel (<Command>) instead of a
    * full-screen dialog (<Command.Dialog>). Parent controls visibility by
    * conditionally mounting/unmounting this component.

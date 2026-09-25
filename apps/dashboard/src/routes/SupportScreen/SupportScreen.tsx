@@ -155,6 +155,7 @@ import { useAuth, useAuthContextValues } from '../../hooks/useAuth';
 import { usePlatform } from '../../hooks/usePlatform';
 import { TicketListView } from '../../components/Tickets/TicketListView';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
+import { useRacedQuery } from '../../hooks/useRacedQuery';
 import { SupportKanbanBoard } from './SupportKanbanBoard';
 import { SupportTicketTable } from './SupportTicketTable';
 import {
@@ -4703,7 +4704,7 @@ export const SupportTicketDetail = ({
   // Fetch the ticket metadata needed to resolve the detail view. Emails and drafts use
   // their dedicated conversation-scoped queries below. supportTicketDetailV2 looks up by
   // `id` when list navigation supplied it, else by `xyneId` from the URL path param.
-  const [ticket] = useCachedQuery(
+  const [ticket] = useRacedQuery(
     queries.supportTicketDetailV2({
       id: ticketId || undefined,
       xyneId: ticketIdParam || undefined,
@@ -4812,7 +4813,7 @@ export const SupportTicketDetail = ({
     ],
   );
 
-  const [allEmails] = useCachedQuery(
+  const [allEmails] = useRacedQuery(
     queries.getEmailsForConversationsV2({
       conversationIds: allConversationIds,
       channelId: routeChannelId,
