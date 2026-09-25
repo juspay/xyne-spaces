@@ -2556,7 +2556,9 @@ const SupportScreen = (): ReactElement => {
           }
         })
         .catch(error => {
-          toast.error(error instanceof Error ? error.message : 'Failed to start Instagram authorization');
+          toast.error(
+            error instanceof Error ? error.message : 'Failed to start Instagram authorization',
+          );
         });
       return;
     }
@@ -6227,7 +6229,11 @@ export const SupportTicketDetail = ({
                     channelId={channel?.id ?? null}
                     drafts={ticketEmailDrafts}
                     replyBasePath='/integrations/social-media'
-                    placeholder={channelIntegrationInfo.sourceType === 'instagram' ? 'Reply to this DM…' : 'Reply to this review…'}
+                    placeholder={
+                      channelIntegrationInfo.sourceType === 'instagram'
+                        ? 'Reply to this DM…'
+                        : 'Reply to this review…'
+                    }
                     // Play caps replies at 350; Apple documents no maximum, so do not invent one.
                     {...(channelIntegrationInfo.sourceType === SOCIAL_MEDIA_SOURCE_TYPE.INSTAGRAM
                       ? { maxLength: 1000 }
@@ -6350,46 +6356,54 @@ export const SupportTicketDetail = ({
               >
                 {conversationId && channelId ? (
                   <>
-                    <ThreadMessages
-                      channelId={channelId}
-                      conversationId={conversationId}
-                      ticketId={ticket?.id ?? null}
-                      matchedMessageId={targetMessageId}
-                      skipInputAutoFocus
-                      onClose={() => setIsRightPanelOpen(false)}
-                      onAskAI={() => {
-                        if (isAIPanelOpen) {
-                          xyneAIActor.send({ type: 'CLOSE' });
-                        } else {
-                          void openDraftAgentSession();
-                        }
-                      }}
-                    />
-                    {channel?.type === ChannelType.SOCIAL_MEDIA && channelIntegrationInfo.sourceType === 'instagram' && channelId && conversationId && (
-                      <InstagramCustomerHistory
+                    {/* Messages Tab Content */}
+                    <Tabs.Content
+                      value='messages'
+                      className='flex-1 flex flex-col h-full overflow-hidden data-[state=inactive]:hidden'
+                    >
+                      <ThreadMessages
                         channelId={channelId}
                         conversationId={conversationId}
-                        onTicketClick={xyneId => {
-                          void navigate(`${supportBase}/${channelId}/${xyneId}`);
+                        ticketId={ticket?.id ?? null}
+                        matchedMessageId={targetMessageId}
+                        skipInputAutoFocus
+                        onClose={() => setIsRightPanelOpen(false)}
+                        onAskAI={() => {
+                          if (isAIPanelOpen) {
+                            xyneAIActor.send({ type: 'CLOSE' });
+                          } else {
+                            void openDraftAgentSession();
+                          }
                         }}
                       />
-                    )}
-                    {isUserMember ? (
-                      <div className='pb-4 bg-background flex-shrink-0 px-[var(--composer-px)] [--composer-px:1rem]'>
-                        <ChatInput
-                          ref={inputRef}
+                      {channel?.type === ChannelType.SOCIAL_MEDIA &&
+                        channelIntegrationInfo.sourceType === 'instagram' &&
+                        channelId &&
+                        conversationId && (
+                          <InstagramCustomerHistory
+                            channelId={channelId}
+                            conversationId={conversationId}
+                            onTicketClick={xyneId => {
+                              void navigate(`${supportBase}/${channelId}/${xyneId}`);
+                            }}
+                          />
+                        )}
+                      {isUserMember ? (
+                        <div className='pb-4 bg-background flex-shrink-0 px-[var(--composer-px)] [--composer-px:1rem]'>
+                          <ChatInput
+                            ref={inputRef}
+                            channelId={channelId}
+                            conversation={conversation ?? undefined}
+                            placeholder='Reply to this thread...'
+                            hasTicket={hasTicketInMessages}
+                          />
+                        </div>
+                      ) : (
+                        <JoinChannel
                           channelId={channelId}
-                          conversation={conversation ?? undefined}
-                          placeholder='Reply to this thread...'
-                          hasTicket={hasTicketInMessages}
+                          {...(channel?.name && { channelTitle: channel.name })}
                         />
-                      </div>
-                    ) : (
-                      <JoinChannel
-                        channelId={channelId}
-                        {...(channel?.name && { channelTitle: channel.name })}
-                      />
-                    )}
+                      )}
                     </Tabs.Content>
 
                     {/* Details Tab Content */}
@@ -6400,15 +6414,18 @@ export const SupportTicketDetail = ({
                       {ticket?.id ? (
                         <>
                           <TicketDetails ticketId={ticket.id} />
-                          {channel?.type === ChannelType.SOCIAL_MEDIA && channelIntegrationInfo.sourceType === 'instagram' && channelId && conversationId && (
-                            <InstagramCustomerHistory
-                              channelId={channelId}
-                              conversationId={conversationId}
-                              onTicketClick={xyneId => {
-                                void navigate(`${supportBase}/${channelId}/${xyneId}`);
-                              }}
-                            />
-                          )}
+                          {channel?.type === ChannelType.SOCIAL_MEDIA &&
+                            channelIntegrationInfo.sourceType === 'instagram' &&
+                            channelId &&
+                            conversationId && (
+                              <InstagramCustomerHistory
+                                channelId={channelId}
+                                conversationId={conversationId}
+                                onTicketClick={xyneId => {
+                                  void navigate(`${supportBase}/${channelId}/${xyneId}`);
+                                }}
+                              />
+                            )}
                         </>
                       ) : (
                         <div className='flex flex-col items-center justify-center h-full text-muted-foreground p-4'>

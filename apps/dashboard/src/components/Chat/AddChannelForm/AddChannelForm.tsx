@@ -386,16 +386,16 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
                   })),
                 }
               : socialProvider === 'APP_STORE'
-              ? {
-                  appStore: {
-                    keyId: appStoreKeyId.trim(),
-                    privateKey: appStorePrivateKey.trim(),
-                    applications: appStoreApplications.map(application => ({
-                      bundleId: application.bundleId.trim(),
-                    })),
-                  },
-                }
-              : {}),
+                ? {
+                    appStore: {
+                      keyId: appStoreKeyId.trim(),
+                      privateKey: appStorePrivateKey.trim(),
+                      applications: appStoreApplications.map(application => ({
+                        bundleId: application.bundleId.trim(),
+                      })),
+                    },
+                  }
+                : {}),
             assigneeUserGroupId: value.assigneeUserGroupId,
           });
         } else if (deskType === DeskType.DL) {
@@ -1116,33 +1116,9 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
                         data-track-category='ADD_CHANNEL_FORM'
                         data-track-name='REMOVE_APP_STORE_APPLICATION'
                       >
-                        Android package name
-                      </label>
-                      <Input
-                        id={`android-package-name-${index}`}
-                        value={application.packageName}
-                        onChange={event =>
-                          setGooglePlayApplications(applications =>
-                            applications.map((candidate, applicationIndex) =>
-                              applicationIndex === index
-                                ? { ...candidate, packageName: event.target.value.trim() }
-                                : candidate,
-                            ),
-                          )
-                        }
-                        placeholder='com.example.app'
-                        autoComplete='off'
-                        aria-invalid={invalidPackage || duplicatePackage}
-                      />
-                      {invalidPackage && (
-                        <p className='text-sm text-destructive'>Enter a valid package name.</p>
-                      )}
-                      {duplicatePackage && (
-                        <p className='text-sm text-destructive'>
-                          This package name has already been added.
-                        </p>
-                      )}
-                    </div>
+                        <Trash2 className='size-4' />
+                      </button>
+                    )}
                   </div>
                 );
               })}
@@ -1158,7 +1134,8 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
         <div className='space-y-2 rounded-lg border border-border bg-muted/20 p-3'>
           <p className='text-sm text-foreground font-medium'>Connect via Instagram</p>
           <p className='text-xs text-muted-foreground'>
-            You&apos;ll be redirected to Instagram to authorize your Business account. No extra details needed here.
+            You&apos;ll be redirected to Instagram to authorize your Business account. No extra
+            details needed here.
           </p>
         </div>
       )}
