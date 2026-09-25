@@ -269,7 +269,7 @@ export async function handleMutate(request: Request): Promise<unknown> {
             mutationAsyncTasks,
             mutationAwaitedPostCommitTasks,
           );
-          mutationAuditJobs = createZeroAuditJobs(tx);
+          mutationAuditJobs = await createZeroAuditJobs(tx, context.userID);
           const wrappedTx = wrapTransactionWithACL(
             tx,
             context,
@@ -739,7 +739,7 @@ export async function runCatalogMutation(
   const mutator = mustGetCatalogMutator(mutators, name);
 
   await dbProvider.transaction(async (tx) => {
-    const auditJobs = createZeroAuditJobs(tx);
+    const auditJobs = await createZeroAuditJobs(tx, ctx.userID);
     const wrappedTx = wrapTransactionWithACL(tx, ctx, vespaJobs, sideEffectJobs, name, auditJobs);
     // Args are validated by the mutator's own zod schema; the cast only satisfies
     // Zero's ReadonlyJSONValue parameter type.

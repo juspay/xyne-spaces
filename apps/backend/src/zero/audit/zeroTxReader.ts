@@ -102,8 +102,18 @@ export function createZeroAuditLookup(tx: Transaction<Schema>): AuditLookup {
 }
 
 /** Create the per-save accumulator bound to a Zero transaction. */
-export function createZeroAuditJobs(tx: Transaction<Schema>): AuditJobsAccumulator {
-  return { jobs: [], resolution: new AuditResolution(createZeroAuditLookup(tx)) };
+/**
+ * Build the per-mutation audit accumulator. Prewarms the actor's user row while
+ * the transaction is open — the flush runs post-commit, so its actor lookup
+ * could otherwise hit the released tx connection (lagged or undefined behavior).
+ */
+export async function createZeroAuditJobs(
+  tx: Transaction<Schema>,
+  actorUserId: string,
+): Promise<AuditJobsAccumulator> {
+  const resolution = new AuditResolution(createZeroAuditLookup(tx));
+  await resolution.warmUsers([actorUserId]);
+  return { jobs: [], resolution };
 }
 
 /**

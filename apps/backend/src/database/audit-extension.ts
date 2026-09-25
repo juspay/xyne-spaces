@@ -2,7 +2,6 @@ import { Prisma } from '@prisma/client';
 import { v4 as uuidv4 } from 'uuid';
 import { logger } from '@/utils/logger';
 import { getContextOrNull } from './tenant/context';
-import { getTransactionClient, watchTransactionFn } from './tenant/tx-context';
 import {
   AUDIT_TABLE_CONFIG,
   collectTableAudit,
@@ -19,15 +18,19 @@ import type {
 } from '../zero/audit/types';
 
 /**
- * Prisma-side audit interceptor. Writes to whitelisted tables made through the
- * shared `db` client (HTTP controllers, services, background jobs) are diffed
- * and recorded with the same AUDIT_TABLE_CONFIG the Zero wrapper uses — no
- * per-caller audit code.
- *
- * Audit rows are persisted right after the intercepted write succeeds. They are
- * therefore not strictly same-transaction with a surrounding $transaction
- * (unlike the Zero path, which flushes on the mutation's own transaction).
- */
+  * Prisma-side audit interceptor. Writes to whitelisted tables made through the
+  * shared `db` client (HTTP controllers, services, background jobs) are diffed
+  * and recorded with the same AUDIT_TABLE_CONFIG the Zero wrapper uses — no
+  * per-caller audit code.
+  *
+  * POLICY (deliberate): audit rows never enter the caller's transaction. They
+  * are written on the root client right after the intercepted op — so an audit
+  * failure can never crash or poison the business transaction. Trade-off,
+  * consciously accepted: if the caller's transaction later ROLLBACKS, the audit
+  * entry stays (phantom entry), and an update-after-insert inside one
+  * transaction reads the committed before-state (rollback/timing nuance, not
+  * the wrong-diff kind the shared collector normally guards against).
+  */
 
 const MODEL_TO_TABLE: Record<string, string> = {
   Board: 'boards',
@@ -137,9 +140,8 @@ function createPrismaAuditLookup(prisma: PrismaAuditClient): AuditLookup {
   };
 }
 
-export const auditExtension = Prisma.defineExtension(client => {
-  let runTransaction: (...args: unknown[]) => unknown;
-  const extended = client.$extends({
+export const auditExtension = Prisma.defineExtension(client =>
+  client.$extends({
     name: 'prisma-audit-trail',
     query: {
       $allOperations: async ({ model, operation, args, query }) => {
@@ -147,27 +149,11 @@ export const auditExtension = Prisma.defineExtension(client => {
         if (!model || !table || !operation || !AUDIT_TABLE_CONFIG[table] || !AUDITED_PRISMA_OPERATIONS.has(operation)) {
           return query(args);
         }
-        // Inside an interactive transaction, run on its client so the before-read
-        // sees rows created earlier in it and the audit insert rolls back with it.
-        const auditClient = (getTransactionClient() ?? client) as PrismaAuditClient;
-        return auditPrismaOperation({ client: auditClient, operation, table, model, args, query });
+        return auditPrismaOperation({ client, operation, table, model, args, query });
       },
     },
-    client: {
-      $transaction(...args: unknown[]) {
-        if (typeof args[0] === 'function') {
-          return runTransaction(
-            watchTransactionFn(args[0] as (tx: unknown) => unknown),
-            ...args.slice(1),
-          );
-        }
-        return runTransaction(...args);
-      },
-    },
-  });
-  runTransaction = (extended.$transaction as (...args: unknown[]) => unknown).bind(extended);
-  return extended;
-});
+  }),
+);
 
 async function auditPrismaOperation(params: {
   client: unknown;
