@@ -74,6 +74,7 @@ import type {
 } from './FlowAutomationView.types';
 import {
   TRIGGER_NODE_ID,
+  isDescendantPath,
   buildFlowItems,
   buildPathPrefix,
   buildVariableSourcesForPath,
@@ -882,18 +883,30 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
     [editable, onAddStep],
   );
 
-  const handleToggleCollapse = useCallback((id: string): void => {
-    setCollapsed(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
+  const handleToggleCollapse = useCallback(
+    (id: string): void => {
+      const collapsing = !collapsed.has(id);
+      setCollapsed(prev => {
+        const next = new Set(prev);
+        if (next.has(id)) {
+          next.delete(id);
+        } else {
+          next.add(id);
+        }
+        return next;
+      });
+      // Folding a branch that holds the selection would leave the panel empty and
+      // the canvas with nothing highlighted; move the selection to the folded step.
+      // `itemsById` is still the pre-collapse map here.
+      const control = itemsById.get(id);
+      const selected = selectedNodeId ? itemsById.get(selectedNodeId) : undefined;
+      if (collapsing && control && selected && isDescendantPath(control.path, selected.path)) {
+        setSelectedNodeId(id);
       }
-      return next;
-    });
-    pendingFocusId.current = id;
-  }, []);
+      pendingFocusId.current = id;
+    },
+    [collapsed, itemsById, selectedNodeId],
+  );
 
   const handleUpdateStep = (path: ViewStepPath, next: AutomationStepConfig): void => {
     onConfigChange(updateStepAtPath(config, path, next));

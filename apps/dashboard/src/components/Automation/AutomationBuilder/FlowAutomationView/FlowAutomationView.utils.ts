@@ -230,6 +230,11 @@ export function getInsertAfterTarget(item: FlowItem): FlowInsertTarget | undefin
   };
 }
 
+/** True when `path` sits strictly inside the step at `ancestor` (e.g. in one of its branches). */
+export function isDescendantPath(ancestor: ViewStepPath, path: ViewStepPath): boolean {
+  return path.length > ancestor.length && ancestor.every((segment, i) => path[i] === segment);
+}
+
 export function getStepAtPath(
   config: AutomationConfig,
   path: ViewStepPath,

@@ -16,11 +16,13 @@ import {
   getInsertAfterTarget,
   getStepAtPath,
   insertStepAtPath,
+  isDescendantPath,
   issuesUnderPath,
   moveStepAtPath,
   removeStepAtPath,
   updateStepAtPath,
 } from './FlowAutomationView.utils';
+import type { ViewStepPath } from './FlowAutomationView.types';
 
 const action = (id: string): ActionStepConfig => ({ id, type: 'SEND_MESSAGE', config: {} });
 
@@ -236,5 +238,18 @@ describe('validation paths', () => {
     const r0 = items.find(i => i.id === 'r0')!;
     expect(issuesUnderPath([issue('steps[10].config.a')], r0.path, 'conditional')).toHaveLength(0);
     expect(findItemForIssuePath(items, 'steps[10].config.a')?.id).toBe('r9');
+  });
+});
+
+describe('isDescendantPath', () => {
+  it('matches steps nested in the branches of a control step only', () => {
+    const config = makeConfig([conditional('c', [conditional('n', [action('x')])]), action('a')]);
+    const items = buildFlowItems(config, []);
+    const path = (id: string): ViewStepPath => items.find(i => i.id === id)!.path;
+    expect(isDescendantPath(path('c'), path('x'))).toBe(true);
+    expect(isDescendantPath(path('c'), path('n'))).toBe(true);
+    expect(isDescendantPath(path('c'), path('c'))).toBe(false);
+    expect(isDescendantPath(path('c'), path('a'))).toBe(false);
+    expect(isDescendantPath(path('n'), path('c'))).toBe(false);
   });
 });
