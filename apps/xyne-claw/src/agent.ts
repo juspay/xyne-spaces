@@ -802,6 +802,7 @@ const MODEL_CONTEXT_WINDOW_OVERRIDES: ReadonlyMap<string, number> = new Map([
   ["gpt-5.6-sol", 272_000],
   ["gpt-5.6-terra", 272_000],
   ["gpt-6-astra", 272_000],
+  ["glm-5.3-flash", 128_000],
 ]);
 
 export function contextWindowFor(modelId: string | undefined): number {

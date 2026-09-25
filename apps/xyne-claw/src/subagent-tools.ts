@@ -54,6 +54,7 @@ import type { ClawStreamMeta } from "xyne-claw-shared";
 import { takeCitations, recordCitations } from "./citations.js";
 import { writeSessionSkills, deleteSessionSkills } from "./session-skills.js";
 import { installLlmCallMetrics } from "./llm-call-metrics.js";
+import { installStreamModelFallback } from "./stream-model-fallback.js";
 import { installToolBudget, type ToolBudgetTracker } from "./tool-budget.js";
 import { metric } from "./metrics.js";
 import { track, type ChildTaskRegistry } from "./child-tasks.js";
@@ -997,16 +998,17 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
 
         // Apply copilot proxy (no-op for other providers) then register model via the same helper the parent uses
         const effectiveConfig = await applyCopilotProxyIfNeeded(resolvedProvider?.provider, resolvedProvider?.config);
-        // fast-model is EXPLICIT opt-in (no faster grid model exists yet —
-        // fast-mode-plan.md Slice A deferred 2026-07-15). Default/undefined/
-        // "spaces" all keep today's LITELLM.model routing.
-        const litellmFallbackModel =
-          providerResolution?.subagentProviderMode === "fast-model"
-            ? LITELLM.fastModel
-            : LITELLM.model;
+        // fast-model is EXPLICIT opt-in. Default/undefined/"spaces" all keep
+        // today's LITELLM.model routing.
+        const useFastModel = !resolvedProvider && providerResolution?.subagentProviderMode === "fast-model";
+        const litellmFallbackModel = useFastModel ? LITELLM.subagentFastModel : LITELLM.model;
         const model = resolveModel(modelRegistry, resolvedProvider?.provider, effectiveConfig, {
           model: resolvedProvider ? undefined : litellmFallbackModel,
         });
+        const slowModelFallback =
+          useFastModel && litellmFallbackModel !== LITELLM.model
+            ? resolveModel(ModelRegistry.create(AuthStorage.create()), undefined, undefined, { model: LITELLM.model })
+            : undefined;
         log.info(`[${def.name}] Using provider=${resolvedProvider?.provider ?? "litellm"} model=${resolvedProvider?.config.model ?? litellmFallbackModel}`);
 
         // Materialize skills onto disk so the child session loads them as
@@ -1146,6 +1148,12 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
         });
         sessionRef = session;
         installLlmCallMetrics(session.agent, parentSessionId ?? `subagent-${def.name}`);
+        if (slowModelFallback) {
+          installStreamModelFallback(session.agent, model, slowModelFallback, {
+            label: def.name,
+            onFallback: (reason) => pushDebugEvent("model_fallback", { from: model.id, to: slowModelFallback.id, reason }),
+          });
+        }
         toolBudget = installToolBudget(session.agent, {
           sessionId: parentSessionId ?? `subagent-${def.name}`,
           budgetScale: 0.5,
