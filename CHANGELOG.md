@@ -1,3 +1,10 @@
+## [1.405.1](https://github.com/juspay/xyne-spaces/compare/v1.405.0...v1.405.1) (2026-09-25)
+
+
+### Bug Fixes
+
+* drive call and private-canvas queries from the viewer's own rows ([#2319](https://github.com/juspay/xyne-spaces/issues/2319)) ([918623a](https://github.com/juspay/xyne-spaces/commit/918623a8d29e6a7bc1bc6b727b023d8aae7b9286))
+
 ## [1.405.0](https://github.com/juspay/xyne-spaces/compare/v1.404.2...v1.405.0) (2026-09-25)
 
 
