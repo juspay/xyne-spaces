@@ -34,6 +34,7 @@ export function StepCard({
   schema,
   schemaLoading,
   index,
+  displayIndex,
   total,
   variableSources,
   onConfigChange,
@@ -77,7 +78,7 @@ export function StepCard({
           </div>
           <div className='flex flex-col'>
             <span className='text-[10px] font-medium uppercase tracking-wide text-muted-foreground'>
-              Step {index} {catalogItem ? `· ${catalogItem.category}` : ''}
+              Step {displayIndex ?? index} {catalogItem ? `· ${catalogItem.category}` : ''}
             </span>
             <span className='text-sm font-medium text-foreground'>{heading}</span>
             {description && (

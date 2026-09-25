@@ -12,6 +12,8 @@ export interface StepCardProps {
   schema: StepSchema | null;
   schemaLoading?: boolean;
   index: number;
+  /** Label shown instead of `index`, e.g. the flow view's nested "1.2". */
+  displayIndex?: string;
   total: number;
   variableSources: VariablePickerSource[];
   onConfigChange: (config: Record<string, unknown>) => void;

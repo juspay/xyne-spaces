@@ -17,6 +17,8 @@ export interface ConditionalCardProps {
   operators: OperatorMeta[];
   variableSources: VariablePickerSource[];
   index: number;
+  /** Label shown instead of `index`, e.g. the flow view's nested "1.2". */
+  displayIndex?: string;
   total: number;
   onChange: (next: ConditionalStepConfig) => void;
   onMoveUp: () => void;
