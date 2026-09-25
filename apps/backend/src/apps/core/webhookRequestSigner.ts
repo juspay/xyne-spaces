@@ -7,7 +7,14 @@ import crypto from 'crypto';
  * scheme of signWebhookPayload (eventSubscriptionUtils.ts), which stays
  * untouched and keeps using X-Xyne-Signature. The signed string is:
  *
- *   `${timestamp}\n${METHOD}\n${pathWithQuery}`
+ *   `${timestamp}\n${METHOD}\n${pathWithQuery}\n${sha256Hex(body)}`
+ *
+ * The body hash is the last line and is the hash of the empty string for a
+ * bodyless request. It binds the payload to the signature: an export request's
+ * body carries the channel id and the date window, so signing only the path
+ * would let a captured request be replayed against a different channel inside
+ * the skew window. Method and path stay in the string too, so a body cannot be
+ * replayed against a different endpoint either.
  *
  * HMAC-SHA256 with the app's signingSecret, hex-encoded, in the distinct
  * X-Xyne-Request-Signature header so an app verifier can't confuse the two
@@ -27,6 +34,8 @@ export interface SignedAppRequestParams {
   method: string;
   /** path + query as seen by the app, e.g. `/export/messages?startDate=...`. */
   pathWithQuery: string;
+  /** Hex SHA-256 of the raw request body; the empty-string hash when bodyless. */
+  bodyHash: string;
   /** Epoch seconds. Defaults to now. */
   timestamp?: number;
 }
@@ -36,7 +45,7 @@ export function signAppRequest(params: SignedAppRequestParams): {
   signature: string;
 } {
   const timestamp = params.timestamp ?? Math.floor(Date.now() / 1000);
-  const payload = `${timestamp}\n${params.method.toUpperCase()}\n${params.pathWithQuery}`;
+  const payload = `${timestamp}\n${params.method.toUpperCase()}\n${params.pathWithQuery}\n${params.bodyHash}`;
   const signature = crypto
     .createHmac('sha256', params.signingSecret)
     .update(payload)

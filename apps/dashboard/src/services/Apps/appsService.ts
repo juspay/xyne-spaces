@@ -31,6 +31,96 @@ export interface AttachedResource {
   name: string;
 }
 
+export type AppFetchMethod = 'GET' | 'POST';
+
+/**
+ * How Xyne calls this app's history export API.
+ *
+ * Deliberately the same shape as an automation's TRIGGER_WEBHOOK step config —
+ * that is what lets the Apps screen reuse WebhookStepForm verbatim. Mirrors the
+ * backend's AppFetchConfigSchema; keep the two in step.
+ *
+ * `body` is a template string: `{{...}}` references are resolved at send time,
+ * and an unresolved one renders empty — so `{{fetch.cursor}}` is `""` on the
+ * first page. Not sent for GET, where params belong in the URL instead.
+ *
+ * Secret header values arrive redacted and are preserved on save unless retyped.
+ */
+export interface AppFetchResponseMapping {
+  /** Path to the message array; empty means the response is a bare array. */
+  messagesPath: string;
+  /** Path to the continuation token; read only in cursor pagination. */
+  nextCursorPath: string;
+  /** Where each Xyne field lives on the app's item. Dot paths. */
+  fields: {
+    externalId: string;
+    externalThreadId: string;
+    subject: string;
+    body: string;
+    senderEmail: string;
+    senderName: string;
+    recipients: string;
+    sentAt: string;
+  };
+  /**
+   * Paths combined into the dedup id. An app's own id is not always unique —
+   * a canned or auto-reply message carries its template id, so it repeats across
+   * tickets. Listing the jointly-unique fields makes the key meaningful.
+   */
+  idFields: string[];
+}
+
+export interface AppFetchConfig {
+  url: string;
+  method: AppFetchMethod;
+  headers?: Record<string, string>;
+  secretHeaders?: string[];
+  encoding: 'JSON' | 'FORM' | 'RAW';
+  body?: string;
+  timeoutMs: number;
+  /** `cursor` echoes the app's token; `offset` advances a counter and stops on an empty page. */
+  pagination: 'cursor' | 'offset';
+  /** Page size for offset pagination — sent as {{fetch.limit}} and used as the increment. */
+  pageSize: number;
+  response: AppFetchResponseMapping;
+}
+
+export interface FetchConfigResponse {
+  configured: boolean;
+  config: AppFetchConfig | null;
+  /** A stored config the server could not parse — it must be re-saved. */
+  invalid?: boolean;
+  error?: string;
+}
+
+/** What the app was actually sent, echoed back so a failure can be diagnosed. */
+export interface FetchConfigTestRequestPreview {
+  url: string;
+  method: AppFetchMethod;
+  body: string | null;
+}
+
+export type FetchConfigTestResult =
+  | {
+      ok: true;
+      status: number;
+      durationMs: number;
+      messageCount: number;
+      hasNextCursor: boolean;
+      sampleMessage: unknown;
+      sent: FetchConfigTestRequestPreview;
+    }
+  | {
+      ok: false;
+      /** Where it broke: could not connect, a non-2xx, or a 2xx that broke the contract. */
+      stage: 'transport' | 'response' | 'contract';
+      status?: number;
+      durationMs?: number;
+      error: string;
+      responsePreview?: string;
+      sent: FetchConfigTestRequestPreview;
+    };
+
 export interface BotChannel {
   id: string;
   name: string;
@@ -446,6 +536,53 @@ export class AppsService {
     const response = await apiInstance.patch<{ webhookUrl: string | null }>(
       `/apps/installed/${installedAppId}`,
       data,
+    );
+    return response.data;
+  }
+
+  /**
+   * Read this install's App Desk history fetch config. When none is stored,
+   * `configured` is false and `config` carries a suggestion derived from the
+   * install's webhook URL, so the form opens pre-filled rather than blank.
+   * `invalid` marks a stored config the server could no longer parse.
+   */
+  async getFetchConfig(installedAppId: string): Promise<FetchConfigResponse> {
+    const response = await apiInstance.get<FetchConfigResponse>(
+      `/apps/installed/${installedAppId}/fetch-config`,
+    );
+    return response.data;
+  }
+
+  /** Replace this install's fetch config. Validated server-side before it is stored. */
+  async saveFetchConfig(
+    installedAppId: string,
+    config: AppFetchConfig,
+  ): Promise<{ configured: true; config: AppFetchConfig }> {
+    const response = await apiInstance.put<{ configured: true; config: AppFetchConfig }>(
+      `/apps/installed/${installedAppId}/fetch-config`,
+      config,
+    );
+    return response.data;
+  }
+
+  /** Clear the config, disabling history pulls for this install. */
+  async deleteFetchConfig(installedAppId: string): Promise<void> {
+    await apiInstance.delete(`/apps/installed/${installedAppId}/fetch-config`);
+  }
+
+  /**
+   * Send one real signed request for a single message and report what came back,
+   * ingesting nothing. Pass `config` to test unsaved form state; omit it to test
+   * what is stored. A failed test resolves — it does not throw — so the caller
+   * renders the diagnosis rather than a generic error.
+   */
+  async testFetchConfig(
+    installedAppId: string,
+    options?: { config?: AppFetchConfig; channelId?: string },
+  ): Promise<FetchConfigTestResult> {
+    const response = await apiInstance.post<FetchConfigTestResult>(
+      `/apps/installed/${installedAppId}/fetch-config/test`,
+      options ?? {},
     );
     return response.data;
   }

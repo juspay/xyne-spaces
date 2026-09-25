@@ -5,6 +5,7 @@
 
 import express, { Router, Request, Response } from 'express';
 import crypto from 'crypto';
+import type { ExternalSource } from '@prisma/client';
 import { DeskType, isDeskChannelType } from '@xyne/shared';
 import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
 import { extractEmailAddress } from '@/utils/email';
@@ -23,6 +24,75 @@ import { db } from '@/database/client';
 import { ingestExternalSource } from '@/bypassAcl/webhookIngestServices';
 import { resolveAppDeskInstalledAppId } from '@/integrations/core/deskSources';
 import { ChannelEmailAliasService } from '@/services/channelEmailAliasService';
+
+/**
+ * The mailbox a desk channel fetches through, with the job parameters that go
+ * with it.
+ * Shared by POST /refetch and GET /sources
+ */
+export async function resolveChannelMailbox(
+  channelId: string,
+): Promise<{ source: ExternalSource; targetChannelId?: string; dlEmail?: string } | null> {
+  const repo = new ExternalSourceRepository();
+  let mailbox: ExternalSource | null = await repo.findChannelSource(channelId, {
+    sourceTypes: [...MAILBOX_SOURCE_TYPES],
+  });
+  let targetChannelId: string | undefined;
+  let dlEmail: string | undefined;
+
+  if (!mailbox || !mailbox.isActive) {
+    const pref = await db.emailChannelPreference.findUnique({
+      where: { channelId },
+      select: { deskType: true, dlEmail: true, workspaceId: true },
+    });
+    if (pref?.deskType === DeskType.DL && pref.workspaceId && pref.dlEmail) {
+      mailbox = await db.externalSource.findFirst({
+        where: {
+          workspaceId: pref.workspaceId,
+          ...WORKSPACE_LEVEL,
+          sourceType: { in: ['google', 'microsoft'] },
+          isActive: true,
+        },
+      });
+      if (mailbox?.isActive) {
+        targetChannelId = channelId;
+        dlEmail = pref.dlEmail;
+      } else {
+        mailbox = null;
+      }
+    }
+  }
+
+  // Newer channel-email model (workspace-level google-channel-email /
+  // microsoft-channel-email source): each desk gets a +ch_<channelId>
+  // alias of the shared mailbox and fetches through it.
+  if (!mailbox) {
+    const channel = await db.channel.findUnique({
+      where: { id: channelId },
+      select: { workspaceId: true },
+    });
+    if (channel?.workspaceId) {
+      const channelEmailSource = await channelEmailAliasService.getWorkspaceChannelEmailSource(
+        channel.workspaceId,
+      );
+      const alias =
+        channelEmailSource?.isActive && channelEmailSource.displayName
+          ? channelEmailAliasService.getChannelEmailAlias(channelId, channelEmailSource.displayName)
+          : null;
+      if (channelEmailSource && alias) {
+        const channelEmailFullSource = await db.externalSource.findUnique({
+          where: { id: channelEmailSource.id },
+        });
+        if (channelEmailFullSource?.isActive) {
+          mailbox = channelEmailFullSource;
+          targetChannelId = channelId;
+          dlEmail = alias;
+        }
+      }
+    }
+  }
+  return mailbox ? { source: mailbox, targetChannelId, dlEmail } : null;
+}
 
 const router = Router();
 const channelEmailAliasService = new ChannelEmailAliasService();
@@ -209,7 +279,15 @@ router.get(
           isActive: source.isActive,
         };
       });
-      const emailRows = emailSources.map(source => ({
+      const mailboxSources =
+        emailSources.length > 0
+          ? emailSources
+          : await (async () => {
+              const resolved = await resolveChannelMailbox(channelId);
+              return resolved ? [resolved.source] : [];
+            })();
+
+      const emailRows = mailboxSources.map(source => ({
         sourceId: source.id,
         sourceType: source.sourceType,
         displayName: extractEmailAddress(source.displayName) ?? source.displayName,
@@ -282,13 +360,15 @@ router.post(
       const refetchJobIdFor = (sourceId: string, jobData: FetchTarget['jobData']) =>
         `refetch-${sourceId}-${crypto
           .createHash('sha1')
-          .update(`${jobData.targetChannelId ?? channelId}|${jobData.dlEmail ?? ''}|${startDate}|${endDate}`)
+          .update(
+            `${jobData.targetChannelId ?? channelId}|${jobData.dlEmail ?? ''}|${startDate}|${endDate}|${requesterUserId}`,
+          )
           .digest('hex')}`;
 
       // Target resolution: either the explicitly requested source, or the
       // mailbox (with DL fallback) plus every active app binding on the desk.
       interface FetchTarget {
-        source: import('@prisma/client').ExternalSource;
+        source: ExternalSource;
         installedAppId: string | null;
         jobData: {
           targetChannelId?: string;
@@ -298,74 +378,42 @@ router.post(
       const targets: FetchTarget[] = [];
 
       if (requestedSourceId) {
-        const requested = await new ExternalSourceRepository().findById(requestedSourceId);
-        if (!requested || requested.channelId !== channelId || !requested.isActive) {
-          return res.status(404).json({ success: false, error: 'No active external source for this channel' });
+        // A DL or channel-email desk fetches through a workspace-level row whose
+        // channelId is null, so an ownership check on channelId alone rejects the
+        // very source /sources just listed for this channel. Resolve the channel's
+        // mailbox first and accept it by identity — and reuse the target it
+        // computed, because its jobData carries the dlEmail / +ch_<channelId>
+        // alias that scopes the shared mailbox to this desk. Dropping that would
+        // pull the whole workspace mailbox into one channel.
+        const resolvedMailbox = await resolveChannelMailbox(channelId);
+        if (resolvedMailbox && resolvedMailbox.source.id === requestedSourceId) {
+          targets.push({
+            source: resolvedMailbox.source,
+            installedAppId: null,
+            jobData: {
+              ...(resolvedMailbox.targetChannelId && {
+                targetChannelId: resolvedMailbox.targetChannelId,
+              }),
+              ...(resolvedMailbox.dlEmail && { dlEmail: resolvedMailbox.dlEmail }),
+            },
+          });
+        } else {
+          const requested = await new ExternalSourceRepository().findById(requestedSourceId);
+          if (!requested || requested.channelId !== channelId || !requested.isActive) {
+            return res.status(404).json({ success: false, error: 'No active external source for this channel' });
+          }
+          targets.push({
+            source: requested,
+            installedAppId: resolveAppDeskInstalledAppId(requested),
+            jobData: {},
+          });
         }
-        targets.push({
-          source: requested,
-          installedAppId: resolveAppDeskInstalledAppId(requested),
-          jobData: {},
-        });
       } else {
         const repo = new ExternalSourceRepository();
-        let mailbox = await repo.findChannelSource(channelId, {
-          sourceTypes: [...MAILBOX_SOURCE_TYPES],
-        });
-        let targetChannelId: string | undefined;
-        let dlEmail: string | undefined;
-
-        if (!mailbox || !mailbox.isActive) {
-          const pref = await db.emailChannelPreference.findUnique({
-            where: { channelId },
-            select: { deskType: true, dlEmail: true, workspaceId: true },
-          });
-          if (pref?.deskType === DeskType.DL && pref.workspaceId && pref.dlEmail) {
-            mailbox = await db.externalSource.findFirst({
-              where: {
-                workspaceId: pref.workspaceId,
-                ...WORKSPACE_LEVEL,
-                sourceType: { in: ['google', 'microsoft'] },
-                isActive: true,
-              },
-            });
-            if (mailbox?.isActive) {
-              targetChannelId = channelId;
-              dlEmail = pref.dlEmail;
-            } else {
-              mailbox = null;
-            }
-          }
-        }
-
-        // Newer channel-email model (workspace-level google-channel-email /
-        // microsoft-channel-email source): each desk gets a +ch_<channelId>
-        // alias of the shared mailbox and fetches through it.
-        if (!mailbox) {
-          const channel = await db.channel.findUnique({
-            where: { id: channelId },
-            select: { workspaceId: true },
-          });
-          if (channel?.workspaceId) {
-            const channelEmailSource = await channelEmailAliasService.getWorkspaceChannelEmailSource(
-              channel.workspaceId,
-            );
-            const alias =
-              channelEmailSource?.isActive && channelEmailSource.displayName
-                ? channelEmailAliasService.getChannelEmailAlias(channelId, channelEmailSource.displayName)
-                : null;
-            if (channelEmailSource && alias) {
-              const channelEmailFullSource = await db.externalSource.findUnique({
-                where: { id: channelEmailSource.id },
-              });
-              if (channelEmailFullSource?.isActive) {
-                mailbox = channelEmailFullSource;
-                targetChannelId = channelId;
-                dlEmail = alias;
-              }
-            }
-          }
-        }
+        const resolved = await resolveChannelMailbox(channelId);
+        const mailbox = resolved?.source ?? null;
+        const targetChannelId = resolved?.targetChannelId;
+        const dlEmail = resolved?.dlEmail;
 
         if (mailbox) {
           targets.push({
@@ -479,7 +527,7 @@ router.post(
             endDate,
             ...jobData,
           },
-          { jobId: refetchJobIdFor(source.id, jobData), removeOnComplete: true, removeOnFail: true },
+          { jobId: refetchJobIdFor(source.id, jobData), removeOnComplete: true },
         );
         logger.info('Fetch enqueued', { jobId: job.id, sourceId: source.id, channelId });
         jobs.push({ sourceId: source.id, installedAppId, jobId: String(job.id) });
