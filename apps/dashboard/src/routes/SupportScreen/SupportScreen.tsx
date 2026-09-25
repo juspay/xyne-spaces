@@ -6228,7 +6228,12 @@ export const SupportTicketDetail = ({
                     drafts={ticketEmailDrafts}
                     replyBasePath='/integrations/social-media'
                     placeholder={channelIntegrationInfo.sourceType === 'instagram' ? 'Reply to this DM…' : 'Reply to this review…'}
-                    maxLength={channelIntegrationInfo.sourceType === 'instagram' ? 1000 : 350}
+                    // Play caps replies at 350; Apple documents no maximum, so do not invent one.
+                    {...(channelIntegrationInfo.sourceType === SOCIAL_MEDIA_SOURCE_TYPE.INSTAGRAM
+                      ? { maxLength: 1000 }
+                      : channelIntegrationInfo.sourceType === SOCIAL_MEDIA_SOURCE_TYPE.GOOGLE_PLAY
+                        ? { maxLength: 350 }
+                        : {})}
                     trackingCategory='social-media-composer'
                   />
                 ) : null
