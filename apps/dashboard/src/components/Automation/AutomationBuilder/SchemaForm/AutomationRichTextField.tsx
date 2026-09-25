@@ -79,6 +79,8 @@ export function AutomationRichTextField({
           value={editorValue}
           onChange={onChange}
           onEditorReady={setEditor}
+          // Selecting a step must not pull focus off the canvas or list.
+          focusOnMount={false}
           placeholder={placeholder ?? 'Type your message…'}
           toolbarRightSlot={variableButton}
           className='min-h-[160px]'
