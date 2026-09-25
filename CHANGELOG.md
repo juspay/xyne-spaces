@@ -1,3 +1,10 @@
+## [1.395.2](https://github.com/juspay/xyne-spaces/compare/v1.395.1...v1.395.2) (2026-09-25)
+
+
+### Bug Fixes
+
+* timeout 401 to 503, agenrun populated on failures ([#2290](https://github.com/juspay/xyne-spaces/issues/2290)) ([e73cd33](https://github.com/juspay/xyne-spaces/commit/e73cd33355f7c66e55657b3fbd7d7aec5a1ebfe3))
+
 ## [1.395.1](https://github.com/juspay/xyne-spaces/compare/v1.395.0...v1.395.1) (2026-09-24)
 
 ## [1.395.0](https://github.com/juspay/xyne-spaces/compare/v1.394.0...v1.395.0) (2026-09-24)
