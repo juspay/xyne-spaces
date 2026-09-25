@@ -27,6 +27,21 @@ import {
   serializeFetchConfig,
 } from '../core/appFetchConfig';
 import { dispatchAppFetch, readCappedText } from '../core/appFetchDispatch';
+import { isInternalMappedHost } from '../core/appUrlResolver';
+
+/**
+ * The internally mapped host in a fetch URL, if any. A templated URL that will
+ * not parse yet is allowed through here — dispatchAppFetch re-checks the URL
+ * once its variables are resolved.
+ */
+function internalHostInUrl(url: string): string | null {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return isInternalMappedHost(host) ? host : null;
+  } catch {
+    return null;
+  }
+}
 
 const externalSourceRepo = new ExternalSourceRepository();
 
@@ -146,6 +161,24 @@ export class FetchConfigController {
         res.status(404).json({
           error: 'Installed app not found in this workspace',
           code: 'INSTALLED_APP_NOT_FOUND',
+        });
+        return;
+      }
+
+      // Rejected on save as well as at dispatch, so the admin is told now rather
+      // than by a failed run later. dispatchAppFetch stays the real enforcement:
+      // the host map can change after a config is stored.
+      const forbiddenHost = internalHostInUrl(parsed.data.url);
+      if (forbiddenHost) {
+        res.status(400).json({
+          error: 'Invalid fetch configuration',
+          code: 'VALIDATION_ERROR',
+          issues: [
+            {
+              path: 'url',
+              message: `"${forbiddenHost}" is an internal service host and cannot be used as a fetch URL`,
+            },
+          ],
         });
         return;
       }
