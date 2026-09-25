@@ -7,3 +7,11 @@ export function wrapTransactionWithEncryption(
 ): Transaction<Schema> {
   return tx;
 }
+
+/**
+ * Decrypt server-encrypted strings in a query result that was read outside Zero's `run`
+ * path (replica fallback, zql-to-sql, catalog HTTP). Pass-through in the public build.
+ */
+export async function decryptQueryResult<T>(result: T, _options: { queryName: string }): Promise<T> {
+  return result;
+}
