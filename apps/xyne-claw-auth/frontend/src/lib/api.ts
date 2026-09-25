@@ -1553,6 +1553,17 @@ export async function connectWebflow(userId: string): Promise<string> {
   return data.data.authUrl;
 }
 
+// ── ClickUp OAuth ──────────────────────────────────────────────────────────
+
+/** Start the ClickUp OAuth flow (DCR + PKCE, public client) — returns the consent URL. */
+export async function connectClickUp(userId: string): Promise<string> {
+  const data = await request<{ success: boolean; data: { authUrl: string } }>(
+    `${AUTH_API_URL}/api/v1/users/${userId}/oauth/clickup/authorize`,
+    { method: "POST", body: JSON.stringify({}) },
+  );
+  return data.data.authUrl;
+}
+
 // ── Wix OAuth ────────────────────────────────────────────────────────────────
 
 /** Start the Wix OAuth flow (DCR + PKCE, public client) — returns the consent URL. */

@@ -28,6 +28,7 @@ import { docusignAdapter } from "./adapters/docusign.js";
 import { egnyteAdapter } from "./adapters/egnyte.js";
 import { miroAdapter } from "./adapters/miro.js";
 import { webflowAdapter } from "./adapters/webflow.js";
+import { clickupAdapter } from "./adapters/clickup.js";
 import { wixAdapter } from "./adapters/wix.js";
 import { mailerliteAdapter } from "./adapters/mailerlite.js";
 import { attioAdapter } from "./adapters/attio.js";
@@ -96,6 +97,7 @@ export const STATIC_ADAPTERS: Record<string, McpAdapter> = {
   egnyte: egnyteAdapter,
   miro: miroAdapter,
   webflow: webflowAdapter,
+  clickup: clickupAdapter,
   wix: wixAdapter,
   mailerlite: mailerliteAdapter,
   attio: attioAdapter,

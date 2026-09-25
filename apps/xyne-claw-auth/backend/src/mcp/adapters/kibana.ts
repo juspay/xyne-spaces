@@ -1,29 +1,26 @@
-import type { StdioMcpAdapter } from "../types.js";
+import type { HttpMcpAdapter } from "../types.js";
 
-export const kibanaAdapter: StdioMcpAdapter = {
-  transport: "stdio",
+/**
+ * Uses Kibana's native Agent Builder MCP endpoint, not the deprecated
+ * `docker.elastic.co/mcp/elasticsearch` container (this backend has no
+ * Docker CLI or socket access, so that path always failed with ENOENT).
+ * Key needs the `feature_agentBuilder.read` Kibana app privilege — see
+ * https://www.elastic.co/docs/explore-analyze/ai-features/agent-builder/mcp-server-api-keys
+ */
+export const kibanaAdapter: HttpMcpAdapter = {
+  transport: "http",
   type: "kibana",
-  healthCheck: { name: "list_indices", params: {} },
+  healthCheck: { name: "__list_tools__", params: {} },
   credentialFields: [
-    { name: "url", label: "Elasticsearch URL", type: "text", placeholder: "https://your-elasticsearch.example.com" },
-    { name: "apiKey", label: "API Key", type: "password", placeholder: "Enter your Elasticsearch API key" },
+    { name: "url", label: "Kibana URL", type: "text", placeholder: "https://your-kibana.example.com" },
+    { name: "apiKey", label: "API Key", type: "password", placeholder: "Needs feature_agentBuilder.read privilege" },
   ],
-  buildCommand(credentials) {
-    const url = credentials["url"] as string;
+  buildHttpUrl(credentials) {
+    const url = (credentials["url"] as string).replace(/\/$/, "");
     const apiKey = credentials["apiKey"] as string;
     return {
-      cmd: "docker",
-      args: [
-        "run", "--rm", "-i",
-        "-e", "ES_URL",
-        "-e", "ES_API_KEY",
-        "docker.elastic.co/mcp/elasticsearch:0.4.6",
-        "stdio",
-      ],
-      env: {
-        ES_URL: url,
-        ES_API_KEY: apiKey,
-      },
+      url: `${url}/api/agent_builder/mcp`,
+      headers: { Authorization: `ApiKey ${apiKey}` },
     };
   },
 };

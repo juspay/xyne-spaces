@@ -160,7 +160,9 @@ function fromStaticAdapter(serverType: string): ResolvedConnectorDefinition | un
  * Everything else falls through to DB-first, preserving the pre-XYNE-14952
  * behaviour.
  */
-const STATIC_FIRST_TYPES = new Set<string>(["rapidapi-linkedin"]);
+// clickup: DB row is a dead manual-token form — ClickUp only accepts OAuth
+// PKCE tokens from routes/clickup-oauth.ts, so the code adapter must win.
+const STATIC_FIRST_TYPES = new Set<string>(["rapidapi-linkedin", "clickup"]);
 
 export async function resolveConnectorDefinition(serverType: string): Promise<ResolvedConnectorDefinition | undefined> {
   if (STATIC_FIRST_TYPES.has(serverType)) {

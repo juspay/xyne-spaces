@@ -51,6 +51,7 @@ import { docusignOAuthRouter, docusignCallbackRouter } from "../routes/docusign-
 import { egnyteOAuthRouter, egnyteCallbackRouter } from "../routes/egnyte-oauth.js";
 import { miroOAuthRouter, miroCallbackRouter } from "../routes/miro-oauth.js";
 import { webflowOAuthRouter, webflowCallbackRouter } from "../routes/webflow-oauth.js";
+import { clickupOAuthRouter, clickupCallbackRouter } from "../routes/clickup-oauth.js";
 import { wixOAuthRouter, wixCallbackRouter } from "../routes/wix-oauth.js";
 import { attioOAuthRouter, attioCallbackRouter } from "../routes/attio-oauth.js";
 import { mailerliteOAuthRouter, mailerliteCallbackRouter } from "../routes/mailerlite-oauth.js";
@@ -235,6 +236,8 @@ function mountOAuthProviders(app: Express): void {
   app.use(BASE, miroCallbackRouter);
   app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, webflowOAuthRouter);
   app.use(BASE, webflowCallbackRouter);
+  app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, clickupOAuthRouter);
+  app.use(BASE, clickupCallbackRouter);
   app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, wixOAuthRouter);
   app.use(BASE, wixCallbackRouter);
   app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, attioOAuthRouter);

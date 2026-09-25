@@ -21,6 +21,7 @@ import { calendlyOAuthProvider } from "./calendly-oauth.js";
 import { jotformOAuthProvider } from "./jotform-oauth.js";
 import { wixOAuthProvider } from "./wix-oauth.js";
 import { webflowOAuthProvider } from "./webflow-oauth.js";
+import { clickupOAuthProvider } from "./clickup-oauth.js";
 import { mailerliteOAuthProvider } from "./mailerlite-oauth.js";
 import { attioOAuthProvider } from "./attio-oauth.js";
 import { honeycombOAuthProvider } from "./honeycomb-oauth.js";
@@ -37,6 +38,7 @@ const ALL_OAUTH_PROVIDERS: OAuthTokenProvider[] = [
   jotformOAuthProvider,
   wixOAuthProvider,
   webflowOAuthProvider,
+  clickupOAuthProvider,
   mailerliteOAuthProvider,
   attioOAuthProvider,
   honeycombOAuthProvider,
