@@ -11,7 +11,7 @@ import {
 import { Tooltip } from '../../../ui/Tooltip';
 import { useUsersById } from '../../../../hooks/useUsers';
 import { fetchAutomationVersions } from '../../../../api/automationsApi';
-import { AutomationBuilder } from '../../AutomationBuilder/AutomationBuilder';
+import { AutomationVersionDiff } from './AutomationVersionDiff';
 import type { Automation } from '../../Automation.types';
 
 interface VersionDiffViewProps {
@@ -22,8 +22,6 @@ interface VersionDiffViewProps {
   onToChange: (id: string) => void;
   onClose: () => void;
 }
-
-const noop = (): void => undefined;
 
 type UsersById = Map<string, { name?: string; email?: string }>;
 
@@ -119,17 +117,8 @@ export function VersionDiffView({
         />
       </div>
 
-      <div className='flex min-h-0 flex-1 divide-x divide-border'>
-        <div className='min-h-0 min-w-0 flex-1'>
-          {from ? (
-            <AutomationBuilder key={from.id} automation={from} onBack={noop} readOnlyPreview />
-          ) : null}
-        </div>
-        <div className='min-h-0 min-w-0 flex-1'>
-          {to ? (
-            <AutomationBuilder key={to.id} automation={to} onBack={noop} readOnlyPreview />
-          ) : null}
-        </div>
+      <div className='flex min-h-0 flex-1'>
+        {from && to ? <AutomationVersionDiff from={from} to={to} /> : null}
       </div>
     </div>
   );
