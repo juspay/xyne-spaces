@@ -22,16 +22,19 @@ import {
   type DynamicFieldQueryFilter,
   type FormEntityValueLike,
 } from '../../../utils/board/dynamicFieldFilters';
+import type { ResolvedDisplayFormField } from '../../../utils/board/resolveDisplayFormFields';
+import { dynamicColumnKey } from '../TicketTable/TicketTableTypes';
 import {
   DEFAULT_TICKET_LIST_COLUMN_WIDTHS,
+  dynamicFieldListColumn,
   getTicketListColumnAlignClass,
   getTicketListGridTemplate,
+  orderTicketListColumns,
   TICKET_LIST_COLUMN_GAP,
   TICKET_LIST_COLUMN_PADDING_X,
   TICKET_LIST_COLUMNS,
   TICKET_LIST_HORIZONTAL_PADDING,
   TICKET_LIST_SELECTION_COLUMN_WIDTH,
-  type TicketListColumnKey,
   type TicketListColumnWidths,
 } from './ticketListColumns';
 import type { TicketListColumnDefinition } from './ticketListColumns';
@@ -40,8 +43,8 @@ const PAGE_SIZE = 50;
 const COLUMN_WIDTHS_STORAGE_KEY = 'xyne:desk-ticket-list-column-widths:v2';
 
 interface ColumnResizeDrag {
-  column: TicketListColumnKey;
-  adjacentColumn: TicketListColumnKey;
+  column: string;
+  adjacentColumn: string;
   pointerId: number;
   startX: number;
   startWidth: number;
@@ -77,10 +80,9 @@ const loadColumnWidths = (): TicketListColumnWidths => {
     const stored = localStorage.getItem(COLUMN_WIDTHS_STORAGE_KEY);
     if (!stored) return widths;
     const parsed = JSON.parse(stored) as Record<string, unknown>;
-    for (const column of TICKET_LIST_COLUMNS) {
-      const storedWidth = parsed[column.key];
+    for (const [key, storedWidth] of Object.entries(parsed)) {
       if (typeof storedWidth === 'number' && Number.isFinite(storedWidth) && storedWidth > 0) {
-        widths[column.key] = storedWidth;
+        widths[key] = storedWidth;
       }
     }
   } catch {
@@ -135,6 +137,8 @@ interface TicketListViewProps {
   onToggleSelectAll?: (rows: SelectableRow[], select: boolean) => void;
   onTicketsLoaded?: (tickets: SupportTicketRow[]) => void;
   visibleColumnKeys?: ReadonlySet<string> | undefined;
+  dynamicFieldColumns?: ResolvedDisplayFormField[] | undefined;
+  columnOrder?: string[] | undefined;
   initialPageIndex?: number | undefined;
   initialPageCursors?: ReadonlyArray<PageCursor | null> | undefined;
   initialFetchLimit?: number | undefined;
@@ -182,6 +186,8 @@ export const TicketListView = function TicketListView({
   onToggleSelectAll,
   onTicketsLoaded,
   visibleColumnKeys,
+  dynamicFieldColumns,
+  columnOrder,
   initialPageIndex,
   initialPageCursors,
   initialFetchLimit,
@@ -220,7 +226,7 @@ export const TicketListView = function TicketListView({
   const skipFirstLimitResetRef = useRef(restoringPage);
   const [selectAllMenuOpen, setSelectAllMenuOpen] = useState(false);
   const [columnWidths, setColumnWidths] = useState<TicketListColumnWidths>(loadColumnWidths);
-  const [resizingColumn, setResizingColumn] = useState<TicketListColumnKey | null>(null);
+  const [resizingColumn, setResizingColumn] = useState<string | null>(null);
   const resizeDragRef = useRef<ColumnResizeDrag | null>(null);
   const columnHeadersRef = useRef<HTMLDivElement>(null);
   // Virtuoso's scroller: rows render inside it (net of its scrollbar) while the header and
@@ -262,18 +268,40 @@ export const TicketListView = function TicketListView({
   const showSelectionColumn = !!onToggleSelect;
 
   // subject is always visible; other columns respect visibleColumnKeys when provided.
-  const visibleColumns = useMemo((): readonly TicketListColumnDefinition[] => {
-    if (!visibleColumnKeys) return TICKET_LIST_COLUMNS;
-    return TICKET_LIST_COLUMNS.filter(c => c.key === 'subject' || visibleColumnKeys.has(c.key));
-  }, [visibleColumnKeys]);
+  const dynamicFieldByKey = useMemo(
+    () => new Map((dynamicFieldColumns ?? []).map(field => [dynamicColumnKey(field.id), field])),
+    [dynamicFieldColumns],
+  );
+  const visibleColumns = useMemo(
+    (): readonly TicketListColumnDefinition[] =>
+      orderTicketListColumns(
+        [
+          ...(visibleColumnKeys
+            ? TICKET_LIST_COLUMNS.filter(c => c.key === 'subject' || visibleColumnKeys.has(c.key))
+            : TICKET_LIST_COLUMNS),
+          ...Array.from(dynamicFieldByKey, ([key, field]) =>
+            dynamicFieldListColumn(key, field.fieldName),
+          ),
+        ],
+        columnOrder,
+      ),
+    [visibleColumnKeys, dynamicFieldByKey, columnOrder],
+  );
+  const widthOf = useCallback(
+    (key: string): number =>
+      columnWidths[key] ?? visibleColumns.find(c => c.key === key)?.defaultWidth ?? 0,
+    [columnWidths, visibleColumns],
+  );
+  const formEntityValueFieldIds = useMemo(
+    () =>
+      dynamicFieldColumns && dynamicFieldColumns.length > 0
+        ? dynamicFieldColumns.map(field => field.id)
+        : undefined,
+    [dynamicFieldColumns],
+  );
 
   const ticketListGridTemplate = useMemo(
-    () =>
-      getTicketListGridTemplate(
-        columnWidths,
-        showSelectionColumn,
-        new Set(visibleColumns.map(c => c.key)),
-      ),
+    () => getTicketListGridTemplate(visibleColumns, columnWidths, showSelectionColumn),
     [columnWidths, showSelectionColumn, visibleColumns],
   );
 
@@ -313,8 +341,8 @@ export const TicketListView = function TicketListView({
   // Denominator for unit → pixel conversion. A drag only shifts width between two adjacent
   // columns, so the total stays constant.
   const totalColumnUnits = useMemo(
-    () => visibleColumns.reduce((total, item) => total + columnWidths[item.key], 0),
-    [columnWidths, visibleColumns],
+    () => visibleColumns.reduce((total, item) => total + widthOf(item.key), 0),
+    [widthOf, visibleColumns],
   );
   const columnsPixelWidth = computeAvailableColumnsWidth(
     scrollerClientWidth,
@@ -322,25 +350,23 @@ export const TicketListView = function TicketListView({
     visibleColumns.length,
   );
   const columnPixelWidth = useCallback(
-    (key: TicketListColumnKey): number =>
-      totalColumnUnits > 0
-        ? Math.round((columnWidths[key] / totalColumnUnits) * columnsPixelWidth)
-        : 0,
-    [columnWidths, totalColumnUnits, columnsPixelWidth],
+    (key: string): number =>
+      totalColumnUnits > 0 ? Math.round((widthOf(key) / totalColumnUnits) * columnsPixelWidth) : 0,
+    [widthOf, totalColumnUnits, columnsPixelWidth],
   );
 
   const resizeColumnPair = useCallback(
     (
-      column: TicketListColumnKey,
-      adjacentColumn: TicketListColumnKey,
+      column: string,
+      adjacentColumn: string,
       startWidth: number,
       startAdjacentWidth: number,
       deltaPixels: number,
       availableWidth: number,
       totalWidthUnits: number,
     ): void => {
-      const columnDefinition = TICKET_LIST_COLUMNS.find(item => item.key === column);
-      const adjacentDefinition = TICKET_LIST_COLUMNS.find(item => item.key === adjacentColumn);
+      const columnDefinition = visibleColumns.find(item => item.key === column);
+      const adjacentDefinition = visibleColumns.find(item => item.key === adjacentColumn);
       if (!columnDefinition || !adjacentDefinition) return;
 
       const pixelsToUnits = totalWidthUnits / availableWidth;
@@ -368,11 +394,11 @@ export const TicketListView = function TicketListView({
         [adjacentColumn]: Number((pairWidth - nextWidth).toFixed(3)),
       }));
     },
-    [],
+    [visibleColumns],
   );
 
   const handleColumnResizePointerDown = useCallback(
-    (column: TicketListColumnKey, event: React.PointerEvent<HTMLButtonElement>): void => {
+    (column: string, event: React.PointerEvent<HTMLButtonElement>): void => {
       if (event.button !== 0) return;
       const columnIndex = visibleColumns.findIndex(item => item.key === column);
       const adjacentColumn = visibleColumns[columnIndex + 1];
@@ -385,8 +411,8 @@ export const TicketListView = function TicketListView({
         adjacentColumn: adjacentColumn.key,
         pointerId: event.pointerId,
         startX: event.clientX,
-        startWidth: columnWidths[column],
-        startAdjacentWidth: columnWidths[adjacentColumn.key],
+        startWidth: widthOf(column),
+        startAdjacentWidth: widthOf(adjacentColumn.key),
         availableWidth: getAvailableColumnsWidth(),
         totalWidthUnits: totalColumnUnits,
         handle: event.currentTarget,
@@ -397,7 +423,7 @@ export const TicketListView = function TicketListView({
       document.body.style.userSelect = 'none';
       setResizingColumn(column);
     },
-    [columnWidths, getAvailableColumnsWidth, totalColumnUnits, visibleColumns],
+    [widthOf, getAvailableColumnsWidth, totalColumnUnits, visibleColumns],
   );
 
   const handleColumnResizePointerMove = useCallback(
@@ -433,7 +459,7 @@ export const TicketListView = function TicketListView({
   );
 
   const handleColumnResizeKeyDown = useCallback(
-    (column: TicketListColumnKey, event: React.KeyboardEvent<HTMLButtonElement>): void => {
+    (column: string, event: React.KeyboardEvent<HTMLButtonElement>): void => {
       if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
       const columnIndex = visibleColumns.findIndex(item => item.key === column);
       const adjacentColumn = visibleColumns[columnIndex + 1];
@@ -442,14 +468,14 @@ export const TicketListView = function TicketListView({
       resizeColumnPair(
         column,
         adjacentColumn.key,
-        columnWidths[column],
-        columnWidths[adjacentColumn.key],
+        widthOf(column),
+        widthOf(adjacentColumn.key),
         event.key === 'ArrowRight' ? 8 : -8,
         getAvailableColumnsWidth(),
         totalColumnUnits,
       );
     },
-    [columnWidths, getAvailableColumnsWidth, resizeColumnPair, totalColumnUnits, visibleColumns],
+    [widthOf, getAvailableColumnsWidth, resizeColumnPair, totalColumnUnits, visibleColumns],
   );
 
   const pageStart = pageCursors[pageIndex] ?? null;
@@ -476,6 +502,7 @@ export const TicketListView = function TicketListView({
       // adaptive fetch window so their pages fill correctly after filtering.
       ...(mailboxFolder ? { mailboxFolder } : {}),
       dynamicFieldFilters,
+      formEntityValueFieldIds,
       limit: fetchLimit,
       userGroups,
       ...(conversationLabelId ? { conversationLabelId } : {}),
@@ -825,7 +852,8 @@ export const TicketListView = function TicketListView({
             isActive={isActive}
             showExtraFields={showExtraFields}
             gridTemplate={ticketListGridTemplate}
-            visibleColumnKeys={visibleColumnKeys}
+            columns={visibleColumns}
+            dynamicFieldByKey={dynamicFieldByKey}
             {...(onToggleSelect
               ? {
                   isSelected: selectedIds?.has(row.id) ?? false,
