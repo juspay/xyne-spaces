@@ -1,3 +1,10 @@
+## [1.401.1](https://github.com/juspay/xyne-spaces/compare/v1.401.0...v1.401.1) (2026-09-25)
+
+
+### Bug Fixes
+
+* cache dashboard eslint results ([#2317](https://github.com/juspay/xyne-spaces/issues/2317)) ([1dcdeeb](https://github.com/juspay/xyne-spaces/commit/1dcdeeb792ba0e178b091e6868120c613b5ff734))
+
 ## [1.401.0](https://github.com/juspay/xyne-spaces/compare/v1.400.0...v1.401.0) (2026-09-25)
 
 
