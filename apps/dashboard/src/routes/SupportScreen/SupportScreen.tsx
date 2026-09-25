@@ -2520,7 +2520,7 @@ const SupportScreen = (): ReactElement => {
           assigneeUserGroupId: rest.assigneeUserGroupId,
         }),
         visibility: rest.visibility === 'public' ? 'PUBLIC' : 'PRIVATE',
-        platform: formPlatform ?? (isElectron ? 'electron' : 'web'),
+        platform: isElectron ? 'electron' : 'web',
       })
         .then(authorizationUrl => {
           setShowCreateChannelModal(false);
@@ -2536,11 +2536,11 @@ const SupportScreen = (): ReactElement => {
       return;
     }
 
-    if (deskType === 'SOCIAL_MEDIA' && socialProvider === 'INSTAGRAM') {
+    if (socialProvider === 'INSTAGRAM') {
       void startInstagramOAuth({
         channelName: rest.name,
         projectId: rest.projectId,
-        boardId: rest.boardId,
+        boardId: rest.boardId ?? '',
         ...(rest.assigneeUserGroupId && {
           assigneeUserGroupId: rest.assigneeUserGroupId,
         }),
@@ -6356,108 +6356,33 @@ export const SupportTicketDetail = ({
               >
                 {conversationId && channelId ? (
                   <>
-                    {/* Messages Tab Content */}
-                    <Tabs.Content
-                      value='messages'
-                      className='flex-1 flex flex-col h-full overflow-hidden data-[state=inactive]:hidden'
-                    >
-                      <ThreadMessages
-                        channelId={channelId}
-                        conversationId={conversationId}
-                        ticketId={ticket?.id ?? null}
-                        matchedMessageId={targetMessageId}
-                        skipInputAutoFocus
-                        onClose={() => setIsRightPanelOpen(false)}
-                        onAskAI={() => {
-                          if (isAIPanelOpen) {
-                            xyneAIActor.send({ type: 'CLOSE' });
-                          } else {
-                            void openDraftAgentSession();
-                          }
-                        }}
-                      />
-                      {channel?.type === ChannelType.SOCIAL_MEDIA &&
-                        channelIntegrationInfo.sourceType === 'instagram' &&
-                        channelId &&
-                        conversationId && (
-                          <InstagramCustomerHistory
-                            channelId={channelId}
-                            conversationId={conversationId}
-                            onTicketClick={xyneId => {
-                              void navigate(`${supportBase}/${channelId}/${xyneId}`);
-                            }}
-                          />
-                        )}
-                      {isUserMember ? (
-                        <div className='pb-4 bg-background flex-shrink-0 px-[var(--composer-px)] [--composer-px:1rem]'>
-                          <ChatInput
-                            ref={inputRef}
-                            channelId={channelId}
-                            conversation={conversation ?? undefined}
-                            placeholder='Reply to this thread...'
-                            hasTicket={hasTicketInMessages}
-                          />
-                        </div>
-                      ) : (
-                        <JoinChannel
+                    <ThreadMessages
+                      channelId={channelId}
+                      conversationId={conversationId}
+                      ticketId={ticket?.id ?? null}
+                      matchedMessageId={targetMessageId}
+                      skipInputAutoFocus
+                      onClose={() => setIsRightPanelOpen(false)}
+                      onAskAI={() => {
+                        if (isAIPanelOpen) {
+                          xyneAIActor.send({ type: 'CLOSE' });
+                        } else {
+                          void openDraftAgentSession();
+                        }
+                      }}
+                    />
+                    {channel?.type === ChannelType.SOCIAL_MEDIA &&
+                      channelIntegrationInfo.sourceType === 'instagram' &&
+                      channelId &&
+                      conversationId && (
+                        <InstagramCustomerHistory
                           channelId={channelId}
-                          {...(channel?.name && { channelTitle: channel.name })}
-                        />
-                      )}
-                    </Tabs.Content>
-
-                    {/* Details Tab Content */}
-                    <Tabs.Content
-                      value='details'
-                      className='flex-1 overflow-auto data-[state=inactive]:hidden'
-                    >
-                      {ticket?.id ? (
-                        <>
-                          <TicketDetails ticketId={ticket.id} />
-                          {channel?.type === ChannelType.SOCIAL_MEDIA &&
-                            channelIntegrationInfo.sourceType === 'instagram' &&
-                            channelId &&
-                            conversationId && (
-                              <InstagramCustomerHistory
-                                channelId={channelId}
-                                conversationId={conversationId}
-                                onTicketClick={xyneId => {
-                                  void navigate(`${supportBase}/${channelId}/${xyneId}`);
-                                }}
-                              />
-                            )}
-                        </>
-                      ) : (
-                        <div className='flex flex-col items-center justify-center h-full text-muted-foreground p-4'>
-                          <FileText size={48} className='mb-2 text-muted-foreground' />
-                          <p>Ticket ID not found</p>
-                        </div>
-                      )}
-                    </Tabs.Content>
-
-                    <Tabs.Content
-                      value='sources'
-                      className='flex-1 overflow-auto data-[state=inactive]:hidden p-4'
-                    >
-                      <DraftSourcesPanel
-                        citations={visibleAutoDraftCitations}
-                        embedded
-                        showAutoDraftNote
-                        loading={sourcesHydrating}
-                      />
-                    </Tabs.Content>
-
-                    {hasAutoDraftReasoning && conversationId && channelId && (
-                      <Tabs.Content
-                        value='reasoning'
-                        className='flex-1 overflow-auto data-[state=inactive]:hidden p-4'
-                      >
-                        <AutoDraftReasoningPanel
                           conversationId={conversationId}
-                          channelId={channelId}
+                          onTicketClick={xyneId => {
+                            void navigate(`${supportBase}/${channelId}/${xyneId}`);
+                          }}
                         />
-                      </Tabs.Content>
-                    )}
+                      )}
                   </>
                 ) : (
                   <div className='h-full flex items-center justify-center'>

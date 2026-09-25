@@ -21,10 +21,9 @@ import {
   Smartphone,
   Phone,
   Plus,
+  Share2,
   Trash2,
 } from 'lucide-react';
-
-import { SiInstagram } from 'react-icons/si';
 import { Button } from '../../ui/Button';
 import { Tooltip } from '../../ui/Tooltip';
 import {
@@ -371,7 +370,6 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
             assigneeUserGroupId: value.assigneeUserGroupId,
           });
         } else if (deskType === DeskType.SOCIAL_MEDIA) {
-          const isElectron = typeof window.electronAPI?.openExternal === 'function';
           onSubmit?.({
             ...value,
             connector: null,
