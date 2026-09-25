@@ -1,5 +1,9 @@
 import { logger } from '@/utils/logger';
-import { FormFieldType, MAX_DUPLICATE_SCOPE_FIELDS, TicketReferenceRelation } from '@xyne/shared';
+import { MAX_DUPLICATE_SCOPE_FIELDS, TicketReferenceRelation } from '@xyne/shared';
+import {
+  resolveBoardTicketFormId,
+  resolveFormFieldDefinitionsForForm,
+} from '@/utils/fieldDefinition';
 import { extractPlainTextFromHtml } from '@/utils/contentUtils';
 import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import { config } from '@/config/env';
@@ -25,6 +29,11 @@ const prisma = DatabaseClient.getInstance();
 const emailChannelPreferenceRepo = new EmailChannelPreferenceRepository();
 const DUPLICATE_REFERENCE_LIMIT = 10;
 
+// Channels already reported as scoped-but-boardless, so the warning is emitted once per
+// channel per process instead of once per ticket. Bounded by the number of misconfigured
+// desk channels, and holding only their ids.
+const boardlessScopedChannelsLogged = new Set<string>();
+
 /**
  * One raw scope-field value carried by the NEW ticket, handed to the service as a
  * 1:1 map of the caller's precomputed custom-field write payload entries (fieldId +
@@ -39,11 +48,11 @@ export type DuplicateScopeFieldValue = {
 };
 
 /**
- * A configured scope field resolved against the project, ready to become one
- * `fieldId::value` token.
+ * A configured scope field resolved against the channel's board form, ready to
+ * become one `fieldId::value` token.
  */
 type ResolvedDuplicateScopeField = {
-  globalFieldId: string;
+  fieldId: string;
   values: string[];
 };
 
@@ -64,16 +73,33 @@ type DuplicateScopeConfig = z.infer<typeof duplicateScopeConfigSchema>;
  * representation: date normalization, per-element rows for multi-select/user, and
  * scalar normalization all come from one implementation rather than a copy.
  *
- * Ids that aren't global fields of THIS project drop silently: a legacy form-only
- * field can never be a configured scope key, because the settings picker lists
- * GlobalFields, and scoping must never reach another project's fields.
+ * Resolution runs against the ticket form of the channel's OWN board, using the same
+ * resolveFormFieldDefinitionsForForm the write path and the settings picker use. That
+ * matters for two reasons:
+ *
+ *  - Legacy (non-global) board fields work. Their canonical id is `globalFieldId ?? id`,
+ *    which is what buildPartialCustomFieldWritePayload hands us and what the indexer
+ *    writes to form_entity_values — so a board whose form predates GlobalFields is
+ *    scopable. A global-fields-only lookup silently dropped every such field, which
+ *    forced 100% project-wide fallback on those desks.
+ *  - Scope can never widen past the channel. The board comes from the channel's own
+ *    preference row, so a stray caller id resolves to nothing rather than to another
+ *    project's field — the guarantee the old `projectId` filter provided.
+ *
+ * CAVEAT: these ids resolve against the channel PREFERENCE's board, while the caller built
+ * them from the board the ticket is actually created on. Every desk intake path derives
+ * both from channelPref.boardId today, so they agree. If a ticket is ever created on a
+ * different board of the same project, a LEGACY scope key — whose canonical id is a
+ * per-form FormFields row — will not resolve, and detection degrades to project-wide
+ * rather than filtering wrongly. Global-backed keys are unaffected: their canonical id is
+ * the GlobalField id, which is shared across forms.
  */
 export const buildDuplicateScopeFieldValues = async (params: {
-  projectId: string;
+  boardId: string;
   fieldValues: ReadonlyArray<DuplicateScopeFieldValue>;
 }): Promise<ResolvedDuplicateScopeField[]> => {
-  const { projectId, fieldValues } = params;
-  if (!projectId || fieldValues.length === 0) {
+  const { boardId, fieldValues } = params;
+  if (!boardId || fieldValues.length === 0) {
     return [];
   }
 
@@ -87,22 +113,25 @@ export const buildDuplicateScopeFieldValues = async (params: {
   }
 
   try {
-    // Restrict to global fields that actually belong to this project so a stray
-    // caller id can never widen the scope to another project's fields.
-    const projectGlobalFields = await prisma.globalField.findMany({
-      where: { id: { in: [...rawValueByFieldId.keys()] }, projectId },
-      select: { id: true, fieldType: true },
-    });
-    if (projectGlobalFields.length === 0) {
+    const formId = await resolveBoardTicketFormId(prisma, boardId);
+    if (!formId) {
+      return [];
+    }
+
+    // Canonical ids (`globalFieldId ?? id`) for every field the board's form carries —
+    // the exact id space the caller's payload and form_entity_values both use.
+    const boardFields = await resolveFormFieldDefinitionsForForm(prisma, formId);
+    const scopableFields = boardFields.filter(field => rawValueByFieldId.has(field.id));
+    if (scopableFields.length === 0) {
       return [];
     }
     const fieldTypeByFieldId = new Map(
-      projectGlobalFields.map(g => [g.id, g.fieldType as FormFieldType] as const),
+      scopableFields.map(field => [field.id, field.fieldType] as const),
     );
 
     // Same inputs the indexer gets, so the rows come out identical.
     const indexedRows = buildFormFields(
-      projectGlobalFields.map(({ id }) => ({
+      scopableFields.map(({ id }) => ({
         fieldId: id,
         actualFieldValue: rawValueByFieldId.get(id) as Prisma.JsonValue,
       })),
@@ -121,12 +150,12 @@ export const buildDuplicateScopeFieldValues = async (params: {
       }
     }
 
-    return [...valuesByFieldId].map(([globalFieldId, values]) => ({ globalFieldId, values }));
+    return [...valuesByFieldId].map(([fieldId, values]) => ({ fieldId, values }));
   } catch (error) {
     // Scope expansion is best-effort: pass nothing scoped rather than risk a
     // wrongly-built filter — detection falls back to project-wide behavior.
     logger.warn('[TicketDuplicateService] Failed to build scope field values, falling back to project-wide detection', {
-      projectId,
+      boardId,
       error: error instanceof Error ? error.message : String(error),
     });
     return [];
@@ -146,11 +175,15 @@ const buildDuplicateSearchQuery = (title: string, description: string): string =
 
 class TicketDuplicateService {
   /**
-   * Load the channel's per-channel duplicate-scope config. Null config, disabled
-   * flag, or an unparsable Json payload all resolve to null = today's project-wide
-   * behavior. Any lookup failure also resolves to null (detection must be tolerant).
+   * Load the channel's per-channel duplicate-scope config, together with the board
+   * whose ticket form defines the id space those configured ids live in. Null config,
+   * disabled flag, an unparsable Json payload, or a channel with no board all resolve
+   * to null = today's project-wide behavior. Any lookup failure also resolves to null
+   * (detection must be tolerant).
    */
-  private async resolveDuplicateScopeConfig(channelId: string | undefined): Promise<DuplicateScopeConfig | null> {
+  private async resolveDuplicateScopeConfig(
+    channelId: string | undefined,
+  ): Promise<{ config: DuplicateScopeConfig; boardId: string } | null> {
     if (!channelId) {
       return null;
     }
@@ -184,7 +217,22 @@ class TicketDuplicateService {
       if (!parsed.data.enabled || parsed.data.scopeFieldGlobalIds.length === 0) {
         return null;
       }
-      return parsed.data;
+      // Scope keys are ids on this board's ticket form, so without a board there is
+      // nothing to resolve them against. Reported once per channel per process: the
+      // condition is static config that cannot change between two tickets, so logging
+      // it per ticket creation would be unbounded noise on a hot path. Desk settings is
+      // where an admin sees it — the picker refuses to offer fields without a board.
+      if (!preference.boardId) {
+        if (!boardlessScopedChannelsLogged.has(channelId)) {
+          boardlessScopedChannelsLogged.add(channelId);
+          logger.warn(
+            '[TicketDuplicateService] Scoped channel has no board, treating as disabled',
+            { channelId },
+          );
+        }
+        return null;
+      }
+      return { config: parsed.data, boardId: preference.boardId };
     } catch (error) {
       logger.warn('[TicketDuplicateService] Failed to load duplicateScopeConfig, falling back to project-wide detection', {
         channelId,
@@ -214,15 +262,31 @@ class TicketDuplicateService {
     excludeTicketId?: string;
   }): Promise<string[] | null> {
     const { channelId, projectId, scopeFieldValues, excludeTicketId } = input;
-    const scopeConfig = await this.resolveDuplicateScopeConfig(channelId);
-    if (!scopeConfig) {
+    const scope = await this.resolveDuplicateScopeConfig(channelId);
+    if (!scope) {
       return null;
     }
+    const { config: scopeConfig, boardId } = scope;
 
-    const logProjectWideFallback = (missingScopeFieldGlobalIds: string[]): void => {
+    // Both the configured keys and what we could actually resolve, because "which id
+    // was missing" alone cannot distinguish a value the ticket never carried from a
+    // configured id that does not exist on this board's form at all.
+    const logProjectWideFallback = (
+      missingScopeFieldIds: string[],
+      resolvedScopeFieldIds: string[] = [],
+    ): void => {
       logger.info(
         '[TicketDuplicateService] Channel scope fields missing on new ticket, using project-wide duplicate search',
-        { ticketId: excludeTicketId, channelId, projectId, missingScopeFieldGlobalIds },
+        {
+          ticketId: excludeTicketId,
+          channelId,
+          projectId,
+          boardId,
+          missingScopeFieldIds,
+          configuredScopeFieldIds: scopeConfig.scopeFieldGlobalIds,
+          providedScopeFieldIds: (scopeFieldValues ?? []).map(entry => entry.fieldId),
+          resolvedScopeFieldIds,
+        },
       );
     };
 
@@ -231,27 +295,27 @@ class TicketDuplicateService {
       return null;
     }
 
-    // Lazy resolution: the globalField query runs only here — config enabled +
+    // Lazy resolution: the board-form query runs only here — config enabled +
     // fields configured (checked above) + raw values present.
     const resolvedFields = await buildDuplicateScopeFieldValues({
-      projectId,
+      boardId,
       fieldValues: scopeFieldValues,
     });
-    const valuesByGlobalId = new Map(
-      resolvedFields.map(entry => [entry.globalFieldId, entry.values] as const),
+    const valuesByFieldId = new Map(
+      resolvedFields.map(entry => [entry.fieldId, entry.values] as const),
     );
 
-    const missing = scopeConfig.scopeFieldGlobalIds.filter(id => !valuesByGlobalId.has(id));
+    const missing = scopeConfig.scopeFieldGlobalIds.filter(id => !valuesByFieldId.has(id));
     if (missing.length > 0) {
-      logProjectWideFallback(missing);
+      logProjectWideFallback(missing, [...valuesByFieldId.keys()]);
       return null;
     }
 
     // One token per indexed value. YqlBuilder buckets by fieldId, so tokens sharing
     // a fieldId OR together while distinct fields AND — "matches every scope field,
     // on at least one of its values".
-    return scopeConfig.scopeFieldGlobalIds.flatMap(globalFieldId =>
-      valuesByGlobalId.get(globalFieldId)!.map(value => `${globalFieldId}::${value}`),
+    return scopeConfig.scopeFieldGlobalIds.flatMap(fieldId =>
+      valuesByFieldId.get(fieldId)!.map(value => `${fieldId}::${value}`),
     );
   }
 
@@ -289,8 +353,9 @@ class TicketDuplicateService {
       });
       if (!ticket) return;
 
-      const scopeConfig = await this.resolveDuplicateScopeConfig(ticket.channelId);
-      if (!scopeConfig) return;
+      const scope = await this.resolveDuplicateScopeConfig(ticket.channelId);
+      if (!scope) return;
+      const scopeConfig = scope.config;
 
       // updatedFieldIds come from resolveFormFieldDefinitionsForForm, which returns
       // `globalFieldId ?? id` — so for global-backed fields they compare directly

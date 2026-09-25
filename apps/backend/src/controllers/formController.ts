@@ -94,6 +94,44 @@ export class FormController {
   };
 
   /**
+   * Get the fields on a board's ticket form.
+   *
+   * Used by desk settings to offer duplicate-scope keys: only a field this board's
+   * form actually carries can ever be supplied by a ticket on that board, and the ids
+   * returned here are the same ones the ticket write path stores.
+   */
+  getBoardTicketFormFields = async (req: Request, res: Response): Promise<void> => {
+    try {
+      if (!req.user?.id || !req.user.workspaceId) {
+        res.status(403).json({ error: 'Authentication required' });
+        return;
+      }
+
+      const boardId = typeof req.query.boardId === 'string' ? req.query.boardId : '';
+
+      if (!boardId) {
+        res.status(400).json({ error: 'Board ID is required' });
+        return;
+      }
+
+      const fields = await formService.getBoardTicketFormFields({
+        boardId,
+        workspaceId: req.user.workspaceId,
+      });
+
+      if (fields === null) {
+        res.status(404).json({ error: 'Board not found' });
+        return;
+      }
+
+      res.status(200).json(fields);
+    } catch (error: any) {
+      logger.error('Error getting board ticket form fields:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
+
+  /**
    * Create form
    */
   createForm = async (req: Request, res: Response): Promise<void> => {

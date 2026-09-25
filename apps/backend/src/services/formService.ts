@@ -1,6 +1,8 @@
 import { FormsRepository, CreateFormWithFieldsInput } from '../database/repositories/formsRepository';
 import { FormContextType, FormEntityType, FormFieldType } from '@xyne/shared';
 import { Prisma } from '@prisma/client';
+import { DatabaseClient } from '../database/client';
+import { resolveBoardTicketFormId, resolveFormFieldDefinitionsForForm } from '../utils/fieldDefinition';
 
 export class FormService {
   private formsRepository: FormsRepository;
@@ -60,6 +62,48 @@ export class FormService {
     workspaceId: string;
   }) {
     return await this.formsRepository.getGlobalFields(input);
+  }
+
+  /**
+   * Fields on a board's ticket form, keyed by the canonical id (`globalFieldId ?? id`)
+   * that the ticket write path and form_entity_values both use.
+   *
+   * This is the id space duplicate-scope config must be expressed in: a board whose
+   * form is legacy (no GlobalField backing) has no global field ids at all, so a
+   * project-GlobalFields list would offer keys its tickets can never supply.
+   */
+  async getBoardTicketFormFields(input: {
+    boardId: string;
+    workspaceId: string;
+  }): Promise<Array<{
+    id: string;
+    fieldName: string;
+    fieldType: FormFieldType;
+    isOptional: boolean;
+  }> | null> {
+    const { boardId, workspaceId } = input;
+    const db = DatabaseClient.getInstance();
+
+    const board = await this.formsRepository.findBoardForWorkspace(boardId, workspaceId);
+    if (!board) {
+      return null;
+    }
+
+    const formId = await resolveBoardTicketFormId(db, boardId);
+    if (!formId) {
+      return [];
+    }
+
+    const fields = await resolveFormFieldDefinitionsForForm(
+      db,
+      formId,
+    );
+    return fields.map(({ id, fieldName, fieldType, isOptional }) => ({
+      id,
+      fieldName,
+      fieldType,
+      isOptional,
+    }));
   }
 
   /**

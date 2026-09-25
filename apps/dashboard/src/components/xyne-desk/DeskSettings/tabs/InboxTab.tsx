@@ -15,7 +15,7 @@ import { Switch } from '../../../ui/Switch';
 import { SearchableMultiSelect } from '../../../ui/SearchableMultiSelect/SearchableMultiSelect';
 import { matchesUserQuery } from '../../../../utils/userDisplayName';
 import { useChannelApps } from '../../../../hooks/useChannelApps';
-import { useGlobalFieldSearch } from '../../../../hooks/useGlobalFieldSearch';
+import { useBoardTicketFormFields } from '../../../../hooks/useBoardTicketFormFields';
 import { useUsers } from '../../../../hooks/useUsers';
 import { useZero } from '../../../../hooks/useZero';
 import { mutators } from '../../../../zero/mutators';
@@ -76,7 +76,7 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
     setDuplicateDetectionEnabled,
     duplicateScopeFieldIds,
     setDuplicateScopeFieldIds,
-    projectId,
+    boardId,
   } = form;
 
   const [ccInputValue, setCcInputValue] = useState('');
@@ -106,27 +106,34 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
   const showAppWebhookDelivery = isApp || (connectedApps?.length ?? 0) > 0;
 
   const [scopeFieldPickerOpen, setScopeFieldPickerOpen] = useState(false);
-  // Empty search string: the picker's own input filters; we only need the cached list here.
-  const { details: globalFieldsQuery } = useGlobalFieldSearch(projectId, '', {
-    enabled: isDeskChannel && !!projectId,
+  const scopeFieldsQuery = useBoardTicketFormFields(boardId, {
+    enabled: isDeskChannel && !!boardId,
   });
   // Every field type is a valid scope key — the service derives its Vespa token from
   // the same buildFormFields the indexer uses — so the picker offers the whole list.
-  const globalFields = useMemo(() => globalFieldsQuery.data ?? [], [globalFieldsQuery.data]);
+  const scopedFields = useMemo(() => scopeFieldsQuery.data ?? [], [scopeFieldsQuery.data]);
   // Chips are driven by the saved config, not by the field list: a configured field
   // that has since been deleted still needs a chip, or its id is stranded — it keeps
   // counting toward the cap and the backend reports it missing forever, which turns
   // scoping off for the whole channel while this screen still reads "on".
-  const globalFieldById = useMemo(
-    () => new Map(globalFields.map(field => [field.id, field])),
-    [globalFields],
+  const scopeFieldById = useMemo(
+    () => new Map(scopedFields.map(field => [field.id, field])),
+    [scopedFields],
   );
   const selectedDuplicateScopeFields = duplicateScopeFieldIds.map(id => ({
     id,
-    field: globalFieldById.get(id),
+    field: scopeFieldById.get(id),
   }));
+  // "We know this board's fields" is NOT "the list came back empty" — and the other two
+  // states also leave scopedFields empty: a desk with no target board leaves the query
+  // disabled, which react-query v5 parks at isPending indefinitely, and a failed fetch
+  // clears data too. Marking a configured field deleted, or advising its removal, in
+  // either case would talk an admin into destroying a working config, so every such
+  // claim below hangs off isSuccess rather than off an empty list.
+  const hasTargetBoard = !!boardId;
+  const scopeFieldsResolved = hasTargetBoard && scopeFieldsQuery.isSuccess;
   const hasUnresolvedScopeField =
-    !globalFieldsQuery.isPending && selectedDuplicateScopeFields.some(entry => !entry.field);
+    scopeFieldsResolved && selectedDuplicateScopeFields.some(entry => !entry.field);
   const duplicateScopeFieldCapReached = duplicateScopeFieldIds.length >= MAX_DUPLICATE_SCOPE_FIELDS;
 
   useEffect(() => {
@@ -490,20 +497,24 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
               <div className='text-desk-label'>Scope fields</div>
               <div className='flex w-full max-w-[500px] flex-wrap items-center gap-[6px]'>
                 {selectedDuplicateScopeFields.map(({ id, field }) => {
-                  const label = field ? field.fieldName : 'Deleted field';
+                  // Only flag a field as missing once the board's list actually loaded —
+                  // otherwise a pending or failed query makes every configured field look
+                  // deleted.
+                  const isMissing = scopeFieldsResolved && !field;
+                  const label = field ? field.fieldName : isMissing ? 'Deleted field' : id;
                   return (
                     <div
                       key={id}
-                      title={field ? undefined : `This field no longer exists (${id})`}
+                      title={isMissing ? `This field no longer exists (${id})` : undefined}
                       className={`inline-flex shrink-0 items-center gap-[4px] whitespace-nowrap rounded-[6px] py-[2px] pl-[6px] pr-[4px] ${
-                        field
-                          ? 'bg-desk-accent-subtle'
-                          : 'bg-destructive/10 line-through decoration-destructive/60'
+                        isMissing
+                          ? 'bg-destructive/10 line-through decoration-destructive/60'
+                          : 'bg-desk-accent-subtle'
                       }`}
                     >
                       <span
-                        className={`text-[13px] font-medium leading-[18px] tracking-[-0.2px] ${
-                          field ? 'text-desk-accent-foreground' : 'text-destructive'
+                        className={`max-w-[220px] truncate text-[13px] font-medium leading-[18px] tracking-[-0.2px] ${
+                          isMissing ? 'text-destructive' : 'text-desk-accent-foreground'
                         }`}
                       >
                         {label}
@@ -517,7 +528,7 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
                         }
                         disabled={!canManage || !duplicateDetectionEnabled}
                         className={`hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 ${
-                          field ? 'text-desk-accent-foreground' : 'text-destructive'
+                          isMissing ? 'text-destructive' : 'text-desk-accent-foreground'
                         }`}
                         data-track-category='DeskSettings'
                         data-track-name='RemoveDuplicateScopeField'
@@ -528,9 +539,9 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
                     </div>
                   );
                 })}
-                {globalFields.length > 0 && (
+                {scopeFieldsResolved && scopedFields.length > 0 && (
                   <SearchableMultiSelect
-                    options={globalFields.map(field => {
+                    options={scopedFields.map(field => {
                       const FieldTypeIcon = getIconForFieldType(field.fieldType);
                       return {
                         value: field.id,
@@ -582,13 +593,29 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
               </div>
               {hasUnresolvedScopeField && (
                 <div className='w-full max-w-[500px] text-[13px] leading-[18px] text-destructive'>
-                  A selected field no longer exists, so duplicate detection falls back to
-                  project-wide on this desk. Remove it to re-enable scoping.
+                  A selected field is not on the board ticket form for this desk, so duplicate
+                  detection falls back to project-wide here. Remove it and pick a field from the
+                  list to re-enable scoping.
                 </div>
               )}
-              {!globalFieldsQuery.isPending && globalFields.length === 0 && (
+              {!hasTargetBoard && (
                 <div className='text-desk-helper w-full max-w-[500px]'>
-                  No fields in this project yet. Add one on a ticket form first, then pick it here.
+                  Scope fields come from the ticket form of this desk&apos;s target board. Set a
+                  target board for this desk first, then pick the fields to scope on. Until then
+                  duplicate detection stays project-wide.
+                </div>
+              )}
+              {hasTargetBoard && scopeFieldsQuery.isError && (
+                <div className='w-full max-w-[500px] text-[13px] leading-[18px] text-destructive'>
+                  Could not load the fields on this board&apos;s ticket form, so the list is
+                  unavailable right now. The saved scope fields are unchanged — retry before editing
+                  them.
+                </div>
+              )}
+              {scopeFieldsResolved && scopedFields.length === 0 && (
+                <div className='text-desk-helper w-full max-w-[500px]'>
+                  The board for this desk has no ticket form fields yet. Add one to the board ticket
+                  form first, then pick it here.
                 </div>
               )}
             </div>

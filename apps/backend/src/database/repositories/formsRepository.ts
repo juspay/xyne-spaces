@@ -276,6 +276,20 @@ export class FormsRepository extends BaseRepository<Form, CreateFormInput, Prism
   }
 
   /**
+   * Board lookup scoped to the caller's workspace, so a board id from another
+   * workspace cannot be used to enumerate its form fields.
+   */
+  async findBoardForWorkspace(
+    boardId: string,
+    workspaceId: string,
+  ): Promise<{ id: string } | null> {
+    return await this.db.board.findFirst({
+      where: { id: boardId, workspaceId },
+      select: { id: true },
+    });
+  }
+
+  /**
    * Update form with fields while preserving existing field IDs when possible.
    */
   async updateWithFields(
