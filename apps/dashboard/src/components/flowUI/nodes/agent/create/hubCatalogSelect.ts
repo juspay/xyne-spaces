@@ -522,6 +522,7 @@ export async function selectHubToolsForIntent(args: {
   selection: AgentToolboxSelection;
   catalog: AvailableTools;
   labels: string[];
+  skillSlugs: string[];
 } | null> {
   const { getAvailableTools, suggestTools } = await import('@/services/claw/clawToolsService');
   const catalog =
@@ -532,6 +533,7 @@ export async function selectHubToolsForIntent(args: {
   // Named/soft MCP + local subagent/builtin picks first — do not wait on suggest-tools.
   let selection = applyLocalHubBinds(args.intent, catalog, args.current);
   const named = matchNamedMcpEntries(args.intent, catalog);
+  let skillSlugs: string[] = [];
 
   const needsSuggest =
     !selectionHasTools(selection) ||
@@ -557,6 +559,9 @@ export async function selectHubToolsForIntent(args: {
         reasoning: {},
       }),
     );
+    skillSlugs = Array.isArray(suggestion.skillSlugs)
+      ? suggestion.skillSlugs.filter(s => typeof s === 'string' && s.trim().length > 0)
+      : [];
     selection = selectionFromCatalogSuggestion({
       current: selection,
       suggestion,
@@ -583,5 +588,6 @@ export async function selectHubToolsForIntent(args: {
     selection,
     catalog,
     labels: describeSelectedTools(selection, catalog),
+    skillSlugs,
   };
 }

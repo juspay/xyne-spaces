@@ -376,6 +376,19 @@ export function AgentCreateSplitPage({
                       });
                       if (selected) {
                         incoming.tools = selected.selection;
+                        if (selected.skillSlugs.length > 0 && user?.id) {
+                          try {
+                            const skills = await listSkills(user.id);
+                            const ids = new Set(createForm.getForm().selectedSkillIds);
+                            for (const slug of selected.skillSlugs) {
+                              const match = skills.find(s => s.slug === slug);
+                              if (match?.id) ids.add(match.id);
+                            }
+                            if (ids.size > 0) incoming.selectedSkillIds = [...ids];
+                          } catch {
+                            // Skills hub may stay empty if list fails.
+                          }
+                        }
                         return selected.labels;
                       }
                     } catch {

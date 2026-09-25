@@ -146,6 +146,7 @@ import { buildTwinDeliverTool, buildTwinDeliverMandate, type TwinDeliverRef } fr
 import { buildProposePlanTool, PROPOSE_PLAN_TOOL_NAME, type ProposePlanRef } from "../propose-plan.js";
 import { presentationCatalogDefaultOn, isFreePresentationTool, buildPresentationPrimer } from "../presentation-catalog.js";
 import { buildProposeAgentTool, type ProposeAgentRef } from "../propose-agent.js";
+import { fetchAuthoringPreflight } from "../authoring-preflight.js";
 import { buildDescribeAgentTool, type DescribeAgentRef } from "../describe-agent.js";
 import { buildSuggestConnectorsTool, type SuggestConnectorsRef } from "../suggest-connectors.js";
 import { buildEmitBriefTool, EMIT_BRIEF_TOOL_NAME, type EmitBriefRef } from "../daily-brief.js";
@@ -2996,9 +2997,17 @@ export async function processTask(
       !isTwinMentionFlow &&
       !isPlanMode &&
       !isDailyBrief;
+    let authoringPreflightNote: string | undefined;
     if (agentAuthoringEnabled) {
       allTools.push(buildProposeAgentTool(proposeAgentRef, abortRun));
       log("Agent authoring enabled — injected terminal propose-agent tool");
+      const preflight = await fetchAuthoringPreflight({ intent: task, userId });
+      if (preflight) {
+        authoringPreflightNote = preflight.note;
+        log(
+          `Agent authoring preflight — ${preflight.tools.length} tool(s), ${preflight.skillSlugs.length} skill(s), permission=${preflight.permissionMode}`,
+        );
+      }
     }
 
     // describe-agent: EVERY agent gets this, no config. "What can you do?" is a
@@ -3852,6 +3861,10 @@ export async function processTask(
       fullContext = fullContext
         ? `${fullContext}${instructionsNote}`
         : instructionsNote;
+    }
+    if (authoringPreflightNote) {
+      const note = `\n\n${authoringPreflightNote}`;
+      fullContext = fullContext ? `${fullContext}${note}` : note;
     }
 
     // Inject ticket/canvas/call IDs from the frontend into context metadata

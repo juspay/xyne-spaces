@@ -47,6 +47,8 @@ export interface ToolSuggestion {
     writeTools: string[];
   }>;
   reasoning: Record<string, string>;
+  /** Optional org skill slugs from Laya gap shortlist. */
+  skillSlugs?: string[];
 }
 
 /** The wizard's tool selection, threaded through ToolboxPicker value/onChange. */

@@ -243,3 +243,6 @@ security-reports/
 
 # Build exports (make export-dashboard-bundle)
 out/
+
+# Local Laya sidecar venv
+.venv-laya/

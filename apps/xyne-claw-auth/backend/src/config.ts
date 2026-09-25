@@ -405,6 +405,10 @@ export const CONFIG = {
     process.env["HEISENBERG_BASE_URL"] ??
     "<heisenberg-url>"
   ).replace(/\/+$/, ""),
+  /** Loopback laya-serve for agent-creation gap shortlists. */
+  layaUrl: (process.env["LAYA_URL"] ?? "http://127.0.0.1:8000").replace(/\/+$/, ""),
+  layaApiKey: process.env["LAYA_API_KEY"] ?? "",
+  layaTimeoutMs: Math.max(200, Number(process.env["LAYA_TIMEOUT_MS"] ?? 2_500)),
 } as const;
 
 // Prod safety gate: the claw-auth → session-MCP relay and the run callbacks

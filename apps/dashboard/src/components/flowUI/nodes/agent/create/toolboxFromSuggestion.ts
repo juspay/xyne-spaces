@@ -33,8 +33,16 @@ export function toolboxFromSuggestion(
       continue;
     }
     if (integration.kind === 'mcp') {
+      // Only the named tools from the suggestion — never every tool on the integration.
+      const named = new Set([
+        ...(sugg.readTools ?? []),
+        ...(sugg.writeTools ?? []),
+      ]);
+      if (named.size === 0) continue;
       for (const tool of [...integration.readTools, ...integration.writeTools]) {
-        directSet.add(tool.name);
+        if (named.has(tool.name) || named.has(tool.slug)) {
+          directSet.add(tool.name);
+        }
       }
     }
   }
@@ -50,7 +58,9 @@ export function toolboxFromSuggestion(
   }
   for (const group of availableTools.customGroups) {
     for (const tool of group.tools) {
-      if (suggestedNames.has(tool.name)) customSet.add(tool.slug);
+      if (suggestedNames.has(tool.name) || suggestedNames.has(tool.slug)) {
+        customSet.add(tool.slug);
+      }
     }
   }
   return {

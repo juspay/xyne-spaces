@@ -52,6 +52,12 @@ import { exportAgentToml, importAgentToml } from "../lib/agent-toml-sync.js";
 import { parseToolsConfig } from "xyne-claw-shared";
 
 import { createLogger } from "../logger.js";
+import {
+  buildGapShortlist,
+  defaultEmptyHubs,
+  recordClosedPick,
+} from "../lib/laya-authoring.js";
+import { layaSuggestMode } from "../lib/laya-client.js";
 const log = createLogger("agents");
 
 const router = Router();
@@ -285,9 +291,10 @@ router.post("/generate-output-format", async (req: Request, res: Response) => {
 
 router.post("/suggest-tools", async (req: Request, res: Response) => {
   try {
-    const { systemPrompt, description } = req.body as {
+    const { systemPrompt, description, emptyHubs: rawEmptyHubs } = req.body as {
       systemPrompt?: string;
       description?: string;
+      emptyHubs?: string[];
     };
     const intent = (systemPrompt && systemPrompt.trim()) || (description && description.trim());
     if (!intent) {
@@ -323,17 +330,69 @@ router.post("/suggest-tools", async (req: Request, res: Response) => {
       })),
     };
 
+    const mode = layaSuggestMode();
+    const skills = await skillRepository.listVisible({
+      ...(requesterId ? { userId: requesterId } : {}),
+      orgId,
+    });
+    const skillCandidates = skills.map((s) => ({
+      slug: s.slug,
+      name: s.name,
+      description: s.description ?? "",
+    }));
+
+    const allowedHubs = new Set(["mcp", "builtin", "subagent", "skill"]);
+    const emptyHubs =
+      Array.isArray(rawEmptyHubs) && rawEmptyHubs.length > 0
+        ? (rawEmptyHubs.filter((h): h is "mcp" | "builtin" | "subagent" | "skill" =>
+            allowedHubs.has(h),
+          ))
+        : defaultEmptyHubs(catalog, skillCandidates.length > 0);
+
+    let catalogForClaw = catalog;
+    let skillSlugs: string[] = [];
+    let gap: Awaited<ReturnType<typeof buildGapShortlist>> | null = null;
+
+    if (mode !== "off" && emptyHubs.length > 0) {
+      gap = await buildGapShortlist({
+        intent,
+        catalog,
+        skills: skillCandidates,
+        emptyHubs,
+        surface: "hub",
+      });
+      // fast + non-empty shortlist → closed pick on truncated catalog.
+      // Lexical shortlist works without laya-serve; Laya re-ranks when up.
+      // shadow → still shortlists for audit but returns today's full-catalog pick.
+      if (mode === "fast" && gap.shortlistIds.length > 0 && gap.fallback !== "empty") {
+        catalogForClaw = gap.catalog as typeof catalog;
+        skillSlugs = gap.skillSlugs;
+      }
+    }
+
     const clawRes = await fetch(`${CONFIG.xyneClawUrl}/suggest-tools`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
       },
-      body: JSON.stringify({ intent, catalog }),
+      body: JSON.stringify({ intent, catalog: catalogForClaw }),
       signal: AbortSignal.timeout(50_000),
     });
 
-    const data = await clawRes.json();
+    const data = (await clawRes.json()) as {
+      success?: boolean;
+      data?: Record<string, unknown>;
+      error?: string;
+    };
+    if (clawRes.ok && data.success && data.data && typeof data.data === "object") {
+      if (skillSlugs.length > 0) {
+        data.data = { ...data.data, skillSlugs };
+      }
+      if (gap) {
+        recordClosedPick(gap, "hub", data.data);
+      }
+    }
     res.status(clawRes.status).json(data);
   } catch (err) {
     log.error("[agents] suggest-tools proxy error:", err);
