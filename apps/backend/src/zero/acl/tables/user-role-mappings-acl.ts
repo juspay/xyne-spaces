@@ -1,5 +1,5 @@
 import type { DeleteID, InsertValue, Transaction, UpdateValue } from '@rocicorp/zero';
-import { Schema } from '@xyne/shared';
+import { Schema, UserRoleMappingEntityType } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { TableSchema, MutationACLError } from '../core/types';
 import { assertCanManageRoles, canManageUserGroup } from '../core/admin-access';
@@ -21,7 +21,7 @@ export class UserRoleMappingsACL extends BaseACL<'user_role_mappings'> {
     entityId: string | null | undefined,
     tx: Transaction<Schema>,
   ): Promise<void> {
-    if (entityType === 'USER_GROUP') {
+    if (entityType === UserRoleMappingEntityType.USER_GROUP) {
       const userGroup = await tx.run(
         zql.user_groups.where('id', entityId ?? '').one(),
       );

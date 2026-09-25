@@ -6,6 +6,7 @@ import Input from '../../ui/Input/Input';
 import Textarea from '../../ui/Textarea/Textarea';
 import { UserManagement } from '../UserManagement';
 import type { UserGroup, User } from '@xyne/shared';
+import { UserRoleMappingEntityType } from '@xyne/shared';
 import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { usePlatform } from '../../../hooks/usePlatform';
@@ -59,9 +60,10 @@ export const UserGroupForm = ({
 
   // Group-scoped role bindings (user_role_mappings, entityType=USER_GROUP).
   const [groupRoleMappings] = useCachedQuery(
-    userGroup
-      ? queries.getUserGroupRoleMappings({ userGroupId: userGroup.id })
-      : queries.getUserGroupRoleMappings({ userGroupId: '' }),
+    queries.getRoleMappingsByEntity({
+      entityType: UserRoleMappingEntityType.USER_GROUP,
+      entityId: userGroup?.id ?? '',
+    }),
     { enabled: isEdit && !!userGroup },
   );
 

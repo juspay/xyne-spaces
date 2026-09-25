@@ -9,6 +9,7 @@ import {
   PaginatedResult,
 } from '@/types/database';
 import { aclAuditService } from '@/services/aclAuditService';
+import { UserRoleMappingEntityType } from '@xyne/shared';
 
 export interface CreateUserGroupWithUsersInput extends CreateUserGroupInput {
   userIds?: string[];
@@ -102,7 +103,7 @@ export class UserGroupRepository extends BaseRepository<UserGroup, CreateUserGro
               workspaceId: userGroup.workspaceId,
               userId,
               roleId,
-              entityType: 'USER_GROUP',
+              entityType: UserRoleMappingEntityType.USER_GROUP,
               entityId: userGroup.id,
               createdAt: now,
               updatedAt: now,
