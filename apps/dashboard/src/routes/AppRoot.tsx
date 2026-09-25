@@ -8,7 +8,6 @@ import {
 } from 'react-router-dom';
 import SplashScreen from './SplashScreen/SplashScreen';
 import ProtectedRoute from '../components/Auth/ProtectedRoute';
-import { WorkspaceSyncGuard } from '../components/WorkspaceSync/WorkspaceSyncGuard';
 import { useActivityTracker } from '../hooks/useActivityTracker';
 import HomeScreen from './HomeScreen';
 import SlackMigration from '../pages/SlackMigration';
@@ -765,9 +764,6 @@ const AppRoot = (): ReactElement => {
 
   return (
     <InstrumentationProvider value={dashboardInstrumentation}>
-      {/* Before the providers: if the URL names a workspace the session is not
-          on, nothing below should settle against the old one. */}
-      <WorkspaceSyncGuard />
       <EncryptionBootstrapProvider>
         <EncryptionInit />
         <ZeroProvider>

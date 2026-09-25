@@ -26,28 +26,6 @@ const toInternalLocation = (href: string): string | null => {
   }
 };
 
-/**
- * Rebuild the link as a path this router can actually match.
- *
- * Links in the wild carry extra scope segments the router knows nothing about —
- * `/<orgId>/<workspaceId>/chat/...` from the native app, and
- * `/<theirs>/<ours>/chat/...` from links corrupted by the old copy behaviour.
- * Navigating to the raw path after switching lands on the 404 route, because
- * every app route is `/:workspaceId/<section>/...` with exactly one scope
- * segment. Collapse everything before `chat` down to the resolved workspace.
- */
-const toCanonicalLocation = (href: string, workspaceId: string): string | null => {
-  try {
-    const url = new URL(href, window.location.origin);
-    const segments = url.pathname.split('/').filter(Boolean);
-    const chatIndex = segments.indexOf('chat');
-    if (chatIndex < 0) return toInternalLocation(href);
-    return `/${workspaceId}/${segments.slice(chatIndex).join('/')}${url.search}${url.hash}`;
-  } catch {
-    return null;
-  }
-};
-
 /** Navigate to an internal Spaces URL after switching the authenticated workspace when needed. */
 export const crossWorkspaceNavigate = async ({
   href,
@@ -92,8 +70,7 @@ export const crossWorkspaceNavigate = async ({
     throw error;
   }
   queryClient.clear();
-  // Canonical, not raw: the raw path may carry scope segments no route matches.
-  window.location.href = toCanonicalLocation(href, targetWorkspaceId) ?? internalLocation;
+  window.location.href = internalLocation;
 };
 
 export const useCrossWorkspaceNavigate = (): ((href: string) => Promise<void>) => {

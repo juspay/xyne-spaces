@@ -103,16 +103,8 @@ export const parseInternalXyneLink = (href: string): ParsedInternalXyneLink | nu
 
     const segments = url.pathname.split('/').filter(Boolean);
     let linkWorkspaceId: string | undefined;
-
-    // Accept up to TWO leading scope segments: `[<orgId>/]<workspaceId>/chat/...`.
-    // The dashboard emits one; the native app emits both. The workspace is always
-    // the segment immediately before `chat`. Handling only one segment made every
-    // org-scoped link parse as `unknown` with no workspaceId, which silently
-    // skipped the cross-workspace switch and routed to a path no route matches.
-    const chatIndex = segments.indexOf('chat');
-    if (chatIndex > 0 && chatIndex <= 2) {
-      linkWorkspaceId = segments[chatIndex - 1];
-      segments.splice(0, chatIndex);
+    if (segments[0] !== 'chat' && segments[1] === 'chat') {
+      linkWorkspaceId = segments.shift();
     }
     if (segments[0] !== 'chat') {
       return fallbackUnknownLink;
