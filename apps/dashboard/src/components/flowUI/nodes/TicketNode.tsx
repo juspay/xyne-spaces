@@ -17,6 +17,8 @@ import Tooltip from '../../ui/Tooltip';
 import { getPriorityIcon } from '../../Tickets/TicketCard/TicketCard.utils';
 import { TicketCardV2 } from '../../Tickets/TicketCardV2/TicketCardV2';
 import { useNavigate } from '../../../hooks/useWorkspaceNavigate';
+import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { queries } from '../../../zero/queries';
 import { cn } from '../../../utils/classNames';
 
 const ACCENT = '#EB5F3A';
@@ -98,6 +100,14 @@ export const TicketNode: React.FC<{ node: FlowComponent; children?: React.ReactN
   const [box, setBox] = useState({ w: 0, h: 0 });
   const cardRef = useRef<HTMLDivElement>(null);
 
+  // A created-phase artifact is a snapshot taken when the agent posted it. Stage/status
+  // changes made afterwards (board moves, PR webhooks, automations) never rewrite the
+  // FlowJSON, so subscribe to the live ticket and prefer its fields over the snapshot.
+  const liveTicketId = props?.phase !== 'proposed' ? (props?.ticketId ?? '') : '';
+  const [liveTicket] = useCachedQuery(queries.ticketByIdV2({ ticketId: liveTicketId }), {
+    enabled: !!liveTicketId,
+  });
+
   useEffect(() => {
     const el = cardRef.current;
     if (!el) return undefined;
@@ -113,22 +123,41 @@ export const TicketNode: React.FC<{ node: FlowComponent; children?: React.ReactN
   if (!proposed) {
     const etaMs = props.eta ? Date.parse(props.eta) : Number.NaN;
     const ticketUrl = props.url;
+    const snapshot = {
+      id: props.ticketId ?? props.xyneId ?? '',
+      xyneId: props.xyneId ?? null,
+      title: props.title,
+      statusV2: props.status as TicketStatusV2,
+      priority: props.priority as TicketPriority,
+      stageName: props.stageName ?? null,
+      assignedTo: props.assigneeId ?? null,
+      eta: Number.isNaN(etaMs) ? null : etaMs,
+      channelId: props.channelId ?? null,
+      conversationId: props.conversationId ?? null,
+    };
+    const ticket = liveTicket
+      ? {
+          ...snapshot,
+          id: liveTicket.id,
+          xyneId: liveTicket.xyneId,
+          title: liveTicket.title,
+          statusV2: liveTicket.statusV2,
+          priority: liveTicket.priority,
+          stageName: liveTicket.stageName ?? null,
+          assignedTo: liveTicket.assignedTo ?? null,
+          eta: liveTicket.eta ?? null,
+          createdBy: liveTicket.createdBy,
+          createdAt: liveTicket.createdAt,
+          ticketType: liveTicket.ticketType ?? null,
+          channelId: liveTicket.channelId,
+          conversationId: liveTicket.conversationId,
+        }
+      : snapshot;
     return (
       <section className='flow-artifact-wide flex w-full flex-col'>
         <TicketCardV2
           isConversation
-          ticket={{
-            id: props.ticketId ?? props.xyneId ?? '',
-            xyneId: props.xyneId ?? null,
-            title: props.title,
-            statusV2: props.status as TicketStatusV2,
-            priority: props.priority as TicketPriority,
-            stageName: props.stageName ?? null,
-            assignedTo: props.assigneeId ?? null,
-            eta: Number.isNaN(etaMs) ? null : etaMs,
-            channelId: props.channelId ?? null,
-            conversationId: props.conversationId ?? null,
-          }}
+          ticket={ticket}
           {...(ticketUrl
             ? {
                 onClick: (): void => {
