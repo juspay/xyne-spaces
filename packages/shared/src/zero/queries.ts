@@ -540,30 +540,64 @@ const applyKanbanTicketPageV3Conditions = (
   return query;
 };
 
+// Without the public arm every branch is bounded by the viewer, so each is flipped and
+// the viewer's own canvases / participations drive instead of every canvas in the workspace.
+const applyPrivateCanvasVisibilityQueryFilter = (query: any, userId: string) => {
+  const flip = { flip: true };
+  return query.where((helpers: any) =>
+    helpers.or(
+      helpers.exists('createdByUser', (u: any) => u.where('id', userId), flip),
+      helpers.exists('participants', (p: any) => p.where('userId', userId), flip),
+      helpers.exists(
+        'participants',
+        (p: any) =>
+          p.whereExists(
+            'userGroup',
+            (ug: any) => ug.whereExists('userGroupMappings', (m: any) => m.where('userId', userId), flip),
+            flip,
+          ),
+        flip,
+      ),
+      helpers.exists(
+        'participants',
+        (p: any) =>
+          p.whereExists(
+            'channel',
+            (ch: any) => ch.whereExists('participants', (cp: any) => cp.where('userId', userId), flip),
+            flip,
+          ),
+        flip,
+      ),
+    ),
+  );
+};
+
 const applyCanvasVisibilityQueryFilter = (
   query: any,
   userId: string,
   includePublicVisibility = true,
 ) =>
-  query.where((helpers: any) =>
-    helpers.or(
-      helpers.cmp('createdBy', userId),
-      helpers.exists('participants', (p: any) =>
-        p.where(({ or, cmp, exists: ex }: any) =>
-          or(
-            cmp('userId', userId),
-            ex('userGroup', (ug: any) =>
-              ug.whereExists('userGroupMappings', (m: any) => m.where('userId', userId)),
-            ),
-            ex('channel', (ch: any) =>
-              ch.whereExists('participants', (cp: any) => cp.where('userId', userId)),
+  !includePublicVisibility
+    ? applyPrivateCanvasVisibilityQueryFilter(query, userId)
+    : query.where((helpers: any) =>
+        helpers.or(
+          helpers.cmp('createdBy', userId),
+          helpers.exists('participants', (p: any) =>
+            p.where(({ or, cmp, exists: ex }: any) =>
+              or(
+                cmp('userId', userId),
+                ex('userGroup', (ug: any) =>
+                  ug.whereExists('userGroupMappings', (m: any) => m.where('userId', userId)),
+                ),
+                ex('channel', (ch: any) =>
+                  ch.whereExists('participants', (cp: any) => cp.where('userId', userId)),
+                ),
+              ),
             ),
           ),
+          helpers.cmp('visibility', CanvasVisibility.PUBLIC),
         ),
-      ),
-      ...(includePublicVisibility ? [helpers.cmp('visibility', CanvasVisibility.PUBLIC)] : []),
-    ),
-  );
+      );
 
 const includeCurrentUserCanvasStatus = (query: any, userId: string) =>
   query.related('userStatuses', (status: any) => status.where('userId', userId));
