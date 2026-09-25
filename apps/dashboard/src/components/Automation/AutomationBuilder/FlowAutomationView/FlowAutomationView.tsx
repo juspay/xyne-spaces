@@ -101,7 +101,9 @@ import {
 const TRACK_CATEGORY = 'automation-builder-flow';
 /** Show the minimap only once the flow no longer fits comfortably on screen. */
 const MINIMAP_MIN_NODES = 10;
-const VIEWPORT_STORAGE_PREFIX = 'automation-flow-viewport:';
+/** One localStorage entry holding the last viewport per automation, most recent last. */
+const VIEWPORT_STORAGE_KEY = 'automation-flow-viewport';
+const VIEWPORT_STORAGE_LIMIT = 20;
 
 const MINIMAP_COLORS: Record<FlowItem['nodeType'], string> = {
   trigger: 'hsl(38 92% 50%)',
@@ -128,23 +130,52 @@ function ResolveIcon({
   return <IconComponent className={className} />;
 }
 
+function isViewport(value: unknown): value is Viewport {
+  if (!value || typeof value !== 'object') return false;
+  const v = value as Partial<Viewport>;
+  return typeof v.x === 'number' && typeof v.y === 'number' && typeof v.zoom === 'number';
+}
+
+type StoredViewport = Viewport & { id: string };
+
+/**
+ * Reads the stored list (least recent first), dropping malformed entries. An
+ * array rather than an object so numeric-looking ids can't reorder the LRU.
+ * Throws if storage is blocked or the JSON is corrupt.
+ */
+function loadStoredViewports(): StoredViewport[] {
+  const raw = window.localStorage.getItem(VIEWPORT_STORAGE_KEY);
+  const parsed: unknown = raw ? JSON.parse(raw) : [];
+  if (!Array.isArray(parsed)) return [];
+  return parsed.filter(
+    (entry): entry is StoredViewport =>
+      isViewport(entry) && typeof (entry as Partial<StoredViewport>).id === 'string',
+  );
+}
+
 function readStoredViewport(key: string | undefined): Viewport | null {
   if (!key || typeof window === 'undefined') return null;
   try {
-    const raw = window.localStorage.getItem(`${VIEWPORT_STORAGE_PREFIX}${key}`);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<Viewport>;
-    if (
-      typeof parsed.x === 'number' &&
-      typeof parsed.y === 'number' &&
-      typeof parsed.zoom === 'number'
-    ) {
-      return { x: parsed.x, y: parsed.y, zoom: parsed.zoom };
-    }
+    const entry = loadStoredViewports().find(e => e.id === key);
+    return entry ? { x: entry.x, y: entry.y, zoom: entry.zoom } : null;
   } catch {
     // Corrupt or blocked storage: fall back to fitView.
+    return null;
   }
-  return null;
+}
+
+/** Saves `viewport` as the most recent entry, evicting the least recent past the cap. */
+function writeStoredViewport(key: string, viewport: Viewport): void {
+  try {
+    const entries = loadStoredViewports().filter(e => e.id !== key);
+    entries.push({ id: key, x: viewport.x, y: viewport.y, zoom: viewport.zoom });
+    window.localStorage.setItem(
+      VIEWPORT_STORAGE_KEY,
+      JSON.stringify(entries.slice(-VIEWPORT_STORAGE_LIMIT)),
+    );
+  } catch {
+    // Storage full, blocked or corrupt: persistence is best-effort.
+  }
 }
 
 /* ─────────────────────────────── Nodes ─────────────────────────────── */
@@ -679,7 +710,7 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
     focusRequest,
   } = props;
 
-  const { setCenter, getZoom, setViewport, fitView } = useReactFlow();
+  const { setCenter, getZoom, getViewport, setViewport, fitView } = useReactFlow();
   const canvasRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -705,8 +736,9 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
   const itemsById = useMemo(() => new Map(items.map(item => [item.id, item])), [items]);
 
   // Layout depends only on structure (ids, edges, sizes). Editing a field in
-  // the panel must not re-run layout or reset the viewport.
-  const layoutKey = structureKey(items);
+  // the panel must not re-run layout or reset the viewport: `positions` keys on
+  // the structure string, so a new `items` array with the same shape reuses it.
+  const layoutKey = useMemo(() => structureKey(items), [items]);
   const positions = useMemo(() => {
     const structure = JSON.parse(layoutKey) as [string, string[], number, number][];
     const layout = computeFlowLayout(
@@ -853,15 +885,7 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
 
   const handleMoveEnd = useCallback(
     (_event: unknown, viewport: Viewport): void => {
-      if (!viewportKey) return;
-      try {
-        window.localStorage.setItem(
-          `${VIEWPORT_STORAGE_PREFIX}${viewportKey}`,
-          JSON.stringify(viewport),
-        );
-      } catch {
-        // Storage full or blocked: persistence is best-effort.
-      }
+      if (viewportKey) writeStoredViewport(viewportKey, viewport);
     },
     [viewportKey],
   );
@@ -870,6 +894,18 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
     if (storedViewport) setViewport(storedViewport);
     else void fitView({ padding: 0.2 });
   }, [storedViewport, setViewport, fitView]);
+
+  // The key arrives after mount on a new automation's first save (undefined ->
+  // id). Restore anything stored under it, else keep the user's current view.
+  const lastViewportKey = useRef(viewportKey);
+  useEffect(() => {
+    if (viewportKey === lastViewportKey.current) return;
+    lastViewportKey.current = viewportKey;
+    if (!viewportKey) return;
+    const stored = readStoredViewport(viewportKey);
+    if (stored) setViewport(stored);
+    else writeStoredViewport(viewportKey, getViewport());
+  }, [viewportKey, setViewport, getViewport]);
 
   /* ── Mutations ── */
 
@@ -1001,6 +1037,8 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
             summary: summaryById.get(item.id),
             issueMessages: issuesById.get(item.id) ?? [],
             collapsed: collapsed.has(item.id),
+            // Search matches steps; placeholders and merge dots are structure,
+            // so they stay at full opacity to keep the branch shape readable.
             dimmed: Boolean(matchIds && interactive && !matchIds.has(item.id)),
             stepCatalog,
             onInsert: handleInsert,
