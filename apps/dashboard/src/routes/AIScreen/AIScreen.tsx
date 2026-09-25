@@ -670,7 +670,6 @@ const AIScreen = (): ReactElement => {
                         onAgentChange={handleAgentChange}
                         showAgentSelector={isV2}
                         onContextChange={handleContextChange}
-                        hideDisclaimer
                       />
                     </div>
                   </div>
