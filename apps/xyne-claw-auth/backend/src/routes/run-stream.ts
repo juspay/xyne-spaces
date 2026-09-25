@@ -2093,6 +2093,60 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
       log.warn(`[run-stream] callback streamId=${streamId} missing meta (userId/conversationId) — message persistence skipped`);
     }
 
+
+    const pendingAgentCard = body["pendingAgentCard"] as
+      | { variant?: string; slug?: string; slugs?: string[] }
+      | undefined;
+    if (pendingAgentCard?.variant) {
+      try {
+        const { resolveXyneAiCardTarget } = await import("../lib/flow-card-delivery.js");
+        const cardTarget = await resolveXyneAiCardTarget({ assistantMessageId });
+        if (!cardTarget) {
+          log.info(`[agent-card] xyne-ai card skipped — no assistant row for stream=${streamId}`);
+        } else {
+          const {
+            renderAgentProfileCard,
+            renderAgentProfileListCard,
+            renderAgentSummaryCard,
+          } = await import("../lib/agent-card-render.js");
+          const identity = {
+            agentSlug: cardTarget.agentSlug,
+            orgId: cardTarget.orgId,
+            userId: cardTarget.userId,
+            conversationId: cardTarget.conversationId,
+            channelId: "",
+            spacesAppId: cardTarget.spacesAppId,
+          };
+          const delivered =
+            pendingAgentCard.variant === "profile"
+              ? await renderAgentProfileCard(
+                  pendingAgentCard.slug?.trim() || cardTarget.agentSlug,
+                  identity,
+                  cardTarget,
+                )
+              : pendingAgentCard.variant === "summary"
+                ? await renderAgentSummaryCard(identity, cardTarget)
+                : pendingAgentCard.variant === "profile-list"
+                  ? await renderAgentProfileListCard(pendingAgentCard.slugs ?? [], identity, cardTarget)
+                  : null;
+          if (!delivered) {
+            log.info(`[agent-card] xyne-ai no card for variant "${pendingAgentCard.variant}"`);
+          } else {
+            const cardStream = pendingStreams.get(streamId);
+            if (cardStream) cardStream.sendEvent("ui-flow", { flow: delivered });
+            else
+              publishStreamEvent({
+                kind: "progress",
+                streamId,
+                events: [{ event: "ui-flow", data: { flow: delivered } }],
+              });
+          }
+        }
+      } catch (cardErr) {
+        log.warn(`[agent-card] xyne-ai card failed:`, errMsg(cardErr));
+      }
+    }
+
     // Finalize AgentRun (same pattern as /agent-chat). Pod-independent —
     // agentRunRepository.finalize is keyed on sessionId so it's safe to
     // run from any pod.
