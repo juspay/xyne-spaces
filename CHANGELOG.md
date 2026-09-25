@@ -1,3 +1,10 @@
+## [1.402.1](https://github.com/juspay/xyne-spaces/compare/v1.402.0...v1.402.1) (2026-09-25)
+
+
+### Bug Fixes
+
+* wrap markdown and recording-note message content in ExpandableMessage ([#2314](https://github.com/juspay/xyne-spaces/issues/2314)) ([b48268f](https://github.com/juspay/xyne-spaces/commit/b48268fd4916cd9cdc2d6a90ef13bb23d4822980))
+
 ## [1.402.0](https://github.com/juspay/xyne-spaces/compare/v1.401.1...v1.402.0) (2026-09-25)
 
 
