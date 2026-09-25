@@ -153,6 +153,26 @@ const renderSwitchCard = (
   />
 );
 
+type AutomationViewMode = 'builder' | 'graph';
+const VIEW_MODE_STORAGE_KEY = 'xyne-automation-builder-view-mode';
+
+// Builder Mode stays the default; storage failures (private mode, quota) fall back to it.
+function readStoredViewMode(): AutomationViewMode {
+  try {
+    return localStorage.getItem(VIEW_MODE_STORAGE_KEY) === 'graph' ? 'graph' : 'builder';
+  } catch {
+    return 'builder';
+  }
+}
+
+function writeStoredViewMode(mode: AutomationViewMode): void {
+  try {
+    localStorage.setItem(VIEW_MODE_STORAGE_KEY, mode);
+  } catch {
+    // Non-fatal: the choice just won't persist.
+  }
+}
+
 export function AutomationBuilder({
   automation,
   initialConfig,
@@ -199,7 +219,13 @@ export function AutomationBuilder({
   const [editMode, setEditMode] = useState<boolean>(!automation);
   // Builder Mode is the default; Graph Mode is a second renderer over the
   // same `config` state, so switching is lossless (no serialization round-trip).
-  const [viewMode, setViewMode] = useState<'builder' | 'graph'>('builder');
+  // The last chosen mode is remembered per browser so people who prefer the
+  // canvas don't have to switch on every visit.
+  const [viewMode, setViewModeState] = useState<AutomationViewMode>(readStoredViewMode);
+  const setViewMode = useCallback((mode: AutomationViewMode) => {
+    setViewModeState(mode);
+    writeStoredViewMode(mode);
+  }, []);
   const [editConfirmOpen, setEditConfirmOpen] = useState(false);
   const [proposeChangeConfirmOpen, setProposeChangeConfirmOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -1195,7 +1221,7 @@ export function AutomationBuilder({
         </div>
       </div>
 
-      {viewMode === 'graph' ? (
+      {viewMode === 'graph' && !readOnlyPreview ? (
         <div className='relative flex min-h-0 flex-1 flex-col bg-muted/20'>
           <div className='px-6 pt-4'>
             <LockBanner status={savedStatus} isLiveRow={isLiveRow} />
@@ -1227,6 +1253,15 @@ export function AutomationBuilder({
               onMoveStep={handleMoveStep}
               renderConditionalCard={renderConditionalCard}
               renderSwitchCard={renderSwitchCard}
+              onRequestEdit={
+                canEdit && !readOnlyPreview
+                  ? () => {
+                      if (forksOnEdit) setProposeChangeConfirmOpen(true);
+                      else setEditConfirmOpen(true);
+                    }
+                  : undefined
+              }
+              editActionLabel={isLiveRow ? 'Propose change' : 'Edit'}
             />
           </div>
         </div>

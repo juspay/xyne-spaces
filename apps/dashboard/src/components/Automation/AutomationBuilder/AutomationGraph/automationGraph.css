@@ -1,0 +1,60 @@
+/*
+ * Theme bridge for the Automations Graph canvas.
+ *
+ * @xyflow/react paints its background, controls, minimap and edge labels from its
+ * own `--xy-*` tokens with a fixed light palette. Re-pointing them at the
+ * dashboard's shadcn variables makes the canvas follow every app theme
+ * (classic / midnight / summer_breeze) without per-theme overrides.
+ */
+.xyne-automation-graph {
+  --xy-background-color: hsl(var(--muted) / 0.35);
+  --xy-background-pattern-dots-color: hsl(var(--muted-foreground) / 0.28);
+  --xy-edge-stroke: hsl(var(--muted-foreground) / 0.55);
+  --xy-edge-stroke-width: 1.5;
+  --xy-edge-label-background-color: hsl(var(--background));
+  --xy-edge-label-color: hsl(var(--foreground));
+  --xy-controls-button-background-color: hsl(var(--card));
+  --xy-controls-button-background-color-hover: hsl(var(--accent));
+  --xy-controls-button-color: hsl(var(--foreground));
+  --xy-controls-button-color-hover: hsl(var(--foreground));
+  --xy-controls-button-border-color: hsl(var(--border));
+  --xy-controls-box-shadow: 0 1px 3px rgb(0 0 0 / 0.12);
+  --xy-minimap-background-color: hsl(var(--card));
+  --xy-minimap-mask-background-color: hsl(var(--background) / 0.65);
+  --xy-minimap-mask-stroke-color: hsl(var(--border));
+  --xy-attribution-background-color: transparent;
+}
+
+.xyne-automation-graph .react-flow__edge.automation-graph-edge .react-flow__edge-path {
+  stroke: var(--xy-edge-stroke);
+}
+
+.xyne-automation-graph .react-flow__edge.automation-graph-edge .react-flow__arrowhead polyline {
+  stroke: var(--xy-edge-stroke);
+  fill: var(--xy-edge-stroke);
+}
+
+.xyne-automation-graph .react-flow__edge-textbg {
+  fill: var(--xy-edge-label-background-color);
+  stroke: hsl(var(--border));
+  stroke-width: 1;
+}
+
+.xyne-automation-graph .react-flow__edge-text {
+  fill: var(--xy-edge-label-color);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.xyne-automation-graph .react-flow__controls,
+.xyne-automation-graph .react-flow__minimap {
+  border: 1px solid hsl(var(--border));
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+/* Custom nodes own their focus ring; the wrapper's outline would double it. */
+.xyne-automation-graph .react-flow__node:focus,
+.xyne-automation-graph .react-flow__node:focus-visible {
+  outline: none;
+}
