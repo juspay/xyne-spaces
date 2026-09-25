@@ -3167,21 +3167,46 @@ export const queries: AnyQueryRegistry = defineQueries({
       participantId: z.string().nullable(),
     }),
     ({ ctx, args: { limit, start, participantId } }) => {
+      const liveNoteTakerShare = (share: typeof zql.entity_access) =>
+        share
+          .where('shareableEntityType', ShareableEntityType.NOTE_TAKER)
+          .where('entityUserAccess', '!=', EntityUserAccess.REVOKED);
+
       let query = zql.calls
         .where('workspaceId', ctx.workspaceId)
         .where('callType', CallType.HEADLESS)
         .where('createdByUserId', '!=', ctx.userID)
-        .whereExists('shares', share =>
-          share
-            .where('shareableEntityType', ShareableEntityType.NOTE_TAKER)
-            .where('entityUserAccess', '!=', EntityUserAccess.REVOKED)
-            .where(({ or, cmp, exists }) =>
-              or(
-                cmp('userId', ctx.userID),
-                exists('userGroupMemberships', m => m.where('userId', ctx.userID)),
-                exists('channelMembers', m => m.where('userId', ctx.userID)),
-              ),
+        // One exists per way a share can reach the viewer, each flipped so it starts
+        // from their own rows. A single exists with the `or` inside cannot drive the
+        // query, leaving Zero to walk every recording in the workspace and probe its
+        // shares. Both flip levels matter: flipping only the outer exists, or only the
+        // inner membership one, is dramatically slower.
+        .where(({ or, exists }) =>
+          or(
+            exists('shares', share => liveNoteTakerShare(share).where('userId', ctx.userID), {
+              flip: true,
+            }),
+            exists(
+              'shares',
+              share =>
+                liveNoteTakerShare(share).whereExists(
+                  'userGroupMemberships',
+                  m => m.where('userId', ctx.userID),
+                  { flip: true },
+                ),
+              { flip: true },
             ),
+            exists(
+              'shares',
+              share =>
+                liveNoteTakerShare(share).whereExists(
+                  'channelMembers',
+                  m => m.where('userId', ctx.userID),
+                  { flip: true },
+                ),
+              { flip: true },
+            ),
+          ),
         )
         .related('shares', shares =>
           shares
