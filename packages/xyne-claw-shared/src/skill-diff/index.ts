@@ -79,9 +79,19 @@ type EditOp = { kind: "eq" | "add" | "del"; line: string };
  * few thousand lines), so the O(n*m) table is fine and keeps the code simple
  * and obviously-correct versus a hand-rolled Myers implementation.
  */
+const MAX_LCS_CELLS = 4_000_000;
+
 function lcsEditScript(oldLines: string[], newLines: string[]): EditOp[] {
   const n = oldLines.length;
   const m = newLines.length;
+  // Bound the DP table: past this many cells, report a whole-body
+  // replacement instead of allocating a quadratic amount of memory.
+  if ((n + 1) * (m + 1) > MAX_LCS_CELLS) {
+    const ops: EditOp[] = [];
+    for (const line of oldLines) ops.push({ kind: "del", line });
+    for (const line of newLines) ops.push({ kind: "add", line });
+    return ops;
+  }
   // dp[i][j] = LCS length of oldLines[i..] and newLines[j..]
   const dp: number[][] = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0));
   for (let i = n - 1; i >= 0; i--) {
