@@ -1,3 +1,10 @@
+## [1.396.1](https://github.com/juspay/xyne-spaces/compare/v1.396.0...v1.396.1) (2026-09-25)
+
+
+### Bug Fixes
+
+* moving runAsServiceActor to one place ([#2244](https://github.com/juspay/xyne-spaces/issues/2244)) ([8dab89d](https://github.com/juspay/xyne-spaces/commit/8dab89dde4a0d45ad45036eaeed167ec038894f7))
+
 ## [1.396.0](https://github.com/juspay/xyne-spaces/compare/v1.395.2...v1.396.0) (2026-09-25)
 
 
