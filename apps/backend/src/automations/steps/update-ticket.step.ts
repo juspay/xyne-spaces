@@ -9,6 +9,7 @@ import { DatabaseClient } from '@/database/client';
 import { ticketStageTransitionService } from '@/services/stageTransition/ticketStageTransitionService';
 import { ActivitySource } from '@/types/ticket';
 import { logger } from '@/utils/logger';
+import { inactiveAssigneeMessage, isInactiveUserId } from '@/utils/inactiveAssignee';
 
 const UpdateTicketConfigSchema = z.object({
   ticketId: variableRef(z.string().min(1)),
@@ -22,10 +23,12 @@ const UpdateTicketConfigSchema = z.object({
 
 const UpdateTicketOutputSchema = z.object({
   ticketId: z.string(),
+  warnings: z.array(z.string()).optional(),
 });
 
 interface UpdateTicketOutput extends Record<string, unknown> {
   ticketId: string;
+  warnings?: string[];
 }
 
 export class UpdateTicketStep extends BaseActionStep<typeof UpdateTicketConfigSchema, UpdateTicketOutput> {
@@ -44,8 +47,20 @@ export class UpdateTicketStep extends BaseActionStep<typeof UpdateTicketConfigSc
     const ticketId = config.ticketId as string;
     const updatedBy = context.automation.createdById;
 
+    const warnings: string[] = [];
+
     if (config.assignedTo !== undefined) {
-      await repositories.tickets.updateTicketAssignee(ticketId, config.assignedTo as string, updatedBy);
+      const assignedTo = config.assignedTo as string;
+      // A rule naming a user who has since left must not keep handing them tickets.
+      // Skip only the assignee change — the ticket keeps its current owner and the
+      // rest of the step still applies — and record why on the run.
+      if (assignedTo && (await isInactiveUserId(assignedTo))) {
+        const message = `${inactiveAssigneeMessage(assignedTo)}; assignee left unchanged`;
+        warnings.push(message);
+        logger.warn(`[automations] UPDATE_TICKET ${message} (automation=${context.automation.id}, ticket=${ticketId})`);
+      } else {
+        await repositories.tickets.updateTicketAssignee(ticketId, assignedTo, updatedBy);
+      }
     }
 
     if (config.stageName !== undefined) {
@@ -105,7 +120,7 @@ export class UpdateTicketStep extends BaseActionStep<typeof UpdateTicketConfigSc
       await repositories.tickets.updateTicketFields(ticketId, fields, updatedBy);
     }
 
-    return { ticketId };
+    return warnings.length > 0 ? { ticketId, warnings } : { ticketId };
   }
 }
 

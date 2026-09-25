@@ -3,6 +3,7 @@ import { UserStatus, AuthProvider } from '@xyne/shared';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { UserService } from '@/services/userService';
+import { userActivationService } from '@/services/userActivationService';
 
 export interface MettleSubteam {
   id: string;
@@ -274,14 +275,28 @@ export class MettleUserSyncService {
       const hasUserStatusUpdate = Boolean(userStatus);
       const hasUserProfileUpdate = Object.keys(userProfileData).length > 0;
 
-      if (hasUserNameUpdate || hasUserStatusUpdate) {
+      // Deactivation goes through the shared path, not a bare status write: it also
+      // pulls the user out of every assignment pool and hands off their open tickets.
+      const isDeactivation = userStatus === UserStatus.INACTIVE;
+      const writesStatusDirectly = hasUserStatusUpdate && !isDeactivation;
+
+      if (hasUserNameUpdate || writesStatusDirectly) {
         await db.user.update({
           where: { id: user.id },
           data: {
             ...(hasUserNameUpdate ? { name: employee.name } : {}),
-            ...(hasUserStatusUpdate ? { status: userStatus } : {}),
+            ...(writesStatusDirectly ? { status: userStatus } : {}),
           },
         });
+      }
+
+      if (isDeactivation) {
+        const handedOff = await userActivationService.deactivateUsers([user.id], workspaceId);
+        if (handedOff > 0) {
+          logger.info(
+            `[Mettle User Sync] Deactivated user ${user.id}; queued reassignment for ${handedOff} group membership(s)`,
+          );
+        }
       }
 
       if (Object.keys(userProfileData).length > 0) {
