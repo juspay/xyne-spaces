@@ -318,25 +318,28 @@ export default function CallDetailScreen(): ReactElement {
     aiOpenedRef.current = true;
   }, [call, callConversationId]);
 
+  const callId = call?.id;
+
   useEffect(() => {
-    if (!call || isMobile) return;
-    if (_userClosedAIForCallId === call.id) {
+    if (!callId || isMobile) return;
+    if (_userClosedAIForCallId === callId) {
       _userClosedAIForCallId = null;
       return;
     }
     const subscription = xyneAIActor.subscribe(state => {
       if (state.matches('closed') && aiOpenedRef.current) {
-        _userClosedAIForCallId = call.id;
+        _userClosedAIForCallId = callId;
         aiOpenedRef.current = false;
       }
     });
-    openAI();
     return (): void => {
       subscription.unsubscribe();
-      xyneAIActor.send({ type: 'CLOSE' });
-      aiOpenedRef.current = false;
+      if (aiOpenedRef.current) {
+        xyneAIActor.send({ type: 'CLOSE' });
+        aiOpenedRef.current = false;
+      }
     };
-  }, [call, isMobile, openAI]);
+  }, [callId, isMobile]);
 
   // The call's host, anyone who took part, or a member of the channel it happened
   // in. Mirrors isCallAudience on the backend, which gates the same two actions.

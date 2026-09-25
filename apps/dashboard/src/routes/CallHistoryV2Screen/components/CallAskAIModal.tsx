@@ -1,54 +1,52 @@
 import { useCallback, useEffect, useMemo, useState, type ReactElement } from 'react';
 import type { User } from '@xyne/shared/machines';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { AlertTriangle, MultipleCrossCancelDefault, SearchBig } from '@xyne/icons';
-import { AudioLines } from 'lucide-react';
+import { AlertTriangle, MultipleCrossCancelDefault, SearchBig, PhoneDefault } from '@xyne/icons';
+import { format } from 'date-fns';
 import { Button } from '../../../components/ui/Button/Button';
 import { Checkbox } from '../../../components/ui/Checkbox/Checkbox';
 import { Dialog } from '../../../components/ui/Dialog';
-import { TextShimmer } from '../../../components/ui/ShimmerText';
 import { XyneAIStar } from '../../../components/icons/xyne-ai';
-import type { OatsRecordingEntry } from '../../../hooks/usePaginatedOatsRecordings';
-import { useRecordingTitleState } from '../../../hooks/useRecordingTitleState';
 import {
   formatParticipantNames,
   getPreviewParticipantUsers,
+  type Call,
 } from '../../CallHistoryScreen/callHistoryItem.utils';
 import { cn } from '../../../utils/classNames';
-import { formatRecordingDuration, normalizeRecordingTags } from '../../../utils/recordingUtils';
+import { formatDuration } from '../../../utils/dateUtils';
+import { normalizeRecordingTags } from '../../../utils/recordingUtils';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
-import { formatRecordingTimestamp, toRecordingTitleInput } from '../utils/RecordingsV2.utils';
 import { buildDateGroupedRowsFromItems } from '../../../utils/dateGroupedList';
 
-export interface RecordingAskAIModalProps {
+export interface CallAskAIModalProps {
   open: boolean;
-  recordings: OatsRecordingEntry[];
+  calls: Call[];
   users: User[];
   currentUserId: string | undefined;
   resolveLabel?: (label: string) => string;
   onOpenChange: (open: boolean) => void;
-  onConfirm: (recordings: OatsRecordingEntry[]) => void;
+  onConfirm: (calls: Call[]) => void;
 }
 
-interface SearchableRecording {
-  recording: OatsRecordingEntry;
+interface SearchableCall {
+  call: Call;
   participants: User[];
   haystack: string;
 }
 
-const MAX_SELECTED_RECORDINGS = 25;
+const MAX_SELECTED_CALLS = 25;
 
 const LIMIT_NOTICE_MS = 3200;
 
-const RecordingAskAIModal = ({
+const CallAskAIModal = ({
   open,
-  recordings,
+  calls,
   users,
   currentUserId,
   resolveLabel = (label: string): string => label,
   onOpenChange,
   onConfirm,
-}: RecordingAskAIModalProps): ReactElement => {
+}: CallAskAIModalProps): ReactElement => {
   const [query, setQuery] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
@@ -64,20 +62,20 @@ const RecordingAskAIModal = ({
     return (): void => window.clearTimeout(timer);
   }, [limitNotice]);
 
-  const searchable = useMemo<SearchableRecording[]>(
+  const searchable = useMemo<SearchableCall[]>(
     () =>
-      recordings.map(recording => {
+      calls.map(call => {
         const participants = getPreviewParticipantUsers(
-          recording.participantPreviewUserIds,
+          call.participantPreviewUserIds,
           users,
           currentUserId,
         );
-        const labels = normalizeRecordingTags(recording.labels).map(resolveLabel);
+        const labels = normalizeRecordingTags(call.labels).map(resolveLabel);
         return {
-          recording,
+          call,
           participants,
           haystack: [
-            recording.title ?? '',
+            call.title ?? '',
             ...participants.map(participant => getUserDisplayName(participant)),
             ...labels,
           ]
@@ -85,7 +83,7 @@ const RecordingAskAIModal = ({
             .toLowerCase(),
         };
       }),
-    [recordings, users, currentUserId, resolveLabel],
+    [calls, users, currentUserId, resolveLabel],
   );
 
   const filtered = useMemo(() => {
@@ -94,37 +92,47 @@ const RecordingAskAIModal = ({
     return searchable.filter(entry => entry.haystack.includes(needle));
   }, [searchable, query]);
 
-  const participantsByRecordingId = useMemo(
-    () => new Map(searchable.map(entry => [entry.recording.id, entry.participants])),
+  const participantsByCallId = useMemo(
+    () => new Map(searchable.map(entry => [entry.call.id, entry.participants])),
     [searchable],
   );
 
   const rows = useMemo(
-    () => buildDateGroupedRowsFromItems(filtered.map(entry => entry.recording)),
+    () => buildDateGroupedRowsFromItems(filtered.map(entry => entry.call)),
     [filtered],
   );
 
-  const filteredIds = useMemo(() => filtered.map(entry => entry.recording.id), [filtered]);
-  const selectedFilteredCount = filteredIds.filter(id => selectedIds.has(id)).length;
+  const transcriptIds = useMemo(
+    () => new Set(calls.filter(call => Boolean(call.transcript)).map(call => call.id)),
+    [calls],
+  );
+  const selectableFilteredIds = useMemo(
+    () => filtered.map(entry => entry.call.id).filter(id => transcriptIds.has(id)),
+    [filtered, transcriptIds],
+  );
+  const selectedFilteredCount = selectableFilteredIds.filter(id => selectedIds.has(id)).length;
   const allFilteredSelected =
-    filteredIds.length > 0 && selectedFilteredCount === filteredIds.length;
+    selectableFilteredIds.length > 0 && selectedFilteredCount === selectableFilteredIds.length;
 
-  const toggleRecording = useCallback(
-    (recordingId: string): void => {
-      const isSelected = selectedIds.has(recordingId);
-      if (!isSelected && selectedIds.size >= MAX_SELECTED_RECORDINGS) {
-        setLimitNotice(value => value + 1);
-        return;
+  const toggleCall = useCallback(
+    (callId: string): void => {
+      const isSelected = selectedIds.has(callId);
+      if (!isSelected) {
+        if (!transcriptIds.has(callId)) return;
+        if (selectedIds.size >= MAX_SELECTED_CALLS) {
+          setLimitNotice(value => value + 1);
+          return;
+        }
       }
 
       setSelectedIds(previous => {
         const next = new Set(previous);
-        if (isSelected) next.delete(recordingId);
-        else next.add(recordingId);
+        if (isSelected) next.delete(callId);
+        else next.add(callId);
         return next;
       });
     },
-    [selectedIds],
+    [selectedIds, transcriptIds],
   );
 
   /** Fills up to the cap rather than refusing outright, then says what it left out. */
@@ -133,15 +141,15 @@ const RecordingAskAIModal = ({
       const next = new Set(selectedIds);
 
       if (!checked) {
-        for (const id of filteredIds) next.delete(id);
+        for (const id of selectableFilteredIds) next.delete(id);
         setSelectedIds(next);
         return;
       }
 
       let refused = false;
-      for (const id of filteredIds) {
+      for (const id of selectableFilteredIds) {
         if (next.has(id)) continue;
-        if (next.size >= MAX_SELECTED_RECORDINGS) {
+        if (next.size >= MAX_SELECTED_CALLS) {
           refused = true;
           break;
         }
@@ -151,7 +159,7 @@ const RecordingAskAIModal = ({
       setSelectedIds(next);
       if (refused) setLimitNotice(value => value + 1);
     },
-    [filteredIds, selectedIds],
+    [selectableFilteredIds, selectedIds],
   );
 
   const handleClose = useCallback((): void => {
@@ -160,21 +168,21 @@ const RecordingAskAIModal = ({
 
   const handleConfirm = useCallback((): void => {
     if (selectedIds.size === 0) return;
-    onConfirm(recordings.filter(recording => selectedIds.has(recording.id)));
+    onConfirm(calls.filter(call => selectedIds.has(call.id)));
     onOpenChange(false);
-  }, [onConfirm, onOpenChange, recordings, selectedIds]);
+  }, [onConfirm, onOpenChange, calls, selectedIds]);
 
   const selectedCount = selectedIds.size;
-  const isAtLimit = selectedCount >= MAX_SELECTED_RECORDINGS;
+  const isAtLimit = selectedCount >= MAX_SELECTED_CALLS;
 
   return (
     <Dialog
       open={open}
       onOpenChange={onOpenChange}
       title='Choose context'
-      description='Pick the recordings Ask AI should answer from'
+      description='Pick the calls Ask AI should answer from'
       className='max-w-xl overflow-hidden rounded-[18px] p-0'
-      testId='recording-ask-ai-modal'
+      testId='call-ask-ai-modal'
     >
       <div className='flex max-h-[90vh] w-full flex-col'>
         {/* Header, search and select-all stay put; only the list below scrolls. */}
@@ -185,7 +193,7 @@ const RecordingAskAIModal = ({
           <span className='min-w-0 flex-1'>
             <span className='block text-sm font-semibold text-foreground'>Choose context</span>
             <span className='block truncate text-xs text-muted-foreground'>
-              Pick the recordings Ask AI should answer from
+              Pick the calls Ask AI should answer from
             </span>
           </span>
           <Button
@@ -195,7 +203,7 @@ const RecordingAskAIModal = ({
             onClick={handleClose}
             aria-label='Close'
             className='shrink-0 text-muted-foreground hover:text-foreground'
-            data-track-category='RecordingsV2'
+            data-track-category='CALLS'
             data-track-name='close_ask_ai_context_modal'
           >
             <MultipleCrossCancelDefault size={16} />
@@ -213,11 +221,11 @@ const RecordingAskAIModal = ({
             type='text'
             value={query}
             onChange={event => setQuery(event.target.value)}
-            placeholder='Search recordings, people or labels...'
-            aria-label='Search recordings, people or labels'
+            placeholder='Search calls, people or labels...'
+            aria-label='Search calls, people or labels'
             className='w-full bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground'
-            data-track-category='RecordingsV2'
-            data-track-name='search_ask_ai_context_recordings'
+            data-track-category='CALLS'
+            data-track-name='search_ask_ai_context_calls'
           />
         </div>
 
@@ -225,7 +233,7 @@ const RecordingAskAIModal = ({
           <Checkbox
             checked={allFilteredSelected}
             onChange={handleToggleAll}
-            disabled={filteredIds.length === 0}
+            disabled={selectableFilteredIds.length === 0}
             label='Select all'
           />
           <span className='flex shrink-0 items-center gap-3 text-xs text-muted-foreground'>
@@ -239,14 +247,14 @@ const RecordingAskAIModal = ({
             >
               {selectedCount === 0
                 ? 'None selected'
-                : `${selectedCount} of ${recordings.length} selected`}
+                : `${selectedCount} of ${transcriptIds.size} selected`}
             </motion.span>
             {selectedCount > 0 && (
               <button
                 type='button'
                 onClick={() => setSelectedIds(new Set())}
                 className='font-medium text-foreground underline-offset-2 hover:underline'
-                data-track-category='RecordingsV2'
+                data-track-category='CALLS'
                 data-track-name='clear_ask_ai_context_selection'
               >
                 Clear
@@ -257,7 +265,7 @@ const RecordingAskAIModal = ({
         <div className='min-h-xs flex-1 overflow-y-auto px-2.5 py-2 no-scrollbar'>
           {rows.length === 0 ? (
             <p className='flex min-h-[160px] items-center justify-center px-6 text-center text-sm text-muted-foreground'>
-              No recordings match that search.
+              No calls match that search.
             </p>
           ) : (
             <ul
@@ -276,13 +284,17 @@ const RecordingAskAIModal = ({
                     {row.label}
                   </li>
                 ) : (
-                  <RecordingOption
+                  <CallOption
                     key={row.id}
-                    recording={row.item}
-                    participants={participantsByRecordingId.get(row.item.id) ?? []}
+                    call={row.item}
+                    participants={participantsByCallId.get(row.item.id) ?? []}
                     checked={selectedIds.has(row.item.id)}
-                    blocked={isAtLimit && !selectedIds.has(row.item.id)}
-                    onToggle={toggleRecording}
+                    hasTranscript={transcriptIds.has(row.item.id)}
+                    blocked={
+                      !transcriptIds.has(row.item.id) ||
+                      (isAtLimit && !selectedIds.has(row.item.id))
+                    }
+                    onToggle={toggleCall}
                   />
                 ),
               )}
@@ -307,12 +319,12 @@ const RecordingAskAIModal = ({
                 {isLimitNoticeVisible ? (
                   <>
                     <AlertTriangle size={13} className='shrink-0' aria-hidden='true' />
-                    <span className='truncate'>Limit is {MAX_SELECTED_RECORDINGS} recordings</span>
+                    <span className='truncate'>Limit is {MAX_SELECTED_CALLS} calls</span>
                   </>
                 ) : selectedCount === 0 ? (
-                  'Select at least one recording'
+                  'Select at least one call'
                 ) : (
-                  'Answers will cite only these recordings'
+                  'Answers will cite only these calls'
                 )}
               </motion.span>
             </AnimatePresence>
@@ -322,7 +334,7 @@ const RecordingAskAIModal = ({
             variant='outline'
             onClick={handleClose}
             className='h-8 shrink-0 rounded-lg px-3 text-xs font-semibold'
-            data-track-category='RecordingsV2'
+            data-track-category='CALLS'
             data-track-name='cancel_ask_ai_context'
           >
             Cancel
@@ -332,16 +344,16 @@ const RecordingAskAIModal = ({
             onClick={handleConfirm}
             disabled={selectedCount === 0}
             className='h-8 shrink-0 gap-2.5 rounded-lg px-5 text-xs font-semibold bg-foreground text-background hover:bg-foreground/80 transition-opacity duration-300'
-            data-track-category='RecordingsV2'
-            data-track-name='send_recordings_to_ask_ai'
-            data-track-metadata={JSON.stringify({ recordingCount: selectedCount })}
+            data-track-category='CALLS'
+            data-track-name='send_calls_to_ask_ai'
+            data-track-metadata={JSON.stringify({ callCount: selectedCount })}
           >
             <XyneAIStar size={12} />
             {selectedCount === 0
               ? 'Send to Ask AI'
               : selectedCount === 1
-                ? 'Ask this recording'
-                : `Ask across ${selectedCount} recordings`}
+                ? 'Ask this call'
+                : `Ask across ${selectedCount} calls`}
           </Button>
         </div>
       </div>
@@ -349,25 +361,28 @@ const RecordingAskAIModal = ({
   );
 };
 
-interface RecordingOptionProps {
-  recording: OatsRecordingEntry;
+interface CallOptionProps {
+  call: Call;
   participants: User[];
   checked: boolean;
+  hasTranscript: boolean;
   blocked: boolean;
-  onToggle: (recordingId: string) => void;
+  onToggle: (callId: string) => void;
 }
 
-const RecordingOption = ({
-  recording,
+const CallOption = ({
+  call,
   participants,
   checked,
+  hasTranscript,
   blocked,
   onToggle,
-}: RecordingOptionProps): ReactElement => {
-  const titleState = useRecordingTitleState(toRecordingTitleInput(recording));
-  const durationMs = recording.endedAt
-    ? Math.max(0, recording.endedAt - recording.startedAt)
-    : null;
+}: CallOptionProps): ReactElement => {
+  const title =
+    call.title ||
+    formatParticipantNames(participants.map(participant => getUserDisplayName(participant)));
+  const durationMs = call.endedAt ? Math.max(0, call.endedAt - call.startedAt) : undefined;
+  const startedAt = call.startsAt || call.startedAt;
 
   return (
     <li
@@ -376,53 +391,41 @@ const RecordingOption = ({
       aria-selected={checked}
       aria-disabled={blocked}
       data-theme-tokens
-      onClick={() => onToggle(recording.id)}
+      onClick={() => onToggle(call.id)}
       onKeyDown={event => {
         if (event.key !== 'Enter' && event.key !== ' ') return;
         event.preventDefault();
-        onToggle(recording.id);
+        onToggle(call.id);
       }}
       className={cn(
         'flex items-center gap-2 rounded-lg px-2 py-2 transition-[background-color,opacity] duration-200',
         checked ? 'bg-accent' : 'hover:bg-accent/60',
         blocked ? 'cursor-not-allowed opacity-45' : 'cursor-pointer',
       )}
-      data-track-category='RecordingsV2'
-      data-track-name='toggle_ask_ai_context_recording'
+      data-track-category='CALLS'
+      data-track-name='toggle_ask_ai_context_call'
     >
       <span className='pointer-events-none shrink-0'>
-        <Checkbox checked={checked} onChange={() => onToggle(recording.id)} label='' />
+        <Checkbox checked={checked} onChange={() => onToggle(call.id)} label='' />
       </span>
 
       <span className='flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground'>
-        <AudioLines size={15} strokeWidth={2.2} />
+        <PhoneDefault size={15} strokeWidth={2.2} />
       </span>
 
       <span className='min-w-0 flex-1'>
-        {titleState.kind === 'generating' ? (
-          <TextShimmer
-            as='span'
-            glassEffect={false}
-            className='shimmer-text-themed block truncate text-sm font-semibold'
-          >
-            Generating title…
-          </TextShimmer>
-        ) : (
-          <span className='block truncate text-sm font-medium text-foreground'>
-            {titleState.text}
-          </span>
-        )}
+        <span className='block truncate text-sm font-medium text-foreground'>{title}</span>
         <span className='mt-0.5 block truncate text-xs text-muted-foreground'>
           {formatParticipantNames(participants.map(participant => getUserDisplayName(participant)))}{' '}
-          · {formatRecordingTimestamp(recording.startedAt)}
+          · {format(new Date(startedAt), 'h:mm a')}
         </span>
       </span>
 
       <span className='shrink-0 font-mono text-xs text-muted-foreground/70'>
-        {formatRecordingDuration(durationMs)}
+        {hasTranscript ? formatDuration(durationMs) : 'No transcript'}
       </span>
     </li>
   );
 };
 
-export default RecordingAskAIModal;
+export default CallAskAIModal;
