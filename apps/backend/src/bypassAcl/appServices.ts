@@ -93,6 +93,25 @@ export async function claimAppSigningSecret(appId: string, fresh: string) {
 }
 
 /**
+ * Relocated from apps/middelware/channelValidation.ts's resolveBotDmChannelId. Opening a bot's
+ * DM is work done on behalf of the workspace, not by a member on their own behalf: under the
+ * request's own `user` actor ChannelsACL rejects the create, and ChannelParticipantsACL then
+ * refuses to let the bot add the human to a brand-new private channel it isn't yet a member of.
+ * The caller's channel and user lookups stay under the request's own actor, so workspace scoping
+ * still decides what this app may address.
+ */
+export async function openBotDmForUser(botUserId: string, workspaceId: string, targetUserId: string) {
+  const { unifiedDMService } = await import('@/bots/unified/services/unified-dm-service');
+  return asService(
+    ['Channel', 'ChannelParticipant'],
+    'bot DM open: the per-table ACLs refuse a member-actor create of a new private channel the bot is not yet in',
+    botUserId,
+    workspaceId,
+    () => unifiedDMService.getOrCreateBotDM(targetUserId, botUserId, workspaceId),
+  );
+}
+
+/**
  * Relocated from apps/controllers/incomingWebhookController.ts's handleSlackIncoming. Slack incoming webhook: posts the parsed Slack message into the webhook's channel.
  * Unauthenticated webhook — no req.user, so an explicit tenant scope is opened from the validated
  * :workspaceId URL param so the workspaceId stamper fills downstream writes.
