@@ -202,6 +202,7 @@ export const MessageHoverToolbar: React.FC<MessageHoverToolbarProps> = ({ contai
   return (
     <div
       ref={overlayRef}
+      data-hover-key={activeRow.hoverKey}
       className='absolute inset-x-0 top-0 z-50 h-0'
       style={{ transform: `translateY(${activeRow.top}px)` }}
     >

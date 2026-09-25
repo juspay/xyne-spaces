@@ -27,6 +27,9 @@
 * clicking on text <priority> in "ul[role='listbox']"
 
 # Verifying ticket <ticketAlias> was created
+ponytail: asserts a card exists, not that <ticketAlias> does — hooks.steps.ts resets storedUsers
+per scenario, so the alias is out of scope here. Real per-ticket checks belong in the creating
+scenario, where the alias is still stored.
 * clicking on "[data-testid='channel-tab-tickets']"
 * waiting for "[data-testid^='ticket-card-']" to appear
 
@@ -161,6 +164,7 @@
 
 # Creating sub-ticket <ticketAlias> for user <userAlias> with priority <priority>
 * ensuring ticket <ticketAlias> exists in fixture for user <userAlias>
+* opening the ticket relationships tab
 * clicking on "[data-testid='create-sub-ticket-button']"
 * waiting for "[data-testid='ticket-title-input']" to appear
 * typing stored user <userAlias> ticket <ticketAlias> field "title" in "[data-testid='ticket-title-input']"
@@ -174,6 +178,7 @@
 
 # Creating sub-ticket <ticketAlias> with attachment for user <userAlias> with priority <priority> and assignee <assigneeAlias>
 * ensuring ticket <ticketAlias> exists in fixture for user <userAlias>
+* opening the ticket relationships tab
 * clicking on "[data-testid='create-sub-ticket-button']"
 * waiting for "[data-testid='ticket-title-input']" to appear
 * typing stored user <userAlias> ticket <ticketAlias> field "title" in "[data-testid='ticket-title-input']"
