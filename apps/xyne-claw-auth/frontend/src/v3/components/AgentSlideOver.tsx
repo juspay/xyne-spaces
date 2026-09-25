@@ -31,6 +31,7 @@ const PROVIDER_LABELS_SLIDEOVER: Record<string, string> = {
   claude:     "Anthropic Claude",
   codex:      "OpenAI Codex",
   openrouter: "OpenRouter",
+  orcarouter: "OrcaRouter",
   kimi:       "Kimi",
 };
 import type { Agent, AgentLight } from "../../lib/types";

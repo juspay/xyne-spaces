@@ -17,6 +17,7 @@ export const SUPPORTED_PROVIDERS = [
   "claude",
   "copilot",
   "openrouter",
+  "orcarouter",
   "litellm",
   "spaces",
 ] as const;
@@ -28,6 +29,7 @@ export const PROVIDER_LABELS: Record<string, string> = {
   claude: "Anthropic Claude",
   copilot: "GitHub Copilot",
   openrouter: "OpenRouter",
+  orcarouter: "OrcaRouter",
   litellm: "LiteLLM (own key)",
   spaces: "Spaces",
 };
@@ -37,6 +39,7 @@ export const PROVIDER_DESCRIPTIONS: Record<string, string> = {
   claude: "Your Anthropic account, signed in through Claude.",
   copilot: "Your GitHub Copilot seat.",
   openrouter: "One key, many models across providers.",
+  orcarouter: "OrcaRouter key or account sign-in — many models, one endpoint.",
   litellm: "Point at your own LiteLLM gateway.",
   spaces: "The built-in default. Always available, nothing to connect.",
 };
@@ -47,6 +50,7 @@ export const PROVIDER_CONNECT_METHOD: Record<string, "oauth" | "device" | "api_k
   claude: "oauth",
   copilot: "device",
   openrouter: "api_key",
+  orcarouter: "api_key",
   litellm: "api_key",
   spaces: "none",
 };
@@ -65,6 +69,7 @@ const PROVIDER_HINTS: readonly ProviderHint[] = [
   { provider: "codex", keywords: ["codex", "openai", "open ai", "chatgpt", "gpt"] },
   { provider: "copilot", keywords: ["copilot", "github copilot"] },
   { provider: "openrouter", keywords: ["openrouter", "open router"] },
+  { provider: "orcarouter", keywords: ["orcarouter", "orca router"] },
   { provider: "litellm", keywords: ["litellm", "lite llm"] },
   { provider: "spaces", keywords: ["spaces default", "xyne default"] },
 ];

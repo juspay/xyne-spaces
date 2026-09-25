@@ -405,6 +405,20 @@ export const CONFIG = {
     process.env["HEISENBERG_BASE_URL"] ??
     "<heisenberg-url>"
   ).replace(/\/+$/, ""),
+  /**
+   * OrcaRouter base URLs. Authentication and inference are DIFFERENT public
+   * origins and neither is derivable from the other (the auth endpoints are not
+   * served under the inference origin's `/v1`), so both are declared separately.
+   *
+   * Precedence per side: the explicit env, then the shared `ORCA_BASE_URL`
+   * (one-origin self-hosted deployments), then the public default. Resolution
+   * and the https-only / loopback-http guard live in
+   * lib/orcarouter/constants.ts — these are the raw env values, kept here so
+   * every deployment knob is declared in one file.
+   */
+  orcaAuthBaseUrl: (process.env["ORCA_AUTH_BASE_URL"] ?? "").replace(/\/+$/, ""),
+  orcaApiBaseUrl: (process.env["ORCA_API_BASE_URL"] ?? "").replace(/\/+$/, ""),
+  orcaBaseUrl: (process.env["ORCA_BASE_URL"] ?? "").replace(/\/+$/, ""),
 } as const;
 
 // Prod safety gate: the claw-auth → session-MCP relay and the run callbacks

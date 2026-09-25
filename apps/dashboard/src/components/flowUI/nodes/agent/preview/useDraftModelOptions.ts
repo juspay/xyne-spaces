@@ -4,6 +4,7 @@ import {
   listClaudeModelsForUser,
   listCodexModelsForUser,
   listCopilotModelsForUser,
+  listOrcaRouterModelsForUser,
 } from '@/services/claw/clawSettingsService';
 import { fetchClawAgentModels } from '@/services/clawAgentModelsService';
 
@@ -33,7 +34,7 @@ export function defaultModelLabel(provider: string | undefined): string {
   return `${providerDisplayName(provider)} default`;
 }
 
-const PROVIDER_CATALOGS = new Set(['claude', 'codex', 'copilot']);
+const PROVIDER_CATALOGS = new Set(['claude', 'codex', 'copilot', 'orcarouter']);
 
 async function listForProvider(provider: string, userId: string): Promise<DraftModelOption[]> {
   if (provider === 'claude') {
@@ -44,10 +45,13 @@ async function listForProvider(provider: string, userId: string): Promise<DraftM
     const rows = await listCodexModelsForUser(userId);
     return rows.map(row => ({ value: row.id, label: row.name || row.id }));
   }
+  if (provider === 'orcarouter') {
+    const catalog = await listOrcaRouterModelsForUser(userId, { capability: 'chat' });
+    return catalog.models.map(row => ({ value: row.id, label: row.name || row.id }));
+  }
   const rows = await listCopilotModelsForUser(userId);
   return rows.map(row => ({ value: row.id, label: row.name || row.id }));
 }
-
 export function useDraftModelOptions({
   provider,
   userId,

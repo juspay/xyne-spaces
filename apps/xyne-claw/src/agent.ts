@@ -30,7 +30,7 @@ import type {
   UiWidget,
 } from "xyne-claw-shared";
 import { getModels, getProviders, type ThinkingLevel } from "@earendil-works/pi-ai";
-import { AGENT, LITELLM, PATHS, SANDBOX_PREVIEW, SERVER } from "./config.js";
+import { AGENT, LITELLM, ORCAROUTER, PATHS, SANDBOX_PREVIEW, SERVER } from "./config.js";
 import {
   hasSession,
   ensureSessionDir,
@@ -826,6 +826,17 @@ function liteLlmThinkingCompat(modelId: string): { thinkingFormat: "deepseek" } 
     : undefined;
 }
 
+/**
+ * OrcaRouter is an OpenAI-wire aggregator serving `vendor/model` ids. The
+ * reasoning families it resells accept the OpenAI `reasoning_effort` parameter
+ * (verified against the live relay); its own `orcarouter/*` aliases and anything
+ * unrecognised are registered non-reasoning so pi never sends a parameter the
+ * model may reject — a 400 there would drop the run onto the fallback chain.
+ */
+function isReasoningOrcaRouterModel(modelId: string): boolean {
+  return /^(openai\/(gpt-5|o\d)|anthropic\/claude|google\/gemini|deepseek\/|x-ai\/grok|zai\/glm|moonshotai\/kimi)/i.test(modelId);
+}
+
 /** Human-readable description of how the thinking level reaches the provider —
  *  surfaced in the debug snapshot so a "why is it still thinking?" report can be
  *  answered from the trace instead of by reading adapter source. */
@@ -1053,6 +1064,47 @@ export function resolveModel(
       throw new Error(`Failed to register LiteLLM model "${providerConfig.model}" at ${baseUrl}`);
     }
     log.info(`[agent] Using user LiteLLM model: ${providerConfig.model} at ${baseUrl}`);
+    return model;
+  }
+
+  if (provider === "orcarouter" && providerConfig?.apiKey) {
+    // OrcaRouter (agent-level "orcarouter" credential): the user's own
+    // `sk-orca-…` key against the relay at https://api.orcarouter.ai/v1, which
+    // speaks the OpenAI wire format. Registered under its own provider name so
+    // it can never collide with the platform-key "litellm" terminal fallback
+    // below — the credential must reach OrcaRouter, never the platform proxy
+    // (the wrong-answer bug an unhandled provider name falls into).
+    //
+    // baseUrl falls back to the public inference origin only when the
+    // credential omits one; a self-hosted deployment overrides it explicitly.
+    const providerName = "orcarouter-user";
+    const baseUrl = (providerConfig.baseUrl || ORCAROUTER.baseUrl).replace(/\/+$/, "");
+    const isReasoning = isReasoningOrcaRouterModel(providerConfig.model);
+    modelRegistry.registerProvider(providerName, {
+      baseUrl,
+      apiKey: providerConfig.apiKey,
+      api: "openai-completions",
+      authHeader: true,
+      models: [
+        {
+          id: providerConfig.model,
+          name: providerConfig.model,
+          reasoning: isReasoning,
+          // OrcaRouter rejects the `developer` role (422) that pi picks for
+          // reasoning models by default; it only accepts `system`.
+          compat: { supportsDeveloperRole: false },
+          input: ["text", "image"],
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+          contextWindow: contextWindowFor(providerConfig.model),
+          maxTokens,
+        },
+      ],
+    });
+    const model = modelRegistry.find(providerName, providerConfig.model);
+    if (!model) {
+      throw new Error(`Failed to register OrcaRouter model "${providerConfig.model}" at ${baseUrl}`);
+    }
+    log.info(`[agent] Using OrcaRouter model: ${providerConfig.model} at ${baseUrl}${isReasoning ? " (reasoning)" : ""}`);
     return model;
   }
 

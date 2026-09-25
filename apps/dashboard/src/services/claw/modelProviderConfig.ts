@@ -10,6 +10,7 @@ export const HOSTED_PROVIDERS = [
   'claude',
   'copilot',
   'openrouter',
+  'orcarouter',
   'litellm',
   'spaces',
 ] as const;
@@ -32,6 +33,7 @@ export const PROVIDER_DISPLAY: Record<string, string> = {
   claude: 'Anthropic Claude',
   codex: 'OpenAI Codex',
   openrouter: 'OpenRouter',
+  orcarouter: 'OrcaRouter',
   litellm: 'LiteLLM (own key)',
   'claude-code': 'Claude Code (this device)',
   'codex-cli': 'Codex CLI (this device)',

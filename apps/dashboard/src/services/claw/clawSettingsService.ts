@@ -3,6 +3,8 @@ import type {
   ClaudeModelInfo,
   CodexOauthStart,
   GitHubDeviceCode,
+  OrcaRouterCatalog,
+  OrcaRouterOauthStart,
   ProviderCredential,
   ProviderCredentialPayload,
   ProviderModelOption,
@@ -167,6 +169,80 @@ export async function exchangeCodexOauth(
 export async function listCodexModelsForUser(userId: string): Promise<ProviderModelOption[]> {
   const data = await clawRequest<{ success: boolean; data: ProviderModelOption[] }>(
     '/api/v1/settings/codex/models',
+    withUser(userId),
+  );
+  return data.data;
+}
+
+/* ── OrcaRouter ────────────────────────────────────────────────────────
+ * One provider, two explicit authentication choices (API key, or the
+ * out-of-band PKCE sign-in). The backend holds the issued key — the browser
+ * never receives it, and the catalog is proxied so no key rides a browser
+ * request.
+ * ───────────────────────────────────────────────────────────────────── */
+
+export async function startOrcaRouterOauth(userId: string): Promise<OrcaRouterOauthStart> {
+  const data = await clawRequest<{ success: boolean; data: OrcaRouterOauthStart }>(
+    '/api/v1/settings/provider-credentials/orcarouter/oauth/start',
+    {
+      method: 'POST',
+      headers: { [USER_ID_HEADER]: userId },
+    },
+  );
+  return data.data;
+}
+
+export async function exchangeOrcaRouterOauth(
+  userId: string,
+  payload: { code: string; state: string },
+): Promise<{ provider: string; hasApiKey: boolean; source: string }> {
+  const data = await clawRequest<{
+    success: boolean;
+    data: { provider: string; hasApiKey: boolean; source: string };
+  }>('/api/v1/settings/provider-credentials/orcarouter/oauth/exchange', {
+    method: 'POST',
+    headers: { [USER_ID_HEADER]: userId },
+    body: JSON.stringify(payload),
+  });
+  return data.data;
+}
+
+/**
+ * Cancel an in-flight OrcaRouter sign-in server-side. Uses `keepalive` so the
+ * request still leaves the browser during `pagehide` / tab teardown. Failures
+ * are swallowed: cancellation is best-effort and must never surface as a
+ * settings error.
+ */
+export async function cancelOrcaRouterOauth(
+  userId: string,
+  payload: { state?: string },
+  opts?: { keepalive?: boolean },
+): Promise<void> {
+  try {
+    await clawRequest<{ success: boolean }>(
+      '/api/v1/settings/provider-credentials/orcarouter/oauth/cancel',
+      {
+        method: 'POST',
+        headers: { [USER_ID_HEADER]: userId },
+        body: JSON.stringify(payload),
+        ...(opts?.keepalive ? { keepalive: true } : {}),
+      },
+    );
+  } catch {
+    /* best-effort */
+  }
+}
+
+export async function listOrcaRouterModelsForUser(
+  userId: string,
+  params: { capability: string; modalities?: readonly string[] },
+): Promise<OrcaRouterCatalog> {
+  const query = new URLSearchParams({ capability: params.capability });
+  if (params.modalities && params.modalities.length > 0) {
+    query.set('modalities', params.modalities.join(','));
+  }
+  const data = await clawRequest<{ success: boolean; data: OrcaRouterCatalog }>(
+    `/api/v1/settings/provider-credentials/orcarouter/models?${query.toString()}`,
     withUser(userId),
   );
   return data.data;

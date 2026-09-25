@@ -551,7 +551,10 @@ function resolveProviderForSubagent(
   }
 
   const chosen = explicit ?? resolution?.parentProvider;
-  if ((chosen === "copilot" || chosen === "claude" || chosen === "codex") && resolution?.providerConfigs?.[chosen]) {
+  // `orcarouter` inherits like the other BYO-baseUrl providers: a subagent left
+  // on "spaces" would quietly bill the platform LiteLLM key for a run the user
+  // pointed at their own OrcaRouter credential.
+  if ((chosen === "copilot" || chosen === "claude" || chosen === "codex" || chosen === "orcarouter") && resolution?.providerConfigs?.[chosen]) {
     const cfg = resolution.providerConfigs[chosen]!;
     const base: CopilotConfig | ClaudeConfig | CodexConfig = {
       apiKey: cfg.apiKey,

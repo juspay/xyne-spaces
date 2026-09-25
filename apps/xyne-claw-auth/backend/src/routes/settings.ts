@@ -23,6 +23,23 @@ import {
   providerNeedsKey,
   verifyProviderCredential,
 } from "../lib/provider-credential-verify.js";
+import {
+  buildAuthorizeUrl,
+  CATALOG_TIMEOUT_MS,
+  classifyExchangeError,
+  credentialSource,
+  createPkceAttempt,
+  MAX_CATALOG_BYTES,
+  ORCAROUTER_MODELS_PATH,
+  ORCAROUTER_PKCE_PREFIX,
+  ORCAROUTER_PKCE_TTL_SECONDS,
+  parseCapabilitiesAndModalities,
+  parseCatalog,
+  redactOrcaRouterSecrets,
+  resolveApiBase,
+  resolveCatalog,
+  type OrcaRouterCredential,
+} from "../lib/orcarouter/index.js";
 import { assertSafeOutboundUrl } from "../mcpgateway/services/http-client.js";
 import { createLogger } from "../logger.js";
 
@@ -30,7 +47,7 @@ const log = createLogger("settings");
 
 const router = Router();
 
-const VALID_PROVIDERS = new Set(["spaces", "copilot", "claude", "codex", "openrouter", "litellm"]);
+const VALID_PROVIDERS = new Set(["spaces", "copilot", "claude", "codex", "openrouter", "orcarouter", "litellm"]);
 
 const GITHUB_CLIENT_ID = "Ov23li8tweQw6odWQebz";
 const GITHUB_DEVICE_CODE_URL = "https://github.com/login/device/code";
@@ -860,5 +877,168 @@ router.post("/provider-credentials/claude/oauth/exchange", oauthLimiter, async (
     res.status(500).json({ success: false, error: "Claude login exchange failed" });
   }
 });
+
+// ── OrcaRouter — API key + OAuth 2.0 PKCE (Flow B, out-of-band code) ─────────
+// One provider id (`orcarouter`) with two explicit authentication choices: the
+// user pastes an existing `sk-orca-…` key (the ordinary PUT credential route),
+// or signs in with their OrcaRouter account. Flow B is chosen because this
+// backend is self-hosted: its public address differs per deployment and is
+// often behind a proxy, so a 127.0.0.1 loopback callback cannot be served back
+// to it. The consent screen shows the code and the user pastes it in — the same
+// UX as the Codex/Claude sign-in above.
+//
+// Auth and inference live on DIFFERENT origins and the paths are not derivable
+// from one another (the inference origin's `/v1` does not serve the auth
+// endpoints). The origin/path constants live in lib/orcarouter/constants.ts and
+// nothing here builds a URL by hand.
+
+router.post("/provider-credentials/orcarouter/oauth/start", oauthLimiter, asyncHandler(async (req: Request, res: Response) => {
+  const userId = requireRequester(req);
+
+  const attempt = createPkceAttempt();
+  // The verifier stays server-side, keyed by state, single use, 10 min TTL
+  // (matching the auth code's own TTL). It is never in the URL or the response.
+  await redisService
+    .getConnection()
+    .set(`${ORCAROUTER_PKCE_PREFIX}${userId}:${attempt.state}`, attempt.verifier, "EX", ORCAROUTER_PKCE_TTL_SECONDS);
+
+  const url = buildAuthorizeUrl({ challenge: attempt.challenge, state: attempt.state });
+  log.info(`[settings] orcarouter/oauth/start userId=${userId} flow=oob`);
+  ok(res, { url, state: attempt.state, expiresIn: ORCAROUTER_PKCE_TTL_SECONDS, flow: "oob" });
+}));
+
+router.post("/provider-credentials/orcarouter/oauth/exchange", oauthLimiter, asyncHandler(async (req: Request, res: Response) => {
+  const userId = requireRequester(req);
+
+  let { code, state } = (req.body ?? {}) as { code?: string; state?: string };
+  // Tolerate the user pasting the whole URL the browser showed them.
+  const raw = (code ?? "").trim();
+  if (raw && (raw.startsWith("http") || raw.includes("code="))) {
+    try {
+      const u = raw.startsWith("http") ? new URL(raw) : new URL(`http://x?${raw}`);
+      code = u.searchParams.get("code") ?? code;
+      state = u.searchParams.get("state") ?? state;
+    } catch { /* keep original */ }
+  }
+  if (!code || !state) throw badRequest("code and state are required");
+
+  const redis = redisService.getConnection();
+  const key = `${ORCAROUTER_PKCE_PREFIX}${userId}:${state}`;
+  const verifier = await redis.get(key);
+  // A missing key is a state mismatch, an expiry, or a replay — all three end
+  // the same way, and none of them may echo the verifier.
+  if (!verifier) throw badRequest("Sign-in expired or the state did not match — start again");
+  await redis.del(key); // single use: the code can never be redeemed twice
+
+  let credential: OrcaRouterCredential;
+  try {
+    credential = await credentialSource("orcarouter-oauth").acquire({ code, state, verifier });
+  } catch (err) {
+    const failure = classifyExchangeError(err);
+    throw new HttpError(failure.retryable ? 502 : 400, failure.message);
+  }
+
+  // The issued key is DURABLE — not a refresh token. Stored like any other
+  // provider key; no refresh grant exists and none is recorded.
+  const enc = encrypt(credential.apiKey, CONFIG.encryptionKey);
+  const row = await userProviderCredentialsRepository.upsert(userId, "orcarouter", {
+    encryptedKey: enc.ciphertext,
+    iv: enc.iv,
+    authTag: enc.authTag,
+    authType: "api_key",
+    baseUrl: credential.baseUrl,
+  });
+
+  ok(res, {
+    provider: row.provider,
+    hasApiKey: Boolean(row.encryptedKey),
+    source: "orcarouter-oauth",
+  });
+}));
+
+// POST /settings/provider-credentials/orcarouter/oauth/cancel
+// Releases an in-flight sign-in by dropping its single-use verifier, so an
+// abandoned attempt cannot be redeemed later. The clients call this when the
+// user cancels, switches authentication method, closes the dialog, unmounts, or
+// the page is torn down (`pagehide`, with `keepalive`) — so it must stay cheap,
+// idempotent, and never fail the caller: a missing state just means there is
+// nothing left to release.
+router.post("/provider-credentials/orcarouter/oauth/cancel", asyncHandler(async (req: Request, res: Response) => {
+  const userId = requireRequester(req);
+  const state = typeof (req.body as { state?: unknown } | undefined)?.state === "string"
+    ? (req.body as { state: string }).state
+    : "";
+
+  const redis = redisService.getConnection();
+  if (state) {
+    await redis.del(`${ORCAROUTER_PKCE_PREFIX}${userId}:${state}`);
+  } else {
+    // Cancelled before `start` resolved, so the client has no state to name:
+    // clear this user's pending attempts instead of leaving them to expire.
+    const keys = await redis.keys(`${ORCAROUTER_PKCE_PREFIX}${userId}:*`);
+    if (keys.length > 0) await redis.del(...keys);
+  }
+
+  ok(res, { cancelled: true });
+}));
+
+// GET /settings/provider-credentials/orcarouter/models?capability=&modalities=
+// The backend holds the key; the browser receives minimal metadata only.
+// Live success is authoritative. When the upstream call fails (or returns
+// nothing usable) the VERIFIED seed is served with degraded:true — never
+// free-text entry, and never a mix of live and seed.
+router.get("/provider-credentials/orcarouter/models", asyncHandler(async (req: Request, res: Response) => {
+  const userId = requireRequester(req);
+  const { capability, modalities } = parseCapabilitiesAndModalities(
+    req.query["capability"],
+    req.query["modalities"],
+  );
+
+  const cred = await userProviderCredentialsRepository.findByUserAndProvider(userId, "orcarouter");
+  if (!cred?.encryptedKey || !cred.iv || !cred.authTag) {
+    // No key yet is not an error the picker should blank on — the seed is what
+    // a not-yet-connected user can choose from.
+    const seeded = resolveCatalog(null, capability, modalities);
+    ok(res, seeded);
+    return;
+  }
+
+  const apiKey = decrypt(cred.encryptedKey, cred.iv, cred.authTag, CONFIG.encryptionKey);
+  const baseUrl = (cred.baseUrl || resolveApiBase()).replace(/\/+$/, "");
+  // Scope the upstream request to the capability being selected, per the
+  // OrcaRouter model-list contract — asking for the whole catalog and filtering
+  // here would pull capabilities this client cannot speak.
+  const url = `${baseUrl}${ORCAROUTER_MODELS_PATH}?capability=${encodeURIComponent(capability)}`;
+
+  let live: ReturnType<typeof parseCatalog> | null = null;
+  try {
+    const upstream = await fetch(url, {
+      headers: { Authorization: `Bearer ${apiKey}`, "User-Agent": "xyne-claw-auth" },
+      signal: AbortSignal.timeout(CATALOG_TIMEOUT_MS),
+    });
+    if (upstream.ok) {
+      // Bound the response bytes before parsing — a catalog must not be able to
+      // consume unbounded memory. `parseCatalog` then bounds the item count and
+      // drops anything malformed.
+      const body = await upstream.text();
+      const bounded = body.length > MAX_CATALOG_BYTES ? body.slice(0, MAX_CATALOG_BYTES) : body;
+      try {
+        const parsed = parseCatalog(JSON.parse(bounded));
+        // Distinguish "the catalog answered with no models" (an authoritative
+        // empty answer) from "the catalog could not be read" (null → the seed).
+        live = parsed;
+      } catch {
+        live = null;
+      }
+    } else {
+      // Never log the key; the status and the origin are enough to diagnose.
+      log.warn(`[settings] orcarouter/models upstream ${upstream.status} at ${url}`);
+    }
+  } catch (err) {
+    log.warn(`[settings] orcarouter/models unreachable at ${url}: ${redactOrcaRouterSecrets(String(err instanceof Error ? err.message : err))}`);
+  }
+
+  ok(res, resolveCatalog(live, capability, modalities));
+}));
 
 export const settingsRouter = router;

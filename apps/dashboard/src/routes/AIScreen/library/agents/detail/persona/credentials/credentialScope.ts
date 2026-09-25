@@ -17,6 +17,7 @@ import {
   exchangeClaudeOauth,
   exchangeCodexOauth,
   initiateCopilotGitHubLogin,
+  listOrcaRouterModelsForUser,
   listProviderCredentials,
   pollCopilotGitHubLogin,
   startClaudeOauth,
@@ -25,6 +26,7 @@ import {
   verifyProviderCredentialForUser,
   type CredentialHealth,
 } from '@/services/claw/clawSettingsService';
+import type { OrcaRouterCatalog } from '@/services/claw/clawSettingsTypes';
 
 export type OauthCredentialProvider = 'codex' | 'claude';
 
@@ -44,6 +46,16 @@ export interface CredentialScope {
   pollCopilot: () => Promise<{ status: string }>;
   /** Asks the provider whether the stored key still works. */
   verify: (provider: string) => Promise<CredentialHealth>;
+  /**
+   * OrcaRouter model catalog for the OrcaRouter model dropdown. Only the
+   * user-level route exists (the backend holds the key), so agent-scoped
+   * credentials leave this undefined and the dropdown reports itself
+   * unavailable instead of falling back to free text.
+   */
+  orcaRouterModels?: (params: {
+    capability: string;
+    modalities?: readonly string[];
+  }) => Promise<OrcaRouterCatalog>;
 }
 
 export function agentCredentialScope(slug: string): CredentialScope {
@@ -95,5 +107,6 @@ export function userCredentialScope(userId: string): CredentialScope {
     },
     pollCopilot: () => pollCopilotGitHubLogin(userId),
     verify: provider => verifyProviderCredentialForUser(userId, provider),
+    orcaRouterModels: params => listOrcaRouterModelsForUser(userId, params),
   };
 }

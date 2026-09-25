@@ -3964,6 +3964,85 @@ export async function listCodexModelsForUser(userId: string): Promise<Array<{ id
   return data.data;
 }
 
+// ── OrcaRouter (API key + out-of-band PKCE sign-in) ──────────────────
+// The backend holds the OrcaRouter key: the browser never receives it, and
+// the model catalog is proxied so no key ever rides on a browser request.
+
+export interface OrcaRouterOauthStart {
+  url: string;
+  state: string;
+  expiresIn: number;
+  flow: "oob";
+}
+
+export interface OrcaRouterModelInfo {
+  id: string;
+  name: string;
+  contextLength?: number;
+  inputModalities?: string[];
+  reasoning?: string[];
+}
+
+export interface OrcaRouterCatalog {
+  models: OrcaRouterModelInfo[];
+  source: "live" | "fallback";
+  degraded: boolean;
+  capability: string;
+}
+
+export async function startOrcaRouterOauth(userId: string): Promise<OrcaRouterOauthStart> {
+  const data = await request<{ success: boolean; data: OrcaRouterOauthStart }>(
+    `${AUTH_API_URL}/api/v1/settings/provider-credentials/orcarouter/oauth/start`,
+    { method: "POST", headers: { "x-user-id": userId } },
+  );
+  return data.data;
+}
+
+export async function exchangeOrcaRouterOauth(
+  userId: string,
+  payload: { code: string; state: string },
+): Promise<{ provider: string; hasApiKey: boolean; source: string }> {
+  const data = await request<{
+    success: boolean;
+    data: { provider: string; hasApiKey: boolean; source: string };
+  }>(
+    `${AUTH_API_URL}/api/v1/settings/provider-credentials/orcarouter/oauth/exchange`,
+    { method: "POST", headers: { "x-user-id": userId }, body: JSON.stringify(payload) },
+  );
+  return data.data;
+}
+
+/** Cancel an in-flight OrcaRouter sign-in server-side. `keepalive` lets the
+ *  request survive a page teardown (`pagehide` / tab close). */
+export async function cancelOrcaRouterOauth(
+  userId: string,
+  payload: { state?: string },
+  opts?: { keepalive?: boolean },
+): Promise<void> {
+  await fetch(`${AUTH_API_URL}/api/v1/settings/provider-credentials/orcarouter/oauth/cancel`, {
+    method: "POST",
+    credentials: "include",
+    keepalive: opts?.keepalive ?? false,
+    headers: { "Content-Type": "application/json", "x-user-id": userId },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function listOrcaRouterModelsForUser(
+  userId: string,
+  params: { capability: string; modalities?: string[] },
+): Promise<OrcaRouterCatalog> {
+  const query = new URLSearchParams({ capability: params.capability });
+  if (params.modalities && params.modalities.length > 0) {
+    query.set("modalities", params.modalities.join(","));
+  }
+  const data = await request<{ success: boolean; data: OrcaRouterCatalog }>(
+    `${AUTH_API_URL}/api/v1/settings/provider-credentials/orcarouter/models?${query.toString()}`,
+    { headers: { "x-user-id": userId } },
+  );
+  return data.data;
+}
+
 // ── Agent Control Center ─────────────────────────────────────────────
 
 export interface ToolInvocation {
