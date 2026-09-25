@@ -2,6 +2,7 @@ import { app, dialog, Menu, MenuItem, MenuItemConstructorOptions } from 'electro
 import path from 'path';
 import log from 'electron-log/main';
 import { config, ENABLE_LOCAL_HARNESS } from './config';
+import { setIsQuitting } from './app-state';
 import { setupDeepLinks } from '../services/deep-links';
 import { setupIpcHandlers } from '../ipc/handlers';
 import { createMainWindow, getMainWindow, setWindowReferences } from '../window/manager';
@@ -67,19 +68,10 @@ if (config.USER_DATA_SUFFIX) {
 // This must be called before app.whenReady() for proper protocol handling
 const gotTheLock = setupDeepLinks(createMainWindow);
 
-// Track if app is quitting (for Cmd+Q support on macOS)
-let isQuitting = false;
-
-export function getIsQuitting(): boolean {
-  return isQuitting;
-}
-
-
-
 // Handle before-quit to allow Cmd+Q to actually quit the app
 app.on('before-quit', async () => {
-  isQuitting = true;
-  
+  setIsQuitting(true);
+
   // Log app quit event
   Logger.info(ElectronEvent.APP_QUIT, {}, 'App');
 

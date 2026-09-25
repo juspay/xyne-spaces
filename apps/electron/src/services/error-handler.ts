@@ -7,20 +7,9 @@
 
 import { app, BrowserWindow } from 'electron';
 import log from 'electron-log/main';
+import { getIsQuitting } from '../app/app-state';
 import { Logger, errorLogger } from './logger/Logger';
 import ElectronEvent from './logger/electron-events';
-
-// Reasons that indicate a real crash worth an automatic reload attempt.
-// 'clean-exit' and 'killed' cover normal teardown (e.g. app quit, or Chromium
-// tearing down an on-demand utility process like video capture) and should
-// not trigger a reload.
-const RECOVERABLE_RENDERER_REASONS = new Set<string>([
-  'crashed',
-  'abnormal-exit',
-  'oom',
-  'launch-failed',
-  'integrity-failure',
-]);
 
 const MAX_RENDERER_RELOAD_ATTEMPTS = 3;
 const rendererReloadAttempts = new Map<number, number>();
@@ -119,7 +108,9 @@ function setupRendererErrorHandlers(): void {
       return;
     }
 
-    if (!RECOVERABLE_RENDERER_REASONS.has(details.reason)) {
+    // App is intentionally shutting down (e.g. Cmd+Q) - don't fight it by
+    // reviving a window that's about to be torn down anyway.
+    if (getIsQuitting()) {
       return;
     }
 
