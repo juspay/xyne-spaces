@@ -184,7 +184,6 @@ export const Event = {
   IDE_REPO_DELETED: 'ide_repo_deleted',
   API_ERROR_INTERCEPTOR_CAUGHT: 'api_error_interceptor_caught',
   AUTH_SESSION_EXPIRED: 'auth_session_expired',
-  AUTH_SESSION_401_TRANSIENT: 'auth_session_401_transient',
   API_NETWORK_ERROR: 'api_network_error',
   API_OPERATIONAL_ERROR: 'api_operational_error',
   CANVAS_PREFETCH_STARTED: 'canvas_prefetch_started',
