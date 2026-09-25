@@ -676,7 +676,7 @@ export async function handleQueriesZqlToSql(request: Request): Promise<any> {
             };
           }
 
-          // Extract ZQL result from JSON-wrapped response. $queryRawUnsafe bypasses the
+          // Extract ZQL result from JSON-wrapped response. Raw SQL bypasses the
           // Prisma encryption extension, so decrypt server-encrypted fields explicitly.
           const data = await decryptQueryResult(extractZqlResult(pgArrayResult), { queryName: req.name });
 
