@@ -186,6 +186,34 @@ export function deskFiltersToValues(filters: TicketFilters): DeskValueRow[] {
   return values;
 }
 
+/** Serialize visible column keys into a single saved-view value row. */
+export function columnKeysToValues(columnKeys: ReadonlySet<string>): DeskValueRow[] {
+  if (columnKeys.size === 0) return [];
+  return [
+    {
+      id: uuidv4(),
+      entityName: SavedConfigEntityName.TICKET,
+      fieldName: '__columns',
+      fieldValue: [...columnKeys].join(','),
+    },
+  ];
+}
+
+/**
+ * Extract saved column keys from view value rows.
+ * Returns null when no column row exists (old view with no column data).
+ */
+export function columnKeysFromValues(
+  values: ReadonlyArray<SavedConfigValueRow>,
+): Set<string> | null {
+  for (const { fieldName, fieldValue } of values) {
+    if (fieldName === '__columns' && fieldValue) {
+      return new Set(fieldValue.split(',').filter(Boolean));
+    }
+  }
+  return null;
+}
+
 interface ShareableView {
   id: string;
   name: string;

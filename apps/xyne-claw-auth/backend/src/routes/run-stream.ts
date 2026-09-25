@@ -33,6 +33,7 @@ import {
   parseLateFollowUpCallback,
 } from "../lib/follow-up-suggestions.js";
 import { consumeClawStream } from "../lib/consume-claw-stream.js";
+import { mintChatSessionId, beginChatRun, failChatRun } from "../lib/chat-run-record.js";
 import { recordUploadedArtifacts } from "../lib/conversation-artifact-signals.js";
 import { attachArtifactToSessionApp } from "../lib/artifact-app-session.js";
 import { recordDeliveredArtifacts } from "../lib/delivered-artifacts.js";
@@ -404,6 +405,11 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
   // Started once the SSE response is open, stopped on disconnect and in the
   // finally below. See the setInterval site for why this is required.
   let backendKeepalive: ReturnType<typeof setInterval> | null = null;
+  // Visible to the outer catch — see the identical pair in agent-chat.ts. A turn
+  // that throws before dispatch owns a placeholder and a run row that must both
+  // reach a terminal state instead of being stranded at "running".
+  let pendingAssistantMsgId: string | undefined;
+  let pendingRunSessionId: string | undefined;
 
   try {
     const {
@@ -879,6 +885,37 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       } catch (msgErr) {
         log.warn("[run-stream] Failed to pre-create assistant placeholder:", errMsg(msgErr));
       }
+      pendingAssistantMsgId = assistantMsg?.id;
+    }
+
+    // Record the run BEFORE dispatch, on an id we mint rather than one read back
+    // from the dispatch response — see lib/chat-run-record.ts for why. Awaited
+    // and fatal: a turn whose run cannot be recorded must not run.
+    const runSessionId = mintChatSessionId();
+    if (convId && userId && orgId) {
+      try {
+        await beginChatRun({
+          sessionId: runSessionId,
+          userId,
+          agentSlug: slug,
+          orgId,
+          task: effectiveTask,
+          conversationId: convId,
+        });
+        pendingRunSessionId = runSessionId;
+      } catch (startErr) {
+        log.error("[run-stream] AgentRun.start failed — refusing the turn:", errMsg(startErr));
+        if (assistantMsg) {
+          await chatMessageRepository
+            .update(assistantMsg.id, {
+              content: widgetErrorContent(undefined, "Could not start this run. Please try again."),
+              status: "failed",
+            })
+            .catch(() => {});
+        }
+        res.status(500).json({ success: false, error: "Could not start this run" });
+        return;
+      }
     }
 
     // Branched PI session clone (regenerate / edit-user).
@@ -1275,6 +1312,10 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
     );
 
     const runRequestBody: Record<string, unknown> = {
+      // Pre-minted and already persisted as an AgentRun row above. prepareRun
+      // honours a caller-supplied sessionId on internal runs, so the row, the
+      // dispatch and every later callback all key on the same id.
+      sessionId: runSessionId,
       userId,
       userName,
       userEmail,
@@ -1487,6 +1528,8 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       } catch (msgErr) {
         log.warn("[run-stream] Failed to persist local-folder failure message:", errMsg(msgErr));
       }
+      await failChatRun(runSessionId, errContent);
+      pendingRunSessionId = undefined;
       if (!res.writableEnded && !res.destroyed) {
         res.write(`event: done\ndata: ${JSON.stringify({
           content: errContent,
@@ -1507,6 +1550,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       }
       const dispatched = await dispatchLocalHarnessRun({
         target: localTarget,
+        sessionId: runSessionId,
         userId,
         orgId,
         conversationId: convId,
@@ -1532,16 +1576,11 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
 
       res.write(`event: run\ndata: ${JSON.stringify({ sessionId: dispatched.sessionId, conversationId: convId, clawRunOrigin: runOrigin })}\n\n`);
 
-      agentRunRepository.start({
-        sessionId: dispatched.sessionId,
-        userId,
-        agentSlug: slug,
-        orgId,
-        triggerSource: "chat",
-        task: effectiveTask,
-        conversationId: convId,
-        fastMode: fastModeEnabled,
-      }).catch((e: unknown) => log.warn("[run-stream] AgentRun.start failed:", errMsg(e)));
+      // The row was written before dispatch; the harness run carries the same id
+      // because we handed it down. Ownership of the terminal state passes to the
+      // callback from here.
+      pendingRunSessionId = undefined;
+      pendingAssistantMsgId = undefined;
 
       const harnessResult = await resultPromise;
 
@@ -1651,6 +1690,10 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       } catch (msgErr) {
         log.warn("[run-stream] Failed to persist error assistant message:", errMsg(msgErr));
       }
+      // Close the pre-created row. This is the dispatch-refused case that used to
+      // leave the conversation with messages and no run at all.
+      await failChatRun(runSessionId, runBody.error ?? "Failed to start agent");
+      pendingRunSessionId = undefined;
 
       res.write(`event: error\ndata: ${JSON.stringify({
         error: errContent,
@@ -1662,19 +1705,14 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
 
     res.write(`event: run\ndata: ${JSON.stringify({ sessionId: runBody.sessionId, conversationId: convId })}\n\n`);
 
-    // Track AgentRun (same as agent-chat)
-    if (runBody.sessionId) {
-      agentRunRepository.start({
-        sessionId: runBody.sessionId,
-        userId,
-        agentSlug: slug,
-        orgId,
-        triggerSource: "chat",
-        task: effectiveTask,
-        conversationId: convId,
-        fastMode: fastModeEnabled,
-      }).catch((e: unknown) => log.warn("[run-stream] AgentRun.start failed:", errMsg(e)));
+    // Row already written before dispatch; the callback owns it from here.
+    if (runBody.sessionId && runBody.sessionId !== runSessionId) {
+      log.error(
+        `[run-stream] dispatch returned sessionId=${runBody.sessionId} but the run row is keyed on ${runSessionId} (conv=${convId})`,
+      );
     }
+    pendingRunSessionId = undefined;
+    pendingAssistantMsgId = undefined;
 
     const result = await resultPromise;
 
@@ -1699,6 +1737,18 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
 
   } catch (err) {
     log.error(`[run-stream] Error:`, err);
+    // Drive the turn terminal — see the identical block in agent-chat.ts. Before
+    // this, a throw in the pre-dispatch window stranded the placeholder at
+    // "running" with no run row for anything to reap.
+    if (pendingRunSessionId) await failChatRun(pendingRunSessionId, err);
+    if (pendingAssistantMsgId) {
+      await chatMessageRepository
+        .update(pendingAssistantMsgId, {
+          content: widgetErrorContent(undefined, "This run stopped unexpectedly."),
+          status: "failed",
+        })
+        .catch(() => {});
+    }
     pendingStreams.delete(streamId);
     streamMeta.delete(streamId);
     if (!res.headersSent) {
@@ -2129,9 +2179,9 @@ internalRouter.post(
     });
 
     try {
-      for (const invocation of invocations) {
-        await agentRunRepository.appendToolInvocation(sessionId, invocation);
-      }
+      const appended = invocations.map((invocation) => agentRunRepository.appendToolInvocation(sessionId, invocation));
+      await agentRunRepository.flushToolInvocations(sessionId);
+      await Promise.all(appended);
       log.info(`[follow-ups] persisted late suggestions streamId=${req.params.streamId} sessionId=${sessionId} count=${suggestions.length}`);
       res.json({ success: true });
     } catch (err) {
@@ -2178,21 +2228,13 @@ async function runViaSseTransport(opts: RunViaSseOpts): Promise<void> {
   // missing-done fallback below report a `cancelled` terminal state instead of
   // a misleading `failed` when the cancelled `done` didn't make it back.
   let sawCancelled = false;
-  let agentRunStarted = false;
-  const startAgentRunOnce = (sessionId: string) => {
-    if (agentRunStarted) return;
-    agentRunStarted = true;
-    agentRunRepository.start({
-      sessionId,
-      userId,
-      agentSlug: slug,
-      orgId,
-      triggerSource: "chat",
-      task: task.trim(),
-      conversationId: convId,
-      fastMode: runRequestBody["fastMode"] === true,
-    }).catch((e: unknown) => log.warn("[run-stream/sse] AgentRun.start failed:", errMsg(e)));
-  };
+  // The run row is written by the caller BEFORE this function is reached, on the
+  // id carried in runRequestBody.sessionId. It used to be created here, on the
+  // `started` frame — so a stream that died before `started` (claw down, or the
+  // conversation already locked) recorded nothing at all.
+  const expectedSessionId = typeof runRequestBody["sessionId"] === "string"
+    ? (runRequestBody["sessionId"] as string)
+    : undefined;
 
   const consumeResult = await consumeClawStream({
     url: `${CONFIG.internalUrl}/claw/api/v1/internal/run`,
@@ -2221,15 +2263,18 @@ async function runViaSseTransport(opts: RunViaSseOpts): Promise<void> {
         // Mirror the legacy "event: run" the outer handler writes after the
         // /internal/run JSON response — same name, same payload shape.
         res.write(`event: run\ndata: ${JSON.stringify({ sessionId, conversationId: convId })}\n\n`);
-        startAgentRunOnce(sessionId);
+        if (expectedSessionId && sessionId !== expectedSessionId) {
+          log.error(
+            `[run-stream/sse] claw started sessionId=${sessionId} but the run row is keyed on ${expectedSessionId} (conv=${convId})`,
+          );
+        }
       },
       onInvocation: async (sessionId, toolInvocation) => {
         const internalFollowUp = isInternalFollowUpInvocation(toolInvocation);
         if (!internalFollowUp) stream.sendEvent("invocation", toolInvocation);
-        await agentRunRepository.appendToolInvocation(
-          sessionId,
-          toolInvocation as Record<string, unknown>,
-        );
+        agentRunRepository
+          .appendToolInvocation(sessionId, toolInvocation as Record<string, unknown>)
+          .catch((err) => log.warn(`[run-stream/sse] appendToolInvocation failed for ${sessionId}:`, errMsg(err)));
         // Live tap for VIEWERS (reloaded tabs / Spaces): fan tool calls to the
         // shared live-conversation-bus that GET /agent-chat/:slug/chat/:convId/live
         // reads (same convId + slug as this run — no separate viewer bus needed).

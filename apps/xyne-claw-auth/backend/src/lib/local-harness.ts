@@ -203,8 +203,12 @@ export async function dispatchLocalHarnessRun(args: {
   resumeSessionId?: string | null;
   continuation?: { agentSlug: string; excludeMessageIds?: string[] } | false;
   localSandbox?: LocalHarnessRunEnvelope["localSandbox"];
+  /** Pre-minted session id. The interactive chat surfaces write their AgentRun
+   *  row BEFORE dispatch, so the row and the harness envelope have to agree on
+   *  the id; letting this mint its own would orphan that row. */
+  sessionId?: string;
 }): Promise<{ sessionId: string; runId: string }> {
-  const sessionId = randomUUID();
+  const sessionId = args.sessionId ?? randomUUID();
   const model = args.model ?? defaultModelForProvider(args.target.provider);
 
   let resumeSessionId = args.resumeSessionId;

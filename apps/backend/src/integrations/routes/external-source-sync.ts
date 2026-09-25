@@ -8,7 +8,6 @@ import { DeskType } from '@xyne/shared';
 import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
 import { authenticate } from '../core/authenticate';
 import { adapterResolver } from '../middleware/adapterResolver';
-import { externalSourceCore } from '../core/core';
 import { adapterRegistry } from '../core/adapterRegistry';
 import { logger } from '../../utils/logger';
 import { RawBodyRequest } from '@/types/express';
@@ -18,7 +17,7 @@ import { ExternalSourceRepository } from '@/database/repositories/externalSource
 import { emailFetchQueue } from '@/queues/emailFetchQueue';
 import { config as appConfig } from '@/config/env';
 import { db } from '@/database/client';
-import { runAsServiceActor } from '@/database/tenant/context';
+import { ingestExternalSource } from '@/bypassAcl/webhookIngestServices';
 import { ChannelEmailAliasService } from '@/services/channelEmailAliasService';
 
 const router = Router();
@@ -94,9 +93,7 @@ router.post(
         });
         throw new Error(`External source ingest: no resolvable workspaceId for source ${source?.id ?? sourceName}`);
       }
-      const results = await runAsServiceActor('external-source-ingest', ingestWorkspaceId,
-        () => externalSourceCore.ingest(adapter, sourceName, req.body, source),
-      );
+      const results = await ingestExternalSource(ingestWorkspaceId, adapter, sourceName, req.body, source);
 
       const duration = Date.now() - startTime;
       logger.info(`Data processed in ${duration}ms`, {

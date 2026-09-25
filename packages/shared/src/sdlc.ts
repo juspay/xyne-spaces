@@ -414,6 +414,27 @@ export const writeSdlcWikiPageSchema = sdlcWikiScopeSchema.extend({
 });
 export type WriteSdlcWikiPageInput = z.infer<typeof writeSdlcWikiPageSchema>;
 
+/** A Wiki page on the artifact create endpoint: same row shape, placed by the Wiki store. */
+export const createSdlcClawWikiPageSchema = z.object({
+  artifactType: z.literal("WIKI"),
+  channelId: z.string().min(1),
+  // Absent is the Hub Wiki.
+  repoId: z.string().min(1).optional(),
+  folderPath: sdlcWikiFolderPathSchema.optional(),
+  title: sdlcWikiTitleSchema,
+  markdown: z.string().min(1).max(5_000_000),
+});
+export type CreateSdlcClawWikiPageInput = z.infer<
+  typeof createSdlcClawWikiPageSchema
+>;
+
+export const setSdlcArtifactArchivedSchema = z.object({
+  archived: z.boolean(),
+});
+export type SetSdlcArtifactArchivedInput = z.infer<
+  typeof setSdlcArtifactArchivedSchema
+>;
+
 const sdlcRunAuthorityFields = {
   workspaceId: z.string().min(1),
   actorUserId: z.string().min(1),
@@ -503,6 +524,15 @@ export const createSdlcClawArtifactSchema = z.object({
 });
 export type CreateSdlcClawArtifactInput = z.infer<
   typeof createSdlcClawArtifactSchema
+>;
+
+/** Every SDLC document is a Canvas plus an SdlcArtifact row; artifactType picks the placement. */
+export const createSdlcClawDocumentSchema = z.union([
+  createSdlcClawWikiPageSchema,
+  createSdlcClawArtifactSchema,
+]);
+export type CreateSdlcClawDocumentInput = z.infer<
+  typeof createSdlcClawDocumentSchema
 >;
 
 export const updateSdlcClawArtifactSchema = z.object({

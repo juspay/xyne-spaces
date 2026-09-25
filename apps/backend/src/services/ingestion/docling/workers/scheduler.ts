@@ -12,7 +12,7 @@ import { randomUUID } from 'node:crypto';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
-import { runAsServiceActor } from '@/database/tenant/context';
+import { commitDoclingSplit } from '@/bypassAcl/doclingIngestServices';
 import vespaClient from '@/vespa/client';
 import { fileSchema, type InsertDocument } from '@/vespa/src/types';
 import { runSyncFallbackForFailedFile } from '../../processors/syncFallback';
@@ -473,16 +473,9 @@ const runSplitterWorker = async (id: string, shouldStop: () => boolean) => {
       // Stamp docling_async_parts with the file's tenant. Background worker has no
       // request-scoped context, so open one from the denormalized file.workspaceId
       // (populated at intake). Fall back to an unscoped run when it's absent.
-      const commitSplit = () => markDoclingFileSplitComplete(
-        file,
-        stagedParts,
-        stagedParts.resultsDir,
-      );
       const committed = file.workspaceId
-        ? await runAsServiceActor('docling-splitter', file.workspaceId,
-            commitSplit,
-          )
-        : await commitSplit();
+        ? await commitDoclingSplit(file.workspaceId, file, stagedParts, stagedParts.resultsDir)
+        : await markDoclingFileSplitComplete(file, stagedParts, stagedParts.resultsDir);
       if (!committed) {
         logger.warn('[DOCLING_SCHEDULER] Ignoring stale split completion (lease changed)', {
           fileId: file.fileId,

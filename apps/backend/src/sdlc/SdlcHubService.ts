@@ -25,6 +25,7 @@ import {
   type CreateSdlcLinkInput,
   type CreateSdlcTrackInput,
   type CreateSdlcClawTrackFolderInput,
+  type CreateSdlcClawWikiPageInput,
   type ListSdlcEntityLinksInput,
   type ResolveSdlcRepositoryLinkInput,
   type UpdateSdlcClawArtifactInput,
@@ -71,6 +72,7 @@ import {
   ensureRepositoryWikiFolder,
   placeHubItem,
 } from './hubFolders';
+import { sdlcWikiPageStore } from './wiki/SdlcWikiPageStore';
 
 const SDLC_FOLDERS = [SDLC_HUB_KNOWLEDGE_FOLDER, 'PRDs', 'Tech Docs'] as const;
 
@@ -494,6 +496,50 @@ export class SdlcHubService implements SdlcHub {
     if (removed.count === 0) {
       throw new AppError('Repository is not part of this hub', 404);
     }
+  }
+
+  /** A Wiki page is an artifact whose placement belongs to the Wiki store, not a type folder. */
+  async createWikiPage(
+    actor: SdlcActor,
+    input: CreateSdlcClawWikiPageInput
+  ): Promise<SdlcArtifact> {
+    await this.requireChannelRole(actor, input.channelId, true);
+    const page = await sdlcWikiPageStore.write({
+      workspaceId: actor.workspaceId,
+      actorUserId: actor.userId,
+      channelId: input.channelId,
+      ...(input.repoId ? { repoId: input.repoId } : {}),
+      page: {
+        action: 'create',
+        title: input.title,
+        ...(input.folderPath ? { folderPath: input.folderPath } : {}),
+        markdown: input.markdown,
+      },
+    });
+    return { canvasId: page.canvasId, url: `/chat/canvas/${page.canvasId}` };
+  }
+
+  /** Archiving drops the document out of Hub Knowledge reads and the Wiki tree. */
+  async setArtifactArchived(
+    actor: SdlcActor,
+    channelId: string,
+    canvasId: string,
+    archived: boolean
+  ): Promise<void> {
+    await this.requireChannelRole(actor, channelId, true);
+    const canvas = await this.prisma.canvas.findFirst({
+      where: { id: canvasId, channelId },
+      select: { sdlcArtifact: { select: { artifactType: true } } },
+    });
+    if (!canvas?.sdlcArtifact) throw new AppError('SDLC artifact not found', 404);
+    const artifactType = canvas.sdlcArtifact.artifactType;
+    if (artifactType !== 'WIKI' && artifactType !== SDLC_HUB_KNOWLEDGE_ARTIFACT_TYPE) {
+      throw new AppError('Only Wiki pages and Hub Knowledge documents can be archived here', 400);
+    }
+    await this.prisma.sdlcArtifact.update({
+      where: { artifactId: canvasId },
+      data: { artifactStatus: archived ? 'ARCHIVED' : 'ACTIVE' },
+    });
   }
 
   async getChannel(actor: SdlcActor, channelId: string): Promise<SdlcChannel> {

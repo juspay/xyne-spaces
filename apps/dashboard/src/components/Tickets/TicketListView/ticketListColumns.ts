@@ -129,11 +129,20 @@ const COLUMN_BY_KEY: ReadonlyMap<TicketListColumnKey, TicketListColumnDefinition
 export const getTicketListColumnAlignClass = (key: TicketListColumnKey): string =>
   ALIGN_CLASS[COLUMN_BY_KEY.get(key)?.align ?? 'left'];
 
+// All columns except subject, which is always anchored visible in list view.
+export const DESK_LIST_TOGGLEABLE_COLUMNS: readonly TicketListColumnDefinition[] =
+  TICKET_LIST_COLUMNS.filter(c => c.key !== 'subject');
+
 export const getTicketListGridTemplate = (
   widths: TicketListColumnWidths,
   showSelectionColumn: boolean,
-): string =>
-  [
+  visibleKeys?: ReadonlySet<TicketListColumnKey>,
+): string => {
+  const cols = visibleKeys
+    ? TICKET_LIST_COLUMNS.filter(c => visibleKeys.has(c.key))
+    : TICKET_LIST_COLUMNS;
+  return [
     ...(showSelectionColumn ? [`${TICKET_LIST_SELECTION_COLUMN_WIDTH}px`] : []),
-    ...TICKET_LIST_COLUMNS.map(column => `minmax(0, ${widths[column.key]}fr)`),
+    ...cols.map(column => `minmax(0, ${widths[column.key]}fr)`),
   ].join(' ');
+};

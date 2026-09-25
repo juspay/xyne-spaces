@@ -7,7 +7,7 @@ import { workflowManager } from '@/workflows/services/workflowManager';
 import { WorkflowType, WorkflowExecutionStatus, isActiveStatus } from '@/workflows/types/workflow-enums';
 import { buildPRWorkflowContext } from './prWorkflowContextBuilder';
 import { randomUUID } from 'crypto';
-import { runAsServiceActor } from '@/database/tenant/context';
+import { continueXyneCommentWorkflow } from '@/bypassAcl/sdlcServices';
 import { MessageType, PRStatus } from '@xyne/shared';
 
 interface ProcessedComment {
@@ -134,15 +134,9 @@ export class XyneCommentService {
       where: { id: workflowInfo.ticketId },
       select: { workspaceId: true },
     });
-    const continueWork = (): Promise<void> => this.continueWorkflowWithPRComments(
-      workflowInfo.ticketId,
-      filteredComments,
-      prId,
-      prUrl
-    );
     await (ticketForScope?.workspaceId
-      ? runAsServiceActor('xyne-comment', ticketForScope.workspaceId, continueWork)
-      : continueWork());
+      ? continueXyneCommentWorkflow(ticketForScope.workspaceId, this, workflowInfo.ticketId, filteredComments, prId, prUrl)
+      : this.continueWorkflowWithPRComments(workflowInfo.ticketId, filteredComments, prId, prUrl));
 
     logger.info(`[Xyne-Comment] Triggered workflow continuation with ${filteredComments.length} PR comments`, {
       version: '1.0',
@@ -249,7 +243,7 @@ export class XyneCommentService {
   /**
    * Continue workflow execution with PR comments
    */
-  private async continueWorkflowWithPRComments(
+  async continueWorkflowWithPRComments(
     ticketId: string,
     comments: ProcessedComment[],
     prId: number,

@@ -5,6 +5,8 @@ import { retryForever } from '@/utils/retry';
 import { installPrismaRetryMiddleware } from './retryMiddleware';
 import { setupUserSessionLogging } from './middleware/userSessionLogging';
 import { encryptionExtension } from '@/database/prisma-encryption-extension';
+import { auditExtension } from '@/database/audit-extension';
+import { getEncryptionProvider } from '@/services/encryption/provider';
 import { setupMessageMetadataSync } from './middleware/messageMetadataSync';
 import { withAclExtension } from './tenant/acl-extension';
 import { withWorkspaceStamp } from './tenant/stamp';
@@ -88,8 +90,9 @@ export class DatabaseClient {
         logger.warn('Database warning:', e.message);
       });
 
-      // Apply zero field encryption extension (no-op when encryptedFieldsConfig is empty)
+      // Apply zero field encryption extension (public build: pass-through)
       DatabaseClient.instance = DatabaseClient.instance.$extends(encryptionExtension) as unknown as PrismaClient;
+      DatabaseClient.instance = DatabaseClient.instance.$extends(auditExtension) as unknown as PrismaClient;
       DatabaseClient.wrappedInstance = withWorkspaceStamp(withAclExtension(DatabaseClient.instance));
     }
 
@@ -106,6 +109,10 @@ export class DatabaseClient {
 
     DatabaseClient.isConnected = true;
     logger.info('Database connected successfully');
+
+    // Warm the encrypted-fields snapshot so the first query never blocks on, or
+    // fails because of, the encryption service. Fails boot loudly if it is unreachable.
+    await getEncryptionProvider().getEncryptedFieldsConfig();
   }
 
   static async disconnect(): Promise<void> {

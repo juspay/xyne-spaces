@@ -1,3 +1,52 @@
+## [1.398.1](https://github.com/juspay/xyne-spaces/compare/v1.398.0...v1.398.1) (2026-09-25)
+
+
+### Bug Fixes
+
+* batch tool invocation appends to stop claw-auth OOM ([#2304](https://github.com/juspay/xyne-spaces/issues/2304)) ([16a853b](https://github.com/juspay/xyne-spaces/commit/16a853b43f8a2f98862edd867315a9b4d8549868))
+
+## [1.398.0](https://github.com/juspay/xyne-spaces/compare/v1.397.0...v1.398.0) (2026-09-25)
+
+
+### Features
+
+* move encrypted-fields config to enc-owned DB table ([#2015](https://github.com/juspay/xyne-spaces/issues/2015)) ([4ab93b8](https://github.com/juspay/xyne-spaces/commit/4ab93b8518a243530e64b83ae09404c8e5547d99))
+
+## [1.397.0](https://github.com/juspay/xyne-spaces/compare/v1.396.1...v1.397.0) (2026-09-25)
+
+
+### Features
+
+* add fuzzy channel mention search ([#2273](https://github.com/juspay/xyne-spaces/issues/2273)) ([3c5c502](https://github.com/juspay/xyne-spaces/commit/3c5c502b311d54bb95d4efe91f7d9bb43cff7881))
+
+
+### Bug Fixes
+
+* desk list view columns, saved view column sync, and pagination restore ([#2047](https://github.com/juspay/xyne-spaces/issues/2047)) ([f61a993](https://github.com/juspay/xyne-spaces/commit/f61a9936cd2d47957b7b2d0947e5510791e50324))
+
+## [1.396.1](https://github.com/juspay/xyne-spaces/compare/v1.396.0...v1.396.1) (2026-09-25)
+
+
+### Bug Fixes
+
+* moving runAsServiceActor to one place ([#2244](https://github.com/juspay/xyne-spaces/issues/2244)) ([8dab89d](https://github.com/juspay/xyne-spaces/commit/8dab89dde4a0d45ad45036eaeed167ec038894f7))
+
+## [1.396.0](https://github.com/juspay/xyne-spaces/compare/v1.395.2...v1.396.0) (2026-09-25)
+
+
+### Features
+
+* audit log framework ([#2282](https://github.com/juspay/xyne-spaces/issues/2282)) ([b928491](https://github.com/juspay/xyne-spaces/commit/b928491f184d485ad106d2d2e91feb9b97ba6914))
+
+## [1.395.2](https://github.com/juspay/xyne-spaces/compare/v1.395.1...v1.395.2) (2026-09-25)
+
+
+### Bug Fixes
+
+* timeout 401 to 503, agenrun populated on failures ([#2290](https://github.com/juspay/xyne-spaces/issues/2290)) ([e73cd33](https://github.com/juspay/xyne-spaces/commit/e73cd33355f7c66e55657b3fbd7d7aec5a1ebfe3))
+
+## [1.395.1](https://github.com/juspay/xyne-spaces/compare/v1.395.0...v1.395.1) (2026-09-24)
+
 ## [1.395.0](https://github.com/juspay/xyne-spaces/compare/v1.394.0...v1.395.0) (2026-09-24)
 
 

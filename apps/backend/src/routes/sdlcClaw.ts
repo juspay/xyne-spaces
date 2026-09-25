@@ -4,7 +4,7 @@ import {
   createSdlcClawLinkSchema,
   listSdlcEntityLinksSchema,
   sdlcRepoIds,
-  createSdlcClawArtifactSchema,
+  createSdlcClawDocumentSchema,
   createSdlcTrackSchema,
   createSdlcArtifactTypeSchema,
   renameSdlcArtifactTypeSchema,
@@ -178,8 +178,12 @@ router.patch(
 router.post(
   '/artifacts',
   route(async (req, res) => {
-    const input = createSdlcClawArtifactSchema.parse(req.body);
-    const artifact = await sdlcHub.createArtifactFromClaw(await actorFromRequest(req), input);
+    const input = createSdlcClawDocumentSchema.parse(req.body);
+    const actor = await actorFromRequest(req);
+    const artifact =
+      'artifactType' in input
+        ? await sdlcHub.createWikiPage(actor, input)
+        : await sdlcHub.createArtifactFromClaw(actor, input);
     res.status(201).json({ success: true, artifact });
   }),
 );
