@@ -1,3 +1,10 @@
+## [1.400.0](https://github.com/juspay/xyne-spaces/compare/v1.399.2...v1.400.0) (2026-09-25)
+
+
+### Features
+
+* questionnaire screen fix ([#2312](https://github.com/juspay/xyne-spaces/issues/2312)) ([b578384](https://github.com/juspay/xyne-spaces/commit/b578384e2006da0c5454b6509bbb21c203c7cf0b))
+
 ## [1.399.2](https://github.com/juspay/xyne-spaces/compare/v1.399.1...v1.399.2) (2026-09-25)
 
 
