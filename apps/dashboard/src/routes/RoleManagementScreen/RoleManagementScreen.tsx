@@ -17,6 +17,7 @@ import { Panel, ResizableGroup, Separator } from '../../components/ui/Resizable/
 import { cn } from '../../utils/classNames';
 import { getUserDisplayNameById } from '../../utils/userDisplayName';
 import type { Role, UserRoleMapping } from '@xyne/shared';
+import { UserRoleMappingEntityType } from '@xyne/shared';
 import {
   ROLES_SIDEBAR_DEFAULT_WIDTH,
   ROLES_SIDEBAR_MAX_WIDTH,
@@ -503,7 +504,10 @@ export const RoleManagementScreen = (): ReactElement => {
   // (entityType='USER_GROUP') are managed from the user group screen, so exclude them here.
   // Workspace rows have a null entityType (legacy/default), so match "not group" to keep them.
   const members = useMemo(
-    () => (selectedRole?.userMappings ?? []).filter(m => m.entityType !== 'USER_GROUP'),
+    () =>
+      (selectedRole?.userMappings ?? []).filter(
+        m => m.entityType !== UserRoleMappingEntityType.USER_GROUP,
+      ),
     [selectedRole],
   );
 

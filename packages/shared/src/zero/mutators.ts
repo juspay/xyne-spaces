@@ -58,6 +58,7 @@ import {
   SavedConfigVisibility,
   SavedConfigEntityName,
   ViewAccessEntityType,
+  UserRoleMappingEntityType,
   GuestEntity,
   WorkspaceRole,
   Status,
@@ -4837,7 +4838,7 @@ export const mutators = defineMutators({
             const urmRows = await tx.run(
               zql.user_role_mappings
                 .where('userId', userId)
-                .where('entityType', 'USER_GROUP')
+                .where('entityType', UserRoleMappingEntityType.USER_GROUP)
                 .where('entityId', userGroupId),
             );
             const urmByRole = new Map(urmRows.map(r => [r.roleId, r]));
@@ -4853,7 +4854,7 @@ export const mutators = defineMutators({
                   id: groupRoleMappingId(userGroupId, userId, roleId),
                   userId,
                   roleId,
-                  entityType: 'USER_GROUP',
+                  entityType: UserRoleMappingEntityType.USER_GROUP,
                   entityId: userGroupId,
                   createdAt: timestamp,
                   updatedAt: timestamp,
@@ -4929,7 +4930,7 @@ export const mutators = defineMutators({
         // Purge group-scoped role bindings first so deleting the group can't orphan grants.
         const groupRoleRows = await tx.run(
           zql.user_role_mappings
-            .where('entityType', 'USER_GROUP')
+            .where('entityType', UserRoleMappingEntityType.USER_GROUP)
             .where('entityId', userGroupId),
         );
         for (const row of groupRoleRows) {
@@ -5030,7 +5031,7 @@ export const mutators = defineMutators({
               id: groupRoleMappingId(userGroupId, userId, roleId),
               userId,
               roleId,
-              entityType: 'USER_GROUP',
+              entityType: UserRoleMappingEntityType.USER_GROUP,
               entityId: userGroupId,
               createdAt: timestamp,
               updatedAt: timestamp,
@@ -5074,7 +5075,7 @@ export const mutators = defineMutators({
           const roleRows = await tx.run(
             zql.user_role_mappings
               .where('userId', userId)
-              .where('entityType', 'USER_GROUP')
+              .where('entityType', UserRoleMappingEntityType.USER_GROUP)
               .where('entityId', userGroupId),
           );
           for (const row of roleRows) {
@@ -13337,7 +13338,7 @@ export const mutators = defineMutators({
               id: mappingId,
               roleId,
               userId,
-              entityType: 'WORKSPACE',
+              entityType: UserRoleMappingEntityType.WORKSPACE,
               entityId: ctx.workspaceId,
               createdAt: timestamp,
               updatedAt: timestamp,

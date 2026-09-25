@@ -1,6 +1,7 @@
 import { transaction } from '../base';
 import { UserGroupRepository, CreateUserGroupWithUsersInput } from '@/database/repositories/userGroups';
 import { aclAuditService } from '@/services/aclAuditService';
+import { UserRoleMappingEntityType } from '@xyne/shared';
 
 
 export function createWithUsersTx(self: UserGroupRepository, data: CreateUserGroupWithUsersInput, actorUserId: string | undefined) {
@@ -45,7 +46,7 @@ export function createWithUsersTx(self: UserGroupRepository, data: CreateUserGro
             workspaceId: userGroup.workspaceId,
             userId,
             roleId,
-            entityType: 'USER_GROUP',
+            entityType: UserRoleMappingEntityType.USER_GROUP,
             entityId: userGroup.id,
             createdAt: now,
             updatedAt: now,
