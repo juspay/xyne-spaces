@@ -14,6 +14,7 @@ import {
 } from './social-media/access';
 import googlePlayRoutes from './social-media/google-play';
 import appStoreRoutes from './social-media/app-store';
+import instagramRoutes from './social-media/instagram';
 
 const TAG = '[SocialMediaRoutes]';
 const router = express.Router();
@@ -33,8 +34,11 @@ function parseBackfill(
 }
 
 router.use(express.json());
+// Meta's data-deletion callback sends signed_request as application/x-www-form-urlencoded
+router.use(express.urlencoded({ extended: false }));
 router.use(googlePlayRoutes);
 router.use(appStoreRoutes);
+router.use(instagramRoutes);
 
 router.post(
   '/:conversationId/reply',
@@ -71,15 +75,18 @@ router.post(
         res.status(400).json({ error: error.message });
         return;
       }
-      logger.error(`${TAG} Failed to send review reply`, {
+      logger.error(`${TAG} Failed to send reply`, {
         conversationId: req.params.conversationId,
         error,
       });
-      res.status(500).json({ error: 'Failed to send review reply' });
+      res.status(500).json({ error: 'Failed to send reply' });
     }
-  }
+  },
 );
 
+// POST /:channelId/sync — manual sync trigger for polling sources (Google Play only).
+// Instagram does NOT use this endpoint — it is webhook-driven. The frontend hides the
+// refetch button for Instagram channels so this path is never reached for IG.
 router.post(
   '/:channelId/sync',
   authV2Middleware.authenticate,
@@ -87,11 +94,7 @@ router.post(
     try {
       const workspaceId = req.user!.workspaceId!;
       if (
-        !(await canAccessSocialMediaChannel(
-          req.params.channelId,
-          req.user!.id,
-          workspaceId
-        ))
+        !(await canAccessSocialMediaChannel(req.params.channelId, req.user!.id, workspaceId))
       ) {
         res.status(404).json({ error: 'Social media desk not found' });
         return;
@@ -150,26 +153,19 @@ router.post(
       logger.error(`${TAG} Manual source sync failed`, { error });
       res.status(500).json({ error: 'Failed to synchronize review source' });
     }
-  }
+  },
 );
 
+// POST /:channelId/disconnect — deactivate all sources on a channel
 router.post(
   '/:channelId/disconnect',
   authV2Middleware.authenticate,
   async (req: Request, res: Response): Promise<void> => {
     try {
       const workspaceId = req.user!.workspaceId!;
-      if (
-        !(await authorizeSocialMediaManager(
-          req.params.channelId,
-          req.user!.id,
-          workspaceId,
-          res
-        ))
-      ) {
+      if (!(await authorizeSocialMediaManager(req.params.channelId, req.user!.id, workspaceId, res))) {
         return;
       }
-
       const result = await db.externalSource.updateMany({
         where: {
           channelId: req.params.channelId,
@@ -195,15 +191,12 @@ router.post(
         data: { credentials: '' },
       });
 
-      res.json({
-        message: 'Social media desk disconnected',
-        sourceCount: result.count,
-      });
+      res.json({ message: 'Social media desk disconnected', sourceCount: result.count });
     } catch (error) {
-      logger.error(`${TAG} Failed to disconnect source`, { error });
+      logger.error(`${TAG} Failed to disconnect`, { error });
       res.status(500).json({ error: 'Failed to disconnect social media source' });
     }
-  }
+  },
 );
 
 export default router;

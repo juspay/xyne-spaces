@@ -194,7 +194,9 @@ import { SocialMediaReplyComposer } from '../../components/xyne-desk/DeskReplyCo
 import {
   connectAppStoreDesk,
   startGooglePlayOAuth,
+  startInstagramOAuth,
 } from '../../services/clients/socialMediaDeskApi';
+import { InstagramCustomerHistory } from '../../components/xyne-desk/InstagramCustomerHistory/InstagramCustomerHistory';
 import { EmailThreadHeader } from '../../components/xyne-desk/EmailBody/EmailThreadHeader';
 import { DeskCalendarView } from '../../components/xyne-desk/DeskCalendar/DeskCalendarView';
 import { ConversationLabels } from '../../components/xyne-desk/ConversationLabels/ConversationLabels';
@@ -234,6 +236,7 @@ import { valuesToFilters } from '../../utils/savedViewSerialization';
 import {
   useChannelIntegrationInfo,
   clearChannelConnectedEmailCache,
+  fetchConnectedEmail,
 } from '../../hooks/useChannelConnectedEmail';
 import AddChannelForm from '../../components/Chat/AddChannelForm/AddChannelForm';
 import Info, { ChannelTab } from '../../components/Chat/Info/Info';
@@ -342,8 +345,9 @@ interface PersistedComposeInstance {
   savedAt?: number;
 }
 
-/** Desk types with no "new message" concept: calls aren't composed, and Slack/app
- *  desks can only reply into a thread that already exists externally. */
+/** Desk types with no "new message" concept: calls aren't composed, Slack/app
+ *  desks can only reply into an existing thread, and social media DMs originate
+ *  from the customer side only. */
 const COMPOSE_DISABLED_CHANNEL_TYPES: ReadonlySet<ChannelType | undefined> = new Set([
   ChannelType.CALL,
   ChannelType.SLACK,
@@ -1748,6 +1752,48 @@ const SupportScreen = (): ReactElement => {
         { replace: true },
       );
     }
+
+    const socialMediaOAuth = searchParams.get('socialMediaOAuth');
+    const socialMediaProvider = searchParams.get('socialMediaProvider');
+    const socialMediaError = searchParams.get('socialMediaError');
+    if (socialMediaOAuth === 'success' && socialMediaProvider === 'instagram') {
+      toast.success('Instagram account connected successfully');
+      setSearchParams(
+        prev => {
+          const p = new URLSearchParams(prev);
+          p.delete('socialMediaOAuth');
+          p.delete('socialMediaProvider');
+          return p;
+        },
+        { replace: true },
+      );
+    } else if (socialMediaError && socialMediaProvider === 'instagram') {
+      // mismatch error format: "instagram_account_mismatch:@handle"
+      const [errorCode, errorPayload] = socialMediaError.split(':');
+      const mismatchMessage = errorPayload
+        ? `This channel is connected to ${errorPayload}. Please log into that account on instagram.com and try reconnecting.`
+        : 'Instagram account mismatch — please make sure the correct account is active in your browser and try reconnecting.';
+      const socialMediaErrorMessages: Record<string, string> = {
+        instagram_account_mismatch: mismatchMessage,
+        instagram_auth_denied: 'Instagram authorization was denied. Please try again.',
+        instagram_account_already_connected:
+          'This Instagram account is already connected to another channel.',
+        instagram_connection_failed: 'Failed to connect Instagram. Please try again.',
+      };
+      toast.error(
+        socialMediaErrorMessages[errorCode ?? ''] ??
+          'Instagram connection error. Please try again.',
+      );
+      setSearchParams(
+        prev => {
+          const p = new URLSearchParams(prev);
+          p.delete('socialMediaError');
+          p.delete('socialMediaProvider');
+          return p;
+        },
+        { replace: true },
+      );
+    }
   }, [searchParams, setSearchParams, navigate, queryClient]);
 
   // Sync panel open/close with the URL so back button works correctly
@@ -1785,6 +1831,26 @@ const SupportScreen = (): ReactElement => {
 
   // Email channels are already sorted by the useEmailChannels hook
   const sortedEmailChannels = emailChannels;
+  const [socialSourceTypes, setSocialSourceTypes] = useState<Record<string, string | null>>({});
+  const socialChannelIds = useMemo(
+    () => sortedEmailChannels.filter(c => c.type === ChannelType.SOCIAL_MEDIA).map(c => c.id),
+    [sortedEmailChannels],
+  );
+  useEffect(() => {
+    if (socialChannelIds.length === 0) return;
+    let cancelled = false;
+    void Promise.all(
+      socialChannelIds.map(id =>
+        fetchConnectedEmail(id).then(info => [id, info.sourceType] as const),
+      ),
+    ).then(entries => {
+      if (cancelled) return;
+      setSocialSourceTypes(Object.fromEntries(entries));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [socialChannelIds]);
   const userChannelStatuses = useUserChannelStatuses();
   // Both star and joined state live on channel_user_status (per-user). A row
   // in that list for a given channelId means the user has joined the channel;
@@ -1963,6 +2029,12 @@ const SupportScreen = (): ReactElement => {
   );
   const selectedChannelName = selectedChannelFull?.name?.trim() || 'Xyne Desk';
   const isSocialMediaDesk = selectedChannelFull?.type === ChannelType.SOCIAL_MEDIA;
+  const selectedChannelIntegration = useChannelIntegrationInfo(
+    isSocialMediaDesk && selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID
+      ? selectedChannelId
+      : null,
+  );
+  const isInstagramDesk = selectedChannelIntegration.sourceType === 'instagram';
 
   // Manual fetch for the selected desk. Social-media desks fetch every review
   // currently available from Google; email desks open the range picker.
@@ -2372,7 +2444,7 @@ const SupportScreen = (): ReactElement => {
       dlEmail?: string;
       slackChannelId?: string;
       installedAppId?: string;
-      socialProvider?: 'GOOGLE_PLAY' | 'APP_STORE';
+      socialProvider?: 'GOOGLE_PLAY' | 'APP_STORE' | 'INSTAGRAM';
       applications?: Array<{ displayName: string; packageName: string }>;
       appStore?: {
         keyId: string;
@@ -2461,6 +2533,33 @@ const SupportScreen = (): ReactElement => {
         })
         .catch(error => {
           toast.error(error instanceof Error ? error.message : 'Failed to start Google Play OAuth');
+        });
+      return;
+    }
+
+    if (socialProvider === 'INSTAGRAM') {
+      void startInstagramOAuth({
+        channelName: rest.name,
+        projectId: rest.projectId,
+        boardId: rest.boardId ?? '',
+        ...(rest.assigneeUserGroupId && {
+          assigneeUserGroupId: rest.assigneeUserGroupId,
+        }),
+        visibility: rest.visibility === 'public' ? 'PUBLIC' : 'PRIVATE',
+        platform: isElectron ? 'electron' : 'web',
+      })
+        .then(authUrl => {
+          setShowCreateChannelModal(false);
+          if (isElectron && window.electronAPI?.openExternal) {
+            window.electronAPI.openExternal(authUrl);
+          } else {
+            window.location.href = authUrl;
+          }
+        })
+        .catch(error => {
+          toast.error(
+            error instanceof Error ? error.message : 'Failed to start Instagram authorization',
+          );
         });
       return;
     }
@@ -2610,8 +2709,10 @@ const SupportScreen = (): ReactElement => {
 
   useEffect(() => {
     const connected = searchParams.get('socialMediaOAuth') === 'success';
+    const provider = searchParams.get('socialMediaProvider');
     const error = searchParams.get('socialMediaError');
     const failedPackage = searchParams.get('socialMediaPackage');
+    if (provider === 'instagram') return; // handled by the Instagram useEffect above
     if (!connected && !error) return;
     if (connected) {
       toast.success('Google Play reviews connected successfully');
@@ -2628,6 +2729,7 @@ const SupportScreen = (): ReactElement => {
       previous => {
         const next = new URLSearchParams(previous);
         next.delete('socialMediaOAuth');
+        next.delete('socialMediaProvider');
         next.delete('socialMediaError');
         next.delete('socialMediaPackage');
         return next;
@@ -2773,14 +2875,19 @@ const SupportScreen = (): ReactElement => {
                 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-200',
             }
           : c.type === ChannelType.SOCIAL_MEDIA
-            ? {
-                label: 'Social',
-                className: 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-200',
-              }
+            ? socialSourceTypes[c.id] === 'instagram'
+              ? {
+                  label: 'Instagram',
+                  className: 'bg-pink-100 text-pink-700 dark:bg-pink-500/20 dark:text-pink-200',
+                }
+              : {
+                  label: 'Social',
+                  className: 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-200',
+                }
             : c.type === ChannelType.CALL
               ? {
                   label: 'Call',
-                  className: 'bg-lime-100 text-lime-700 dark:bg-lime-500/20 dark:text-lime-200',
+                  className: 'bg-sky-100 text-sky-700 dark:bg-sky-500/20 dark:text-sky-200',
                 }
               : {
                   label: 'Mailbox',
@@ -3172,6 +3279,7 @@ const SupportScreen = (): ReactElement => {
                         )}
                       {canRefetch &&
                         isSelectedChannelJoined &&
+                        !isInstagramDesk &&
                         (isDlDesk ? (
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
@@ -4261,6 +4369,9 @@ const SupportScreen = (): ReactElement => {
                         dynamicFieldEntries={dynamicFieldEntries}
                         showExtraFields={true}
                         activeTicketId={ticketId}
+                        {...(channelPreference?.deskType !== undefined && {
+                          deskType: channelPreference.deskType,
+                        })}
                         selectedIds={selectedTicketIds}
                         onToggleSelect={toggleTicketSelected}
                         onBoardIdReady={handleChannelBoardIdResolved}
@@ -5650,62 +5761,6 @@ export const SupportTicketDetail = ({
                           Summarize thread
                         </DropdownMenuItem>
                       )}
-                      <DropdownMenuItem
-                        onSelect={() => {
-                          if (!channelId || !ticketIdParam) {
-                            toast.error('Cannot copy link');
-                            return;
-                          }
-                          const url = `${shareableOrigin}/support/${channelId}/${ticketIdParam}`;
-                          void navigator.clipboard
-                            .writeText(url)
-                            .then(() => toast.success('Link copied'))
-                            .catch(() => toast.error('Failed to copy link'));
-                        }}
-                        data-track-category='Support'
-                        data-track-name='CopyTicketLink'
-                        data-track-metadata={JSON.stringify(
-                          deskTicketTrackingMetadata(ticket, {
-                            deskType: channelPreference?.deskType ?? null,
-                            emailCount,
-                          }),
-                        )}
-                      >
-                        <LinkIcon size={14} className='shrink-0' />
-                        Copy link
-                      </DropdownMenuItem>
-                      {emails.length > 0 &&
-                        channel?.type !== ChannelType.SLACK &&
-                        channel?.type !== ChannelType.APP && (
-                          <DropdownMenuItem
-                            onSelect={() => {
-                              if (!ticket?.id) return;
-                              void zero
-                                .mutate(
-                                  mutators.emailRead.bulkMarkAsUnread({ ticketIds: [ticket.id] }),
-                                )
-                                .client.then(() => {
-                                  trackDeskOutcome(
-                                    'READ_STATE_CHANGED',
-                                    ticket,
-                                    { deskType: channelPreference?.deskType ?? null, emailCount },
-                                    { to: 'unread', trigger: 'manual', bulkCount: 1 },
-                                  );
-                                });
-                              goBackToTicketList();
-                            }}
-                            data-track-category='Support'
-                            data-track-name='MarkTicketUnread'
-                            data-track-metadata={JSON.stringify(
-                              deskTicketTrackingMetadata(ticket, {
-                                deskType: channelPreference?.deskType ?? null,
-                              }),
-                            )}
-                          >
-                            <MailOpen size={14} className='shrink-0' />
-                            Mark as unread
-                          </DropdownMenuItem>
-                        )}
                       {channel?.type === ChannelType.EMAIL && mailboxTicketId && channelId && (
                         <>
                           {(mailboxOverlay?.state ?? MailboxState.INBOX) ===
@@ -5789,27 +5844,79 @@ export const SupportTicketDetail = ({
                           )}
                         </>
                       )}
-                      {channel && channel.type !== ChannelType.APP && (
-                        <DropdownMenuItem
-                          onSelect={e => e.preventDefault()}
-                          className='p-0 focus:bg-transparent'
-                        >
-                          <CloudAgentDock buttonBehavior='floating' />
-                        </DropdownMenuItem>
-                      )}
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem
-                        onSelect={() => setShowArchiveConfirmDialog(true)}
-                        disabled={!ticket || !!ticket.isArchived}
-                        data-track-category='Support'
-                        data-track-name='ArchiveTicket'
-                        className='text-destructive focus:text-destructive'
-                      >
-                        <Archive size={14} className='shrink-0' />
-                        Archive ticket
-                      </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
+
+                  <Tooltip side='bottom' delayDuration={300} content='Copy link to ticket'>
+                    <button
+                      type='button'
+                      onClick={() => {
+                        if (!channelId || !ticketIdParam) {
+                          toast.error('Cannot copy link');
+                          return;
+                        }
+                        const url = `${shareableOrigin}/support/${channelId}/${ticketIdParam}`;
+                        void navigator.clipboard
+                          .writeText(url)
+                          .then(() => toast.success('Link copied'))
+                          .catch(() => toast.error('Failed to copy link'));
+                      }}
+                      className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
+                      aria-label='Copy link to ticket'
+                      data-track-category='Support'
+                      data-track-name='CopyTicketLink'
+                    >
+                      <LinkIcon size={16} />
+                    </button>
+                  </Tooltip>
+                  <div className='w-px h-4 bg-border' />
+
+                  {channel && <CloudAgentDock buttonBehavior='floating' />}
+
+                  <Tooltip
+                    side='bottom'
+                    delayDuration={300}
+                    content={ticket?.isArchived ? 'Already archived' : 'Archive ticket'}
+                  >
+                    <button
+                      type='button'
+                      onClick={() => setShowArchiveConfirmDialog(true)}
+                      disabled={!ticket || !!ticket.isArchived}
+                      className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors'
+                      aria-label='Archive ticket'
+                      data-track-category='Support'
+                      data-track-name='ArchiveTicket'
+                    >
+                      <Archive size={16} />
+                    </button>
+                  </Tooltip>
+                  {emails.length > 0 &&
+                    channel?.type !== ChannelType.SLACK &&
+                    channel?.type !== ChannelType.APP &&
+                    (channel?.type !== ChannelType.SOCIAL_MEDIA ||
+                      channelIntegrationInfo.sourceType !== 'instagram') && (
+                      <>
+                        <div className='w-px h-4 bg-border' />
+                        <Tooltip side='bottom' delayDuration={300} content='Mark as unread'>
+                          <button
+                            type='button'
+                            onClick={() => {
+                              if (!ticket?.id) return;
+                              void zero.mutate(
+                                mutators.emailRead.bulkMarkAsUnread({ ticketIds: [ticket.id] }),
+                              );
+                              goBackToTicketList();
+                            }}
+                            className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
+                            aria-label='Mark as unread'
+                            data-track-category='Support'
+                            data-track-name='MarkTicketUnread'
+                          >
+                            <MailOpen size={16} />
+                          </button>
+                        </Tooltip>
+                      </>
+                    )}
                 </div>
               </div>
               <div className='flex flex-col gap-1 flex-shrink-0'>
@@ -6102,37 +6209,49 @@ export const SupportTicketDetail = ({
                 </div>
               )}
             </div>
+            {channelIntegrationInfo.sourceType === 'instagram' && channelId && conversationId && (
+              <InstagramCustomerHistory
+                channelId={channelId}
+                conversationId={conversationId}
+                onTicketClick={xyneId => {
+                  void navigate(`${navBasePath ?? supportBase}/${channelId}/${xyneId}`);
+                }}
+              />
+            )}
             <div
               className='absolute inset-x-0 bottom-0 z-20 bg-background'
               ref={composerOverlayRef}
             >
               <DuplicateTicketsBanner ticketId={mailboxTicketId} />
-              {isAppSourcedTicket ? (
-                conversationId ? (
-                  <SlackComposer
-                    conversationId={conversationId}
-                    channelId={channel?.id ?? null}
-                    drafts={ticketEmailDrafts}
-                    variant='app'
-                    // The ticket is app-sourced whatever the desk type, so the
-                    // channel preference alone decides whether the reply reaches
-                    // the app — matching appDeskService's outbound gate.
-                    recordOnly={channelPreference?.appWebhookDeliveryEnabled === false}
-                  />
-                ) : null
-              ) : channel?.type === ChannelType.SOCIAL_MEDIA ? (
+              {channel?.type === ChannelType.SOCIAL_MEDIA ? (
                 conversationId ? (
                   <SocialMediaReplyComposer
                     conversationId={conversationId}
                     channelId={channel?.id ?? null}
                     drafts={ticketEmailDrafts}
                     replyBasePath='/integrations/social-media'
-                    placeholder='Reply to this review…'
+                    placeholder={
+                      channelIntegrationInfo.sourceType === 'instagram'
+                        ? 'Reply to this DM…'
+                        : 'Reply to this review…'
+                    }
                     // Play caps replies at 350; Apple documents no maximum, so do not invent one.
-                    {...(channelIntegrationInfo.sourceType === SOCIAL_MEDIA_SOURCE_TYPE.GOOGLE_PLAY
-                      ? { maxLength: 350 }
-                      : {})}
+                    {...(channelIntegrationInfo.sourceType === SOCIAL_MEDIA_SOURCE_TYPE.INSTAGRAM
+                      ? { maxLength: 1000 }
+                      : channelIntegrationInfo.sourceType === SOCIAL_MEDIA_SOURCE_TYPE.GOOGLE_PLAY
+                        ? { maxLength: 350 }
+                        : {})}
                     trackingCategory='social-media-composer'
+                  />
+                ) : null
+              ) : isAppSourcedTicket ? (
+                conversationId ? (
+                  <SlackComposer
+                    conversationId={conversationId}
+                    channelId={channel?.id ?? null}
+                    drafts={ticketEmailDrafts}
+                    variant='app'
+                    recordOnly={channelPreference?.appWebhookDeliveryEnabled === false}
                   />
                 ) : null
               ) : channel?.type === ChannelType.SLACK || channel?.type === ChannelType.APP ? (
@@ -6237,21 +6356,35 @@ export const SupportTicketDetail = ({
                 data-thread-citation-host
               >
                 {conversationId && channelId ? (
-                  <ThreadMessages
-                    channelId={channelId}
-                    conversationId={conversationId}
-                    ticketId={ticket?.id ?? null}
-                    matchedMessageId={targetMessageId}
-                    skipInputAutoFocus
-                    onClose={() => setIsRightPanelOpen(false)}
-                    onAskAI={() => {
-                      if (isAIPanelOpen) {
-                        xyneAIActor.send({ type: 'CLOSE' });
-                      } else {
-                        void openDraftAgentSession();
-                      }
-                    }}
-                  />
+                  <>
+                    <ThreadMessages
+                      channelId={channelId}
+                      conversationId={conversationId}
+                      ticketId={ticket?.id ?? null}
+                      matchedMessageId={targetMessageId}
+                      skipInputAutoFocus
+                      onClose={() => setIsRightPanelOpen(false)}
+                      onAskAI={() => {
+                        if (isAIPanelOpen) {
+                          xyneAIActor.send({ type: 'CLOSE' });
+                        } else {
+                          void openDraftAgentSession();
+                        }
+                      }}
+                    />
+                    {channel?.type === ChannelType.SOCIAL_MEDIA &&
+                      channelIntegrationInfo.sourceType === 'instagram' &&
+                      channelId &&
+                      conversationId && (
+                        <InstagramCustomerHistory
+                          channelId={channelId}
+                          conversationId={conversationId}
+                          onTicketClick={xyneId => {
+                            void navigate(`${supportBase}/${channelId}/${xyneId}`);
+                          }}
+                        />
+                      )}
+                  </>
                 ) : (
                   <div className='h-full flex items-center justify-center'>
                     <div className='text-lg font-semibold text-muted-foreground'>

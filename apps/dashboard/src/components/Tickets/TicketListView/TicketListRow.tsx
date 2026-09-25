@@ -11,7 +11,7 @@ import type { TicketListItem } from './TicketListView.types';
 import { UserSelector } from '../CreateTicketModal/UserSelector';
 import { useTicketAssignee, resolveAssigneeRef } from '../../../hooks/useTicketAssignee';
 import { PriorityPicker } from './PriorityPicker';
-import { AutoDraftStatus } from '@xyne/shared';
+import { AutoDraftStatus, DeskType } from '@xyne/shared';
 import { getTicketListColumnAlignClass } from './ticketListColumns';
 
 interface TicketListRowProps {
@@ -22,6 +22,7 @@ interface TicketListRowProps {
   isSelected?: boolean;
   onToggleSelect?: () => void;
   gridTemplate: string;
+  deskType?: string;
 }
 
 const formatStatusText = (status: string): string => {
@@ -97,7 +98,9 @@ export const TicketListRow = ({
   isSelected = false,
   onToggleSelect,
   gridTemplate,
+  deskType,
 }: TicketListRowProps): ReactElement => {
+  const isSocialMedia = deskType === DeskType.SOCIAL_MEDIA;
   const ticketIdValue = ticket.xyneId || ticket.id || '';
   const isHumanInterventionTicket = ticket.stageName?.toLowerCase().includes('human') ?? false;
   const assignee = resolveAssigneeRef(ticket.assignedTo, ticket.userGroupId);
@@ -249,7 +252,11 @@ export const TicketListRow = ({
         {emailCount > 0 && (
           <span
             className='inline-flex h-[18px] min-w-[28px] items-center justify-center rounded-sm bg-muted px-1 text-[10px] font-medium tabular-nums text-muted-foreground'
-            title={`${emailCount} email${emailCount === 1 ? '' : 's'}`}
+            title={
+              isSocialMedia
+                ? `${emailCount} message${emailCount === 1 ? '' : 's'}`
+                : `${emailCount} email${emailCount === 1 ? '' : 's'}`
+            }
           >
             {emailCount}
           </span>
@@ -379,7 +386,11 @@ export const TicketListRow = ({
       >
         <Tooltip
           delayDuration={500}
-          content={`Latest email: ${formatDateTime(dueDate)}`}
+          content={
+            isSocialMedia
+              ? `Latest message: ${formatDateTime(dueDate)}`
+              : `Latest email: ${formatDateTime(dueDate)}`
+          }
           side='top'
         >
           <span

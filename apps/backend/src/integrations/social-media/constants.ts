@@ -1,7 +1,9 @@
 import { ExternalSourcePlatform } from '@/integrations/core/types';
 
+
 export const SOCIAL_MEDIA_INTERACTION_TYPES = {
   REVIEW: 'REVIEW',
+  DM: 'DM',
   REPLY: 'REPLY',
 } as const;
 
@@ -9,6 +11,7 @@ export const SOCIAL_MEDIA_INTERACTION_TYPES = {
 export const SOCIAL_MEDIA_PLATFORMS: readonly ExternalSourcePlatform[] = [
   ExternalSourcePlatform.GOOGLE_PLAY,
   ExternalSourcePlatform.APP_STORE,
+  ExternalSourcePlatform.INSTAGRAM,
 ] as const;
 
 export function isSocialMediaPlatform(sourceType: string): boolean {
