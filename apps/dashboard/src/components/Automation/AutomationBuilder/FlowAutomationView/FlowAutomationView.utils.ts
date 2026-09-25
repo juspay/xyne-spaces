@@ -469,7 +469,8 @@ export function issuesUnderPath(
   if (nodeType === 'action') {
     return all.filter(i => i.path.startsWith(`${prefix}.config.`));
   }
-  return all.filter(i => i.path.startsWith(prefix));
+  // `steps[1]` must not also match `steps[10]`.
+  return all.filter(i => i.path === prefix || i.path.startsWith(`${prefix}.`));
 }
 
 const NESTED_STEP_SEGMENT = /^\.config\.(if_true|if_false|default|cases\[\d+\]\.steps)\[\d+\]/;
