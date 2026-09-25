@@ -22,6 +22,7 @@ import { useUserChannelStatuses } from '../../hooks/useChannels';
 import { TypingStateProvider } from '../../contexts/TypingStateContext';
 import { cn } from '../../utils/classNames';
 import { usePath } from '../../hooks/usePath';
+import { useRegionFocusCycler } from '../../hooks/useRegionFocusCycler';
 
 interface ChatScreenProps {
   shouldStackThread?: boolean;
@@ -52,6 +53,11 @@ const ChatScreen = ({ shouldStackThread = false }: ChatScreenProps): ReactElemen
   // ChatListV3 and losing scroll position a second time.
   const isWideScreen = !isMobile || measuredWideScreen;
   const chatSidebarPanelRef = useRef<PanelImperativeHandle>(null);
+
+  // ⌘⌃→/←, ⌘(+Shift)+F6 — hop between major chat sections (directory →
+  // conversation → composer) instead of Tab-ing through every row (Slack's
+  // "Navigate with your keyboard" model; see hooks/useRegionFocusCycler.ts).
+  useRegionFocusCycler();
 
   // Listen for resize events from global shortcuts
   const handleResizeEvent = useCallback((event: Event) => {
@@ -145,7 +151,7 @@ const ChatScreen = ({ shouldStackThread = false }: ChatScreenProps): ReactElemen
                 collapsible
                 collapsedSize={0}
               >
-                <aside className='w-full h-full'>
+                <aside className='w-full h-full' data-focus-region='chat-directory'>
                   <ChatDirectory
                     channelData={channelData}
                     allChannelsUserStatus={allChannelsUserStatus}
@@ -170,6 +176,7 @@ const ChatScreen = ({ shouldStackThread = false }: ChatScreenProps): ReactElemen
             <Panel id='chat-main' minSize='30%'>
               <main
                 data-id='conversation-view'
+                data-focus-region='conversation'
                 className={cn(
                   'flex-1 h-full overflow-hidden relative flex flex-col rounded-2xl',
                   // DM + Bookmarks + Canvas routes render their own transparent left

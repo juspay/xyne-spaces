@@ -188,6 +188,26 @@ export const WorkspaceSwitcher: React.FC = () => {
     return () => document.removeEventListener('mousedown', handleClick);
   }, [isOpen]);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    popoverRef.current?.focus({ preventScroll: true });
+    const onKeyDown = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      const active = document.activeElement;
+      if (active instanceof HTMLElement && popoverRef.current?.contains(active)) {
+        triggerRef.current?.focus({ preventScroll: true });
+      }
+    };
+  }, [isOpen]);
+
   const handleSwitch = async (targetWorkspaceId: string): Promise<void> => {
     if (targetWorkspaceId === workspaceId) {
       setIsOpen(false);
@@ -299,6 +319,8 @@ export const WorkspaceSwitcher: React.FC = () => {
         className='size-8 rounded-lg flex items-center justify-center text-white text-xs font-bold cursor-pointer hover:opacity-85 transition-opacity relative'
         style={{ backgroundColor: bgColor }}
         aria-label='Switch workspace'
+        aria-expanded={isOpen}
+        aria-haspopup='true'
         data-testid='workspace-switcher-trigger'
         data-track-category='Workspace_Switcher'
         data-track-name='Open_Switcher'
@@ -315,7 +337,10 @@ export const WorkspaceSwitcher: React.FC = () => {
       {isOpen && (
         <div
           ref={popoverRef}
-          className='absolute left-full top-0 ml-2 z-[60] w-64 rounded-xl border border-border bg-background shadow-xl'
+          tabIndex={-1}
+          role='dialog'
+          aria-label='Workspaces'
+          className='absolute left-full top-0 ml-2 z-[60] w-64 rounded-xl border border-border bg-background shadow-xl outline-none'
         >
           {/* Header */}
           <div className='px-3 pt-3 pb-1'>

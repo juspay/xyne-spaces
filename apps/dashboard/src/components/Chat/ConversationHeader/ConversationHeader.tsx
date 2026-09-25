@@ -317,7 +317,12 @@ const ConversationHeader = ({
       )}
       style={APP_DRAG_STYLE}
     >
-      <div ref={rowRef} className='shrink-0 flex items-center justify-between gap-6'>
+      {/* Toolbar strip: ←/→ walks star → name menu → members/notifications/… → call → ⋯ (useRegionFocusCycler). */}
+      <div
+        ref={rowRef}
+        className='shrink-0 flex items-center justify-between gap-6'
+        data-arrow-row=''
+      >
         <div
           ref={titleRef}
           className='flex items-center gap-2 text-foreground min-w-0 flex-1 px-1.5'

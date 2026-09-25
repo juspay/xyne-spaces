@@ -807,6 +807,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           style: 'min-height: 20px; max-height: 200px; overflow-y: auto;',
           'aria-label': 'Message input',
           'data-testid': 'message-input',
+          // Region "focus seat" for useRegionFocusCycler (⌘⌃→/⌘F6 section hop).
+          'data-focus-seat': '',
           role: 'textbox',
           'aria-multiline': 'true',
           spellcheck: 'true',
@@ -1647,7 +1649,11 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
     );
 
     return (
-      <div className={`flex-shrink-0 relative ${className}`} data-input-id={id}>
+      <div
+        className={`flex-shrink-0 relative ${className}`}
+        data-input-id={id}
+        data-focus-region='composer'
+      >
         {features.mentions && (
           <MentionSelector
             editor={editor}

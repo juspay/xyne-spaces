@@ -161,8 +161,11 @@ const GroupSettingsMenu = ({
       <DropdownMenuTrigger asChild>
         <button
           className={cn(
-            'group/child flex items-center justify-center rounded-md p-1 shrink-0 text-sidebar-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent transition-opacity ease-in-out duration-300 focus:outline-none',
-            alwaysVisible || menuOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
+            'group/child flex items-center justify-center rounded-md p-1 shrink-0 text-sidebar-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent transition-opacity ease-in-out duration-300',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+            alwaysVisible || menuOpen
+              ? 'opacity-100'
+              : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100',
           )}
           onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
             e.preventDefault();
@@ -597,6 +600,13 @@ const ChatDirectory = ({
       const currentId = activeChannelId ?? null;
 
       if (e.key === 'Enter') {
+        if ((active as HTMLElement).tagName === 'BUTTON') return;
+        const link = (active as HTMLElement).closest?.('a[href]');
+        if (link) {
+          const href = link.getAttribute('href') ?? '';
+          const hrefPath = new URL(href, window.location.origin).pathname;
+          if (hrefPath !== window.location.pathname) return;
+        }
         // Confirm current selection → focus the chat input directly
         // (URL may already be on this channel thanks to j/k navigation).
         e.preventDefault();
@@ -707,7 +717,8 @@ const ChatDirectory = ({
 
   return (
     <div className={cn('h-full w-full flex flex-col', isMobile && 'bg-sidebar')}>
-      <div className='w-full h-[52px] shrink-0'>
+      {/* Toolbar strip: ←/→ walks Back/Forward/Search (useRegionFocusCycler). */}
+      <div className='w-full h-[52px] shrink-0' data-arrow-row=''>
         <AppNavigator />
       </div>
       <div className='relative flex-1 min-h-0 px-3 pt-3 pb-12 sm:pb-0 flex flex-col border-t border-sidebar-border-muted'>
@@ -741,8 +752,6 @@ const ChatDirectory = ({
 
         <div
           ref={listContainerRef}
-          // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
-          tabIndex={0}
           role='region'
           aria-label='Channels and direct messages'
           className='flex-1 h-full overflow-y-scroll no-scrollbar pb-[calc(2.5rem+env(safe-area-inset-bottom))] px-0.5 pt-1 outline-none'
@@ -778,6 +787,10 @@ const ChatDirectory = ({
                       }}
                       onMouseEnter={item.key === 'recap' ? prefetchRecap : undefined}
                       data-testid={CHAT_NAV_TEST_IDS[item.key]}
+                      // ↑/↓ arrow-walk target (useRegionFocusCycler) — the top
+                      // utility rows are buttons, not row links, so they need
+                      // their own marker to join the directory's list traversal.
+                      data-arrow-item=''
                       data-track-category='CHAT_SIDEBAR'
                       data-track-name={item.trackName}
                       data-track-metadata={chatNavTrackMetadata(item.key)}
@@ -826,9 +839,11 @@ const ChatDirectory = ({
               align='start'
               trigger={
                 <button
-                  type='button'
-                  className='flex items-center justify-start gap-3 w-full px-3 py-2 text-sm font-medium tracking-[-0.14px] rounded-[10px] border border-dashed border-transparent text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent hover:border-sidebar-border hover:text-sidebar-accent-foreground'
-                  data-testid='chat-nav-add'
+                  className={cn(
+                    'flex items-center justify-start gap-3 w-full px-3 py-2 text-sm font-medium tracking-[-0.14px] rounded-[10px] border border-transparent transition-colors hover:bg-sidebar-accent hover:border-sidebar-border',
+                    CHAT_NAV_ROW_DEFAULT_CLASS,
+                  )}
+                  data-arrow-item=''
                   data-track-category='CHAT_SIDEBAR'
                   data-track-name='OPEN_ADD_MENU'
                 >
@@ -865,7 +880,7 @@ const ChatDirectory = ({
                               <ChevronRight
                                 strokeWidth={2.33}
                                 size={12}
-                                className='hidden group-hover:block transition-transform duration-200 group-data-[state=open]:rotate-90'
+                                className='hidden group-hover:block group-focus-within:block transition-transform duration-200 group-data-[state=open]:rotate-90'
                               />
                             </span>
                             <span className='text-left truncate block'>Starred</span>
@@ -980,13 +995,13 @@ const ChatDirectory = ({
                 <Accordion.Header asChild>
                   <div className='group px-3 flex items-center justify-between gap-2 '>
                     <Accordion.Trigger asChild>
-                      <button className=' flex items-center justify-start gap-2 w-full h-7 text-sidebar-foreground text-xs font-medium'>
+                      <button className=' flex items-center justify-start gap-2 w-full h-7 text-sidebar-foreground text-xs font-medium rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'>
                         <span className='size-4 flex items-center justify-center shrink-0'>
                           <Hashtag size={14} className='group-hover:hidden' />
                           <ChevronRight
                             strokeWidth={2.33}
                             size={12}
-                            className='hidden group-hover:block transition-transform duration-200 group-data-[state=open]:rotate-90'
+                            className='hidden group-hover:block group-focus-within:block transition-transform duration-200 group-data-[state=open]:rotate-90'
                           />
                         </span>
                         <span className='text-left truncate block'>Channels</span>
@@ -998,7 +1013,7 @@ const ChatDirectory = ({
                       </Badge>
                     )}
                     <div
-                      className={`flex items-center gap-2 mr-0.5 transition-opacity ease-in-out duration-300 ${isSectionMenuOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+                      className={`flex items-center gap-2 mr-0.5 transition-opacity ease-in-out duration-300 ${isSectionMenuOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'}`}
                     >
                       <Tooltip
                         content='Browse channels'
@@ -1115,7 +1130,7 @@ const ChatDirectory = ({
                           <ChevronRight
                             strokeWidth={2.33}
                             size={12}
-                            className='hidden group-hover:block transition-transform duration-200 group-data-[state=open]:rotate-90'
+                            className='hidden group-hover:block group-focus-within:block transition-transform duration-200 group-data-[state=open]:rotate-90'
                           />
                         </span>
                         <span className='text-left truncate block'>Direct Messages</span>
@@ -1134,7 +1149,7 @@ const ChatDirectory = ({
                     >
                       <button
                         id='sidebar-add-dm-btn'
-                        className='group/child text-sidebar-foreground hover:text-sidebar-accent-foreground opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity ease-in-out duration-300 hover:bg-sidebar-accent rounded-md p-1 mr-0.5'
+                        className='group/child text-sidebar-foreground hover:text-sidebar-accent-foreground opacity-100 md:opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity ease-in-out duration-300 hover:bg-sidebar-accent rounded-md p-1 mr-0.5'
                         onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
                           e.preventDefault();
                           e.stopPropagation();

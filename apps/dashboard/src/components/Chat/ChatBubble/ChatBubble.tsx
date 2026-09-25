@@ -1209,6 +1209,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       data-show-avatar={showAvatar}
       data-message-id={message.messageId}
       data-hover-key={hoverToolbarKey}
+      data-message-row=''
+      tabIndex={-1}
       className={cn(
         isMobile && 'no-select-mobile',
         'group/bubble relative transition-colors duration-200 ease-in-out',

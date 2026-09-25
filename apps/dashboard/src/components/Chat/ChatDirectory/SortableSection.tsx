@@ -105,7 +105,7 @@ const SortableSection = ({
               <ChevronRight
                 strokeWidth={2.33}
                 size={12}
-                className='hidden group-hover:block transition-transform duration-200 group-data-[state=open]/trigger:rotate-90'
+                className='hidden group-hover:block group-focus-within:block transition-transform duration-200 group-data-[state=open]/trigger:rotate-90'
               />
             </span>
             <span className='text-left truncate block'>{section.name}</span>
@@ -121,7 +121,9 @@ const SortableSection = ({
             <button
               className={cn(
                 'flex items-center justify-center p-1 mr-0.5 rounded-md hover:bg-sidebar-accent shrink-0 text-sidebar-foreground hover:text-sidebar-accent-foreground transition-opacity ease-in-out duration-300',
-                menuOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
+                menuOpen
+                  ? 'opacity-100'
+                  : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100',
               )}
               aria-label='Section options'
               data-track-category='CHAT_SIDEBAR'

@@ -23,6 +23,7 @@ const SortableChannelItem = memo(
     const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
       id: channel.id,
       data: { type: 'channel' },
+      attributes: { tabIndex: -1 },
     });
     const style: CSSProperties = {
       opacity: isDragging ? 0 : undefined,

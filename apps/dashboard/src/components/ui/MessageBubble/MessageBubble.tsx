@@ -915,19 +915,13 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 />
               </div>
             ) : showAvatar && sender?.userType === UserType.APP ? (
-              <div
+              <button
+                type='button'
                 onClick={() => handleUserClick(sender.id)}
                 data-track-category='MESSAGE'
                 data-track-name='OPEN_SENDER_PROFILE_FROM_AVATAR'
                 className='cursor-pointer'
-                role='button'
-                tabIndex={0}
-                onKeyDown={e => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    handleUserClick(sender.id);
-                  }
-                }}
+                tabIndex={-1}
                 aria-label={`View ${getUserDisplayName(sender) || 'app'} profile`}
               >
                 {isMobile ? (
@@ -941,7 +935,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                     <UserAvatar userId={sender.id} size={AvatarSize.MD} showActiveStatus={false} />
                   </UserHoverWrapper>
                 )}
-              </div>
+              </button>
             ) : showAvatar && isXyneBot ? (
               <div className='flex items-center justify-center'>
                 <svg
@@ -1019,19 +1013,13 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 </svg>
               </div>
             ) : showAvatar && sender ? (
-              <div
+              <button
+                type='button'
                 onClick={() => handleUserClick(sender.id)}
                 data-track-category='MESSAGE'
                 data-track-name='OPEN_SENDER_PROFILE_FROM_AVATAR'
                 className='cursor-pointer'
-                role='button'
-                tabIndex={0}
-                onKeyDown={e => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    handleUserClick(sender.id);
-                  }
-                }}
+                tabIndex={-1}
                 aria-label={`View ${getUserDisplayName(sender) || 'user'} profile`}
               >
                 {isMobile ? (
@@ -1045,7 +1033,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                     <UserAvatar userId={sender.id} size={AvatarSize.MD} showActiveStatus={false} />
                   </UserHoverWrapper>
                 )}
-              </div>
+              </button>
             ) : (
               <div
                 className={`text-[10px] text-muted-foreground flex items-center gap-1 cursor-pointer hover:underline pt-[5px] ${shouldShowPending ? '' : 'opacity-0 group-hover:opacity-100'} visual-regression-hide`}

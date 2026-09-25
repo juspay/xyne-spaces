@@ -417,7 +417,7 @@ const AppSidebar = (): ReactElement => {
   }
 
   return (
-    <aside className='h-full w-[60px] flex flex-col bg-sidebar'>
+    <aside className='h-full w-[60px] flex flex-col bg-sidebar' data-focus-region='app-sidebar'>
       {/* Top spacer aligns with the header strip / macOS traffic lights; make it a
           drag region so the window can be moved by its top-left corner in Electron. */}
       <div className='w-full h-[52px] shrink-0' style={APP_DRAG_STYLE} />
@@ -693,7 +693,9 @@ const AppSidebar = (): ReactElement => {
           <Popover
             trigger={
               hasDisplayStatus ? (
-                <div
+                <button
+                  type='button'
+                  aria-label='Profile and settings'
                   className='relative w-[32px] h-14 rounded-lg flex flex-col items-center justify-end transition-opacity hover:opacity-90 cursor-pointer [--avatar-ring:var(--sidebar-avatar-ring)]'
                   data-testid='profile-icon'
                 >
@@ -721,9 +723,11 @@ const AppSidebar = (): ReactElement => {
                       </div>
                     )}
                   </div>
-                </div>
+                </button>
               ) : (
-                <div
+                <button
+                  type='button'
+                  aria-label='Profile and settings'
                   className='relative w-[32px] flex flex-col items-center justify-end transition-opacity hover:opacity-90 cursor-pointer [--avatar-ring:var(--sidebar-avatar-ring)]'
                   data-testid='profile-icon'
                 >
@@ -737,7 +741,7 @@ const AppSidebar = (): ReactElement => {
                       </div>
                     )}
                   </div>
-                </div>
+                </button>
               )
             }
             open={isSettingsPopoverOpen}

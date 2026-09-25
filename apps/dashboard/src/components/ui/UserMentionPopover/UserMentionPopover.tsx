@@ -153,28 +153,7 @@ const UserHoverWrapperInner: React.FC<UserHoverWrapperProps> = ({
 
   return (
     <HoverCard
-      trigger={
-        <span
-          role='button'
-          tabIndex={0}
-          onClick={e => {
-            e.preventDefault();
-            e.stopPropagation();
-            handleProfileClick();
-          }}
-          data-track-category='MENTION'
-          data-track-name='OPEN_USER_PROFILE_FROM_MENTION'
-          onKeyDown={e => {
-            if (e.key === 'Enter' || e.key === ' ') {
-              e.preventDefault();
-              handleProfileClick();
-            }
-          }}
-          style={{ display: 'inline' }}
-        >
-          {children}
-        </span>
-      }
+      trigger={<span style={{ display: 'inline' }}>{children}</span>}
       side='top'
       align='start'
       avoidCollisions

@@ -181,8 +181,15 @@ const ChannelItemV2 = memo(
     );
 
     return (
+      // `group` lives on the Link (the row's Tab stop), not the inner div:
+      // the hidden 3-dots / close buttons below use `group-focus-within` —
+      // `hidden` elements can't receive focus, so focus must come from the
+      // row itself. If `group` sat on the inner <div>, the focused Link would
+      // be its PARENT and :focus-within would never match (WCAG 2.1.1).
       <Link
-        className=''
+        className='group block rounded-[10px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring'
+        {...(isActive ? { 'data-focus-seat': '' } : {})}
+        data-arrow-item=''
         draggable={false}
         to={`/chat/dir/${channel.id}`}
         onClick={handleChannelClick}
@@ -197,7 +204,7 @@ const ChannelItemV2 = memo(
       >
         <div
           className={cn(
-            'flex items-center gap-3 h-9 mt-px group rounded-[10px] px-3 border border-transparent transition-colors',
+            'flex items-center gap-3 h-9 mt-px rounded-[10px] px-3 border border-transparent transition-colors',
             isActive
               ? 'text-sidebar-accent-foreground font-medium bg-sidebar-accent border-sidebar-border'
               : 'text-sidebar-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent',
@@ -250,7 +257,7 @@ const ChannelItemV2 = memo(
                     'items-center justify-center p-1 rounded-md hover:bg-sidebar-accent shrink-0',
                     // Use display (not opacity) so the hidden trigger reserves no
                     // width — otherwise it shrinks the name and truncates early.
-                    sectionMenuOpen ? 'flex' : 'hidden group-hover:flex',
+                    sectionMenuOpen ? 'flex' : 'hidden group-hover:flex group-focus-within:flex',
                   )}
                   onClick={e => {
                     e.preventDefault();
@@ -327,7 +334,7 @@ const ChannelItemV2 = memo(
           {shouldShowCloseButton && (
             <button
               type='button'
-              className='group-hover:block hidden p-1 rounded-md -blue'
+              className='group-hover:block group-focus-within:block hidden p-1 rounded-md -blue'
               onClick={handleCloseDm}
               data-ph-capture-attribute-track-id='close_dm_channel'
               data-track-category='CHAT_SIDEBAR'

@@ -1466,6 +1466,7 @@ export const ThreadMessages = ({
           isInPanelWebview ? '' : 'rounded-lg'
         }`}
         ref={dragAndDropAreaRef}
+        data-focus-region='thread'
       >
         {/* Drag and Drop Overlay */}
         <DragAndDropOverlay isVisible={isDragging} />
@@ -1497,7 +1498,10 @@ export const ThreadMessages = ({
         )}
         {/* pt-3 only — the tabs header below supplies the 12px gap. See note above. */}
         {derivedTicketId && ticket && !simpleView && !headerActionsContainer && (
-          <div className='flex justify-between items-center w-full pl-2 pr-3 pt-3 gap-4'>
+          <div
+            className='flex justify-between items-center w-full pl-2 pr-3 pt-3 gap-4'
+            data-arrow-row=''
+          >
             <div className='flex gap-2 items-center min-w-0 flex-1'>
               <Tooltip content='Copy ticket ID'>
                 <button
@@ -1917,6 +1921,7 @@ export const ThreadMessages = ({
               <div
                 className='flex justify-between items-center w-full pl-2 pr-3 pt-3 gap-4'
                 style={isDraggableThreadPanel ? APP_DRAG_STYLE : undefined}
+                data-arrow-row=''
               >
                 {/* Title */}
                 <div className='flex items-center gap-2 min-w-0 flex-1'>
