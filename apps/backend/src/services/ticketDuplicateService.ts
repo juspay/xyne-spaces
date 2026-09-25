@@ -29,11 +29,6 @@ const prisma = DatabaseClient.getInstance();
 const emailChannelPreferenceRepo = new EmailChannelPreferenceRepository();
 const DUPLICATE_REFERENCE_LIMIT = 10;
 
-// Channels already reported as scoped-but-boardless, so the warning is emitted once per
-// channel per process instead of once per ticket. Bounded by the number of misconfigured
-// desk channels, and holding only their ids.
-const boardlessScopedChannelsLogged = new Set<string>();
-
 /**
  * One raw scope-field value carried by the NEW ticket, handed to the service as a
  * 1:1 map of the caller's precomputed custom-field write payload entries (fieldId +
@@ -97,8 +92,6 @@ export const buildDuplicateScopeFieldValues = async (params: {
       return [];
     }
 
-    // Canonical ids (`globalFieldId ?? id`) for every field the board's form carries —
-    // the exact id space the caller's payload and form_entity_values both use.
     const boardFields = await resolveFormFieldDefinitionsForForm(prisma, formId);
     const scopableFields = boardFields.filter(field => rawValueByFieldId.has(field.id));
     if (scopableFields.length === 0) {
@@ -190,13 +183,9 @@ class TicketDuplicateService {
         return null;
       }
       if (!preference.boardId) {
-        if (!boardlessScopedChannelsLogged.has(channelId)) {
-          boardlessScopedChannelsLogged.add(channelId);
-          logger.warn(
-            '[TicketDuplicateService] Scoped channel has no board, treating as disabled',
-            { channelId },
-          );
-        }
+        logger.info('[TicketDuplicateService] Scoped channel has no board, treating as disabled', {
+          channelId,
+        });
         return null;
       }
       return { config: parsed.data, boardId: preference.boardId };
@@ -235,13 +224,9 @@ class TicketDuplicateService {
     }
     const { config: scopeConfig, boardId } = scope;
 
-    // Both the configured keys and what we could actually resolve, because "which id
-    // was missing" alone cannot distinguish a value the ticket never carried from a
-    // configured id that does not exist on this board's form at all.
-    const logProjectWideFallback = (
-      missingScopeFieldIds: string[],
-      resolvedScopeFieldIds: string[] = [],
-    ): void => {
+    // providedScopeFieldIds separates "the ticket carried no value for this key" from
+    // "this key is not on the board's form at all" — same log line, different fixes.
+    const logProjectWideFallback = (missingScopeFieldIds: string[]): void => {
       logger.info(
         '[TicketDuplicateService] Channel scope fields missing on new ticket, using project-wide duplicate search',
         {
@@ -250,9 +235,7 @@ class TicketDuplicateService {
           projectId,
           boardId,
           missingScopeFieldIds,
-          configuredScopeFieldIds: scopeConfig.scopeFieldGlobalIds,
           providedScopeFieldIds: (scopeFieldValues ?? []).map(entry => entry.fieldId),
-          resolvedScopeFieldIds,
         },
       );
     };
@@ -274,7 +257,7 @@ class TicketDuplicateService {
 
     const missing = scopeConfig.scopeFieldGlobalIds.filter(id => !valuesByFieldId.has(id));
     if (missing.length > 0) {
-      logProjectWideFallback(missing, [...valuesByFieldId.keys()]);
+      logProjectWideFallback(missing);
       return null;
     }
 

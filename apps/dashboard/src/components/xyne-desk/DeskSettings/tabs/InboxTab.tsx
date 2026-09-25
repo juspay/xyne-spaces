@@ -113,11 +113,8 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
   const showAppWebhookDelivery = isApp || (connectedApps?.length ?? 0) > 0;
 
   const [scopeFieldPickerOpen, setScopeFieldPickerOpen] = useState(false);
-  // Scope keys must come from THIS channel's board ticket form, not the project's
-  // GlobalFields. A ticket can only carry a value for a field its board's form defines,
-  // and on a legacy form those fields have no GlobalField id at all — so a project-wide
-  // GlobalField list offers keys the backend can never resolve, and every ticket silently
-  // falls back to a project-wide duplicate search.
+  // The board's ticket form, not the project's global fields: a legacy form's fields have
+  // no GlobalField id, so project-wide options would offer keys the backend can't resolve.
   const [scopeFieldsMapping, scopeFieldsDetails] = useCachedQuery(
     queries.getFormMappingByContextId({
       contextId: boardId || 'nonexistent',
@@ -126,10 +123,6 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
     }),
     { enabled: isDeskChannel && !!boardId },
   );
-  // resolveDisplayFormFields yields `globalFieldId ?? id` per row — the same canonical id
-  // the ticket write path stores and the backend resolves scope config against.
-  // Every field type is a valid scope key — the service derives its Vespa token from
-  // the same buildFormFields the indexer uses — so the picker offers the whole list.
   const scopedFields = useMemo(
     () =>
       scopeFieldsMapping?.formFields
@@ -137,10 +130,8 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
         : [],
     [scopeFieldsMapping?.formFields, scopeFieldsMapping?.formId],
   );
-  // Chips are driven by the saved config, not by the field list: a configured field
-  // that has since been deleted still needs a chip, or its id is stranded — it keeps
-  // counting toward the cap and the backend reports it missing forever, which turns
-  // scoping off for the whole channel while this screen still reads "on".
+  // Chips come from the saved config, not the field list, so a deleted field still gets a
+  // chip to remove rather than a stranded id that counts toward the cap forever.
   const scopeFieldById = useMemo(
     () => new Map(scopedFields.map(field => [field.id, field])),
     [scopedFields],
@@ -149,12 +140,9 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
     id,
     field: scopeFieldById.get(id),
   }));
-  // "We know this board's fields" is NOT "the list came back empty": a desk with no target
-  // board, and a sync that has not landed yet, both leave scopedFields empty. Marking a
-  // configured field deleted — or advising its removal — in either case would talk an admin
-  // into destroying a working config, so every such claim below waits for a complete result.
-  const hasTargetBoard = !!boardId;
-  const scopeFieldsResolved = hasTargetBoard && scopeFieldsDetails.type === 'complete';
+  // No board and an unlanded sync both leave scopedFields empty, so nothing calls a saved
+  // field deleted until the result is complete.
+  const scopeFieldsResolved = !!boardId && scopeFieldsDetails.type === 'complete';
   const hasUnresolvedScopeField =
     scopeFieldsResolved && selectedDuplicateScopeFields.some(entry => !entry.field);
   const duplicateScopeFieldCapReached = duplicateScopeFieldIds.length >= MAX_DUPLICATE_SCOPE_FIELDS;
@@ -520,11 +508,9 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
               <div className='text-desk-label'>Scope fields</div>
               <div className='flex w-full max-w-[500px] flex-wrap items-center gap-[6px]'>
                 {selectedDuplicateScopeFields.map(({ id, field }) => {
-                  // Only flag a field as missing once the board's list actually loaded —
-                  // otherwise a pending or failed query makes every configured field look
-                  // deleted.
                   const isMissing = scopeFieldsResolved && !field;
-                  const label = field ? field.fieldName : isMissing ? 'Deleted field' : id;
+                  const unresolvedLabel = boardId ? 'Loading…' : 'Unresolved field';
+                  const label = field?.fieldName ?? (isMissing ? 'Deleted field' : unresolvedLabel);
                   return (
                     <div
                       key={id}
@@ -621,17 +607,14 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
                   list to re-enable scoping.
                 </div>
               )}
-              {!hasTargetBoard && (
+              {!boardId && (
                 <div className='text-desk-helper w-full max-w-[500px]'>
-                  Scope fields come from the ticket form of this desk&apos;s target board. Set a
-                  target board for this desk first, then pick the fields to scope on. Until then
-                  duplicate detection stays project-wide.
+                  Set a target board for this desk first — scope fields come from its ticket form.
                 </div>
               )}
               {scopeFieldsResolved && scopedFields.length === 0 && (
                 <div className='text-desk-helper w-full max-w-[500px]'>
-                  The board for this desk has no ticket form fields yet. Add one to the board ticket
-                  form first, then pick it here.
+                  This board&apos;s ticket form has no fields yet. Add one there first.
                 </div>
               )}
             </div>
