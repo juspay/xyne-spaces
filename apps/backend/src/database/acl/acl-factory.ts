@@ -381,6 +381,10 @@ export class ACLFactory {
       return new WorkspaceOrganizationsACL(ctx, prisma)
     case 'aCLAuditLog':
       return new BaseQueryACL(ctx, prisma)
+    case 'auditLog':
+      return new BaseQueryACL(ctx, prisma)
+    case 'auditLogChange':
+      return new BaseQueryACL(ctx, prisma)
     case 'activityAlias':
       return new UnscopedACL(ctx, prisma)
     case 'apiKey':

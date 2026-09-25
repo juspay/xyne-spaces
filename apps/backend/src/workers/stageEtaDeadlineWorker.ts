@@ -1,7 +1,7 @@
-import { Prisma } from '@prisma/client';
+
 import { logger } from '@/utils/logger';
 import { db, readReplicaDb } from '@/database/client';
-import { runAsServiceActor } from '@/database/tenant/context';
+import { commitStageEtaDecision, dispatchStageEtaNotifications } from '@/bypassAcl/ticketEtaServices';
 import { stageEtaDeadlineQueue } from '@/queues/stageEtaDeadlineQueue';
 import {
   getTicketBotActorId,
@@ -10,16 +10,12 @@ import {
 } from '@/utils/etaNotificationUtils';
 import {
   parseTicketEtaManagement,
-  mergeTicketEtaManagement,
   BoardType,
 } from '@xyne/shared';
-import { recordTicketTimelineEvent } from '@/services/ticketTimelineEventService';
 import {
   evaluatePlanningRisk,
-  buildRiskTransitionActivityIntents,
-  dispatchEtaNotifications,
-  etaSignalsFromResult,
 } from '@/services/etaManagement';
+import { markTicketsStageOverdue } from '@/bypassAcl/ticketServices';
 
 interface TicketForReconciliation extends TicketWithStageInfo {
   boardId: string;
@@ -112,12 +108,7 @@ class StageEtaDeadlineWorker {
 
     for (let i = 0; i < overdueTicketIds.length; i += BATCH_SIZE) {
       const batchIds = overdueTicketIds.slice(i, i + BATCH_SIZE);
-      await db.$executeRaw`
-        UPDATE "tickets"
-        SET "isStageOverdue" = true
-        WHERE "id" IN (${Prisma.join(batchIds)})
-          AND ("isStageOverdue" = false OR "isStageOverdue" IS NULL)
-      `;
+      await markTicketsStageOverdue(batchIds);
       if (i + BATCH_SIZE < overdueTicketIds.length) {
         await sleep(BATCH_SLEEP_MS);
       }
@@ -361,55 +352,13 @@ class StageEtaDeadlineWorker {
         // both write. Without the lock this is check-then-write: two workers could
         // duplicate the risk activities and notify twice for one fingerprint.
         const systemActorId = await getTicketBotActorId(ticket.workspaceId);
-        const committed = await runAsServiceActor(
-          'stage-eta-deadline-worker',
-          ticket.workspaceId,
-          async () =>
-            db.$transaction(async tx => {
-              const [locked] = await tx.$queryRaw<{ metadata: unknown }[]>`
-                SELECT "metadata"
-                FROM "tickets"
-                WHERE "id" = ${ticket.id}
-                FOR UPDATE
-              `;
-              const freshRisk = parseTicketEtaManagement(locked?.metadata).planningRisk;
-              if (freshRisk.fingerprint !== currentTicketEtaManagement.planningRisk.fingerprint) {
-                return false;
-              }
-
-              const mergedMetadata = mergeTicketEtaManagement(locked?.metadata, {
-                planningRisk: decision.nextState,
-              });
-              await tx.ticket.update({
-                where: { id: ticket.id },
-                data: { metadata: mergedMetadata as Prisma.InputJsonValue },
-              });
-
-              const intents = buildRiskTransitionActivityIntents(decision, {
-                currentStageId: entry.stageId,
-                oldEta: ticket.eta ? ticket.eta.getTime() : null,
-                trigger: 'RECONCILIATION',
-                systemReason: 'Hourly reconciliation detected a planning-risk state change',
-                previousRiskFingerprint: currentTicketEtaManagement.planningRisk.fingerprint,
-              });
-              for (const intent of intents) {
-                await recordTicketTimelineEvent(
-                  {
-                    activity: {
-                      ticketId: ticket.id,
-                      updatedBy: systemActorId,
-                      activityType: intent.activityType,
-                      value: intent.value as Prisma.InputJsonValue,
-                      workspaceId: ticket.workspaceId,
-                      channelId: ticket.channelId,
-                    },
-                  },
-                  tx,
-                );
-              }
-              return true;
-            }),
-        );
+        const committed = await commitStageEtaDecision({
+          ticket,
+          stageId: entry.stageId,
+          decision,
+          previousFingerprint: currentTicketEtaManagement.planningRisk.fingerprint,
+          systemActorId,
+        });
 
         if (!committed) {
           metrics.skippedStale += 1;
@@ -419,19 +368,7 @@ class StageEtaDeadlineWorker {
         // Post-commit, and never while paused. Only the run that actually won the lock
         // reaches here, so one fingerprint notifies once.
         if (ticket.statusV2 !== 'PAUSED') {
-          await runAsServiceActor('stage-eta-deadline-worker', ticket.workspaceId, () =>
-            dispatchEtaNotifications(
-              etaSignalsFromResult({ etaDecision: { newEta: null, changed: false }, planningRisk: decision }),
-              {
-                ticketId: ticket.id,
-                createdBy: ticket.createdBy ?? systemActorId,
-                assignedTo: ticket.assignedTo,
-                ticketUserGroupId: ticket.userGroupId,
-                boardId: ticket.boardId,
-                actorId: systemActorId,
-              },
-            ),
-          );
+          await dispatchStageEtaNotifications(ticket, decision, systemActorId);
         }
 
         if (decision.transitionKind === 'DETECTED') metrics.detected += 1;

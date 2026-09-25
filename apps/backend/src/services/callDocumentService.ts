@@ -10,7 +10,14 @@ import { newConnectId, createConnectGroupForEntity, resolveCanvasConnectId } fro
 import { withWorkspaceScope } from '@/database/tenant/context';
 import { repositories } from '@/database/repositories';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
-import { CallOrigin, DEFAULT_SUMMARY_FIELDS, MessageType, CanvasRole, CanvasVisibility } from '@xyne/shared';
+import {
+  CallOrigin,
+  DEFAULT_SUMMARY_FIELDS,
+  MessageType,
+  CanvasRole,
+  CanvasVisibility,
+  SUMMARY_MAX_INPUT_CHARS,
+} from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { formatToISTLocaleString } from '@/utils/dateUtils';
 import type { Prisma, SummaryTemplate } from '@prisma/client';
@@ -76,6 +83,15 @@ interface CanvasSideEffectContext {
 
 import { executeStreamingLlmRequest, type SummaryModelType } from './callLlmRetry';
 import { initializeYSweetDoc, syncToYSweet } from '@/utils/ysweetUtils.js';
+import { lockMessageMetadata } from '@/bypassAcl/rowLockServices';
+
+export interface RecordingSummaryTemplateSelection<T extends SummaryTemplateCandidate = SummaryTemplate> {
+  template: T | null;
+  fellBack: boolean;
+  reason: string | null;
+}
+
+export const DRAFT_SUMMARY_TEMPLATE_ID = 'draft';
 
 /**
  * Sanitize input strings to prevent injection attacks
@@ -87,8 +103,8 @@ function sanitizeInput(input: string | null): string {
   // Remove null bytes and other control characters except newlines and tabs
   const sanitized = input.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
 
-  // Limit length to prevent excessive token usage (adjust as needed)
-  const maxLength = 100000; // ~100K chars
+  // Limit length to prevent excessive token usage
+  const maxLength = SUMMARY_MAX_INPUT_CHARS;
   return sanitized.length > maxLength ? sanitized.substring(0, maxLength) : sanitized;
 }
 
@@ -137,7 +153,7 @@ const CITATION_TOKEN_RE = /\[clf-(\d+)\]/g;
 const MAX_CITATION_SNIPPET = 300;
 const INITIAL_DETAILED_SUMMARY_CANVAS_VERSION = 1;
 
-interface CitationSegment {
+export interface CitationSegment {
   n: number;
   timestamp: string; // "MM:SS" or "HH:MM:SS"
   speaker: string;
@@ -986,18 +1002,93 @@ export class CallDocumentService {
     userId: string,
     callId: string,
   ): Promise<SummaryTemplate | null> {
-    const templates = await summaryTemplateService.list(workspaceId, userId);
-    const defaultTemplate = await summaryTemplateService.findAccessibleById(
-      DEFAULT_RECORDING_SUMMARY_TEMPLATE.id,
+    const { templates, defaultTemplate } = await this.loadRecordingSummaryTemplateCandidates(
       workspaceId,
       userId,
     );
-    if (templates.length === 0) return defaultTemplate;
+    const selection = await this.pickRecordingSummaryTemplate(
+      transcript,
+      templates,
+      defaultTemplate,
+      callId,
+    );
+    return selection.template;
+  }
+
+  /**
+   * Same selection as production, but with an unsaved draft standing in for its saved
+   * version (or added as a new candidate). A draft id the user can't see is treated as new.
+   */
+  async previewRecordingSummaryTemplateSelection(
+    transcript: string,
+    workspaceId: string,
+    userId: string,
+    callId: string,
+    draft: SummaryTemplateCandidate,
+  ): Promise<RecordingSummaryTemplateSelection<SummaryTemplateCandidate>> {
+    const { templates, defaultTemplate } = await this.loadRecordingSummaryTemplateCandidates(
+      workspaceId,
+      userId,
+    );
+    const saved = templates.find(template => template.id === draft.id);
+    const draftCandidate: SummaryTemplateCandidate = saved
+      ? { ...draft, id: saved.id, version: saved.version }
+      : { ...draft, id: DRAFT_SUMMARY_TEMPLATE_ID };
+    const others: SummaryTemplateCandidate[] = templates.filter(
+      template => template.id !== draftCandidate.id,
+    );
+    // Slot the draft where summaryTemplateService.list's ordering (name asc, version desc,
+    // id asc) would put it, since candidate order in the prompt can sway the pick.
+    const insertAt = others.findIndex(
+      template =>
+        draftCandidate.name.localeCompare(template.name) < 0 ||
+        (draftCandidate.name === template.name &&
+          (draftCandidate.version > template.version ||
+            (draftCandidate.version === template.version &&
+              draftCandidate.id < template.id))),
+    );
+    const candidates = [...others];
+    candidates.splice(insertAt === -1 ? candidates.length : insertAt, 0, draftCandidate);
+    return this.pickRecordingSummaryTemplate(
+      transcript,
+      candidates,
+      defaultTemplate,
+      callId,
+      userId,
+    );
+  }
+
+  private async loadRecordingSummaryTemplateCandidates(
+    workspaceId: string,
+    userId: string,
+  ): Promise<{ templates: SummaryTemplate[]; defaultTemplate: SummaryTemplate | null }> {
+    const [templates, defaultTemplate] = await Promise.all([
+      summaryTemplateService.list(workspaceId, userId),
+      summaryTemplateService.findAccessibleById(
+        DEFAULT_RECORDING_SUMMARY_TEMPLATE.id,
+        workspaceId,
+        userId,
+      ),
+    ]);
+    return { templates, defaultTemplate };
+  }
+
+  private async pickRecordingSummaryTemplate<T extends SummaryTemplateCandidate>(
+    transcript: string,
+    templates: T[],
+    defaultTemplate: T | null,
+    callId: string,
+    credentialUserId?: string,
+  ): Promise<RecordingSummaryTemplateSelection<T>> {
+    if (templates.length === 0) {
+      return { template: defaultTemplate, fellBack: true, reason: 'no_templates' };
+    }
 
     const result = await executeStreamingLlmRequest({
       userPrompt: buildSummaryTemplateSelectionPrompt(transcript, templates),
       operation: 'recording_summary_template_selection',
       callId,
+      ...(credentialUserId ? { userId: credentialUserId } : {}),
     });
 
     if (result.ok) {
@@ -1010,15 +1101,16 @@ export class CallDocumentService {
           template_id: template.id,
           template_name: template.name,
         });
-        return template;
+        return { template, fellBack: false, reason: null };
       }
     }
 
+    const reason = result.ok ? 'invalid_selection' : result.reason;
     logger.warn(`[${callId}] recording_summary_template_selection_fallback`, {
       template_id: defaultTemplate?.id,
-      reason: result.ok ? 'invalid_selection' : result.reason,
+      reason,
     });
-    return defaultTemplate;
+    return { template: defaultTemplate, fellBack: true, reason };
   }
 
   /** Generate a headless-recording summary using a saved or code-backed template. */
@@ -1067,6 +1159,53 @@ export class CallDocumentService {
       return null;
     }
 
+    const rendered = await this.renderRecordingSummary(transcript, template, callId, {
+      onDelta,
+      citationSegments,
+      modelType,
+    });
+    return rendered ? { ...rendered, template } : null;
+  }
+
+  /**
+   * Summarize a pasted transcript with an unsaved draft template, through the same prompt
+   * and post-processing as a real recording. Nothing is persisted.
+   */
+  async previewRecordingSummary(
+    transcript: string,
+    workspaceId: string,
+    userId: string,
+    draft: Pick<SummaryTemplate, 'name' | 'autoTriggerPrompt' | 'sections' | 'systemPrompt'>,
+  ): Promise<{ summary: string; segments: CitationSegment[] } | null> {
+    const requestId = `summary-template-output-test:${workspaceId}:${userId}`;
+    const systemPrompt = await summaryTemplateService.resolveDraftSystemPrompt(draft, requestId);
+    if (!systemPrompt) return null;
+
+    const { numbered, segments } = numberTranscriptSegments(transcript);
+    const rendered = await this.renderRecordingSummary(
+      numbered,
+      { ...draft, systemPrompt },
+      requestId,
+      {
+        citationSegments: new Map(segments.map(segment => [segment.n, segment])),
+        credentialUserId: userId,
+      },
+    );
+    return rendered ? { summary: rendered.summary, segments } : null;
+  }
+
+  private async renderRecordingSummary(
+    transcript: string,
+    template: Pick<SummaryTemplate, 'autoTriggerPrompt' | 'sections' | 'systemPrompt'>,
+    callId: string,
+    options: {
+      onDelta?: (accumulatedContent: string) => void | Promise<void>;
+      citationSegments?: CitationContext['segments'];
+      modelType?: SummaryModelType;
+      credentialUserId?: string;
+    },
+  ): Promise<{ summary: string; markedItems: RecordingSummaryMarkedItem[] } | null> {
+    const { onDelta, citationSegments, modelType, credentialUserId } = options;
     // A Scribe admin may have switched off Decisions / Action Items on this template;
     // the prompt must then stop asking for those sections and their annotations.
     const mandatorySections = getMandatorySummarySectionState(template.sections);
@@ -1086,6 +1225,7 @@ export class CallDocumentService {
           )
         : undefined,
       modelType,
+      credentialUserId,
     );
 
     if (!rawSummary) return null;
@@ -1100,7 +1240,7 @@ export class CallDocumentService {
     );
     const summary = stripRecordingSummaryMarkedItemAnnotations(normalizedSummary);
 
-    return { summary, template, markedItems };
+    return { summary, markedItems };
   }
 
   /**
@@ -1116,6 +1256,7 @@ export class CallDocumentService {
     defaultSummaryFields = DEFAULT_SUMMARY_FIELDS,
     onDelta?: (accumulatedContent: string) => void | Promise<void>,
     modelType?: SummaryModelType,
+    credentialUserId?: string,
   ): Promise<string | null> {
     // Use people who actually spoke in the transcript. A channel roster can contain
     // members who never joined or contributed to this particular call.
@@ -1185,6 +1326,7 @@ MANDATORY OUTPUT CONTRACT:
       userPrompt: buildPrompt(),
       operation: 'detailed_summary_generation',
       callId,
+      ...(credentialUserId ? { userId: credentialUserId } : {}),
       ...(effectiveSystemPrompt ? { systemPrompt: effectiveSystemPrompt } : {}),
       ...(modelType ? { modelType } : {}),
       onDelta,
@@ -2041,12 +2183,7 @@ A comprehensive detailed summary has been generated from this call.
           // Title generation and first-chunk Canvas publication can now update
           // this message concurrently. Lock the row and merge from the latest
           // metadata so neither write erases the other's key.
-          const [lockedMessage] = await tx.$queryRaw<Array<{ metadata: unknown }>>`
-            SELECT "metadata"
-            FROM "messages"
-            WHERE "messageId" = ${callMessage.messageId}
-            FOR UPDATE
-          `;
+          const lockedMessage = await lockMessageMetadata(tx, callMessage.messageId);
           if (!lockedMessage) {
             return;
           }

@@ -57,6 +57,7 @@ import { encryptSurfaceSecret } from "./surface-resolver.js";
 import { isClawAdmin } from "../middleware/agent-acl.js";
 import { isScheduledOrAutomationEvent } from "./run-bridge.js";
 import { dispatchRun } from "./dispatch-run.js";
+import { toolUsageRankFor, wantsToolUsageRank } from "./tool-usage-rank.js";
 import { createLogger } from "../logger.js";
 import type { SessionContext } from "../routes/webhook.js";
 
@@ -1396,6 +1397,13 @@ export async function prepareRun(
         content: sk.content,
       })).filter((sk) => !takenSlugs.has(sk.slug)),
     ];
+
+    const toolUsageRank =
+      agentSlug && wantsToolUsageRank(mergedAgentConfig["optimizations"], optimizations)
+        ? await toolUsageRankFor(agentSlug, agent.orgId)
+        : [];
+    const { toolUsageRank: _suppliedToolUsageRank, ...agentConfigWithoutRank } = mergedAgentConfig;
+    mergedAgentConfig = toolUsageRank.length > 0 ? { ...agentConfigWithoutRank, toolUsageRank } : agentConfigWithoutRank;
 
     const forwardBody = {
       sessionId,

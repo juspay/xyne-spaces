@@ -317,6 +317,12 @@ const envSchema = Joi.object({
   LANGFUSE_BASE_URL: Joi.string().allow('').default(''),
   MESSAGE_CLASSIFIER_URL: Joi.string().uri().default('http://localhost:8082'),
   MESSAGE_CLASSIFIER_TIMEOUT_MS: Joi.number().default(5000),
+  // Jev — the typed classifier behind the cmd+K AI overview (services/queryIntent).
+  // Unset key => never called. URL/model default to TypeSafe's hosted Jev; point them at
+  // any service that speaks the same wire format (e.g. a LiteLLM-hosted jev).
+  JEV_API_KEY: Joi.string().allow('').default(''),
+  JEV_URL: Joi.string().allow('').default(''),
+  JEV_MODEL: Joi.string().allow('').default(''),
   // Genius Bot API Configuration
   GENIUS_API_URL: Joi.string().uri().default('http://localhost:8000'),
   GENIUS_API_KEY: Joi.string().allow('').default(''),
@@ -960,6 +966,11 @@ export const config = {
   messageClassifier: {
     url: envVars.MESSAGE_CLASSIFIER_URL,
     timeoutMs: envVars.MESSAGE_CLASSIFIER_TIMEOUT_MS,
+  },
+  jev: {
+    apiKey: envVars.JEV_API_KEY,
+    url: envVars.JEV_URL,
+    model: envVars.JEV_MODEL,
   },
   genius: {
     apiUrl: envVars.GENIUS_API_URL,

@@ -128,6 +128,7 @@ import {
   withSlashCommandArtifactClosed,
 } from '@xyne/shared';
 import { SDLC_HUB_KNOWLEDGE_FOLDER, sdlcTrackStatusSchema } from '@xyne/shared';
+import { MAX_DUPLICATE_SCOPE_FIELDS } from '@xyne/shared';
 import {
   evaluateEta,
   buildEtaActivityIntents,
@@ -172,6 +173,7 @@ import { addChannelParticipant, removeChannelParticipant } from '@/zero/utils/ch
 import { convert } from 'html-to-text';
 import { typingService } from '@/services/typingService';
 import { logger } from '@/utils/logger';
+import { queueScheduledCallPillSync } from '@/services/scheduledCallPillSync';
 import { config } from '@/config/env';
 import { processMeetLinksFromChatMessage } from '@/services/meetLinkService';
 import { bookmarkReminderService } from '@/services/bookmarkReminderService';
@@ -5260,6 +5262,12 @@ export function createMutators(
             id: call.id,
             status: CallStatus.CANCELLED,
             updatedAt: timestamp,
+          });
+          // Cancelling from the Calls screen goes through this mutator, not a REST
+          // route, so the channel pill has to be refreshed from here too.
+          const cancelledCallId = call.id;
+          asyncTasks.push(async () => {
+            queueScheduledCallPillSync(cancelledCallId, 'mutators.calls.cancel');
           });
           if (cancelEntireSeries && call.recurringSeriesId) {
             await tx.mutate.recurring_call_series.update({
@@ -15641,6 +15649,19 @@ export function createMutators(
             );
           }
 
+          // Cross-user public name uniqueness — desk channels only.
+          if (isDeskContext && visibility === SavedConfigVisibility.PUBLIC) {
+            const publicConfigs = await tx.run(
+              zql.saved_user_configurations
+                .where('contextType', contextType)
+                .where('contextId', contextId)
+                .where('visibility', SavedConfigVisibility.PUBLIC)
+            );
+            if (publicConfigs.some(c => c.name.trim().toLowerCase() === name.trim().toLowerCase())) {
+              throw new Error('A public view with this name already exists for this channel');
+            }
+          }
+
           await tx.mutate.saved_user_configurations.insert({
             workspaceId: authData.workspaceId,
             id,
@@ -15694,7 +15715,7 @@ export function createMutators(
             throw new Error('You can only edit your own saved views');
           }
 
-          // If renaming, check for duplicate name (case-insensitive)
+          // If renaming, check for duplicate name (case-insensitive) within own views
           if (name && name.toLowerCase() !== config.name.toLowerCase()) {
             const allUserConfigs = await tx.run(
               zql.saved_user_configurations
@@ -15709,6 +15730,36 @@ export function createMutators(
                   ? 'A saved view with this name already exists for this channel'
                   : 'A saved view with this name already exists for this board',
               );
+            }
+          }
+
+          // Cross-user public name uniqueness — desk channels only (covers rename + visibility flip).
+          const isDesk = config.contextType === SavedConfigContextType.DESK_TICKET;
+          const effectiveName = name ?? config.name;
+          const effectiveVisibility = visibility ?? config.visibility;
+          const nameChanged = name !== undefined && name.toLowerCase() !== config.name.toLowerCase();
+          const flippedToPublic =
+            visibility === SavedConfigVisibility.PUBLIC &&
+            config.visibility !== SavedConfigVisibility.PUBLIC;
+          if (
+            isDesk &&
+            effectiveVisibility === SavedConfigVisibility.PUBLIC &&
+            (nameChanged || flippedToPublic)
+          ) {
+            const publicConfigs = await tx.run(
+              zql.saved_user_configurations
+                .where('contextType', config.contextType)
+                .where('contextId', config.contextId)
+                .where('visibility', SavedConfigVisibility.PUBLIC)
+            );
+            if (
+              publicConfigs.some(
+                c =>
+                  c.id !== configId &&
+                  c.name.trim().toLowerCase() === effectiveName.trim().toLowerCase(),
+              )
+            ) {
+              throw new Error('A public view with this name already exists for this channel');
             }
           }
 
@@ -16579,6 +16630,14 @@ export function createMutators(
           deskReportEnabled: z.boolean().optional(),
           deskReportAgentSlug: z.string().optional().nullable(),
           deskReportRangeDays: z.number().optional(),
+          // Scoped duplicate detection config (see EmailChannelPreference.duplicateScopeConfig)
+          duplicateScopeConfig: z
+            .object({
+              enabled: z.boolean(),
+              scopeFieldGlobalIds: z.array(z.string()).max(MAX_DUPLICATE_SCOPE_FIELDS),
+            })
+            .nullable()
+            .optional(),
         }),
         async ({
           tx,
@@ -16600,6 +16659,7 @@ export function createMutators(
             deskReportEnabled,
             deskReportAgentSlug,
             deskReportRangeDays,
+            duplicateScopeConfig,
           },
         }) => {
           // One address routes to one desk; channelController enforces the same
@@ -16644,6 +16704,9 @@ export function createMutators(
               ...(deskReportEnabled !== undefined ? { deskReportEnabled } : {}),
               ...(deskReportAgentSlug !== undefined ? { deskReportAgentSlug } : {}),
               ...(deskReportRangeDays !== undefined ? { deskReportRangeDays } : {}),
+              ...(duplicateScopeConfig !== undefined
+                ? { duplicateScopeConfig: duplicateScopeConfig == null ? null : JSON.stringify(duplicateScopeConfig) }
+                : {}),
             });
           } else {
             const channel = await tx.run(zql.channels.where('id', channelId).one());
@@ -16676,6 +16739,7 @@ export function createMutators(
               deskReportEnabled: deskReportEnabled ?? false,
               deskReportAgentSlug: deskReportAgentSlug ?? null,
               deskReportRangeDays: deskReportRangeDays ?? 1,
+              duplicateScopeConfig: duplicateScopeConfig ? JSON.stringify(duplicateScopeConfig) : null,
             });
           }
         },

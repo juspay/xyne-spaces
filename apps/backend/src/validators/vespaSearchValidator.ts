@@ -424,3 +424,14 @@ export const vespaSchemaQuerySchema = Joi.object({
 }).messages({
   'object.unknown': 'Unknown query parameter: {{#label}}',
 });
+
+/**
+ * Validation schema for cmd+K query intent classification (lexical vs AI)
+ */
+export const queryIntentQuerySchema = Joi.object({
+  q: Joi.string().trim().min(1).max(500).required().messages({
+    'string.empty': 'Query parameter "q" cannot be empty',
+    'string.max': 'Query cannot exceed 500 characters',
+    'any.required': 'Query parameter "q" is required'
+  }),
+});

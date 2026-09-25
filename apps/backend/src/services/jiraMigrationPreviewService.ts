@@ -5,6 +5,7 @@ import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { JiraMigrationClient } from '@/services/jira/client';
 import { jiraMigrationProjectIndexService, type JiraMigrationFilterOptions, type JiraMigrationFilters } from '@/services/jiraMigrationProjectIndexService';
+import { queryBoardTicketFormFields } from '@/bypassAcl/formServices';
 
 const JIRA_RETRYABLE_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
 const JIRA_MAX_RETRY_ATTEMPTS = 5;
@@ -612,19 +613,7 @@ export class JiraMigrationPreviewService {
         orderBy: { sequenceNumber: 'asc' },
       }),
       this.fetchJson<JiraFieldDefinition[]>('/rest/api/3/field'),
-      db.$queryRaw<Array<{ id: string; fieldName: string; fieldType: string; isOptional: boolean }>>`
-        SELECT ff.id, ff."fieldName", ff."fieldType", ff."isOptional"
-        FROM public.form_fields ff
-        INNER JOIN public.forms_context_mapping fcm ON fcm."formId" = ff."formId"
-        WHERE fcm."contextId" = ${input.targetBoardId}
-          AND fcm."contextType" = ${FormContextType.BOARD}
-          AND fcm."entityType" = ${FormEntityType.TICKET}
-          AND EXISTS (
-            SELECT 1 FROM public.boards b
-            WHERE b.id = fcm."contextId" AND b."workspaceId" = ${currentWorkspaceId()}
-          )
-        ORDER BY ff."createdAt" ASC
-      `,
+      queryBoardTicketFormFields(db, input.targetBoardId, FormContextType.BOARD, FormEntityType.TICKET, currentWorkspaceId()),
       this.fetchAllProjectStatuses(jiraProjectKey),
       this.fetchProjectBoards(jiraProjectKey),
       this.fetchProjectStatusSequence(jiraProjectKey),

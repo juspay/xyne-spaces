@@ -1,5 +1,11 @@
+import type { Prisma } from '@prisma/client';
 import { repositories } from '@/database/repositories';
-import { asSystem } from './base';
+import { DatabaseClient } from '@/database/client';
+import type { GoogleCalendarPushState } from '@/database/repositories/callRepository';
+import { db } from '@/database/client';
+import { MessageType } from '@xyne/shared';
+import { pushCallToCalendar } from '@/services/callCalendarPushService';
+import { asSystem, asService, rawQuery } from './base';
 
 /**
  * Relocated from callCalendarPushService.ts's syncCallToGoogleCalendar: the job carries only a
@@ -17,6 +23,77 @@ export function findCallForCalendarPush(
 }
 
 /**
+ * Relocated from callCalendarPushService.ts's syncCallToGoogleCalendar. Background push job →
+ * no request context, actor is the call's creator since the calendar event is pushed on their
+ * behalf.
+ */
+export function syncCallToGoogleCalendarAsCreator(
+  call: NonNullable<Awaited<ReturnType<typeof findCallForCalendarPush>>>,
+): Promise<void> {
+  return asService(
+    ['Call'],
+    'calendar push job: background job has no request context, pushed on behalf of the call\'s creator',
+    call.createdByUserId,
+    call.workspaceId,
+    () => pushCallToCalendar(call),
+  );
+}
+
+/**
+ * Relocated from controllers/meetCallbackController.ts. SAM webhook → no HTTP tenant context;
+ * opens one from the resolved workspace so the call-summary system message insert gets
+ * workspaceId stamped instead of leaking NULL. The message, the thread's reply count and the
+ * participants' last-reply time are written in one transaction.
+ */
+export function insertMeetCallbackSummaryMessage(input: {
+  workspaceId: string;
+  conversationId: string;
+  senderId: string;
+  content: string;
+  now: Date;
+}) {
+  const { workspaceId, conversationId, senderId, content, now } = input;
+  return asService(
+    ['Message', 'Conversation', 'ConversationParticipant'],
+    'meet callback: SAM webhook has no HTTP tenant context, scope opened from the resolved workspace',
+    'meet-callback',
+    workspaceId,
+    () => db.$transaction(async (tx) => {
+      const createdMessage = await tx.message.create({
+        data: {
+          conversationId,
+          workspaceId,
+          senderId,
+          content,
+          msgType: MessageType.BOT,
+          metadata: {
+            contentFormat: 'markdown',
+            messageSubtype: 'call_summary',
+          },
+        },
+      });
+
+      await tx.conversation.update({
+        where: { conversationId },
+        data: {
+          replyCount: {
+            increment: 1,
+          },
+          lastActivityAt: now,
+        },
+      });
+
+      await tx.conversationParticipant.updateMany({
+        where: { conversationId },
+        data: { lastReplyAt: now },
+      });
+
+      return createdMessage;
+    }),
+  );
+}
+
+/**
  * Relocated from queues/callCalendarPushQueue.ts's sync-call processor: the job carries only a
  * callId, same as findCallForCalendarPush above — resolved cross-workspace before anything else.
  */
@@ -25,5 +102,51 @@ export function findCallCalendarPushRevision(callId: string): Promise<Date | nul
     ['Call'],
     'calendar push queue job carries only a callId, resolved cross-workspace like the sync itself',
     () => repositories.calls.findCalendarPushRevision(callId),
+  );
+}
+
+/**
+ * Relocated from callRepository's setGoogleCalendarPushState. A jsonb merge rather than a
+ * read-modify-write, because other flows write unrelated metadata keys and a push job that
+ * round-tripped the whole object would silently drop whichever of those landed in between.
+ */
+export async function setCallGoogleCalendarPushState(callId: string, state: GoogleCalendarPushState): Promise<number> {
+  return rawQuery(
+    ['Call'],
+    'call calendar push: merge one key into calls.metadata so an unrelated concurrent write is not round-tripped away',
+    () => DatabaseClient.getInstance().$executeRaw`
+      UPDATE "calls"
+      SET "metadata" = COALESCE("metadata", '{}'::jsonb) || ${JSON.stringify({ googleCalendarPush: state })}::jsonb
+      WHERE "id" = ${callId}
+    `,
+  );
+}
+
+/** Relocated from callRepository's setGoogleCalendarPushState (the clearing branch). */
+export async function clearCallGoogleCalendarPushState(callId: string): Promise<number> {
+  return rawQuery(
+    ['Call'],
+    'call calendar push: drop one key from calls.metadata without round-tripping the whole object',
+    () => DatabaseClient.getInstance().$executeRaw`
+        UPDATE "calls"
+        SET "metadata" = COALESCE("metadata", '{}'::jsonb) - 'googleCalendarPush'
+        WHERE "id" = ${callId}
+      `,
+  );
+}
+
+/**
+ * Relocated from callRepository's appendMarkedItem: appends to calls.markedItems with `||` so
+ * two concurrent appends cannot overwrite each other. Statement unchanged.
+ */
+export async function appendCallMarkedItem(externalId: string, item: Prisma.InputJsonValue): Promise<number> {
+  return rawQuery(
+    ['Call'],
+    'call marked items: jsonb append so concurrent appends do not overwrite each other',
+    () => DatabaseClient.getInstance().$executeRaw`
+      UPDATE "calls"
+      SET "markedItems" = "markedItems" || ${JSON.stringify(item)}::jsonb
+      WHERE "externalId" = ${externalId}
+    `,
   );
 }

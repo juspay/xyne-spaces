@@ -126,6 +126,8 @@ import {
 } from '../../utils/board/dynamicFieldFilters';
 import { dynamicColumnKey } from '../../components/Tickets/TicketTable/TicketTableTypes';
 import { useDeskTableColumns, DESK_TABLE_BUILTIN_COLUMNS } from './useDeskTableColumns';
+import { useDeskListColumns } from './useDeskListColumns';
+import { DESK_LIST_TOGGLEABLE_COLUMNS } from '../../components/Tickets/TicketListView/ticketListColumns';
 import DuplicateTicketsBanner from './DuplicateTicketsBanner';
 import type { LabelUnreadFilters } from '../../api/conversationLabelsApi';
 import { tagsConfigApi } from '../../api/tagsConfigApi';
@@ -153,8 +155,9 @@ import { Button } from '../../components/ui/Button/Button';
 import { Badge } from '../../components/ui/Badge/Badge';
 import { useAuth, useAuthContextValues } from '../../hooks/useAuth';
 import { usePlatform } from '../../hooks/usePlatform';
-import { TicketListView } from '../../components/Tickets/TicketListView';
+import { TicketListView, type PageCursor } from '../../components/Tickets/TicketListView';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
+import { useRacedQuery } from '../../hooks/useRacedQuery';
 import { SupportKanbanBoard } from './SupportKanbanBoard';
 import { SupportTicketTable } from './SupportTicketTable';
 import {
@@ -229,7 +232,7 @@ import {
 } from '../../components/xyne-desk/DeskInsights/DeskInsightsPanel';
 import { DeskSavedViewsControls } from '../../components/xyne-desk/DeskSavedViewsControls';
 import { useDeskTicketSavedViews } from '../../hooks/useDeskTicketSavedViews';
-import { valuesToFilters } from '../../utils/savedViewSerialization';
+import { columnKeysFromValues, valuesToFilters } from '../../utils/savedViewSerialization';
 import {
   useChannelIntegrationInfo,
   clearChannelConnectedEmailCache,
@@ -784,11 +787,52 @@ const SupportScreen = (): ReactElement => {
     [filters.dynamicFields, dynamicFieldTypesById],
   );
 
-  const { selectedColumnKeys, toggleColumn } = useDeskTableColumns(selectedChannelId);
+  const {
+    selectedColumnKeys,
+    toggleColumn,
+    setColumns: setTableColumns,
+  } = useDeskTableColumns(selectedChannelId);
+  const {
+    selectedColumnKeys: listColumnKeys,
+    toggleColumn: toggleListColumn,
+    setColumns: setListColumns,
+  } = useDeskListColumns(selectedChannelId);
   const tableVisibleColumns = useMemo(
     () => new Set([...selectedColumnKeys].filter(key => !key.startsWith('df:'))),
     [selectedColumnKeys],
   );
+
+  // Snapshot of the active mode's columns. Intersection logic on apply handles
+  // cross-mode restoration by filtering to keys valid for the target mode.
+  const currentColumnSnapshot = useMemo((): ReadonlySet<string> => {
+    return viewMode === 'list' ? listColumnKeys : selectedColumnKeys;
+  }, [viewMode, listColumnKeys, selectedColumnKeys]);
+
+  const applyViewColumns = useCallback(
+    (columns: Set<string> | null): void => {
+      if (!columns) return;
+      const validTableKeys = new Set(DESK_TABLE_BUILTIN_COLUMNS.map(c => c.key as string));
+      const tableKeys = new Set(
+        [...columns].filter(k => validTableKeys.has(k) || k.startsWith('df:')),
+      );
+      if (tableKeys.size > 0) setTableColumns(tableKeys);
+      const validListKeys = new Set(DESK_LIST_TOGGLEABLE_COLUMNS.map(c => c.key as string));
+      const listKeys = new Set([...columns].filter(k => validListKeys.has(k)));
+      if (listKeys.size > 0) setListColumns(listKeys);
+    },
+    [setTableColumns, setListColumns],
+  );
+
+  // Persists list-view pagination across ticket-detail navigation (TicketListView unmounts
+  // when ticketId is set, so its local state is lost). Keyed to channel+filter+folder so
+  // a filter change while on the detail view doesn't restore a stale page.
+  const listPaginationCacheRef = useRef<{
+    key: string;
+    pageIndex: number;
+    pageCursors: Array<PageCursor | null>;
+    fetchLimit: number;
+  } | null>(null);
+
   const tableDynamicFieldColumns = useMemo(
     () => deskDynamicFields.filter(field => selectedColumnKeys.has(dynamicColumnKey(field.id))),
     [deskDynamicFields, selectedColumnKeys],
@@ -848,6 +892,38 @@ const SupportScreen = (): ReactElement => {
       conversationLabelId: selectedLabel?.id ?? filters.conversationLabelId,
     }),
     [filters, userID, dynamicFieldEntries, tagFilterConversationIds, selectedLabel?.id],
+  );
+
+  // Stable key that identifies the current list-view data context. When this changes
+  // while the user is on a ticket detail page, the stored page is stale and must not
+  // be restored.
+  const listFilterKey = useMemo(
+    () =>
+      JSON.stringify({
+        c: selectedChannelId,
+        f: ticketFilter,
+        m: selectedFolder?.key ?? null,
+      }),
+    [selectedChannelId, ticketFilter, selectedFolder],
+  );
+
+  const cachedListPagination =
+    listPaginationCacheRef.current?.key === listFilterKey ? listPaginationCacheRef.current : null;
+
+  const handleListPaginationChange = useCallback(
+    (
+      pageIndex: number,
+      pageCursors: ReadonlyArray<PageCursor | null>,
+      fetchLimit: number,
+    ): void => {
+      listPaginationCacheRef.current = {
+        key: listFilterKey,
+        pageIndex,
+        pageCursors: [...pageCursors],
+        fetchLimit,
+      };
+    },
+    [listFilterKey],
   );
 
   // Mode-B label counts drop the label scoping from the shared filter surface.
@@ -1002,7 +1078,7 @@ const SupportScreen = (): ReactElement => {
     updateView: updateDeskView,
     deleteView: deleteDeskView,
     applySavedView: applyDeskSavedView,
-  } = useDeskTicketSavedViews(ticketViewsChannelId, setFilters);
+  } = useDeskTicketSavedViews(ticketViewsChannelId, setFilters, applyViewColumns);
 
   // Self-heal: clear a stale activeViewId that no longer exists in the list.
   // Guard on savedViewsLoaded so we don't clear before the query returns data.
@@ -1020,11 +1096,11 @@ const SupportScreen = (): ReactElement => {
     name: string,
     visibility: SavedConfigVisibility,
   ): Promise<string | undefined> => {
-    return saveDeskView(name, filters, visibility);
+    return saveDeskView(name, filters, visibility, currentColumnSnapshot);
   };
 
   const handleUpdateDeskView = async (viewId: string): Promise<void> => {
-    await updateDeskView(viewId, filters);
+    await updateDeskView(viewId, filters, currentColumnSnapshot);
   };
 
   const isDeskViewDirty = useMemo(() => {
@@ -1050,8 +1126,20 @@ const SupportScreen = (): ReactElement => {
       }
       return v;
     };
-    return JSON.stringify(sortDeep(filters)) !== JSON.stringify(sortDeep(viewFilters));
-  }, [activeTicketViewId, deskSavedViews, filters]);
+    if (JSON.stringify(sortDeep(filters)) !== JSON.stringify(sortDeep(viewFilters))) return true;
+    // Also dirty when column selections differ from what was saved
+    // Only check column dirty state when the view actually saved column data; legacy views have no opinion.
+    const savedColumnKeys = columnKeysFromValues(activeView.values);
+    if (!savedColumnKeys) return false;
+    const modeColumnKeys = viewMode === 'list' ? listColumnKeys : selectedColumnKeys;
+    const validKeys =
+      viewMode === 'list'
+        ? new Set(DESK_LIST_TOGGLEABLE_COLUMNS.map(c => c.key as string))
+        : new Set(DESK_TABLE_BUILTIN_COLUMNS.map(c => c.key as string));
+    const savedForMode = new Set([...savedColumnKeys].filter(k => validKeys.has(k)));
+    const currentForMode = new Set([...modeColumnKeys].filter(k => validKeys.has(k)));
+    return [...savedForMode].sort().join(',') !== [...currentForMode].sort().join(',');
+  }, [activeTicketViewId, deskSavedViews, filters, viewMode, listColumnKeys, selectedColumnKeys]);
 
   const {
     rowRef: filterRowRef,
@@ -1064,7 +1152,7 @@ const SupportScreen = (): ReactElement => {
     collapsedFilterIds,
     hasCollapsedFilters,
     isFilterVisibleOnBar,
-  } = useDeskToolbarOverflow({ showColumnsPicker: viewMode === 'table' });
+  } = useDeskToolbarOverflow({ showColumnsPicker: viewMode === 'table' || viewMode === 'list' });
 
   // Shown on the "Filters" trigger once anything is folded, so an active-but-hidden filter
   // still announces itself instead of silently disappearing.
@@ -3356,7 +3444,7 @@ const SupportScreen = (): ReactElement => {
                           <DeskFilterTrigger id='priority' active={hasPriorityFilter} />
                           <DeskFilterTrigger id='stages' active={hasStagesFilter} />
                         </div>
-                        {viewMode === 'table' && (
+                        {(viewMode === 'table' || viewMode === 'list') && (
                           <>
                             <div ref={columnsWideTwinRef} className='flex items-center'>
                               <Button
@@ -3758,7 +3846,7 @@ const SupportScreen = (): ReactElement => {
                       )}
                     </div>
                     <div className='flex items-center gap-2 shrink-0'>
-                      {viewMode === 'table' && (
+                      {(viewMode === 'table' || viewMode === 'list') && (
                         <Popover.Root open={columnsOpen} onOpenChange={setColumnsOpen}>
                           <Popover.Trigger asChild>
                             <Button
@@ -3770,8 +3858,6 @@ const SupportScreen = (): ReactElement => {
                             >
                               <div className='flex items-center gap-1.5'>
                                 <Columns3 className='w-3.5 h-3.5' />
-                                {/* Label yields before any filter folds — this is secondary
-                                    chrome, and the icon plus tooltip carries it fine. */}
                                 {isColumnsLabelled && <span className='font-medium'>Columns</span>}
                               </div>
                             </Button>
@@ -3782,74 +3868,102 @@ const SupportScreen = (): ReactElement => {
                             sideOffset={6}
                             className='z-[60] w-56 bg-background border border-border rounded-lg shadow-lg py-1 max-h-[400px] overflow-y-auto'
                           >
-                            {DESK_TABLE_BUILTIN_COLUMNS.map(column => {
-                              const Icon =
-                                column.key === 'assignee'
-                                  ? User
-                                  : column.key === 'dueDate' || column.key === 'createdAt'
-                                    ? CalendarDays
-                                    : column.key === 'priority'
-                                      ? BarChart4Icon
-                                      : column.key === 'tags'
-                                        ? Tag
-                                        : Circle;
-                              const isSelected = selectedColumnKeys.has(column.key);
-                              return (
-                                <button
-                                  key={column.key}
-                                  type='button'
-                                  onClick={() => toggleColumn(column.key, !isSelected)}
-                                  className='w-full flex items-center justify-between px-4 py-2 text-sm hover:bg-muted'
-                                  data-track-category='Support'
-                                  data-track-name='ToggleTableColumn'
-                                  data-track-metadata={JSON.stringify({
-                                    column: column.key,
-                                    visible: !isSelected,
-                                  })}
-                                >
-                                  <div className='flex items-center gap-3'>
-                                    <Icon className='w-4 h-4' />
-                                    <span>{column.label}</span>
-                                  </div>
-                                  {isSelected && <Check className='w-4 h-4 text-primary' />}
-                                </button>
-                              );
-                            })}
-                            {SHOW_DESK_CUSTOM_FIELD_COLUMNS && deskDynamicFields.length > 0 && (
+                            {viewMode === 'table' ? (
                               <>
-                                <div className='my-1 border-t border-border' />
-                                <div className='px-4 py-1 text-xs font-medium text-muted-foreground'>
-                                  Custom fields
-                                </div>
-                                {deskDynamicFields.map(field => {
-                                  const key = dynamicColumnKey(field.id);
-                                  const Icon = getIconForFieldType(field.fieldType);
-                                  const isSelected = selectedColumnKeys.has(key);
+                                {DESK_TABLE_BUILTIN_COLUMNS.map(column => {
+                                  const Icon =
+                                    column.key === 'assignee'
+                                      ? User
+                                      : column.key === 'dueDate' || column.key === 'createdAt'
+                                        ? CalendarDays
+                                        : column.key === 'priority'
+                                          ? BarChart4Icon
+                                          : column.key === 'tags'
+                                            ? Tag
+                                            : Circle;
+                                  const isSelected = selectedColumnKeys.has(column.key);
                                   return (
                                     <button
-                                      key={key}
+                                      key={column.key}
                                       type='button'
-                                      onClick={() => toggleColumn(key, !isSelected)}
+                                      onClick={() => toggleColumn(column.key, !isSelected)}
                                       className='w-full flex items-center justify-between px-4 py-2 text-sm hover:bg-muted'
                                       data-track-category='Support'
                                       data-track-name='ToggleTableColumn'
                                       data-track-metadata={JSON.stringify({
-                                        column: key,
-                                        fieldName: field.fieldName,
+                                        column: column.key,
                                         visible: !isSelected,
                                       })}
                                     >
                                       <div className='flex items-center gap-3'>
                                         <Icon className='w-4 h-4' />
-                                        <span className='truncate'>{field.fieldName}</span>
+                                        <span>{column.label}</span>
                                       </div>
-                                      {isSelected && (
-                                        <Check className='w-4 h-4 text-primary shrink-0' />
-                                      )}
+                                      {isSelected && <Check className='w-4 h-4 text-primary' />}
                                     </button>
                                   );
                                 })}
+                                {SHOW_DESK_CUSTOM_FIELD_COLUMNS && deskDynamicFields.length > 0 && (
+                                  <>
+                                    <div className='my-1 border-t border-border' />
+                                    <div className='px-4 py-1 text-xs font-medium text-muted-foreground'>
+                                      Custom fields
+                                    </div>
+                                    {deskDynamicFields.map(field => {
+                                      const key = dynamicColumnKey(field.id);
+                                      const Icon = getIconForFieldType(field.fieldType);
+                                      const isSelected = selectedColumnKeys.has(key);
+                                      return (
+                                        <button
+                                          key={key}
+                                          type='button'
+                                          onClick={() => toggleColumn(key, !isSelected)}
+                                          className='w-full flex items-center justify-between px-4 py-2 text-sm hover:bg-muted'
+                                          data-track-category='Support'
+                                          data-track-name='ToggleTableColumn'
+                                          data-track-metadata={JSON.stringify({
+                                            column: key,
+                                            fieldName: field.fieldName,
+                                            visible: !isSelected,
+                                          })}
+                                        >
+                                          <div className='flex items-center gap-3'>
+                                            <Icon className='w-4 h-4' />
+                                            <span className='truncate'>{field.fieldName}</span>
+                                          </div>
+                                          {isSelected && (
+                                            <Check className='w-4 h-4 text-primary shrink-0' />
+                                          )}
+                                        </button>
+                                      );
+                                    })}
+                                  </>
+                                )}
                               </>
+                            ) : (
+                              DESK_LIST_TOGGLEABLE_COLUMNS.map(column => {
+                                const isSelected = listColumnKeys.has(column.key);
+                                return (
+                                  <button
+                                    key={column.key}
+                                    type='button'
+                                    onClick={() => toggleListColumn(column.key, !isSelected)}
+                                    className='w-full flex items-center justify-between px-4 py-2 text-sm hover:bg-muted'
+                                    data-track-category='Support'
+                                    data-track-name='ToggleListColumn'
+                                    data-track-metadata={JSON.stringify({
+                                      column: column.key,
+                                      visible: !isSelected,
+                                    })}
+                                  >
+                                    <div className='flex items-center gap-3'>
+                                      <Circle className='w-4 h-4' />
+                                      <span>{column.label}</span>
+                                    </div>
+                                    {isSelected && <Check className='w-4 h-4 text-primary' />}
+                                  </button>
+                                );
+                              })
                             )}
                           </Popover.Content>
                         </Popover.Root>
@@ -3868,6 +3982,14 @@ const SupportScreen = (): ReactElement => {
                             onUpdate={handleUpdateDeskView}
                             onDelete={deleteDeskView}
                             currentFilters={filters}
+                            currentColumnKeys={
+                              viewMode === 'list' ? listColumnKeys : selectedColumnKeys
+                            }
+                            validColumnKeysForMode={
+                              viewMode === 'list'
+                                ? new Set(DESK_LIST_TOGGLEABLE_COLUMNS.map(c => c.key as string))
+                                : new Set(DESK_TABLE_BUILTIN_COLUMNS.map(c => c.key as string))
+                            }
                             dynamicFieldDefs={deskDynamicFields}
                             trackCategory='Support'
                           />
@@ -4266,6 +4388,11 @@ const SupportScreen = (): ReactElement => {
                         onPageChange={clearTicketSelection}
                         onToggleSelectAll={handleToggleSelectAll}
                         onTicketsLoaded={handleTicketsLoaded}
+                        visibleColumnKeys={listColumnKeys}
+                        initialPageIndex={cachedListPagination?.pageIndex}
+                        initialPageCursors={cachedListPagination?.pageCursors}
+                        initialFetchLimit={cachedListPagination?.fetchLimit}
+                        onPaginationChange={handleListPaginationChange}
                         onTicketClick={ticket => {
                           void navigate(`${supportBase}/${ticket.channelId}/${ticket.xyneId}`, {
                             state: {
@@ -4703,7 +4830,7 @@ export const SupportTicketDetail = ({
   // Fetch the ticket metadata needed to resolve the detail view. Emails and drafts use
   // their dedicated conversation-scoped queries below. supportTicketDetailV2 looks up by
   // `id` when list navigation supplied it, else by `xyneId` from the URL path param.
-  const [ticket] = useCachedQuery(
+  const [ticket] = useRacedQuery(
     queries.supportTicketDetailV2({
       id: ticketId || undefined,
       xyneId: ticketIdParam || undefined,
@@ -4812,7 +4939,7 @@ export const SupportTicketDetail = ({
     ],
   );
 
-  const [allEmails] = useCachedQuery(
+  const [allEmails] = useRacedQuery(
     queries.getEmailsForConversationsV2({
       conversationIds: allConversationIds,
       channelId: routeChannelId,

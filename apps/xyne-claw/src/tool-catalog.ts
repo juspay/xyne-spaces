@@ -1,7 +1,6 @@
 import { jevEnabled, jevScoreItems, jevThreshold } from "./jev.js";
 import { recordJudgeOutcome } from "./judge-backend.js";
 import { optEnabled } from "./optimizations.js";
-import { looksReadOnly } from "./read-only-tools.js";
 import { metric } from "./metrics.js";
 import { Type } from "@sinclair/typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
@@ -115,7 +114,7 @@ function extractRuntimeToolName(name: string): string {
   return idx >= 0 ? name.slice(idx + 2) : name;
 }
 
-function oneLineDescription(tool: ToolDefinition): string {
+export function oneLineDescription(tool: ToolDefinition): string {
   const raw = (tool.description || tool.promptSnippet || tool.label || tool.name)
     .replace(/\s+/g, " ")
     .trim();
@@ -209,11 +208,10 @@ export function buildToolCatalog(params: {
   /**
    * Whether to catalogue subagent-wrapped read tools.
    *
-   * Only meaningful when subagent delegation is OFF (fast mode) — there the
-   * catalog stands in for the wrappers, so the individual read tools belong in
-   * it. With delegation ON, the wrapper tool is already in the palette and
-   * cataloguing its members too would show the model both `spaces` and
-   * `Spaces__spaces-search`, which is duplication, not disclosure.
+   * With delegation OFF (fast mode) the catalog stands in for the wrappers.
+   * With delegation ON it is set by the open palette or `subagent_read_tools`,
+   * so the model can load a subagent's tools and call them itself instead of
+   * paying for a nested run.
    *
    * Presentation tools are catalogued either way: they're wrapped by nothing.
    */
@@ -228,7 +226,6 @@ export function buildToolCatalog(params: {
    */
   catalogUnwrapped?: boolean;
   catalogUnwrappedWrites?: boolean;
-  includeSubagentReadTools?: boolean;
 }): ToolCatalogItem[] {
   const items: ToolCatalogItem[] = [];
   const seen = new Set<string>();
@@ -259,27 +256,6 @@ export function buildToolCatalog(params: {
       const palette = resolveCustomSubagentTools(spec.tools, params.groups, params.customTools);
       for (const tool of palette) {
         addUnique(items, seen, tool, `custom-subagent:${spec.name}`);
-      }
-    }
-  }
-
-  if (params.includeSubagentReadTools && !params.includeSubagentTools) {
-    for (const group of params.groups) {
-      if (group.sourceSubagent) continue;
-      const def = findSubagentDefinitionForServer(group.serverType);
-      if (!def) continue;
-      const writeSet = new Set(group.writeTools.map(String));
-      for (const tool of group.tools) {
-        if (!looksReadOnly(tool.name, writeSet.has(extractRuntimeToolName(tool.name)))) continue;
-        addUnique(items, seen, tool, `subagent:${def.name}`, group.serverType);
-      }
-    }
-    if (params.customTools) {
-      for (const def of SUBAGENT_DEFINITIONS) {
-        for (const tool of params.customTools.filter((t) => customToolSource(t) === def.serverType)) {
-          if (!looksReadOnly(tool.name, isCustomWriteTool(tool))) continue;
-          addUnique(items, seen, tool, `subagent:${def.name}`, def.serverType);
-        }
       }
     }
   }
@@ -1028,7 +1004,7 @@ export function renderToolCatalogForPrompt(
   const subagentCatalogs = [...new Set(catalog.filter((e) => e.source.startsWith("subagent:")).map((e) => e.catalog))].sort();
   const directFirst =
     opts?.preferDirect && !opts.subagentDelegationDisabled && subagentCatalogs.length
-      ? [`The ${subagentCatalogs.join(", ")} catalog${subagentCatalogs.length === 1 ? " holds" : "s hold"} the same read tools your subagent${subagentCatalogs.length === 1 ? "" : "s"} of that name use${subagentCatalogs.length === 1 ? "s" : ""}. Call them yourself first: a subagent is a slow nested model run, so delegate only for a write or for open-ended research that needs many queries.`]
+      ? [`The ${subagentCatalogs.join(", ")} catalog${subagentCatalogs.length === 1 ? " holds" : "s hold"} the same tools your subagent${subagentCatalogs.length === 1 ? "" : "s"} of that name use${subagentCatalogs.length === 1 ? "s" : ""}, writes included. Call them yourself first: a subagent is a slow nested model run, so delegate only for open-ended research that needs many queries.`]
       : [];
   const intro = opts?.subagentDelegationDisabled
     ? "Subagent delegation is disabled. The tools below are NOT loaded yet — use `load-tools` to pull in the ones you need, then call them yourself."

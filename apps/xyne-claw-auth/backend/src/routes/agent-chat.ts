@@ -8,6 +8,7 @@ import { errMsg } from "../lib/errors.js";
 import { SDLC_AGENT_SLUG, isAgentInvocableBy, IMMEDIATE_TASK_COMMAND_RE, parseLocalSandboxCommand } from "xyne-claw-shared";
 import { recordDeliveredArtifacts } from "../lib/delivered-artifacts.js";
 import { recordUploadedArtifacts } from "../lib/conversation-artifact-signals.js";
+import { mintChatSessionId, beginChatRun, failChatRun, discardChatRun } from "../lib/chat-run-record.js";
 import {
   localFolderUnavailableMessage,
   splitLocalFolderContext,
@@ -1153,6 +1154,12 @@ function evalRunSwitches(
 }
 
 router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response) => {
+  // Visible to the outer catch. A turn that throws after these are set owns a
+  // placeholder and a run row that must both be driven to a terminal state —
+  // otherwise the assistant row sits at "running" forever and the run row (if it
+  // existed at all) never closes. This is the exact pair that used to go missing.
+  let pendingAssistantMsgId: string | undefined;
+  let pendingRunSessionId: string | undefined;
   try {
     const { slug } = req.params;
     const {
@@ -1523,6 +1530,33 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       parentId: assistantParentId,
       orgId: agent.orgId,
     });
+    pendingAssistantMsgId = assistantMsg.id;
+
+    // Record the run BEFORE anything can fail. The id is minted here rather than
+    // read back from the dispatch response: prepareRun honours a caller-supplied
+    // sessionId on internal runs, and keying the row on an id the dispatch call
+    // returns meant every pre-dispatch failure lost the row entirely.
+    //
+    // Awaited, and fatal on failure: a turn whose run cannot be recorded must not
+    // run. The old `.catch(log.warn)` made that loss silent.
+    const runSessionId = mintChatSessionId();
+    try {
+      await beginChatRun({
+        sessionId: runSessionId,
+        userId,
+        agentSlug: slug,
+        orgId: agent.orgId,
+        task: message.trim(),
+        conversationId,
+      });
+      pendingRunSessionId = runSessionId;
+    } catch (err) {
+      log.error("[agent-chat] AgentRun.start failed — refusing the turn:", errMsg(err));
+      const errContent = widgetErrorContent(undefined, "Could not start this run. Please try again.");
+      await chatMessageRepository.update(assistantMsg.id, { content: errContent, status: "failed" }).catch(() => {});
+      res.status(500).json({ success: false, error: "Could not start this run" });
+      return;
+    }
 
     // If this turn requires a branched PI session, clone it now (S2S to claw).
     if (cloneSourcePiConversationId) {
@@ -1544,6 +1578,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       if (!cloneRes.success) {
         const errContent = cloneRes.error ?? "Failed to create branch session";
         await chatMessageRepository.update(assistantMsg.id, { content: errContent, status: "failed" });
+        await failChatRun(runSessionId, errContent);
         res.status(500).json({ success: false, error: errContent });
         return;
       }
@@ -1843,6 +1878,10 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
     const fastModeEnabled = await resolveFastMode(conversationId, slug, effectiveAgentConfig);
 
     const forwardBody: Record<string, unknown> = {
+      // Pre-minted above and already persisted as an AgentRun row. prepareRun
+      // honours it because this is an internal run, so the row, the dispatch and
+      // every later callback all key on the same id.
+      sessionId: runSessionId,
       userId,
       userName: user?.name,
       userEmail: user?.email,
@@ -1971,6 +2010,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       }
       const dispatched = await dispatchLocalHarnessRun({
         target: localTarget,
+        sessionId: runSessionId,
         userId,
         orgId: agent.orgId,
         conversationId,
@@ -2020,22 +2060,17 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       runBody = (await runRes.json()) as { success: boolean; sessionId?: string; error?: string };
     }
 
-    // Track run for Agent Control Center
+    // The run row and the cc:events start signal were written before dispatch —
+    // nothing to record here any more, only the id to announce. A dispatch that
+    // came back under a DIFFERENT id than the one we minted would strand our row,
+    // so say so loudly rather than papering over it.
     if (runBody.success && runBody.sessionId) {
+      if (runBody.sessionId !== runSessionId) {
+        log.error(
+          `[agent-chat] dispatch returned sessionId=${runBody.sessionId} but the run row is keyed on ${runSessionId} (conv=${conversationId})`,
+        );
+      }
       res.write(`event: run\ndata: ${JSON.stringify({ sessionId: runBody.sessionId })}\n\n`);
-      agentRunRepository.start({
-        sessionId: runBody.sessionId,
-        userId,
-        agentSlug: slug,
-        orgId: agent.orgId,
-        triggerSource: "chat",
-        task: message.trim(),
-        conversationId,
-        fastMode: fastModeEnabled,
-      }).catch((e) => log.warn("[agent-chat] AgentRun.start failed:", e instanceof Error ? e.message : e));
-      redisService.getConnection()
-        .publish("cc:events", JSON.stringify({ type: "agent_start", sessionId: runBody.sessionId, agentSlug: slug }))
-        .catch(() => {});
     }
 
     // Deferred = this run was skipped because another worker already owns the
@@ -2047,6 +2082,11 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
     if (!runBody.success && runBody.deferred) {
       pendingStreams.delete(callbackId);
       await chatMessageRepository.deleteById(assistantMsg.id).catch(() => {});
+      // Drop the row too, for the same reason the placeholder goes: the owning
+      // run has its own, and recording this one as failed would invent a failed
+      // run for every duplicate dispatch.
+      await discardChatRun(runSessionId);
+      pendingRunSessionId = undefined;
       log.info(`[agent-chat] deferred run (conversation already locked) — dropped duplicate placeholder ${assistantMsg.id}, conv=${conversationId}`);
       res.write(`event: superseded\ndata: ${JSON.stringify({ id: assistantMsg.id })}\n\n`);
       res.end();
@@ -2059,6 +2099,10 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       // Update the pre-created placeholder rather than creating a second
       // assistant row — keeps the assistant id stable for the frontend.
       await chatMessageRepository.update(assistantMsg.id, { content: errContent, status: "failed" });
+      // Close the run we opened before dispatch. This is the case that used to
+      // leave no run row at all, so the failure never showed up in /runs.
+      await failChatRun(runSessionId, runBody.error ?? "Failed to start agent");
+      pendingRunSessionId = undefined;
       res.write(`event: done\ndata: ${JSON.stringify({
         id: assistantMsg.id,
         userMessageId: createdUserMessageId,
@@ -2071,6 +2115,12 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       res.end();
       return;
     }
+
+    // Dispatch succeeded: the result callback now owns the terminal state of both
+    // the run and the placeholder. Release them from the outer catch so a throw
+    // in the tail of this handler can't overwrite a finished turn.
+    pendingRunSessionId = undefined;
+    pendingAssistantMsgId = undefined;
 
     // Keep backend processing alive even if the client disconnects (e.g. user
     // clicked Stop and aborted the fetch). We still persist the final message/run.
@@ -2111,6 +2161,19 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
     }
   } catch (err) {
     log.error("[agent-chat] send error:", err);
+    // Drive the turn to a terminal state. Without this a throw anywhere in the
+    // pre-dispatch window left the assistant placeholder stuck at "running"
+    // forever — nothing reaps it, because orphan-run-finalizer only repairs runs
+    // that exist, and before this change no run row existed either.
+    if (pendingRunSessionId) await failChatRun(pendingRunSessionId, err);
+    if (pendingAssistantMsgId) {
+      await chatMessageRepository
+        .update(pendingAssistantMsgId, {
+          content: widgetErrorContent(undefined, "This run stopped unexpectedly."),
+          status: "failed",
+        })
+        .catch(() => {});
+    }
     if (!res.headersSent) {
       res.status(500).json({ success: false, error: "Internal server error" });
     } else {

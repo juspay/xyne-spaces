@@ -333,6 +333,24 @@ export const agentRunRepository = {
     }
   },
 
+  /** Close a run that never reached a terminal callback. Guarded on status
+   *  "running" so a late failure path can't flip a run the result callback has
+   *  already finalized — same discipline as services/orphan-run-finalizer.ts.
+   *  Returns the number of rows actually updated (0 = already terminal). */
+  failIfRunning: async (sessionId: string, error: string) => {
+    const res = await prisma.agentRun.updateMany({
+      where: { sessionId, status: "running" },
+      data: { status: "failed", error, completedAt: new Date(), currentToolLabel: null },
+    });
+    return res.count;
+  },
+
+  /** Hard-delete one run row. Used only when a chat turn pre-created its run and
+   *  the dispatch was then DEFERRED — another worker already owned the
+   *  conversation and its run carries the answer. `deleteMany` (not `delete`) so
+   *  a missing row is a no-op rather than a throw. */
+  deleteBySessionId: (sessionId: string) => prisma.agentRun.deleteMany({ where: { sessionId } }),
+
   updateProgress: (sessionId: string, currentToolLabel: string) =>
     prisma.agentRun.updateMany({
       where: { sessionId },
@@ -1202,6 +1220,16 @@ export const agentRunRepository = {
         tokensCacheWrite: r._sum.tokensCacheWrite ?? 0,
       }))
       .sort((a, b) => (b.tokensIn + b.tokensOut) - (a.tokensIn + a.tokensOut));
+  },
+
+  toolsUsedSince: async (agentSlug: string, orgId: string, since: Date, maxRuns: number): Promise<string[][]> => {
+    const rows = await prisma.agentRun.findMany({
+      where: { agentSlug, orgId, startedAt: { gte: since } },
+      select: { toolsUsed: true },
+      orderBy: { startedAt: "desc" },
+      take: maxRuns,
+    });
+    return rows.map((r) => r.toolsUsed);
   },
 
   /** High-level global overview suitable for dashboard header cards. */

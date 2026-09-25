@@ -70,6 +70,7 @@ export interface TicketDuplicateCheckRequest {
   description: string;
   projectId: string;
   limit?: number;
+  channelId?: string;
 }
 
 export interface TicketDuplicateCandidate {

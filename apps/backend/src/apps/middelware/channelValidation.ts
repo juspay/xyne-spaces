@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import { z } from "zod";
 import { repositories } from "@/database/repositories";
-import { runAsServiceActor } from "@/database/tenant/context";
+import { openBotDmForUser } from "@/bypassAcl/appServices";
 import { logger } from "@/utils/logger";
 
 const ChannelValidationSchema = z.object({
@@ -266,18 +266,9 @@ async function resolveBotDmChannelId(
   const targetUser = await repositories.users.findById(channelId);
   if (!targetUser || targetUser.workspaceId !== workspaceId) return null;
 
-  const { unifiedDMService } = await import('@/bots/unified/services/unified-dm-service');
-  // Opening a bot's DM is work done on behalf of the workspace, not by a member
-  // on their own behalf, so it runs as a service actor — the same actor the
-  // app-token webhook paths use for app-triggered writes. Under the request's
-  // own `user` actor the per-table ACLs refuse it twice over: ChannelsACL
-  // rejects the create, and ChannelParticipantsACL then refuses to let the bot
-  // add the human to a brand-new private channel it isn't yet a member of.
-  // The channel and user lookups above stay under the request's own actor, so
-  // workspace scoping still decides what this app is allowed to address.
-  const dmChannel = await runAsServiceActor(botUserId, workspaceId, () =>
-    unifiedDMService.getOrCreateBotDM(targetUser.id, botUserId, workspaceId),
-  );
+  // Opening a bot's DM runs as a service actor (see openBotDmForUser); the channel and user
+  // lookups above stay under the request's own actor.
+  const dmChannel = await openBotDmForUser(botUserId, workspaceId, targetUser.id);
   logger.info(
     `[CHANNEL-VALIDATION] Resolved user ${targetUser.id} to bot DM channel ${dmChannel.id}`,
   );

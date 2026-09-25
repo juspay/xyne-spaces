@@ -34,6 +34,7 @@ import {
   type TicketListColumnKey,
   type TicketListColumnWidths,
 } from './ticketListColumns';
+import type { TicketListColumnDefinition } from './ticketListColumns';
 
 const PAGE_SIZE = 50;
 const COLUMN_WIDTHS_STORAGE_KEY = 'xyne:desk-ticket-list-column-widths:v2';
@@ -56,8 +57,9 @@ interface ColumnResizeDrag {
 const computeAvailableColumnsWidth = (
   containerWidth: number,
   showSelectionColumn: boolean,
+  visibleColumnCount: number = TICKET_LIST_COLUMNS.length,
 ): number => {
-  const columnCount = TICKET_LIST_COLUMNS.length + (showSelectionColumn ? 1 : 0);
+  const columnCount = visibleColumnCount + (showSelectionColumn ? 1 : 0);
   return Math.max(
     1,
     containerWidth -
@@ -91,7 +93,7 @@ export type SupportTicketRow = NonNullable<
   QueryResultType<typeof queries.supportTicketsPageV4>[number]
 >;
 
-type PageCursor = { id: string; lastEmailAt: number };
+export type PageCursor = { id: string; lastEmailAt: number };
 
 interface TicketListViewProps {
   filter: {
@@ -132,6 +134,15 @@ interface TicketListViewProps {
   onPageChange?: (pageIndex: number) => void;
   onToggleSelectAll?: (rows: SelectableRow[], select: boolean) => void;
   onTicketsLoaded?: (tickets: SupportTicketRow[]) => void;
+  visibleColumnKeys?: ReadonlySet<string> | undefined;
+  initialPageIndex?: number | undefined;
+  initialPageCursors?: ReadonlyArray<PageCursor | null> | undefined;
+  initialFetchLimit?: number | undefined;
+  onPaginationChange?: (
+    pageIndex: number,
+    pageCursors: ReadonlyArray<PageCursor | null>,
+    fetchLimit: number,
+  ) => void;
 }
 
 export interface SelectableRow {
@@ -170,6 +181,11 @@ export const TicketListView = function TicketListView({
   onPageChange,
   onToggleSelectAll,
   onTicketsLoaded,
+  visibleColumnKeys,
+  initialPageIndex,
+  initialPageCursors,
+  initialFetchLimit,
+  onPaginationChange,
 }: TicketListViewProps): React.ReactElement {
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const { userID } = useAuthContextValues();
@@ -193,8 +209,15 @@ export const TicketListView = function TicketListView({
     conversationLabelId,
   } = filter;
 
-  const [pageCursors, setPageCursors] = useState<Array<PageCursor | null>>([null]);
-  const [pageIndex, setPageIndex] = useState(0);
+  const [pageCursors, setPageCursors] = useState<Array<PageCursor | null>>(() =>
+    initialPageCursors ? [...initialPageCursors] : [null],
+  );
+  const [pageIndex, setPageIndex] = useState(initialPageIndex ?? 0);
+  // Two independent refs so Effect A and Effect B each guard their own first run
+  // independently — sharing one ref would let Effect A consume it before Effect B checks.
+  const restoringPage = initialPageIndex !== undefined && initialPageIndex > 0;
+  const skipFirstPageResetRef = useRef(restoringPage);
+  const skipFirstLimitResetRef = useRef(restoringPage);
   const [selectAllMenuOpen, setSelectAllMenuOpen] = useState(false);
   const [columnWidths, setColumnWidths] = useState<TicketListColumnWidths>(loadColumnWidths);
   const [resizingColumn, setResizingColumn] = useState<TicketListColumnKey | null>(null);
@@ -235,11 +258,23 @@ export const TicketListView = function TicketListView({
   }, []);
   // Adaptive server fetch window. Starts at one page (+1 sentinel); grows only for the
   // client-filtered folders when a page needs more rows to fill after filtering.
-  const [fetchLimit, setFetchLimit] = useState(PAGE_SIZE + 1);
+  const [fetchLimit, setFetchLimit] = useState(initialFetchLimit ?? PAGE_SIZE + 1);
   const showSelectionColumn = !!onToggleSelect;
+
+  // subject is always visible; other columns respect visibleColumnKeys when provided.
+  const visibleColumns = useMemo((): readonly TicketListColumnDefinition[] => {
+    if (!visibleColumnKeys) return TICKET_LIST_COLUMNS;
+    return TICKET_LIST_COLUMNS.filter(c => c.key === 'subject' || visibleColumnKeys.has(c.key));
+  }, [visibleColumnKeys]);
+
   const ticketListGridTemplate = useMemo(
-    () => getTicketListGridTemplate(columnWidths, showSelectionColumn),
-    [columnWidths, showSelectionColumn],
+    () =>
+      getTicketListGridTemplate(
+        columnWidths,
+        showSelectionColumn,
+        new Set(visibleColumns.map(c => c.key)),
+      ),
+    [columnWidths, showSelectionColumn, visibleColumns],
   );
 
   // Persist on drag settle only — `columnWidths` changes every pointermove and setItem is sync.
@@ -251,6 +286,13 @@ export const TicketListView = function TicketListView({
       // Column resizing remains available when storage is blocked.
     }
   }, [columnWidths, resizingColumn]);
+
+  // Report pagination state to parent so it can be restored after remount.
+  const onPaginationChangeRef = useRef(onPaginationChange);
+  onPaginationChangeRef.current = onPaginationChange;
+  useEffect(() => {
+    onPaginationChangeRef.current?.(pageIndex, pageCursors, fetchLimit);
+  }, [pageIndex, pageCursors, fetchLimit]);
 
   useEffect((): (() => void) => {
     return (): void => {
@@ -265,16 +307,20 @@ export const TicketListView = function TicketListView({
     // Header ref is only a fallback for the first render, before the callback ref runs.
     const containerWidth =
       scrollerElRef.current?.clientWidth ?? columnHeadersRef.current?.clientWidth ?? 1;
-    return computeAvailableColumnsWidth(containerWidth, showSelectionColumn);
-  }, [showSelectionColumn]);
+    return computeAvailableColumnsWidth(containerWidth, showSelectionColumn, visibleColumns.length);
+  }, [showSelectionColumn, visibleColumns.length]);
 
   // Denominator for unit → pixel conversion. A drag only shifts width between two adjacent
   // columns, so the total stays constant.
   const totalColumnUnits = useMemo(
-    () => TICKET_LIST_COLUMNS.reduce((total, item) => total + columnWidths[item.key], 0),
-    [columnWidths],
+    () => visibleColumns.reduce((total, item) => total + columnWidths[item.key], 0),
+    [columnWidths, visibleColumns],
   );
-  const columnsPixelWidth = computeAvailableColumnsWidth(scrollerClientWidth, showSelectionColumn);
+  const columnsPixelWidth = computeAvailableColumnsWidth(
+    scrollerClientWidth,
+    showSelectionColumn,
+    visibleColumns.length,
+  );
   const columnPixelWidth = useCallback(
     (key: TicketListColumnKey): number =>
       totalColumnUnits > 0
@@ -328,8 +374,8 @@ export const TicketListView = function TicketListView({
   const handleColumnResizePointerDown = useCallback(
     (column: TicketListColumnKey, event: React.PointerEvent<HTMLButtonElement>): void => {
       if (event.button !== 0) return;
-      const columnIndex = TICKET_LIST_COLUMNS.findIndex(item => item.key === column);
-      const adjacentColumn = TICKET_LIST_COLUMNS[columnIndex + 1];
+      const columnIndex = visibleColumns.findIndex(item => item.key === column);
+      const adjacentColumn = visibleColumns[columnIndex + 1];
       if (!adjacentColumn) return;
       event.preventDefault();
       event.stopPropagation();
@@ -351,7 +397,7 @@ export const TicketListView = function TicketListView({
       document.body.style.userSelect = 'none';
       setResizingColumn(column);
     },
-    [columnWidths, getAvailableColumnsWidth, totalColumnUnits],
+    [columnWidths, getAvailableColumnsWidth, totalColumnUnits, visibleColumns],
   );
 
   const handleColumnResizePointerMove = useCallback(
@@ -389,8 +435,8 @@ export const TicketListView = function TicketListView({
   const handleColumnResizeKeyDown = useCallback(
     (column: TicketListColumnKey, event: React.KeyboardEvent<HTMLButtonElement>): void => {
       if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
-      const columnIndex = TICKET_LIST_COLUMNS.findIndex(item => item.key === column);
-      const adjacentColumn = TICKET_LIST_COLUMNS[columnIndex + 1];
+      const columnIndex = visibleColumns.findIndex(item => item.key === column);
+      const adjacentColumn = visibleColumns[columnIndex + 1];
       if (!adjacentColumn) return;
       event.preventDefault();
       resizeColumnPair(
@@ -403,7 +449,7 @@ export const TicketListView = function TicketListView({
         totalColumnUnits,
       );
     },
-    [columnWidths, getAvailableColumnsWidth, resizeColumnPair, totalColumnUnits],
+    [columnWidths, getAvailableColumnsWidth, resizeColumnPair, totalColumnUnits, visibleColumns],
   );
 
   const pageStart = pageCursors[pageIndex] ?? null;
@@ -484,6 +530,10 @@ export const TicketListView = function TicketListView({
   );
 
   useEffect(() => {
+    if (skipFirstPageResetRef.current) {
+      skipFirstPageResetRef.current = false;
+      return;
+    }
     setPageCursors([null]);
     setPageIndex(0);
     loadStartTimeRef.current = Date.now();
@@ -491,6 +541,10 @@ export const TicketListView = function TicketListView({
 
   // Each page (and each filter) begins a fresh adaptive fetch from its own cursor.
   useEffect(() => {
+    if (skipFirstLimitResetRef.current) {
+      skipFirstLimitResetRef.current = false;
+      return;
+    }
     setFetchLimit(PAGE_SIZE + 1);
   }, [pageStart, filterKey]);
 
@@ -771,6 +825,7 @@ export const TicketListView = function TicketListView({
             isActive={isActive}
             showExtraFields={showExtraFields}
             gridTemplate={ticketListGridTemplate}
+            visibleColumnKeys={visibleColumnKeys}
             {...(onToggleSelect
               ? {
                   isSelected: selectedIds?.has(row.id) ?? false,
@@ -964,7 +1019,7 @@ export const TicketListView = function TicketListView({
             }}
           >
             {showSelectionColumn && <div aria-hidden='true' />}
-            {TICKET_LIST_COLUMNS.map(column => (
+            {visibleColumns.map(column => (
               <div
                 key={column.key}
                 role='columnheader'
@@ -991,9 +1046,9 @@ export const TicketListView = function TicketListView({
           }}
         >
           {showSelectionColumn && <span aria-hidden='true' />}
-          {TICKET_LIST_COLUMNS.map((column, columnIndex) => (
+          {visibleColumns.map((column, columnIndex) => (
             <span key={column.key} className='relative'>
-              {columnIndex < TICKET_LIST_COLUMNS.length - 1 && (
+              {columnIndex < visibleColumns.length - 1 && (
                 <button
                   type='button'
                   role='slider'

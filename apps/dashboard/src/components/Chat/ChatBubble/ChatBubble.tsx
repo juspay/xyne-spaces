@@ -909,9 +909,17 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     message.msgType === MessageType.SYSTEM &&
     metadata?.['ticketId'] !== undefined &&
     !isTicketActivity;
+  // The scheduled-call pill is attributed to the organizer, so like a ticket-creation
+  // message it must NOT count as a system message — that is what gives it the sender's
+  // avatar and a bold name header instead of the anonymous system treatment.
+  const isScheduledCallPill =
+    message.msgType === MessageType.SYSTEM && metadata?.['isScheduledCallPill'] === true;
   // Check if this is a system message (channel join, etc.) - not ticket activities or ticket creation
   const isSystemMessage =
-    message.msgType === MessageType.SYSTEM && !isTicketActivity && !isTicketCreationMessage;
+    message.msgType === MessageType.SYSTEM &&
+    !isTicketActivity &&
+    !isTicketCreationMessage &&
+    !isScheduledCallPill;
 
   // Check if this is a showInChannel message (thread reply shown in main channel)
   const isShowInChannel = message.showInChannel === true;

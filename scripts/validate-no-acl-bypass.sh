@@ -17,19 +17,21 @@ else
   RED=''; YELLOW=''; GREEN=''; RESET=''
 fi
 
-# Only runAsSystem is checked here for now — it's the only category fully relocated into
-# bypassAcl/ so far. runAsServiceActor, $queryRaw/$executeRaw, and .$transaction( are each
-# being done as separate PRs; add each back once its relocation lands:
-#   label "runAsServiceActor(",                    pattern 'runAsServiceActor\('
-#   label "\$queryRaw / \$executeRaw (incl. *Unsafe)", pattern '\$(query|execute)Raw(Unsafe)?'
-#   label ".\$transaction(",                        pattern '\.\$transaction\('
+# runAsSystem, runAsServiceActor and the raw SQL primitives are checked here — all three
+# categories are fully relocated into bypassAcl/. .$transaction( is being done as a separate PR;
+# add it back once its relocation lands:
+#   label ".\$transaction(",      pattern '\.\$transaction\('
 #
 # Each entry: human label, grep -E pattern.
 declare -a LABELS=(
   "runAsSystem("
+  "runAsServiceActor("
+  "raw query/execute calls (incl. *Unsafe)"
 )
 declare -a PATTERNS=(
   'runAsSystem\('
+  'runAsServiceActor\('
+  '\$(query|execute)Raw(Unsafe)?'
 )
 
 violations=0
@@ -56,11 +58,44 @@ for i in "${!PATTERNS[@]}"; do
   echo ""
 done
 
+# Inside bypassAcl/ itself: an exported function that takes a callback (a parameter typed as a
+# function returning a Promise) is a generic wrapper — anyone can hand it any code and get the
+# bypass. Each bypass must be a named operation that owns its logic. base.ts holds the
+# primitives and tenantUtils.ts the tenant helpers, so both are exempt.
+cb_files=$(find "$ROOT/bypassAcl" -name '*.ts' ! -name 'base.ts' ! -name 'tenantUtils.ts' 2>/dev/null || true)
+cb_hits=""
+for f in $cb_files; do
+  h=$(awk '
+    function flush() {
+      if (sig != "" && sig ~ /[A-Za-z_]+\??[ \t]*:[ \t]*\(.*\)[ \t]*=>[ \t]*(Promise|PromiseLike)/)
+        print FILENAME ":" start ": " first
+      sig = ""
+    }
+    /^export[ \t]+(async[ \t]+)?(function|const)[ \t]/ { flush(); sig = $0; first = $0; start = NR; if ($0 ~ /\{[ \t]*$/ || $0 ~ /=>/) { flush() } ; next }
+    sig != "" { sig = sig " " $0; if ($0 ~ /\{[ \t]*$/ || $0 ~ /^\)/) flush() }
+    END { flush() }
+  ' "$f" || true)
+  [ -n "$h" ] && cb_hits="$cb_hits$h"$'\n'
+done
+
+if [ -n "$cb_hits" ]; then
+  if [ "$violations" -eq 0 ]; then
+    echo -e "${RED}❌ ACL bypass guard: bypass primitive used outside bypassAcl/${RESET}"
+    echo ""
+  fi
+  violations=$((violations + 1))
+  echo -e "  ${YELLOW}callback-taking function exported from bypassAcl/${RESET}"
+  printf '%s' "$cb_hits" | sed 's/^/    /'
+  echo ""
+  echo "  Exports in bypassAcl/ must be a named operation that owns its logic, not a function that"
+  echo "  takes a callback — a callback wrapper lets any caller run arbitrary code inside the bypass."
+  echo ""
+fi
+
 if [ "$violations" -gt 0 ]; then
-  echo "runAsSystem is a way to reach the database without going through the Prisma tenant ACL"
-  echo "extension (apps/backend/src/database/tenant/acl-extension.ts). (runAsServiceActor, raw"
-  echo "query/execute calls, and .\$transaction( are tracked separately and not checked by this"
-  echo "script for now.)"
+  echo "These are ways to reach the database without going through the Prisma tenant ACL"
+  echo "extension (apps/backend/src/database/tenant/acl-extension.ts). (.\$transaction( is tracked"
+  echo "separately and not checked by this script for now.)"
   echo "Every call site must live in apps/backend/src/bypassAcl/, importable from elsewhere —"
   echo "see /ACL_BYPASS_AUDIT.md at the repo root for why, and /BYPASS_ACL_EXAMPLES.md for the"
   echo "relocation pattern."

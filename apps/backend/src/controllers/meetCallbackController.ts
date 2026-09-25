@@ -8,14 +8,12 @@
  */
 
 import { Request, Response } from 'express';
-import { MessageType } from '@xyne/shared';
 import { z } from 'zod';
 import { logger } from '@/utils/logger';
 import { repositories } from '@/database/repositories';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service';
 import { meetLinkService } from '@/services/meetLinkService';
-import { db } from '@/database/client';
-import { runAsServiceActor } from '@/database/tenant/context';
+import { insertMeetCallbackSummaryMessage } from '@/bypassAcl/callServices';
 
 /**
  * Zod schema for validating SAM Meet callback payloads
@@ -161,39 +159,13 @@ export class MeetCallbackController {
       const now = new Date();
       // SAM webhook → no HTTP tenant context. Open one from the resolved workspace so the system
       // message insert gets workspaceId stamped instead of leaking NULL.
-      const message = await runAsServiceActor('meet-callback', targetWorkspaceId,
-        () => db.$transaction(async (tx) => {
-        const createdMessage = await tx.message.create({
-          data: {
-            conversationId: targetConversationId,
-            workspaceId: targetWorkspaceId,
-            senderId,
-            content: messageContent,
-            msgType: MessageType.BOT,
-            metadata: {
-              contentFormat: 'markdown',
-              messageSubtype: 'call_summary',
-            },
-          },
-        });
-
-        await tx.conversation.update({
-          where: { conversationId: targetConversationId },
-          data: {
-            replyCount: {
-              increment: 1,
-            },
-            lastActivityAt: now,
-          },
-        });
-
-        await tx.conversationParticipant.updateMany({
-          where: { conversationId: targetConversationId },
-          data: { lastReplyAt: now },
-        });
-
-        return createdMessage;
-      }));
+      const message = await insertMeetCallbackSummaryMessage({
+        workspaceId: targetWorkspaceId,
+        conversationId: targetConversationId,
+        senderId,
+        content: messageContent,
+        now,
+      });
 
       logger.info('[MeetCallbackController] Successfully posted SAM response to thread', {
         xyneTicketId,

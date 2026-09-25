@@ -585,6 +585,23 @@ export enum ACLAuditTargetType {
   USER_GROUP = 'USER_GROUP',
 }
 
+// Generalized audit trail types. The audit tables live in the non_zero schema —
+// written by the backend audit interceptors, read via REST (GET /api/audit-logs).
+// @ts-ignore TS1294
+export enum AuditAction {
+  CREATE = 'CREATE',
+  UPDATE = 'UPDATE',
+  DELETE = 'DELETE',
+}
+
+// Logical context an audit log belongs to (non_zero.audit_logs.entityType).
+// Determines which screen an audit row is displayed on (audit_logs.entityId).
+// @ts-ignore TS1294
+export enum AuditEntityType {
+  USER_GROUP_ASSIGNMENT_CONFIG = 'USER_GROUP_ASSIGNMENT_CONFIG',
+  BOARD = 'BOARD',
+}
+
 // @ts-ignore TS1294
 export enum QueryVisualizationType {
   KPI = 'KPI',
@@ -806,6 +823,14 @@ export enum FormFieldType {
   DOC = 'DOC',
   TICKET = 'TICKET',
 }
+
+/**
+ * Max scope fields on EmailChannelPreference.duplicateScopeConfig. Enforced in the
+ * desk settings picker, both Zero mutators, and the duplicate service's parser —
+ * a config over the limit is treated as malformed and detection falls back to
+ * project-wide, so the three must agree.
+ */
+export const MAX_DUPLICATE_SCOPE_FIELDS = 5;
 
 // @ts-ignore TS1294
 export enum FormContextType {

@@ -60,6 +60,7 @@ import { isSlashCommandArtifactMessage } from '../../Chat/SlashCommandArtifacts'
 import type { ToolInvocation } from '../../Chat/XyneAISidebar/utils/XyneAITypes';
 import { ExpandableMessage } from '../../Chat/ExpandableMessage/ExpandableMessage';
 import { MessageMetadata } from './MessageBubble.utils';
+import { ScheduledCallPill } from './ScheduledCallPill';
 import { MarkdownMessageRenderer } from './MarkdownMessageRenderer';
 import { SharedTranscriptCard } from '../../Chat/ShareAgentConversationModal/SharedTranscriptCard';
 import { NonParticipantActions } from './NonParticipantActions';
@@ -573,6 +574,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     !isWorkflowMessage;
   const ticketAttachments = isTicketCardMessage ? (conversation?.ticket?.attachments ?? []) : [];
   const isCallMessage = metadata?.isCallMessage === true;
+  // Read-only scheduled-call card. Kept off isCallMessage on purpose: that flag opts a
+  // SYSTEM message into reply/forward/Ask-AI/subscribe in ChatBubble, and the pill is inert.
+  const isScheduledCallPill = metadata?.['isScheduledCallPill'] === true;
   const isActiveCall = useIsCallActive(metadata?.callId);
   // Anchor message for a headless recording started from a thread (see
   // RecordingBubble) — deliberately independent of isCallMessage so it never
@@ -1239,7 +1243,12 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             )}
 
           {/* ================== MESSAGE CONTENT ================== */}
-          {isCallShareMessage && !isForwardedMessage && !message.isDeleted ? (
+          {isScheduledCallPill && metadata?.callId && !message.isDeleted ? (
+            <ScheduledCallPill
+              message={{ messageId: message.messageId, metadata }}
+              callId={metadata.callId}
+            />
+          ) : isCallShareMessage && !isForwardedMessage && !message.isDeleted ? (
             <CallShareBubble message={{ content: message.content, metadata }} />
           ) : isRecordingMessage &&
             metadata?.callId &&

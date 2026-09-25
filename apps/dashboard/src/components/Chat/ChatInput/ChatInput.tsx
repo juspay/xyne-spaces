@@ -25,7 +25,7 @@ import {
   CommandAccessibility,
 } from '@xyne/shared';
 import { BLOCKED_EXTENSIONS } from '../../ui/utils/files';
-import { useChannel, useChannelSearch } from '../../../hooks/useChannels';
+import { useChannel, useChannelMentionSearch } from '../../../hooks/useChannels';
 import { ConversationTabContext } from '../ConversationTabContext';
 import { intentClassifier } from '../../../services/onDeviceIntent';
 import { useIntentSuggestionToast } from '../../../hooks/useIntentSuggestionToast';
@@ -210,7 +210,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
 
     const { allowThreadBroadcastMentions } = useThreadBroadcastMentions();
     const [channelSearchQuery, setChannelSearchQuery] = useState('');
-    const channelResults = useChannelSearch(channelSearchQuery, 10);
+    const channelResults = useChannelMentionSearch(channelSearchQuery, 10);
     const conversationId = conversation?.conversationId;
 
     // A thread is one incident's workspace, so it holds at most one open artifact
@@ -575,18 +575,15 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
     const channelItems = React.useMemo(() => {
       if (!channelResults || channelResults.length === 0) return [];
 
-      // Filter channels to only show DEFAULT scope (exclude DM, GROUP_DM, TICKET, DOCUMENT)
-      const items = channelResults
-        .filter(channel => channel.scopeType === ChannelScopeType.DEFAULT)
-        .map(channel => {
-          return {
-            id: channel.id,
-            name: channel.name,
-            isPrivate: channel.visibility === ChannelVisibility.PRIVATE,
-            ...(channel.description && { description: channel.description }),
-            hasAccess: true,
-          };
-        });
+      const items = channelResults.map(channel => {
+        return {
+          id: channel.id,
+          name: channel.name,
+          isPrivate: channel.visibility === ChannelVisibility.PRIVATE,
+          ...(channel.description && { description: channel.description }),
+          hasAccess: true,
+        };
+      });
 
       return items;
     }, [channelResults]);
