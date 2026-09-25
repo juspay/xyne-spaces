@@ -1,14 +1,47 @@
 import type { DeleteID, InsertValue, Transaction, UpdateValue } from '@rocicorp/zero';
-import { Schema } from '@xyne/shared';
+import { Schema, UserRoleMappingEntityType } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { TableSchema, MutationACLError } from '../core/types';
-import { assertCanManageRoles } from '../core/admin-access';
+import { assertCanManageRoles, canManageUserGroup } from '../core/admin-access';
 import { zql } from '../../queries';
 import { getRoleInWorkspaceOrThrow } from './roles-acl';
 import { assertGuestWriteBlocked } from '../core/guest-access';
 
 export class UserRoleMappingsACL extends BaseACL<'user_role_mappings'> {
-  private async verifyWorkspace(
+  /**
+   * Authorize a write against the entity the mapping belongs to.
+   *
+   * - WORKSPACE rows (and legacy/undefined entityType): gated by workspace
+   *   role-management permission (`assertCanManageRoles`).
+   * - USER_GROUP rows: gated by group-management permission for the group
+   *   identified by `entityId` (`canManageUserGroup(..., 'members')`).
+   */
+  private async authorizeByEntity(
+    entityType: string | null | undefined,
+    entityId: string | null | undefined,
+    tx: Transaction<Schema>,
+  ): Promise<void> {
+    if (entityType === UserRoleMappingEntityType.USER_GROUP) {
+      const userGroup = await tx.run(
+        zql.user_groups.where('id', entityId ?? '').one(),
+      );
+      if (!userGroup) {
+        throw new MutationACLError('User role mapping failed: the specified group does not exist', 'user_role_mappings');
+      }
+      const canManage = await canManageUserGroup(this.ctx, tx, userGroup, 'members');
+      if (!canManage) {
+        throw new MutationACLError(
+          'User role mapping failed: only the creator of a group without resource grants or ADMIN access allowed',
+          'user_role_mappings',
+        );
+      }
+      return;
+    }
+    // WORKSPACE (and legacy/undefined default)
+    await assertCanManageRoles(this.ctx, tx);
+  }
+
+  private async verifyMapping(
     mappingId: string,
     tx: Transaction<Schema>,
   ): Promise<void> {
@@ -17,6 +50,7 @@ export class UserRoleMappingsACL extends BaseACL<'user_role_mappings'> {
       throw new MutationACLError('User role mapping not found', 'user_role_mappings');
     }
     await getRoleInWorkspaceOrThrow(mapping.roleId, this.ctx.workspaceId, tx);
+    await this.authorizeByEntity(mapping.entityType, mapping.entityId, tx);
   }
 
   async canInsert(
@@ -25,7 +59,7 @@ export class UserRoleMappingsACL extends BaseACL<'user_role_mappings'> {
   ): Promise<void> {
     await getRoleInWorkspaceOrThrow(args.roleId, this.ctx.workspaceId, tx);
     assertGuestWriteBlocked(this.ctx, 'user_role_mappings', 'insert', 'User role mapping');
-    await assertCanManageRoles(this.ctx, tx);
+    await this.authorizeByEntity(args.entityType, args.entityId, tx);
   }
 
   async canUpdate(
@@ -33,8 +67,7 @@ export class UserRoleMappingsACL extends BaseACL<'user_role_mappings'> {
     tx: Transaction<Schema>,
   ): Promise<void> {
     assertGuestWriteBlocked(this.ctx, 'user_role_mappings', 'update', 'User role mapping');
-    await this.verifyWorkspace(args.id, tx);
-    await assertCanManageRoles(this.ctx, tx);
+    await this.verifyMapping(args.id, tx);
   }
 
   async canDelete(
@@ -42,7 +75,6 @@ export class UserRoleMappingsACL extends BaseACL<'user_role_mappings'> {
     tx: Transaction<Schema>,
   ): Promise<void> {
     assertGuestWriteBlocked(this.ctx, 'user_role_mappings', 'delete', 'User role mapping');
-    await this.verifyWorkspace(args.id, tx);
-    await assertCanManageRoles(this.ctx, tx);
+    await this.verifyMapping(args.id, tx);
   }
 }

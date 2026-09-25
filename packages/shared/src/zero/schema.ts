@@ -1850,6 +1850,8 @@ export const userRoleMappingsTable = table('user_role_mappings')
     id: string(),
     userId: string(),
     roleId: string(),
+    entityType: string().optional(), // null = workspace-level (legacy/default); 'USER_GROUP' for group-scoped
+    entityId: string().optional(), // null for workspace-level; = userGroupId for group-scoped
     createdAt: number(),
     updatedAt: number(),
   })

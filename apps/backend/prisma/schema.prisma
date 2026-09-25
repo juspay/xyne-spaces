@@ -822,20 +822,29 @@ model Role {
   @@schema("public")
 }
 
+// Polymorphic role binding: one row per (user, role, scope). entityType/entityId
+// scope the binding — WORKSPACE (entityId = workspaceId) for direct workspace roles,
+// USER_GROUP (entityId = userGroupId) for group roles. A user can hold multiple roles
+// in the same scope (multiple rows). Source of truth for role bindings; for user groups
+// it is read union'd with the legacy user_group_mappings.roleId column (see mutators).
 model UserRoleMapping {
   workspaceId String // denormalized tenant key (stamped on insert)
   id        String   @id @default(cuid())
   userId    String
   roleId    String
+  entityType String? // null = workspace-level (legacy/default); 'USER_GROUP' for group-scoped
+  entityId   String? // null for workspace-level; = userGroupId for group-scoped
   createdAt DateTime
   updatedAt DateTime
 
   user User @relation(fields: [userId], references: [id])
   role Role @relation(fields: [roleId], references: [id])
 
-  @@unique([userId, roleId])
+  @@unique([userId, roleId, entityId]) 
   @@index([userId])
   @@index([roleId])
+  @@index([entityType, entityId])
+  @@index([roleId, entityType, entityId])
   @@map("user_role_mappings")
   @@schema("public")
 }
@@ -1054,8 +1063,8 @@ model UserGroupMapping {
   id             String              @id @default(cuid())
   userId         String              // No FK constraint
   userGroupId    String              // No FK constraint
-  roleId         String?             // References Role.id; null = legacy rows using responsibility column
-  responsibility String?             // Legacy column; new writes set roleId instead
+  roleId         String?             // DEPRECATED: legacy single group role. Read via union with user_role_mappings; cleared on role removal; never inserted by new code (multi-role lives in user_role_mappings entityType=USER_GROUP).
+  responsibility String?             // DEPRECATED: legacy enum; cleared alongside roleId.
   onCallSetNumber    Int?                // Deprecated: use onCallSetNumbers instead. Only set when autoRotationEnabled is true
   onCallSetNumbers   Int[]               // Array of set numbers for on-call rotation
   startOffset    Int?                // Cold-start fairness offset, added once for brand-new members with zero prior workload history

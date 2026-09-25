@@ -217,6 +217,14 @@ export enum WorkspaceRole {
   COMMUNITY_MEMBER = 'COMMUNITY_MEMBER',
 }
 
+// Scope of a user_role_mappings row (entityType column). A role binding is either
+// workspace-level (entityId = workspaceId) or scoped to a user group
+// (entityId = userGroupId). Legacy rows may have a null entityType (treated as WORKSPACE).
+export enum UserRoleMappingEntityType {
+  WORKSPACE = 'WORKSPACE',
+  USER_GROUP = 'USER_GROUP',
+}
+
 export const WorkspaceType = {
   ENTERPRISE: 'ENTERPRISE',
   COMMUNITY: 'COMMUNITY',

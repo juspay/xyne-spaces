@@ -56,6 +56,7 @@ import {
   UserResponsibility,
   UserType,
   ViewAccessEntityType,
+  UserRoleMappingEntityType,
 } from './schema.js';
 
 export const zql = createBuilder(schema);
@@ -3497,6 +3498,21 @@ export const queries = defineQueries({
     z.object({ userGroupIds: z.array(z.string()) }),
     ({ args: { userGroupIds } }) => {
       return zql.user_group_mappings.where('userGroupId', 'IN', userGroupIds);
+    },
+  ),
+  // Role bindings scoped to an entity (a user group, a workspace, …). Generic over
+  // entityType so callers can fetch group- or workspace-scoped roles. The UI unions
+  // these with the legacy user_group_mappings.roleId to show every role a member holds.
+  getRoleMappingsByEntity: defineQuery(
+    z.object({
+      entityType: z.nativeEnum(UserRoleMappingEntityType),
+      entityId: z.string(),
+    }),
+    ({ args: { entityType, entityId } }) => {
+      return zql.user_role_mappings
+        .where('entityType', entityType)
+        .where('entityId', entityId)
+        .related('role');
     },
   ),
   // Query for user group mappings by user ID

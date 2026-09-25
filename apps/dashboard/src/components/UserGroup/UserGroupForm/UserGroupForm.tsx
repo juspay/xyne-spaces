@@ -6,6 +6,7 @@ import Input from '../../ui/Input/Input';
 import Textarea from '../../ui/Textarea/Textarea';
 import { UserManagement } from '../UserManagement';
 import type { UserGroup, User } from '@xyne/shared';
+import { UserRoleMappingEntityType } from '@xyne/shared';
 import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { usePlatform } from '../../../hooks/usePlatform';
@@ -23,7 +24,7 @@ interface UserGroupFormProps {
     alias?: string;
     description?: string;
     userIds?: string[];
-    userRoleUpdates?: Record<string, string>;
+    userRoleUpdates?: Record<string, string[]>;
   }) => Promise<{ id: string }> | Promise<void> | void;
   onCancel: () => void;
   loading?: boolean;
@@ -40,9 +41,14 @@ export const UserGroupForm = ({
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'about' | 'members'>('about');
   const { isMobile } = usePlatform();
-  // ONE Map - mutate directly
-  const roleIdsRef = useRef<Map<string, string>>(new Map());
+  // ONE Map - mutate directly. userId -> the full set of role ids that user holds in the group.
+  const roleIdsRef = useRef<Map<string, string[]>>(new Map());
   const roleIds = roleIdsRef.current;
+  // Bumped once the map is seeded from server data, so children re-render with it.
+  const [, bumpRoleInit] = useState(0);
+  // Roles are batched and only persisted on submit, so seed from the server exactly ONCE.
+  // Rebuilding on every query change would wipe pending local selections mid-edit.
+  const roleInitDoneRef = useRef(false);
 
   // Load server data
   const [userGroupMembers] = useCachedQuery(
@@ -52,17 +58,40 @@ export const UserGroupForm = ({
     { enabled: isEdit && !!userGroup },
   );
 
-  // Initialize from server data
+  // Group-scoped role bindings (user_role_mappings, entityType=USER_GROUP).
+  const [groupRoleMappings] = useCachedQuery(
+    queries.getRoleMappingsByEntity({
+      entityType: UserRoleMappingEntityType.USER_GROUP,
+      entityId: userGroup?.id ?? '',
+    }),
+    { enabled: isEdit && !!userGroup },
+  );
+
+  // Seed once from server data: each member's roles = union of the new user_role_mappings
+  // rows and the legacy user_group_mappings.roleId (when non-null). Gated on BOTH queries
+  // having resolved so the URM roles aren't missed (they load separately from the members).
   useEffect(() => {
-    if (isEdit && userGroupMembers) {
-      roleIdsRef.current.clear();
-      userGroupMembers.forEach(mapping => {
-        if (mapping.roleId) {
-          roleIdsRef.current.set(mapping.userId, mapping.roleId);
-        }
-      });
-    }
-  }, [isEdit, userGroupMembers]);
+    if (!isEdit) return;
+    if (roleInitDoneRef.current) return;
+    if (userGroupMembers === undefined || groupRoleMappings === undefined) return;
+
+    const next = new Map<string, string[]>();
+    const add = (userId: string, roleId: string): void => {
+      const existing = next.get(userId);
+      if (!existing) {
+        next.set(userId, [roleId]);
+      } else if (!existing.includes(roleId)) {
+        existing.push(roleId);
+      }
+    };
+    userGroupMembers.forEach(mapping => {
+      if (mapping.roleId) add(mapping.userId, mapping.roleId);
+    });
+    groupRoleMappings.forEach(m => add(m.userId, m.roleId));
+    roleIdsRef.current = next;
+    roleInitDoneRef.current = true;
+    bumpRoleInit(n => n + 1);
+  }, [isEdit, userGroupMembers, groupRoleMappings]);
 
   const {
     control,
@@ -94,7 +123,7 @@ export const UserGroupForm = ({
           alias?: string;
           description?: string;
           userIds?: string[];
-          userRoleUpdates?: Record<string, string>;
+          userRoleUpdates?: Record<string, string[]>;
         } = {};
 
         if (name.trim() !== userGroup.name) {
@@ -129,7 +158,7 @@ export const UserGroupForm = ({
           alias?: string;
           description?: string;
           userIds?: string[];
-          userRoleUpdates?: Record<string, string>;
+          userRoleUpdates?: Record<string, string[]>;
         } = {
           name: name.trim(),
         };
