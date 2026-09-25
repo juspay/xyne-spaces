@@ -39,6 +39,7 @@ import {
   makeStepId,
   type SaveResult,
   type ValidationResult,
+  type ValidationIssue,
 } from '../Automation.types';
 import { useIsAutomationsAdmin } from '../useIsAutomationsAdmin';
 import {
@@ -74,6 +75,8 @@ import {
 import type { AutomationBuilderProps } from './AutomationBuilder.types';
 import type { StepSchema } from '../Automation.types';
 import { FlowAutomationView } from './FlowAutomationView/FlowAutomationView';
+import type { ViewStepPath } from './FlowAutomationView/FlowAutomationView.types';
+import { ROOT_CONTAINER, insertStepAtPath } from './FlowAutomationView/FlowAutomationView.utils';
 
 const MAX_AUTOMATION_NAME_LENGTH = 80;
 
@@ -194,6 +197,10 @@ export function AutomationBuilder({
   }, [builderView]);
 
   const [savedId, setSavedId] = useState<string | null>(automation?.id ?? null);
+  const [flowFocusRequest, setFlowFocusRequest] = useState<{
+    issuePath: string;
+    seq: number;
+  } | null>(null);
   const [savedStatus, setSavedStatus] = useState<string>(
     automation?.status ?? AutomationStatusValues.DRAFT,
   );
@@ -631,14 +638,8 @@ export function AutomationBuilder({
   }, []);
 
   const handleAddStep = useCallback(
-    (type: string, insertAt?: number): void => {
-      const insertInto = (steps: AutomationStepConfig[], step: AutomationStepConfig) => {
-        if (insertAt === undefined || insertAt < 0 || insertAt > steps.length) {
-          return [...steps, step];
-        }
-        return [...steps.slice(0, insertAt), step, ...steps.slice(insertAt)];
-      };
-
+    (type: string, insertAt?: number, container: ViewStepPath = ROOT_CONTAINER): string => {
+      let step: AutomationStepConfig;
       if (type === CONDITIONAL_STEP_TYPE) {
         const cond: ConditionalStepConfig = {
           id: makeStepId(),
@@ -649,69 +650,35 @@ export function AutomationBuilder({
             if_false: [],
           },
         };
-        setConfig(prev => {
-          const next = insertInto(prev.steps, cond);
-          logger.info(LogEvent.INFO, {
-            type: 'migrated_console_info',
-            message: String('[automations] step added'),
-            context: [
-              {
-                type,
-                insertAt,
-                finalIndex: next.indexOf(cond),
-              },
-            ],
-          });
-          return { ...prev, steps: next };
-        });
-        return;
-      }
-      if (type === SWITCH_STEP_TYPE) {
+        step = cond;
+      } else if (type === SWITCH_STEP_TYPE) {
         const sw: SwitchStepConfig = {
           id: makeStepId(),
           type: SWITCH_STEP_TYPE,
           config: { cases: [], default: [] },
         };
-        setConfig(prev => {
-          const next = insertInto(prev.steps, sw);
-          logger.info(LogEvent.INFO, {
-            type: 'migrated_console_info',
-            message: String('[automations] step added'),
-            context: [
-              {
-                type,
-                insertAt,
-                finalIndex: next.indexOf(sw),
-              },
-            ],
-          });
-          return { ...prev, steps: next };
-        });
-        return;
+        step = sw;
+      } else {
+        // A new "run agent" step starts with a { result: 'string' } output schema so
+        // downstream steps have a usable variable by default. Other actions start empty.
+        const action: ActionStepConfig = {
+          id: makeStepId(),
+          type,
+          config: type === 'RUN_AGENT' ? { outputSchema: { result: 'string' } } : {},
+        };
+        step = action;
       }
-      // A new "run agent" step starts with a { result: 'string' } output schema so
-      // downstream steps have a usable variable by default. Other actions start empty.
-      const action: ActionStepConfig = {
-        id: makeStepId(),
-        type,
-        config: type === 'RUN_AGENT' ? { outputSchema: { result: 'string' } } : {},
-      };
       setConfig(prev => {
-        const next = insertInto(prev.steps, action);
+        const next = insertStepAtPath(prev, container, insertAt, step);
         logger.info(LogEvent.INFO, {
           type: 'migrated_console_info',
           message: String('[automations] step added'),
-          context: [
-            {
-              type,
-              insertAt,
-              finalIndex: next.indexOf(action),
-            },
-          ],
+          context: [{ type, insertAt, container: container.join('.') }],
         });
-        return { ...prev, steps: next };
+        return next;
       });
-      ensureSchema(type);
+      if (type !== CONDITIONAL_STEP_TYPE && type !== SWITCH_STEP_TYPE) ensureSchema(type);
+      return step.id;
     },
     [ensureSchema],
   );
@@ -1217,6 +1184,21 @@ export function AutomationBuilder({
           onAddStep={handleAddStep}
           formFieldNameMap={formFieldNameMap}
           onFormFieldNamesResolved={handleFormFieldNamesResolved}
+          onRequestEdit={
+            !editMode && canEdit && !readOnlyPreview
+              ? (): void => {
+                  if (forksOnEdit) setProposeChangeConfirmOpen(true);
+                  else setEditConfirmOpen(true);
+                }
+              : undefined
+          }
+          triggerExtras={
+            config.trigger.type === 'WEBHOOK' ? (
+              <WebhookEndpointPanel automationId={savedId} />
+            ) : undefined
+          }
+          viewportKey={savedId ?? undefined}
+          focusRequest={flowFocusRequest}
         />
       ) : (
         <div
@@ -1416,6 +1398,15 @@ export function AutomationBuilder({
           result={validation}
           isSaving={saveMutation.isPending}
           errorMessage={errorMessage}
+          {...(builderView === 'flow'
+            ? {
+                onIssueClick: (issue: ValidationIssue): void =>
+                  setFlowFocusRequest(prev => ({
+                    issuePath: issue.path,
+                    seq: (prev?.seq ?? 0) + 1,
+                  })),
+              }
+            : {})}
         />
       </div>
 

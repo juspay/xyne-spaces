@@ -94,35 +94,58 @@ export function buildVariableSources(
     if (step.type === CONDITIONAL_STEP_TYPE || step.type === SWITCH_STEP_TYPE) continue;
     const schema = schemaCache[step.type];
     if (!schema) continue;
-    const groupLabel = `Step ${i + 1} — ${schema.name}`;
-    sources.push({
-      sourceKey: step.id,
-      role: 'input',
-      label: `Step ${i + 1} input`,
-      sublabel: schema.name,
-      groupKey: step.id,
-      groupLabel,
-      schema: schema.configSchema,
-    });
-
-    const outputSchema =
-      step.type === 'RUN_AGENT'
-        ? buildOutputSchemaFromRunAgentConfig(step.config)
-        : step.type === 'TRIGGER_WEBHOOK'
-          ? buildOutputSchemaFromWebhookConfig(step.config)
-          : schema.outputSchema;
-    sources.push({
-      sourceKey: step.id,
-      role: 'output',
-      label: `Step ${i + 1} output`,
-      sublabel: schema.name,
-      groupKey: step.id,
-      groupLabel,
-      schema: outputSchema,
-    });
+    pushStepVariableSources(
+      sources,
+      step as ActionStepConfig,
+      schema,
+      formatStepSourceLabel(i + 1),
+    );
   }
 
   return sources;
+}
+
+/**
+ * Label for a step in the variable picker. Root steps read "Step 2"; steps
+ * inside a branch carry the branch trail, e.g. "True → Step 1".
+ */
+export function formatStepSourceLabel(displayIndex: number, branchTrail: string[] = []): string {
+  return [...branchTrail, `Step ${displayIndex}`].join(' → ');
+}
+
+/** Pushes the input + output picker sources for one action step. */
+export function pushStepVariableSources(
+  sources: VariablePickerSource[],
+  step: ActionStepConfig,
+  schema: StepSchema,
+  label: string,
+): void {
+  const groupLabel = `${label} — ${schema.name}`;
+  sources.push({
+    sourceKey: step.id,
+    role: 'input',
+    label: `${label} input`,
+    sublabel: schema.name,
+    groupKey: step.id,
+    groupLabel,
+    schema: schema.configSchema,
+  });
+
+  const outputSchema =
+    step.type === 'RUN_AGENT'
+      ? buildOutputSchemaFromRunAgentConfig(step.config)
+      : step.type === 'TRIGGER_WEBHOOK'
+        ? buildOutputSchemaFromWebhookConfig(step.config)
+        : schema.outputSchema;
+  sources.push({
+    sourceKey: step.id,
+    role: 'output',
+    label: `${label} output`,
+    sublabel: schema.name,
+    groupKey: step.id,
+    groupLabel,
+    schema: outputSchema,
+  });
 }
 
 export function buildOutputSchemaFromRunAgentConfig(

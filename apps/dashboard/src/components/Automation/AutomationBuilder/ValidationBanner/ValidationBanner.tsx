@@ -7,6 +7,7 @@ export function ValidationBanner({
   result,
   isSaving,
   errorMessage,
+  onIssueClick,
 }: ValidationBannerProps): React.ReactElement {
   const [expanded, setExpanded] = useState(false);
 
@@ -86,10 +87,27 @@ export function ValidationBanner({
         <ul className='border-t border-amber-500/30 px-4 py-2 text-xs text-amber-900 dark:text-amber-200'>
           {result.issues.map((issue, index) => (
             <li key={`${issue.path}-${index}`} className='py-1'>
-              <code className='mr-2 rounded bg-amber-500/20 dark:bg-amber-500/30 px-1.5 py-0.5 font-mono text-[10px]'>
-                {issue.path || '(root)'}
-              </code>
-              <span>{issue.message}</span>
+              {onIssueClick ? (
+                <button
+                  type='button'
+                  onClick={() => onIssueClick(issue)}
+                  data-track-category='automation-builder'
+                  data-track-name='validation-banner-focus-issue'
+                  className='text-left hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/50 rounded'
+                >
+                  <code className='mr-2 rounded bg-amber-500/20 dark:bg-amber-500/30 px-1.5 py-0.5 font-mono text-[10px]'>
+                    {issue.path || '(root)'}
+                  </code>
+                  <span>{issue.message}</span>
+                </button>
+              ) : (
+                <>
+                  <code className='mr-2 rounded bg-amber-500/20 dark:bg-amber-500/30 px-1.5 py-0.5 font-mono text-[10px]'>
+                    {issue.path || '(root)'}
+                  </code>
+                  <span>{issue.message}</span>
+                </>
+              )}
             </li>
           ))}
         </ul>
