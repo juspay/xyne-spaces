@@ -70,6 +70,7 @@ export const LITELLM = {
   // Boss decisions are short structured calls; running them on the same big
   // model as the worker would double the per-turn cost for marginal quality.
   fastModel: litellmFastModel,
+  subagentFastModel: process.env["LITELLM_SUBAGENT_FAST_MODEL"]?.trim() || litellmFastModel,
 } as const;
 
 export const AGENT = {
