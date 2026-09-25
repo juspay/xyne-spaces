@@ -13,6 +13,7 @@ import { useTicketAssignee, resolveAssigneeRef } from '../../../hooks/useTicketA
 import { PriorityPicker } from './PriorityPicker';
 import { AutoDraftStatus } from '@xyne/shared';
 import { getTicketListColumnAlignClass } from './ticketListColumns';
+import type { TicketListColumnKey } from './ticketListColumns';
 
 interface TicketListRowProps {
   ticket: TicketListItem;
@@ -22,6 +23,7 @@ interface TicketListRowProps {
   isSelected?: boolean;
   onToggleSelect?: () => void;
   gridTemplate: string;
+  visibleColumnKeys?: ReadonlySet<string> | undefined;
 }
 
 const formatStatusText = (status: string): string => {
@@ -97,7 +99,10 @@ export const TicketListRow = ({
   isSelected = false,
   onToggleSelect,
   gridTemplate,
+  visibleColumnKeys,
 }: TicketListRowProps): ReactElement => {
+  const isVisible = (key: TicketListColumnKey): boolean =>
+    !visibleColumnKeys || visibleColumnKeys.has(key);
   const ticketIdValue = ticket.xyneId || ticket.id || '';
   const isHumanInterventionTicket = ticket.stageName?.toLowerCase().includes('human') ?? false;
   const assignee = resolveAssigneeRef(ticket.assignedTo, ticket.userGroupId);
@@ -196,22 +201,24 @@ export const TicketListRow = ({
           </span>
         </div>
       )}
-      <div className={cn('flex min-w-0 items-center', getTicketListColumnAlignClass('priority'))}>
-        {isHumanInterventionTicket ? (
-          <Tooltip delayDuration={500} content='Human Intervention'>
-            <span className='h-full rounded-sm text-xs whitespace-nowrap flex items-center justify-center'>
-              <Sparkles
-                size={14}
-                className='text-status-paused'
-                fill='currentColor'
-                fillOpacity={0.3}
-              />
-            </span>
-          </Tooltip>
-        ) : (
-          <PriorityPicker ticketId={ticket.id} priority={ticket.priority} compact />
-        )}
-      </div>
+      {isVisible('priority') && (
+        <div className={cn('flex min-w-0 items-center', getTicketListColumnAlignClass('priority'))}>
+          {isHumanInterventionTicket ? (
+            <Tooltip delayDuration={500} content='Human Intervention'>
+              <span className='h-full rounded-sm text-xs whitespace-nowrap flex items-center justify-center'>
+                <Sparkles
+                  size={14}
+                  className='text-status-paused'
+                  fill='currentColor'
+                  fillOpacity={0.3}
+                />
+              </span>
+            </Tooltip>
+          ) : (
+            <PriorityPicker ticketId={ticket.id} priority={ticket.priority} compact />
+          )}
+        </div>
+      )}
       <div
         className={cn(
           'flex min-w-0 items-center gap-2 overflow-hidden',
@@ -245,161 +252,183 @@ export const TicketListRow = ({
           </span>
         )}
       </div>
-      <div className={cn('flex min-w-0 items-center', getTicketListColumnAlignClass('emails'))}>
-        {emailCount > 0 && (
-          <span
-            className='inline-flex h-[18px] min-w-[28px] items-center justify-center rounded-sm bg-muted px-1 text-[10px] font-medium tabular-nums text-muted-foreground'
-            title={`${emailCount} email${emailCount === 1 ? '' : 's'}`}
-          >
-            {emailCount}
-          </span>
-        )}
-      </div>
-      <div
-        className={cn(
-          'flex min-w-0 items-center overflow-hidden',
-          getTicketListColumnAlignClass('draft'),
-        )}
-      >
-        {draftKind === 'user' && (
-          <Tooltip delayDuration={500} content='Your unsent draft'>
+      {isVisible('emails') && (
+        <div className={cn('flex min-w-0 items-center', getTicketListColumnAlignClass('emails'))}>
+          {emailCount > 0 && (
             <span
-              className='inline-flex h-[18px] items-center gap-1 whitespace-nowrap rounded-sm bg-amber-100 px-1.5 text-[10px] font-medium text-amber-700'
-              aria-label='Unsent draft'
+              className='inline-flex h-[18px] min-w-[28px] items-center justify-center rounded-sm bg-muted px-1 text-[10px] font-medium tabular-nums text-muted-foreground'
+              title={`${emailCount} email${emailCount === 1 ? '' : 's'}`}
             >
-              <Pencil size={10} />
-              Draft
+              {emailCount}
             </span>
-          </Tooltip>
-        )}
-        {draftKind === 'auto' && (
-          <Tooltip delayDuration={500} content='AI-generated draft suggestion'>
-            <span
-              className='inline-flex h-[18px] items-center gap-1 whitespace-nowrap rounded-sm bg-violet-100 px-1.5 text-[10px] font-medium text-violet-700 dark:bg-violet-950/50 dark:text-violet-300'
-              aria-label='AI draft suggestion'
-            >
-              <Wand2 size={10} />
-              AI draft
-            </span>
-          </Tooltip>
-        )}
-        {draftKind === 'generating' && (
-          <Tooltip delayDuration={500} content='Generating AI draft…'>
-            <span
-              className='inline-flex h-[18px] items-center gap-1 whitespace-nowrap rounded-sm bg-violet-100 px-1.5 text-[10px] font-medium text-violet-700 dark:bg-violet-950/50 dark:text-violet-300'
-              aria-label='Generating AI draft'
-            >
-              <Loader2 size={10} className='animate-spin' />
-              Drafting…
-            </span>
-          </Tooltip>
-        )}
-      </div>
-      <div
-        className={cn(
-          'flex min-w-0 items-center gap-2 overflow-hidden',
-          getTicketListColumnAlignClass('sender'),
-        )}
-      >
-        {displaySender && (
-          <>
-            <span className='size-1 shrink-0 rounded-full bg-muted' />
-            <TruncatedTooltip content={senderTitle}>
-              <span
-                className={cn(
-                  'min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-xs',
-                  hasUnread ? 'text-foreground font-semibold' : 'text-muted-foreground font-normal',
-                )}
-              >
-                {senderName ? (
-                  <>
-                    {senderName}
-                    {displayEmail && (
-                      <span className='ml-1 font-normal text-muted-foreground'>
-                        {`<${displayEmail}>`}
-                      </span>
-                    )}
-                  </>
-                ) : (
-                  displayEmail
-                )}
-              </span>
-            </TruncatedTooltip>
-          </>
-        )}
-      </div>
-      <div
-        className={cn(
-          'flex min-w-0 items-center overflow-hidden',
-          getTicketListColumnAlignClass('status'),
-        )}
-      >
-        <span className='inline-flex max-w-full items-center rounded bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground'>
-          <TruncatedTooltip content={statusLabel}>
-            <span className='min-w-0 truncate'>{statusLabel}</span>
-          </TruncatedTooltip>
-        </span>
-      </div>
-      <div className={cn('flex min-w-0 items-center', getTicketListColumnAlignClass('assignee'))}>
-        <UserSelector
-          selectedUserId={assignee.userId}
-          assignedGroupId={assignee.groupId}
-          onUserSelect={onAssign}
-          channelId={ticket.channelId ?? undefined}
-          variant='compact'
-        />
-      </div>
-      <div
-        className={cn(
-          'flex min-w-0 items-center overflow-hidden',
-          getTicketListColumnAlignClass('createdAt'),
-        )}
-      >
-        <Tooltip delayDuration={500} content={`Created: ${formatDateTime(createdDate)}`} side='top'>
-          <span className='overflow-hidden text-ellipsis whitespace-nowrap text-xs tabular-nums text-muted-foreground'>
-            {formatDate(createdDate)} · {formatTime(createdDate)}
-          </span>
-        </Tooltip>
-      </div>
-      <div
-        className={cn(
-          'flex min-w-0 items-center overflow-hidden',
-          getTicketListColumnAlignClass('age'),
-        )}
-      >
-        <span className='overflow-hidden text-ellipsis whitespace-nowrap text-xs tabular-nums text-muted-foreground'>
-          {Math.max(0, Math.floor((Date.now() - ticket.createdAt) / 86400000))}d
-        </span>
-      </div>
-      <div
-        className={cn(
-          'flex min-w-0 items-center gap-2 overflow-hidden',
-          getTicketListColumnAlignClass('latestEmail'),
-        )}
-      >
-        <Tooltip
-          delayDuration={500}
-          content={`Latest email: ${formatDateTime(dueDate)}`}
-          side='top'
+          )}
+        </div>
+      )}
+      {isVisible('draft') && (
+        <div
+          className={cn(
+            'flex min-w-0 items-center overflow-hidden',
+            getTicketListColumnAlignClass('draft'),
+          )}
         >
+          {draftKind === 'user' && (
+            <Tooltip delayDuration={500} content='Your unsent draft'>
+              <span
+                className='inline-flex h-[18px] items-center gap-1 whitespace-nowrap rounded-sm bg-amber-100 px-1.5 text-[10px] font-medium text-amber-700'
+                aria-label='Unsent draft'
+              >
+                <Pencil size={10} />
+                Draft
+              </span>
+            </Tooltip>
+          )}
+          {draftKind === 'auto' && (
+            <Tooltip delayDuration={500} content='AI-generated draft suggestion'>
+              <span
+                className='inline-flex h-[18px] items-center gap-1 whitespace-nowrap rounded-sm bg-violet-100 px-1.5 text-[10px] font-medium text-violet-700 dark:bg-violet-950/50 dark:text-violet-300'
+                aria-label='AI draft suggestion'
+              >
+                <Wand2 size={10} />
+                AI draft
+              </span>
+            </Tooltip>
+          )}
+          {draftKind === 'generating' && (
+            <Tooltip delayDuration={500} content='Generating AI draft…'>
+              <span
+                className='inline-flex h-[18px] items-center gap-1 whitespace-nowrap rounded-sm bg-violet-100 px-1.5 text-[10px] font-medium text-violet-700 dark:bg-violet-950/50 dark:text-violet-300'
+                aria-label='Generating AI draft'
+              >
+                <Loader2 size={10} className='animate-spin' />
+                Drafting…
+              </span>
+            </Tooltip>
+          )}
+        </div>
+      )}
+      {isVisible('sender') && (
+        <div
+          className={cn(
+            'flex min-w-0 items-center gap-2 overflow-hidden',
+            getTicketListColumnAlignClass('sender'),
+          )}
+        >
+          {displaySender && (
+            <>
+              <span className='size-1 shrink-0 rounded-full bg-muted' />
+              <TruncatedTooltip content={senderTitle}>
+                <span
+                  className={cn(
+                    'min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-xs',
+                    hasUnread
+                      ? 'text-foreground font-semibold'
+                      : 'text-muted-foreground font-normal',
+                  )}
+                >
+                  {senderName ? (
+                    <>
+                      {senderName}
+                      {displayEmail && (
+                        <span className='ml-1 font-normal text-muted-foreground'>
+                          {`<${displayEmail}>`}
+                        </span>
+                      )}
+                    </>
+                  ) : (
+                    displayEmail
+                  )}
+                </span>
+              </TruncatedTooltip>
+            </>
+          )}
+        </div>
+      )}
+      {isVisible('status') && (
+        <div
+          className={cn(
+            'flex min-w-0 items-center overflow-hidden',
+            getTicketListColumnAlignClass('status'),
+          )}
+        >
+          <span className='inline-flex max-w-full items-center rounded bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground'>
+            <TruncatedTooltip content={statusLabel}>
+              <span className='min-w-0 truncate'>{statusLabel}</span>
+            </TruncatedTooltip>
+          </span>
+        </div>
+      )}
+      {isVisible('assignee') && (
+        <div className={cn('flex min-w-0 items-center', getTicketListColumnAlignClass('assignee'))}>
+          <UserSelector
+            selectedUserId={assignee.userId}
+            assignedGroupId={assignee.groupId}
+            onUserSelect={onAssign}
+            channelId={ticket.channelId ?? undefined}
+            variant='compact'
+          />
+        </div>
+      )}
+      {isVisible('createdAt') && (
+        <div
+          className={cn(
+            'flex min-w-0 items-center overflow-hidden',
+            getTicketListColumnAlignClass('createdAt'),
+          )}
+        >
+          <Tooltip
+            delayDuration={500}
+            content={`Created: ${formatDateTime(createdDate)}`}
+            side='top'
+          >
+            <span className='overflow-hidden text-ellipsis whitespace-nowrap text-xs tabular-nums text-muted-foreground'>
+              {formatDate(createdDate)} · {formatTime(createdDate)}
+            </span>
+          </Tooltip>
+        </div>
+      )}
+      {isVisible('age') && (
+        <div
+          className={cn(
+            'flex min-w-0 items-center overflow-hidden',
+            getTicketListColumnAlignClass('age'),
+          )}
+        >
+          <span className='overflow-hidden text-ellipsis whitespace-nowrap text-xs tabular-nums text-muted-foreground'>
+            {Math.max(0, Math.floor((Date.now() - ticket.createdAt) / 86400000))}d
+          </span>
+        </div>
+      )}
+      {isVisible('latestEmail') && (
+        <div
+          className={cn(
+            'flex min-w-0 items-center gap-2 overflow-hidden',
+            getTicketListColumnAlignClass('latestEmail'),
+          )}
+        >
+          <Tooltip
+            delayDuration={500}
+            content={`Latest email: ${formatDateTime(dueDate)}`}
+            side='top'
+          >
+            <span
+              className={cn(
+                'overflow-hidden text-ellipsis whitespace-nowrap text-xs tabular-nums',
+                hasUnread ? 'text-foreground font-semibold' : 'text-muted-foreground font-normal',
+              )}
+            >
+              {formatDate(dueDate)}
+            </span>
+          </Tooltip>
           <span
             className={cn(
-              'overflow-hidden text-ellipsis whitespace-nowrap text-xs tabular-nums',
+              'shrink-0 whitespace-nowrap text-xs tabular-nums',
               hasUnread ? 'text-foreground font-semibold' : 'text-muted-foreground font-normal',
             )}
           >
-            {formatDate(dueDate)}
+            {formatTime(dueDate)}
           </span>
-        </Tooltip>
-        <span
-          className={cn(
-            'shrink-0 whitespace-nowrap text-xs tabular-nums',
-            hasUnread ? 'text-foreground font-semibold' : 'text-muted-foreground font-normal',
-          )}
-        >
-          {formatTime(dueDate)}
-        </span>
-      </div>
+        </div>
+      )}
     </div>
   );
 };
