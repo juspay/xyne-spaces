@@ -3,7 +3,8 @@ import type { SideEffectJobConfig, ChannelParticipantPreviousValue } from '../ty
 import { db } from '@/database/client';
 import { notificationService } from '@/services/notificationService';
 import { logger } from '@/utils/logger';
-import { ChannelScopeType } from '@xyne/shared';
+import { ActivityClassification, ChannelScopeType, isDmShelfScopeType } from '@xyne/shared';
+import { activityService } from '@/services/activity/activityService';
 import { refreshCanvasPermissionsForChannel } from '@/services/canvasPermissionSync';
 
 export class ChannelParticipantsSideEffectHandler extends BaseSideEffectHandler {
@@ -82,6 +83,33 @@ export class ChannelParticipantsSideEffectHandler extends BaseSideEffectHandler 
         adderName,
         this.ctx.workspaceId
       );
+
+      // Bell entry so the unread count reflects being added (counted by BELL_COUNT_RULES).
+      // Not for DM / GROUP_DM: those belong to the DM shelf, and their messages already count
+      // there, so a bell entry would count the same conversation twice.
+      // The id derives from the participant row so a redelivered side-effect is a no-op.
+      if (!channel?.scopeType || !isDmShelfScopeType(channel.scopeType)) {
+        const activityId = `added_to_channel_${job.entityId}`;
+        const existing = await db.activity.findUnique({
+          where: { id: activityId },
+          select: { id: true },
+        });
+        if (!existing) {
+          // FYI skips the classification worker; the bell only excludes SKIP.
+          await activityService.createActivities([
+            {
+              id: activityId,
+              userId,
+              actorId: adderId,
+              actorAction: 'added_to_channel',
+              actionSource: 'channel',
+              actionSourceId: channelId,
+              channelId,
+              classification: ActivityClassification.FYI,
+            },
+          ]);
+        }
+      }
 
       logger.info(`[ChannelParticipantsHandler] Notification sent for user ${userId} added to channel ${channelId} by ${adderName}`);
 
