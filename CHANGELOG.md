@@ -1,3 +1,10 @@
+## [1.403.0](https://github.com/juspay/xyne-spaces/compare/v1.402.1...v1.403.0) (2026-09-25)
+
+
+### Features
+
+* run subagents on a fast model with fallback to Kimi ([#2323](https://github.com/juspay/xyne-spaces/issues/2323)) ([388a6d5](https://github.com/juspay/xyne-spaces/commit/388a6d55b55b87fcb5581ee47cfb1f8e247c7760))
+
 ## [1.402.1](https://github.com/juspay/xyne-spaces/compare/v1.402.0...v1.402.1) (2026-09-25)
 
 
