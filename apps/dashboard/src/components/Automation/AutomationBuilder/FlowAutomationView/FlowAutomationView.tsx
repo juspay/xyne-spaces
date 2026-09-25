@@ -10,9 +10,12 @@ import {
   GitBranch,
   LayoutGrid,
   ListTree,
+  Maximize,
+  Minus,
   Plus,
   Search,
   Trash2,
+  X,
   Zap,
   type LucideIcon,
 } from 'lucide-react';
@@ -20,12 +23,10 @@ import ReactFlow, {
   Background,
   BackgroundVariant,
   BaseEdge,
-  Controls,
   EdgeLabelRenderer,
   Handle,
   MarkerType,
   MiniMap,
-  Panel,
   Position,
   ReactFlowProvider,
   getSmoothStepPath,
@@ -101,6 +102,13 @@ import {
 const TRACK_CATEGORY = 'automation-builder-flow';
 /** Show the minimap only once the flow no longer fits comfortably on screen. */
 const MINIMAP_MIN_NODES = 10;
+/** Below this canvas width the minimap would cover the nodes it summarises. */
+const MINIMAP_MIN_CANVAS_WIDTH = 640;
+/** Minimap width as a share of the canvas, clamped; height keeps a 4:3 ratio. */
+const MINIMAP_WIDTH_RATIO = 0.2;
+const MINIMAP_MIN_WIDTH = 120;
+const MINIMAP_MAX_WIDTH = 180;
+const FIT_VIEW_OPTIONS = { padding: 0.2, duration: 200 } as const;
 /** One localStorage entry holding the last viewport per automation, most recent last. */
 const VIEWPORT_STORAGE_KEY = 'automation-flow-viewport';
 const VIEWPORT_STORAGE_LIMIT = 20;
@@ -334,7 +342,12 @@ function TriggerNode({ data, selected }: NodeProps<FlowNodeData>): React.ReactEl
         kicker='When this happens'
         title={name ?? 'Choose a trigger'}
       />
-      <NodeSummary text={data.summary} placeholder='No filters' warn={!name} />
+      {/* Filters only mean something once a trigger is chosen. */}
+      {name ? (
+        <NodeSummary text={data.summary} placeholder='No filters' />
+      ) : (
+        <NodeSummary text={undefined} placeholder='Required to run the automation' warn />
+      )}
     </NodeShell>
   );
 }
@@ -482,11 +495,14 @@ function PlaceholderNode({ data }: NodeProps<FlowNodeData>): React.ReactElement 
 }
 
 /** Where branches rejoin. Purely visual: not selectable, focusable, or announced. */
-function MergeNode(): React.ReactElement {
+function MergeNode({ data }: NodeProps<FlowNodeData>): React.ReactElement {
   return (
     <div
       aria-hidden='true'
-      className='flex size-3 items-center justify-center rounded-full border border-border bg-muted'
+      className={cn(
+        'flex size-3 items-center justify-center rounded-full border border-border bg-muted transition-opacity',
+        data.dimmed && 'opacity-40',
+      )}
     >
       <Handle type='target' position={Position.Top} className='!opacity-0' isConnectable={false} />
       <Handle
@@ -621,6 +637,7 @@ const renderConditionalCard = (
     operators={props.operators}
     variableSources={props.variableSources}
     index={props.index}
+    {...(props.displayIndex ? { displayIndex: props.displayIndex } : {})}
     total={props.total}
     onChange={next => props.onChange(next)}
     onMoveUp={props.onMoveUp}
@@ -647,6 +664,7 @@ const renderSwitchCard = (
     operators={props.operators}
     variableSources={props.variableSources}
     index={props.index}
+    {...(props.displayIndex ? { displayIndex: props.displayIndex } : {})}
     total={props.total}
     onChange={next => props.onChange(next)}
     onMoveUp={props.onMoveUp}
@@ -687,6 +705,14 @@ function isTypingTarget(target: EventTarget | null): boolean {
   return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable;
 }
 
+/** Panel controls that use arrow/Enter keys themselves (selects, menus, tabs). */
+const PANEL_KEY_OWNER =
+  'button, a[href], [role="combobox"], [role="listbox"], [role="option"], [role="menu"], [role="menuitem"], [role="tab"], [role="radio"], [role="slider"], [role="switch"], [role="checkbox"]';
+
+function ownsNavigationKeys(target: EventTarget | null): boolean {
+  return target instanceof HTMLElement && target.closest(PANEL_KEY_OWNER) !== null;
+}
+
 function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactElement {
   const {
     config,
@@ -710,7 +736,8 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
     focusRequest,
   } = props;
 
-  const { setCenter, getZoom, getViewport, setViewport, fitView } = useReactFlow();
+  const { setCenter, getZoom, getViewport, setViewport, fitView, zoomIn, zoomOut } = useReactFlow();
+  const rootRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -723,7 +750,7 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
   const [search, setSearch] = useState('');
   const searchCursor = useRef(0);
   const pendingFocusId = useRef<string | null>(null);
-  const [storedViewport] = useState(() => readStoredViewport(viewportKey));
+  const [canvasWidth, setCanvasWidth] = useState(0);
 
   const editable = editMode && !readOnly;
 
@@ -841,6 +868,14 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
       setSelectedNodeId(id);
       setPendingInsert(null);
       centerOn(id);
+      // Keep keyboard focus on the canvas node so the next arrow key walks on
+      // from here, even while the side panel re-renders for the new selection.
+      requestAnimationFrame(() => {
+        const node = canvasRef.current?.querySelector<HTMLElement>(
+          `.react-flow__node[data-id="${CSS.escape(id)}"]`,
+        );
+        node?.focus({ preventScroll: true });
+      });
     },
     [centerOn],
   );
@@ -890,22 +925,46 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
     [viewportKey],
   );
 
-  const handleInit = useCallback((): void => {
-    if (storedViewport) setViewport(storedViewport);
-    else void fitView({ padding: 0.2 });
-  }, [storedViewport, setViewport, fitView]);
+  // `viewportKey` can arrive after mount: the builder copies the automation id
+  // into state in an effect, and a new automation only gets one on first save.
+  // `onInit` can also fire before or after that. Whichever happens last applies
+  // the viewport stored for the key, so the order doesn't matter.
+  const flowReady = useRef(false);
+  const appliedViewportKey = useRef<string | undefined>(undefined);
 
-  // The key arrives after mount on a new automation's first save (undefined ->
-  // id). Restore anything stored under it, else keep the user's current view.
-  const lastViewportKey = useRef(viewportKey);
+  const applyViewportForKey = useCallback(
+    (key: string | undefined, isInitial: boolean): void => {
+      const stored = key ? readStoredViewport(key) : undefined;
+      if (stored) setViewport(stored);
+      else if (isInitial) void fitView({ padding: 0.2 });
+      // No stored view for a newly saved automation: keep what the user sees.
+      else if (key) writeStoredViewport(key, getViewport());
+      appliedViewportKey.current = key;
+    },
+    [setViewport, fitView, getViewport],
+  );
+
+  const handleInit = useCallback((): void => {
+    flowReady.current = true;
+    applyViewportForKey(viewportKey, true);
+  }, [viewportKey, applyViewportForKey]);
+
   useEffect(() => {
-    if (viewportKey === lastViewportKey.current) return;
-    lastViewportKey.current = viewportKey;
-    if (!viewportKey) return;
-    const stored = readStoredViewport(viewportKey);
-    if (stored) setViewport(stored);
-    else writeStoredViewport(viewportKey, getViewport());
-  }, [viewportKey, setViewport, getViewport]);
+    if (!flowReady.current || !viewportKey || viewportKey === appliedViewportKey.current) return;
+    applyViewportForKey(viewportKey, false);
+  }, [viewportKey, applyViewportForKey]);
+
+  // The minimap is sized from, and hidden below, the canvas width.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver(entries => {
+      const width = entries[0]?.contentRect.width;
+      if (width !== undefined) setCanvasWidth(width);
+    });
+    observer.observe(canvas);
+    return (): void => observer.disconnect();
+  }, []);
 
   /* ── Mutations ── */
 
@@ -1037,9 +1096,9 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
             summary: summaryById.get(item.id),
             issueMessages: issuesById.get(item.id) ?? [],
             collapsed: collapsed.has(item.id),
-            // Search matches steps; placeholders and merge dots are structure,
-            // so they stay at full opacity to keep the branch shape readable.
-            dimmed: Boolean(matchIds && interactive && !matchIds.has(item.id)),
+            // Search matches steps only, so every other node (placeholders and
+            // merge dots included) fades while a search is active.
+            dimmed: Boolean(matchIds && !matchIds.has(item.id)),
             stepCatalog,
             onInsert: handleInsert,
             onToggleCollapse: handleToggleCollapse,
@@ -1097,6 +1156,9 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
             stroke: 'hsl(var(--border))',
             strokeWidth: 1.5,
             ...(toPlaceholder ? { strokeDasharray: '4 4' } : {}),
+            ...(matchIds && !(matchIds.has(parentId) && matchIds.has(item.id))
+              ? { opacity: 0.4 }
+              : {}),
           },
           data: {
             label: getEdgeLabel(source, item),
@@ -1111,7 +1173,16 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
       }
     }
     return next;
-  }, [items, itemsById, editable, hoveredEdgeId, stepCatalog, handleInsert, onRequestEdit]);
+  }, [
+    items,
+    itemsById,
+    editable,
+    hoveredEdgeId,
+    stepCatalog,
+    matchIds,
+    handleInsert,
+    onRequestEdit,
+  ]);
 
   /* ── Canvas interaction ── */
 
@@ -1176,9 +1247,11 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
   }, [contextMenu]);
 
   // Keyboard: Escape clears, arrows walk the graph, Enter selects the focused node.
+  // Bound on the root (canvas and side panel) so a click into the panel's
+  // non-text controls doesn't disable navigation; text fields keep their keys.
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return undefined;
+    const root = rootRef.current;
+    if (!root) return undefined;
     const visible = (id: string): boolean => {
       const item = itemsById.get(id);
       return Boolean(item && item.nodeType !== 'merge' && item.nodeType !== 'placeholder');
@@ -1217,13 +1290,17 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
       return best;
     };
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (isTypingTarget(event.target)) return;
+      if (event.defaultPrevented || isTypingTarget(event.target)) return;
+      const inCanvas =
+        event.target instanceof Node && Boolean(canvasRef.current?.contains(event.target));
       if (event.key === 'Escape') {
         setContextMenu(null);
         setPendingInsert(null);
         setSelectedNodeId(null);
         return;
       }
+      // Outside the canvas, leave keys to panel controls that handle them.
+      if (!inCanvas && ownsNavigationKeys(event.target)) return;
       if (event.key === 'Enter' || event.key === ' ') {
         const focusedNode =
           event.target instanceof HTMLElement ? event.target.closest('.react-flow__node') : null;
@@ -1247,8 +1324,8 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
       const next = selectedNodeId ? move(selectedNodeId) : TRIGGER_NODE_ID;
       if (next) selectAndFocus(next);
     };
-    canvas.addEventListener('keydown', onKeyDown);
-    return (): void => canvas.removeEventListener('keydown', onKeyDown);
+    root.addEventListener('keydown', onKeyDown);
+    return (): void => root.removeEventListener('keydown', onKeyDown);
   }, [items, itemsById, positions, selectedNodeId, selectAndFocus]);
 
   const jumpToNextMatch = (): void => {
@@ -1366,6 +1443,7 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
         formFieldNameMap,
       ),
       index: containerInfo.index + 1,
+      ...(item.stepNumber ? { displayIndex: item.stepNumber } : {}),
       total: containerInfo.steps.length,
       onChange: next => handleUpdateStep(item.path, next),
       onMoveUp: () => handleMoveStep(item.path, -1),
@@ -1394,6 +1472,7 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
         schema={stepSchemaCache[step.type] ?? null}
         schemaLoading={schemaLoadingFor(step.type)}
         index={containerInfo.index + 1}
+        {...(item.stepNumber ? { displayIndex: item.stepNumber } : {})}
         total={containerInfo.steps.length}
         variableSources={buildVariableSourcesForPath(
           config,
@@ -1449,179 +1528,256 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
   const menuItem = contextMenu ? itemsById.get(contextMenu.itemId) : undefined;
   const menuIsStep = Boolean(menuItem && isStepItem(menuItem));
   const menuIsControl = menuItem?.nodeType === 'conditional' || menuItem?.nodeType === 'switch';
-  const showMiniMap = items.filter(isStepItem).length + 1 >= MINIMAP_MIN_NODES;
+  const showMiniMap =
+    items.filter(isStepItem).length + 1 >= MINIMAP_MIN_NODES &&
+    canvasWidth >= MINIMAP_MIN_CANVAS_WIDTH;
+  const miniMapWidth = Math.round(
+    Math.min(MINIMAP_MAX_WIDTH, Math.max(MINIMAP_MIN_WIDTH, canvasWidth * MINIMAP_WIDTH_RATIO)),
+  );
+  const noSearchMatches = Boolean(searchMatches && searchMatches.length === 0);
 
   const menuButtonClass =
     'flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground hover:bg-accent focus-visible:bg-accent focus-visible:outline-none';
 
-  return (
-    <div className='flex flex-1 overflow-hidden'>
-      <div
-        ref={canvasRef}
-        role='region'
-        aria-label='Automation flow canvas'
-        className='relative flex-1 bg-muted/30'
-      >
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          nodeTypes={nodeTypes}
-          edgeTypes={edgeTypes}
-          onNodesChange={onNodesChange}
-          onNodeClick={handleNodeClick}
-          onNodeContextMenu={handleNodeContextMenu}
-          onNodeDoubleClick={handleNodeDoubleClick}
-          zoomOnDoubleClick={false}
-          onNodesDelete={handleNodesDelete}
-          onPaneClick={handlePaneClick}
-          onEdgeMouseEnter={(_event, edge) => setHoveredEdgeId(edge.id)}
-          onEdgeMouseLeave={() => setHoveredEdgeId(null)}
-          onMoveEnd={handleMoveEnd}
-          onInit={handleInit}
-          deleteKeyCode={editable ? ['Backspace', 'Delete'] : null}
-          multiSelectionKeyCode={null}
-          selectionKeyCode={null}
-          minZoom={0.2}
-          maxZoom={1.5}
-          nodesDraggable={false}
-          nodesConnectable={false}
-          elementsSelectable
-          selectNodesOnDrag={false}
-          panOnScroll
-          proOptions={{ hideAttribution: true }}
-        >
-          <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
-          <Controls showInteractive={false} />
-          {showMiniMap && (
-            <MiniMap
-              nodeStrokeWidth={3}
-              zoomable
-              pannable
-              nodeColor={node => MINIMAP_COLORS[node.type as FlowItem['nodeType']] ?? 'gray'}
-              maskColor='hsl(var(--background) / 0.72)'
-              className='!border-border !bg-background/80'
-            />
-          )}
-          <Panel position='top-left'>
-            <div className='flex items-center gap-2 rounded-md border border-border bg-background px-2 py-1 shadow-sm'>
-              <Search className='size-3.5 text-muted-foreground' aria-hidden='true' />
-              <input
-                type='search'
-                value={search}
-                onChange={event => {
-                  setSearch(event.target.value);
-                  searchCursor.current = 0;
-                }}
-                onKeyDown={event => {
-                  if (event.key === 'Enter') {
-                    event.preventDefault();
-                    jumpToNextMatch();
-                  }
-                }}
-                placeholder='Find a step…'
-                aria-label='Find a step'
-                data-track-category={TRACK_CATEGORY}
-                data-track-name='search-steps'
-                className='w-40 bg-transparent text-xs text-foreground outline-none placeholder:text-muted-foreground'
-              />
-              {searchMatches && (
-                <span className='text-[11px] text-muted-foreground' aria-live='polite'>
-                  {searchMatches.length} {searchMatches.length === 1 ? 'match' : 'matches'}
-                </span>
-              )}
-            </div>
-          </Panel>
-        </ReactFlow>
+  const zoomButtonClass =
+    'flex size-7 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
 
-        {contextMenu && menuItem && (
-          <div
-            ref={menuRef}
-            role='menu'
-            aria-label='Step actions'
-            className='absolute z-20 min-w-[200px] overflow-hidden rounded-md border border-border bg-popover py-1 shadow-lg'
-            style={{ left: contextMenu.x, top: contextMenu.y }}
-          >
+  return (
+    <div ref={rootRef} className='flex flex-1 overflow-hidden'>
+      <div className='flex min-w-0 flex-1 flex-col'>
+        {/* Toolbar sits above the canvas so it never covers nodes. */}
+        <div className='flex items-center gap-2 border-b border-border bg-background px-3 py-1.5'>
+          <div className='flex min-w-0 items-center gap-2 rounded-md border border-border bg-background px-2 py-1'>
+            <Search className='size-3.5 text-muted-foreground' aria-hidden='true' />
+            <input
+              type='search'
+              value={search}
+              onChange={event => {
+                setSearch(event.target.value);
+                searchCursor.current = 0;
+              }}
+              onKeyDown={event => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  jumpToNextMatch();
+                }
+              }}
+              placeholder='Find a step…'
+              aria-label='Find a step'
+              data-track-category={TRACK_CATEGORY}
+              data-track-name='search-steps'
+              className='w-40 bg-transparent text-xs text-foreground outline-none placeholder:text-muted-foreground'
+            />
+            {searchMatches && (
+              <span
+                className={cn(
+                  'whitespace-nowrap text-[11px]',
+                  noSearchMatches ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground',
+                )}
+                aria-live='polite'
+              >
+                {noSearchMatches
+                  ? 'No matches'
+                  : `${searchMatches.length} ${searchMatches.length === 1 ? 'match' : 'matches'}`}
+              </span>
+            )}
+          </div>
+          <div className='ml-auto flex items-center gap-0.5' role='group' aria-label='Zoom'>
             <button
               type='button'
-              role='menuitem'
-              className={menuButtonClass}
+              className={zoomButtonClass}
+              onClick={() => void zoomOut({ duration: 200 })}
+              aria-label='Zoom out'
+              title='Zoom out'
               data-track-category={TRACK_CATEGORY}
-              data-track-name='context-add-after'
-              onClick={() => {
-                openPendingInsert(menuItem);
-                setContextMenu(null);
-              }}
+              data-track-name='zoom-out'
             >
-              <Plus className='size-4 text-muted-foreground' aria-hidden='true' />
-              {menuItem.nodeType === 'trigger' ? 'Add first step' : 'Add step after'}
+              <Minus className='size-3.5' aria-hidden='true' />
             </button>
-            {menuIsStep && (
-              <>
-                <button
-                  type='button'
-                  role='menuitem'
-                  className={menuButtonClass}
-                  data-track-category={TRACK_CATEGORY}
-                  data-track-name='context-duplicate'
-                  onClick={() => {
-                    handleDuplicate(menuItem);
-                    setContextMenu(null);
-                  }}
-                >
-                  <Copy className='size-4 text-muted-foreground' aria-hidden='true' />
-                  Duplicate
-                </button>
-                <button
-                  type='button'
-                  role='menuitem'
-                  className={menuButtonClass}
-                  data-track-category={TRACK_CATEGORY}
-                  data-track-name='context-wrap-condition'
-                  onClick={() => {
-                    handleWrapInCondition(menuItem);
-                    setContextMenu(null);
-                  }}
-                >
-                  <GitBranch className='size-4 text-muted-foreground' aria-hidden='true' />
-                  Wrap in condition
-                </button>
-              </>
+            <button
+              type='button'
+              className={zoomButtonClass}
+              onClick={() => void zoomIn({ duration: 200 })}
+              aria-label='Zoom in'
+              title='Zoom in'
+              data-track-category={TRACK_CATEGORY}
+              data-track-name='zoom-in'
+            >
+              <Plus className='size-3.5' aria-hidden='true' />
+            </button>
+            <button
+              type='button'
+              className={zoomButtonClass}
+              onClick={() => void fitView(FIT_VIEW_OPTIONS)}
+              aria-label='Fit flow to view'
+              title='Fit to view'
+              data-track-category={TRACK_CATEGORY}
+              data-track-name='fit-view'
+            >
+              <Maximize className='size-3.5' aria-hidden='true' />
+            </button>
+          </div>
+        </div>
+        <div
+          ref={canvasRef}
+          role='region'
+          aria-label='Automation flow canvas'
+          className='relative flex-1 bg-muted/30'
+        >
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            nodeTypes={nodeTypes}
+            edgeTypes={edgeTypes}
+            onNodesChange={onNodesChange}
+            onNodeClick={handleNodeClick}
+            onNodeContextMenu={handleNodeContextMenu}
+            onNodeDoubleClick={handleNodeDoubleClick}
+            zoomOnDoubleClick={false}
+            onNodesDelete={handleNodesDelete}
+            onPaneClick={handlePaneClick}
+            onEdgeMouseEnter={(_event, edge) => setHoveredEdgeId(edge.id)}
+            onEdgeMouseLeave={() => setHoveredEdgeId(null)}
+            onMoveEnd={handleMoveEnd}
+            onInit={handleInit}
+            deleteKeyCode={editable ? ['Backspace', 'Delete'] : null}
+            multiSelectionKeyCode={null}
+            selectionKeyCode={null}
+            minZoom={0.2}
+            maxZoom={1.5}
+            nodesDraggable={false}
+            nodesConnectable={false}
+            elementsSelectable
+            selectNodesOnDrag={false}
+            panOnScroll
+            proOptions={{ hideAttribution: true }}
+          >
+            <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
+            {showMiniMap && (
+              <MiniMap
+                style={{ width: miniMapWidth, height: Math.round(miniMapWidth * 0.75) }}
+                nodeStrokeWidth={3}
+                zoomable
+                pannable
+                nodeColor={node => MINIMAP_COLORS[node.type as FlowItem['nodeType']] ?? 'gray'}
+                maskColor='hsl(var(--background) / 0.72)'
+                className='!border-border !bg-background/80'
+              />
             )}
-            {menuIsControl && (
+          </ReactFlow>
+
+          {noSearchMatches && (
+            <div
+              role='status'
+              className='absolute left-1/2 top-4 z-10 flex -translate-x-1/2 items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-xs text-muted-foreground shadow-sm'
+            >
+              <span>
+                No steps match{' '}
+                <span className='font-medium text-foreground'>“{search.trim()}”</span>
+              </span>
+              <button
+                type='button'
+                className='flex items-center gap-1 rounded px-1.5 py-0.5 text-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+                onClick={() => setSearch('')}
+                data-track-category={TRACK_CATEGORY}
+                data-track-name='search-clear'
+              >
+                <X className='size-3' aria-hidden='true' />
+                Clear
+              </button>
+            </div>
+          )}
+
+          {contextMenu && menuItem && (
+            <div
+              ref={menuRef}
+              role='menu'
+              aria-label='Step actions'
+              className='absolute z-20 min-w-[200px] overflow-hidden rounded-md border border-border bg-popover py-1 shadow-lg'
+              style={{ left: contextMenu.x, top: contextMenu.y }}
+            >
               <button
                 type='button'
                 role='menuitem'
                 className={menuButtonClass}
                 data-track-category={TRACK_CATEGORY}
-                data-track-name='context-toggle-collapse'
+                data-track-name='context-add-after'
                 onClick={() => {
-                  handleToggleCollapse(menuItem.id);
+                  openPendingInsert(menuItem);
                   setContextMenu(null);
                 }}
               >
-                {collapsed.has(menuItem.id) ? (
-                  <ChevronRight className='size-4 text-muted-foreground' aria-hidden='true' />
-                ) : (
-                  <ChevronDown className='size-4 text-muted-foreground' aria-hidden='true' />
-                )}
-                {collapsed.has(menuItem.id) ? 'Expand branches' : 'Collapse branches'}
+                <Plus className='size-4 text-muted-foreground' aria-hidden='true' />
+                {menuItem.nodeType === 'trigger' ? 'Add first step' : 'Add step after'}
               </button>
-            )}
-            {menuIsStep && (
-              <button
-                type='button'
-                role='menuitem'
-                className={cn(menuButtonClass, 'text-destructive')}
-                data-track-category={TRACK_CATEGORY}
-                data-track-name='context-delete'
-                onClick={() => requestDelete(menuItem.id)}
-              >
-                <Trash2 className='size-4' aria-hidden='true' />
-                Delete
-              </button>
-            )}
-          </div>
-        )}
+              {menuIsStep && (
+                <>
+                  <button
+                    type='button'
+                    role='menuitem'
+                    className={menuButtonClass}
+                    data-track-category={TRACK_CATEGORY}
+                    data-track-name='context-duplicate'
+                    onClick={() => {
+                      handleDuplicate(menuItem);
+                      setContextMenu(null);
+                    }}
+                  >
+                    <Copy className='size-4 text-muted-foreground' aria-hidden='true' />
+                    Duplicate
+                  </button>
+                  <button
+                    type='button'
+                    role='menuitem'
+                    className={menuButtonClass}
+                    data-track-category={TRACK_CATEGORY}
+                    data-track-name='context-wrap-condition'
+                    onClick={() => {
+                      handleWrapInCondition(menuItem);
+                      setContextMenu(null);
+                    }}
+                  >
+                    <GitBranch className='size-4 text-muted-foreground' aria-hidden='true' />
+                    Wrap in condition
+                  </button>
+                </>
+              )}
+              {menuIsControl && (
+                <button
+                  type='button'
+                  role='menuitem'
+                  className={menuButtonClass}
+                  data-track-category={TRACK_CATEGORY}
+                  data-track-name='context-toggle-collapse'
+                  onClick={() => {
+                    handleToggleCollapse(menuItem.id);
+                    setContextMenu(null);
+                  }}
+                >
+                  {collapsed.has(menuItem.id) ? (
+                    <ChevronRight className='size-4 text-muted-foreground' aria-hidden='true' />
+                  ) : (
+                    <ChevronDown className='size-4 text-muted-foreground' aria-hidden='true' />
+                  )}
+                  {collapsed.has(menuItem.id) ? 'Expand branches' : 'Collapse branches'}
+                </button>
+              )}
+              {menuIsStep && (
+                <button
+                  type='button'
+                  role='menuitem'
+                  className={cn(menuButtonClass, 'text-destructive')}
+                  data-track-category={TRACK_CATEGORY}
+                  data-track-name='context-delete'
+                  onClick={() => requestDelete(menuItem.id)}
+                >
+                  <Trash2 className='size-4' aria-hidden='true' />
+                  Delete
+                </button>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       <div className='flex w-96 flex-col overflow-hidden border-l border-border bg-background'>
@@ -1703,11 +1859,11 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
       >
         <div className='flex flex-col gap-4 px-5 py-4 text-sm text-foreground'>
           <p>
-            {deleteCount > 1
-              ? `This removes the step and the ${deleteCount - 1} ${
-                  deleteCount - 1 === 1 ? 'step' : 'steps'
-                } inside its branches.`
-              : 'This removes the step from the automation.'}{' '}
+            {deleteCount === 2
+              ? 'This removes the step and the step inside its branches.'
+              : deleteCount > 2
+                ? `This removes the step and all ${deleteCount - 1} steps inside its branches.`
+                : 'This removes the step from the automation.'}{' '}
             You can still discard changes before saving.
           </p>
           <div className='flex justify-end gap-2 pt-2'>
