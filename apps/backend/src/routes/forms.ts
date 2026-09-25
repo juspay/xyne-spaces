@@ -7,7 +7,6 @@ const controller = new FormController();
 // Form routes
 router.post('/', controller.createForm);
 router.get('/global-fields', controller.getGlobalFields);
-router.get('/board-ticket-fields', controller.getBoardTicketFormFields);
 router.get('/:id', controller.getFormById);
 router.put('/:id', controller.updateForm);
 

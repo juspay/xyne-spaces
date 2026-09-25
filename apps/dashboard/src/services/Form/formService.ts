@@ -39,13 +39,6 @@ export interface GlobalFieldListResult {
   fieldOptions: FieldEnumOption[] | null;
 }
 
-export interface BoardTicketFormField {
-  id: string;
-  fieldName: string;
-  fieldType: FormFieldType;
-  isOptional: boolean;
-}
-
 export interface CreateFormResponse {
   id: string;
   formName: string;
@@ -115,15 +108,6 @@ export class FormService {
       fieldEnum: field.fieldEnum ? parseFieldOptions(field.fieldEnum) : null,
       fieldOptions: field.fieldOptions ? parseFieldOptions(field.fieldOptions) : null,
     }));
-  }
-
-  async getBoardTicketFormFields(params: { boardId: string }): Promise<BoardTicketFormField[]> {
-    const response = await apiInstance.get<BoardTicketFormField[]>('/forms/board-ticket-fields', {
-      params: {
-        boardId: params.boardId,
-      },
-    });
-    return response.data;
   }
 
   async updateForm(data: UpdateFormRequest): Promise<CreateFormResponse> {

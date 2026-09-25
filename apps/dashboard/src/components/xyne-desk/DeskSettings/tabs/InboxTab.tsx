@@ -1,6 +1,11 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Plus, X, Check, Pencil, Trash2 } from 'lucide-react';
-import { MAX_DUPLICATE_SCOPE_FIELDS, type EmailSignature } from '@xyne/shared';
+import {
+  FormContextType,
+  FormEntityType,
+  MAX_DUPLICATE_SCOPE_FIELDS,
+  type EmailSignature,
+} from '@xyne/shared';
 import { v4 as uuidv4 } from 'uuid';
 import { toast } from 'sonner';
 import Avatar from '../../../ui/Avatar/Avatar';
@@ -15,10 +20,12 @@ import { Switch } from '../../../ui/Switch';
 import { SearchableMultiSelect } from '../../../ui/SearchableMultiSelect/SearchableMultiSelect';
 import { matchesUserQuery } from '../../../../utils/userDisplayName';
 import { useChannelApps } from '../../../../hooks/useChannelApps';
-import { useBoardTicketFormFields } from '../../../../hooks/useBoardTicketFormFields';
+import { useCachedQuery } from '../../../../hooks/useCachedQuery';
 import { useUsers } from '../../../../hooks/useUsers';
 import { useZero } from '../../../../hooks/useZero';
 import { mutators } from '../../../../zero/mutators';
+import { queries } from '../../../../zero/queries';
+import { resolveDisplayFormFields } from '../../../../utils/board/resolveDisplayFormFields';
 import { getIconForFieldType } from '../../../Tickets/TicketFilters/fieldTypeIcons';
 import type { useDeskSettingsForm } from '../useDeskSettingsForm';
 import SignatureIcon from '../../../icons/SignatureIcon';
@@ -106,12 +113,30 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
   const showAppWebhookDelivery = isApp || (connectedApps?.length ?? 0) > 0;
 
   const [scopeFieldPickerOpen, setScopeFieldPickerOpen] = useState(false);
-  const scopeFieldsQuery = useBoardTicketFormFields(boardId, {
-    enabled: isDeskChannel && !!boardId,
-  });
+  // Scope keys must come from THIS channel's board ticket form, not the project's
+  // GlobalFields. A ticket can only carry a value for a field its board's form defines,
+  // and on a legacy form those fields have no GlobalField id at all — so a project-wide
+  // GlobalField list offers keys the backend can never resolve, and every ticket silently
+  // falls back to a project-wide duplicate search.
+  const [scopeFieldsMapping, scopeFieldsDetails] = useCachedQuery(
+    queries.getFormMappingByContextId({
+      contextId: boardId || 'nonexistent',
+      contextType: FormContextType.BOARD,
+      entityType: FormEntityType.TICKET,
+    }),
+    { enabled: isDeskChannel && !!boardId },
+  );
+  // resolveDisplayFormFields yields `globalFieldId ?? id` per row — the same canonical id
+  // the ticket write path stores and the backend resolves scope config against.
   // Every field type is a valid scope key — the service derives its Vespa token from
   // the same buildFormFields the indexer uses — so the picker offers the whole list.
-  const scopedFields = useMemo(() => scopeFieldsQuery.data ?? [], [scopeFieldsQuery.data]);
+  const scopedFields = useMemo(
+    () =>
+      scopeFieldsMapping?.formFields
+        ? resolveDisplayFormFields(scopeFieldsMapping.formId, [...scopeFieldsMapping.formFields])
+        : [],
+    [scopeFieldsMapping?.formFields, scopeFieldsMapping?.formId],
+  );
   // Chips are driven by the saved config, not by the field list: a configured field
   // that has since been deleted still needs a chip, or its id is stranded — it keeps
   // counting toward the cap and the backend reports it missing forever, which turns
@@ -124,14 +149,12 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
     id,
     field: scopeFieldById.get(id),
   }));
-  // "We know this board's fields" is NOT "the list came back empty" — and the other two
-  // states also leave scopedFields empty: a desk with no target board leaves the query
-  // disabled, which react-query v5 parks at isPending indefinitely, and a failed fetch
-  // clears data too. Marking a configured field deleted, or advising its removal, in
-  // either case would talk an admin into destroying a working config, so every such
-  // claim below hangs off isSuccess rather than off an empty list.
+  // "We know this board's fields" is NOT "the list came back empty": a desk with no target
+  // board, and a sync that has not landed yet, both leave scopedFields empty. Marking a
+  // configured field deleted — or advising its removal — in either case would talk an admin
+  // into destroying a working config, so every such claim below waits for a complete result.
   const hasTargetBoard = !!boardId;
-  const scopeFieldsResolved = hasTargetBoard && scopeFieldsQuery.isSuccess;
+  const scopeFieldsResolved = hasTargetBoard && scopeFieldsDetails.type === 'complete';
   const hasUnresolvedScopeField =
     scopeFieldsResolved && selectedDuplicateScopeFields.some(entry => !entry.field);
   const duplicateScopeFieldCapReached = duplicateScopeFieldIds.length >= MAX_DUPLICATE_SCOPE_FIELDS;
@@ -603,13 +626,6 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
                   Scope fields come from the ticket form of this desk&apos;s target board. Set a
                   target board for this desk first, then pick the fields to scope on. Until then
                   duplicate detection stays project-wide.
-                </div>
-              )}
-              {hasTargetBoard && scopeFieldsQuery.isError && (
-                <div className='w-full max-w-[500px] text-[13px] leading-[18px] text-destructive'>
-                  Could not load the fields on this board&apos;s ticket form, so the list is
-                  unavailable right now. The saved scope fields are unchanged — retry before editing
-                  them.
                 </div>
               )}
               {scopeFieldsResolved && scopedFields.length === 0 && (
