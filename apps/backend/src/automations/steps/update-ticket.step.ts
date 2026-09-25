@@ -9,6 +9,7 @@ import { DatabaseClient } from '@/database/client';
 import { ticketStageTransitionService } from '@/services/stageTransition/ticketStageTransitionService';
 import { ActivitySource } from '@/types/ticket';
 import { logger } from '@/utils/logger';
+import { handleTicketAssignmentChange } from '@/utils/workloadUtils';
 
 const UpdateTicketConfigSchema = z.object({
   ticketId: variableRef(z.string().min(1)),
@@ -43,13 +44,20 @@ export class UpdateTicketStep extends BaseActionStep<typeof UpdateTicketConfigSc
   ): Promise<UpdateTicketOutput> {
     const ticketId = config.ticketId as string;
     const updatedBy = context.automation.createdById;
+    const prisma = DatabaseClient.getInstance();
 
     if (config.assignedTo !== undefined) {
-      await repositories.tickets.updateTicketAssignee(ticketId, config.assignedTo as string, updatedBy);
+      const assignedTo = config.assignedTo as string;
+      const prev = await prisma.ticket.findUnique({ where: { id: ticketId }, select: { assignedTo: true, userGroupId: true, boardId: true } });
+      await repositories.tickets.updateTicketAssignee(ticketId, assignedTo, updatedBy);
+
+      // Same as ASSIGN_TICKET: the repository does not touch the workload counters.
+      if (prev?.userGroupId) {
+        await handleTicketAssignmentChange(assignedTo, prev.assignedTo, prev.userGroupId, prev.boardId, updatedBy);
+      }
     }
 
     if (config.stageName !== undefined) {
-      const prisma = DatabaseClient.getInstance();
       const ticket = await prisma.ticket.findUnique({
         where: { id: ticketId },
         select: { stageName: true, board: { select: { boardType: true } } },

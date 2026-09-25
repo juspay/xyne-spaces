@@ -6,6 +6,7 @@ import type { AutomationContext } from '../types/context';
 import { variableRef } from '../engine/variable-ref';
 import { repositories } from '@/database/repositories';
 import { DatabaseClient } from '@/database/client';
+import { handleTicketAssignmentChange } from '@/utils/workloadUtils';
 
 const AssignTicketConfigSchema = z.object({
   ticketId: variableRef(z.string().min(1)),
@@ -39,8 +40,14 @@ export class AssignTicketStep extends BaseActionStep<typeof AssignTicketConfigSc
     const assigneeId = config.assigneeId as string;
     const prisma = DatabaseClient.getInstance();
 
-    const prev = await prisma.ticket.findUnique({ where: { id: ticketId }, select: { assignedTo: true } });
+    const prev = await prisma.ticket.findUnique({ where: { id: ticketId }, select: { assignedTo: true, userGroupId: true, boardId: true } });
     await repositories.tickets.updateTicketAssignee(ticketId, assigneeId, context.automation.createdById);
+
+    // updateTicketAssignee only persists the assignee — syncing the workload counters is the
+    // caller's job, exactly as the Zero mutators do for a manual assignment.
+    if (prev?.userGroupId) {
+      await handleTicketAssignmentChange(assigneeId, prev.assignedTo, prev.userGroupId, prev.boardId, context.automation.createdById);
+    }
 
     await prisma.ticketActivity.create({
       data: {
