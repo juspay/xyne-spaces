@@ -35,6 +35,21 @@ export const askJevNoul = async (
   question: JevNoulQuestion,
   timeoutMs: number
 ): Promise<number | null> => {
+  const answers = await askJevNouls(state, { q: question }, timeoutMs);
+  return answers?.q ?? null;
+};
+
+/**
+ * P(yes) for several questions about one `state`, in a single request — Jev answers a
+ * batch in about the time it takes to answer one. Keyed like `questions`. Null when
+ * Jev can't answer, or when any answer is unusable: a partial batch would read as
+ * "every missing question is a no". Never throws.
+ */
+export const askJevNouls = async (
+  state: string,
+  questions: Record<string, JevNoulQuestion>,
+  timeoutMs: number
+): Promise<Record<string, number> | null> => {
   const { apiKey, url, model } = envConfig.jev;
   if (!apiKey) return null;
 
@@ -42,21 +57,26 @@ export const askJevNoul = async (
     const response = await fetch(url || DEFAULT_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({ model: model || DEFAULT_MODEL, state, questions: { q: question } }),
+      body: JSON.stringify({ model: model || DEFAULT_MODEL, state, questions }),
       signal: AbortSignal.timeout(timeoutMs),
     });
     if (!response.ok) {
-      logger.warn('Jev request failed', { status: response.status, error: await response.text() });
+      // Status only: an error body can echo the request, which carries user text.
+      logger.warn('Jev request failed', { status: response.status });
       return null;
     }
 
-    const body = (await response.json()) as { answers?: { q?: { noul?: unknown } } };
-    const p = body.answers?.q?.noul;
-    if (typeof p !== 'number' || p < 0 || p > 1) {
-      logger.warn('Jev answered with no usable probability', { body });
-      return null;
+    const body = (await response.json()) as { answers?: Record<string, { noul?: unknown }> };
+    const answers: Record<string, number> = {};
+    for (const key of Object.keys(questions)) {
+      const p = body.answers?.[key]?.noul;
+      if (typeof p !== 'number' || p < 0 || p > 1) {
+        logger.warn('Jev answered with no usable probability', { question: key });
+        return null;
+      }
+      answers[key] = p;
     }
-    return p;
+    return answers;
   } catch (error) {
     const timedOut = error instanceof Error && error.name === 'TimeoutError';
     logger.warn(`Jev request ${timedOut ? `timed out after ${timeoutMs}ms` : 'errored'}`, {

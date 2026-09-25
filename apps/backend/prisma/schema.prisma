@@ -5068,6 +5068,7 @@ model ExecutionRunLog {
   droppedOps     Json? // validator rejects, with reasons
   applied        Json? // applier counts { created, resolved, reassigned }
   assessment     String? // model's one-sentence read of the window (why ops / why none)
+  dedupChecks    Json? // Jev duplicate-check verdict per create, and what the parser did after a recall
   error          String?
   durationMs     Int?
   createdAt      DateTime @default(now())
