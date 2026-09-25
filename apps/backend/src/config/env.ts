@@ -118,6 +118,14 @@ const envSchema = Joi.object({
   ENABLE_SOCIAL_MEDIA_SYNC_WORKER: Joi.boolean().default(false),
 
   DESK_TICKET_DEBUG: Joi.boolean().default(false),
+  // Mock Desk mail provider for local/CI automation only. Never enable in a
+  // horizontally scaled or public-facing deployment (state is process-local).
+  DESK_MOCK_ENABLED: Joi.boolean().default(false),
+  DESK_MOCK_DEFAULT_EMAIL_DOMAIN: Joi.string().default('desk-mock.xyne.test'),
+  // Per-channel ceiling on mock inbound mail injection. Validated here rather
+  // than read raw from process.env so a typo fails startup instead of silently
+  // falling back to the default.
+  MOCK_DESK_INCOMING_EMAIL_LIMIT: Joi.number().integer().positive().default(120),
   ENABLE_EMAIL_CLASSIFICATION_WORKER: Joi.boolean().default(false),
   // One switch for the whole feature, read by both processes: the API gates
   // its producer on it, the worker gates its drain loop on it. A separate
@@ -627,6 +635,15 @@ if (error) {
   throw new Error(`Config validation error: ${error.message}`);
 }
 
+// Defense-in-depth: the mock Desk provider stores captured mail in process
+// memory and short-circuits real outbound send. It must never be reachable in
+// production, where enabling it would silently swallow real customer mail.
+if (envVars.DESK_MOCK_ENABLED && envVars.NODE_ENV === 'production') {
+  throw new Error(
+    'DESK_MOCK_ENABLED must not be true when NODE_ENV=production: the in-memory mock Desk provider would silently capture real outbound mail instead of sending it.'
+  );
+}
+
 export const config = {
   env: envVars.NODE_ENV,
   isTestEnv: envVars.NODE_ENV === 'test',
@@ -788,6 +805,9 @@ export const config = {
   enableCalendarSyncWorker: envVars.ENABLE_CALENDAR_SYNC_WORKER,
   enableSocialMediaSyncWorker: envVars.ENABLE_SOCIAL_MEDIA_SYNC_WORKER,
   deskTicketDebug: envVars.DESK_TICKET_DEBUG as boolean,
+  isDeskMockEnabled: envVars.DESK_MOCK_ENABLED as boolean,
+  deskMockDefaultEmailDomain: envVars.DESK_MOCK_DEFAULT_EMAIL_DOMAIN as string,
+  mockDeskIncomingEmailLimit: envVars.MOCK_DESK_INCOMING_EMAIL_LIMIT as number,
   enableEmailClassificationWorker: envVars.ENABLE_EMAIL_CLASSIFICATION_WORKER,
   // Radar execution engine. Two switches: enqueue on message insert, and run
   // the drain worker. A gated window always goes to the parser and a valid

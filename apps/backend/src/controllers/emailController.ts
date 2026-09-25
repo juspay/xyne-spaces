@@ -50,6 +50,7 @@ import { config as appConfig } from '@/config/env';
 import { tagGenerationPipeline } from '@/tags/pipeline';
 import { DESK_EMAIL_SOURCE_TYPE, deskEmailConfigKey } from '@/tags';
 import { ChannelExternalSourceResolver } from '@/services/channelExternalSourceResolver';
+import { captureMockDeskSentMail } from '@/utils/mockDeskCredentials';
 import { recordTicketTimelineEvent } from '@/services/ticketTimelineEventService';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -301,7 +302,29 @@ export class EmailController {
 
       let result: { threadId: string; messageId?: string };
 
-      if (externalSource.sourceType === ExternalSourcePlatform.MICROSOFT) {
+      // Mock Desk short-circuit (test/dev only). When the resolved source carries
+      // mock credentials AND the DESK_MOCK_ENABLED flag is on, capture the outbound
+      // reply into the in-memory mock mailbox instead of dispatching to a real
+      // provider — whose credentials are fabricated and would fail auth. Everything
+      // after this branch (DB persistence, activity, dedup) runs unchanged.
+      const mockCapture = captureMockDeskSentMail(externalSource.credentials, {
+        kind: 'reply',
+        channelId: conversation.channelId,
+        conversationId,
+        from: fromEmailAddress,
+        to: toRecipients,
+        cc: ccRecipients,
+        bcc: bccRecipients,
+        subject: replySubject,
+        body: outboundBody,
+        threadId:
+          latestEmail.externalThreadId ?? initialEmail.externalThreadId ?? undefined,
+        attachmentCount: fileAttachments.length,
+      });
+
+      if (mockCapture) {
+        result = mockCapture;
+      } else if (externalSource.sourceType === ExternalSourcePlatform.MICROSOFT) {
         const sender = MicrosoftDeskService.createEmailSender(
           externalSource.credentials,
           externalSource.id
@@ -969,17 +992,34 @@ export class EmailController {
       const fileAttachments = inlineRewrite.attachments;
       const inlineCidByAttachmentId = inlineRewrite.inlineCidByAttachmentId;
 
-      const sendResult = await adapter.sendMailNew({
-        encryptedCredentials: externalSource.credentials,
-        sourceId: externalSource.id,
-        subject: safeSubject,
-        body: outboundBody,
+      // Mock Desk short-circuit (test/dev only) — mirror the reply path. Capture
+      // the composed mail into the in-memory mock mailbox instead of calling the
+      // real provider when the source carries mock credentials and the flag is on.
+      const mockCapture = captureMockDeskSentMail(externalSource.credentials, {
+        kind: 'compose',
+        channelId,
+        from: fromEmail,
         to: [...new Set(to)],
         cc: [...new Set(cc)],
         bcc: [...new Set(bcc)],
-        ...(fromEmail && { fromEmailAddress: fromEmail }),
-        ...(fileAttachments.length > 0 && { fileAttachments }),
+        subject: safeSubject,
+        body: outboundBody,
+        attachmentCount: fileAttachments.length,
       });
+
+      const sendResult =
+        mockCapture ??
+        (await adapter.sendMailNew({
+          encryptedCredentials: externalSource.credentials,
+          sourceId: externalSource.id,
+          subject: safeSubject,
+          body: outboundBody,
+          to: [...new Set(to)],
+          cc: [...new Set(cc)],
+          bcc: [...new Set(bcc)],
+          ...(fromEmail && { fromEmailAddress: fromEmail }),
+          ...(fileAttachments.length > 0 && { fileAttachments }),
+        }));
 
       const externalMessageId = sendResult.messageId || sendResult.threadId;
 
