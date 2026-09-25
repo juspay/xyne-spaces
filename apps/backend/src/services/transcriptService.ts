@@ -24,6 +24,7 @@ import { TagMethod } from '@xyne/shared';
 import { callDocumentService } from '@/services/callDocumentService';
 import { callNotesCanvasService } from '@/services/callNotesCanvasService';
 import { callSubject } from '@/utils/callTypeUtils';
+import { isTranscriptUnlinked } from '@/utils/transcriptUnlink';
 import { logDetailedSummaryFailed } from '@/services/detailedSummaryFailureLog';
 import { RECORDING_TITLE_PROMPT } from '@/services/recordingSummaryTemplates';
 import { acquireLock, releaseLock } from '@/utils/distributedLock';
@@ -1470,6 +1471,13 @@ export class TranscriptService {
    */
   async reconcileTranscriptFromGcs(callId: string): Promise<void> {
     try {
+      // An admin-unlinked transcript has no attachment left, so the entryCount dedup
+      // below would read it as never processed and re-link it from GCS.
+      if (isTranscriptUnlinked(await repositories.calls.findByExternalId(callId))) {
+        logger.info(`[${callId}] transcript_reconcile_skipped`, { reason: 'transcript_unlinked' });
+        return;
+      }
+
       // Locate the call system message (same lookup the transcript-ready webhook uses).
       const callMessage = await repositories.messages.findHeadMessageByCallId(callId);
       if (!callMessage) {
@@ -1635,6 +1643,14 @@ export class TranscriptService {
       if (dispositionMeta === 'discard') {
         logger.info(`[${callId}] transcript_discarded_by_host`, { message_id: messageId });
         await this.deleteTranscriptArtifacts(callId);
+        return;
+      }
+
+      // Admin unlink: the transcript was detached on purpose and its GCS files kept, so
+      // a late webhook, the reconcile or the manual button must not re-attach it. Only
+      // the admin "reprocess" action clears the marker.
+      if (isTranscriptUnlinked(call)) {
+        logger.info(`[${callId}] transcript_processing_skipped`, { reason: 'transcript_unlinked', message_id: messageId });
         return;
       }
 

@@ -128,12 +128,29 @@ export interface UpdateCallInput {
   metadata?: any;
   aiSummary?: string;
   title?: string;
-  transcript?: string;
+  transcript?: string | null;
   startedAt?: Date;
   recordingUrl?: string | null;
   labels?: string[];
   markedItems?: Prisma.InputJsonValue[];
   summaryTemplateId?: string | null;
+}
+
+export interface CallAdminListFilters {
+  workspaceId: string;
+  /** SELF tier: only calls this user created or participates in. */
+  participantUserId?: string;
+  statuses?: CallStatus[];
+  callType?: CallType;
+  ownerId?: string;
+  /** Case-insensitive title match, or an exact externalId. */
+  search?: string;
+  /** Matches Call.metadata.detailedSummaryStatus. */
+  summaryStatuses?: Array<'pending' | 'ready' | 'failed'>;
+  hasTranscript?: boolean;
+  /** Bounds on startedAt. */
+  from?: Date;
+  to?: Date;
 }
 
 export interface CreateCallWithParticipantsInput {
@@ -590,6 +607,128 @@ export class CallRepository {
     }
 
     return { calls, nextCursor };
+  }
+
+  /**
+   * Calls admin panel list: every call in the workspace, newest first, cursor-paged
+   * the same way as findByUserAndType. `participantUserId` narrows it to calls that
+   * user created or is a participant of (the panel's SELF tier).
+   */
+  async findForAdminList(
+    filters: CallAdminListFilters,
+    options: { limit: number; cursor?: { startedAt: Date; id: string } },
+  ): Promise<{ calls: Call[]; nextCursor: { startedAt: Date; id: string } | null }> {
+    const conditions: Prisma.CallWhereInput[] = [{ workspaceId: filters.workspaceId }];
+
+    if (filters.participantUserId) {
+      conditions.push({
+        OR: [
+          { createdByUserId: filters.participantUserId },
+          { participants: { some: { userId: filters.participantUserId } } },
+        ],
+      });
+    }
+    if (filters.statuses?.length) conditions.push({ status: { in: filters.statuses } });
+    if (filters.callType) conditions.push({ callType: filters.callType });
+    if (filters.ownerId) conditions.push({ createdByUserId: filters.ownerId });
+    if (filters.search) {
+      // Support pastes a call id as often as a title, so match either.
+      conditions.push({
+        OR: [
+          { title: { contains: filters.search, mode: 'insensitive' } },
+          { externalId: filters.search },
+        ],
+      });
+    }
+    if (filters.summaryStatuses?.length) {
+      conditions.push({
+        OR: filters.summaryStatuses.map((status) => ({
+          metadata: { path: ['detailedSummaryStatus'], equals: status },
+        })),
+      });
+    }
+    if (filters.hasTranscript !== undefined) {
+      conditions.push({ transcript: filters.hasTranscript ? { not: null } : null });
+    }
+    if (filters.from || filters.to) {
+      conditions.push({
+        startedAt: {
+          ...(filters.from && { gte: filters.from }),
+          ...(filters.to && { lte: filters.to }),
+        },
+      });
+    }
+    if (options.cursor) {
+      conditions.push({
+        OR: [
+          { startedAt: { lt: options.cursor.startedAt } },
+          { startedAt: options.cursor.startedAt, id: { lt: options.cursor.id } },
+        ],
+      });
+    }
+
+    // Fetch one extra to determine if there is a next page
+    const calls = await DatabaseClient.getInstance().call.findMany({
+      where: { AND: conditions },
+      orderBy: [{ startedAt: 'desc' }, { id: 'desc' }],
+      take: options.limit + 1,
+    });
+
+    let nextCursor: { startedAt: Date; id: string } | null = null;
+    if (calls.length > options.limit) {
+      calls.pop(); // discard the sentinel item (not part of the current page)
+      const lastInPage = calls[calls.length - 1];
+      nextCursor = { startedAt: lastInPage.startedAt, id: lastInPage.id };
+    }
+
+    return { calls, nextCursor };
+  }
+
+  /**
+   * Hand calls to a new owner: `newOwnerId` becomes createdByUserId (and organizerId
+   * where one is set) and is upserted as a participant with an ACCEPTED RSVP, the way
+   * createCallWithParticipants seeds an organizer. The previous owner keeps their
+   * participant row. Ownership deliberately stays out of UpdateCallInput — this is
+   * the only write path for it.
+   */
+  async transferOwnership(
+    callIds: string[],
+    newOwnerId: string,
+    tx: Prisma.TransactionClient,
+  ): Promise<void> {
+    if (callIds.length === 0) return;
+
+    const calls = await tx.call.findMany({
+      where: { id: { in: callIds } },
+      select: { id: true, workspaceId: true, createdByUserId: true, organizerId: true },
+    });
+    const now = new Date();
+
+    for (const call of calls) {
+      await tx.call.update({
+        where: { id: call.id },
+        data: {
+          createdByUserId: newOwnerId,
+          ...(call.organizerId ? { organizerId: newOwnerId } : {}),
+        },
+      });
+      await tx.callParticipant.upsert({
+        where: { callId_userId: { callId: call.id, userId: newOwnerId } },
+        create: {
+          id: uuidv4(),
+          callId: call.id,
+          workspaceId: call.workspaceId,
+          userId: newOwnerId,
+          invitedBy: call.createdByUserId,
+          invitedAt: now,
+          response: InvitationResponse.INVITED,
+          meetingStatus: MeetingStatus.ACCEPTED,
+          respondedAt: now,
+        },
+        update: { meetingStatus: MeetingStatus.ACCEPTED, respondedAt: now },
+      });
+      await refreshCallParticipantPreview(tx, call.id);
+    }
   }
 
   async delete(id: string): Promise<void> {

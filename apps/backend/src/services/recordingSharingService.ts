@@ -169,6 +169,43 @@ export class RecordingSharingService {
     }
   }
 
+  /**
+   * After an ownership transfer, keep the previous owner's view access as a plain
+   * direct share (no DM, no notification) that the new owner can revoke.
+   */
+  async grantPreviousOwnerView(
+    tx: Prisma.TransactionClient,
+    callId: string,
+    previousOwnerUserId: string,
+  ): Promise<void> {
+    const recording = await tx.call.findUnique({
+      where: { id: callId },
+      select: {
+        id: true,
+        externalId: true,
+        title: true,
+        metadata: true,
+        callType: true,
+        channelId: true,
+        workspaceId: true,
+        createdByUserId: true,
+        startedAt: true,
+        endedAt: true,
+      },
+    });
+    if (!recording?.workspaceId || !isRecording(recording)) return;
+    if (recording.createdByUserId === previousOwnerUserId) return;
+
+    await this.setAccess(
+      tx,
+      recording,
+      recording.workspaceId,
+      { type: 'user', id: previousOwnerUserId },
+      EntityUserAccess.VIEW,
+      RECORDING_SHARE_INTENT.DIRECT_SHARE,
+    );
+  }
+
   private async setVisibility(
     callId: string,
     actor: RecordingSharingActor,

@@ -41,6 +41,7 @@ export enum CallVespaFeedSource {
   CallRepositoryUpsertExternalCalendarCallCreate = 'CallRepository.upsertExternalCalendarCall.create',
   CallRepositoryUpsertExternalCalendarCallUpdate = 'CallRepository.upsertExternalCalendarCall.update',
   CallRepositoryCancelByExternalId = 'CallRepository.cancelByExternalId',
+  CallAdminPanel = 'CallAdminPanel',
 }
 
 export const queueCallVespaFeed = (

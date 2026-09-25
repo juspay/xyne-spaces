@@ -1,6 +1,7 @@
-import { Hash, Info, RefreshCw } from 'lucide-react';
+import { Hash, Info, RefreshCw, Settings2 } from 'lucide-react';
 import * as Popover from '@radix-ui/react-popover';
 import { useRef, type Dispatch, type ReactElement, type SetStateAction } from 'react';
+import { useNavigate } from 'react-router-dom';
 import Avatar from '../../components/ui/Avatar/Avatar';
 import { Switch } from '../../components/ui/Switch';
 import { Tooltip } from '../../components/ui/Tooltip/Tooltip';
@@ -78,6 +79,7 @@ export function CallHistorySearchPanel({
   isMobile,
   currentUserId,
 }: CallHistorySearchPanelProps): ReactElement {
+  const navigate = useNavigate();
   const insertMentionRef = useRef<
     ((item: { id: string; name: string; email?: string }) => void) | null
   >(null);
@@ -127,6 +129,22 @@ export function CallHistorySearchPanel({
               </span>
             </button>
           )}
+          <button
+            type='button'
+            onClick={() => void navigate('/calls/admin')}
+            data-track-category='CALLS'
+            data-track-name='open-calls-admin'
+            className={cn(
+              'flex items-center gap-1.5 px-3 py-1.5 h-8 rounded-lg text-sm font-medium border border-border text-foreground transition-colors',
+              !isMobile && 'hover:bg-muted',
+            )}
+          >
+            <Settings2 className='size-3.5' />
+            <span>
+              <span className='md:hidden'>Manage</span>
+              <span className='hidden md:inline'>Manage calls</span>
+            </span>
+          </button>
         </div>
       </div>
 

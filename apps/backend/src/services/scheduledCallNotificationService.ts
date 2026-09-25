@@ -562,6 +562,26 @@ class ScheduledCallNotificationService {
   }
 
   /**
+   * Add a user to the recipients of a call's queued reminder. The job carries a
+   * snapshot of participant ids, so someone added after it was scheduled (a new owner
+   * from the calls admin panel) would otherwise never be reminded. No-op when no
+   * reminder is queued — later series instances read participants when their jobs
+   * are created.
+   */
+  async addReminderRecipient(callId: string, userId: string): Promise<void> {
+    try {
+      const job = await this.queue.getJob(`call-reminder-${callId}`);
+      if (!job) return;
+      const data = job.data as ScheduledCallReminderData;
+      if (data.participantIds.includes(userId)) return;
+      await job.update({ ...data, participantIds: [...data.participantIds, userId] });
+      logger.info(`Added reminder recipient for call ${callId}`, { userId });
+    } catch (error) {
+      logger.warn(`Failed to add reminder recipient for call ${callId}:`, error);
+    }
+  }
+
+  /**
    * Reschedule the auto-end job for a call after its end time has changed.
    */
   async rescheduleCallAutoEnd(

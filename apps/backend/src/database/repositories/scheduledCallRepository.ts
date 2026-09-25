@@ -291,6 +291,27 @@ export class ScheduledCallRepository {
   }
 
   /**
+   * The next upcoming SCHEDULED instance of each given series, in one query
+   * (`distinct` keeps the first row per series of the startsAt-ascending order).
+   */
+  async findNextScheduledInstancesBySeriesIds(
+    seriesIds: string[],
+    now: Date,
+  ): Promise<Array<{ recurringSeriesId: string | null; externalId: string; startsAt: Date | null }>> {
+    if (seriesIds.length === 0) return [];
+    return this.client().call.findMany({
+      where: {
+        recurringSeriesId: { in: seriesIds },
+        status: CallStatus.SCHEDULED,
+        startsAt: { gte: now },
+      },
+      orderBy: { startsAt: 'asc' },
+      distinct: ['recurringSeriesId'],
+      select: { recurringSeriesId: true, externalId: true, startsAt: true },
+    });
+  }
+
+  /**
    * Find participant user IDs for a call instance.
    */
   async findCallParticipantUserIds(params: {

@@ -13,6 +13,8 @@ interface ConfirmDialogProps {
   danger?: boolean;
   loading?: boolean;
   onConfirm: () => void;
+  /** `data-track-category` for both buttons; defaults to the claw-agents surface. */
+  trackCategory?: string;
 }
 
 /**
@@ -30,6 +32,7 @@ export const ConfirmDialog = ({
   danger = false,
   loading = false,
   onConfirm,
+  trackCategory = 'Claw Agents',
 }: ConfirmDialogProps): ReactElement => (
   <Dialog open={open} onOpenChange={onOpenChange} title={title} description={description}>
     <div className='flex flex-col gap-4 p-6'>
@@ -43,7 +46,7 @@ export const ConfirmDialog = ({
           variant='outline'
           size='sm'
           onClick={() => onOpenChange(false)}
-          data-track-category='Claw Agents'
+          data-track-category={trackCategory}
           data-track-name='CANCEL_CONFIRM_DIALOG'
           disabled={loading}
         >
@@ -55,7 +58,7 @@ export const ConfirmDialog = ({
           size='sm'
           loading={loading}
           onClick={onConfirm}
-          data-track-category='Claw Agents'
+          data-track-category={trackCategory}
           data-track-name='CONFIRM_DIALOG_ACTION'
         >
           {confirmLabel}

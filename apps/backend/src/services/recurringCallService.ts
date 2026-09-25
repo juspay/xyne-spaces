@@ -1,7 +1,7 @@
 import rruleLib from 'rrule';
 const { RRule } = rruleLib;
 import { v4 as uuidv4 } from 'uuid';
-import { type Prisma } from '@prisma/client';
+import { type Call, type Prisma } from '@prisma/client';
 import { CallOrigin, CallStatus, CallType, RecurringCallSeriesStatus } from '@xyne/shared';
 import { repositories } from '@/database/repositories';
 import { logger } from '@/utils/logger';
@@ -497,6 +497,55 @@ class RecurringCallService {
         logger.error(`Failed to schedule jobs for next instance ${nextInstance.id}:`, err);
       }
     });
+  }
+
+  /**
+   * Cancel a single SCHEDULED call (a one-off or one instance of a series) and run its
+   * side effects: remove its Bull jobs, mark it CANCELLED (record preserved), withdraw
+   * the mirrored calendar event, and for a series instance replenish the buffer and
+   * hand the Bull job chain to the next instance. Callers own the permission and
+   * status checks; `context` labels the calendar push for tracing.
+   */
+  async cancelScheduledCall(
+    call: Pick<Call, 'id' | 'recurringSeriesId' | 'endsAt'>,
+    context: string,
+  ): Promise<void> {
+    // Remove Bull jobs for this instance
+    try {
+      await scheduledCallNotificationService.removeCallJobs(call.id);
+    } catch (err) {
+      logger.error(`Failed to remove Bull jobs for call ${call.id}:`, err);
+    }
+
+    // Mark the instance as CANCELLED (preserve record)
+    await repositories.scheduledCalls.cancelCall(call.id);
+
+    // Withdraw the mirrored calendar event so attendees' calendars clear too.
+    queueCallCalendarPush(call.id, context);
+
+    // Trigger buffer replenishment for recurring series
+    if (call.recurringSeriesId) {
+      try {
+        await this.replenishInstanceBuffer(call.recurringSeriesId);
+        logger.info(`Buffer replenished for series ${call.recurringSeriesId} after instance cancellation`);
+      } catch (err) {
+        logger.error(`Failed to replenish buffer for series ${call.recurringSeriesId}:`, err);
+      }
+
+      // Transfer the Bull job chain to the next instance.
+      // Instances beyond the first are created without Bull jobs (scheduleJobs=false),
+      // relying on the previous instance's auto-end job to call scheduleJobsForNextInstance.
+      // When that previous instance is cancelled instead of auto-ended, the chain is broken
+      // and the next instance never gets its auto-end job — leaving it stuck in SCHEDULED.
+      if (call.endsAt) {
+        try {
+          await this.scheduleJobsForNextInstance(call.recurringSeriesId, call.endsAt);
+          logger.info(`Bull jobs transferred to next instance in series ${call.recurringSeriesId}`);
+        } catch (err) {
+          logger.error(`Failed to schedule jobs for next instance in series ${call.recurringSeriesId}:`, err);
+        }
+      }
+    }
   }
 
   /**
