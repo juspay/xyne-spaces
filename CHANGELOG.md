@@ -1,3 +1,16 @@
+## [1.402.0](https://github.com/juspay/xyne-spaces/compare/v1.401.1...v1.402.0) (2026-09-25)
+
+
+### Features
+
+* dedup Radar creates with Jev, tidy the table view and count tabs under their filters ([#2208](https://github.com/juspay/xyne-spaces/issues/2208)) ([afaae56](https://github.com/juspay/xyne-spaces/commit/afaae56d935639c696a1b36d7a2467d66d78899b))
+* Recording Access Levels ([#1921](https://github.com/juspay/xyne-spaces/issues/1921)) ([e06f8b0](https://github.com/juspay/xyne-spaces/commit/e06f8b043a85060ebccdf3376206d887a15d3b31))
+
+
+### Bug Fixes
+
+* logs in app based inbound ([#2321](https://github.com/juspay/xyne-spaces/issues/2321)) ([acc498e](https://github.com/juspay/xyne-spaces/commit/acc498e11d1e885456a147a064427aba7e8dafe7))
+
 ## [1.401.1](https://github.com/juspay/xyne-spaces/compare/v1.401.0...v1.401.1) (2026-09-25)
 
 
