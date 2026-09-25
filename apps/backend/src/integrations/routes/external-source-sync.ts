@@ -20,8 +20,6 @@ import { config as appConfig } from '@/config/env';
 import { db } from '@/database/client';
 import { runAsServiceActor } from '@/database/tenant/context';
 import { ChannelEmailAliasService } from '@/services/channelEmailAliasService';
-import { decrypt } from '@/services/encryptionService';
-import { metaGraphClient } from '../adapters/social-media/instagram/metaGraphClient';
 
 const router = Router();
 const channelEmailAliasService = new ChannelEmailAliasService();

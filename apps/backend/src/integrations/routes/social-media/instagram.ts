@@ -15,7 +15,7 @@ import { decrypt, encrypt } from '@/services/encryptionService';
 import { getBackendUrl, getFrontendUrl } from '@/utils/publicUrls';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
-import { buildSupportPath } from '../urlHelpers';
+import { buildSupportPath, postOAuthRedirect } from '../urlHelpers';
 import { ExternalSourcePlatform } from '../../core/types';
 import { metaGraphClient } from '../../adapters/social-media/instagram/metaGraphClient';
 import { instagramOAuthStateService } from '../../adapters/social-media/instagram/oauthStateService';
