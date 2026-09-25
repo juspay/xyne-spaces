@@ -10,6 +10,33 @@ import log from 'electron-log/main';
 import { Logger, errorLogger } from './logger/Logger';
 import ElectronEvent from './logger/electron-events';
 
+// Reasons that indicate a real crash worth an automatic reload attempt.
+// 'clean-exit' and 'killed' cover normal teardown (e.g. app quit, or Chromium
+// tearing down an on-demand utility process like video capture) and should
+// not trigger a reload.
+const RECOVERABLE_RENDERER_REASONS = new Set<string>([
+  'crashed',
+  'abnormal-exit',
+  'oom',
+  'launch-failed',
+  'integrity-failure',
+]);
+
+const MAX_RENDERER_RELOAD_ATTEMPTS = 3;
+const rendererReloadAttempts = new Map<number, number>();
+
+// child-process-gone fires for on-demand utility processes (e.g. the video
+// capture service) tearing down normally, not just for real crashes. Only
+// escalate to an error log for reasons that indicate an actual problem so
+// routine camera/screen-share lifecycle churn doesn't flood error logs.
+const CHILD_PROCESS_ERROR_REASONS = new Set<string>([
+  'crashed',
+  'abnormal-exit',
+  'oom',
+  'launch-failed',
+  'integrity-failure',
+]);
+
 /**
  * Setup all global error handlers
  */
@@ -75,6 +102,7 @@ function setupRendererErrorHandlers(): void {
   app.on('render-process-gone', (event, webContents, details) => {
     const window = BrowserWindow.fromWebContents(webContents);
     const windowTitle = window?.getTitle() || 'Unknown Window';
+    const windowId = window?.id;
 
     Logger.error(ElectronEvent.UNCAUGHT_EXCEPTION, {
       source: 'renderer_process',
@@ -82,15 +110,39 @@ function setupRendererErrorHandlers(): void {
       reason: details.reason,
       exit_code: details.exitCode,
       window_title: windowTitle,
-      window_id: window?.id,
+      window_id: windowId,
     }, 'ErrorHandler');
 
     Logger.flushLogs();
+
+    if (!window || window.isDestroyed() || windowId === undefined) {
+      return;
+    }
+
+    if (!RECOVERABLE_RENDERER_REASONS.has(details.reason)) {
+      return;
+    }
+
+    const attempts = rendererReloadAttempts.get(windowId) ?? 0;
+    if (attempts >= MAX_RENDERER_RELOAD_ATTEMPTS) {
+      log.error(`[ErrorHandler] Renderer for window ${windowId} crashed ${attempts} times, giving up on auto-reload`);
+      return;
+    }
+
+    rendererReloadAttempts.set(windowId, attempts + 1);
+    log.warn(`[ErrorHandler] Reloading crashed renderer for window ${windowId} (attempt ${attempts + 1}/${MAX_RENDERER_RELOAD_ATTEMPTS}, reason: ${details.reason})`);
+    window.webContents.reload();
   });
 
   // Monitor new windows as they're created
   app.on('browser-window-created', (_event, window) => {
-    
+
+    // A successful load means the renderer recovered; reset its crash count
+    // so a later, unrelated crash still gets the full retry budget.
+    window.webContents.on('did-finish-load', () => {
+      rendererReloadAttempts.delete(window.id);
+    });
+
     // Handle unresponsive renderer
     window.webContents.on('unresponsive', () => {
       Logger.warn(ElectronEvent.UNCAUGHT_EXCEPTION, {
@@ -110,7 +162,7 @@ function setupRendererErrorHandlers(): void {
 function setupChildProcessHandlers(): void {
   // Handle child process crashes (utility processes, GPU, etc.)
   app.on('child-process-gone', (_event, details) => {
-    Logger.error(ElectronEvent.UNCAUGHT_EXCEPTION, {
+    const logPayload = {
       source: 'child_process',
       origin: 'child_process_gone',
       process_type: details.type,
@@ -118,8 +170,15 @@ function setupChildProcessHandlers(): void {
       exit_code: details.exitCode,
       service_name: details.serviceName,
       process_name: details.name,
-    }, 'ErrorHandler');
-    
-    Logger.flushLogs();
+    };
+
+    if (CHILD_PROCESS_ERROR_REASONS.has(details.reason)) {
+      Logger.error(ElectronEvent.UNCAUGHT_EXCEPTION, logPayload, 'ErrorHandler');
+      Logger.flushLogs();
+    } else {
+      // Routine teardown (e.g. 'clean-exit', or 'killed' when Chromium tears
+      // down an on-demand utility process like video capture) - not an error.
+      Logger.info(ElectronEvent.UNCAUGHT_EXCEPTION, logPayload, 'ErrorHandler');
+    }
   });
 }

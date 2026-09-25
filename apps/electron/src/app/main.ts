@@ -103,28 +103,8 @@ app.on('before-quit', async () => {
 
 
 
-function menuItemToTemplate(item: MenuItem): MenuItemConstructorOptions {
-  return {
-    label: item.label,
-    role: item.role || undefined,
-    type: item.type,
-    accelerator: item.accelerator || undefined,
-    checked: item.checked,
-    enabled: item.enabled,
-    visible: item.visible,
-    submenu: item.submenu ? item.submenu.items.map(menuItemToTemplate) : undefined,
-    click: item.click as MenuItemConstructorOptions['click'],
-    id: item.id,
-  };
-}
-
-function setupApplicationMenu(): void {
-  const existingMenu = Menu.getApplicationMenu();
-  const template: MenuItemConstructorOptions[] = existingMenu
-    ? existingMenu.items.map(menuItemToTemplate)
-    : [];
-
-  template.push({
+function buildBetaMenuItem(): MenuItem {
+  return new MenuItem({
     label: 'Beta',
     submenu: [
       {
@@ -148,9 +128,24 @@ function setupApplicationMenu(): void {
       },
     ],
   });
+}
 
-  const newMenu = Menu.buildFromTemplate(template);
-  Menu.setApplicationMenu(newMenu);
+function setupApplicationMenu(): void {
+  // Append to Electron's existing default menu instead of rebuilding it from
+  // a template. Copying `role`-derived `click` handlers off built MenuItems
+  // into a fresh Menu.buildFromTemplate() call detaches Electron's internal
+  // role dispatcher from its original context, which throws
+  // "e.getOwnerBrowserWindow is not a function" the next time a role item
+  // (e.g. macOS Window menu's zoom/front) is clicked and crashes the main
+  // process.
+  const existingMenu = Menu.getApplicationMenu();
+
+  if (existingMenu) {
+    existingMenu.append(buildBetaMenuItem());
+    Menu.setApplicationMenu(existingMenu);
+  } else {
+    Menu.setApplicationMenu(Menu.buildFromTemplate([buildBetaMenuItem()]));
+  }
 }
 
 async function initializeApp(): Promise<void> {
