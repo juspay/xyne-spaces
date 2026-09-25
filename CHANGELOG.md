@@ -1,3 +1,10 @@
+## [1.396.0](https://github.com/juspay/xyne-spaces/compare/v1.395.2...v1.396.0) (2026-09-25)
+
+
+### Features
+
+* audit log framework ([#2282](https://github.com/juspay/xyne-spaces/issues/2282)) ([b928491](https://github.com/juspay/xyne-spaces/commit/b928491f184d485ad106d2d2e91feb9b97ba6914))
+
 ## [1.395.2](https://github.com/juspay/xyne-spaces/compare/v1.395.1...v1.395.2) (2026-09-25)
 
 
