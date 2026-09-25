@@ -1,12 +1,13 @@
 import { DatabaseClient } from '@/database/client';
 import { ReleaseChangeType, ReleaseEvent, Prisma, RCA, Impact, COE } from '@prisma/client';
-import { FormContextType, FormEntityType, ReleaseEventType } from '@xyne/shared';
+import { FormContextType, FormEntityType } from '@xyne/shared';
 import { FormsRepository } from './formsRepository';
 import { logger } from '@/utils/logger';
 import type { ReleaseEventContext } from '@/services/release/core/types';
+import { saveReleaseFormValuesTx } from '@/bypassAcl/transactions/releaseRepository';
 
-const prisma = DatabaseClient.getInstance();
-const formsRepository = new FormsRepository();
+export const prisma = DatabaseClient.getInstance();
+export const formsRepository = new FormsRepository();
 
 export type RCAWithRelations = RCA & {
 	impacts: Impact[];
@@ -211,24 +212,7 @@ export class ReleaseRepository {
 			// Atomic: the form values and their FORM_SAVED audit event must commit
 			// together. A bare Promise.all lets one write commit while the other
 			// fails, leaving form_entity_values and the event out of sync.
-			await prisma.$transaction(async tx => {
-				await formsRepository.createManyFormEntityValues(formEntityValuesData, tx);
-				await this.createReleaseEvent(
-					{
-						releaseId: releaseContext.releaseId,
-						applicationReleaseId: releaseContext.applicationReleaseId ?? null,
-						eventType: ReleaseEventType.SYSTEM,
-						eventName: 'FORM_SAVED',
-						message: message ?? `Saved form values for ${formEntityValuesData.length} fields`,
-						userId: releaseContext.userId,
-						userName: releaseContext.userName,
-						channelId: releaseContext.channelId,
-						conversationId: releaseContext.conversationId,
-						payload: (payload ?? { formValues }) as Prisma.InputJsonValue,
-					},
-					tx,
-				);
-			});
+			await saveReleaseFormValuesTx(formEntityValuesData, this, releaseContext, message, payload, formValues);
 
 			logger.info(
 				`[ReleaseRepository] Saved ${formEntityValuesData.length} form values for release change ID ${releaseChangeTypeId} (${formEntity})`,
@@ -279,3 +263,4 @@ export class ReleaseRepository {
 		return result;
 	}
 }
+

@@ -5,8 +5,6 @@ import {
   ChannelVisibility,
   FLOW_STAGE_NAMES,
   FlowPlanModel,
-  MessageType,
-  TicketPriority,
   TicketStatusV2,
   deserializeFlowPlan,
   flowDecisionOutcomeKey,
@@ -22,7 +20,6 @@ import { createFlowSubTicketMappings } from '@/services/subTicketService';
 import { TicketRepository } from '@/database/repositories/ticketRepository';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service';
 import { logger } from '@/utils/logger';
-import { TicketIdService } from '@/services/ticketIdService';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { messageMetadataService } from '@/services/messageMetadataService';
 import { AppError } from '@/middleware/errorHandler';
@@ -30,7 +27,7 @@ import {
   ensureFlowStageTransition,
   findBackloggedCascadeTicketId,
 } from '@/services/flowStageTransitionRecovery';
-import { lockTicketStatusV2 } from '@/bypassAcl/rowLockServices';
+import { createFlowStepTicketTx } from '@/bypassAcl/transactions/flowCascadeService';
 
 export interface FlowTicketMetadata {
   planNodeId?: string;
@@ -40,7 +37,7 @@ export interface FlowTicketMetadata {
   decisionOutcomes?: Record<string, FlowDecisionOutcome>;
 }
 
-const ticketRepository = new TicketRepository();
+export const ticketRepository = new TicketRepository();
 const FLOW_BACKLOGGABLE_STATUSES = [
   TicketStatusV2.TODO,
   TicketStatusV2.STARTED,
@@ -901,95 +898,7 @@ async function createFlowStepTicket(params: {
   };
 
   try {
-    const ticket = await db.$transaction(async (tx) => {
-      if (requireActiveRoot) {
-        const lockedRoot = await lockTicketStatusV2(tx, rootTicketId);
-        if (lockedRoot?.statusV2 !== TicketStatusV2.STARTED) {
-          throw new AppError('Only an active Flow run can move a group to backlog', 409);
-        }
-      }
-      const conversationId = uuidv5(
-        `flow-conversation:${rootTicketId}:${node.id}`,
-        '98175b0b-310d-50de-852f-0f6df9be4c30'
-      );
-      const initialMessageId = uuidv5(
-        `flow-message:${rootTicketId}:${node.id}`,
-        '98175b0b-310d-50de-852f-0f6df9be4c30'
-      );
-      await tx.conversation.create({
-        data: {
-          conversationId,
-          workspaceId: rootTicket.workspaceId,
-          channelId: rootTicket.channelId,
-          createdBy: actorUserId,
-          initialMessageId,
-          pinned: false,
-          doNotPostToChannel: false,
-        },
-      });
-      const xyneId = await TicketIdService.generateTicketId(tx, rootTicket.projectId);
-      const created = await ticketRepository.createTicket(
-        {
-          id: deterministicTicketId,
-          title: node.title,
-          description: node.description || node.title,
-          createdBy: actorUserId,
-          updatedBy: actorUserId,
-          conversationId,
-          channelId: rootTicket.channelId,
-          projectId: rootTicket.projectId,
-          workspaceId: rootTicket.workspaceId,
-          boardId: rootTicket.boardId,
-          statusV2: TicketStatusV2.TODO,
-          stageName: FLOW_STAGE_NAMES.TODO,
-          priority: TicketPriority.LOW,
-          xyneId,
-          ...(node.assignedTo && { assignedTo: node.assignedTo }),
-          rootId: rootTicketId,
-          metadata: { flow: { planNodeId: node.id, rootTicketId, nodeSnapshot } },
-        },
-        tx
-      );
-      await tx.message.create({
-        data: {
-          messageId: initialMessageId,
-          conversationId,
-          workspaceId: rootTicket.workspaceId,
-          senderId: actorUserId,
-          content: `Flow step created: ${node.title}`,
-          msgType: MessageType.SYSTEM,
-          hasAttachment: false,
-          edited: false,
-          isDeleted: false,
-          isSent: true,
-          showInChannel: true,
-          createdAt: new Date(),
-          metadata: { ticketId: created.id },
-        },
-      });
-      await tx.conversation.update({
-        where: { conversationId },
-        data: { ticketId: created.id },
-      });
-      await tx.conversationParticipant.upsert({
-        where: { conversationId_userId: { conversationId, userId: actorUserId } },
-        create: {
-          id: uuidv5(
-            `flow-participant:${conversationId}:${actorUserId}`,
-            '98175b0b-310d-50de-852f-0f6df9be4c30'
-          ),
-          conversationId,
-          workspaceId: rootTicket.workspaceId,
-          userId: actorUserId,
-          participationType: 'MENTIONED',
-          isSubscribed: true,
-          joinedAt: new Date(),
-          channelId: rootTicket.channelId,
-        },
-        update: { participationType: 'MENTIONED', isSubscribed: true },
-      });
-      return created;
-    });
+    const ticket = await createFlowStepTicketTx(requireActiveRoot, rootTicketId, node, rootTicket, actorUserId, deterministicTicketId, nodeSnapshot);
     await messageMetadataService.syncInitialMessageMd(ticket.conversationId);
     await syncConversationTicketMdFromPrismaTicket(db, ticket);
     return { id: ticket.id, xyneId: ticket.xyneId };

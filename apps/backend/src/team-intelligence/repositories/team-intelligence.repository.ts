@@ -8,6 +8,7 @@ import {
 } from '@prisma/client';
 import { db } from '@/database/client';
 import { TeamIntelligenceBatchStatus, TeamIntelligenceUserIngestionStatus } from '@xyne/shared';
+import { createBatchWithUsersTx } from '@/bypassAcl/transactions/teamIntelligenceRepository';
 
 export interface CreateTeamIntelligenceBatchData {
   orgId?: string | null;
@@ -96,8 +97,8 @@ export interface TeamIntelligenceOrgProgress {
   failedTeams: number;
 }
 
-class TeamIntelligenceRepository {
-  private prisma: PrismaClient;
+export class TeamIntelligenceRepository {
+  prisma: PrismaClient;
 
   constructor() {
     this.prisma = db;
@@ -130,28 +131,7 @@ class TeamIntelligenceRepository {
     batchData: CreateTeamIntelligenceBatchData,
     usersData: CreateTeamIntelligenceUserData[]
   ): Promise<TeamIntelligenceBatchWithUsers> {
-    return await this.prisma.$transaction(async (transaction) => {
-      const batch = await transaction.teamIntelligenceIngestionBatchV2.create({
-        data: {
-          ...batchData,
-          requestPayload: batchData.requestPayload ?? Prisma.JsonNull,
-        },
-      });
-
-      const users = await Promise.all(
-        usersData.map((userData) =>
-          transaction.teamIntelligenceUserIngestionV2.create({
-            data: {
-              ...userData,
-              aiUsage: userData.aiUsage ?? Prisma.JsonNull,
-              batchId: batch.id,
-            },
-          })
-        )
-      );
-
-      return { batch, users };
-    });
+    return await createBatchWithUsersTx(this, batchData, usersData);
   }
 
   async updateBatchStatus(
@@ -652,3 +632,4 @@ class TeamIntelligenceRepository {
 }
 
 export const teamIntelligenceRepository = new TeamIntelligenceRepository();
+

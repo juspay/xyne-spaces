@@ -1,10 +1,11 @@
+import { createRecurringSeriesTx } from '@/bypassAcl/transactions/scheduleCallController';
 import { Request, Response } from 'express';
 import { repositories } from '@/database/repositories';
 import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { v4 as uuidv4 } from 'uuid';
 import { type Prisma } from '@prisma/client';
-import { CallOrigin, CallStatus, CallType, RecurringCallSeriesStatus, CalendarVisibility, ChannelScopeType } from '@xyne/shared';
+import { CallOrigin, CallStatus, RecurringCallSeriesStatus, CalendarVisibility, ChannelScopeType } from '@xyne/shared';
 import { ZodError } from 'zod';
 import { scheduledCallNotificationService } from '@/services/scheduledCallNotificationService';
 import { ScheduleCallSchema, RecurringScheduleCallSchema, UpdateScheduleCallSchema, UpdateRecurringSeriesSchema, CancelScheduledCallSchema, CancelRecurringSeriesSchema } from '@/validators/callValidator';
@@ -21,9 +22,11 @@ import { CallVespaFeedSource, queueCallVespaFeed } from '@/services/callVespaQue
 import { queueCallCalendarPush, queueCallCalendarPushMany } from '@/queues/callCalendarPushQueue';
 import { buildCallInviteUrl } from '@/utils/urlUtils';
 import { messageMetadataService } from '@/services/messageMetadataService';
+import { scheduleCallTx } from '@/bypassAcl/transactions/scheduleCallController';
+import { updateRecurringSeriesTx } from '@/bypassAcl/transactions/scheduleCallController';
 
 // Number of milliseconds to buffer recurring call instances ahead of time (60 days)
-const INSTANCE_BUFFER_DAYS = 60 * 24 * 60 * 60 * 1000;
+export const INSTANCE_BUFFER_DAYS = 60 * 24 * 60 * 60 * 1000;
 
 type ExternalInvitationDelivery = 'standalone' | 'conversation_reply';
 
@@ -247,57 +250,7 @@ export class ScheduleCallController {
       // Create series and pre-create all instances for the next 60 days
       // Only the first upcoming instance notifies participants (to avoid spam)
       let createdCallIds: string[] = [];
-      await dbClient.$transaction(async (tx) => {
-        const series = await repositories.recurringCallSeries.create({
-          id: seriesId,
-          title,
-          description,
-          workspaceId: req.user!.workspaceId!,
-          organizerId: userId,
-          channelId: finalChannelId!,
-          recurrenceRule,
-          timezone,
-          startTime,
-          endTime,
-          startsOn: new Date(startsOn),
-          endsOn: resolvedEndsOn,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-          callUpdatesChannel,
-        }, tx);
-
-        await repositories.recurringCallParticipants.replaceInternalParticipants({
-          recurringSeriesId: series.id,
-          organizerId: userId,
-          userIds: recurringParticipantUserIds,
-          workspaceId: req.user!.workspaceId!,
-          tx,
-        });
-
-        if (normalizedExternalInvitees.length > 0) {
-          await repositories.recurringCallParticipants.replaceExternalInvitees({
-            recurringSeriesId: series.id,
-            organizerId: userId,
-            externalInvitees: normalizedExternalInvitees,
-            workspaceId: req.user!.workspaceId!,
-            tx,
-          });
-        }
-
-        // Pre-create all instances for the next buffer period.
-        // RecurringCallParticipant rows are the source for internal participants and external invitees.
-        const fromDate = new Date(startsOn);
-        const toDate = new Date(Date.now() + INSTANCE_BUFFER_DAYS);
-        const finalToDate = resolvedEndsOn && resolvedEndsOn < toDate ? resolvedEndsOn : toDate;
-
-        createdCallIds = await recurringCallService.createInstancesForDateRange(
-          series,
-          fromDate,
-          finalToDate,
-          tx,
-          callUpdatesChannel,
-        );
-      });
+      ({ createdCallIds } = await createRecurringSeriesTx(dbClient, seriesId, title, description, req, userId, finalChannelId, recurrenceRule, timezone, startTime, endTime, startsOn, resolvedEndsOn, callUpdatesChannel, recurringParticipantUserIds, normalizedExternalInvitees, createdCallIds));
 
       logger.info(
         `Recurring series ${seriesId} created by ${userId} — ${createdCallIds.length} instances pre-created`,
@@ -401,44 +354,7 @@ export class ScheduleCallController {
 
       const db = DatabaseClient.getInstance();
       const resolvedCallOrigin = conversationId ? CallOrigin.CONVERSATION : CallOrigin.CHANNEL;
-      let pillConversationId: string | undefined;
-
-      const { participantUserIds } = await db.$transaction(async (tx) => {
-        const result = await repositories.calls.createCallWithParticipants({
-          callId,
-          externalId,
-          title,
-          createdByUserId: userId,
-          channelId: finalChannelId!,
-          callType: CallType.AUDIO,
-          callOrigin: resolvedCallOrigin,
-          roomLink,
-          timezone: 'UTC',
-          isRecurring: false,
-          startsAt: new Date(startsAt),
-          endsAt: new Date(endsAt),
-          ...(targetUserIds?.length && { targetUserIds }),
-          ...(conversationId && { metadata: { conversationId } }),
-          callUpdatesChannel,
-          ...(normalizedExternalInvitees.length && { externalInvitees: normalizedExternalInvitees }),
-        }, tx);
-
-        // Same transaction as the call, so a pill can never outlive a failed insert.
-        const workspaceId = await repositories.channels.getWorkspaceId(finalChannelId!);
-        const pill = await repositories.calls.createScheduledCallPill(tx, {
-          callId,
-          callExternalId: externalId,
-          channelId: finalChannelId!,
-          workspaceId,
-          senderId: userId,
-          senderName: req.user?.displayName || req.user?.name || 'Someone',
-          ...(conversationId && { threadConversationId: conversationId }),
-        });
-        // Only a channel-root pill is its conversation's initialMessage.
-        if (pill && !conversationId) pillConversationId = pill.conversationId;
-
-        return result;
-      });
+      const { participantUserIds, pillConversationId } = await scheduleCallTx(db, callId, externalId, title, userId, finalChannelId, conversationId, roomLink, startsAt, endsAt, targetUserIds, callUpdatesChannel, normalizedExternalInvitees, resolvedCallOrigin, req);
 
       // Eager, so initial_message_md is populated before the response returns.
       if (pillConversationId) {
@@ -968,37 +884,7 @@ export class ScheduleCallController {
 
       logger.info(`[updateRecurringSeries] seriesUpdate payload=${JSON.stringify(seriesUpdate)}`);
 
-      const updatedSeries = await db.$transaction(async (tx) => {
-        const seriesAfterUpdate = await repositories.recurringCallSeries.update(
-          seriesId,
-          seriesUpdate,
-          tx,
-        );
-
-        if (recurringParticipantUserIds !== undefined) {
-          await repositories.recurringCallParticipants.replaceInternalParticipants({
-            recurringSeriesId: seriesId,
-            organizerId: series.organizerId,
-            // Credit the editor on rows they add, so they can remove them later.
-            invitedByUserId: userId,
-            userIds: recurringParticipantUserIds,
-            workspaceId: req.user!.workspaceId!,
-            tx,
-          });
-        }
-
-        if (normalizedExternalInvitees !== undefined) {
-          await repositories.recurringCallParticipants.replaceExternalInvitees({
-            recurringSeriesId: seriesId,
-            organizerId: series.organizerId,
-            externalInvitees: normalizedExternalInvitees,
-            workspaceId: req.user!.workspaceId!,
-            tx,
-          });
-        }
-
-        return seriesAfterUpdate;
-      });
+      const updatedSeries = await updateRecurringSeriesTx(db, seriesId, seriesUpdate, recurringParticipantUserIds, series, userId, req, normalizedExternalInvitees);
 
       logger.info(`[updateRecurringSeries] source transaction committed | newChannelId=${updatedSeries.channelId}`);
 

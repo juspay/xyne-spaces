@@ -3,7 +3,7 @@ import { DatabaseClient } from '@/database/client';
 import { QueryOptions, PaginationOptions, PaginatedResult } from '@/types/database';
 
 export abstract class BaseRepository<T, CreateInput, UpdateInput> {
-  protected db: PrismaClient;
+  db: PrismaClient;
   protected modelName: string;
 
   constructor(modelName: string) {

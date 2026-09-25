@@ -1,15 +1,13 @@
 import { DatabaseClient } from '@/database/client';
 import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import { logger } from '@framework';
-import { TicketIdService } from '@/services/ticketIdService';
 
-const prisma = DatabaseClient.getInstance();
+export const prisma = DatabaseClient.getInstance();
 import { Application } from '@prisma/client';
-import { ActivityType, TicketPriority } from '@xyne/shared';
-import { dualWriteTicketTag } from '@/services/ticketTagDualWriteService';
-import { advisoryXactLock } from '@/bypassAcl/lockServices';
+import { createApplicationSubTicketsTx } from '@/bypassAcl/transactions/applicationRepository';
+import { createApplicationSubTicketsLockedTx } from '@/bypassAcl/transactions/applicationRepository';
 
-type CreateApplicationSubTicketsOpts = {
+export type CreateApplicationSubTicketsOpts = {
   parentTicketId: string;
   parentTitle: string;
   projectId: string;
@@ -134,18 +132,10 @@ export class ApplicationRepository {
   async createApplicationSubTickets(
     opts: CreateApplicationSubTicketsOpts,
   ): Promise<Map<string, { subTicketId: string; mappedTicketId: string; xyneId: string }>> {
-    return prisma.$transaction(
-      async (tx) => {
-        await advisoryXactLock(tx, ['Ticket'],
-          'release sub-tickets: serialize sub-ticket creation for one parent ticket',
-          'release-subtickets:' + opts.parentTicketId);
-        return this.createApplicationSubTicketsLocked(opts);
-      },
-      { maxWait: 10_000, timeout: 60_000 },
-    );
+    return createApplicationSubTicketsTx(opts, this);
   }
 
-  private async createApplicationSubTicketsLocked(
+  async createApplicationSubTicketsLocked(
     opts: CreateApplicationSubTicketsOpts,
   ): Promise<Map<string, { subTicketId: string; mappedTicketId: string; xyneId: string }>> {
     const {
@@ -191,90 +181,7 @@ export class ApplicationRepository {
       }
 
       try {
-        const txResult = await prisma.$transaction(async (tx) => {
-          const xyneId = await TicketIdService.generateTicketId(tx, projectId);
-
-          const prLinks = prLinksByApplication.get(application.id) || [];
-          const prLinksSection = prLinks.length > 0
-            ? `\n\nPull Requests:\n${prLinks.map(link => `- ${link}`).join('\n')}`
-            : '';
-
-          // Pick the application's release board's first stage (lowest
-          // sequenceNumber) so the per-app ticket lands on the board's
-          // configured first column instead of a hardcoded 'Release' label
-          // that may not exist on the board.
-          const firstStage = await tx.stage.findFirst({
-            where: { boardId: application.boardId! },
-            orderBy: { sequenceNumber: 'asc' },
-            select: { name: true, defaultTicketStatusV2: true },
-          });
-
-          const ticket = await tx.ticket.create({
-            data: {
-              title: `${parentTitle} - ${application.name}`,
-              description: `Release ticket for ${application.name} application.${prLinksSection}`,
-              createdBy,
-              updatedBy: createdBy,
-              conversationId,
-              channelId,
-              xyneId,
-              projectId,
-              workspaceId: ticketWorkspaceId,
-              boardId: application.boardId,
-              statusV2: firstStage?.defaultTicketStatusV2 ?? 'TODO',
-              priority: TicketPriority.LOW,
-              stageName: firstStage?.name ?? 'Backlog',
-              lastEmailAt: new Date(),
-            },
-          });
-
-          if (isHotFix) {
-            await tx.ticketTag.create({
-              data: {
-                ticketId: ticket.id,
-                name: 'HotFix',
-                workspaceId: ticketWorkspaceId,
-              }
-            })
-            await dualWriteTicketTag(ticket.id, 'HotFix', tx);
-          }
-
-          const subTicket = await tx.subTicket.create({
-            data: {
-              title: `${parentTitle} - ${application.name}`,
-              description: `Release sub-ticket for ${application.name} application.${prLinksSection}`,
-              createdBy,
-              updatedBy: createdBy,
-              conversationId,
-              mappedTicketId: ticket.id,
-              assignedTo: null,
-              workspaceId: ticketWorkspaceId,
-            },
-          });
-
-          await tx.ticketSubTicketMapping.create({
-            data: { ticketId: parentTicketId, subTicketId: subTicket.id, workspaceId: ticketWorkspaceId },
-          });
-
-          await tx.ticketActivity.create({
-            data: {
-              ticketId: parentTicketId,
-              workspaceId: ticketWorkspaceId,
-              updatedBy: createdBy,
-              activityType: ActivityType.SUBTICKET_CREATED,
-              value: {
-                subTicketId: subTicket.id,
-                subTicketTitle: subTicket.title,
-                applicationName: application.name,
-                applicationId: application.id,
-                ticketId: ticket.id,
-                ticketXyneId: xyneId,
-              },
-            },
-          });
-
-          return { subTicketId: subTicket.id, mappedTicketId: ticket.id, xyneId };
-        });
+        const txResult = await createApplicationSubTicketsLockedTx(projectId, prLinksByApplication, application, parentTitle, createdBy, conversationId, channelId, ticketWorkspaceId, isHotFix, parentTicketId);
 
         result.set(application.id, txResult);
         logger.info(`Created sub-ticket ${txResult.subTicketId}, ticket ${txResult.xyneId} (${txResult.mappedTicketId}) for application ${application.name}`);
@@ -320,3 +227,5 @@ export class ApplicationRepository {
     return result;
   }
 }
+
+

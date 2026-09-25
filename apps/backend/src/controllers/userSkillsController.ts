@@ -2,8 +2,9 @@ import { Request, Response } from 'express';
 import { db } from '../database/client';
 import { logger } from '@/utils/logger';
 import { getSystemSkills } from '../agents/xyne-ai/langfuse/system-skills';
+import { createSkillTx } from '@/bypassAcl/transactions/userSkillsController';
 
-const MAX_SKILLS_PER_USER = 20;
+export const MAX_SKILLS_PER_USER = 20;
 
 /**
  * Get all skills for the authenticated user
@@ -73,28 +74,7 @@ export async function createSkill(req: Request, res: Response) {
     }
 
     // Check maximum skill count and create skill atomically
-    const skill = await db.$transaction(async (tx) => {
-      const skillCount = await tx.userSkill.count({
-        where: { userId },
-      });
-
-      if (skillCount >= MAX_SKILLS_PER_USER) {
-        const limitError = new Error('MAX_SKILLS_REACHED');
-        (limitError as any).code = 'MAX_SKILLS_REACHED';
-        throw limitError;
-      }
-
-      return tx.userSkill.create({
-        data: {
-          userId,
-          name: trimmedName,
-          description: trimmedDescription,
-          instructions: trimmedInstructions,
-          enabled: true,
-          workspaceId,
-        },
-      });
-    });
+    const skill = await createSkillTx(userId, trimmedName, trimmedDescription, trimmedInstructions, workspaceId);
 
     logger.info(`[UserSkills] Created skill '${skill.name}' for user ${userId}`);
     return res.status(201).json({ skill });

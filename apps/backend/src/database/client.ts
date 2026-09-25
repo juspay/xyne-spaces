@@ -157,10 +157,6 @@ export class DatabaseClient {
     return DatabaseClient.isConnected;
   }
 
-  static async transaction<T>(callback: (tx: any) => Promise<T>): Promise<T> {
-    const client = DatabaseClient.getInstance();
-    return await client.$transaction(callback);
-  }
 }
 
 export const db = DatabaseClient.getInstance();

@@ -3,6 +3,9 @@ import { IngestionStatus, CollectionRole, AttachmentEntityType } from '@xyne/sha
 import { DatabaseClient } from '@/database/client';
 import { v4 as uuidv4 } from 'uuid';
 import { queryCollectionFolderTree } from '@/bypassAcl/collectionServices';
+import { updateCollectionTx } from '@/bypassAcl/transactions/collectionRepository';
+import { createItemVersionTx } from '@/bypassAcl/transactions/collectionRepository';
+import { restoreItemVersionTx } from '@/bypassAcl/transactions/collectionRepository';
 
 type WithAttachment = { attachment: MessageAttachment | null };
 
@@ -32,7 +35,7 @@ export type CollectionItemSummary = {
 
 
 export class CollectionRepository {
-    protected db: PrismaClient;
+    db: PrismaClient;
 
     constructor() {
         this.db = DatabaseClient.getInstance();
@@ -335,34 +338,7 @@ export class CollectionRepository {
         }
     ): Promise<Collection> {
         if (data.permissions) {
-            return await this.db.$transaction(async (tx) => {
-                if (data.name) {
-                    await tx.collection.update({ where: { id: collectionId }, data: { name: data.name } });
-                }
-                await tx.collectionPermission.deleteMany({ where: { collectionId } });
-                if (data.permissions && data.permissions.length > 0) {
-                    const now = new Date();
-                    const collection = await tx.collection.findUniqueOrThrow({
-                        where: { id: collectionId },
-                        select: { workspaceId: true },
-                    });
-                    await tx.collectionPermission.createMany({
-                        data: data.permissions.map(p => ({
-                            collectionId,
-                            workspaceId: collection.workspaceId,
-                            userId: p.userId,
-                            userGroupId: p.userGroupId,
-                            role: p.role,
-                            canShare: p.canShare || false,
-                            createdAt: now,
-                        })),
-                    });
-                }
-                return await tx.collection.findUniqueOrThrow({
-                    where: { id: collectionId },
-                    include: { permissions: true },
-                });
-            });
+            return await updateCollectionTx(this, data, collectionId);
         }
 
         return await this.db.collection.update({
@@ -508,61 +484,14 @@ export class CollectionRepository {
             select: { rootCollectionId: true, collectionId: true, fileId: true, ownerId: true, name: true, versionNumber: true },
         });
 
-        return await this.db.$transaction(async (tx) => {
-            await tx.collectionItem.update({
-                where: { id: data.currentItemId },
-                data: { isLatest: false },
-            });
-
-            const newItem = await tx.collectionItem.create({
-                data: {
-                    rootCollectionId: current.rootCollectionId,
-                    collectionId: current.collectionId,
-                    workspaceId: data.workspaceId,
-                    fileId: current.fileId,
-                    ownerId: current.ownerId,
-                    name: current.name,
-                    uploadedById: data.uploadedById,
-                    versionNumber: current.versionNumber + 1,
-                    isLatest: true,
-                    ingestionStatus: data.ingestionStatus,
-                    createdAt: new Date(),
-                },
-            });
-
-            await tx.messageAttachment.create({
-                data: {
-                    entityType: AttachmentEntityType.COLLECTION,
-                    entityId: newItem.id,
-                    workspaceId: data.workspaceId,
-                    storageProvider: 'GCS',
-                    originalFilename: current.name,
-                    mimetype: data.mimeType,
-                    size: Number(data.fileSize),
-                    url: data.storageKey,
-                    uploadedByUserId: data.uploadedById,
-                    createdBy: data.uploadedById,
-                },
-            });
-
-            return newItem;
-        });
+        return await createItemVersionTx(this, data, current);
     }
 
     /**
      * Restore a version: flip isLatest between current latest and target version
      */
     async restoreItemVersion(currentItemId: string, targetVersionId: string): Promise<CollectionItem> {
-        return await this.db.$transaction(async (tx) => {
-            await tx.collectionItem.update({
-                where: { id: currentItemId },
-                data: { isLatest: false },
-            });
-            return await tx.collectionItem.update({
-                where: { id: targetVersionId },
-                data: { isLatest: true },
-            });
-        });
+        return await restoreItemVersionTx(this, currentItemId, targetVersionId);
     }
 
     /**
@@ -586,3 +515,6 @@ export class CollectionRepository {
         return { ...version, attachment };
     }
 }
+
+
+

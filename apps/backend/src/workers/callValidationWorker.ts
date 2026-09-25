@@ -1,15 +1,14 @@
 import { logger } from '@/utils/logger';
-import { db } from '@/database/client';
 import { Call } from '@prisma/client';
 import { CallStatus, CallOrigin } from '@xyne/shared';
 import { livekitService } from '@/services/liveKitService';
 import { repositories } from '@/database/repositories';
-import { updateCallSystemMessageIfNeeded } from '@/zero/utils/systemMessagesUtils';
 import { recurringCallService } from '@/services/recurringCallService';
 import { callSideEffectService } from '@/services/callSideEffectService';
 import { noteTakerTranscriptService } from '@/services/noteTakerTranscriptService';
 import { logDetailedSummaryFailed } from '@/services/detailedSummaryFailureLog';
 import { userActivityStatusService } from '@/services/userActivityStatusService';
+import { validateCallTx } from '@/bypassAcl/transactions/callValidationWorker';
 
 const POLL_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
 
@@ -354,26 +353,7 @@ export class CallValidationWorker {
         const endedAt = new Date();
 
         // Use transaction to atomically update call and system message
-        await db.$transaction(async (tx) => {
-          // End the call
-          await repositories.calls.endCall(callId, endedAt, tx);
-
-          logger.info(
-            `[CallValidationWorker] [${externalId}] call_status_updated | from=${status}, to=ENDED, reason=${reason}`,
-          );
-
-          // Update system message if needed
-          const messageUpdated = await updateCallSystemMessageIfNeeded({
-            call,
-            callId: externalId,
-            endedAt,
-            tx,
-          });
-
-          if (messageUpdated) {
-            logger.info(`[CallValidationWorker] Updated system message for call ${externalId}`);
-          }
-        });
+        await validateCallTx(callId, endedAt, externalId, status, reason, call);
 
         logger.info('[CallValidationWorker] Transcript will be processed when user views the ended call message');
 
@@ -392,3 +372,4 @@ export class CallValidationWorker {
 }
 
 export const callValidationWorker = CallValidationWorker.getInstance();
+

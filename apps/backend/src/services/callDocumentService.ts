@@ -1,3 +1,5 @@
+import { createDetailedSummaryCanvasTx } from '@/bypassAcl/transactions/callDocumentService';
+import { createPRDCanvasTx } from '@/bypassAcl/transactions/callDocumentService';
 /**
  * Call Document Service - Generates documents from call transcripts
  * Handles both PRD (Product Requirements Documents) and Detailed Summaries
@@ -10,11 +12,11 @@ import { withWorkspaceScope } from '@/database/tenant/context';
 import { repositories } from '@/database/repositories';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import {
-  CallOrigin,
+  
   DEFAULT_SUMMARY_FIELDS,
   MessageType,
-  CanvasRole,
-  CanvasVisibility,
+  
+  
   SUMMARY_MAX_INPUT_CHARS,
 } from '@xyne/shared';
 import { logger } from '@/utils/logger';
@@ -82,7 +84,7 @@ interface CanvasSideEffectContext {
 
 import { executeStreamingLlmRequest, type SummaryModelType } from './callLlmRetry';
 import { initializeYSweetDoc, syncToYSweet } from '@/utils/ysweetUtils.js';
-import { lockMessageMetadata } from '@/bypassAcl/rowLockServices';
+import { updateCallMessageMetadataTx } from '@/bypassAcl/transactions/callDocumentService';
 
 export interface RecordingSummaryTemplateSelection<T extends SummaryTemplateCandidate = SummaryTemplate> {
   template: T | null;
@@ -150,7 +152,7 @@ function renderPromptTemplate(template: string, values: Record<string, string>):
 // frontend chip can open the transcript at that moment.
 const CITATION_TOKEN_RE = /\[clf-(\d+)\]/g;
 const MAX_CITATION_SNIPPET = 300;
-const INITIAL_DETAILED_SUMMARY_CANVAS_VERSION = 1;
+export const INITIAL_DETAILED_SUMMARY_CANVAS_VERSION = 1;
 
 export interface CitationSegment {
   n: number;
@@ -1371,72 +1373,6 @@ MANDATORY OUTPUT CONTRACT:
   }
 
   /**
-   * Grant the standard access policy for a canvas generated from a call.
-   */
-  private async createCallCanvasAccess(
-    tx: Prisma.TransactionClient,
-    params: {
-      canvasId: string;
-      workspaceId: string;
-      callId: string;
-      createdByUserId: string;
-      callCreatorUserId: string;
-      channelId: string | null;
-      now: Date;
-    },
-  ): Promise<string> {
-    const { canvasId, workspaceId, callId, createdByUserId, callCreatorUserId, channelId, now } = params;
-    const call = await tx.call.findUnique({
-      where: { externalId: callId },
-      select: { id: true, callOrigin: true },
-    });
-    const isChannelThreadCall = call?.callOrigin === CallOrigin.CONVERSATION && channelId !== null;
-
-    await tx.canvasParticipant.create({
-      data: {
-        id: uuidv4(), canvasId, workspaceId, userId: createdByUserId, role: CanvasRole.OWNER,
-        joinedAt: now, updatedAt: now,
-      },
-    });
-    await tx.canvasParticipant.create({
-      data: {
-        id: uuidv4(), canvasId, workspaceId, userId: callCreatorUserId, role: CanvasRole.OWNER,
-        joinedAt: now, updatedAt: now,
-      },
-    });
-
-    if (isChannelThreadCall && call) {
-      const callParticipants = await tx.callParticipant.findMany({
-        where: { callId: call.id, isExternal: false },
-        select: { userId: true },
-      });
-      const editorUserIds = [...new Set(callParticipants.map(({ userId }) => userId))]
-        .filter((userId) => userId !== createdByUserId && userId !== callCreatorUserId);
-      if (editorUserIds.length > 0) {
-        await tx.canvasParticipant.createMany({
-          data: editorUserIds.map((userId) => ({
-            id: uuidv4(), canvasId, workspaceId, userId, role: CanvasRole.EDITOR,
-            joinedAt: now, updatedAt: now,
-          })),
-        });
-      }
-    }
-
-    if (channelId) {
-      await tx.canvasParticipant.create({
-        data: {
-          id: uuidv4(), canvasId, workspaceId, channelId,
-          role: isChannelThreadCall ? CanvasRole.VIEWER : CanvasRole.EDITOR,
-          joinedAt: now, updatedAt: now,
-        },
-      });
-    }
-
-    if (isChannelThreadCall) return 'thread participants as editors and channel as viewer';
-    return channelId ? 'channel as editor' : 'private access';
-  }
-
-  /**
    * Create PRD Canvas in database
    */
   async createPRDCanvas(
@@ -1458,42 +1394,7 @@ MANDATORY OUTPUT CONTRACT:
       const content = formatPRDToBlockNote(prd, callId);
 
       let accessMode = 'private access';
-      await prisma.$transaction(async (tx) => {
-        // Keep PRD canvases private and grant the same explicit access as
-        // detailed-summary canvases generated from this call.
-        await tx.canvas.create({
-          data: {
-            id: canvasId,
-            title,
-            content: [],
-            channelId,
-            workspaceId,
-            createdBy: createdByUserId,
-            visibility: CanvasVisibility.PRIVATE,
-            isTemplate: false,
-            isCollaborative: true,
-            lastEditedBy: createdByUserId,
-            lastEditedAt: now,
-            createdAt: now,
-            updatedAt: now,
-            metadata: {
-              source: 'call_prd',
-              callId,
-              conversationId,
-              generatedAt: now.toISOString(),
-            },
-          },
-        });
-        accessMode = await this.createCallCanvasAccess(tx, {
-          canvasId,
-          workspaceId,
-          callId,
-          createdByUserId,
-          callCreatorUserId,
-          channelId,
-          now,
-        });
-      });
+      ({ accessMode } = await createPRDCanvasTx(prisma, canvasId, title, channelId, workspaceId, createdByUserId, now, callId, conversationId, accessMode, callCreatorUserId));
 
       // Initialize Y-Sweet for collaborative editing
       const ysweetInitialized = await initializeYSweetDoc(canvasId, content, createdByUserId);
@@ -1570,50 +1471,7 @@ MANDATORY OUTPUT CONTRACT:
       // otherwise deny the second insert since the requester isn't a
       // participant yet); regular canvas access after this stays ACL-gated.
       let accessMode = 'private access';
-      await prisma.$transaction(async (tx) => {
-        await tx.canvas.create({
-          data: {
-            id: canvasId,
-            title,
-            content: [],
-            channelId,
-            workspaceId,
-            createdBy: createdByUserId,
-            visibility: CanvasVisibility.PRIVATE,
-            isTemplate: false,
-            isCollaborative: true,
-            lastEditedBy: createdByUserId,
-            lastEditedAt: now,
-            createdAt: now,
-            updatedAt: now,
-            metadata: {
-              source: 'call_detailed_summary',
-              callId,
-              conversationId,
-              isAiGenerated: true,
-              generatedAt: now.toISOString(),
-              mentionedUserIds, // Store mentioned users for side effect handler
-              version: INITIAL_DETAILED_SUMMARY_CANVAS_VERSION,
-              // Recording summary LLM tier the client carried from its
-              // localStorage at recording start; read back on the headless
-              // call-end path (see noteTakerTranscriptService.getSummaryModelPreference).
-              ...(options.summaryModelPreference
-                ? { summaryModelPreference: options.summaryModelPreference }
-                : {}),
-            },
-          },
-        });
-
-        accessMode = await this.createCallCanvasAccess(tx, {
-          canvasId,
-          workspaceId,
-          callId,
-          createdByUserId,
-          callCreatorUserId,
-          channelId,
-          now,
-        });
-      });
+      ({ accessMode } = await createDetailedSummaryCanvasTx(prisma, canvasId, title, channelId, workspaceId, createdByUserId, now, callId, conversationId, mentionedUserIds, options, accessMode, callCreatorUserId));
 
       // Initialize Y-Sweet for collaborative editing
       const ysweetInitialized = await initializeYSweetDoc(canvasId, sanitizedContent as unknown as BlockNoteBlock[], createdByUserId);
@@ -2160,28 +2018,7 @@ A comprehensive detailed summary has been generated from this call.
       });
 
       if (callMessage) {
-        await prisma.$transaction(async (tx) => {
-          // Title generation and first-chunk Canvas publication can now update
-          // this message concurrently. Lock the row and merge from the latest
-          // metadata so neither write erases the other's key.
-          const lockedMessage = await lockMessageMetadata(tx, callMessage.messageId);
-          if (!lockedMessage) {
-            return;
-          }
-
-          // Set the canvas URL, or drop the key entirely when clearing (null).
-          const currentMetadata = (lockedMessage.metadata as Record<string, any>) || {};
-          const nextMetadata = { ...currentMetadata };
-          if (canvasUrl === null) {
-            delete nextMetadata[metadataKey];
-          } else {
-            nextMetadata[metadataKey] = canvasUrl;
-          }
-          await tx.message.update({
-            where: { messageId: callMessage.messageId },
-            data: { metadata: nextMetadata },
-          });
-        });
+        await updateCallMessageMetadataTx(prisma, callMessage, canvasUrl, metadataKey);
         logger.info(`[CallDocumentService] Updated call message ${callMessage.messageId} with ${metadataKey}`);
       } else {
         logger.warn(`[CallDocumentService] Call message not found for callId ${callId}`);

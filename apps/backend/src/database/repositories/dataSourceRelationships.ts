@@ -1,3 +1,4 @@
+import { replaceForDataSourceTx } from '@/bypassAcl/transactions/dataSourceRelationships';
 import { BaseRepository } from './base';
 import type {
   DataSourceRelationship,
@@ -36,15 +37,7 @@ export class DataSourceRelationshipRepository extends BaseRepository<
     dataSourceId: string,
     rows: CreateDataSourceRelationshipInput[],
   ): Promise<number> {
-    return this.db.$transaction(async (tx) => {
-      await tx.dataSourceRelationship.deleteMany({ where: { dataSourceId } });
-      if (rows.length === 0) return 0;
-      const result = await tx.dataSourceRelationship.createMany({
-        data: rows,
-        skipDuplicates: true,
-      });
-      return result.count;
-    });
+    return replaceForDataSourceTx(this, dataSourceId, rows);
   }
 
   async findById(id: string): Promise<DataSourceRelationship | null> {
@@ -81,3 +74,4 @@ export class DataSourceRelationshipRepository extends BaseRepository<
     return this.db.dataSourceRelationship.delete({ where: { id } });
   }
 }
+

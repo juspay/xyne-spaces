@@ -18,7 +18,7 @@ import { OrgRole,
   ProjectType,
   UserStatus,
   WorkspaceRole,
-  Status, ChannelRole, WorkspaceJoinRequestStatus } from '@xyne/shared';
+  ChannelRole, WorkspaceJoinRequestStatus } from '@xyne/shared';
 import type { WorkspaceJoinPolicy as WorkspaceJoinPolicyValue, WorkspaceType as WorkspaceTypeValue } from '@xyne/shared';
 import { aiProvisioningService } from '@/services/aiProvisioningService';
 import { isOrganizationPolicyError, organizationDomainService } from '@/services/organizationDomainService';
@@ -28,6 +28,7 @@ import { ensureUserInGeneralChannel as joinUserToGeneralChannel } from '@/utils/
 import { redisService } from '@/services/redisService';
 import { createId } from '@paralleldrive/cuid2';
 import { getEncryptionProvider } from '@/services/encryption';
+import { createOrganizationWithUserTx } from '@/bypassAcl/transactions/userService';
 
 interface OAuthUserData {
   provider: AuthProvider;
@@ -50,7 +51,7 @@ export interface UserWithOrgRole extends User {
 }
 
 export class UserService {
-  private prisma: PrismaClient;
+  prisma: PrismaClient;
 
   constructor() {
     this.prisma = DatabaseClient.getInstance();
@@ -893,35 +894,7 @@ export class UserService {
       const orgId = createId();
       await getEncryptionProvider().initializeOrg(orgId);
 
-      const { organization, workspace } = await this.prisma.$transaction(async (tx) => {
-        // Step 1: Create organization with temporary createdBy (will update later)
-        const organization = await tx.organization.create({
-          data: {
-            orgId,
-            name: orgName,
-            createdBy: userData.providerUserId, // Temporary: will update after user creation
-            status: Status.ACTIVE
-          }
-        });
-
-        // Step 2: Create workspace with temporary createdBy (will update later)
-        const workspace = await tx.workspace.create({
-          data: {
-            orgId: organization.orgId,
-            name: workspaceName,
-            createdBy: userData.providerUserId, // Temporary: will update after user creation
-            status: Status.ACTIVE,
-            workspaceType: WorkspaceType.ENTERPRISE,
-            joinPolicy: WorkspaceJoinPolicy.INVITE_ONLY,
-          }
-        });
-        await getEncryptionProvider().provisionEntity({
-          entityId: workspace.id,
-          orgId: workspace.orgId,
-          entityType: 'WORKSPACE',
-        });
-        return { organization, workspace };
-      });
+      const { organization, workspace } = await createOrganizationWithUserTx(this, orgId, orgName, userData, workspaceName);
 
       // Step 3: Link workspace to organization
       await this.prisma.workspaceOrganization.create({
@@ -1117,3 +1090,4 @@ export class UserService {
     throw error;
   }
 }
+

@@ -3,6 +3,10 @@ import { ChannelParticipant } from '@prisma/client';
 import { ChannelRole, UserStatus, UserType } from '@xyne/shared';
 import { QueryOptions } from '@/types/database';
 import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
+import { createTx } from '@/bypassAcl/transactions/channelParticipantRepository';
+import { addParticipantTx } from '@/bypassAcl/transactions/channelParticipantRepository';
+import { removeParticipantTx } from '@/bypassAcl/transactions/channelParticipantRepository';
+import { addParticipantsBatchTx } from '@/bypassAcl/transactions/channelParticipantRepository';
 
 export interface CreateChannelParticipantInput {
   channelId: string;
@@ -25,7 +29,7 @@ export class ChannelParticipantRepository extends BaseRepository<ChannelParticip
     super('channelParticipant');
   }
 
-  private async getConversationSeenCutoffAt(
+  async getConversationSeenCutoffAt(
     tx: { conversation: { findMany: (args: any) => Promise<Array<{ createdAt: Date }>> } },
     channelId: string,
     fallbackDate: Date,
@@ -51,53 +55,7 @@ export class ChannelParticipantRepository extends BaseRepository<ChannelParticip
       await this.validateEnum(data.role, 'role', ['ADMIN', 'MEMBER']);
     }
 
-    return await this.db.$transaction(async (tx) => {
-      const now = new Date();
-      const conversationSeenCutoffAt = await this.getConversationSeenCutoffAt(
-        tx,
-        data.channelId,
-        now,
-      );
-
-      const workspaceId = await resolveWorkspaceIdFromModel(tx, 'channel', { id: data.channelId });
-
-      const participant = await tx.channelParticipant.create({
-        data: {
-          channelId: data.channelId,
-          workspaceId,
-          userId: data.userId,
-          role: data.role || 'MEMBER',
-        }
-      });
-
-      // Automatically create status record. Use upsert so a pre-existing status
-      // row (e.g. orphaned from a prior partial migration run) is left as-is
-      // instead of throwing a unique-constraint error on (channelId, userId).
-      // desktopNotificationLevel / mobileNotificationLevel intentionally omitted —
-      // null (inherit global) is the DB column default.
-      await tx.channelUserStatus.upsert({
-        where: { channelId_userId: { channelId: data.channelId, userId: data.userId } },
-        update: {},
-        create: {
-          channelId: data.channelId,
-          workspaceId,
-          userId: data.userId,
-          isClosed: false,
-          isStarred: false,
-          lastViewedAt: now,
-          conversationSeenCutoffAt,
-        }
-      });
-
-      // Increment participantCount in channel_stats
-      await tx.channelStats.upsert({
-        where: { channelId: data.channelId },
-        update: { participantCount: { increment: 1 } },
-        create: { channelId: data.channelId, workspaceId, participantCount: 1, lastActivityAt: new Date()},
-      });
-
-      return participant;
-    });
+    return await createTx(this, data);
   }
 
   async findById(id: string): Promise<ChannelParticipant | null> {
@@ -230,9 +188,7 @@ export class ChannelParticipantRepository extends BaseRepository<ChannelParticip
 
     const conversationSeenCutoffAt = await this.resolveSeenCutoff(channelId);
 
-    const { participant } = await this.db.$transaction(async (tx) =>
-      this.addParticipantInTransaction(tx, channelId, userId, conversationSeenCutoffAt, role, isClosed)
-    );
+    const { participant } = await addParticipantTx(this, channelId, userId, conversationSeenCutoffAt, role, isClosed);
     return participant;
   }
 
@@ -242,23 +198,7 @@ export class ChannelParticipantRepository extends BaseRepository<ChannelParticip
       return;
     }
 
-    await this.db.$transaction(async (tx) => {
-      // Delete participant
-      await tx.channelParticipant.delete({
-        where: { id: participant.id }
-      });
-
-      // Also delete the status record
-      await tx.channelUserStatus.deleteMany({
-        where: { channelId, userId }
-      });
-
-      // Decrement participantCount in channel_stats
-      await tx.channelStats.update({
-        where: { channelId },
-        data: { participantCount: { decrement: 1 } },
-      });
-    });
+    await removeParticipantTx(this, participant, channelId, userId);
   }
 
   async findParticipant(channelId: string, userId: string): Promise<ChannelParticipant | null> {
@@ -375,63 +315,7 @@ export class ChannelParticipantRepository extends BaseRepository<ChannelParticip
       return { addedCount: 0, existingCount: 0 };
     }
 
-    return await this.db.$transaction(async (tx) => {
-      const now = new Date();
-      const conversationSeenCutoffAt = overrideCutoffAt !== undefined
-        ? overrideCutoffAt
-        : await this.getConversationSeenCutoffAt(tx, channelId, now);
-      const existingParticipants = await tx.channelParticipant.findMany({
-        where: {
-          channelId,
-          userId: {
-            in: userIds,
-          },
-        },
-        select: {
-          userId: true,
-        },
-      });
-
-      const existingUserIds = new Set(existingParticipants.map((p) => p.userId));
-      const newUserIds = userIds.filter((id) => !existingUserIds.has(id));
-
-      if (newUserIds.length === 0) {
-        return { addedCount: 0, existingCount: existingUserIds.size };
-      }
-
-      const workspaceId = await resolveWorkspaceIdFromModel(tx, 'channel', { id: channelId });
-
-      await tx.channelParticipant.createMany({
-        data: newUserIds.map((userId) => ({
-          channelId,
-          workspaceId,
-          userId,
-          role: role || 'MEMBER',
-        })),
-        skipDuplicates: true,
-      });
-
-      await tx.channelUserStatus.createMany({
-        data: newUserIds.map((userId) => ({
-          channelId,
-          workspaceId,
-          userId,
-          isClosed,
-          isStarred: false,
-          lastViewedAt: now,
-          conversationSeenCutoffAt,
-        })),
-        skipDuplicates: true,
-      });
-
-      await tx.channelStats.upsert({
-        where: { channelId },
-        update: { participantCount: { increment: newUserIds.length } },
-        create: { channelId, workspaceId, participantCount: newUserIds.length, lastActivityAt: new Date() },
-      });
-
-      return { addedCount: newUserIds.length, existingCount: existingUserIds.size };
-    });
+    return await addParticipantsBatchTx(this, overrideCutoffAt, channelId, userIds, role, isClosed);
   }
 
   async getParticipantRole(channelId: string, userId: string): Promise<string | null> {
@@ -498,3 +382,7 @@ export class ChannelParticipantRepository extends BaseRepository<ChannelParticip
     return new Set(participants.map(p => p.channelId));
   }
 }
+
+
+
+

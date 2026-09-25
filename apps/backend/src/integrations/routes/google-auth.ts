@@ -3,7 +3,7 @@
  */
 
 import { randomUUID } from 'crypto';
-import { EmailMergeMode, WorkspaceRole, DeskType, ChannelRole, ChannelScopeType, ChannelType, AccessType } from '@xyne/shared';
+import { WorkspaceRole, AccessType } from '@xyne/shared';
 import express, { Request, Response } from 'express';
 import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
 import { google } from 'googleapis';
@@ -17,7 +17,6 @@ import { authorize } from '@/middleware/authorize';
 import { BACKFILL_ADMIN_RESOURCE } from '@/middleware/backfillAdminAuth';
 import { db } from '@/database/client';
 import { redisService } from '@/services/redisService';
-import { config as appConfig } from '@/config/env';
 import {
   appendQueryToReturnPath,
   buildReturnPathOrSupportPath,
@@ -28,6 +27,7 @@ import { encrypt } from '@/services/encryptionService';
 import { emailFetchQueue, enqueueCursorCatchup } from '@/queues/emailFetchQueue';
 import { getFrontendUrl, getBackendUrl } from '@/utils/publicUrls';
 import { pubSubWatchService } from '@/pubsub';
+import { getAuthCallbackTx } from '@/bypassAcl/transactions/googleAuth';
 
 const TAG = '[GoogleAuth]';
 
@@ -37,7 +37,7 @@ const seedCursorsAdminAuth = authorize(BACKFILL_ADMIN_RESOURCE, AccessType.ADMIN
 const router = express.Router();
 router.use(express.json());
 
-type PendingChannelData = {
+export type PendingChannelData = {
   name: string;
   description?: string;
   visibility: string;
@@ -1221,126 +1221,7 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
         refreshToken: tokens.refresh_token,
       });
 
-      const txResult = await db.$transaction(async (tx) => {
-        const ch = await tx.channel.create({
-          data: {
-            scopeType: ChannelScopeType.DEFAULT,
-            name: cd.name,
-            description: cd.description,
-            visibility: cd.visibility === 'private' ? 'PRIVATE' : 'PUBLIC',
-            createdBy: cd.userId,
-            workspaceId: cd.workspaceId,
-            projectId: cd.projectId,
-            type: ChannelType.EMAIL,
-          },
-        });
-        const now = new Date();
-        const seenConversations = await tx.conversation.findMany({
-          where: {
-            channelId: ch.id,
-            createdAt: { lte: now },
-          },
-          orderBy: { createdAt: 'desc' },
-          take: 25,
-          select: { createdAt: true },
-        });
-        const conversationSeenCutoffAt =
-          seenConversations[seenConversations.length - 1]?.createdAt ?? now;
-
-        await tx.channelParticipant.create({
-          data: { channelId: ch.id, userId: cd.userId, role: ChannelRole.ADMIN, workspaceId: cd.workspaceId },
-        });
-
-        await tx.channelUserStatus.create({
-          data: {
-            channelId: ch.id,
-            userId: cd.userId,
-            lastViewedAt: now,
-            conversationSeenCutoffAt,
-            updatedAt: now,
-            workspaceId: cd.workspaceId,
-          },
-        });
-
-        await tx.channelStats.create({
-          data: {
-            channelId: ch.id,
-            lastActivityAt: now,
-            participantCount: 1,
-            workspaceId: cd.workspaceId,
-          },
-        });
-
-        // Create EmailChannelPreference for owner and assignee tracking
-        // Note: We create it directly in the transaction, bypassing repository validation
-        // since we already know this is an EMAIL channel
-        await tx.emailChannelPreference.create({
-          data: {
-            channelId: ch.id,
-            ownerUserId: cd.userId,
-            ...(cd.assigneeUserGroupId && { assigneeUserGroupId: cd.assigneeUserGroupId }),
-            ...(cd.boardId && { boardId: cd.boardId }),
-            emailMergeMode: appConfig.emailMergeModeDefault as EmailMergeMode,
-            deskType: DeskType.EMAIL,
-            workspaceId: cd.workspaceId,
-          },
-        });
-
-        const boards = await tx.board.findMany({
-          where: { projectId: cd.projectId },
-          orderBy: { createdAt: 'asc' },
-          select: { id: true },
-        });
-        const board = boards[0] ?? null;
-
-        // Dual-write: mirror the channel→project board set into ChannelBoardMapping
-        // so downstream consumers never need to read channel.projectId.
-        if (boards.length > 0) {
-          // Resolve the default board: honour the requested boardId only when it
-          // actually belongs to this project's board set, otherwise fall back to
-          // the oldest board. Without this guard a requested boardId outside the
-          // project yields a mapping set with NO default row.
-          const defaultBoardId =
-            cd.boardId && boards.some((b) => b.id === cd.boardId)
-              ? cd.boardId
-              : boards[0].id;
-          if (cd.boardId && cd.boardId !== defaultBoardId) {
-            logger.warn(
-              `[CBM_DEFAULT] Requested boardId ${cd.boardId} is not in project ${cd.projectId} for channel ${ch.id}; ` +
-                `defaulting to oldest board ${defaultBoardId}.`,
-            );
-          }
-          await tx.channelBoardMapping.createMany({
-            data: boards.map((b) => ({
-              channelId: ch.id,
-              boardId: b.id,
-              workspaceId: cd.workspaceId,
-              isDefault: b.id === defaultBoardId,
-              createdBy: cd.userId,
-              createdAt: now,
-              updatedAt: now,
-            })),
-            skipDuplicates: true,
-          });
-        }
-
-        await tx.externalSource.create({
-          data: {
-            name: network.sourceName,
-            sourceType: ExternalSourcePlatform.GOOGLE,
-            displayName: emailAddress,
-            channelId: ch.id,
-            boardId: cd.boardId ?? board?.id,
-            credentials: network.encryptedCredentials,
-            ownerUserId: cd.userId,
-            isActive: true,
-            workspaceId: cd.workspaceId,
-            lastSyncCursor: network.watchResult.historyId,
-          },
-        });
-
-        return { channelId: ch.id };
-      });
+      const txResult = await getAuthCallbackTx(cd, network, emailAddress);
 
       logger.info(`${TAG} Gmail integration setup complete`, { sourceName: network.sourceName });
       const params = new URLSearchParams({ emailConnected: 'true', provider: 'google' });
@@ -1446,3 +1327,4 @@ router.post('/watch/renew/:sourceName', async (req: Request, res: Response): Pro
 });
 
 export default router;
+

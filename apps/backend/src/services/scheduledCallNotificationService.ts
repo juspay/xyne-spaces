@@ -1,3 +1,4 @@
+import { updateParticipantMeetingStatusTx } from '@/bypassAcl/transactions/scheduledCallNotificationService';
 import Bull from 'bull';
 import {
   CallStatus,
@@ -12,7 +13,6 @@ import { notificationService } from '@/services/notificationService';
 import { activityService } from '@/services/activity/activityService';
 import { formatDateTimeShort } from '@/utils/dateUtils';
 import { recurringCallService } from '@/services/recurringCallService';
-import { db } from '@/database/client';
 
 interface ScheduledCallReminderData {
   callId: string;
@@ -665,19 +665,7 @@ class ScheduledCallNotificationService {
              organizerId, callId, callExternalId, channelId } = params;
      let updatedCount = 1;
 
-     await db.$transaction(async (tx) => {
-       await repositories.calls.updateParticipantMeetingStatus(participantId, meetingStatus, respondedAt, tx);
-
-       if (isSeries && recurringSeriesId) {
-         updatedCount = await repositories.calls.updateRecurringSeriesMeetingStatus({
-           recurringSeriesId,
-           userId,
-           meetingStatus,
-           respondedAt,
-           tx,
-         });
-       }
-     });
+     ({ updatedCount } = await updateParticipantMeetingStatusTx(participantId, meetingStatus, respondedAt, isSeries, recurringSeriesId, updatedCount, userId));
 
      // Create activity for the organizer when a participant accepts or declines
      if (userId !== organizerId &&

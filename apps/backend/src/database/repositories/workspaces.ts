@@ -5,8 +5,7 @@ import {
   UpdateWorkspaceInput,
   QueryOptions,
 } from '@/types/database';
-import { WorkspaceJoinPolicy, WorkspaceType } from '@xyne/shared';
-import { getEncryptionProvider } from '@/services/encryption';
+import { createTx } from '@/bypassAcl/transactions/workspaces';
 
 export class WorkspaceRepository extends BaseRepository<Workspace, CreateWorkspaceInput, UpdateWorkspaceInput> {
   constructor() {
@@ -14,21 +13,7 @@ export class WorkspaceRepository extends BaseRepository<Workspace, CreateWorkspa
   }
 
   async create(data: CreateWorkspaceInput): Promise<Workspace> {
-    return await this.db.$transaction(async (tx) => {
-      const workspace = await tx.workspace.create({
-        data: {
-          ...data,
-          workspaceType: (data as any).workspaceType ?? WorkspaceType.ENTERPRISE,
-          joinPolicy: (data as any).joinPolicy ?? WorkspaceJoinPolicy.INVITE_ONLY,
-        },
-      });
-      await getEncryptionProvider().provisionEntity({
-        entityId: workspace.id,
-        orgId: workspace.orgId,
-        entityType: 'WORKSPACE',
-      });
-      return workspace;
-    });
+    return await createTx(this, data);
   }
 
   async findById(id: string): Promise<Workspace | null> {
@@ -68,3 +53,4 @@ export class WorkspaceRepository extends BaseRepository<Workspace, CreateWorkspa
     });
   }
 }
+

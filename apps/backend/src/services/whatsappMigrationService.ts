@@ -25,8 +25,10 @@ import {
   queueJiraPurgeAttachmentVespaDeleteJob,
   queueJiraPurgeMessageVespaDeleteJob,
 } from '@/services/jira/vespa';
+import { purgeImportTx } from '@/bypassAcl/transactions/whatsappMigrationService';
+import { purgeImportTx2 } from '@/bypassAcl/transactions/whatsappMigrationService';
 
-const db = DatabaseClient.getInstance();
+export const db = DatabaseClient.getInstance();
 const externalSourceRepository = new ExternalSourceRepository();
 const externalMessageRepository = new ExternalMessageRepository();
 const channelParticipantRepository = new ChannelParticipantRepository();
@@ -984,42 +986,7 @@ export class WhatsAppMigrationService {
         const shouldDeleteConversation = otherMessages.length === 0 && !hasTicket;
         const attachments = attachmentsByMessageId.get(messageId) || [];
 
-        await db.$transaction(async tx => {
-          if (attachments.length > 0) {
-            await tx.messageAttachment.deleteMany({
-              where: {
-                id: { in: attachments.map(attachment => attachment.id) },
-              },
-            });
-          }
-
-          await tx.reactionCount.deleteMany({ where: { messageId } });
-          await tx.reaction.deleteMany({ where: { messageId } });
-
-          if (shouldSoftDelete) {
-            await tx.message.update({
-              where: { messageId },
-              data: {
-                isDeleted: true,
-                content: '',
-                hasAttachment: false,
-                edited: false,
-                link_preview_md: '',
-              },
-            });
-          } else {
-            await tx.message.deleteMany({ where: { messageId } });
-
-            if (shouldDeleteConversation) {
-              await tx.conversationParticipant.deleteMany({
-                where: { conversationId: conversation.conversationId },
-              });
-              await tx.conversation.deleteMany({
-                where: { conversationId: conversation.conversationId },
-              });
-            }
-          }
-        });
+        await purgeImportTx(attachments, messageId, shouldSoftDelete, shouldDeleteConversation, conversation);
 
         for (const attachment of attachments) {
           deletedAttachments += 1;
@@ -1062,13 +1029,7 @@ export class WhatsAppMigrationService {
 
     if (purgeData.externalSource.id) {
       const sourceId = purgeData.externalSource.id;
-      const result = await db.$transaction(async tx => {
-        const externalDeleteResult = await tx.externalMessage.deleteMany({
-          where: { externalSourceId: sourceId },
-        });
-        await tx.externalSource.delete({ where: { id: sourceId } });
-        return externalDeleteResult.count;
-      });
+      const result = await purgeImportTx2(sourceId);
       deletedExternalMessages = result;
     }
 
@@ -1475,3 +1436,5 @@ export class WhatsAppMigrationService {
 }
 
 export const whatsAppMigrationService = new WhatsAppMigrationService();
+
+

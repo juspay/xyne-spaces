@@ -26,6 +26,8 @@ import {
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { GENERIC_RECOVERY_EXCLUDED_WORKFLOW_TYPES } from '@/workflows/polling/workflowRecoveryPolicy';
 import { claimNextPendingExecutionRow } from '@/bypassAcl/workflowServices';
+import { deleteTx } from '@/bypassAcl/transactions/workflows';
+import { approveProposalTx } from '@/bypassAcl/transactions/workflows';
 
 function getDescriptionFromTicketUpdateInput(
   description: Prisma.TicketUpdateInput['description'],
@@ -145,10 +147,7 @@ export class TicketRepository extends BaseRepository<Ticket, CreateTicketInput, 
    * jiraMigrationController for the full ordering.
    */
   async delete(id: string): Promise<Ticket> {
-    return await this.db.$transaction(async tx => {
-      await tx.emailRead.deleteMany({ where: { ticketId: id } });
-      return tx.ticket.delete({ where: { id } });
-    });
+    return await deleteTx(this, id);
   }
 
   async findWithWorkflows(id: string): Promise<Ticket | null> {
@@ -306,40 +305,7 @@ export class WorkflowRepository extends BaseRepository<Workflow, CreateWorkflowI
   async approveProposal(
     proposalId: string,
   ): Promise<{ approved: Workflow; autoRevoked: Workflow[] }> {
-    return await this.db.$transaction(async tx => {
-      const proposal = await tx.workflow.findUnique({ where: { id: proposalId } });
-      if (!proposal || proposal.workflowType !== 'Automations') {
-        throw new Error(`Cannot approve proposal ${proposalId}: not an automation row.`);
-      }
-      const rootId = proposal.automationSeriesId ?? proposal.id;
-
-      const approved =
-        proposal.status === 'DISABLED'
-          ? proposal
-          : await tx.workflow.update({
-              where: { id: proposal.id },
-              data: { status: 'DISABLED' },
-            });
-
-      const siblings = await tx.workflow.findMany({
-        where: {
-          workflowType: 'Automations',
-          automationSeriesId: rootId,
-          status: 'PENDING_APPROVAL',
-          id: { not: proposal.id },
-        },
-      });
-      const autoRevoked = await Promise.all(
-        siblings.map(s =>
-          tx.workflow.update({
-            where: { id: s.id },
-            data: { status: 'AUTO_REVOKED' },
-          }),
-        ),
-      );
-
-      return { approved, autoRevoked };
-    });
+    return await approveProposalTx(this, proposalId);
   }
 
   async archivePriorLiveInLineage(
@@ -564,3 +530,5 @@ export class WorkflowExecutionRepository extends BaseRepository<WorkflowExecutio
     return execution?.createdBy ?? null;
   }
 }
+
+

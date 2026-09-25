@@ -1,8 +1,6 @@
 import { Prisma } from '@prisma/client';
 import {
   EmailType,
-  MessageDirection,
-  ExternalEntityType,
   ActivityType,
   AttachmentEntityType,
 } from '@xyne/shared';
@@ -18,11 +16,12 @@ import { dispatchEmailEventForEmailId } from '@/apps/core/emailUtils';
 import { ExternalAttachmentService } from '@/services/externalAttachmentService';
 import { logger } from '@/utils/logger';
 import { htmlToSlackMrkdwn } from '@/integrations/adapters/slack-desk/slackMrkdwn';
+import { sendSlackReplyTx } from '@/bypassAcl/transactions/slackDeskService';
 
 const TAG = '[SlackDeskService]';
 
-class SlackDeskService {
-  private prisma = DatabaseClient.getInstance();
+export class SlackDeskService {
+  prisma = DatabaseClient.getInstance();
   private conversationRepo = new ConversationRepository();
   private emailRepo = new EmailRepository();
   private externalSourceRepo = new ExternalSourceRepository();
@@ -168,40 +167,7 @@ class SlackDeskService {
     //    both records — no duplicate Email.
     let email: { id: string; createdAt: Date };
     try {
-      email = await this.prisma.$transaction(async (tx) => {
-        const created = await tx.email.create({
-          data: {
-            type: EmailType.REPLY,
-            subject: initialEmail.subject,
-            body: hasText ? body : '',
-            to: [],
-            from: senderName,
-            cc: [],
-            bcc: [],
-            conversationId,
-            channelId: conversation.channelId,
-            workspaceId: conversation.workspaceId,
-            externalThreadId: threadTs,
-            externalMessageId: messageTs,
-            sentByUserId: userId,
-          } as Prisma.EmailUncheckedCreateInput,
-        });
-
-        await tx.externalMessage.create({
-          data: {
-            externalSourceId: externalSource.id,
-            externalId: messageTs,
-            externalThreadId: threadTs,
-            messageId: created.id,
-            entityId: created.id,
-            workspaceId: conversation.workspaceId,
-            direction: MessageDirection.OUTGOING,
-            entityType: ExternalEntityType.EMAIL,
-          },
-        });
-
-        return created;
-      });
+      email = await sendSlackReplyTx(this, initialEmail, hasText, body, senderName, conversationId, conversation, threadTs, messageTs, userId, externalSource);
     } catch (err) {
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
         // Webhook already processed this message — look up the existing record
@@ -323,3 +289,4 @@ class SlackDeskService {
 }
 
 export const slackDeskService = new SlackDeskService();
+

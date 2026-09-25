@@ -24,9 +24,14 @@ import {
   queueJiraPurgeTicketVespaDeleteJob,
 } from '@/services/jira/vespa';
 import { runWithContext } from '@/database/tenant/context';
-import { CanvasRole, CanvasVisibility, ConversationParticipation, ExternalEntityType, MessageType } from '@xyne/shared';
+import { ExternalEntityType } from '@xyne/shared';
+import { moveJiraProjectBoardTx } from '@/bypassAcl/transactions/jiraMigrationController';
+import { moveJiraProjectChannelTx } from '@/bypassAcl/transactions/jiraMigrationController';
+import { runPurgeJobTx } from '@/bypassAcl/transactions/jiraMigrationController';
+import { createMigrationReportCanvasTx } from '@/bypassAcl/transactions/jiraMigrationController';
+import { postMigrationReportTx } from '@/bypassAcl/transactions/jiraMigrationController';
 
-const db = DatabaseClient.getInstance();
+export const db = DatabaseClient.getInstance();
 
 const chunkArray = <T>(items: T[], chunkSize: number): T[][] => {
   if (chunkSize <= 0) return [items];
@@ -349,19 +354,7 @@ export class JiraMigrationController {
       for (let batchIndex = 0; batchIndex < updateBatches.length; batchIndex += 1) {
         const batch = updateBatches[batchIndex]!;
 
-        await db.$transaction(async tx => {
-          for (const update of batch) {
-            await tx.ticket.update({
-              where: { id: update.ticketId },
-              data: {
-                boardId: targetBoardId,
-                kanbanPosition: update.kanbanPosition,
-                updatedBy: actorUserId,
-                updatedAt: now,
-              },
-            });
-          }
-        });
+        await moveJiraProjectBoardTx(batch, targetBoardId, actorUserId, now);
 
         if (batchIndex < updateBatches.length - 1) {
           await sleep(1000);
@@ -586,66 +579,7 @@ export class JiraMigrationController {
       }
 
       const now = new Date();
-      const result = await db.$transaction(async tx => {
-        const ticketUpdate = await tx.ticket.updateMany({
-          where: {
-            id: { in: ticketsToMove.map(ticket => ticket.id) },
-            channelId: sourceChannelId,
-          },
-          data: {
-            channelId: targetChannelId,
-            updatedBy: actorUserId,
-            updatedAt: now,
-          },
-        });
-
-        const conversationUpdateCount =
-          conversationIds.length > 0
-            ? (
-                await tx.conversation.updateMany({
-                  where: { conversationId: { in: conversationIds }, channelId: sourceChannelId },
-                  data: { channelId: targetChannelId, workspaceId: targetChannel.workspaceId },
-                })
-              ).count
-            : 0;
-
-        const participantUpdateCount =
-          conversationIds.length > 0
-            ? (
-                await tx.conversationParticipant.updateMany({
-                  where: { conversationId: { in: conversationIds }, channelId: sourceChannelId },
-                  data: { channelId: targetChannelId },
-                })
-              ).count
-            : 0;
-
-        const remainingOnSource = await tx.ticket.count({
-          where: {
-            id: { in: mappedTicketIds },
-            channelId: sourceChannelId,
-          },
-        });
-
-        let externalSourceUpdated = false;
-        if (remainingOnSource === 0) {
-          await tx.externalSource.update({
-            where: { id: sourceExternalSource.id },
-            data: {
-              name: targetExternalSourceName,
-              channelId: targetChannelId,
-            },
-          });
-          externalSourceUpdated = true;
-        }
-
-        return {
-          ticketUpdateCount: ticketUpdate.count,
-          conversationUpdateCount,
-          participantUpdateCount,
-          remainingOnSource,
-          externalSourceUpdated,
-        };
-      });
+      const result = await moveJiraProjectChannelTx(ticketsToMove, sourceChannelId, targetChannelId, actorUserId, now, conversationIds, targetChannel, mappedTicketIds, sourceExternalSource, targetExternalSourceName);
 
       res.json({
         success: true,
@@ -1037,12 +971,7 @@ export class JiraMigrationController {
         const chunks = chunkArray(conversationIds, phase1ConversationChunkSize);
         for (const chunk of chunks) {
           if (chunk.length === 0) continue;
-          await db.$transaction(async tx => {
-            await tx.conversationParticipant.deleteMany({ where: { conversationId: { in: chunk } } });
-            await tx.messageAttachment.deleteMany({ where: { conversationId: { in: chunk } } });
-            await tx.message.deleteMany({ where: { conversationId: { in: chunk } } });
-            await tx.conversation.deleteMany({ where: { conversationId: { in: chunk } } });
-          });
+          await runPurgeJobTx(chunk);
         }
       }
 
@@ -1761,7 +1690,7 @@ export class JiraMigrationController {
     });
   }
 
-  private getMigrationReportSummary(result: import('@/services/jiraMigrationImportService').JiraMigrationExecuteResult) {
+  getMigrationReportSummary(result: import('@/services/jiraMigrationImportService').JiraMigrationExecuteResult) {
     return {
       completedIssues: result.issueResults.filter(issue => issue.status === 'completed').length,
       partialIssues: result.issueResults.filter(issue => issue.status === 'partial').length,
@@ -1914,50 +1843,7 @@ export class JiraMigrationController {
       if (!synced) {
         throw new Error(`Failed to save Jira migration report canvas ${canvasId} to Y-Sweet`);
       }
-      await db.$transaction(async tx => {
-        await tx.canvas.create({
-          data: {
-            id: canvasId,
-            workspaceId: canvasChannel.workspaceId,
-            title: `Jira Migration Report: ${result.jiraProjectKey}`,
-            content: [],
-            channelId,
-            createdBy: actorUserId,
-            visibility: CanvasVisibility.PUBLIC,
-            isTemplate: false,
-            isCollaborative: true,
-            lastEditedBy: actorUserId,
-            lastEditedAt: now,
-            createdAt: now,
-            updatedAt: now,
-            metadata: {
-              source: 'jira_migration_report',
-              jiraProjectKey: result.jiraProjectKey,
-              externalSourceId: result.externalSourceId || null,
-              summary: {
-                importedTickets: result.importedTickets,
-                skippedTickets: result.skippedTickets,
-                importedComments: result.importedComments,
-                importedAttachments: result.importedAttachments,
-                warnings: result.warnings.length,
-                ...this.getMigrationReportSummary(result),
-              },
-            },
-          },
-        });
-
-        await tx.canvasParticipant.create({
-          data: {
-            id: participantId,
-            workspaceId: canvasChannel.workspaceId,
-            canvasId,
-            userId: actorUserId,
-            role: CanvasRole.OWNER,
-            joinedAt: now,
-            updatedAt: now,
-          },
-        });
-      });
+      await createMigrationReportCanvasTx(canvasId, canvasChannel, result, channelId, actorUserId, now, this, participantId);
     } catch (error) {
       logger.error('[JiraMigration] Canvas report create failed', error, {
         jiraProjectKey: result.jiraProjectKey,
@@ -2032,85 +1918,7 @@ export class JiraMigrationController {
       select: { workspaceId: true },
     });
 
-    await db.$transaction(async tx => {
-      await tx.conversation.create({
-        data: {
-          conversationId,
-          channelId,
-          createdBy: actorUserId,
-          initialMessageId: messageId,
-          workspaceId: migrationReportChannel.workspaceId,
-          createdAt: now,
-          lastActivityAt: now,
-          metadata: {
-            source: {
-              system: 'jira',
-              kind: 'migration_report',
-              jiraProjectKey: result.jiraProjectKey,
-              canvasUrl,
-            },
-          },
-        },
-      });
-
-      await tx.message.create({
-        data: {
-          messageId,
-          conversationId,
-          senderId: actorUserId,
-          workspaceId: migrationReportChannel.workspaceId,
-          content: messageContent,
-          msgType: MessageType.SYSTEM,
-          hasAttachment: false,
-          showInChannel: true,
-          metadata: {
-            messageSubtype: 'jira_migration_report',
-            jiraProjectKey: result.jiraProjectKey,
-            externalSourceId: result.externalSourceId || null,
-            canvasUrl,
-            summary: {
-              importedTickets: result.importedTickets,
-              skippedTickets: result.skippedTickets,
-              importedComments: result.importedComments,
-              importedAttachments: result.importedAttachments,
-              warnings: result.warnings.length,
-              completedIssues,
-              partialIssues,
-              failedIssues,
-            },
-          },
-          createdAt: now,
-        },
-      });
-
-      await tx.conversationParticipant.upsert({
-        where: {
-          conversationId_userId: {
-            conversationId,
-            userId: actorUserId,
-          },
-        },
-        create: {
-          id: randomUUID(),
-          conversationId,
-          userId: actorUserId,
-          participationType: ConversationParticipation.AUTHOR,
-          isSubscribed: true,
-          joinedAt: now,
-          channelId,
-          workspaceId: migrationReportChannel.workspaceId,
-        },
-        update: {
-          participationType: ConversationParticipation.AUTHOR,
-          isSubscribed: true,
-        },
-      });
-
-      await tx.channel.update({
-        where: { id: channelId },
-        data: { lastActivityAt: now },
-      });
-    });
+    await postMigrationReportTx(conversationId, channelId, actorUserId, messageId, migrationReportChannel, now, result, canvasUrl, messageContent, completedIssues, partialIssues, failedIssues);
     await messageMetadataService.syncInitialMessageMd(conversationId);
 
   }
@@ -2146,3 +1954,8 @@ export class JiraMigrationController {
     }
   }
 }
+
+
+
+
+

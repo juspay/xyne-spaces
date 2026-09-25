@@ -54,6 +54,7 @@ import { canvasAuthService } from '@/services/canvasAuthService';
 import { isTrackInChannel } from '@/sdlc/sdlcChannelMembership';
 import { buildCallInviteUrl } from '@/utils/urlUtils';
 import { readRecordingGoogleDocLinks } from '@/utils/recordingGoogleDocs';
+import { hideCallTx } from '@/bypassAcl/transactions/callController';
 
 const RecordingParticipantsCommandSchema = z.object({
   action: z.enum(['add', 'remove']),
@@ -340,26 +341,7 @@ export class CallController {
         return;
       }
 
-      const updatedCount = await db.$transaction(async tx => {
-        await repositories.calls.updateParticipantMeetingStatus(
-          participant.id,
-          MeetingStatus.HIDDEN,
-          now,
-          tx,
-        );
-
-        if (isSeries && call.recurringSeriesId) {
-          return repositories.calls.updateRecurringSeriesMeetingStatus({
-            recurringSeriesId: call.recurringSeriesId,
-            userId,
-            meetingStatus: MeetingStatus.HIDDEN,
-            respondedAt: now,
-            tx,
-          });
-        }
-
-        return 1;
-      });
+      const updatedCount = await hideCallTx(participant, now, isSeries, call, userId);
 
       res.json({
         success: true,
@@ -3573,3 +3555,4 @@ export class CallController {
 }
 
 export const callController = new CallController();
+

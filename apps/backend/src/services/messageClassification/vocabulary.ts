@@ -1,3 +1,4 @@
+import { patchThreadTypeVocabularyTx } from '@/bypassAcl/transactions/vocabulary';
 /**
  * The thread-type vocabulary a workspace classifies against.
  *
@@ -15,6 +16,7 @@
 import { normalizeThreadTypeName, THREAD_TYPES, type ThreadTypeEntry } from '@xyne/shared';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
+import { setThreadTypeVocabularyTx } from '@/bypassAcl/transactions/vocabulary';
 
 const TAG = '[ThreadTypeVocabulary]';
 
@@ -98,7 +100,7 @@ const toEntry = (row: {
  * removal, and the must-keep-one guard can pass on a vocabulary that is no longer there.
  * Taken inside the caller's transaction so the decision and the write see the same rows.
  */
-const approvedNames = async (tx: Tx, workspaceId: string): Promise<Set<string>> => {
+export const approvedNames = async (tx: Tx, workspaceId: string): Promise<Set<string>> => {
   const rows = await tx.threadTypeVocabulary.findMany({
     where: { ...scopeKey(workspaceId), status: 'APPROVED', isDeleted: false },
     select: { name: true },
@@ -242,52 +244,7 @@ export async function setThreadTypeVocabulary(
   const key = scopeKey(workspaceId);
   const keep = new Set(entries.map(entry => entry.name));
 
-  await db.$transaction(async tx => {
-    // Read inside the transaction: what is removed is everything currently approved that the
-    // caller did not resend, and that set has to be the one this write is about to act on.
-    const current = await approvedNames(tx, workspaceId);
-    for (const name of current) {
-      if (keep.has(name)) continue;
-      await tx.threadTypeVocabulary.upsert({
-        where: { scope_scopeId_name: { ...key, name } },
-        create: {
-          ...key,
-          workspaceId,
-          ...suppression(name),
-          createdBy: userId,
-          updatedBy: userId,
-          updatedAt: now,
-        },
-        update: { isDeleted: true, updatedBy: userId, updatedAt: now },
-      });
-    }
-
-    for (const entry of entries) {
-      // Upsert on (scope, scopeId, name) so re-adding a suppressed entry revives that row
-      // rather than colliding with it on the unique index.
-      await tx.threadTypeVocabulary.upsert({
-        where: { scope_scopeId_name: { ...key, name: entry.name } },
-        create: {
-          ...key,
-          workspaceId,
-          ...entry,
-          status: entry.status ?? 'APPROVED',
-          createdBy: userId,
-          updatedBy: userId,
-          updatedAt: now,
-        },
-        update: {
-          ...entry,
-          status: entry.status ?? 'APPROVED',
-          isDeleted: false,
-          updatedBy: userId,
-          updatedAt: now,
-        },
-      });
-    }
-
-    await retireCandidates(tx, workspaceId, entries.map(entry => entry.name));
-  });
+  await setThreadTypeVocabularyTx(workspaceId, keep, key, userId, now, entries);
 
   clearVocabularyCache(workspaceId);
   logger.info(`${TAG} Vocabulary replaced`, { workspaceId, entries: entries.length, userId });
@@ -296,7 +253,7 @@ export async function setThreadTypeVocabulary(
 }
 
 /** A row that exists only to hide a name. Nothing renders from these fields. */
-const suppression = (name: string) => ({
+export const suppression = (name: string) => ({
   name,
   label: name,
   summary: '',
@@ -334,63 +291,7 @@ export async function patchThreadTypeVocabulary(
   let removed: string[] = [];
   let ignored: string[] = [];
 
-  await db.$transaction(async tx => {
-    // Read inside the transaction rather than through the cache. Both the guard below and the
-    // removed/ignored split are DECISIONS taken on this list, and a per-process cache means a
-    // second instance can decide them on a vocabulary that no longer exists.
-    const effective = await approvedNames(tx, workspaceId);
-
-    // Refuse to empty the vocabulary: a workspace with nothing to pick from cannot classify.
-    const surviving = new Set(effective);
-    for (const name of remove) surviving.delete(name);
-    for (const entry of add) surviving.add(entry.name);
-    if (surviving.size === 0) {
-      throw new Error('A workspace must keep at least one thread type');
-    }
-
-    removed = remove.filter(name => effective.has(name));
-    ignored = remove.filter(name => !effective.has(name));
-
-    for (const name of removed) {
-      await tx.threadTypeVocabulary.upsert({
-        where: { scope_scopeId_name: { ...key, name } },
-        create: {
-          ...key,
-          workspaceId,
-          ...suppression(name),
-          createdBy: userId,
-          updatedBy: userId,
-          updatedAt: now,
-        },
-        update: { isDeleted: true, updatedBy: userId, updatedAt: now },
-      });
-    }
-
-    for (const entry of add) {
-      (effective.has(entry.name) ? updated : added).push(entry.name);
-      await tx.threadTypeVocabulary.upsert({
-        where: { scope_scopeId_name: { ...key, name: entry.name } },
-        create: {
-          ...key,
-          workspaceId,
-          ...entry,
-          status: entry.status ?? 'APPROVED',
-          createdBy: userId,
-          updatedBy: userId,
-          updatedAt: now,
-        },
-        update: {
-          ...entry,
-          status: entry.status ?? 'APPROVED',
-          isDeleted: false,
-          updatedBy: userId,
-          updatedAt: now,
-        },
-      });
-    }
-
-    await retireCandidates(tx, workspaceId, add.map(entry => entry.name));
-  });
+  ({ removed, ignored } = await patchThreadTypeVocabularyTx(workspaceId, remove, add, removed, ignored, key, userId, now, updated, added));
 
   clearVocabularyCache(workspaceId);
   logger.info(`${TAG} Vocabulary patched`, { workspaceId, userId, added, updated, removed, ignored });
@@ -723,7 +624,7 @@ export async function reconsiderVocabularyCandidates(
  * Promoting a name to the workspace retires every user's candidate for it — the suggestion
  * has been answered, and leaving them would keep the name in the review queue forever.
  */
-const retireCandidates = async (tx: Tx, workspaceId: string, names: string[]): Promise<void> => {
+export const retireCandidates = async (tx: Tx, workspaceId: string, names: string[]): Promise<void> => {
   if (names.length === 0) return;
 
   // Names are normalised where they are INVENTED, so a proposal and the entry that approves

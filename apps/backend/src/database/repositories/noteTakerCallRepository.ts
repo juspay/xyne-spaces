@@ -1,7 +1,10 @@
 import { type Call, type Prisma } from '@prisma/client';
-import { CallStatus, CallType, MessageType } from '@xyne/shared';
+import { CallStatus, CallType } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
 import { repositories } from './index';
+import { createThreadAnchorMessageTx } from '@/bypassAcl/transactions/noteTakerCallRepository';
+import { handleParticipantLeaveTx } from '@/bypassAcl/transactions/noteTakerCallRepository';
+import { handleRoomFinishedTx } from '@/bypassAcl/transactions/noteTakerCallRepository';
 
 export interface CreateNoteTakerCallParams {
   callId: string;
@@ -33,7 +36,7 @@ interface NoteTakerCallMetadata {
  * CallParticipant rows are needed.
  */
 export class NoteTakerCallRepository {
-  private get db() {
+  get db() {
     return DatabaseClient.getInstance();
   }
 
@@ -73,7 +76,7 @@ export class NoteTakerCallRepository {
    * ends. No-op (returns false) for recordings that weren't started from a
    * thread (no conversationId/messageId on call.metadata).
    */
-  private async updateThreadMessageOnEnd(
+  async updateThreadMessageOnEnd(
     tx: Prisma.TransactionClient,
     call: Call,
     endedAt: Date,
@@ -192,58 +195,7 @@ export class NoteTakerCallRepository {
         : {};
 
     // Anchor message, conversation stamp, and call metadata must land atomically.
-    await this.db.$transaction(async (tx) => {
-      await tx.message.create({
-        data: {
-          messageId,
-          conversationId,
-          workspaceId,
-          senderId: 'system',
-          content: `${initiator?.displayName || initiator?.name || 'Someone'} started recording notes`,
-          msgType: MessageType.SYSTEM,
-          showInChannel: false,
-          createdAt: now,
-          metadata: {
-            isRecordingMessage: true,
-            isHeadlessRecording: true,
-            callId: callExternalId,
-            callType: CallType.HEADLESS,
-            operation: 'recording_active',
-            notesCanvasId,
-            createdBy,
-          },
-        },
-      });
-
-      // Marks the conversation as having a live recording attached.
-      await tx.conversation.update({
-        where: { conversationId },
-        data: {
-          callId: callExternalId,
-          metadata: { ...existingMetadata, isHeadlessRecording: true } as Prisma.InputJsonValue,
-        },
-      });
-
-
-      const currentCall = await tx.call.findUnique({ where: { id: callId }, select: { metadata: true } });
-      const currentCallMetadata: Record<string, unknown> =
-        currentCall?.metadata && typeof currentCall.metadata === 'object' && !Array.isArray(currentCall.metadata)
-          ? (currentCall.metadata as Record<string, unknown>)
-          : {};
-      await tx.call.update({
-        where: { id: callId },
-        data: {
-          metadata: {
-            ...currentCallMetadata,
-            notesCanvasId,
-            detailedSummaryCanvasId,
-            conversationId,
-            messageId,
-            channelId,
-          } as Prisma.InputJsonValue,
-        },
-      });
-    });
+    await createThreadAnchorMessageTx(this, messageId, conversationId, workspaceId, initiator, now, callExternalId, notesCanvasId, createdBy, existingMetadata, callId, detailedSummaryCanvasId, channelId);
 
     // Bumps reply count only after the transaction above has committed.
     await repositories.conversations.incrementReplyCount(conversationId, now);
@@ -262,23 +214,7 @@ export class NoteTakerCallRepository {
   }): Promise<{ shouldEndCall: boolean; call: Call | null }> {
     const { callExternalId, userId, leftAt } = params;
 
-    return this.db.$transaction(async (tx) => {
-      const call = await tx.call.findUnique({ where: { externalId: callExternalId } });
-      if (!call) return { shouldEndCall: false, call: null };
-
-      if (call.createdByUserId !== userId || call.status === CallStatus.ENDED) {
-        return { shouldEndCall: false, call };
-      }
-
-      await tx.call.update({
-        where: { id: call.id },
-        data: { status: CallStatus.ENDED, endedAt: leftAt },
-      });
-
-      await this.updateThreadMessageOnEnd(tx, call, leftAt);
-
-      return { shouldEndCall: true, call };
-    });
+    return handleParticipantLeaveTx(this, callExternalId, userId, leftAt);
   }
 
   /**
@@ -293,24 +229,11 @@ export class NoteTakerCallRepository {
   }): Promise<{ shouldEndCall: boolean; call: Call | null }> {
     const { callExternalId, endedAt } = params;
 
-    return this.db.$transaction(async (tx) => {
-      const call = await tx.call.findUnique({ where: { externalId: callExternalId } });
-      if (!call) return { shouldEndCall: false, call: null };
-
-      if (call.status === CallStatus.ENDED) {
-        return { shouldEndCall: false, call };
-      }
-
-      await tx.call.update({
-        where: { id: call.id },
-        data: { status: CallStatus.ENDED, endedAt },
-      });
-
-      await this.updateThreadMessageOnEnd(tx, call, endedAt);
-
-      return { shouldEndCall: true, call };
-    });
+    return handleRoomFinishedTx(this, callExternalId, endedAt);
   }
 }
 
 export const noteTakerCallRepository = new NoteTakerCallRepository();
+
+
+

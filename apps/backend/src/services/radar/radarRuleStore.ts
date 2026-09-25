@@ -1,7 +1,8 @@
 import type { RadarRule } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
+import { createWithinLimitTx } from '@/bypassAcl/transactions/radarRuleStore';
 
-const prisma = DatabaseClient.getInstance();
+export const prisma = DatabaseClient.getInstance();
 
 /**
  * A reader's own rules, read and written only as themselves.
@@ -10,7 +11,7 @@ const prisma = DatabaseClient.getInstance();
  * rather than on the row id alone. An id is guessable and a rule decides what
  * somebody sees, so "the row exists" is never sufficient grounds to touch it.
  */
-interface RuleAuth {
+export interface RuleAuth {
   userId: string;
   workspaceId: string;
 }
@@ -24,7 +25,7 @@ interface RuleRow {
  *  loser re-reads a count that has moved by exactly one. */
 const RULE_WRITE_RETRIES = 2;
 
-const toRule = (row: RuleRow): RadarRule => ({
+export const toRule = (row: RuleRow): RadarRule => ({
   id: row.id,
   conditions: (Array.isArray(row.conditions) ? row.conditions : []) as RadarRule['conditions'],
 });
@@ -55,20 +56,7 @@ class RadarRuleStore {
   ): Promise<RadarRule | null> {
     for (let attempt = 0; ; attempt++) {
       try {
-        return await prisma.$transaction(
-          async (tx) => {
-            const count = await tx.radarRule.count({
-              where: { workspaceId: auth.workspaceId, userId: auth.userId },
-            });
-            if (count >= max) return null;
-            const row = await tx.radarRule.create({
-              data: { workspaceId: auth.workspaceId, userId: auth.userId, conditions },
-              select: { id: true, conditions: true },
-            });
-            return toRule(row);
-          },
-          { isolationLevel: 'Serializable' },
-        );
+        return await createWithinLimitTx(auth, max, conditions);
       } catch (error) {
         // P2034 is the write conflict / deadlock Serializable is there to
         // raise. Anything else is a real failure and belongs to the caller.
@@ -103,3 +91,4 @@ class RadarRuleStore {
 }
 
 export const radarRuleStore = new RadarRuleStore();
+

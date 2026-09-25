@@ -1,9 +1,6 @@
 import { Prisma, Conversation, Email, ExternalSource } from '@prisma/client';
 import {
   EmailType,
-  MessageDirection,
-  ExternalEntityType,
-  AttachmentEntityType,
   ActivityType,
   ChannelType,
 } from '@xyne/shared';
@@ -20,11 +17,12 @@ import { dispatchEmailEventForEmailId } from '@/apps/core/emailUtils';
 import { sendWebhookNotification } from '@/apps/core/eventSubscriptionUtils';
 import { AppEventType, BaseAppEvent, DeskReplyEventPayload, DeskReplyAttachment } from '@/apps/types';
 import { logger } from '@/utils/logger';
+import { sendAppReplyTx } from '@/bypassAcl/transactions/appDeskService';
 
 const TAG = '[AppDeskService]';
 
-class AppDeskService {
-  private prisma = DatabaseClient.getInstance();
+export class AppDeskService {
+  prisma = DatabaseClient.getInstance();
   private conversationRepo = new ConversationRepository();
   private emailRepo = new EmailRepository();
   private externalMessageRepo = new ExternalMessageRepository();
@@ -164,49 +162,7 @@ class AppDeskService {
       });
     }
 
-    const email = await this.prisma.$transaction(async (tx) => {
-      const created = await tx.email.create({
-        data: {
-          type: EmailType.REPLY,
-          subject: initialEmail.subject,
-          body,
-          to: [],
-          from: replierName ?? 'Xyne',
-          cc: [],
-          bcc: [],
-          conversationId,
-          channelId: conversation.channelId,
-          workspaceId: conversation.workspaceId,
-          externalThreadId: threadId,
-          externalMessageId: scopedAckExternalId,
-          sentByUserId: userId,
-        } as Prisma.EmailUncheckedCreateInput,
-      });
-
-      if (outboundConfigured) {
-        await tx.externalMessage.create({
-          data: {
-            externalSourceId: externalSource.id,
-            externalId: scopedAckExternalId,
-            externalThreadId: threadId,
-            messageId: created.id,
-            entityId: created.id,
-            workspaceId: conversation.workspaceId,
-            direction: MessageDirection.OUTGOING,
-            entityType: ExternalEntityType.EMAIL,
-          },
-        });
-      }
-
-      if (stagedAttachments.length > 0) {
-        await tx.messageAttachment.updateMany({
-          where: { id: { in: stagedAttachments.map(a => a.id) } },
-          data: { entityType: AttachmentEntityType.EMAIL, entityId: created.id, conversationId },
-        });
-      }
-
-      return created;
-    });
+    const email = await sendAppReplyTx(this, initialEmail, body, replierName, conversationId, conversation, threadId, scopedAckExternalId, userId, outboundConfigured, externalSource, stagedAttachments);
 
     await syncTicketEmailCount(this.prisma, conversationId);
     void dispatchEmailEventForEmailId(email.id);
@@ -291,3 +247,4 @@ class AppDeskService {
 }
 
 export const appDeskService = new AppDeskService();
+

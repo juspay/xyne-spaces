@@ -1,12 +1,9 @@
+import { syncTicketTagsForConversationTx } from '@/bypassAcl/transactions/deskTicket';
 import { db } from '@/database/client';
-import { tagRepository, MirrorTagRow } from '@/database/repositories/tagRepository';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { ticketSchema } from '@/vespa/src/types';
 import { logger } from '@/utils/logger';
 import { config as appConfig } from '@/config/env';
-import { TagMethod } from '@xyne/shared';
-import { DESK_EMAIL_SOURCE_TYPE, deskEmailConfigKey } from './deskEmail';
-import { advisoryXactLock } from '@/bypassAcl/lockServices';
 
 export const DESK_TICKET_SOURCE_TYPE = 'desk-ticket';
 
@@ -63,43 +60,7 @@ export async function syncTicketTagsForConversation(conversationId: string): Pro
   let ticketId: string | null = null;
 
   try {
-    await db.$transaction(async (tx) => {
-      await advisoryXactLock(tx, ['Ticket', 'Email', 'Tag'],
-        'ticket tag mirror: serialize the compare-and-swap of a ticket\'s mirrored tag rows',
-        'tag-mirror:' + conversationId);
-
-      const ticket = await tx.ticket.findFirst({
-        where: { conversationId },
-        select: { id: true, channelId: true, workspaceId: true },
-      });
-      if (!ticket) return;
-
-      const latest = await tx.email.findFirst({
-        where: { conversationId },
-        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-        select: { id: true },
-      });
-
-      const sourceRows: MirrorTagRow[] = latest
-        ? (await tx.tag.findMany({
-            where: { sourceId: latest.id, sourceType: DESK_EMAIL_SOURCE_TYPE, isDeleted: false },
-            select: { tagCategory: true, tag: true, method: true, reason: true },
-          })).map(r => ({ ...r, method: r.method as TagMethod }))
-        : [];
-
-      const changed = await tagRepository.replaceAllTagsForSource(
-        {
-          sourceId: ticket.id,
-          sourceType: DESK_TICKET_SOURCE_TYPE,
-          workspaceId: ticket.workspaceId,
-          configKey: deskEmailConfigKey(ticket.channelId),
-          rows: sourceRows,
-        },
-        tx,
-      );
-
-      if (changed) ticketId = ticket.id;
-    });
+    ({ ticketId } = await syncTicketTagsForConversationTx(conversationId, ticketId));
 
     if (ticketId) void enqueueTicketTagRefeed(ticketId);
   } catch (err) {

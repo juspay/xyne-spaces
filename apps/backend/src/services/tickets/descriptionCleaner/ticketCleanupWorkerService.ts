@@ -6,12 +6,13 @@ import { config } from '@/config/env';
 import vespaClient from '@/vespa/client';
 import { ticketSchema } from '@/vespa/src/types';
 import { descCleaner } from './index';
+import { claimFailedCleanupLogsTx } from '@/bypassAcl/transactions/ticketCleanupWorkerService';
 
 const ONE_HOUR_MS = 60 * 60 * 1000;
 const MIN_INTERVAL_MS = 5000;
 const MAX_INTERVAL_MS = ONE_HOUR_MS;
-const BATCH_SIZE = 20;
-const MAX_RETRIES = config.ticketDescriptionClean?.maxRetries ?? 6;
+export const BATCH_SIZE = 20;
+export const MAX_RETRIES = config.ticketDescriptionClean?.maxRetries ?? 6;
 
 class TicketCleanupWorkerService {
   private isRunning = false;
@@ -105,44 +106,7 @@ class TicketCleanupWorkerService {
   }
 
   private async claimFailedCleanupLogs(): Promise<VespaInsertionLogs[]> {
-    return db.$transaction(async tx => {
-      const logs = await tx.vespaInsertionLogs.findMany({
-        where: {
-          type: VespaOperationType.POST_INGEST_CLEAN,
-          status: VespaInsertionStatus.FAILED,
-          retryCount: { lt: MAX_RETRIES },
-        },
-        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-        take: BATCH_SIZE,
-      });
-
-      if (logs.length === 0) {
-        return [];
-      }
-
-      const ids = logs.map(log => log.id);
-      const claimResult = await tx.vespaInsertionLogs.updateMany({
-        where: {
-          id: { in: ids },
-          status: VespaInsertionStatus.FAILED,
-        },
-        data: {
-          status: VespaInsertionStatus.PENDING,
-        },
-      });
-
-      if (claimResult.count !== ids.length) {
-        logger.warn('[TicketCleanupWorker] Unexpected claim count while marking logs as PENDING', {
-          requested: ids.length,
-          updated: claimResult.count,
-        });
-      }
-
-      return logs.map(log => ({
-        ...log,
-        status: VespaInsertionStatus.PENDING,
-      }));
-    });
+    return claimFailedCleanupLogsTx();
   }
 
   private async processLog(log: VespaInsertionLogs): Promise<void> {
@@ -262,3 +226,4 @@ class TicketCleanupWorkerService {
 }
 
 export const ticketCleanupWorkerService = new TicketCleanupWorkerService();
+

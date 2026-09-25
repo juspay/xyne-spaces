@@ -1,4 +1,3 @@
-import { db } from '@/database/client';
 import { currentWorkspaceId } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 import {
@@ -6,6 +5,7 @@ import {
   getSurfaceAreaIdField,
   type SurfaceAreaIdField, NudgeState } from '@xyne/shared';
 import type { Prisma, PrismaClient } from '@prisma/client';
+import { rebuildSurfaceNudgeAudienceCountsWithDbTx } from '@/bypassAcl/transactions/surfaceNudgeAudienceCountService';
 
 type PrismaTransaction = Prisma.TransactionClient;
 type DatabaseLike = PrismaClient | PrismaTransaction;
@@ -225,11 +225,6 @@ export async function rebuildSurfaceNudgeAudienceCountsWithDb(params: {
   sourceType: string;
 }): Promise<void> {
   const { sourceId, sourceType } = params;
-  await db.$transaction(async tx => {
-    await rebuildSurfaceNudgeAudienceCounts({
-      tx,
-      sourceId,
-      sourceType,
-    });
-  });
+  await rebuildSurfaceNudgeAudienceCountsWithDbTx(sourceId, sourceType);
 }
+

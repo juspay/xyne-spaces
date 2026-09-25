@@ -4,9 +4,7 @@ import { deskEmailConfigKey, DESK_EMAIL_SOURCE_TYPE } from '@/tags';
 import { getGroupedTagsWithConfig } from '@/tags/presentation';
 import type { TagsConfigShape } from '@/tags';
 import { logger } from '../utils/logger';
-import { TAG_FORMAT_REGEX, ChannelRole, TagMethod } from '@xyne/shared';
-import { db } from '@/database/client';
-import { TagServiceError } from '@/tags/service';
+import { TAG_FORMAT_REGEX, ChannelRole } from '@xyne/shared';
 import { ChannelParticipantRepository } from '@/database/repositories/channelParticipantRepository';
 import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { isDeskOwnerOrChannelAdmin } from '@/utils/channelMembership';
@@ -15,7 +13,7 @@ import { EmailRepository } from '@/database/repositories/emailRepository';
 import { generateLlmTags } from '@/tags/generators/llm';
 import { tagRepository } from '@/database/repositories/tagRepository';
 import { syncTicketTagsFromEmail } from '@/tags/deskTicket';
-import { advisoryXactLock } from '@/bypassAcl/lockServices';
+import { addDeskEmailTagTx } from '@/bypassAcl/transactions/deskTagsConfigController';
 
 /**
  * Epoch-ms query param as a Date, or null when it is missing or unusable. The
@@ -418,50 +416,7 @@ export class DeskTagsConfigController {
 
       // Advisory lock scoped to (sourceType, sourceId, category) serializes concurrent
       // manual tag adds for the same entity+category without requiring serializable isolation.
-      await db.$transaction(async (tx) => {
-        await advisoryXactLock(tx, ['Tag'],
-          'desk tags: serialize concurrent manual tag adds for the same entity+category',
-          `tag-add:${DESK_EMAIL_SOURCE_TYPE}:${emailId}:${category}`);
-
-        const existing = await tx.tag.findFirst({
-          where: { sourceId: emailId, sourceType: DESK_EMAIL_SOURCE_TYPE, tagCategory: category, tag, isDeleted: false },
-        });
-        if (existing) {
-          throw new TagServiceError(
-            `Active tag "${tag}" already exists for ${DESK_EMAIL_SOURCE_TYPE}/${emailId} in category "${category}"`,
-            409,
-          );
-        }
-
-        if (catConfig.count != null) {
-          const current = await tx.tag.count({
-            where: { sourceId: emailId, sourceType: DESK_EMAIL_SOURCE_TYPE, tagCategory: category, isDeleted: false },
-          });
-          if (current >= catConfig.count) {
-            throw new TagServiceError(
-              `Maximum tag count (${catConfig.count}) reached for category "${category}"`,
-              400,
-            );
-          }
-        }
-
-        await tx.tag.create({
-          data: {
-            sourceId: emailId,
-            sourceType: DESK_EMAIL_SOURCE_TYPE,
-            workspaceId,
-            configKey,
-            tagCategory: category,
-            tag,
-            method: TagMethod.MANUAL,
-            createdBy: userId,
-            updatedBy: userId,
-            createdAt: new Date(),
-            updatedAt: new Date(),
-            isDeleted: false,
-          },
-        });
-      });
+      await addDeskEmailTagTx(emailId, category, tag, catConfig, workspaceId, configKey, userId);
 
       // Sync ticket tags outside the transaction — raw tx bypasses tagService hooks.
       void syncTicketTagsFromEmail(emailId);
@@ -513,3 +468,4 @@ export class DeskTagsConfigController {
     }
   };
 }
+

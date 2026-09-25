@@ -1,5 +1,5 @@
 import { NextFunction, Request, Response } from 'express';
-import { Ticket, MessageAttachment } from '@prisma/client';
+import { Ticket } from '@prisma/client';
 import { currentWorkspaceId, withWorkspaceScope } from '@/database/tenant/context';
 import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
 import { TicketRepository, emitTicketCreated } from '../database/repositories/ticketRepository';
@@ -10,7 +10,7 @@ import { ResourceAccessRepository } from '../database/repositories/resourceAcces
 import { ChannelRepository } from '../database/repositories/channelRepository';
 import { ChannelParticipantRepository } from '../database/repositories/channelParticipantRepository';
 import { MessageRepository } from '../database/repositories/messageRepository';
-import { MessageAttachmentRepository, CreateMessageAttachmentInput } from '../database/repositories/messageAttachmentRepository';
+import { MessageAttachmentRepository } from '../database/repositories/messageAttachmentRepository';
 import { EmailRepository } from '../database/repositories/emailRepository';
 import { ReleaseRepository } from '../database/repositories/releaseRepository';
 import { getGroupedTagsWithConfig, DESK_EMAIL_SOURCE_TYPE, deskEmailConfigKey } from '@/tags';
@@ -46,16 +46,13 @@ import { uploadFiles, UploadedFileResult } from '../services/fileUploadService';
 import { config } from '../config/env';
 import { superpositionClient } from '@/services/superpositionClient';
 import { randomUUID } from 'crypto';
-import { linkCreatedEntities, resolveInheritedOwner } from '@/sdlc/entityLinkService';
 import { activityService } from '@/services/activity/activityService';
 import { entityLinkOwnerSchema, type EntityLinkOwner } from '@xyne/shared';
 import { vespaQueue } from '@/queues/vespaQueue';
-import { messageClassificationQueue } from '@/queues/messageClassificationQueue';
 import { ticketSchema, fileSchema, SubApp } from '@/vespa/src/types';
 import { isSupportedMimeType } from '@/services/fileProcessor';
 import { logger } from '@/utils/logger';
 import { resolveChannelDefaultBoard } from '@/utils/channelDefaultBoard';
-import { messageMetadataService } from '@/services/messageMetadataService';
 import { maybeCreateEntryApprovalRequest } from '@/services/stageTransition/stageEntryApproval';
 import { db } from '@/database/client';
 import { NAMESPACE } from '@/vespa/vespaConfig';
@@ -67,21 +64,16 @@ import { BaseTicketType,
   FormContextType,
   FormEntityType,
   ReleaseTrackingMode,
-  serializeTicketMd,
   TicketStatusV2,
   TicketPriority,
   AttachmentEntityType,
   ChannelType,
-  ActivityType,
   TicketReferenceRelation,
-  MessageType,
-  ConversationParticipation,
   BoardType,
   WorkspaceRole,
   OrgRole,
   AccessType,
 } from '@xyne/shared';
-import type { TicketCardSummary } from '@xyne/shared';
 import { CommitAnalysisController } from './commitAnalysisController';
 import { isReleaseTicket } from '@xyne/shared';
 import { backlogFlowGroup } from '@/services/flowCascadeService';
@@ -94,15 +86,18 @@ const AddAttachmentsFromConversationBodySchema = z.object({
   sourceMessageId: z.string().min(1).optional(),
 });
 import { userActivityTrackingService } from '@/services/userActivityTrackingService';
-import { TicketIdService } from '@/services/ticketIdService';
 import { unifiedBotUserService } from '@/bots/unified';
 import { workflowManager } from '@/workflows/services/workflowManager';
 import { WorkflowType } from '@/workflows/types/workflow-enums';
 import { ticketService } from '@/services/ticketService';
 import { dualWriteTicketTags } from '@/services/ticketTagDualWriteService';
+import { createTicketWithConversationTx } from '@/bypassAcl/transactions/controllersTicketController';
+import { createTicketTx } from '@/bypassAcl/transactions/controllersTicketController';
+import { mergeTicketTx } from '@/bypassAcl/transactions/controllersTicketController';
+import { unmergeTicketTx } from '@/bypassAcl/transactions/controllersTicketController';
 
 
-const prisma = DatabaseClient.getInstance();
+export const prisma = DatabaseClient.getInstance();
 
 type MyTicketBoardOption = {
   id: string;
@@ -111,13 +106,13 @@ type MyTicketBoardOption = {
 };
 
 export class TicketController {
-  private ticketRepository: TicketRepository;
-  private conversationRepository: ConversationRepository;
+  ticketRepository: TicketRepository;
+  conversationRepository: ConversationRepository;
   private boardRepository: BoardRepository;
-  private channelRepository: ChannelRepository;
+  channelRepository: ChannelRepository;
   private channelParticipantRepository: ChannelParticipantRepository;
-  private messageRepository: MessageRepository;
-  private messageAttachmentRepository: MessageAttachmentRepository;
+  messageRepository: MessageRepository;
+  messageAttachmentRepository: MessageAttachmentRepository;
   private commitAnalysisController: CommitAnalysisController | null = null;
 
   constructor() {
@@ -137,7 +132,7 @@ export class TicketController {
     }
   }
 
-  private async pushVespaJobForAttachments(
+  async pushVespaJobForAttachments(
     attachments: Array<{ id: string; mimetype: string }>,
     userId: string,
     workspaceId?: string
@@ -259,114 +254,7 @@ export class TicketController {
       entityLinkContext,
     } = params;
 
-    const ticket = await prisma.$transaction(async (tx) => {
-      // Get channelId from conversation
-      const conversation = await this.conversationRepository.findById(conversationId);
-      if (!conversation) {
-        throw new Error(`Conversation ${conversationId} not found`);
-      }
-      const channelId = conversation.channelId;
-
-      // Get workspaceId from channel
-      const channelWorkspaceId = await this.channelRepository.getWorkspaceId(channelId);
-
-      // Generate xyneId using project-scoped format
-      const xyneId = await TicketIdService.generateTicketId(tx, projectId);
-
-      const creationMessageId = randomUUID();
-
-      // Create ticket
-      const ticket = await this.ticketRepository.createTicket({
-        title,
-        description,
-        sourceMessageId: creationMessageId,
-        createdBy,
-        updatedBy,
-        assignedTo: assignedTo || undefined,
-        conversationId,
-        channelId,
-        projectId,
-        workspaceId: channelWorkspaceId,
-        boardId,
-        statusV2: statusV2 as TicketStatusV2,
-        priority: priority.toUpperCase() as TicketPriority,
-        xyneId,
-      }, tx);
-
-      // Post ticket notification as SYSTEM message in conversation
-      const now = new Date();
-      await tx.message.create({
-        data: {
-          messageId: creationMessageId,
-          conversationId,
-          senderId: createdBy,
-          workspaceId: channelWorkspaceId,
-          content: messageContent || `Ticket created: ${title}`,
-          msgType: MessageType.SYSTEM,
-          showInChannel: false,
-          metadata: {
-            messageSubtype,
-            ticketId: ticket.id,
-            xyneId: ticket.xyneId,
-            isAiGenerated: true,
-            ...metadata,
-          },
-        },
-      });
-
-      // Update conversation reply count and set ticketId
-      await tx.conversation.update({
-        where: { conversationId },
-        data: {
-          replyCount: { increment: 1 },
-          lastActivityAt: now,
-          ticketId: ticket.id,
-        },
-      });
-
-      // Update lastReplyAt on all participants (denormalized for userConversationsPaginatedV2)
-      await tx.conversationParticipant.updateMany({
-        where: { conversationId },
-        data: { lastReplyAt: now },
-      });
-
-      // Add/update ticket creator as MENTIONED participant (subscribed by default)
-      await tx.conversationParticipant.upsert({
-        where: {
-          conversationId_userId: {
-            conversationId,
-            userId: createdBy,
-          },
-        },
-        create: {
-          id: randomUUID(),
-          conversationId,
-          userId: createdBy,
-          workspaceId: channelWorkspaceId,
-          participationType: ConversationParticipation.MENTIONED,
-          isSubscribed: true,
-          joinedAt: now,
-          channelId,
-        },
-        update: {
-          participationType: ConversationParticipation.MENTIONED,
-          isSubscribed: true,
-        },
-      });
-
-      const linkOwner = entityLinkContext ?? (await resolveInheritedOwner(tx, conversationId));
-      if (linkOwner) {
-        await linkCreatedEntities(
-          tx,
-          { owner: linkOwner, channelId, conversationId, ticketId: ticket.id },
-          { workspaceId: channelWorkspaceId, userId: createdBy },
-        );
-      }
-
-      await this.channelRepository.updateLastActivity(channelId);
-
-      return ticket;
-    });
+    const ticket = await createTicketWithConversationTx(this, conversationId, projectId, title, description, createdBy, updatedBy, assignedTo, boardId, statusV2, priority, messageContent, messageSubtype, metadata, entityLinkContext);
 
     // Ticket committed on its initial stage — auto-create the on-entry approval
     // request if that stage's single outgoing transition is configured for it.
@@ -895,397 +783,7 @@ export class TicketController {
       }
 
       // Wrap all database operations in a transaction for data integrity
-      const { ticket } = await prisma.$transaction(async (tx) => {
-        // Generate xyneId using project-scoped format
-        const xyneId = await TicketIdService.generateTicketId(tx, projectId);
-
-        let conversationId: string;
-        let ticket: Ticket;
-
-        if (sourceConversationId) {
-          const existingConversation = validatedConversation;
-          // Conversation existence already validated before transaction
-
-          conversationId = existingConversation.conversationId;
-          const channelIdFromConversation = existingConversation.channelId;
-          const existingConversationWorkspaceId = await this.channelRepository.getWorkspaceId(channelIdFromConversation);
-
-          ticket = await this.ticketRepository.createTicket({
-            ...(requestedTicketId && { id: requestedTicketId }),
-            title,
-            description,
-            createdBy: userId,
-            updatedBy: userId,
-            assignedTo: finalAssignedTo,
-            conversationId,
-            channelId: channelIdFromConversation,
-            projectId,
-            workspaceId: existingConversationWorkspaceId,
-            userGroupId,
-            boardId,
-            statusV2: effectiveStatusV2,
-            priority,
-            eta,
-            metadata,
-            closedAt,
-            closedBy,
-            merchantId,
-            xyneId,
-            sourceMessageId: sourceMessageId ?? existingConversation.initialMessageId ?? undefined,
-            ticketType: effectiveTicketType,
-            stageName: effectiveStageName,
-            dynamicFields: dynamicFields as Record<string, string>,
-            formFieldChanges: formFieldChangesForEmit,
-          }, tx);
-
-          const ticketMd = serializeTicketMd({
-            id: ticket.id,
-            title: ticket.title,
-            description: ticket.description,
-            statusV2: ticket.statusV2 as TicketCardSummary['statusV2'],
-            priority: ticket.priority as TicketCardSummary['priority'],
-            assignedTo: ticket.assignedTo ?? null,
-            createdBy: ticket.createdBy,
-            createdAt: ticket.createdAt.getTime(),
-            eta: ticket.eta ? ticket.eta.getTime() : null,
-            xyneId: ticket.xyneId,
-            stageName: ticket.stageName,
-            ticketType: ticket.ticketType ?? null,
-            channelId: ticket.channelId,
-            conversationId: ticket.conversationId,
-          });
-
-          // Update conversation with ticketId and ticket_md
-          await tx.conversation.update({
-            where: { conversationId: existingConversation.conversationId },
-            data: { ticketId: ticket.id, ticket_md: ticketMd },
-          });
-
-
-          // Add/update ticket creator as MENTIONED participant (subscribed by default)
-          await db.conversationParticipant.upsert({
-            where: {
-              conversationId_userId: {
-                conversationId,
-                userId,
-              },
-            },
-            create: {
-              id: randomUUID(),
-              conversationId,
-              userId,
-              workspaceId: existingConversationWorkspaceId,
-              participationType: ConversationParticipation.MENTIONED,
-              isSubscribed: true,
-              joinedAt: new Date(),
-              channelId,
-            },
-            update: {
-              participationType: ConversationParticipation.MENTIONED,
-              isSubscribed: true,
-            },
-          });
-
-          if (existingConversation.initialMessageId) {
-            const initialMessage = await this.messageRepository.findById(existingConversation.initialMessageId);
-
-            if (initialMessage) {
-              const existingMetadata = (initialMessage.metadata as Record<string, unknown>) || {};
-              await this.messageRepository.update(existingConversation.initialMessageId, {
-                metadata: {
-                  ...existingMetadata,
-                  ticketId: ticket.id,
-                },
-              });
-            }
-          }
-
-          // Get existing CHAT attachments from the FIRST MESSAGE ONLY and convert them to TICKET attachments (excluding any that user chose to exclude)
-          let existingChatAttachments: MessageAttachment[] = [];
-
-          if (existingConversation.initialMessageId) {
-            // Only get attachments from the initial/first message of the conversation
-            existingChatAttachments = await this.messageAttachmentRepository.findByMessageId(
-              existingConversation.initialMessageId
-            );
-          }
-
-          // Filter out excluded attachments
-          const attachmentsToConvert = existingChatAttachments.filter(attachment =>
-            !(excludedChatAttachmentIds || []).includes(attachment.id)
-          );
-
-          // Update existing CHAT attachments to TICKET attachments (atomic operation)
-          if (attachmentsToConvert.length > 0) {
-            const attachmentIdsToConvert = attachmentsToConvert.map(attachment => attachment.id);
-            await this.messageAttachmentRepository.updateManyEntityTypeAndId(
-              attachmentIdsToConvert,
-              AttachmentEntityType.TICKET,
-              ticket.id
-            );
-          }
-
-          // If there were any excluded attachments, they remain as CHAT attachments
-          // (they won't be deleted since the conversation still exists)
-
-          const linkOwner =
-            entityLinkOwner ?? (await resolveInheritedOwner(tx, conversationId));
-          if (linkOwner) {
-            await linkCreatedEntities(
-              tx,
-              {
-                owner: linkOwner,
-                channelId: channelIdFromConversation,
-                conversationId,
-                ticketId: ticket.id,
-              },
-              { workspaceId: existingConversationWorkspaceId, userId },
-            );
-          }
-        } else {
-          let doNotPostToChannel = false;
-          if (fromTicketsTab) {
-            const channelSetting = await tx.channel.findUnique({
-              where: { id: channelId! },
-              select: { showTicketsTabTicketsInChat: true },
-            });
-            doNotPostToChannel = channelSetting?.showTicketsTabTicketsInChat === false;
-          }
-          const conversation = await this.conversationRepository.create({
-            channelId: channelId!,
-            createdBy: userId,
-            initialMessageId,
-            doNotPostToChannel,
-          });
-
-          conversationId = conversation.conversationId;
-
-          const newConversationWorkspaceId = await this.channelRepository.getWorkspaceId(channelId!);
-
-          ticket = await this.ticketRepository.createTicket({
-            ...(requestedTicketId && { id: requestedTicketId }),
-            title,
-            description,
-            createdBy: userId,
-            updatedBy: userId,
-            assignedTo: finalAssignedTo,
-            conversationId,
-            channelId: channelId!,
-            projectId,
-            workspaceId: newConversationWorkspaceId,
-            userGroupId,
-            boardId,
-            statusV2: effectiveStatusV2,
-            priority,
-            eta,
-            metadata,
-            closedAt,
-            closedBy,
-            merchantId,
-            xyneId,
-            sourceMessageId: sourceMessageId ?? initialMessageId,
-            ticketType: effectiveTicketType,
-            stageName: effectiveStageName,
-            dynamicFields: dynamicFields as Record<string, string>,
-            formFieldChanges: formFieldChangesForEmit,
-          }, tx);
-
-          await this.messageRepository.createWithExecutionId({
-            conversationId,
-            senderId: userId,
-            content: `Ticket created in ${board?.name || 'Unknown Board'}: ${title}`,
-            msgType: MessageType.SYSTEM,
-            metadata: { ticketId: ticket.id },
-          }, initialMessageId);
-          await messageMetadataService.syncInitialMessageMd(conversationId);
-
-          // Ticket creation writes its message through Prisma, not a Zero mutator, so the
-          // vespa-injection handler that normally triggers classification never fires here.
-          // The thread has no user messages yet — the classifier reads the ticket instead.
-          void messageClassificationQueue.enqueueForMessage(conversationId);
-
-          const ticketMd = serializeTicketMd({
-            id: ticket.id,
-            title: ticket.title,
-            description: ticket.description,
-            statusV2: ticket.statusV2 as TicketCardSummary['statusV2'],
-            priority: ticket.priority as TicketCardSummary['priority'],
-            assignedTo: ticket.assignedTo ?? null,
-            createdBy: ticket.createdBy,
-            createdAt: ticket.createdAt.getTime(),
-            eta: ticket.eta ? ticket.eta.getTime() : null,
-            xyneId: ticket.xyneId,
-            stageName: ticket.stageName,
-            ticketType: ticket.ticketType ?? null,
-            channelId: ticket.channelId,
-            conversationId: ticket.conversationId,
-          });
-
-          // Update conversation with ticketId and ticket_md
-          await tx.conversation.update({
-            where: { conversationId },
-            data: { ticketId: ticket.id, ticket_md: ticketMd },
-          });
-
-          // Add ticket creator as MENTIONED participant (subscribed by default)
-          await tx.conversationParticipant.upsert({
-            where: {
-              conversationId_userId: {
-                conversationId,
-                userId: userId,
-              },
-            },
-            create: {
-              id: randomUUID(),
-              conversationId,
-              userId: userId,
-              workspaceId: newConversationWorkspaceId,
-              participationType: ConversationParticipation.MENTIONED,
-              isSubscribed: true,
-              joinedAt: new Date(),
-              channelId: ticket.channelId,
-            },
-            update: {
-              participationType: ConversationParticipation.MENTIONED,
-              isSubscribed: true,
-            },
-          });
-
-          let newConversationLinkOwner = entityLinkOwner;
-          if (!newConversationLinkOwner && sourceMessageId) {
-            const stampSourceMessage = await this.messageRepository.findById(sourceMessageId);
-            if (stampSourceMessage?.conversationId) {
-              newConversationLinkOwner = (await resolveInheritedOwner(
-                tx,
-                stampSourceMessage.conversationId,
-              )) ?? undefined;
-            }
-          }
-          if (newConversationLinkOwner) {
-            await linkCreatedEntities(
-              tx,
-              {
-                owner: newConversationLinkOwner,
-                channelId: channelId!,
-                conversationId,
-                ticketId: ticket.id,
-              },
-              { workspaceId: newConversationWorkspaceId, userId },
-            );
-          }
-        }
-
-        // Get workspaceId from channel for attachments
-        const ticketChannelWorkspaceId = channelId
-          ? await this.channelRepository.getWorkspaceId(channelId)
-          : '';
-
-        // Create attachment records for uploaded files (inside transaction)
-        if (uploadedFiles.length > 0) {
-          const attachmentData: CreateMessageAttachmentInput[] = uploadedFiles.map(file => ({
-            entityId: ticket.id,
-            entityType: AttachmentEntityType.TICKET,
-            originalFilename: file.originalName,
-            size: file.fileSize,
-            mimetype: file.mimeType,
-            url: file.fileUrl,
-            thumbnailUrl: file.thumbnailUrl ?? undefined,
-            width: file.width,
-            height: file.height,
-            uploadedByUserId: userId,
-            createdBy: userId,
-            storageProvider: config.fileStorage.provider,
-            conversationId: conversationId,
-            workspaceId: ticketChannelWorkspaceId,
-            metadata: file.metadata || {},
-          }));
-
-          await this.messageAttachmentRepository.createMany(attachmentData);
-
-          // Fetch back to get real IDs for manual Vespa trigger
-          const savedAttachments = await this.messageAttachmentRepository.findByEntityIdAndType(ticket.id, AttachmentEntityType.TICKET);
-          if (savedAttachments.length > 0) {
-            const attachments = savedAttachments.map(a => ({ id: a.id, mimetype: a.mimetype }));
-            this.pushVespaJobForAttachments(attachments, userId, ticketChannelWorkspaceId).catch((error: any) => {
-              logger.error(`[TicketController] Error pushing Vespa job for ticket attachments ${ticket.id}:`, error);
-            });
-          }
-        }
-
-        // Trigger Vespa job for converted chat attachments
-        if (sourceConversationId) {
-          // chat attachments were updated to TICKET type, we should re-index them
-          const convertedAttachments = await this.messageAttachmentRepository.findByEntityIdAndType(ticket.id, AttachmentEntityType.TICKET);
-          if (convertedAttachments.length > 0) {
-            const attachments = convertedAttachments.map(a => ({ id: a.id, mimetype: a.mimetype }));
-            this.pushVespaJobForAttachments(attachments, userId, ticketChannelWorkspaceId).catch((error: any) => {
-              logger.error(`[TicketController] Error pushing Vespa job for converted attachments in ticket ${ticket.id}:`, error);
-            });
-          }
-        }
-
-        // Transfer draft attachments to ticket (if provided)
-        if (draftAttachmentIds && draftAttachmentIds.length > 0) {
-          // Validate draft attachments exist and belong to the user
-          const draftAttachments = await this.messageAttachmentRepository.findByIds(draftAttachmentIds);
-
-          if (draftAttachments.length !== draftAttachmentIds.length) {
-            logger.warn(`[Ticket Creation] Some draft attachments not found: requested ${draftAttachmentIds.length}, found ${draftAttachments.length}`);
-          }
-
-          // Validate all are DRAFT attachments owned by the user
-          const validDraftAttachments = draftAttachments
-            .filter((attachment: MessageAttachment) =>
-              attachment.entityType === AttachmentEntityType.DRAFT &&
-              attachment.uploadedByUserId === userId
-            );
-
-          const validDraftAttachmentIds = validDraftAttachments.map(a => a.id);
-
-          // Update draft attachments to ticket attachments
-          if (validDraftAttachmentIds.length > 0) {
-            await this.messageAttachmentRepository.updateManyEntityTypeAndId(
-              validDraftAttachmentIds,
-              AttachmentEntityType.TICKET,
-              ticket.id
-            );
-
-            // Also update conversationId to associate with the new conversation
-            await tx.messageAttachment.updateMany({
-              where: {
-                id: { in: validDraftAttachmentIds },
-              },
-              data: {
-                conversationId: conversationId,
-              },
-            });
-
-            const draftMessage = await db.draftMessage.findUnique({
-              where: {
-                id: draftAttachments[0].entityId, // All attachments belong to the same draft message
-              },
-            });
-
-            if (draftMessage) {
-              await db.draftMessage.delete({
-                where: {
-                  id: draftMessage.id,
-                },
-              });
-            }
-
-            logger.info(`[Ticket Creation] Transferred ${validDraftAttachmentIds.length} draft attachments to ticket ${ticket.id}`);
-
-            // Trigger Vespa re-indexing for transferred draft attachments
-            const attachments = validDraftAttachments.map(a => ({ id: a.id, mimetype: a.mimetype }));
-            this.pushVespaJobForAttachments(attachments, userId!, ticketChannelWorkspaceId).catch((error: any) => {
-              logger.error(`[TicketController] Error pushing Vespa job for transferred draft attachments in ticket ${ticket.id}:`, error);
-            });
-          }
-        }
-
-        return { ticket, conversationId };
-      });
+      const { ticket } = await createTicketTx(projectId, sourceConversationId, validatedConversation, this, requestedTicketId, title, description, userId, finalAssignedTo, userGroupId, boardId, effectiveStatusV2, priority, eta, metadata, closedAt, closedBy, merchantId, sourceMessageId, effectiveTicketType, effectiveStageName, dynamicFields, formFieldChangesForEmit, channelId, excludedChatAttachmentIds, entityLinkOwner, fromTicketsTab, initialMessageId, board, uploadedFiles, draftAttachmentIds);
 
       // Ticket committed on its initial stage — auto-create the on-entry approval
       // request if that stage's single outgoing transition is configured for it.
@@ -2246,21 +1744,7 @@ export class TicketController {
         return;
       }
 
-      const mapping = await prisma.$transaction(async (tx) => {
-        const created = await tx.ticketReferenceMapping.create({
-          data: { sourceTicketId: ticketId, targetTicketId, relationType: TicketReferenceRelation.MERGED_INTO, createdBy: userId, workspaceId: source.workspaceId },
-        });
-        await tx.ticket.update({ where: { id: ticketId }, data: { isArchived: true, updatedBy: userId } });
-
-        await tx.ticketActivity.create({
-          data: { ticketId, updatedBy: userId, workspaceId: source.workspaceId, activityType: ActivityType.MERGED, value: { targetTicketId: target.id, targetTicketXyneId: target.xyneId, targetTicketTitle: target.title } },
-        });
-        await tx.ticketActivity.create({
-          data: { ticketId: targetTicketId, updatedBy: userId, workspaceId: target.workspaceId, activityType: ActivityType.MERGED, value: { sourceTicketId: ticketId, sourceTicketXyneId: source.xyneId, sourceTicketTitle: source.title } },
-        });
-
-        return created;
-      });
+      const mapping = await mergeTicketTx(ticketId, targetTicketId, userId, source, target);
 
       // Create Zero-side notification activities (fire-and-forget)
       TicketsSideEffectHandler.handleTicketMerged({
@@ -2299,17 +1783,7 @@ export class TicketController {
       });
       if (!mapping) { res.status(400).json({ error: 'Ticket is not merged into another ticket' }); return; }
 
-      await prisma.$transaction(async (tx) => {
-        await tx.ticketReferenceMapping.delete({ where: { id: mapping.id } });
-        await tx.ticket.update({ where: { id: ticketId }, data: { isArchived: false, updatedBy: userId } });
-
-        await tx.ticketActivity.create({
-          data: { ticketId, updatedBy: userId, workspaceId: ticket.workspaceId, activityType: ActivityType.UNMERGED, value: { targetTicketId: mapping.targetTicketId, targetTicketXyneId: mapping.targetTicket.xyneId, targetTicketTitle: mapping.targetTicket.title } },
-        });
-        await tx.ticketActivity.create({
-          data: { ticketId: mapping.targetTicketId, updatedBy: userId, workspaceId: mapping.targetTicket.workspaceId, activityType: ActivityType.UNMERGED, value: { sourceTicketId: ticketId, sourceTicketXyneId: ticket.xyneId, sourceTicketTitle: ticket.title } },
-        });
-      });
+      await unmergeTicketTx(mapping, ticketId, userId, ticket);
 
       // Create Zero-side notification activities (fire-and-forget)
       TicketsSideEffectHandler.handleTicketUnmerged({
@@ -2395,3 +1869,7 @@ export class TicketController {
   };
 
 }
+
+
+
+
