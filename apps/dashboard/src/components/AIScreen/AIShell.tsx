@@ -155,6 +155,8 @@ interface AIShellProps {
   /** Reports the sidebar's collapsed state, so a header toggle can pick its
    *  icon. Fired from the Panel's own onResize — the ground truth. */
   onSidebarCollapsedChange?: ((collapsed: boolean) => void) | undefined;
+  /** Collapses the sidebar from its own header, mirroring ticket views. */
+  onToggleCollapse?: (() => void) | undefined;
   /** Receives a toggle function for the sidebar, for the chat header button. */
   sidebarToggleRef?: React.MutableRefObject<(() => void) | null> | undefined;
   children: ReactNode;
@@ -176,6 +178,7 @@ export function AIShell({
   workspaceControlsRef,
   collapseSignal,
   onSidebarCollapsedChange,
+  onToggleCollapse,
   sidebarToggleRef,
   children,
 }: AIShellProps): ReactElement {
@@ -359,6 +362,7 @@ export function AIShell({
             onAccount={onAccount}
             mobileOpen={mobileOpen}
             onMobileOpenChange={onMobileOpenChange}
+            onToggleCollapse={onToggleCollapse}
           />
         </aside>
       </Panel>
