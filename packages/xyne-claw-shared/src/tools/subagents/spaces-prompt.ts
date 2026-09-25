@@ -104,7 +104,7 @@ If a question can only be answered by something outside Spaces, say so plainly.
 
 Most wrong answers come from one of three failures:
 
-1. Picking the wrong tool (e.g. \`spaces-search\` for tickets).
+1. Picking the wrong tool (e.g. \`spaces-vespa-search\` for tickets).
 2. Forgetting to scope (no \`channelId\`, no \`conversationId\`).
 3. Passing a name or email where the tool wants an ID — or worse, inventing an ID.
 
@@ -124,8 +124,8 @@ For multi-part user tasks, mix — do simple parts yourself, farm deep sub-queri
 |---|---|
 | Who am I / what's my user ID | \`spaces-whoami\` |
 | Resolving a person's name → ID | \`spaces-users\` |
-| A specific topic/keyword across messages, files, tickets | \`spaces-search\` |
-| Tickets — status, assignee, priority, board, stage, dates | \`spaces-tickets\` — NOT spaces-search |
+| A specific topic/keyword across messages, files, tickets | \`spaces-vespa-search\` |
+| Tickets — status, assignee, priority, board, stage, dates | \`spaces-tickets\` — NOT spaces-vespa-search |
 | Reading a specific thread | \`spaces-messages\` |
 | One message's reactions / attachments / metadata | \`spaces-message-detail\` |
 | Finding a channel | \`spaces-channels\` |
@@ -136,7 +136,7 @@ For multi-part user tasks, mix — do simple parts yourself, farm deep sub-queri
 | Finding a doc | \`spaces-canvases\` |
 | Reading a doc's contents | \`spaces-read-canvas\` |
 | A call/meeting list — titles/times/status | \`spaces-calls\` |
-| Meeting/call content — decisions, action items, what someone said | \`spaces-meeting-insights\` — NOT spaces-search |
+| Meeting/call content — decisions, action items, what someone said | \`spaces-meeting-insights\` — NOT spaces-vespa-search |
 | The full verbatim transcript of one call — exact quotes, end-to-end read | \`spaces-calls\` with \`callId\` + \`includeTranscript=true\` |
 | Email threads on a desk ticket | \`spaces-emails\` |
 | Files on a thread | \`spaces-thread-attachments\`, then \`spaces-fetch-attachment\` |
@@ -173,7 +173,7 @@ When the user attaches a channel/thread/ticket/canvas/call to their message, a "
 
 Always pass the attached IDs explicitly:
 
-- **Channel** attached → \`channelId=<id>\` for \`spaces-tickets\` / \`spaces-activity\` / \`spaces-canvases\` / \`spaces-calls\`; \`in=<id>\` for \`spaces-search\`.
+- **Channel** attached → \`channelId=<id>\` for \`spaces-tickets\` / \`spaces-activity\` / \`spaces-canvases\` / \`spaces-calls\`; \`filters={ channelId: { eq: <id> } }\` for \`spaces-vespa-search\`.
 - **Thread** attached → \`conversationId=<tid>\` for \`spaces-messages\` / \`spaces-emails\` / \`spaces-thread-attachments\`.
 - **Ticket** attached → read its \`conversationId\` with \`spaces-messages\`; narrow further with \`spaces-tickets\` if the user asks about related work.
 - **Canvas** attached → \`spaces-read-canvas\` with its \`viewAccessId\` **before** answering.
@@ -214,7 +214,7 @@ The org is full of look-alike content. Stay anchored to **exactly** what was ask
 
 - \`spaces-tickets\` + \`spaces-meeting-insights\` (different surfaces, same topic)
 - \`spaces-users\` + \`spaces-channels\` (resolving identities for a follow-up call)
-- \`spaces-canvases\` + \`spaces-emails\` + \`spaces-search\` (broad sweep across surfaces)
+- \`spaces-canvases\` + \`spaces-emails\` + \`spaces-vespa-search\` (broad sweep across surfaces)
 
 **Sequential — must wait:**
 

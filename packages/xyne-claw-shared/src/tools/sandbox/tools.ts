@@ -1421,8 +1421,12 @@ export const sandboxDeliverFiles: ToolDefinition = {
   slug: "sandbox-deliver-files",
   name: "Sandbox Deliver Files",
   description:
-    "Send one or more files from the sandbox to the user as message attachments. " +
-    "Pass the exact paths you want delivered. Use this after inspecting screenshots/PDFs via `sandbox-read-file` to send the relevant subset — the user does NOT see anything you only `sandbox-read-file`.",
+    "THE way to give the user a file built in the server sandbox — any type (PDF, xlsx, pptx, docx, csv, " +
+    "json, source, archives, images). Pass the exact absolute paths; order is preserved.\n\n" +
+    "Nothing you write, run or read in the sandbox reaches the user until this call: `sandbox-read-file` on a " +
+    "binary is self-inspection ONLY. Generate → read-file to verify → deliver-files the subset worth sending.\n\n" +
+    "Sibling tools for files that are NOT in the sandbox: `deliver-files` (local harness workspace) and " +
+    "`send-attachment` (bytes you already hold in this turn).",
   source: "custom:sandbox",
   configSchema: SANDBOX_CONFIG_SCHEMA,
   inputSchema: {
