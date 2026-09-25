@@ -229,6 +229,15 @@ export class WorkerScheduler {
             logger.info('[WORKER_SCHEDULER] Recap scheduler is disabled (ENABLE_RECAP_SCHEDULER=false)');
         }
 
+        this.isRunning = true;
+        logger.info('[WORKER_SCHEDULER] All workers started');
+    }
+
+    /**
+     * Start the desk report cron. Called from worker.ts independently of
+     * ENABLE_VESPA_WORKER, since the report dispatch needs claw env.
+     */
+    async startDeskReportScheduler(): Promise<void> {
         // Initialize Desk Report Generation Queue
         if (config.deskReportScheduler.enabled) {
             this.deskReportGenerationQueue = new Bull('desk-report-generation', {
@@ -358,9 +367,6 @@ export class WorkerScheduler {
         } else {
             logger.info('[WORKER_SCHEDULER] Desk report scheduler is disabled (ENABLE_DESK_REPORT_SCHEDULER=false)');
         }
-
-        this.isRunning = true;
-        logger.info('[WORKER_SCHEDULER] All workers started');
     }
 
 
@@ -395,6 +401,11 @@ export class WorkerScheduler {
             this.recapCleanupQueue = null;
         }
 
+        this.isRunning = false;
+        logger.info('[WORKER_SCHEDULER] Workers stopped');
+    }
+
+    async stopDeskReportScheduler(): Promise<void> {
         if (this.deskReportGenerationQueue) {
             await this.deskReportGenerationQueue.close();
             this.deskReportGenerationQueue = null;
@@ -404,9 +415,6 @@ export class WorkerScheduler {
             await this.deskReportCleanupQueue.close();
             this.deskReportCleanupQueue = null;
         }
-
-        this.isRunning = false;
-        logger.info('[WORKER_SCHEDULER] Workers stopped');
     }
 
     private async runProductInsightsRecluster(): Promise<void> {
