@@ -1,6 +1,11 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Plus, X, Check, Pencil, Trash2 } from 'lucide-react';
-import { MAX_DUPLICATE_SCOPE_FIELDS, type EmailSignature } from '@xyne/shared';
+import {
+  FormContextType,
+  FormEntityType,
+  MAX_DUPLICATE_SCOPE_FIELDS,
+  type EmailSignature,
+} from '@xyne/shared';
 import { v4 as uuidv4 } from 'uuid';
 import { toast } from 'sonner';
 import Avatar from '../../../ui/Avatar/Avatar';
@@ -15,10 +20,12 @@ import { Switch } from '../../../ui/Switch';
 import { SearchableMultiSelect } from '../../../ui/SearchableMultiSelect/SearchableMultiSelect';
 import { matchesUserQuery } from '../../../../utils/userDisplayName';
 import { useChannelApps } from '../../../../hooks/useChannelApps';
-import { useGlobalFieldSearch } from '../../../../hooks/useGlobalFieldSearch';
+import { useCachedQuery } from '../../../../hooks/useCachedQuery';
 import { useUsers } from '../../../../hooks/useUsers';
 import { useZero } from '../../../../hooks/useZero';
 import { mutators } from '../../../../zero/mutators';
+import { queries } from '../../../../zero/queries';
+import { resolveDisplayFormFields } from '../../../../utils/board/resolveDisplayFormFields';
 import { getIconForFieldType } from '../../../Tickets/TicketFilters/fieldTypeIcons';
 import type { useDeskSettingsForm } from '../useDeskSettingsForm';
 import SignatureIcon from '../../../icons/SignatureIcon';
@@ -76,7 +83,7 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
     setDuplicateDetectionEnabled,
     duplicateScopeFieldIds,
     setDuplicateScopeFieldIds,
-    projectId,
+    boardId,
   } = form;
 
   const [ccInputValue, setCcInputValue] = useState('');
@@ -106,27 +113,38 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
   const showAppWebhookDelivery = isApp || (connectedApps?.length ?? 0) > 0;
 
   const [scopeFieldPickerOpen, setScopeFieldPickerOpen] = useState(false);
-  // Empty search string: the picker's own input filters; we only need the cached list here.
-  const { details: globalFieldsQuery } = useGlobalFieldSearch(projectId, '', {
-    enabled: isDeskChannel && !!projectId,
-  });
-  // Every field type is a valid scope key — the service derives its Vespa token from
-  // the same buildFormFields the indexer uses — so the picker offers the whole list.
-  const globalFields = useMemo(() => globalFieldsQuery.data ?? [], [globalFieldsQuery.data]);
-  // Chips are driven by the saved config, not by the field list: a configured field
-  // that has since been deleted still needs a chip, or its id is stranded — it keeps
-  // counting toward the cap and the backend reports it missing forever, which turns
-  // scoping off for the whole channel while this screen still reads "on".
-  const globalFieldById = useMemo(
-    () => new Map(globalFields.map(field => [field.id, field])),
-    [globalFields],
+  // The board's ticket form, not the project's global fields: a legacy form's fields have
+  // no GlobalField id, so project-wide options would offer keys the backend can't resolve.
+  const [scopeFieldsMapping, scopeFieldsDetails] = useCachedQuery(
+    queries.getFormMappingByContextId({
+      contextId: boardId || 'nonexistent',
+      contextType: FormContextType.BOARD,
+      entityType: FormEntityType.TICKET,
+    }),
+    { enabled: isDeskChannel && !!boardId },
+  );
+  const scopedFields = useMemo(
+    () =>
+      scopeFieldsMapping?.formFields
+        ? resolveDisplayFormFields(scopeFieldsMapping.formId, [...scopeFieldsMapping.formFields])
+        : [],
+    [scopeFieldsMapping?.formFields, scopeFieldsMapping?.formId],
+  );
+  // Chips come from the saved config, not the field list, so a deleted field still gets a
+  // chip to remove rather than a stranded id that counts toward the cap forever.
+  const scopeFieldById = useMemo(
+    () => new Map(scopedFields.map(field => [field.id, field])),
+    [scopedFields],
   );
   const selectedDuplicateScopeFields = duplicateScopeFieldIds.map(id => ({
     id,
-    field: globalFieldById.get(id),
+    field: scopeFieldById.get(id),
   }));
+  // No board and an unlanded sync both leave scopedFields empty, so nothing calls a saved
+  // field deleted until the result is complete.
+  const scopeFieldsResolved = !!boardId && scopeFieldsDetails.type === 'complete';
   const hasUnresolvedScopeField =
-    !globalFieldsQuery.isPending && selectedDuplicateScopeFields.some(entry => !entry.field);
+    scopeFieldsResolved && selectedDuplicateScopeFields.some(entry => !entry.field);
   const duplicateScopeFieldCapReached = duplicateScopeFieldIds.length >= MAX_DUPLICATE_SCOPE_FIELDS;
 
   useEffect(() => {
@@ -490,20 +508,22 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
               <div className='text-desk-label'>Scope fields</div>
               <div className='flex w-full max-w-[500px] flex-wrap items-center gap-[6px]'>
                 {selectedDuplicateScopeFields.map(({ id, field }) => {
-                  const label = field ? field.fieldName : 'Deleted field';
+                  const isMissing = scopeFieldsResolved && !field;
+                  const unresolvedLabel = boardId ? 'Loading…' : 'Unresolved field';
+                  const label = field?.fieldName ?? (isMissing ? 'Deleted field' : unresolvedLabel);
                   return (
                     <div
                       key={id}
-                      title={field ? undefined : `This field no longer exists (${id})`}
+                      title={isMissing ? `This field no longer exists (${id})` : undefined}
                       className={`inline-flex shrink-0 items-center gap-[4px] whitespace-nowrap rounded-[6px] py-[2px] pl-[6px] pr-[4px] ${
-                        field
-                          ? 'bg-desk-accent-subtle'
-                          : 'bg-destructive/10 line-through decoration-destructive/60'
+                        isMissing
+                          ? 'bg-destructive/10 line-through decoration-destructive/60'
+                          : 'bg-desk-accent-subtle'
                       }`}
                     >
                       <span
-                        className={`text-[13px] font-medium leading-[18px] tracking-[-0.2px] ${
-                          field ? 'text-desk-accent-foreground' : 'text-destructive'
+                        className={`max-w-[220px] truncate text-[13px] font-medium leading-[18px] tracking-[-0.2px] ${
+                          isMissing ? 'text-destructive' : 'text-desk-accent-foreground'
                         }`}
                       >
                         {label}
@@ -517,7 +537,7 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
                         }
                         disabled={!canManage || !duplicateDetectionEnabled}
                         className={`hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 ${
-                          field ? 'text-desk-accent-foreground' : 'text-destructive'
+                          isMissing ? 'text-destructive' : 'text-desk-accent-foreground'
                         }`}
                         data-track-category='DeskSettings'
                         data-track-name='RemoveDuplicateScopeField'
@@ -528,9 +548,9 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
                     </div>
                   );
                 })}
-                {globalFields.length > 0 && (
+                {scopeFieldsResolved && scopedFields.length > 0 && (
                   <SearchableMultiSelect
-                    options={globalFields.map(field => {
+                    options={scopedFields.map(field => {
                       const FieldTypeIcon = getIconForFieldType(field.fieldType);
                       return {
                         value: field.id,
@@ -582,13 +602,19 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
               </div>
               {hasUnresolvedScopeField && (
                 <div className='w-full max-w-[500px] text-[13px] leading-[18px] text-destructive'>
-                  A selected field no longer exists, so duplicate detection falls back to
-                  project-wide on this desk. Remove it to re-enable scoping.
+                  A selected field is not on the board ticket form for this desk, so duplicate
+                  detection falls back to project-wide here. Remove it and pick a field from the
+                  list to re-enable scoping.
                 </div>
               )}
-              {!globalFieldsQuery.isPending && globalFields.length === 0 && (
+              {!boardId && (
                 <div className='text-desk-helper w-full max-w-[500px]'>
-                  No fields in this project yet. Add one on a ticket form first, then pick it here.
+                  Set a target board for this desk first — scope fields come from its ticket form.
+                </div>
+              )}
+              {scopeFieldsResolved && scopedFields.length === 0 && (
+                <div className='text-desk-helper w-full max-w-[500px]'>
+                  This board&apos;s ticket form has no fields yet. Add one there first.
                 </div>
               )}
             </div>
