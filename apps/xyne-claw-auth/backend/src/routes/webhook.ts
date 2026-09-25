@@ -4174,6 +4174,22 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     if (payload.emptyReason === "no_output") {
       clog.warn(`[webhook/result] channel run produced no output session=${sessionId}`);
     }
+    if (resultWithCitations.trim() && ctx.conversationId && ctx.agentSlug && ctx.agentOrgId && channelUserId) {
+      const parentId = await chatMessageRepository.latestMessageId(ctx.conversationId, ctx.agentSlug).catch(() => null);
+      chatMessageRepository.create({
+        conversationId: ctx.conversationId,
+        agentSlug: ctx.agentSlug,
+        userId: channelUserId,
+        orgId: ctx.agentOrgId,
+        ...(parentId ? { parentId } : {}),
+        role: "assistant",
+        content: resultWithCitations,
+        status: "completed",
+        ...(payload.reasoning ? { reasoning: payload.reasoning } : {}),
+      })
+        .then((msg) => persistCallbackAttachments(msg.id, channelUserId, payload.attachments))
+        .catch((e) => clog.warn(`[webhook/result] failed to save channel assistant ChatMessage session=${sessionId}: ${errMsg(e)}`));
+    }
     await deliverChannelResult({
       target: channelTarget,
       status: payload.emptyReason === "no_output" ? "failed" : (payload.status ?? "failed"),

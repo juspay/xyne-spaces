@@ -72,6 +72,12 @@ function channelSurfaceInstructions(channel: MessagingChannelKey): string {
       "- A file reaches them only if you DELIVER it with a tool that sends files (sandbox-deliver-files and the like). Writing a file into your workspace sends nothing.",
       "- Never say something is attached unless you delivered it in this reply. If you could not send it, say so and paste the content as text when it is short enough.",
     );
+    // The Cloud API rejects any document outside Meta's allowlist, HTML included.
+    if (channel === "whatsapp-cloud") {
+      lines.push(
+        "- Only PDF, Word, Excel, PowerPoint, plain-text, JPEG and PNG files can be sent here. Never produce an HTML file or HTML report: when they want a document, make a PDF. If the PDF cannot be made, say so instead of sending another format.",
+      );
+    }
   }
   lines.push("- They can send /new to start a fresh conversation, /stop to give up on a slow answer, /status to ask what you are doing, and /agents to see who else they can talk to. Mention these only if they ask how to do one of those things.");
   if (plugin && !plugin.capabilities.groups) lines.push("- This is a one-to-one conversation. There are no groups or threads here.");

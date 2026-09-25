@@ -301,7 +301,9 @@ export const whatsappCloudPlugin: ChannelPlugin<CloudHandle, WhatsAppCloudConfig
         typingTimers.delete(key);
         return;
       }
-      void postTyping(handle, messageId).catch(() => undefined);
+      void postTyping(handle, messageId).catch((err) =>
+        log.warn(`[whatsapp-cloud] typing refresh failed chat=${chatId} message=${messageId}: ${errMsg(err)}`),
+      );
     }, TYPING_REFRESH_MS);
     // Never hold the process open for a typing animation.
     timer.unref?.();

@@ -220,12 +220,9 @@ router.delete("/accounts/:id", async (req: Request, res: Response) => {
   await updateAccountConfig(account.id, { desiredState: "stopped" });
   await publishControl({ op: "logout", accountId: account.id });
   await setAccountStatus(account.id, "INACTIVE");
-  // Auth state never outlives the account; linked identities go with it.
+  // Auth state never outlives the account; linked numbers belong to people, not the account, so they stay.
   await authStateFor(account.id).clear();
-  await prisma.$transaction([
-    prisma.surfaceAgent.deleteMany({ where: { surfaceId: account.surfaceId, surfaceTenantId: account.accountKey } }),
-    prisma.userSurfaceIdentity.deleteMany({ where: { surfaceId: account.surfaceId, surfaceWorkspaceId: account.accountKey } }),
-  ]);
+  await prisma.surfaceAgent.deleteMany({ where: { surfaceId: account.surfaceId, surfaceTenantId: account.accountKey } });
   log.info(`[channels] account deleted id=${account.id} by=${resolved.userId}`);
   res.json({ success: true });
 });
@@ -330,7 +327,7 @@ router.get("/accounts/:id/status", async (req: Request, res: Response) => {
   });
 });
 
-/** Admin unlink: severs any user's identity on this account. The self-service
+/** Admin unlink: severs any user's number in this account's org. The self-service
  *  counterpart (your own numbers only) lives in numbers.ts. */
 router.delete("/accounts/:id/identities/:senderId", async (req: Request, res: Response) => {
   const resolved = await resolveAccountRequest(req);
@@ -340,7 +337,7 @@ router.delete("/accounts/:id/identities/:senderId", async (req: Request, res: Re
   }
   const account = toChannelAccount(resolved.account);
   const senderId = typeof req.params["senderId"] === "string" ? decodeURIComponent(req.params["senderId"]) : "";
-  const result = await unlinkIdentity({ surfaceId: account.surfaceId, accountKey: account.accountKey, senderId });
+  const result = await unlinkIdentity({ surfaceId: account.surfaceId, orgId: account.orgId, senderId });
   log.info(`[channels] identity unlinked account=${account.id} sender=${senderId} by=${resolved.userId}`);
   res.json({ success: true, removed: result.count });
 });

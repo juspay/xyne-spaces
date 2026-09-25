@@ -29,8 +29,9 @@ export const OUTBOX_POP_TIMEOUT_S = 5;
 
 /** Typing keeps refreshing until the reply is delivered. This is only the
  *  backstop for a run that never reports back at all — without it a lost
- *  result would leave a number typing into someone's chat indefinitely. */
-export const TYPING_MAX_MS = 15 * 60 * 1_000;
+ *  result would leave a number typing into someone's chat indefinitely.
+ *  Matches ACTIVE_RUN_TTL_S so typing never stops while a run can still be live. */
+export const TYPING_MAX_MS = 30 * 60 * 1_000;
 
 /** How long we remember which run is working in a chat, for /stop and
  *  /status. Longer than any run should take, short enough that a lost result
