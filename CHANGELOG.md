@@ -1,3 +1,10 @@
+## [1.404.2](https://github.com/juspay/xyne-spaces/compare/v1.404.1...v1.404.2) (2026-09-25)
+
+
+### Bug Fixes
+
+* digital twin should not run /eval ([#2326](https://github.com/juspay/xyne-spaces/issues/2326)) ([3202ca9](https://github.com/juspay/xyne-spaces/commit/3202ca9eaae3cbe61ef72614e8f6c78b0031954a))
+
 ## [1.404.1](https://github.com/juspay/xyne-spaces/compare/v1.404.0...v1.404.1) (2026-09-25)
 
 
