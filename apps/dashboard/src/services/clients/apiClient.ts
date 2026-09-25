@@ -225,6 +225,33 @@ apiConfig.interceptors.response.use(
 
     // External guests have no session to lose, so a 401 must not log them out of the call.
     if (axiosError.response?.status === 401 && !isExternalApp) {
+      const originalConfig = axiosError.config as
+        | (InternalAxiosRequestConfig & { _retry?: boolean })
+        | undefined;
+
+      // Try a one-shot session refresh before logging out. Skip straight to logout when
+      // there's no request to retry, when the failed request IS the refresh call, or when
+      // we already retried once — the _retry flag + refresh-URL guard prevent any re-entry loop.
+      const canAttemptRefresh =
+        !!originalConfig &&
+        !originalConfig.url?.includes('/auth/refresh-session') &&
+        originalConfig._retry !== true;
+
+      if (canAttemptRefresh) {
+        try {
+          originalConfig._retry = true;
+          // baseURL (API_BASE_URL) already ends in '/api', so this resolves to /api/auth/refresh-session.
+          await apiInstance.get('/auth/refresh-session');
+          logger.info(Logger.Event.AUTH_REFRESH_SUCCESS, {
+            url: sanitizedUrl,
+            message: 'Session refresh succeeded after 401. Retrying original request.',
+          });
+          return apiInstance(originalConfig);
+        } catch {
+          // Refresh failed (including its own 401) - fall through to logout below.
+        }
+      }
+
       logger.warn(Logger.Event.AUTH_SESSION_EXPIRED, {
         url: sanitizedUrl,
         message: 'Received 401 Unauthorized. Logging out.',
