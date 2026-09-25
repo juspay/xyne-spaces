@@ -54,6 +54,8 @@ export interface FlowEdgeData {
   insert?: FlowInsertTarget | undefined;
   readOnly: boolean;
   hovered: boolean;
+  /** A search is active; the edge fades and hides its insert button. */
+  dimmed: boolean;
   stepCatalog: StepCatalogItem[];
   onInsert: (target: FlowInsertTarget, type: string) => void;
   onRequestEdit?: (() => void) | undefined;

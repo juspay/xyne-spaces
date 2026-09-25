@@ -99,6 +99,12 @@ import {
   updateStepAtPath,
 } from './FlowAutomationView.utils';
 
+/** React Flow's measured node size (kept across node rebuilds). */
+interface MeasuredSize {
+  width?: number;
+  height?: number;
+}
+
 const TRACK_CATEGORY = 'automation-builder-flow';
 /** Show the minimap only once the flow no longer fits comfortably on screen. */
 const MINIMAP_MIN_NODES = 10;
@@ -436,7 +442,6 @@ function PlaceholderNode({ data }: NodeProps<FlowNodeData>): React.ReactElement 
   const className = cn(
     'nodrag nopan flex h-full w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-border bg-background/60 text-xs text-muted-foreground transition-colors',
     'hover:border-foreground/40 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-    data.dimmed && 'opacity-40',
   );
   let body: ReactNode;
   if (!insert || (data.readOnly && !data.onRequestEdit)) {
@@ -481,7 +486,11 @@ function PlaceholderNode({ data }: NodeProps<FlowNodeData>): React.ReactElement 
     );
   }
   return (
-    <div className='h-full w-full'>
+    // Dim on the wrapper so the read-only, request-edit and picker bodies all fade.
+    <div
+      className={cn('h-full w-full transition-opacity', data.dimmed && 'opacity-40')}
+      data-dimmed={data.dimmed ? 'true' : undefined}
+    >
       <Handle type='target' position={Position.Top} className='!opacity-0' isConnectable={false} />
       {body}
       <Handle
@@ -550,7 +559,9 @@ function InsertEdge({
     borderRadius: 8,
   });
   const insert = data?.insert;
-  const canInsert = Boolean(insert && data && (!data.readOnly || data.onRequestEdit));
+  const dimmed = Boolean(data?.dimmed);
+  // While a search is active the + buttons are hidden, so the canvas reads as results.
+  const canInsert = Boolean(!dimmed && insert && data && (!data.readOnly || data.onRequestEdit));
   const label = data?.label;
   const plusY = label ? labelY + 12 : labelY;
   const labelTop = canInsert ? labelY - 10 : labelY;
@@ -565,12 +576,15 @@ function InsertEdge({
         id={id}
         path={edgePath}
         {...(markerEnd ? { markerEnd } : {})}
-        {...(style ? { style } : {})}
+        style={{ ...style, ...(dimmed ? { opacity: 0.4, strokeOpacity: 0.4 } : {}) }}
       />
       <EdgeLabelRenderer>
         {label && (
           <span
-            className='pointer-events-none absolute rounded-full border border-border bg-background px-1.5 py-px text-[10px] font-medium text-muted-foreground'
+            className={cn(
+              'pointer-events-none absolute rounded-full border border-border bg-background px-1.5 py-px text-[10px] font-medium text-muted-foreground',
+              dimmed && 'opacity-40',
+            )}
             style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelTop}px)` }}
           >
             {label}
@@ -750,6 +764,7 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
   const [search, setSearch] = useState('');
   const searchCursor = useRef(0);
   const pendingFocusId = useRef<string | null>(null);
+  const focusSelectionRequested = useRef(false);
   const [canvasWidth, setCanvasWidth] = useState(0);
 
   const editable = editMode && !readOnly;
@@ -868,17 +883,39 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
       setSelectedNodeId(id);
       setPendingInsert(null);
       centerOn(id);
-      // Keep keyboard focus on the canvas node so the next arrow key walks on
-      // from here, even while the side panel re-renders for the new selection.
-      requestAnimationFrame(() => {
-        const node = canvasRef.current?.querySelector<HTMLElement>(
-          `.react-flow__node[data-id="${CSS.escape(id)}"]`,
-        );
-        node?.focus({ preventScroll: true });
-      });
+      focusSelectionRequested.current = true;
     },
     [centerOn],
   );
+
+  // Keep DOM focus on the selected node so the focus ring, screen readers and
+  // the selection agree. Keyboard/search moves always take focus; other
+  // selection changes (clicks, issue links) only do when focus is already on
+  // the canvas or nowhere, so typing in the side panel is never interrupted.
+  useEffect(() => {
+    if (!selectedNodeId) return undefined;
+    const requested = focusSelectionRequested.current;
+    focusSelectionRequested.current = false;
+    const active = document.activeElement;
+    const focusIsFree =
+      !active || active === document.body || Boolean(canvasRef.current?.contains(active));
+    if (isTypingTarget(active) || (!requested && !focusIsFree)) return undefined;
+    // The node may not be focusable yet: just inserted/expanded, or still hidden
+    // by React Flow until it is measured. Retry briefly until focus lands.
+    let frame = 0;
+    let attempts = 0;
+    const tryFocus = (): void => {
+      const node = canvasRef.current?.querySelector<HTMLElement>(
+        `.react-flow__node[data-id="${CSS.escape(selectedNodeId)}"]`,
+      );
+      if (node && document.activeElement !== node) node.focus({ preventScroll: true });
+      if (node && document.activeElement === node) return;
+      attempts += 1;
+      if (attempts < 10) frame = requestAnimationFrame(tryFocus);
+    };
+    frame = requestAnimationFrame(tryFocus);
+    return (): void => cancelAnimationFrame(frame);
+  }, [selectedNodeId]);
 
   // New steps (and steps revealed by expanding) are laid out on the next render;
   // centre on them once their position exists.
@@ -1124,7 +1161,22 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
   );
 
   const [nodes, setNodes, onNodesChangeBase] = useNodesState<FlowNodeData>([]);
-  useEffect(() => setNodes(derivedNodes), [derivedNodes, setNodes]);
+  // Carry React Flow's measured size across rebuilds: a node without `measured`
+  // is rendered hidden until re-measured, which flickers the canvas on every
+  // selection change and makes the selected node unfocusable for that frame.
+  useEffect(() => {
+    setNodes(previous => {
+      const measuredById = new Map<string, MeasuredSize>();
+      for (const node of previous) {
+        const { measured } = node as { measured?: MeasuredSize };
+        if (measured) measuredById.set(node.id, measured);
+      }
+      return derivedNodes.map(node => {
+        const measured = measuredById.get(node.id);
+        return measured ? { ...node, measured } : node;
+      });
+    });
+  }, [derivedNodes, setNodes]);
 
   // Positions and selection are owned by this view; only let React Flow record
   // measured dimensions. Removals go through `onNodesDelete` → confirm dialog.
@@ -1156,15 +1208,14 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
             stroke: 'hsl(var(--border))',
             strokeWidth: 1.5,
             ...(toPlaceholder ? { strokeDasharray: '4 4' } : {}),
-            ...(matchIds && !(matchIds.has(parentId) && matchIds.has(item.id))
-              ? { opacity: 0.4 }
-              : {}),
           },
           data: {
             label: getEdgeLabel(source, item),
             insert: getEdgeInsertTarget(source, item),
             readOnly: !editable,
             hovered: hoveredEdgeId === id,
+            // Any active search dims connections; they are structure, not matches.
+            dimmed: Boolean(matchIds),
             stepCatalog,
             onInsert: handleInsert,
             onRequestEdit,
@@ -1261,13 +1312,19 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
       while (current && !visible(current)) current = itemsById.get(current)?.parentIds[0];
       return current;
     };
+    // Breadth-first so the first branch's step wins; walks through empty-branch
+    // placeholders and merge dots so an all-empty branch still reaches the next step.
     const resolveDown = (id: string): string | undefined => {
       const queue = items.filter(i => i.parentIds.includes(id)).map(i => i.id);
+      const seen = new Set(queue);
       while (queue.length) {
         const next = queue.shift()!;
         if (visible(next)) return next;
-        if (itemsById.get(next)?.nodeType === 'merge') {
-          queue.push(...items.filter(i => i.parentIds.includes(next)).map(i => i.id));
+        for (const child of items) {
+          if (child.parentIds.includes(next) && !seen.has(child.id)) {
+            seen.add(child.id);
+            queue.push(child.id);
+          }
         }
       }
       return undefined;
