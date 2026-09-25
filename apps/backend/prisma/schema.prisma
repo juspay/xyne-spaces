@@ -4347,6 +4347,7 @@ model InstalledApps {
   appId String
   userId String
   webhookUrl String?
+  fetchConfig String?
 
   signingSecret String?   // @deprecated
   version Int

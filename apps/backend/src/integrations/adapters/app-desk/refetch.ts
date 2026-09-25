@@ -1,6 +1,8 @@
 /**
- * App Desk refetch — pulls historical tickets from a Xyne App's export API
- * (GET {webhookUrl}/export/messages) into its desk channel.
+ * App Desk refetch — pulls historical tickets from a Xyne App's export API into
+ * its desk channel. Where that API lives and what it is sent is per-install
+ * configuration (`installed_apps.fetchConfig`, see apps/core/appFetchConfig.ts);
+ * this adapter owns the windowing, pagination and ingest around it.
  *
  * Persistence deliberately reuses the exact two calls of POST
  * /api/apps/tickets/appDeskInbound (emailService.createConversationWithEmail /
@@ -24,19 +26,27 @@ import { ExternalSourceRepository, MAILBOX_SOURCE_TYPES } from '@/database/repos
 import { ExternalMessageRepository } from '@/database/repositories/externalMessageRepository';
 import { emailService } from '@/services/emailService';
 import { extractEmailAddress } from '@/utils/email';
-import { prepareAppWebhookDispatch } from '@/apps/core/appUrlResolver';
-import { safeWebhookFetch } from '@/utils/ssrfGuard';
-import { buildSignedAppRequestHeaders } from '@/apps/core/webhookRequestSigner';
+import {
+  AppFetchResponseTooLargeError,
+  dispatchAppFetch,
+  readCappedText,
+} from '@/apps/core/appFetchDispatch';
+import {
+  AppFetchConfig,
+  AppFetchVariables,
+  buildSignedFetchRequest,
+  mapExportPage,
+  parseFetchConfig,
+} from '@/apps/core/appFetchConfig';
 import { config } from '@/config/env';
 import { AppDeskExportMessage, AppDeskExportPage } from './types';
 import { AppDeskExportError, AppDeskExportThrottledError } from './errors';
 
 const TAG = '[AppDeskRefetch]';
-const PAGE_SIZE = 200;
 const MAX_PAGES = 500;
-// Per-page cap plus an overall wall-clock budget sized under the Bull lock,
-// so a hung app can't stall the shared refetch processor.
-const PAGE_TIMEOUT_MS = 30_000;
+// Per-page timeout comes from the install's fetch config; this overall
+// wall-clock budget is sized under the Bull lock, so a hung app can't stall the
+// shared refetch processor.
 const EXPORT_WALL_CLOCK_MS = 8 * 60_000;
 // The summary's errors tail is display-only; the true count goes to totalErrors.
 const MAX_SUMMARY_ERRORS = 100;
@@ -132,16 +142,11 @@ export class AppDeskRefetch extends BaseRefetch {
     }
     const installedApp = await db.installedApps.findUnique({
       where: { id: installedAppId },
-      select: { webhookUrl: true, app: { select: { signingSecret: true } } },
+      select: { fetchConfig: true, appId: true, app: { select: { signingSecret: true } } },
     });
     if (!installedApp) {
       throw new AppDeskExportError(
         `${TAG} the app backing source ${source.name} no longer exists (install ${installedAppId})`,
-      );
-    }
-    if (!installedApp.webhookUrl?.trim()) {
-      throw new AppDeskExportError(
-        `${TAG} app backing source ${source.name} has no webhook URL — cannot export`,
       );
     }
     if (!installedApp.app?.signingSecret) {
@@ -150,17 +155,18 @@ export class AppDeskRefetch extends BaseRefetch {
       );
     }
     const signingSecret = decrypt(installedApp.app.signingSecret);
-    // webhookUrl is user-provided and only ever validated as z.string().url() —
-    // a query/fragment on it would poison the export URL built in fetchPage.
-    let baseUrl: string;
+    // How to call the app — URL, method, headers, body template — is per-install
+    // configuration, not something this adapter derives. A missing or malformed
+    // config is a hard stop: there is no default endpoint to fall back to.
+    let fetchConfig: AppFetchConfig;
     try {
-      const parsed = new URL(installedApp.webhookUrl.trim());
-      parsed.search = '';
-      parsed.hash = '';
-      baseUrl = parsed.toString().replace(/\/+$/, '');
-    } catch {
+      fetchConfig = parseFetchConfig(
+        installedApp.fetchConfig,
+        `app backing source ${source.name}`,
+      );
+    } catch (error) {
       throw new AppDeskExportError(
-        `${TAG} app backing source ${source.name} has an invalid webhook URL — cannot export`,
+        `${TAG} ${error instanceof Error ? error.message : String(error)}`,
       );
     }
 
@@ -201,6 +207,29 @@ export class AppDeskRefetch extends BaseRefetch {
       installedAppId,
       ownerUser: ownerUser ? { name: ownerUser.name, email: ownerUser.email } : null,
     };
+
+    // Everything an install's body template may interpolate. `channel` is what
+    // lets one app serve many desks off a single config: the app branches on the
+    // id we send rather than us holding a separate config per channel.
+    const channel = await db.channel.findUnique({
+      where: { id: channelId },
+      select: { name: true },
+    });
+    const { startDate, endDate } = options;
+    const buildVars = (pageCursor: string | undefined, offset: number): AppFetchVariables => ({
+      fetch: {
+        startDate,
+        endDate,
+        cursor: pageCursor ?? '',
+        offset,
+        limit: fetchConfig.pageSize,
+      },
+      channel: { id: channelId, name: channel?.name ?? '' },
+      source: { id: source.id },
+      installedApp: { id: installedAppId },
+      app: { id: installedApp.appId },
+      workspace: { id: source.workspaceId },
+    });
 
     let processed = 0;
     let newTickets = 0;
@@ -263,7 +292,13 @@ export class AppDeskRefetch extends BaseRefetch {
       });
     }
 
-    let cursor: string | undefined = resume?.cursor;
+    const offsetMode = fetchConfig.pagination === 'offset';
+    // One parked value serves both modes: an opaque token in cursor mode, the
+    // decimal offset in offset mode. A malformed parked offset restarts the
+    // window rather than resuming somewhere arbitrary.
+    let cursor: string | undefined = offsetMode ? undefined : resume?.cursor;
+    let offset = offsetMode ? Number(resume?.cursor ?? 0) : 0;
+    if (!Number.isInteger(offset) || offset < 0) offset = 0;
     let pageCount = 0;
     let capped = false;
     const deadline = Date.now() + EXPORT_WALL_CLOCK_MS;
@@ -271,7 +306,7 @@ export class AppDeskRefetch extends BaseRefetch {
     const windowStart = options.startDate;
     const windowEnd = options.endDate;
     const parkProgress = async (): Promise<void> => {
-      const parkedCursor = cursor;
+      const parkedCursor = offsetMode ? String(offset) : cursor;
       if (!parkedCursor) return;
       await this.persistResumeCursor(source.id, windowStart, windowEnd, {
         cursor: parkedCursor,
@@ -296,11 +331,9 @@ export class AppDeskRefetch extends BaseRefetch {
         let page: AppDeskExportPage;
         try {
           page = await this.fetchPage(
-            baseUrl,
+            fetchConfig,
             signingSecret,
-            options.startDate,
-            options.endDate,
-            cursor,
+            buildVars(cursor, offset),
             deadline,
           );
         } catch (error) {
@@ -323,6 +356,11 @@ export class AppDeskRefetch extends BaseRefetch {
         // threads the way GoogleRefetch does: group first, then batch. No
         // inter-batch delay (unlike the Gmail path's batchDelayMs): the
         // bottleneck here is our own database, not a third party's rate limit.
+        for (const invalid of page.invalidRows) {
+          logger.warn(`${TAG} unmappable row skipped`, { sourceId: source.id, detail: invalid });
+          recordError(invalid);
+        }
+
         const threadGroups = groupPageByThread(page.messages);
         const batchSize = ingestBatchSize();
         for (let i = 0; i < threadGroups.length; i += batchSize) {
@@ -331,10 +369,26 @@ export class AppDeskRefetch extends BaseRefetch {
           );
         }
 
-        if (!page.nextCursor) break;
-        // Moving cursor first keeps both loop exits below pointing at the first
-        // unfetched page, which is what the parked resume cursor must store.
-        cursor = page.nextCursor;
+        if (offsetMode) {
+          // No continuation token exists in this mode: an empty page is the
+          // only end-of-data signal, so it must be checked before advancing.
+          if (page.messages.length === 0) break;
+          offset += fetchConfig.pageSize;
+        } else {
+          if (!page.nextCursor) break;
+          if (page.nextCursor === cursor) {
+            const msg =
+              `app returned the same cursor twice ("${page.nextCursor}") — stopping to avoid an endless loop. ` +
+              'Check that the request actually sends {{fetch.cursor}}.';
+            logger.warn(`${TAG} ${msg}`, { sourceId: source.id, channelId });
+            recordError(msg);
+            capped = true;
+            break;
+          }
+          // Moving cursor first keeps both loop exits below pointing at the
+          // first unfetched page, which is what the parked cursor must store.
+          cursor = page.nextCursor;
+        }
         if (pageCount >= MAX_PAGES) {
           const msg = `hard page cap ${MAX_PAGES} hit mid-export — nothing after this page ingested`;
           logger.warn(`${TAG} ${msg}`, { sourceId: source.id, startDate: options.startDate, endDate: options.endDate });
@@ -382,43 +436,29 @@ export class AppDeskRefetch extends BaseRefetch {
    * sleeping through the Bull lock.
    */
   private async fetchPage(
-    baseUrl: string,
+    fetchConfig: AppFetchConfig,
     signingSecret: string,
-    startDate: string,
-    endDate: string,
-    cursor: string | undefined,
+    vars: AppFetchVariables,
     deadline: number,
   ): Promise<AppDeskExportPage> {
-    const url = new URL(`${baseUrl}/export/messages`);
-    url.searchParams.set('startDate', startDate);
-    url.searchParams.set('endDate', endDate);
-    url.searchParams.set('limit', String(PAGE_SIZE));
-    if (cursor) url.searchParams.set('cursor', cursor);
-    url.searchParams.sort();
-    const pathWithQuery = `${url.pathname}${url.search}`;
-
     for (let attempt = 0; ; attempt += 1) {
-      // Re-signed every attempt: X-Xyne-Timestamp ages while we back off, and
-      // the contract has apps reject signatures outside a ±5 min skew window.
-      const headers = buildSignedAppRequestHeaders({
-        signingSecret,
-        method: 'GET',
-        pathWithQuery,
-      });
-      headers['Accept'] = 'application/json';
+      // Rebuilt every attempt rather than hoisted: X-Xyne-Timestamp ages while
+      // we back off, and the contract has apps reject signatures outside a
+      // ±5 min skew window. The body is re-rendered with it so it stays the
+      // body the fresh signature covers.
+      const request = buildSignedFetchRequest({ config: fetchConfig, vars, signingSecret });
 
       let response: Response;
       try {
-        const dispatch = await prepareAppWebhookDispatch(url.toString(), headers);
-        const init: RequestInit = {
-          method: 'GET',
-          headers: dispatch.headers,
-          redirect: 'manual',
-          signal: AbortSignal.timeout(PAGE_TIMEOUT_MS),
-        };
-        response = dispatch.isInternal
-          ? await fetch(dispatch.url, init)
-          : await safeWebhookFetch(dispatch.url, init);
+        // Clamped to what is left of the run budget: timeoutMs may be up to
+        // 10 minutes, which on a late page would outlive the Bull lock. The job
+        // would then be marked stalled and re-run while this one is still
+        // ingesting, giving two concurrent exports over the same window.
+        const remainingMs = deadline - Date.now();
+        response = await dispatchAppFetch(
+          request,
+          Math.max(1_000, Math.min(fetchConfig.timeoutMs, remainingMs)),
+        );
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
         throw new AppDeskExportError(`${TAG} export request failed: ${msg}`);
@@ -444,23 +484,34 @@ export class AppDeskRefetch extends BaseRefetch {
       }
 
       if (!response.ok) {
-        const detail = (await response.text().catch(() => '')).slice(0, 200);
+        const detail = (await readCappedText(response).catch(() => '')).slice(0, 200);
         throw new AppDeskExportError(
           `${TAG} export returned ${response.status}${detail ? `: ${detail}` : ''}`,
           response.status,
         );
       }
 
-      let page: AppDeskExportPage;
+      let raw: unknown;
       try {
-        page = (await response.json()) as AppDeskExportPage;
-      } catch {
+        // Size-capped rather than response.json(): an unbounded body would be
+        // buffered whole into the shared worker before anything validated it.
+        raw = JSON.parse(await readCappedText(response));
+      } catch (error) {
+        if (error instanceof AppFetchResponseTooLargeError) {
+          throw new AppDeskExportError(`${TAG} ${error.message}`);
+        }
         throw new AppDeskExportError(`${TAG} export response was not valid JSON`);
       }
-      if (!page || !Array.isArray(page.messages)) {
-        throw new AppDeskExportError(`${TAG} export response is missing the messages array`);
+      // The app's own shape is translated here rather than being required to
+      // match ours — see AppFetchResponseMappingSchema. A mapping that points at
+      // a field the app does not send fails with that path named.
+      try {
+        return mapExportPage(raw, fetchConfig.response, fetchConfig.pagination);
+      } catch (error) {
+        throw new AppDeskExportError(
+          `${TAG} ${error instanceof Error ? error.message : String(error)}`,
+        );
       }
-      return page;
     }
   }
 
