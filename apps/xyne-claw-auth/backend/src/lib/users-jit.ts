@@ -94,6 +94,33 @@ export async function resolveClawUserIdForSpacesIdentity(
 }
 
 /**
+ * Inverse of `resolveClawUserIdForSpacesIdentity`: canonical Claw user id →
+ * the raw (workspace-scoped) Spaces user id. Needed when a Claw-owned id must
+ * be handed BACK to Spaces APIs (openDm, postAsUser, …) — Spaces keys its own
+ * users table by the workspace-scoped id and can't resolve a Claw-internal id.
+ * Falls back to the input when there is no identity row (legacy rows where the
+ * Claw user id IS the Spaces id).
+ */
+export async function spacesUserIdForClawUser(
+  clawUserId: string,
+  workspaceId?: string | null,
+): Promise<string> {
+  const id = clawUserId.trim();
+  if (!id) return id;
+  const identity = await prisma.userSurfaceIdentity.findFirst({
+    where: {
+      surfaceId: "spaces",
+      userId: id,
+      status: "ACTIVE",
+      ...(workspaceId ? { surfaceWorkspaceId: workspaceId } : {}),
+    },
+    select: { surfaceUserId: true },
+    orderBy: { updatedAt: "desc" },
+  });
+  return identity?.surfaceUserId ?? clawUserId;
+}
+
+/**
  * Every id form a user's rows may be keyed by: the input id, the canonical
  * Claw id it resolves to (identity ladder), and every ACTIVE workspace-scoped
  * Spaces identity linked to that canonical user. Falls back to the input id

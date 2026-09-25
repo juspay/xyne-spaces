@@ -398,7 +398,8 @@ export async function optionalAuth(
 ): Promise<void> {
   stripClientOrgHeaders(req);
   try {
-    const spacesIdentity = await resolveSpacesIdentityFromSpaces(req).catch(() => undefined);
+    const identity = await resolveSpacesIdentity(req).catch(() => undefined);
+    const spacesIdentity = identity?.kind === "user" ? identity : undefined;
     const userId = spacesIdentity?.userId;
     if (userId) {
       await ensureUserExists(userId, "require-auth").catch((err) => {
