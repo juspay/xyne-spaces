@@ -55,33 +55,41 @@ export function useTranscriptTranslation({
     if (currentError !== undefined) return;
 
     let cancelled = false;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
-    void recordingService
-      .translateTranscript(externalId, language)
-      .then(result => {
-        if (cancelled) return;
-        cacheRef.current.set(language, result);
+    const POLL_INTERVAL_MS = 3000;
 
-        if (result.status === 'pending') {
-          setTranslatingLanguage(language);
-          return;
-        }
+    const fetchStatus = (): void => {
+      void recordingService
+        .translateTranscript(externalId, language)
+        .then(result => {
+          if (cancelled) return;
+          cacheRef.current.set(language, result);
 
-        setDisplayed(result);
-        setTranslatingLanguage(current => (current === language ? null : current));
-      })
-      .catch((err: unknown) => {
-        if (cancelled) return;
-        logRecordingError('useTranscriptTranslation', err);
-        const message = axios.isAxiosError(err)
-          ? (err.response?.data as { error?: string } | undefined)?.error
-          : undefined;
-        setErrors(current => new Map(current).set(language, message ?? 'Please try again.'));
-        setTranslatingLanguage(current => (current === language ? null : current));
-      });
+          if (result.status === 'pending') {
+            setTranslatingLanguage(language);
+            timeoutId = setTimeout(fetchStatus, POLL_INTERVAL_MS);
+            return;
+          }
+
+          setDisplayed(result);
+          setTranslatingLanguage(current => (current === language ? null : current));
+        })
+        .catch((err: unknown) => {
+          if (cancelled) return;
+          logRecordingError('useTranscriptTranslation', err);
+          const message = axios.isAxiosError(err)
+            ? (err.response?.data as { error?: string } | undefined)?.error
+            : undefined;
+          setErrors(current => new Map(current).set(language, message ?? 'Please try again.'));
+          setTranslatingLanguage(current => (current === language ? null : current));
+        });
+    };
+    fetchStatus();
 
     return (): void => {
       cancelled = true;
+      clearTimeout(timeoutId);
     };
   }, [enabled, externalId, language, currentError]);
 

@@ -476,6 +476,9 @@ export class TranscriptService {
       // 6. Upload raw formatted transcript immediately (no translation yet - non-blocking)
       const txtStoragePath = await this.uploadFormattedTranscript(callId, formattedTranscript);
 
+      // Drop any cached translations from a previous run — they're of the old content.
+      await this.purgeTranslatedTranscriptCache(callId);
+
       // 7. Keep the original JSONL file for debugging/archival purposes
       // Note: Not deleting the JSONL file as it may be useful for troubleshooting
 
@@ -550,13 +553,7 @@ export class TranscriptService {
 
       logger.info(`[${callId}] transcript_processing_completed`, { message_id: messageId });
 
-      // 13. Fire-and-forget: Translate transcript asynchronously in background
-      // This updates the same GCS file without blocking the response
-      this.translateTranscriptAsync(callId, txtStoragePath).catch((err) => {
-        logger.error(`[${callId}] background_translation_failed`, { error: err });
-      });
-
-      // 14. Attach identified transcript (real-name labelled) as a second attachment when available.
+      // 13. Attach identified transcript (real-name labelled) as a second attachment when available.
       // Written by the Python agent's RealtimeIdentifier during the call into
       // transcriptions/{callId}_identified.jsonl — may not exist if no voiceprints were enrolled.
       void this.attachIdentifiedTranscriptIfExists(callId, messageId, call.createdByUserId, callMessage.conversationId, channel.workspaceId);
@@ -792,11 +789,6 @@ export class TranscriptService {
         });
         logger.info(`[${callId}] identified_transcript_attachment_created`, { attachment_id: attachment.id });
       }
-
-      // Apply the same background translation as the plain transcript
-      this.translateIdentifiedTranscriptAsync(callId, formattedPath).catch((err) => {
-        logger.error(`[${callId}] identified_background_translation_failed`, { error: err });
-      });
     } catch (err) {
       logger.error(`[${callId}] identified_transcript_attach_failed`, { error: err });
     }
@@ -876,7 +868,6 @@ export class TranscriptService {
   }
 
   // fileExists()-only check, no download and no raw-JSONL fallback (unlike getIdentifiedTranscriptContent).
-  // ponytail: formatted-file-only, add raw-JSONL fallback if that gap turns out to matter.
   async identifiedTranscriptExists(callId: string): Promise<boolean> {
     try {
       return await this.transcriptStorage.fileExists(`attachments/${callId}_identified_formatted.txt`);
@@ -940,90 +931,6 @@ export class TranscriptService {
     }
   }
 
-  /**
-   * Translate transcript asynchronously in background (fire-and-forget)
-   * Downloads raw transcript from GCS, translates it, and overwrites the same file
-   * @param callId - The external call ID
-   * @param gcsPath - The GCS path to the transcript file
-   */
-  async translateTranscriptAsync(callId: string, storagePath: string): Promise<void> {
-    return this.translateStoredTranscriptAsync(callId, storagePath, 'transcript');
-  }
-
-  
-  private async translateIdentifiedTranscriptAsync(callId: string, storagePath: string): Promise<void> {
-    return this.translateStoredTranscriptAsync(callId, storagePath, 'identified_transcript');
-  }
-
-  private async translateStoredTranscriptAsync(
-    callId: string,
-    storagePath: string,
-    type: TranscriptAttachmentMetadata['type'],
-  ): Promise<void> {
-    try {
-      logger.info(`[${callId}] transcript_translation_started`, { type });
-
-      const buffer = await this.transcriptStorage.getFileBuffer(storagePath);
-      const rawTranscript = buffer.toString('utf-8');
-
-      const translatedTranscript = await this.postProcessTranscript(rawTranscript, callId);
-
-      await this.transcriptStorage.uploadFileV2(Buffer.from(translatedTranscript, 'utf-8'), {
-        path: storagePath,
-        contentType: 'text/plain',
-        metadata: { callId, type, translated: 'true' },
-      });
-
-      // Only the plain transcript has a corresponding message_attachments row to bump.
-      if (type === 'transcript') {
-        const attachments = await repositories.messageAttachments.findByCallId(callId);
-        if (attachments.length > 0) {
-          const transcriptAttachment = attachments[0];
-          await repositories.messageAttachments.updateVersion(transcriptAttachment.id, {
-            ...((transcriptAttachment.metadata as Record<string, any>) || {}), // eslint-disable-line @typescript-eslint/no-explicit-any
-          });
-          logger.info(`[${callId}] transcript_translation_attachment_updated`, { type });
-        } else {
-          logger.warn(`[${callId}] transcript_translation_no_attachment_found`, { type });
-        }
-      }
-
-      logger.info(`[${callId}] transcript_translation_completed`, { type });
-    } catch (error) {
-      logger.error(`[${callId}] transcript_translation_failed`, { type, error });
-    }
-  }
-
-  /**
-   * Post-process transcript: translate to English
-   * Handles long transcripts by chunking them into smaller pieces
-   * @param transcript - The formatted transcript text
-   * @returns Post-processed transcript or original if processing fails
-   */
-  async postProcessTranscript(transcript: string, callId?: string): Promise<string> {
-    const systemInstructions = `You are processing a call transcript. Your task is to translate any non-English text to English, and to fix one specific brand name spelling.
-
-IMPORTANT:
-- Keep ALL timestamps exactly as they are: [MM:SS] format
-- Keep ALL speaker names exactly as they are
-- Only translate the spoken text to English
-- Do not modify, fix, or improve the text beyond translation
-- Do not add new lines or remove existing ones
-- Do not add commentary or explanations
-- Do not use placeholders like "[...]" or "[content continues]"
-- Preserve the exact line-by-line structure: [MM:SS] Speaker Name: text
-- Translate EVERY line completely, do not skip or truncate any content
-
-BRAND NAME CORRECTION:
-- The word "Xyne" (a product/brand name, pronounced like "zine") is often misspelled by speech-to-text as "Zain", "Zine", "Xine", "Zyane", or "Zyne"
-- When any of word that phonetically sounds like XYNE appear as a standalone word or as part of a compound like "Zain Spaces", "Zine Calls", etc., replace it with "Xyne"
-- Only apply this correction when the word is clearly a reference to the brand (e.g. "Xyne Spaces", "Xyne Calls"), not when it is part of an unrelated proper noun or personal name
-
-Output ONLY the processed transcript, nothing else.`;
-
-    return this.runChunkedTranslation(transcript, systemInstructions, 'transcript_translation', callId);
-  }
-
   async translateTranscript(
     transcript: string,
     targetLanguageName: string,
@@ -1067,7 +974,7 @@ Output ONLY the processed transcript, nothing else.`;
       });
   }
 
-  // Shared chunking/streaming core for postProcessTranscript and translateTranscript.
+  // Shared chunking/streaming core for translateTranscript.
   private async runChunkedTranslation(
     transcript: string,
     systemInstructions: string,
@@ -1829,6 +1736,13 @@ Output ONLY the processed transcript, nothing else.`;
       }
     }
 
+    await this.purgeTranslatedTranscriptCache(callId);
+  }
+
+  /**
+    * Delete any translated transcript artifacts for this call. Best-effort and idempotent — a missing file is treated as already-deleted.
+   */
+  private async purgeTranslatedTranscriptCache(callId: string): Promise<void> {
     try {
       const translated = await this.transcriptStorage.listFiles(`attachments/${callId}_translated_`);
       for (const file of translated) {
