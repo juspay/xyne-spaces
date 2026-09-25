@@ -27,13 +27,13 @@ vi.mock("../db.js", () => {
       return {};
     }),
   };
-  const tx = {
-    $executeRaw: vi.fn(async () => {
-      db.locks += 1;
-      return 1;
-    }),
-    agentRun,
-  };
+  const lockStub = vi.fn(async () => {
+    db.locks += 1;
+    return 1;
+  });
+  const tx = new Proxy({ agentRun } as Record<string, unknown>, {
+    get: (target, key) => (typeof key === "string" && key in target ? target[key] : lockStub),
+  });
   return {
     prisma: {
       $transaction: vi.fn(async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx)),
