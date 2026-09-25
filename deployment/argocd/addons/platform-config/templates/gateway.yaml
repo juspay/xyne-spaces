@@ -1,0 +1,35 @@
+{{- if .Values.gateway.enabled }}
+{{- $tls := .Values.gateway.tls | default "acme" }}
+apiVersion: networking.istio.io/v1
+kind: Gateway
+metadata:
+  name: {{ .Values.gateway.name }}
+  namespace: {{ .Values.gateway.namespace }}
+  labels:
+    {{- include "platform-config.labels" . | nindent 4 }}
+spec:
+  selector:
+    {{- toYaml .Values.gateway.selector | nindent 4 }}
+  servers:
+    - port:
+        number: 80
+        name: http
+        protocol: HTTP
+      hosts:
+        {{- include "platform-config.hosts" . | nindent 8 }}
+      {{- if and .Values.gateway.httpsRedirect (ne $tls "none") }}
+      tls:
+        httpsRedirect: true
+      {{- end }}
+    {{- if ne $tls "none" }}
+    - port:
+        number: 443
+        name: https
+        protocol: HTTPS
+      hosts:
+        {{- include "platform-config.hosts" . | nindent 8 }}
+      tls:
+        mode: SIMPLE
+        credentialName: {{ .Values.gateway.tlsSecret }}
+    {{- end }}
+{{- end }}

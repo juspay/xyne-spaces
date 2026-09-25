@@ -22,6 +22,9 @@ import { Agent } from 'undici';
 const briefStreamDispatcher = new Agent({ headersTimeout: 0, bodyTimeout: 0, connectTimeout: 10_000 });
 
 
+/** Claw agent that answers the cmd+K AI overview in one turn (claw-auth provisions it). */
+export const CMDK_ANSWER_AGENT_SLUG = 'cmdk-answer';
+
 export interface ClawRunRequest {
   userId: string;
   /**
@@ -86,6 +89,8 @@ export interface ClawRunRequest {
   instant?: boolean;
   /** Same empty-tools pin as claw-auth agent-chat `disableTools`. */
   disableTools?: boolean;
+  /** cmd+K AI overview: the palette tab claw searches before answering (its `agentConfig.answerScope`). */
+  answerScope?: string;
   researchContext?: { type: string; id?: string; name: string } | null;
   createCanvasEnabled: boolean;
   sessionId?: string;
@@ -122,6 +127,12 @@ export interface ClawRunRequest {
    *  /run/stream, which merges it over the agent's modelSettings for this run.
    *  Absent = agent default. */
   thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high';
+  studioMode?: 'design';
+  sandboxMode?: 'local' | 'remote' | 'container';
+  designArtifactAttachmentId?: string;
+  designSelection?: unknown;
+  pageSelection?: unknown;
+  openItems?: unknown;
 }
 
 export interface ClawRunStreamResult {
@@ -135,6 +146,10 @@ export interface ClawRunStreamResult {
 export interface ClawAgentModel {
   id: string;
   name: string;
+  provider?: 'local-harness';
+  harness?: string;
+  deviceName?: string;
+  recommended?: boolean;
 }
 
 export interface AccessibleClawAgent {
@@ -336,6 +351,37 @@ function getS2SHeaders(): Record<string, string> {
   return s2sKey ? { 'x-s2s-key': s2sKey } : {};
 }
 
+export interface SynthesizedSpeechResult {
+  audioBase64: string;
+  mimeType: string;
+}
+
+export async function synthesizeSpeech(payload: {
+  text: string;
+  voice?: string;
+}): Promise<SynthesizedSpeechResult> {
+  const url = `${getClawBaseUrl()}/claw/api/v1/internal/tts`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getS2SHeaders() },
+    body: JSON.stringify({ text: payload.text, ...(payload.voice ? { voice: payload.voice } : {}) }),
+  });
+  if (!response.ok) {
+    const errorText = await response.text();
+    logger.error(`[ClawAgentService] tts failed: ${response.status} ${errorText}`);
+    throw new Error('TTS synthesis failed');
+  }
+  const json = (await response.json()) as {
+    success: boolean;
+    data?: SynthesizedSpeechResult;
+    error?: string;
+  };
+  if (!json.success || !json.data) {
+    throw new Error(json.error || 'TTS synthesis failed');
+  }
+  return json.data;
+}
+
 function inferMimeType(filename: string | undefined, existingMimeType: string): string {
   if (existingMimeType && existingMimeType !== 'application/octet-stream') {
     return existingMimeType;
@@ -531,9 +577,18 @@ export async function runClawAgentStream(
     ...(request.disableTools && { disableTools: true }),
     ...(request.researchContext && { researchContext: request.researchContext }),
     ...(request.thinkingLevel && { thinkingLevel: request.thinkingLevel }),
+    ...(request.studioMode && { studioMode: request.studioMode }),
+    ...(request.sandboxMode && { sandboxMode: request.sandboxMode }),
+    ...(request.designArtifactAttachmentId && {
+      designArtifactAttachmentId: request.designArtifactAttachmentId,
+    }),
+    ...(request.designSelection !== undefined && { designSelection: request.designSelection }),
+    ...(request.pageSelection !== undefined && { pageSelection: request.pageSelection }),
+    ...(request.openItems !== undefined && { openItems: request.openItems }),
     agentConfig: {
       webSearchEnabled: String(request.webSearchEnabled),
       deepResearchEnabled: String(request.deepResearchEnabled),
+      ...(request.answerScope && { answerScope: request.answerScope }),
       ...(config.xyneAiExtended.url && { XYNE_AI_EXTENDED_URL: config.xyneAiExtended.url }),
       ...(request.conversationId && { SPACES_CONVERSATION_ID: request.conversationId }),
       ...(request.canvasId && { SPACES_CANVAS_ID: request.canvasId }),
@@ -672,6 +727,15 @@ export async function runClawAgentStream(
                 `data: ${JSON.stringify({
                   type: 'tool_invocation',
                   toolInvocation: parsed,
+                })}\n\n`
+              );
+              if (typeof (res as any).flush === 'function') (res as any).flush();
+            } else if (eventType === 'plan') {
+              res.write(
+                `data: ${JSON.stringify({
+                  type: 'plan',
+                  todos: parsed.todos,
+                  ...(parsed.title ? { title: parsed.title } : {}),
                 })}\n\n`
               );
               if (typeof (res as any).flush === 'function') (res as any).flush();
@@ -958,6 +1022,7 @@ export async function listClawAgentModels(
   data: ClawAgentModel[];
   defaultModel: string | null;
   pinProvider: 'litellm' | 'spaces';
+  recommendedId?: string;
 }> {
   const slug = agentSlug || 'ask-ai';
   const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/${encodeURIComponent(slug)}/litellm-models`;
@@ -975,6 +1040,7 @@ export async function listClawAgentModels(
         data: ClawAgentModel[];
         defaultModel?: string | null;
         pinProvider?: 'litellm' | 'spaces';
+        recommendedId?: string;
       };
       if (result.success && (result.data ?? []).length > 0) {
         return {
@@ -986,6 +1052,7 @@ export async function listClawAgentModels(
           // back to the platform allowed list. Old claw-auth omits the field
           // and only ever served the credential list — default "litellm".
           pinProvider: result.pinProvider ?? 'litellm',
+          ...(result.recommendedId ? { recommendedId: result.recommendedId } : {}),
         };
       }
       if (result.success) {
@@ -1091,6 +1158,136 @@ export async function getClawConversationMessages(
   }
 
   return (await response.json()) as ClawMessagesResponse;
+}
+
+export async function listClawConversationArtifacts(
+  req: { headers?: { cookie?: string }; userId: string },
+  convId: string
+): Promise<{ success: boolean; artifacts: unknown[] }> {
+  const url = `${getClawBaseUrl()}/claw/api/v1/conversation-artifacts?conversationId=${encodeURIComponent(convId)}`;
+  const response = await fetch(url, {
+    headers: {
+      ...extractUserIdHeader(req.userId),
+      ...extractCookieHeader(req),
+    },
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    logger.error(`[ClawAgentService] listConversationArtifacts failed: ${response.status} ${errorText}`);
+    throw new Error('Failed to fetch conversation artifacts');
+  }
+
+  return (await response.json()) as { success: boolean; artifacts: unknown[] };
+}
+
+export async function getClawConversationArtifact(
+  req: { headers?: { cookie?: string }; userId: string },
+  artifactId: string
+): Promise<{ success: boolean; artifact: unknown }> {
+  const url = `${getClawBaseUrl()}/claw/api/v1/conversation-artifacts/${encodeURIComponent(artifactId)}`;
+  const response = await fetch(url, {
+    headers: {
+      ...extractUserIdHeader(req.userId),
+      ...extractCookieHeader(req),
+    },
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    logger.error(`[ClawAgentService] getConversationArtifact failed: ${response.status} ${errorText}`);
+    throw new Error('Failed to fetch artifact');
+  }
+
+  return (await response.json()) as { success: boolean; artifact: unknown };
+}
+
+export async function clawArtifactComments(
+  req: { headers?: { cookie?: string }; userId: string },
+  artifactId: string,
+): Promise<unknown> {
+  const url = `${getClawBaseUrl()}/claw/api/v1/conversation-artifacts/${encodeURIComponent(artifactId)}/comments`;
+  const response = await fetch(url, {
+    headers: { ...extractUserIdHeader(req.userId), ...extractCookieHeader(req) },
+  });
+  if (!response.ok) {
+    const errorText = await response.text();
+    logger.error(`[ClawAgentService] artifactComments failed: ${response.status} ${errorText}`);
+    throw new Error('Failed to list artifact comments');
+  }
+  return response.json();
+}
+
+export async function addClawArtifactComment(
+  req: { headers?: { cookie?: string }; userId: string },
+  artifactId: string,
+  payload: { body: string; anchor?: unknown },
+): Promise<unknown> {
+  const url = `${getClawBaseUrl()}/claw/api/v1/conversation-artifacts/${encodeURIComponent(artifactId)}/comments`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...extractUserIdHeader(req.userId),
+      ...extractCookieHeader(req),
+    },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    const errorText = await response.text();
+    logger.error(`[ClawAgentService] addArtifactComment failed: ${response.status} ${errorText}`);
+    throw new Error('Failed to add the comment');
+  }
+  return response.json();
+}
+
+export async function resolveClawArtifactComment(
+  req: { headers?: { cookie?: string }; userId: string },
+  artifactId: string,
+  commentId: string,
+  resolved: boolean,
+): Promise<unknown> {
+  const url = `${getClawBaseUrl()}/claw/api/v1/conversation-artifacts/${encodeURIComponent(artifactId)}/comments/${encodeURIComponent(commentId)}`;
+  const response = await fetch(url, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      ...extractUserIdHeader(req.userId),
+      ...extractCookieHeader(req),
+    },
+    body: JSON.stringify({ resolved }),
+  });
+  if (!response.ok) {
+    const errorText = await response.text();
+    logger.error(`[ClawAgentService] resolveArtifactComment failed: ${response.status} ${errorText}`);
+    throw new Error('Failed to update the comment');
+  }
+  return response.json();
+}
+
+export async function updateClawConversationArtifact(
+  req: { headers?: { cookie?: string }; userId: string },
+  artifactId: string,
+  patch: { title?: string; pinned?: boolean; status?: string }
+): Promise<{ success: boolean; artifact: unknown }> {
+  const url = `${getClawBaseUrl()}/claw/api/v1/conversation-artifacts/${encodeURIComponent(artifactId)}`;
+  const response = await fetch(url, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      ...extractUserIdHeader(req.userId),
+      ...extractCookieHeader(req),
+    },
+    body: JSON.stringify(patch),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    logger.error(`[ClawAgentService] updateConversationArtifact failed: ${response.status} ${errorText}`);
+    throw new Error('Failed to update artifact');
+  }
+
+  return (await response.json()) as { success: boolean; artifact: unknown };
 }
 
 /**
@@ -1284,10 +1481,6 @@ export async function approveClawAction(
     signature?: string;
   }
 ): Promise<ClawActionApprovalResult> {
-  if (!payload.approved) {
-    return { success: true, data: { content: '' } };
-  }
-
   const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/ask-ai/chat/approve-action`;
   const pendingAction: Record<string, unknown> = {
     serverType: payload.serverType || 'xyne-spaces',
@@ -1304,7 +1497,7 @@ export async function approveClawAction(
       ...extractUserIdHeader(req.userId),
       ...extractCookieHeader(req),
     },
-    body: JSON.stringify({ pendingAction }),
+    body: JSON.stringify({ pendingAction, conversationId: payload.sessionId, approved: payload.approved !== false }),
   });
 
   if (!response.ok) {

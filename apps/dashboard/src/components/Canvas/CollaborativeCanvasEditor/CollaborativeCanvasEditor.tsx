@@ -91,6 +91,7 @@ import { CanvasFilePanel } from '../CanvasFilePanel/CanvasFilePanel';
 import { useCanvasCommentEditorBridge } from '../useCanvasCommentEditorBridge';
 import { useCanvasTicketEditorBridge } from '../useCanvasTicketEditorBridge';
 import { CanvasTicketCreationFlow } from '../CanvasTicketCreationFlow/CanvasTicketCreationFlow';
+import { CanvasTicketLinkFlow } from '../CanvasTicketLinkFlow/CanvasTicketLinkFlow';
 
 const DEFAULT_CANVAS_PLACEHOLDER = "Write something, or press '/' for commands";
 const RECORDING_SUMMARY_EDITED_TEXT_COLOR = 'recording-summary-edited';
@@ -585,8 +586,10 @@ export const CollaborativeCanvasEditor = forwardRef<
     });
     const {
       activeTicketAnchor,
+      activeTicketAction,
       isTicketChannelArchived,
       openTicketForCurrentSelection,
+      openTicketLinkForCurrentSelection,
       closeTicketModal,
       handleTicketCreated,
     } = useCanvasTicketEditorBridge({
@@ -709,6 +712,7 @@ export const CollaborativeCanvasEditor = forwardRef<
           canComment: editable && !isReadOnly,
           canCreateTicket: editable && !isReadOnly && !isTicketChannelArchived,
           onCreateTicket: openTicketForCurrentSelection,
+          onLinkTicket: openTicketLinkForCurrentSelection,
         }),
       [
         canvasId,
@@ -716,6 +720,7 @@ export const CollaborativeCanvasEditor = forwardRef<
         isReadOnly,
         isTicketChannelArchived,
         openCommentsForCurrentBlock,
+        openTicketLinkForCurrentSelection,
         openTicketForCurrentSelection,
         title,
       ],
@@ -893,10 +898,15 @@ export const CollaborativeCanvasEditor = forwardRef<
         </div>
 
         <CanvasTicketCreationFlow
-          anchor={activeTicketAnchor}
+          anchor={activeTicketAction === 'create' ? activeTicketAnchor : null}
           channelId={channelId}
           onClose={closeTicketModal}
           onTicketCreated={handleTicketCreated}
+        />
+        <CanvasTicketLinkFlow
+          anchor={activeTicketAction === 'link' ? activeTicketAnchor : null}
+          onClose={closeTicketModal}
+          onTicketSelected={handleTicketCreated}
         />
 
         {/* Presentation Modal */}

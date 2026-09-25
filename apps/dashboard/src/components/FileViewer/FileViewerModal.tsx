@@ -126,6 +126,9 @@ export const SlideContent: React.FC<{
   autoPlay?: boolean;
   onInteractionStateChange?: (state: ZoomState) => void;
   onExpand?: () => void;
+  /** Passed to the viewer: false lets a surface that frames the preview itself
+   *  drop the viewer's own header and border. */
+  chrome?: boolean;
 }> = ({
   file,
   isActive,
@@ -134,6 +137,7 @@ export const SlideContent: React.FC<{
   autoPlay,
   onInteractionStateChange,
   onExpand,
+  chrome,
 }) => {
   const [fileData, setFileData] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -260,6 +264,7 @@ export const SlideContent: React.FC<{
         key={viewerResetKey}
         source={fileData}
         fileName={file.fileName}
+        {...(chrome === false && { chrome })}
         // Only the visible slide participates in search; adjacent mounted slides
         // must not register as the find bar's target.
         searchable={isActive}

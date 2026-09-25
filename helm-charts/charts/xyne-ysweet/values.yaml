@@ -1,0 +1,195 @@
+global:
+  imageRegistry: ""
+  imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+image:
+  registry: ghcr.io
+  repository: juspay/y-sweet
+  tag: ""
+  digest: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+version: ""
+versionedName: false
+
+replicaCount: 1
+revisionHistoryLimit: 3
+strategy:
+  type: Recreate
+
+command:
+  - y-sweet
+args:
+  - serve
+  - --host
+  - 0.0.0.0
+  - --port
+  - "8080"
+  - --checkpoint-freq-seconds
+  - "10"
+  - /data
+
+containerPorts:
+  - name: http
+    containerPort: 8080
+    protocol: TCP
+
+service:
+  enabled: true
+  type: ClusterIP
+  annotations: {}
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+
+env:
+  Y_SWEET_OTEL_ENDPOINT: http://otel-collector:4318/v1/metrics
+  Y_SWEET_OTEL_SERVICE_NAME: y-sweet
+  Y_SWEET_OTEL_PUSH_INTERVAL: "30"
+
+secretEnv: {}
+
+envFromSecrets: []
+envFromConfigMaps: []
+extraEnv: []
+
+startupProbe: {}
+livenessProbe:
+  httpGet:
+    path: /ready
+    port: http
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 10
+readinessProbe:
+  httpGet:
+    path: /ready
+    port: http
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 10
+lifecycle: {}
+
+resources:
+  requests:
+    cpu: 256m
+    memory: 256Mi
+  limits:
+    memory: 1Gi
+
+podSecurityContext: {}
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  seccompProfile:
+    type: RuntimeDefault
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+  automount: false
+
+commonLabels: {}
+podLabels: {}
+podAnnotations: {}
+deploymentAnnotations: {}
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+podAntiAffinityPreset: soft
+topologySpreadConstraints: []
+priorityClassName: ""
+runtimeClassName: ""
+terminationGracePeriodSeconds: 60
+hostAliases: []
+dnsPolicy: ""
+dnsConfig: {}
+
+initContainers: []
+sidecars: []
+
+volumes:
+  - name: ysweet-data
+    emptyDir: {}
+volumeMounts:
+  - name: ysweet-data
+    mountPath: /data
+
+persistence:
+  enabled: false
+  existingClaim: ""
+  storageClass: ""
+  accessModes:
+    - ReadWriteOnce
+  size: 10Gi
+  mountPath: /data
+  subPath: ""
+  annotations: {}
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 3
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+  metrics: []
+  behavior: {}
+
+pdb:
+  enabled: false
+  minAvailable: 1
+  unhealthyPodEvictionPolicy: ""
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: collab.spaces.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+istio:
+  virtualService:
+    enabled: false
+    hosts: []
+    gateways: []
+    timeout: 0s
+    retries: {}
+    http: []
+  destinationRule:
+    enabled: false
+    exportTo: []
+    trafficPolicy: {}
+    subsets: []
+
+networkPolicy:
+  enabled: false
+  policyTypes:
+    - Ingress
+  ingress: []
+  egress: []
+
+serviceMonitor:
+  enabled: false
+  namespace: ""
+  labels: {}
+  port: http
+  path: /metrics
+  interval: 30s
+  scrapeTimeout: ""
+
+extraObjects: []

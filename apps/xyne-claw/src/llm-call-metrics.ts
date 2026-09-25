@@ -38,6 +38,7 @@ function sanitize(v: string | number | boolean): string {
 function metricLine(
   ttftMs: number,
   totalMs: number,
+  usage: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number } | undefined,
   provider: string,
   model: string,
   sessionId: string,
@@ -51,6 +52,14 @@ function metricLine(
     "kind=observe",
     `ttft_ms=${ttftMs}`,
     `total_ms=${totalMs}`,
+    // Cache accounting per call. A large cache_write on a turn that is not the
+    // first means the prefix was invalidated and re-paid — the signal for
+    // whether tool loading mutates the prefix, or a long tool call simply
+    // outlives the provider's cache TTL.
+    `in_tok=${usage?.input ?? 0}`,
+    `out_tok=${usage?.output ?? 0}`,
+    `cache_read=${usage?.cacheRead ?? 0}`,
+    `cache_write=${usage?.cacheWrite ?? 0}`,
     `provider=${sanitize(provider)}`,
     `model=${sanitize(model)}`,
     `session=${sanitize(sessionId)}`,
@@ -81,7 +90,7 @@ function wrapStream(
     const ok = eventOk(lastTerminalEvent, result);
     const provider = model.provider || "unknown";
     const modelId = model.id || model.name || "unknown";
-    log.info(metricLine(ttftMs, totalMs, provider, modelId, sessionId, ok, inflightAtStart, fastMode));
+    log.info(metricLine(ttftMs, totalMs, result?.usage, provider, modelId, sessionId, ok, inflightAtStart, fastMode));
     if (ttftMs > 30_000) {
       log.warn(`[llm] slow-ttft ttft_ms=${ttftMs} provider=${sanitize(provider)} inflight=${inflightAtStart}`);
     }
@@ -134,7 +143,7 @@ export function installLlmCallMetrics(agent: StreamAgent, sessionId: string, lab
       const totalMs = Date.now() - startedAt;
       const provider = model.provider || "unknown";
       const modelId = model.id || model.name || "unknown";
-      log.info(metricLine(totalMs, totalMs, provider, modelId, sessionId, ok, inflightAtStart, fastMode));
+      log.info(metricLine(totalMs, totalMs, undefined, provider, modelId, sessionId, ok, inflightAtStart, fastMode));
       if (totalMs > 30_000) {
         log.warn(`[llm] slow-ttft ttft_ms=${totalMs} provider=${sanitize(provider)} inflight=${inflightAtStart}`);
       }

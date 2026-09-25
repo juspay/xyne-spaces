@@ -1,4 +1,5 @@
 import { randomUUID } from "crypto";
+import { isMessagingChannelKey, type MessagingChannelKey } from "../surfaces/messaging/plugin.js";
 import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
 import { decrypt } from "../crypto.js";
@@ -56,8 +57,11 @@ import { encryptSurfaceSecret } from "./surface-resolver.js";
 import { isClawAdmin } from "../middleware/agent-acl.js";
 import { isScheduledOrAutomationEvent } from "./run-bridge.js";
 import { dispatchRun } from "./dispatch-run.js";
+import { toolUsageRankFor, wantsToolUsageRank } from "./tool-usage-rank.js";
 import { createLogger } from "../logger.js";
 import type { SessionContext } from "../routes/webhook.js";
+
+const JUDGE_BACKENDS = new Set(["jev", "ournormaljev", "ourtrainedjev", "llm"]);
 
 const log = createLogger("run");
 
@@ -217,10 +221,11 @@ function isExperimentContext(value: unknown): boolean {
     typeof obj["deadlineAt"] === "string" && obj["deadlineAt"].trim() !== "";
 }
 
-export type AgentRunTriggerSource = "spaces" | "scheduled" | "chat" | "api" | "automation" | "slack" | "heartbeat" | "reflex";
+export type AgentRunTriggerSource = "spaces" | "scheduled" | "chat" | "api" | "automation" | "slack" | "heartbeat" | "reflex" | MessagingChannelKey;
 
 function triggerSourceForEventType(eventType: unknown, requested: unknown): AgentRunTriggerSource {
   if (requested === "slack") return "slack";
+  if (isMessagingChannelKey(requested)) return requested;
   if (eventType === "automation") return "automation";
   if (eventType === "scheduled_job") return "scheduled";
   return "spaces";
@@ -554,7 +559,7 @@ export async function prepareRun(
   const serviceToken = caller.serviceToken;
   const isServiceTokenCaller = serviceToken?.client === "service";
   {
-    const { task, context, conversationId, piSessionConversationId, agentSlug, callbackUrl, callbackSecret, channelId, deliverTo, projectId, projectName, cwd, eventType, triggerSource, slackDelivery, traceId, provider, providerOrder, providerOverride, subagentProviders, subagentProviderMode, providerConfigs, progressUrl, attachments, recordingRefs, contextFiles, skills: bodySkills, attachedContext, ticketIds, canvasIds, callIds, idempotencyKey: requestedIdempotencyKey, isRegenerate, detached, fastMode, resumedFromHandoff, generateFollowUpSuggestions } = body as {
+    const { task, context, conversationId, piSessionConversationId, agentSlug, callbackUrl, callbackSecret, channelId, deliverTo, projectId, projectName, cwd, eventType, triggerSource, slackDelivery, channelDelivery, traceId, provider, providerOrder, providerOverride, subagentProviders, subagentProviderMode, providerConfigs, progressUrl, attachments, recordingRefs, contextFiles, skills: bodySkills, attachedContext, ticketIds, canvasIds, callIds, idempotencyKey: requestedIdempotencyKey, isRegenerate, detached, fastMode, resumedFromHandoff, judgeBackend, optimizations, generateFollowUpSuggestions } = body as {
       task?: string;
       context?: string;
       conversationId?: string;
@@ -574,6 +579,7 @@ export async function prepareRun(
       eventType?: string;
       triggerSource?: string;
       slackDelivery?: SessionContext["slackDelivery"];
+      channelDelivery?: SessionContext["channelDelivery"];
       traceId?: string;
       provider?: string;
       providerOrder?: string[];
@@ -608,6 +614,8 @@ export async function prepareRun(
       detached?: boolean;
       fastMode?: boolean;
       resumedFromHandoff?: boolean;
+      judgeBackend?: string;
+      optimizations?: unknown;
       generateFollowUpSuggestions?: boolean;
       /** Branching: when true, claw branches the PI session at the last user
        *  entry so the new assistant turn is a sibling of the previous one. */
@@ -660,6 +668,9 @@ export async function prepareRun(
     }
     if ((triggerSource === "slack" || slackDelivery !== undefined) && !isInternalS2SCaller) {
       return { ok: false, status: 400, error: "slackDelivery requires internal service authentication" };
+    }
+    if ((isMessagingChannelKey(triggerSource) || channelDelivery !== undefined) && !isInternalS2SCaller) {
+      return { ok: false, status: 400, error: "channelDelivery requires internal service authentication" };
     }
     if (callbackUrl && !isInternalCallbackOrigin(callbackUrl) && !isAllowedExternalCallbackUrl(callbackUrl)) {
       return { ok: false, status: 400, error: "callbackUrl is not an allowed target" };
@@ -738,11 +749,26 @@ export async function prepareRun(
         .findByUserAndProvider(resolved.userId, runOverride.provider)
         .catch(() => null);
       if (!cred?.encryptedKey) {
-        return {
-          ok: false,
-          status: 400,
-          error: `No ${runOverride.provider} credentials for this user — connect it in Settings first`,
-        };
+        // Fall back to the AGENT's own credential for that provider. Requiring a
+        // personal key here was over-broad: every normal mention already runs on
+        // the agent's credentials, so pinning one of the providers the agent is
+        // ALREADY configured with spends the same quota by a different route. It
+        // is not a way to reach a provider nobody has connected — a provider
+        // absent from the agent's own config is still refused below.
+        const agentProviders = await resolveAgentProviderConfigs({ id: agent.id, config: agent.config })
+          .catch(() => null);
+        if (!agentProviders?.providerConfigs?.[runOverride.provider]) {
+          return {
+            ok: false,
+            status: 400,
+            error:
+              `No ${runOverride.provider} credentials for this user, and "${agentSlug}" has none configured either ` +
+              `— connect it in Settings, or add it to the agent's providers`,
+          };
+        }
+        log.info(
+          `[run] provider override ${runOverride.provider} using agent credentials agentSlug=${agentSlug} userId=${resolved.userId}`,
+        );
       }
     }
 
@@ -1159,7 +1185,26 @@ export async function prepareRun(
         // cred, ignore the override and fall through to normal resolution
         // rather than forcing a provider claw can't serve (which would silently
         // drop to the platform default).
-        const cfg = effectiveProviderConfigs?.[runOverride.provider];
+        // Resolve the agent's own configs when the request did not carry one for
+        // this provider. Without this the pin is silently dropped and the run
+        // lands on the platform default — /eval saw all four arms report
+        // "spaces" while each claimed a different pin.
+        let cfg = effectiveProviderConfigs?.[runOverride.provider];
+        if (!cfg) {
+          const fromAgent = await resolveAgentProviderConfigs({ id: agent.id, config: agent.config })
+            .catch(() => null);
+          const agentCfg = fromAgent?.providerConfigs?.[runOverride.provider];
+          if (agentCfg) {
+            effectiveProviderConfigs = { ...(effectiveProviderConfigs ?? {}), [runOverride.provider]: agentCfg };
+            cfg = agentCfg;
+          }
+        }
+        if (!cfg) {
+          log.warn(
+            `[run] provider override ${runOverride.provider} DROPPED — no credential resolved; ` +
+            `run will use ${effectiveProvider ?? "the platform default"} agentSlug=${agentSlug}`,
+          );
+        }
         if (cfg) {
           effectiveProvider = runOverride.provider;
           if (runOverride.model?.trim()) {
@@ -1307,6 +1352,7 @@ export async function prepareRun(
           ...(traceId ? { traceId } : {}),
           ...(externalResultCallback ? { externalResultCallback } : {}),
           ...(defaultTriggerSource === "slack" && slackDelivery ? { slackDelivery } : {}),
+          ...(isMessagingChannelKey(defaultTriggerSource) && channelDelivery ? { channelDelivery } : {}),
         };
         const { setSession } = await import("../routes/webhook.js");
         await setSession(
@@ -1416,6 +1462,13 @@ export async function prepareRun(
       })).filter((sk) => !takenSlugs.has(sk.slug)),
     ];
 
+    const toolUsageRank =
+      agentSlug && wantsToolUsageRank(mergedAgentConfig["optimizations"], optimizations)
+        ? await toolUsageRankFor(agentSlug, agent.orgId)
+        : [];
+    const { toolUsageRank: _suppliedToolUsageRank, ...agentConfigWithoutRank } = mergedAgentConfig;
+    mergedAgentConfig = toolUsageRank.length > 0 ? { ...agentConfigWithoutRank, toolUsageRank } : agentConfigWithoutRank;
+
     const forwardBody = {
       sessionId,
       idempotencyKey,
@@ -1467,6 +1520,8 @@ export async function prepareRun(
       ...(detached === true ? { detached: true } : {}),
       fastMode: effectiveFastMode,
       ...(resumedFromHandoff === true ? { resumedFromHandoff: true } : {}),
+      ...(typeof judgeBackend === "string" && JUDGE_BACKENDS.has(judgeBackend) ? { judgeBackend } : {}),
+      ...(typeof optimizations === "string" && /^[a-z0-9_,+\-]{1,400}$/i.test(optimizations) ? { optimizations } : {}),
       // Plan/auto mode gate. This forwardBody is an explicit allowlist, so these
       // MUST be threaded here or claw never sees them and plan mode is inert.
       // 'plan' is set by the webhook mention dispatch (planMode agents, non-twin);

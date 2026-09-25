@@ -19,6 +19,12 @@ import {
 } from './sdlc-credential-bootstrap.js';
 
 const binding = { repoId: 'repo-1', workspaceId: 'ws-1', actorUserId: 'user-1' };
+const transport = {
+  authUrl: 'https://claw-auth.example/',
+  s2sKey: 's2s-key',
+  runSessionId: 'wf-run-1',
+  sessionToken: 'session-token',
+};
 const repository = {
   name: 'torana',
   cloneUrl: 'https://bb.example.net/scm/lp/torana.git',
@@ -67,33 +73,33 @@ function envelopeFor(
 
 afterEach(() => {
   vi.unstubAllGlobals();
-  delete process.env.SPACES_BACKEND_URL;
-  delete process.env.XYNE_CLAW_S2S_KEY;
 });
 
 describe('installSdlcRepositoryAccess', () => {
   it('fails closed before asking for credentials when Node crypto is unavailable', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
-    await expect(installSdlcRepositoryAccess(mockSession('sandbox-1', 1), binding))
+    await expect(installSdlcRepositoryAccess(mockSession('sandbox-1', 1), binding, transport))
       .rejects.toThrow('Node.js 20+');
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('asks for the Actor and repository, never a grant, and returns anonymous access as such', async () => {
-    process.env.SPACES_BACKEND_URL = 'https://spaces.example';
-    process.env.XYNE_CLAW_S2S_KEY = 's2s-key';
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({ success: true, anonymous: true, repository }),
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const result = await installSdlcRepositoryAccess(mockSession('sandbox-1'), binding);
+    const result = await installSdlcRepositoryAccess(mockSession('sandbox-1'), binding, transport);
 
     expect(result).toEqual({ mode: 'anonymous', repository });
     const [url, init] = fetchMock.mock.calls[0]!;
-    expect(url).toBe('https://spaces.example/api/internal/sdlc/vcs/runtime-credentials/bootstrap');
+    expect(url).toBe('https://claw-auth.example/claw/api/v1/sessions/wf-run-1/sdlc/runtime-credentials/bootstrap');
+    expect((init as RequestInit).headers).toMatchObject({
+      'x-s2s-key': 's2s-key',
+      Authorization: 'Bearer session-token',
+    });
     expect(JSON.parse(String((init as RequestInit).body))).toEqual({
       ...binding,
       sandboxId: 'sandbox-1',
@@ -102,15 +108,23 @@ describe('installSdlcRepositoryAccess', () => {
   });
 
   it('surfaces the backend refusal reason', async () => {
-    process.env.SPACES_BACKEND_URL = 'https://spaces.example';
-    process.env.XYNE_CLAW_S2S_KEY = 's2s-key';
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: false,
       status: 403,
       json: async () => ({ error: 'You are not a member of this repository' }),
     }));
-    await expect(installSdlcRepositoryAccess(mockSession('sandbox-1'), binding))
+    await expect(installSdlcRepositoryAccess(mockSession('sandbox-1'), binding, transport))
       .rejects.toThrow('HTTP 403): You are not a member of this repository');
+  });
+
+  it('fails before calling claw-auth when the run session token is missing', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const session = mockSession('sandbox-1');
+    await expect(installSdlcRepositoryAccess(session, binding, { ...transport, sessionToken: '' }))
+      .rejects.toThrow('Claw auth URL, S2S key or session token is unavailable');
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(session.commands.run).toHaveBeenLastCalledWith('rm -f /tmp/.sdlc-private-key', 5_000);
   });
 });
 

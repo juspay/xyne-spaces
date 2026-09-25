@@ -2,6 +2,12 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { Mic, Monitor, CircleDot, CircleStop } from 'lucide-react';
 import { RecordingType } from '@xyne/shared';
 import { cn } from '../../../utils/classNames';
+import { ControlButton, type ControlSizing } from './ControlButton';
+
+/** Text label for the full-view button; the red fill shows it's live. */
+function RecLabel(): React.ReactElement {
+  return <span className='text-[11px] font-extrabold leading-none tracking-tight'>REC</span>;
+}
 
 export interface RecordingButtonProps {
   isRecording: boolean;
@@ -9,12 +15,7 @@ export interface RecordingButtonProps {
   canStopRecording?: boolean;
   onStartRecording?: ((type: RecordingType) => void | Promise<void>) | undefined;
   onStopRecording?: (() => void | Promise<void>) | undefined;
-  hasCustomSizing: boolean;
-  iconSize: number;
-  buttonPadding: number;
-  buttonClasses: string;
-  midnightControlClass: string;
-  midnightPopoverClass: string;
+  sizing: ControlSizing;
   callId: string;
 }
 
@@ -23,12 +24,7 @@ export function RecordingButton({
   canStopRecording = true,
   onStartRecording,
   onStopRecording,
-  hasCustomSizing,
-  iconSize,
-  buttonPadding,
-  buttonClasses,
-  midnightControlClass,
-  midnightPopoverClass,
+  sizing,
   callId,
 }: RecordingButtonProps): React.ReactElement {
   const [showPicker, setShowPicker] = useState(false);
@@ -67,27 +63,25 @@ export function RecordingButton({
 
   return (
     <div className='relative' ref={pickerRef}>
-      <button
-        onClick={handleButtonClick}
-        disabled={stopDisabled}
-        className={cn(
-          buttonClasses,
-          isRecording
-            ? 'bg-red-600 text-white shadow-red-900/40 animate-pulse [animation-duration:3s]'
-            : showPicker
-              ? 'bg-blue-600 hover:bg-blue-700 text-white'
-              : midnightControlClass,
-          isRecording && !stopDisabled && 'hover:bg-red-700',
-          stopDisabled && 'cursor-default opacity-90',
-        )}
-        style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
-        title={
+      <ControlButton
+        sizing={sizing}
+        // Full view shows "REC" in the round button; the mini window keeps the icon.
+        icon={sizing.isFullView ? RecLabel : isRecording ? CircleStop : CircleDot}
+        label={
           isRecording
             ? stopDisabled
               ? 'Recording in progress — only the person who started it can stop it'
               : 'Stop recording'
-            : 'Start AI recording'
+            : 'Start recording'
         }
+        tone={isRecording ? 'off' : showPicker ? 'active' : 'neutral'}
+        className={cn(
+          !sizing.isFullView && isRecording && 'animate-pulse [animation-duration:3s]',
+          stopDisabled && 'cursor-default opacity-90 hover:bg-[#dc362e]',
+        )}
+        onClick={handleButtonClick}
+        disabled={stopDisabled}
+        aria-expanded={isRecording ? undefined : showPicker}
         data-track-event='BUTTON_CLICK'
         data-track-category='CALLS'
         data-track-name='TOGGLE_RECORDING'
@@ -98,37 +92,21 @@ export function RecordingButton({
           // opens the mode picker, so the mode lands on the picker buttons below.
           intent: isRecording ? 'stop' : 'open_mode_picker',
         })}
-      >
-        {isRecording ? (
-          <CircleStop
-            className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
-            style={
-              hasCustomSizing ? { width: `${iconSize}px`, height: `${iconSize}px` } : undefined
-            }
-          />
-        ) : (
-          <CircleDot
-            className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
-            style={
-              hasCustomSizing ? { width: `${iconSize}px`, height: `${iconSize}px` } : undefined
-            }
-          />
-        )}
-      </button>
+      />
 
       {showPicker && !isRecording && (
         <div
           className={cn(
-            'absolute bottom-full mb-3 left-1/2 -translate-x-1/2 rounded-xl shadow-2xl overflow-hidden min-w-max',
-            midnightPopoverClass,
+            'absolute bottom-full z-50 mb-3 left-1/2 -translate-x-1/2 rounded-xl overflow-hidden min-w-max py-1',
+            'bg-[#1e1f20] ring-1 ring-white/10 text-[#e3e3e3] shadow-2xl',
           )}
         >
-          <div className='px-4 pt-2.5 pb-1.5 text-[10px] font-semibold uppercase tracking-widest text-gray-500'>
-            Start AI recording
+          <div className='px-4 pt-2.5 pb-1.5 text-[10px] font-semibold uppercase tracking-widest text-[#9aa0a6]'>
+            Start recording
           </div>
           <button
             onClick={() => handlePick(RecordingType.AUDIO_ONLY)}
-            className='flex items-center gap-3 w-full px-4 py-2.5 text-sm text-gray-200 hover:bg-gray-600 transition-colors text-left'
+            className='flex items-center gap-3 w-full px-4 py-2.5 text-sm text-[#e3e3e3] hover:bg-white/10 transition-colors text-left'
             data-track-category='CALLS'
             data-track-name='start-recording-audio-only'
             data-track-metadata={JSON.stringify({
@@ -139,13 +117,13 @@ export function RecordingButton({
             <Mic className='w-4 h-4 text-blue-400 flex-shrink-0' />
             <div>
               <div className='font-medium'>Voice only</div>
-              <div className='text-xs text-gray-400'>Record participant audio and transcript</div>
+              <div className='text-xs text-[#9aa0a6]'>Record participant audio and transcript</div>
             </div>
           </button>
-          <div className='h-px bg-gray-600 mx-3' />
+          <div className='h-px bg-white/10 mx-3' />
           <button
             onClick={() => handlePick(RecordingType.AUDIO_SCREEN)}
-            className='flex items-center gap-3 w-full px-4 py-2.5 text-sm text-gray-200 hover:bg-gray-600 transition-colors text-left'
+            className='flex items-center gap-3 w-full px-4 py-2.5 text-sm text-[#e3e3e3] hover:bg-white/10 transition-colors text-left'
             data-track-category='CALLS'
             data-track-name='start-recording-audio-screen'
             data-track-metadata={JSON.stringify({
@@ -156,7 +134,7 @@ export function RecordingButton({
             <Monitor className='w-4 h-4 text-purple-400 flex-shrink-0' />
             <div>
               <div className='font-medium'>Screen + voice</div>
-              <div className='text-xs text-gray-400'>
+              <div className='text-xs text-[#9aa0a6]'>
                 Record screen share, audio, and transcript
               </div>
             </div>

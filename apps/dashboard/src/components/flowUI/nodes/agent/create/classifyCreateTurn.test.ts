@@ -50,13 +50,7 @@ void describe('classifyCreateTurn', () => {
   void it('infers tools for a thin standup job (channel/standup cue)', () => {
     const result = classifyCreateTurn('build a standup agent', true);
     assert.equal(result.kind, 'edit');
-    assert.deepEqual(result.fields, [
-      'name',
-      'slug',
-      'description',
-      'systemPrompt',
-      'tools',
-    ]);
+    assert.deepEqual(result.fields, ['name', 'slug', 'description', 'systemPrompt', 'tools']);
     assert.equal(shouldGeneratePrompt(result, true, 'build a standup agent'), true);
     assert.deepEqual(firstDraftFields('standup bot'), [
       'name',
@@ -68,8 +62,7 @@ void describe('classifyCreateTurn', () => {
   });
 
   void it('adds tools when the request implies email / X.com capabilities', () => {
-    const text =
-      'Build an agent that posts to X.com and sends a daily email digest of mentions.';
+    const text = 'Build an agent that posts to X.com and sends a daily email digest of mentions.';
     assert.deepEqual(firstDraftFields(text), [
       'name',
       'slug',
@@ -79,13 +72,7 @@ void describe('classifyCreateTurn', () => {
     ]);
     const result = classifyCreateTurn(text, true);
     assert.equal(result.kind, 'edit');
-    assert.deepEqual(result.fields, [
-      'name',
-      'slug',
-      'description',
-      'systemPrompt',
-      'tools',
-    ]);
+    assert.deepEqual(result.fields, ['name', 'slug', 'description', 'systemPrompt', 'tools']);
   });
 
   void it('keeps vague make-a-bot as clarify (no draft)', () => {

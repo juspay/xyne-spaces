@@ -81,7 +81,14 @@ export function isWebRenderableImageType(mimeType: string): boolean {
  * and results are cached per File object so remounts never re-convert.
  */
 const HEIC_PREVIEW_MAX_EDGE = 2048;
-const heicPreviewBlobCache = new WeakMap<File, Promise<Blob>>();
+
+export interface HeicPreviewConversion {
+  blob: Blob;
+  width: number;
+  height: number;
+}
+
+const heicPreviewConversionCache = new WeakMap<File, Promise<HeicPreviewConversion>>();
 
 async function downscaleForPreview(blob: Blob): Promise<Blob> {
   try {
@@ -107,24 +114,32 @@ async function downscaleForPreview(blob: Blob): Promise<Blob> {
   }
 }
 
-export function convertHeicFileToPreviewBlob(file: File): Promise<Blob> {
-  const cached = heicPreviewBlobCache.get(file);
+export function convertHeicFileWithDimensions(file: File): Promise<HeicPreviewConversion> {
+  const cached = heicPreviewConversionCache.get(file);
   if (cached) return cached;
 
-  const conversion = (async (): Promise<Blob> => {
+  const conversion = (async (): Promise<HeicPreviewConversion> => {
     const heic2any = (await import('heic2any')).default;
     const result = await heic2any({ blob: file, toType: 'image/webp', quality: 0.9 });
     const webp = Array.isArray(result) ? result[0] : result;
     if (!webp) throw new Error('HEIC conversion produced no image');
-    return downscaleForPreview(webp);
+    const bitmap = await createImageBitmap(webp);
+    const { width, height } = bitmap;
+    bitmap.close();
+    return { blob: await downscaleForPreview(webp), width, height };
   })();
 
-  heicPreviewBlobCache.set(
+  heicPreviewConversionCache.set(
     file,
     conversion.catch(error => {
-      heicPreviewBlobCache.delete(file);
+      heicPreviewConversionCache.delete(file);
       throw error;
     }),
   );
   return conversion;
+}
+
+export async function convertHeicFileToPreviewBlob(file: File): Promise<Blob> {
+  const conversion = await convertHeicFileWithDimensions(file);
+  return conversion.blob;
 }

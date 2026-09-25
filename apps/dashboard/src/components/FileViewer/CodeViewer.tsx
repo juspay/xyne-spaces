@@ -92,7 +92,10 @@ const ErrorDisplay: React.FC<{ error: string; canRetry?: boolean; onRetry?: () =
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-const CodeViewer: React.FC<BaseViewerProps> = memo(({ source, fileName, searchable }) => {
+const CodeViewer: React.FC<BaseViewerProps> = memo(({ source, fileName, searchable, chrome }) => {
+  // Absent means the viewer draws its own frame, which is the modal. Only a
+  // surface that frames the preview itself passes false.
+  const showChrome = chrome !== false;
   const [lines, setLines] = useState<string[]>([]);
   // Plain-text shadow of `lines`, kept in lockstep. `lines` holds highlight.js
   // HTML, whose string offsets don't correspond to text offsets (tags are
@@ -250,7 +253,7 @@ const CodeViewer: React.FC<BaseViewerProps> = memo(({ source, fileName, searchab
   // Markdown "rendered" view uses ReadmeViewer in-place (same modal).
   if (isRenderedMarkdown) {
     return (
-      <div className='relative h-full w-full mt-[65px]'>
+      <div className={`relative h-full w-full ${showChrome ? 'mt-[65px]' : ''}`}>
         <div className='absolute right-3 top-3 z-20'>
           <button
             type='button'
@@ -260,7 +263,7 @@ const CodeViewer: React.FC<BaseViewerProps> = memo(({ source, fileName, searchab
             data-track-name='ToggleMarkdownRaw'
             data-track-metadata={JSON.stringify({ fileName })}
           >
-            View code
+            {showChrome ? 'View code' : 'Raw'}
           </button>
         </div>
         <ReadmeViewer source={source} {...(fileName ? { fileName } : {})} />
@@ -289,21 +292,43 @@ const CodeViewer: React.FC<BaseViewerProps> = memo(({ source, fileName, searchab
 
   return (
     <div
-      className='font-mono text-sm bg-background dark:bg-[#1E1E1E] text-foreground dark:text-gray-100 border border-border dark:border-gray-700 rounded-lg mt-[65px]'
+      className={
+        showChrome
+          ? 'font-mono text-sm bg-background dark:bg-[#1E1E1E] text-foreground dark:text-gray-100 border border-border dark:border-gray-700 rounded-lg mt-[65px]'
+          : 'relative font-mono text-sm bg-background text-foreground'
+      }
       style={{
         // Subtracts the 65px margin above, which clears the modal's floating
         // top bar. Without this, 100% + margin overflows the scrollable wrapper
         // and clips the bottom of the viewer out of sight — hiding the file's
         // last lines and any match revealed there. (Csv/Excel avoid this by
         // using `pt-[65px]` padding rather than a margin.)
-        height: 'calc(100% - 65px)',
+        height: showChrome ? 'calc(100% - 65px)' : '100%',
         width: '100%',
         display: 'flex',
         flexDirection: 'column',
       }}
     >
+      {/* Without the frame the switch floats over the text, so it stays reachable
+          in both modes without a bar above the file. */}
+      {!showChrome && isMarkdown && (
+        <div className='absolute right-3 top-3 z-20'>
+          <button
+            type='button'
+            onClick={() => setMarkdownMode('rendered')}
+            className='rounded-md border border-border bg-background/80 px-3 py-1.5 text-xs text-foreground backdrop-blur transition-colors hover:bg-accent'
+            data-track-category='FileViewer'
+            data-track-name='ToggleMarkdownRendered'
+            data-track-metadata={JSON.stringify({ fileName })}
+          >
+            Formatted
+          </button>
+        </div>
+      )}
       {/* Header with file info */}
-      <div className='flex items-center justify-between p-3 border-b border-border dark:border-gray-700 bg-muted dark:bg-gray-800/50 rounded-t-lg flex-shrink-0'>
+      <div
+        className={`flex items-center justify-between p-3 border-b border-border dark:border-gray-700 bg-muted dark:bg-gray-800/50 rounded-t-lg flex-shrink-0 ${showChrome ? '' : 'hidden'}`}
+      >
         <div className='flex items-center gap-4 min-w-0 flex-1'>
           {language && (
             <span className='text-xs text-muted-foreground dark:text-muted-foreground truncate uppercase'>

@@ -23,7 +23,7 @@ import Wallpaper from './components/Wallpaper/Wallpaper';
 import { initializeTelemetry } from './services/otel/init';
 import { KeyboardProvider } from './contexts/KeyboardContext';
 import { SwitchLoadingOverlay } from './components/SwitchLoadingOverlay/SwitchLoadingOverlay';
-import { RecordingInterruptGuard } from './components/Recording/RecordingInterruptGuard/RecordingInterruptGuard';
+import { InterruptGuard } from './components/InterruptGuard/InterruptGuard';
 import { WorkspaceSwitchToastListener } from './components/WorkspaceSwitchToastListener';
 import { TRUSTED_ORIGINS } from '@xyne/shared';
 import { parseCallInviteLink } from './components/Chat/RenderMessageWithHTML/internalLinkUtils';
@@ -157,7 +157,7 @@ const App = (): ReactElement => {
                       <RouterProvider router={router}></RouterProvider>
                     </main>
                     <SwitchLoadingOverlay />
-                    <RecordingInterruptGuard />
+                    <InterruptGuard />
                     <WorkspaceSwitchToastListener />
                     <Toaster
                       position='top-right'

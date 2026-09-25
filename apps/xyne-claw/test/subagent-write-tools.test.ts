@@ -22,14 +22,26 @@ describe("subagent write tools", () => {
     writeTools: ["spaces-create-ticket"],
   };
 
-  it("keeps built-in connector write tools on the subagent while preserving parent-level approval compatibility", () => {
+  it("keeps built-in connector write tools on the subagent and no longer force-unwraps them to the parent", () => {
     const { subagentTools, directTools } = buildSubagentTools([spacesGroup]);
 
     expect(subagentTools.map((t) => t.name)).toEqual(["spaces"]);
-    // Existing parent-driven prompts still see write tools directly. The same
-    // ToolDefinition is also inside the spaces subagent palette, where its MCP
-    // execute path queues a signed pendingAction instead of executing writes.
-    expect(directTools.map((t) => t.name)).toEqual(["Xyne_Spaces__spaces-create-ticket"]);
+    // Writes stay inside the subagent palette, where the MCP execute path
+    // queues a signed pendingAction instead of executing. They used to be
+    // pushed to the parent as well for parent-driven approval prompts, which
+    // made every write permanently prompt-resident — the catalog skips writes,
+    // and anything uncatalogued can never go dormant.
+    expect(directTools.map((t) => t.name)).toEqual([]);
+  });
+
+  it("restores the parent-level push when XYNE_UNWRAP_WRITE_TOOLS=1", () => {
+    process.env["XYNE_UNWRAP_WRITE_TOOLS"] = "1";
+    try {
+      const { directTools } = buildSubagentTools([spacesGroup]);
+      expect(directTools.map((t) => t.name)).toEqual(["Xyne_Spaces__spaces-create-ticket"]);
+    } finally {
+      delete process.env["XYNE_UNWRAP_WRITE_TOOLS"];
+    }
   });
 
   it("allows custom subagents to resolve selected write tools", () => {

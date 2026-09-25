@@ -16,6 +16,13 @@ export interface ZoomState {
 }
 
 export interface BaseViewerProps {
+  /**
+   * Draw the viewer's own frame — its header bar, border and the margin that
+   * clears the modal's floating top bar. Default true, which is the modal. A
+   * surface that already provides the frame (the SDLC file tab) passes false so
+   * the preview sits flush rather than as a card inside a card.
+   */
+  chrome?: boolean;
   source: File | null;
   fileName?: string;
   attachmentId?: string;

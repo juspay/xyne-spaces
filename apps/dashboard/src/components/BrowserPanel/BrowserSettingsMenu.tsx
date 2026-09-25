@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Settings, Shield } from 'lucide-react';
 import Popover from '../ui/Popover';
 
@@ -25,6 +25,39 @@ export const BrowserSettingsMenu: React.FC<BrowserSettingsMenuProps> = ({ isOpen
     // Send to main process
     if (isElectronApp() && window.electronAPI?.setBrowserSettings) {
       void window.electronAPI.setBrowserSettings({ [key]: value });
+    }
+  };
+
+  const [importState, setImportState] = useState<'idle' | 'running' | 'done' | 'failed'>('idle');
+  const [importSummary, setImportSummary] = useState('');
+  const [importAvailable, setImportAvailable] = useState(false);
+
+  useEffect(() => {
+    if (!isOpen || !isElectronApp() || !window.electronAPI?.browserImportAvailable) return;
+    void window.electronAPI
+      .browserImportAvailable()
+      .then(res => setImportAvailable(Boolean(res?.available)))
+      .catch(() => setImportAvailable(false));
+  }, [isOpen]);
+
+  const handleImportChrome = async () => {
+    if (!isElectronApp() || !window.electronAPI?.importChromeCookies) return;
+    setImportState('running');
+    setImportSummary('');
+    try {
+      const res = await window.electronAPI.importChromeCookies();
+      if (res?.success) {
+        setImportState('done');
+        setImportSummary(`${res.imported ?? 0} cookies from ${res.hosts ?? 0} sites`);
+      } else {
+        setImportState('failed');
+        setImportSummary(
+          res?.error === 'unsupported-platform' ? 'Only supported on macOS' : 'Import failed',
+        );
+      }
+    } catch {
+      setImportState('failed');
+      setImportSummary('Import failed');
     }
   };
 
@@ -68,6 +101,27 @@ export const BrowserSettingsMenu: React.FC<BrowserSettingsMenuProps> = ({ isOpen
         </div>
 
         <div className='h-px bg-border my-1' />
+
+        {importAvailable ? (
+          <div className='flex flex-col gap-1'>
+            <button
+              onClick={() => {
+                void handleImportChrome();
+              }}
+              disabled={importState === 'running'}
+              className='h-auto w-full justify-start text-left text-sm text-foreground hover:bg-secondary/60 px-2 py-1.5 rounded-md transition-colors font-medium disabled:opacity-60'
+              data-track-category='browser_settings'
+              data-track-name='import_chrome_cookies'
+            >
+              {importState === 'running' ? 'Importing from Chrome…' : 'Import sessions from Chrome'}
+            </button>
+            <p className='px-2 text-xs text-muted-foreground'>
+              {importState === 'idle'
+                ? 'Copies your Chrome sign-ins into this browser. macOS will ask for your keychain password.'
+                : importSummary}
+            </p>
+          </div>
+        ) : null}
 
         <button
           onClick={() => {

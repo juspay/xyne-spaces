@@ -8,9 +8,7 @@
  */
 
 import type { AvailableTools } from '@/services/claw/clawToolsTypes';
-import {
-  buildBuiltinCatalog,
-} from '@/routes/AIScreen/library/shared/pickers/builtin/builtinCatalog';
+import { buildBuiltinCatalog } from '@/routes/AIScreen/library/shared/pickers/builtin/builtinCatalog';
 import { buildMcpCatalog } from '@/routes/AIScreen/library/shared/pickers/mcp/mcpCatalog';
 import type { AgentCreateFormState } from './types.ts';
 import {
@@ -51,10 +49,7 @@ function formHasKnowledge(form: AgentCreateFormState): boolean {
   return form.selectedKbResources.length > 0;
 }
 
-export function canvasHasCapability(
-  form: AgentCreateFormState,
-  cls: CapabilityClass,
-): boolean {
+export function canvasHasCapability(form: AgentCreateFormState, cls: CapabilityClass): boolean {
   switch (cls) {
     case 'mcp':
       return formHasMcp(form);
@@ -141,8 +136,8 @@ export function validateCanvasCapabilities(args: {
   for (const cls of missing) {
     if (
       catalogCanSatisfy(cls, args.catalog ?? null, args.intent, {
-        skillCount: args.skillCount,
-        knowledgeCount: args.knowledgeCount,
+        ...(args.skillCount !== undefined ? { skillCount: args.skillCount } : {}),
+        ...(args.knowledgeCount !== undefined ? { knowledgeCount: args.knowledgeCount } : {}),
       })
     ) {
       healable.push(cls);

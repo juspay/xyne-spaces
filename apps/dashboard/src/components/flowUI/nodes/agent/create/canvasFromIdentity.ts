@@ -120,9 +120,7 @@ export function draftIdentityFromModelReply(visibleReply: string): ParsedDraftId
     }
   }
 
-  const nameLine = text.match(
-    /(?:^|\n)\s*[-*•]?\s*(?:\*\*)?Name(?:\*\*)?\s*:\s*([^\n@/]+)/i,
-  );
+  const nameLine = text.match(/(?:^|\n)\s*[-*•]?\s*(?:\*\*)?Name(?:\*\*)?\s*:\s*([^\n@/]+)/i);
   if (nameLine?.[1]) {
     const name = sanitizeAgentCanvasName(nameLine[1]);
     if (name.length > 0) {
@@ -236,7 +234,7 @@ export function buildDraftCanvasPatch(args: {
     } else {
       const fromPrompt = nameFromGeneratedPrompt(args.generatedPrompt);
       const raw = fromPrompt || nameFromIntent(args.intent) || '';
-      patch.name = raw ? sanitizeAgentCanvasName(raw) : undefined;
+      if (raw) patch.name = sanitizeAgentCanvasName(raw);
     }
   }
   if (args.fillSlug) {
@@ -249,16 +247,15 @@ export function buildDraftCanvasPatch(args: {
     }
   }
   if (args.fillDescription) {
-    patch.description = explicit.description || descriptionFromIntent(args.intent) || undefined;
+    const description = explicit.description || descriptionFromIntent(args.intent);
+    if (description) patch.description = description;
   }
   if (args.fillInstructions) {
     // Prefer the dedicated generate-prompt result; fall back to anything the model
     // stated in chat (Instructions/Rules), then a minimal intent-derived prompt.
-    patch.systemPrompt =
-      args.generatedPrompt.trim() ||
-      explicit.systemPrompt ||
-      fallbackPromptFromIntent(args.intent) ||
-      undefined;
+    const systemPrompt =
+      args.generatedPrompt.trim() || explicit.systemPrompt || fallbackPromptFromIntent(args.intent);
+    if (systemPrompt) patch.systemPrompt = systemPrompt;
   }
 
   return patch;

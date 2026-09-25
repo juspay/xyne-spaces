@@ -101,7 +101,11 @@ import type { Canvas } from '../../components/Canvas/Canvas.types';
 import { xyneAIActor } from '../../machines/xyneAIMachine';
 import { useSelf } from '../../hooks/useUsers';
 import { getUserDisplayName } from '../../utils/userDisplayName';
-import { SummaryTemplatesModal, getTemplateIcon } from './components/SummaryTemplatesModal';
+import {
+  SUMMARY_TEMPLATES_DIALOG_CLASS,
+  SummaryTemplatesModal,
+  getTemplateIcon,
+} from './components/SummaryTemplatesModal';
 import { useSummaryTemplates } from '../../hooks/useSummaryTemplates';
 import { useSummaryModelPreference } from '../../hooks/useSummaryModelPreference';
 
@@ -1653,7 +1657,7 @@ export default function RecordingDetailV2Screen({
           onOpenChange={open => !open && setTemplatesModalMode(null)}
           title='Summary Templates'
           description='Choose, create, edit, and share a recording summary template.'
-          className='h-full max-h-[824px] w-full max-w-screen-lg overflow-hidden rounded-2xl p-0'
+          className={SUMMARY_TEMPLATES_DIALOG_CLASS}
           testId='summary-templates-dialog'
         >
           <SummaryTemplatesModal

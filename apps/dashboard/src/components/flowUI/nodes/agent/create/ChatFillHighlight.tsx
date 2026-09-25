@@ -74,7 +74,9 @@ export function ChatFillHighlight({
       data-create-placement={placement}
       data-create-shimmer={active ? 'true' : 'false'}
       {...(field ? { 'data-create-field': field } : {})}
-      {...(active ? { 'data-testid': anticipating ? 'create-anticipate-shimmer' : 'create-writing-shimmer' } : {})}
+      {...(active
+        ? { 'data-testid': anticipating ? 'create-anticipate-shimmer' : 'create-writing-shimmer' }
+        : {})}
     >
       {children}
     </div>

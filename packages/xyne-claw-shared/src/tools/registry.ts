@@ -34,6 +34,13 @@ import * as videoExplainer from "./video-explainer/index.js";
 import * as reactArtifact from "./react-artifact/index.js";
 import * as recordSkill from "./record-skill/index.js";
 import * as agentTools from "./agent-tools/index.js";
+import * as openUrl from "./open-url/index.js";
+import * as workspaceBrowser from "./workspace-browser/index.js";
+import * as localSessions from "./local-sessions/tools.js";
+import * as appControl from "./app-control/tools.js";
+import * as workspacePlan from "./workspace-plan/index.js";
+import * as localSandbox from "./local-sandbox/index.js";
+import * as localContainer from "./local-container/index.js";
 
 /** All custom tools, keyed by slug */
 const CUSTOM_TOOLS: Record<string, ToolDefinition> = {};
@@ -49,6 +56,13 @@ register(askQuestion.askUserQuestion);
 register(codeArtifacts.postCodeBlock);
 register(codeArtifacts.postDiff);
 register(codeArtifacts.postChart);
+register(openUrl.openUrl);
+for (const t of workspaceBrowser.WORKSPACE_BROWSER_TOOLS) register(t);
+for (const t of localSessions.LOCAL_SESSION_TOOLS) register(t);
+for (const t of appControl.APP_CONTROL_TOOLS) register(t);
+register(workspacePlan.updatePlan);
+for (const t of localSandbox.LOCAL_SANDBOX_TOOLS) register(t);
+for (const t of localContainer.LOCAL_CONTAINER_TOOLS) register(t);
 register(addCitations.addCitationsTool);
 
 // Register google tools

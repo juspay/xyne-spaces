@@ -97,10 +97,7 @@ function entryMatchesNeedles(entry: McpCatalogEntry, needles: readonly string[])
 }
 
 /** Match named + soft job-cue products in the utterance to org MCP/gateway rows. */
-export function matchNamedMcpEntries(
-  intent: string,
-  catalog: AvailableTools,
-): McpCatalogEntry[] {
+export function matchNamedMcpEntries(intent: string, catalog: AvailableTools): McpCatalogEntry[] {
   const mcpCatalog = buildMcpCatalog(catalog, []);
   const matched: McpCatalogEntry[] = [];
   const seen = new Set<string>();
@@ -187,7 +184,9 @@ function scoreNameAgainstIntent(name: string, intent: string): number {
   const tokens = intent
     .toLowerCase()
     .split(/[^a-z0-9]+/)
-    .filter(token => token.length >= 3 && !/^(the|and|for|with|that|this|from|into|use|add)$/.test(token));
+    .filter(
+      token => token.length >= 3 && !/^(the|and|for|with|that|this|from|into|use|add)$/.test(token),
+    );
   let score = 0;
   for (const token of tokens) {
     const needle = normalizeToken(token);
@@ -215,7 +214,10 @@ function scoreBuiltinAgainstNeedles(
 export function pickSubagentsForIntent(intent: string, catalog: AvailableTools): string[] {
   if (!intentImpliesSubagent(intent) || catalog.subagents.length === 0) return [];
   const ranked = [...catalog.subagents]
-    .map(entry => ({ name: entry.name, score: scoreNameAgainstIntent(`${entry.name} ${entry.description}`, intent) }))
+    .map(entry => ({
+      name: entry.name,
+      score: scoreNameAgainstIntent(`${entry.name} ${entry.description}`, intent),
+    }))
     .sort((a, b) => b.score - a.score);
   const best = ranked[0];
   if (best && best.score > 0) return [best.name];
@@ -535,7 +537,8 @@ export async function selectHubToolsForIntent(args: {
     !selectionHasTools(selection) ||
     (jobImpliesBuiltin(args.intent) && selection.custom.length === 0) ||
     (jobImpliesSubagent(args.intent) && selection.subagents.length === 0) ||
-    (named.length === 0 && softProductNeedles(args.intent).length > 0 &&
+    (named.length === 0 &&
+      softProductNeedles(args.intent).length > 0 &&
       selection.direct.length === 0 &&
       (selection.gateway ?? []).length === 0);
 
@@ -569,11 +572,7 @@ export async function selectHubToolsForIntent(args: {
 
   // Hard-named product with no catalog match and no other binds → empty.
   const hardNamed = PRODUCT_ALIASES.some(alias => alias.re.test(args.intent));
-  if (
-    hardNamed &&
-    named.length === 0 &&
-    !selectionHasTools(selection)
-  ) {
+  if (hardNamed && named.length === 0 && !selectionHasTools(selection)) {
     selection = {
       ...args.current,
       callableAgents: args.current.callableAgents ?? [],

@@ -3,6 +3,8 @@ import { prisma } from "../db.js";
 
 export const chatMessageRepository = {
   create: (data: {
+    pendingActions?: unknown;
+    runProvider?: string | null;
     conversationId: string;
     agentSlug: string;
     userId: string;
@@ -18,12 +20,15 @@ export const chatMessageRepository = {
      *  JSON cast is localized here. */
     attachedContext?: unknown;
   }) => {
-    const { attachedContext, ...rest } = data;
+    const { attachedContext, pendingActions, ...rest } = data;
     return prisma.chatMessage.create({
       data: {
         ...rest,
         ...(attachedContext !== undefined
           ? { attachedContext: attachedContext as Prisma.InputJsonValue }
+          : {}),
+        ...(pendingActions !== undefined
+          ? { pendingActions: pendingActions as Prisma.InputJsonValue }
           : {}),
       },
     });
@@ -34,8 +39,37 @@ export const chatMessageRepository = {
    *  run completes (branching needs the assistant id reserved up-front). */
   update: (
     id: string,
-    data: { content?: string; status?: string; reasoning?: string | null; parentId?: string | null },
-  ) => prisma.chatMessage.update({ where: { id }, data }),
+    data: { content?: string; status?: string; reasoning?: string | null; parentId?: string | null; pendingActions?: unknown; runProvider?: string | null },
+  ) => {
+    const { pendingActions, ...rest } = data;
+    return prisma.chatMessage.update({
+      where: { id },
+      data: {
+        ...rest,
+        ...(pendingActions !== undefined
+          ? { pendingActions: pendingActions as Prisma.InputJsonValue }
+          : {}),
+      },
+    });
+  },
+
+  resolvePendingAction: async (
+    conversationId: string,
+    signature: string,
+    resolution: "approved" | "declined",
+  ): Promise<boolean> => {
+    const row = await prisma.chatMessage.findFirst({
+      where: { conversationId, pendingActions: { array_contains: [{ signature }] } },
+      select: { id: true, pendingActions: true },
+      orderBy: { createdAt: "desc" },
+    });
+    if (!row || !Array.isArray(row.pendingActions)) return false;
+    const next = (row.pendingActions as Array<Record<string, unknown>>).map((action) =>
+      action && typeof action === "object" && action["signature"] === signature ? { ...action, resolution } : action,
+    );
+    await prisma.chatMessage.update({ where: { id: row.id }, data: { pendingActions: next as Prisma.InputJsonValue } });
+    return true;
+  },
 
   /** Persist mid-run PARTIAL content, but ONLY while the row is still "running".
    *  Conditional (updateMany + status guard) so a late/cross-pod debounced write
@@ -74,6 +108,33 @@ export const chatMessageRepository = {
       select: { id: true },
     });
     return row?.id ?? null;
+  },
+
+  /** Newest user message in this conversation+agent whose attachedContext holds
+   *  a `local-folder` item, or null. Powers the sticky local folder: once a turn
+   *  attaches a folder, later turns in the same thread keep running in it. */
+  latestLocalFolderContext: async (
+    conversationId: string,
+    agentSlug: string,
+  ): Promise<unknown | null> => {
+    if (!conversationId || !agentSlug) return null;
+    const rows = await prisma.chatMessage.findMany({
+      where: { conversationId, agentSlug, role: "user" },
+      orderBy: { createdAt: "desc" },
+      take: 40,
+      select: { attachedContext: true },
+    });
+    for (const row of rows) {
+      const list = row.attachedContext;
+      if (!Array.isArray(list)) continue;
+      const hit = list.find(
+        (entry) =>
+          entry && typeof entry === "object" && !Array.isArray(entry) &&
+          (entry as Record<string, unknown>)["type"] === "local-folder",
+      );
+      if (hit) return hit;
+    }
+    return null;
   },
 
   findByConversation: (conversationId: string) =>

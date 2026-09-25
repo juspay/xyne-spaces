@@ -42,6 +42,7 @@ import {
   buildChangeCountsByKey,
 } from '../../components/Release/releaseChanges.utils';
 import { cn } from '../../utils/classNames';
+import { formatDateNumeric } from '../../utils/dateUtils';
 import { Dialog } from '../../components/ui/Dialog';
 import Textarea from '../../components/ui/Textarea';
 import { useFailureReasonDialog } from './useFailureReasonDialog';
@@ -125,7 +126,7 @@ function formatRelativeTime(ts: number): string {
   if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m ago`;
   if (diffSec < 86_400) return `${Math.floor(diffSec / 3600)}h ago`;
   if (diffSec < 30 * 86_400) return `${Math.floor(diffSec / 86_400)}d ago`;
-  return new Date(ts).toLocaleDateString();
+  return formatDateNumeric(ts);
 }
 
 // Human-readable titles for the eventName values written by the backend.
@@ -704,7 +705,7 @@ const ReleaseDetailScreen = (): ReactElement => {
         <div className='max-w-none'>
           <button
             onClick={() =>
-              void navigate(`/listProjects/${projectId}`, {
+              void navigate(`/listProjects/${projectId}?from=releaseManager`, {
                 // 'releases' = the Releases list in release-manager mode ('release' is Repositories).
                 state: { tab: 'releases', from: 'releaseManager' },
               })
@@ -771,7 +772,7 @@ const ReleaseDetailScreen = (): ReactElement => {
                     Version: {releaseVersion}
                   </span>
                 )}
-                <span>· Created {new Date(releaseTicket.createdAt).toLocaleString()}</span>
+                <span>· Created {formatDateNumeric(releaseTicket.createdAt)}</span>
                 {isMultiRepo && <span>· {repoCount} repositories</span>}
               </div>
             )}

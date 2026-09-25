@@ -59,6 +59,8 @@ class AdapterRegistry {
       .map(([platform]) => platform);
   }
 
+  // Longest-first is load-bearing: 'app-store-reviews' and 'app-desk' share a prefix, so a plain
+  // find() would silently route a desk to the wrong adapter. Do not simplify.
   private findRegisteredAdapter(sourceName: string): ExternalSourceAdapter | undefined {
     return [...this.adapters.entries()]
       .sort(([left], [right]) => right.length - left.length)

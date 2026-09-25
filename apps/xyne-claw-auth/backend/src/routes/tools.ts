@@ -5,6 +5,7 @@ import { prisma } from "../db.js";
 import { decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 import { hasConnectorDefinition, resolveConnectorDefinition } from "../mcp/connector-definitions.js";
+import { syncToolsToIndexBestEffort } from "../services/tool-index/index.js";
 import { syncToolsForServer, reconcileServerCatalog } from "../tool-sync.js";
 import { requireClawAdmin, getRequesterId, getOrgId } from "../middleware/agent-acl.js";
 import { SKIP_CATALOG_SOURCES } from "../catalog-skip.js";
@@ -646,6 +647,10 @@ router.post("/sync", requireClawAdmin, asyncHandler(async (req: Request, res: Re
     });
   }
   totalSynced += customTools.length;
+
+  // Unqualified: builtins/custom tools above and per-server sync all ran
+  // unconditionally, so the whole catalog is the honest scope to re-index.
+  syncToolsToIndexBestEffort();
 
   ok(res, { synced: totalSynced, servers: syncedServers, errors });
 }));

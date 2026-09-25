@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState, type ReactElement } from 'react';
+import { Fragment, useEffect, useMemo, useState, type ReactElement } from 'react';
 import { cn } from '@/utils/classNames';
 import { searchByNameThenDescription } from '../../librarySearch';
 import { BROWSE_CARD, BROWSE_CARD_IDLE, BROWSE_CARD_SELECTED } from '../../primitives/browseCard';
@@ -96,6 +96,7 @@ interface BrowseSkillsDialogProps {
   onRetry: () => void;
   selectedIds: readonly string[];
   onChange: (next: string[]) => void;
+  initialId?: string | null;
 }
 
 export function BrowseSkillsDialog({
@@ -107,10 +108,15 @@ export function BrowseSkillsDialog({
   onRetry,
   selectedIds,
   onChange,
+  initialId,
 }: BrowseSkillsDialogProps): ReactElement {
   const [query, setQuery] = useState('');
   const [scope, setScope] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (open) setOpenId(initialId ?? null);
+  }, [open, initialId]);
 
   const openEntry = catalog.find(entry => entry.id === openId) ?? null;
 

@@ -1,0 +1,21 @@
+{{- $sc := .Values.storageClass }}
+{{- if $sc.enabled }}
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: {{ $sc.name }}
+  labels:
+    {{- include "platform-config.labels" . | nindent 4 }}
+  {{- if $sc.default }}
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "true"
+  {{- end }}
+provisioner: {{ $sc.provisioner }}
+{{- with $sc.parameters }}
+parameters:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+reclaimPolicy: {{ $sc.reclaimPolicy }}
+volumeBindingMode: {{ $sc.volumeBindingMode }}
+allowVolumeExpansion: {{ $sc.allowVolumeExpansion }}
+{{- end }}

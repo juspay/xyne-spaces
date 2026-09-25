@@ -22,11 +22,14 @@ export enum ExternalSourcePlatform {
   APP_DESK = 'app-desk',
   OZONETEL = 'ozonetel',
   GOOGLE_PLAY = 'google-play-reviews',
+  APP_STORE = 'app-store-reviews',
 }
 
 export interface IngestionOptions {
   /** Bypass the source's persisted cursor for an explicit full/manual fetch. */
   ignoreSyncCursor?: boolean;
+  /** User-chosen backfill window. The only thing allowed to reach past the normal floor. */
+  backfill?: { startDate: Date; endDate: Date };
 }
 
 /**
@@ -210,6 +213,18 @@ export interface ExternalSourceAdapter {
     source?: ExternalSource,
     options?: IngestionOptions,
   ): Promise<unknown>;
+
+  /**
+   * Optional: resume cursor to persist after a successful ingest. Return null to leave the stored
+   * cursor untouched — required when a run could not prove it covered its whole window.
+   */
+  resolveNextCursor?(source: ExternalSource, syncStartedAt: Date): string | null;
+
+  /**
+   * Optional: called with the externalIds that failed to sync, before ingest throws. Lets an
+   * adapter bound retries on a permanently-bad item instead of re-fetching it forever.
+   */
+  onIngestFailures?(source: ExternalSource, failedExternalIds: string[]): Promise<void>;
 
   /** Optional: Dynamically determine source name for database lookup based on payload */
   getSourceNameFromDB?(payload: unknown): string | undefined;

@@ -44,6 +44,7 @@ RUN corepack enable && corepack prepare pnpm@10.15.0 --activate
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
 COPY packages/kata-sdk/package.json         packages/kata-sdk/
+COPY packages/icons/package.json            packages/icons/
 COPY packages/litellm-client/package.json   packages/litellm-client/
 COPY packages/storage/package.json          packages/storage/
 COPY packages/xyne-claw-shared/package.json packages/xyne-claw-shared/
@@ -56,6 +57,7 @@ COPY apps/xyne-claw/package.json            apps/xyne-claw/
 RUN pnpm install --frozen-lockfile --prod=false --ignore-scripts --filter xyne-claw...
 
 COPY packages/kata-sdk         packages/kata-sdk
+COPY packages/icons            packages/icons
 COPY packages/litellm-client   packages/litellm-client
 COPY packages/storage          packages/storage
 COPY packages/xyne-claw-shared packages/xyne-claw-shared
@@ -65,10 +67,13 @@ COPY apps/xyne-claw/skills        apps/xyne-claw/skills
 COPY apps/xyne-claw/design-skills apps/xyne-claw/design-skills
 COPY apps/xyne-claw/understanding-skills apps/xyne-claw/understanding-skills
 COPY apps/xyne-claw/scripts       apps/xyne-claw/scripts
-# @xyne/storage ships built output (main: dist/index.js); --ignore-scripts
-# skipped its prepare hook, so build it explicitly before the typecheck.
+# @xyne/storage and @xyne/icons ship built output (dist/); --ignore-scripts
+# skipped their prepare hooks, so build them explicitly before the typecheck.
+# @xyne/icons is here for its React-free `meta` entrypoint, which
+# xyne-claw-shared's react-artifact tool imports to validate icon names.
 RUN pnpm --filter @xyne/litellm-client run build && \
     pnpm --filter @xyne/storage run build && \
+    pnpm --filter @xyne/icons run build && \
     pnpm --filter xyne-claw run typecheck
 
 # Production image

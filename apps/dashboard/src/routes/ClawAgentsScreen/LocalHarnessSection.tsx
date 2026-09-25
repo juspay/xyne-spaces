@@ -1,5 +1,5 @@
 import { ReactElement, useCallback, useEffect, useState } from 'react';
-import { Code2, Laptop, RefreshCw, Sparkles } from 'lucide-react';
+import { Box, Code2, Laptop, RefreshCw, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/utils/classNames';
 import { Button } from '@/components/ui/Button';
@@ -299,6 +299,26 @@ const LocalHarnessSection = (): ReactElement | null => {
           );
         })}
       </div>
+
+      {status.containerRuntime && (
+        <div
+          className={cn(
+            'mt-3 flex items-start gap-2 rounded-lg border px-3 py-2 text-xs',
+            status.containerRuntime.available
+              ? 'border-border bg-muted/40 text-muted-foreground'
+              : 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400',
+          )}
+        >
+          <Box className='mt-0.5 size-3.5 shrink-0' />
+          <span className='min-w-0'>
+            <span className='font-medium text-foreground'>Container sandbox</span>
+            {' · '}
+            {status.containerRuntime.available
+              ? 'Ready (Podman)'
+              : (status.containerRuntime.reason ?? 'Unavailable')}
+          </span>
+        </div>
+      )}
 
       {status.lastError && (
         <p className='mt-3 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive'>

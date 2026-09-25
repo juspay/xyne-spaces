@@ -91,8 +91,7 @@ const EXPLICIT_TOOL_NOUN =
 const BUILTIN_JOB =
   /\b(built-?ins?|browse|web\s*search|web\s*fetch|webfetch|filesystem|terminal|research|researches|search(?:es|ing)?|look\s*up|competitor|on\s+the\s+web|web\s+research|code\s*search|e-?mails?|inbox|mails?\b|digest|dm\b|dms\b|direct\s+messages?|send\s+(?:email|message)|from\s+x\.com|from\s+twitter)\b/i;
 
-const SUBAGENT_JOB =
-  /\b(sub-?agents?|delegate|delegat(?:e|ion)|research\s+agent|web-?research)\b/i;
+const SUBAGENT_JOB = /\b(sub-?agents?|delegate|delegat(?:e|ion)|research\s+agent|web-?research)\b/i;
 
 const SKILL_JOB = /\b(skills?|workflow|recipe|playbook)\b/i;
 
@@ -147,7 +146,7 @@ export function softBuiltinNeedles(intent: string): string[] {
 }
 
 /** Active builtin cue categories for this job (precision gates for catalog rows). */
-export function softBuiltinCuesForIntent(intent: string): typeof BUILTIN_SOFT_CUES[number][] {
+export function softBuiltinCuesForIntent(intent: string): (typeof BUILTIN_SOFT_CUES)[number][] {
   return BUILTIN_SOFT_CUES.filter(cue => cue.re.test(intent));
 }
 
@@ -191,9 +190,7 @@ export function inferNeededCapabilities(intent: string): CapabilityClass[] {
 }
 
 /** Hub draft fields to reveal from job semantics (tools / skills / knowledge). */
-export function inferredCapabilityFields(
-  text: string,
-): Array<'tools' | 'skills' | 'knowledge'> {
+export function inferredCapabilityFields(text: string): Array<'tools' | 'skills' | 'knowledge'> {
   const needed = inferNeededCapabilities(text);
   const fields: Array<'tools' | 'skills' | 'knowledge'> = [];
   if (needed.includes('mcp') || needed.includes('builtin') || needed.includes('subagent')) {

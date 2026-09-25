@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import {
   getOzonetelCampaigns,
   getOzonetelConfig,
+  getPhoneFieldNames,
   saveOzonetelConfig,
   subscribeOzonetelLiveEvents,
   type OzonetelAgentMap,
@@ -81,7 +82,7 @@ export const WorkspaceOzonetelCard = (): ReactElement => {
   const [ticketSubjectTemplate, setTicketSubjectTemplate] = useState(
     '{callType} call from {callerId} ({monitorUcid})',
   );
-  const [customerPhoneFieldName, setCustomerPhoneFieldName] = useState('');
+  const [phoneFieldNames, setPhoneFieldNames] = useState<string[]>([]);
   const [ticketRules, setTicketRules] = useState<OzonetelTicketRules>({});
   const [defaultChannelId, setDefaultChannelId] = useState('');
   const [campaignRoutes, setCampaignRoutes] = useState<
@@ -101,7 +102,7 @@ export const WorkspaceOzonetelCard = (): ReactElement => {
     setTicketSubjectTemplate(
       data.ticketRules?.ticketSubjectTemplate ?? '{callType} call from {callerId} ({monitorUcid})',
     );
-    setCustomerPhoneFieldName(data.ticketRules?.customerPhoneFieldName ?? '');
+    setPhoneFieldNames(getPhoneFieldNames(data.ticketRules));
     setTicketRules(data.ticketRules ?? {});
     setDefaultChannelId(data.ticketRules?.defaultChannelId ?? '');
     setCampaignRoutes(
@@ -184,6 +185,11 @@ export const WorkspaceOzonetelCard = (): ReactElement => {
       normalizedRoutes.map(route => [route.campaignName, route.channelId]),
     );
 
+    // Always sent, even empty, so removing a field clears it on the server; customerPhoneFieldName is sent for older backends.
+    const trimmedPhoneFieldNames = [
+      ...new Set(phoneFieldNames.map(name => name.trim()).filter(Boolean)),
+    ];
+
     mutation.mutate({
       apiKey,
       apiUser,
@@ -195,9 +201,8 @@ export const WorkspaceOzonetelCard = (): ReactElement => {
         defaultChannelId,
         campaignRouting,
         ...(ticketSubjectTemplate ? { ticketSubjectTemplate } : {}),
-        ...(customerPhoneFieldName.trim()
-          ? { customerPhoneFieldName: customerPhoneFieldName.trim() }
-          : {}),
+        phoneFieldNames: trimmedPhoneFieldNames,
+        customerPhoneFieldName: trimmedPhoneFieldNames[0],
       },
     });
   };
@@ -447,17 +452,53 @@ export const WorkspaceOzonetelCard = (): ReactElement => {
                     </Field>
 
                     <Field
-                      label='Customer Phone Field'
-                      help='Ticket custom field holding the customer number. On app desks, a toolbar call to that number is logged on the open ticket.'
+                      label='Phone Field Names'
+                      help='Ticket custom fields holding numbers agents call, e.g. customer and driver. On app desks, a toolbar call to any of these numbers is logged on the open ticket.'
                     >
-                      <input
-                        value={customerPhoneFieldName}
-                        onChange={e => setCustomerPhoneFieldName(e.target.value)}
-                        placeholder='Customer Phone'
-                        data-track-category='workspace-ozonetel'
-                        data-track-name='EditCustomerPhoneField'
-                        className={inputClass}
-                      />
+                      <div className='flex flex-col gap-2'>
+                        {phoneFieldNames.map((fieldName, index) => (
+                          <div key={index} className='flex items-center gap-2'>
+                            <input
+                              value={fieldName}
+                              onChange={e =>
+                                setPhoneFieldNames(current =>
+                                  current.map((entry, entryIndex) =>
+                                    entryIndex === index ? e.target.value : entry,
+                                  ),
+                                )
+                              }
+                              placeholder='Customer Phone'
+                              data-track-category='workspace-ozonetel'
+                              data-track-name='EditPhoneFieldName'
+                              className={inputClass}
+                            />
+                            <button
+                              type='button'
+                              onClick={() =>
+                                setPhoneFieldNames(current =>
+                                  current.filter((_, entryIndex) => entryIndex !== index),
+                                )
+                              }
+                              aria-label='Remove phone field'
+                              className='inline-flex shrink-0 items-center justify-center rounded-[10px] border border-border px-3 py-1.5 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-muted'
+                              data-track-category='workspace-ozonetel'
+                              data-track-name='RemovePhoneFieldName'
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        ))}
+                        <button
+                          type='button'
+                          onClick={() => setPhoneFieldNames(current => [...current, ''])}
+                          className='inline-flex w-fit items-center gap-2 rounded-[12px] border border-border bg-background px-3 py-2 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-muted'
+                          data-track-category='workspace-ozonetel'
+                          data-track-name='AddPhoneFieldName'
+                        >
+                          <Plus size={14} />
+                          Add phone field
+                        </button>
+                      </div>
                     </Field>
 
                     <Field

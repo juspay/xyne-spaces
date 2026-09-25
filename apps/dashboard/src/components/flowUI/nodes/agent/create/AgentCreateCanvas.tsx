@@ -445,11 +445,7 @@ export function AgentCreateCanvas({
 
             {note ? <p className='text-sm leading-5 text-muted-foreground'>{note}</p> : null}
           </>
-          <WritingFieldPointer
-            field={writingField}
-            hubRow={writingHubRow}
-            originRef={columnRef}
-          />
+          <WritingFieldPointer field={writingField} hubRow={writingHubRow} originRef={columnRef} />
         </div>
       </div>
       {footer ? (

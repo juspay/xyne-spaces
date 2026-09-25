@@ -13,7 +13,7 @@ interface CallLabelFilterProps {
 
 /** Sized to sit level with the Recents dropdown beside it. */
 const TRIGGER_CLASS_NAME =
-  'h-9 gap-1 rounded-xl border-border px-2.5 text-sm font-medium shadow-none';
+  'h-7 gap-1 rounded-lg border-border px-2.5 text-sm font-medium shadow-none';
 
 /** Calls binding for {@link LabelFilter}: calls copy, analytics namespace and trigger sizing. */
 export function CallLabelFilter({

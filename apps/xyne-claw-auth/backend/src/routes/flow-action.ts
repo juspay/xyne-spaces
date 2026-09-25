@@ -24,7 +24,7 @@ import { verifySpacesSignature } from "../middleware/verify-spaces-signature.js"
 import { agentRunRepository } from "../repositories/index.js";
 import { recordTwinApprovalOutcome } from "../services/twinResponseFeedback.js";
 import type { FlowDefinition } from "xyne-claw-shared";
-import { mdToMrkdwn, buildWriteResultFlow, buildPlanFlow, buildUserQuestionFlow, buildTicketFlow, buildAgentCardFlow, userQuestionOptionLabel, PLAN_COMPONENT_ID, AGENT_COMPONENT_ID } from "xyne-claw-shared";
+import { mdToMrkdwn, buildWriteResultFlow, buildPlanFlow, buildUserQuestionFlow, buildTicketFlow, buildAgentCardFlow, userQuestionOptionLabel, PLAN_COMPONENT_ID, AGENT_COMPONENT_ID, AGENT_EDITS_STATE_KEY } from "xyne-claw-shared";
 import {
   clearActivePlanCard,
   getActivePlanCard,
@@ -569,6 +569,19 @@ async function finishWriteSuccess(opts: {
     const fallback = buildWriteResultFlow({ tool: opts.tool, ok: true, heading, details });
     await replaceFlowCardWithFlow(opts.messageId, opts.agentSlug, fallback, opts.conversationId, opts.channelId, opts.spacesAppId);
   }
+  const { resumeLocalHarnessRunForAction } = await import("../lib/local-harness-approval.js");
+  const resumed = await resumeLocalHarnessRunForAction({
+    userId: opts.writeUserId,
+    signature: opts.signature,
+    tool: opts.tool,
+    approved: true,
+    resultText: opts.resultText,
+  }).catch((err: unknown) => {
+    log.warn("[flow-action] local-harness approval resume failed:", errMsg(err));
+    return { handled: false };
+  });
+  if (resumed.handled) return;
+
   if (opts.actionId === "approve-continue" || opts.actionId === "retry-continue") {
     await dispatchContinuationRun({
       writeUserId: opts.writeUserId,
@@ -712,6 +725,16 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         resp = { type: "close_screen", finalMessage: "❌ Action declined." };
         res.json(resp);
         void replaceFlowCardWithText(messageId, agentSlug, "❌ **Action declined.**", conversationId, undefined, spacesAppId);
+        void (async () => {
+          const { resumeLocalHarnessRunForAction, rejectionResultText } = await import("../lib/local-harness-approval.js");
+          await resumeLocalHarnessRunForAction({
+            userId: writeUserId,
+            signature,
+            tool,
+            approved: false,
+            resultText: rejectionResultText(tool),
+          }).catch((err: unknown) => log.warn("[flow-action] local-harness rejection resume failed:", errMsg(err)));
+        })();
         return;
       }
 
@@ -1809,13 +1832,15 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       }
 
       const decision = actionId === "agent-draft-approve" ? "approve" : "reject";
-      const { resolveAgentDraft } = await import("../lib/agent-card.js");
+      const { resolveAgentDraft, parseAgentDraftEdits } = await import("../lib/agent-card.js");
+      const edits = parseAgentDraftEdits(values[AGENT_EDITS_STATE_KEY]);
       const result = await resolveAgentDraft(
         requestId,
         callerUserId,
         decision,
         values[AGENT_COMPONENT_ID],
         cardAgentSlug,
+        edits,
       );
 
       if (!result.ok) {
@@ -1858,6 +1883,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
             variant: "draft",
             phase,
             agent: result.identity,
+            toolSelection: result.toolSelection,
             ...(result.note ? { note: result.note } : {}),
             ...(deciderName ? { decidedBy: deciderName } : {}),
             ...(decidedNow ? { decidedById: callerUserId } : {}),

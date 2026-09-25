@@ -44,9 +44,7 @@ function catalogWithSlackGithub(): AvailableTools {
         label: 'Jira',
         kind: 'gateway',
         connected: true,
-        readTools: [
-          { slug: 'jira:read', name: 'jira_read', description: '', riskLevel: 'read' },
-        ],
+        readTools: [{ slug: 'jira:read', name: 'jira_read', description: '', riskLevel: 'read' }],
         writeTools: [],
         usageCount: 1,
       },
@@ -160,9 +158,7 @@ function designDigestCatalog(): AvailableTools {
         label: 'Web Search',
         kind: 'custom',
         connected: true,
-        readTools: [
-          { slug: 'web_search', name: 'Web search', description: '', riskLevel: 'read' },
-        ],
+        readTools: [{ slug: 'web_search', name: 'Web search', description: '', riskLevel: 'read' }],
         writeTools: [],
         usageCount: 2,
       },
@@ -183,9 +179,15 @@ void describe('hubCatalogSelect', () => {
   void it('matches named Slack / GitHub products in the utterance', () => {
     const catalog = catalogWithSlackGithub();
     const slack = matchNamedMcpEntries('standup bot that posts to Slack', catalog);
-    assert.equal(slack.some(entry => entry.slug === 'slack'), true);
+    assert.equal(
+      slack.some(entry => entry.slug === 'slack'),
+      true,
+    );
     const github = matchNamedMcpEntries('add the GitHub MCP', catalog);
-    assert.equal(github.some(entry => entry.slug === 'github'), true);
+    assert.equal(
+      github.some(entry => entry.slug === 'github'),
+      true,
+    );
   });
 
   void it('binds named MCP over a blind first-gateway suggestion', () => {

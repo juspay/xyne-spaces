@@ -1,5 +1,10 @@
 import { apiInstance } from './clients/apiClient';
-import { DisplaySearchResult, VespaSearchResponse, VespaSearchFilters } from '../types/search';
+import {
+  DisplaySearchResult,
+  QueryIntent,
+  VespaSearchResponse,
+  VespaSearchFilters,
+} from '../types/search';
 import { buildVespaSearchCacheKey } from './vespaSearchCacheKey';
 import { toSearchQuery } from '../utils/exactSearch';
 /**
@@ -132,6 +137,19 @@ export class SearchService {
   }
 
   /**
+   * Classify a cmd+K query as a keyword lookup or a question that needs AI.
+   * Separate from vespaSearch so a slow classifier never delays results.
+   * Null means "no verdict" (feature off, clearly lexical, or classifier down).
+   */
+  async getQueryIntent(query: string, signal?: AbortSignal): Promise<QueryIntent | null> {
+    const response = await apiInstance.get<{ success: boolean; data: QueryIntent | null }>(
+      `${this.vespaBaseUrl}/intent`,
+      { params: { q: query }, ...(signal ? { signal } : {}) },
+    );
+    return response.data.success ? response.data.data : null;
+  }
+
+  /**
    * Build query parameters for Vespa search request
    */
   private buildVespaSearchParams(filters: VespaSearchFilters): Record<string, string> {
@@ -177,6 +195,10 @@ export class SearchService {
 
     if (filters.channelMentions) {
       params['channelMentions'] = filters.channelMentions;
+    }
+
+    if (filters.groupMentions) {
+      params['groupMentions'] = filters.groupMentions;
     }
 
     // Highlight-only display names; JSON-encoded since names can contain commas.

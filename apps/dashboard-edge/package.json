@@ -10,7 +10,7 @@
   ],
   "scripts": {
     "build": "tsc",
-    "dev": "tsx watch src/main.ts",
+    "dev": "tsx watch --exclude \"**/node_modules/**\" --exclude \"**/dist/**\" --exclude \"**/.git/**\" src/main.ts",
     "start": "node dist/main.js",
     "typecheck": "tsc --noEmit",
     "lint": "eslint 'src/**/*.ts'",

@@ -113,6 +113,7 @@ export interface VespaSearchFilters {
   in?: string; // Channel IDs (scope: within channel/DM)
   mentions?: string; // User IDs the message mentions (scoped mention search; bare @user chip)
   channelMentions?: string; // Channel IDs the message references (scoped mention search; bare #channel chip)
+  groupMentions?: string; // User-group IDs the message mentions (scoped mention search; @user-group chip)
   mentionHighlights?: string[]; // Display name(s) of bare mention chips — highlighted in results, not in YQL
   offset?: number;
   limit?: number;
@@ -169,6 +170,13 @@ export interface VespaSearchGroup {
   groupValue: string;
   count: number;
   results: DisplaySearchResult[];
+}
+
+/** Backend verdict on how the cmd+K palette should treat a query. */
+export interface QueryIntent {
+  mode: 'lexical' | 'ai';
+  /** Probability that the query needs AI (from Jev). */
+  pAI: number;
 }
 
 export interface VespaSearchResponse {

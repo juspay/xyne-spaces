@@ -1,21 +1,17 @@
-import React, { createContext, useMemo } from 'react';
+import React, { createContext } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { useParams } from 'react-router-dom';
 import { MultipleCrossCancelDefault } from '@xyne/icons';
 import type { AgentIdentity } from '@xyne/shared';
 import { PreviewSplitDialog, PreviewThreadPanel } from '../../../ui/PreviewSplitDialog';
-import { MarkdownMessageRenderer } from '../../../ui/MessageBubble/MarkdownMessageRenderer';
-import { createMarkdownComponents } from '../../../../utils/markdownComponents';
 import { usePlatform } from '../../../../hooks/usePlatform';
-import {
-  AgentCapabilities,
-  AgentConnectLinks,
-  type AgentCapabilityInteraction,
-} from './AgentIdentityBlock';
+import { AgentConnectLinks } from './AgentIdentityBlock';
 import { AgentCreateCanvas } from './create/AgentCreateCanvas';
 import { AgentCreateSessionContext } from './create/AgentCreateSessionContext';
 import type { useAgentCreateForm } from './create/useAgentCreateForm';
 import type { AgentCreatePhase } from './create/types';
+import type { DraftAgentEditor } from './useDraftAgentEditor';
+import { AgentPreviewTabs } from './preview/AgentPreviewTabs';
 
 /**
  * True inside AgentPreview's thread panel. The thread re-renders the SAME agent
@@ -27,9 +23,10 @@ export const InsideAgentPreviewContext = createContext(false);
 interface AgentPreviewProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  messageId: string;
+  messageId?: string | undefined;
   agent: AgentIdentity;
-  interactive?: AgentCapabilityInteraction | undefined;
+  /** Present ⇒ the tools/model/provider sections are editable. */
+  editor?: DraftAgentEditor | undefined;
   note?: string | undefined;
   statePill?: React.ReactNode;
   conversationId?: string | undefined;
@@ -67,18 +64,13 @@ const PanelHeader: React.FC<{ label: string; onClose?: (() => void) | undefined 
 );
 
 const DetailPanel: React.FC<{
-  messageId: string;
   agent: AgentIdentity;
-  interactive?: AgentCapabilityInteraction | undefined;
+  editor?: DraftAgentEditor | undefined;
   note?: string | undefined;
   statePill?: React.ReactNode;
   footer?: React.ReactNode;
   onClose?: () => void;
-}> = ({ messageId, agent, interactive, note, statePill, footer, onClose }) => {
-  const markdownComponents = useMemo(
-    () => createMarkdownComponents(messageId || 'agent-detail'),
-    [messageId],
-  );
+}> = ({ agent, editor, note, statePill, footer, onClose }) => {
   const details = agent.details ?? [];
 
   return (
@@ -104,15 +96,6 @@ const DetailPanel: React.FC<{
             </p>
           </div>
 
-          {agent.description && (
-            <div className='flex flex-col gap-1'>
-              <h2 className='text-sm font-medium leading-[1.2] tracking-[-0.1px] text-foreground'>
-                Description
-              </h2>
-              <p className='text-sm leading-[22px] text-foreground/70'>{agent.description}</p>
-            </div>
-          )}
-
           {details.length > 0 && (
             <div className='flex flex-col gap-1.5 rounded-lg border border-border bg-muted/30 p-3'>
               {details.map(detail => (
@@ -124,22 +107,10 @@ const DetailPanel: React.FC<{
             </div>
           )}
 
-          <AgentCapabilities capabilities={agent.capabilities ?? []} interactive={interactive} />
           <AgentConnectLinks agent={agent} />
           {note && <p className='text-xs leading-[1.4] text-muted-foreground'>{note}</p>}
 
-          {agent.systemPrompt && (
-            <>
-              <div className='h-px w-full bg-border' />
-              <div className='flex flex-col gap-2'>
-                <h2 className='text-sm font-medium leading-[1.2] text-foreground'>Instructions</h2>
-                <MarkdownMessageRenderer
-                  content={agent.systemPrompt}
-                  markdownComponents={markdownComponents}
-                />
-              </div>
-            </>
-          )}
+          <AgentPreviewTabs agent={agent} editor={editor} />
         </div>
       </div>
       {footer && (
@@ -154,9 +125,8 @@ const DetailPanel: React.FC<{
 export const AgentPreview: React.FC<AgentPreviewProps> = ({
   open,
   onOpenChange,
-  messageId,
   agent,
-  interactive,
+  editor,
   note,
   statePill,
   conversationId,
@@ -180,9 +150,8 @@ export const AgentPreview: React.FC<AgentPreviewProps> = ({
         {agent.description ?? 'Agent details'}
       </Dialog.Description>
       <DetailPanel
-        messageId={messageId}
         agent={agent}
-        interactive={interactive}
+        editor={editor}
         note={note}
         statePill={statePill}
         footer={footer}

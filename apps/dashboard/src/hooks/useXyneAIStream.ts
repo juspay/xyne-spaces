@@ -24,6 +24,8 @@ import {
   trackCanvasModeQuery,
   trackAttachmentsAdded,
 } from '../services/otel/xyneAIMetrics';
+import type { DesignSelectionPayload } from '../components/AIScreen/Workspace/design/designStudioContext';
+import type { PageSelectionPayload } from '../components/AIScreen/Workspace/pageSelectionContext';
 
 /**
  * Per-submit overrides for the stream options. When provided, each field takes
@@ -36,6 +38,7 @@ export interface StreamOverrides {
   webSearchEnabled?: boolean;
   deepResearchEnabled?: boolean;
   createCanvasEnabled?: boolean;
+  voiceMode?: boolean;
   /** Single search + single answer pass instead of the full agentic tool
    *  loop — see xyne-claw-auth's run-stream.ts POST / instant branch. */
   instant?: boolean;
@@ -49,7 +52,7 @@ export interface StreamOverrides {
   /** Which provider a model pin rides — the models endpoint's pinProvider
    *  ("litellm" = the agent's shared credential, "spaces" = the keyless
    *  platform provider). Only sent alongside `model`. */
-  modelProvider?: 'litellm' | 'spaces' | null;
+  modelProvider?: 'litellm' | 'spaces' | 'local-harness' | null;
   /** Per-run thinking level. Absent = the agent's configured default. */
   thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high';
   researchContext?: ResearchContext | null;
@@ -64,6 +67,11 @@ export interface StreamOverrides {
   /** What caused this send, for the SEND_MESSAGE event. Regenerate and edit are
    *  derived from their flags; pass 'auto_send' / 'suggestion' from those paths. */
   trigger?: XyneAiSendTrigger;
+  sandboxMode?: 'remote' | 'local' | 'container';
+  studioMode?: 'design';
+  designArtifactAttachmentId?: string;
+  designSelection?: DesignSelectionPayload;
+  pageSelection?: PageSelectionPayload;
 }
 
 interface UseXyneAIStreamParams {
@@ -82,6 +90,7 @@ interface UseXyneAIStreamParams {
   deepResearchEnabled?: boolean;
   researchContext?: ResearchContext | null;
   createCanvasEnabled?: boolean;
+  voiceMode?: boolean;
   instant?: boolean;
   isV2?: boolean;
   channelId?: string | undefined; // Added for thread ID construction
@@ -98,7 +107,7 @@ interface UseXyneAIStreamParams {
   /** Per-run model pin from the composer's model picker. Null = agent default. */
   model?: string | null;
   /** pinProvider for the hook-level `model` (see StreamOverrides.modelProvider). */
-  modelProvider?: 'litellm' | 'spaces' | null;
+  modelProvider?: 'litellm' | 'spaces' | 'local-harness' | null;
   /** Hook-level thinking pick (the sidebar's menu). Null = agent default. */
   thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | null;
   /** Skip the global "response ready" toast for this stream (embedded/preview instances). */
@@ -126,6 +135,8 @@ function activitiesToAttachedContext(activities: UserActivity[]): AttachedContex
     relatedData: (activity.relatedData ?? {}) as Record<string, unknown>,
   }));
 }
+
+const VOICE_MODE_INSTRUCTION = `Voice mode: keep your spoken reply concise — 100 words or fewer, in a natural conversational style. You can still use tools, browse, and create artifacts as usual; put any long or detailed output (code, tables, lists, documents) into an artifact instead of the message text, and briefly summarize it in your spoken reply.`;
 
 // Canvas creation instruction appended when createCanvasEnabled is true
 const CANVAS_CREATION_INSTRUCTION = `
@@ -334,6 +345,7 @@ export const useXyneAIStream = ({
         ov && 'deepResearchEnabled' in ov ? !!ov.deepResearchEnabled : deepResearchEnabled;
       const eCreateCanvasEnabled =
         ov && 'createCanvasEnabled' in ov ? !!ov.createCanvasEnabled : createCanvasEnabled;
+      const eVoiceMode = ov && 'voiceMode' in ov ? !!ov.voiceMode : false;
       const eInstant = ov && 'instant' in ov ? !!ov.instant : instant;
       const eDisableTools = ov && 'disableTools' in ov ? !!ov.disableTools : false;
       const eModel = ov && 'model' in ov ? (ov.model ?? null) : model;
@@ -368,6 +380,10 @@ export const useXyneAIStream = ({
       // For v2, canvas creation is handled via additionalInstructions in the backend
       if (eCreateCanvasEnabled && !isV2) {
         internalQuery = internalQuery + '\n\n' + CANVAS_CREATION_INSTRUCTION;
+      }
+
+      if (eVoiceMode) {
+        internalQuery = internalQuery + '\n\n' + VOICE_MODE_INSTRUCTION;
       }
 
       // Get current messages synchronously
@@ -422,6 +438,7 @@ export const useXyneAIStream = ({
             timestamp: new Date(),
             ...(attachments.length > 0 && { attachments }),
             ...(selectionContexts && selectionContexts.length > 0 && { selectionContexts }),
+            ...(ov?.pageSelection ? { pageSelection: ov.pageSelection } : {}),
             ...(parentMessageId && { parentId: parentMessageId }),
             ...(userTags && Object.keys(userTags).length > 0 && { userTags }),
             ...(displayContextForMessage && displayContextForMessage.length > 0
@@ -551,6 +568,15 @@ export const useXyneAIStream = ({
           ...(isV2 && eModel && eModelProvider ? { modelProvider: eModelProvider } : {}),
           ...(eThinkingLevel ? { thinkingLevel: eThinkingLevel } : {}),
           ...(suppressCompletionToast && { suppressCompletionToast: true }),
+          ...(ov?.sandboxMode && ov.sandboxMode !== 'remote'
+            ? { sandboxMode: ov.sandboxMode }
+            : {}),
+          ...(ov?.studioMode ? { studioMode: ov.studioMode } : {}),
+          ...(ov?.designArtifactAttachmentId
+            ? { designArtifactAttachmentId: ov.designArtifactAttachmentId }
+            : {}),
+          ...(ov?.designSelection ? { designSelection: ov.designSelection } : {}),
+          ...(ov?.pageSelection ? { pageSelection: ov.pageSelection } : {}),
           version: isV2 ? 'v2' : 'v1',
         },
         allMessages,

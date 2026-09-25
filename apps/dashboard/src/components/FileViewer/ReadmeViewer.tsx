@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import rehypeRaw from 'rehype-raw';
+import { MermaidBlock } from '../Markdown/MermaidBlock';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import rehypeSlug from 'rehype-slug';
 import type { Components } from 'react-markdown';
@@ -225,12 +226,28 @@ export const ReadmeViewer: React.FC<BaseViewerProps> = memo(({ source }) => {
       td: ({ children }) => (
         <td className='border border-border px-3 py-2 text-foreground align-top'>{children}</td>
       ),
-      pre: ({ children }) => (
-        <pre className='bg-muted border border-border rounded-lg p-4 mb-4 overflow-x-auto'>
-          {children}
-        </pre>
-      ),
+      pre: ({ children }) => {
+        const child: unknown = Array.isArray(children) ? children[0] : children;
+        const childClass =
+          child && typeof child === 'object' && 'props' in child
+            ? String((child as { props?: { className?: string } }).props?.className ?? '')
+            : '';
+        if (childClass.includes('language-mermaid')) return <>{children}</>;
+        return (
+          <pre className='bg-muted border border-border rounded-lg p-4 mb-4 overflow-x-auto'>
+            {children}
+          </pre>
+        );
+      },
       code: ({ children, className, ...props }): React.ReactElement => {
+        if (className?.includes('language-mermaid')) {
+          const chart = Array.isArray(children)
+            ? children.join('')
+            : typeof children === 'string'
+              ? children.replace(/\n$/, '')
+              : '';
+          return <MermaidBlock chart={chart} messageId='readme-viewer' />;
+        }
         const isInline = !className?.includes('language-');
         if (isInline) {
           return (

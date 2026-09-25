@@ -32,8 +32,7 @@ void describe('parseCreateChatAction', () => {
   });
 
   void it('holds draft chat ack until canvas sections land', () => {
-    const draft =
-      'Drafted Design Radar on the canvas.\nXYNE_CREATE_DRAFT: design radar';
+    const draft = 'Drafted Design Radar on the canvas.\nXYNE_CREATE_DRAFT: design radar';
     assert.equal(shouldHoldDraftChatAck(draft), true);
     assert.equal(visibleCreateReply(draft, true), '');
     assert.equal(visibleCreateReply(draft, false), '');
@@ -45,8 +44,14 @@ void describe('parseCreateChatAction', () => {
       visibleCreateReply('Hi — the canvas on the right is the agent.\nXYNE_CREATE_IDLE', false),
       'Hi — the canvas on the right is the agent.',
     );
-    assert.equal(sectionCompleteChatLine({ field: 'name', name: 'Standup Scribe' }), 'Name set to Standup Scribe.');
-    assert.equal(sectionCompleteChatLine({ field: 'systemPrompt' }), 'Instructions are on the canvas.');
+    assert.equal(
+      sectionCompleteChatLine({ field: 'name', name: 'Standup Scribe' }),
+      'Name set to Standup Scribe.',
+    );
+    assert.equal(
+      sectionCompleteChatLine({ field: 'systemPrompt' }),
+      'Instructions are on the canvas.',
+    );
     assert.equal(
       sectionCompleteChatLine({ field: 'tools', hubRow: 'mcp', toolLabels: ['Slack'] }),
       'Also suggested MCP: Slack.',
@@ -95,10 +100,7 @@ void describe('parseCreateChatAction', () => {
       '**Instructions**:\nYou are Design Radar.\n' +
       '**Rules**:\nStay concise.';
     assert.equal(compactCreateDraftChatReply(wall), 'Drafted Design Radar on the canvas.');
-    assert.equal(
-      visibleCreateReply(`${wall}\nXYNE_CREATE_DRAFT: design radar`, false),
-      '',
-    );
+    assert.equal(visibleCreateReply(`${wall}\nXYNE_CREATE_DRAFT: design radar`, false), '');
     assert.equal(
       compactCreateDraftChatReply('Drafted Design Radar on the canvas.'),
       'Drafted Design Radar on the canvas.',
@@ -161,9 +163,7 @@ void describe('decideCreateCanvasAction', () => {
       userText:
         'Create a scribe that posts daily summaries to the eng channel and researches competitors on the web.',
       canvasEmpty: true,
-      marker: parseCreateChatAction(
-        'Can it post to the channel, or draft-only?\nXYNE_CREATE_ASK',
-      ),
+      marker: parseCreateChatAction('Can it post to the channel, or draft-only?\nXYNE_CREATE_ASK'),
     });
     assert.equal(ask.type, 'draft');
     if (ask.type === 'draft') {
@@ -192,13 +192,7 @@ void describe('decideCreateCanvasAction', () => {
     assert.equal(action.type, 'draft');
     if (action.type === 'draft') {
       assert.equal(action.intent, 'standup bot');
-      assert.deepEqual(action.fields, [
-        'name',
-        'slug',
-        'description',
-        'systemPrompt',
-        'tools',
-      ]);
+      assert.deepEqual(action.fields, ['name', 'slug', 'description', 'systemPrompt', 'tools']);
     }
   });
 

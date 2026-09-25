@@ -61,6 +61,8 @@ export interface TicketFilters {
   createdBy?: string[];
   userGroupId?: string[];
   tags?: string[];
+  merchantId?: string[];
+  hasMerchantId?: boolean;
   isArchived?: boolean;
   createdAfter?: Date;
   createdBefore?: Date;
@@ -110,6 +112,14 @@ export const buildTicketFilterWhere = (
   // matching the main Kanban query builder's read convention.
   if (filters.tags && filters.tags.length > 0) {
     where.tags = { some: { name: { in: filters.tags } } };
+  }
+
+  // An explicit merchantId list already implies "has a merchant", so it wins over
+  // hasMerchantId when both are sent.
+  if (filters.merchantId && filters.merchantId.length > 0) {
+    where.merchantId = { in: filters.merchantId };
+  } else if (filters.hasMerchantId !== undefined) {
+    where.merchantId = filters.hasMerchantId ? { not: null } : null;
   }
 
   if (filters.isArchived !== undefined) {

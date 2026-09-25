@@ -15,7 +15,8 @@ export type CreateTurnField =
   | 'systemPrompt'
   | 'tools'
   | 'skills'
-  | 'knowledge';
+  | 'knowledge'
+  | 'permissionMode';
 
 export type IntakeGap = 'audience' | 'io' | 'format' | 'tools' | 'constraints';
 
@@ -163,10 +164,7 @@ function fieldsForExplicitEdit(text: string): CreateTurnField[] {
   ) {
     return ['tools'];
   }
-  if (
-    /\bknowledge(?:\s+base)?\b|\bkb\b/.test(lower) &&
-    !touchesPrompt
-  ) {
+  if (/\bknowledge(?:\s+base)?\b|\bkb\b/.test(lower) && !touchesPrompt) {
     return ['knowledge'];
   }
   if (/\bdescription\b/.test(lower) && !touchesPrompt) return ['description'];
@@ -248,7 +246,11 @@ export function planDescribe(text: string): DescribePlan {
     return 'none';
   }
   if (isVagueAgentCreate(trimmed)) return 'ask';
-  if (words.length <= 6 && !hasJob && !/\b(standup|scribe|triage|digest|monitor)\b/i.test(trimmed)) {
+  if (
+    words.length <= 6 &&
+    !hasJob &&
+    !/\b(standup|scribe|triage|digest|monitor)\b/i.test(trimmed)
+  ) {
     return 'ask';
   }
   if (/^(make|create|build|i want)\b.{0,48}\b(an?\s+)?(agent|bot|assistant)\b\.?$/i.test(trimmed)) {

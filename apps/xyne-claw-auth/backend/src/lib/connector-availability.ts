@@ -39,13 +39,24 @@ export async function availabilityForServerIds(
 ): Promise<ConnectorAvailability> {
   if (serverIds.length === 0) return { personal: new Set(), org: new Set() };
 
+  const orgId =
+    (await prisma.user.findUnique({ where: { id: userId }, select: { orgId: true } }))?.orgId ?? null;
+
   const [personal, shared] = await Promise.all([
     prisma.userMcpConnection.findMany({
       where: { userId, mcpServerId: { in: serverIds } },
       select: { mcpServerId: true },
     }),
     prisma.mcpServer.findMany({
-      where: { id: { in: serverIds }, ...GLOBAL_FALLBACK_WHERE },
+      where: {
+        id: { in: serverIds },
+        allowGlobalFallback: true,
+        // Mirrors credentials-loader: this org's row, or the deployment-wide
+        // default. Another org's row must not read as covered here.
+        globalCredentials: {
+          some: orgId ? { OR: [{ orgId }, { orgId: null }] } : { orgId: null },
+        },
+      },
       select: { id: true },
     }),
   ]);

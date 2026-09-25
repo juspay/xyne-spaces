@@ -29,6 +29,7 @@ import {
   type ResolveSdlcRepositoryLinkInput,
   type UpdateSdlcClawArtifactInput,
 } from '@xyne/shared';
+import type { SdlcNavTarget } from '@xyne/shared/sdlc';
 import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { DatabaseClient } from '@/database/client';
 import { AppError } from '@/middleware/errorHandler';
@@ -46,6 +47,7 @@ import {
 } from './sdlcChannelMembership';
 import { sdlcChannelCanvasParticipant } from './sdlcCanvasAccess';
 import { ensureLink } from './entityLinkService';
+import { resolveSdlcNavTarget } from './sdlcNavTarget';
 import type {
   SdlcActor,
   SdlcArtifact,
@@ -993,6 +995,19 @@ export class SdlcHubService implements SdlcHub {
       }
       throw error;
     }
+  }
+
+  /**
+   * Where a hub conversation opens. Null when it has no place of its own.
+   * The rule lives in sdlc_entity_links, so a client cannot derive it from the message.
+   */
+  async navTarget(
+    actor: SdlcActor,
+    channelId: string,
+    ids: { conversationId: string; messageId?: string }
+  ): Promise<SdlcNavTarget | null> {
+    await this.requireChannelRole(actor, channelId, false);
+    return resolveSdlcNavTarget({ channelId, ...ids });
   }
 
   async listTracks(actor: SdlcActor, channelId: string) {

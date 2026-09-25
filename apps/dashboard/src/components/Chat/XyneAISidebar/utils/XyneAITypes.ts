@@ -216,6 +216,7 @@ export type StreamEventType =
   | 'debug_event'
   | 'debug_artifacts_ready'
   | 'attachment'
+  | 'plan'
   | 'complete'
   | 'error'
   | 'end'
@@ -474,7 +475,15 @@ export interface SelectionContext {
   preview: string; // Truncated preview for display
 }
 
+export interface PlanTodo {
+  id?: string;
+  title: string;
+  status: 'pending' | 'in_progress' | 'completed' | 'failed';
+}
+
 export interface Message {
+  planTodos?: PlanTodo[];
+  planTitle?: string;
   id: string;
   type: 'user' | 'bot';
   content: string;
@@ -506,6 +515,12 @@ export interface Message {
   userTags?: Record<string, UserTag>; // Tag -> {name, userId} for user mentions
   participants?: Participant[]; // List of participants for Summarizer responses
   selectionContexts?: SelectionContext[]; // Canvas selection contexts
+  pageSelection?: {
+    text: string;
+    url: string;
+    title: string;
+    provider?: string;
+  };
   parentId?: string | null; // Parent message ID for tree branching
   /**
    * Stable React key that does NOT change when the message's `id` is swapped

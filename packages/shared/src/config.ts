@@ -1,5 +1,7 @@
-const isElectronBundled = typeof window !== 'undefined' ? window.location.protocol.startsWith('xyne-spaces') : false;
-const hostname = typeof window !== 'undefined' ? window.location.hostname : '';
+// React Native defines `window` but not `window.location`.
+const runtimeLocation = typeof window !== 'undefined' ? window.location : undefined;
+const isElectronBundled = runtimeLocation?.protocol.startsWith('xyne-spaces') ?? false;
+const hostname = runtimeLocation?.hostname ?? '';
 const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1';
 const isSandboxLocal = hostname.endsWith('.localhost');
 const viteEnv =

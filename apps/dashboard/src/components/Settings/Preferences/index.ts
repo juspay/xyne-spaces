@@ -10,6 +10,8 @@ export type PreferenceSection =
   | 'messaging'
   | 'launch'
   | 'toolbar'
+  | 'inbox'
+  | 'channelTabs'
   | 'calendar'
   | 'password'
   | 'developer';

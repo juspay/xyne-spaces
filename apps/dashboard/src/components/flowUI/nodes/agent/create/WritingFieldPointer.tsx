@@ -29,9 +29,8 @@ function measureBox(
   hubRow: AgentCreateHubRow | null,
 ): FieldBox | null {
   const host =
-    (hubRow
-      ? origin.querySelector(`[data-create-hub-row="${hubRow}"]`)
-      : null) ?? origin.querySelector(`[data-create-field="${field}"]`);
+    (hubRow ? origin.querySelector(`[data-create-hub-row="${hubRow}"]`) : null) ??
+    origin.querySelector(`[data-create-field="${field}"]`);
   if (!host) return null;
   const box = host.getBoundingClientRect();
   const root = origin.getBoundingClientRect();
@@ -139,13 +138,19 @@ export function WritingFieldPointer({
     setShown(true);
 
     const sameTarget =
-      activeFieldRef.current === field && activeHubRowRef.current === hubRow && lastPointRef.current;
+      activeFieldRef.current === field &&
+      activeHubRowRef.current === hubRow &&
+      lastPointRef.current;
     if (sameTarget) {
       const box = measureBox(origin, field, hubRow);
       if (box) {
         const target = hubRow
           ? pointerHubRowPoint(box)
-          : pointerCaretPoint(fieldControl(origin, field), box, fieldControl(origin, field)?.value ?? '');
+          : pointerCaretPoint(
+              fieldControl(origin, field),
+              box,
+              fieldControl(origin, field)?.value ?? '',
+            );
         x.set(target.x);
         y.set(target.y);
         opacity.set(1);

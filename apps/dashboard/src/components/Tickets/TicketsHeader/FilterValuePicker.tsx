@@ -11,6 +11,7 @@ import {
   SourceChannelsSubmenu,
   StagesSubmenu,
   TagsSubmenu,
+  MerchantIdSubmenu,
   TicketTypeSubmenu,
   UserGroupSubmenu,
   UserSubmenu,
@@ -18,6 +19,10 @@ import {
 import type { DateRange, TicketFilters } from '../TicketFilters/types';
 import type { FilterFieldDef } from './filterChips';
 import type { FilterPickerContext } from './TicketsHeader.types';
+
+// Stable identity: a fresh [] on each render would change the prop identity every render
+// and invalidate the submenu's memoised list.
+const NO_MERCHANTS: string[] = [];
 
 interface FilterValuePickerProps {
   field: FilterFieldDef;
@@ -196,6 +201,13 @@ export const FilterValuePicker = ({
         <TicketTypePicker
           selected={filters.ticketTypes || []}
           onChange={types => setKey('ticketTypes', types)}
+        />
+      );
+    case 'merchantIds':
+      return (
+        <MerchantIdSubmenu
+          selectedMerchantIds={filters.merchantIds ?? NO_MERCHANTS}
+          onChange={(merchantIds: string[]) => setKey('merchantIds', merchantIds)}
         />
       );
     case 'sourceChannels':

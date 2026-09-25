@@ -2,7 +2,7 @@ import { logger, Event as LogEvent } from '../../../utils/logger';
 import React, { ReactElement, useEffect, useMemo, useState, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Command } from 'cmdk';
-import { CalendarDays, ChevronDown, LayoutGrid, SignalHigh, X } from 'lucide-react';
+import { CalendarDays, LayoutGrid, SignalHigh, X, ChevronDown } from 'lucide-react';
 import {
   ChatDefault,
   UserTwo,
@@ -26,15 +26,7 @@ import {
 import * as Tabs from '@radix-ui/react-tabs';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { Channel, ChannelVisibility, isDeskChannelType, TicketPriority } from '@xyne/shared';
-import {
-  ChannelChipIcon,
-  ChipIcon,
-  chipLabelText,
-  chipPrefixText,
-  isSelfMentionChip,
-  resolveChipName,
-  PRIORITY_ICON_COLOR,
-} from './FilterChipNode';
+import { ChannelChipIcon, resolveChipName, PRIORITY_ICON_COLOR } from './FilterChipNode';
 import {
   isDMChannel,
   isGroupDMChannel,
@@ -47,6 +39,7 @@ import {
 } from './ChatDirectory.utils';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import { Tooltip } from '../../ui/Tooltip/Tooltip';
+import { useAuthContextValues } from '../../../hooks/useAuth';
 import Avatar from '../../ui/Avatar/Avatar';
 import ChannelIcon from '../ChannelIcon/ChannelIcon';
 import Badge from '../../ui/Badge';
@@ -72,12 +65,14 @@ import {
 type PalettePayload = PaletteRestore;
 import type { ChannelTriggerType, UserTriggerType } from './MentionPlugin';
 import { loadRecents } from '../../../utils/contextPickerRecents';
+import { RecentSearches, useRecentSearches, type RecentSearchEntry } from './RecentSearches';
+import { QueryFilterChips } from './QueryFilterChips';
 import ThreadContextPanel from '../ThreadContextPanel/ThreadContextPanel';
 import {
   buildContextItemFromResult,
   buildContextItemFromChannel,
 } from '../ThreadContextPanel/contextItem.utils';
-import { ChannelCategory } from './ChatDirectory.types';
+import { ChannelCategory, NON_STARRED_CATEGORIES } from './ChatDirectory.types';
 import {
   navigateToSearchResult,
   navigateToUser,
@@ -89,6 +84,9 @@ import { useAffinityCallback } from '../../../hooks/useAffinityCallback';
 import { useDeskContacts } from '../../../hooks/useDeskContacts';
 import { useDeskPeople, ALL_DESK } from '../../../hooks/useDeskPeople';
 import { useUsers, useUserSearch, useUser } from '../../../hooks/useUsers';
+import { useUserGroups } from '../../../hooks/useUserGroup';
+import { makeMentionHighlightsBuilder } from '../../../search/mentionHighlights';
+import { useUserGroupSearch } from '@xyne/shared/hooks';
 import { QuickDmComposer } from './SlashCommands/QuickDmComposer';
 import type { CommandTarget } from './SlashCommands/QuickDmComposer';
 import { ResultActionsMenu } from './ResultActionsMenu';
@@ -105,7 +103,15 @@ import { getUserDisplayName, isUserDeactivated } from '../../../utils/userDispla
 import { LexicalSearchInput, type InitialQueryData } from './LexicalSearchInput';
 import { StatusIndicator } from '../../ui/StatusIndicator';
 import { useSearchMetrics, CMDK_USER_LIMIT } from '../../../hooks/useSearchMetrics';
-import { filterChannelsBySearchableNames, rankUsersWithMfu } from '../../../utils/rankingUtils';
+import {
+  filterChannelsBySearchableNames,
+  rankUsersWithMfu,
+  toChannelCandidates,
+  toUserCandidates,
+  type ChannelSearchItem,
+} from '../../../utils/rankingUtils';
+import { mergeRankedCandidates, type RankedCandidate } from '@xyne/shared/utils';
+import type { User } from '../../../machines/stateMachine';
 import { searchMetricsService } from '../../../services/searchMetricsService';
 import { useHistoryBackedOverlay } from '../../../hooks/useHistoryBackedOverlay';
 import {
@@ -134,6 +140,7 @@ import { apiInstance } from '../../../services/clients/apiClient';
 import { MergeTicketsDialog } from '../../Tickets/MergeTicketsDialog/MergeTicketsDialog';
 import { toast } from 'sonner';
 import Button from '../../ui/Button';
+import { AiAnswerCard } from './AiAnswerCard';
 
 type SearchResultsDocType = SearchResultsFilters['docType'];
 
@@ -341,6 +348,7 @@ const TEXT_FILTER_HINT_REGEX =
  */
 const MENTION_GROUPS = [
   { key: 'people', type: ChipType.USER, heading: 'People' },
+  { key: 'userGroups', type: ChipType.USER_GROUP, heading: 'User Groups' },
   { key: 'channels', type: ChipType.CHANNEL, heading: 'Channels' },
 ] as const;
 
@@ -349,6 +357,29 @@ type MentionGroupKey = (typeof MENTION_GROUPS)[number]['key'];
 /** Rows shown per section before "Show more", and the ceiling once expanded. */
 const MENTION_GROUP_PAGE = 5;
 const MENTION_GROUP_MAX = 20;
+
+// Rows shown collapsed in the flat ALL view's merged people+channel list, before "See more".
+// The entries are the ones the per-category sections would have rendered — this only changes
+// their order. The merge itself keeps more than this so expanding has something to reveal.
+const MERGED_DISPLAY_LIMIT = 8;
+const MERGED_CANDIDATE_LIMIT = MERGED_DISPLAY_LIMIT * 5;
+/** expandedCategories key for the merged section — not a ChannelCategory, it spans types. */
+const MERGED_CATEGORY = 'merged-people-channels';
+
+/**
+ * A row in the merged list is either a person or a channel/DM. The two narrowings below
+ * are sound because `toUserCandidates` is the only producer of `type: 'user'` and it only
+ * ever carries a user, while `toChannelCandidates` produces 'dm' and 'channel' and only
+ * ever carries a channel item.
+ */
+type MergedCandidate = RankedCandidate<User | ChannelSearchItem>;
+
+const isMergedUser = (candidate: MergedCandidate): candidate is RankedCandidate<User> =>
+  candidate.type === 'user';
+
+const isMergedChannel = (
+  candidate: MergedCandidate,
+): candidate is RankedCandidate<ChannelSearchItem> => candidate.type !== 'user';
 
 const isPreviewableTicketResult = (result: DisplaySearchResult | null): boolean =>
   !!result &&
@@ -365,6 +396,7 @@ const SeeMoreItem = ({
   trackCategory,
   trackName,
   trackMetadata,
+  onMouseEnter,
 }: {
   value: string;
   label: string;
@@ -373,10 +405,13 @@ const SeeMoreItem = ({
   trackCategory: string;
   trackName: string;
   trackMetadata: string;
+  // Lets mention lists clear their row highlight on hover so only this row greys (avoids a double).
+  onMouseEnter?: () => void;
 }): ReactElement => (
   <Command.Item
     value={value}
     onSelect={onSelect}
+    onMouseEnter={onMouseEnter}
     className={`w-full px-2 py-1.5 mt-1 text-sm text-muted-foreground rounded-lg text-left cursor-pointer transition-colors aria-selected:text-foreground aria-selected:bg-accent ${hoverable ? 'hover:text-foreground hover:bg-accent' : ''}`}
     style={{ WebkitTapHighlightColor: 'transparent', userSelect: 'none' }}
     data-track-category={trackCategory}
@@ -386,6 +421,122 @@ const SeeMoreItem = ({
     {label}
   </Command.Item>
 );
+
+/**
+ * Expand-only "Show more" for the `@` / `mentions:` typeaheads. A real `<button>` (not a cmdk
+ * `Command.Item`) with `onMouseDown` → `preventDefault`, so clicking it never blurs the Lexical
+ * editor — the arrow-key mention commands are registered on that editor and stop firing the moment
+ * it loses focus. Expand-only: the caller hides it once its section is expanded, so there is no
+ * "See less" toggle.
+ */
+function MentionShowMoreButton({
+  onExpand,
+  trackName,
+}: {
+  onExpand: () => void;
+  trackName: string;
+}): ReactElement {
+  return (
+    <button
+      type='button'
+      onMouseDown={e => e.preventDefault()}
+      onClick={onExpand}
+      className='flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-[13px] text-muted-foreground hover:bg-muted hover:text-foreground'
+      data-track-category='SEARCH'
+      data-track-name={trackName}
+    >
+      <span className='flex h-4 w-5 flex-shrink-0 items-center justify-center'>
+        <ChevronDown size={14} />
+      </span>
+      Show more
+    </button>
+  );
+}
+
+/** The only sections whose "See more" expands in place — the valid keys for expandedCategories and toggleCategoryExpansion. */
+type ExpandableCategory = ChannelCategory | 'users' | typeof MERGED_CATEGORY;
+
+/** One flat `@`-typeahead row — a person or user-group; `type` drives which chip a pick lands. */
+interface AtMentionCandidate {
+  type: ChipType; // USER | USER_GROUP
+  id: string;
+  name: string;
+  alias?: string | null; // user-group `@`-handle; shown bold with `name` as the secondary line
+  email?: string;
+  isDeactivated?: boolean;
+}
+
+/** The user-group glyph — 👥 on a green tile, sized to match the xs avatars in people rows. */
+function UserGroupGlyph({ isDeactivated }: { isDeactivated?: boolean }): ReactElement {
+  return (
+    <span
+      className={`flex size-4 flex-shrink-0 items-center justify-center overflow-hidden rounded-sm border ${
+        isDeactivated ? 'bg-muted border-muted-foreground/30' : 'bg-green-50 border-green-200'
+      }`}
+    >
+      <span className='text-[14px] leading-none'>👥</span>
+    </span>
+  );
+}
+
+function AtMentionRow({
+  item,
+  index,
+  selectedMentionIndex,
+  onSelect,
+  onHover,
+  isMobile,
+}: {
+  item: AtMentionCandidate;
+  index: number;
+  selectedMentionIndex: number;
+  onSelect: (item: AtMentionCandidate) => void;
+  onHover: (index: number) => void;
+  isMobile: boolean;
+}): ReactElement {
+  const isUserGroup = item.type === ChipType.USER_GROUP;
+  // One line like the user rows: a name-sized foreground label + a muted secondary. A group
+  // reads `@alias` with its display name as the secondary; a user reads name + email.
+  const primaryLabel = isUserGroup ? (item.alias ?? item.name) : item.name;
+  const secondaryLabel = isUserGroup
+    ? item.alias && item.name !== item.alias
+      ? item.name
+      : undefined
+    : item.email;
+  return (
+    <Command.Item
+      key={`${item.type}-${item.id}`}
+      value={`mention-${item.type}-${item.id}`}
+      onSelect={() => onSelect(item)}
+      onMouseEnter={() => onHover(index)}
+      className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all duration-150 mt-1.5 ${
+        index === selectedMentionIndex ? 'cmdk-active-row' : ''
+      } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
+      style={{ WebkitTapHighlightColor: 'transparent' }}
+    >
+      {isUserGroup ? (
+        <UserGroupGlyph isDeactivated={item.isDeactivated ?? false} />
+      ) : (
+        <Avatar userId={item.id} size='xs' />
+      )}
+      <div className='flex-1 min-w-0 flex items-baseline gap-2'>
+        <span
+          className={`min-w-0 truncate text-[15px] leading-[1.2] tracking-[-0.1px] ${item.isDeactivated ? 'text-muted-foreground' : 'text-foreground'}`}
+        >
+          {primaryLabel}
+        </span>
+        {item.isDeactivated && (
+          <span className='self-center shrink-0 text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded'>
+            Deactivated
+          </span>
+        )}
+        {secondaryLabel && (
+          <span className='min-w-0 truncate text-xs text-muted-foreground'>{secondaryLabel}</span>
+        )}
+      </div>
+    </Command.Item>
+  );
+}
 
 const ChannelCommandMenu = ({
   channels,
@@ -405,6 +556,7 @@ const ChannelCommandMenu = ({
   initialToggles,
   restoreFromLastSearch,
   enabledTabs,
+  aiOverview = false,
   inline = false,
   compactTabs = false,
   onTabChange,
@@ -414,6 +566,7 @@ const ChannelCommandMenu = ({
 }: ChannelCommandMenuProps): ReactElement | null => {
   const navigate = useNavigate();
   const channelData = useAllChannels();
+  const { workspaceId } = useAuthContextValues(); // Per-user, per-workspace key for recents
   const commandRef = useRef<HTMLDivElement | null>(null);
   // MutationObserver (owned by attachCommandRef) that recomputes the ⌥↵ hint when cmdk adds/removes rows.
   const rowListObserverRef = useRef<MutationObserver | null>(null);
@@ -469,8 +622,9 @@ const ChannelCommandMenu = ({
   const [seedCommandMode, setSeedCommandMode] = useState(
     () => initialQuery?.text === '/' && initialQuery?.mentions.length === 0,
   );
-  // The search the user left behind when the palette sent them to the results page, handed
-  // back by the history hook so pressing back reopens cmd+K exactly as they typed it.
+  // A query to re-seed the palette with: its text + chips are replayed into the Lexical editor
+  // through the initial-query seed pipeline. Set when back-navigation restores the search the palette
+  // sent to the results page, and when replaying a recent; null when nothing is being restored.
   const [restoredQuery, setRestoredQuery] = useState<InitialQueryData | null>(null);
   // Which of on:/after:/before: opened the date list — it decides what a pick means.
   const [dateTrigger, setDateTrigger] = useState<'on:' | 'after:' | 'before:'>('on:');
@@ -650,10 +804,26 @@ const ChannelCommandMenu = ({
   // Mention search state - declared before useSearchMetrics so it can be passed to the hook
   const [mentionSearchQuery, setMentionSearchQuery] = useState('');
   const [mentionSearchType, setMentionSearchType] = useState<ChipType | null>(null);
+  // True only during the ~100ms settle window after a chip commit, until mentionSearchType
+  // clears. Must be a transient ref, not a derived check: a fresh typeahead and a stale
+  // echo of the last commit carry identical render state, so only history tells them apart.
+  const justCommittedMentionRef = useRef(false);
   // Which `mentions:` sections have been expanded past their first five rows.
   const [expandedMentionGroups, setExpandedMentionGroups] = useState<
     Record<MentionGroupKey, boolean>
-  >({ people: false, channels: false });
+  >({ people: false, channels: false, userGroups: false });
+
+  // Reuse this component's existing usersById + allUserGroups (no re-subscription) to resolve
+  // each mention chip's display forms for result highlighting.
+  const allUserGroups = useUserGroups();
+  const userGroupsById = useMemo(
+    () => new Map(allUserGroups.map(group => [group.id, group])),
+    [allUserGroups],
+  );
+  const buildMentionHighlights = useMemo(
+    () => makeMentionHighlightsBuilder(usersById, userGroupsById),
+    [usersById, userGroupsById],
+  );
 
   const {
     searchResults: backendResults,
@@ -671,6 +841,7 @@ const ChannelCommandMenu = ({
     text: searchText,
     setText: setSearchText,
     inputRef,
+    isAiQuery,
     // New hookstate
     activeTab,
     setActiveTab,
@@ -689,6 +860,7 @@ const ChannelCommandMenu = ({
     // Clipboard tracking callbacks
     onPasteDetected,
     onManualKeystroke,
+    markRecentReplay,
   } = useSearchMetrics({
     allChannels,
     mentionSearchType,
@@ -696,13 +868,17 @@ const ChannelCommandMenu = ({
     // unless we're restoring a search that ran at a different scope.
     defaultOnlyMyChannels: initialToggles?.onlyMyChannels ?? true,
     defaultIncludeBotMessages: initialToggles?.includeBotMessages ?? false,
+    // Classifying costs a request per settled query, so only surfaces that can show the
+    // overview ask for it (the backend gates the feature itself on cmdk_ai_intent_config.enabled).
+    classifyIntent: aiOverview,
+    buildMentionHighlights,
   });
 
   // Aliases to match old usage if needed or just use new names
   const search = cleanedSearchText;
   const setSearch = setSearchText;
 
-  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
+  const [expandedCategories, setExpandedCategories] = useState<Set<ExpandableCategory>>(new Set());
   const isFlatAllView = activeTab === TabType.ALL && !isGrouped;
 
   // type:channels shows grouped local channels (same as CHANNELS tab) — used by the
@@ -750,26 +926,75 @@ const ChannelCommandMenu = ({
     return rankUsersWithMfu(filteredLocalUsers, allUsers, cleanedSearchText, dmContactRecency);
   }, [filteredLocalUsers, allUsers, cleanedSearchText, dmContactRecency, affinityVersion]);
 
+  /**
+   * ONE merged people + DM + channel list, for the flat ALL view only.
+   *
+   * Exactly the rows the sections already render — `rankedLocalUsers` (the USERS section)
+   * and `filteredLocalChannels` (STARRED, CHANNELS, GROUP DMS) — reordered into one list.
+   * Nothing is searched again and nothing new is admitted: the only change is the order.
+   *
+   * Each entry is tagged with the shared match tier, then `mergeRankedCandidates` applies
+   * affinity once across both, so a person and a channel can share a rung and compete
+   * directly. See docs/cmdk-search-ranking.md §15.
+   *
+   * Only computed when the merged list will actually render, so the per-entity tabs pay
+   * nothing for it.
+   */
+
+  const mergedLocalResults = useMemo<MergedCandidate[]>(() => {
+    void affinityVersion;
+    if (activeTab !== TabType.ALL) return [];
+
+    // BROWSE (nothing typed): one list of every conversation, ordered by affinity — there is
+    // no query for tiers to describe, so `tierOf` puts them all on the top rung and affinity
+    // alone decides. 1:1 DMs are INCLUDED here, unlike in search: browse shows no people
+    // rows for them to duplicate, and a DM is the thing you navigate to.
+    if (!cleanedSearchText.trim()) {
+      return mergeRankedCandidates<User | ChannelSearchItem>(
+        [
+          toChannelCandidates(
+            filteredLocalChannels.filter(({ category }) => category !== ChannelCategory.STARRED),
+            '',
+          ),
+        ],
+        MERGED_CANDIDATE_LIMIT,
+      );
+    }
+    // SEARCH: people and regular channels only.
+    //
+    // 1:1 DMs are out because the other participant is already here as a person, and
+    // selecting them opens that very conversation (navigateToUser ->
+    // resolveOrCreateDmChannelId) — the row would only ever be the same human twice.
+    // Self-DMs go with them; their only participant is you.
+    //
+    // Group DMs are out for a different reason: they keep their own GROUP DMS section,
+    // rendered separately below. Their match quality is borrowed from a participant, so
+    // mixing them in means a dozen group chats crowding out the person you actually typed.
+    //
+    // Starred is out too, for the same reason — it keeps its own section. It is a category,
+    // not a scopeType, so it has to be filtered by category: a starred GROUP DM carries
+    // category STARRED rather than DIRECT_MESSAGES, which is how it fell through both the
+    // merged list and the GROUP DMS section and disappeared entirely.
+    const mergeableChannels = filteredLocalChannels.filter(
+      ({ channel, category }) =>
+        !isDMChannel(channel.scopeType) && category !== ChannelCategory.STARRED,
+    );
+
+    return mergeRankedCandidates<User | ChannelSearchItem>(
+      [
+        toUserCandidates(rankedLocalUsers, cleanedSearchText),
+        toChannelCandidates(mergeableChannels, cleanedSearchText),
+      ],
+      MERGED_CANDIDATE_LIMIT,
+    );
+  }, [activeTab, cleanedSearchText, rankedLocalUsers, filteredLocalChannels, affinityVersion]);
+
   // Slack-style strong user match: when the top-ranked user's full name
   // prefix-matches the query, the USERS section renders ABOVE the "Show
   // results for" row and the default Enter target becomes that top user.
   // Only applies to plain search (no from:/in:/with: chips, USERS section
   // shown and non-empty) — filter-chip ordering otherwise wins.
   //
-  // The full-name-prefix test is intentionally the SAME rule `rankUsers` uses
-  // for its top tier (key 1, `name.startsWith(q)`); gating on rankUsers'
-  // own top-tier signal keeps ranking and the Enter target from drifting
-  // apart. A user surfaced to #0 only by DM recency (keys 3–4, no name match)
-  // therefore does NOT steal the default Enter target — Enter targets the user
-  // only when the query is clearly naming them.
-  const hasStrongUserMatch = useMemo(() => {
-    if (hasFromOrInFilter || !showGroupedUsers) return false;
-    const topUser = rankedLocalUsers[0];
-    if (!topUser) return false;
-    const q = cleanedSearchText.toLowerCase().trim();
-    if (!q) return false;
-    return topUser.name.toLowerCase().startsWith(q);
-  }, [hasFromOrInFilter, showGroupedUsers, rankedLocalUsers, cleanedSearchText]);
 
   // Which trigger opened the channel typeahead: '#' acts like Slack's quick
   // switcher (navigate on select, show only regular channels); 'in:' creates a
@@ -1160,6 +1385,10 @@ const ChannelCommandMenu = ({
         const found = channels.find(c => c.channel.id === id);
         return found ? formatChannelLabel(found) : undefined;
       },
+      userGroupName: id => {
+        const group = userGroupsById.get(id);
+        return group ? (group.alias ?? group.name) : undefined;
+      },
     })
       // Prefix + value: the token splits them so the glyph can sit between, but the label
       // is one string and needs both, or it reads `Nasim Sheikh` instead of `from:Nasim`.
@@ -1217,6 +1446,7 @@ const ChannelCommandMenu = ({
     } catch {
       // Swallowed on purpose — a broken log line must not block the results page.
     }
+    recentSearches.save();
 
     onOpenChange(false);
     // Land on the tab the user was already filtering by — Messages stays on Messages,
@@ -1231,6 +1461,7 @@ const ChannelCommandMenu = ({
   // Navigate to the full results page with a specific section's tab pre-selected
   // (from the screen-mode "See N more" links).
   const handleSeeMoreNavigate = (tab: SearchResultsDocType): void => {
+    recentSearches.save();
     onOpenChange(false);
     void navigate(
       `/search-results?${buildSearchParams(searchText, selectedMentions, usersById, allChannels, tab).toString()}`,
@@ -1267,6 +1498,22 @@ const ChannelCommandMenu = ({
   >(new Map());
   const [showMergeDialog, setShowMergeDialog] = useState(false);
 
+  // Only the real search palette keeps history — not the context picker or desk-merge mode.
+  const recentSearchesEnabled = !contextSelectionMode && !deskMergeMode;
+  const recentSearches = useRecentSearches({
+    open,
+    enabled: recentSearchesEnabled,
+    workspaceId,
+    userId: currentUserID,
+    query: {
+      text: searchText,
+      filterChips: selectedMentions as ChipData[],
+      tab: activeTab,
+      onlyMyChannels,
+      includeBotMessages,
+    },
+  });
+
   // Extract ticketId from a desk email result for merge
   const getDeskTicketId = (result: DisplaySearchResult): string | null => {
     if (result.type === 'conversation' && result.searchContext?.subApp === 'DESK') {
@@ -1301,6 +1548,7 @@ const ChannelCommandMenu = ({
   }, []);
 
   const DISPLAY_LIMIT = 5;
+  const RECENTS_STARRED_CAP = 3; // Starred caps at 3 while Recents shows, to fit both sections
 
   // Suppress hover highlights when dialog first opens to prevent dual-highlight
   // (CSS :hover on one item + aria-selected on another) when mouse is already resting in the dialog area
@@ -1409,6 +1657,8 @@ const ChannelCommandMenu = ({
       }
 
       if (insertMentionRef.current) {
+        // Open the settle window (see declaration) — hides the suffix for this commit only.
+        justCommittedMentionRef.current = true;
         insertMentionRef.current({
           id: mention.id,
           name: mention.name,
@@ -1418,6 +1668,7 @@ const ChannelCommandMenu = ({
 
         // Clear mention search state after a delay to allow insertion to complete
         setTimeout(() => {
+          justCommittedMentionRef.current = false;
           setMentionSearchType(null);
           setMentionSearchQuery('');
           setChannelTrigger(null);
@@ -1647,7 +1898,7 @@ const ChannelCommandMenu = ({
   // In a Desk channel, `from:`/`to:` instead surface synced mailbox contacts
   // (id = email) so the chip carries an address for the mail from/to filter.
   const availableUsers = useMemo<
-    Array<{ id: string; name: string; status?: string; email?: string }>
+    Array<{ id: string; name: string; status?: string; email?: string; displayName?: string }>
   >(() => {
     if (isDeskPeopleTrigger) {
       const raw = mentionSearchQuery.trim();
@@ -1700,6 +1951,7 @@ const ChannelCommandMenu = ({
         id: user.id,
         name: user.name,
         status: user.status,
+        ...(user.displayName && { displayName: user.displayName }),
         ...(user.email && { email: user.email }),
       }),
     );
@@ -1877,15 +2129,62 @@ const ChannelCommandMenu = ({
     return [...availableRegularChannels, ...availableDMs];
   }, [availableRegularChannels, availableDMs]);
 
-  /**
-   * `mentions:` candidates — people first, then channels, in one flat list so Enter and the
-   * ghost text can index it directly. Only regular channels: a DM is never `#`-referenced
-   * in a message, so it can't be a channel mention.
-   */
+  // `mentions:` and the bare `@` typeahead both offer user-groups — picking one lands a
+  // `groupMentions` filter. The shared hook matches name + alias.
+  const availableUserGroups = useUserGroupSearch(mentionSearchQuery, MENTION_GROUP_MAX);
+
+  // The `@` typeahead's flat list: people, then user-groups (paged). Other USER triggers
+  // (from:/assignee:/…) are people-only. `type` tells the editor which chip to land.
+  const atMentionItems = useMemo<AtMentionCandidate[]>(() => {
+    const people: AtMentionCandidate[] = availableUsers.map(user => ({
+      type: ChipType.USER,
+      id: user.id,
+      name: getUserDisplayName(user),
+      isDeactivated: isUserDeactivated(user),
+      ...(user.email ? { email: user.email } : {}),
+    }));
+    // Only the bare `@` list is sectioned + paged; other user triggers stay one people list.
+    if (mentionSearchType !== ChipType.USER || userTrigger !== '@') return people;
+
+    // People first, then user-groups; each keeps its own order and pages independently.
+    const visiblePeople = people.slice(
+      0,
+      expandedMentionGroups.people ? MENTION_GROUP_MAX : MENTION_GROUP_PAGE,
+    );
+    const groups: AtMentionCandidate[] = availableUserGroups.map(group => ({
+      type: ChipType.USER_GROUP,
+      id: group.id,
+      name: group.name,
+      alias: group.alias ?? null,
+      isDeactivated: group.isActive === false,
+    }));
+    const visibleGroups = groups.slice(
+      0,
+      expandedMentionGroups.userGroups ? MENTION_GROUP_MAX : MENTION_GROUP_PAGE,
+    );
+    return [...visiblePeople, ...visibleGroups];
+  }, [availableUsers, availableUserGroups, mentionSearchType, userTrigger, expandedMentionGroups]);
+
+  // Commit a picked `@` row — person (may quick-switch to DM) or user-group chip; routed by type.
+  const handleAtMentionSelect = useCallback(
+    (item: AtMentionCandidate) =>
+      void handleMentionSelect({
+        id: item.id,
+        // A group's chip reads its `@`-handle (alias), like the compose box; users keep their name.
+        name: item.type === ChipType.USER_GROUP ? (item.alias ?? item.name) : item.name,
+        type: item.type,
+        ...(item.email ? { email: item.email } : {}),
+      }),
+    [handleMentionSelect],
+  );
+
+  /** `mentions:` candidates by section (people/user-groups/channels). Regular channels only (no DMs). */
   const mentionCandidates = useMemo<
     Record<MentionGroupKey, Array<{ id: string; name: string; type: ChipType }>>
   >(() => {
-    if (mentionSearchType !== ChipType.MENTIONS) return { people: [], channels: [] };
+    if (mentionSearchType !== ChipType.MENTIONS) {
+      return { people: [], channels: [], userGroups: [] };
+    }
     return {
       people: availableUsers
         .slice(0, MENTION_GROUP_MAX)
@@ -1897,17 +2196,18 @@ const ChannelCommandMenu = ({
           name: displayName,
           type: ChipType.CHANNEL,
         })),
+      userGroups: availableUserGroups
+        .slice(0, MENTION_GROUP_MAX)
+        // Show/commit the `@`-handle (alias) like the compose box, falling back to the name.
+        .map(g => ({ id: g.id, name: g.alias ?? g.name, type: ChipType.USER_GROUP })),
     };
-  }, [mentionSearchType, availableUsers, availableRegularChannels]);
+  }, [mentionSearchType, availableUsers, availableRegularChannels, availableUserGroups]);
 
   useEffect(() => {
-    setExpandedMentionGroups({ people: false, channels: false });
+    setExpandedMentionGroups({ people: false, channels: false, userGroups: false });
   }, [mentionSearchQuery, mentionSearchType]);
 
-  /**
-   * The flat, people-then-channels list the keyboard indexes. It holds exactly the rows on
-   * screen — expanding a section grows it — so arrow keys can never land on a hidden row.
-   */
+  /** The flat list the keyboard indexes — exactly the visible rows, so arrows never hit a hidden one. */
   const availableMentionTargets = useMemo<Array<{ id: string; name: string; type: ChipType }>>(
     () =>
       MENTION_GROUPS.flatMap(group =>
@@ -1970,8 +2270,10 @@ const ChannelCommandMenu = ({
   // Reads the same arrays the Enter handler indexes, so the ghost never disagrees with Enter.
   const mentionActiveLabel = useMemo<string | null>(() => {
     if (mentionSearchType === ChipType.USER) {
-      const user = availableUsers[selectedMentionIndex];
-      return user ? getUserDisplayName(user) : null;
+      // People + user-groups are one interleaved list under `@`. The ghost completes to the
+      // row's displayed primary — a group's `@`-handle (alias), a person's name.
+      const item = atMentionItems[selectedMentionIndex];
+      return item ? (item.alias ?? item.name) : null;
     }
     if (mentionSearchType === ChipType.CHANNEL) {
       return availableChannels[selectedMentionIndex]?.displayName ?? null;
@@ -1991,7 +2293,7 @@ const ChannelCommandMenu = ({
     return null;
   }, [
     mentionSearchType,
-    availableUsers,
+    atMentionItems,
     availableChannels,
     availablePriorities,
     availableDates,
@@ -2006,10 +2308,18 @@ const ChannelCommandMenu = ({
   // "pick a value" context, so the first candidate previews at rest); the row's gray→blue tier
   // still signals navigation. Empty when there's no matching candidate.
   const popupFilterHint = useMemo(() => {
+    // While a commit settles, mentionSearchType is still set for a few frames — hide the
+    // suffix so it doesn't stack on the just-inserted pill at the pre-commit caret position.
+    if (justCommittedMentionRef.current) return '';
     if (!mentionSearchType || !mentionActiveLabel) return '';
     const query = mentionSearchQuery.trim();
-    // @/# navigate on select; every other prefix builds a filter chip (a "select").
-    const action = userTrigger === '@' || channelTrigger === '#' ? 'Open' : 'Select';
+    // @/# navigate on select; every other prefix builds a filter chip (a "select"). A user-group
+    // under `@` has no open target — picking it builds a groupMentions chip — so it reads "Select".
+    const activeAtGroupRow =
+      mentionSearchType === ChipType.USER &&
+      atMentionItems[selectedMentionIndex]?.type === ChipType.USER_GROUP;
+    const action =
+      (userTrigger === '@' || channelTrigger === '#') && !activeAtGroupRow ? 'Open' : 'Select';
     // No value typed yet: at rest show only the action word ("from: - Select"), not the first
     // candidate's name - the resting highlight is arbitrary, so previewing it reads as if it were
     // already chosen. Once the user navigates, preview the actually-highlighted name.
@@ -2031,6 +2341,11 @@ const ChannelCommandMenu = ({
     userTrigger,
     channelTrigger,
     mentionActiveLabel,
+    atMentionItems,
+    selectedMentionIndex,
+    // Not read by the memo body — forces a recompute when a chip lands; a ref change alone
+    // never re-renders, so without this the memo could serve the stale pre-commit suffix.
+    selectedMentions.length,
   ]);
 
   // Never surface a ghost when the input is truly empty (no free text AND no chip). A stale
@@ -2149,7 +2464,7 @@ const ChannelCommandMenu = ({
     }
   }, [open, searchSessionId, onClose, onOpen, resetSearchState, inline, initialTab]);
 
-  const toggleCategoryExpansion = (category: string): void => {
+  const toggleCategoryExpansion = (category: ExpandableCategory): void => {
     setExpandedCategories(prev => {
       const newSet = new Set(prev);
       if (newSet.has(category)) {
@@ -2167,6 +2482,16 @@ const ChannelCommandMenu = ({
     return modifier && !isMobile;
   };
 
+  // Restore the recent's tab, scope, and query so it re-runs with the same results.
+  const handleRecentSearchSelect = (entry: RecentSearchEntry): void => {
+    // Tag this search's origin so its impression + session-end carry query_source='RECENT'.
+    markRecentReplay();
+    setActiveTab(entry.tab);
+    setOnlyMyChannels(entry.toggles?.onlyMyChannels ?? true);
+    setIncludeBotMessages(entry.toggles?.includeBotMessages ?? false);
+    setRestoredQuery({ text: entry.text, mentions: entry.filterChips });
+  };
+
   const handleChannelSelect = async (
     channel: Channel,
     displayName: string,
@@ -2176,7 +2501,6 @@ const ChannelCommandMenu = ({
       onContextItemToggle(buildContextItemFromChannel(channel, displayName));
       return;
     }
-
     const route = `/chat/dir/${channel.id}`;
 
     // Track click on channel if metrics available
@@ -2222,6 +2546,8 @@ const ChannelCommandMenu = ({
     if (searchText.trim()) {
       onResultClick(result, rankPosition, result.searchContext?.channelId);
     }
+    // Skip user/channel opens — recents capture content searches, not navigation to a person/channel.
+    if (result.type !== 'user' && result.type !== 'channel') recentSearches.save();
 
     const useModifier = consumeModifier();
 
@@ -2399,7 +2725,7 @@ const ChannelCommandMenu = ({
 
   // Group local channels by category
   const groupedChannels = useMemo(() => {
-    const groups: Record<string, typeof filteredLocalChannels> = {};
+    const groups: Partial<Record<ChannelCategory, typeof filteredLocalChannels>> = {};
     filteredLocalChannels.forEach(item => {
       if (!groups[item.category]) {
         groups[item.category] = [];
@@ -2410,50 +2736,9 @@ const ChannelCommandMenu = ({
   }, [filteredLocalChannels]);
 
   const localGroupDMs =
-    groupedChannels['direct-messages']?.filter(({ channel }) =>
+    groupedChannels[ChannelCategory.DIRECT_MESSAGES]?.filter(({ channel }) =>
       isGroupDMChannel(channel.scopeType),
     ) ?? [];
-
-  // Slack-style strong channel match: when the top-ranked regular channel's
-  // name prefix-matches the query, the CHANNELS section renders ABOVE the
-  // "Show results for" row and the default Enter target becomes that channel.
-  // Mirrors `hasStrongUserMatch` exactly — only applies to plain search (no
-  // from:/in:/with: chips, CHANNELS section shown and non-empty) and only when
-  // a strong USER match does NOT already win (users take precedence).
-  //
-  // `name.startsWith(q)` is the SAME full-name-prefix signal `searchChannels`
-  // boosts to the top tier, so the ranking and the Enter target stay aligned.
-  const hasStrongChannelMatch = useMemo(() => {
-    if (hasStrongUserMatch) return false;
-    if (hasFromOrInFilter || !showGroupedLocalResults) return false;
-    const topChannel = groupedChannels['channels']?.[0]?.channel;
-    if (!topChannel) return false;
-    const q = cleanedSearchText.toLowerCase().trim();
-    if (!q) return false;
-    return topChannel.name.toLowerCase().startsWith(q);
-  }, [
-    hasStrongUserMatch,
-    hasFromOrInFilter,
-    showGroupedLocalResults,
-    groupedChannels,
-    cleanedSearchText,
-  ]);
-
-  // Slack-style strong starred match: the Starred section only LEADS (hoists above People/Channels)
-  // when a starred item's displayed name prefix-matches the query. Without this, ANY query hoisted
-  // Starred, so a weak fuzzy hit on a starred DM (e.g. "venkatesan" matching a starred
-  // "…Venkattaramanujam" DM shown as "Mamtha") jumped above the exact "Venkatesan S" user. Checks
-  // every matched starred item (not just the top, which affinity may hold), mirroring the prefix
-  // rule hasStrongUserMatch/hasStrongChannelMatch use.
-  const hasStrongStarredMatch = useMemo(() => {
-    if (hasFromOrInFilter) return false;
-    const q = cleanedSearchText.toLowerCase().trim();
-    if (!q) return false;
-    const starredMatches = groupedChannels[ChannelCategory.STARRED] ?? [];
-    return starredMatches.some(item =>
-      (item.searchableNames ?? []).some(name => name.toLowerCase().startsWith(q)),
-    );
-  }, [hasFromOrInFilter, groupedChannels, cleanedSearchText]);
 
   const iconSize = 14;
 
@@ -2468,6 +2753,9 @@ const ChannelCommandMenu = ({
     { id: TabType.RECORDING, label: 'Recordings', icon: <MicOn size={iconSize} /> },
     { id: TabType.DESK, label: 'Desk', icon: <EnvelopeDefault size={iconSize} /> },
   ];
+
+  const resolveTabLabel = (tab: TabType): string =>
+    allTabDefinitions.find(t => t.id === tab)?.label ?? '';
 
   // Tabs the active filters could fill — `in:#general` scopes to content within a channel,
   // so People and Channels can only come back empty. Not named `enabledTabs`: that's a prop,
@@ -2608,11 +2896,13 @@ const ChannelCommandMenu = ({
     // gate (which tracks Vespa results) so the first command row is highlighted at rest.
     const hasActiveSearch =
       searchText.trim().length > 0 || selectedMentions.length > 0 || commandActive;
-    // While a mention typeahead is open, selection is owned by selectedMentionIndex - don't
+    // While a mention typeahead is open, selection is owned by selectedMentionIndex — don't
     // also auto-select a cmdk row, or two rows light up.
+    // The show-results row renders as soon as there's searchText (see showResultsForRow),
+    // so a typed query is reason enough to fire even with zero hits.
     if (
       !hasActiveSearch ||
-      (!hasResults && !commandActive) ||
+      (!hasResults && !commandActive && !searchText.trim()) ||
       hasNavigatedRef.current ||
       mentionSearchType
     )
@@ -2622,25 +2912,18 @@ const ChannelCommandMenu = ({
       if (hasNavigatedRef.current) return;
       const items = commandRef.current?.querySelectorAll('[cmdk-item]:not([aria-disabled="true"])');
       if (items && items.length > 0) {
-        // Once there's a query or a filter, the user has expressed a search rather than a
-        // jump-to, so Enter should open the full results — that row becomes the resting
-        // target. With an empty box it stays on the first real result, where Enter is a
-        // quick-switch. The screen palette keeps first-row either way.
         const rows = Array.from(items);
         const showResultsIndex = rows.findIndex(
           item => item.getAttribute('data-show-results-item') === 'true',
         );
-        const hasSearchIntent = searchText.trim().length > 0 || selectedMentions.length > 0;
 
-        const firstReal = isScreenPalette
-          ? -1
-          : rows.findIndex(item => item.getAttribute('data-show-results-item') !== 'true');
+        // Rest on the first real result; fall back to the show-results row when no real
+        // row is selectable (zero hits, still streaming, or it's the only row).
+        const firstReal = rows.findIndex(
+          item => item.getAttribute('data-show-results-item') !== 'true',
+        );
         const selectedIndex =
-          !isScreenPalette && hasSearchIntent && showResultsIndex !== -1
-            ? showResultsIndex
-            : firstReal === -1
-              ? 0
-              : firstReal;
+          firstReal !== -1 ? firstReal : showResultsIndex !== -1 ? showResultsIndex : 0;
         items.forEach((item, i) => {
           item.setAttribute('aria-selected', i === selectedIndex ? 'true' : 'false');
         });
@@ -2669,6 +2952,90 @@ const ChannelCommandMenu = ({
 
   // Browse-mode hint sync lives in attachCommandRef's MutationObserver (the auto-select effect above
   // only runs during an active search).
+
+  /**
+   * The merged people/DM/channel list for the flat ALL view.
+   *
+   * One `Command.Group`, three kinds of row: people render as `SearchResultItem` (what the
+   * PEOPLE section uses), channels and DMs as `ChannelCommandItem` (what the CHANNELS and
+   * GROUP DMS sections use), so a row looks and behaves identically whichever list it
+   * appears in. Order comes entirely from `mergedLocalResults`.
+   */
+  const renderMergedLocalResults = () => {
+    if (mergedLocalResults.length === 0) return null;
+
+    // Same collapse/expand contract as every other local section, so the fold behaves the
+    // way the rest of the palette does. It expands in place rather than routing out: there
+    // is no results page that shows people and channels together.
+    const isExpanded = expandedCategories.has(MERGED_CATEGORY);
+    const hasMore = mergedLocalResults.length > MERGED_DISPLAY_LIMIT;
+    const displayItems =
+      !isExpanded && hasMore
+        ? mergedLocalResults.slice(0, MERGED_DISPLAY_LIMIT)
+        : mergedLocalResults;
+    const hiddenCount = mergedLocalResults.length - MERGED_DISPLAY_LIMIT;
+
+    return (
+      <div className='mb-4'>
+        <Command.Group
+          heading={`People & channels (${mergedLocalResults.length})`}
+          className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
+        >
+          {displayItems.map((candidate, index) => {
+            if (isMergedUser(candidate)) {
+              const user = candidate.item;
+              const result: DisplaySearchResult = {
+                id: user.id,
+                type: 'user' as const,
+                title: getUserDisplayName(user),
+                subtitle: user.email || '',
+                relevanceScore: 1,
+                metadata: {},
+              };
+              return (
+                <SearchResultItem
+                  key={`merged-user-${user.id}`}
+                  result={result}
+                  onSelect={res => handleBackendResultSelect(res, index + 1)}
+                  onItemMouseDown={handleItemMouseDown}
+                  isSelected={contextItems.some(c => c.id === `user-${user.id}`)}
+                />
+              );
+            }
+
+            if (!isMergedChannel(candidate)) return null;
+            const { channel } = candidate.item;
+            return (
+              <ChannelCommandItem
+                key={`merged-channel-${channel.id}`}
+                channel={channel}
+                currentUserID={currentUserID}
+                unreadCount={unreadCounts[channel.id] ?? 0}
+                onSelect={displayName => {
+                  void handleChannelSelect(channel, displayName, index + 1);
+                }}
+                onItemMouseDown={handleItemMouseDown}
+                getChannelIcon={getChannelIcon}
+                selectionVariant={selectionVariant}
+                isSelected={contextItems.some(c => c.id === `channel-${channel.id}`)}
+              />
+            );
+          })}
+          {hasMore && (
+            <SeeMoreItem
+              value='__see-more-merged__'
+              label={isExpanded ? 'See less' : `See ${hiddenCount} more`}
+              onSelect={() => toggleCategoryExpansion(MERGED_CATEGORY)}
+              hoverable={!isMobile}
+              trackCategory='CHANNEL_SEARCH'
+              trackName='TOGGLE_CATEGORY_EXPANSION'
+              trackMetadata={JSON.stringify({ category: MERGED_CATEGORY, isExpanded })}
+            />
+          )}
+        </Command.Group>
+      </div>
+    );
+  };
 
   // Render backend results for the search-active branch (flat list filtered by activeTab)
   const renderSearchBackendResults = () => (
@@ -2809,7 +3176,8 @@ const ChannelCommandMenu = ({
           const displayCount =
             activeTab === TabType.ALL ? items.length : paginationState[activeTab].cumulativeCount;
           const isUserType = type === 'user';
-          const isExpanded = expandedCategories.has(type);
+          // Only the users section expands here; other backend types route to the results page.
+          const isExpanded = isUserType && expandedCategories.has('users');
           const hasMore = items.length > DISPLAY_LIMIT;
           const displayItems =
             isUserType && !isExpanded && hasMore ? items.slice(0, DISPLAY_LIMIT) : items;
@@ -2840,7 +3208,7 @@ const ChannelCommandMenu = ({
                   <SeeMoreItem
                     value={`__see-more-default-${type}__`}
                     label={isExpanded ? 'See less' : `See ${hiddenCount} more`}
-                    onSelect={() => toggleCategoryExpansion(type)}
+                    onSelect={() => toggleCategoryExpansion('users')}
                     hoverable={!isMobile}
                     trackCategory='CHANNEL_SEARCH'
                     trackName='TOGGLE_BACKEND_USER_EXPANSION'
@@ -2902,7 +3270,7 @@ const ChannelCommandMenu = ({
           const totalItemsCount = allItems.length;
           const displayCount = totalItemsCount;
 
-          const isExpanded = expandedCategories.has('user');
+          const isExpanded = expandedCategories.has('users');
           // Full-screen (screen) mode: "See more" routes to the results page for ANY tab
           // (not just ALL); popup mode keeps the inline expand/collapse.
           const routeSeeMore = searchMode === 'screen';
@@ -2931,12 +3299,14 @@ const ChannelCommandMenu = ({
                   value='__see-more-local-user__'
                   label={!routeSeeMore && isExpanded ? 'See less' : `See ${hiddenCount} more`}
                   onSelect={() =>
-                    routeSeeMore ? handleSeeMoreNavigate('people') : toggleCategoryExpansion('user')
+                    routeSeeMore
+                      ? handleSeeMoreNavigate('people')
+                      : toggleCategoryExpansion('users')
                   }
                   hoverable={!isMobile}
                   trackCategory={routeSeeMore ? 'SEARCH' : 'CHANNEL_SEARCH'}
                   trackName={routeSeeMore ? 'SEE_MORE_SECTION' : 'TOGGLE_CATEGORY_EXPANSION'}
-                  trackMetadata={JSON.stringify({ category: 'user', isExpanded })}
+                  trackMetadata={JSON.stringify({ category: 'users', isExpanded })}
                 />
               )}
             </Command.Group>
@@ -2951,11 +3321,10 @@ const ChannelCommandMenu = ({
   const renderSearchChannelsSection = () =>
     (activeTab === TabType.ALL || activeTab === TabType.CHANNELS) &&
     showGroupedLocalResults &&
-    groupedChannels['channels'] &&
-    groupedChannels['channels'].length > 0 ? (
+    (groupedChannels[ChannelCategory.CHANNELS]?.length ?? 0) > 0 ? (
       <div className='mb-4'>
         {(() => {
-          const items = groupedChannels['channels'];
+          const items = groupedChannels[ChannelCategory.CHANNELS] ?? [];
           const category = ChannelCategory.CHANNELS;
           const isExpanded = expandedCategories.has(category);
           const routeSeeMore = searchMode === 'screen';
@@ -3015,11 +3384,10 @@ const ChannelCommandMenu = ({
   const renderSearchStarredSection = () =>
     (activeTab === TabType.ALL || activeTab === TabType.CHANNELS) &&
     showGroupedLocalResults &&
-    groupedChannels['starred'] &&
-    groupedChannels['starred'].length > 0 ? (
+    (groupedChannels[ChannelCategory.STARRED]?.length ?? 0) > 0 ? (
       <div className='mb-4'>
         {(() => {
-          const items = groupedChannels['starred'];
+          const items = groupedChannels[ChannelCategory.STARRED] ?? [];
           const category = ChannelCategory.STARRED;
           const isExpanded = expandedCategories.has(category);
           const routeSeeMore = searchMode === 'screen';
@@ -3073,20 +3441,14 @@ const ChannelCommandMenu = ({
       </div>
     ) : null;
 
-  // Render the local sections (Starred, Users, Group DMs, Channels) for the search branch.
-  // Each `include*` flag is false when that section is pinned to the top of the
-  // list (hoistStarred / hoistUser / hoistChannel) — avoids a double-render.
-  const renderSearchLocalSections = (
-    includeStarred = true,
-    includeUsers = true,
-    includeChannels = true,
-  ) => (
+  const renderSearchLocalSections = () => (
     <>
       {/* 0. Starred (from local channels) */}
-      {includeStarred && renderSearchStarredSection()}
+      {renderSearchStarredSection()}
 
-      {/* 1. Users (from local) */}
-      {includeUsers && renderSearchUsersSection()}
+      {/* 1. Users + channels. On ALL they are ONE clubbed list; every other tab keeps them
+             as separate sections (the dedicated channels section below is skipped on ALL). */}
+      {activeTab === TabType.ALL ? renderMergedLocalResults() : renderSearchUsersSection()}
 
       {/* 2. Group DMs (from local channels) */}
       {(activeTab === TabType.ALL || activeTab === TabType.CHANNELS) &&
@@ -3151,80 +3513,74 @@ const ChannelCommandMenu = ({
         })()}
 
       {/* 3. Channels (from local channels) */}
-      {includeChannels && renderSearchChannelsSection()}
+      {activeTab !== TabType.ALL && renderSearchChannelsSection()}
     </>
   );
 
-  // Render the local channels for the browse branch (no search text)
-  const renderBrowseLocalChannels = () => (
-    <>
-      {showGroupedLocalResults &&
-        (activeTab === TabType.ALL || activeTab === TabType.CHANNELS || isChannelsType) &&
-        filteredLocalChannels.length > 0 && (
-          <>
-            {Object.entries(groupedChannels).map(([category, items]) => {
-              const typedCategory = category as ChannelCategory;
-              const isExpanded = expandedCategories.has(category);
-              const shouldLimit = !search.trim();
-              const hasMore = items.length > DISPLAY_LIMIT;
-              const displayItems =
-                shouldLimit && !isExpanded && hasMore ? items.slice(0, DISPLAY_LIMIT) : items;
-              const hiddenCount = items.length - DISPLAY_LIMIT;
+  // One browse category group. Starred caps at 3 while Recents shows (so all three sections fit
+  // above the fold); other categories, and Starred without Recents, use the default cap.
+  const renderBrowseCategoryGroup = (category: ChannelCategory): ReactElement | null => {
+    const items = groupedChannels[category] ?? [];
+    if (items.length === 0) return null;
+    const limit =
+      category === ChannelCategory.STARRED && recentSearches.isVisible
+        ? RECENTS_STARRED_CAP
+        : DISPLAY_LIMIT;
+    const isExpanded = expandedCategories.has(category);
+    const shouldLimit = !search.trim();
+    const hasMore = items.length > limit;
+    const displayItems = shouldLimit && !isExpanded && hasMore ? items.slice(0, limit) : items;
+    const hiddenCount = items.length - limit;
 
-              return (
-                <div key={category} className='mb-4'>
-                  <Command.Group
-                    heading={getCategoryLabel(typedCategory)}
-                    className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
-                  >
-                    {displayItems.map(({ channel }, index) => {
-                      const unreadCount = unreadCounts[channel.id] ?? 0;
-                      return (
-                        <ChannelCommandItem
-                          key={channel.id}
-                          channel={channel}
-                          currentUserID={currentUserID}
-                          unreadCount={unreadCount}
-                          onSelect={displayName => {
-                            void handleChannelSelect(channel, displayName, index + 1);
-                          }}
-                          onItemMouseDown={handleItemMouseDown}
-                          getChannelIcon={getChannelIcon}
-                          selectionVariant={selectionVariant}
-                          isSelected={contextItems.some(c => c.id === `channel-${channel.id}`)}
-                        />
-                      );
-                    })}
-                    {shouldLimit && hasMore && (
-                      <SeeMoreItem
-                        value={`__see-more-browse-${category}__`}
-                        label={isExpanded ? 'See less' : `See ${hiddenCount} more`}
-                        onSelect={() => toggleCategoryExpansion(category)}
-                        hoverable={!isMobile}
-                        trackCategory='CHANNEL_SEARCH'
-                        trackName='TOGGLE_LOCAL_CHANNEL_EXPANSION'
-                        trackMetadata={JSON.stringify({ category, isExpanded })}
-                      />
-                    )}
-                  </Command.Group>
-                </div>
-              );
-            })}
-          </>
-        )}
-    </>
-  );
+    return (
+      <div key={category} className='mb-4'>
+        <Command.Group
+          heading={getCategoryLabel(category)}
+          className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
+        >
+          {displayItems.map(({ channel }, index) => {
+            const unreadCount = unreadCounts[channel.id] ?? 0;
+            return (
+              <ChannelCommandItem
+                key={channel.id}
+                channel={channel}
+                currentUserID={currentUserID}
+                unreadCount={unreadCount}
+                onSelect={displayName => {
+                  void handleChannelSelect(channel, displayName, index + 1);
+                }}
+                onItemMouseDown={handleItemMouseDown}
+                getChannelIcon={getChannelIcon}
+                selectionVariant={selectionVariant}
+                isSelected={contextItems.some(c => c.id === `channel-${channel.id}`)}
+              />
+            );
+          })}
+          {shouldLimit && hasMore && (
+            <SeeMoreItem
+              value={`__see-more-browse-${category}__`}
+              label={isExpanded ? 'See less' : `See ${hiddenCount} more`}
+              onSelect={() => toggleCategoryExpansion(category)}
+              hoverable={!isMobile}
+              trackCategory='CHANNEL_SEARCH'
+              trackName='TOGGLE_LOCAL_CHANNEL_EXPANSION'
+              trackMetadata={JSON.stringify({ category, isExpanded })}
+            />
+          )}
+        </Command.Group>
+      </div>
+    );
+  };
 
-  // Hoist the best local matches to the top of the list — applies in BOTH the
-  // popup and the screen search bar. Only in the combined ALL view (a single-type
-  // tab has nothing to reorder) and not while a mention typeahead is open.
-  // Starred always leads; a strong user/channel match then becomes the default
-  // Enter target. `hasStrongUserMatch`/`hasStrongChannelMatch` already exclude
-  // from:/in:/with: chips, where backend results lead instead.
-  const canHoist = activeTab === TabType.ALL && !isFlatAllView && !mentionSearchType;
-  const hoistStarred = canHoist && hasStrongStarredMatch;
-  const hoistUser = canHoist && hasStrongUserMatch;
-  const hoistChannel = canHoist && hasStrongChannelMatch;
+  const canShowLocalBrowse =
+    showGroupedLocalResults &&
+    (activeTab === TabType.ALL || activeTab === TabType.CHANNELS || isChannelsType) &&
+    filteredLocalChannels.length > 0;
+
+  const renderBrowseChannels = (categories: ChannelCategory[]): ReactElement | null => {
+    if (!canShowLocalBrowse) return null;
+    return <>{categories.map(renderBrowseCategoryGroup)}</>;
+  };
 
   // Shared confirmation for a `/call` on a channel. Rendered from every return branch
   // (below) so it survives the Cmd+K close — the menu unmounts its dialog, this stays.
@@ -3457,15 +3813,13 @@ const ChannelCommandMenu = ({
       return;
     }
 
-    // Handle regular user mention search (@, from:, with:, assignee:)
-    if (mentionSearchType === ChipType.USER && availableUsers[selectedMentionIndex]) {
-      const user = availableUsers[selectedMentionIndex];
-      void handleMentionSelect({
-        id: user.id,
-        name: getUserDisplayName(user),
-        type: ChipType.USER,
-        ...(user.email ? { email: user.email } : {}),
-      });
+    // Regular user mention search (@, from:, with:, assignee:) — plus user-groups under `@`.
+    // People and groups share one interleaved list; the item's own type decides the chip.
+    if (mentionSearchType === ChipType.USER) {
+      // Reuse the click handler so keyboard, click, and ghost all commit the same label —
+      // a group's `@`-handle (alias), a person's name.
+      const item = atMentionItems[selectedMentionIndex];
+      if (item) handleAtMentionSelect(item);
     } else if (mentionSearchType === ChipType.CHANNEL && availableChannels[selectedMentionIndex]) {
       const { channel, displayName } = availableChannels[selectedMentionIndex];
       void handleMentionSelect({
@@ -3827,6 +4181,17 @@ const ChannelCommandMenu = ({
     enterTarget?.click();
   };
 
+  // Word a chip via its own helpers + live lookups, so this row and the pill in the box above
+  // can't render the same filter differently.
+  const resolveChipDisplayName = (chip: ChipData): string =>
+    resolveChipName(chip, {
+      userName: id => getUserDisplayName(usersById.get(id) ?? { displayName: id, email: '' }),
+      channelName: id => {
+        const found = allChannels.find(c => c.channel.id === id);
+        return found ? resolveChannelLabel(found.channel, currentUserID, allUsers) : undefined;
+      },
+    });
+
   // "Show results for: <chips> <query>" — the row that leaves the palette for the
   // full-screen results page. Rendered in both palettes; where it sits in the list is
   // decided at the call sites below. Never in the inline/context-selection palettes
@@ -3837,66 +4202,36 @@ const ChannelCommandMenu = ({
     !contextSelectionMode &&
     !mentionSearchType &&
     (searchText.trim() || selectedMentions.length > 0) ? (
-      <Command.Item
-        value='__show-results-for__'
-        data-show-results-item='true'
-        onPointerDown={() => {
-          showResultsTriggerRef.current = 'click';
-        }}
-        // Both paths are wired on purpose: cmdk's onSelect covers keyboard activation,
-        // and the plain onClick covers the mouse without depending on cmdk's selection
-        // state. goToSearchResults de-dupes when a click fires both.
-        onClick={() => goToSearchResults('click')}
-        onSelect={() => goToSearchResults(showResultsTriggerRef.current)}
-        className={`flex items-center gap-2 px-2 py-2 rounded-md cursor-pointer text-sm text-foreground ${!isMobile && 'hover:bg-muted'} aria-selected:bg-muted`}
-        data-track-category='SEARCH'
-        data-track-name='SHOW_RESULTS_FOR'
-      >
-        <SearchDefault size={14} className='text-muted-foreground shrink-0' />
-        <span className='flex items-center flex-wrap gap-1'>
-          <span className='text-sm'>Show detailed results for:</span>
-          {selectedMentions.map(m => {
-            // The surface supplies the lookups; everything after that — which prefix,
-            // how the value reads, whether it's you — comes from the chip's own helpers,
-            // so this row and the pill in the box above can't word a filter differently.
-            const chip: ChipData = {
-              ...m,
-              name: resolveChipName(m as ChipData, {
-                userName: id =>
-                  getUserDisplayName(usersById.get(id) ?? { displayName: id, email: '' }),
-                channelName: id => {
-                  const found = allChannels.find(c => c.channel.id === id);
-                  return found
-                    ? resolveChannelLabel(found.channel, currentUserID, allUsers)
-                    : undefined;
-                },
-              }),
-            } as ChipData;
-            const prefix = chipPrefixText(chip);
-            const name = chipLabelText(chip);
-
-            return (
-              <span
-                key={`${m.prefix}-${m.id}`}
-                // The same `.filter-chip` the search box renders, so a filter looks
-                // identical whether it's a chip you're editing above or a value being
-                // summarised here — including the self-mention tint for your own user.
-                className={cn(
-                  'filter-chip h-6 px-1.5',
-                  isSelfMentionChip(chip, currentUserID) && 'filter-chip--self-mention',
-                )}
-              >
-                {/* prefix → icon → value, the order `$createFilterChip` appends them in,
-                    so this reads identically to the chip in the box above. */}
-                <span className='leading-tight'>{prefix}</span>
-                <ChipIcon mentionData={m as ChipData} />
-                <span className='leading-tight'>{name}</span>
-              </span>
-            );
-          })}
-          {searchText.trim() && <span className='font-semibold text-sm'>{searchText.trim()}</span>}
-        </span>
-      </Command.Item>
+      <div className='mb-4'>
+        <Command.Item
+          value='__show-results-for__'
+          data-show-results-item='true'
+          onPointerDown={() => {
+            showResultsTriggerRef.current = 'click';
+          }}
+          // Both paths are wired on purpose: cmdk's onSelect covers keyboard activation,
+          // and the plain onClick covers the mouse without depending on cmdk's selection
+          // state. goToSearchResults de-dupes when a click fires both.
+          onClick={() => goToSearchResults('click')}
+          onSelect={() => goToSearchResults(showResultsTriggerRef.current)}
+          className={`flex items-center gap-2 px-2 py-2 rounded-md cursor-pointer text-sm text-foreground ${!isMobile && 'hover:bg-muted'} aria-selected:bg-muted`}
+          data-track-category='SEARCH'
+          data-track-name='SHOW_RESULTS_FOR'
+        >
+          <SearchDefault size={14} className='text-muted-foreground shrink-0' />
+          <span className='flex items-center flex-wrap gap-1'>
+            <span className='text-sm'>Show detailed results for:</span>
+            <QueryFilterChips
+              mentions={selectedMentions as ChipData[]}
+              currentUserID={currentUserID}
+              resolveName={resolveChipDisplayName}
+            />
+            {searchText.trim() && (
+              <span className='font-semibold text-sm'>{searchText.trim()}</span>
+            )}
+          </span>
+        </Command.Item>
+      </div>
     ) : null;
 
   const commandBody = (
@@ -3943,6 +4278,7 @@ const ChannelCommandMenu = ({
             availableDates={availableDates}
             availableBoards={availableBoards}
             availableMentionTargets={availableMentionTargets}
+            availableUserMentionItems={atMentionItems}
             className='flex-1 px-1.5'
             open={open}
             mentionSearchType={mentionSearchType}
@@ -4250,6 +4586,17 @@ const ChannelCommandMenu = ({
               <SlashCommandPalette command={slash} onItemMouseDown={handleItemMouseDown} />
             ) : (
               <>
+                {/* AI answer above the current tab's results when the query needs AI
+                    (Google "AI Overview" style). Not a cmdk item, so the results below
+                    keep arrow keys and the Enter target. */}
+                {aiOverview && (
+                  <AiAnswerCard
+                    query={searchText}
+                    tab={activeTab}
+                    active={isAiQuery && !mentionSearchType}
+                  />
+                )}
+
                 {/* Popup palette: the row is pinned here, directly under the tabs, so it
                     sits in the same place no matter what matched. It is skipped by the
                     first-row auto-select, so the top result keeps the Enter target. */}
@@ -4259,9 +4606,6 @@ const ChannelCommandMenu = ({
                     screen. Starred leads; the strong-matched user/channel then becomes
                     the default Enter target (Slack-style). In screen mode these sit
                     above the "Show results for" row below. */}
-                {hoistStarred && renderSearchStarredSection()}
-                {hoistUser && renderSearchUsersSection()}
-                {hoistChannel && renderSearchChannelsSection()}
 
                 {/* Screen palette: the row stays below the hoisted best matches, which
                     own the Enter target there. */}
@@ -4360,74 +4704,6 @@ const ChannelCommandMenu = ({
                           mentionSearchQuery && (
                             <Command.Empty className='py-6 text-center text-sm text-muted-foreground'>
                               No results found for &quot;{mentionSearchQuery}&quot;
-                            </Command.Empty>
-                          )}
-
-                        {/* Regular USER mention search (@, from:, assignee:) - Show only Users */}
-                        {mentionSearchType === ChipType.USER &&
-                          (userTrigger === '@' ||
-                            userTrigger === 'from:' ||
-                            userTrigger === 'to:' ||
-                            userTrigger === 'assignee:') &&
-                          availableUsers.length > 0 && (
-                            <Command.Group
-                              heading='Users'
-                              className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
-                            >
-                              {availableUsers.map((user, index) => {
-                                const isDeactivated = isUserDeactivated(user);
-                                return (
-                                  <Command.Item
-                                    key={user.id}
-                                    value={`mention-user-${user.id}`}
-                                    onSelect={() => {
-                                      void handleMentionSelect({
-                                        id: user.id,
-                                        name: getUserDisplayName(user),
-                                        type: ChipType.USER,
-                                        ...(user.email ? { email: user.email } : {}),
-                                      });
-                                    }}
-                                    onMouseEnter={() => {
-                                      selectMention(index);
-                                    }}
-                                    className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all duration-150 mt-1.5 ${
-                                      index === selectedMentionIndex ? 'cmdk-active-row' : ''
-                                    } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
-                                    style={{ WebkitTapHighlightColor: 'transparent' }}
-                                  >
-                                    <Avatar userId={user.id} size='xs' />
-                                    <div className='flex-1 min-w-0 flex items-center gap-2'>
-                                      <span
-                                        className={`min-w-0 truncate text-[15px] leading-[1.2] tracking-[-0.1px] ${isDeactivated ? 'text-muted-foreground' : 'text-foreground'}`}
-                                      >
-                                        {getUserDisplayName(user)}
-                                      </span>
-                                      {isDeactivated && (
-                                        <span className='shrink-0 text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded'>
-                                          Deactivated
-                                        </span>
-                                      )}
-                                      {user.email && (
-                                        <span className='min-w-0 truncate text-xs text-muted-foreground'>
-                                          {user.email}
-                                        </span>
-                                      )}
-                                    </div>
-                                  </Command.Item>
-                                );
-                              })}
-                            </Command.Group>
-                          )}
-                        {mentionSearchType === ChipType.USER &&
-                          (userTrigger === '@' ||
-                            userTrigger === 'from:' ||
-                            userTrigger === 'to:' ||
-                            userTrigger === 'assignee:') &&
-                          availableUsers.length === 0 &&
-                          mentionSearchQuery && (
-                            <Command.Empty className='py-6 text-center text-sm text-muted-foreground'>
-                              No users found for &quot;{mentionSearchQuery}&quot;
                             </Command.Empty>
                           )}
                       </>
@@ -4576,70 +4852,76 @@ const ChannelCommandMenu = ({
                         </Command.Empty>
                       )}
 
-                    {/* Regular USER mention search (@, from:, with:, assignee:) - Show only Users */}
+                    {/* USER typeahead — people (all USER triggers), then user-groups under `@`.
+                        Both sections share one render; only the descriptor fields differ. */}
                     {mentionSearchType === ChipType.USER &&
                       (userTrigger === '@' ||
                         userTrigger === 'from:' ||
                         userTrigger === 'to:' ||
                         userTrigger === 'with:' ||
                         userTrigger === 'assignee:') &&
-                      availableUsers.length > 0 && (
-                        <Command.Group
-                          heading='Users'
-                          className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
-                        >
-                          {availableUsers.map((user, index) => {
-                            const isDeactivated = isUserDeactivated(user);
-                            return (
-                              <Command.Item
-                                key={user.id}
-                                value={`mention-user-${user.id}`}
-                                onSelect={() => {
-                                  void handleMentionSelect({
-                                    id: user.id,
-                                    name: getUserDisplayName(user),
-                                    type: ChipType.USER,
-                                    ...(user.email ? { email: user.email } : {}),
-                                  });
-                                }}
-                                onMouseEnter={() => {
-                                  selectMention(index);
-                                }}
-                                className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all duration-150 mt-1.5 ${
-                                  index === selectedMentionIndex ? 'cmdk-active-row' : ''
-                                } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
-                                style={{ WebkitTapHighlightColor: 'transparent' }}
-                              >
-                                <Avatar userId={user.id} size='xs' />
-                                <div className='flex-1 min-w-0 flex items-center gap-2'>
-                                  <span
-                                    className={`min-w-0 truncate text-[15px] leading-[1.2] tracking-[-0.1px] ${isDeactivated ? 'text-muted-foreground' : 'text-foreground'}`}
-                                  >
-                                    {getUserDisplayName(user)}
-                                  </span>
-                                  {isDeactivated && (
-                                    <span className='shrink-0 text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded'>
-                                      Deactivated
-                                    </span>
-                                  )}
-                                  {user.email && (
-                                    <span className='min-w-0 truncate text-xs text-muted-foreground'>
-                                      {user.email}
-                                    </span>
-                                  )}
-                                </div>
-                              </Command.Item>
-                            );
-                          })}
-                        </Command.Group>
-                      )}
+                      atMentionItems.length > 0 &&
+                      [
+                        {
+                          type: ChipType.USER,
+                          heading: userTrigger === '@' ? 'People' : 'Users',
+                          stateKey: 'people' as const,
+                          total: availableUsers.length,
+                          trackName: 'AT_MENTION_SHOW_MORE_PEOPLE',
+                        },
+                        {
+                          type: ChipType.USER_GROUP,
+                          heading: 'User Groups',
+                          stateKey: 'userGroups' as const,
+                          total: availableUserGroups.length,
+                          trackName: 'AT_MENTION_SHOW_MORE_USER_GROUPS',
+                        },
+                      ]
+                        .filter(section => atMentionItems.some(item => item.type === section.type))
+                        .map(section => (
+                          <Command.Group
+                            key={section.stateKey}
+                            heading={section.heading}
+                            className='mb-4 [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
+                          >
+                            {atMentionItems
+                              .map((item, index) => ({ item, index }))
+                              .filter(({ item }) => item.type === section.type)
+                              .map(({ item, index }) => (
+                                <AtMentionRow
+                                  key={`${item.type}-${item.id}`}
+                                  item={item}
+                                  index={index}
+                                  selectedMentionIndex={selectedMentionIndex}
+                                  onSelect={handleAtMentionSelect}
+                                  onHover={selectMention}
+                                  isMobile={isMobile}
+                                />
+                              ))}
+                            {userTrigger === '@' &&
+                              !expandedMentionGroups[section.stateKey] &&
+                              section.total > MENTION_GROUP_PAGE && (
+                                <MentionShowMoreButton
+                                  onExpand={() => {
+                                    setExpandedMentionGroups(prev => ({
+                                      ...prev,
+                                      [section.stateKey]: true,
+                                    }));
+                                    // Expanding shifts later rows' indices, so reset to the top.
+                                    setSelectedMentionIndex(0);
+                                  }}
+                                  trackName={section.trackName}
+                                />
+                              )}
+                          </Command.Group>
+                        ))}
                     {mentionSearchType === ChipType.USER &&
                       (userTrigger === '@' ||
                         userTrigger === 'from:' ||
                         userTrigger === 'to:' ||
                         userTrigger === 'with:' ||
                         userTrigger === 'assignee:') &&
-                      availableUsers.length === 0 &&
+                      atMentionItems.length === 0 &&
                       mentionSearchQuery && (
                         <Command.Empty className='py-6 text-center text-sm text-muted-foreground'>
                           No users found for &quot;{mentionSearchQuery}&quot;
@@ -4703,7 +4985,7 @@ const ChannelCommandMenu = ({
                           <Command.Group
                             key={group.type}
                             heading={group.heading}
-                            className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
+                            className='mb-4 [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
                           >
                             {rows.map(({ target, index }) => (
                               <Command.Item
@@ -4731,6 +5013,8 @@ const ChannelCommandMenu = ({
                                 <div className='flex items-center justify-center h-4 w-5 flex-shrink-0 text-muted-foreground'>
                                   {target.type === ChipType.USER ? (
                                     <Avatar userId={target.id} size='xs' />
+                                  ) : target.type === ChipType.USER_GROUP ? (
+                                    <UserGroupGlyph />
                                   ) : (
                                     <ChannelChipIcon id={target.id} size={16} />
                                   )}
@@ -4742,29 +5026,20 @@ const ChannelCommandMenu = ({
                                 </div>
                               </Command.Item>
                             ))}
-                            {mentionCandidates[group.key].length > rows.length && (
-                              <button
-                                type='button'
-                                onMouseDown={e => e.preventDefault()}
-                                onClick={() => {
-                                  setExpandedMentionGroups(prev => ({
-                                    ...prev,
-                                    [group.key]: true,
-                                  }));
-                                  // Expanding People shifts every Channels row's index, so
-                                  // the old highlight would point at a different row.
-                                  setSelectedMentionIndex(0);
-                                }}
-                                className='flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-[13px] text-muted-foreground hover:bg-muted hover:text-foreground'
-                                data-track-category='SEARCH'
-                                data-track-name={`MENTIONS_SHOW_MORE_${group.key.toUpperCase()}`}
-                              >
-                                <span className='flex h-4 w-5 flex-shrink-0 items-center justify-center'>
-                                  <ChevronDown size={14} />
-                                </span>
-                                Show more
-                              </button>
-                            )}
+                            {!expandedMentionGroups[group.key] &&
+                              mentionCandidates[group.key].length > MENTION_GROUP_PAGE && (
+                                <MentionShowMoreButton
+                                  onExpand={() => {
+                                    setExpandedMentionGroups(prev => ({
+                                      ...prev,
+                                      [group.key]: true,
+                                    }));
+                                    // Expanding shifts later rows' indices, so reset to the top.
+                                    setSelectedMentionIndex(0);
+                                  }}
+                                  trackName={`MENTIONS_SHOW_MORE_${group.key.toUpperCase()}`}
+                                />
+                              )}
                           </Command.Group>
                         );
                       })}
@@ -4962,13 +5237,17 @@ const ChannelCommandMenu = ({
                         {hasFromOrInFilter ? (
                           <>
                             {backendResults.length > 0 && renderSearchBackendResults()}
+                            {/* Flat ALL view replaces the per-category sections with ONE merged
+                                people/DM/channel list — rendering both would repeat every row.
+                                It renders unconditionally: it is local, so it must survive a
+                                Vespa failure or an empty backend response. */}
                             {renderSearchLocalSections()}
                           </>
                         ) : (
                           <>
                             {/* A section pinned to the top (above) is skipped here to
                             avoid a double-render. */}
-                            {renderSearchLocalSections(!hoistStarred, !hoistUser, !hoistChannel)}
+                            {renderSearchLocalSections()}
                             {backendResults.length > 0 && renderSearchBackendResults()}
                           </>
                         )}
@@ -4980,11 +5259,37 @@ const ChannelCommandMenu = ({
                             {activeTab !== TabType.CHANNELS &&
                               backendResults.length > 0 &&
                               renderDefaultBackendResults()}
-                            {renderBrowseLocalChannels()}
+                            {renderBrowseChannels([
+                              ChannelCategory.STARRED,
+                              ...NON_STARRED_CATEGORIES,
+                            ])}
                           </>
                         ) : (
                           <>
-                            {renderBrowseLocalChannels()}
+                            {activeTab === TabType.ALL ? (
+                              <>
+                                {/* ALL-tab empty state, in order: Starred (capped while recents
+                                    show), then recents, then the merged People & channels list. */}
+                                {canShowLocalBrowse &&
+                                  renderBrowseCategoryGroup(ChannelCategory.STARRED)}
+                                {recentSearches.isVisible && (
+                                  <RecentSearches
+                                    recents={recentSearches.recents}
+                                    currentUserID={currentUserID}
+                                    getTabLabel={resolveTabLabel}
+                                    onSelect={handleRecentSearchSelect}
+                                    onRemove={recentSearches.remove}
+                                    onItemMouseDown={handleItemMouseDown}
+                                  />
+                                )}
+                                {renderMergedLocalResults()}
+                              </>
+                            ) : (
+                              renderBrowseChannels([
+                                ChannelCategory.STARRED,
+                                ...NON_STARRED_CATEGORIES,
+                              ])
+                            )}
                             {/* People tab browse: rank by affinity (rankUsersWithMfu) like the
                                 search branch, instead of the raw, unranked backend user list. */}
                             {activeTab === TabType.USERS

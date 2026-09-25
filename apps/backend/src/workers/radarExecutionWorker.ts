@@ -4,8 +4,9 @@ import { logger } from '@/utils/logger';
 import { radarExecutionQueue, type RadarExecutionJobData } from '@/queues/radarExecutionQueue';
 import { radarExecutionService } from '@/services/radar/radarExecutionService';
 import { DatabaseClient } from '@/database/client';
-import { runAsServiceActor, runAsSystem } from '@/database/tenant/context';
+import { runAsServiceActor } from '@/database/tenant/context';
 import { radarScopeFor } from '@/services/radar/radarScope';
+import { sweepRunLogsQuery } from '@/bypassAcl/radarServices';
 
 const prisma = DatabaseClient.getInstance();
 
@@ -14,13 +15,8 @@ const prisma = DatabaseClient.getInstance();
 // processed serially by construction while different scopes drain in parallel.
 const CONCURRENCY = config.radar.workerConcurrency;
 
-const RUN_LOG_RETENTION_DAYS = config.radar.runLogRetentionDays;
 /** Retention is a housekeeping floor, not a deadline — hourly is plenty. */
 const RUN_LOG_SWEEP_INTERVAL_MS = 60 * 60 * 1000;
-const RUN_LOG_SWEEP_BATCH_SIZE = 5_000;
-const RUN_LOG_SWEEP_BATCH_PAUSE_MS = 250;
-/** Bounds one sweep's work; the remainder is picked up by the next tick. */
-const RUN_LOG_SWEEP_MAX_BATCHES = 40;
 
 class RadarExecutionWorker {
   private isInitialized = false;
@@ -68,39 +64,7 @@ class RadarExecutionWorker {
    * locks short and the work interruptible.
    */
   private sweepRunLogs(): Promise<void> {
-    // Retention spans every tenant by design: runAsSystem leaves the query
-    // unfiltered and marks it intentional for the ACL extension.
-    return runAsSystem(() => this.sweepRunLogsUnscoped());
-  }
-
-  private async sweepRunLogsUnscoped(): Promise<void> {
-    const cutoff = new Date(Date.now() - RUN_LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000);
-    let deleted = 0;
-    try {
-      for (let batch = 0; batch < RUN_LOG_SWEEP_MAX_BATCHES; batch++) {
-        const stale = await prisma.executionRunLog.findMany({
-          where: { createdAt: { lt: cutoff } },
-          select: { id: true },
-          take: RUN_LOG_SWEEP_BATCH_SIZE,
-        });
-        if (stale.length === 0) break;
-        const { count } = await prisma.executionRunLog.deleteMany({
-          where: { id: { in: stale.map(r => r.id) } },
-        });
-        deleted += count;
-        // Breathe so a large backlog doesn't monopolise the pool.
-        await new Promise(resolve => setTimeout(resolve, RUN_LOG_SWEEP_BATCH_PAUSE_MS));
-      }
-      if (deleted > 0) {
-        logger.info('[RADAR-EXECUTION-WORKER] Swept run logs', {
-          deleted,
-          olderThanDays: RUN_LOG_RETENTION_DAYS,
-        });
-      }
-    } catch (error) {
-      // Retention must never take the worker down.
-      logger.warn('[RADAR-EXECUTION-WORKER] Run-log sweep failed', { deleted, error });
-    }
+    return sweepRunLogsQuery();
   }
 
   private startRunLogSweep(): void {

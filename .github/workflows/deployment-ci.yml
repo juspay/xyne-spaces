@@ -1,0 +1,41 @@
+name: Deployment CI
+
+on:
+  pull_request:
+    paths:
+      - deployment/**
+      - .github/workflows/deployment-ci.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Terraform + Helm validate
+    runs-on: ubuntu-latest
+    env:
+      TF_PLUGIN_CACHE_DIR: ${{ github.workspace }}/.terraform-plugin-cache
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          terraform_wrapper: false
+
+      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
+        with:
+          version: v3.16.2
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.TF_PLUGIN_CACHE_DIR }}
+          key: ${{ runner.os }}-terraform-plugins-${{ hashFiles('deployment/terraform/**/.terraform.lock.hcl') }}
+          restore-keys: |
+            ${{ runner.os }}-terraform-plugins-
+
+      - name: Validate deployment
+        run: bash deployment/scripts/validate.sh

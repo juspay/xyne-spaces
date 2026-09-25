@@ -2,15 +2,13 @@ import { useState, useRef, useEffect, useMemo } from 'react';
 import { REACTION_EMOJIS } from '../hooks/useReactions';
 import {
   Users,
-  Share2,
+  Link as LinkIcon,
   Mic,
   MicOff,
   Video,
   VideoOff,
-  Monitor,
+  MonitorUp,
   PhoneOff,
-  Maximize2,
-  Minimize2,
   MessageSquare,
   MessageCircleMore,
   Volume2,
@@ -20,9 +18,9 @@ import {
   MoreVertical,
   PencilRuler,
   SmilePlus,
-  UserCog,
   ImagePlus,
-  NotebookPen,
+  Hand,
+  NotepadText,
 } from 'lucide-react';
 import { useMediaDeviceSelect } from '@livekit/components-react';
 import { cn } from '../../../utils/classNames';
@@ -45,6 +43,7 @@ import {
   buildCallInviteText,
   getAiButtonColorClass,
   getAiButtonDisabled,
+  getAiControlState,
   getAiButtonTitle,
   handleAiButtonClick,
 } from '../../../utils/callControls';
@@ -53,10 +52,19 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '../../ui/dropdown-menu';
 import Tooltip from '../../ui/Tooltip';
 import { ShortcutHint } from '../../ui/ShortcutHint';
+import {
+  ControlBadge,
+  ControlButton,
+  controlClassName,
+  controlIconProps,
+  controlStyle,
+  type ControlSizing,
+} from './ControlButton';
 
 import { XyneTelepresenceIcon } from '../../../assets/icons/XyneTelepresenceIcon';
 
@@ -83,8 +91,6 @@ interface CallControlsProps {
   isAnySharingScreen?: boolean;
   isChatOpen: boolean;
   isParticipantsSidebarOpen: boolean;
-  isHostControlsOpen?: boolean | undefined;
-  onToggleHostControls?: (() => void) | undefined;
   isNotesOpen?: boolean | undefined;
   /** Omit to hide the notes button (e.g. external users) */
   onToggleNotes?: (() => void) | undefined;
@@ -97,7 +103,6 @@ interface CallControlsProps {
   onToggleCamera: () => void;
   onToggleScreenShare: () => void;
   onDisconnect: () => void;
-  onToggleView: () => void;
   onToggleChat: () => void;
   onToggleParticipantsSidebar: () => void;
   onToggleAIAssistant: () => void;
@@ -115,7 +120,6 @@ interface CallControlsProps {
   unreadCallChatCount?: number | undefined;
   hideThreadChat?: boolean | undefined;
   hideAIAssistant?: boolean | undefined;
-  hideMinimize?: boolean | undefined;
   isExternalUser?: boolean | undefined;
   /** Whether this user is the call host (can start/stop recording) */
   isHost?: boolean | undefined;
@@ -128,6 +132,11 @@ interface CallControlsProps {
   onTogglePresentationMode?: (() => void) | undefined;
   isPresentationMode?: boolean | undefined;
   hidePresentationMode?: boolean | undefined;
+  /** Full view: left-hand meeting details (clock, title), Meet's bottom-left corner. */
+  infoSlot?: React.ReactNode;
+  /** Full view: raise / lower hand, offered in the ⋮ menu. */
+  isHandRaised?: boolean | undefined;
+  onToggleHandRaise?: (() => void) | undefined;
 }
 
 export function CallControls({
@@ -137,8 +146,6 @@ export function CallControls({
   isAnySharingScreen = false,
   isChatOpen,
   isParticipantsSidebarOpen,
-  isHostControlsOpen = false,
-  onToggleHostControls,
   isNotesOpen = false,
   onToggleNotes,
   isAIAssistantEnabled,
@@ -150,7 +157,6 @@ export function CallControls({
   onToggleCamera,
   onToggleScreenShare,
   onDisconnect,
-  onToggleView,
   onToggleChat,
   onToggleParticipantsSidebar,
   onToggleAIAssistant,
@@ -166,7 +172,6 @@ export function CallControls({
   unreadCallChatCount = 0,
   hideThreadChat = false,
   hideAIAssistant = false,
-  hideMinimize = false,
   hidePresentationMode = false,
   isExternalUser = false,
   isRecording = false,
@@ -175,6 +180,9 @@ export function CallControls({
   onStopRecording,
   onTogglePresentationMode,
   isPresentationMode = false,
+  infoSlot,
+  isHandRaised = false,
+  onToggleHandRaise,
 }: CallControlsProps): React.ReactElement {
   const [showCopied, setShowCopied] = useState(false);
   const [showCameraMenu, setShowCameraMenu] = useState(false);
@@ -185,7 +193,6 @@ export function CallControls({
 
   const micMenuRef = useRef<HTMLDivElement>(null);
   const cameraMenuRef = useRef<HTMLDivElement>(null);
-  const controlsRef = useRef<HTMLDivElement>(null);
   const room = useSelector(roomActor, state => state.context.room);
   const isBackgroundBlurEnabled = useSelector(
     roomActor,
@@ -227,8 +234,8 @@ export function CallControls({
   const micTooltip = audioTurnedOffByHost
     ? "The host turned off everyone's audio"
     : isMicEnabled
-      ? 'Mute microphone'
-      : 'Unmute microphone (or press spacebar to speak)';
+      ? 'Turn off microphone'
+      : 'Turn on microphone (or hold spacebar to speak)';
   const cameraTooltip = cameraTurnedOffByHost
     ? "The host turned off everyone's camera"
     : isCameraEnabled
@@ -239,8 +246,8 @@ export function CallControls({
     : screenShareTurnedOffByHost
       ? 'The host turned off screen sharing'
       : isScreenSharing
-        ? 'Stop sharing'
-        : 'Share screen';
+        ? 'Stop presenting'
+        : 'Present now';
   const handleScreenShareClick = (): void => {
     if (screenShareTurnedOffByHost || screenShareBlockedByWhiteboard) return;
     onToggleScreenShare();
@@ -286,17 +293,8 @@ export function CallControls({
     return () => window.removeEventListener('keyup', handleKeyUp);
   }, [isPushToTalkActive]);
 
-  // Check if current user is the controller
-  const isController = localParticipantId === aiController?.id;
-  const isControlledByOther = Boolean(aiController && !isController);
-
-  // Check if someone else has a pending request (disable request button)
-  const hasPendingRequestFromOther = Boolean(
-    pendingControlRequest && pendingControlRequest.requesterId !== localParticipantId,
-  );
-  const isRequestingUser = Boolean(
-    pendingControlRequest && pendingControlRequest.requesterId === localParticipantId,
-  );
+  const { isController, isControlledByOther, hasPendingRequestFromOther, isRequestingUser } =
+    getAiControlState({ localParticipantId, aiController, pendingControlRequest });
 
   // Use LiveKit's device selection hooks
   const {
@@ -333,21 +331,6 @@ export function CallControls({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const handleMicDeviceChange = async (deviceId: string): Promise<void> => {
-    await setActiveAudioDevice(deviceId);
-    // Keep the main menu open so user can see the selection
-  };
-
-  const handleSpeakerDeviceChange = async (deviceId: string): Promise<void> => {
-    await setActiveSpeakerDevice(deviceId);
-    // Keep the main menu open so user can see the selection
-  };
-
-  const handleCameraDeviceChange = async (deviceId: string): Promise<void> => {
-    await setActiveCameraDevice(deviceId);
-    // Keep the main menu open so user can see the selection
-  };
-
   const handleCopyInviteLink = (): void => {
     if (!roomLink) return;
     const text = buildCallInviteText({
@@ -367,24 +350,12 @@ export function CallControls({
     });
   };
 
-  // Determine if custom sizing is being used (for mini view with dynamic sizing)
+  const isFullView = viewMode === 'full';
+  // The mini window scales controls with its width; full view uses fixed Meet sizes.
   const hasCustomSizing = iconSize !== 20 || buttonPadding !== 16;
-  const isCompactControls = viewMode === 'mini' || hasCustomSizing;
-  const buttonClasses = cn(
-    'rounded-full transition-all duration-200 transform hover:scale-110 shadow-lg flex-shrink-0',
-    !hasCustomSizing && 'p-2.5 sm:p-4',
-  );
-  const requestCountBadgeClasses = cn(
-    'absolute top-[14%] right-[14%] translate-x-1/2 -translate-y-1/2 px-1 flex items-center justify-center bg-red-500 text-white font-bold rounded-full border border-gray-900',
-    isCompactControls ? 'min-w-[16px] h-[16px] text-[9px]' : 'min-w-[22px] h-[22px] text-[11px]',
-  );
-  const midnightControlClass = 'bg-gray-700 hover:bg-gray-600 text-white';
-  const midnightControlGroupClass = 'bg-gray-700 border border-gray-600';
-  const midnightPopoverClass = 'bg-gray-700 border border-gray-600 text-white';
-  const midnightSeparatorClass = 'bg-gray-600';
-
-  // Calculate button gap based on iconSize
-  const gapClass = iconSize < 16 ? 'gap-1' : iconSize < 20 ? 'gap-1.5' : 'gap-1 sm:gap-1.5';
+  const sizing: ControlSizing = { isFullView, hasCustomSizing, iconSize, buttonPadding };
+  const menuIconProps = controlIconProps(sizing);
+  const popoverClass = 'bg-[#1e1f20] ring-1 ring-white/10 text-[#e3e3e3] shadow-2xl';
 
   const isAiButtonDisabled = getAiButtonDisabled({
     hasPendingRequestFromOther,
@@ -404,8 +375,10 @@ export function CallControls({
     isController,
     isAIAssistantEnabled,
     isControlledByOther,
-    defaultControlClass: midnightControlClass,
+    defaultControlClass: '',
   });
+  const showAiButton = !hideAIAssistant && isTranscriptionEnabled;
+  const showPresentationMode = !hidePresentationMode && !!onTogglePresentationMode;
 
   const publishWhiteboardVisibility = (isOpen: boolean, timestamp: number): void => {
     if (!room) return;
@@ -421,809 +394,650 @@ export function CallControls({
     });
   };
 
-  const toggleWhiteboardFromMiniView = (): void => {
-    const nextIsOpen = !isWhiteboardOpen;
-    const timestamp = Date.now();
-    sendCallWhiteboardEvent({ type: 'setOpen', isOpen: nextIsOpen, timestamp });
-    publishWhiteboardVisibility(nextIsOpen, timestamp);
-  };
-
   const handleWhiteboardClick = (): void => {
-    if (viewMode === 'mini') {
-      toggleWhiteboardFromMiniView();
-      return;
-    }
-
     const nextIsOpen = !isWhiteboardOpen;
     const timestamp = Date.now();
     sendCallWhiteboardEvent({ type: 'setOpen', isOpen: nextIsOpen, timestamp });
     publishWhiteboardVisibility(nextIsOpen, timestamp);
   };
 
-  const callToolMenuItems = [
-    {
-      id: 'whiteboard',
-      label: isWhiteboardOpen ? 'Close whiteboard' : 'Open whiteboard',
-      icon: PencilRuler,
-      isActive: isWhiteboardOpen,
-      onSelect: handleWhiteboardClick,
-      trackName: 'TOGGLE_WHITEBOARD',
-    },
-  ];
+  // ── Individual controls ────────────────────────────────────────────────────
 
-  return (
-    <>
-      <div ref={controlsRef} className={`flex items-center justify-center ${gapClass} flex-nowrap`}>
-        {/* Microphone Toggle with Device Selector */}
-        <div className='relative' ref={micMenuRef}>
-          <div className={cn('flex items-center gap-0.5 rounded-full', midnightControlGroupClass)}>
-            <Tooltip
-              content={
-                audioTurnedOffByHost ? (
-                  micTooltip
-                ) : (
-                  <span>
-                    {micTooltip} <ShortcutHint shortcut='huddle.toggleMute' />
-                  </span>
-                )
-              }
-              side='top'
-              sideOffset={8}
-              collisionPadding={8}
-              className={cn(
-                'whitespace-normal text-center leading-snug',
-                viewMode === 'mini' ? 'max-w-44' : 'max-w-64',
-              )}
-            >
-              <span className='inline-flex flex-shrink-0'>
-                <button
-                  onClick={onToggleMic}
-                  disabled={audioTurnedOffByHost}
-                  className={cn(
-                    'rounded-full transition-all duration-200 transform hover:scale-110 shadow-lg flex-shrink-0',
-                    !hasCustomSizing && 'p-2.5 sm:p-4',
-                    isPushToTalkActive
-                      ? 'bg-green-500 hover:bg-green-600 text-white shadow-green-500/50 ring-4 ring-green-500/30'
-                      : isMicEnabled
-                        ? midnightControlClass
-                        : 'bg-red-600 hover:bg-red-700 text-white shadow-red-900/40',
-                    audioTurnedOffByHost && 'opacity-50 cursor-not-allowed hover:scale-100',
-                  )}
-                  style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
-                  aria-label={micTooltip}
-                  data-testid='mic-toggle-button'
-                  data-track-category='CALLS'
-                  data-track-name='MIC_TOGGLE'
-                  data-track-metadata={JSON.stringify({ enabled: isMicEnabled, callId })}
-                >
-                  {isMicEnabled || isPushToTalkActive ? (
-                    <Mic
-                      className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
-                      style={
-                        hasCustomSizing
-                          ? { width: `${iconSize}px`, height: `${iconSize}px` }
-                          : undefined
-                      }
-                    />
-                  ) : (
-                    <MicOff
-                      className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
-                      style={
-                        hasCustomSizing
-                          ? { width: `${iconSize}px`, height: `${iconSize}px` }
-                          : undefined
-                      }
-                    />
-                  )}
-                </button>
+  const deviceChevronClass =
+    'flex h-11 w-8 flex-shrink-0 items-center justify-center rounded-l-full pl-1 text-[#e3e3e3] transition-colors hover:bg-white/10';
+
+  const micControl = (
+    <div className='relative' ref={micMenuRef}>
+      <div className={cn('flex items-center rounded-full', isFullView && 'bg-[#333537]')}>
+        {isFullView && (
+          <button
+            type='button'
+            onClick={() => setShowMicMenu(!showMicMenu)}
+            className={deviceChevronClass}
+            aria-label='Audio settings'
+            aria-expanded={showMicMenu}
+            title='Audio settings'
+            data-track-category='CALLS'
+            data-track-name='Toggle_Mic_Menu'
+            data-track-metadata={JSON.stringify({ showMicMenu: !showMicMenu, callId })}
+          >
+            <ChevronUp
+              className={cn('h-4 w-4 transition-transform', showMicMenu && 'rotate-180')}
+            />
+          </button>
+        )}
+        <ControlButton
+          sizing={sizing}
+          icon={isMicEnabled || isPushToTalkActive ? Mic : MicOff}
+          label={micTooltip}
+          tooltip={
+            audioTurnedOffByHost ? (
+              micTooltip
+            ) : (
+              <span>
+                {micTooltip} <ShortcutHint shortcut='huddle.toggleMute' />
               </span>
-            </Tooltip>
-            {viewMode === 'full' && (
-              <button
-                onClick={() => setShowMicMenu(!showMicMenu)}
-                className='text-[#f2f2f2] flex-shrink-0 p-1.5 sm:p-2 transition-transform'
-                title='Select audio devices'
-                data-track-category='CALLS'
-                data-track-name='Toggle_Mic_Menu'
-                data-track-metadata={JSON.stringify({ showMicMenu: !showMicMenu, callId })}
-              >
-                <ChevronUp
-                  className={cn(
-                    'w-3 h-3 sm:w-4 sm:h-4 transition-transform',
-                    showMicMenu && 'rotate-180',
-                  )}
-                />
-              </button>
-            )}
-          </div>
+            )
+          }
+          tone={isPushToTalkActive ? 'pushToTalk' : isMicEnabled ? 'neutral' : 'off'}
+          inactive={audioTurnedOffByHost}
+          onClick={onToggleMic}
+          disabled={audioTurnedOffByHost}
+          aria-pressed={!isMicEnabled}
+          data-testid='mic-toggle-button'
+          data-track-category='CALLS'
+          data-track-name='MIC_TOGGLE'
+          data-track-metadata={JSON.stringify({ enabled: isMicEnabled, callId })}
+        />
+      </div>
 
-          {/* Main Menu - Shows Mic and Speaker Options */}
-          {showMicMenu && (
-            <div
-              className={cn(
-                midnightPopoverClass,
-                'shadow-xl',
-                isMobile
-                  ? 'absolute bottom-full mb-2 -left-2 min-w-[280px] py-2 rounded-xl'
-                  : 'absolute bottom-full mb-2 left-0 rounded-full',
-              )}
-            >
-              <div className={cn('flex', isMobile ? 'flex-col gap-1' : 'p-1.5 gap-2 rounded-3xl')}>
-                <DeviceSelector
-                  devices={audioDevices}
-                  currentDeviceId={activeAudioId}
-                  onDeviceChange={deviceId => {
-                    void handleMicDeviceChange(deviceId);
-                  }}
-                  icon={Mic}
-                  label='Microphone'
-                />
-                {isMobile && <div className='w-full bg-border h-px' />}
-                <DeviceSelector
-                  devices={speakerDevices}
-                  currentDeviceId={activeSpeakerId}
-                  onDeviceChange={deviceId => {
-                    void handleSpeakerDeviceChange(deviceId);
-                  }}
-                  icon={Volume2}
-                  label='Speaker'
-                />
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Camera Toggle with Device Selector */}
-        <div className='relative' ref={cameraMenuRef}>
-          <div className={cn('flex items-center gap-0.5 rounded-full', midnightControlGroupClass)}>
-            <Tooltip
-              content={
-                cameraTurnedOffByHost ? (
-                  cameraTooltip
-                ) : (
-                  <span>
-                    {cameraTooltip} <ShortcutHint shortcut='huddle.toggleVideo' />
-                  </span>
-                )
-              }
-              side='top'
-              sideOffset={8}
-              collisionPadding={8}
-              className={cn(
-                'whitespace-normal text-center leading-snug',
-                viewMode === 'mini' ? 'max-w-44' : 'max-w-64',
-              )}
-            >
-              <span className='inline-flex flex-shrink-0'>
-                <button
-                  onClick={onToggleCamera}
-                  disabled={cameraTurnedOffByHost}
-                  className={cn(
-                    'rounded-full transition-all duration-200 transform hover:scale-110 shadow-lg flex-shrink-0',
-                    !hasCustomSizing && 'p-2.5 sm:p-4',
-                    isCameraEnabled
-                      ? midnightControlClass
-                      : 'bg-red-600 hover:bg-red-700 text-white shadow-red-900/40',
-                    cameraTurnedOffByHost && 'opacity-50 cursor-not-allowed hover:scale-100',
-                  )}
-                  style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
-                  aria-label={cameraTooltip}
-                  data-testid='camera-toggle-button'
-                  data-track-category='CALLS'
-                  data-track-name='CAMERA_TOGGLE'
-                  data-track-metadata={JSON.stringify({ enabled: isCameraEnabled, callId })}
-                >
-                  {isCameraEnabled ? (
-                    <Video
-                      className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
-                      style={
-                        hasCustomSizing
-                          ? { width: `${iconSize}px`, height: `${iconSize}px` }
-                          : undefined
-                      }
-                    />
-                  ) : (
-                    <VideoOff
-                      className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
-                      style={
-                        hasCustomSizing
-                          ? { width: `${iconSize}px`, height: `${iconSize}px` }
-                          : undefined
-                      }
-                    />
-                  )}
-                </button>
-              </span>
-            </Tooltip>
-            {viewMode === 'full' && (
-              <button
-                onClick={() => {
-                  setShowCameraMenu(!showCameraMenu);
-                }}
-                className='text-[#f2f2f2] flex-shrink-0 p-1.5 sm:p-2 transition-transform'
-                title='Select camera'
-                data-track-category='CALLS'
-                data-track-name='Toggle_Camera_Menu'
-                data-track-metadata={JSON.stringify({ showCameraMenu: !showCameraMenu, callId })}
-              >
-                <ChevronUp
-                  className={cn(
-                    'w-3 h-3 sm:w-4 sm:h-4 transition-transform',
-                    showCameraMenu && 'rotate-180',
-                  )}
-                />
-              </button>
-            )}
-          </div>
-
-          {/* Camera Menu - Shows current camera and device list option */}
-          {showCameraMenu && (
-            <div
-              className={cn(
-                midnightPopoverClass,
-                'shadow-xl',
-                isMobile
-                  ? 'absolute bottom-full mb-2 -left-20 min-w-[280px] py-2 rounded-xl'
-                  : 'absolute bottom-full mb-2 left-0 rounded-full',
-              )}
-            >
-              <div className={cn('flex', isMobile ? 'flex-col gap-1' : 'p-1.5 gap-2 rounded-3xl')}>
-                <DeviceSelector
-                  devices={videoDevices}
-                  currentDeviceId={activeCameraId}
-                  onDeviceChange={deviceId => {
-                    void handleCameraDeviceChange(deviceId);
-                  }}
-                  icon={Video}
-                  label='Camera'
-                  iconSize={iconSize}
-                  buttonPadding={buttonPadding}
-                />
-                {isMobile && <div className={cn('w-full h-px', midnightSeparatorClass)} />}
-                <button
-                  onClick={() => roomActor.send({ type: 'TOGGLE_BACKGROUND_BLUR' })}
-                  title={isBackgroundBlurEnabled ? 'Turn off background blur' : 'Blur background'}
-                  data-track-category='CALLS'
-                  data-track-name='TOGGLE_BACKGROUND_BLUR'
-                  data-track-metadata={JSON.stringify({
-                    enabled: !isBackgroundBlurEnabled,
-                    callId,
-                  })}
-                  className={cn(
-                    'flex items-center gap-2 px-3 py-2 text-sm whitespace-nowrap transition-colors',
-                    isMobile ? 'w-full rounded-lg' : 'rounded-full',
-                    isBackgroundBlurEnabled
-                      ? 'bg-blue-600 text-white hover:bg-blue-500'
-                      : midnightControlClass,
-                  )}
-                >
-                  <ImagePlus size={iconSize ?? 16} />
-                  <span>Blur background</span>
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Screen Share Toggle */}
-        <Tooltip
-          content={screenShareTooltip}
-          side='top'
-          sideOffset={8}
-          collisionPadding={8}
+      {/* Device picker — a floating strip above the button, like Meet's */}
+      {showMicMenu && (
+        <div
           className={cn(
-            'whitespace-normal text-center leading-snug',
-            viewMode === 'mini' ? 'max-w-44' : 'max-w-64',
+            popoverClass,
+            'absolute bottom-full z-50 mb-3',
+            isMobile ? '-left-2 min-w-[280px] rounded-xl py-2' : 'left-0 rounded-full',
           )}
         >
-          <span className='inline-flex flex-shrink-0'>
+          <div className={cn('flex', isMobile ? 'flex-col gap-1' : 'gap-2 p-1.5')}>
+            <DeviceSelector
+              devices={audioDevices}
+              currentDeviceId={activeAudioId}
+              onDeviceChange={deviceId => void setActiveAudioDevice(deviceId)}
+              icon={Mic}
+              label='Microphone'
+            />
+            {isMobile && <div className='h-px w-full bg-white/10' />}
+            <DeviceSelector
+              devices={speakerDevices}
+              currentDeviceId={activeSpeakerId}
+              onDeviceChange={deviceId => void setActiveSpeakerDevice(deviceId)}
+              icon={Volume2}
+              label='Speaker'
+            />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  const cameraControl = (
+    <div className='relative' ref={cameraMenuRef}>
+      <div className={cn('flex items-center rounded-full', isFullView && 'bg-[#333537]')}>
+        {isFullView && (
+          <button
+            type='button'
+            onClick={() => setShowCameraMenu(!showCameraMenu)}
+            className={deviceChevronClass}
+            aria-label='Video settings'
+            aria-expanded={showCameraMenu}
+            title='Video settings'
+            data-track-category='CALLS'
+            data-track-name='Toggle_Camera_Menu'
+            data-track-metadata={JSON.stringify({ showCameraMenu: !showCameraMenu, callId })}
+          >
+            <ChevronUp
+              className={cn('h-4 w-4 transition-transform', showCameraMenu && 'rotate-180')}
+            />
+          </button>
+        )}
+        <ControlButton
+          sizing={sizing}
+          icon={isCameraEnabled ? Video : VideoOff}
+          label={cameraTooltip}
+          tooltip={
+            cameraTurnedOffByHost ? (
+              cameraTooltip
+            ) : (
+              <span>
+                {cameraTooltip} <ShortcutHint shortcut='huddle.toggleVideo' />
+              </span>
+            )
+          }
+          tone={isCameraEnabled ? 'neutral' : 'off'}
+          inactive={cameraTurnedOffByHost}
+          onClick={onToggleCamera}
+          disabled={cameraTurnedOffByHost}
+          aria-pressed={!isCameraEnabled}
+          data-testid='camera-toggle-button'
+          data-track-category='CALLS'
+          data-track-name='CAMERA_TOGGLE'
+          data-track-metadata={JSON.stringify({ enabled: isCameraEnabled, callId })}
+        />
+      </div>
+
+      {showCameraMenu && (
+        <div
+          className={cn(
+            popoverClass,
+            'absolute bottom-full z-50 mb-3',
+            isMobile ? '-left-20 min-w-[280px] rounded-xl py-2' : 'left-0 rounded-full',
+          )}
+        >
+          <div className={cn('flex', isMobile ? 'flex-col gap-1' : 'gap-2 p-1.5')}>
+            <DeviceSelector
+              devices={videoDevices}
+              currentDeviceId={activeCameraId}
+              onDeviceChange={deviceId => void setActiveCameraDevice(deviceId)}
+              icon={Video}
+              label='Camera'
+              iconSize={iconSize}
+              buttonPadding={buttonPadding}
+            />
+            {isMobile && <div className='h-px w-full bg-white/10' />}
             <button
-              onClick={handleScreenShareClick}
-              disabled={screenShareTurnedOffByHost && !screenShareBlockedByWhiteboard}
-              aria-disabled={screenShareTurnedOffByHost || screenShareBlockedByWhiteboard}
+              type='button'
+              onClick={() => roomActor.send({ type: 'TOGGLE_BACKGROUND_BLUR' })}
+              title={isBackgroundBlurEnabled ? 'Turn off background blur' : 'Blur background'}
+              data-track-category='CALLS'
+              data-track-name='TOGGLE_BACKGROUND_BLUR'
+              data-track-metadata={JSON.stringify({
+                enabled: !isBackgroundBlurEnabled,
+                callId,
+              })}
               className={cn(
-                buttonClasses,
-                isScreenSharing || screenShareBlockedByWhiteboard
-                  ? 'bg-blue-500 hover:bg-blue-600 text-white shadow-blue-500/50'
-                  : midnightControlClass,
-                screenShareTurnedOffByHost && 'opacity-50 cursor-not-allowed hover:scale-100',
-                screenShareBlockedByWhiteboard && 'cursor-not-allowed hover:scale-100',
+                'flex items-center gap-2 whitespace-nowrap px-4 py-3 text-sm transition-colors',
+                isMobile ? 'w-full rounded-lg' : 'rounded-full',
+                isBackgroundBlurEnabled
+                  ? 'bg-[#a8c7fa] text-[#062e6f] hover:bg-[#bcd4fb]'
+                  : 'bg-[#333537] text-[#e3e3e3] hover:bg-[#404245]',
               )}
+            >
+              <ImagePlus size={16} />
+              <span>Blur background</span>
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  const screenShareControl = (
+    <ControlButton
+      sizing={sizing}
+      icon={MonitorUp}
+      label={screenShareTooltip}
+      tone={isScreenSharing || screenShareBlockedByWhiteboard ? 'active' : 'neutral'}
+      inactive={screenShareTurnedOffByHost || screenShareBlockedByWhiteboard}
+      onClick={handleScreenShareClick}
+      disabled={screenShareTurnedOffByHost && !screenShareBlockedByWhiteboard}
+      aria-disabled={screenShareTurnedOffByHost || screenShareBlockedByWhiteboard}
+      aria-pressed={isScreenSharing}
+      data-track-event='BUTTON_CLICK'
+      data-track-category='CALLS'
+      data-track-name='TOGGLE_SCREEN_SHARE'
+      data-track-metadata={JSON.stringify({ callId, enabled: isScreenSharing })}
+    />
+  );
+
+  // Recording — any participant can start; only the starter can stop (enforced server-side)
+  const recordingControl = (onStartRecording || onStopRecording) && (
+    <RecordingButton
+      isRecording={isRecording}
+      canStopRecording={canStopRecording}
+      onStartRecording={onStartRecording}
+      onStopRecording={onStopRecording}
+      sizing={sizing}
+      callId={callId}
+    />
+  );
+
+  // Lands on the call's timeline once the call ends. Its own component so the
+  // Zero-backed hook never mounts for external users (they have no ZeroProvider).
+  const markMomentControl = !isExternalUser && (
+    <MarkMomentButton
+      variant='button'
+      externalId={externalId}
+      callStartedAtMs={currentCall?.startedAt ?? null}
+      isAllowed={isHost && isTranscriptionEnabled}
+      callId={callId}
+      sizing={sizing}
+    />
+  );
+
+  // Annotate (Draw) Toggle — only shown when a screen share is active
+  const annotateControl = isAnySharingScreen && (
+    <ControlButton
+      sizing={sizing}
+      icon={Pencil}
+      label={isDrawingEnabled ? 'Stop annotating' : 'Annotate screen share'}
+      tone={isDrawingEnabled ? 'active' : 'neutral'}
+      aria-pressed={isDrawingEnabled}
+      onClick={() => sendDrawEvent({ type: 'toggleDrawMode' })}
+      data-track-event='BUTTON_CLICK'
+      data-track-category='CALLS'
+      data-track-name='TOGGLE_DRAW_MODE'
+      data-track-metadata={JSON.stringify({ callId, enabled: isDrawingEnabled })}
+    />
+  );
+
+  const reactionsControl = onSendReaction && (
+    <div className='relative' ref={reactionPickerRef}>
+      <ControlButton
+        sizing={sizing}
+        icon={SmilePlus}
+        label='Send a reaction'
+        tone={showReactionPicker ? 'active' : 'neutral'}
+        aria-expanded={showReactionPicker}
+        onClick={() => setShowReactionPicker(prev => !prev)}
+        data-track-category='CALLS'
+        data-track-name='TOGGLE_REACTION_PICKER'
+      />
+
+      {showReactionPicker && (
+        <div
+          className={cn(
+            'absolute bottom-full left-1/2 z-50 mb-3 flex -translate-x-1/2 gap-0.5 rounded-full p-1.5',
+            popoverClass,
+          )}
+        >
+          {REACTION_EMOJIS.map(emoji => (
+            <button
+              type='button'
+              key={emoji}
+              onClick={() => {
+                onSendReaction(emoji);
+                setShowReactionPicker(false);
+              }}
+              className='transform rounded-full p-2 text-2xl leading-none transition duration-150 hover:scale-125 hover:bg-white/10'
+              title={emoji}
+              data-ph-capture-attribute-track-id='send_reaction'
+              data-track-category='CALLS'
+              data-track-name='SEND_REACTION'
+              data-track-metadata={JSON.stringify({ emoji, callId })}
+            >
+              {emoji}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
+  const leaveControl = (
+    <ControlButton
+      sizing={sizing}
+      shape='leave'
+      icon={PhoneOff}
+      label='Leave call'
+      onClick={onDisconnect}
+      data-testid='end-call-button'
+      data-ph-capture-attribute-track-id='end_call'
+      data-track-category='CALLS'
+      data-track-name='END_CALL'
+      data-track-metadata={JSON.stringify({ callId })}
+    />
+  );
+
+  // Panel toggles: flat icons on the right in full view, discs in the mini window.
+  const panelShape = isFullView ? 'flat' : 'round';
+  const miniBadgeClass = !isFullView ? 'h-4 min-w-4 text-[9px]' : undefined;
+
+  const peopleControl = (
+    <ControlButton
+      sizing={sizing}
+      shape={panelShape}
+      icon={Users}
+      label='People'
+      tooltip={requestedParticipantCount > 0 ? 'People — someone wants to join' : 'People'}
+      tone={isParticipantsSidebarOpen ? 'active' : 'neutral'}
+      aria-pressed={isParticipantsSidebarOpen}
+      onClick={onToggleParticipantsSidebar}
+      data-testid='add-participant-button'
+      data-track-event='BUTTON_CLICK'
+      data-track-category='CALLS'
+      data-track-name='TOGGLE_PARTICIPANTS_SIDEBAR'
+      data-track-metadata={JSON.stringify({ isOpen: isParticipantsSidebarOpen })}
+    >
+      {requestedParticipantCount > 0 && (
+        <ControlBadge
+          count={requestedParticipantCount}
+          className={miniBadgeClass}
+          data-testid='participants-request-count'
+        />
+      )}
+    </ControlButton>
+  );
+
+  const callChatControl = onToggleCallChat && (
+    <ControlButton
+      sizing={sizing}
+      shape={panelShape}
+      icon={MessageCircleMore}
+      iconStyle={{ transform: 'scaleX(-1)' }}
+      label='Chat with everyone'
+      tone={isCallChatOpen ? 'active' : 'neutral'}
+      aria-pressed={!!isCallChatOpen}
+      onClick={onToggleCallChat}
+      data-track-category='CALLS'
+      data-track-name='TOGGLE_CALL_CHAT'
+    >
+      {unreadCallChatCount > 0 && (
+        <ControlBadge
+          count={unreadCallChatCount}
+          className={isFullView ? 'right-0.5 top-1' : miniBadgeClass}
+        />
+      )}
+    </ControlButton>
+  );
+
+  // Shared notes canvas (series-wide for recurring calls).
+  const notesControl = onToggleNotes && (
+    <ControlButton
+      sizing={sizing}
+      icon={NotepadText}
+      label='Notes'
+      tone={isNotesOpen ? 'active' : 'neutral'}
+      aria-pressed={isNotesOpen}
+      onClick={onToggleNotes}
+      data-testid='call-notes-button'
+      data-track-event='BUTTON_CLICK'
+      data-track-category='CALLS'
+      data-track-name='TOGGLE_CALL_NOTES'
+      data-track-metadata={JSON.stringify({ callId, isOpen: isNotesOpen })}
+    />
+  );
+
+  const threadChatControl = !hideThreadChat && (
+    <ControlButton
+      sizing={sizing}
+      shape={panelShape}
+      icon={MessageSquare}
+      label='Thread chat'
+      tone={isChatOpen ? 'active' : 'neutral'}
+      aria-pressed={isChatOpen}
+      onClick={onToggleChat}
+      data-track-category='CALLS'
+      data-track-name='TOGGLE_CHAT'
+      data-track-metadata={JSON.stringify({ callId: callId, isOpen: isChatOpen })}
+    />
+  );
+
+  // AI Assistant (mini window; the full view has it in the People panel). Hidden
+  // while transcription is off — talk-back depends on STT.
+  const aiControl = showAiButton && (
+    <ControlButton
+      sizing={sizing}
+      shape={panelShape}
+      icon={Bot}
+      label={aiButtonTitle}
+      inactive={hasPendingRequestFromOther}
+      className={aiButtonColorClass}
+      onClick={() =>
+        handleAiButtonClick({
+          hasPendingRequestFromOther,
+          isControlledByOther,
+          onRequestControl,
+          onToggleAIAssistant,
+        })
+      }
+      disabled={isAiButtonDisabled}
+      data-track-category='CALLS'
+      data-track-name='AI_Assistant'
+      data-track-metadata={JSON.stringify({
+        isControlledByOther,
+        hasPendingRequest: hasPendingRequestFromOther,
+      })}
+    >
+      {isControlledByOther && !hasPendingRequestFromOther && (
+        <span className='absolute right-1 top-1 h-2.5 w-2.5 rounded-full border-2 border-[#131314] bg-[#dc362e]' />
+      )}
+    </ControlButton>
+  );
+
+  const copyInviteControl = (
+    <ControlButton
+      sizing={sizing}
+      shape={panelShape}
+      icon={LinkIcon}
+      label={
+        roomLink ? 'Copy joining info — works for teammates and guests' : 'Preparing invite link…'
+      }
+      inactive={!roomLink}
+      onClick={handleCopyInviteLink}
+      disabled={!roomLink}
+      data-track-category='CALLS'
+      data-track-name='SHARE_CALL_LINK'
+      data-track-metadata={JSON.stringify({ callId, isExternalUser })}
+    >
+      {showCopied && (
+        <span className='absolute -top-10 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-lg bg-[#e3e3e3] px-3 py-1.5 text-xs font-medium text-[#1f1f1f] shadow-lg'>
+          Joining info copied
+        </span>
+      )}
+    </ControlButton>
+  );
+
+  const presentationModeControl = showPresentationMode && (
+    <ControlButton
+      sizing={sizing}
+      icon={XyneTelepresenceIcon}
+      label={isPresentationMode ? 'Exit presentation mode' : 'Enter presentation mode'}
+      tone={isPresentationMode ? 'active' : 'neutral'}
+      aria-pressed={isPresentationMode}
+      onClick={onTogglePresentationMode}
+      data-track-category='CALLS'
+      data-track-name='TOGGLE_PRESENTATION_MODE'
+      data-track-metadata={JSON.stringify({ callId, isEnabled: isPresentationMode })}
+    />
+  );
+
+  // ── Mini window: one compact row ───────────────────────────────────────────
+
+  if (!isFullView) {
+    const gapClass = iconSize < 16 ? 'gap-1' : 'gap-1.5';
+    return (
+      <div className={cn('flex flex-nowrap items-center justify-center', gapClass)}>
+        {micControl}
+        {cameraControl}
+        {screenShareControl}
+        {recordingControl}
+        {markMomentControl}
+        {annotateControl}
+        {callChatControl}
+        {peopleControl}
+        {copyInviteControl}
+        {reactionsControl}
+        {aiControl}
+        {notesControl}
+        {threadChatControl}
+        {presentationModeControl}
+        {leaveControl}
+      </div>
+    );
+  }
+
+  // ── Full view: Meet's three-zone bar ───────────────────────────────────────
+  // Left: meeting details. Centre: media controls + leave. Right: panel toggles.
+  // People (with host controls and the AI agent) and Minimize live in the top bar.
+  // Below `lg` the right-hand toggles fold into the ⋮ menu; below `sm` so do the
+  // secondary centre controls, keeping the bar to one row on a phone.
+
+  const menuItemClass =
+    'cursor-pointer gap-3 rounded-lg px-3 py-2.5 text-sm text-[#e3e3e3] focus:bg-white/10 focus:text-white data-[disabled]:opacity-50';
+  const menuIcon = (iconComponent: React.ElementType, isActive = false): React.ReactElement => {
+    const Icon = iconComponent;
+    return (
+      <Icon className={cn('h-4 w-4', isActive ? 'text-[#a8c7fa]' : 'text-[#c4c7c5]')} aria-hidden />
+    );
+  };
+
+  const moreMenu = (
+    <DropdownMenu modal={false}>
+      <Tooltip content='More options' side='top' sideOffset={10}>
+        <span className='inline-flex flex-shrink-0'>
+          <DropdownMenuTrigger asChild>
+            <button
+              type='button'
+              aria-label='More options'
+              className={controlClassName({ sizing })}
+              style={controlStyle(sizing)}
               data-track-event='BUTTON_CLICK'
               data-track-category='CALLS'
-              data-track-name='TOGGLE_SCREEN_SHARE'
-              data-track-metadata={JSON.stringify({ callId, enabled: isScreenSharing })}
-              style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
-              aria-label={screenShareTooltip}
+              data-track-name='OPEN_CALL_TOOLS_MENU'
+              data-track-metadata={JSON.stringify({ callId })}
             >
-              {isScreenSharing ? (
-                <Monitor
-                  className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
-                  style={
-                    hasCustomSizing
-                      ? { width: `${iconSize}px`, height: `${iconSize}px` }
-                      : undefined
-                  }
-                />
-              ) : (
-                <Monitor
-                  className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
-                  style={
-                    hasCustomSizing
-                      ? { width: `${iconSize}px`, height: `${iconSize}px` }
-                      : undefined
-                  }
-                />
-              )}
+              <MoreVertical className={menuIconProps.className} style={menuIconProps.style} />
             </button>
-          </span>
-        </Tooltip>
-
-        {/* Recording — any participant can start; only the starter can stop (enforced server-side) */}
-        {(onStartRecording || onStopRecording) && (
-          <RecordingButton
-            isRecording={isRecording}
-            canStopRecording={canStopRecording}
-            onStartRecording={onStartRecording}
-            onStopRecording={onStopRecording}
-            hasCustomSizing={hasCustomSizing}
-            iconSize={iconSize}
-            buttonPadding={buttonPadding}
-            buttonClasses={buttonClasses}
-            midnightControlClass={midnightControlClass}
-            midnightPopoverClass={midnightPopoverClass}
-            callId={callId}
-          />
+          </DropdownMenuTrigger>
+        </span>
+      </Tooltip>
+      <DropdownMenuContent
+        side='top'
+        align='end'
+        sideOffset={12}
+        className='w-64 rounded-xl border-white/10 bg-[#1e1f20] p-1 text-[#e3e3e3] shadow-2xl'
+      >
+        {onToggleHandRaise && (
+          <DropdownMenuItem
+            onClick={onToggleHandRaise}
+            className={menuItemClass}
+            data-track-category='CALLS'
+            data-track-name='TOGGLE_HAND_RAISE'
+            data-track-metadata={JSON.stringify({ raised: !isHandRaised, callId })}
+          >
+            {menuIcon(Hand, isHandRaised)}
+            <span>{isHandRaised ? 'Lower hand' : 'Raise hand'}</span>
+          </DropdownMenuItem>
         )}
-
+        <DropdownMenuItem
+          onClick={handleWhiteboardClick}
+          className={cn(menuItemClass, isWhiteboardOpen && 'bg-white/10')}
+          data-track-event='BUTTON_CLICK'
+          data-track-category='CALLS'
+          data-track-name='TOGGLE_WHITEBOARD'
+          data-track-metadata={JSON.stringify({ callId, enabled: isWhiteboardOpen })}
+        >
+          {menuIcon(PencilRuler, isWhiteboardOpen)}
+          <span>{isWhiteboardOpen ? 'Close whiteboard' : 'Open whiteboard'}</span>
+        </DropdownMenuItem>
+        {showPresentationMode && (
+          <DropdownMenuItem
+            onClick={onTogglePresentationMode}
+            className={menuItemClass}
+            data-track-category='CALLS'
+            data-track-name='TOGGLE_PRESENTATION_MODE'
+            data-track-metadata={JSON.stringify({ callId, isEnabled: isPresentationMode })}
+          >
+            {menuIcon(XyneTelepresenceIcon, isPresentationMode)}
+            <span>{isPresentationMode ? 'Exit presentation mode' : 'Presentation mode'}</span>
+          </DropdownMenuItem>
+        )}
         {/* Lands on the call's timeline once the call ends. Creator-only mutator, and a
             flag is only useful next to a transcript. External users have no ZeroProvider. */}
         {!isExternalUser && (
           <MarkMomentButton
+            variant='menuItem'
             externalId={externalId}
             callStartedAtMs={currentCall?.startedAt ?? null}
             isAllowed={isHost && isTranscriptionEnabled}
-            hasCustomSizing={hasCustomSizing}
-            iconSize={iconSize}
-            buttonPadding={buttonPadding}
-            buttonClasses={buttonClasses}
-            midnightControlClass={midnightControlClass}
             callId={callId}
+            menuItemClassName={menuItemClass}
           />
         )}
 
-        {/* Annotate (Draw) Toggle — only shown when a screen share is active */}
-        {isAnySharingScreen && (
-          <button
-            onClick={() => sendDrawEvent({ type: 'toggleDrawMode' })}
-            className={cn(
-              buttonClasses,
-              isDrawingEnabled
-                ? 'bg-orange-500 hover:bg-orange-600 text-white shadow-orange-500/50'
-                : midnightControlClass,
-            )}
-            style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
-            title={isDrawingEnabled ? 'Stop annotating' : 'Annotate screen share'}
-            data-track-event='BUTTON_CLICK'
-            data-track-category='CALLS'
-            data-track-name='TOGGLE_DRAW_MODE'
-            data-track-metadata={JSON.stringify({ callId, enabled: isDrawingEnabled })}
-          >
-            <Pencil
-              className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
-              style={
-                hasCustomSizing ? { width: `${iconSize}px`, height: `${iconSize}px` } : undefined
-              }
-            />
-          </button>
-        )}
-
-        {iconSize >= 16 && (
-          <div className={cn('hidden sm:block w-px h-8 mx-0.5', midnightSeparatorClass)}></div>
-        )}
-
-        {/* Call Chat Button */}
+        {/* Controls that live in the bar on wider screens */}
+        <DropdownMenuSeparator className='bg-white/10 lg:hidden' />
         {onToggleCallChat && (
-          <button
+          <DropdownMenuItem
             onClick={onToggleCallChat}
-            className={cn(
-              buttonClasses,
-              'text-white relative',
-              isCallChatOpen ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-700 hover:bg-gray-600',
-            )}
-            style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
+            className={cn(menuItemClass, 'lg:hidden')}
             data-track-category='CALLS'
             data-track-name='TOGGLE_CALL_CHAT'
-            title='Call chat'
           >
-            <MessageCircleMore
-              className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
-              style={{
-                transform: 'scaleX(-1)',
-                ...(hasCustomSizing ? { width: `${iconSize}px`, height: `${iconSize}px` } : {}),
-              }}
-            />
+            {menuIcon(MessageCircleMore, isCallChatOpen)}
+            <span className='flex-1'>Chat with everyone</span>
             {unreadCallChatCount > 0 && (
-              <span className='absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 flex items-center justify-center bg-red-500 text-white text-[10px] font-bold rounded-full'>
+              <span className='rounded-full bg-[#dc362e] px-1.5 text-[10px] font-semibold text-white'>
                 {unreadCallChatCount > 99 ? '99+' : unreadCallChatCount}
               </span>
             )}
-          </button>
+          </DropdownMenuItem>
         )}
-
-        {isHost && onToggleHostControls && (
-          <button
-            onClick={onToggleHostControls}
-            className={cn(
-              buttonClasses,
-              isHostControlsOpen
-                ? 'bg-blue-600 hover:bg-blue-700 text-white'
-                : midnightControlClass,
-            )}
-            style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
-            title='Host controls'
-            data-testid='host-controls-button'
-            data-track-event='BUTTON_CLICK'
-            data-track-category='CALLS'
-            data-track-name='TOGGLE_HOST_CONTROLS'
-            data-track-metadata={JSON.stringify({ isOpen: isHostControlsOpen })}
-          >
-            <UserCog
-              className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
-              style={
-                hasCustomSizing ? { width: `${iconSize}px`, height: `${iconSize}px` } : undefined
-              }
-            />
-          </button>
-        )}
-
-        <button
-          onClick={onToggleParticipantsSidebar}
-          className={cn(
-            buttonClasses,
-            'relative',
-            isParticipantsSidebarOpen
-              ? 'bg-blue-600 hover:bg-blue-700 text-white'
-              : midnightControlClass,
-          )}
-          style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
-          title='Participants'
-          data-testid='add-participant-button'
-          data-track-event='BUTTON_CLICK'
-          data-track-category='CALLS'
-          data-track-name='TOGGLE_PARTICIPANTS_SIDEBAR'
-          data-track-metadata={JSON.stringify({ isOpen: isParticipantsSidebarOpen })}
-        >
-          <Users
-            className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
-            style={
-              hasCustomSizing ? { width: `${iconSize}px`, height: `${iconSize}px` } : undefined
-            }
-          />
-          {requestedParticipantCount > 0 && (
-            <span className={requestCountBadgeClasses} data-testid='participants-request-count'>
-              {requestedParticipantCount > 99 ? '99+' : requestedParticipantCount}
-            </span>
-          )}
-        </button>
-
-        {/* Share Link Button */}
-        <button
-          onClick={handleCopyInviteLink}
-          disabled={!roomLink}
-          className={cn(
-            buttonClasses,
-            'relative bg-gray-700 text-white',
-            roomLink ? 'hover:bg-gray-600' : 'cursor-not-allowed opacity-50',
-          )}
-          style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
-          title={
-            roomLink
-              ? 'Copy invite message — works for teammates and guests'
-              : 'Preparing invite link…'
-          }
-          aria-label={
-            roomLink ? 'Copy invite message for teammates and guests' : 'Preparing invite link'
-          }
-          data-track-category='CALLS'
-          data-track-name='SHARE_CALL_LINK'
-          data-track-metadata={JSON.stringify({ callId, isExternalUser })}
-        >
-          <Share2
-            className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
-            style={
-              hasCustomSizing ? { width: `${iconSize}px`, height: `${iconSize}px` } : undefined
-            }
-          />
-          {showCopied && (
-            <span className='absolute -top-8 sm:-top-10 left-1/2 transform -translate-x-1/2 bg-green-500 text-white text-xs sm:text-sm px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg shadow-lg whitespace-nowrap'>
-              Invite copied!
-            </span>
-          )}
-        </button>
-
-        {iconSize >= 16 && (
-          <div className={cn('hidden sm:block w-px h-8 mx-0.5', midnightSeparatorClass)}></div>
-        )}
-
-        {/* Reactions Button */}
-        {onSendReaction && (
-          <div className='relative' ref={reactionPickerRef}>
-            <button
-              onClick={() => setShowReactionPicker(prev => !prev)}
-              className={cn(
-                buttonClasses,
-                showReactionPicker
-                  ? 'bg-yellow-500 hover:bg-yellow-600 text-white'
-                  : midnightControlClass,
-              )}
-              style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
-              title='Send a reaction'
-              data-track-category='CALLS'
-              data-track-name='TOGGLE_REACTION_PICKER'
-            >
-              <SmilePlus
-                className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
-                style={
-                  hasCustomSizing ? { width: `${iconSize}px`, height: `${iconSize}px` } : undefined
-                }
-              />
-            </button>
-
-            {showReactionPicker && (
-              <div
-                className={cn(
-                  'absolute bottom-full mb-3 left-1/2 -translate-x-1/2 rounded-2xl shadow-2xl p-2 flex gap-1',
-                  midnightPopoverClass,
-                )}
-              >
-                {REACTION_EMOJIS.map(emoji => (
-                  <button
-                    key={emoji}
-                    onClick={() => {
-                      onSendReaction(emoji);
-                      setShowReactionPicker(false);
-                    }}
-                    className='text-2xl p-2 rounded-xl hover:bg-[#202224] transition-colors duration-150 hover:scale-125 transform'
-                    title={emoji}
-                    data-ph-capture-attribute-track-id='send_reaction'
-                    data-track-category='CALLS'
-                    data-track-name='SEND_REACTION'
-                    data-track-metadata={JSON.stringify({ emoji, callId })}
-                  >
-                    {emoji}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* AI Assistant Button - Single button for all cases.
-            Hidden while transcription is off (talk-back depends on STT). */}
-        {!hideAIAssistant && isTranscriptionEnabled && (
-          <div className='relative'>
-            <button
-              onClick={() =>
-                handleAiButtonClick({
-                  hasPendingRequestFromOther,
-                  isControlledByOther,
-                  onRequestControl,
-                  onToggleAIAssistant,
-                })
-              }
-              disabled={isAiButtonDisabled}
-              className={cn(buttonClasses, 'relative', aiButtonColorClass)}
-              style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
-              title={aiButtonTitle}
-              data-track-category='CALLS'
-              data-track-name='AI_Assistant'
-              data-track-metadata={JSON.stringify({
-                isControlledByOther,
-                hasPendingRequest: hasPendingRequestFromOther,
-              })}
-            >
-              <Bot
-                className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
-                style={
-                  hasCustomSizing ? { width: `${iconSize}px`, height: `${iconSize}px` } : undefined
-                }
-              />
-              {isControlledByOther && !hasPendingRequestFromOther && (
-                <span className='absolute top-0 right-0 w-3 h-3 bg-red-500 rounded-full border-2 border-background'></span>
-              )}
-            </button>
-          </div>
-        )}
-
-        {/* Notes Button — shared notes canvas (series-wide for recurring calls) */}
         {onToggleNotes && (
-          <button
+          <DropdownMenuItem
             onClick={onToggleNotes}
-            className={cn(
-              buttonClasses,
-              isNotesOpen ? 'bg-blue-600 hover:bg-blue-700 text-white' : midnightControlClass,
-            )}
-            style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
-            title='Notes'
-            data-testid='call-notes-button'
+            className={cn(menuItemClass, 'sm:hidden')}
             data-track-event='BUTTON_CLICK'
             data-track-category='CALLS'
             data-track-name='TOGGLE_CALL_NOTES'
             data-track-metadata={JSON.stringify({ callId, isOpen: isNotesOpen })}
           >
-            <NotebookPen
-              className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
-              style={
-                hasCustomSizing ? { width: `${iconSize}px`, height: `${iconSize}px` } : undefined
-              }
-            />
-          </button>
+            {menuIcon(NotepadText, isNotesOpen)}
+            <span>Notes</span>
+          </DropdownMenuItem>
         )}
-
-        {/* Thread Chat Button — hidden for external users */}
         {!hideThreadChat && (
-          <button
+          <DropdownMenuItem
             onClick={onToggleChat}
-            className={cn(
-              buttonClasses,
-              'text-white relative',
-              isChatOpen ? 'bg-blue-600 hover:bg-blue-700' : 'bg-gray-700 hover:bg-gray-600',
-            )}
-            style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
+            className={cn(menuItemClass, 'lg:hidden')}
             data-track-category='CALLS'
             data-track-name='TOGGLE_CHAT'
-            data-track-metadata={JSON.stringify({ callId: callId, isOpen: isChatOpen })}
-            title='Thread chat'
+            data-track-metadata={JSON.stringify({ callId, isOpen: isChatOpen })}
           >
-            <MessageSquare
-              className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
-              style={
-                hasCustomSizing ? { width: `${iconSize}px`, height: `${iconSize}px` } : undefined
-              }
-            />
-          </button>
+            {menuIcon(MessageSquare, isChatOpen)}
+            <span>Thread chat</span>
+          </DropdownMenuItem>
         )}
-
-        {iconSize >= 16 && (
-          <div className={cn('hidden sm:block w-px h-8 mx-0.5', midnightSeparatorClass)}></div>
-        )}
-
-        {/* Minimize/Maximize Button */}
-        {!hideMinimize && (
-          <button
-            onClick={onToggleView}
-            className={cn(buttonClasses, midnightControlClass)}
-            style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
-            title={viewMode === 'mini' ? 'Expand view' : 'Minimize view'}
-            data-track-category='CALLS'
-            data-track-name='TOGGLE_VIEW_MODE'
-            data-track-metadata={JSON.stringify({ callId: callId, viewMode })}
-          >
-            {viewMode === 'mini' ? (
-              <Maximize2
-                className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
-                style={
-                  hasCustomSizing ? { width: `${iconSize}px`, height: `${iconSize}px` } : undefined
-                }
-              />
-            ) : (
-              <Minimize2
-                className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
-                style={
-                  hasCustomSizing ? { width: `${iconSize}px`, height: `${iconSize}px` } : undefined
-                }
-              />
-            )}
-          </button>
-        )}
-
-        {/* More options */}
-        {viewMode !== 'mini' && (
-          <DropdownMenu modal={false}>
-            <DropdownMenuTrigger asChild>
-              <button
-                className={cn(
-                  buttonClasses,
-                  isWhiteboardOpen
-                    ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-500/50'
-                    : midnightControlClass,
-                )}
-                style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
-                data-track-event='BUTTON_CLICK'
-                data-track-category='CALLS'
-                data-track-name='OPEN_CALL_TOOLS_MENU'
-                data-track-metadata={JSON.stringify({ callId })}
-                title='More options'
-              >
-                <MoreVertical
-                  className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
-                  style={
-                    hasCustomSizing
-                      ? { width: `${iconSize}px`, height: `${iconSize}px` }
-                      : undefined
-                  }
-                />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent
-              side='top'
-              align='end'
-              sideOffset={12}
-              className='w-52 rounded-xl border-gray-700 bg-gray-800 p-1 text-gray-100 shadow-2xl'
-            >
-              {callToolMenuItems.map(item => {
-                const Icon = item.icon;
-                return (
-                  <DropdownMenuItem
-                    key={item.id}
-                    onClick={item.onSelect}
-                    className={cn(
-                      'cursor-pointer rounded-lg px-3 py-2 text-sm focus:bg-gray-700 focus:text-white',
-                      item.isActive && 'bg-gray-700 text-white',
-                    )}
-                    data-track-event='BUTTON_CLICK'
-                    data-track-category='CALLS'
-                    data-track-name={item.trackName}
-                    data-track-metadata={JSON.stringify({ callId, enabled: item.isActive })}
-                  >
-                    <Icon className='h-4 w-4 text-emerald-300' aria-hidden />
-                    <span>{item.label}</span>
-                  </DropdownMenuItem>
-                );
-              })}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
-
-        {/* Presentation Mode Button */}
-        {!hidePresentationMode && onTogglePresentationMode && (
-          <button
-            onClick={onTogglePresentationMode}
-            className={cn(
-              buttonClasses,
-              'text-white',
-              isPresentationMode
-                ? 'bg-blue-600 hover:bg-blue-700'
-                : 'bg-gray-700 hover:bg-gray-600',
-            )}
-            style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
-            title={isPresentationMode ? 'Exit presentation mode' : 'Enter presentation mode'}
-            aria-label={isPresentationMode ? 'Exit presentation mode' : 'Enter presentation mode'}
-            aria-pressed={isPresentationMode}
-            data-track-category='CALLS'
-            data-track-name='TOGGLE_PRESENTATION_MODE'
-            data-track-metadata={JSON.stringify({ callId, isEnabled: isPresentationMode })}
-          >
-            <XyneTelepresenceIcon
-              className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
-              style={
-                hasCustomSizing ? { width: `${iconSize}px`, height: `${iconSize}px` } : undefined
-              }
-            />
-          </button>
-        )}
-
-        {/* Disconnect Button */}
-        <button
-          onClick={onDisconnect}
-          className={cn(buttonClasses, 'bg-red-600 hover:bg-red-700 text-white shadow-red-900/40')}
-          style={hasCustomSizing ? { padding: `${buttonPadding}px` } : undefined}
-          title='Leave call'
-          data-testid='end-call-button'
-          data-ph-capture-attribute-track-id='end_call'
+        <DropdownMenuItem
+          onClick={handleCopyInviteLink}
+          disabled={!roomLink}
+          className={cn(menuItemClass, 'lg:hidden')}
           data-track-category='CALLS'
-          data-track-name='END_CALL'
-          data-track-metadata={JSON.stringify({ callId })}
+          data-track-name='SHARE_CALL_LINK'
+          data-track-metadata={JSON.stringify({ callId, isExternalUser })}
         >
-          <PhoneOff
-            className={hasCustomSizing ? '' : 'w-5 h-5 sm:w-6 sm:h-6'}
-            style={
-              hasCustomSizing ? { width: `${iconSize}px`, height: `${iconSize}px` } : undefined
-            }
-          />
-        </button>
+          {menuIcon(LinkIcon)}
+          <span>Copy joining info</span>
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+
+  return (
+    <div className='flex h-16 w-full items-center justify-center gap-4 px-3 sm:h-20 sm:px-4 lg:grid lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]'>
+      <div className='hidden min-w-0 items-center lg:flex'>{infoSlot}</div>
+
+      <div className='flex flex-nowrap items-center justify-center gap-2 sm:gap-3'>
+        {micControl}
+        {cameraControl}
+        {screenShareControl}
+        <div className='hidden items-center gap-2 sm:flex sm:gap-3'>
+          {recordingControl}
+          {reactionsControl}
+          {notesControl}
+        </div>
+        {annotateControl}
+        {moreMenu}
+        {leaveControl}
       </div>
-    </>
+
+      <div className='hidden items-center justify-end gap-0.5 lg:flex'>
+        {copyInviteControl}
+        {callChatControl}
+        {threadChatControl}
+      </div>
+    </div>
   );
 }

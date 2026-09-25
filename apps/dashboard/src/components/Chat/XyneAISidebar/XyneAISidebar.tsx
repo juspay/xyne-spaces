@@ -377,7 +377,6 @@ const XyneAISidebar = ({
     setSelectedCanvases(initialContextSelections.canvases);
     setSelectedTickets(initialContextSelections.tickets ?? []);
     setSelectedRecordings(initialContextSelections.recordings);
-    setSelectedTranscripts(initialContextSelections.calls ?? []);
   }, [initialContextSelections, contextOpenNonce]);
   // Track the original channel where the current conversation was started
   // This prevents duplicate history entries when user switches channels during a query
@@ -896,6 +895,7 @@ const XyneAISidebar = ({
     canvases: selectedCanvases,
     transcripts: selectedTranscripts,
     recordings: selectedRecordings,
+    localFolders: [],
     folders: folderScopes,
     files: fileScopes,
     collections: selectedCollectionIds
@@ -938,7 +938,11 @@ const XyneAISidebar = ({
     displayAttachedContext: toAttachedContext(kbContextSelections),
     agentSlug: effectiveAgentSlug,
     model: selectedModel,
-    modelProvider: selectedModel ? (agentModelsData?.pinProvider ?? 'litellm') : null,
+    modelProvider: !selectedModel
+      ? null
+      : selectedModel.startsWith('local-harness:')
+        ? 'local-harness'
+        : (agentModelsData?.pinProvider ?? 'litellm'),
     thinkingLevel,
   });
 
@@ -2091,6 +2095,7 @@ const XyneAISidebar = ({
     canvases: selectedCanvases,
     transcripts: selectedTranscripts,
     recordings: selectedRecordings,
+    localFolders: [],
   };
 
   const sharedInputSectionProps = {

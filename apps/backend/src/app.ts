@@ -79,6 +79,7 @@ import calendarWebhookRoutes from '@/routes/calendarWebhooks';
 import callLobbyRoutes from '@/routes/callLobby';
 import csatRoutes from '@/routes/csat';
 import voiceInputRoutes from '@/routes/voiceInput';
+import ttsRoutes from '@/routes/tts';
 import { attachVoiceInputStreamHandler } from '@/routes/voiceInputStream';
 import transcriptionAgentRoutes from '@/routes/transcriptionAgent';
 import livekitWebhookRoutes from '@/routes/livekitWebhook';
@@ -198,6 +199,7 @@ import userMigrationRoutes from '@/routes/userMigration';
 import { decryptRequestBodyMiddleware, encryptResponseBodyMiddleware } from './middleware/decryptionMiddleware';
 import internalRoutes from '@/routes/internal';
 import collectionsRoutes from '@/routes/collections';
+import merchantRoutes from '@/routes/merchants';
 import officeConversionRoutes from '@/routes/officeConversion';
 import sdlcRoutes from '@/routes/sdlc';
 import sdlcClawRoutes from '@/routes/sdlcClaw';
@@ -530,6 +532,7 @@ export class App {
     this.app.use('/api/calendar/sync', authMiddleware.authenticate, calendarSyncRoutes); // Calendar manual sync
     this.app.use('/api/calendar/watch', authMiddleware.authenticate, calendarWatchRoutes); // Calendar watch setup
     this.app.use('/api/voice-input', authMiddleware.authenticate, voiceInputRoutes); // Low-latency chat voice input
+    this.app.use('/api/tts', authMiddleware.authenticate, ttsRoutes);
 
     // App routes
     this.app.use('/api/apps', appRoutes);
@@ -738,6 +741,7 @@ export class App {
 
     // Collections routes
     this.app.use('/api/collections', authMiddleware.authenticate, collectionsRoutes);
+    this.app.use('/api/merchants', authMiddleware.authenticate, merchantRoutes);
 
     // Office document (pptx, docx, ...) -> PDF conversion, via LibreOffice.
     // Stateless: takes uploaded bytes, returns converted bytes, touches no stored data.

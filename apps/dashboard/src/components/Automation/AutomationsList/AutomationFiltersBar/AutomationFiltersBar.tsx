@@ -17,7 +17,7 @@ import { DateRangeFilter } from '../../../ui/DateRangeFilter/DateRangeFilter';
 import UserAvatar, { AvatarShape, AvatarSize } from '../../../UserAvatar/UserAvatar';
 import { cn } from '../../../../utils/classNames';
 import { getUserDisplayName, isUserDeactivated } from '../../../../utils/userDisplayName';
-import { useAllChannels } from '../../../../hooks/useChannels';
+import { searchChannels, useAllChannels } from '../../../../hooks/useChannels';
 import { useUserSearch, useUsersById } from '../../../../hooks/useUsers';
 import type { Automation } from '../../Automation.types';
 import {
@@ -199,10 +199,11 @@ function useChannelOptions(search: string, value: string[]): ChecklistOption<str
     [allChannels],
   );
   return useMemo(() => {
-    const lower = search.trim().toLowerCase();
-    const base = channels
-      .filter(c => !lower || (c.name ?? '').toLowerCase().includes(lower))
-      .map(c => ({ value: c.id, label: c.name || '(unnamed channel)', icon: channelIcon(c.type) }));
+    const base = searchChannels(channels, search, 10).map(c => ({
+      value: c.id,
+      label: c.name || '(unnamed channel)',
+      icon: channelIcon(c.type),
+    }));
     return withMissingSelected(base, value, id => {
       const c = channels.find(ch => ch.id === id);
       return { value: id, label: c?.name || id, icon: channelIcon(c?.type) };

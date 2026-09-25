@@ -2,6 +2,7 @@ import { repositories } from '@/database/repositories';
 import { UserResponsibility } from '@xyne/shared';
 import { withWorkspaceScope } from '@/database/tenant/context';
 import { notificationService } from '@/services/notificationService';
+import { syncWorkloadForUsers } from './workloadUtils';
 import { logger } from './logger';
 import type {
   UserGroupMapping,
@@ -184,6 +185,73 @@ async function filterMappingsToChannelParticipants(
  * - The system picks the second-lowest score candidate if the lowest is the excluded user
  * - If no other candidates exist after exclusion, returns { reason: 'EXCLUDED_USER_ONLY_CANDIDATE' }
  *
+/**
+ * Recorded as `createdBy` on workload rows the engine creates itself: the refresh
+ * below is driven by the assignment decision, not by any one user's action.
+ */
+const WORKLOAD_SYNC_ACTOR = 'system';
+
+/**
+ * Refresh the candidates' workload rows from ticket truth, then read them back.
+ *
+ * `user_workload_mappings` is the scorer's only input, so a row that is never
+ * updated after an assignment freezes that user's load at its old value and the
+ * least-loaded pick keeps landing on them (XYNE-55777). Doing the refresh here —
+ * inside the engine, for exactly the users about to be scored — means every
+ * assignment path gets it by construction and no caller has to remember to sync
+ * after it persists an assignment.
+ *
+ * Best-effort by design: a refresh failure must never block an assignment, and
+ * the counts are recomputed from committed ticket state on the next evaluation.
+ */
+async function loadWorkloadMappings(
+  userGroupId: string,
+  boardId: string,
+  userIds: string[],
+): Promise<UserWorkloadMapping[]> {
+  try {
+    await syncWorkloadForUsers(userIds, userGroupId, boardId, WORKLOAD_SYNC_ACTOR);
+  } catch (error) {
+    logger.error(
+      `[Assignment] Workload refresh failed for userGroupId ${userGroupId}, boardId ${boardId}; scoring on existing rows`,
+      error,
+    );
+  }
+  return withWorkspaceScope(() =>
+    repositories.userWorkloadMapping.findMany({
+      where: { userGroupId, userId: { in: userIds } },
+    }),
+  );
+}
+
+/**
+ * Auto-assignment system that selects the most suitable user for a board or ticket.
+ * Uses existing database tables only - no expression-based rules or configuration.
+ *
+ * Eligibility Flow (Filtering Phase):
+ * 1. Fetch all users in the group
+ * 2. Filter by responsibility based on assignment type:
+ *    - TICKET_ASSIGNEE: Everyone except QA (MANAGER, TEAM_LEAD, MEMBER, PR_REVIEWER)
+ *    - PR_REVIEWER: Only users with PR_REVIEWER responsibility
+ *    - QA: Only users with QA responsibility
+ * 3. Filter users where isActiveForAssignment = true AND onCall = true
+ * 4. If no users found → Fallback to users where isActiveForAssignment = true (ignore onCall)
+ * 5. If still no users → STOP (no auto-assignment)
+ * 6. If board has expertise mappings: keep only users with expertise for the board
+ *
+ * Scoring Strategy (Ranking Phase):
+ * For each user, calculate weighted workload across ALL boards:
+ *   weightedActiveTasks = sum(activeTasks * boardWeight) for all boards
+ * finalScore = weightedActiveTasks - expertiseBonus
+ * expertiseBonus = 10 if user has expertise else 0
+ *
+ * Lower score = higher priority (fewer active tasks = more available).
+ *
+ * Exclusion rule:
+ * - If excludeUserId is provided, that user cannot be selected for the assignment
+ * - The system picks the second-lowest score candidate if the lowest is the excluded user
+ * - If no other candidates exist after exclusion, returns { reason: 'EXCLUDED_USER_ONLY_CANDIDATE' }
+ *
  * Returns: { assignedUserId } or { reason: "NO_ON_CALL_USERS" | "EXCLUDED_USER_ONLY_CANDIDATE" }
  * @param projectId - Optional project ID to scope workload calculation to boards in the same project only
  */
@@ -308,14 +376,7 @@ export async function evaluateAssignmentRule(
 
   // Get workload mappings and board scores for boards in this user group
   let [allWorkloadMappings, allBoardScores, userGroup] = await Promise.all([
-    withWorkspaceScope(() =>
-      repositories.userWorkloadMapping.findMany({
-        where: {
-          userGroupId,
-          userId: { in: finalEligibleUserIds },
-        },
-      }),
-    ),
+    loadWorkloadMappings(userGroupId, boardId, finalEligibleUserIds),
     repositories.boardComplexityScore.findMany({
       where: { userGroupId },
     }),
@@ -771,9 +832,7 @@ export async function evaluateAllRoles(
   let [userStates, expertiseMappings, allWorkloadMappings, allBoardScores, userGroup] = await Promise.all([
     repositories.userAssignmentState.findMany({ where: { userGroupId, userId: { in: allUserIds } } }),
     repositories.userExpertiseMapping.findMany({ where: { userGroupId, boardId, userId: { in: allUserIds } } }),
-    withWorkspaceScope(() =>
-      repositories.userWorkloadMapping.findMany({ where: { userGroupId, userId: { in: allUserIds } } }),
-    ),
+    loadWorkloadMappings(userGroupId, boardId, allUserIds),
     repositories.boardComplexityScore.findMany({ where: { userGroupId } }),
     repositories.userGroups.findById(userGroupId),
   ]);
@@ -927,9 +986,7 @@ export async function evaluateRoleSlots(
   let [userStates, expertiseMappings, allWorkloadMappings, allBoardScores, userGroup] = await Promise.all([
     repositories.userAssignmentState.findMany({ where: { userGroupId, userId: { in: allUserIds } } }),
     repositories.userExpertiseMapping.findMany({ where: { userGroupId, boardId, userId: { in: allUserIds } } }),
-    withWorkspaceScope(() =>
-      repositories.userWorkloadMapping.findMany({ where: { userGroupId, userId: { in: allUserIds } } }),
-    ),
+    loadWorkloadMappings(userGroupId, boardId, allUserIds),
     repositories.boardComplexityScore.findMany({ where: { userGroupId } }),
     repositories.userGroups.findById(userGroupId),
   ]);

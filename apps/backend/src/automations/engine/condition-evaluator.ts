@@ -38,22 +38,30 @@ function resolveVariable(variable: string, context: AutomationContext): unknown 
 
 function looseEquals(a: unknown, b: unknown): boolean {
   if (a === b) return true;
-  if (a === null || a === undefined) return b === null || b === undefined;
-  if (b === null || b === undefined) return false;
+  const aNil = a === null || a === undefined;
+  const bNil = b === null || b === undefined;
+  if (aNil && bNil) return true;
+  if ((!aNil && typeof a === 'object') || (!bNil && typeof b === 'object')) return false;
   if (typeof a === 'number' && typeof b === 'string') return a === Number(b);
   if (typeof a === 'string' && typeof b === 'number') return Number(a) === b;
-  if (typeof a === 'boolean' || typeof b === 'boolean') return Number(a) === Number(b);
-  return false;
+  if (typeof a === 'boolean' || typeof b === 'boolean') {
+    return Number(a) === Number(b) || String(a) === String(b);
+  }
+  // The editor stores the operand as a string, so a real null/true from the
+  // trigger payload arrives here as "null"/"true".
+  return String(a) === String(b);
 }
 
 function toFiniteNumber(value: unknown): number | null {
   if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (value instanceof Date) return toFiniteNumber(+value);
   if (typeof value !== 'string') return null;
 
   const trimmed = value.trim();
   if (trimmed.length === 0) return null;
 
-  const parsed = Number(trimmed);
+  // Numeric strings must win here, so "5" stays 5 instead of parsing as a date.
+  const parsed = Number.isFinite(Number(trimmed)) ? Number(trimmed) : Date.parse(trimmed);
   return Number.isFinite(parsed) ? parsed : null;
 }
 

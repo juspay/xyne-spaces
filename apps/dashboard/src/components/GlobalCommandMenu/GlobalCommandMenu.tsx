@@ -51,6 +51,9 @@ interface GlobalCommandMenuProps {
   restoreQueryFromUrl?: boolean;
   // Opened by the `mod+/` shortcut in screen mode: seed the box with `/` so it lands in command mode.
   seedCommand?: boolean;
+  // Show the inline AI overview above the results. Only the cmd+K search overlay sets it;
+  // the pickers built on this menu leave it off.
+  aiOverview?: boolean;
 }
 
 const GlobalCommandMenu = ({
@@ -71,6 +74,7 @@ const GlobalCommandMenu = ({
   hideTabs,
   restoreQueryFromUrl,
   seedCommand,
+  aiOverview,
 }: GlobalCommandMenuProps = {}): ReactElement | null => {
   const context = useAuthContextValues();
   const channelData = useAllChannels();
@@ -374,6 +378,7 @@ const GlobalCommandMenu = ({
       {...(contextualTab !== undefined ? { initialTab: contextualTab } : {})}
       {...(disableAutoFocus !== undefined ? { disableAutoFocus } : {})}
       {...(effectiveHideTabs ? { hideTabs: effectiveHideTabs } : {})}
+      {...(aiOverview !== undefined ? { aiOverview } : {})}
       deskMergeEnabled={deskMergeEnabled}
     />
   );

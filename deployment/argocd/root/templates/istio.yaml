@@ -1,0 +1,37 @@
+{{- $istio := .Values.addons.istio }}
+{{- if $istio.enabled }}
+{{- $repo := "https://istio-release.storage.googleapis.com/charts" }}
+{{- $ingress := .Values.infra.ingress }}
+{{- $baseValues := include "xyne-root.merge" (dict "base" (dict "defaultRevision" "default") "layers" (list $istio.values.base)) | fromYaml }}
+{{- $istiodValues := include "xyne-root.merge" (dict "base" (dict "meshConfig" (dict "accessLogFile" "/dev/stdout")) "layers" (list $istio.values.istiod)) | fromYaml }}
+{{- $serviceAnnotations := deepCopy ($ingress.lbAnnotations | default dict) }}
+{{- $ed := .Values.addons.externalDns }}
+{{- $edIdentity := (.Values.infra.identities | default dict).externalDns | default dict }}
+{{- $ing := include "xyne-root.ingress" . | fromYaml }}
+{{- $edEnabled := $ed.enabled }}
+{{- if kindIs "invalid" $edEnabled }}
+{{- $edEnabled = and (eq $ing.serviceType "LoadBalancer") (ne ($ingress.dnsZone | default "") "") (gt (len ($edIdentity.annotations | default dict)) 0) }}
+{{- end }}
+{{- if and $edEnabled (eq $ing.serviceType "LoadBalancer") }}
+{{- $_ := set $serviceAnnotations "external-dns.alpha.kubernetes.io/hostname" (printf "%s,*.%s" $.Values.global.domain $.Values.global.domain) }}
+{{- end }}
+{{- $service := dict "type" $ing.serviceType "annotations" $serviceAnnotations }}
+{{- if eq $ing.serviceType "LoadBalancer" }}
+{{- with $ingress.staticIp }}
+{{- $_ := set $service "loadBalancerIP" . }}
+{{- end }}
+{{- end }}
+{{- with $ing.externalTrafficPolicy }}
+{{- $_ := set $service "externalTrafficPolicy" . }}
+{{- end }}
+{{- if eq $ing.serviceType "NodePort" }}
+{{- $_ := set $service "ports" (list
+  (dict "name" "status-port" "port" 15021 "protocol" "TCP" "targetPort" 15021 "nodePort" (int $ing.nodePorts.status))
+  (dict "name" "http2" "port" 80 "protocol" "TCP" "targetPort" 80 "nodePort" (int $ing.nodePorts.http))
+  (dict "name" "https" "port" 443 "protocol" "TCP" "targetPort" 443 "nodePort" (int $ing.nodePorts.https))) }}
+{{- end }}
+{{- $gatewayValues := include "xyne-root.merge" (dict "base" (dict "service" $service) "layers" (list $istio.values.gateway)) | fromYaml }}
+{{- include "xyne-root.application" (dict "root" $ "name" "istio-base" "namespace" $istio.namespace "wave" -3 "source" (include "xyne-root.helmSource" (dict "root" $ "repoURL" $repo "chart" "base" "targetRevision" $istio.version "releaseName" "istio-base" "values" $baseValues) | fromYaml)) }}
+{{- include "xyne-root.application" (dict "root" $ "name" "istiod" "namespace" $istio.namespace "wave" -3 "source" (include "xyne-root.helmSource" (dict "root" $ "repoURL" $repo "chart" "istiod" "targetRevision" $istio.version "releaseName" "istiod" "values" $istiodValues) | fromYaml)) }}
+{{- include "xyne-root.application" (dict "root" $ "name" "istio-ingressgateway" "namespace" $istio.gatewayNamespace "wave" -2 "source" (include "xyne-root.helmSource" (dict "root" $ "repoURL" $repo "chart" "gateway" "targetRevision" $istio.version "releaseName" "istio-ingressgateway" "values" $gatewayValues) | fromYaml) "ignoreDifferences" (include "xyne-root.deploymentIgnore" . | fromYamlArray)) }}
+{{- end }}

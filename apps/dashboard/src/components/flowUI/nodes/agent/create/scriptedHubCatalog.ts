@@ -169,10 +169,11 @@ function mergeKb(current: ClawKnowledgeBaseTree | undefined): ClawKnowledgeBaseT
 function mergeMcp(current: ClawMcpData | undefined): ClawMcpData {
   const servers = current?.servers ?? [];
   const connections = current?.connections ?? [];
+  const availability = current?.availability ?? [];
   if (servers.some(server => server.type === SCRIPTED_HUB_IDS.slackSource)) {
-    return current ?? { servers, connections };
+    return current ?? { servers, connections, availability };
   }
-  return { servers: [...servers, SCRIPTED_SLACK_SERVER], connections };
+  return { servers: [...servers, SCRIPTED_SLACK_SERVER], connections, availability };
 }
 
 export function seedScriptedHubCatalog(queryClient: QueryClient, userId: string | undefined): void {

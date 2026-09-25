@@ -2,6 +2,7 @@ import { PrismaClient } from '@prisma/client';
 import { UserStatus } from '@xyne/shared';
 import { logger } from '../utils/logger';
 import { DatabaseClient } from '@/database/client';
+import { ticketReassignmentQueue } from '@/queues/ticketReassignmentQueue';
 
 export interface BulkStatusUpdateResult {
   successful: string[];
@@ -101,6 +102,18 @@ export class UserActivationService {
           continue; // Move to next batch
         }
 
+        // Capture group membership BEFORE the transaction: deactivation deletes the
+        // user_group_mappings rows below, and those pairs are the only record of which
+        // groups' open tickets need handing off. Read after the delete and there is
+        // nothing left to schedule.
+        const membershipsToHandOff =
+          status === UserStatus.INACTIVE
+            ? await this.prisma.userGroupMapping.findMany({
+                where: { userId: { in: batch } },
+                select: { userId: true, userGroupId: true },
+              })
+            : [];
+
         // Step 2: All users exist, perform batch update in transaction
         await this.prisma.$transaction(async (tx) => {
           await tx.user.updateMany({
@@ -130,12 +143,34 @@ export class UserActivationService {
           }
         });
 
+        // Hand off the departed members' open tickets. Scheduled post-commit so the
+        // queue processor reads committed rows: by the time it runs, the mappings above
+        // are gone, so the departing user is already out of every candidate pool and
+        // cannot be picked as their own replacement.
+        //
+        // Deliberately not gated on userGroup.reassignOnUnavailable, unlike the member
+        // pause flow. That flag governs a temporary absence, where holding a member's
+        // tickets for their return is reasonable. A departure is permanent, so leaving
+        // open tickets on an account that will never act on them is never correct.
+        for (const { userId, userGroupId } of membershipsToHandOff) {
+          try {
+            await ticketReassignmentQueue.scheduleReassignment(userId, userGroupId);
+          } catch (error) {
+            // Best-effort: a scheduling failure must not fail the deactivation itself,
+            // which has already committed.
+            logger.error(
+              `[bulkUpdateUserStatus] Failed to schedule ticket reassignment for user ${userId} in group ${userGroupId}:`,
+              error
+            );
+          }
+        }
+
         // Mark all as successful
         for (const userId of batch) {
           result.successful.push(userId);
         }
 
-        logger.info(`[bulkUpdateUserStatus] Batch ${batchNumber} completed successfully: ${batch.length} users updated`);
+        logger.info(`[bulkUpdateUserStatus] Batch ${batchNumber} completed successfully: ${batch.length} users updated${membershipsToHandOff.length ? `; queued reassignment for ${membershipsToHandOff.length} membership(s)` : ''}`);
 
       } catch (error) {
         // Transaction failed - fail entire batch

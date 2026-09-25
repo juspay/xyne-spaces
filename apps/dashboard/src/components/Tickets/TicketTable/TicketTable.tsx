@@ -278,7 +278,10 @@ export const TicketTable: React.FC<TicketTableProps> = ({
     count: itemCount,
     getScrollElement,
     estimateSize: index => (index >= tickets.length ? TRAILING_ROW_HEIGHT : rowHeight),
-    overscan: 12,
+    // ~1.5 viewports of rows pre-mounted each direction, so fast scrolls land
+    // on rendered rows instead of a blank gap (the ghost shimmer covers what
+    // even this can't). Pickers and hover cards do their heavy work on open.
+    overscan: 45,
     scrollMargin: usesExternalScroller ? scrollMargin : 0,
   });
   const virtualItems = virtualizer.getVirtualItems();
@@ -401,6 +404,31 @@ export const TicketTable: React.FC<TicketTableProps> = ({
     [visibleBoards],
   );
 
+  // Fast flicks outrun React row rendering no matter the overscan; these ghost
+  // regions cover the not-yet-mounted gaps with skeleton rows drawn in CSS,
+  // which paints synchronously with the scroll. Real rows replace them as soon
+  // as the virtualizer catches up.
+  const ghostStyle = useMemo<React.CSSProperties>(() => {
+    const barTop = (rowHeight - 12) / 2;
+    return {
+      backgroundImage:
+        `linear-gradient(to bottom, transparent ${barTop}px, hsl(var(--muted)) ${barTop}px, hsl(var(--muted)) ${barTop + 12}px, transparent ${barTop + 12}px), ` +
+        `linear-gradient(to bottom, transparent ${rowHeight - 1}px, hsl(var(--border)) ${rowHeight - 1}px)`,
+      backgroundSize: `min(45%, 360px) ${rowHeight}px, 100% ${rowHeight}px`,
+      backgroundPosition: '48px 0, 0 0',
+      backgroundRepeat: 'repeat-y, repeat-y',
+    };
+  }, [rowHeight]);
+  const ghostRegions: Array<{ top: number; height: number }> = [];
+  if (virtualItems.length > 0) {
+    const offset = usesExternalScroller ? scrollMargin : 0;
+    const firstTop = virtualItems[0]!.start - offset;
+    const lastEnd = virtualItems[virtualItems.length - 1]!.end - offset;
+    const totalSize = virtualizer.getTotalSize();
+    if (firstTop > 0) ghostRegions.push({ top: 0, height: firstTop });
+    if (lastEnd < totalSize) ghostRegions.push({ top: lastEnd, height: totalSize - lastEnd });
+  }
+
   const listBody = (
     <div
       ref={listRef}
@@ -409,6 +437,14 @@ export const TicketTable: React.FC<TicketTableProps> = ({
       // getTotalSize() excludes scrollMargin; items translate by (start - margin).
       style={{ height: `${virtualizer.getTotalSize()}px` }}
     >
+      {ghostRegions.map(region => (
+        <div
+          key={`ghost-${region.top}`}
+          aria-hidden
+          className='pointer-events-none absolute left-0 w-full animate-pulse'
+          style={{ top: `${region.top}px`, height: `${region.height}px`, ...ghostStyle }}
+        />
+      ))}
       {virtualItems.map(item => {
         const start = item.start - (usesExternalScroller ? scrollMargin : 0);
         if (item.index >= tickets.length) {

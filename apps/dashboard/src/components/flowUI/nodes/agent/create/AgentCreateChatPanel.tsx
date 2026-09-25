@@ -241,11 +241,11 @@ function LiveAgentCreateChatPanel({
     const raw = lastBot.content || lastBot.streamingContent || '';
     // Reply-only: keep streamed answer. Draft: canvas pipeline first, then section lines.
     if (!shouldHoldDraftChatAck(raw)) {
-      void onTurnCompleteRef.current({ userText: lastUser.content, marker: parseCreateChatAction(raw) }).catch(
-        (err: unknown) => {
+      void onTurnCompleteRef
+        .current({ userText: lastUser.content, marker: parseCreateChatAction(raw) })
+        .catch((err: unknown) => {
           setCanvasError(clawErrorText(err, 'Could not draft from chat. Try again.'));
-        },
-      );
+        });
       return;
     }
     canvasStartedForUserRef.current = lastUser.id;
@@ -277,7 +277,8 @@ function LiveAgentCreateChatPanel({
         });
       const userId = `proof-user-${Date.now()}`;
       const botId = `proof-bot-${Date.now()}`;
-      const holdAck = action.type === 'draft' || action.type === 'rename' || shouldHoldDraftChatAck(raw);
+      const holdAck =
+        action.type === 'draft' || action.type === 'rename' || shouldHoldDraftChatAck(raw);
       const replyOnly = !holdAck;
       setMessages([
         {
@@ -570,7 +571,10 @@ function CreateChatLayout({
                       ) : null}
                     </div>
                   ) : (
-                    <div className='flex min-w-0 flex-col gap-2' data-testid='agent-create-chat-bot'>
+                    <div
+                      className='flex min-w-0 flex-col gap-2'
+                      data-testid='agent-create-chat-bot'
+                    >
                       {hasReasoning || (message.isStreaming && !progressLabel) ? (
                         <div data-testid='agent-create-chat-reasoning'>
                           <ActivityBlock

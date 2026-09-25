@@ -38,6 +38,7 @@ import {
   CallStatus,
   CallType,
   InvitationResponse,
+  RingStatus,
   MeetingStatus,
   NotificationType,
   RecordingType,
@@ -2355,6 +2356,7 @@ export class CallController {
               where: { id: existingParticipant.id },
               data: {
                 response: InvitationResponse.INVITED,
+                ringStatus: RingStatus.CALLING,
                 invitedBy: userId,
                 invitedAt: now,
                 respondedAt: null,
@@ -2375,6 +2377,7 @@ export class CallController {
             invitedBy: userId,
             invitedAt: now,
             response: InvitationResponse.INVITED,
+            ringStatus: RingStatus.CALLING,
           });
           invitedUserIds.push(targetUserId);
         }

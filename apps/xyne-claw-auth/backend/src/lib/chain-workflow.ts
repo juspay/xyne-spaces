@@ -233,9 +233,8 @@ export function summarizeChainToolInvocations(raw: unknown): ChainToolInvocation
       ...(command ? { command: command.slice(0, CHAIN_JUDGE_COMMAND_EXCERPT_LENGTH) } : {}),
       ...(typeof inv["isError"] === "boolean" ? { isError: inv["isError"] } : {}),
     });
-    if (out.length >= CHAIN_JUDGE_INVOCATION_LIMIT) break;
   }
-  return out;
+  return out.length > CHAIN_JUDGE_INVOCATION_LIMIT ? out.slice(-CHAIN_JUDGE_INVOCATION_LIMIT) : out;
 }
 
 const NESTED_QUANTIFIER_RE = /\((?:[^()\\]|\\.)*[+*{](?:[^()\\]|\\.)*\)[+*{]/;
@@ -296,10 +295,10 @@ export function evaluateChainCommandConditions(
     : [];
 
   if (conditions.commandsMustMatch?.length) {
-    const allMatched = conditions.commandsMustMatch.every((pattern) =>
+    const anyMatched = conditions.commandsMustMatch.some((pattern) =>
       commandTexts.some((text) => chainCommandPatternMatches(pattern, text) === "match"),
     );
-    if (!allMatched) return false;
+    if (!anyMatched) return false;
   }
 
   if (conditions.commandsMustNotMatch?.length) {

@@ -1,0 +1,72 @@
+[
+  {
+    "name": "backend",
+    "image": "xyne-spaces-backend",
+    "dockerfile": "apps/backend/Dockerfile",
+    "context": ".",
+    "charts": ["xyne-backend", "xyne-worker"]
+  },
+  {
+    "name": "dashboard",
+    "image": "xyne-spaces-dashboard",
+    "dockerfile": "apps/dashboard/Dockerfile",
+    "context": ".",
+    "charts": ["xyne-dashboard"]
+  },
+  {
+    "name": "dashboard-external",
+    "image": "xyne-spaces-dashboard-external",
+    "dockerfile": "apps/dashboard-external/Dockerfile",
+    "context": ".",
+    "charts": ["xyne-dashboard-external"]
+  },
+  {
+    "name": "dashboard-edge",
+    "image": "xyne-spaces-dashboard-edge",
+    "dockerfile": "apps/dashboard-edge/Dockerfile",
+    "context": ".",
+    "charts": ["xyne-dashboard-edge"]
+  },
+  {
+    "name": "claw",
+    "image": "xyne-spaces-claw",
+    "dockerfile": "apps/xyne-claw/Dockerfile",
+    "context": ".",
+    "charts": ["xyne-claw"]
+  },
+  {
+    "name": "claw-auth-backend",
+    "image": "xyne-spaces-claw-auth-backend",
+    "dockerfile": "apps/xyne-claw-auth/backend/Dockerfile",
+    "context": ".",
+    "charts": ["xyne-claw-auth"]
+  },
+  {
+    "name": "claw-auth-frontend",
+    "image": "xyne-spaces-claw-auth-frontend",
+    "dockerfile": "apps/xyne-claw-auth/frontend/Dockerfile",
+    "context": ".",
+    "charts": ["xyne-claw-auth-frontend"]
+  },
+  {
+    "name": "transcription-agent",
+    "image": "xyne-spaces-transcription-agent",
+    "dockerfile": "apps/backend/python-agent/Dockerfile",
+    "context": "apps/backend/python-agent",
+    "charts": ["xyne-transcription-agent"]
+  },
+  {
+    "name": "lighton-ocr-server",
+    "image": "xyne-spaces-lighton-ocr-server",
+    "dockerfile": "lighton-ocr-server/Dockerfile",
+    "context": "lighton-ocr-server",
+    "charts": ["xyne-lighton-ocr"]
+  },
+  {
+    "name": "sandbox-router",
+    "image": "xyne-spaces-sandbox-router",
+    "dockerfile": "claw-deployments/kata-infra/sandbox-router-ws/Dockerfile",
+    "context": "claw-deployments/kata-infra/sandbox-router-ws",
+    "charts": ["xyne-sandbox-router"]
+  }
+]

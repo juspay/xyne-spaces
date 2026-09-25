@@ -6,10 +6,25 @@
  * buttons), which breaks list-row layout. These helpers collapse it to plain text.
  */
 
-/** Strips mrkdwn / standard-markdown emphasis and Xyne tokens for a clean preview. */
-function stripFlowMarkup(raw: string): string {
+/** Resolves a mentioned user id to the name shown in place of its token. */
+export type MentionNameResolver = (userId: string) => string | undefined;
+
+/**
+ * Strips mrkdwn / standard-markdown emphasis and Xyne tokens for a clean preview.
+ * User mentions become `@Name` when a resolver is supplied, and are dropped when
+ * it is not — a preview must never leak a raw `<userid:…>` token either way.
+ */
+export function stripFlowMarkup(raw: string, resolveUserName?: MentionNameResolver): string {
   return raw
-    .replace(/<userid:[^>]+>/g, '')
+    .replace(/<\/?u>/g, '')
+    .replace(/<userid:([^>]+)>/g, (_match, userId: string) => {
+      const name = resolveUserName?.(userId);
+      return name ? `@${name}` : '';
+    })
+    .replace(
+      /<groupid:[^:>]+(?::([^>]+))?>/g,
+      (_match, alias: string | undefined) => `@${alias ?? 'group'}`,
+    )
     .replace(/<channelid:[^>]+>/g, '#channel')
     .replace(/<broadcast:channel>/gi, '@channel')
     .replace(/<broadcast:here>/gi, '@here')

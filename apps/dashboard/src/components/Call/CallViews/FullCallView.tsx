@@ -1,13 +1,13 @@
 import type { Room } from 'livekit-client';
 import { ConnectionQuality, ConnectionState } from 'livekit-client';
-import { WifiLow } from 'lucide-react';
+import { Minimize2, MonitorUp, WifiLow } from 'lucide-react';
 import { useSelector } from '@xstate/react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   useParticipantNetworkQuality,
   useNetworkQualityToast,
 } from '../hooks/useParticipantNetworkQuality';
-import { type RecordingType } from '@xyne/shared';
+import { InvitationResponse, type RecordingType } from '@xyne/shared';
 import type { ParticipantInfo } from '../../../machines/roomMachine';
 import { roomActor } from '../../../machines/roomMachine';
 import { cn } from '../../../utils/classNames';
@@ -19,8 +19,9 @@ import { findPresentationParticipant } from '../ParticipantGrid/sortParticipants
 import { ScreenShareView } from '../ScreenShareView/ScreenShareView';
 import { ControlRequestDialog } from '../CallModals/ControlRequestDialog';
 import { ParticipantsSidebar } from '../ParticipantsSidebar/ParticipantsSidebar';
-import { HostControlsPanel } from '../HostControlsPanel/HostControlsPanel';
+import { ParticipantsPill } from '../ParticipantsPill/ParticipantsPill';
 import { CallNotesPanel } from '../CallNotesPanel/CallNotesPanel';
+import { getRingingInvitees, useIsDmCall } from '../ringStatus.utils';
 import { ConnectionStatusIndicators } from '../ConnectionStatusIndicators/ConnectionStatusIndicators';
 import { sendDrawEvent } from '../../../hooks/useDrawStore';
 import { useCallWhiteboardStore } from '../../../stores/callWhiteboardStore';
@@ -42,6 +43,20 @@ import { PresentationModeOverlay } from '../PresentationMode/PresentationModeOve
 import { formatElapsedTime } from '../../../utils/recordingUtils';
 import { logger, Event } from '../../../utils/logger';
 import { usePlatform } from '../../../hooks/usePlatform';
+
+/** Wall-clock time for the bottom-left of the bar. Polled every 10s so the minute flips promptly. */
+function useClockLabel(): string {
+  const format = (): string =>
+    new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  const [label, setLabel] = useState(format);
+  useEffect(() => {
+    const interval = setInterval(() => setLabel(format()), 10_000);
+    return (): void => clearInterval(interval);
+  }, []);
+  return label;
+}
+
+type SidePanel = 'participants' | 'notes' | 'callChat' | 'thread';
 
 interface FullCallViewProps {
   participants: ParticipantInfo[];
@@ -83,6 +98,7 @@ interface FullCallViewProps {
         readonly metadata: unknown;
         readonly displayName?: string | null | undefined;
         readonly isExternal?: boolean | undefined;
+        readonly ringStatus?: string | null | undefined;
       }>
     | undefined;
   /** Optional: override host detection */
@@ -171,7 +187,6 @@ export function FullCallView({
   // UI state
   const [focusedScreenShareIdentity, setFocusedScreenShareIdentity] = useState<string | null>(null);
   const [isParticipantsSidebarOpen, setIsParticipantsSidebarOpen] = useState(false);
-  const [isHostControlsOpen, setIsHostControlsOpen] = useState(false);
   const [isNotesOpen, setIsNotesOpen] = useState(false);
   const isWhiteboardOpen = useCallWhiteboardStore(s => s.isOpen);
   const [isPresentationMode, setIsPresentationMode] = useState(false);
@@ -360,66 +375,48 @@ export function FullCallView({
     setFocusedScreenShareIdentity(identity);
   }, []);
 
-  // Handle toggling participants sidebar (closes chat if open)
+  // Meet shows one side panel at a time: opening any panel closes the others.
+  // People (which also holds host controls and the agent) and Notes are local
+  // state; the two chats are owned upstream.
+  const closePanelsExcept = useCallback(
+    (keep: SidePanel): void => {
+      if (keep !== 'participants') setIsParticipantsSidebarOpen(false);
+      if (keep !== 'notes') setIsNotesOpen(false);
+      if (keep !== 'thread' && isChatOpen) onToggleThread();
+      if (keep !== 'callChat' && isCallChatOpen && onToggleCallChat) onToggleCallChat();
+    },
+    [isChatOpen, onToggleThread, isCallChatOpen, onToggleCallChat],
+  );
+
   const handleToggleParticipantsSidebar = useCallback((): void => {
-    setIsParticipantsSidebarOpen(prev => {
-      // If opening participants sidebar, close chat and call chat
-      if (!prev && isChatOpen) {
-        onToggleThread();
-      }
-      if (!prev && isCallChatOpen && onToggleCallChat) {
-        onToggleCallChat();
-      }
-      if (!prev) {
-        setIsHostControlsOpen(false);
-        setIsNotesOpen(false);
-      }
-      return !prev;
-    });
-  }, [isChatOpen, onToggleThread, isCallChatOpen, onToggleCallChat]);
+    if (!isParticipantsSidebarOpen) closePanelsExcept('participants');
+    setIsParticipantsSidebarOpen(!isParticipantsSidebarOpen);
+  }, [isParticipantsSidebarOpen, closePanelsExcept]);
 
-  const handleToggleHostControls = useCallback((): void => {
-    setIsHostControlsOpen(prev => {
-      if (!prev && isChatOpen) {
-        onToggleThread();
-      }
-      if (!prev && isCallChatOpen && onToggleCallChat) {
-        onToggleCallChat();
-      }
-      if (!prev) {
-        setIsParticipantsSidebarOpen(false);
-        setIsNotesOpen(false);
-      }
-      return !prev;
-    });
-  }, [isChatOpen, onToggleThread, isCallChatOpen, onToggleCallChat]);
-
-  // Notes share the right sidebar slot with thread, participants and host controls
+  // Shared notes canvas (series-wide for recurring calls).
   const handleToggleNotes = useCallback((): void => {
-    setIsNotesOpen(prev => {
-      if (!prev && isChatOpen) {
-        onToggleThread();
-      }
-      if (!prev) {
-        setIsParticipantsSidebarOpen(false);
-        setIsHostControlsOpen(false);
-      }
-      return !prev;
-    });
-  }, [isChatOpen, onToggleThread]);
+    if (!isNotesOpen) closePanelsExcept('notes');
+    setIsNotesOpen(!isNotesOpen);
+  }, [isNotesOpen, closePanelsExcept]);
 
-  // Close participants sidebar when chat opens
+  const handleToggleThread = useCallback((): void => {
+    if (!isChatOpen) closePanelsExcept('thread');
+    onToggleThread();
+  }, [isChatOpen, closePanelsExcept, onToggleThread]);
+
+  const handleToggleCallChat = useCallback((): void => {
+    if (!onToggleCallChat) return;
+    if (!isCallChatOpen) closePanelsExcept('callChat');
+    onToggleCallChat();
+  }, [isCallChatOpen, closePanelsExcept, onToggleCallChat]);
+
+  // Chat can also be opened from outside the call UI — keep local panels closed then.
   useEffect(() => {
-    if (isChatOpen && isParticipantsSidebarOpen) {
+    if (isChatOpen || isCallChatOpen) {
       setIsParticipantsSidebarOpen(false);
-    }
-    if (isChatOpen && isHostControlsOpen) {
-      setIsHostControlsOpen(false);
-    }
-    if (isChatOpen && isNotesOpen) {
       setIsNotesOpen(false);
     }
-  }, [isChatOpen, isParticipantsSidebarOpen, isHostControlsOpen, isNotesOpen]);
+  }, [isChatOpen, isCallChatOpen]);
 
   // Show toast for incoming call chat messages
   useCallChatNotifications(room, localParticipantId, onCallChatNewMessage);
@@ -427,6 +424,20 @@ export function FullCallView({
   const hasExternalJoined = useMemo(() => {
     return hasJoinedExternalParticipant(callParticipants);
   }, [callParticipants]);
+
+  // Ring tiles are DM-only; elsewhere the sidebar carries ring status.
+  const isDmCall = useIsDmCall(channelId);
+  const ringingInvitees = useMemo(
+    () =>
+      isExternalUser || !isDmCall
+        ? []
+        : getRingingInvitees(
+            callParticipants,
+            new Set(participants.map(p => p.identity)),
+            currentUserId !== undefined ? currentUserId : user?.id,
+          ),
+    [isExternalUser, isDmCall, callParticipants, participants, currentUserId, user?.id],
+  );
 
   const canUseCallChat = isExternalUser || hasExternalJoined;
   const isCallChatVisible = canUseCallChat && isCallChatOpen;
@@ -442,15 +453,132 @@ export function FullCallView({
     [participants, localParticipantId],
   );
 
-  // Determine if any right sidebar is open (for layout adjustments)
-  const isRightSidebarOpen =
-    isChatOpen || isParticipantsSidebarOpen || isHostControlsOpen || isNotesOpen;
+  const activePanel: SidePanel | null = isParticipantsSidebarOpen
+    ? 'participants'
+    : isNotesOpen && !isExternalUser
+      ? 'notes'
+      : isCallChatVisible && onToggleCallChat
+        ? 'callChat'
+        : isChatOpen && channelId && conversationId
+          ? 'thread'
+          : null;
+
+  const activeCalls = useSelector(roomActor, state => state.context.activeCalls);
+  const currentCall = useMemo(
+    () =>
+      (
+        activeCalls as Array<{
+          externalId: string;
+          title?: string | null;
+          participants?: Array<{ response?: string | null }>;
+        }>
+      ).find(c => c.externalId === callId),
+    [activeCalls, callId],
+  );
+  const callTitle = currentCall?.title ?? null;
+  // Anyone in the call can admit people, so everyone sees the waiting count.
+  const joinRequestCount = useMemo(
+    () =>
+      (callParticipants ?? currentCall?.participants ?? []).filter(
+        p => p.response === InvitationResponse.REQUESTED,
+      ).length,
+    [callParticipants, currentCall?.participants],
+  );
+  const clockLabel = useClockLabel();
+  const isLocalHandRaised = !!localParticipantId && raisedHands.includes(localParticipantId);
+
+  const renderStage = (): React.ReactElement => {
+    if (isWhiteboardOpen) {
+      return (
+        <CallWhiteboardView
+          participants={participants}
+          room={room}
+          className='h-full'
+          showSidebar={true}
+          aiController={aiController}
+          requestedAiController={requestedAiController}
+        />
+      );
+    }
+    if (focusedScreenShare) {
+      return (
+        <ScreenShareView
+          focusedScreenShare={focusedScreenShare}
+          participants={participants}
+          onScreenShareClick={handleScreenShareClick}
+          className='h-full'
+          showSidebar={true}
+          showDrawingTools={true}
+          aiController={aiController}
+          requestedAiController={requestedAiController}
+          raisedHands={raisedHands}
+        />
+      );
+    }
+    return (
+      <ParticipantGrid
+        participants={participants}
+        ringingInvitees={ringingInvitees}
+        aiController={aiController}
+        requestedAiController={requestedAiController}
+        raisedHands={raisedHands}
+      />
+    );
+  };
+
+  const renderPanel = (): React.ReactNode => {
+    switch (activePanel) {
+      case 'participants':
+        return (
+          <ParticipantsSidebar
+            callId={callId}
+            onClose={handleToggleParticipantsSidebar}
+            callParticipants={callParticipants}
+            isHost={isHostProp}
+            currentUserId={currentUserId}
+            onApproveLobbyRequest={onApproveLobbyRequest}
+            onRejectLobbyRequest={onRejectLobbyRequest}
+            hideInvite={hideInvite}
+            raisedHands={raisedHands}
+            onToggleHandRaise={onToggleHandRaise}
+            hostName={hostName}
+            agentControls={
+              hideAIAssistant
+                ? undefined
+                : { localParticipantId, requestedAiController, onRequestControl }
+            }
+          />
+        );
+      case 'notes':
+        return <CallNotesPanel callId={callId} channelId={channelId} onClose={handleToggleNotes} />;
+      case 'callChat':
+        return (
+          <CallChatPanel
+            room={room}
+            externalId={callId}
+            localParticipantId={localParticipantId}
+            onClose={handleToggleCallChat}
+            onNewMessage={onCallChatNewMessage}
+            isExternalUser={isExternalUser}
+          />
+        );
+      case 'thread':
+        return channelId && conversationId ? (
+          <ThreadMessages
+            channelId={channelId}
+            conversationId={conversationId}
+            ticketId={null}
+            onClose={handleToggleThread}
+          />
+        ) : null;
+      default:
+        return null;
+    }
+  };
 
   return (
     <div
-      className={cn(
-        'h-screen bg-[#131314] flex flex-col overflow-hidden transition-all duration-300',
-      )}
+      className='relative flex h-screen flex-col overflow-hidden bg-[#131314]'
       data-testid='call-window'
     >
       {/* Floating reactions overlay */}
@@ -473,135 +601,114 @@ export function FullCallView({
         </div>
       )}
 
-      {/* Connection Status Indicators Bar */}
+      {/* Top strip, keeping the stage chrome-free (Meet's layout). Left: transcription
+          and recording status. Centre: the "you're presenting" reminder. Right:
+          connection trouble, People and Minimize. Leaves room for the macOS traffic
+          lights in Electron. */}
       <div
         className={cn(
-          'flex justify-between items-center pr-4 py-3',
-          isElectron && isMac ? 'pl-24' : 'pl-4',
+          'relative flex h-14 shrink-0 items-center justify-between gap-3 pr-3 sm:pr-4',
+          isElectron && isMac ? 'pl-24' : 'pl-3 sm:pl-4',
         )}
       >
-        <div className='flex items-center gap-2'>
-          <div className='relative visual-regression-hide'>
-            <div className='w-2 h-2 bg-green-500 rounded-full'></div>
-            <div className='absolute inset-0 w-2 h-2 bg-green-500 rounded-full animate-ping'></div>
-          </div>
-          <span className='text-white text-xs font-semibold'>Call Active</span>
-          <span className='text-muted-foreground text-xs'>·</span>
-          <span className='text-muted-foreground text-xs' data-testid='participant-count'>
-            {participants.length} participant{participants.length !== 1 ? 's' : ''}
-          </span>
-          {isRecordingActive && (
-            <>
-              <span className='text-muted-foreground text-xs'>·</span>
-              <span
-                className='flex items-center gap-1 text-red-400 text-xs font-semibold'
-                title={
-                  displayActiveRecording?.startedByName
-                    ? `Recording started by ${displayActiveRecording.startedByName}`
-                    : 'This call is being recorded'
-                }
-              >
-                <span className='w-2 h-2 bg-red-500 rounded-full animate-pulse inline-block' />
-                REC {recordingElapsed}
-              </span>
-            </>
-          )}
-        </div>
-        <div className='flex items-center gap-3'>
+        <div className='flex min-w-0 items-center gap-2 sm:gap-3'>
           <CallPrivacyIndicator
             isTranscriptionEnabled={isTranscriptionEnabled}
             isHost={isHost}
             hostName={hostName}
             onToggleTranscription={() => roomActor.send({ type: 'TOGGLE_TRANSCRIPTION' })}
+            isRecordingActive={isRecordingActive}
+            recordingType={displayRecordingType}
             trackMetadata={{
               isRecordingActive,
               recordingType: displayRecordingType,
             }}
           />
-          <ConnectionStatusIndicators room={room} />
+          {isRecordingActive && (
+            <span
+              className='flex h-10 items-center gap-2 rounded-full bg-transparent px-3.5 text-sm font-semibold text-[#f28b82] ring-1 ring-inset ring-[#f28b82]/40'
+              title={
+                displayActiveRecording?.startedByName
+                  ? `Recording started by ${displayActiveRecording.startedByName}`
+                  : 'This call is being recorded'
+              }
+            >
+              <span className='inline-block h-2 w-2 animate-pulse rounded-full bg-[#ea4335]' />
+              REC <span className='tabular-nums'>{recordingElapsed}</span>
+            </span>
+          )}
+        </div>
+        {/* Meet's "you're presenting" reminder, with a one-click stop */}
+        {isScreenSharing && (
+          <div className='absolute left-1/2 top-1/2 hidden -translate-x-1/2 -translate-y-1/2 items-center gap-3 rounded-full bg-[#333537] py-1 pl-3 pr-1 text-sm text-[#e3e3e3] md:flex'>
+            <MonitorUp className='h-4 w-4 text-[#a8c7fa]' />
+            <span className='whitespace-nowrap'>You&apos;re presenting to everyone</span>
+            <button
+              type='button'
+              onClick={onToggleScreenShare}
+              className='rounded-full bg-[#a8c7fa] px-3 py-1 text-xs font-medium text-[#062e6f] transition-colors hover:bg-[#bcd4fb]'
+              data-track-category='CALLS'
+              data-track-name='TOGGLE_SCREEN_SHARE'
+              data-track-metadata={JSON.stringify({
+                callId,
+                enabled: true,
+                source: 'presenting_banner',
+              })}
+            >
+              Stop presenting
+            </button>
+          </div>
+        )}
+        <div className='flex items-center gap-2 sm:gap-3'>
+          <ConnectionStatusIndicators room={room} hideWhenHealthy />
+          <ParticipantsPill
+            participants={participants}
+            requestCount={joinRequestCount}
+            raisedHandCount={raisedHands.length}
+            isOpen={activePanel === 'participants'}
+            onClick={handleToggleParticipantsSidebar}
+          />
+          {!hideMinimize && (
+            <button
+              type='button'
+              onClick={onMinimize}
+              className='flex h-10 items-center gap-2 rounded-full bg-[#333537] px-3 text-sm font-medium text-[#e3e3e3] outline-none transition-colors hover:bg-[#404245] focus-visible:ring-2 focus-visible:ring-[#a8c7fa] focus-visible:ring-offset-2 focus-visible:ring-offset-[#131314] sm:pl-3 sm:pr-4'
+              title='Minimize to a floating window'
+              aria-label='Minimize call'
+              data-track-category='CALLS'
+              data-track-name='TOGGLE_VIEW_MODE'
+              data-track-metadata={JSON.stringify({ callId, viewMode: 'full', source: 'top_bar' })}
+            >
+              <Minimize2 className='h-4 w-4' />
+              <span className='hidden sm:inline'>Minimize</span>
+            </button>
+          )}
         </div>
       </div>
 
       <CallStateTransition connectionState={connectionState} machineState={machineState}>
-        {isWhiteboardOpen ? (
-          <div
-            className='flex-1 w-full pb-32 sm:pb-36 transition-all duration-300 overflow-hidden'
-            style={{
-              paddingRight: isRightSidebarOpen ? 'min(500px, 100vw)' : '0',
-              paddingLeft: isCallChatVisible ? 'min(400px, 100vw)' : '0',
-            }}
-          >
-            <CallWhiteboardView
-              participants={participants}
-              room={room}
-              className='h-full'
-              showSidebar={true}
-              aiController={aiController}
-              requestedAiController={requestedAiController}
-            />
-          </div>
-        ) : focusedScreenShare ? (
-          // Screen share layout with sidebar
-          <div
-            className='flex-1 w-full pb-32 sm:pb-36 transition-all duration-300 overflow-hidden'
-            style={{
-              paddingRight: isRightSidebarOpen ? 'min(500px, 100vw)' : '0',
-              paddingLeft: isCallChatVisible ? 'min(400px, 100vw)' : '0',
-            }}
-          >
-            <ScreenShareView
-              focusedScreenShare={focusedScreenShare}
-              participants={participants}
-              onScreenShareClick={handleScreenShareClick}
-              className='h-full'
-              showSidebar={true}
-              showDrawingTools={true}
-              aiController={aiController}
-              requestedAiController={requestedAiController}
-              raisedHands={raisedHands}
-              onToggleHandRaise={onToggleHandRaise}
-            />
-          </div>
-        ) : (
-          // Normal grid layout when no screen share
-          <div
-            className='flex-1 w-full pb-32 sm:pb-36 transition-all duration-300 overflow-hidden'
-            style={{
-              paddingRight: isRightSidebarOpen ? 'min(500px, 100vw)' : '0',
-              paddingLeft: isCallChatVisible ? 'min(400px, 100vw)' : '0',
-            }}
-          >
-            <ParticipantGrid
-              participants={participants}
-              aiController={aiController}
-              requestedAiController={requestedAiController}
-              raisedHands={raisedHands}
-              onToggleHandRaise={onToggleHandRaise}
-            />
-          </div>
-        )}
+        <div className='flex min-h-0 flex-1'>
+          <main className='relative min-w-0 flex-1 overflow-hidden'>{renderStage()}</main>
 
-        {/* Control Bar */}
-        <div
-          className='absolute bottom-3 sm:bottom-6 left-1/2 -translate-x-1/2 z-50 w-[calc(100%-1rem)] sm:w-auto max-w-[calc(100%-1rem)] transition-transform duration-300'
-          style={{
-            transform: isRightSidebarOpen
-              ? `translateX(calc(-50% - min(250px, 50vw)${isCallChatVisible ? ' + min(200px, 50vw)' : ''}))`
-              : isCallChatVisible
-                ? 'translateX(calc(-50% + min(200px, 50vw)))'
-                : 'translateX(-50%)',
-          }}
-        >
+          {/* Side panel — docked card beside the stage (the stage shrinks rather
+              than being covered); full-screen sheet on small screens. */}
+          {activePanel && (
+            <aside className='fixed inset-0 z-[60] overflow-hidden bg-background shadow-2xl animate-in fade-in slide-in-from-right-4 duration-200 md:static md:z-auto md:my-4 md:mr-4 md:w-[360px] md:shrink-0 md:rounded-2xl lg:w-[400px]'>
+              {renderPanel()}
+            </aside>
+          )}
+        </div>
+
+        {/* Control bar */}
+        <div className='relative z-50 shrink-0'>
           <CallControls
             isMicEnabled={isMicEnabled}
             isCameraEnabled={isCameraEnabled}
             isScreenSharing={isScreenSharing}
             isAnySharingScreen={!!focusedScreenShare}
-            isChatOpen={isChatOpen}
-            isParticipantsSidebarOpen={isParticipantsSidebarOpen}
-            isHostControlsOpen={isHostControlsOpen}
-            onToggleHostControls={handleToggleHostControls}
-            isNotesOpen={isNotesOpen}
+            isChatOpen={activePanel === 'thread'}
+            isParticipantsSidebarOpen={activePanel === 'participants'}
+            isNotesOpen={activePanel === 'notes'}
             onToggleNotes={isExternalUser ? undefined : handleToggleNotes}
             isAIAssistantEnabled={isAIAssistantEnabled}
             aiController={aiController}
@@ -612,8 +719,7 @@ export function FullCallView({
             onToggleCamera={onToggleCamera}
             onToggleScreenShare={onToggleScreenShare}
             onDisconnect={onDisconnect}
-            onToggleView={onMinimize}
-            onToggleChat={onToggleThread}
+            onToggleChat={handleToggleThread}
             onToggleParticipantsSidebar={handleToggleParticipantsSidebar}
             onToggleAIAssistant={() => roomActor.send({ type: 'TOGGLE_AI_ASSISTANT' })}
             onSendReaction={sendReaction}
@@ -621,12 +727,11 @@ export function FullCallView({
             viewMode='full'
             requestedAiController={requestedAiController}
             pendingControlRequest={pendingControlRequest}
-            isCallChatOpen={isCallChatVisible}
-            onToggleCallChat={canUseCallChat ? onToggleCallChat : undefined}
+            isCallChatOpen={activePanel === 'callChat'}
+            onToggleCallChat={canUseCallChat && onToggleCallChat ? handleToggleCallChat : undefined}
             unreadCallChatCount={unreadCallChatCount}
             hideThreadChat={hideThreadChat}
             hideAIAssistant={hideAIAssistant}
-            hideMinimize={hideMinimize}
             isExternalUser={isExternalUser}
             isHost={isHost}
             isRecording={isRecordingActive}
@@ -638,64 +743,24 @@ export function FullCallView({
             }
             isPresentationMode={isPresentationMode}
             hidePresentationMode={!isTelepresenceEnabled}
+            isHandRaised={isLocalHandRaised}
+            onToggleHandRaise={onToggleHandRaise}
+            infoSlot={
+              <div className='flex min-w-0 items-center gap-3 text-base font-medium text-[#e3e3e3]'>
+                <span className='shrink-0 tabular-nums'>{clockLabel}</span>
+                {callTitle && (
+                  <>
+                    <span aria-hidden className='h-5 w-px shrink-0 bg-white/25' />
+                    <span className='truncate' title={callTitle}>
+                      {callTitle}
+                    </span>
+                  </>
+                )}
+              </div>
+            }
           />
         </div>
       </CallStateTransition>
-
-      {/* Call Chat Panel - Left Sidebar */}
-      {isCallChatVisible && onToggleCallChat && (
-        <div className='fixed left-0 top-0 h-full w-full md:w-[400px] bg-background shadow-xl z-[60]'>
-          <CallChatPanel
-            room={room}
-            externalId={callId}
-            localParticipantId={localParticipantId}
-            onClose={onToggleCallChat}
-            onNewMessage={onCallChatNewMessage}
-            isExternalUser={isExternalUser}
-          />
-        </div>
-      )}
-
-      {/* Thread Panel - Sidebar */}
-      {isChatOpen && channelId && conversationId && (
-        <div className='fixed right-0 top-0 h-full w-full md:w-[500px] bg-background shadow-xl z-[60]'>
-          <ThreadMessages
-            channelId={channelId}
-            conversationId={conversationId}
-            ticketId={null}
-            onClose={onToggleThread}
-          />
-        </div>
-      )}
-
-      {/* Participants Sidebar */}
-      {isParticipantsSidebarOpen && (
-        <div className='fixed right-0 top-0 h-full w-full md:w-[500px] bg-background shadow-xl z-[60]'>
-          <ParticipantsSidebar
-            callId={callId}
-            onClose={handleToggleParticipantsSidebar}
-            callParticipants={callParticipants}
-            isHost={isHostProp}
-            currentUserId={currentUserId}
-            onApproveLobbyRequest={onApproveLobbyRequest}
-            onRejectLobbyRequest={onRejectLobbyRequest}
-            hideInvite={hideInvite}
-            raisedHands={raisedHands}
-          />
-        </div>
-      )}
-
-      {isHostControlsOpen && isHostProp && (
-        <div className='fixed right-0 top-0 h-full w-full md:w-[500px] bg-background shadow-xl z-[60]'>
-          <HostControlsPanel callId={callId} onClose={handleToggleHostControls} />
-        </div>
-      )}
-
-      {isNotesOpen && !isExternalUser && (
-        <div className='fixed right-0 top-0 h-full w-full md:w-[500px] bg-background shadow-xl z-[60]'>
-          <CallNotesPanel callId={callId} channelId={channelId} onClose={handleToggleNotes} />
-        </div>
-      )}
 
       {/* Control Request Dialog */}
       {pendingControlRequest && localParticipantId === aiController?.id && (
@@ -722,8 +787,6 @@ export function FullCallView({
         callId={callId}
         isOpen={isPresentationMode}
         participant={presentationParticipant ?? null}
-        aiController={aiController}
-        requestedAiController={requestedAiController}
         onExit={() => setIsPresentationMode(false)}
       />
     </div>

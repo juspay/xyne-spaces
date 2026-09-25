@@ -1,0 +1,51 @@
+namespace: xyne
+name: xyne-pg
+instances: 2
+imageName: ""
+primaryUpdateStrategy: unsupervised
+
+storage:
+  size: 50Gi
+  storageClass: ""
+walStorage:
+  enabled: false
+  size: 10Gi
+  storageClass: ""
+
+resources: {}
+
+parameters:
+  max_connections: "200"
+  shared_buffers: 256MB
+
+owner: xyne
+appSecret: xyne-pg-app
+databases:
+  app: xyne
+  common: xyne_common
+  zeroCvr: zero_cvr
+  zeroCdb: zero_cdb
+  clawAuth: claw_auth
+extraSQL: []
+
+pooler:
+  instances: 2
+  maxClientConn: 1000
+  defaultPoolSize: 20
+  resources: {}
+
+backup:
+  enabled: false
+  destinationPath: ""
+  endpointURL: ""
+  credentialsSecret: xyne-pg-backup
+  accessKeyIdKey: ACCESS_KEY_ID
+  secretAccessKeyKey: ACCESS_SECRET_KEY
+  schedule: "0 0 2 * * *"
+  retentionPolicy: 14d
+  walCompression: gzip
+
+podAnnotations:
+  sidecar.istio.io/inject: "false"
+nodeSelector: {}
+tolerations: []

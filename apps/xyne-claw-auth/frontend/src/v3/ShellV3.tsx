@@ -114,6 +114,7 @@ const SIDEBAR_GROUPS: SidebarGroupConfig[] = [
     items: [
       { label: "Agents",    path: "/v3/agents",    icon: RobotIcon },
       { label: "MCPs",          path: "/v3/mcp",       icon: PlugsConnectedIcon },
+      { label: "MCP Registry",  path: "/v3/gateway-registry", icon: PlugsConnectedIcon },
       { label: "Skills",       path: "/v3/skills",    icon: WrenchIcon },
       { label: "Subagents",  path: "/v3/subagents", icon: TreeStructureIcon },
       { label: "Channels",     path: "/v3/gateways",  icon: ShareNetworkIcon },

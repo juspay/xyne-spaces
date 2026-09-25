@@ -2,8 +2,10 @@ import { useMemo, useState } from 'react';
 import { ConnectionQuality, Track } from 'livekit-client';
 import { useSelector } from '@xstate/react';
 import { useParticipantNetworkQuality } from '../hooks/useParticipantNetworkQuality';
-import { Hand, MicOff, Monitor, ImagePlus, Maximize2 } from 'lucide-react';
+import { Hand, Monitor, ImagePlus, Pin } from 'lucide-react';
 import { SignalBars } from '../components/SignalBars';
+import { AudioIndicator } from '../components/AudioIndicator';
+import { getParticipantPicturePath } from '../callParticipant.utils';
 import type { ParticipantInfo } from '../../../machines/roomMachine';
 import { roomActor } from '../../../machines/roomMachine';
 import { ParticipantAvatar } from '../ParticipantAvatar/ParticipantAvatar';
@@ -32,12 +34,8 @@ interface ParticipantTileProps {
   requestedAiController?: boolean;
   isHandRaised?: boolean | undefined;
   onToggleHandRaise?: (() => void) | undefined;
-  /** Shows a hover "expand" button (top-right) that opens this tile full-screen. */
+  /** Shows a hover "Pin" button (top-centre of the tile) that spotlights this participant. */
   onExpand?: (() => void) | undefined;
-  /** Hide the participant name overlay (used by presentation mode's full-bleed tile) */
-  hideNameLabel?: boolean | undefined;
-  /** Drop the speaking/raised-hand glow ring (a full-screen coloured frame looks wrong) */
-  hideSpeakingIndicator?: boolean | undefined;
 }
 
 export function ParticipantTile({
@@ -55,8 +53,6 @@ export function ParticipantTile({
   isHandRaised = false,
   onToggleHandRaise,
   onExpand,
-  hideNameLabel = false,
-  hideSpeakingIndicator = false,
 }: ParticipantTileProps): React.ReactElement {
   // Get track publications - these are observables that update automatically
   const cameraPublication = participant.participant?.getTrackPublication(Track.Source.Camera);
@@ -86,6 +82,7 @@ export function ParticipantTile({
   // Check if this is the AI agent participant
   const isAIAgent = participant.identity.startsWith('agent-');
   const isControlled = isAIAgent && aiController;
+  const canPin = !!onExpand && !isScreenShare && !compact && !isAIAgent;
 
   // Host detection + host name for the agent-tile menu: the backend stamps the
   // host's LiveKit identity as `createdBy` in room metadata (same source the toggle uses).
@@ -114,19 +111,10 @@ export function ParticipantTile({
   // Determine avatar and background colors
   const colors = getAvatarColors(participant.identity);
 
-  // Extract picture path from participant metadata
-  let picturePath: string | null = null;
-  try {
-    const meta = participant.participant?.metadata;
-    if (meta) {
-      const parsed = JSON.parse(meta) as { picture?: string };
-      picturePath = parsed.picture ?? null;
-    }
-  } catch {
-    // ignore parse errors
-  }
-
-  const { url: pictureUrl } = useProfilePictureUrl(participant.identity, picturePath);
+  const { url: pictureUrl } = useProfilePictureUrl(
+    participant.identity,
+    getParticipantPicturePath(participant.participant),
+  );
 
   // Camera-off backdrop is the participant's own profile picture, blown up and
   // blurred to a wash (Meet's treatment) — so a tile is recognisably *theirs*
@@ -183,18 +171,14 @@ export function ParticipantTile({
     if (isFocused) {
       return 'border-[1.5px] border-blue-400';
     }
-    // Presentation mode fills the screen, so any state frame becomes a coloured
-    // border around the whole viewport — drop it entirely there.
-    if (hideSpeakingIndicator) {
-      return 'border-0';
-    }
     // Hand raised — amber to draw attention (a raised hand usually means the
     // person is waiting to speak, so it takes precedence over the speaking ring).
     if (isHandRaised) {
       return compact ? 'border-[1.5px] border-amber-400' : 'border-2 border-amber-400';
     }
+    // Active speaker: Meet's blue frame.
     if (isSpeaking && participant.isMicrophoneEnabled) {
-      return compact ? 'border-[1.5px] border-green-400' : 'border-2 border-green-400';
+      return compact ? 'border-[1.5px] border-[#8ab4f8]' : 'border-[3px] border-[#8ab4f8]';
     }
     // Resting state: a hairline highlight rather than a grey border. This is the
     // edge that reads as "pane of glass" rather than "boxed div".
@@ -205,14 +189,11 @@ export function ParticipantTile({
   // the element, so nothing can cover it). Kept faint — the overlay border is the
   // real state signal; a strong glow bleeds onto neighbouring tiles.
   const getGlowClass = (): string => {
-    if (hideSpeakingIndicator) {
-      return '';
-    }
     if (isHandRaised) {
       return 'shadow-[0_0_8px_rgba(251,191,36,0.2)]';
     }
     if (isSpeaking && participant.isMicrophoneEnabled) {
-      return 'shadow-[0_0_8px_rgba(74,222,128,0.2)]';
+      return 'shadow-[0_0_10px_rgba(138,180,248,0.25)]';
     }
     return compact ? 'shadow-lg' : 'shadow-[0_4px_24px_rgba(0,0,0,0.45)]';
   };
@@ -238,83 +219,83 @@ export function ParticipantTile({
         participantName: participant.name,
       })}
     >
-      {/* Expand-to-fullscreen button — top-right corner, hover-revealed (mirrors the
-          screen-share tile's expand affordance). Not shown for screen-share tiles
-          (ScreenShareView already has its own fullscreen entry point) or compact
-          tiles (mini call view), and never overlaps the AI agent's actions menu
-          since that only renders on agent tiles. */}
-      {onExpand && !isScreenShare && !compact && !isAIAgent && (
-        <button
-          onClick={e => {
-            e.stopPropagation();
-            onExpand();
-          }}
-          title='Expand'
-          aria-label={`Expand ${participant.isLocal ? 'your' : `${participant.name}'s`} video`}
-          data-track-category='CALLS'
-          data-track-name='Expand_Participant_Tile'
-          data-track-metadata={JSON.stringify({ participantIdentity: participant.identity })}
-          className={cn(
-            'absolute top-1 right-1 sm:top-2 sm:right-2 z-20 flex items-center justify-center',
-            'rounded-lg p-1.5 sm:p-2 bg-black/45 backdrop-blur-md ring-1 ring-inset ring-white/15',
-            'text-white/90 shadow-md transition-all duration-200',
-            'opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:bg-black/70 hover:text-white',
-            'focus:outline-none focus-visible:ring-2 focus-visible:ring-white/60',
-          )}
-        >
-          <Maximize2 className='h-3.5 w-3.5 sm:h-4 sm:w-4' />
-        </button>
-      )}
-
-      {/* Agent-tile actions. Host: "Remove from call" opens the transcription popover
-          (one-click stop/start there) — the reversible soft kill-switch, not a hard
-          removal. Non-host: a disabled note pointing them to the host. */}
-      {isAIAgent && !compact && (
+      {/* Hover actions — a small pill at the top-centre, clear of the avatar, the
+          name/mic row bottom-left and the corner controls. Pin puts
+          this participant on the main stage; the AI agent gets its actions menu
+          instead (host: "Remove from call" opens the transcription popover, the
+          reversible soft kill-switch; non-host: a note pointing to the host).
+          Not shown on screen-share tiles (ScreenShareView has its own entry
+          point) or compact mini-view tiles. */}
+      {(canPin || (isAIAgent && !compact)) && (
         <div
           data-theme='midnight'
-          className='absolute top-2 right-2 z-20 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100'
+          className={cn(
+            'absolute left-1/2 top-2 z-20 flex -translate-x-1/2 items-center gap-0.5 rounded-full p-0.5 sm:top-3',
+            'bg-black/60 shadow-md ring-1 ring-inset ring-white/15 backdrop-blur-md',
+            'opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-within:opacity-100',
+          )}
         >
-          <CompactActionsMenu
-            triggerClassName='p-1.5 h-7 w-7 rounded-md border-0 bg-background/70 text-foreground hover:bg-background'
-            forceDarkTheme
-            items={[
-              isHost
-                ? {
-                    onSelect: () => roomActor.send({ type: 'SET_PRIVACY_POPOVER', open: true }),
-                    testId: 'remove-agent-menu-item',
-                    customContent: (
-                      <div className='flex items-start gap-2.5 px-3 py-2'>
-                        <SlashedBot className='mt-0.5 h-4 w-4 text-destructive' />
-                        <div className='min-w-0'>
-                          <div className='text-sm font-semibold text-destructive'>
-                            Remove from call
-                          </div>
-                          <div className='mt-0.5 text-xs leading-snug text-muted-foreground'>
-                            Stops transcription for everyone. You can add the agent back later.
+          {canPin && (
+            <button
+              type='button'
+              onClick={e => {
+                e.stopPropagation();
+                onExpand?.();
+              }}
+              title='Pin to the main stage'
+              aria-label={`Pin ${participant.isLocal ? 'your' : `${participant.name}'s`} video`}
+              data-track-category='CALLS'
+              data-track-name='Expand_Participant_Tile'
+              data-track-metadata={JSON.stringify({ participantIdentity: participant.identity })}
+              className='flex h-7 items-center gap-1 rounded-full px-2 text-xs font-medium text-white outline-none transition-colors hover:bg-white/15 focus-visible:ring-2 focus-visible:ring-white/60'
+            >
+              <Pin className='h-3.5 w-3.5' />
+              <span>Pin</span>
+            </button>
+          )}
+          {isAIAgent && !compact && (
+            <CompactActionsMenu
+              triggerClassName='p-1.5 h-7 w-7 rounded-full border-0 bg-transparent text-white hover:bg-white/15'
+              forceDarkTheme
+              items={[
+                isHost
+                  ? {
+                      onSelect: () => roomActor.send({ type: 'SET_PRIVACY_POPOVER', open: true }),
+                      testId: 'remove-agent-menu-item',
+                      customContent: (
+                        <div className='flex items-start gap-2.5 px-3 py-2'>
+                          <SlashedBot className='mt-0.5 h-4 w-4 text-destructive' />
+                          <div className='min-w-0'>
+                            <div className='text-sm font-semibold text-destructive'>
+                              Remove from call
+                            </div>
+                            <div className='mt-0.5 text-xs leading-snug text-muted-foreground'>
+                              Stops transcription for everyone. You can add the agent back later.
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    ),
-                  }
-                : {
-                    disabled: true,
-                    onSelect: () => undefined,
-                    testId: 'remove-agent-menu-item-disabled',
-                    customContent: (
-                      <div className='flex max-w-[16rem] items-start gap-2.5 px-3 py-2'>
-                        <SlashedBot className='mt-0.5 h-4 w-4 flex-shrink-0 text-muted-foreground' />
-                        <div className='min-w-0 text-xs leading-snug text-muted-foreground'>
-                          Please ask{' '}
-                          <span className='font-semibold text-foreground'>
-                            {hostName ?? 'the host'}
-                          </span>{' '}
-                          (host) to stop transcribing the call.
+                      ),
+                    }
+                  : {
+                      disabled: true,
+                      onSelect: () => undefined,
+                      testId: 'remove-agent-menu-item-disabled',
+                      customContent: (
+                        <div className='flex max-w-[16rem] items-start gap-2.5 px-3 py-2'>
+                          <SlashedBot className='mt-0.5 h-4 w-4 flex-shrink-0 text-muted-foreground' />
+                          <div className='min-w-0 text-xs leading-snug text-muted-foreground'>
+                            Please ask{' '}
+                            <span className='font-semibold text-foreground'>
+                              {hostName ?? 'the host'}
+                            </span>{' '}
+                            (host) to stop transcribing the call.
+                          </div>
                         </div>
-                      </div>
-                    ),
-                  },
-            ]}
-          />
+                      ),
+                    },
+              ]}
+            />
+          )}
         </div>
       )}
 
@@ -364,7 +345,14 @@ export function ParticipantTile({
               />
               {/* Holds the wash well below the avatar and keeps the name pill and
                   badges legible over whatever the picture happens to contain. */}
-              <div aria-hidden className='pointer-events-none absolute inset-0 bg-black/55' />
+              <div
+                aria-hidden
+                className='pointer-events-none absolute inset-0'
+                style={{
+                  background:
+                    'radial-gradient(115% 95% at 50% 45%, rgba(30,31,32,0.35) 0%, rgba(30,31,32,0.92) 75%)',
+                }}
+              />
             </>
           ) : (
             /* Faint halo so the avatar sits *in* the wash instead of floating on top
@@ -437,32 +425,31 @@ export function ParticipantTile({
           double (or triple, whenever a participant appeared in more than one
           tile at once) their audio. */}
 
-      {/* Participant Info Overlay */}
-      {!hideNameLabel && (
-        <div
+      {/* Bottom-left: mic state + name. The mic badge sits beside the name rather
+          than in a corner, because the corners are taken by view controls
+          (spotlight exit/fullscreen, modal close, the blur toggle). Presentation
+          mode hides the name and the speaking bars but keeps the muted state. */}
+      <div
+        className={cn(
+          'pointer-events-none absolute z-10 flex items-center visual-regression-hide',
+          compact
+            ? 'bottom-1 left-1 gap-1 max-w-[calc(100%-2rem)]'
+            : 'bottom-2 left-2 gap-1.5 max-w-[calc(100%-4.5rem)] sm:bottom-3 sm:left-3',
+        )}
+      >
+        <AudioIndicator
+          isMuted={!participant.isMicrophoneEnabled}
+          isSpeaking={isSpeaking && participant.isMicrophoneEnabled}
+        />
+        <span
           className={cn(
-            'absolute z-10 flex items-center rounded-lg bg-black/45 backdrop-blur-md',
-            'ring-1 ring-inset ring-white/15 text-white font-medium visual-regression-hide',
-            compact
-              ? 'bottom-1 left-1 gap-1 px-1.5 py-0.5 text-[9px] max-w-[calc(100%-0.5rem)]'
-              : 'bottom-1.5 left-1.5 gap-1.5 px-2 py-1 text-[10px] sm:bottom-2.5 sm:left-2.5 sm:text-xs max-w-[calc(100%-1rem)]',
+            'truncate font-medium text-white [text-shadow:0_1px_3px_rgba(0,0,0,0.75)]',
+            compact ? 'text-[10px]' : 'text-xs sm:text-sm',
           )}
         >
-          {/* Mic state rides in the pill (Meet's placement). The standalone badge
-              below only appears when this label is hidden. */}
-          {!participant.isMicrophoneEnabled && (
-            <MicOff
-              className={cn(
-                'flex-shrink-0 text-red-400',
-                compact ? 'h-2.5 w-2.5' : 'h-3 w-3 sm:h-3.5 sm:w-3.5',
-              )}
-            />
-          )}
-          <span className='truncate'>
-            {participant.isLocal ? 'You' : isAIAgent ? 'Xyne Automatic' : participant.name}
-          </span>
-        </div>
-      )}
+          {participant.isLocal ? 'You' : isAIAgent ? 'Xyne Automatic' : participant.name}
+        </span>
+      </div>
 
       {/* Background Blur Toggle - local tile only, when camera is on */}
       {showBlurToggle && (
@@ -584,21 +571,6 @@ export function ParticipantTile({
             activeColor={networkQuality === ConnectionQuality.Lost ? '#f87171' : '#fbbf24'}
             className={cn(compact ? 'w-2.5 h-2.5' : 'w-3.5 h-3.5')}
           />
-        </div>
-      )}
-
-      {/* Mute indicator — fallback for tiles that hide the name pill (presentation
-          mode), which is otherwise where mic state lives. */}
-      {!participant.isMicrophoneEnabled && hideNameLabel && (
-        <div
-          className={cn(
-            'absolute bg-red-500/90 backdrop-blur-md ring-1 ring-inset ring-white/20 rounded-full',
-            compact
-              ? 'top-0.5 right-0.5 p-0.5 shadow-sm'
-              : 'top-1 right-1 sm:top-2 sm:right-2 p-1 sm:p-1.5 shadow-lg',
-          )}
-        >
-          <MicOff className={cn('text-white', compact ? 'w-2.5 h-2.5' : 'w-2 h-2 sm:w-3 sm:h-3')} />
         </div>
       )}
     </div>

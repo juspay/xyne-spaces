@@ -60,9 +60,9 @@ export async function getGoogleEventById(accessToken: string, eventId: string): 
  * typed error for 412 so callers can distinguish "stale etag, re-evaluate
  * once" from other failures.
  *
- * `sendUpdates` defaults to 'none': the reconciler is a background pass, not
- * an organizer-authored change, so it must not email attendees. The outbound
- * push passes 'all' because there the edit *is* the organizer's own.
+ * `sendUpdates` defaults to 'none': neither the reconciler nor the outbound
+ * push should make Google email attendees — Xyne owns participant
+ * notification. Callers may still opt in explicitly.
  */
 export async function patchGoogleEvent(
   accessToken: string,
@@ -113,15 +113,16 @@ export async function patchGoogleEvent(
 /**
  * Create a Google Calendar event on the connected user's primary calendar.
  * Used by the outbound push so a call scheduled inside Xyne shows up on the
- * organizer's calendar — and, via `attendees` + `sendUpdates: 'all'`, on every
- * invitee's calendar, including people who never connected Xyne.
+ * organizer's calendar — and, via `attendees`, on every invitee's calendar,
+ * including people who never connected Xyne. `sendUpdates` defaults to 'none'
+ * so Google does not email the invitation; the event still appears for them.
  */
 export async function insertGoogleEvent(
   accessToken: string,
   body: Record<string, unknown>,
   options?: { sendUpdates?: GoogleSendUpdates }
 ): Promise<GCalEvent> {
-  const params = new URLSearchParams({ sendUpdates: options?.sendUpdates ?? 'all' });
+  const params = new URLSearchParams({ sendUpdates: options?.sendUpdates ?? 'none' });
 
   const res = await fetch(
     `https://www.googleapis.com/calendar/v3/calendars/primary/events?${params.toString()}`,
@@ -154,7 +155,7 @@ export async function deleteGoogleEvent(
   eventId: string,
   options?: { sendUpdates?: GoogleSendUpdates }
 ): Promise<void> {
-  const params = new URLSearchParams({ sendUpdates: options?.sendUpdates ?? 'all' });
+  const params = new URLSearchParams({ sendUpdates: options?.sendUpdates ?? 'none' });
 
   const res = await fetch(
     `https://www.googleapis.com/calendar/v3/calendars/primary/events/${encodeURIComponent(eventId)}?${params.toString()}`,

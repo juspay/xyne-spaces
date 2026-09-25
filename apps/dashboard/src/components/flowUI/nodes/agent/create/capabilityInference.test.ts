@@ -6,10 +6,7 @@ import {
   softBuiltinNeedles,
   softProductNeedles,
 } from './capabilityInference.ts';
-import {
-  canvasHasCapability,
-  validateCanvasCapabilities,
-} from './capabilityValidation.ts';
+import { canvasHasCapability, validateCanvasCapabilities } from './capabilityValidation.ts';
 import type { AvailableTools } from '@/services/claw/clawToolsTypes';
 import { EMPTY_CREATE_FORM, EMPTY_TOOLS } from './types.ts';
 
@@ -47,9 +44,18 @@ void describe('capabilityInference', () => {
 
   void it('soft-cues builtin email/DM/web needles for design digest', () => {
     const builtins = softBuiltinNeedles(DESIGN_DIGEST_JOB);
-    assert.ok(builtins.some(n => /email/i.test(n)), JSON.stringify(builtins));
-    assert.ok(builtins.some(n => /send[-_\s]?message/i.test(n)), JSON.stringify(builtins));
-    assert.ok(builtins.some(n => /web[-_\s]?search|webfetch/i.test(n)), JSON.stringify(builtins));
+    assert.ok(
+      builtins.some(n => /email/i.test(n)),
+      JSON.stringify(builtins),
+    );
+    assert.ok(
+      builtins.some(n => /send[-_\s]?message/i.test(n)),
+      JSON.stringify(builtins),
+    );
+    assert.ok(
+      builtins.some(n => /web[-_\s]?search|webfetch/i.test(n)),
+      JSON.stringify(builtins),
+    );
     const needed = inferNeededCapabilities(DESIGN_DIGEST_JOB);
     assert.ok(needed.includes('mcp'), JSON.stringify(needed));
     assert.ok(needed.includes('builtin'), JSON.stringify(needed));
@@ -94,9 +100,7 @@ void describe('capabilityValidation', () => {
         label: 'Web Search',
         kind: 'custom',
         connected: true,
-        readTools: [
-          { slug: 'web_search', name: 'web_search', description: '', riskLevel: 'read' },
-        ],
+        readTools: [{ slug: 'web_search', name: 'web_search', description: '', riskLevel: 'read' }],
         writeTools: [],
         usageCount: 1,
       },

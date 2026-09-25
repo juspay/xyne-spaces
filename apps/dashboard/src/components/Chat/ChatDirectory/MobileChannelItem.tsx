@@ -132,7 +132,7 @@ const MobileChannelItem = ({ channel, unreadCount = 0 }: MobileChannelItemProps)
               />
             )}
           </span>
-          {hasActiveCall && (
+          {hasActiveCall && !isDM && (
             <span className='shrink-0 rounded-full bg-status-success px-2 py-1 text-background'>
               <Headphones size={14} />
             </span>

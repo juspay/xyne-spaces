@@ -1,3 +1,4 @@
+import { syncToYSweet } from '@/utils/ysweetUtils';
 import { Prisma, type User } from '@prisma/client';
 import { CanvasRole, CanvasVisibility } from '@xyne/shared';
 import { v4 as uuidv4 } from 'uuid';
@@ -206,28 +207,10 @@ export class ReleaseReportCanvasService {
       mentionedUserIds: [],
     };
 
-    const result = await db.$transaction(async (tx) => {
-      const preferredCanvas = preferredCanvasId
-        ? await tx.canvas.findFirst({
-            where: {
-              id: preferredCanvasId,
-              AND: [
-                { metadata: { path: ['source'], equals: 'release_report' } },
-                {
-                  metadata: {
-                    path: ['releaseTicketId'],
-                    equals: report.release.ticketId,
-                  },
-                },
-              ],
-            },
-            select: { id: true },
-          })
-        : null;
-      const existingCanvas =
-        preferredCanvas ??
-        (await tx.canvas.findFirst({
+    const preferredCanvas = preferredCanvasId
+      ? await db.canvas.findFirst({
           where: {
+            id: preferredCanvasId,
             AND: [
               { metadata: { path: ['source'], equals: 'release_report' } },
               {
@@ -239,22 +222,47 @@ export class ReleaseReportCanvasService {
             ],
           },
           select: { id: true },
-          orderBy: { createdAt: 'asc' },
-        }));
+        })
+      : null;
+    const existingCanvas =
+      preferredCanvas ??
+      (await db.canvas.findFirst({
+        where: {
+          AND: [
+            { metadata: { path: ['source'], equals: 'release_report' } },
+            {
+              metadata: {
+                path: ['releaseTicketId'],
+                equals: report.release.ticketId,
+              },
+            },
+          ],
+        },
+        select: { id: true },
+        orderBy: { createdAt: 'asc' },
+      }));
 
+    const canvasId = existingCanvas?.id ?? uuidv4();
+    // Persist before clearing legacy DB content or switching the editor to Y-Sweet.
+    const synced = await syncToYSweet(canvasId, content, owner.id);
+    if (!synced) {
+      throw new Error(`Failed to save release report canvas ${canvasId} to Y-Sweet`);
+    }
+
+    const result = await db.$transaction(async (tx) => {
       if (existingCanvas) {
         await tx.canvas.update({
           where: { id: existingCanvas.id },
           data: {
             title,
-            content: content as unknown as Prisma.InputJsonValue,
+            content: [],
             channelId: report.release.channelId,
             projectId: report.release.projectId,
             createdBy: owner.id,
             lastEditedBy: owner.id,
             lastEditedAt: now,
             visibility: CanvasVisibility.PUBLIC,
-            isCollaborative: false,
+            isCollaborative: true,
             metadata,
           },
         });
@@ -286,19 +294,18 @@ export class ReleaseReportCanvasService {
         };
       }
 
-      const canvasId = uuidv4();
       await tx.canvas.create({
         data: {
           id: canvasId,
           title,
-          content: content as unknown as Prisma.InputJsonValue,
+          content: [],
           channelId: report.release.channelId,
           projectId: report.release.projectId,
           workspaceId: report.release.workspaceId,
           createdBy: owner.id,
           visibility: CanvasVisibility.PUBLIC,
           isTemplate: false,
-          isCollaborative: false,
+          isCollaborative: true,
           lastEditedBy: owner.id,
           lastEditedAt: now,
           metadata,

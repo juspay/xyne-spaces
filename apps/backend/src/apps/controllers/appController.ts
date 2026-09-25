@@ -11,6 +11,7 @@ import { UserManagementService } from '@/services/userManagementService';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { appSchema } from '@/vespa/src/types';
 import { withWorkspaceScope } from '@/database/tenant/context';
+import { promoteAppToGlobal } from '@/bypassAcl/appServices';
 
 const CreateAppBodySchema = z.object({
   name: z.string().min(1, 'App name cannot be empty').trim(),
@@ -235,10 +236,11 @@ export class AppController {
         return;
       }
 
-      // Promotion is authorised by org ownership above, not by who created the app.
-      const updated = await withWorkspaceScope(() =>
-        repositories.apps.update(appId, { scope: 'GLOBAL' }),
-      );
+      // Promotion is authorised by org ownership above, not by who created the app. The app row
+      // carries its creating workspace's id, which for a sibling workspace in the same org is not
+      // the caller's — so neither the creator predicate nor workspace scope would match it. Both
+      // checks that matter (XYNE-APPS admin, same owning org) have already run above.
+      const updated = await promoteAppToGlobal(appId);
       res.status(200).json(updated);
     } catch (error) {
       logger.error('Error promoting app:', error);

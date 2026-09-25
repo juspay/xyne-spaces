@@ -1,5 +1,6 @@
 import React, { useContext, useEffect, useState } from 'react';
-import { MaximizeTwoArrow } from '@xyne/icons';
+import { Link } from 'react-router-dom';
+import { MaximizeTwoArrow, Spinner } from '@xyne/icons';
 import type { AgentDraftProps, FlowComponent } from '@xyne/shared';
 import { useFlow } from '../../FlowContext';
 import { cn } from '../../../../utils/classNames';
@@ -15,6 +16,7 @@ import { useAgentCreateForm } from './create/useAgentCreateForm';
 import { useAgentCreateSession } from './create/AgentCreateSessionContext';
 import { useAgentNameCheck } from '../../../../hooks/useAgentNameCheck';
 import { slugify } from '../../../../routes/ClawAgentsScreen/create/wizardState';
+import { useDraftAgentEditor } from './useDraftAgentEditor';
 
 /**
  * The `agent` artifact's DRAFT variant — an agent an agent proposed, awaiting
@@ -38,6 +40,7 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
 
   const decided = props.phase !== 'pending';
   const createForm = useAgentCreateForm(formFromIdentity(props.agent));
+  const editor = useDraftAgentEditor(props, node.id);
 
   useEffect(() => {
     if (createSession && props.phase === 'pending') {
@@ -127,6 +130,8 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
     </div>
   );
 
+  const approveLabel = pending === 'approve' ? 'Creating…' : 'Create Agent';
+
   const ghostButton = cn(
     'inline-flex h-7 items-center gap-1.5 rounded-[10px] px-1.5',
     'text-sm font-semibold leading-5 text-foreground',
@@ -147,29 +152,33 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
     createForm.conflicts.length === 0;
 
   const compactActions = (
-    <div className='flex w-full items-center justify-between gap-3'>
-      <button
-        type='button'
-        onClick={requestDiscard}
-        disabled={locked}
-        className={cn(ghostButton, 'px-2.5')}
-        data-track-category='AGENT_ARTIFACT'
-        data-track-name='CLICK_DECLINE'
-        data-ph-capture-attribute-track-id='agent_draft_decline'
-      >
-        {pending === 'reject' ? 'Declining…' : 'Decline'}
-      </button>
-      <button
-        type='button'
-        onClick={() => void submit('agent-draft-approve')}
-        disabled={locked || !canCreate}
-        className={cn(primaryButton, 'px-2.5')}
-        data-track-category='AGENT_ARTIFACT'
-        data-track-name='CLICK_APPROVE'
-        data-ph-capture-attribute-track-id='agent_draft_approve'
-      >
-        {pending === 'approve' ? 'Creating…' : 'Create Agent'}
-      </button>
+    <div className='flex w-full items-center justify-end gap-3'>
+      <div className='flex shrink-0 items-center gap-2'>
+        <button
+          type='button'
+          onClick={requestDiscard}
+          disabled={locked}
+          className={cn(ghostButton, 'px-2.5')}
+          data-track-category='AGENT_ARTIFACT'
+          data-track-name='CLICK_DECLINE'
+          data-ph-capture-attribute-track-id='agent_draft_decline'
+        >
+          {pending === 'reject' && <Spinner size={14} className='animate-spin' />}
+          {pending === 'reject' ? 'Declining…' : 'Decline'}
+        </button>
+        <button
+          type='button'
+          onClick={() => void submit('agent-draft-approve')}
+          disabled={locked || !canCreate}
+          className={cn(primaryButton, 'px-2.5')}
+          data-track-category='AGENT_ARTIFACT'
+          data-track-name='CLICK_APPROVE'
+          data-ph-capture-attribute-track-id='agent_draft_approve'
+        >
+          {pending === 'approve' && <Spinner size={14} className='animate-spin' />}
+          {approveLabel}
+        </button>
+      </div>
     </div>
   );
 
@@ -200,18 +209,28 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
             </span>
             {statePill}
           </div>
-          {!insidePreview && (
-            <button
-              type='button'
-              onClick={(): void => setExpanded(true)}
-              aria-label='Expand agent'
-              className='shrink-0 rounded-[10px] p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
-              data-track-category='AGENT_ARTIFACT'
-              data-track-name='EXPAND_ARTIFACT'
-            >
-              <MaximizeTwoArrow size={16} className='shrink-0' />
-            </button>
-          )}
+          {!insidePreview &&
+            (props.phase === 'created' ? (
+              <Link
+                to={`/ai/library/agent/${encodeURIComponent(props.agent.slug)}?tab=persona`}
+                className='shrink-0 rounded-[10px] px-2 py-1 text-sm font-medium leading-5 !text-muted-foreground !no-underline transition-colors hover:bg-accent hover:!text-foreground'
+                data-track-category='AGENT_ARTIFACT'
+                data-track-name='VIEW_AGENT_FROM_DRAFT_CARD'
+              >
+                View
+              </Link>
+            ) : (
+              <button
+                type='button'
+                onClick={(): void => setExpanded(true)}
+                aria-label='Expand agent'
+                className='shrink-0 rounded-[10px] p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
+                data-track-category='AGENT_ARTIFACT'
+                data-track-name='EXPAND_ARTIFACT'
+              >
+                <MaximizeTwoArrow size={16} className='shrink-0' />
+              </button>
+            ))}
         </div>
 
         <div className='flex flex-col gap-3'>
@@ -247,6 +266,7 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
           onOpenChange={setExpanded}
           messageId={messageId ?? ''}
           agent={props.agent}
+          editor={editor}
           note={props.note}
           statePill={statePill}
           conversationId={conversationId ?? undefined}

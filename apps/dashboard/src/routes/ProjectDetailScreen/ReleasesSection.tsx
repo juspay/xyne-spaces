@@ -8,6 +8,7 @@ import { ReleaseStagePicker } from '../../components/Release/ReleaseStagePicker'
 import { buildStagesByBoard } from '../../components/Release/releaseChanges.utils';
 import { readReleaseInsights } from '../../components/Release/ReleaseInsightsPanel';
 import { BoardType } from '@xyne/shared';
+import { formatDateNumeric } from '../../utils/dateUtils';
 
 interface ReleasesSectionProps {
   projectId: string;
@@ -189,7 +190,7 @@ export const ReleasesSection = ({ projectId }: ReleasesSectionProps): ReactEleme
                   />
                 </td>
                 <td className='px-4 py-2 text-xs text-muted-foreground'>
-                  {new Date(ticket.createdAt).toLocaleDateString()}
+                  {formatDateNumeric(ticket.createdAt)}
                 </td>
               </tr>
             ))}

@@ -1,0 +1,244 @@
+global:
+  imageRegistry: ""
+  imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+image:
+  registry: docker.io
+  repository: ubuntu/squid
+  tag: ""
+  digest: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+version: ""
+versionedName: false
+
+replicaCount: 2
+revisionHistoryLimit: 3
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 1
+    maxUnavailable: 0
+
+command: []
+args: []
+
+containerPorts:
+  - name: tcp-proxy
+    containerPort: 3128
+    protocol: TCP
+
+service:
+  enabled: true
+  type: ClusterIP
+  annotations: {}
+  ports:
+    - name: tcp-proxy
+      port: 3128
+      targetPort: tcp-proxy
+
+env: {}
+
+secretEnv: {}
+
+envFromSecrets: []
+envFromConfigMaps: []
+extraEnv: []
+
+startupProbe: {}
+livenessProbe:
+  tcpSocket:
+    port: tcp-proxy
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 3
+  failureThreshold: 3
+readinessProbe:
+  tcpSocket:
+    port: tcp-proxy
+  initialDelaySeconds: 5
+  periodSeconds: 5
+  timeoutSeconds: 3
+  failureThreshold: 3
+lifecycle: {}
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    memory: 512Mi
+
+podSecurityContext:
+  fsGroup: 13
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 13
+  runAsGroup: 13
+  readOnlyRootFilesystem: true
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  seccompProfile:
+    type: RuntimeDefault
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+  automount: false
+
+commonLabels: {}
+podLabels: {}
+podAnnotations:
+  sidecar.istio.io/inject: "false"
+deploymentAnnotations: {}
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+podAntiAffinityPreset: soft
+topologySpreadConstraints: []
+priorityClassName: ""
+runtimeClassName: ""
+terminationGracePeriodSeconds: 30
+hostAliases: []
+dnsPolicy: ""
+dnsConfig: {}
+
+initContainers: []
+sidecars: []
+
+volumes:
+  - name: config
+    configMap:
+      name: '{{ include "xyne-common.fullname" . }}-config'
+  - name: logs
+    emptyDir: {}
+  - name: tmp
+    emptyDir: {}
+volumeMounts:
+  - name: config
+    mountPath: /etc/squid/squid.conf
+    subPath: squid.conf
+    readOnly: true
+  - name: config
+    mountPath: /etc/squid/allow_hosts.txt
+    subPath: allow_hosts.txt
+    readOnly: true
+  - name: logs
+    mountPath: /var/log/squid
+  - name: tmp
+    mountPath: /tmp
+
+persistence:
+  enabled: false
+  existingClaim: ""
+  storageClass: ""
+  accessModes:
+    - ReadWriteOnce
+  size: 1Gi
+  mountPath: /var/spool/squid
+  subPath: ""
+  annotations: {}
+
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 4
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+  metrics: []
+  behavior: {}
+
+pdb:
+  enabled: true
+  minAvailable: 1
+  unhealthyPodEvictionPolicy: ""
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts: []
+  tls: []
+
+istio:
+  virtualService:
+    enabled: false
+    hosts: []
+    gateways: []
+    timeout: ""
+    retries: {}
+    http: []
+  destinationRule:
+    enabled: false
+    exportTo: []
+    trafficPolicy: {}
+    subsets: []
+
+networkPolicy:
+  enabled: false
+  policyTypes:
+    - Ingress
+  ingress: []
+  egress: []
+
+serviceMonitor:
+  enabled: false
+  namespace: ""
+  labels: {}
+  port: tcp-proxy
+  path: /metrics
+  interval: 30s
+  scrapeTimeout: ""
+
+extraObjects: []
+
+squid:
+  config: |
+    http_port 3128
+    pid_filename none
+    forwarded_for delete
+    via off
+    httpd_suppress_version_string on
+    cache deny all
+    cache_mem 0 MB
+    pinger_enable off
+    access_log stdio:/dev/stdout squid
+    logfile_rotate 0
+    shutdown_lifetime 5 seconds
+    acl SSL_ports port 443
+    acl SSH_ports port 22
+    acl Safe_ports port 80
+    acl Safe_ports port 443
+    acl Safe_ports port 22
+    acl allowlist dstdomain "/etc/squid/allow_hosts.txt"
+    http_access deny !Safe_ports
+    http_access allow CONNECT allowlist SSL_ports
+    http_access allow CONNECT allowlist SSH_ports
+    http_access deny CONNECT
+    http_access allow allowlist
+    http_access deny all
+  allowedHosts:
+    - .github.com
+    - .githubusercontent.com
+    - .githubassets.com
+    - .npmjs.org
+    - pypi.org
+    - files.pythonhosted.org
+    - crates.io
+    - index.crates.io
+    - static.crates.io
+    - rubygems.org
+    - .nixos.org
+    - .cachix.org
+    - ftp.gnu.org
+    - ftpmirror.gnu.org
+    - .haskell.org
+    - binaries.prisma.sh

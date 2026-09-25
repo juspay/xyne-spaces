@@ -14,15 +14,16 @@ import {
   startMcpOAuth,
 } from '@/services/claw/clawMcpService';
 import { useIsClawAdmin } from '@/hooks/useIsClawAdmin';
+import Tooltip from '@/components/ui/Tooltip';
 import { openOAuthConsent } from '../../shared/pickers/mcp/openOAuthConsent';
 import { McpConnectDialog } from './McpConnectDialog';
 import { McpDefinitionDialog } from './McpDefinitionDialog';
 import { Pill } from '../../shared/primitives/Pill';
 import { CopyButton } from '../../shared/primitives/CopyButton';
 import { McpLogo } from '../../shared/pickers/mcp/McpLogo';
+import { scopeHint, scopeLabel } from '../../shared/pickers/mcp/mcpCatalog';
 import { useMcpCatalog } from '../../shared/pickers/mcp/useMcpCatalog';
 import { useMcpCredentialFields } from '../../shared/pickers/mcp/useMcpCredentialFields';
-import { VerifiedTick } from '../../shared/pickers/mcp/McpIdentity';
 
 const NOTE =
   'Only connect tools you trust. Connectors are created by third-party developers and may change over time.';
@@ -62,8 +63,15 @@ const ClawMcpDetailV2 = (): ReactElement => {
   const { type, workspaceId } = useParams<{ type?: string; workspaceId?: string }>();
   const libraryPath = workspaceId ? `/${workspaceId}/ai/library` : '/ai/library';
 
-  const { entries, connectedServerIds, connectionsByServerId, loading, isError, refetch } =
-    useMcpCatalog();
+  const {
+    entries,
+    connectedServerIds,
+    orgCoveredServerIds,
+    connectionsByServerId,
+    loading,
+    isError,
+    refetch,
+  } = useMcpCatalog();
   const { fieldsFor, ensureFieldsFor } = useMcpCredentialFields();
   const { user } = useAuth();
   const [connecting, setConnecting] = useState(false);
@@ -80,6 +88,7 @@ const ClawMcpDetailV2 = (): ReactElement => {
   const config = server?.httpConfigTemplate ?? server?.launchConfigTemplate ?? null;
   const configJson = config ? JSON.stringify(config, null, 2) : null;
   const connected = server ? connectedServerIds.has(server.id) : false;
+  const orgCovered = server ? orgCoveredServerIds.has(server.id) : false;
   const credentialFields = fieldsFor(server);
   const connection = server ? connectionsByServerId.get(server.id) : undefined;
   // Only connectors with fields have anything to re-enter; an OAuth connector
@@ -179,10 +188,33 @@ const ClawMcpDetailV2 = (): ReactElement => {
                   <span className='truncate text-sm font-semibold leading-[22px] text-foreground'>
                     {entry.label}
                   </span>
-                  {entry.verified && <VerifiedTick />}
-                  <Pill tone={connected ? 'success' : 'neutral'}>
-                    {connected ? 'Connected' : 'Not connected'}
-                  </Pill>
+                  <Tooltip content={scopeHint(entry.scope)} side='top'>
+                    <span className='flex'>
+                      <Pill tone={entry.scope === 'global' ? 'success' : 'neutral'}>
+                        {scopeLabel(entry.scope)}
+                      </Pill>
+                    </span>
+                  </Tooltip>
+                  <Tooltip
+                    content={
+                      connected
+                        ? 'Runs with the key you connected.'
+                        : orgCovered
+                          ? 'Runs with a key your organisation shares. Connect your own to use it instead.'
+                          : 'Needs a key before this connector can do anything.'
+                    }
+                    side='top'
+                  >
+                    <span className='flex'>
+                      <Pill tone={connected || orgCovered ? 'success' : 'neutral'}>
+                        {connected
+                          ? 'Connected'
+                          : orgCovered
+                            ? 'Available via org'
+                            : 'Not connected'}
+                      </Pill>
+                    </span>
+                  </Tooltip>
                   {server?.enabled === false && <Pill tone='neutral'>Inactive</Pill>}
                 </div>
 
@@ -236,7 +268,7 @@ const ClawMcpDetailV2 = (): ReactElement => {
                         data-track-category='Claw MCP'
                         data-track-name='ConnectMcp'
                       >
-                        {connecting ? 'Connecting…' : 'Connect'}
+                        {connecting ? 'Connecting…' : orgCovered ? 'Use your own key' : 'Connect'}
                       </Button>
                     )}
                   </div>

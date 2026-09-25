@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactElement } from 'react';
+import { useEffect, useMemo, useState, type ReactElement } from 'react';
 import { cn } from '@/utils/classNames';
 import { searchByNameThenDescription } from '../../librarySearch';
 import { BROWSE_CARD, BROWSE_CARD_IDLE, BROWSE_CARD_SELECTED } from '../../primitives/browseCard';
@@ -107,6 +107,7 @@ interface BrowseSubagentsDialogProps {
   onRetry: () => void;
   selection: SubagentSelection;
   onSelectionChange: (next: SubagentSelection) => void;
+  initialName?: string | null;
   suggested: readonly SubagentCatalogEntry[];
 }
 
@@ -119,11 +120,16 @@ export function BrowseSubagentsDialog({
   onRetry,
   selection,
   onSelectionChange,
+  initialName,
   suggested,
 }: BrowseSubagentsDialogProps): ReactElement {
   const [query, setQuery] = useState('');
   const [source, setSource] = useState<string | null>(null);
   const [openName, setOpenName] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (open) setOpenName(initialName ?? null);
+  }, [open, initialName]);
 
   const openEntry = catalog.find(entry => entry.name === openName) ?? null;
 

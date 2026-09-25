@@ -1,17 +1,7 @@
 import { type ReactElement, type ReactNode } from 'react';
-import { VerificationCheck } from '@xyne/icons';
 import { cn } from '@/utils/classNames';
 import { Pill } from '../../primitives/Pill';
 import { McpLogo } from './McpLogo';
-
-export const VerifiedTick = (): ReactElement => (
-  <VerificationCheck
-    variant='Solid'
-    className='size-4 shrink-0 text-[color:var(--mention-color)]'
-    aria-label='Verified connector'
-    role='img'
-  />
-);
 
 export const EnabledBadge = (): ReactElement => (
   <Pill tone='success' size='sm'>
@@ -34,7 +24,6 @@ export const StatusBadge = ({
 interface McpIdentityProps {
   label: string;
   iconType: string;
-  verified: boolean;
   gap?: 'tight' | 'default';
   muted?: boolean;
   weight?: 'medium' | 'semibold';
@@ -44,7 +33,6 @@ interface McpIdentityProps {
 export function McpIdentity({
   label,
   iconType,
-  verified,
   gap = 'default',
   muted = false,
   weight = 'medium',
@@ -63,7 +51,6 @@ export function McpIdentity({
         >
           {label}
         </span>
-        {verified && <VerifiedTick />}
       </span>
       {trailing}
     </span>

@@ -63,6 +63,38 @@ interface FeedConversation {
   scopeType: string | null;
 }
 
+/** One page of Pending Others, filtered on the server. */
+export interface PendingOthersPageQuery {
+  /** Zero-based; clamped to the last page. */
+  page: number;
+  /** The Muted drawer's own page, over the muted half of the same list. */
+  mutedPage: number;
+  pageSize: number;
+  /** Keep a thread when any of its items is held by one of these. */
+  holderIds: string[];
+  /** Keep a thread in one of these channels. */
+  channelIds: string[];
+  /** Keep a thread whose earliest item was raised in this window. */
+  createdFrom: Date | null;
+  createdTo: Date | null;
+}
+
+export interface PendingOthersPage {
+  threads: FeedThreadCard[];
+  totalThreads: number;
+  page: number;
+  mutedThreads: FeedThreadCard[];
+  mutedTotalThreads: number;
+  mutedItemCount: number;
+  mutedPage: number;
+  /** Unmuted open items before any filter — the tab's badge. */
+  openItemCount: number;
+  /** What the pickers offer. Holders come from the whole feed, channels from the
+   *  feed after the holder filter — each ignores its own selection, so ticking
+   *  one option never hides the rest. */
+  facets: { holderIds: string[]; channelIds: string[] };
+}
+
 export interface FeedThreadCard {
   /**
    * What this card IS: a thread, or a whole DM. Bulk actions address the card
@@ -142,6 +174,135 @@ class RadarFeedService {
       },
       scoped
     );
+  }
+
+  /**
+   * Pending Others one page at a time. This is the one workspace-wide feed, so
+   * sending all of it to be filtered and paged in the browser meant every load
+   * shipped up to a thousand items to draw five threads.
+   *
+   * The filters are applied to whole threads, after grouping — the same as the
+   * panel did: a thread is kept when any of its items matches, and keeps all
+   * of its items. Pushing the holder filter into the WHERE would instead drop a
+   * matching thread's other items. Mute rules still run here rather than in
+   * SQL (keyword rules match item text), so the scan itself stays bounded by
+   * FEED_SCAN_LIMIT; what shrinks is everything after it: the thread previews
+   * are read for the page only, and the response is one page.
+   */
+  async pendingOthersPage(
+    auth: AuthContext,
+    query: PendingOthersPageQuery
+  ): Promise<PendingOthersPage> {
+    const scoped = await viewerAccessibleChannelIds(auth);
+    const items = await this.openItems(auth, {
+      channelId: { in: scoped },
+      NOT: { pendingOn: { has: auth.userId } },
+      OR: [{ pendingOn: { isEmpty: false } }, { requestedBy: { has: auth.userId } }],
+    });
+    const empty: PendingOthersPage = {
+      threads: [],
+      totalThreads: 0,
+      page: 0,
+      mutedThreads: [],
+      mutedTotalThreads: 0,
+      mutedItemCount: 0,
+      mutedPage: 0,
+      openItemCount: 0,
+      facets: { holderIds: [], channelIds: [] },
+    };
+    if (items.length === 0) return empty;
+    const conversations = await this.conversationsFor(
+      items.map((i) => i.conversationId),
+      { withPreview: false }
+    );
+    const allowed = await this.aclFilter(auth, items, conversations, scoped);
+    const muted = await mutedItemIds(
+      auth,
+      allowed.map((i) => ({
+        ...i,
+        channelId: conversations.get(i.conversationId)?.channelId ?? i.channelId,
+      }))
+    );
+    for (const item of allowed) item.muted = muted.has(item.id);
+
+    let cards = this.groupByThread(allowed, conversations);
+    const holderIds = [...new Set(allowed.flatMap((i) => i.pendingOn))];
+
+    if (query.holderIds.length) {
+      const holders = new Set(query.holderIds);
+      cards = cards.filter((c) => c.items.some((i) => i.pendingOn.some((id) => holders.has(id))));
+    }
+    const channelIds = [...new Set(cards.map((c) => c.channelId))];
+
+    if (query.createdFrom || query.createdTo) {
+      // When the item was raised, not when the thread was last touched.
+      const from = query.createdFrom?.getTime() ?? 0;
+      const to = query.createdTo?.getTime() ?? Infinity;
+      cards = cards.filter((c) => {
+        const t = Math.min(...c.items.map((i) => i.createdAt.getTime()));
+        return t >= from && t <= to;
+      });
+    }
+    if (query.channelIds.length) {
+      const channels = new Set(query.channelIds);
+      cards = cards.filter((c) => channels.has(c.channelId));
+    }
+
+    // A thread whose items disagree is split, as the panel did: the asks inside
+    // a thread are the unit of attention, not the thread.
+    const live: FeedThreadCard[] = [];
+    const hushed: FeedThreadCard[] = [];
+    let mutedItemCount = 0;
+    for (const card of cards) {
+      const kept = card.items.filter((i) => !i.muted);
+      const quiet = card.items.filter((i) => i.muted);
+      if (kept.length) live.push({ ...card, items: kept });
+      if (quiet.length) {
+        hushed.push({ ...card, items: quiet });
+        mutedItemCount += quiet.length;
+      }
+    }
+    // Newest of the thread's own activity and its items' updates.
+    const activity = (c: FeedThreadCard): number =>
+      Math.max(c.lastActivityAt?.getTime() ?? 0, ...c.items.map((i) => i.updatedAt.getTime()));
+    live.sort((a, b) => activity(b) - activity(a));
+    hushed.sort((a, b) => activity(b) - activity(a));
+
+    const slice = (list: FeedThreadCard[], page: number) => {
+      const last = Math.max(0, Math.ceil(list.length / query.pageSize) - 1);
+      const at = Math.min(Math.max(0, page), last);
+      return { at, rows: list.slice(at * query.pageSize, (at + 1) * query.pageSize) };
+    };
+    const livePage = slice(live, query.page);
+    const mutedPage = slice(hushed, query.mutedPage);
+    await this.attachPreviews([...livePage.rows, ...mutedPage.rows]);
+
+    return {
+      threads: livePage.rows,
+      totalThreads: live.length,
+      page: livePage.at,
+      mutedThreads: mutedPage.rows,
+      mutedTotalThreads: hushed.length,
+      mutedItemCount,
+      mutedPage: mutedPage.at,
+      openItemCount: allowed.filter((i) => !i.muted).length,
+      facets: { holderIds, channelIds },
+    };
+  }
+
+  /** Thread previews for the cards actually being sent. A DM card spans
+   *  conversations and has no single opening message, so it stays null. */
+  private async attachPreviews(cards: FeedThreadCard[]): Promise<void> {
+    const threadCards = cards.filter((c) => c.scopeKey === c.conversationId);
+    if (threadCards.length === 0) return;
+    const rows = await prisma.conversation.findMany({
+      where: { conversationId: { in: [...new Set(threadCards.map((c) => c.conversationId))] } },
+      select: { conversationId: true, initial_message_md: true },
+    });
+    const byId = new Map(rows.map((r) => [r.conversationId, r.initial_message_md]));
+    for (const card of threadCards) {
+      card.threadPreview = byId.get(card.conversationId)?.slice(0, THREAD_PREVIEW_CHARS) ?? null;
+    }
   }
 
   /**
@@ -252,7 +413,10 @@ class RadarFeedService {
    * stamp the cards render.
    */
   private async conversationsFor(
-    conversationIds: string[]
+    conversationIds: string[],
+    /** The opening message is the heaviest column here; a paged read fetches
+     *  it afterwards for the page's threads only. */
+    { withPreview = true }: { withPreview?: boolean } = {}
   ): Promise<Map<string, FeedConversation>> {
     const unique = [...new Set(conversationIds)];
     if (unique.length === 0) return new Map();
@@ -261,7 +425,7 @@ class RadarFeedService {
       select: {
         conversationId: true,
         channelId: true,
-        initial_message_md: true,
+        initial_message_md: withPreview,
         lastActivityAt: true,
         channel: { select: { scopeType: true } },
       },
@@ -457,10 +621,7 @@ class RadarFeedService {
     };
   }
 
-  private async openItems(
-    auth: AuthContext,
-    filter: Record<string, unknown>
-  ): Promise<FeedItem[]> {
+  private async openItems(auth: AuthContext, filter: Record<string, unknown>): Promise<FeedItem[]> {
     // `muted` is not a column — it belongs to whoever is asking, and is filled
     // in by buildFeed once their rules have been read. Defaulted here so the
     // rest of the pipeline never handles a half-built item.
@@ -486,7 +647,7 @@ class RadarFeedService {
         updatedAt: true,
       },
     });
-    return rows.map(row => ({ ...row, muted: false }));
+    return rows.map((row) => ({ ...row, muted: false }));
   }
 
   private groupByThread(

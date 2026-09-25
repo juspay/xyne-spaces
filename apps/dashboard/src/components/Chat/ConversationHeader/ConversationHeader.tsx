@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, JSX, cloneElement } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback, JSX, cloneElement } from 'react';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import { useZero } from '../../../hooks/useZero';
 import {
@@ -31,7 +31,18 @@ import Tooltip from '../../ui/Tooltip';
 import Info, { ChannelTab } from '../Info/Info';
 import ConversationHeaderMobile from '../ConversationHeaderMobile/ConversationHeaderMobile';
 import ChannelIcon from '../ChannelIcon/ChannelIcon';
-import { ConversationTabListType } from '../ConversationPannel/ConversationPannel.utils';
+import {
+  ConversationTabListType,
+  isChannelTabsCustomizable,
+} from '../ConversationPannel/ConversationPannel.utils';
+import { getChannelTabsStore } from '../../../hooks/barItems';
+import {
+  BarAddMenu,
+  BarRemoveButton,
+  SortableBar,
+  SortableBarItem,
+  useChannelTabBuiltIns,
+} from '../../BarCustomize';
 import { Button } from '../../ui/Button';
 import { CallTriggerModal } from '../../Call/CallTriggerModal/CallTriggerModal';
 import { getTargetUserIdForCall } from './ConversationHeader.utils';
@@ -45,7 +56,7 @@ import { standaloneNavigate, APP_DRAG_STYLE, APP_NO_DRAG_STYLE } from '../../../
 import { usePlatform } from '../../../hooks/usePlatform';
 import { XyneAIStar } from '../../icons/xyne-ai';
 import { invokeShortcut } from '../../../shortcuts';
-import { CalendarEvent } from '@xyne/icons';
+import { CalendarEvent, PlusDefault } from '@xyne/icons';
 import { xyneCalendarActor } from '../../../machines/xyneCalendarMachine';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
@@ -64,6 +75,54 @@ import {
   DropdownMenuTrigger,
 } from '../../ui/dropdown-menu';
 import { channelTrackingMetadata } from '../../../services/Analytics/channelTracking';
+
+interface ChannelTabTriggerProps {
+  tab: ConversationTabListType;
+  isActive: boolean;
+  /** Reserves room for the hover "×" the editable strip draws over the label. */
+  removable: boolean;
+  onSelect: (tab: string, e?: React.MouseEvent) => void;
+}
+
+/** One tab button, identical whether or not the strip can be edited. */
+const ChannelTabTrigger = ({
+  tab,
+  isActive,
+  removable,
+  onSelect,
+}: ChannelTabTriggerProps): JSX.Element => {
+  const trigger = (
+    <Tabs.Trigger value={tab.value} asChild>
+      <button
+        data-testid={`channel-tab-${tab.value}`}
+        data-track-category='CHANNELS'
+        data-track-name='SWITCH_TAB'
+        data-track-metadata={JSON.stringify({ tabValue: tab.value })}
+        onClick={e => onSelect(tab.value || '', e)}
+        className={cn(
+          'flex items-center justify-center gap-2 px-2.5 py-1.5 rounded-lg transition-colors duration-100 cursor-pointer',
+          removable && 'group-hover:pr-7',
+          isActive
+            ? 'bg-muted text-foreground'
+            : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
+        )}
+      >
+        <span className='shrink-0'>
+          {cloneElement(tab.icon, { color: 'currentColor' } as { color: string })}
+        </span>
+        <span className={cn('text-sm font-medium tracking-[-0.28px]')}>{tab.label}</span>
+      </button>
+    </Tabs.Trigger>
+  );
+
+  return tab.value !== 'canvas' ? (
+    trigger
+  ) : (
+    <ShortcutTooltip label={tab.label} shortcut='global.openCanvasTab' side='bottom'>
+      {trigger}
+    </ShortcutTooltip>
+  );
+};
 
 interface ConversationHeaderProps {
   channelId: string;
@@ -85,6 +144,17 @@ const ConversationHeader = ({
   const context = useAuthContextValues();
   const zero = useZero();
   const channel = useVisibleChannel(channelId);
+  const channelTabBuiltIns = useChannelTabBuiltIns(channel?.scopeType);
+  // Null in a DM, a group DM or a ticket/document channel: those show the
+  // built-in tabs with no ×, no + and no dragging.
+  const tabsStore = isChannelTabsCustomizable(channel?.scopeType)
+    ? getChannelTabsStore(channelId)
+    : null;
+  const channelTabIds = useMemo(() => (channelTabs ?? []).map(tab => tab.value), [channelTabs]);
+  const handleTabSelect = useCallback(
+    (value: string, e?: React.MouseEvent) => setActiveTab?.(value, e),
+    [setActiveTab],
+  );
   const channelUserStatus = useGetChannelUserStatus(channelId);
   useCallAutoJoin({ channelId, isMember: !!channelUserStatus });
   const { displayName, avatarUserId } = useChannelDisplayName(channel, context.userID);
@@ -540,43 +610,68 @@ const ConversationHeader = ({
           className='flex items-center justify-start gap-0.5 px-0.5 overflow-x-auto no-scrollbar'
           style={APP_NO_DRAG_STYLE}
         >
-          {channelTabs?.map(tab => {
-            const trigger = (
-              <Tabs.Trigger key={tab.value} value={tab.value} asChild>
-                <button
-                  data-testid={`channel-tab-${tab.value}`}
-                  data-track-category='CHANNELS'
-                  data-track-name='SWITCH_TAB'
-                  data-track-metadata={JSON.stringify({ tabValue: tab.value })}
-                  onClick={e => setActiveTab?.(tab.value || '', e)}
-                  className={cn(
-                    'flex items-center justify-center gap-2 px-2.5 py-1.5 rounded-lg transition-colors duration-100 cursor-pointer',
-                    activeTab === tab.value
-                      ? 'bg-muted text-foreground'
-                      : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
-                  )}
-                >
-                  <span className='shrink-0'>
-                    {cloneElement(tab.icon, { color: 'currentColor' } as { color: string })}
-                  </span>
-                  <span className={cn('text-sm font-medium tracking-[-0.28px]')}>{tab.label}</span>
-                </button>
-              </Tabs.Trigger>
-            );
-
-            if (tab.value !== 'canvas') return trigger;
-
-            return (
-              <ShortcutTooltip
-                key={tab.value}
-                label={tab.label}
-                shortcut='global.openCanvasTab'
+          {tabsStore ? (
+            <>
+              <SortableBar store={tabsStore} ids={channelTabIds} direction='horizontal'>
+                {channelTabs?.map(tab => (
+                  // `group` wrapper so the "×" appears only while this tab is
+                  // pointed at. Kept inside the strip's box (not offset outside
+                  // it) because the list clips overflow for horizontal
+                  // scrolling.
+                  <SortableBarItem
+                    key={tab.value}
+                    id={tab.value}
+                    as='span'
+                    className='group relative inline-flex shrink-0'
+                  >
+                    <ChannelTabTrigger
+                      tab={tab}
+                      isActive={activeTab === tab.value}
+                      removable={!tabsStore.locked.includes(tab.value)}
+                      onSelect={handleTabSelect}
+                    />
+                    <BarRemoveButton
+                      store={tabsStore}
+                      id={tab.value}
+                      label={tab.label.trim()}
+                      trackCategory='CHANNELS'
+                      className='right-1.5 top-1/2 size-4 -translate-y-1/2'
+                    />
+                  </SortableBarItem>
+                ))}
+              </SortableBar>
+              <BarAddMenu
+                store={tabsStore}
+                builtIns={channelTabBuiltIns}
+                trackCategory='CHANNELS'
                 side='bottom'
-              >
-                {trigger}
-              </ShortcutTooltip>
-            );
-          })}
+                align='start'
+                trigger={
+                  <button
+                    type='button'
+                    aria-label='Add a tab'
+                    data-testid='channel-tab-add'
+                    data-track-category='CHANNELS'
+                    data-track-name='OPEN_ADD_TAB_MENU'
+                    className='flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground'
+                  >
+                    <PlusDefault size={14} />
+                  </button>
+                }
+              />
+            </>
+          ) : (
+            channelTabs?.map(tab => (
+              <span key={tab.value} className='inline-flex shrink-0'>
+                <ChannelTabTrigger
+                  tab={tab}
+                  isActive={activeTab === tab.value}
+                  removable={false}
+                  onSelect={handleTabSelect}
+                />
+              </span>
+            ))
+          )}
         </Tabs.List>
       </Tabs.Root>
 

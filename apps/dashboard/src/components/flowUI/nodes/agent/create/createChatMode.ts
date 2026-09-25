@@ -14,10 +14,7 @@ import { slicePatch } from './mergeChatPatch.ts';
 
 const ANTICIPATE_MS = 520;
 
-type SetWritingField = (
-  field: AgentCreateField | null,
-  hubRow?: AgentCreateHubRow | null,
-) => void;
+type SetWritingField = (field: AgentCreateField | null, hubRow?: AgentCreateHubRow | null) => void;
 type SetAttentionField = (
   field: AgentCreateField | null,
   hubRow?: AgentCreateHubRow | null,
@@ -71,9 +68,13 @@ async function revealTextField(args: {
   const stepMs = Math.max(18, Math.min(Math.floor(args.writeMs / Math.max(steps, 1)), 55));
   for (let end = chunk; end <= full.length + chunk - 1; end += chunk) {
     const partial = full.slice(0, Math.min(end, full.length));
-    args.applyChatPatch(`${args.sourceId}-${args.field}-${partial.length}`, args.patchForText(partial), {
-      highlight: false,
-    });
+    args.applyChatPatch(
+      `${args.sourceId}-${args.field}-${partial.length}`,
+      args.patchForText(partial),
+      {
+        highlight: false,
+      },
+    );
     await args.sleep(stepMs);
   }
   await args.sleep(Math.max(48, Math.min(args.writeMs, 120)));
@@ -472,10 +473,7 @@ export function briefCreateDraftAck(agentName?: string | null): string {
  * Chat should only acknowledge drafts. Keep the raw reply for canvas parsing;
  * display uses this so profile fields are not duplicated as a markdown wall.
  */
-export function compactCreateDraftChatReply(
-  visible: string,
-  agentName?: string | null,
-): string {
+export function compactCreateDraftChatReply(visible: string, agentName?: string | null): string {
   const text = visible.trim();
   if (!text || !looksLikeCreateProfileDump(text)) {
     return visible;
@@ -587,10 +585,7 @@ export function decideCreateCanvasAction(args: {
     const stated = draftFromModelReply(marker.visible);
     const statedName = stated.name?.trim() ?? '';
     const statedSpec = Boolean(stated.description?.trim() || stated.systemPrompt?.trim());
-    if (
-      statedName &&
-      (statedSpec || (!marker.idle && /\bdraft\b/i.test(marker.visible)))
-    ) {
+    if (statedName && (statedSpec || (!marker.idle && /\bdraft\b/i.test(marker.visible)))) {
       return {
         type: 'draft',
         intent: userText.trim().slice(0, 500) || statedName,
@@ -620,11 +615,7 @@ export function decideCreateCanvasAction(args: {
     // ask-first). Pure vague asks without capability cues remain idle.
     if (marker.ask && canvasEmpty) {
       const fields = firstDraftFields(userText);
-      if (
-        fields.includes('tools') ||
-        fields.includes('skills') ||
-        fields.includes('knowledge')
-      ) {
+      if (fields.includes('tools') || fields.includes('skills') || fields.includes('knowledge')) {
         return {
           type: 'draft',
           intent: userText.trim().slice(0, 500),
@@ -729,7 +720,13 @@ export async function applyCreateHubDraft(args: {
     if (args.setAttentionField) revealArgs.setAttentionField = args.setAttentionField;
     if (args.setProgressLabel) revealArgs.setProgressLabel = args.setProgressLabel;
     const announceField = (field: CreateTurnField, hubRow: AgentCreateHubRow | null): void => {
-      if (field !== 'name' && field !== 'systemPrompt' && field !== 'tools' && field !== 'skills' && field !== 'knowledge') {
+      if (
+        field !== 'name' &&
+        field !== 'systemPrompt' &&
+        field !== 'tools' &&
+        field !== 'skills' &&
+        field !== 'knowledge'
+      ) {
         return;
       }
       const line = sectionCompleteChatLine({
@@ -870,7 +867,12 @@ export async function applyCreateHubDraft(args: {
   if (args.setProgressLabel) tailArgs.setProgressLabel = args.setProgressLabel;
   if (args.onSectionComplete) {
     tailArgs.onFieldComplete = (field, hubRow) => {
-      if (field !== 'systemPrompt' && field !== 'tools' && field !== 'skills' && field !== 'knowledge') {
+      if (
+        field !== 'systemPrompt' &&
+        field !== 'tools' &&
+        field !== 'skills' &&
+        field !== 'knowledge'
+      ) {
         return;
       }
       const line = sectionCompleteChatLine({

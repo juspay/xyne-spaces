@@ -123,17 +123,8 @@ export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
     handleOpenChange(false); // Close drawer after action
   };
 
-  const handleEmojiSelect = (emoji: {
-    emoji: string;
-    isCustom: boolean;
-    emojiId?: string;
-    imageUrl?: string;
-    names?: string[];
-  }): void => {
-    // For custom emojis, store the emojiId with a prefix
-    const emojiName = emoji.isCustom
-      ? `custom:${emoji.emoji}:${emoji.names?.[0] || 'custom'}`
-      : emoji.emoji;
+  // Receives the stored reaction token, already serialised by the picker surface.
+  const handleEmojiSelect = (emojiName: string): void => {
     const hasReacted = !!user && (reactionsData[emojiName] || []).includes(user.id);
 
     toggleReaction({
@@ -206,6 +197,7 @@ export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
                   </button>
                   <AddReactionActionView
                     handleEmojiSelect={handleEmojiSelect}
+                    messageId={messageId}
                     customEmojis={customEmojis}
                   />
                 </div>

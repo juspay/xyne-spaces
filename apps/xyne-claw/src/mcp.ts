@@ -60,6 +60,8 @@ interface McpToolInfo {
   readonly serviceName?: string;
   readonly backendId?: string;
   readonly selectionKey?: string;
+  /** claw-auth says this tool cannot mutate — see the propagation below. */
+  readonly readOnly?: boolean;
 }
 
 interface McpServerTools {
@@ -99,6 +101,8 @@ export function applyTrustedMcpBindings(
 ): Record<string, unknown> {
   return bindings ? { ...params, ...bindings } : params;
 }
+
+import type { DeploymentToolMatch } from "./tool-catalog.js";
 
 export class McpAuthServiceError extends Error {
   readonly status: number;
@@ -283,6 +287,31 @@ function isCredentialRejection(status: number): boolean {
   return status === 401 || status === 403;
 }
 
+/**
+ * Search the deployment-wide tool catalog through claw-auth.
+ *
+ * Session-scoped: org comes from the run, not an argument, so a call cannot
+ * widen its own scope. Errors degrade `scope:"claw"` to a message rather than
+ * failing the turn.
+ */
+export async function searchDeploymentTools(
+  sessionId: string,
+  sessionToken: string,
+  params: { query: string; integration?: string; maxRisk?: string; limit: number },
+): Promise<DeploymentToolMatch[]> {
+  const qs = new URLSearchParams();
+  if (params.query) qs.set("q", params.query);
+  if (params.integration) qs.set("integrations", params.integration);
+  if (params.maxRisk) qs.set("maxRisk", params.maxRisk);
+  qs.set("limit", String(params.limit));
+
+  const { matches } = await authFetch<{ mode: string; matches: DeploymentToolMatch[] }>(
+    `/claw/api/v1/sessions/${encodeURIComponent(sessionId)}/mcp/tools/search?${qs.toString()}`,
+    sessionToken,
+  );
+  return matches ?? [];
+}
+
 export async function loadMcpToolsForUser(
   sessionId: string,
   sessionToken: string,
@@ -340,9 +369,17 @@ export async function loadMcpToolsForUser(
       const acceptsFiles = isFileInputForwardingServer(server.serverType);
       const trustedBindings = trustedToolBindings?.[mcpTool.name];
       const baseDescription = mcpTool.description || `Tool ${mcpTool.name} from ${displayName}`;
-      const definition: ToolDefinition & { serviceName?: string; backendId?: string; selectionKey?: string; mcpToolName?: string } = {
+      const definition: ToolDefinition & { serviceName?: string; backendId?: string; selectionKey?: string; mcpToolName?: string; isWriteTool?: boolean } = {
         name: safeName,
         mcpToolName: mcpTool.name,
+        // A declared read-only tool carries `isWriteTool: false` so the open
+        // palette (routes/run.ts::admittedByOpenPalette) believes the
+        // declaration instead of guessing risk from the name. The guess leans
+        // write and reads "star" as a mutation, which silently kept
+        // github-list-stargazers / -star-history / -stargazer-profiles out of
+        // every read-palette run. Only `true` means write anywhere downstream,
+        // so `false` narrows nothing that was previously wide.
+        ...(mcpTool.readOnly === true ? { isWriteTool: false } : {}),
         label: `${displayName}/${mcpTool.name}`,
         ...(typeof mcpTool.serviceName === "string" && mcpTool.serviceName.length > 0
           ? { serviceName: mcpTool.serviceName }

@@ -1,0 +1,165 @@
+global:
+  imageRegistry: ""
+  imagePullSecrets: []
+
+xyne-backend:
+  enabled: true
+
+xyne-dashboard:
+  enabled: true
+
+xyne-zero:
+  enabled: true
+
+xyne-ysweet:
+  enabled: true
+
+xyne-zero-replication:
+  enabled: false
+  replicaCount: 1
+  strategy:
+    type: Recreate
+  containerPorts:
+    - name: http
+      containerPort: 4849
+      protocol: TCP
+  service:
+    ports:
+      - name: http
+        port: 80
+        targetPort: http
+      - name: http-zero
+        port: 4849
+        targetPort: http
+  env:
+    ZERO_NUM_SYNC_WORKERS: "0"
+    ZERO_CHANGE_STREAMER_PORT: "4849"
+    ZERO_CHANGE_STREAMER_URI: null
+  autoscaling:
+    enabled: false
+  pdb:
+    enabled: false
+
+xyne-worker:
+  enabled: false
+
+xyne-dashboard-external:
+  enabled: false
+
+xyne-dashboard-edge:
+  enabled: false
+
+xyne-claw:
+  enabled: false
+
+xyne-claw-auth:
+  enabled: false
+
+xyne-claw-auth-frontend:
+  enabled: false
+
+xyne-transcription-agent:
+  enabled: false
+
+xyne-lighton-ocr:
+  enabled: false
+
+xyne-vespa:
+  enabled: false
+
+xyne-vespa-content:
+  enabled: false
+  fullnameOverride: vespa-content
+  args:
+    - services
+  containerPorts:
+    - name: http
+      containerPort: 19107
+      protocol: TCP
+  service:
+    ports:
+      - name: http
+        port: 19107
+        targetPort: http
+  readinessProbe: null
+  resources: null
+  persistence:
+    size: 200Gi
+
+xyne-vespa-feed:
+  enabled: false
+  fullnameOverride: vespa-feed
+  args:
+    - services
+  containerPorts:
+    - name: http
+      containerPort: 8080
+      protocol: TCP
+  service:
+    clusterIP: null
+    ports:
+      - name: http
+        port: 8080
+        targetPort: http
+  resources:
+    requests:
+      cpu: "1"
+      memory: 8Gi
+    limits:
+      cpu: "3"
+      memory: 8Gi
+  podSecurityContext: null
+  securityContext:
+    runAsUser: 0
+  podAnnotations:
+    sidecar.istio.io/inject: null
+    traffic.sidecar.istio.io/includeInboundPorts: "8080"
+    traffic.sidecar.istio.io/includeOutboundPorts: "8080,8088"
+  podAntiAffinityPreset: ""
+  persistence:
+    enabled: false
+
+xyne-vespa-search:
+  enabled: false
+  fullnameOverride: vespa-search
+  args:
+    - services
+  containerPorts:
+    - name: http
+      containerPort: 8080
+      protocol: TCP
+  service:
+    clusterIP: null
+    ports:
+      - name: http
+        port: 8080
+        targetPort: http
+  resources:
+    requests:
+      cpu: "1"
+      memory: 10Gi
+    limits:
+      cpu: "3"
+      memory: 10Gi
+  podSecurityContext: null
+  podAnnotations:
+    sidecar.istio.io/inject: null
+    traffic.sidecar.istio.io/includeInboundPorts: "8080"
+    traffic.sidecar.istio.io/includeOutboundPorts: "8080"
+  persistence:
+    enabled: false
+
+xyne-vespa-embedder:
+  enabled: false
+
+xyne-tei-batch-proxy:
+  enabled: false
+
+xyne-redis:
+  enabled: false
+
+xyne-sandbox-router:
+  enabled: false
+
+xyne-egress-proxy:
+  enabled: false

@@ -18,7 +18,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { usePinnedArtifactApps } from '../../../hooks/usePinnedArtifactApps';
+import { updateAppSnapshot } from '../../../hooks/barItems';
 import {
   getArtifactApp,
   restoreArtifactAppVersion,
@@ -193,7 +193,6 @@ export function useAppCreationMode(
     [appId, restore],
   );
 
-  const { updatePinnedApp } = usePinnedArtifactApps();
   const iconMutation = useMutation({
     mutationFn: (icon: string | null) => updateArtifactAppIcon(appId as string, icon),
     onSuccess: (_result, icon) => {
@@ -202,7 +201,7 @@ export function useAppCreationMode(
       // localStorage snapshot — both must learn the new mark or the pane shows
       // one icon while the rail shows another.
       void queryClient.invalidateQueries({ queryKey: ['artifact-apps'] });
-      if (appId) updatePinnedApp(appId, { icon });
+      if (appId) updateAppSnapshot(appId, { icon });
     },
   });
   const setIcon = useCallback(

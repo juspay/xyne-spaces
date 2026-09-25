@@ -1,4 +1,4 @@
-import { useState, type ReactElement } from 'react';
+import { useMemo, useState, type ReactElement } from 'react';
 import { ChevronBigDown } from '@xyne/icons';
 import { Pill } from '../../../../shared/primitives/Pill';
 import {
@@ -10,7 +10,9 @@ import {
   ReadOnlyBadge,
 } from '../../../../shared/primitives/DetailPrimitives';
 import { AgentKeysDialog } from './AgentKeysDialog';
+import { agentCredentialScope } from './credentialScope';
 import { useAgentCredentials } from './useAgentCredentials';
+import { useCredentialHealth } from './useCredentialHealth';
 
 interface CredentialsCardProps {
   slug: string;
@@ -20,9 +22,19 @@ interface CredentialsCardProps {
 
 export function CredentialsCard({ slug, canRead, canManage }: CredentialsCardProps): ReactElement {
   const [keysOpen, setKeysOpen] = useState(false);
-  const { data: credentials } = useAgentCredentials(slug, canRead);
+  const scope = useMemo(() => agentCredentialScope(slug), [slug]);
+  const { data: credentials } = useAgentCredentials(scope, canRead);
 
-  const configured = (credentials ?? []).filter(entry => entry.configured).length;
+  const configuredEntries = (credentials ?? []).filter(entry => entry.configured);
+  const configured = configuredEntries.length;
+  const health = useCredentialHealth(
+    scope,
+    configuredEntries.map(entry => entry.provider),
+    canRead,
+  );
+  const broken = configuredEntries.filter(
+    entry => health.byProvider.get(entry.provider)?.status === 'invalid',
+  ).length;
 
   return (
     <DetailSection
@@ -54,7 +66,11 @@ export function CredentialsCard({ slug, canRead, canManage }: CredentialsCardPro
               data-track-name='Agent detail v2: open agent keys'
               className='flex h-9 shrink-0 items-center gap-2 rounded-[10px] border border-border bg-card px-3 text-sm font-normal leading-5 text-foreground transition-colors hover:bg-muted'
             >
-              {configured > 0 ? `${configured} configured` : 'Configure'}
+              {broken > 0
+                ? `${broken} need${broken === 1 ? 's' : ''} attention`
+                : configured > 0
+                  ? `${configured} configured`
+                  : 'Configure'}
               <ChevronBigDown className='size-4 shrink-0 text-muted-foreground' aria-hidden />
             </button>
           ) : (
@@ -66,7 +82,7 @@ export function CredentialsCard({ slug, canRead, canManage }: CredentialsCardPro
       <AgentKeysDialog
         open={keysOpen}
         onOpenChange={setKeysOpen}
-        slug={slug}
+        scope={scope}
         canManage={canManage}
       />
     </DetailSection>

@@ -475,6 +475,13 @@ export const applyTicketFilters = (
       }
     }
 
+    // Merchant ID filter (exact match)
+    if (filters.merchantIds && filters.merchantIds.length > 0) {
+      if (!ticket.merchantId || !filters.merchantIds.includes(ticket.merchantId)) {
+        return false;
+      }
+    }
+
     // Source channel filter
     if (filters.sourceChannels && filters.sourceChannels.length > 0) {
       if (!ticket.channelId || !filters.sourceChannels.includes(ticket.channelId)) {

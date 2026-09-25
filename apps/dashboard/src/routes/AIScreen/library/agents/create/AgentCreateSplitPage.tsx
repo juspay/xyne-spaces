@@ -1,11 +1,4 @@
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ReactElement,
-} from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Panel, ResizableGroup, Separator } from '@/components/ui/Resizable/Resizable';
 import { useAuth } from '@/hooks/useAuth';
@@ -115,8 +108,7 @@ export function AgentCreateSplitPage({
   // Manual canvas picks clear a sticky Create block once chips cover job needs.
   useEffect(() => {
     if (!capabilityBlock) return;
-    const intent =
-      lastJobIntentRef.current || jobIntentFromForm('', createForm.form);
+    const intent = lastJobIntentRef.current || jobIntentFromForm('', createForm.form);
     const needed = inferNeededCapabilities(intent);
     if (needed.length === 0) {
       setCapabilityBlock(false);
@@ -252,254 +244,253 @@ export function AgentCreateSplitPage({
     (turn: CreateChatTurn): Promise<void> => {
       if (scripted) return Promise.resolve();
       const run = canvasTurnChainRef.current.then(async (): Promise<void> => {
-      const canvasEmpty = canvasIsEmpty(createForm.form);
-      const userText = turn.userText;
+        const canvasEmpty = canvasIsEmpty(createForm.form);
+        const userText = turn.userText;
 
-      const action =
-        resolveWalkCreateAction(userText) ??
-        decideCreateCanvasAction({
-          userText,
-          canvasEmpty,
-          marker: turn.marker,
-        });
+        const action =
+          resolveWalkCreateAction(userText) ??
+          decideCreateCanvasAction({
+            userText,
+            canvasEmpty,
+            marker: turn.marker,
+          });
 
-      if (action.type === 'idle') {
-        createForm.clearHighlights();
-        createForm.setWritingField(null);
-        createForm.setAttentionField(null);
-        setProgressLabel(null);
-        setSkeletonIdentity(false);
-        return;
-      }
-
-      setCreateError(null);
-      setCapabilityBlock(false);
-      createForm.clearHighlightMarks();
-      setProgressLabel(PROGRESS_THINKING);
-
-      if (action.type === 'rename') {
-        const sourceId = `hub-rename-${Date.now()}`;
-        const renameName = sanitizeAgentCanvasName(action.name);
-        const nameBeforeRename = createForm.form.name.trim();
-        try {
-          createForm.setAttentionField('name');
-          setProgressLabel('Drafting name…');
-          await sleep(320);
-          createForm.setWritingField('name');
-          await sleep(48);
-          const changedName = createForm.applyChatPatch(
-            sourceId,
-            { name: renameName },
-            { highlight: false },
-          );
-          if (changedName.includes('name')) {
-            await sleep(WRITE_MS);
-          }
-          const nameLocked =
-            !changedName.includes('name') &&
-            nameBeforeRename.length > 0 &&
-            nameBeforeRename !== renameName;
-          if (!nameLocked) {
-            createForm.setWritingField('slug');
-            const changedSlug = createForm.applyChatPatch(
-              `${sourceId}-slug`,
-              { slug: slugify(action.name) },
-              { highlight: false },
-            );
-            if (changedSlug.includes('slug')) {
-              await sleep(WRITE_MS);
-            }
-          }
-          setPhase('draft');
-        } finally {
+        if (action.type === 'idle') {
+          createForm.clearHighlights();
           createForm.setWritingField(null);
           createForm.setAttentionField(null);
           setProgressLabel(null);
-        }
-        return;
-      }
-
-      if (action.type !== 'draft') {
-        setProgressLabel(null);
-        return;
-      }
-
-      const firstDescribe = canvasEmpty;
-      if (firstDescribe) {
-        setSkeletonIdentity(true);
-      }
-
-      try {
-        const sourceId = `hub-${Date.now()}`;
-        if (firstDescribe) {
           setSkeletonIdentity(false);
+          return;
         }
-        const toolsHubRow =
-          userText === WALK_BUILTIN_HUB_USER_TEXT
-            ? 'builtin'
-            : preferredToolsHubRow(userText);
-        await applyCreateHubDraft({
-          action,
-          canvasEmpty,
-          existingSystemPrompt: createForm.form.systemPrompt,
-          writeMs: WRITE_MS,
-          sourceId,
-          toolsHubRow,
-          generateAgentPrompt: async (intent, existingPrompt) =>
-            generateAgentPrompt({
-              intent,
-              ...(existingPrompt ? { existingPrompt } : {}),
-            }),
-          setWritingField: createForm.setWritingField,
-          setAttentionField: createForm.setAttentionField,
-          setProgressLabel,
-          applyChatPatch: createForm.applyChatPatch,
-          sleep,
-          ...(turn.announceSection ? { onSectionComplete: turn.announceSection } : {}),
-          ...(action.fields.includes('tools')
-            ? {
-                fillTools: async (incoming: AgentCreateChatPatch) => {
-                  try {
-                    if (userText === WALK_BUILTIN_HUB_USER_TEXT) {
-                      const catalog = await getAvailableTools().catch(() => null);
-                      if (!catalog) return;
-                      const built = buildBuiltinCatalog(catalog);
-                      const pick = built.find(entry => entry.tools.length > 0);
-                      if (pick) {
-                        const live = createForm.getForm();
-                        incoming.tools = {
-                          ...enableBuiltinEntry(live.tools, pick),
-                          callableAgents: live.tools.callableAgents,
-                        };
-                      }
-                      return;
-                    }
-                    // Prefer userText — model draftIntent often drops “Slack”/“GitHub”.
-                    const selectIntent = [userText.trim(), action.intent.trim()]
-                      .filter(Boolean)
-                      .join('\n');
-                    const selected = await selectHubToolsForIntent({
-                      intent: selectIntent,
-                      current: createForm.getForm().tools,
-                      systemPrompt:
-                        incoming.systemPrompt || createForm.getForm().systemPrompt || undefined,
-                    });
-                    if (selected) {
-                      incoming.tools = selected.selection;
-                      return selected.labels;
-                    }
-                  } catch {
-                    // Prompt still applies if tool suggest fails.
-                  }
-                },
+
+        setCreateError(null);
+        setCapabilityBlock(false);
+        createForm.clearHighlightMarks();
+        setProgressLabel(PROGRESS_THINKING);
+
+        if (action.type === 'rename') {
+          const sourceId = `hub-rename-${Date.now()}`;
+          const renameName = sanitizeAgentCanvasName(action.name);
+          const nameBeforeRename = createForm.form.name.trim();
+          try {
+            createForm.setAttentionField('name');
+            setProgressLabel('Drafting name…');
+            await sleep(320);
+            createForm.setWritingField('name');
+            await sleep(48);
+            const changedName = createForm.applyChatPatch(
+              sourceId,
+              { name: renameName },
+              { highlight: false },
+            );
+            if (changedName.includes('name')) {
+              await sleep(WRITE_MS);
+            }
+            const nameLocked =
+              !changedName.includes('name') &&
+              nameBeforeRename.length > 0 &&
+              nameBeforeRename !== renameName;
+            if (!nameLocked) {
+              createForm.setWritingField('slug');
+              const changedSlug = createForm.applyChatPatch(
+                `${sourceId}-slug`,
+                { slug: slugify(action.name) },
+                { highlight: false },
+              );
+              if (changedSlug.includes('slug')) {
+                await sleep(WRITE_MS);
               }
-            : {}),
-          ...(action.fields.includes('skills')
-            ? {
-                fillSkills: async (incoming: AgentCreateChatPatch) => {
-                  try {
-                    if (!user?.id) return;
-                    const skills = await listSkills(user.id);
-                    if (skills.length === 0) return;
-                    const intent = [userText.trim(), action.intent.trim()]
-                      .filter(Boolean)
-                      .join('\n')
-                      .toLowerCase();
-                    const tokens = intent
-                      .split(/[^a-z0-9]+/)
-                      .filter(token => token.length >= 3);
-                    const ranked = skills
-                      .map(skill => {
-                        const hay = `${skill.name} ${skill.slug} ${skill.label} ${skill.description}`.toLowerCase();
-                        let score = 0;
-                        for (const token of tokens) {
-                          if (hay.includes(token)) score += token.length;
-                        }
-                        if (/\bresearch\b/.test(intent) && /\bresearch\b/.test(hay)) score += 20;
-                        return { skill, score };
-                      })
-                      .sort((a, b) => b.score - a.score);
-                    const pick =
-                      (ranked[0] && ranked[0].score > 0 ? ranked[0].skill : null) ??
-                      skills.find(skill => skill.slug) ??
-                      skills[0];
-                    if (pick?.id) {
-                      const ids = new Set(createForm.form.selectedSkillIds);
-                      ids.add(pick.id);
-                      incoming.selectedSkillIds = [...ids];
-                      return pick.label || pick.name || pick.slug;
-                    }
-                  } catch {
-                    // Hub row may stay empty if skills API fails.
-                  }
-                },
-              }
-            : {}),
-          ...(action.fields.includes('knowledge')
-            ? {
-                fillKnowledge: async (incoming: AgentCreateChatPatch) => {
-                  try {
-                    const { collections } = await listAccessibleKnowledgeBase();
-                    if (collections.length === 0) return;
-                    const intent = [userText.trim(), action.intent.trim()]
-                      .filter(Boolean)
-                      .join('\n')
-                      .toLowerCase();
-                    const ranked = collections
-                      .map(collection => {
-                        const hay =
-                          `${collection.name ?? ''} ${collection.id}`.toLowerCase();
-                        let score = 0;
-                        if (/\b(docs?|documentation|product|knowledge|wiki)\b/.test(intent)) {
-                          if (/\b(docs?|product|wiki|knowledge)\b/.test(hay)) score += 10;
-                        }
-                        return { collection, score };
-                      })
-                      .sort((a, b) => b.score - a.score);
-                    const pick =
-                      (ranked[0] && ranked[0].score > 0 ? ranked[0].collection : null) ??
-                      collections.find(collection => collection.id.trim().length > 0) ??
-                      collections[0];
-                    if (!pick?.id) return;
-                    incoming.selectedKbScope = 'COLLECTIONS';
-                    incoming.selectedKbResources = [{ collectionId: pick.id, fileId: null }];
-                    return pick.name?.trim() || pick.id;
-                  } catch {
-                    // Hub row may stay empty if KB API fails.
-                  }
-                },
-              }
-            : {}),
-        });
-        lastJobIntentRef.current = [userText.trim(), action.intent.trim()]
-          .filter(Boolean)
-          .join('\n');
-        // Post-bind validation: heal missing hubs the job needs, then gate Create.
-        const capResult = await healMissingCapabilities(lastJobIntentRef.current);
-        if (capResult.healable.length > 0) {
-          setCapabilityBlock(true);
-          setCreateError(capabilityGapMessage(capResult));
-        } else {
-          setCapabilityBlock(false);
-          const miss = capabilityGapMessage(capResult);
-          if (miss && capResult.catalogMiss.length > 0) {
-            setCreateError(miss);
+            }
+            setPhase('draft');
+          } finally {
+            createForm.setWritingField(null);
+            createForm.setAttentionField(null);
+            setProgressLabel(null);
           }
+          return;
         }
-        await sleep(WRITE_MS * 2);
-        createForm.setWritingField(null);
-        createForm.setAttentionField(null);
-        setProgressLabel(null);
-        setSkeletonIdentity(false);
-        setPhase('draft');
-      } catch (err) {
-        createForm.clearHighlights();
-        createForm.setAttentionField(null);
-        setProgressLabel(null);
-        setSkeletonIdentity(false);
-        setPhase(canvasIsEmpty(createForm.getForm()) ? 'empty' : 'draft');
-        throw err;
-      }
+
+        if (action.type !== 'draft') {
+          setProgressLabel(null);
+          return;
+        }
+
+        const firstDescribe = canvasEmpty;
+        if (firstDescribe) {
+          setSkeletonIdentity(true);
+        }
+
+        try {
+          const sourceId = `hub-${Date.now()}`;
+          if (firstDescribe) {
+            setSkeletonIdentity(false);
+          }
+          const toolsHubRow =
+            userText === WALK_BUILTIN_HUB_USER_TEXT ? 'builtin' : preferredToolsHubRow(userText);
+          await applyCreateHubDraft({
+            action,
+            canvasEmpty,
+            existingSystemPrompt: createForm.form.systemPrompt,
+            writeMs: WRITE_MS,
+            sourceId,
+            toolsHubRow,
+            generateAgentPrompt: async (intent, existingPrompt) =>
+              generateAgentPrompt({
+                intent,
+                ...(existingPrompt ? { existingPrompt } : {}),
+              }),
+            setWritingField: createForm.setWritingField,
+            setAttentionField: createForm.setAttentionField,
+            setProgressLabel,
+            applyChatPatch: createForm.applyChatPatch,
+            sleep,
+            ...(turn.announceSection ? { onSectionComplete: turn.announceSection } : {}),
+            ...(action.fields.includes('tools')
+              ? {
+                  fillTools: async (incoming: AgentCreateChatPatch) => {
+                    try {
+                      if (userText === WALK_BUILTIN_HUB_USER_TEXT) {
+                        const catalog = await getAvailableTools().catch(() => null);
+                        if (!catalog) return;
+                        const built = buildBuiltinCatalog(catalog);
+                        const pick = built.find(entry => entry.tools.length > 0);
+                        if (pick) {
+                          const live = createForm.getForm();
+                          incoming.tools = {
+                            ...enableBuiltinEntry(live.tools, pick),
+                            callableAgents: live.tools.callableAgents,
+                          };
+                        }
+                        return;
+                      }
+                      // Prefer userText — model draftIntent often drops “Slack”/“GitHub”.
+                      const selectIntent = [userText.trim(), action.intent.trim()]
+                        .filter(Boolean)
+                        .join('\n');
+                      const selected = await selectHubToolsForIntent({
+                        intent: selectIntent,
+                        current: createForm.getForm().tools,
+                        systemPrompt:
+                          incoming.systemPrompt || createForm.getForm().systemPrompt || undefined,
+                      });
+                      if (selected) {
+                        incoming.tools = selected.selection;
+                        return selected.labels;
+                      }
+                    } catch {
+                      // Prompt still applies if tool suggest fails.
+                    }
+                    return;
+                  },
+                }
+              : {}),
+            ...(action.fields.includes('skills')
+              ? {
+                  fillSkills: async (incoming: AgentCreateChatPatch) => {
+                    try {
+                      if (!user?.id) return;
+                      const skills = await listSkills(user.id);
+                      if (skills.length === 0) return;
+                      const intent = [userText.trim(), action.intent.trim()]
+                        .filter(Boolean)
+                        .join('\n')
+                        .toLowerCase();
+                      const tokens = intent.split(/[^a-z0-9]+/).filter(token => token.length >= 3);
+                      const ranked = skills
+                        .map(skill => {
+                          const hay =
+                            `${skill.name} ${skill.slug} ${skill.label} ${skill.description}`.toLowerCase();
+                          let score = 0;
+                          for (const token of tokens) {
+                            if (hay.includes(token)) score += token.length;
+                          }
+                          if (/\bresearch\b/.test(intent) && /\bresearch\b/.test(hay)) score += 20;
+                          return { skill, score };
+                        })
+                        .sort((a, b) => b.score - a.score);
+                      const pick =
+                        (ranked[0] && ranked[0].score > 0 ? ranked[0].skill : null) ??
+                        skills.find(skill => skill.slug) ??
+                        skills[0];
+                      if (pick?.id) {
+                        const ids = new Set(createForm.form.selectedSkillIds);
+                        ids.add(pick.id);
+                        incoming.selectedSkillIds = [...ids];
+                        return pick.label || pick.name || pick.slug;
+                      }
+                    } catch {
+                      // Hub row may stay empty if skills API fails.
+                    }
+                    return;
+                  },
+                }
+              : {}),
+            ...(action.fields.includes('knowledge')
+              ? {
+                  fillKnowledge: async (incoming: AgentCreateChatPatch) => {
+                    try {
+                      const { collections } = await listAccessibleKnowledgeBase();
+                      if (collections.length === 0) return;
+                      const intent = [userText.trim(), action.intent.trim()]
+                        .filter(Boolean)
+                        .join('\n')
+                        .toLowerCase();
+                      const ranked = collections
+                        .map(collection => {
+                          const hay = `${collection.name ?? ''} ${collection.id}`.toLowerCase();
+                          let score = 0;
+                          if (/\b(docs?|documentation|product|knowledge|wiki)\b/.test(intent)) {
+                            if (/\b(docs?|product|wiki|knowledge)\b/.test(hay)) score += 10;
+                          }
+                          return { collection, score };
+                        })
+                        .sort((a, b) => b.score - a.score);
+                      const pick =
+                        (ranked[0] && ranked[0].score > 0 ? ranked[0].collection : null) ??
+                        collections.find(collection => collection.id.trim().length > 0) ??
+                        collections[0];
+                      if (!pick?.id) return;
+                      incoming.selectedKbScope = 'COLLECTIONS';
+                      incoming.selectedKbResources = [{ collectionId: pick.id, fileId: null }];
+                      return pick.name?.trim() || pick.id;
+                    } catch {
+                      // Hub row may stay empty if KB API fails.
+                    }
+                    return;
+                  },
+                }
+              : {}),
+          });
+          lastJobIntentRef.current = [userText.trim(), action.intent.trim()]
+            .filter(Boolean)
+            .join('\n');
+          // Post-bind validation: heal missing hubs the job needs, then gate Create.
+          const capResult = await healMissingCapabilities(lastJobIntentRef.current);
+          if (capResult.healable.length > 0) {
+            setCapabilityBlock(true);
+            setCreateError(capabilityGapMessage(capResult));
+          } else {
+            setCapabilityBlock(false);
+            const miss = capabilityGapMessage(capResult);
+            if (miss && capResult.catalogMiss.length > 0) {
+              setCreateError(miss);
+            }
+          }
+          await sleep(WRITE_MS * 2);
+          createForm.setWritingField(null);
+          createForm.setAttentionField(null);
+          setProgressLabel(null);
+          setSkeletonIdentity(false);
+          setPhase('draft');
+        } catch (err) {
+          createForm.clearHighlights();
+          createForm.setAttentionField(null);
+          setProgressLabel(null);
+          setSkeletonIdentity(false);
+          setPhase(canvasIsEmpty(createForm.getForm()) ? 'empty' : 'draft');
+          throw err;
+        }
       });
       canvasTurnChainRef.current = run.catch(() => {});
       return run;
@@ -507,14 +498,11 @@ export function AgentCreateSplitPage({
     [createForm, healMissingCapabilities, scripted, user?.id],
   );
 
-
   const persist = useCallback(async (): Promise<void> => {
     if (scripted || !canCreate || creating) return;
     setCreating(true);
     setCreateError(null);
-    const intent =
-      lastJobIntentRef.current ||
-      jobIntentFromForm('', createForm.getForm());
+    const intent = lastJobIntentRef.current || jobIntentFromForm('', createForm.getForm());
     const capResult = await healMissingCapabilities(intent);
     if (capResult.healable.length > 0) {
       setCapabilityBlock(true);

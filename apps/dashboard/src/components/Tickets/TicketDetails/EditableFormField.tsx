@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { SingleSelect, SelectMenuAlignment } from '@juspay/blend-design-system';
+import { LockClose as Lock } from '@xyne/icons';
 import { AvatarShape, AvatarSize } from '../../UserAvatar/UserAvatar';
 import { FormFieldType, User } from '@xyne/shared';
 import type { ReadonlyJSONValue } from '@rocicorp/zero';
@@ -20,6 +21,8 @@ interface EditableFormFieldProps {
   fieldType: FormFieldType;
   fieldEnum?: string[] | undefined; // Options for SELECT fields
   onSave: (newValue: string[]) => void; // Always accept string array
+  /** Show the field but refuse edits — the row carries a lock instead of a cursor. */
+  readOnly?: boolean;
 }
 
 // Helper to convert JSON value to string for display
@@ -33,14 +36,14 @@ const jsonToString = (value: ReadonlyJSONValue): string => {
 };
 
 const formatBooleanDisplay = (value: ReadonlyJSONValue): string => {
-  if (value === null || value === undefined || value === '') return '—';
+  if (value === null || value === undefined || value === '') return '';
   if (typeof value === 'boolean') return value ? 'Yes' : 'No';
   if (typeof value === 'string') {
     const normalized = value.trim().toLowerCase();
     if (normalized === 'true' || normalized === 'yes') return 'Yes';
     if (normalized === 'false' || normalized === 'no') return 'No';
   }
-  return '—';
+  return '';
 };
 
 /** Strict boolean edit value: only true/false; unknown inputs clear the field. */
@@ -79,14 +82,62 @@ const jsonToArray = (value: ReadonlyJSONValue): string[] => {
   return [];
 };
 
+/**
+ * The click-to-edit surface of a read-mode row. Locked fields get no handlers and no button
+ * semantics at all, so a field that cannot change never advertises that it can.
+ */
+const ReadModeValue = ({
+  readOnly,
+  className,
+  onEdit,
+  trackName,
+  trackMetadata,
+  children,
+}: {
+  readOnly: boolean;
+  className: string;
+  onEdit: () => void;
+  trackName: string;
+  trackMetadata: string;
+  children: React.ReactNode;
+}): React.ReactElement => {
+  if (readOnly) {
+    return <div className={`${className} cursor-default`}>{children}</div>;
+  }
+  return (
+    <div
+      role='button'
+      tabIndex={0}
+      className={`${className} cursor-text hover:bg-muted`}
+      onClick={onEdit}
+      onKeyDown={e => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onEdit();
+        }
+      }}
+      data-track-category='TicketDetails'
+      data-track-name={trackName}
+      data-track-metadata={trackMetadata}
+    >
+      {children}
+    </div>
+  );
+};
+
 export const EditableFormField: React.FC<EditableFormFieldProps> = ({
   fieldName,
   fieldValue,
   fieldType,
   fieldEnum,
   onSave,
+  readOnly = false,
 }) => {
   const [isEditing, setIsEditing] = useState(false);
+  const beginEdit = (): void => {
+    if (readOnly) return;
+    setIsEditing(true);
+  };
   const [editValue, setEditValue] = useState(
     fieldType === FormFieldType.MULTI_SELECT
       ? jsonToArray(fieldValue).join(', ')
@@ -234,7 +285,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
       return (
         <div className='flex items-center gap-2 w-full'>
           <span
-            className='text-sm text-muted-foreground w-[120px] flex-shrink-0 overflow-x-auto whitespace-nowrap'
+            className='text-sm text-muted-foreground w-[186px] flex-shrink-0 overflow-x-auto whitespace-nowrap'
             title={fieldName}
           >
             {fieldName}
@@ -262,7 +313,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
       return (
         <div className='flex items-center gap-2 w-full'>
           <span
-            className='text-sm text-muted-foreground w-[120px] flex-shrink-0 overflow-x-auto whitespace-nowrap'
+            className='text-sm text-muted-foreground w-[186px] flex-shrink-0 overflow-x-auto whitespace-nowrap'
             title={fieldName}
           >
             {fieldName}
@@ -291,7 +342,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
       return (
         <div className='flex items-center gap-2 w-full'>
           <span
-            className='text-sm text-muted-foreground w-[120px] flex-shrink-0 overflow-x-auto whitespace-nowrap'
+            className='text-sm text-muted-foreground w-[186px] flex-shrink-0 overflow-x-auto whitespace-nowrap'
             title={fieldName}
           >
             {fieldName}
@@ -324,7 +375,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
       return (
         <div className='flex items-center gap-2 w-full'>
           <span
-            className='text-sm text-muted-foreground w-[120px] flex-shrink-0 overflow-x-auto whitespace-nowrap'
+            className='text-sm text-muted-foreground w-[186px] flex-shrink-0 overflow-x-auto whitespace-nowrap'
             title={fieldName}
           >
             {fieldName}
@@ -351,7 +402,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
       return (
         <div className='flex items-start gap-2 w-full'>
           <span
-            className='text-sm text-muted-foreground w-[120px] flex-shrink-0 overflow-x-auto whitespace-nowrap'
+            className='text-sm text-muted-foreground w-[186px] flex-shrink-0 overflow-x-auto whitespace-nowrap'
             title={fieldName}
           >
             {fieldName}
@@ -378,7 +429,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
       return (
         <div className='flex items-start gap-2 w-full'>
           <span
-            className='text-sm text-muted-foreground w-[120px] flex-shrink-0 overflow-x-auto whitespace-nowrap'
+            className='text-sm text-muted-foreground w-[186px] flex-shrink-0 overflow-x-auto whitespace-nowrap'
             title={fieldName}
           >
             {fieldName}
@@ -399,7 +450,7 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
     return (
       <div className='flex items-center gap-2 w-full'>
         <span
-          className='text-sm text-muted-foreground w-[120px] flex-shrink-0 overflow-x-auto whitespace-nowrap'
+          className='text-sm text-muted-foreground w-[186px] flex-shrink-0 overflow-x-auto whitespace-nowrap'
           title={fieldName}
         >
           {fieldName}
@@ -426,47 +477,35 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
   if (fieldType === FormFieldType.USER) {
     // Display users with avatars and names
     return (
-      <div className='flex items-start gap-2 w-full'>
+      <div className='grid min-h-[36px] w-full grid-cols-[186px_1fr] items-center gap-[14px] rounded-lg py-[5px] pr-[10px] transition-colors hover:bg-muted/40'>
         <span
-          className='text-sm text-muted-foreground w-[120px] flex-shrink-0 pt-0.5 overflow-x-auto whitespace-nowrap'
-          title={fieldName}
+          className='flex items-center gap-1.5 truncate whitespace-nowrap text-[13px] text-muted-foreground'
+          title={readOnly ? `${fieldName} — read-only` : fieldName}
         >
-          {fieldName}
+          <span className='truncate'>{fieldName}</span>
+          {readOnly && <Lock size={11} className='shrink-0 text-muted-foreground/70' />}
         </span>
-        <div
-          role='button'
-          tabIndex={0}
-          className='flex-1 flex flex-wrap gap-2 cursor-text hover:bg-muted rounded px-1 py-0.5 -mx-1'
-          onClick={() => setIsEditing(true)}
-          onKeyDown={e => {
-            if (e.key === 'Enter' || e.key === ' ') {
-              e.preventDefault();
-              setIsEditing(true);
-            }
-          }}
-          data-track-category='TicketDetails'
-          data-track-name='EditUserField'
-          data-track-metadata={JSON.stringify({
-            fieldName,
-            fieldType,
-            fieldValue,
-            selectedUserIds,
-          })}
+        <ReadModeValue
+          readOnly={readOnly}
+          className='flex flex-1 flex-wrap gap-2 rounded px-1 py-0.5'
+          onEdit={beginEdit}
+          trackName='EditUserField'
+          trackMetadata={JSON.stringify({ fieldName, fieldType, fieldValue, selectedUserIds })}
         >
           {selectedUsers.length > 0 ? (
             selectedUsers.map(user => (
               <div
                 key={user.id}
-                className='flex items-center gap-1.5 bg-muted rounded-full px-2 py-0.5 border border-border'
+                className='flex items-center gap-1.5 rounded-full border border-border bg-muted px-2 py-0.5'
               >
                 <UserAvatar userId={user.id} size={AvatarSize.SM} shape={AvatarShape.CIRCULAR} />
-                <span className='text-sm text-muted-foreground'>{getUserDisplayName(user)}</span>
+                <span className='text-[13px] text-foreground'>{getUserDisplayName(user)}</span>
               </div>
             ))
           ) : (
-            <span className='text-sm text-muted-foreground'>—</span>
+            <span className='text-[13px] text-muted-foreground/60'>Empty</span>
           )}
-        </div>
+        </ReadModeValue>
       </div>
     );
   }
@@ -478,60 +517,54 @@ export const EditableFormField: React.FC<EditableFormFieldProps> = ({
       : selectedTicketValue;
 
     return (
-      <div className='flex items-center gap-2 w-full'>
+      <div className='grid min-h-[36px] w-full grid-cols-[186px_1fr] items-center gap-[14px] rounded-lg py-[5px] pr-[10px] transition-colors hover:bg-muted/40'>
         <span
-          className='text-sm text-muted-foreground w-[120px] flex-shrink-0 overflow-x-auto whitespace-nowrap'
-          title={fieldName}
+          className='flex items-center gap-1.5 truncate whitespace-nowrap text-[13px] text-muted-foreground'
+          title={readOnly ? `${fieldName} — read-only` : fieldName}
         >
-          {fieldName}
+          <span className='truncate'>{fieldName}</span>
+          {readOnly && <Lock size={11} className='shrink-0 text-muted-foreground/70' />}
         </span>
-        <div
-          role='button'
-          tabIndex={0}
-          className='flex-1 text-sm text-muted-foreground break-all cursor-text hover:bg-muted rounded px-1 py-0.5 -mx-1'
-          onClick={() => setIsEditing(true)}
-          onKeyDown={e => {
-            if (e.key === 'Enter' || e.key === ' ') {
-              e.preventDefault();
-              setIsEditing(true);
-            }
-          }}
-          data-track-category='TicketDetails'
-          data-track-name='EditTicketField'
-          data-track-metadata={JSON.stringify({ fieldName, fieldType, fieldValue })}
+        <ReadModeValue
+          readOnly={readOnly}
+          className='min-w-0 break-words rounded px-1 py-0.5 text-[13px]'
+          onEdit={beginEdit}
+          trackName='EditTicketField'
+          trackMetadata={JSON.stringify({ fieldName, fieldType, fieldValue })}
         >
-          {ticketLabel || '—'}
-        </div>
+          {ticketLabel ? (
+            <span className='font-medium text-foreground'>{ticketLabel}</span>
+          ) : (
+            <span className='text-muted-foreground/60'>Empty</span>
+          )}
+        </ReadModeValue>
       </div>
     );
   }
 
   // Read mode for other field types
   return (
-    <div className='flex items-center gap-2 w-full'>
+    <div className='grid min-h-[36px] w-full grid-cols-[186px_1fr] items-center gap-[14px] rounded-lg py-[5px] pr-[10px] transition-colors hover:bg-muted/40'>
       <span
-        className='text-sm text-muted-foreground w-[120px] flex-shrink-0 overflow-x-auto whitespace-nowrap'
-        title={fieldName}
+        className='flex items-center gap-1.5 truncate whitespace-nowrap text-[13px] text-muted-foreground'
+        title={readOnly ? `${fieldName} — read-only` : fieldName}
       >
-        {fieldName}
+        <span className='truncate'>{fieldName}</span>
+        {readOnly && <Lock size={11} className='shrink-0 text-muted-foreground/70' />}
       </span>
-      <div
-        role='button'
-        tabIndex={0}
-        className='flex-1 text-sm text-muted-foreground break-all cursor-text hover:bg-muted rounded px-1 py-0.5 -mx-1'
-        onClick={() => setIsEditing(true)}
-        onKeyDown={e => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            setIsEditing(true);
-          }
-        }}
-        data-track-category='TicketDetails'
-        data-track-name='EditField'
-        data-track-metadata={JSON.stringify({ fieldName, fieldType, fieldValue })}
+      <ReadModeValue
+        readOnly={readOnly}
+        className='min-w-0 break-words rounded px-1 py-0.5 text-[13px]'
+        onEdit={beginEdit}
+        trackName='EditField'
+        trackMetadata={JSON.stringify({ fieldName, fieldType, fieldValue })}
       >
-        {displayValue || '—'}
-      </div>
+        {displayValue ? (
+          <span className='font-medium text-foreground'>{displayValue}</span>
+        ) : (
+          <span className='text-muted-foreground/60'>Empty</span>
+        )}
+      </ReadModeValue>
     </div>
   );
 };

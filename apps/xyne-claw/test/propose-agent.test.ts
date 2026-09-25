@@ -181,3 +181,57 @@ test("normalizeAgentSlug matches the slug rule the server enforces", () => {
   expect(normalizeAgentSlug("!!!")).toBe("");
   expect(normalizeAgentSlug("a".repeat(200)).length).toBe(80);
 });
+
+describe("detail-parity fields", () => {
+  test("carries skills, knowledge, providerOrder, memory and scope through", async () => {
+    const ref: ProposeAgentRef = {};
+    await callTool(ref, undefined, {
+      ...validDraft,
+      skills: ["pr-review", "pr-review", "  "],
+      knowledge: { scope: "COLLECTIONS", collections: ["Handbook", "Handbook"] },
+      providerOrder: ["claude", "codex"],
+      memory: { enabled: true, requiresApproval: false },
+      scope: "global",
+    });
+
+    expect(ref.value).toMatchObject({
+      variant: "draft",
+      agent: {
+        skills: ["pr-review"],
+        knowledge: { scope: "COLLECTIONS", collections: ["Handbook"] },
+        providerOrder: ["claude", "codex"],
+        memory: { enabled: true, requiresApproval: false },
+        scope: "global",
+      },
+    });
+  });
+
+  test("omits every new field when the model does not send them", async () => {
+    const ref: ProposeAgentRef = {};
+    await callTool(ref, undefined, validDraft);
+    const agent = (ref.value as { agent: Record<string, unknown> }).agent;
+
+    expect(agent.skills).toBeUndefined();
+    expect(agent.knowledge).toBeUndefined();
+    expect(agent.providerOrder).toBeUndefined();
+    expect(agent.memory).toBeUndefined();
+    expect(agent.scope).toBeUndefined();
+  });
+
+  test("drops junk values instead of passing them on", async () => {
+    const ref: ProposeAgentRef = {};
+    await callTool(ref, undefined, {
+      ...validDraft,
+      skills: "not-an-array",
+      knowledge: { scope: "NONSENSE", collections: [1, 2] },
+      memory: { enabled: "yes" },
+      scope: "everyone",
+    });
+    const agent = (ref.value as { agent: Record<string, unknown> }).agent;
+
+    expect(agent.skills).toBeUndefined();
+    expect(agent.knowledge).toBeUndefined();
+    expect(agent.memory).toBeUndefined();
+    expect(agent.scope).toBeUndefined();
+  });
+});

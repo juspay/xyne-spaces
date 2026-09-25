@@ -19,6 +19,7 @@ interface SelectorProps {
   noBorder?: boolean;
   isItemDisabled?: (item: StatusItem) => boolean;
   onOpenChange?: (isOpen: boolean) => void;
+  inputClassName?: string;
 }
 
 /**
@@ -35,6 +36,7 @@ export const Selector: React.FC<SelectorProps> = ({
   noBorder,
   isItemDisabled,
   onOpenChange,
+  inputClassName,
 }) => {
   const options: SelectorOption[] = useMemo(() => {
     return items.map(item => ({
@@ -65,6 +67,7 @@ export const Selector: React.FC<SelectorProps> = ({
       noBorder={noBorder || false}
       isOpen={isOpen}
       onOpenChange={handleOpenChange}
+      {...(inputClassName ? { inputClassName } : {})}
     />
   );
 };

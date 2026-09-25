@@ -10,7 +10,6 @@ import { subscribeSendLifecycle } from './mutationLifecycle.js';
 import {
   addPending,
   getCurrentSessionId,
-  removePending,
   updatePending,
   type PendingAttachment,
   type ZeroStateName,
@@ -85,11 +84,18 @@ export function sendMessage(
   // stops showing text that has already been handed to pending. Queued along
   // with the send mutator when offline (Zero applies both optimistically
   // and replays them in order on reconnect).
+  //
+  // The attachment ids go with it: clearContent re-points them off the draft so
+  // a send the server later rejects does not hand its files back to the
+  // composer. It has to happen here rather than inside the send mutator,
+  // because that claim is part of the send and is rolled back with it.
+  const claimedAttachmentIds = attachments.map(a => a.attachmentId);
   zero.mutate(
     mutators.draft.clearContent({
       channelId: ref.channelId,
       ...(ref.kind === 'thread' && { conversationId: ref.conversationId }),
       timestamp: Date.now(),
+      ...(claimedAttachmentIds.length > 0 && { claimedAttachmentIds, messageId }),
     }),
   );
 
@@ -100,12 +106,15 @@ export function sendMessage(
   const fireTimestamp = Date.now();
   updatePending(messageId, { mutatorFired: true, timestamp: fireTimestamp });
 
-  // First fire only: when the caller passes no attachments we OMIT attachmentIds
-  // so a send that under-specifies still hits the mutator's legacy draft-scan
-  // fallback for this same compose context. The durable retry path
-  // (firePendingMutator in pending.ts) deliberately does the opposite and always
-  // passes attachmentIds, because a replay must not scavenge live draft state.
-  const attachmentIds = attachments.map(a => a.attachmentId);
+  // ALWAYS passed, even empty. Omitting it drops the mutator into its legacy
+  // draft-scan fallback, which claims whatever DRAFT attachments sit on this
+  // compose context right now. That is unsafe once a failed send can persist:
+  // its attachments stay DRAFT-typed (the server never promoted them), so a
+  // later unrelated send would scavenge them onto itself and the failed
+  // message's retry would reference attachments it no longer owns. Passing the
+  // exact ids — including none — makes ownership explicit. firePendingMutator
+  // does the same on replay.
+  const attachmentIds = claimedAttachmentIds;
   const mutation =
     ref.kind === 'channel'
       ? zero.mutate(
@@ -116,7 +125,7 @@ export function sendMessage(
             messageId,
             timestamp: fireTimestamp,
             type,
-            ...(attachmentIds.length > 0 && { attachmentIds }),
+            attachmentIds,
             ...(payload.entityLinkContext !== undefined && {
               entityLinkContext: payload.entityLinkContext,
             }),
@@ -129,7 +138,7 @@ export function sendMessage(
             type,
             timestamp: fireTimestamp,
             messageId,
-            ...(attachmentIds.length > 0 && { attachmentIds }),
+            attachmentIds,
             ...(payload.alsoSendToChannel !== undefined && {
               showInChannel: payload.alsoSendToChannel,
             }),
@@ -146,13 +155,12 @@ export function sendMessage(
       updatePending(messageId, { mutatorAppError: true });
     },
     outcome => {
-      if (outcome === 'ok') {
-        removePending(messageId);
+      if (outcome === 'client-applied') {
         emitMessageSent({
           ref,
           messageId,
           conversationId,
-          isServerConfirmed: true,
+          isClientApplied: true,
           ...(payload.alsoSendToChannel !== undefined && {
             showInChannel: payload.alsoSendToChannel,
           }),

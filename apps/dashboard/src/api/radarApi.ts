@@ -85,6 +85,49 @@ export function fetchRadarPendingOthers(): Promise<RadarThreadCard[]> {
   ).then(d => d.threads);
 }
 
+export interface RadarPendingOthersPageParams {
+  page: number;
+  mutedPage: number;
+  pageSize: number;
+  holderIds: string[];
+  channelIds: string[];
+  createdFrom: Date | null;
+  createdTo: Date | null;
+}
+
+export interface RadarPendingOthersPage {
+  threads: RadarThreadCard[];
+  totalThreads: number;
+  page: number;
+  mutedThreads: RadarThreadCard[];
+  mutedTotalThreads: number;
+  mutedItemCount: number;
+  mutedPage: number;
+  /** Unmuted open items before any filter — the tab's badge. */
+  openItemCount: number;
+  facets: { holderIds: string[]; channelIds: string[] };
+}
+
+/** Pending Others one page at a time, filtered on the server — the feed is
+ *  workspace-wide, so it is never shipped whole to be paged in the browser. */
+export function fetchRadarPendingOthersPage(
+  params: RadarPendingOthersPageParams,
+): Promise<RadarPendingOthersPage> {
+  return unwrap(
+    apiInstance.get<SuccessEnvelope<RadarPendingOthersPage>>('/radar/feed/pending-others', {
+      params: {
+        page: params.page,
+        mutedPage: params.mutedPage,
+        pageSize: params.pageSize,
+        ...(params.holderIds.length ? { holders: params.holderIds.join(',') } : {}),
+        ...(params.channelIds.length ? { channels: params.channelIds.join(',') } : {}),
+        ...(params.createdFrom ? { createdFrom: params.createdFrom.toISOString() } : {}),
+        ...(params.createdTo ? { createdTo: params.createdTo.toISOString() } : {}),
+      },
+    }),
+  );
+}
+
 export interface RadarItemMutation {
   id: string;
   itemId: string;

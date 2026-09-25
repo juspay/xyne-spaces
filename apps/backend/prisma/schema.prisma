@@ -176,6 +176,7 @@ model Ticket {
   // onDelete: deleting a conversation that has a ticket throws P2014 (Restrict).
   conversation       Conversation           @relation("TicketConversation", fields: [conversationId], references: [conversationId])
   emailReads         EmailRead[]
+  ticketDescription TicketDescription?
 
   @@index([status])
   @@index([assignedTo, status])
@@ -208,6 +209,22 @@ model Ticket {
   @@index([xyneId])
   @@unique([workspaceId, xyneId])
   @@map("tickets")
+  @@schema("public")
+}
+
+model TicketDescription {
+  ticketId    String @id
+  workspaceId String
+  channelId   String
+  description String
+  createdAt   DateTime
+  updatedAt   DateTime
+
+  // Relations
+  ticket      Ticket  @relation(fields: [ticketId], references: [id])
+  channel     Channel @relation(fields: [channelId], references: [id])
+
+  @@map("ticket_descriptions")
   @@schema("public")
 }
 
@@ -1855,6 +1872,7 @@ model Channel {
   // SDLC channel membership: the CHANNEL -> REPOSITORY edges in sdlcEntityLinks.
   sdlcEntityLinks    SdlcEntityLink[] @relation("SdlcChannelLink")
   collectionPermissions CollectionPermission[]
+  ticketDescriptions    TicketDescription[]
 
   @@index([projectId])
   @@index([workspaceId, visibility, id]) // ACL workspace filtering + visibility
@@ -2324,6 +2342,7 @@ model EmailChannelPreference {
   deskReportEnabled      Boolean? @default(false) // Gates the scheduled desk-report cron + sidebar panel
   deskReportAgentSlug    String?
   deskReportRangeDays    Int?     @default(1) // 1 = "Last 1 day", 7 = "Last 1 week"
+  duplicateScopeConfig   String?    // Scoped duplicate detection: JSON-serialized { enabled, scopeFieldGlobalIds }; stored as string for Zero compatibility, parsed at code level (null = project-wide legacy behavior)
   @@index([ownerUserId])
   @@index([assigneeUserGroupId])
   @@index([boardId])
@@ -2946,6 +2965,7 @@ model CallParticipant {
   displayName  String?             // Name for external users
   email        String?             // Email for external invitees
   isExternal   Boolean             @default(false)  // True for external lobby users
+  ringStatus   String?             // CALLING | RINGING | BUSY — ring delivery state, only meaningful while response = INVITED
 
   // Relations
   call Call @relation(fields: [callId], references: [id])
@@ -3162,7 +3182,7 @@ model CanvasVersion {
 
 model CanvasCommentThread {
   id              String                    @id @default(cuid())
-  workspaceId     String?                   // denormalized tenant key (stamped on insert; nullable during backfill release)
+  workspaceId     String                    // denormalized tenant key (stamped on insert)
   canvasId        String
   blockId         String
   anchorText      String?
@@ -3180,14 +3200,14 @@ model CanvasCommentThread {
   createdByUser       User            @relation("CanvasCommentThreadCreatedBy", fields: [createdBy], references: [id])
   statusUpdatedByUser User?           @relation("CanvasCommentThreadStatusUpdatedBy", fields: [statusUpdatedBy], references: [id])
 
-  @@index([ canvasId, createdAt])
+  @@index([workspaceId, canvasId, createdAt])
   @@map("canvas_comment_threads")
   @@schema("public")
 }
 
 model CanvasComment {
   id               String   @id @default(cuid())
-  workspaceId      String?  // denormalized tenant key (stamped on insert; nullable during backfill release)
+  workspaceId      String   // denormalized tenant key (stamped on insert)
   threadId         String
   canvasId         String
   body             String
@@ -3202,7 +3222,7 @@ model CanvasComment {
   initialForThreads CanvasCommentThread[] @relation("CanvasCommentThreadInitialComment")
   createdByUser User               @relation("CanvasCommentCreatedBy", fields: [createdBy], references: [id])
 
-  @@index([threadId, isInitial, createdAt])
+  @@index([workspaceId, threadId, createdAt])
   @@map("canvas_comments")
   @@schema("public")
 }
@@ -3415,6 +3435,30 @@ model SdlcEntityLink {
   @@index([repoId, sourceType, sourceId]) // deprecated
   @@index([repoId, targetType, targetId]) // deprecated
   @@map("sdlc_entity_links")
+  @@schema("public")
+}
+
+// A comment anchored to a passage inside an SDLC hub item (a canvas, an uploaded
+// file, a linked page). The anchor is stored as the quoted text plus the css
+// selector it was picked from, so a thread survives edits that move the block.
+model SdlcItemComment {
+  id             String    @id @default(cuid())
+  workspaceId    String
+  entityType     String
+  entityId       String
+  body           String
+  anchorQuote    String?
+  anchorSelector String?
+  resolved       Boolean   @default(false)
+  resolvedBy     String?
+  resolvedAt     DateTime?
+  createdBy      String
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([entityType, entityId, createdAt])
+  @@index([workspaceId])
+  @@map("sdlc_item_comments")
   @@schema("public")
 }
 
@@ -4247,6 +4291,7 @@ model Apps {
   commands            AppCommand[]
   appPermissions AppPermission[]
 
+  @@unique([orgId, name])
   @@index([name])
   @@index([createdBy])
   @@index([orgId])

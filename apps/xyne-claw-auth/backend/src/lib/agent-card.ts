@@ -21,13 +21,17 @@ import {
   permissionModeLabel,
   type AgentCapability,
   type AgentIdentity,
+  type AgentKnowledge,
   type AgentPermissionMode,
+  type AgentSkill,
 } from "xyne-claw-shared";
 import { errMsg } from "./errors.js";
-import type { AvailableToolsCatalog } from "../routes/tools.js";
+import type { AvailableToolsCatalog, Integration, IntegrationToolEntry } from "../routes/tools.js";
 import { agentRepository, agentRequestRepository, skillRepository } from "../repositories/index.js";
 import { availableServerTypesSafe } from "./connector-availability.js";
 import { writeAuditLog } from "./audit.js";
+import { isClawAdmin } from "../middleware/agent-acl.js";
+import { normalizeProviderOrder } from "./provider-hints.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("agent-card");
@@ -65,6 +69,8 @@ export interface ResolvedCapabilities {
   gateway: string[];
   /** config.tools.custom — matched custom tool slugs. */
   custom: string[];
+  /** config.tools.callableAgents — matched agent slugs this agent may call. */
+  callableAgents: string[];
   /** Tokens that matched nothing. Reported on the card, never persisted. */
   unknown: string[];
 }
@@ -76,30 +82,47 @@ export interface ResolvedCapabilities {
  * "needs connecting" hint on a capability — pass the person who will approve
  * the card, since it is their account the created agent runs against.
  */
+export interface CallableAgentOption {
+  slug: string;
+  name: string;
+  description?: string | null;
+}
+
 export async function resolveAgentCapabilities(
   requested: string[],
   catalog: AvailableToolsCatalog,
   connectedFor?: string,
+  callableAgentOptions: CallableAgentOption[] = [],
 ): Promise<ResolvedCapabilities> {
+  const agentBySlug = new Map(callableAgentOptions.map((a) => [a.slug, a]));
   const subagentByName = new Map(catalog.subagents.map((s) => [s.name, s]));
   const customBySlug = new Map(
     catalog.customGroups.flatMap((g) => g.tools.map((t) => [t.slug, t] as const)),
   );
-  const directBySlug = new Map(
-    catalog.integrations.flatMap((integration) =>
-      [...integration.readTools, ...integration.writeTools].map((tool) => [tool.slug, { integration, tool }] as const),
-    ),
-  );
+  const directBySlug = new Map<string, { integration: Integration; tool: IntegrationToolEntry }>();
+  for (const integration of catalog.integrations) {
+    for (const tool of [...integration.readTools, ...integration.writeTools]) {
+      if (!directBySlug.has(tool.slug)) directBySlug.set(tool.slug, { integration, tool });
+      if (tool.name && !directBySlug.has(tool.name)) directBySlug.set(tool.name, { integration, tool });
+    }
+  }
   const gatewayBySlug = new Map(
     catalog.integrations
       .filter((integration) => integration.kind === "gateway")
       .map((integration) => [integration.slug, integration] as const),
   );
 
+  const parentOf = (slug: string): { parentId: string; parentLabel: string } | undefined => {
+    const integration = directBySlug.get(slug)?.integration;
+    if (!integration) return undefined;
+    return { parentId: integration.slug, parentLabel: integration.label };
+  };
+
   const subagents: string[] = [];
   const direct: string[] = [];
   const gateway: string[] = [];
   const custom: string[] = [];
+  const callableAgents: string[] = [];
   const unknown: string[] = [];
   const seen = new Set<string>();
 
@@ -111,6 +134,7 @@ export async function resolveAgentCapabilities(
     else if (customBySlug.has(token)) custom.push(token);
     else if (directBySlug.has(token)) direct.push(token);
     else if (gatewayBySlug.has(token)) gateway.push(token);
+    else if (agentBySlug.has(token)) callableAgents.push(token);
     else unknown.push(token);
   }
 
@@ -143,6 +167,8 @@ export async function resolveAgentCapabilities(
         id: name,
         label: name,
         kind: "subagent" as const,
+        group: "subagent" as const,
+        ...(def?.description ? { description: def.description } : {}),
         // The brand icon is keyed by serverType, which is NOT always the
         // subagent name ("spaces" is served by "xyne-spaces") — resolve it here
         // so the renderer never guesses an asset filename. Non-connector types
@@ -160,22 +186,38 @@ export async function resolveAgentCapabilities(
         id: slug,
         label: match?.tool.name ?? slug,
         kind: "tool" as const,
+        group: "mcp" as const,
+        ...(match?.tool.description ? { description: match.tool.description } : {}),
         ...(match?.integration.slug ? { iconKey: match.integration.slug } : {}),
+        ...(parentOf(slug) ?? {}),
       };
     }),
     ...gateway.map((slug) => ({
       id: slug,
       label: gatewayBySlug.get(slug)?.label ?? slug,
       kind: "tool" as const,
+      group: "mcp" as const,
     })),
     ...custom.map((slug) => ({
       id: slug,
       label: customBySlug.get(slug)?.name ?? slug,
       kind: "tool" as const,
+      group: "builtin" as const,
+      ...(parentOf(slug) ?? {}),
     })),
+    ...callableAgents.map((slug) => {
+      const agent = agentBySlug.get(slug);
+      return {
+        id: slug,
+        label: agent?.name ?? slug,
+        kind: "tool" as const,
+        group: "agent" as const,
+        ...(agent?.description ? { description: agent.description } : {}),
+      };
+    }),
   ];
 
-  return { capabilities, subagents, direct, gateway, custom, unknown };
+  return { capabilities, subagents, direct, gateway, custom, callableAgents, unknown };
 }
 
 /**
@@ -191,22 +233,80 @@ export function toolIdsFromConfig(config: unknown): string[] {
     Array.isArray(tools[key])
       ? (tools[key] as unknown[]).filter((v): v is string => typeof v === "string")
       : [];
-  return [...read("subagents"), ...read("direct"), ...read("gateway"), ...read("custom")];
+  return [
+    ...read("subagents"),
+    ...read("direct"),
+    ...read("gateway"),
+    ...read("custom"),
+    ...read("callableAgents"),
+  ];
 }
 
 /** The `config.tools` object, omitting empty buckets so a tool-less agent gets `{}`. */
-export function toConfigTools(resolved: Pick<ResolvedCapabilities, "subagents" | "direct" | "gateway" | "custom">): {
+export function toConfigTools(
+  resolved: Pick<
+    ResolvedCapabilities,
+    "subagents" | "direct" | "gateway" | "custom" | "callableAgents"
+  >,
+): {
   subagents?: string[];
   direct?: string[];
   gateway?: string[];
   custom?: string[];
+  callableAgents?: string[];
 } {
   return {
     ...(resolved.subagents.length > 0 ? { subagents: resolved.subagents } : {}),
     ...(resolved.direct.length > 0 ? { direct: resolved.direct } : {}),
     ...(resolved.gateway.length > 0 ? { gateway: resolved.gateway } : {}),
     ...(resolved.custom.length > 0 ? { custom: resolved.custom } : {}),
+    ...(resolved.callableAgents.length > 0 ? { callableAgents: resolved.callableAgents } : {}),
   };
+}
+
+export interface ExpandedMcpRequests {
+  tokens: string[];
+  unknown: string[];
+}
+
+export function expandMcpRequests(
+  mcps: string[] | undefined,
+  catalog: AvailableToolsCatalog,
+): ExpandedMcpRequests {
+  const requested = (mcps ?? []).map(trimToken).filter(Boolean);
+  if (requested.length === 0) return { tokens: [], unknown: [] };
+
+  const byKey = new Map<string, Integration>();
+  for (const integration of catalog.integrations) {
+    if (integration.kind !== "mcp" && integration.kind !== "gateway") continue;
+    byKey.set(integration.slug.toLowerCase(), integration);
+    byKey.set(integration.label.toLowerCase(), integration);
+  }
+
+  const tokens: string[] = [];
+  const unknown: string[] = [];
+  const seenIntegration = new Set<string>();
+  for (const token of requested) {
+    const integration = byKey.get(token.toLowerCase());
+    if (!integration) {
+      if (!unknown.includes(token)) unknown.push(token);
+      continue;
+    }
+    if (seenIntegration.has(integration.slug)) continue;
+    seenIntegration.add(integration.slug);
+    if (integration.kind === "gateway") {
+      tokens.push(integration.slug);
+      continue;
+    }
+    for (const tool of [...integration.readTools, ...integration.writeTools]) {
+      tokens.push(tool.name || tool.slug);
+    }
+  }
+  return { tokens, unknown };
+}
+
+export function draftToolTokens(spec: DraftAgentSpec, catalog: AvailableToolsCatalog): string[] {
+  return [...spec.tools, ...expandMcpRequests(spec.mcps, catalog).tokens];
 }
 
 /** Muted card footnote naming what could not be granted. */
@@ -215,6 +315,27 @@ export function unknownToolsNote(unknown: string[]): string | undefined {
   const shown = unknown.slice(0, 6).join(", ");
   const more = unknown.length > 6 ? ` (+${unknown.length - 6} more)` : "";
   return `Not granted — no such tool in this workspace: ${shown}${more}. Add them from the agent's settings.`;
+}
+
+export function unknownMcpsNote(unknown: string[]): string | undefined {
+  if (unknown.length === 0) return undefined;
+  const shown = unknown.slice(0, 6).join(", ");
+  const verb = unknown.length === 1 ? "is not an MCP" : "are not MCPs";
+  return `${shown} ${verb} in this workspace, so nothing was added for it.`;
+}
+
+/** Card footnote for providers Xyne does not offer, so the card never implies one was set. */
+export function unknownProvidersNote(unknown: string[]): string | undefined {
+  if (unknown.length === 0) return undefined;
+  const shown = unknown.join(", ");
+  const verb = unknown.length === 1 ? "is not an AI provider" : "are not AI providers";
+  return `${shown} ${verb} Xyne offers — the agent uses the workspace default instead.`;
+}
+
+/** Join the card's footnotes, dropping the ones that have nothing to say. */
+export function draftNote(...parts: Array<string | undefined>): string | undefined {
+  const kept = parts.filter((p): p is string => Boolean(p));
+  return kept.length > 0 ? kept.join(" ") : undefined;
 }
 
 /** The draft spec the pod ships on `pendingAgentCard`. */
@@ -227,8 +348,15 @@ export interface DraftAgentSpec {
   color?: string;
   tools: string[];
   permissionMode?: AgentPermissionMode;
+  /** Skill slugs from propose-agent; resolved to ids on approve. */
   skillSlugs?: string[];
   deniedTools?: string[];
+  mcps?: string[];
+  skills?: string[];
+  knowledge?: { scope?: "COLLECTIONS" | "USER"; collections?: string[] };
+  providerOrder?: string[];
+  memory?: { enabled: boolean; requiresApproval?: boolean };
+  scope?: "personal" | "global";
   /** The agent's own line for the thread, posted next to the card. Chat text
    *  only — deliberately NOT part of the identity, so it never renders on a
    *  re-drawn card after the decision. */
@@ -241,10 +369,86 @@ export interface DraftAgentSpec {
  * `builtBy` credits the agent that authored the draft — the card says "Built by
  * @<slug>" so a user reading it later knows the agent didn't come from a human.
  */
+export interface ResolvedDraftExtras {
+  skills?: AgentSkill[];
+  knowledgeSources?: AgentKnowledge["sources"];
+  unknownSkills?: string[];
+  /** providerOrder mapped onto supported keys ("anthropic" → "claude"). */
+  providerOrder?: string[];
+  /** Named providers Xyne does not offer — reported, never persisted. */
+  unknownProviders?: string[];
+}
+
+export async function resolveDraftExtras(
+  spec: DraftAgentSpec,
+  orgId: string | null,
+  requesterId?: string,
+): Promise<ResolvedDraftExtras> {
+  const extras: ResolvedDraftExtras = {};
+
+  const requestedSkills = (spec.skills ?? []).map(trimToken).filter(Boolean);
+  if (requestedSkills.length > 0) {
+    const rows = await skillRepository
+      .listVisible({
+        ...(requesterId ? { userId: requesterId } : {}),
+        ...(orgId ? { orgId } : {}),
+      })
+      .catch(() => []);
+    const byKey = new Map<string, { id: string; name: string; description: string }>();
+    for (const row of rows) {
+      byKey.set(row.name.toLowerCase(), row);
+      byKey.set(row.slug.toLowerCase(), row);
+    }
+    const matched: AgentSkill[] = [];
+    const unknown: string[] = [];
+    const seen = new Set<string>();
+    for (const token of requestedSkills) {
+      const hit = byKey.get(token.toLowerCase());
+      if (!hit) {
+        unknown.push(token);
+        continue;
+      }
+      if (seen.has(hit.id)) continue;
+      seen.add(hit.id);
+      matched.push({
+        id: hit.id,
+        name: hit.name,
+        ...(hit.description ? { description: hit.description } : {}),
+      });
+    }
+    if (matched.length > 0) extras.skills = matched;
+    if (unknown.length > 0) extras.unknownSkills = unknown;
+  }
+
+  const rawProviders = spec.providerOrder ?? [];
+  if (rawProviders.length > 0) {
+    const { providers, unknown } = normalizeProviderOrder(rawProviders);
+    if (providers.length > 0) extras.providerOrder = providers;
+    if (unknown.length > 0) extras.unknownProviders = unknown;
+  }
+
+  const collections = (spec.knowledge?.collections ?? []).map(trimToken).filter(Boolean);
+  if (collections.length > 0) {
+    const seen = new Set<string>();
+    const sources = collections
+      .filter((name) => {
+        const key = name.toLowerCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .map((name) => ({ id: name, name, kind: "collection" as const }));
+    if (sources.length > 0) extras.knowledgeSources = sources;
+  }
+
+  return extras;
+}
+
 export function identityFromDraftSpec(
   spec: DraftAgentSpec,
   resolved: ResolvedCapabilities,
   builtBy?: string,
+  extras?: ResolvedDraftExtras,
 ): AgentIdentity {
   const permissionMode = normalizePermissionMode(spec.permissionMode);
   const details: NonNullable<AgentIdentity["details"]> = [
@@ -256,6 +460,13 @@ export function identityFromDraftSpec(
   if (spec.deniedTools && spec.deniedTools.length > 0) {
     details.push({ label: "Denied tools", value: spec.deniedTools.join(", ") });
   }
+  const knowledge: AgentKnowledge = {
+    ...(spec.knowledge?.scope ? { scope: spec.knowledge.scope } : {}),
+    ...(extras?.knowledgeSources && extras.knowledgeSources.length > 0
+      ? { sources: extras.knowledgeSources }
+      : {}),
+  };
+
   return agentIdentity({
     name: spec.name,
     slug: spec.slug,
@@ -264,6 +475,13 @@ export function identityFromDraftSpec(
     systemPrompt: spec.systemPrompt,
     ...(spec.modelId ? { modelId: spec.modelId } : {}),
     ...(spec.color ? { color: spec.color } : {}),
+    ...(spec.scope ? { scope: spec.scope } : {}),
+    ...(extras?.providerOrder && extras.providerOrder.length > 0
+      ? { providerOrder: extras.providerOrder }
+      : {}),
+    ...(spec.memory ? { memory: spec.memory } : {}),
+    ...(extras?.skills && extras.skills.length > 0 ? { skills: extras.skills } : {}),
+    ...(Object.keys(knowledge).length > 0 ? { knowledge } : {}),
     capabilities: resolved.capabilities,
     details,
     // No Identifier/Model rows: the card renders slug + model in its header line,
@@ -321,13 +539,123 @@ export type AgentDraftResolution =
       status: "approved" | "rejected";
       /** Re-rendered identity for the decided card (approved = what was granted). */
       identity: AgentIdentity;
+      toolSelection: ReturnType<typeof toConfigTools>;
       note?: string;
       /** True when someone/something already decided this draft (replay, race). */
       alreadyResolved: boolean;
     }
   | { ok: false; code: 400 | 403 | 404 | 409 | 500; error: string };
 
-function parseDraftSpec(raw: string | null): DraftAgentSpec | null {
+export interface AgentDraftEdits {
+  toolSelection?: {
+    subagents?: string[];
+    direct?: string[];
+    gateway?: string[];
+    custom?: string[];
+    callableAgents?: string[];
+  };
+  /** "" clears the pin back to the workspace default. */
+  modelId?: string;
+  providerOrder?: string[];
+}
+
+const MAX_MODEL_ID = 120;
+const MAX_EDITED_TOOLS = 120;
+
+const stringArray = (raw: unknown): string[] =>
+  Array.isArray(raw) ? raw.filter((v): v is string => typeof v === "string" && v.trim().length > 0).map((v) => v.trim()) : [];
+
+export function parseAgentDraftEdits(raw: unknown): AgentDraftEdits | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const record = raw as Record<string, unknown>;
+  const edits: AgentDraftEdits = {};
+
+  const rawSelection = record["toolSelection"];
+  if (rawSelection && typeof rawSelection === "object" && !Array.isArray(rawSelection)) {
+    const selection = rawSelection as Record<string, unknown>;
+    const bucket = (key: string): string[] => stringArray(selection[key]).slice(0, MAX_EDITED_TOOLS);
+    edits.toolSelection = {
+      subagents: bucket("subagents"),
+      direct: bucket("direct"),
+      gateway: bucket("gateway"),
+      custom: bucket("custom"),
+      callableAgents: bucket("callableAgents"),
+    };
+  }
+
+  if (typeof record["modelId"] === "string") {
+    edits.modelId = record["modelId"].trim().slice(0, MAX_MODEL_ID);
+  } else if (record["modelId"] === null) {
+    edits.modelId = "";
+  }
+
+  const rawProviders = record["providerOrder"];
+  if (Array.isArray(rawProviders)) edits.providerOrder = stringArray(rawProviders).slice(0, 8);
+
+  return Object.keys(edits).length > 0 ? edits : undefined;
+}
+
+export function flattenToolSelection(selection: AgentDraftEdits["toolSelection"]): string[] {
+  if (!selection) return [];
+  return [
+    ...(selection.subagents ?? []),
+    ...(selection.direct ?? []),
+    ...(selection.gateway ?? []),
+    ...(selection.custom ?? []),
+    ...(selection.callableAgents ?? []),
+  ];
+}
+
+export function narrowToKeptCapabilities(
+  requested: string[],
+  keptCapabilityIds: string[] | undefined,
+  shownIds: Iterable<string>,
+): string[] {
+  if (!keptCapabilityIds) return requested;
+  const shown = new Set(shownIds);
+  const kept = new Set(keptCapabilityIds);
+  return requested.filter((token) => !shown.has(token) || kept.has(token));
+}
+
+export interface AppliedDraftEdits {
+  requestedTools?: string[];
+  modelId?: string;
+  providerOrder: string[];
+  unknownProviders: string[];
+}
+
+export function applyDraftEdits(
+  spec: DraftAgentSpec,
+  extras: ResolvedDraftExtras,
+  edits?: AgentDraftEdits,
+): AppliedDraftEdits {
+  const applied: AppliedDraftEdits = {
+    providerOrder: extras.providerOrder ?? [],
+    unknownProviders: extras.unknownProviders ?? [],
+    ...(spec.modelId ? { modelId: spec.modelId } : {}),
+  };
+
+  if (edits?.toolSelection) {
+    const seen = new Set<string>();
+    applied.requestedTools = flattenToolSelection(edits.toolSelection).filter((token) => {
+      if (seen.has(token)) return false;
+      seen.add(token);
+      return true;
+    });
+  }
+
+  if (edits?.modelId !== undefined) applied.modelId = edits.modelId;
+
+  if (edits?.providerOrder !== undefined) {
+    const { providers, unknown } = normalizeProviderOrder(edits.providerOrder);
+    applied.providerOrder = providers;
+    applied.unknownProviders = unknown;
+  }
+
+  return applied;
+}
+
+export function parseDraftSpec(raw: string | null): DraftAgentSpec | null {
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw) as Partial<DraftAgentSpec>;
@@ -350,6 +678,42 @@ function parseDraftSpec(raw: string | null): DraftAgentSpec | null {
       tools: Array.isArray(parsed.tools) ? parsed.tools.filter((t): t is string => typeof t === "string") : [],
       ...(skillSlugs.length > 0 ? { skillSlugs } : {}),
       ...(deniedTools.length > 0 ? { deniedTools } : {}),
+      ...(Array.isArray(parsed.mcps)
+        ? { mcps: parsed.mcps.filter((v): v is string => typeof v === "string") }
+        : {}),
+      ...(Array.isArray(parsed.skills)
+        ? { skills: parsed.skills.filter((v): v is string => typeof v === "string") }
+        : {}),
+      ...(parsed.knowledge && typeof parsed.knowledge === "object"
+        ? {
+            knowledge: {
+              ...(parsed.knowledge.scope === "USER" || parsed.knowledge.scope === "COLLECTIONS"
+                ? { scope: parsed.knowledge.scope }
+                : {}),
+              ...(Array.isArray(parsed.knowledge.collections)
+                ? {
+                    collections: parsed.knowledge.collections.filter(
+                      (v): v is string => typeof v === "string",
+                    ),
+                  }
+                : {}),
+            },
+          }
+        : {}),
+      ...(Array.isArray(parsed.providerOrder)
+        ? { providerOrder: parsed.providerOrder.filter((v): v is string => typeof v === "string") }
+        : {}),
+      ...(parsed.memory && typeof parsed.memory.enabled === "boolean"
+        ? {
+            memory: {
+              enabled: parsed.memory.enabled,
+              ...(typeof parsed.memory.requiresApproval === "boolean"
+                ? { requiresApproval: parsed.memory.requiresApproval }
+                : {}),
+            },
+          }
+        : {}),
+      ...(parsed.scope === "global" || parsed.scope === "personal" ? { scope: parsed.scope } : {}),
     };
   } catch {
     return null;
@@ -474,6 +838,7 @@ export async function resolveAgentDraft(
   canvasValue?: unknown,
   /** Drafting agent's slug, so the decided card keeps its "Built by" credit. */
   builtBy?: string,
+  edits?: AgentDraftEdits,
 ): Promise<AgentDraftResolution> {
   const request = await agentRequestRepository.findById(requestId);
   if (!request || request.requestType !== "agent_create") {
@@ -494,23 +859,40 @@ export async function resolveAgentDraft(
   const spec = applyCanvasOverlay(parsedSpec, parsedCanvas.overlay);
 
   const catalog = await buildCatalogFor(request.orgId);
-  const buildIdentity = async (grantedIds?: string[]): Promise<{ identity: AgentIdentity; resolved: ResolvedCapabilities }> => {
+  const expandedMcps = expandMcpRequests(spec.mcps, catalog);
+  const specTools = [...spec.tools, ...expandedMcps.tokens];
+  const extras = await resolveDraftExtras(spec, request.orgId, request.requesterId);
+  const callableOptions = await listCallableAgentOptions(
+    request.orgId,
+    request.requesterId,
+    spec.slug,
+  );
+  const buildIdentity = async (
+    grantedIds?: string[],
+    applied?: AppliedDraftEdits,
+  ): Promise<{ identity: AgentIdentity; resolved: ResolvedCapabilities }> => {
     const resolved = await resolveAgentCapabilities(
-      grantedIds ?? spec.tools,
+      grantedIds ?? specTools,
       catalog,
       request.requesterId,
+      callableOptions,
     );
-    return { identity: identityFromDraftSpec(spec, resolved, builtBy), resolved };
+    const effectiveSpec = applied ? { ...spec, ...(applied.modelId ? { modelId: applied.modelId } : { modelId: "" }) } : spec;
+    const effectiveExtras = applied
+      ? { ...extras, providerOrder: applied.providerOrder, unknownProviders: applied.unknownProviders }
+      : extras;
+    return { identity: identityFromDraftSpec(effectiveSpec, resolved, builtBy, effectiveExtras), resolved };
   };
 
   // Already decided (replay, or the other tab won): report the settled state
   // with a re-rendered card instead of creating anything.
   if (request.status !== "pending") {
-    const { identity } = await buildIdentity();
+    const { identity, resolved } = await buildIdentity();
     return {
       ok: true,
       status: request.status === "approved" ? "approved" : "rejected",
       identity,
+      toolSelection: toConfigTools(resolved),
       alreadyResolved: true,
       ...(request.reviewNote ? { note: request.reviewNote } : {}),
     };
@@ -523,20 +905,27 @@ export async function resolveAgentDraft(
   );
   if (claimed.count !== 1) {
     const fresh = await agentRequestRepository.findById(requestId);
-    const { identity } = await buildIdentity();
+    const { identity, resolved } = await buildIdentity();
     return {
       ok: true,
       status: fresh?.status === "approved" ? "approved" : "rejected",
       identity,
+      toolSelection: toConfigTools(resolved),
       alreadyResolved: true,
       ...(fresh?.reviewNote ? { note: fresh.reviewNote } : {}),
     };
   }
 
   if (decision === "reject") {
-    const { identity } = await buildIdentity();
+    const { identity, resolved } = await buildIdentity();
     log.info(`[agent-card] draft ${spec.slug} rejected by ${callerUserId} (request=${requestId})`);
-    return { ok: true, status: "rejected", identity, alreadyResolved: false };
+    return {
+      ok: true,
+      status: "rejected",
+      identity,
+      toolSelection: toConfigTools(resolved),
+      alreadyResolved: false,
+    };
   }
 
   // ── Approve: create the agent ──────────────────────────────────────────────
@@ -552,16 +941,35 @@ export async function resolveAgentDraft(
     }
 
     const denied = new Set((spec.deniedTools ?? []).map((t) => t.trim()).filter(Boolean));
-    // The user's chip selection can only remove capabilities: intersect it with
-    // what the catalog actually grants rather than trusting it as the source.
-    const grantedIds = (
-      parsedCanvas.overlay?.toolIds
-        ? spec.tools
-        : parsedCanvas.keptCapabilityIds
-          ? spec.tools.filter((token) => parsedCanvas.keptCapabilityIds!.includes(token))
-          : spec.tools
-    ).filter((token) => !denied.has(token));
-    const { identity, resolved } = await buildIdentity(grantedIds);
+    const applied = applyDraftEdits(spec, extras, edits);
+    const full = await buildIdentity(specTools, applied);
+    const keptCapabilityIds = parsedCanvas.keptCapabilityIds;
+    const baseGrantedIds =
+      applied.requestedTools ??
+      narrowToKeptCapabilities(
+        specTools,
+        keptCapabilityIds,
+        (full.identity.capabilities ?? []).map((c) => c.id),
+      );
+    const grantedIds = baseGrantedIds.filter((token) => !denied.has(token));
+    const unchanged =
+      applied.requestedTools === undefined &&
+      denied.size === 0 &&
+      grantedIds.length === specTools.length;
+    const { identity, resolved } = unchanged ? full : await buildIdentity(grantedIds, applied);
+
+    // Global agents are org-wide, so the same admin gate the REST create route
+    // applies has to apply here — a drafted spec must not be a way around it.
+    const admin = await isClawAdmin(callerUserId).catch(() => false);
+    const effectiveScope = spec.scope === "global" && admin ? "global" : "personal";
+    if (spec.scope === "global" && !admin) {
+      log.info(`[agent-card] draft ${spec.slug} asked for global scope; downgraded to personal (approver is not an admin)`);
+    }
+    const effectiveKbScope =
+      parsedCanvas.overlay?.kbScope === "USER" || spec.knowledge?.scope === "USER"
+        ? "USER"
+        : "COLLECTIONS";
+    const providerOrder = applied.providerOrder;
 
     const permissionMode = normalizePermissionMode(spec.permissionMode);
     if (permissionMode === "read-only") {
@@ -590,18 +998,28 @@ export async function resolveAgentDraft(
       name: spec.name,
       description: spec.description ?? "",
       systemPrompt: spec.systemPrompt,
-      scope: "personal",
+      scope: effectiveScope,
+      kbScope: effectiveKbScope,
       color: spec.color?.trim() || "#6366f1",
-      modelId: spec.modelId?.trim() ?? "",
+      modelId: applied.modelId?.trim() ?? "",
       config: {
         tools: toConfigTools(resolved),
         permissionMode,
         ...(denied.size > 0 ? { deniedTools: [...denied] } : {}),
+        ...(providerOrder.length > 0 ? { providerOrder } : {}),
       },
-      kbScope: parsedCanvas.overlay?.kbScope === "USER" ? "USER" : "COLLECTIONS",
       owner: { connect: { id: request.requesterId } },
       org: { connect: { id: request.orgId } },
     });
+
+    // Skills were resolved to ids when the draft was built; attach them the same
+    // way the REST route does. A failure here must not undo the agent, so each
+    // attach is logged and skipped rather than thrown.
+    for (const skill of extras.skills ?? []) {
+      await agentRepository.upsertSkill(created.id, skill.id).catch((err: unknown) => {
+        log.warn(`[agent-card] could not attach skill ${skill.id} to ${spec.slug}: ${errMsg(err)}`);
+      });
+    }
 
     await agentRequestRepository.recordAgentCreateResult(requestId, created.id).catch(() => {});
 
@@ -641,14 +1059,29 @@ export async function resolveAgentDraft(
         subagents: resolved.subagents,
         custom: resolved.custom,
         permissionMode,
+        callableAgents: resolved.callableAgents,
+        skills: (extras.skills ?? []).map((skill) => skill.id),
+        scope: effectiveScope,
+        kbScope: effectiveKbScope,
       },
     });
     log.info(
       `[agent-card] created agent ${spec.slug} (id=${created.id}) owner=${request.requesterId} org=${request.orgId} tools=${resolved.subagents.length + resolved.custom.length} permission=${permissionMode}`,
     );
 
-    const note = unknownToolsNote(resolved.unknown);
-    return { ok: true, status: "approved", identity, alreadyResolved: false, ...(note ? { note } : {}) };
+    const note = draftNote(
+      unknownToolsNote(resolved.unknown),
+      unknownMcpsNote(expandedMcps.unknown),
+      unknownProvidersNote(applied.unknownProviders),
+    );
+    return {
+      ok: true,
+      status: "approved",
+      identity,
+      toolSelection: toConfigTools(resolved),
+      alreadyResolved: false,
+      ...(note ? { note } : {}),
+    };
   } catch (err) {
     // Roll the claim back so the card stays approvable instead of dead.
     await agentRequestRepository.revertAgentCreateToPending(requestId).catch(() => {});
@@ -663,4 +1096,18 @@ export async function resolveAgentDraft(
 async function buildCatalogFor(orgId: string): Promise<AvailableToolsCatalog> {
   const { buildAvailableToolsCatalog } = await import("../routes/tools.js");
   return buildAvailableToolsCatalog(undefined, orgId);
+}
+
+export async function listCallableAgentOptions(
+  orgId: string | null,
+  requesterId?: string,
+  excludeSlug?: string,
+): Promise<CallableAgentOption[]> {
+  if (!orgId) return [];
+  const rows = await agentRepository
+    .listVisible({ ...(requesterId ? { userId: requesterId } : {}), orgId })
+    .catch(() => []);
+  return rows
+    .filter((row) => row.enabled && row.slug !== excludeSlug)
+    .map((row) => ({ slug: row.slug, name: row.name, description: row.description }));
 }

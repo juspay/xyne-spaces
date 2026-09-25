@@ -423,6 +423,7 @@ export class TestAuthController {
           refreshTokenExpiry,
           deviceInfo,
           ipAddress: req.ip || '127.0.0.1',
+          loginMethod: 'TEST',
         });
 
         sessionId = session.id;
@@ -511,7 +512,7 @@ export class TestAuthController {
       // cookie, otherwise the browser keeps a valid user_session_id and re-login sees stale data.
       const sessionId = req.cookies?.user_session_id;
       if (sessionId) {
-        await this.userSessionService.revokeSession(sessionId).catch((err: unknown) =>
+        await this.userSessionService.revokeSession(sessionId, 'TEST_CLEANUP').catch((err: unknown) =>
           logger.warn(`[${requestId}] Session revoke failed: ${err instanceof Error ? err.message : String(err)}`)
         );
         await getEncryptionProvider().revokeSessionKey(sessionId).catch((err: unknown) =>

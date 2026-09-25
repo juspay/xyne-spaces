@@ -112,6 +112,40 @@ export async function validateUserIds(userIds: string[]): Promise<IdValidationRe
 }
 
 /**
+ * Validate user-group IDs against the database
+ * @param userGroupIds - Array of user-group IDs to validate
+ * @returns Object containing valid and invalid IDs
+ */
+export async function validateUserGroupIds(userGroupIds: string[]): Promise<IdValidationResult> {
+  try {
+    if (!userGroupIds || userGroupIds.length === 0) {
+      return { valid: [], invalid: [] };
+    }
+
+    // Query database for existing user groups
+    const existingUserGroups = await db.userGroup.findMany({
+      where: {
+        id: {
+          in: userGroupIds
+        }
+      },
+      select: {
+        id: true
+      }
+    });
+
+    const existingIds = new Set(existingUserGroups.map(g => g.id));
+    const valid = userGroupIds.filter(id => existingIds.has(id));
+    const invalid = userGroupIds.filter(id => !existingIds.has(id));
+
+    return { valid, invalid };
+  } catch (error) {
+    logger.error('Error validating user-group IDs:', error);
+    throw new Error('Failed to validate user-group IDs');
+  }
+}
+
+/**
  * Parse comma-separated IDs and filter out empty strings
  * @param idsString - Comma-separated string of IDs
  * @returns Array of trimmed, non-empty IDs

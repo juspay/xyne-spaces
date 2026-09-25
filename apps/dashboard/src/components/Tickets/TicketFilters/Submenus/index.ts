@@ -7,6 +7,7 @@ export { TagsSubmenu } from './TagsSubmenu/TagsSubmenu';
 export { StagesSubmenu } from './StagesSubmenu/StagesSubmenu';
 export { DynamicFieldSubmenu } from './DynamicFieldSubmenu/DynamicFieldSubmenu';
 export { TicketTypeSubmenu } from './TicketTypeSubmenu/TicketTypeSubmenu';
+export { MerchantIdSubmenu } from './MerchantIdSubmenu/MerchantIdSubmenu';
 export { SourceChannelsSubmenu } from './SourceChannelsSubmenu/SourceChannelsSubmenu';
 export { AICategorySubmenu } from './AICategorySubmenu/AICategorySubmenu';
 export { GeneratedTagsSubmenu } from './GeneratedTagsSubmenu/GeneratedTagsSubmenu';

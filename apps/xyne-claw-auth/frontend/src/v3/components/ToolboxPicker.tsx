@@ -216,8 +216,27 @@ export function ToolboxPicker({
     const arr = value[key];
     onChange({ ...value, [key]: arr.includes(val) ? arr.filter((x) => x !== val) : [...arr, val] });
   };
-  const toggleAll = (key: RequiredSelectionKey, all: string[]) =>
-    onChange({ ...value, [key]: value[key].length === all.length ? [] : all });
+  /**
+   * Select-all for ONE section.
+   *
+   * Sections share a single array — every MCP server's tools live in `direct` —
+   * so this unions and subtracts rather than assigning. Assigning `all` replaced
+   * the whole array, which silently dropped every other server's picks. Same
+   * shape as `toggleCustomGroup` below, which always did it this way.
+   *
+   * `select` is for callers that already know which way they are going; without
+   * it the section flips on its own current state.
+   */
+  const toggleAll = (key: RequiredSelectionKey, all: string[], select?: boolean) => {
+    const current = value[key];
+    const shouldSelect = select ?? !(all.length > 0 && all.every((v) => current.includes(v)));
+    onChange({
+      ...value,
+      [key]: shouldSelect
+        ? [...new Set([...current, ...all])]
+        : current.filter((x) => !all.includes(x)),
+    });
+  };
   const toggleCustomGroup = (slugs: string[], allSelected: boolean) =>
     onChange({ ...value, custom: allSelected ? value.custom.filter((x) => !slugs.includes(x)) : [...new Set([...value.custom, ...slugs])] });
   const clearAll = () =>
@@ -418,7 +437,7 @@ export function ToolboxPicker({
   ) => {
     const gatewaySource = parseGatewaySource(source);
     if (!gatewaySource) {
-      toggleAll("direct", tools.map((t) => t.name));
+      toggleAll("direct", tools.map((t) => t.name), next);
       return;
     }
     const groupKeys = tools.map((t) => t.slug);

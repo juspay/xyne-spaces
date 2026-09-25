@@ -22,7 +22,9 @@ export function McpCapabilityRow({
   suggestContext,
 }: McpCapabilityRowProps): ReactElement {
   const [browseOpen, setBrowseOpen] = useState(false);
-  const { entries, connectedServerIds, loading, isError, refetch } = useMcpCatalog();
+  const [browseSlug, setBrowseSlug] = useState<string | null>(null);
+  const { entries, connectedServerIds, orgCoveredServerIds, loading, isError, refetch } =
+    useMcpCatalog();
   const suggestions = useMcpSuggestions(entries, suggestContext);
 
   const selectedEntries = useMemo(
@@ -109,7 +111,10 @@ export function McpCapabilityRow({
 
         <button
           type='button'
-          onClick={() => setBrowseOpen(true)}
+          onClick={() => {
+            setBrowseSlug(null);
+            setBrowseOpen(true);
+          }}
           aria-label='Browse MCPs'
           data-track-category='Claw Agents'
           data-track-name='Create agent v2: browse MCPs'
@@ -129,6 +134,10 @@ export function McpCapabilityRow({
               label={entry.label}
               iconType={entry.iconType}
               selected
+              onOpen={() => {
+                setBrowseSlug(entry.slug);
+                setBrowseOpen(true);
+              }}
               onToggle={() => onSelectionChange(disableEntry(entries, selection, entry))}
             />
           ))}
@@ -154,9 +163,14 @@ export function McpCapabilityRow({
 
       <BrowseMcpsDialog
         open={browseOpen}
-        onOpenChange={setBrowseOpen}
+        onOpenChange={next => {
+          setBrowseOpen(next);
+          if (!next) setBrowseSlug(null);
+        }}
+        initialSlug={browseSlug}
         catalog={entries}
         connectedServerIds={connectedServerIds}
+        orgCoveredServerIds={orgCoveredServerIds}
         loading={loading}
         isError={isError}
         onRetry={refetch}
