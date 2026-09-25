@@ -84,8 +84,13 @@ export async function resolveCanvasConnectId(
 export type ConnectAclOp = 'read' | 'write';
 
 /**
- * Resolve the connectIds `workspaceId` can reach — the connectIds of ACTIVE connect_groups it
- * hosts or is invited to — and record the connect_acl_mode metric. Prisma can't subquery
+ * Resolve the connectIds shared INTO `workspaceId` — the connectIds of ACTIVE connect_groups where
+ * this workspace is the INVITED side — and record the connect_acl_mode metric.
+ *
+ * We deliberately do NOT include groups this workspace HOSTS: a host's own rows already carry its
+ * `workspaceId`, so `connectReachWhere` covers them with the cheap, indexed `workspaceId = ctx.ws`
+ * branch. Fetching only the invited set keeps the `connectId IN (...)` list tiny (empty until
+ * sharing exists) instead of "one id per channel+canvas in the workspace". Prisma can't subquery
  * connect_group by the non-unique connectId, so callers match `connectId IN (ids)` themselves.
  *
  * `ok = false` means the connect_group lookup threw: the caller MUST fall back to its plain
@@ -103,7 +108,7 @@ export async function resolveReachableConnectIds(
     const groups = await client.connectGroup.findMany({
       where: {
         status: 'ACTIVE',
-        OR: [{ hostWorkspaceId: workspaceId }, { invitedWorkspaceId: workspaceId }],
+        invitedWorkspaceId: workspaceId,
       },
       select: { connectId: true },
     });
@@ -130,10 +135,15 @@ export async function resolveReachableConnectIds(
 }
 
 /**
- * Slack Connect — Prisma ACL reach fragment for tables that HAVE a `workspaceId` column. A row
- * is reachable when its connectId is in `workspaceId`'s reach; rows with no connectId fall back
- * to `workspaceId`. AND this with the table's membership clause. On lookup failure, degrades to
- * the plain `workspaceId` predicate (see resolveReachableConnectIds).
+ * Slack Connect — Prisma ACL reach fragment for tables that HAVE a `workspaceId` column. A row is
+ * reachable when it belongs to THIS workspace (its own entities — the bulk; covered by the indexed
+ * `workspaceId` column, and this also catches null-connectId rows) OR its connectId was shared INTO
+ * this workspace (the small invited set). AND this with the table's membership clause. On lookup
+ * failure, degrades to the plain `workspaceId` predicate (see resolveReachableConnectIds).
+ *
+ * Equivalent to the old `connectId IN (host+invited) OR (connectId null AND workspaceId)`, but the
+ * huge "host" half is handled by the indexed `workspaceId = ctx.ws` instead of a giant IN-list —
+ * only the tiny shared-into-me set stays a `connectId IN (...)` (empty until sharing exists).
  */
 export async function connectReachWhere(
   client: Prisma.TransactionClient,
@@ -141,13 +151,13 @@ export async function connectReachWhere(
   table = 'unknown',
   op: ConnectAclOp = 'read',
 ): Promise<
-  | { OR: [{ connectId: { in: string[] } }, { connectId: null; workspaceId: string }] }
+  | { OR: [{ workspaceId: string }, { connectId: { in: string[] } }] }
   | { workspaceId: string }
 > {
   const { ids, ok } = await resolveReachableConnectIds(client, workspaceId, table, op);
-  return ok
-    ? { OR: [{ connectId: { in: ids } }, { connectId: null, workspaceId }] }
-    : { workspaceId };
+  // No invited connectIds (the norm today) or a lookup failure → plain workspace scope.
+  if (!ok || ids.length === 0) return { workspaceId };
+  return { OR: [{ workspaceId }, { connectId: { in: ids } }] };
 }
 
 /** Resolve the connectId of an existing channel (for channel-scoped folders). */
