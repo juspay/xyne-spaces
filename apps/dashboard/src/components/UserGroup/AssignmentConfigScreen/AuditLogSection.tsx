@@ -1,4 +1,4 @@
-import { ReactElement, useCallback, useEffect, useMemo, useState } from 'react';
+import { ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { formatDistanceToNow } from 'date-fns';
 import { ChevronDown, ChevronRight, History, RefreshCw, Search } from 'lucide-react';
 import Avatar from '../../ui/Avatar/Avatar';
@@ -269,12 +269,18 @@ export const AuditLogSection = ({
   const [search, setSearch] = useState('');
   const [actionFilter, setActionFilter] = useState<ActionFilter>('all');
 
+  // Sequence guard: a stale response from an earlier entity or an older
+  // "load more" call must not overwrite fresher state — last caller wins.
+  const requestSeqRef = useRef(0);
+
   const fetchPage = useCallback(
     async (cursor: string | null, mode: 'replace' | 'append'): Promise<void> => {
+      const requestSeq = ++requestSeqRef.current;
       setIsLoading(true);
       setLoadError(false);
       try {
         const page = await fetchAuditLogPage({ entityType, entityId, limit: PAGE_SIZE, cursor });
+        if (requestSeq !== requestSeqRef.current) return;
         setLogs(previous => {
           if (mode === 'replace') return page.logs;
           const seenIds = new Set(previous.map(log => log.id));
@@ -284,9 +290,10 @@ export const AuditLogSection = ({
         setHasMore(page.hasMore);
         setHasLoaded(true);
       } catch {
+        if (requestSeq !== requestSeqRef.current) return;
         setLoadError(true);
       } finally {
-        setIsLoading(false);
+        if (requestSeq === requestSeqRef.current) setIsLoading(false);
       }
     },
     [entityType, entityId],

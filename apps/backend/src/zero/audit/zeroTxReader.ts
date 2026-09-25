@@ -105,14 +105,21 @@ export function createZeroAuditLookup(tx: Transaction<Schema>): AuditLookup {
 /**
  * Build the per-mutation audit accumulator. Prewarms the actor's user row while
  * the transaction is open — the flush runs post-commit, so its actor lookup
- * could otherwise hit the released tx connection (lagged or undefined behavior).
+ * could otherwise hit the released tx connection. Failure must never fail the
+ * business mutation (audit policy): on error the actor is marked missing so the
+ * flush reads the cache and records actorUserId=null rather than querying
+ * the released connection lazily.
  */
 export async function createZeroAuditJobs(
   tx: Transaction<Schema>,
   actorUserId: string,
 ): Promise<AuditJobsAccumulator> {
   const resolution = new AuditResolution(createZeroAuditLookup(tx));
-  await resolution.warmUsers([actorUserId]);
+  try {
+    await resolution.warmUsers([actorUserId]);
+  } catch {
+    resolution.markActorMissing(actorUserId);
+  }
   return { jobs: [], resolution };
 }
 

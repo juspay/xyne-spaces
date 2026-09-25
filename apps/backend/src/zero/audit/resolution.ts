@@ -126,6 +126,16 @@ export class AuditResolution {
     return this.userExistsById.get(userId) === true ? userId : null;
   }
 
+  /**
+   * Mark the actor as unknown WITHOUT querying — used when the inside-transaction
+   * prewarm failed, so the post-commit flush resolves actorUserId=null from this
+   * cache entry instead of lazily querying the released connection.
+   */
+  markActorMissing(userId: string): void {
+    this.userExistsById.set(userId, false);
+    this.userNameById.set(userId, userId);
+  }
+
   async warmRoles(ids: Iterable<string>): Promise<void> {
     const missing = [...new Set(ids)].filter(id => !this.roleNameById.has(id));
     if (missing.length === 0) return;
