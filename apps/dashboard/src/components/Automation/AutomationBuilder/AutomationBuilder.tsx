@@ -35,6 +35,7 @@ import {
   type ScheduleConfig,
   CONDITIONAL_STEP_TYPE,
   SWITCH_STEP_TYPE,
+  WEBHOOK_TRIGGER_TYPE,
   AutomationStatusValues,
   makeStepId,
   type SaveResult,
@@ -1193,7 +1194,7 @@ export function AutomationBuilder({
               : undefined
           }
           triggerExtras={
-            config.trigger.type === 'WEBHOOK' ? (
+            config.trigger.type === WEBHOOK_TRIGGER_TYPE ? (
               <WebhookEndpointPanel automationId={savedId} />
             ) : undefined
           }
@@ -1248,7 +1249,7 @@ export function AutomationBuilder({
               onConfigChange={handleTriggerConfigChange}
               issues={triggerIssues}
             />
-            {config.trigger.type === 'WEBHOOK' && (
+            {config.trigger.type === WEBHOOK_TRIGGER_TYPE && (
               <div className='mt-4'>
                 <WebhookEndpointPanel automationId={savedId} />
               </div>
