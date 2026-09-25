@@ -2178,9 +2178,9 @@ internalRouter.post(
     });
 
     try {
-      for (const invocation of invocations) {
-        await agentRunRepository.appendToolInvocation(sessionId, invocation);
-      }
+      const appended = invocations.map((invocation) => agentRunRepository.appendToolInvocation(sessionId, invocation));
+      await agentRunRepository.flushToolInvocations(sessionId);
+      await Promise.all(appended);
       log.info(`[follow-ups] persisted late suggestions streamId=${req.params.streamId} sessionId=${sessionId} count=${suggestions.length}`);
       res.json({ success: true });
     } catch (err) {
@@ -2271,10 +2271,9 @@ async function runViaSseTransport(opts: RunViaSseOpts): Promise<void> {
       onInvocation: async (sessionId, toolInvocation) => {
         const internalFollowUp = isInternalFollowUpInvocation(toolInvocation);
         if (!internalFollowUp) stream.sendEvent("invocation", toolInvocation);
-        await agentRunRepository.appendToolInvocation(
-          sessionId,
-          toolInvocation as Record<string, unknown>,
-        );
+        agentRunRepository
+          .appendToolInvocation(sessionId, toolInvocation as Record<string, unknown>)
+          .catch((err) => log.warn(`[run-stream/sse] appendToolInvocation failed for ${sessionId}:`, errMsg(err)));
         // Live tap for VIEWERS (reloaded tabs / Spaces): fan tool calls to the
         // shared live-conversation-bus that GET /agent-chat/:slug/chat/:convId/live
         // reads (same convId + slug as this run — no separate viewer bus needed).

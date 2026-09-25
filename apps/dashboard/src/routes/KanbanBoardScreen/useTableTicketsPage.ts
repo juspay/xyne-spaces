@@ -63,13 +63,27 @@ const rowMatchesGroup = (
   return true;
 };
 
-/**
- * The table's Vespa search. Also called once by the board, so the search runs on every
- * input even when every group is collapsed; open groups reuse that call via the shared key.
- */
-export const useTableVespaSearch = (
+export const useTableTicketsPage = (
   options: UseTableTicketsPageOptions,
-): { requiresVespaIds: boolean; vespaTicketSearch: ReturnType<typeof useVespaTicketSearch> } => {
+): UseTableTicketsPageResult => {
+  const pageSize = options.pageSize ?? DEFAULT_PAGE_SIZE;
+  const enabled = options.enabled ?? true;
+  const [ticketsState, setTicketsState] = useState<TicketsState>({ queryKey: '', tickets: [] });
+  const [cursorState, setCursorState] = useState<{ queryKey: string; cursor: PageCursor } | null>(
+    null,
+  );
+  const [hasMore, setHasMore] = useState(true);
+  const isLoadingMoreRef = useRef(false);
+  const ticketsStateRef = useRef<TicketsState>({ queryKey: '', tickets: [] });
+  ticketsStateRef.current = ticketsState;
+
+  const overdueReferenceTimeRef = useRef<number | null>(null);
+  if (options.showOverdueOnly && overdueReferenceTimeRef.current === null) {
+    overdueReferenceTimeRef.current = options.overdueReferenceTime ?? ceilToMinute(Date.now());
+  } else if (!options.showOverdueOnly && overdueReferenceTimeRef.current !== null) {
+    overdueReferenceTimeRef.current = null;
+  }
+
   const trimmedSearchTerm = options.searchTerm?.trim() ?? '';
   const vespaTokens = useMemo(
     () => [...(options.dynamicFieldVespaTokens ?? [])].sort(),
@@ -98,14 +112,12 @@ export const useTableVespaSearch = (
     typeof options.groupBy === 'object'
       ? `${options.groupBy.type}:${options.groupBy.fieldId}`
       : String(options.groupBy ?? 'none');
-  // The request never filters by group (tableTicketsPage does, in Zero), so the key
-  // leaves groupKey out and every group shares one call.
-  const vespaSearchKey = `table:${groupByKey}`;
+  const vespaSearchKey = `table:${groupByKey}:${options.groupKey ?? ''}`;
 
   const vespaTicketSearch = useVespaTicketSearch({
     searchTerm: trimmedSearchTerm,
     dynamicFieldValues: vespaTokens,
-    enabled: requiresVespaIds && (options.enabled ?? true),
+    enabled: requiresVespaIds && enabled,
     limit: trimmedSearchTerm ? 400 : 200,
     fetchAllDynamicFieldMatches: true,
     maxFetchedResults: trimmedSearchTerm ? 800 : 400,
@@ -119,32 +131,6 @@ export const useTableVespaSearch = (
     ...(vespaAssignee ? { assignee: vespaAssignee } : {}),
     ...(vespaTags ? { tags: vespaTags } : {}),
   });
-
-  return { requiresVespaIds, vespaTicketSearch };
-};
-
-export const useTableTicketsPage = (
-  options: UseTableTicketsPageOptions,
-): UseTableTicketsPageResult => {
-  const pageSize = options.pageSize ?? DEFAULT_PAGE_SIZE;
-  const enabled = options.enabled ?? true;
-  const [ticketsState, setTicketsState] = useState<TicketsState>({ queryKey: '', tickets: [] });
-  const [cursorState, setCursorState] = useState<{ queryKey: string; cursor: PageCursor } | null>(
-    null,
-  );
-  const [hasMore, setHasMore] = useState(true);
-  const isLoadingMoreRef = useRef(false);
-  const ticketsStateRef = useRef<TicketsState>({ queryKey: '', tickets: [] });
-  ticketsStateRef.current = ticketsState;
-
-  const overdueReferenceTimeRef = useRef<number | null>(null);
-  if (options.showOverdueOnly && overdueReferenceTimeRef.current === null) {
-    overdueReferenceTimeRef.current = options.overdueReferenceTime ?? ceilToMinute(Date.now());
-  } else if (!options.showOverdueOnly && overdueReferenceTimeRef.current !== null) {
-    overdueReferenceTimeRef.current = null;
-  }
-
-  const { requiresVespaIds, vespaTicketSearch } = useTableVespaSearch(options);
   const vespaTicketIds = requiresVespaIds
     ? (vespaTicketSearch.searchResults?.map(ticket => ticket.id) ?? null)
     : undefined;

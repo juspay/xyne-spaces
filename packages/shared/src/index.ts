@@ -2,8 +2,14 @@
 export * from './zero/schema';
 export * from './zero/audit';
 export { defineQuery } from './zero/acl';
-export { encryptedFieldsConfig, type EncryptedTableConfig } from './zero/encrypted-fields';
-export { EncryptedFieldQueryError, validateQueryWhereClause, type Condition, type QueryAST } from './zero/client-transaction-wrapper';
+export {
+  EncryptedFieldQueryError,
+  validateQueryWhereClause,
+  isEncryptionScopeEmpty,
+  isWorkspaceInEncryptionScope,
+  type EncryptedWorkspaceScope,
+  type EncryptedTableConfig,
+} from './zero/query-validation';
 export * from './ai';
 export * from './dashboard';
 export * from './types/activity';
