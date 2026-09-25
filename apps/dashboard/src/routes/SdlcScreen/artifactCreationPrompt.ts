@@ -34,3 +34,28 @@ export function buildSdlcArtifactCreationPrompt(input: SdlcArtifactCreationPromp
     relatedClause;
   return direction ? `${request}\n\nUser direction: ${direction}` : request;
 }
+
+export interface SdlcWikiPageCreationPromptInput {
+  title: string;
+  repositoryName?: string;
+  repoId?: string;
+  folderPath?: string;
+  direction?: string;
+}
+
+export function buildSdlcWikiPageCreationPrompt(input: SdlcWikiPageCreationPromptInput): string {
+  const direction = input.direction?.trim();
+  const scope = input.repositoryName
+    ? `the Wiki of repository ${JSON.stringify(input.repositoryName)}`
+    : "this hub's own Wiki";
+  const folder = input.folderPath ? `folderPath ${JSON.stringify(input.folderPath)}, ` : '';
+  // Omitting the repository would hand the page to the run's pinned one.
+  const repos = input.repoId
+    ? `repoIds [${JSON.stringify(input.repoId)}]`
+    : 'an empty repoIds array';
+  const request =
+    `Write a Wiki page titled ${JSON.stringify(input.title)} in ${scope}, and nowhere else. ` +
+    `Call spaces-sdlc-mutate-artifact with artifactType "WIKI", action "create", ` +
+    `title ${JSON.stringify(input.title)}, ${folder}${repos} so it is filed there.`;
+  return direction ? `${request}\n\nUser direction: ${direction}` : request;
+}
