@@ -82,6 +82,13 @@ export interface CanvasParticipantPreviousValue {
   role: string;
 }
 
+export interface ViewAccessPreviousValue {
+  viewId: string;
+  entityType: string;
+  entityId: string;
+  sharedBy: string;
+}
+
 export interface UserGroupMappingPreviousValue {
   userGroupId: string;
   userId: string;
@@ -124,6 +131,7 @@ export type PreviousValue =
   | ChannelPreviousValue
   | EmailReadPreviousValue
   | CanvasParticipantPreviousValue
+  | ViewAccessPreviousValue
   | UserGroupMappingPreviousValue
   | ChannelParticipantPreviousValue
   | ChannelUserStatusPreviousValue
@@ -160,6 +168,7 @@ export const SIDE_EFFECT_OPERATION_CONFIG: SideEffectOperationConfigMap = {
   call_participants: ["insert", "update"],
   channel_participants: ['insert', 'delete'],
   canvas_participants: ['insert', 'update', 'delete'],
+  view_access: ['insert', 'delete'],
   user_group_mappings: ['insert', 'delete'],
   conversations: ['insert', 'delete'],
   calls: ['update'],
