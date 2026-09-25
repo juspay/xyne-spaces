@@ -11,6 +11,12 @@ import {
 } from '@/services/radar/radarParser';
 import { noOpReassignFeedback, validateTransitions } from '@/services/radar/radarValidator';
 import { radarApplier } from '@/services/radar/radarApplier';
+import {
+  duplicateCreateFeedback,
+  isDuplicate,
+  radarDedupScorer,
+  type DedupCheck,
+} from '@/services/radar/radarDedupScorer';
 import type { RadarScope } from '@/services/radar/radarScope';
 
 const prisma = DatabaseClient.getInstance();
@@ -67,6 +73,7 @@ interface RunLogDraft {
   droppedOps?: unknown;
   applied?: unknown;
   assessment?: string;
+  dedupChecks?: unknown;
   error?: string;
 }
 
@@ -104,6 +111,53 @@ const buildThreadLabels = (
     if (threaded) labels.set(m.conversationId, `T${labels.size + 1}`);
   }
   return labels;
+};
+
+type TrailOp = { op: string; itemId?: string; title?: string; sourceMessageId: string };
+type Validated = ReturnType<typeof validateTransitions>;
+
+/**
+ * The debug trail's record of the Jev duplicate check: one row per create it
+ * scored. A flagged create that went back to the parser also says what came of
+ * it, once the final answer is known. The parser answers with a whole new set,
+ * so there is no id linking the two; the outcome is read off what changed
+ * between its first and final valid operations.
+ */
+const dedupTrail = (
+  checks: DedupCheck[],
+  firstOps: TrailOp[] | null,
+  finalOps: TrailOp[] | null,
+) => ({
+  threshold: config.radar.dedupThreshold,
+  recalled: firstOps !== null,
+  checks: checks.map(c => ({
+    title: c.create.title,
+    sourceMessageId: c.create.sourceMessageId,
+    itemId: c.item?.id ?? null,
+    itemTitle: c.item?.title ?? null,
+    probability: c.probability,
+    verdict: c.item === null ? 'unscored' : c.flagged ? 'duplicate' : 'distinct',
+    ...(c.flagged && firstOps && finalOps ? { outcome: dedupOutcome(c, firstOps, finalOps) } : {}),
+  })),
+});
+
+const dedupOutcome = (
+  check: DedupCheck,
+  firstOps: TrailOp[],
+  finalOps: TrailOp[],
+): 'reassigned' | 'kept' | 'dropped' => {
+  const reassigns = (ops: TrailOp[]) =>
+    ops.some(op => op.op === 'reassign' && op.itemId === check.item?.id);
+  const fromSameMessage = (ops: TrailOp[]) =>
+    ops.filter(op => op.op === 'create' && op.sourceMessageId === check.create.sourceMessageId);
+  const titleOf = (op: TrailOp) => (op.title ?? '').trim().toLowerCase();
+  if (reassigns(finalOps) && !reassigns(firstOps)) return 'reassigned';
+  // Only the same title surviving is the create itself; counting creates per
+  // message cannot tell which of them went, so it is not used.
+  const title = titleOf(check.create as TrailOp);
+  return title && fromSameMessage(finalOps).some(op => titleOf(op) === title)
+    ? 'kept'
+    : 'dropped';
 };
 
 class RadarExecutionService {
@@ -318,6 +372,10 @@ class RadarExecutionService {
             // this workspace before they can land in the ledger.
             allowedUserIds,
           };
+          // Set by the semantic check below, which runs once per parse on the
+          // model's first schema-valid answer.
+          let dedupChecks: DedupCheck[] = [];
+          let firstAttempt: Validated | null = null;
           const transitions = await radarParser.parseWindow(
             openItems.map(({ conversationId, ...item }) =>
               threadLabels.size > 0
@@ -331,22 +389,64 @@ class RadarExecutionService {
             // The validator doubles as the parser's semantic check: a reassign
             // it would drop as a no-op goes back to the model once, because
             // that drop nearly always means the wrong open item was matched.
-            ops => noOpReassignFeedback(validateTransitions(ops, validationCtx).dropped, openItems),
+            // A create the duplicate scorer matches to an open item rides the
+            // same single round-trip — the prompt's own duplicate rules are
+            // what the model misses most, and a pointed second look at the
+            // specific pair is what gets it to re-apply them.
+            async ops => {
+              firstAttempt = validateTransitions(ops, validationCtx);
+              try {
+                if (radarDedupScorer.isActive()) {
+                  // Scored as they would be applied: an ownerless create in a
+                  // DM is the counterpart's, and a handoff only reads as one
+                  // once it names them. Copies, so the answer is untouched.
+                  const scored = firstAttempt.valid.map(op => ({ ...op }));
+                  await this.directDmOwnerless(scored, scope, windowSenders, allowedUserIds);
+                  dedupChecks = await radarDedupScorer.scoreCreates(scored, openItems);
+                }
+              } catch (error) {
+                // An optional check must never cost the window its parse.
+                // The error's type only — a message can quote the data it failed on.
+                logger.warn('[RADAR-DEDUP] duplicate check failed, continuing without it', {
+                  conversationId,
+                  error: error instanceof Error ? error.name : typeof error,
+                });
+                dedupChecks = [];
+              }
+              const feedback = [
+                noOpReassignFeedback(firstAttempt.dropped, openItems),
+                duplicateCreateFeedback(dedupChecks.filter(isDuplicate)),
+              ].filter(Boolean);
+              // Recorded now, so a retry that fails still leaves the verdicts
+              // that sent it back in the trail.
+              if (dedupChecks.length > 0) {
+                run.dedupChecks = dedupTrail(
+                  dedupChecks,
+                  feedback.length > 0 ? firstAttempt.valid : null,
+                  null,
+                );
+              }
+              return feedback.length > 0 ? feedback.join('\n\n') : null;
+            },
           );
           run.proposedOps = transitions.operations;
           run.assessment = transitions.assessment;
           const { valid, dropped } = validateTransitions(transitions.operations, validationCtx);
           await this.directDmOwnerless(valid, scope, windowSenders, allowedUserIds);
           run.validOps = valid;
+          // The semantic check validated the first answer; it is only the
+          // first attempt when that answer was sent back.
+          // (Assigned inside the callback, which TypeScript cannot see.)
+          const recalledFrom = transitions.repair ? (firstAttempt as Validated | null) : null;
+          if (dedupChecks.length > 0) {
+            run.dedupChecks = dedupTrail(dedupChecks, recalledFrom?.valid ?? null, valid);
+          }
           // A repaired pass keeps its first attempt's rejects in the trail,
           // flagged, so the debug panel shows what the model was corrected on.
-          run.droppedOps = transitions.repair
-            ? [
-                ...validateTransitions(transitions.repair.firstAttempt, validationCtx).dropped.map(
-                  d => ({ ...d, repaired: true }),
-                ),
-                ...dropped,
-              ]
+          // Creates the duplicate check sent back are not rejects — the dedup
+          // section of the trail records them and what the parser did.
+          run.droppedOps = recalledFrom
+            ? [...recalledFrom.dropped.map(d => ({ ...d, repaired: true })), ...dropped]
             : dropped;
           const last = window[window.length - 1];
           const applied = await radarApplier.apply({
@@ -462,6 +562,7 @@ class RadarExecutionService {
           droppedOps: run.droppedOps as object | undefined,
           applied: run.applied as object | undefined,
           assessment: run.assessment ?? null,
+          dedupChecks: run.dedupChecks as object | undefined,
           error: run.error ?? null,
           durationMs: Date.now() - startedAt,
         },
