@@ -2,7 +2,7 @@ import rruleLib from 'rrule';
 const { RRule } = rruleLib;
 import { v4 as uuidv4 } from 'uuid';
 import { type Prisma } from '@prisma/client';
-import { CallOrigin, CallStatus, CallType, RecurringCallSeriesStatus } from '@xyne/shared';
+import { CallOrigin, CallType, RecurringCallSeriesStatus } from '@xyne/shared';
 import { repositories } from '@/database/repositories';
 import { logger } from '@/utils/logger';
 import { scheduledCallNotificationService } from '@/services/scheduledCallNotificationService';
@@ -12,13 +12,18 @@ import { CallVespaFeedSource, queueCallVespaFeed } from '@/services/callVespaQue
 import { queueCallCalendarPush, queueCallCalendarPushMany } from '@/queues/callCalendarPushQueue';
 import { runWithContext } from '@/database/tenant/context';
 import { buildCallInviteUrl } from '@/utils/urlUtils';
+import { replenishInstanceBufferTx } from '@/bypassAcl/transactions/recurringCallService';
+import { regenerateFutureInstancesTx } from '@/bypassAcl/transactions/recurringCallService';
+import { scheduleJobsForNextInstanceTx } from '@/bypassAcl/transactions/recurringCallService';
+import { cancelSeriesTx } from '@/bypassAcl/transactions/recurringCallService';
+import { deleteSeriesTx } from '@/bypassAcl/transactions/recurringCallService';
 
 // Number of milliseconds to buffer recurring call instances ahead of time (60 days)
-const INSTANCE_BUFFER_DAYS = 60 * 24 * 60 * 60 * 1000;
+export const INSTANCE_BUFFER_DAYS = 60 * 24 * 60 * 60 * 1000;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-interface RecurringSeriesShape {
+export interface RecurringSeriesShape {
   id: string;
   workspaceId: string | null;
   title: string;
@@ -35,7 +40,7 @@ interface RecurringSeriesShape {
 
 // ── Service ───────────────────────────────────────────────────────────────────
 
-class RecurringCallService {
+export class RecurringCallService {
   /**
    * Return the next occurrence of the series strictly after `after`.
    * Pass inclusive=true to include `after` itself.
@@ -250,122 +255,13 @@ class RecurringCallService {
   }
 
   /**
-   * Create all instances for a date range in bulk.
-   * Only notifies participants for the first upcoming instance (to avoid notification spam).
-   * Returns array of created call IDs.
-   */
-  async createInstancesForDateRange(
-    series: RecurringSeriesShape,
-    fromDate: Date,
-    toDate: Date,
-    tx: Prisma.TransactionClient,
-    callUpdatesChannel?: string | null,
-  ): Promise<string[]> {
-    const occurrences = this.getOccurrencesInRange(series, fromDate, toDate);
-    const callIds: string[] = [];
-
-    const now = new Date();
-
-    for (let i = 0; i < occurrences.length; i++) {
-      const startsAt = occurrences[i]!;
-      const endsAt = addHHMMDuration(startsAt, series.startTime, series.endTime);
-
-      // Only notify for the first upcoming instance (starts after now)
-      const isFirstUpcoming = startsAt > now && (i === 0 || occurrences[i - 1]! <= now);
-
-      try {
-        // Only schedule Bull jobs for the FIRST instance (i === 0)
-        // Subsequent instances will have their jobs created when the previous instance ends
-        const scheduleJobs = i === 0;
-        const callId = await this.createInstance(series, startsAt, endsAt, isFirstUpcoming, tx, scheduleJobs, callUpdatesChannel);
-        callIds.push(callId);
-      } catch (err) {
-        logger.error(`Failed to create instance for ${startsAt.toISOString()} in series ${series.id}:`, err);
-        // Continue creating other instances
-      }
-    }
-
-    logger.info(`Created ${callIds.length} instances for series ${series.id} between ${fromDate.toISOString()} and ${toDate.toISOString()} (Bull jobs scheduled for first instance only)`);
-    return callIds;
-  }
-
-  /**
    * Replenish the buffer of SCHEDULED instances to maintain the 60-day target.
    * Called when an instance is consumed (auto-end) or deleted.
    */
   async replenishInstanceBuffer(seriesId: string): Promise<void> {
     const db = DatabaseClient.getInstance();
 
-    await db.$transaction(async (tx) => {
-      const series = await repositories.recurringCallSeries.findById(seriesId, tx);
-
-      if (!series) {
-        logger.warn(`Cannot replenish buffer: Series ${seriesId} not found`);
-        return;
-      }
-
-      if (series.status !== RecurringCallSeriesStatus.ACTIVE) {
-        logger.info(`Series ${seriesId} is ${series.status}, skipping buffer replenishment`);
-        return;
-      }
-
-      // Count current SCHEDULED instances that are in the future (startsAt >= now).
-      // Only future instances count toward the buffer — past scheduled instances
-      // shouldn't affect replenishment. This must match the targetCount calculation
-      // which also counts from now onwards.
-      const scheduledCount = await repositories.scheduledCalls.countFutureScheduledInstances({
-        seriesId,
-        fromDate: new Date(),
-        tx,
-      });
-
-      // Calculate target count (60 days worth from now)
-      const targetCount = this.calculateTargetInstanceCount(series);
-
-      if (scheduledCount >= targetCount) {
-        logger.info(`Buffer is full for series ${seriesId}: ${scheduledCount}/${targetCount} instances`);
-        return;
-      }
-
-      // Find the last scheduled instance to determine where to start creating new ones
-      const lastScheduledInstance = await repositories.scheduledCalls.findLastScheduledInstance({
-        seriesId,
-        tx,
-      });
-
-      // Walk forward from the last scheduled instance using getNextOccurrence.
-      // getOccurrencesInRange is capped at now+60 days internally, so it cannot
-      // find occurrences that lie just beyond the current buffer edge. Using
-      // getNextOccurrence (which has no such cap) avoids this problem.
-      const neededCount = targetCount - scheduledCount;
-      let lastDate = lastScheduledInstance?.startsAt ?? new Date();
-      let createdCount = 0;
-
-      while (createdCount < neededCount) {
-        const nextOccurrence = this.getNextOccurrence(series, lastDate);
-        if (!nextOccurrence) break; // No more occurrences in the series
-
-        // Idempotency: skip only if a SCHEDULED instance already exists at this exact time.
-        // CANCELLED instances should NOT block replenishment — a cancelled instance at the
-        // same date/slot means we still need to create a replacement.
-        const existing = await repositories.scheduledCalls.findExistingInstanceAt({
-          seriesId,
-          startsAt: nextOccurrence,
-          tx,
-        });
-
-        if (!existing) {
-          const endsAt = addHHMMDuration(nextOccurrence, series.startTime, series.endTime);
-          // Don't schedule jobs during replenishment - jobs are created on instance end
-          await this.createInstance(series, nextOccurrence, endsAt, false, tx, false, series.callUpdatesChannel);
-          createdCount++;
-        }
-
-        lastDate = nextOccurrence;
-      }
-
-      logger.info(`Replenished buffer for series ${seriesId}: created ${createdCount} instances (${scheduledCount} → ${scheduledCount + createdCount})`);
-    });
+    await replenishInstanceBufferTx(db, seriesId, this);
   }
 
   /**
@@ -399,30 +295,7 @@ class RecurringCallService {
     // Soft-delete: mark existing scheduled instances as CANCELLED instead of hard-deleting
     const scheduledInstanceIds = allScheduledInstances.map((i) => i.id);
 
-    await db.$transaction(async (tx) => {
-      // Mark scheduled instances as CANCELLED (soft-delete)
-      if (scheduledInstanceIds.length > 0) {
-        await tx.call.updateMany({
-          where: {
-            id: { in: scheduledInstanceIds },
-            status: CallStatus.SCHEDULED,
-          },
-          data: { status: CallStatus.CANCELLED },
-        });
-
-        logger.info(`Marked ${scheduledInstanceIds.length} scheduled instances as CANCELLED for series ${series.id} during regeneration`);
-      }
-
-      // Create new instances for the next buffer period.
-      // Never create instances for past dates — use max(fromDate, now) so that
-      // calling this with series.startsOn (potentially months ago) doesn't
-      // produce call records in the past.
-      const now = new Date();
-      const effectiveFromDate = fromDate > now ? fromDate : now;
-      const toDate = new Date(now.getTime() + INSTANCE_BUFFER_DAYS);
-      const newCallIds = await this.createInstancesForDateRange(series, effectiveFromDate, toDate, tx, series.callUpdatesChannel);
-      callIds.push(...newCallIds);
-    });
+    await regenerateFutureInstancesTx(db, scheduledInstanceIds, series, fromDate, this, callIds);
 
     scheduledInstanceIds.forEach((callId) => queueCallVespaFeed(callId, {
       source: CallVespaFeedSource.RecurringCallServiceRegenerateFutureInstancesCancelledInstance,
@@ -444,59 +317,7 @@ class RecurringCallService {
   async scheduleJobsForNextInstance(seriesId: string, currentInstanceEndsAt: Date): Promise<void> {
     const db = DatabaseClient.getInstance();
 
-    await db.$transaction(async (tx) => {
-      const series = await repositories.recurringCallSeries.findById(seriesId, tx);
-
-      if (!series) {
-        logger.warn(`Cannot schedule next jobs: Series ${seriesId} not found`);
-        return;
-      }
-
-      if (series.status !== RecurringCallSeriesStatus.ACTIVE) {
-        logger.info(`Series ${seriesId} is ${series.status}, skipping job scheduling`);
-        return;
-      }
-
-      // Find the next SCHEDULED instance after the current one
-      const nextInstance = await repositories.scheduledCalls.findNextScheduledInstance({
-        seriesId,
-        afterDate: currentInstanceEndsAt,
-        tx,
-      });
-
-      if (!nextInstance) {
-        logger.info(`No next instance found after ${currentInstanceEndsAt.toISOString()} for series ${seriesId}`);
-        return;
-      }
-
-      // Get participant IDs for this instance
-      const participantUserIds = await repositories.scheduledCalls.findCallParticipantUserIds({
-        callId: nextInstance.id,
-        tx,
-      });
-
-      // Schedule the reminder and auto-end jobs
-      try {
-        await scheduledCallNotificationService.scheduleCallReminder(
-          nextInstance.id,
-          nextInstance.externalId,
-          nextInstance.title || series.title,
-          nextInstance.startsAt!,
-          participantUserIds,
-        );
-        await scheduledCallNotificationService.scheduleCallAutoEnd(
-          nextInstance.id,
-          nextInstance.externalId,
-          nextInstance.endsAt!,
-        );
-
-        logger.info(
-          `Scheduled Bull jobs for next recurring instance ${nextInstance.id} (${nextInstance.externalId}) at ${nextInstance.startsAt!.toISOString()}`,
-        );
-      } catch (err) {
-        logger.error(`Failed to schedule jobs for next instance ${nextInstance.id}:`, err);
-      }
-    });
+    await scheduleJobsForNextInstanceTx(db, seriesId, currentInstanceEndsAt);
   }
 
   /**
@@ -529,9 +350,7 @@ class RecurringCallService {
     }
 
     // Step 3: Atomically mark instances + series as CANCELLED via ScheduledCallRepository.
-    const result = await db.$transaction(async (tx) =>
-      repositories.scheduledCalls.cancelSeries({ seriesId, now, tx }),
-    );
+    const result = await cancelSeriesTx(db, seriesId, now);
 
     queueCallCalendarPushMany(futureInstanceIds, 'recurringCallService.cancelSeries');
 
@@ -560,9 +379,7 @@ class RecurringCallService {
       }
     }
 
-    const result = await db.$transaction(async (tx) =>
-      repositories.scheduledCalls.deleteSeries({ seriesId, tx }),
-    );
+    const result = await deleteSeriesTx(db, seriesId);
 
     queueCallCalendarPushMany(instanceIds, 'recurringCallService.deleteSeries');
 
@@ -571,3 +388,8 @@ class RecurringCallService {
 }
 
 export const recurringCallService = new RecurringCallService();
+
+
+
+
+

@@ -37,7 +37,6 @@ import { uploadAutomationTemplates } from '@/middleware/upload';
 import { AppError } from '@/middleware/errorHandler';
 import {
   AutomationTemplateInputError,
-  claimAutomationTemplates,
   releaseAutomationTemplate,
   storeAutomationTemplates,
 } from '../services/automation-template.service';
@@ -45,6 +44,9 @@ import {
   deskLabelRulesService,
   DeskLabelRulesPayloadSchema,
 } from '../services/desk-label-rules.service';
+import { postTx } from '@/bypassAcl/transactions/automationRoutes';
+import { putTx } from '@/bypassAcl/transactions/automationRoutes';
+import { putTx2 } from '@/bypassAcl/transactions/automationRoutes';
 
 const router = Router();
 
@@ -493,23 +495,7 @@ router.post('/', async (req: Request, res: Response) => {
     const prepared = prepareConfigForSave(parsed.data.config, res);
     if (!prepared) return;
 
-    const workflow = await db.$transaction(async tx => {
-      await claimAutomationTemplates(tx, prepared.config, auth.workspaceId);
-      return tx.workflow.create({
-        data: {
-          workflowType: AUTOMATION_WORKFLOW_TYPE,
-          workflowName: parsed.data.name,
-          workspaceId: auth.workspaceId,
-          status: AutomationStatus.DRAFT,
-          eventType: prepared.eventType,
-          context: prepared.context,
-          metadata: buildAutomationMetadata({
-            description: parsed.data.description ?? null,
-            createdById: auth.userId,
-          }),
-        },
-      });
-    });
+    const workflow = await postTx(prepared, auth, parsed);
     res.status(201).json({
       success: true,
       data: { automation: workflowToAutomation(workflow) },
@@ -676,21 +662,7 @@ router.put('/:id', async (req: Request<{ id: string }>, res: Response) => {
     });
 
     if (existing.status === AutomationStatus.DRAFT && existingAutomation.createdById === auth.userId) {
-      const updated = await db.$transaction(async tx => {
-        if (prepared) await claimAutomationTemplates(tx, prepared.config, auth.workspaceId);
-        return tx.workflow.update({
-          where: { id: existing.id },
-          data: {
-            ...(parsed.data.name !== undefined && { workflowName: parsed.data.name }),
-            ...(prepared && {
-              context: prepared.context,
-              eventType: prepared.eventType,
-            }),
-            metadata,
-            updatedAt: new Date(),
-          },
-        });
-      });
+      const updated = await putTx(prepared, auth, existing, parsed, metadata);
       res.json({
         success: true,
         data: { automation: workflowToAutomation(updated) },
@@ -701,21 +673,7 @@ router.put('/:id', async (req: Request<{ id: string }>, res: Response) => {
 
     // Create a new DRAFT version in the same lineage; do not mutate approved/live rows.
     const seriesId = existing.automationSeriesId ?? existing.id;
-    const newVersion = await db.$transaction(async tx => {
-      if (prepared) await claimAutomationTemplates(tx, prepared.config, auth.workspaceId);
-      return tx.workflow.create({
-        data: {
-          workflowType: AUTOMATION_WORKFLOW_TYPE,
-          workflowName: parsed.data.name ?? existing.workflowName,
-          workspaceId: auth.workspaceId,
-          status: AutomationStatus.DRAFT,
-          automationSeriesId: seriesId,
-          context: prepared ? prepared.context : existing.context,
-          ...(prepared && { eventType: prepared.eventType }),
-          metadata,
-        },
-      });
-    });
+    const newVersion = await putTx2(prepared, auth, parsed, existing, seriesId, metadata);
 
     res.status(201).json({
       success: true,

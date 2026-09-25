@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { db } from '@/database/client';
 import { BaseActionStep } from './base-step';
 import { StepCategory } from '../types/categories';
 import type { AutomationContext } from '../types/context';
@@ -7,10 +6,9 @@ import { variableRef } from '../engine/variable-ref';
 import { logger } from '@/utils/logger';
 import { websocketService } from '@/services/websocketService';
 import {
-  applyConversationLabel,
-  archiveConversationMailbox,
   SKIPPABLE_LABEL_ERROR_CODES,
 } from '../services/conversation-label.service';
+import { executeTx } from '@/bypassAcl/transactions/applyConversationLabelStep';
 
 const ApplyConversationLabelConfigSchema = z.object({
   conversationId: variableRef(z.string().min(1)).describe(
@@ -94,31 +92,7 @@ export class ApplyConversationLabelStep extends BaseActionStep<
     if (!createdById) return skipped('missing_owner');
 
     try {
-      const result = await db.$transaction(async tx => {
-        const applied = await applyConversationLabel(
-          {
-            conversationId,
-            channelId,
-            labelName,
-            createdById,
-            color: config.color,
-            labelId: config.labelId,
-          },
-          tx,
-        );
-        if (config.keepInInbox === false) {
-          await archiveConversationMailbox(
-            {
-              conversationId,
-              channelId,
-              workspaceId: context.automation.workspaceId,
-              userId: createdById,
-            },
-            tx,
-          );
-        }
-        return applied;
-      });
+      const result = await executeTx(conversationId, channelId, labelName, createdById, config, context);
       // Broadcast only after commit so refetched label unread counts see the new mapping.
       if (result.applied) {
         websocketService.broadcastLabelUnreadCountsUpdate(channelId);
@@ -140,3 +114,4 @@ export class ApplyConversationLabelStep extends BaseActionStep<
 }
 
 export const applyConversationLabelStep = new ApplyConversationLabelStep();
+

@@ -1,10 +1,9 @@
-import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
-import type { Prisma } from '@prisma/client';
-import { NudgeKind, SurfaceAreaType, NudgeState } from '@xyne/shared';
-import { rebuildSurfaceNudgeAudienceCounts } from './surfaceNudgeAudienceCountService';
+import { NudgeKind, SurfaceAreaType } from '@xyne/shared';
 import { getNudgeCreatedTotal } from '@/services/otel';
 import type { NudgeCandidate } from '../types';
+import { dismissNudgesForSourceTx } from '@/bypassAcl/transactions/surfaceNudgeService';
+import { persistCandidatesTx } from '@/bypassAcl/transactions/surfaceNudgeService';
 
 interface PersistCandidatesInput {
   sourceId: string;
@@ -18,17 +17,7 @@ interface PersistCandidatesInput {
 class NudgeService {
   async dismissNudgesForSource(sourceId: string, sourceType: SurfaceAreaType): Promise<void> {
     try {
-      await db.$transaction(async (tx) => {
-        await tx.surfaceNudge.updateMany({
-          where: { sourceId, state: { in: [NudgeState.ACTIVE, NudgeState.ACTED_ON] } },
-          data: { state: NudgeState.DISMISSED },
-        });
-        await rebuildSurfaceNudgeAudienceCounts({
-          tx,
-          sourceId,
-          sourceType,
-        });
-      });
+      await dismissNudgesForSourceTx(sourceId, sourceType);
 
       logger.info('[NudgeService] Dismissed nudges for source', { sourceId, sourceType });
     } catch (error) {
@@ -46,28 +35,7 @@ class NudgeService {
     if (candidates.length === 0) return;
 
     try {
-      await db.$transaction(async (tx) => {
-        for (const candidate of candidates) {
-          await tx.surfaceNudge.create({
-            data: {
-              nudgeKind,
-              sourceId,
-              workspaceId,
-              title: candidate.title,
-              description: candidate.description,
-              priority: candidate.priority ?? priority ?? 'medium',
-              actions: (candidate.actions as Prisma.InputJsonValue) ?? undefined,
-              state: NudgeState.ACTIVE,
-              visibleTo: candidate.visibleTo ?? null,
-            },
-          });
-        }
-        await rebuildSurfaceNudgeAudienceCounts({
-          tx,
-          sourceId,
-          sourceType,
-        });
-      });
+      await persistCandidatesTx(candidates, nudgeKind, sourceId, workspaceId, priority, sourceType);
 
       try {
         getNudgeCreatedTotal().add(candidates.length, { nudge_kind: nudgeKind });
@@ -94,3 +62,5 @@ class NudgeService {
 }
 
 export const nudgeService = new NudgeService();
+
+

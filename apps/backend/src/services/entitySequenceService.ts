@@ -4,7 +4,7 @@ import { config } from '@/config/env';
 import { CommonDatabaseClient } from '@/database/commonClient';
 import { logger } from '@/utils/logger';
 
-type MainPrismaTransaction = Omit<
+export type MainPrismaTransaction = Omit<
   PrismaClient,
   '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'
 >;
@@ -44,30 +44,6 @@ export class EntitySequenceService {
 
   static isCommonProjectTicketSequenceEnabled(): boolean {
     return this.isCommonEntitySequenceEnabled();
-  }
-
-  static async getNextProjectTicketSequence(
-    tx: MainPrismaTransaction,
-    projectId: string
-  ): Promise<number> {
-    if (this.isCommonProjectTicketSequenceEnabled()) {
-      try {
-        return await this.getNextSequence(SequenceEntityType.PROJECT_TICKET, projectId);
-      } catch (error) {
-        logger.error(
-          `[EntitySequenceService] Common DB ticket allocation failed for project ${projectId}; falling back to main DB:`,
-          error
-        );
-      }
-    }
-
-    const project = await tx.project.update({
-      where: { id: projectId },
-      data: { ticketSequence: { increment: 1 } },
-      select: { ticketSequence: true },
-    });
-
-    return project.ticketSequence;
   }
 
   private static async getNextScopedSequence(
