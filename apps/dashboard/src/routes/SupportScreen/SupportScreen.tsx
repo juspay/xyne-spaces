@@ -127,7 +127,14 @@ import {
 import { dynamicColumnKey } from '../../components/Tickets/TicketTable/TicketTableTypes';
 import { useDeskTableColumns, DESK_TABLE_BUILTIN_COLUMNS } from './useDeskTableColumns';
 import { useDeskListColumns } from './useDeskListColumns';
-import { DESK_LIST_TOGGLEABLE_COLUMNS } from '../../components/Tickets/TicketListView/ticketListColumns';
+import { useDeskListColumnOrder } from './useDeskListColumnOrder';
+import { DeskListColumnsMenu } from './DeskListColumnsMenu';
+import {
+  DESK_LIST_TOGGLEABLE_COLUMNS,
+  dynamicFieldListColumn,
+  orderTicketListColumns,
+  TICKET_LIST_COLUMNS,
+} from '../../components/Tickets/TicketListView/ticketListColumns';
 import DuplicateTicketsBanner from './DuplicateTicketsBanner';
 import type { LabelUnreadFilters } from '../../api/conversationLabelsApi';
 import { tagsConfigApi } from '../../api/tagsConfigApi';
@@ -797,6 +804,14 @@ const SupportScreen = (): ReactElement => {
     toggleColumn: toggleListColumn,
     setColumns: setListColumns,
   } = useDeskListColumns(selectedChannelId);
+  const validListColumnKeys = useMemo(
+    () =>
+      new Set([
+        ...DESK_LIST_TOGGLEABLE_COLUMNS.map(c => c.key),
+        ...deskDynamicFields.map(field => dynamicColumnKey(field.id)),
+      ]),
+    [deskDynamicFields],
+  );
   const tableVisibleColumns = useMemo(
     () => new Set([...selectedColumnKeys].filter(key => !key.startsWith('df:'))),
     [selectedColumnKeys],
@@ -816,8 +831,10 @@ const SupportScreen = (): ReactElement => {
         [...columns].filter(k => validTableKeys.has(k) || k.startsWith('df:')),
       );
       if (tableKeys.size > 0) setTableColumns(tableKeys);
-      const validListKeys = new Set(DESK_LIST_TOGGLEABLE_COLUMNS.map(c => c.key as string));
-      const listKeys = new Set([...columns].filter(k => validListKeys.has(k)));
+      const validListKeys = new Set(DESK_LIST_TOGGLEABLE_COLUMNS.map(c => c.key));
+      const listKeys = new Set(
+        [...columns].filter(k => validListKeys.has(k) || k.startsWith('df:')),
+      );
       if (listKeys.size > 0) setListColumns(listKeys);
     },
     [setTableColumns, setListColumns],
@@ -836,6 +853,29 @@ const SupportScreen = (): ReactElement => {
   const tableDynamicFieldColumns = useMemo(
     () => deskDynamicFields.filter(field => selectedColumnKeys.has(dynamicColumnKey(field.id))),
     [deskDynamicFields, selectedColumnKeys],
+  );
+  const listDynamicFieldColumns = useMemo(
+    () => deskDynamicFields.filter(field => listColumnKeys.has(dynamicColumnKey(field.id))),
+    [deskDynamicFields, listColumnKeys],
+  );
+  const { columnOrder: listColumnOrder, moveColumn: moveListColumn } =
+    useDeskListColumnOrder(selectedChannelId);
+  const deskDynamicFieldByKey = useMemo(
+    () => new Map(deskDynamicFields.map(field => [dynamicColumnKey(field.id), field])),
+    [deskDynamicFields],
+  );
+  const listMenuColumns = useMemo(
+    () =>
+      orderTicketListColumns(
+        [
+          ...TICKET_LIST_COLUMNS,
+          ...Array.from(deskDynamicFieldByKey, ([key, field]) =>
+            dynamicFieldListColumn(key, field.fieldName),
+          ),
+        ],
+        listColumnOrder,
+      ),
+    [deskDynamicFieldByKey, listColumnOrder],
   );
 
   const [tagFilterConversationIds, setTagFilterConversationIds] = useState<string[] | null>(null);
@@ -1134,12 +1174,20 @@ const SupportScreen = (): ReactElement => {
     const modeColumnKeys = viewMode === 'list' ? listColumnKeys : selectedColumnKeys;
     const validKeys =
       viewMode === 'list'
-        ? new Set(DESK_LIST_TOGGLEABLE_COLUMNS.map(c => c.key as string))
+        ? validListColumnKeys
         : new Set(DESK_TABLE_BUILTIN_COLUMNS.map(c => c.key as string));
     const savedForMode = new Set([...savedColumnKeys].filter(k => validKeys.has(k)));
     const currentForMode = new Set([...modeColumnKeys].filter(k => validKeys.has(k)));
     return [...savedForMode].sort().join(',') !== [...currentForMode].sort().join(',');
-  }, [activeTicketViewId, deskSavedViews, filters, viewMode, listColumnKeys, selectedColumnKeys]);
+  }, [
+    activeTicketViewId,
+    deskSavedViews,
+    filters,
+    viewMode,
+    listColumnKeys,
+    selectedColumnKeys,
+    validListColumnKeys,
+  ]);
 
   const {
     rowRef: filterRowRef,
@@ -3941,29 +3989,19 @@ const SupportScreen = (): ReactElement => {
                                 )}
                               </>
                             ) : (
-                              DESK_LIST_TOGGLEABLE_COLUMNS.map(column => {
-                                const isSelected = listColumnKeys.has(column.key);
-                                return (
-                                  <button
-                                    key={column.key}
-                                    type='button'
-                                    onClick={() => toggleListColumn(column.key, !isSelected)}
-                                    className='w-full flex items-center justify-between px-4 py-2 text-sm hover:bg-muted'
-                                    data-track-category='Support'
-                                    data-track-name='ToggleListColumn'
-                                    data-track-metadata={JSON.stringify({
-                                      column: column.key,
-                                      visible: !isSelected,
-                                    })}
-                                  >
-                                    <div className='flex items-center gap-3'>
-                                      <Circle className='w-4 h-4' />
-                                      <span>{column.label}</span>
-                                    </div>
-                                    {isSelected && <Check className='w-4 h-4 text-primary' />}
-                                  </button>
-                                );
-                              })
+                              <DeskListColumnsMenu
+                                columns={listMenuColumns}
+                                dynamicFieldByKey={deskDynamicFieldByKey}
+                                selectedKeys={listColumnKeys}
+                                onToggle={toggleListColumn}
+                                onMove={(fromKey, toKey) =>
+                                  moveListColumn(
+                                    listMenuColumns.map(column => column.key),
+                                    fromKey,
+                                    toKey,
+                                  )
+                                }
+                              />
                             )}
                           </Popover.Content>
                         </Popover.Root>
@@ -3987,7 +4025,7 @@ const SupportScreen = (): ReactElement => {
                             }
                             validColumnKeysForMode={
                               viewMode === 'list'
-                                ? new Set(DESK_LIST_TOGGLEABLE_COLUMNS.map(c => c.key as string))
+                                ? validListColumnKeys
                                 : new Set(DESK_TABLE_BUILTIN_COLUMNS.map(c => c.key as string))
                             }
                             dynamicFieldDefs={deskDynamicFields}
@@ -4389,6 +4427,8 @@ const SupportScreen = (): ReactElement => {
                         onToggleSelectAll={handleToggleSelectAll}
                         onTicketsLoaded={handleTicketsLoaded}
                         visibleColumnKeys={listColumnKeys}
+                        dynamicFieldColumns={listDynamicFieldColumns}
+                        columnOrder={listColumnOrder}
                         initialPageIndex={cachedListPagination?.pageIndex}
                         initialPageCursors={cachedListPagination?.pageCursors}
                         initialFetchLimit={cachedListPagination?.fetchLimit}

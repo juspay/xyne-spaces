@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { DESK_LIST_TOGGLEABLE_COLUMNS } from '../../components/Tickets/TicketListView/ticketListColumns';
 
-const DEFAULT_LIST_COLUMN_KEYS = new Set(DESK_LIST_TOGGLEABLE_COLUMNS.map(c => c.key as string));
+const DEFAULT_LIST_COLUMN_KEYS = new Set(DESK_LIST_TOGGLEABLE_COLUMNS.map(c => c.key));
 
 const storageKey = (channelId: string): string => `desk-list-columns-${channelId}`;
 
