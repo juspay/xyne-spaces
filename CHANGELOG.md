@@ -1,3 +1,10 @@
+## [1.399.1](https://github.com/juspay/xyne-spaces/compare/v1.399.0...v1.399.1) (2026-09-25)
+
+
+### Bug Fixes
+
+* fix: XYNE-17198 revert ticket search on every input regardless of expanded groups ([#2142](https://github.com/juspay/xyne-spaces/issues/2142)) ([#2308](https://github.com/juspay/xyne-spaces/issues/2308)) ([1135708](https://github.com/juspay/xyne-spaces/commit/113570862afe29d87b58a24fe03c55bd35d354d0))
+
 ## [1.399.0](https://github.com/juspay/xyne-spaces/compare/v1.398.1...v1.399.0) (2026-09-25)
 
 
