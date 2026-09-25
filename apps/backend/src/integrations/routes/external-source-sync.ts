@@ -97,15 +97,28 @@ export async function resolveChannelMailbox(
 const router = Router();
 const channelEmailAliasService = new ChannelEmailAliasService();
 
+class RouteError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+    this.name = 'RouteError';
+  }
+}
+
+/** The status this route chose, or undefined for anything thrown from below. */
+function routeStatusOf(error: unknown): number | undefined {
+  return error instanceof RouteError ? error.status : undefined;
+}
+
 async function assertChannelParticipant(channelId: string, userId: string): Promise<void> {
   const channel = await db.channel.findUnique({
     where: { id: channelId },
     select: { id: true },
   });
   if (!channel) {
-    const err = new Error('Channel not found') as Error & { status?: number };
-    err.status = 404;
-    throw err;
+    throw new RouteError('Channel not found', 404);
   }
 
   const participant = await db.channelParticipant.findFirst({
@@ -114,11 +127,7 @@ async function assertChannelParticipant(channelId: string, userId: string): Prom
   });
   if (participant) return;
 
-  const err = new Error('Forbidden: only channel participants can fetch from this desk') as Error & {
-    status?: number;
-  };
-  err.status = 403;
-  throw err;
+  throw new RouteError('Forbidden: only channel participants can fetch from this desk', 403);
 }
 
 router.use(
@@ -308,7 +317,7 @@ router.get(
 
       return res.status(200).json({ sources: [...emailRows, ...appRows] });
     } catch (error) {
-      const status = (error as { status?: number } | undefined)?.status ?? 500;
+      const status = routeStatusOf(error) ?? 500;
       const message = error instanceof Error ? error.message : String(error);
       if (status === 500) {
         logger.error('List channel sources failed', { channelId, error: message });
@@ -575,7 +584,7 @@ router.post(
       });
     } catch (error) {
       const raw = error instanceof Error ? error.message : String(error);
-      const thrownStatus = (error as { status?: number } | undefined)?.status;
+      const thrownStatus = routeStatusOf(error);
       const needsReauth = /invalid_grant|unauthorized_client|invalid_token/i.test(raw);
       const status = thrownStatus ?? (needsReauth ? 403 : 500);
       logger.error('Fetch failed', { error: raw, status });

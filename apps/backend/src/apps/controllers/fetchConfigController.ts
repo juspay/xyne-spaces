@@ -34,13 +34,17 @@ import { isInternalMappedHost } from '../core/appUrlResolver';
  * not parse yet is allowed through here — dispatchAppFetch re-checks the URL
  * once its variables are resolved.
  */
-function internalHostInUrl(url: string): string | null {
-  try {
-    const host = new URL(url).hostname.toLowerCase();
-    return isInternalMappedHost(host) ? host : null;
-  } catch {
-    return null;
-  }
+function internalHostInUrl(url: string, ownWebhookUrl: string | null): string | null {
+  const hostOf = (value: string | null): string => {
+    try {
+      return value ? new URL(value).hostname.toLowerCase() : '';
+    } catch {
+      return '';
+    }
+  };
+  const host = hostOf(url);
+  if (!host || !isInternalMappedHost(host)) return null;
+  return host === hostOf(ownWebhookUrl) ? null : host;
 }
 
 const externalSourceRepo = new ExternalSourceRepository();
@@ -167,8 +171,10 @@ export class FetchConfigController {
 
       // Rejected on save as well as at dispatch, so the admin is told now rather
       // than by a failed run later. dispatchAppFetch stays the real enforcement:
-      // the host map can change after a config is stored.
-      const forbiddenHost = internalHostInUrl(parsed.data.url);
+      // the host map can change after a config is stored. The install's own
+      // webhook host is allowed through — that is how a first-party app running
+      // in-cluster is reached.
+      const forbiddenHost = internalHostInUrl(parsed.data.url, install.webhookUrl);
       if (forbiddenHost) {
         res.status(400).json({
           error: 'Invalid fetch configuration',
@@ -176,7 +182,9 @@ export class FetchConfigController {
           issues: [
             {
               path: 'url',
-              message: `"${forbiddenHost}" is an internal service host and cannot be used as a fetch URL`,
+              message:
+                `"${forbiddenHost}" is an internal service host and is not this app's own webhook host. ` +
+                'A history fetch may only reach the app it belongs to.',
             },
           ],
         });
@@ -324,7 +332,9 @@ export class FetchConfigController {
       let response: globalThis.Response;
       const startedAt = Date.now();
       try {
-        response = await dispatchAppFetch(request, config.timeoutMs);
+        response = await dispatchAppFetch(request, config.timeoutMs, {
+          ownWebhookUrl: install.webhookUrl,
+        });
       } catch (error) {
         res.status(200).json({
           ok: false,
