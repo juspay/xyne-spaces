@@ -5,10 +5,8 @@ import { config } from '@/config/env';
 import { runScopedClawAgent } from '@/services/clawAgentService';
 import { MessageAttachmentRepository } from '@/database/repositories/messageAttachmentRepository';
 import { storageService } from '@/services/storage';
-import { runAsServiceActor } from '@/database/tenant/context';
+import { generateScheduledDeskReport } from '@/bypassAcl/deskReportServices';
 import { AttachmentEntityType, AttachmentUploadStatus } from '@xyne/shared';
-
-const DESK_REPORT_SCHEDULER_ACTOR_ID = 'desk-report-scheduler';
 
 const DESK_REPORT_ENTITY_TYPE = AttachmentEntityType.DESK_REPORT;
 // A run with no callback (crash, dropped webhook) is reaped as failed past this age.
@@ -49,9 +47,7 @@ export class DeskReportGenerationService {
     const results: DeskReportGenerationResult[] = [];
     for (const pref of preferences) {
       try {
-        const result = await runAsServiceActor(DESK_REPORT_SCHEDULER_ACTOR_ID, pref.workspaceId, () =>
-          this.generateReportForChannel(pref),
-        );
+        const result = await generateScheduledDeskReport(this, pref);
         results.push(result);
       } catch (error) {
         logger.error(`[DeskReport] Unexpected error for channel ${pref.channelId}:`, error);

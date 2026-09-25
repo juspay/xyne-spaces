@@ -6,7 +6,8 @@ import {
   trackMembershipRowsFor,
   type LegacySdlcHub,
 } from '@/sdlc/sdlcMembershipRows';
-import { asSystem } from './base';
+import type { XyneCommentService } from '@/services/xyneCommentService';
+import { asSystem, asService } from './base';
 import type { SdlcMultirepoBackfillInput, SdlcMultirepoBackfillResult } from '@/sdlc/cleanup/multirepoBackfill';
 import { repositoryHost } from '@/sdlc/vcs/repositoryHost';
 import { SDLC_VCS_EXTERNAL_SOURCE_TYPE } from '@/sdlc/vcs/SdlcVcsCredentialStore';
@@ -14,6 +15,25 @@ import { SDLC_GITHUB_HOST } from '@xyne/shared';
 import { isTrackInChannel } from '@/sdlc/sdlcChannelMembership';
 
 const MULTIREPO_BACKFILL_TAG = '[SdlcMultirepoBackfill]';
+
+/**
+ * Relocated from services/xyneCommentService.ts's processReviewComments. PR-webhook triggered
+ * workflow continuation — no request context, so scope is opened off the ticket's own
+ * workspaceId before resuming the workflow with the reviewer's comments.
+ */
+export function continueXyneCommentWorkflow(
+  workspaceId: string,
+  service: XyneCommentService,
+  ...args: Parameters<XyneCommentService['continueWorkflowWithPRComments']>
+): Promise<void> {
+  return asService(
+    ['WorkflowExecution'],
+    'xyne PR comment continuation: webhook-triggered, no request context, scope opened off the ticket\'s own workspaceId',
+    'xyne-comment',
+    workspaceId,
+    () => service.continueWorkflowWithPRComments(...args),
+  );
+}
 
 /**
  * Relocated from sdlc/sdlcNavTarget.ts's placeInChannel. Checking whether a track sits in a
