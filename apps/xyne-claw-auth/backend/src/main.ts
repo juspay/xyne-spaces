@@ -40,7 +40,9 @@ async function shutdown(signal: string): Promise<void> {
   await shutdownWorkers();
   await redisService.disconnect().catch(() => {});
   await shutdownOpenTelemetry().catch(() => {});
-  server.close(() => process.exit(0));
+  server.close(() => {
+    void agentRunRepository.flushAllToolInvocations().finally(() => process.exit(0));
+  });
   setTimeout(() => process.exit(1), 10_000).unref();
 }
 

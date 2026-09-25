@@ -155,6 +155,23 @@ describe("appendToolInvocation batching", () => {
     expect(invocations("s6").map((i) => i["toolCallId"])).toEqual(["3"]);
   });
 
+  it("never lets a late running event overwrite a stored completed row (start and end on different pods)", async () => {
+    db.rows.set("s8", { toolInvocations: [{ toolCallId: "t", status: "completed", result: "real result" }] });
+    const p = agentRunRepository.appendToolInvocation("s8", { toolCallId: "t", status: "running" });
+    await vi.advanceTimersByTimeAsync(2000);
+    await p;
+    expect(invocations("s8")).toEqual([{ toolCallId: "t", status: "completed", result: "real result" }]);
+  });
+
+  it("keeps the completed event when end arrives before start in the same window", async () => {
+    db.rows.set("s9", { toolInvocations: [] });
+    const end = agentRunRepository.appendToolInvocation("s9", { toolCallId: "t", status: "completed", result: "ok" });
+    const start = agentRunRepository.appendToolInvocation("s9", { toolCallId: "t", status: "running" });
+    await vi.advanceTimersByTimeAsync(2000);
+    await Promise.all([end, start]);
+    expect(invocations("s9")).toEqual([{ toolCallId: "t", status: "completed", result: "ok" }]);
+  });
+
   it("strips NUL characters before storing", async () => {
     db.rows.set("s7", { toolInvocations: [] });
     const p = agentRunRepository.appendToolInvocation("s7", { toolCallId: "n", result: "a\u0000b" });

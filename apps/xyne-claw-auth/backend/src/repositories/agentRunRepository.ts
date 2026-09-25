@@ -104,6 +104,10 @@ function invocationKey(inv: Record<string, unknown>): string {
   return `anon:${anonymousInvocationSeq}`;
 }
 
+function supersedes(incoming: Record<string, unknown>, current: Record<string, unknown>): boolean {
+  return !(incoming["status"] === "running" && current["status"] !== undefined && current["status"] !== "running");
+}
+
 export function mergeToolInvocations(
   existing: Array<Record<string, unknown>>,
   batch: Array<Record<string, unknown>>,
@@ -118,7 +122,7 @@ export function mergeToolInvocations(
     const id = inv["toolCallId"];
     const at = id ? indexById.get(id) : undefined;
     if (at !== undefined) {
-      next[at] = inv;
+      if (supersedes(inv, next[at] as Record<string, unknown>)) next[at] = inv;
     } else {
       next.push(inv);
       if (id) indexById.set(id, next.length - 1);
@@ -173,7 +177,9 @@ function enqueueToolInvocation(sessionId: string, invocation: unknown): Promise<
     pending = { entries: new Map(), waiters: [], timer: null };
     pendingToolInvocations.set(sessionId, pending);
   }
-  pending.entries.set(invocationKey(inv), inv);
+  const key = invocationKey(inv);
+  const buffered = pending.entries.get(key);
+  if (!buffered || supersedes(inv, buffered)) pending.entries.set(key, inv);
   const target = pending;
   const done = new Promise<void>((resolve, reject) => target.waiters.push({ resolve, reject }));
   if (!target.timer) {
