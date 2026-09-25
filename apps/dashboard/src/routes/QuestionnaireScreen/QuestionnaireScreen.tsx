@@ -264,14 +264,14 @@ const QuestionnaireScreen = (): ReactElement | null => {
 
   if (step === 'ai') {
     return (
-      <div className='relative h-[100dvh] w-full overflow-hidden bg-white'>
+      <div className='relative h-[100dvh] w-full overflow-x-hidden overflow-y-auto bg-white'>
         <img
           src='/svgs/xyne.svg'
           alt='Xyne'
           className='absolute left-6 top-6 h-7 w-auto md:left-12 md:top-[34px] md:h-[30px] lg:left-16'
         />
 
-        <div className='mx-auto flex h-full w-full max-w-[920px] flex-col items-center justify-center px-4 pb-16 sm:px-6 md:justify-start md:pb-0 md:pt-[156px]'>
+        <div className='mx-auto flex min-h-full w-full max-w-[920px] flex-col items-center justify-center px-4 pb-16 sm:px-6 md:justify-start md:pb-10 md:pt-[clamp(72px,12dvh,156px)]'>
           <div className='flex h-[84px] w-[84px] shrink-0 items-center justify-center rounded-[22px] bg-gradient-to-b from-[#FF8C8C] to-[#FF4F4F] shadow-[0_16px_40px_rgba(255,79,79,0.24)] md:h-[118px] md:w-[118px] md:rounded-[30px]'>
             <img
               src='/svgs/icons/genius-star-white.svg'
@@ -287,7 +287,7 @@ const QuestionnaireScreen = (): ReactElement | null => {
             It&apos;s wherever you are, and it already knows what you&apos;re looking at
           </p>
 
-          <div className='mt-[72px] hidden grid-cols-2 gap-[38px] md:grid'>
+          <div className='hidden grid-cols-2 gap-[38px] md:mt-[clamp(40px,6dvh,72px)] md:grid'>
             <div>
               <div className='relative h-[176px] w-[400px] max-w-full overflow-hidden rounded-[18px] border border-[#E1E5EC] bg-[#F8FAFD] shadow-[inset_0_-44px_62px_rgba(145,158,178,0.14)]'>
                 <div className='absolute inset-x-0 top-[80px] h-px bg-[#D9DEE7]' />
@@ -350,7 +350,7 @@ const QuestionnaireScreen = (): ReactElement | null => {
             type='button'
             onClick={() => void handleComplete()}
             disabled={isCompleting}
-            className='mt-[48px] inline-flex h-[56px] shrink-0 items-center gap-3 rounded-[12px] bg-[#FF6868] px-6 text-[18px] font-semibold text-white transition-colors hover:bg-[#FF5A5A] disabled:cursor-not-allowed disabled:opacity-60 md:mt-[120px]'
+            className='mt-[48px] inline-flex h-[56px] shrink-0 items-center gap-3 rounded-[12px] bg-[#FF6868] px-6 text-[18px] font-semibold text-white transition-colors hover:bg-[#FF5A5A] disabled:cursor-not-allowed disabled:opacity-60 md:mt-[clamp(40px,8dvh,120px)]'
             data-track-category='Questionnaire'
             data-track-name='EnterWorkspace'
           >

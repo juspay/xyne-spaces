@@ -2,10 +2,16 @@ export * from './acl';
 export * from './audit';
 
 export { schema, type Schema, type Context } from './schema';
-export { encryptedFieldsConfig, type EncryptedTableConfig } from './encrypted-fields';
 export { DelayedMessageStatus, AttachmentUploadStatus } from './schema';
 export { zql } from './builder';
-export { EncryptedFieldQueryError, validateQueryWhereClause, type Condition, type QueryAST } from './client-transaction-wrapper';
+export {
+  EncryptedFieldQueryError,
+  validateQueryWhereClause,
+  isEncryptionScopeEmpty,
+  isWorkspaceInEncryptionScope,
+  type EncryptedWorkspaceScope,
+  type EncryptedTableConfig,
+} from './query-validation';
 export { queries } from './queries';
 export { mutators, type AuthData } from './mutators';
 export { stringFromFormValue } from '../tickets/utils';

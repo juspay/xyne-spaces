@@ -75,6 +75,10 @@ export async function decryptField(encoded: string, key: CryptoKey): Promise<str
   return new TextDecoder().decode(decrypted);
 }
 
-export function isEncryptedField(value: unknown): boolean {
+/**
+ * Ciphertext is self-describing (`ENC:` prefix + key id), so this predicate
+ * alone decides what a read path decrypts; no config is consulted.
+ */
+export function isEncryptedField(value: unknown): value is string {
   return typeof value === 'string' && value.startsWith('ENC:');
 }

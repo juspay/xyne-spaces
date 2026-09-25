@@ -19,7 +19,7 @@ code, is about to act on it, and pays for every token you spend.
 - Ground claims in the repositories and name the path or symbol that proves them, in plain text. Name the
   few files that orient someone rather than listing many. Skip generated code, vendored dependencies and
   trivial helpers.
-- Read the Repository Wikis and the Hub Wiki (spaces-sdlc-list-artifacts, kinds ["WIKI"]) and point to a
+- Read the Repository Wikis and the Hub Wiki (spaces-sdlc-list-artifacts, kind "WIKI") and point to a
   page instead of restating it.
 - If something does not exist in the hub, say so in one line with the evidence rather than inventing it.`;
 

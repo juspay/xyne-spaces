@@ -98,12 +98,6 @@ export interface FirstParentHistory {
   commits: FirstParentCommitIdentity[];
 }
 
-export interface SourceLineRange {
-  path: string;
-  startLine?: number;
-  endLine?: number;
-}
-
 export interface VcsProviderAdapter {
   readonly provider: VcsProvider;
   parseRepositoryUrl(url: string): ParsedRepository;
@@ -122,12 +116,6 @@ export interface VcsProviderAdapter {
     repository: ParsedRepository,
     number: number
   ): Promise<PullRequestInspection>;
-  verifyRemoteCommit(
-    token: string | undefined,
-    repository: ParsedRepository,
-    branch: string,
-    commitHash: string
-  ): Promise<void>;
   resolveBranchHead(
     token: string | undefined,
     repository: ParsedRepository,
@@ -138,18 +126,6 @@ export interface VcsProviderAdapter {
     repository: ParsedRepository,
     branch: string
   ): Promise<FirstParentHistory>;
-  verifyPathsAtCommit(
-    token: string | undefined,
-    repository: ParsedRepository,
-    commitHash: string,
-    paths: string[]
-  ): Promise<void>;
-  verifySourceRangesAtCommit(
-    token: string | undefined,
-    repository: ParsedRepository,
-    commitHash: string,
-    references: SourceLineRange[]
-  ): Promise<void>;
   validatePullRequestUrl(repository: ParsedRepository, url: string): boolean;
 }
 
@@ -190,12 +166,6 @@ export interface SdlcVcs {
   inspectPullRequest(repoId: string, number: number): Promise<PullRequestInspection>;
   resolveBaseBranchHead(repoId: string): Promise<string>;
   listBaseBranchFirstParentHistory(repoId: string): Promise<FirstParentHistory>;
-  verifySourcePaths(repoId: string, commitHash: string, paths: string[]): Promise<void>;
-  verifySourceRanges(
-    repoId: string,
-    commitHash: string,
-    references: SourceLineRange[]
-  ): Promise<void>;
 }
 
 export class VcsProviderError extends Error {

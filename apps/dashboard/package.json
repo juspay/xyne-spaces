@@ -1,6 +1,6 @@
 {
   "name": "xyne-spaces-dashboard",
-  "version": "1.396.1",
+  "version": "1.401.1",
   "type": "module",
   "description": "Xyne Spaces - Workflow Automation Dashboard",
   "scripts": {
@@ -17,9 +17,10 @@
     "build": "tsc --noEmit && vite build",
     "build:sdlc": "tsc --noEmit && vite build --mode sdlc",
     "preview": "vite preview",
-    "lint": "eslint .",
-    "lint:errors-only": "eslint . --quiet",
-    "lint:fix": "eslint . --fix",
+    "lint": "eslint . --cache --cache-location node_modules/.cache/eslint/ --cache-strategy content",
+    "lint:errors-only": "eslint . --quiet --cache --cache-location node_modules/.cache/eslint/ --cache-strategy content",
+    "lint:errors-only:ci": "eslint . --quiet",
+    "lint:fix": "eslint . --fix --cache --cache-location node_modules/.cache/eslint/ --cache-strategy content",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit --project tsconfig.app.json --pretty",

@@ -29,13 +29,13 @@ import {
   resolveOrchestratorCallableAgentsForRun,
 } from "./callable-agent-resolver.js";
 import {
-  sdlcAgentToolProfile,
+  mergeSdlcToolProfile,
   parseToolsConfig,
   stripPlatformConfigKeys,
   isAgentInvocableBy,
-  SDLC_AGENT_SLUG,
 } from "xyne-claw-shared";
-import { tools as xyneSpacesTools } from "../mcp/servers/xyne-spaces-tools.js";
+import { markSdlcRun, SDLC_AGENT_TOOL_PROFILE } from "./sdlc-run-tools.js";
+import { getSessionByConv } from "./session-context.js";
 import { mintSessionToken } from "./session-tokens.js";
 import {
   resolveAgentProviderConfigs,
@@ -64,10 +64,6 @@ import type { SessionContext } from "../routes/webhook.js";
 const JUDGE_BACKENDS = new Set(["jev", "ournormaljev", "ourtrainedjev", "llm"]);
 
 const log = createLogger("run");
-
-const SDLC_AGENT_TOOL_PROFILE = sdlcAgentToolProfile(
-  xyneSpacesTools.map((tool) => tool.name),
-);
 
 export const RECORDING_MAX_BYTES = 1024 * 1024 * 1024;
 const RECORDING_REF_TTL_SECONDS = 6 * 60 * 60;
@@ -956,24 +952,6 @@ export async function prepareRun(
       ...storedAgentConfig,
       ...((body as { agentConfig?: Record<string, unknown> }).agentConfig ?? {}),
     });
-    if (agentSlug === SDLC_AGENT_SLUG) {
-      const configuredTools = (mergedAgentConfig["tools"] as Record<string, unknown> | undefined) ?? {};
-      const configuredPermissions =
-        (mergedAgentConfig["toolPermissions"] as Record<string, unknown> | undefined) ?? {};
-      mergedAgentConfig = {
-        ...mergedAgentConfig,
-        tools: {
-          ...configuredTools,
-          direct: SDLC_AGENT_TOOL_PROFILE.tools.direct,
-          custom: SDLC_AGENT_TOOL_PROFILE.tools.custom,
-          subagents: SDLC_AGENT_TOOL_PROFILE.tools.subagents,
-        },
-        toolPermissions: {
-          ...configuredPermissions,
-          ...SDLC_AGENT_TOOL_PROFILE.toolPermissions,
-        },
-      };
-    }
     if (!isInternalRun) {
       const {
         sdlcContext: _untrustedSdlcContext,
@@ -985,10 +963,22 @@ export async function prepareRun(
     }
     let sdlcAgentRunContext = parseSdlcAgentRunContext(mergedAgentConfig["sdlcContext"]);
     if (!sdlcAgentRunContext) {
+      // Claw chat sends no channel; a hub thread reopened there takes its hub from the thread's last run.
+      const hubChannelId =
+        effectiveChannelId ||
+        (conversationId && agentSlug
+          ? ((await getSessionByConv(conversationId, agentSlug).catch(() => null))?.channelId ?? "")
+          : "");
       sdlcAgentRunContext = parseSdlcAgentRunContext(
-        await resolveSdlcHubContextForUser(resolved.userId, effectiveChannelId, conversationId),
+        await resolveSdlcHubContextForUser(resolved.userId, hubChannelId, conversationId),
       );
       if (sdlcAgentRunContext) mergedAgentConfig = { ...mergedAgentConfig, sdlcContext: sdlcAgentRunContext };
+    }
+    // Any agent running in an SDLC hub gets the SDLC tools on top of its own.
+    if (sdlcAgentRunContext) {
+      mergedAgentConfig = mergeSdlcToolProfile(mergedAgentConfig, SDLC_AGENT_TOOL_PROFILE, {
+        interactive: !isScheduledOrAutomationEvent(eventType),
+      });
     }
     const effectiveFastMode =
       explicitFastMode ??
@@ -1053,6 +1043,13 @@ export async function prepareRun(
       } catch (error) {
         log.error(`[run] Failed to bind recording references to session ${sessionId}:`, error);
         return { ok: false, status: 503, error: "Could not initialize recording transfer" };
+      }
+    }
+    if (sdlcAgentRunContext) {
+      try {
+        await markSdlcRun(sessionId, String(sdlcAgentRunContext["channelId"]));
+      } catch (error) {
+        log.error(`[run] Failed to mark SDLC run ${sessionId}; the MCP gate will refuse its SDLC tools:`, error);
       }
     }
     const standardCallableAgents = callableAgents as Array<{ slug: string; spacesAppId?: string | null }>;

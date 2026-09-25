@@ -2,14 +2,12 @@ import { WORKFLOW_MCP_TOOL_NAMES, WORKFLOW_MCP_WRITE_TOOL_NAMES } from "../tools
 
 export type SdlcToolTransport = "direct" | "custom" | "subagent";
 export type SdlcMutationLevel = "read" | "write";
-export type SdlcTrustedBinding = "none" | "hub" | "repository" | "actor";
 
 export interface SdlcToolCapability {
   name: string;
   transport: SdlcToolTransport;
   group: "sdlc" | "spaces" | "sandbox" | "planning" | "subagent";
   mutation: SdlcMutationLevel;
-  trustedBinding: SdlcTrustedBinding;
 }
 
 export const SDLC_AGENT_SLUG = "sdlc-agent" as const;
@@ -17,12 +15,13 @@ export const SDLC_AGENT_SLUG = "sdlc-agent" as const;
 export const SDLC_TOOL_NAMES = {
   listArtifacts: "spaces-sdlc-list-artifacts",
   readArtifact: "spaces-sdlc-read-artifact",
-  mutateArtifact: "spaces-sdlc-mutate-artifact",
+  writeArtifact: "spaces-sdlc-write-artifact",
+  archiveArtifact: "spaces-sdlc-archive-artifact",
   listArtifactVersions: "spaces-sdlc-list-artifact-versions",
-  readArtifactVersion: "spaces-sdlc-read-artifact-version",
   createPullRequest: "spaces-sdlc-create-pull-request",
   listTracks: "spaces-sdlc-list-tracks",
   createTrack: "spaces-sdlc-create-track",
+  createTrackFolder: "spaces-sdlc-create-track-folder",
   listArtifactTypes: "spaces-sdlc-list-artifact-types",
   listRepositories: "spaces-sdlc-list-repositories",
   listEntityLinks: "spaces-sdlc-list-entity-links",
@@ -31,17 +30,18 @@ export const SDLC_TOOL_NAMES = {
 export type SdlcToolName = (typeof SDLC_TOOL_NAMES)[keyof typeof SDLC_TOOL_NAMES];
 
 export const SDLC_TOOL_CAPABILITIES: readonly SdlcToolCapability[] = [
-  { name: SDLC_TOOL_NAMES.listArtifacts, transport: "direct", group: "sdlc", mutation: "read", trustedBinding: "repository" },
-  { name: SDLC_TOOL_NAMES.readArtifact, transport: "direct", group: "sdlc", mutation: "read", trustedBinding: "hub" },
-  { name: SDLC_TOOL_NAMES.mutateArtifact, transport: "direct", group: "sdlc", mutation: "write", trustedBinding: "repository" },
-  { name: SDLC_TOOL_NAMES.listArtifactVersions, transport: "direct", group: "sdlc", mutation: "read", trustedBinding: "hub" },
-  { name: SDLC_TOOL_NAMES.readArtifactVersion, transport: "direct", group: "sdlc", mutation: "read", trustedBinding: "hub" },
-  { name: SDLC_TOOL_NAMES.createPullRequest, transport: "direct", group: "sdlc", mutation: "write", trustedBinding: "actor" },
-  { name: SDLC_TOOL_NAMES.listTracks, transport: "direct", group: "sdlc", mutation: "read", trustedBinding: "repository" },
-  { name: SDLC_TOOL_NAMES.createTrack, transport: "direct", group: "sdlc", mutation: "write", trustedBinding: "repository" },
-  { name: SDLC_TOOL_NAMES.listArtifactTypes, transport: "direct", group: "sdlc", mutation: "read", trustedBinding: "repository" },
-  { name: SDLC_TOOL_NAMES.listRepositories, transport: "direct", group: "sdlc", mutation: "read", trustedBinding: "none" },
-  { name: SDLC_TOOL_NAMES.listEntityLinks, transport: "direct", group: "sdlc", mutation: "read", trustedBinding: "hub" },
+  { name: SDLC_TOOL_NAMES.listArtifacts, transport: "direct", group: "sdlc", mutation: "read" },
+  { name: SDLC_TOOL_NAMES.readArtifact, transport: "direct", group: "sdlc", mutation: "read" },
+  { name: SDLC_TOOL_NAMES.writeArtifact, transport: "direct", group: "sdlc", mutation: "write" },
+  { name: SDLC_TOOL_NAMES.archiveArtifact, transport: "direct", group: "sdlc", mutation: "write" },
+  { name: SDLC_TOOL_NAMES.listArtifactVersions, transport: "direct", group: "sdlc", mutation: "read" },
+  { name: SDLC_TOOL_NAMES.createPullRequest, transport: "direct", group: "sdlc", mutation: "write" },
+  { name: SDLC_TOOL_NAMES.listTracks, transport: "direct", group: "sdlc", mutation: "read" },
+  { name: SDLC_TOOL_NAMES.createTrack, transport: "direct", group: "sdlc", mutation: "write" },
+  { name: SDLC_TOOL_NAMES.createTrackFolder, transport: "direct", group: "sdlc", mutation: "write" },
+  { name: SDLC_TOOL_NAMES.listArtifactTypes, transport: "direct", group: "sdlc", mutation: "read" },
+  { name: SDLC_TOOL_NAMES.listRepositories, transport: "direct", group: "sdlc", mutation: "read" },
+  { name: SDLC_TOOL_NAMES.listEntityLinks, transport: "direct", group: "sdlc", mutation: "read" },
 ] as const;
 
 export const SDLC_GENERIC_SANDBOX_TOOLS = [
@@ -74,6 +74,8 @@ export const SDLC_GENERIC_SPACES_WRITE_TOOLS = [
 ] as const;
 
 export const SDLC_RETIRED_TOOL_NAMES = [
+  "spaces-sdlc-mutate-artifact",
+  "spaces-sdlc-read-artifact-version",
   "spaces-sdlc-create-artifact",
   "spaces-sdlc-update-baseline",
   "spaces-sdlc-wiki-list-pages",
@@ -98,8 +100,30 @@ export const SDLC_CUSTOM_TOOL_NAMES = [
 
 export interface SdlcAgentToolProfile {
   tools: { direct: string[]; custom: string[]; subagents: string[] };
+  /** Permissions for a run a person is watching; see sdlcToolPermissions for headless runs. */
   toolPermissions: Record<string, "allow" | "ask">;
   agentToolAllows: string[];
+}
+
+/** Writes ask on a watched run and are allowed on automation/workflow runs, where nobody can approve. */
+export function sdlcToolPermissions(
+  direct: readonly string[],
+  interactive: boolean,
+): Record<string, "allow" | "ask"> {
+  const write = interactive ? "ask" : "allow";
+  const toolPermissions: Record<string, "allow" | "ask"> = {};
+  for (const name of SDLC_GENERIC_SPACES_WRITE_TOOLS) {
+    if (direct.includes(name)) toolPermissions[`xyne-spaces__${name}`] = write;
+  }
+  for (const tool of SDLC_TOOL_CAPABILITIES) {
+    if (tool.transport === "direct") {
+      toolPermissions[`xyne-spaces__${tool.name}`] = tool.mutation === "write" ? write : "allow";
+    }
+  }
+  for (const name of WORKFLOW_MCP_WRITE_TOOL_NAMES) {
+    toolPermissions[`xyne-workflows__${name}`] = write;
+  }
+  return toolPermissions;
 }
 
 export function buildSdlcAgentToolProfile(spacesMcpToolNames: readonly string[]): SdlcAgentToolProfile {
@@ -116,32 +140,15 @@ export function buildSdlcAgentToolProfile(spacesMcpToolNames: readonly string[])
   if (missing.length > 0) {
     throw new Error(`SDLC MCP tools missing from Xyne Spaces server: ${missing.join(", ")}`);
   }
-  const toolPermissions: Record<string, "allow" | "ask"> = {};
-  for (const name of SDLC_GENERIC_SPACES_WRITE_TOOLS) {
-    if (direct.includes(name)) toolPermissions[`xyne-spaces__${name}`] = "ask";
-  }
-  for (const tool of SDLC_TOOL_CAPABILITIES) {
-    if (tool.transport === "direct") toolPermissions[`xyne-spaces__${tool.name}`] = "allow";
-  }
-  // Workflow writes are "allow", not "ask": SDLC runs are also triggered BY
-  // workflows (sessions like wf-…), where nobody is in a thread to approve, so
-  // an "ask" would fail closed and stall the run. Matches ask-ai's seeded config.
-  for (const name of WORKFLOW_MCP_WRITE_TOOL_NAMES) {
-    toolPermissions[`xyne-workflows__${name}`] = "allow";
-  }
   return {
     tools: {
       direct,
       custom: [...SDLC_CUSTOM_TOOL_NAMES],
       subagents: [...SDLC_SUBAGENTS],
     },
-    toolPermissions,
+    toolPermissions: sdlcToolPermissions(direct, true),
     agentToolAllows: [...SDLC_CUSTOM_TOOL_NAMES],
   };
-}
-
-export function sdlcTrustedBindingFor(toolName: string): SdlcTrustedBinding {
-  return SDLC_TOOL_CAPABILITIES.find((tool) => tool.name === toolName)?.trustedBinding ?? "none";
 }
 
 let cachedProfile: SdlcAgentToolProfile | undefined;
@@ -151,3 +158,44 @@ export function sdlcAgentToolProfile(spacesMcpToolNames: readonly string[]): Sdl
   return cachedProfile;
 }
 
+function stringList(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+/**
+ * The SDLC tools unioned into an agent's tools selection. Undefined stays undefined:
+ * an agent with no selection is unrestricted, and creating one would restrict it.
+ */
+export function withSdlcToolsConfig(
+  tools: Record<string, unknown> | undefined,
+  profile: SdlcAgentToolProfile,
+): Record<string, unknown> | undefined {
+  if (!tools) return undefined;
+  const union = (key: "direct" | "custom" | "subagents") => [
+    ...new Set([...stringList(tools[key]), ...profile.tools[key]]),
+  ];
+  return { ...tools, direct: union("direct"), custom: union("custom"), subagents: union("subagents") };
+}
+
+/**
+ * Adds the SDLC profile to an agent config for one run: tools are a union with the
+ * agent's own, SDLC tool permissions overwrite the agent's. An unrestricted agent keeps
+ * no tools selection but still gets the permissions.
+ */
+export function mergeSdlcToolProfile(
+  config: Record<string, unknown>,
+  profile: SdlcAgentToolProfile,
+  options: { interactive: boolean },
+): Record<string, unknown> {
+  const raw = config["tools"];
+  const tools = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : undefined;
+  const permissions = config["toolPermissions"];
+  return {
+    ...config,
+    ...(tools ? { tools: withSdlcToolsConfig(tools, profile) } : {}),
+    toolPermissions: {
+      ...(permissions && typeof permissions === "object" && !Array.isArray(permissions) ? permissions : {}),
+      ...sdlcToolPermissions(profile.tools.direct, options.interactive),
+    },
+  };
+}

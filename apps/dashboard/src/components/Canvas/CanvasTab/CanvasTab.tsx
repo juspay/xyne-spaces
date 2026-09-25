@@ -20,6 +20,7 @@ import { Dialog } from '../../ui/Dialog';
 import { Tooltip } from '../../ui/Tooltip/Tooltip';
 import Input from '../../ui/Input';
 import { ChannelCanvasList } from '../ChannelCanvasList';
+import { CanvasDeleteModal } from '../CanvasDeleteModal';
 import { CanvasShareModal } from '../CanvasShareModal';
 import {
   CanvasVersionDiffPanel,
@@ -184,6 +185,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
   const [showCreateFolderDialog, setShowCreateFolderDialog] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
   const [isCreatingFolder, setIsCreatingFolder] = useState(false);
+  const [deletingFolder, setDeletingFolder] = useState<CanvasFolder | null>(null);
   const [showVersionHistory, setShowVersionHistory] = useState(false);
   const [previewVersion, setPreviewVersion] = useState<CanvasVersionRecord | null>(null);
   const [showVersionDiff, setShowVersionDiff] = useState(false);
@@ -467,6 +469,36 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
       }
     })();
   }, [channelId, isChannelArchived, newFolderName, showArchivedChannelCreateError, z]);
+
+  const handleDeleteFolder = useCallback((folder: CanvasFolder, canvasCount: number): void => {
+    if (canvasCount > 0) {
+      toast.error('Move or delete canvases in this folder first');
+      return;
+    }
+
+    setDeletingFolder(folder);
+  }, []);
+
+  const handleConfirmDeleteFolder = useCallback((): void => {
+    if (!deletingFolder) return;
+
+    void (async (): Promise<void> => {
+      try {
+        const result = z.mutate(mutators.canvasFolder.delete({ id: deletingFolder.id }));
+        const serverResult = await result.server;
+        if (serverResult.type === 'error') {
+          throw new Error(serverResult.error.message || 'Failed to delete folder');
+        }
+
+        toast.success('Folder deleted');
+        setDeletingFolder(null);
+      } catch (error) {
+        toast.error('Failed to delete folder', {
+          description: error instanceof Error ? error.message : 'Please try again.',
+        });
+      }
+    })();
+  }, [deletingFolder, z]);
 
   const handleCreateCanvas = async (): Promise<void> => {
     if (isChannelArchived) {
@@ -753,6 +785,37 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
     setShowVersionDiff(false);
   };
 
+  const handleMoveCanvas = useCallback(
+    async (targetCanvas: Canvas, folderId: string | null): Promise<void> => {
+      if (isChannelArchived) {
+        toast.error('Cannot move canvas', { description: 'This channel is archived.' });
+        return;
+      }
+
+      try {
+        const result = z.mutate(
+          mutators.canvas.update({
+            id: targetCanvas.id,
+            folderId,
+            channelId,
+            timestamp: Date.now(),
+          }),
+        );
+        const serverResult = await result.server;
+        if (serverResult.type === 'error') {
+          throw new Error(serverResult.error.message || 'Failed to move canvas');
+        }
+
+        toast.success(folderId ? 'Canvas moved to folder' : 'Canvas moved to channel root');
+      } catch (error) {
+        toast.error('Failed to move canvas', {
+          description: error instanceof Error ? error.message : 'Please try again.',
+        });
+      }
+    },
+    [channelId, isChannelArchived, z],
+  );
+
   const handleRestoreVersion = useCanvasVersionRestore<Canvas, PartialBlock[], CanvasVersionRecord>(
     {
       canEdit,
@@ -897,10 +960,14 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
               onCreateCanvasInFolder={folder => {
                 void handleCreateCanvasInFolder(folder);
               }}
+              onDeleteFolder={handleDeleteFolder}
+              canManageAllFolders={isChannelAdmin}
               isCreatingCanvas={isCreatingCanvas}
               showStarredOnly={showStarredOnly}
               onToggleStar={handleToggleStar}
               onArchiveToggle={handleArchiveToggleCanvas}
+              onMoveCanvas={handleMoveCanvas}
+              moveDisabled={isChannelArchived}
             />
           </div>
         </div>
@@ -984,6 +1051,20 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
               </Button>
             </div>
           </div>
+        </Dialog>
+        <Dialog
+          open={!!deletingFolder}
+          onOpenChange={open => {
+            if (!open) setDeletingFolder(null);
+          }}
+          title='Delete Folder'
+        >
+          <CanvasDeleteModal
+            onClose={() => setDeletingFolder(null)}
+            onConfirm={handleConfirmDeleteFolder}
+            entityType='folder'
+            itemTitle={deletingFolder?.name}
+          />
         </Dialog>
       </>
     );

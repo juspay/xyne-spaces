@@ -9,6 +9,7 @@ import {
   createSdlcLinkSchema,
   createSdlcVcsCredentialSchema,
   resolveSdlcRepositoryLinkSchema,
+  setSdlcArtifactArchivedSchema,
   sdlcVcsProviderSchema,
   updateSdlcVcsCredentialSchema,
 } from '@xyne/shared';
@@ -152,6 +153,20 @@ router.delete(
       actorFromRequest(req),
       req.params.channelId,
       req.params.repoId
+    );
+    res.status(204).send();
+  })
+);
+
+router.post(
+  '/channels/:channelId/artifacts/:canvasId/archive',
+  route(async (req, res) => {
+    const input = setSdlcArtifactArchivedSchema.parse(req.body);
+    await sdlcHub.setArtifactArchived(
+      actorFromRequest(req),
+      req.params.channelId,
+      req.params.canvasId,
+      input.archived
     );
     res.status(204).send();
   })
