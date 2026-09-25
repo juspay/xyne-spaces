@@ -36,7 +36,8 @@ import {
   isClawAdmin,
   requireRequester,
 } from "../middleware/agent-acl.js";
-import { pinUserIdParam } from "../middleware/pin-user-id-param.js";
+import { getRequesterAliases, matchesAuthenticatedUserId, pinUserIdParam } from "../middleware/pin-user-id-param.js";
+import { findUserByAnyId, resolveCanonicalUserIdOrSelf } from "../lib/users-jit.js";
 import { s2sKeyMatches } from "../middleware/require-auth.js";
 import { writeAuditLog } from "../lib/audit.js";
 import { buildAvailableToolsCatalog } from "./tools.js";
@@ -359,15 +360,70 @@ router.get("/check-name", asyncHandler(async (req: Request, res: Response, next)
 
 // ── Agent CRUD ───────────────────────────────────────────────────────
 
+/** Union one name-sorted listVisible result per identity alias into a single
+ *  name-sorted list, dropping the global agents every alias call returns. */
+function mergeVisibleAgentLists(
+  lists: Array<Awaited<ReturnType<typeof agentRepository.listVisible>>>,
+): Awaited<ReturnType<typeof agentRepository.listVisible>> {
+  const seen = new Set<string>();
+  const merged = [];
+  for (const list of lists) {
+    for (const agent of list) {
+      if (seen.has(agent.id)) continue;
+      seen.add(agent.id);
+      merged.push(agent);
+    }
+  }
+  merged.sort((a, b) => a.name.localeCompare(b.name));
+  return merged;
+}
+
 router.get("/", asyncHandler(async (req: Request, res: Response) => {
   // The caller-passed userId is honoured as a "scope" hint (lets a frontend
   // ask "what would user X see"), but the ADMIN bypass is determined from
   // the AUTHENTICATED user — requireAuth has already verified their cookie
   // and pinned the verified userId at req.headers["x-user-id"]. We never
   // trust the query string for that decision.
-  const scopeUserId = (req.query["userId"] as string | undefined) ?? undefined;
+  const scopeUserId = (req.query["userId"] as string | undefined)?.trim() || undefined;
   const authedUserId = String(req.headers["x-user-id"] ?? "");
   const admin = authedUserId ? await isClawAdmin(authedUserId) : false;
+
+  // Dashboard auth exposes the workspace-scoped Spaces user ID, while
+  // Agent.ownerUserId stores the canonical Claw User ID. Resolve an explicit
+  // scope through UserSurfaceIdentity before applying the visibility filter.
+  // Non-admin callers may only request their own two equivalent identities.
+  if (scopeUserId && !admin && !matchesAuthenticatedUserId(req, scopeUserId)) {
+    throw forbidden("userId does not match authenticated session");
+  }
+  const scopedUser = scopeUserId ? await findUserByAnyId(scopeUserId) : null;
+  if (scopeUserId && !scopedUser) {
+    // If the caller is querying their OWN userId (matched by header aliases),
+    // fall through — canonicalScopeUserId will use authedUserId below.
+    // This handles the case where UserSurfaceIdentity isn't populated yet
+    // (e.g. the Surface migration hasn't run) but the user is authenticated.
+    if (!matchesAuthenticatedUserId(req, scopeUserId)) {
+      throw notFound("User not found");
+    }
+  }
+  const canonicalScopeUserId = (scopedUser?.id ?? authedUserId) || undefined;
+
+  // Agent.ownerUserId / AgentShare.userId may be keyed by EITHER verified
+  // representation of the scoped caller — the canonical Claw id OR the raw
+  // workspace-scoped Spaces id (rows written before canonicalization, or by
+  // clients posting their raw dashboard id as ownerUserId). listVisible
+  // filters one id per call, so an OWN-scope read unions each alias's
+  // results; an admin's explicit foreign scope resolves to the target's
+  // canonical id only.
+  const visibilityUserIds = (() => {
+    if (scopedUser && !matchesAuthenticatedUserId(req, scopedUser.id)) {
+      return [scopedUser.id];
+    }
+    const ids = getRequesterAliases(req);
+    if (canonicalScopeUserId && !ids.includes(canonicalScopeUserId)) {
+      ids.push(canonicalScopeUserId);
+    }
+    return ids;
+  })();
 
   // The admin "see ALL agents" bypass is OPT-IN via ?scope=all. The default
   // list (e.g. the main "My Agents" view) stays filtered to
@@ -378,11 +434,22 @@ router.get("/", asyncHandler(async (req: Request, res: Response) => {
   const wantAllAgents = req.query["scope"] === "all";
   const adminScope = getAdminOrgScope(req, "/agents", admin && wantAllAgents);
   const listOrgId = adminScope.orgId ?? getOrgId(req);
-  const agents = await agentRepository.listVisible({
-    ...(scopeUserId ? { userId: scopeUserId } : {}),
-    ...(listOrgId ? { orgId: listOrgId } : {}),
-    isAdmin: admin && wantAllAgents,
-  });
+  const agents = visibilityUserIds.length > 0
+    ? mergeVisibleAgentLists(
+        await Promise.all(
+          visibilityUserIds.map((id) =>
+            agentRepository.listVisible({
+              userId: id,
+              ...(listOrgId ? { orgId: listOrgId } : {}),
+              isAdmin: admin && wantAllAgents,
+            }),
+          ),
+        ),
+      )
+    : await agentRepository.listVisible({
+        ...(listOrgId ? { orgId: listOrgId } : {}),
+        isAdmin: admin && wantAllAgents,
+      });
   const orgNames = adminScope.allOrgs ? await getOrgNameMap(agents.map((a) => a.orgId)) : new Map();
 
   const view = req.query["view"] === "full" ? "full" : "light";
@@ -401,10 +468,12 @@ router.get("/user-config", asyncHandler(async (req: Request, res: Response) => {
   const userId = (req.query["userId"] as string | undefined)?.trim();
   if (!userId) throw badRequest("userId is required");
   const requesterId = requireRequester(req, "authenticated user required");
-  if (requesterId !== userId) throw forbidden("userId does not match authenticated session");
+  if (!matchesAuthenticatedUserId(req, userId)) throw forbidden("userId does not match authenticated session");
   const orgId = getOrgId(req);
   if (!orgId) throw badRequest("Organization context is required");
-  const configs = await userAgentConfigRepository.listByUser(userId, orgId);
+  // The query id may be the caller's raw Spaces alias while config rows are
+  // keyed by Claw's canonical id — read with the verified canonical id.
+  const configs = await userAgentConfigRepository.listByUser(requesterId, orgId);
   ok(res, {
     configs: configs.map((config) => ({
       agentSlug: config.agentSlug,
@@ -496,11 +565,20 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
   const admin = requesterId ? await isClawAdmin(requesterId) : false;
   const effectiveScope = scope === "global" && admin ? "global" : "personal";
 
-  if (ownerUserId && ownerUserId !== requesterId && !admin) {
+  // The auth boundary retains both representations of the caller, so accept
+  // either the canonical Claw id or the verified Spaces id from the session.
+  if (ownerUserId && !matchesAuthenticatedUserId(req, ownerUserId) && !admin) {
     throw forbidden("Only an admin can create an agent owned by another user");
   }
-  // For personal agents, owner is required
-  const effectiveOwner = ownerUserId ?? requesterId;
+  // For personal agents, owner is required.
+  // When ownerUserId is the caller's own Spaces workspace ID (which the frontend
+  // sends from auth.user.id), prefer requesterId — the canonical Claw user ID
+  // set by requireAuth — so the DB connect targets the correct User row.
+  const effectiveOwner = (() => {
+    if (!ownerUserId) return requesterId;
+    if (matchesAuthenticatedUserId(req, ownerUserId)) return requesterId ?? ownerUserId;
+    return ownerUserId; // admin setting a different owner
+  })();
   if (effectiveScope === "personal" && !effectiveOwner) {
     throw badRequest("ownerUserId or x-user-id header required for personal agents");
   }
@@ -2122,14 +2200,17 @@ router.post("/:slug/shares", requireAgentOwnerContributorOrAdmin, async (req: Re
       res.status(400).json({ success: false, error: "userId is required" });
       return;
     }
-    if (userId === agent.ownerUserId) {
-      res.status(400).json({ success: false, error: "Cannot share with the agent owner" });
-      return;
-    }
 
-    const targetUser = await userRepository.findById(userId);
+    // The body userId may be a canonical Claw id OR a Spaces alias — resolve
+    // before keying the share row so it always references the canonical user.
+    const targetUser = await findUserByAnyId(userId);
     if (!targetUser) {
       res.status(404).json({ success: false, error: "Target user not found" });
+      return;
+    }
+    // Compare canonical forms: `userId` may be the owner's raw Spaces alias.
+    if (targetUser.id === agent.ownerUserId) {
+      res.status(400).json({ success: false, error: "Cannot share with the agent owner" });
       return;
     }
     // Phase-2 (Gap 4): reject cross-org shares. A user can only be granted access
@@ -2144,7 +2225,7 @@ router.post("/:slug/shares", requireAgentOwnerContributorOrAdmin, async (req: Re
 
     const VALID_ROLES = ["VIEWER", "EDITOR", "CONTRIBUTOR"];
     const shareRole = VALID_ROLES.includes(role ?? "") ? (role as string) : "VIEWER";
-    const share = await agentShareRepository.upsert(agent.id, userId, shareRole, requesterId);
+    const share = await agentShareRepository.upsert(agent.id, targetUser.id, shareRole, requesterId);
 
     await writeAuditLog({
       actorUserId: requesterId,
@@ -2178,13 +2259,16 @@ router.delete("/:slug/shares/:userId", requireAgentOwnerContributorOrAdmin, asyn
       return;
     }
 
-    await agentShareRepository.delete(agent.id, req.params.userId);
+    // Share rows are keyed by the canonical Claw id; the URL param may be a
+    // Spaces alias — resolve (fail-open to the input → plain not-found).
+    const targetUserId = await resolveCanonicalUserIdOrSelf(req.params.userId);
+    await agentShareRepository.delete(agent.id, targetUserId);
 
     await writeAuditLog({
       actorUserId: requesterId,
       eventType: "AGENT_UNSHARED",
       targetId: agent.id,
-      description: `Agent "${agent.name}" share removed for user ${req.params.userId}`,
+      description: `Agent "${agent.name}" share removed for user ${targetUserId}`,
     });
 
     res.json({ success: true });
@@ -2259,8 +2343,14 @@ router.post(
       throw badRequest("That user already owns this agent");
     }
 
-    const target = await userRepository.findById(newOwnerUserId);
+    // The body id may be a canonical Claw id OR a Spaces workspace alias —
+    // resolve through the identity ladder and persist the canonical id.
+    const target = await findUserByAnyId(newOwnerUserId);
     if (!target) throw notFound("Target user not found");
+    const canonicalNewOwnerUserId = target.id;
+    if (canonicalNewOwnerUserId === agent.ownerUserId) {
+      throw badRequest("That user already owns this agent");
+    }
 
     // Cross-org transfer would hand an agent to someone who cannot even see it
     // (every read path is org-scoped). Mirrors the guard on POST /:slug/shares.
@@ -2273,7 +2363,7 @@ router.post(
     await prisma.$transaction(async (tx) => {
       await tx.agent.update({
         where: { id: agent.id },
-        data: { ownerUserId: newOwnerUserId },
+        data: { ownerUserId: canonicalNewOwnerUserId },
       });
 
       // The owner is represented by `ownerUserId`, never by a share row — see
@@ -2281,7 +2371,7 @@ router.post(
       // owner previously held a share, drop it so the agent does not end up in a
       // state the ACL helper does not model.
       await tx.agentShare.deleteMany({
-        where: { agentId: agent.id, userId: newOwnerUserId },
+        where: { agentId: agent.id, userId: canonicalNewOwnerUserId },
       });
 
       // Keep the outgoing owner able to see and edit the agent. Without this the
@@ -2308,7 +2398,7 @@ router.post(
       metadata: {
         agentSlug: agent.slug,
         previousOwnerUserId: previousOwnerId,
-        newOwnerUserId,
+        newOwnerUserId: canonicalNewOwnerUserId,
         keepPreviousOwnerAsEditor,
         byAdmin: ctx.isAdmin && !ctx.isOwner,
       },
@@ -2885,7 +2975,10 @@ router.get("/:slug/user-config/:userId", pinUserIdParam, async (req: Request<{ s
   try {
     const agent = await agentRepository.findBySlug(req.params.slug, getOrgId(req));
     if (!agent) { logAgentScopedMiss(req, "agents/get-user-config", req.params.slug); res.status(404).json({ success: false, error: "Agent not found" }); return; }
-    const config = await userAgentConfigRepository.findByUserAndAgent(req.params.userId, agent.orgId, req.params.slug);
+    // Config rows are keyed by Claw's canonical id; the URL param is pinned to
+    // the caller but may carry their raw Spaces alias — resolve before reading.
+    const configUserId = await resolveCanonicalUserIdOrSelf(req.params.userId);
+    const config = await userAgentConfigRepository.findByUserAndAgent(configUserId, agent.orgId, req.params.slug);
     res.json({
       success: true,
       // `inherited` separates "never picked one" from an explicit "spaces" pick.
@@ -2915,7 +3008,9 @@ router.put("/:slug/user-config/:userId", pinUserIdParam, async (req: Request<{ s
     }
     const agent = await agentRepository.findBySlug(req.params.slug, getOrgId(req));
     if (!agent) { logAgentScopedMiss(req, "agents/upsert-user-config", req.params.slug); res.status(404).json({ success: false, error: "Agent not found" }); return; }
-    const config = await userAgentConfigRepository.upsert(req.params.userId, req.params.slug, { provider }, agent.orgId);
+    // Write under Claw's canonical id — provider-resolution reads it that way.
+    const configUserId = await resolveCanonicalUserIdOrSelf(req.params.userId);
+    const config = await userAgentConfigRepository.upsert(configUserId, req.params.slug, { provider }, agent.orgId);
     res.json({ success: true, data: { provider: config.provider } });
   } catch (err) {
     log.error("[agents] upsert user-config error:", err);
@@ -2929,7 +3024,8 @@ router.get("/:slug/chain-config/:userId", pinUserIdParam, async (req: Request<{ 
   try {
     const agent = await agentRepository.findBySlug(req.params.slug, getOrgId(req));
     if (!agent) { logAgentScopedMiss(req, "agents/get-chain-config", req.params.slug); res.status(404).json({ success: false, error: "Agent not found" }); return; }
-    const config = await userAgentConfigRepository.findByUserAndAgent(req.params.userId, agent.orgId, req.params.slug);
+    const configUserId = await resolveCanonicalUserIdOrSelf(req.params.userId);
+    const config = await userAgentConfigRepository.findByUserAndAgent(configUserId, agent.orgId, req.params.slug);
     res.json({ success: true, data: config?.chainConfig ?? null });
   } catch (err) {
     log.error("[agents] get chain-config error:", err);
@@ -2943,7 +3039,8 @@ router.put("/:slug/chain-config/:userId", pinUserIdParam, async (req: Request<{ 
 
     const agent = await agentRepository.findBySlug(req.params.slug, getOrgId(req));
     if (!agent) { logAgentScopedMiss(req, "agents/upsert-chain-config", req.params.slug); res.status(404).json({ success: false, error: "Agent not found" }); return; }
-    await userAgentConfigRepository.upsert(req.params.userId, req.params.slug, { chainConfig }, agent.orgId);
+    const configUserId = await resolveCanonicalUserIdOrSelf(req.params.userId);
+    await userAgentConfigRepository.upsert(configUserId, req.params.slug, { chainConfig }, agent.orgId);
 
     res.json({ success: true, data: chainConfig });
   } catch (err) {
@@ -2956,7 +3053,8 @@ router.delete("/:slug/user-config/:userId", pinUserIdParam, async (req: Request<
   try {
     const agent = await agentRepository.findBySlug(req.params.slug, getOrgId(req));
     if (!agent) { res.json({ success: true }); return; }
-    await userAgentConfigRepository.delete(req.params.userId, agent.orgId, req.params.slug);
+    const configUserId = await resolveCanonicalUserIdOrSelf(req.params.userId);
+    await userAgentConfigRepository.delete(configUserId, agent.orgId, req.params.slug);
     res.json({ success: true });
   } catch (err: unknown) {
     if (err instanceof Error && "code" in err && (err as { code: string }).code === "P2025") {
@@ -3104,7 +3202,10 @@ router.post("/:slug/user-config/:userId/github-poll", pinUserIdParam, async (req
       // Success — encrypt and store the token at user-level
       const encrypted = encrypt(data.access_token, CONFIG.encryptionKey);
 
-      await userProviderCredentialsRepository.upsert(req.params.userId, "copilot", {
+      // Credential + config rows key on Claw's canonical id; the URL param is
+      // pinned to the caller but may carry their raw Spaces alias.
+      const canonicalUserId = await resolveCanonicalUserIdOrSelf(req.params.userId);
+      await userProviderCredentialsRepository.upsert(canonicalUserId, "copilot", {
         encryptedKey: encrypted.ciphertext,
         iv: encrypted.iv,
         authTag: encrypted.authTag,
@@ -3114,7 +3215,7 @@ router.post("/:slug/user-config/:userId/github-poll", pinUserIdParam, async (req
       // Also flip this agent's provider to copilot
       const agent = await agentRepository.findBySlug(req.params.slug, getOrgId(req));
       if (!agent) { logAgentScopedMiss(req, "agents/copilot-login-poll", req.params.slug); res.status(404).json({ success: false, error: "Agent not found" }); return; }
-      await userAgentConfigRepository.upsert(req.params.userId, req.params.slug, { provider: "copilot" }, agent.orgId);
+      await userAgentConfigRepository.upsert(canonicalUserId, req.params.slug, { provider: "copilot" }, agent.orgId);
 
       // Cleanup Redis
       await redis.del(key);
@@ -3156,7 +3257,10 @@ router.post("/:slug/user-config/:userId/claude-models", pinUserIdParam, async (r
     // extractClaudeBearer so an OAuth *bundle* ({access_token,…}) yields the
     // bare token instead of the JSON blob.
     if (!resolvedApiKey) {
-      const userCred = await userProviderCredentialsRepository.findByUserAndProvider(req.params.userId, "claude");
+      // Credentials are stored under Claw's canonical id (see settings.ts);
+      // the URL param may be the caller's raw Spaces alias.
+      const credUserId = await resolveCanonicalUserIdOrSelf(req.params.userId);
+      const userCred = await userProviderCredentialsRepository.findByUserAndProvider(credUserId, "claude");
       if (userCred?.encryptedKey && userCred.iv && userCred.authTag) {
         resolvedApiKey = extractClaudeBearer(decrypt(userCred.encryptedKey, userCred.iv, userCred.authTag, CONFIG.encryptionKey));
         if (!resolvedAuthType) resolvedAuthType = userCred.authType ?? undefined;

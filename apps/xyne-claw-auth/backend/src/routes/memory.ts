@@ -24,6 +24,7 @@ import { prisma } from "../db.js";
 import { agentRepository } from "../repositories/index.js";
 import { createLogger, createTraceId } from "../logger.js";
 import { requireAuth, requireUserAuth, s2sKeyMatches } from "../middleware/require-auth.js";
+import { resolveClawUserIdForSpacesIdentity } from "../lib/users-jit.js";
 import { isClawAdmin, requireClawAdmin, getAgentEditAccess, getOrgId, getRequesterId } from "../middleware/agent-acl.js";
 import { curateApprovedTranscript, persistSubsystemReviews, readSessionTranscript, type SessionTranscript } from "../services/memoryCronService.js";
 import { classifySessionSubsystemForBank, distillSessionFile, parseSessionFile } from "../services/sessionCurator.js";
@@ -76,6 +77,23 @@ const DIGITAL_TWIN_BANK = bankIdForAgent(DIGITAL_TWIN_SLUG);
  */
 function isDigitalTwinAgent(agentSlug: string | undefined): boolean {
   return !!agentSlug && bankIdForAgent(agentSlug) === DIGITAL_TWIN_BANK;
+}
+
+/**
+ * Twin memories are STORED tagged `user:<canonical Claw id>`, but clients
+ * address them with the only id they know — the raw (workspace-scoped) Spaces
+ * id. Validate that `tag` names the requester AND return it in canonical
+ * storage form, or null when it doesn't name them. Centralizes alias tolerance
+ * so legacy and migrated identities pass the twin gates and hit the same
+ * canonical-keyed stored tags.
+ */
+async function canonicalTwinTag(tag: string | undefined, requesterId: string | undefined): Promise<string | null> {
+  const taggedId = /^user:(.+)$/.exec((tag ?? "").trim())?.[1]?.trim();
+  const reqId = requesterId?.trim();
+  if (!taggedId || !reqId) return null;
+  if (taggedId === reqId) return `user:${reqId}`;
+  const canonical = await resolveClawUserIdForSpacesIdentity(taggedId).catch(() => undefined);
+  return canonical === reqId ? `user:${reqId}` : null;
 }
 
 async function assertMemoryUserAccess(
@@ -615,7 +633,8 @@ memoryRouter.post("/banks/:agentSlug/retention-sweep", requireClawAdmin, async (
 memoryRouter.get("/banks/:agentSlug/memories", requireUserAuth, async (req, res) => {
   try {
     const agentSlug = req.params["agentSlug"] as string;
-    const { scope, search, subsystem, userTag, limit = "50", offset = "0" } = req.query as Record<string, string>;
+    const { scope, search, subsystem, limit = "50", offset = "0" } = req.query as Record<string, string>;
+    let userTag = req.query["userTag"] as string | undefined;
     const take = Math.min(Number(limit) || 50, 200);
     const skip = Math.max(Number(offset) || 0, 0);
 
@@ -623,18 +642,21 @@ memoryRouter.get("/banks/:agentSlug/memories", requireUserAuth, async (req, res)
     // opted in. A list call MUST be restricted to the requester's own
     // user-tag — otherwise one user could enumerate everyone else's Twin
     // memories.  We require `?userTag=user:<id>` AND that it matches the
-    // requesting userId. Other agent banks (assistant, doctor, etc.) are
-    // shared/agent-scoped so they don't need this gate.
+    // requesting userId (raw alias or canonical — the tag is canonicalized
+    // here so it also matches the canonical-keyed stored tags). Other agent
+    // banks (assistant, doctor, etc.) are shared/agent-scoped so they don't
+    // need this gate.
     const requesterId = (req.headers["x-user-id"] as string | undefined)?.trim();
     if (isDigitalTwinAgent(agentSlug)) {
-      const expected = requesterId ? `user:${requesterId}` : "";
-      if (!userTag || userTag !== expected) {
+      const canonicalTag = await canonicalTwinTag(userTag, requesterId);
+      if (!canonicalTag) {
         res.status(403).json({
           success: false,
           error: "Digital Twin memories are per-user; userTag must match requester",
         });
         return;
       }
+      userTag = canonicalTag;
     }
 
     const bankId = bankIdForAgent(agentSlug);
@@ -653,16 +675,17 @@ memoryRouter.get("/banks/:agentSlug/memories", requireUserAuth, async (req, res)
       // Wide because the twin bank is SHARED across users and Hindsight can't
       // tag-filter server-side — we over-fetch then filter to `userTag`. Sized
       // to surface a heavy user's full set so pagination can page through it.
+      const twinTag = userTag; // const-capture: closures below keep the narrowing
       const WIDE_FETCH = Number(process.env["TWIN_MEMORIES_WIDE_FETCH"] ?? 2000);
       const widePage = await memory.listMemories(bankId, {
         limit: WIDE_FETCH,
         offset: 0,
         ...(search && search.trim().length > 0 ? { search: search.trim() } : {}),
-        tags: [userTag],
+        tags: [twinTag],
       });
 
       // AUTHORITATIVE user-scope filter — JS, not provider.
-      let scoped = widePage.memories.filter((m) => (m.tags ?? []).includes(userTag));
+      let scoped = widePage.memories.filter((m) => (m.tags ?? []).includes(twinTag));
       // Optional subsystem narrowing inside the user's scope.
       if (subsystem && subsystem.trim().length > 0) {
         const subsystemTag = `subsystem:${subsystem.trim()}`;
@@ -740,12 +763,13 @@ memoryRouter.get("/banks/:agentSlug/memories", requireUserAuth, async (req, res)
     // arbitrary `userTag` (or scope=user). Only an admin may query across
     // users; everyone else is pinned to their own user-tag.
     const isAdmin = requesterId ? await isClawAdmin(requesterId) : false;
-    if (!isAdmin) {
-      const ownTag = requesterId ? `user:${requesterId}` : "";
-      if (userTag && userTag.startsWith("user:") && userTag !== ownTag) {
+    if (!isAdmin && userTag && userTag.startsWith("user:")) {
+      const canonicalTag = await canonicalTwinTag(userTag, requesterId);
+      if (!canonicalTag) {
         res.status(403).json({ success: false, error: "userTag must match the requesting user" });
         return;
       }
+      userTag = canonicalTag;
     }
     const listFilter: { limit: number; offset: number; search?: string; tags?: string[] } = {
       limit: take,
@@ -839,19 +863,22 @@ memoryRouter.get("/banks/:agentSlug/stats", requireUserAuth, async (req, res) =>
   try {
     const agentSlug = req.params["agentSlug"] as string;
     const range = (req.query["range"] as string) || "7d";
-    const userTag = (req.query["userTag"] as string | undefined)?.trim();
+    let userTag = (req.query["userTag"] as string | undefined)?.trim();
     const days = RANGE_DAYS[range] ?? 7;
     const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
     const bankId = bankIdForAgent(agentSlug);
 
     // Per-user privacy gate for the digital-twin bank — see /memories route.
+    // Alias-tolerant (raw Spaces id or canonical Claw id), canonicalized so the
+    // tag matchers below hit the canonical-keyed stored tags.
     const requesterId = (req.headers["x-user-id"] as string | undefined)?.trim();
     if (isDigitalTwinAgent(agentSlug)) {
-      const expected = requesterId ? `user:${requesterId}` : "";
-      if (!userTag || userTag !== expected) {
+      const canonicalTag = await canonicalTwinTag(userTag, requesterId);
+      if (!canonicalTag) {
         res.status(403).json({ success: false, error: "Digital Twin stats are per-user; userTag must match requester" });
         return;
       }
+      userTag = canonicalTag;
     }
 
     // ── Digital-twin: per-user stats path ────────────────────────────
@@ -1050,17 +1077,19 @@ memoryRouter.get("/banks/:agentSlug/stats", requireUserAuth, async (req, res) =>
 memoryRouter.get("/banks/:agentSlug/subsystem-graph", requireUserAuth, async (req, res) => {
   try {
     const agentSlug = req.params["agentSlug"] as string;
-    const userTag = (req.query["userTag"] as string | undefined)?.trim();
+    let userTag = (req.query["userTag"] as string | undefined)?.trim();
     const bankId = bankIdForAgent(agentSlug);
 
     // Per-user privacy gate for the digital-twin bank — see /memories route.
+    // Alias-tolerant + canonicalized (see /memories).
     const requesterId = (req.headers["x-user-id"] as string | undefined)?.trim();
     if (isDigitalTwinAgent(agentSlug)) {
-      const expected = requesterId ? `user:${requesterId}` : "";
-      if (!userTag || userTag !== expected) {
+      const canonicalTag = await canonicalTwinTag(userTag, requesterId);
+      if (!canonicalTag) {
         res.status(403).json({ success: false, error: "Digital Twin graph is per-user; userTag must match requester" });
         return;
       }
+      userTag = canonicalTag;
     }
 
     const listFilter: { limit: number; tags?: string[] } = { limit: 500 };
@@ -1164,7 +1193,12 @@ memoryRouter.get("/banks/:agentSlug/subsystem-graph", requireUserAuth, async (re
 memoryRouter.get("/banks/:agentSlug/graph", requireUserAuth, async (req, res) => {
   try {
     const agentSlug = req.params["agentSlug"] as string;
-    const userTag = (req.query["userTag"] as string | undefined)?.trim();
+    const rawUserTag = (req.query["userTag"] as string | undefined)?.trim();
+    // Canonicalize up front: the gate compares against the (canonical)
+    // requester, and the per-user filters below match canonical-keyed tags.
+    const userTag = isDigitalTwinAgent(agentSlug)
+      ? (await canonicalTwinTag(rawUserTag, (req.headers["x-user-id"] as string | undefined)?.trim())) ?? undefined
+      : rawUserTag;
     if (!(await checkTwinAccess(req, res, agentSlug, "read", { ...(userTag && { userTag }) }))) return;
     const bankId = bankIdForAgent(agentSlug);
     const getGraph = memory.getEntityGraph?.bind(memory);

@@ -16,9 +16,11 @@ import { decrypt } from "../crypto.js";
 import { agentRunRepository, chatMessageRepository } from "../repositories/index.js";
 import { spacesAppFetch, spacesAppFetchMultipart } from "../lib/spaces-api.js";
 import { getRequesterId, getOrgId, isClawAdmin, getAgentEditAccess } from "../middleware/agent-acl.js";
+import { getRequesterAliases, matchesAuthenticatedUserId } from "../middleware/pin-user-id-param.js";
+import { resolveCanonicalUserIdOrSelf, spacesUserIdForClawUser, userIdAliasesFor } from "../lib/users-jit.js";
 import { assertCanControlScheduledJob } from "./scheduled-jobs-auth.js";
 import { requireStrictS2S } from "../middleware/require-auth.js";
-import { getSpacesAuthForUser, getWorkspaceIdForUser } from "../lib/spaces-db.js";
+import { getSpacesAuthForUser, getWorkspaceIdForUser, requestWorkspaceHint } from "../lib/spaces-db.js";
 import { expandSpacesMentions, resolveUnboundMentions } from "../lib/mention-transform.js";
 import { buildSpacesMentionLookups, buildSpacesMentionLookupsDb } from "../lib/mention-lookups.js";
 import {
@@ -139,17 +141,25 @@ async function canViewAgentSchedules(req: Request, agentSlug: string, requesterI
   return Boolean(access?.canEdit);
 }
 
-async function resolveScopedUserId(
+/**
+ * List-filter variant: jobs may be keyed by EITHER id form (canonical Claw id,
+ * or the raw Spaces alias rows predating canonicalization). The filter must
+ * therefore match every form of the target user, never a single id.
+ */
+async function resolveScopedUserIdFilter(
   req: Request,
   explicitUserId?: string,
-): Promise<string | undefined> {
+): Promise<{ in: string[] } | undefined> {
   const requesterId = getRequesterId(req);
-  if (!requesterId) return explicitUserId; // S2S — trust caller
-  if (explicitUserId && explicitUserId !== requesterId) {
-    if (await isClawAdmin(requesterId)) return explicitUserId;
-    return requesterId; // non-admin attempting cross-user read — clamp to self
+  if (!requesterId) {
+    // S2S — trust the caller's target user, still matching every id form.
+    return explicitUserId ? { in: await userIdAliasesFor(explicitUserId) } : undefined;
   }
-  return requesterId;
+  if (explicitUserId && !matchesAuthenticatedUserId(req, explicitUserId)) {
+    if (await isClawAdmin(requesterId)) return { in: await userIdAliasesFor(explicitUserId) };
+    return { in: getRequesterAliases(req) }; // non-admin attempting cross-user read — clamp to self
+  }
+  return { in: getRequesterAliases(req) };
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -202,6 +212,8 @@ async function postScheduledFailureNotice(row: {
 
   let effectiveWorkspaceId = row.workspaceId;
   if (!effectiveWorkspaceId) {
+    // No request here (job-owner row lookup at fire time): the unscoped
+    // resolution relies on the user having a single active Spaces identity.
     effectiveWorkspaceId = await getWorkspaceIdForUser(row.userId, "scheduled-job").catch(() => null);
   }
   if (!effectiveWorkspaceId) {
@@ -240,8 +252,10 @@ async function postScheduledFailureNotice(row: {
     return;
   }
 
+  // row.userId is Claw-canonical; Spaces keys DMs by its workspace-scoped ids.
+  const dmTarget = await spacesUserIdForClawUser(row.userId, effectiveWorkspaceId);
   const dmResult = (await spacesAppFetch("/channel/openDm", {
-    targetUserId: row.userId,
+    targetUserId: dmTarget,
     workspaceId: effectiveWorkspaceId,
   }, appToken)) as { channelId: string };
   await spacesAppFetch("/chat/postMessage", {
@@ -308,8 +322,10 @@ async function postScheduledJobApprovalCard(opts: {
     }, appToken);
     return;
   }
+  // row.userId is Claw-canonical; Spaces keys DMs by its workspace-scoped ids.
+  const dmTarget = await spacesUserIdForClawUser(row.userId, workspaceId);
   const dmResult = (await spacesAppFetch("/channel/openDm", {
-    targetUserId: row.userId,
+    targetUserId: dmTarget,
     workspaceId,
   }, appToken)) as { channelId: string };
   await spacesAppFetch("/chat/postMessage", {
@@ -355,10 +371,12 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
   let workspaceId: string | undefined = bodyWorkspaceId?.trim() || readWorkspaceCookie(req);
 
   // Force userId from the authed requester; only S2S (no requesterId) or admins
-  // can create jobs owned by someone else.
+  // can create jobs owned by someone else. The alias-aware compare matters: an
+  // admin passing their OWN raw Spaces id must not be treated as a cross-user
+  // create (which would store the raw form).
   const requesterId = getRequesterId(req);
   const userId = requesterId
-    ? (bodyUserId && bodyUserId !== requesterId && (await isClawAdmin(requesterId))
+    ? (bodyUserId && !matchesAuthenticatedUserId(req, bodyUserId) && (await isClawAdmin(requesterId))
         ? bodyUserId
         : requesterId)
     : bodyUserId;
@@ -367,17 +385,22 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
     throw badRequest("userId, agentSlug, task, and type are required");
   }
 
+  // Canonicalize: the stored row and every downstream owner lookup must carry
+  // Claw's canonical id — S2S tool calls and admin creates may pass the raw
+  // Spaces workspace alias (fail-open to the supplied id when unresolvable).
+  const ownerUserId = await resolveCanonicalUserIdOrSelf(userId, requestWorkspaceHint(req));
+
   // S2S callers (the runtime's schedule-task tool) send only the S2S key +
   // body userId — no x-user-id header, so requireAuth attaches no org
   // context. Derive the org from the job owner instead (User.orgId is
   // required and 1:1), same pattern as the other S2S entry points.
   let requestOrgId = getOrgId(req);
   if (!requestOrgId) {
-    const owner = await prisma.user.findUnique({ where: { id: userId }, select: { orgId: true } }).catch(() => null);
+    const owner = await prisma.user.findUnique({ where: { id: ownerUserId }, select: { orgId: true } }).catch(() => null);
     requestOrgId = owner?.orgId ?? undefined;
   }
   if (!requestOrgId) {
-    log.error(`[scheduled-jobs/create] orgId is required userId=${userId} requesterId=${requesterId ?? "none"} bodyUserId=${bodyUserId ?? "none"} agentSlug=${agentSlug} channelId=${channelId ?? "none"} conversationId=${conversationId ?? "none"} workspaceId=${workspaceId ?? "none"} type=${type}`);
+    log.error(`[scheduled-jobs/create] orgId is required userId=${ownerUserId} requesterId=${requesterId ?? "none"} bodyUserId=${bodyUserId ?? "none"} agentSlug=${agentSlug} channelId=${channelId ?? "none"} conversationId=${conversationId ?? "none"} workspaceId=${workspaceId ?? "none"} type=${type}`);
     throw badRequest("orgId is required");
   }
   const agent = await prisma.agent.findFirst({
@@ -385,7 +408,7 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
     select: { orgId: true },
   });
   if (!agent) {
-    log.warn(`[scheduled-jobs/create] agent org-scoped miss slug=${agentSlug} orgId=${requestOrgId ?? "none"} userId=${userId}`);
+    log.warn(`[scheduled-jobs/create] agent org-scoped miss slug=${agentSlug} orgId=${requestOrgId ?? "none"} userId=${ownerUserId}`);
     throw notFound("Agent not found");
   }
 
@@ -395,10 +418,10 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
   // Without this fallback the row gets workspaceId=NULL and Spaces rejects
   // the result-delivery call when the job fires.
   if (!workspaceId) {
-    const live = await getSpacesAuthForUser(userId, "scheduled-job");
+    const live = await getSpacesAuthForUser(ownerUserId, "scheduled-job", requestWorkspaceHint(req));
     if (live?.workspaceId) {
       workspaceId = live.workspaceId;
-      log.info(`[scheduled-jobs] resolved workspaceId=${workspaceId} from Spaces session for userId=${userId}`);
+      log.info(`[scheduled-jobs] resolved workspaceId=${workspaceId} from Spaces session for userId=${ownerUserId}`);
     }
   }
 
@@ -409,12 +432,12 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
   // silently rejected result delivery when the job fired ("missing
   // workspaceId on row"). The user row always carries the workspaceId.
   if (!workspaceId) {
-    const wsId = await getWorkspaceIdForUser(userId, "scheduled-job");
+    const wsId = await getWorkspaceIdForUser(ownerUserId, "scheduled-job", requestWorkspaceHint(req));
     if (wsId) {
       workspaceId = wsId;
-      log.info(`[scheduled-jobs] resolved workspaceId=${workspaceId} from users row for userId=${userId}`);
+      log.info(`[scheduled-jobs] resolved workspaceId=${workspaceId} from users row for userId=${ownerUserId}`);
     } else {
-      log.warn(`[scheduled-jobs] no workspaceId from body/cookie/session/usersRow for userId=${userId} — row will be created with NULL and result delivery will fail`);
+      log.warn(`[scheduled-jobs] no workspaceId from body/cookie/session/usersRow for userId=${ownerUserId} — row will be created with NULL and result delivery will fail`);
     }
   }
 
@@ -451,7 +474,7 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
   // Create Prisma row
   const row = await prisma.scheduledJob.create({
     data: {
-      userId,
+      userId: ownerUserId,
       agentSlug,
       task,
       context: context ?? null,
@@ -474,7 +497,7 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
 
   const data: ScheduledJobData = {
     scheduledJobId: row.id,
-    userId,
+    userId: ownerUserId,
     agentSlug,
     task,
     context: context ?? undefined,
@@ -547,9 +570,9 @@ router.get("/", asyncHandler(async (req: Request, res: Response) => {
   // agent's full set. Otherwise fall back to the self-scoped view.
   const agentScoped =
     Boolean(agentSlug) && Boolean(requesterId) && (await canViewAgentSchedules(req, agentSlug!, requesterId!));
-  const userId = agentScoped ? undefined : await resolveScopedUserId(req, qUserId);
+  const userIdFilterValue = agentScoped ? undefined : await resolveScopedUserIdFilter(req, qUserId);
   const where: Record<string, unknown> = {};
-  if (userId) where["userId"] = userId;
+  if (userIdFilterValue) where["userId"] = userIdFilterValue;
   if (status) where["status"] = status;
   if (agentSlug) where["agentSlug"] = agentSlug;
 
@@ -575,9 +598,9 @@ router.get("/runs", asyncHandler(async (req: Request, res: Response) => {
 
   const requesterId = getRequesterId(req);
   const agentScoped = Boolean(requesterId) && (await canViewAgentSchedules(req, agentSlug, requesterId!));
-  const userId = agentScoped ? undefined : await resolveScopedUserId(req, qUserId);
+  const userIdFilterValue = agentScoped ? undefined : await resolveScopedUserIdFilter(req, qUserId);
   const jobWhere: Record<string, unknown> = { agentSlug };
-  if (userId) jobWhere["userId"] = userId;
+  if (userIdFilterValue) jobWhere["userId"] = userIdFilterValue;
 
   const jobIds = await prisma.scheduledJob.findMany({
     where: jobWhere,
@@ -615,9 +638,10 @@ router.get("/:id", asyncHandler(async (req: Request<{ id: string }>, res: Respon
   if (!requesterId) {
     throw unauthorized("Authentication required");
   }
-  // Own job, CLAW_ADMIN, or a maintainer of the agent the job belongs to.
+  // Own job (either id form), CLAW_ADMIN, or a maintainer of the agent the
+  // job belongs to.
   if (
-    row.userId !== requesterId &&
+    !matchesAuthenticatedUserId(req, row.userId) &&
     !(await isClawAdmin(requesterId)) &&
     !(await canViewAgentSchedules(req, row.agentSlug, requesterId))
   ) {
@@ -649,7 +673,7 @@ router.patch("/:id", asyncHandler(async (req: Request<{ id: string }>, res: Resp
   if (!requesterId) {
     throw unauthorized("Authentication required");
   }
-  if (row.userId !== requesterId && !(await isClawAdmin(requesterId))) {
+  if (!matchesAuthenticatedUserId(req, row.userId) && !(await isClawAdmin(requesterId))) {
     throw notFound("Not found");
   }
 
@@ -1074,7 +1098,7 @@ router.delete("/:id", asyncHandler(async (req: Request<{ id: string }>, res: Res
   if (!requesterId) {
     throw unauthorized("Authentication required");
   }
-  if (row.userId !== requesterId && !(await isClawAdmin(requesterId))) {
+  if (!matchesAuthenticatedUserId(req, row.userId) && !(await isClawAdmin(requesterId))) {
     throw notFound("Not found");
   }
 
@@ -1282,6 +1306,8 @@ router.post("/:id/result", requireStrictS2S, async (req: Request<{ id: string }>
   let effectiveWorkspaceId = row.workspaceId;
 
   if (!effectiveWorkspaceId) {
+    // No request here (job-owner row lookup at fire time): the unscoped
+    // resolution relies on the user having a single active Spaces identity.
     const resolvedWorkspaceId = await getWorkspaceIdForUser(row.userId, "scheduled-job");
     if (resolvedWorkspaceId) {
       await prisma.scheduledJob.update({
@@ -1304,6 +1330,7 @@ router.post("/:id/result", requireStrictS2S, async (req: Request<{ id: string }>
   // lookup misses → text left as-is.
   let resultText = payload.result ?? "";
   try {
+    // No request here (job-owner session at fire time): see the note above.
     const senderAuth = row.userId
       ? await getSpacesAuthForUser(row.userId, "scheduled-job").catch(() => null)
       : null;
@@ -1404,9 +1431,11 @@ router.post("/:id/result", requireStrictS2S, async (req: Request<{ id: string }>
 
       log.info(`[scheduled-jobs/result] Posted result to thread ${row.conversationId}`);
     } else if (row.userId) {
-      // DM the user
+      // DM the user. row.userId is Claw-canonical; Spaces keys DMs by its
+      // workspace-scoped ids.
+      const dmTarget = await spacesUserIdForClawUser(row.userId, effectiveWorkspaceId);
       const dmResult = (await spacesAppFetch("/channel/openDm", {
-        targetUserId: row.userId,
+        targetUserId: dmTarget,
         workspaceId: effectiveWorkspaceId,
       }, appToken)) as { channelId: string };
 

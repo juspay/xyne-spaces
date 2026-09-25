@@ -5,7 +5,7 @@ import { prisma } from "../db.js";
 import { decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 import { getRequesterId, getOrgId } from "../middleware/agent-acl.js";
-import { getSpacesAuthForUser, getWorkspaceIdForUser } from "../lib/spaces-db.js";
+import { getSpacesAuthForUser, getWorkspaceIdForUser, requestWorkspaceHint } from "../lib/spaces-db.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("spaces");
@@ -55,7 +55,7 @@ interface SpacesBoardRow {
 
 const router = Router();
 
-async function resolveUserSpacesAuth(userId: string): Promise<SpacesAuthContext | null> {
+async function resolveUserSpacesAuth(userId: string, workspaceHint?: string): Promise<SpacesAuthContext | null> {
   // Prefer a LIVE token from the Spaces session DB. getSpacesAuthForUser reads
   // the user's active session and, if the access token has expired, refreshes
   // it via Spaces' /api/auth/refresh-session — the same mechanism the MCP
@@ -64,7 +64,7 @@ async function resolveUserSpacesAuth(userId: string): Promise<SpacesAuthContext 
   // short-lived) every call here 401s with "Invalid or expired session" until
   // the user re-connects. This is why some users hit that error on the channel
   // picker "always".
-  const live = await getSpacesAuthForUser(userId, "require-auth").catch(() => null);
+  const live = await getSpacesAuthForUser(userId, "require-auth", workspaceHint).catch(() => null);
   if (live?.token) {
     return {
       token: live.token,
@@ -98,7 +98,7 @@ async function resolveUserSpacesAuth(userId: string): Promise<SpacesAuthContext 
   const baseUrl = typeof urlRaw === "string" && urlRaw.trim() ? urlRaw.trim() : CONFIG.spacesInternalUrl;
   const sessionId = typeof sessionIdRaw === "string" && sessionIdRaw.trim() ? sessionIdRaw.trim() : undefined;
   const workspaceIdFromCreds = typeof workspaceIdRaw === "string" && workspaceIdRaw.trim() ? workspaceIdRaw.trim() : undefined;
-  const workspaceId = workspaceIdFromCreds ?? await getWorkspaceIdForUser(userId, "require-auth").catch(() => null) ?? undefined;
+  const workspaceId = workspaceIdFromCreds ?? await getWorkspaceIdForUser(userId, "require-auth", workspaceHint).catch(() => null) ?? undefined;
   if (!workspaceIdFromCreds && workspaceId) {
     log.info(`[spaces] resolved workspaceId=${workspaceId} from user row for cached auth userId=${userId}`);
   }
@@ -154,7 +154,7 @@ router.get("/channels", async (req: Request, res: Response) => {
   const limit = Math.max(1, Math.min(isFinite(limitRaw) ? limitRaw : 50, 200));
   const memberOnly = req.query["memberOnly"] === "true";
 
-  const userAuth = await resolveUserSpacesAuth(requesterId).catch((err) => {
+  const userAuth = await resolveUserSpacesAuth(requesterId, requestWorkspaceHint(req)).catch((err) => {
     log.error("[spaces/channels] failed to load MCP credentials:", err);
     return null;
   });
@@ -293,7 +293,7 @@ router.get("/projects", async (req: Request, res: Response) => {
   const limitRaw = Number(req.query["limit"] ?? 50);
   const limit = Math.max(1, Math.min(isFinite(limitRaw) ? limitRaw : 50, 200));
 
-  const userAuth = await resolveUserSpacesAuth(requesterId).catch((err) => {
+  const userAuth = await resolveUserSpacesAuth(requesterId, requestWorkspaceHint(req)).catch((err) => {
     log.error("[spaces/projects] failed to load Spaces auth:", err);
     return null;
   });
@@ -347,7 +347,7 @@ router.get("/boards", async (req: Request, res: Response) => {
   const limitRaw = Number(req.query["limit"] ?? 50);
   const limit = Math.max(1, Math.min(isFinite(limitRaw) ? limitRaw : 50, 200));
 
-  const userAuth = await resolveUserSpacesAuth(requesterId).catch((err) => {
+  const userAuth = await resolveUserSpacesAuth(requesterId, requestWorkspaceHint(req)).catch((err) => {
     log.error("[spaces/boards] failed to load Spaces auth:", err);
     return null;
   });
@@ -401,7 +401,7 @@ router.get("/automations-schema/triggers", async (req: Request, res: Response) =
     return;
   }
 
-  const userAuth = await resolveUserSpacesAuth(requesterId).catch(() => null);
+  const userAuth = await resolveUserSpacesAuth(requesterId, requestWorkspaceHint(req)).catch(() => null);
   if (!userAuth) {
     res.status(412).json({
       success: false,
@@ -440,7 +440,7 @@ router.get("/automations-schema/triggers/:type", async (req: Request, res: Respo
     return;
   }
 
-  const userAuth = await resolveUserSpacesAuth(requesterId).catch(() => null);
+  const userAuth = await resolveUserSpacesAuth(requesterId, requestWorkspaceHint(req)).catch(() => null);
   if (!userAuth) {
     res.status(412).json({
       success: false,

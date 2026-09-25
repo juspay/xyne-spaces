@@ -28,6 +28,17 @@ export interface SessionContext {
    */
   targetUserId?: string;
   senderId: string;
+  /**
+   * Raw (workspace-scoped) Spaces ids for the mentioned user and the sender.
+   * `mentionedUserId`/`senderId` are CANONICAL Claw ids now — Claw-owned reads
+   * use those; Spaces-facing payloads (openDm, twin-reply-draft, postAsUser,
+   * reactAsUser) MUST use these, because Spaces keys its own tables by the
+   * workspace-scoped id and can't resolve a Claw-internal id. Absent on older
+   * sessions → consumers fall back to `mentionedUserId`/`senderId`, which was
+   * the raw form pre-canonicalization, so the fallback is correct there too.
+   */
+  mentionedSpacesUserId?: string;
+  senderSpacesUserId?: string;
   senderName: string;
   channelId: string;
   channelName: string;
