@@ -1,3 +1,10 @@
+## [1.399.0](https://github.com/juspay/xyne-spaces/compare/v1.398.1...v1.399.0) (2026-09-25)
+
+
+### Features
+
+* hub admins can add and archive hub documents ([#2221](https://github.com/juspay/xyne-spaces/issues/2221)) ([cb786f7](https://github.com/juspay/xyne-spaces/commit/cb786f7e8037137d34dc8087e1cf1581a200f236))
+
 ## [1.398.1](https://github.com/juspay/xyne-spaces/compare/v1.398.0...v1.398.1) (2026-09-25)
 
 
