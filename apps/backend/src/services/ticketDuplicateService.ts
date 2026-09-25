@@ -72,27 +72,6 @@ type DuplicateScopeConfig = z.infer<typeof duplicateScopeConfigSchema>;
  * field type is therefore supported, and the token can never drift from the indexed
  * representation: date normalization, per-element rows for multi-select/user, and
  * scalar normalization all come from one implementation rather than a copy.
- *
- * Resolution runs against the ticket form of the channel's OWN board, using the same
- * resolveFormFieldDefinitionsForForm the write path and the settings picker use. That
- * matters for two reasons:
- *
- *  - Legacy (non-global) board fields work. Their canonical id is `globalFieldId ?? id`,
- *    which is what buildPartialCustomFieldWritePayload hands us and what the indexer
- *    writes to form_entity_values — so a board whose form predates GlobalFields is
- *    scopable. A global-fields-only lookup silently dropped every such field, which
- *    forced 100% project-wide fallback on those desks.
- *  - Scope can never widen past the channel. The board comes from the channel's own
- *    preference row, so a stray caller id resolves to nothing rather than to another
- *    project's field — the guarantee the old `projectId` filter provided.
- *
- * CAVEAT: these ids resolve against the channel PREFERENCE's board, while the caller built
- * them from the board the ticket is actually created on. Every desk intake path derives
- * both from channelPref.boardId today, so they agree. If a ticket is ever created on a
- * different board of the same project, a LEGACY scope key — whose canonical id is a
- * per-form FormFields row — will not resolve, and detection degrades to project-wide
- * rather than filtering wrongly. Global-backed keys are unaffected: their canonical id is
- * the GlobalField id, which is shared across forms.
  */
 export const buildDuplicateScopeFieldValues = async (params: {
   boardId: string;
@@ -174,13 +153,6 @@ const buildDuplicateSearchQuery = (title: string, description: string): string =
 };
 
 class TicketDuplicateService {
-  /**
-   * Load the channel's per-channel duplicate-scope config, together with the board
-   * whose ticket form defines the id space those configured ids live in. Null config,
-   * disabled flag, an unparsable Json payload, or a channel with no board all resolve
-   * to null = today's project-wide behavior. Any lookup failure also resolves to null
-   * (detection must be tolerant).
-   */
   private async resolveDuplicateScopeConfig(
     channelId: string | undefined,
   ): Promise<{ config: DuplicateScopeConfig; boardId: string } | null> {
@@ -217,11 +189,6 @@ class TicketDuplicateService {
       if (!parsed.data.enabled || parsed.data.scopeFieldGlobalIds.length === 0) {
         return null;
       }
-      // Scope keys are ids on this board's ticket form, so without a board there is
-      // nothing to resolve them against. Reported once per channel per process: the
-      // condition is static config that cannot change between two tickets, so logging
-      // it per ticket creation would be unbounded noise on a hot path. Desk settings is
-      // where an admin sees it — the picker refuses to offer fields without a board.
       if (!preference.boardId) {
         if (!boardlessScopedChannelsLogged.has(channelId)) {
           boardlessScopedChannelsLogged.add(channelId);
