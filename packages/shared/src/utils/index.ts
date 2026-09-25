@@ -82,3 +82,14 @@ export {
   isCanvasFolderNameConflictError,
   rethrowCanvasFolderNameConflict,
 } from './canvasFolderNameConflict.js';
+export {
+  RECORDING_ACCESS_RANK,
+  recordingAccessAtLeast,
+  recordingAccessFromGrant,
+  resolveRecordingAccessLevel,
+  strongestRecordingAccess,
+} from './recordingAccess.js';
+export type {
+  RecordingAccessLevel,
+  ResolveRecordingAccessParams,
+} from './recordingAccess.js';
