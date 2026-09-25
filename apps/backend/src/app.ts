@@ -206,6 +206,7 @@ import sdlcRoutes from '@/routes/sdlc';
 import sdlcClawRoutes from '@/routes/sdlcClaw';
 import sdlcVcsInternalRoutes from '@/routes/sdlcVcsInternal';
 import sdlcAgentInternalRoutes from '@/routes/sdlcAgentInternal';
+import appsInternalRoutes from '@/routes/appsInternal';
 import { createSdkPublicRouter, createSdkRouter } from '@/api/sdk';
 import { errorHandler as sdkErrorHandler } from '@/api/sdk/handler';
 import { encryptedFieldsConfig } from '@xyne/shared';
@@ -626,6 +627,7 @@ export class App {
     );
     this.app.use('/api/internal/sdlc/vcs', validateS2SKey, sdlcVcsInternalRoutes);
     this.app.use('/api/internal/sdlc/agent', validateS2SKey, sdlcAgentInternalRoutes);
+    this.app.use('/api/internal/apps', validateS2SKey, appsInternalRoutes);
 
     // Encrypted-fields config (S2S-only). Backend is the source of truth; the
     // encryption service fetches this and caches it instead of importing @xyne/shared.
