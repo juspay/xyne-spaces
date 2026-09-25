@@ -8,6 +8,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import { Brain, Check, ChevronDown, ChevronRight, Laptop, Search, Sparkles } from 'lucide-react';
 import { Popover } from '../ui/Popover';
+import { SELECTOR_ROW_CLASS } from './AIAgentSelector';
 import { cn } from '../../utils/classNames';
 import type { ClawAgentModel } from '../../services/clawAgentModelsService';
 
@@ -104,10 +105,7 @@ export function ModelThinkingSelector({
     THINKING_LEVEL_OPTIONS.find(o => o.value === thinkingLevel)?.label ?? 'Default';
 
   const rowClass = (active: boolean) =>
-    cn(
-      'flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-1.5 mx-0 text-left text-sm transition-colors',
-      active ? 'bg-primary/10 text-primary' : 'hover:bg-accent text-foreground',
-    );
+    cn(SELECTOR_ROW_CLASS, 'justify-between', active && 'bg-accent');
 
   return (
     <Popover
@@ -119,8 +117,9 @@ export function ModelThinkingSelector({
           setThinkingOpen(false);
         }
       }}
+      side='top'
       align='end'
-      sideOffset={4}
+      sideOffset={8}
       trigger={
         // Zero-size anchor when the pill is hidden — Radix positions the
         // popover against the trigger, so it still needs an element in the row.
@@ -141,8 +140,8 @@ export function ModelThinkingSelector({
             data-track-category='XyneAI'
             data-track-name='OPEN_MODEL_SELECTOR'
             className={cn(
-              'flex h-7 min-w-0 shrink items-center gap-1.5 rounded-lg border border-border px-2 text-sm transition-colors',
-              disabled ? 'cursor-not-allowed opacity-60' : 'hover:bg-accent cursor-pointer',
+              'flex h-7 min-w-0 shrink items-center gap-1.5 rounded-lg px-2 text-sm transition-colors',
+              disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer',
             )}
           >
             <Sparkles
@@ -166,120 +165,109 @@ export function ModelThinkingSelector({
           </button>
         )
       }
-      className='w-80 p-0 bg-popover border border-border rounded-lg shadow-lg overflow-visible'
+      className='w-[290px] p-0 bg-popover border border-border rounded-[14px] shadow-lg overflow-visible'
     >
-      <div className='flex flex-col py-1 px-1'>
-        {harnessModels.length > 0 && (
-          <>
-            {harnessModels.map(h => (
-              <button
-                key={h.id}
-                type='button'
-                title={h.deviceName ? `${h.name} — ${h.deviceName}` : h.name}
-                onClick={() => {
-                  onSelectModel(h.id);
-                  setOpen(false);
-                }}
-                data-track-category='XyneAI'
-                data-track-name='SELECT_MODEL'
-                data-track-metadata={JSON.stringify({ model: h.id })}
-                className={rowClass(selectedModel === h.id)}
-              >
-                <span className='flex items-center gap-1.5 min-w-0'>
-                  <Laptop
-                    className='h-3.5 w-3.5 shrink-0 text-muted-foreground'
-                    aria-hidden
-                    strokeWidth={1.75}
-                  />
-                  <span className='flex flex-col items-start gap-0.5 min-w-0'>
-                    <span className='font-medium truncate max-w-full'>{h.name}</span>
-                    <span className='text-[11px] text-muted-foreground truncate max-w-full'>
-                      {h.recommended ? 'Runs on this Mac (Recommended)' : 'Runs on this Mac'}
+      <div className='flex flex-col'>
+        {serverModels.length > 0 && (
+          <div className='flex items-center gap-2.5 border-b border-border px-4 py-3'>
+            <Search className='size-[15px] shrink-0 text-muted-foreground' aria-hidden />
+            <input
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              placeholder='Search'
+              data-id='model-search'
+              data-track-category='XyneAI'
+              data-track-name='SEARCH_MODELS'
+              className='flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/60'
+            />
+          </div>
+        )}
+
+        <div className='flex max-h-[min(300px,60vh)] flex-col overflow-auto p-1.5'>
+          {harnessModels.length > 0 && (
+            <>
+              {harnessModels.map(h => (
+                <button
+                  key={h.id}
+                  type='button'
+                  title={h.deviceName ? `${h.name} — ${h.deviceName}` : h.name}
+                  onClick={() => {
+                    onSelectModel(h.id);
+                    setOpen(false);
+                  }}
+                  data-track-category='XyneAI'
+                  data-track-name='SELECT_MODEL'
+                  data-track-metadata={JSON.stringify({ model: h.id })}
+                  className={rowClass(selectedModel === h.id)}
+                >
+                  <span className='flex min-w-0 items-center gap-2.5'>
+                    <span className='grid size-6 shrink-0 place-items-center text-muted-foreground'>
+                      <Laptop className='size-[18px]' aria-hidden strokeWidth={1.75} />
+                    </span>
+                    <span className='flex min-w-0 flex-col items-start gap-0.5'>
+                      <span className='max-w-full truncate'>{h.name}</span>
+                      <span className='max-w-full truncate text-[11px] text-muted-foreground'>
+                        {h.recommended ? 'Runs on this Mac (Recommended)' : 'Runs on this Mac'}
+                      </span>
                     </span>
                   </span>
-                </span>
-                {selectedModel === h.id && <Check className='h-3.5 w-3.5 shrink-0' aria-hidden />}
-              </button>
-            ))}
-            <div className='my-1 h-px bg-border mx-1' />
-            <div className='px-2.5 pb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground'>
-              Run on server
-            </div>
-          </>
-        )}
-        {/* Recommended — clears the pin; the run uses the model configured in the DB. */}
-        <button
-          type='button'
-          onClick={() => {
-            onSelectModel(null);
-            setOpen(false);
-          }}
-          data-track-category='XyneAI'
-          data-track-name='SELECT_MODEL'
-          data-track-metadata='{"model":"recommended"}'
-          className={rowClass(selectedModel === null)}
-        >
-          <span className='flex flex-col items-start gap-0.5'>
-            <span className='font-medium'>
-              {defaultModel ? formatModelLabel(defaultModel) : 'Recommended'}
-            </span>
-            {defaultModel && !recommendedHarness && (
-              <span className='text-[11px] text-muted-foreground truncate max-w-full'>
-                (Recommended)
+                </button>
+              ))}
+              <div className='px-2.5 pb-1 pt-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground'>
+                Run on server
+              </div>
+            </>
+          )}
+          {/* Recommended — clears the pin; the run uses the model configured in the DB. */}
+          <button
+            type='button'
+            onClick={() => {
+              onSelectModel(null);
+              setOpen(false);
+            }}
+            data-track-category='XyneAI'
+            data-track-name='SELECT_MODEL'
+            data-track-metadata='{"model":"recommended"}'
+            className={rowClass(selectedModel === null)}
+          >
+            <span className='flex min-w-0 items-center gap-1.5'>
+              <span className='min-w-0 truncate'>
+                {defaultModel ? formatModelLabel(defaultModel) : 'Recommended'}
               </span>
-            )}
-          </span>
-          {selectedModel === null && <Check className='h-3.5 w-3.5 shrink-0' aria-hidden />}
-        </button>
-
-        {serverModels.length > 0 && (
-          <>
-            <div className='my-1 h-px bg-border mx-1' />
-            {/* Search over the account's allowed model list. */}
-            <div className='flex items-center gap-1.5 rounded-md border border-border mx-1 my-0.5 px-2 py-1'>
-              <Search className='h-3.5 w-3.5 shrink-0 text-muted-foreground' aria-hidden />
-              <input
-                value={query}
-                onChange={e => setQuery(e.target.value)}
-                placeholder='Search models…'
-                data-id='model-search'
-                data-track-category='XyneAI'
-                data-track-name='SEARCH_MODELS'
-                className='w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground'
-              />
-            </div>
-            <div className='flex max-h-80 flex-col overflow-auto'>
-              {filtered.length === 0 ? (
-                <div className='px-2.5 py-2 text-sm text-muted-foreground'>No models match</div>
-              ) : (
-                filtered.map(m => (
-                  <button
-                    key={m.id}
-                    type='button'
-                    title={m.id}
-                    onClick={() => {
-                      onSelectModel(m.id);
-                      setOpen(false);
-                    }}
-                    data-track-category='XyneAI'
-                    data-track-name='SELECT_MODEL'
-                    data-track-metadata={JSON.stringify({ model: m.id })}
-                    className={rowClass(selectedModel === m.id)}
-                  >
-                    <span className='font-medium truncate'>{formatModelLabel(m.name)}</span>
-                    {selectedModel === m.id && (
-                      <Check className='h-3.5 w-3.5 shrink-0' aria-hidden />
-                    )}
-                  </button>
-                ))
+              {defaultModel && !recommendedHarness && (
+                <span className='shrink-0 text-[11px] text-muted-foreground'>(Recommended)</span>
               )}
-            </div>
-          </>
-        )}
+            </span>
+          </button>
 
-        <div className='my-1 h-px bg-border mx-1' />
-        {/* Thinking — opens a submenu to the right side of the menu. */}
-        <div className='relative'>
+          {serverModels.length > 0 &&
+            (filtered.length === 0 ? (
+              <div className='px-2.5 py-2 text-sm text-muted-foreground'>No models match</div>
+            ) : (
+              filtered.map(m => (
+                <button
+                  key={m.id}
+                  type='button'
+                  title={m.id}
+                  onClick={() => {
+                    onSelectModel(m.id);
+                    setOpen(false);
+                  }}
+                  data-track-category='XyneAI'
+                  data-track-name='SELECT_MODEL'
+                  data-track-metadata={JSON.stringify({ model: m.id })}
+                  className={rowClass(selectedModel === m.id)}
+                >
+                  <span className='min-w-0 flex-1 truncate font-normal'>
+                    {formatModelLabel(m.name)}
+                  </span>
+                </button>
+              ))
+            ))}
+        </div>
+
+        {/* Thinking — opens a submenu beside the menu, outside the scroll area. */}
+        <div className='relative border-t border-border p-1.5'>
           <button
             type='button'
             onClick={e => {
@@ -293,14 +281,12 @@ export function ModelThinkingSelector({
             data-track-category='XyneAI'
             data-track-name='TOGGLE_THINKING_MENU'
             aria-expanded={thinkingOpen}
-            className='flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-accent'
+            className={cn(SELECTOR_ROW_CLASS, 'justify-between')}
           >
-            <span className='flex items-center gap-1.5 font-medium'>
-              <Brain
-                className='h-3.5 w-3.5 shrink-0 text-muted-foreground'
-                aria-hidden
-                strokeWidth={1.75}
-              />
+            <span className='flex items-center gap-2.5'>
+              <span className='grid size-6 shrink-0 place-items-center text-muted-foreground'>
+                <Brain className='size-[18px]' aria-hidden strokeWidth={1.75} />
+              </span>
               Thinking
             </span>
             <span className='flex items-center gap-1 text-muted-foreground'>
@@ -311,7 +297,7 @@ export function ModelThinkingSelector({
           {thinkingOpen && (
             <div
               className={cn(
-                'absolute bottom-0 z-50 w-40 rounded-lg border border-border bg-popover p-1 shadow-lg',
+                'absolute bottom-0 z-50 w-40 rounded-[14px] border border-border bg-popover p-1.5 shadow-lg',
                 flyoutSide === 'right'
                   ? 'right-0 translate-x-[calc(100%+6px)]'
                   : 'left-0 -translate-x-[calc(100%+6px)]',

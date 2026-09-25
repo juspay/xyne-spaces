@@ -21,7 +21,6 @@ import { Agent } from 'undici';
 // real clock. Mirrors streamDispatcher in claw-auth's consume-claw-stream.ts.
 const briefStreamDispatcher = new Agent({ headersTimeout: 0, bodyTimeout: 0, connectTimeout: 10_000 });
 
-
 /** Claw agent that answers the cmd+K AI overview in one turn (claw-auth provisions it). */
 export const CMDK_ANSWER_AGENT_SLUG = 'cmdk-answer';
 
@@ -428,7 +427,6 @@ function extractUserIdHeader(userId: string, workspaceId?: string): Record<strin
 // ============================================================================
 // Channel agent listing
 // ============================================================================
-
 
 // ============================================================================
 // Run / stream
@@ -1395,6 +1393,38 @@ export async function deleteClawConversation(
   }
 
   return (await response.json()) as { success: boolean; data: { deleted: number } };
+}
+
+export async function patchClawConversation(
+  req: { headers?: { cookie?: string }; userId: string },
+  convId: string,
+  patch: { title?: string; pinned?: boolean },
+  agentSlug?: string
+): Promise<{ success: boolean; data: { title: string | null; pinned: boolean } }> {
+  const slug = agentSlug || 'ask-ai';
+  const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/${encodeURIComponent(slug)}/chat/${encodeURIComponent(convId)}`;
+  const response = await fetch(url, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      ...extractUserIdHeader(req.userId),
+      ...extractCookieHeader(req),
+    },
+    body: JSON.stringify(patch),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    logger.error(`[ClawAgentService] patchConversation failed: ${response.status} ${errorText}`);
+    throw new Error(
+      response.status === 404 ? 'Conversation not found' : 'Failed to update conversation'
+    );
+  }
+
+  return (await response.json()) as {
+    success: boolean;
+    data: { title: string | null; pinned: boolean };
+  };
 }
 
 /**

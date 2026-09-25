@@ -1,10 +1,12 @@
-import { useState, type ComponentType, type SVGProps, type ReactElement } from 'react';
+import { useCallback, useState, type ComponentType, type SVGProps, type ReactElement } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import {
   BuildingApartmentTwo,
   ChatPlus,
   ChevronBigDown,
   DeleteDustbin01,
+  PencilEdit,
+  PinSlant,
   LayoutGridStackDown,
   Notebook,
   PencilEditBox,
@@ -22,7 +24,11 @@ import { useClawOrgManageAccess } from '../../hooks/useClawOrganization';
 import { useAuth } from '../../hooks/useAuth';
 import { useDailyBriefEnabled } from '../../hooks/useDailyBriefEnabled';
 import { useV2SessionsList, useV2SessionInvalidator } from '../../hooks/useAskAISessionsV2';
-import { deleteV2Conversation } from '../../services/XyneAI/XyneAISessionsV2Service';
+import {
+  CHAT_TITLE_MAX_CHARS,
+  deleteV2Conversation,
+  updateV2Conversation,
+} from '../../services/XyneAI/XyneAISessionsV2Service';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
 import { Popover } from '../ui/Popover';
 import { Dialog } from '../ui/Dialog/Dialog';
@@ -31,6 +37,7 @@ import Tooltip from '../ui/Tooltip';
 import AppNavigator from '../AppNavigator/AppNavigator';
 import type { ConversationHistory as ConversationHistoryType } from '../Chat/XyneAISidebar/utils/XyneAITypes';
 import { cn } from '../../utils/classNames';
+import { UnpinIcon } from '../../assets/icons/UnpinIcon';
 
 const NAV_ITEM_CLASS =
   'flex items-center justify-start gap-3 w-full px-3 py-2 text-sm font-medium tracking-[-0.14px] rounded-[10px] border border-transparent transition-colors hover:bg-sidebar-accent';
@@ -40,10 +47,8 @@ const NAV_ITEM_IDLE_CLASS = 'text-sidebar-foreground hover:text-sidebar-accent-f
 const NAV_ITEM_ACTIVE_CLASS =
   'text-sidebar-accent-foreground bg-sidebar-accent border-sidebar-border';
 
-// Side padding lives on the row's children, not the row, so the title button can
-// own the full height *and* the left inset — no dead strip around the hit area.
 const LIST_ROW_CLASS =
-  'flex items-center gap-3 h-9 mt-px group rounded-[10px] px-3 border border-transparent transition-colors';
+  'relative flex items-center h-9 mt-px group rounded-[10px] px-3 border border-transparent transition-colors';
 
 const LIST_ROW_ACTIVE_CLASS =
   'text-sidebar-accent-foreground font-medium bg-sidebar-accent border-sidebar-border';
@@ -143,11 +148,47 @@ function SidebarNavItem({
 // SessionHistory (ChatHistory equivalent)
 // ═══════════════════════════════════════════════════════════════════════════════
 
+const MARQUEE_PX_PER_SEC = 35;
+const MARQUEE_TRAVEL_FRACTION = 0.8;
+const MARQUEE_MIN_OVERFLOW_PX = 8;
+const MARQUEE_HOVER_RESERVED_PX = 56;
+
+function SessionTitle({ title }: { title: string }): ReactElement {
+  const setPace = useCallback(
+    (el: HTMLSpanElement | null) => {
+      if (!el) return;
+      const apply = (): void => {
+        const hoverWidth = Math.max(0, el.clientWidth - MARQUEE_HOVER_RESERVED_PX);
+        const overflow = Math.max(0, el.scrollWidth - hoverWidth);
+        const seconds =
+          overflow < MARQUEE_MIN_OVERFLOW_PX
+            ? 0
+            : overflow / MARQUEE_PX_PER_SEC / MARQUEE_TRAVEL_FRACTION;
+        el.style.setProperty('--marquee-duration', `${seconds.toFixed(2)}s`);
+      };
+      apply();
+      requestAnimationFrame(apply);
+    },
+    [title],
+  );
+
+  return (
+    <span className='sidebar-title-clip min-w-0 flex-1'>
+      <span ref={setPace} className='sidebar-title-text'>
+        {title}
+      </span>
+    </span>
+  );
+}
+
 interface SessionHistoryProps {
   sessions: ConversationHistoryType[];
   activeSessionId?: string | undefined;
   onSelect: (sessionId: string) => void;
   onDelete: (sessionId: string) => Promise<void>;
+  onRename: (sessionId: string, title: string) => Promise<void>;
+  onTogglePin: (sessionId: string, pinned: boolean) => Promise<void>;
+  showEmpty?: boolean;
 }
 
 function SessionHistory({
@@ -155,14 +196,23 @@ function SessionHistory({
   activeSessionId,
   onSelect,
   onDelete,
-}: SessionHistoryProps): ReactElement {
-  // Rename + star intentionally omitted: claw-auth (the v2 backing store) has
-  // no title override or starred field, so those actions can't be implemented
-  // here without a schema change. Delete is the only v2 mutation backed by an
-  // existing claw-auth endpoint.
+  onRename,
+  onTogglePin,
+  showEmpty = true,
+}: SessionHistoryProps): ReactElement | null {
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [openDropdownId, setOpenDropdownId] = useState<string | null>(null);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState('');
+
+  const commitRename = (sessionId: string): void => {
+    const next = renameDraft.trim();
+    setRenamingId(null);
+    const current = sessions.find(s => s.sessionId === sessionId)?.title ?? '';
+    if (!next || next === current) return;
+    void onRename(sessionId, next);
+  };
 
   const pendingSession = sessions.find(s => s.sessionId === pendingDeleteId) ?? null;
 
@@ -182,6 +232,10 @@ function SessionHistory({
       setIsDeleting(false);
     }
   };
+
+  if (sessions.length === 0 && !showEmpty) {
+    return null;
+  }
 
   if (sessions.length === 0) {
     return (
@@ -209,62 +263,163 @@ function SessionHistory({
                 className={cn(
                   LIST_ROW_CLASS,
                   isActive ? LIST_ROW_ACTIVE_CLASS : LIST_ROW_IDLE_CLASS,
+                  openDropdownId === session.sessionId && 'sidebar-title-static',
                 )}
               >
-                {/* self-stretch overrides the row's items-center, so the button fills
-                    the full 36px height instead of just wrapping its line box; pl-3
-                    pulls the row's old left inset inside the hit area too. */}
-                <button
-                  type='button'
-                  onClick={() => onSelect(session.sessionId)}
-                  className='flex min-w-0 flex-1 items-center self-stretch pl-3 pr-1 text-left text-sm'
-                  data-track-category='XyneAI'
-                  data-track-name='SELECT_SESSION'
-                >
-                  <span className='min-w-0 flex-1 truncate'>{session.title}</span>
-                </button>
-                <Popover
-                  open={openDropdownId === session.sessionId}
-                  onOpenChange={(open: boolean) =>
-                    setOpenDropdownId(open ? session.sessionId : null)
-                  }
-                  align='end'
-                  sideOffset={4}
-                  trigger={
-                    <button
-                      type='button'
-                      className={cn(
-                        'shrink-0 items-center justify-center rounded-md p-1 hover:bg-sidebar-accent',
-                        openDropdownId === session.sessionId ? 'flex' : 'hidden group-hover:flex',
-                      )}
-                      aria-label='Chat options'
-                      data-track-category='XyneAI'
-                      data-track-name='OPEN_SESSION_MENU'
-                    >
-                      <ThreeDotsMenuVertical size={14} className='shrink-0' aria-hidden />
-                    </button>
-                  }
-                  className='w-48 rounded-lg border border-border bg-popover p-0 shadow-lg'
+                {renamingId === session.sessionId ? (
+                  <input
+                    autoFocus
+                    maxLength={CHAT_TITLE_MAX_CHARS}
+                    value={renameDraft}
+                    onChange={e => setRenameDraft(e.target.value)}
+                    onBlur={() => commitRename(session.sessionId)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        commitRename(session.sessionId);
+                      }
+                      if (e.key === 'Escape') {
+                        e.preventDefault();
+                        setRenamingId(null);
+                      }
+                    }}
+                    className='min-w-0 flex-1 self-stretch bg-transparent pr-1 text-sm outline-none'
+                    aria-label='Rename chat'
+                    data-track-category='XyneAI'
+                    data-track-name='RENAME_SESSION_INPUT'
+                  />
+                ) : (
+                  <button
+                    type='button'
+                    onClick={() => onSelect(session.sessionId)}
+                    className={cn(
+                      'flex min-w-0 flex-1 items-center gap-1.5 self-stretch pr-1 text-left text-sm transition-[padding] group-hover:pr-14',
+                      openDropdownId === session.sessionId && 'pr-14',
+                    )}
+                    data-track-category='XyneAI'
+                    data-track-name='SELECT_SESSION'
+                  >
+                    <SessionTitle title={session.title} />
+                  </button>
+                )}
+                <span
+                  className={cn(
+                    'absolute right-2 flex items-center gap-1',
+                    renamingId === session.sessionId && 'invisible pointer-events-none',
+                  )}
                 >
                   <button
                     type='button'
                     onClick={e => {
                       e.stopPropagation();
-                      setOpenDropdownId(null);
-                      setPendingDeleteId(session.sessionId);
+                      void onTogglePin(session.sessionId, !session.isStarred);
                     }}
-                    className='flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-destructive hover:bg-accent'
+                    className={cn(
+                      'flex shrink-0 items-center justify-center rounded-md p-1 opacity-0 transition-opacity hover:bg-sidebar-accent focus-visible:opacity-100 group-hover:opacity-100',
+                      openDropdownId === session.sessionId && 'opacity-100',
+                    )}
+                    aria-label={session.isStarred ? 'Unpin chat' : 'Pin chat'}
+                    title={session.isStarred ? 'Unpin' : 'Pin'}
                     data-track-category='XyneAI'
-                    data-track-name='DELETE_SESSION'
+                    data-track-name='TOGGLE_PIN_SESSION'
                     data-track-metadata={JSON.stringify({
                       surface: 'page',
                       conversationId: session.sessionId,
+                      pinned: !session.isStarred,
                     })}
                   >
-                    <DeleteDustbin01 size={14} className='shrink-0' aria-hidden />
-                    <span>Delete</span>
+                    {session.isStarred ? (
+                      <UnpinIcon className='h-3.5 w-3.5 shrink-0' />
+                    ) : (
+                      <PinSlant size={14} className='shrink-0' aria-hidden />
+                    )}
                   </button>
-                </Popover>
+                  <Popover
+                    open={openDropdownId === session.sessionId}
+                    onOpenChange={(open: boolean) =>
+                      setOpenDropdownId(open ? session.sessionId : null)
+                    }
+                    side='right'
+                    align='start'
+                    sideOffset={4}
+                    trigger={
+                      <button
+                        type='button'
+                        className={cn(
+                          'flex shrink-0 items-center justify-center rounded-md p-1 opacity-0 transition-opacity hover:bg-sidebar-accent focus-visible:opacity-100 group-hover:opacity-100',
+                          openDropdownId === session.sessionId && 'opacity-100',
+                        )}
+                        aria-label='Chat options'
+                        data-track-category='XyneAI'
+                        data-track-name='OPEN_SESSION_MENU'
+                      >
+                        <ThreeDotsMenuVertical size={14} className='shrink-0' aria-hidden />
+                      </button>
+                    }
+                    className='w-48 rounded-lg border border-border bg-popover p-1.5 shadow-lg'
+                  >
+                    <button
+                      type='button'
+                      onClick={e => {
+                        e.stopPropagation();
+                        setOpenDropdownId(null);
+                        setRenameDraft(session.title);
+                        setRenamingId(session.sessionId);
+                      }}
+                      className='flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-accent'
+                      data-track-category='XyneAI'
+                      data-track-name='RENAME_SESSION'
+                      data-track-metadata={JSON.stringify({
+                        surface: 'page',
+                        conversationId: session.sessionId,
+                      })}
+                    >
+                      <PencilEdit size={14} className='shrink-0' aria-hidden />
+                      <span>Rename</span>
+                    </button>
+                    <button
+                      type='button'
+                      onClick={e => {
+                        e.stopPropagation();
+                        setOpenDropdownId(null);
+                        void onTogglePin(session.sessionId, !session.isStarred);
+                      }}
+                      className='flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm hover:bg-accent'
+                      data-track-category='XyneAI'
+                      data-track-name='PIN_SESSION'
+                      data-track-metadata={JSON.stringify({
+                        surface: 'page',
+                        conversationId: session.sessionId,
+                        pinned: !session.isStarred,
+                      })}
+                    >
+                      {session.isStarred ? (
+                        <UnpinIcon className='h-3.5 w-3.5 shrink-0' />
+                      ) : (
+                        <PinSlant size={14} className='shrink-0' aria-hidden />
+                      )}
+                      <span>{session.isStarred ? 'Unpin' : 'Pin'}</span>
+                    </button>
+                    <button
+                      type='button'
+                      onClick={e => {
+                        e.stopPropagation();
+                        setOpenDropdownId(null);
+                        setPendingDeleteId(session.sessionId);
+                      }}
+                      className='flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm text-destructive hover:bg-accent'
+                      data-track-category='XyneAI'
+                      data-track-name='DELETE_SESSION'
+                      data-track-metadata={JSON.stringify({
+                        surface: 'page',
+                        conversationId: session.sessionId,
+                      })}
+                    >
+                      <DeleteDustbin01 size={14} className='shrink-0' aria-hidden />
+                      <span>Delete</span>
+                    </button>
+                  </Popover>
+                </span>
               </div>
             </li>
           );
@@ -368,6 +523,8 @@ export function AISidebar({
   const { selectedAgentSlug } = useSelectedAgent();
   const effectiveAgentSlug = selectedAgentSlug;
   const { data: sessions = [] } = useV2SessionsList(effectiveAgentSlug, true);
+  const pinnedSessions = sessions.filter(session => session.isStarred);
+  const recentSessions = sessions.filter(session => !session.isStarred);
   const { invalidateSessions: invalidateV2Sessions } = useV2SessionInvalidator();
 
   const handleDeleteSession = async (sessionId: string): Promise<void> => {
@@ -379,6 +536,22 @@ export function AISidebar({
       if (sessionId === activeSessionId) {
         onCreateChat();
       }
+    } finally {
+      invalidateV2Sessions(effectiveAgentSlug);
+    }
+  };
+
+  const handleRenameSession = async (sessionId: string, title: string): Promise<void> => {
+    try {
+      await updateV2Conversation(sessionId, { title }, effectiveAgentSlug);
+    } finally {
+      invalidateV2Sessions(effectiveAgentSlug);
+    }
+  };
+
+  const handleTogglePinSession = async (sessionId: string, pinned: boolean): Promise<void> => {
+    try {
+      await updateV2Conversation(sessionId, { pinned }, effectiveAgentSlug);
     } finally {
       invalidateV2Sessions(effectiveAgentSlug);
     }
@@ -429,6 +602,27 @@ export function AISidebar({
           </nav>
 
           <div className='flex min-h-0 flex-1 flex-col'>
+            {pinnedSessions.length > 0 && (
+              <div className='flex max-h-[40%] shrink-0 flex-col'>
+                <div className='flex h-7 shrink-0 items-center px-3'>
+                  <span className='block truncate text-left text-xs font-medium capitalize tracking-[0.48px] text-sidebar-foreground'>
+                    Pinned
+                  </span>
+                </div>
+                <div className='min-h-0 overflow-y-auto no-scrollbar'>
+                  <SessionHistory
+                    sessions={pinnedSessions}
+                    activeSessionId={activeSessionId}
+                    onSelect={onSelectSession}
+                    onDelete={handleDeleteSession}
+                    onRename={handleRenameSession}
+                    onTogglePin={handleTogglePinSession}
+                    showEmpty={false}
+                  />
+                </div>
+              </div>
+            )}
+
             <div className='group flex h-7 shrink-0 items-center justify-between gap-2 rounded-[10px] px-3'>
               <button
                 type='button'
@@ -469,10 +663,13 @@ export function AISidebar({
             {recentsOpen && (
               <div className='min-h-0 flex-1 overflow-y-auto no-scrollbar'>
                 <SessionHistory
-                  sessions={sessions}
+                  sessions={recentSessions}
                   activeSessionId={activeSessionId}
                   onSelect={onSelectSession}
                   onDelete={handleDeleteSession}
+                  onRename={handleRenameSession}
+                  onTogglePin={handleTogglePinSession}
+                  showEmpty={sessions.length === 0}
                 />
               </div>
             )}

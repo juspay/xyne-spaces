@@ -69,6 +69,7 @@ import {
   usePageSelection,
 } from './Workspace';
 import { fetchV2ConversationMessages } from '../../services/XyneAI/XyneAISessionsV2Service';
+import { useV2SessionsList, useV2SessionInvalidator } from '../../hooks/useAskAISessionsV2';
 import { lengthBucket } from '../../services/Analytics/trackSource';
 import { xyneAIStreamManager } from '../../services/XyneAI/XyneAIStreamManager';
 import { BASE_URL } from '../../services/clients/apiClient';
@@ -107,6 +108,7 @@ import {
   AttachmentPreview,
   useMentionResolver,
   processNodeForUserTags,
+  processTextForCopy,
 } from '../Chat/XyneAISidebar/components/MessageItem';
 import { ToolInvocationList } from '../Chat/XyneAISidebar/components/ToolInvocationList';
 import { PendingActionBlock } from '../Chat/XyneAISidebar/components/PendingActionBlock';
@@ -290,7 +292,9 @@ function ChatTopbar({
           )}
         </button>
       )}
-      <h1 className='flex-1 truncate text-base font-medium text-foreground'>{title}</h1>
+      <h1 className='min-w-0 flex-1 truncate text-base font-medium text-foreground' title={title}>
+        {title}
+      </h1>
     </header>
   );
 }
@@ -841,6 +845,7 @@ function ChatMessageBubble({
   const isUser = message.type === 'user';
   const [isEditing, setIsEditing] = useState(false);
   const [editText, setEditText] = useState('');
+  const [copied, setCopied] = useState(false);
   const editTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   // Once this message has streamed live, KEEP the per-block render after
@@ -1157,6 +1162,20 @@ function ChatMessageBubble({
   const hasAttachedContext =
     isUser && !!message.attachedContext && message.attachedContext.length > 0;
   const passage = isUser ? message.pageSelection : undefined;
+  const userStrippedContent = useMemo(
+    () =>
+      isUser
+        ? stripUnknownCiteLinks(
+            stripNonClfCitationTokens(stripCitationMarks(message.content)),
+            validCitationKeys,
+          )
+        : '',
+    [isUser, message.content, validCitationKeys],
+  );
+  const markCopied = useCallback((): void => {
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }, []);
   if (isUser && !hasUserContent && !hasUserAttachments) {
     return null as unknown as ReactElement;
   }
@@ -1180,24 +1199,6 @@ function ChatMessageBubble({
           )}
         >
           <div className='flex w-full items-start justify-end gap-1'>
-            {/* Edit button — appears on hover to the left of the bubble, forks a
-                new sibling branch from the same parent (mirrors the sidebar). */}
-            {onEditSubmit && !isEditing && (
-              <button
-                type='button'
-                onClick={() => {
-                  setEditText(message.content);
-                  setIsEditing(true);
-                  setTimeout(() => editTextareaRef.current?.focus(), 0);
-                }}
-                className='mt-2 flex-shrink-0 rounded p-1 opacity-0 transition-opacity hover:bg-accent group-hover:opacity-100'
-                title='Edit message'
-                data-track-category='XyneAI'
-                data-track-name='EDIT_MESSAGE'
-              >
-                <Pencil size={14} className='text-muted-foreground' />
-              </button>
-            )}
             <div
               className={cn(
                 'ai-user-bubble rounded-3xl bg-[#ececec] px-4 py-2.5 text-sm leading-relaxed text-gray-900',
@@ -1266,13 +1267,7 @@ function ChatMessageBubble({
                   )}
                   {hasUserContent && (
                     <div className='whitespace-pre-wrap'>
-                      {processNodeForUserTags(
-                        stripUnknownCiteLinks(
-                          stripNonClfCitationTokens(stripCitationMarks(message.content)),
-                          validCitationKeys,
-                        ),
-                        resolveMention,
-                      )}
+                      {processNodeForUserTags(userStrippedContent, resolveMention)}
                     </div>
                   )}
                 </>
@@ -1304,6 +1299,47 @@ function ChatMessageBubble({
               total={branchInfo.total}
               onNavigate={onBranchNavigate}
             />
+          )}
+          {!isEditing && (
+            <div className='mt-0.5 flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100'>
+              {hasUserContent && (
+                <button
+                  type='button'
+                  onClick={(): void => {
+                    void navigator.clipboard
+                      .writeText(processTextForCopy(userStrippedContent, message.userTags))
+                      .then(markCopied);
+                  }}
+                  className='inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground'
+                  title={copied ? 'Copied!' : 'Copy'}
+                  data-track-category='XyneAI'
+                  data-track-name='COPY_USER_MESSAGE'
+                  data-track-metadata={JSON.stringify({ ...trackContext, messageId: message.id })}
+                >
+                  {copied ? (
+                    <Check className='h-3.5 w-3.5' aria-hidden strokeWidth={1.75} />
+                  ) : (
+                    <Copy className='h-3.5 w-3.5' aria-hidden strokeWidth={1.75} />
+                  )}
+                </button>
+              )}
+              {onEditSubmit && (
+                <button
+                  type='button'
+                  onClick={() => {
+                    setEditText(message.content);
+                    setIsEditing(true);
+                    setTimeout(() => editTextareaRef.current?.focus(), 0);
+                  }}
+                  className='inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground'
+                  title='Edit message'
+                  data-track-category='XyneAI'
+                  data-track-name='EDIT_MESSAGE'
+                >
+                  <Pencil className='h-3.5 w-3.5' aria-hidden strokeWidth={1.75} />
+                </button>
+              )}
+            </div>
           )}
         </div>
       ) : (
@@ -1424,14 +1460,21 @@ function ChatMessageBubble({
             <div className='mt-1.5 flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100'>
               <button
                 type='button'
-                onClick={onCopy}
-                title='Copy'
+                onClick={(): void => {
+                  onCopy?.();
+                  markCopied();
+                }}
+                title={copied ? 'Copied!' : 'Copy'}
                 className='inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground'
                 data-track-category='XyneAI'
                 data-track-name='COPY_MESSAGE'
                 data-track-metadata={JSON.stringify({ ...trackContext, messageId: message.id })}
               >
-                <Copy className='h-3.5 w-3.5' aria-hidden strokeWidth={1.75} />
+                {copied ? (
+                  <Check className='h-3.5 w-3.5' aria-hidden strokeWidth={1.75} />
+                ) : (
+                  <Copy className='h-3.5 w-3.5' aria-hidden strokeWidth={1.75} />
+                )}
               </button>
               {isV2 ? (
                 // v2 (claw): persist to agent_runs.rating (metrics + reload) with
@@ -1733,6 +1776,23 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
   );
 
   const queryClient = useQueryClient();
+  const { data: v2Sessions } = useV2SessionsList(
+    effectiveAgentSlug,
+    isV2 && Boolean(conversationId),
+  );
+  const { invalidateSessions } = useV2SessionInvalidator();
+  const generatedTitle = useMemo(() => {
+    if (!conversationId) return undefined;
+    const session = v2Sessions?.find(s => s.sessionId === conversationId);
+    return session?.titleGenerated ? session.title : undefined;
+  }, [v2Sessions, conversationId]);
+  useEffect(() => {
+    if (!isV2 || !conversationId) return;
+    const timers = [4_000, 10_000, 20_000, 35_000, 60_000, 90_000].map(delay =>
+      window.setTimeout(() => invalidateSessions(effectiveAgentSlug), delay),
+    );
+    return () => timers.forEach(id => window.clearTimeout(id));
+  }, [isV2, conversationId, effectiveAgentSlug, invalidateSessions]);
   const designStudio = useDesignStudio();
   const revealedEditsRef = useRef<Set<string>>(new Set());
 
@@ -2483,9 +2543,10 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
   );
 
   const title =
-    messages.length > 0
+    generatedTitle ??
+    (messages.length > 0
       ? (messages.find(m => m.type === 'user')?.content.slice(0, 40) ?? 'New chat')
-      : 'New chat';
+      : 'New chat');
 
   return (
     <div className='flex h-full min-w-0 flex-1'>

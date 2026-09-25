@@ -166,6 +166,11 @@ export const chatMessageRepository = {
     const result = await prisma.chatMessage.deleteMany({
       where: { userId, agentSlug, conversationId },
     });
+    if (result.count > 0) {
+      await prisma.chatConversationMeta.deleteMany({
+        where: { conversationId, userId, agentSlug },
+      });
+    }
     return result.count;
   },
 };

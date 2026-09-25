@@ -2235,6 +2235,47 @@ mark.chat-text-highlight,
   overflow: hidden;
 }
 
+.sidebar-title-clip {
+  container-type: inline-size;
+  overflow: hidden;
+}
+
+.sidebar-title-text {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.group:hover .sidebar-title-text {
+  width: max-content;
+  overflow: visible;
+  animation: sidebar-title-marquee var(--marquee-duration, 4s) linear 450ms infinite;
+}
+
+.group.sidebar-title-static:hover .sidebar-title-text {
+  width: auto;
+  overflow: hidden;
+  animation: none;
+  transform: none;
+}
+
+@keyframes sidebar-title-marquee {
+  0% {
+    transform: translateX(0);
+  }
+
+  80%,
+  100% {
+    transform: translateX(min(0px, calc(100cqw - 100%)));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .group:hover .sidebar-title-text {
+    animation: none;
+  }
+}
+
 @keyframes dots {
   0%,
   20% {

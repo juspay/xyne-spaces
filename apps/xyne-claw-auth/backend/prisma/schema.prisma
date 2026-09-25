@@ -1350,6 +1350,29 @@ model ChatAttachment {
   @@map("chat_attachments")
 }
 
+/// Per-conversation metadata for Ask AI chats. A conversation is otherwise just
+/// a grouping of chat_messages rows, so anything belonging to the conversation
+/// rather than to one message lives here — today the generated title the
+/// sidebar and chat header show instead of the truncated first user message.
+model ChatConversationMeta {
+  conversationId   String    @id
+  userId           String
+  agentSlug        String
+  orgId            String
+  /// Null until generation succeeds; every reader falls back to the first user
+  /// message, so old conversations need no backfill.
+  title            String?
+  titleGeneratedAt DateTime?
+  /// Sorts the chat to the top of Recents. No separate section.
+  pinned           Boolean   @default(false)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([userId, agentSlug])
+  @@index([orgId])
+  @@map("chat_conversation_meta")
+}
+
 /// A chat artifact the user chose to keep: a generated React project promoted out
 /// of a throwaway `ChatAttachment` into something with its own id, title and URL.
 /// Lives here rather than in the Spaces DB because the attachment it derives from
