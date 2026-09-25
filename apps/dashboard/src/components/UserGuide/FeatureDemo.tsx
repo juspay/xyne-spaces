@@ -2,7 +2,6 @@ import { useState, useEffect, useMemo, type ReactElement, type ReactNode } from 
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   MessagesSquare,
-  Phone,
   Mic,
   Ticket,
   Search,
@@ -21,7 +20,6 @@ import {
   ArrowRightLeft,
   Lightbulb,
   FileText,
-  Headphones,
   ShieldUser,
   AppWindow,
   Globe,
@@ -37,6 +35,7 @@ import {
   PieChart,
   ChevronRight,
 } from 'lucide-react';
+import { PhoneDefault } from '@xyne/icons';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -161,7 +160,7 @@ const Sidebar = ({ activeKey, highlightKey }: SidebarProps): ReactElement => {
   const items = [
     { key: 'chat', icon: <MessagesSquare size={12} />, label: 'Chat' },
     { key: 'tickets', icon: <Ticket size={12} />, label: 'Tickets' },
-    { key: 'calls', icon: <Phone size={12} />, label: 'Calls' },
+    { key: 'calls', icon: <PhoneDefault size={12} />, label: 'Calls' },
     { key: 'ai', icon: <Sparkles size={12} />, label: 'AI' },
     { key: 'analytics', icon: <BarChart3 size={12} />, label: 'Reports' },
     { key: 'apps', icon: <AppWindow size={12} />, label: 'Apps' },
@@ -1237,7 +1236,7 @@ function callsScenes(): SceneConfig[] {
                     <div
                       className={`h-6 w-6 rounded-md flex items-center justify-center ${c.active ? 'bg-emerald-500/15 text-emerald-600' : 'bg-muted text-muted-foreground'}`}
                     >
-                      <Phone size={10} />
+                      <PhoneDefault size={10} />
                     </div>
                     <div className='flex-1 min-w-0'>
                       <p className='text-[10px] font-medium text-foreground'>{c.title}</p>
@@ -1270,7 +1269,7 @@ function callsScenes(): SceneConfig[] {
             <div className='p-1.5 space-y-1'>
               <div className='flex items-center gap-1.5 p-1.5 rounded border border-emerald-500/30 bg-emerald-500/5'>
                 <div className='h-6 w-6 rounded-md bg-emerald-500/15 text-emerald-600 flex items-center justify-center'>
-                  <Phone size={10} />
+                  <PhoneDefault size={10} />
                 </div>
                 <div className='flex-1'>
                   <p className='text-[10px] font-medium text-foreground'>Incident Bridge</p>
@@ -1605,7 +1604,7 @@ function genericScenes(visualKey: string): SceneConfig[] {
     },
     support: {
       title: 'Support',
-      icon: <Headphones size={10} />,
+      icon: <PhoneDefault size={10} />,
       lines: [
         'SRT-042 · Cannot log in · 2h left ⚠',
         'SRT-041 · Export CSV broken · 5h',

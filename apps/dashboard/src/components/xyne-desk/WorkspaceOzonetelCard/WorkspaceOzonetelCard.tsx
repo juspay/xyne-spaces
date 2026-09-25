@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactElement, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Check, Copy, Phone, Plus, Settings2, Trash2, X } from 'lucide-react';
+import { Check, Copy, Plus, Settings2, Trash2, X } from 'lucide-react';
 import { ChannelType } from '@xyne/shared';
 import { toast } from 'sonner';
 import {
@@ -19,6 +19,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { getApiErrorMessage } from '../../../utils/apiError';
 import { cn } from '../../../utils/classNames';
 import { useAllChannels } from '../../../hooks/useChannels';
+import { PhoneDefault } from '@xyne/icons';
 
 const inputClass =
   'w-full rounded-[10px] border border-border bg-background px-3 py-1.5 text-sm text-foreground shadow-sm focus:outline-none focus-visible:ring-1 focus-visible:ring-desk-accent';
@@ -255,7 +256,7 @@ export const WorkspaceOzonetelCard = (): ReactElement => {
           <p className='text-sm font-medium text-foreground'>Ozonetel</p>
 
           <div className='flex items-center gap-2 text-sm text-muted-foreground'>
-            <Phone size={14} className='flex-shrink-0' />
+            <PhoneDefault size={14} className='flex-shrink-0' />
             <span className='truncate text-xs' title={`${connectionSummary} • ${bindingLabel}`}>
               {connectionSummary} • {bindingLabel}
             </span>

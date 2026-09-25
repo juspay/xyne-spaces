@@ -9,10 +9,10 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Phone } from 'lucide-react';
 import { toast } from 'sonner';
 import { getOzonetelToolbar, linkOzonetelCall } from '../../../services/clients/telephonyApi';
 import Tooltip from '../../ui/Tooltip';
+import { PhoneDefault } from '@xyne/icons';
 
 /**
  * Embeds Ozonetel's hosted CloudAgent toolbar as a header-triggered iframe.
@@ -180,7 +180,7 @@ function ToolbarButton({ onClick }: { onClick: () => void }): ReactElement {
         data-track-name='OpenOzonetelToolbar'
         onClick={onClick}
       >
-        <Phone size={16} className='shrink-0' />
+        <PhoneDefault size={16} className='shrink-0' />
       </button>
     </Tooltip>
   );
@@ -350,7 +350,7 @@ export const CloudAgentDock = ({
             <span className='absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400/70 opacity-75' />
             <span className='relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500' />
           </div>
-          <Phone size={15} className='text-emerald-600' />
+          <PhoneDefault size={15} className='text-emerald-600' />
           <span className='text-sm font-semibold text-foreground'>Ozonetel</span>
         </div>
         <iframe

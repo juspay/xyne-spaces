@@ -22,7 +22,6 @@ import {
   FolderGit2,
   BookOpen,
   Ticket,
-  Phone,
   Mic,
   Hash,
   Lock,
@@ -31,7 +30,7 @@ import {
   Sparkles,
   MousePointerClick,
 } from 'lucide-react';
-import { PlusDefault } from '@xyne/icons';
+import { PhoneDefault, PlusDefault } from '@xyne/icons';
 import { toast } from 'sonner';
 import { posthogService } from '../../services/Analytics/posthogService';
 import { useQuery } from '@tanstack/react-query';
@@ -915,7 +914,10 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
                 <ContextPill
                   key={`ts-${transcript.id}`}
                   icon={
-                    <Phone className='h-3.5 w-3.5 shrink-0 text-muted-foreground' aria-hidden />
+                    <PhoneDefault
+                      className='h-3.5 w-3.5 shrink-0 text-muted-foreground'
+                      aria-hidden
+                    />
                   }
                   label={transcript.title}
                   onRemove={() => removeTranscript(transcript.id)}

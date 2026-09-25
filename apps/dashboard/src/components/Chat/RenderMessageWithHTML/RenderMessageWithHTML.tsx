@@ -10,7 +10,6 @@ import {
   Ticket as TicketIcon,
   Users,
   Clock,
-  Phone,
 } from 'lucide-react';
 import {
   getAnchorTargetProps,
@@ -26,7 +25,7 @@ import { UserHoverWrapper } from '../../ui/UserMentionPopover/UserMentionPopover
 import { useChannel } from '../../../hooks/useChannels';
 import { GenericMentionHoverPopover } from '../../ui/GenericMentionPopover/GenericMentionPopover';
 import { ALLOWED_TAGS, isValidURL, sanitizeDomTree } from '../../../utils/sanitizer';
-import { CopyCopied, CopyDefault, MaximizeTwoArrow } from '@xyne/icons';
+import { CopyCopied, CopyDefault, MaximizeTwoArrow, PhoneDefault } from '@xyne/icons';
 import { copyTextToClipboard } from '../../../utils/clipboardUtils';
 import { tokenizeMessage, isEmojiOnlyFromDom } from '../../../utils/emojiUtils';
 import { useUsers } from '../../../hooks/useUsers';
@@ -82,7 +81,7 @@ const getInternalLinkIcon = (kind: InternalXyneLinkKind): JSX.Element => {
     case 'canvas':
       return <FileText className='h-3.5 w-3.5' />;
     case 'call':
-      return <Phone className='h-3.5 w-3.5' />;
+      return <PhoneDefault className='h-3.5 w-3.5' />;
     default:
       return <MessageSquare className='h-3.5 w-3.5' />;
   }

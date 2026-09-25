@@ -12,7 +12,6 @@ import {
   Bookmark,
   Forward,
   Copy,
-  Headphones,
   Mic,
   ArrowLeft,
   Clock3,
@@ -30,6 +29,7 @@ import { ConversationWithTicket } from '../../ui/MessageBubble/MessageBubble.typ
 import { AnimatePresence, motion } from 'framer-motion';
 import { useMeasure } from 'react-use';
 import AddReactionActionView from '../AddReactionActionView/AddReactionActionView';
+import { PhoneDefault } from '@xyne/icons';
 
 type DrawerView = 'default' | 'emoji';
 
@@ -222,7 +222,7 @@ export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
                   {/* Initiate Call */}
                   {onInitiateCall && messageId === initialMessageId && !isChannelArchived && (
                     <ActionButton
-                      icon={<Headphones className='w-5 h-5' />}
+                      icon={<PhoneDefault className='w-5 h-5' />}
                       label={isCallDisabled ? 'Call already in progress' : 'Start Call'}
                       onClick={() => handleActionClick(onInitiateCall)}
                       disabled={isCallDisabled}

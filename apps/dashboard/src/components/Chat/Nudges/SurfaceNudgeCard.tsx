@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect } from 'react';
-import { ChevronRight, Eye, Phone, X } from 'lucide-react';
+import { ChevronRight, Eye, X } from 'lucide-react';
 import { useZero } from '../../../hooks/useZero';
 import { toast } from 'sonner';
 import { Button } from '../../ui/Button/Button';
@@ -17,6 +17,7 @@ import { standaloneNavigate } from '../../../utils/electronApp';
 import { getPriorityIcon } from '../../Tickets/TicketCard/TicketCard.utils';
 import { SubTicketCountIcon } from '../../../assets/icons';
 import { ScheduleCallModal } from '../../Call/ScheduleCallModal/ScheduleCallModal';
+import { PhoneDefault } from '@xyne/icons';
 
 const NUDGE_KIND_LABELS: Record<string, string> = {
   CREATE_TICKET_FROM_MESSAGE: 'Create Ticket',
@@ -459,7 +460,7 @@ export const SurfaceNudgeCard: React.FC<SurfaceNudgeCardProps> = ({
               data-track-name='OPEN_NUDGE_SCHEDULE_CALL'
               className='h-8 rounded-lg border-border px-3 text-sm text-foreground'
             >
-              <Phone className='mr-1 h-3.5 w-3.5' />
+              <PhoneDefault className='mr-1 h-3.5 w-3.5' />
               Schedule Xyne Call
             </Button>
           )}

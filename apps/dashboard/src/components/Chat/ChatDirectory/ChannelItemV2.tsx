@@ -4,12 +4,12 @@ import { Link, useNavigate } from 'react-router-dom';
 import {
   Hashtag,
   PencilEdit,
-  Headphones,
   MultipleCrossCancelDefault,
   ThreeDotsMenuVertical,
   CheckTickSingle,
   FolderArrowRight,
   FolderRemove,
+  PhoneDefault,
 } from '@xyne/icons';
 import {
   ChannelVisibility,
@@ -228,7 +228,7 @@ const ChannelItemV2 = memo(
           </span>
           {hasActiveCall && !isDM && (
             <span className='shrink-0 rounded-full bg-status-success px-2 py-1 text-background'>
-              <Headphones size={14} />
+              <PhoneDefault size={14} />
             </span>
           )}
           {shouldShowDraft && !hideDraftIndicator && (

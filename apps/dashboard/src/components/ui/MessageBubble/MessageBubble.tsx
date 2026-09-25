@@ -67,8 +67,7 @@ import { NonParticipantActions } from './NonParticipantActions';
 import { PostedInLink } from './PostedInLink';
 import { MessageHeader } from './MessageHeader';
 import { RunOriginChip } from './RunOriginChip';
-import HuddleIcon from '../../icons/HuddleIcon';
-import { MicOn } from '@xyne/icons';
+import { MicOn, PhoneDefault } from '@xyne/icons';
 import workflowBotAvatar from './workflowBotAvatar.png';
 import { downloadAttachment } from '../../Chat/MessageAttachment/utils';
 import { PendingIcon } from '../../../assets/icons/WorkflowIcons';
@@ -899,7 +898,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               <div
                 className={`w-8 h-8 rounded-md flex items-center justify-center ${isActiveCall ? 'bg-stage-completed' : 'bg-muted-foreground/10'}`}
               >
-                <HuddleIcon
+                <PhoneDefault
+                  size={16}
                   color={isActiveCall ? 'var(--status-success)' : 'hsl(var(--foreground) / 0.8)'}
                 />
               </div>
@@ -1453,7 +1453,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                     <div className='flex items-center gap-2 mb-1'>
                       {forwardedMessageData.originalSenderName === 'Xyne Call' ? (
                         <div className='w-5 h-5 rounded-md flex items-center justify-center bg-muted'>
-                          <HuddleIcon color='hsl(var(--muted-foreground))' size={14} />
+                          <PhoneDefault color='hsl(var(--muted-foreground))' size={14} />
                         </div>
                       ) : (
                         forwardedMessageData.originalSenderId && (

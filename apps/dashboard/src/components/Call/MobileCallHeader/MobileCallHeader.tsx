@@ -1,8 +1,9 @@
 import { ReactElement, useState, useEffect, useMemo } from 'react';
-import { Phone, Mic, MicOff } from 'lucide-react';
+import { Mic, MicOff } from 'lucide-react';
 import { Button } from '../../ui/Button/Button';
 import { cn } from '../../../utils/classNames';
 import { formatDuration } from '../../../utils/dateUtils';
+import { PhoneDefault } from '@xyne/icons';
 
 interface ParticipantInfo {
   identity: string;
@@ -116,7 +117,7 @@ export function MobileCallHeader({
           data-track-category='CALLS'
           data-track-name='Mobile_End_Call'
         >
-          <Phone size={18} className='rotate-[135deg]' />
+          <PhoneDefault size={18} className='rotate-[135deg]' />
         </Button>
       </div>
     </div>

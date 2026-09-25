@@ -25,7 +25,7 @@ import {
   ChevronDown,
   Check,
 } from 'lucide-react';
-import { ResolutionQualityHd, Spinner } from '@xyne/icons';
+import { PhoneDefault, ResolutionQualityHd, Spinner } from '@xyne/icons';
 import {
   NotificationLevel,
   MAX_NOTIFICATION_KEYWORDS,
@@ -63,7 +63,6 @@ import { DailyBriefToggle } from '../DailyBriefToggle';
 import { IntentSuggestionsToggle } from '../IntentSuggestionsToggle';
 import { UpdateAssignmentStatusModal } from '../../AppSidebar/UpdateAssignmentStatusModal';
 import { VoiceSignatureModal } from '../VoiceSignatureModal/VoiceSignatureModal';
-import HuddleIcon from '../../icons/HuddleIcon';
 import { useGlobalNotificationSettings } from '../../../hooks/useGlobalNotificationSettings';
 import { useNotificationKeywords } from '../../../hooks/useNotificationKeywords';
 import { Badge } from '../../ui/Badge/Badge';
@@ -100,7 +99,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'notifications', label: 'Notifications', icon: <Bell className='size-4' /> },
   { id: 'availability', label: 'Availability', icon: <PauseCircle className='size-4' /> },
   { id: 'voice', label: 'Voice', icon: <Mic className='size-4' /> },
-  { id: 'calls', label: 'Calls', icon: <HuddleIcon size={16} /> },
+  { id: 'calls', label: 'Calls', icon: <PhoneDefault size={16} /> },
   { id: 'recordings', label: 'Recordings', icon: <AudioLines className='size-4' /> },
   {
     id: 'messaging',

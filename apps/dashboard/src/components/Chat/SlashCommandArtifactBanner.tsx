@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ArrowRight, ChevronLeft, ChevronRight, Phone, TriangleAlert, X } from 'lucide-react';
+import { ArrowRight, ChevronLeft, ChevronRight, TriangleAlert, X } from 'lucide-react';
 import { useSelector } from '@xstate/react';
 import { useMatches, useNavigate } from 'react-router-dom';
 import { getSlashCommandArtifactDiagnosticKey } from '@xyne/shared';
@@ -20,6 +20,7 @@ import {
 } from './SlashCommandArtifactSideEffects';
 import { buildSlashCommandArtifactRoute } from './SlashCommandArtifacts';
 import { isDMChannel } from './ChatDirectory/ChatDirectory.utils';
+import { PhoneDefault } from '@xyne/icons';
 
 export const getVisibleSlashCommandArtifactBanners = (
   items: readonly SlashCommandArtifactBannerItem[],
@@ -220,7 +221,7 @@ export const SlashCommandArtifactBanner = (): React.JSX.Element | null => {
                     callKey: getSlashCommandArtifactDiagnosticKey(item.activeCallExternalId),
                   })}
                 >
-                  <Phone className='size-3' />
+                  <PhoneDefault className='size-3' />
                   {isInThisCall ? 'In call' : 'Join call'}
                 </button>
               )}
