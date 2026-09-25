@@ -140,6 +140,15 @@ export const shortcuts = {
     priority: 50,
     preventDefault: true,
   },
+  'claw.open': {
+    keys: 'mod+alt+c',
+    scope: 'global',
+    description: 'Open Claw from anywhere',
+    category: 'Navigation',
+    priority: 50,
+    electronOnly: true,
+    preventDefault: true,
+  },
 
   'global.openPreferences': {
     keys: 'mod+comma',
