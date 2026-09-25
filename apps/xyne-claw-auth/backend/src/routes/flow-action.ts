@@ -1328,14 +1328,16 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         return;
       }
 
-      const closeCard = (text: string) =>
-        void replaceFlowCardWithText(messageId, data["agentSlug"] as string | undefined, text, conversationId, data["dmChannelId"] as string | undefined, data["spacesAppId"] as string | undefined);
+      // Feedback rows (twinResponseFeedback) are Claw-owned and keyed by the
+      // CANONICAL Claw user (matching recordTwinApprovalPending's producer-side
+      // keying); the card's baked mentionedUserId is raw for Spaces delivery.
+      const feedbackData = { ...data, mentionedUserId: await resolveCardUserId(ctx.mentionedUserId) };
 
       if (actionId === "twin-decline") {
         resp = { type: "close_screen", finalMessage: "Response declined." };
         res.json(resp);
-        closeCard("**Response declined.**");
-        void recordTwinApprovalOutcome(data, "declined");
+        void replaceFlowCardWithText(messageId, data["agentSlug"] as string | undefined, "❌ **Response declined.**", conversationId, data["dmChannelId"] as string | undefined, data["spacesAppId"] as string | undefined);
+        void recordTwinApprovalOutcome(feedbackData, "declined");
         return;
       }
 
@@ -1352,8 +1354,8 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         }
         resp = { type: "close_screen", finalMessage: result.doneMsg };
         res.json(resp);
-        closeCard(`**${result.doneMsg}**`);
-        void recordTwinApprovalOutcome(data, result.wasEdited ? "accepted_edited" : "accepted", result.finalContent);
+        void replaceFlowCardWithText(messageId, data["agentSlug"] as string | undefined, `**${result.doneMsg}**`, conversationId, data["dmChannelId"] as string | undefined, data["spacesAppId"] as string | undefined);
+        void recordTwinApprovalOutcome(feedbackData, result.wasEdited ? "accepted_edited" : "accepted", result.finalContent);
       } catch (err) {
         log.error("[flow-action] Twin approval error:", err);
         resp = { type: "error", message: "Failed to deliver response" };

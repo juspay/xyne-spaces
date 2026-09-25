@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { executeTwinApprovalDelivery, type TwinDeliveryContext } from "../lib/twin-approval-delivery.js";
 import { recordTwinApprovalOutcome } from "../services/twinResponseFeedback.js";
+import { resolveCanonicalUserIdOrSelf } from "../lib/users-jit.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("twin-draft");
@@ -86,6 +87,7 @@ twinDraftInternalRouter.post("/action", async (req: Request, res: Response) => {
   // destinationKind stays the draft's own so a draft without one records NULL.
   const feedbackData: Record<string, unknown> = {
     ...ctx,
+    mentionedUserId: await resolveCanonicalUserIdOrSelf(ownerId, draft.workspaceId),
     channelName: draft.channelName,
     incomingTask: draft.incomingTask,
     destinationKind: draft.destinationKind,

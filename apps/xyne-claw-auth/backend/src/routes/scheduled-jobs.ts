@@ -16,6 +16,8 @@ import { decrypt } from "../crypto.js";
 import { agentRunRepository, chatMessageRepository } from "../repositories/index.js";
 import { spacesAppFetch, spacesAppFetchMultipart } from "../lib/spaces-api.js";
 import { getRequesterId, getOrgId, isClawAdmin, getAgentEditAccess } from "../middleware/agent-acl.js";
+import { getRequesterAliases, matchesAuthenticatedUserId } from "../middleware/pin-user-id-param.js";
+import { resolveCanonicalUserIdOrSelf, spacesUserIdForClawUser, userIdAliasesFor } from "../lib/users-jit.js";
 import { assertCanControlScheduledJob } from "./scheduled-jobs-auth.js";
 import { requireStrictS2S } from "../middleware/require-auth.js";
 import { getSpacesAuthForUser, getWorkspaceIdForUser, requestWorkspaceHint } from "../lib/spaces-db.js";
@@ -242,8 +244,10 @@ async function postScheduledFailureNotice(row: {
     return;
   }
 
+  // row.userId is Claw-canonical; Spaces keys DMs by its workspace-scoped ids.
+  const dmTarget = await spacesUserIdForClawUser(row.userId, effectiveWorkspaceId);
   const dmResult = (await spacesAppFetch("/channel/openDm", {
-    targetUserId: row.userId,
+    targetUserId: dmTarget,
     workspaceId: effectiveWorkspaceId,
   }, appToken)) as { channelId: string };
   await spacesAppFetch("/chat/postMessage", {
@@ -305,8 +309,10 @@ async function postScheduledJobApprovalCard(opts: {
     }, appToken);
     return;
   }
+  // row.userId is Claw-canonical; Spaces keys DMs by its workspace-scoped ids.
+  const dmTarget = await spacesUserIdForClawUser(row.userId, workspaceId);
   const dmResult = (await spacesAppFetch("/channel/openDm", {
-    targetUserId: row.userId,
+    targetUserId: dmTarget,
     workspaceId,
   }, appToken)) as { channelId: string };
   await spacesAppFetch("/chat/postMessage", {
@@ -1404,9 +1410,11 @@ router.post("/:id/result", requireStrictS2S, async (req: Request<{ id: string }>
 
       log.info(`[scheduled-jobs/result] Posted result to thread ${row.conversationId}`);
     } else if (row.userId) {
-      // DM the user
+      // DM the user. row.userId is Claw-canonical; Spaces keys DMs by its
+      // workspace-scoped ids.
+      const dmTarget = await spacesUserIdForClawUser(row.userId, effectiveWorkspaceId);
       const dmResult = (await spacesAppFetch("/channel/openDm", {
-        targetUserId: row.userId,
+        targetUserId: dmTarget,
         workspaceId: effectiveWorkspaceId,
       }, appToken)) as { channelId: string };
 

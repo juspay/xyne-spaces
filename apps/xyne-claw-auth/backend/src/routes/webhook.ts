@@ -699,6 +699,289 @@ async function pendingActionTargetValidation(
   }
 }
 
+/**
+ * Digital Twin (approval mode): open a DM with the mentioned user and send the
+ * agent's result as an approve/decline flow — with attachments when present.
+ * Nothing is posted to the originating thread; everything goes through the DM.
+ * Deletes the session on completion. Caller should `return` after invoking.
+ */
+/** Union invocation lists (payload + persisted run) deduped by toolCallId,
+ *  preferring the entry that CARRIES citations — subagent children (which the
+ *  reasoning's `[clf-…]` tokens reference) live only in the persisted run, not
+ *  the parent's payload. Mirrors the merge used by the thread-reply citation path. */
+function mergeInvocationsForCitations(...lists: unknown[]): unknown[] {
+  const byId = new Map<string, unknown>();
+  const order: string[] = [];
+  const hasCitations = (x: unknown): boolean =>
+    !!x && typeof x === "object" && Array.isArray((x as Record<string, unknown>)["citations"]);
+  let noId = 0;
+  for (const list of lists) {
+    if (!Array.isArray(list)) continue;
+    for (const inv of list) {
+      const rawId = inv && typeof inv === "object" ? (inv as Record<string, unknown>)["toolCallId"] : undefined;
+      const key = typeof rawId === "string" && rawId ? rawId : `__noid_${noId++}`;
+      const existing = byId.get(key);
+      if (existing === undefined) {
+        order.push(key);
+        byId.set(key, inv);
+      } else if (!hasCitations(existing) && hasCitations(inv)) {
+        byId.set(key, inv); // upgrade to the entry that has citations
+      }
+    }
+  }
+  return order.map((k) => byId.get(k));
+}
+
+/**
+ * LEGACY delivery path (pre-XYNE-17815): post the Twin's proposal as an
+ * approve/decline card in a DM with the owner. Kept ONLY as the fallback for
+ * Spaces backends that don't yet serve /api/internal/twin-reply-draft — see
+ * sendTwinReplyDraft. Delete once every environment runs the in-thread draft.
+ * The signature suffix is already applied by the caller, so the original
+ * inline suffix block was removed on restore (it would double-append).
+ */
+async function sendDigitalTwinApprovalDm(
+  ctx: SessionContext,
+  delivery: TwinDelivery,
+  attachments: Array<{ fileName: string; mimeType: string; data: string }> | undefined,
+  sessionId: string,
+): Promise<void> {
+  // Defense-in-depth: an `ignore` delivery must NEVER reach here (the caller
+  // drops it). If it somehow does, never open a DM / post / write a pending row.
+  if (delivery.action === "ignore") {
+    clog.warn(`[webhook/result] sendDigitalTwinApprovalDm called with action=ignore — dropping, session ${sessionId}`);
+    await deleteSession(sessionId);
+    return;
+  }
+  const token = ctx.appToken;
+
+  // workspaceId required by prod openDm schema. Empty fallback only to satisfy
+  // types — the earlier USER_MENTIONED gate already rejected runs where we
+  // couldn't resolve the workspaceId, so this should always have a real value.
+  const dmResult = (await spacesAppFetch("/channel/openDm", {
+    targetUserId: ctx.mentionedSpacesUserId ?? ctx.mentionedUserId,
+    workspaceId: ctx.workspaceId ?? "",
+  }, token)) as { channelId: string };
+
+  const twinFlow = withSpacesAppId(buildTwinApprovalFlow({
+    delivery: delivery,
+    ...(ctx.sourceMessageId ? { sourceMessageId: ctx.sourceMessageId } : {}),
+    targetChannelId: ctx.channelId,
+    targetConversationId: ctx.conversationId,
+    // Flow data bounces back into flow-action → executeTwinApprovalDelivery
+    // (Spaces-side reactAsUser/getOrCreateDm/postAsUser) — it must carry the
+    // RAW workspace-scoped ids, not the canonical Claw keys.
+    mentionedUserId: ctx.mentionedSpacesUserId ?? ctx.mentionedUserId,
+    workspaceId: ctx.workspaceId ?? "",
+    senderId: ctx.senderSpacesUserId ?? ctx.senderId,
+    senderName: ctx.senderName,
+    channelName: ctx.channelName,
+    task: ctx.task,
+    ...(ctx.agentSlug ? { agentSlug: ctx.agentSlug } : {}),
+    dmChannelId: dmResult.channelId,
+    spacesBaseUrl: CONFIG.spacesAppUrl,
+  }), ctx.spacesAppId);
+
+  if (attachments?.length) {
+    const form = new FormData();
+    for (const att of attachments) {
+      const buffer = Buffer.from(att.data, "base64");
+      const blob = new Blob([buffer], { type: att.mimeType });
+      form.append("files", blob, att.fileName);
+    }
+    form.append("channelId", dmResult.channelId);
+    form.append("userId", ctx.spacesAppUserId);
+    form.append("flow", JSON.stringify(twinFlow));
+
+    await spacesAppFetchMultipart("/files/filesUpload", form, token);
+  } else {
+    await spacesAppFetch("/chat/postMessage", {
+      channelId: dmResult.channelId,
+      flow: twinFlow,
+      userId: ctx.spacesAppUserId,
+    }, token);
+  }
+
+  // Record a PENDING feedback row so the daily learning loop can later reconcile
+  // the user's accept / decline / edit / ignore of this proposal. Fire-and-forget.
+  void recordTwinApprovalPending({
+    userId: ctx.mentionedUserId,
+    conversationId: ctx.conversationId,
+    channelId: ctx.channelId,
+    channelName: ctx.channelName,
+    ...(ctx.sourceMessageId ? { sourceMessageId: ctx.sourceMessageId } : {}),
+    incomingTask: ctx.task,
+    delivery: delivery,
+  });
+
+  clog.info(`[webhook/result] Digital Twin: sent approve/decline DM to ${ctx.mentionedUserId} (asked by ${ctx.senderId})`);
+  await deleteSession(sessionId);
+}
+
+/**
+ * Deliver the Twin's structured proposal as an OWNER-ONLY in-thread reply draft
+ * (replaces the old approval DM card). Bakes citation metadata from the Twin's
+ * private `reasoning` (its `[clf-…#n]` tokens reference the Spaces tools it
+ * searched) so the "Why?" panel can render clickable source chips, then creates
+ * the draft in Spaces (Redis, owner-partitioned) via S2S. Fail-CLOSED: any
+ * create failure leaves nothing posted and the session cleaned up.
+ */
+async function sendTwinReplyDraft(
+  ctx: SessionContext,
+  delivery: TwinDelivery,
+  toolInvocations: unknown,
+  sessionId: string,
+  /** Callback attachments — only used by the legacy approval-DM fallback. */
+  attachments?: Array<{ fileName: string; mimeType: string; data: string }> | undefined,
+): Promise<void> {
+  // Defense-in-depth: an `ignore` delivery must NEVER reach here (the caller
+  // drops it). If it somehow does, never create a draft / write a pending row.
+  if (delivery.action === "ignore") {
+    clog.warn(`[webhook/result] sendTwinReplyDraft called with action=ignore — dropping, session ${sessionId}`);
+    await deleteSession(sessionId);
+    return;
+  }
+
+  // Apply the user's configured Twin signature/disclaimer to the REPLY body (not
+  // to a react-only delivery). Deterministic server-side append.
+  let effectiveDelivery = delivery;
+  if (delivery.message && ctx.mentionedUserId) {
+    try {
+      const u = await prisma.user.findUnique({
+        where: { id: ctx.mentionedUserId },
+        select: { digitalTwinResponseSuffix: true },
+      });
+      const suffix = u?.digitalTwinResponseSuffix?.trim();
+      if (suffix && !delivery.message.endsWith(suffix)) {
+        effectiveDelivery = { ...delivery, message: `${delivery.message.trimEnd()}\n\n${suffix}` };
+      }
+    } catch (err) {
+      clog.warn(`[webhook/result] Twin suffix lookup failed for user ${ctx.mentionedUserId}: ${errMsg(err)}`);
+    }
+  }
+
+  // Bake citation metadata from the private reasoning. Null when the reasoning
+  // carries no `[clf-…]` tokens — the "Why?" panel then renders plain reasoning.
+  let citationMeta: ReturnType<typeof buildThreadCitationMeta> = null;
+  if (effectiveDelivery.reasoning) {
+    try {
+      const persisted = await agentRunRepository.findBySessionId(sessionId).catch(() => null);
+      const merged = mergeInvocationsForCitations(persisted?.toolInvocations, toolInvocations);
+      citationMeta = buildThreadCitationMeta(merged, effectiveDelivery.reasoning);
+    } catch (err) {
+      clog.warn(`[webhook/result] Twin citation baking failed: ${errMsg(err)}`);
+    }
+  }
+
+  const dest = effectiveDelivery.destination;
+  // Spaces owns the draft (Redis, owner-partitioned by RAW Spaces user id) and
+  // forwards it back to twin-draft.ts, whose owner check + postAsUser also run
+  // against Spaces ids — so every user id in this payload is the raw form.
+  const draft = {
+    conversationId: ctx.conversationId,
+    ownerUserId: ctx.mentionedSpacesUserId ?? ctx.mentionedUserId,
+    channelId: ctx.channelId,
+    action: effectiveDelivery.action,
+    ...(effectiveDelivery.message ? { message: effectiveDelivery.message } : {}),
+    ...(effectiveDelivery.emoji ? { emoji: effectiveDelivery.emoji } : {}),
+    ...(effectiveDelivery.reasoning ? { reasoning: effectiveDelivery.reasoning } : {}),
+    ...(citationMeta?.clawCitations ? { clawCitations: citationMeta.clawCitations } : {}),
+    ...(citationMeta?.clawCitationIcons ? { clawCitationIcons: citationMeta.clawCitationIcons } : {}),
+    destinationKind: dest?.kind ?? "origin_thread",
+    ...(dest && "channelId" in dest ? { destinationChannelId: dest.channelId } : {}),
+    ...(dest && "conversationId" in dest ? { destinationConversationId: dest.conversationId } : {}),
+    ...(dest && "userId" in dest ? { destinationUserId: dest.userId } : {}),
+    ...(dest && "channelName" in dest && dest.channelName ? { destinationChannelName: dest.channelName } : {}),
+    // DM recipient name for the owner-facing "sends a DM to …" label. `dm` may
+    // carry it on the destination; `dm_sender` is the mention sender we already
+    // know. Spaces resolves any remaining name from the user id at draft create.
+    ...(dest?.kind === "dm" && dest.userName ? { destinationUserName: dest.userName } : {}),
+    ...(dest?.kind === "dm_sender" && ctx.senderName ? { destinationUserName: ctx.senderName } : {}),
+    ...(effectiveDelivery.destinationReason ? { destinationReason: effectiveDelivery.destinationReason } : {}),
+    ...(ctx.sourceMessageId ? { sourceMessageId: ctx.sourceMessageId } : {}),
+    mentionedUserId: ctx.mentionedSpacesUserId ?? ctx.mentionedUserId,
+    workspaceId: ctx.workspaceId ?? "",
+    ...(ctx.senderId ? { senderId: ctx.senderSpacesUserId ?? ctx.senderId } : {}),
+    ...(ctx.senderName ? { senderName: ctx.senderName } : {}),
+    ...(ctx.channelName ? { channelName: ctx.channelName } : {}),
+    ...(ctx.task ? { incomingTask: ctx.task } : {}),
+    ...(ctx.agentSlug ? { agentSlug: ctx.agentSlug } : {}),
+    ...(ctx.spacesAppId ? { spacesAppId: ctx.spacesAppId } : {}),
+    sessionId,
+  };
+
+  // Create the owner-only in-thread draft in Spaces. When the Spaces backend
+  // doesn't serve /api/internal/twin-reply-draft yet (route added in
+  // XYNE-17815; caller shipped 2026-07-23, route reached main 2026-08-05), the
+  // request falls through to the user-auth middleware and comes back 401/404.
+  // That skew silently killed EVERY twin reply for ~2 weeks because this path
+  // was fail-closed with no alternative. Fall back to the pre-XYNE-17815
+  // approval DM card instead: the twin keeps working on old backends, and the
+  // moment the route deploys we're back on the in-thread draft with no change.
+  try {
+    const resp = await fetch(`${CONFIG.spacesInternalUrl}/api/internal/twin-reply-draft`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-s2s-key": process.env["INTERNAL_S2S_KEY"] ?? "" },
+      body: JSON.stringify(draft),
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => "");
+      // 401/404 == endpoint not deployed (or not reachable as S2S) → legacy DM.
+      // Any other status is a genuine draft-create failure: stay fail-closed.
+      if (resp.status === 401 || resp.status === 404) {
+        clog.warn(`[webhook/result] Twin reply-draft endpoint unavailable (${resp.status}) — falling back to approval DM, session ${sessionId}`);
+        await sendDigitalTwinApprovalDm(ctx, effectiveDelivery, attachments, sessionId);
+        return;
+      }
+      clog.error(`[webhook/result] Twin reply-draft create failed: ${resp.status} ${text.slice(0, 200)} — staying silent, session ${sessionId}`);
+      await deleteSession(sessionId);
+      return;
+    }
+  } catch (err) {
+    clog.error(`[webhook/result] Twin reply-draft create error: ${errMsg(err)} — staying silent, session ${sessionId}`);
+    await deleteSession(sessionId);
+    return;
+  }
+
+  // Record a PENDING feedback row so the daily learning loop can later reconcile
+  // the user's accept / decline / edit / ignore of this proposal. Fire-and-forget.
+  void recordTwinApprovalPending({
+    userId: ctx.mentionedUserId,
+    conversationId: ctx.conversationId,
+    channelId: ctx.channelId,
+    channelName: ctx.channelName,
+    ...(ctx.sourceMessageId ? { sourceMessageId: ctx.sourceMessageId } : {}),
+    incomingTask: ctx.task,
+    delivery: effectiveDelivery,
+  });
+
+  clog.info(`[webhook/result] Digital Twin: posted in-thread reply draft for ${ctx.mentionedUserId} (asked by ${ctx.senderId}) action=${effectiveDelivery.action} dest=${dest?.kind ?? "origin_thread"}`);
+  await deleteSession(sessionId);
+}
+
+
+
+async function resolveAgentByAppUserId(appUserId: string): Promise<ResolvedAgent | null> {
+  const agent = await agentRepository.findByAppUserId(appUserId);
+
+  if (agent?.spacesAppToken && agent.spacesAppId) {
+    return {
+      id: agent.id,
+      slug: agent.slug,
+      name: agent.name ?? agent.slug,
+      orgId: agent.orgId,
+      appToken: decryptStoredField(agent.spacesAppToken),
+      spacesAppId: agent.spacesAppId,
+      spacesAppUserId: agent.spacesAppUserId ?? "",
+      isDefault: agent.isDefault,
+    };
+  }
+
+  return null;
+}
+
+
 export async function fetchConversationHistory(
   conversationId: string,
   appToken?: string,
@@ -1448,6 +1731,12 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     // progressMessageId is assigned post-placeholder below; everything else is final here.
     const sessionContext: SessionContext = {
       mentionedUserId: eventType === "USER_MENTIONED" ? targetUserId : agent.spacesAppUserId,
+      // Spaces-facing payloads (openDm / twin draft / post-as-user) need the RAW
+      // workspace-scoped ids — see SessionContext.mentionedSpacesUserId.
+      ...(eventType === "USER_MENTIONED" && allMentionedIds[0]
+        ? { mentionedSpacesUserId: allMentionedIds[0] }
+        : {}),
+      senderSpacesUserId: spacesSenderId,
       targetUserId,
       senderId: clawSenderId,
       senderName: payload.senderName ?? spacesSenderId,
@@ -4994,6 +5283,47 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
 
     // ── Copilot mode: post pendingResponses instead of result.text ──
     if (payload.pendingResponses?.length) {
+      if (ctx.responseMode === "approval") {
+        // Merge copilot responses into a single result for the approval DM
+        const combinedResult = payload.pendingResponses.map((pr) => pr.message).join("\n\n");
+        // workspaceId is required by Spaces' /channel/openDm Zod schema
+        // (prod-deployed channel.ts:11-15 adds workspaceId.min(1) which our
+        // source tree at work_dir didn't have). Without it the route 400s
+        // with a single-field Zod error, the catch above swallows it, and
+        // the reply never posts.
+        const dmResult = (await spacesAppFetch("/channel/openDm", {
+          targetUserId: ctx.mentionedSpacesUserId ?? ctx.mentionedUserId,
+          workspaceId: ctx.workspaceId ?? "",
+        }, token)) as { channelId: string };
+
+        const twinFlow = withSpacesAppId(buildTwinApprovalFlow({
+          delivery: { action: "reply", message: combinedResult },
+          ...(ctx.sourceMessageId ? { sourceMessageId: ctx.sourceMessageId } : {}),
+          targetChannelId: ctx.channelId,
+          targetConversationId: ctx.conversationId,
+          // Same id-domain rule as sendDigitalTwinApprovalDm (Spaces-facing flow data).
+          mentionedUserId: ctx.mentionedSpacesUserId ?? ctx.mentionedUserId,
+          workspaceId: ctx.workspaceId ?? "",
+          senderId: ctx.senderSpacesUserId ?? ctx.senderId,
+          senderName: ctx.senderName,
+          channelName: ctx.channelName,
+          task: ctx.task,
+          ...(ctx.agentSlug ? { agentSlug: ctx.agentSlug } : {}),
+          dmChannelId: dmResult.channelId,
+          spacesBaseUrl: CONFIG.spacesAppUrl,
+        }), ctx.spacesAppId);
+
+        await spacesAppFetch("/chat/postMessage", {
+          channelId: dmResult.channelId,
+          flow: twinFlow,
+          userId: ctx.spacesAppUserId,
+        }, token);
+
+        log.info(`Digital Twin (copilot): sent approve/decline DM to ${ctx.mentionedUserId}`);
+        await deleteSession(sessionId);
+        return;
+      }
+
       if (payload.attachments?.length) {
         // Run the combined reply + attachments through prepareAgentResultForPosting
         // BEFORE uploading. Previously this branch appended every raw attachment
