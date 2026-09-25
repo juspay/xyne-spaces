@@ -28,9 +28,9 @@ export function buildSdlcArtifactCreationPrompt(input: SdlcArtifactCreationPromp
       : '';
   const request =
     `Create a ${typeLabel} titled ${title} in ${repository}${trackClause}. ` +
-    `Pass folderId ${JSON.stringify(
+    `Pass artifactTypeId ${JSON.stringify(
       input.folderId,
-    )} in the spaces-sdlc-mutate-artifact create call so it is filed under the ${typeLabel} type.` +
+    )} in the spaces-sdlc-write-artifact create call so it is filed under the ${typeLabel} type.` +
     relatedClause;
   return direction ? `${request}\n\nUser direction: ${direction}` : request;
 }
@@ -49,13 +49,11 @@ export function buildSdlcWikiPageCreationPrompt(input: SdlcWikiPageCreationPromp
     ? `the Wiki of repository ${JSON.stringify(input.repositoryName)}`
     : "this hub's own Wiki";
   const folder = input.folderPath ? `folderPath ${JSON.stringify(input.folderPath)}, ` : '';
-  // Omitting the repository would hand the page to the run's pinned one.
-  const repos = input.repoId
-    ? `repoIds [${JSON.stringify(input.repoId)}]`
-    : 'an empty repoIds array';
+  // No repoId is the Hub Wiki.
+  const repo = input.repoId ? `repoId ${JSON.stringify(input.repoId)}` : 'no repoId';
   const request =
     `Write a Wiki page titled ${JSON.stringify(input.title)} in ${scope}, and nowhere else. ` +
-    `Call spaces-sdlc-mutate-artifact with artifactType "WIKI", action "create", ` +
-    `title ${JSON.stringify(input.title)}, ${folder}${repos} so it is filed there.`;
+    `Call spaces-sdlc-write-artifact with kind "WIKI", action "create", the hub's channelId, ` +
+    `title ${JSON.stringify(input.title)}, ${folder}${repo} so it is filed there.`;
   return direction ? `${request}\n\nUser direction: ${direction}` : request;
 }

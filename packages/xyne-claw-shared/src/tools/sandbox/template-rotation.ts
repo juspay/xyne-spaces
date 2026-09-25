@@ -190,3 +190,8 @@ export function isSameTemplateFamily(candidate: string | undefined, base: string
   const variants = ROTATION_SETS[base];
   return !!variants && variants.includes(candidate);
 }
+
+/** Every template with a rotation set, base names and variants alike. */
+export function rotatedTemplateNames(): string[] {
+  return Object.entries(ROTATION_SETS).flatMap(([base, variants]) => [base, ...variants]);
+}

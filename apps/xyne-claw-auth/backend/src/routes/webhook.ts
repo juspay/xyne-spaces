@@ -134,7 +134,6 @@ import { emitAgentWorkingSignal } from "../surfaces/spaces/client.js";
 import JSZip from "jszip";
 
 import {
-  sdlcAgentToolProfile,
   buildWriteApprovalFlow,
   buildTicketProposalFlow,
   buildTwinApprovalFlow,
@@ -161,7 +160,6 @@ import type { TwinDelivery, UiWidget, PrProvider, PrStatus } from "xyne-claw-sha
 import { isAgentInvocableBy } from "xyne-claw-shared";
 import { isSupportedInboundAttachment } from "xyne-claw-shared";
 import type { Todo } from "xyne-claw-shared";
-import { tools as xyneSpacesTools } from "../mcp/servers/xyne-spaces-tools.js";
 import { connectorTypesFromText, connectorTypesUserAskedFor, wantsConnectorRoster } from "../lib/connector-hints.js";
 import {
   SUPPORTED_PROVIDERS,
@@ -178,9 +176,6 @@ import { countTrailingBase64Padding, safePathSegment } from "../lib/url-path.js"
 import { assertSafeOutboundUrl } from "../mcpgateway/services/http-client.js";
 
 const clog = createLogger("webhook");
-const SDLC_AGENT_TOOL_PROFILE = sdlcAgentToolProfile(
-  xyneSpacesTools.map((tool) => tool.name),
-);
 
 /** A run that died because the model provider was over capacity (429 / quota /
  *  overloaded / 5xx after fallback), as opposed to a real agent error. */
@@ -2978,27 +2973,13 @@ export async function handleAutomationWebhook(
     agentSlug === SDLC_AGENT_SLUG &&
     s2sKeyMatches(req.headers["x-s2s-key"]);
   const baseAgentConfig = (agent.config as Record<string, unknown> | null) ?? {};
-  const baseTools = (baseAgentConfig["tools"] as Record<string, unknown> | undefined) ?? {};
+  // SDLC tools are merged in /internal/run (start-run) for any run carrying hub context.
   const forwardedAgentConfig: Record<string, unknown> | undefined =
     agent.config || payload.allowWriteInReadOnlyJob || sdlcProfile
       ? {
           ...baseAgentConfig,
           ...(payload.allowWriteInReadOnlyJob || sdlcProfile ? { allowWriteInReadOnlyJob: true } : {}),
-          ...(sdlcProfile
-            ? {
-                tools: {
-                  ...baseTools,
-                  direct: SDLC_AGENT_TOOL_PROFILE.tools.direct,
-                  custom: SDLC_AGENT_TOOL_PROFILE.tools.custom,
-                  subagents: SDLC_AGENT_TOOL_PROFILE.tools.subagents,
-                },
-                toolPermissions: {
-                  ...((baseAgentConfig["toolPermissions"] as Record<string, unknown> | undefined) ?? {}),
-                  ...SDLC_AGENT_TOOL_PROFILE.toolPermissions,
-                },
-                sdlcContext: payload.sdlcContext,
-              }
-            : {}),
+          ...(sdlcProfile ? { sdlcContext: payload.sdlcContext } : {}),
         }
       : undefined;
   const resultToken = interpose

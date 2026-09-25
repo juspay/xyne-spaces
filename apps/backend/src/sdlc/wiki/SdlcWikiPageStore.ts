@@ -12,16 +12,16 @@ import {
 import { DatabaseClient } from '@/database/client';
 import { AppError } from '@/middleware/errorHandler';
 import { vespaQueue } from '@/queues/vespaQueue';
-import { convertBlockNoteToMarkdown, convertMarkdownToBlockNote } from '@/services/canvasService';
+import { convertMarkdownToBlockNote } from '@/services/canvasService';
 import type { BlockNoteBlock } from '@/types/blockNoteTypes';
 import { logger } from '@/utils/logger';
-import { readFromYSweet, syncToYSweet } from '@/utils/ysweetUtils';
+import { syncToYSweet } from '@/utils/ysweetUtils';
 import { fileSchema, SubApp } from '@/vespa/src/types';
-import { commitAndSyncCanvasArtifact } from '../sdlcCanvasSync';
+import { commitAndSyncCanvasArtifact, readCanvasMarkdown } from '../sdlcCanvasSync';
 import { sdlcChannelCanvasParticipant } from '../sdlcCanvasAccess';
 import { ensureHubWikiFolder, ensureRepositoryWikiFolder, placeHubItem } from '../hubFolders';
-import { mutateWikiMarkdownSection } from './wikiSectionMutation';
 import { advisoryXactLock } from '@/bypassAcl/lockServices';
+import { mutateMarkdownSection } from '../markdownSection';
 
 export interface WikiScopeInput {
   workspaceId: string;
@@ -64,7 +64,7 @@ export class SdlcWikiPageStore {
   constructor(private readonly prisma: PrismaClient = DatabaseClient.getInstance()) {}
 
   async listPages(input: WikiScopeInput & { includeArchived?: boolean }): Promise<WikiPageEntry[]> {
-    return this.pagesIn(await this.scope(input), input.includeArchived ?? false);
+    return this.pagesIn(await this.scope(input, true), input.includeArchived ?? false);
   }
 
   private async pagesIn(scope: WikiScope, includeArchived: boolean): Promise<WikiPageEntry[]> {
@@ -104,21 +104,20 @@ export class SdlcWikiPageStore {
       case 'insert_section':
       case 'remove_section':
         return this.edit(scope, page, input.generationCommit);
-      case 'archive':
-      case 'restore':
-        return this.setArchived(scope, page.canvasId, page.action === 'archive');
       case 'move':
         return this.move(scope, page);
     }
   }
 
-  private async scope(input: WikiScopeInput): Promise<WikiScope> {
+  /** A public hub's Wiki is readable by the workspace; writing still needs membership. */
+  private async scope(input: WikiScopeInput, read = false): Promise<WikiScope> {
+    const member = { participants: { some: { userId: input.actorUserId } } };
     const channel = await this.prisma.channel.findFirst({
       where: {
         id: input.channelId,
         workspaceId: input.workspaceId,
         type: 'SDLC',
-        participants: { some: { userId: input.actorUserId } },
+        ...(read ? { OR: [{ visibility: 'PUBLIC' }, member] } : member),
       },
       select: { projectId: true },
     });
@@ -364,21 +363,12 @@ export class SdlcWikiPageStore {
     if (page.action === 'update') {
       markdown = page.markdown;
     } else {
-      const live = await readFromYSweet(existing.id, existing.createdBy);
-      const current = await convertBlockNoteToMarkdown(
-        live.length > 0 ? live : (existing.content as unknown as BlockNoteBlock[])
-      );
-      try {
-        markdown = mutateWikiMarkdownSection({
-          markdown: current,
-          action: page.action,
-          heading: page.heading,
-          ...(page.action === 'remove_section' ? {} : { sectionMarkdown: page.markdown }),
-        });
-      } catch (error) {
-        const status = (error as { statusCode?: number }).statusCode;
-        throw new AppError(error instanceof Error ? error.message : String(error), status ?? 400);
-      }
+      markdown = mutateMarkdownSection({
+        markdown: await readCanvasMarkdown(existing),
+        action: page.action,
+        heading: page.heading,
+        ...(page.action === 'remove_section' ? {} : { sectionMarkdown: page.markdown }),
+      });
     }
     const content = await convertMarkdownToBlockNote(markdown);
     // Wiki canvases give the hub read-only access, so sync as the creator, who can edit.
@@ -408,15 +398,6 @@ export class SdlcWikiPageStore {
     );
     this.index(scope, existing.id);
     return this.entry(scope, existing.id);
-  }
-
-  private async setArchived(scope: WikiScope, canvasId: string, archived: boolean): Promise<WikiPageEntry> {
-    await this.requirePage(scope, canvasId);
-    await this.prisma.sdlcArtifact.update({
-      where: { artifactId: canvasId },
-      data: { artifactStatus: archived ? 'ARCHIVED' : 'ACTIVE' },
-    });
-    return this.entry(scope, canvasId);
   }
 
   private async move(scope: WikiScope, page: PageAction<'move'>): Promise<WikiPageEntry> {

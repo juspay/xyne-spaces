@@ -574,7 +574,8 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
         channelId && folderId
           ? `Anything you create for them belongs here too: pass channelId="${channelId}" and ` +
             `sdlcFolderId="${folderId}" to spaces-create-canvas so it is filed in this folder ` +
-            "rather than left unfiled."
+            "rather than left unfiled. For an SDLC artifact (PRD, Tech Doc, ...) pass the same id as trackFolderId " +
+            "to spaces-sdlc-write-artifact create, with that folder's trackId."
           : "",
       ]
         .filter(Boolean)

@@ -9,66 +9,6 @@ export function isHubKnowledgeArtifactType(value: string | null | undefined): bo
 
 export const CANVAS_STATUS_ACTIVE = "ACTIVE";
 
-/**
- * Stored shape of sdlc_artifacts.sourceReferences (stringified JSON).
- * All parsing/stringifying of that column goes through the helpers below.
- */
-export const sdlcStoredSourceReferenceSchema = z.object({
-  path: z.string().min(1),
-  commitSha: z.string().min(1),
-  symbol: z.string().min(1).optional(),
-  startLine: z.number().int().positive().optional(),
-  endLine: z.number().int().positive().optional(),
-});
-export type SdlcStoredSourceReference = z.infer<
-  typeof sdlcStoredSourceReferenceSchema
->;
-const sdlcStoredSourceReferencesSchema = z
-  .array(sdlcStoredSourceReferenceSchema)
-  .max(500);
-
-export function parseSdlcSourceReferences(
-  value: string | null | undefined,
-): SdlcStoredSourceReference[] {
-  if (!value) return [];
-  try {
-    const result = sdlcStoredSourceReferencesSchema.safeParse(
-      JSON.parse(value),
-    );
-    return result.success ? result.data : [];
-  } catch {
-    return [];
-  }
-}
-
-export function stringifySdlcSourceReferences(
-  references: readonly SdlcStoredSourceReference[],
-): string | null {
-  return references.length > 0 ? JSON.stringify(references) : null;
-}
-
-export function parseSdlcSourcePaths(
-  value: string | null | undefined,
-): string[] {
-  if (!value) return [];
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    return Array.isArray(parsed)
-      ? parsed.filter(
-          (path): path is string => typeof path === "string" && path.length > 0,
-        )
-      : [];
-  } catch {
-    return [];
-  }
-}
-
-export function stringifySdlcSourcePaths(
-  paths: readonly string[],
-): string | null {
-  return paths.length > 0 ? JSON.stringify(paths) : null;
-}
-
 export const SDLC_ENTITY_TYPES = [
   "CANVAS",
   "TICKET",
@@ -407,21 +347,6 @@ export type CheckSdlcRepositoryAccessInput = z.infer<
   typeof checkSdlcRepositoryAccessSchema
 >;
 
-export const sdlcSourceReferenceInputSchema = z.object({
-  path: z.string().trim().min(1).max(1024),
-  symbol: z.string().trim().min(1).max(512).optional(),
-  startLine: z.number().int().positive().optional(),
-  endLine: z.number().int().positive().optional(),
-});
-export type SdlcSourceReferenceInput = z.infer<
-  typeof sdlcSourceReferenceInputSchema
->;
-
-export const sdlcSourceReferencesSchema = z
-  .array(sdlcSourceReferenceInputSchema)
-  .max(500)
-  .optional();
-
 const sdlcWikiFolderPathSchema = z
   .string()
   .trim()
@@ -461,8 +386,6 @@ export const sdlcWikiPageActionSchema = z.discriminatedUnion("action", [
     canvasId: sdlcWikiCanvasIdSchema,
     heading: sdlcWikiHeadingSchema,
   }),
-  z.object({ action: z.literal("archive"), canvasId: sdlcWikiCanvasIdSchema }),
-  z.object({ action: z.literal("restore"), canvasId: sdlcWikiCanvasIdSchema }),
   z.object({
     action: z.literal("move"),
     canvasId: sdlcWikiCanvasIdSchema,
@@ -512,26 +435,10 @@ export type SetSdlcArtifactArchivedInput = z.infer<
   typeof setSdlcArtifactArchivedSchema
 >;
 
-/** The Actor pair is current; the grant pair is what the older claw still sends, removed once it is gone. */
 const sdlcRunAuthorityFields = {
-  workspaceId: z.string().min(1).optional(),
-  actorUserId: z.string().min(1).optional(),
-  interactiveGrant: z.string().min(1).optional(),
-  conversationId: z.string().min(1).optional(),
+  workspaceId: z.string().min(1),
+  actorUserId: z.string().min(1),
 };
-
-function hasRunAuthority(value: {
-  workspaceId?: string | undefined;
-  actorUserId?: string | undefined;
-  interactiveGrant?: string | undefined;
-  conversationId?: string | undefined;
-}): boolean {
-  return Boolean(
-    (value.workspaceId && value.actorUserId) || (value.interactiveGrant && value.conversationId),
-  );
-}
-
-const SDLC_RUN_AUTHORITY_MESSAGE = "workspaceId and actorUserId are required";
 
 export const createSdlcPullRequestSchema = z
   .object({
@@ -540,14 +447,9 @@ export const createSdlcPullRequestSchema = z
     body: z.string().max(65_536).default(""),
     head: z.string().trim().min(1).max(255),
     base: z.string().trim().min(1).max(255),
-    commitHash: z
-      .string()
-      .trim()
-      .regex(/^[0-9a-f]{40}$/i),
     draft: z.boolean().default(true),
     ...sdlcRunAuthorityFields,
-  })
-  .refine(hasRunAuthority, { message: SDLC_RUN_AUTHORITY_MESSAGE });
+  });
 export type CreateSdlcPullRequestInput = z.infer<
   typeof createSdlcPullRequestSchema
 >;
@@ -567,14 +469,11 @@ export type ResolveSdlcAgentRepositoryInput = z.infer<
 
 export const bootstrapSdlcRuntimeCredentialSchema = z
   .object({
-    agentSlug: z.literal(SDLC_AGENT_SLUG).optional(),
     repoId: z.string().min(1),
-    operation: z.literal("INTERACTIVE").optional(),
     sandboxId: z.string().min(1).max(256),
     sandboxPublicKey: z.string().min(32).max(1024),
     ...sdlcRunAuthorityFields,
-  })
-  .refine(hasRunAuthority, { message: SDLC_RUN_AUTHORITY_MESSAGE });
+  });
 export type BootstrapSdlcRuntimeCredentialInput = z.infer<
   typeof bootstrapSdlcRuntimeCredentialSchema
 >;
@@ -614,12 +513,14 @@ export const createSdlcClawArtifactSchema = z.object({
   repoIds: sdlcRepoIdsSchema,
   // The hub to write into. A repository sits in several, so it cannot be inferred.
   channelId: z.string().min(1).optional(),
+  // The artifact type (PRDs, Tech Docs, ...), stored as a CanvasFolder; tools call it artifactTypeId.
   folderId: z.string().min(1),
   title: z.string().trim().min(1).max(255),
   markdown: z.string().min(1).max(5_000_000),
   relatedCanvasIds: z.array(z.string().min(1)).optional(),
   trackId: z.string().min(1).optional(),
-  sourceReferences: sdlcSourceReferencesSchema,
+  // Track folder: an SdlcFolder inside trackId to file the artifact under instead of the track root.
+  trackFolderId: z.string().min(1).optional(),
 });
 export type CreateSdlcClawArtifactInput = z.infer<
   typeof createSdlcClawArtifactSchema
@@ -639,12 +540,45 @@ export const updateSdlcClawArtifactSchema = z.object({
   channelId: z.string().min(1).optional(),
   canvasId: z.string().min(1),
   title: z.string().trim().min(1).max(255).optional(),
-  markdown: z.string().min(1).max(5_000_000),
-  sourceReferences: sdlcSourceReferencesSchema,
+  markdown: z.string().min(1).max(5_000_000).optional(),
+  relatedCanvasIds: z.array(z.string().min(1)).optional(),
+}).refine((input) => input.markdown !== undefined || input.title !== undefined || !!input.relatedCanvasIds?.length, {
+  message: "Provide markdown, title or relatedCanvasIds",
 });
 export type UpdateSdlcClawArtifactInput = z.infer<
   typeof updateSdlcClawArtifactSchema
 >;
+
+export const editSdlcClawArtifactSectionSchema = z.object({
+  canvasId: z.string().min(1),
+  action: z.enum(["replace_section", "insert_section", "remove_section"]),
+  heading: z.string().trim().min(1).max(255),
+  markdown: z.string().min(1).max(5_000_000).optional(),
+});
+export type EditSdlcClawArtifactSectionInput = z.infer<
+  typeof editSdlcClawArtifactSectionSchema
+>;
+
+/** parentId is a folder inside the artifact's track, or the track itself for its root. */
+export const moveSdlcClawArtifactSchema = z.object({
+  canvasId: z.string().min(1),
+  parentId: z.string().min(1),
+});
+export type MoveSdlcClawArtifactInput = z.infer<typeof moveSdlcClawArtifactSchema>;
+
+export const createSdlcClawTrackFolderSchema = z.object({
+  channelId: z.string().min(1),
+  trackId: z.string().min(1),
+  name: z.string().trim().min(1).max(120),
+  parentTrackFolderId: z.string().min(1).optional(),
+});
+export type CreateSdlcClawTrackFolderInput = z.infer<typeof createSdlcClawTrackFolderSchema>;
+
+export const archiveSdlcClawArtifactSchema = z.object({
+  canvasId: z.string().min(1),
+  archived: z.boolean(),
+});
+export type ArchiveSdlcClawArtifactInput = z.infer<typeof archiveSdlcClawArtifactSchema>;
 
 export const createSdlcLinkSchema = z.object({
   sourceType: sdlcEntityTypeSchema,
@@ -772,13 +706,16 @@ export function buildSdlcPath(target: SdlcNavTarget): string {
 
 const nullableNonEmpty = z.string().min(1).nullable();
 
-export const SDLC_AGENT_OPERATIONS = ["interactive"] as const;
-export const sdlcAgentOperationSchema = z.enum(SDLC_AGENT_OPERATIONS);
-export type SdlcAgentOperation = z.infer<typeof sdlcAgentOperationSchema>;
+/** The one hub item a conversation is the discussion of, if any. */
+export const sdlcLinkedItemSchema = z.object({
+  section: z.string().min(1),
+  id: z.string().min(1),
+  name: z.string(),
+  relation: z.string().min(1),
+});
+export type SdlcLinkedItem = z.infer<typeof sdlcLinkedItemSchema>;
 
 export const sdlcAgentContextSchema = z.object({
-  version: z.literal(1),
-  operation: sdlcAgentOperationSchema,
   workspaceId: z.string().min(1),
   projectId: z.string().min(1),
   channelId: z.string().min(1),
@@ -791,9 +728,10 @@ export const sdlcAgentContextSchema = z.object({
       baseBranch: z.string().min(1),
     })
     .optional(),
-  execution: z.object({ conversationId: z.string().min(1) }),
-  // Only the claw deployed before Actor-based access reads this.
-  interactiveGrant: z.string().min(1).optional(),
+  execution: z.object({
+    conversationId: z.string().min(1),
+    linked: sdlcLinkedItemSchema.nullable().optional(),
+  }),
   generationCommit: nullableNonEmpty.optional(),
 });
 export type SdlcAgentContext = z.infer<typeof sdlcAgentContextSchema>;

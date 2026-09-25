@@ -5356,287 +5356,22 @@ const spacesCreateCanvas: ToolDef = {
     }),
 };
 
-// ── canonical SDLC artifact mutation ──────────────────────────────
-const sdlcSourceReferencesSchema = {
-  type: "array",
-  maxItems: 500,
-  items: {
-    type: "object",
-    additionalProperties: false,
-    properties: {
-      path: { type: "string", minLength: 1, maxLength: 1024, description: "Repository-relative source path" },
-      symbol: { type: "string", minLength: 1, maxLength: 512, description: "Optional source symbol shown in the link label" },
-      startLine: { type: "integer", minimum: 1, description: "Optional trusted one-based start line" },
-      endLine: { type: "integer", minimum: 1, description: "Optional trusted one-based end line" },
-    },
-    required: ["path"],
-  },
+// ── SDLC tools ─────────────────────────────────────────────────────
+// workspaceId and actorUserId arrive bound from the run's SDLC context; every
+// other argument is the LLM's, and the Spaces backend checks the Actor can reach it.
+
+const SDLC_CHANNEL_ID = {
+  type: "string",
+  minLength: 1,
+  description: "Channel id of the SDLC Hub (a hub is a channel). Use this run's hub from the SDLC Run Context, or a channelId from spaces-sdlc-list-repositories.",
 } as const;
 
-const SDLC_CHANNEL_ID_HINT =
-  "Channel id of the SDLC Hub. This is the required scope — a hub covers several repositories and a repository sits in several hubs, so it cannot be inferred. Use the channelId returned alongside the repository by spaces-sdlc-list-repositories.";
-
-const SDLC_REPO_IDS_PARAM = {
-  type: "array" as const,
-  items: { type: "string" as const, minLength: 1 },
-  maxItems: 50,
-  description:
-    "Optional. Repositories to narrow to, from spaces-sdlc-list-repositories. Omit to use the run's pinned repository when one is pinned, or the whole hub when none is. Pass an empty array to force hub scope with no repository at all — the right choice when the work is about the hub itself rather than any repository in it.",
-};
-
-const SDLC_WIKI_ACTIONS = ["create", "update", "replace_section", "insert_section", "remove_section", "archive", "restore", "move"] as const;
-
-function sdlcWikiVariant(action: (typeof SDLC_WIKI_ACTIONS)[number], required: readonly string[]) {
-  return {
-    type: "object",
-    properties: { artifactType: { const: "WIKI" }, action: { const: action } },
-    required: ["artifactType", "action", ...required],
-  } as const;
-}
-
-const spacesSdlcMutateArtifact: ToolDef = {
-  name: SDLC_TOOL_NAMES.mutateArtifact,
-  description:
-    "Create or update one SDLC artifact, or write one Wiki page. Artifact types are canvas " +
-    "folders on the SDLC Hub's channel and are shared by every repository in that hub: PRD and Tech Docs are seeded " +
-    "built-in types, and users can add custom types; list them via spaces-sdlc-list-artifact-types. To create an " +
-    "artifact of any type, pass its folderId (from that tool) plus trackId (the SDLC track it belongs to; Hub Knowledge takes none). To update " +
-    "an artifact, pass its canvasId and markdown. Link related artifacts via relatedCanvasIds. " +
-    "Wiki pages take artifactType WIKI: create (folderPath, title, markdown), update (canvasId, markdown, optional title), " +
-    "replace_section / insert_section (canvasId, heading, markdown), remove_section (canvasId, heading), archive / restore (canvasId), " +
-    "move (canvasId, folderPath, optional title). A page belongs to the run's pinned repository's Wiki, else to the repository named " +
-    "in repoIds, else to the Hub Wiki. Trusted repository and hub identity is injected by the platform when the run has a repository pinned.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      repoId: { type: "string", minLength: 1 },
-      channelId: { type: "string", minLength: 1, description: SDLC_CHANNEL_ID_HINT },
-      repoIds: SDLC_REPO_IDS_PARAM,
-      workspaceId: { type: "string", minLength: 1 },
-      actorUserId: { type: "string", minLength: 1 },
-      artifactType: { type: "string", enum: ["WIKI"], description: "Set to WIKI for Wiki page actions. Omit for artifacts." },
-      title: { type: "string", minLength: 1, maxLength: 255 },
-      action: { type: "string", enum: [...SDLC_WIKI_ACTIONS] },
-      markdown: { type: "string", minLength: 1, maxLength: 5_000_000 },
-      folderPath: { type: "string", maxLength: 512, description: "Wiki folders separated by \"/\", e.g. \"architecture/payments\". Empty is the Wiki's top level." },
-      heading: { type: "string", minLength: 1, maxLength: 255, description: "Exact existing page heading used as the section target or insertion anchor" },
-      sourceReferences: sdlcSourceReferencesSchema,
-      folderId: { type: "string", minLength: 1, description: "The artifact-type folder id to create the artifact under; get it from spaces-sdlc-list-artifact-types. Required for every artifact create." },
-      relatedCanvasIds: { type: "array", items: { type: "string", minLength: 1 }, description: "Optional canvas ids of existing artifacts to link as related context on create." },
-      trackId: { type: "string", minLength: 1, description: "The SDLC track this artifact belongs to. Required for every artifact type except Hub Knowledge, which describes the hub itself. Get it from spaces-sdlc-list-artifacts or the user's chosen track." },
-      generationCommit: { type: "string", maxLength: 255 },
-      canvasId: { type: "string", minLength: 1, description: "Canonical SDLC Canvas ID from the canvas URL or artifact response" },
-    },
-    required: ["action"],
-    oneOf: [
-      {
-        type: "object",
-        properties: {
-          action: { const: "create" },
-          folderId: { type: "string", minLength: 1 },
-        },
-        required: ["action", "folderId", "title", "markdown"],
-        not: { required: ["artifactType"] },
-      },
-      {
-        type: "object",
-        properties: {
-          action: { const: "update" },
-          canvasId: { type: "string", minLength: 1 },
-        },
-        required: ["action", "canvasId", "markdown"],
-        not: { required: ["artifactType"] },
-      },
-      sdlcWikiVariant("create", ["title", "markdown"]),
-      sdlcWikiVariant("update", ["canvasId", "markdown"]),
-      sdlcWikiVariant("replace_section", ["canvasId", "heading", "markdown"]),
-      sdlcWikiVariant("insert_section", ["canvasId", "heading", "markdown"]),
-      sdlcWikiVariant("remove_section", ["canvasId", "heading"]),
-      sdlcWikiVariant("archive", ["canvasId"]),
-      sdlcWikiVariant("restore", ["canvasId"]),
-      sdlcWikiVariant("move", ["canvasId", "folderPath"]),
-    ],
-  },
-  async handler(args, ctx) {
-    return mutateSdlcArtifact(args, ctx);
-  },
-  async appHandler(args, ctx) {
-    return mutateSdlcArtifact(args, ctx);
-  },
-};
-
-async function createSdlcArtifact(args: Record<string, unknown>, ctx: HandlerContext): Promise<ToolResult> {
-  try {
-    const data = (await spacesFetch("/api/sdlc/claw/artifacts", {
-      method: "POST",
-      headers: { "x-xyne-acting-user-id": ctx.userId },
-      body: JSON.stringify(args),
-    }, sdlcSpacesAuth())) as {
-      artifact: {
-        canvasId: string;
-        viewAccessId?: string;
-        url?: string;
-      };
-    };
-    const artifact = data.artifact;
-    const citations: Citation[] = [];
-    pushCanvasCitation(citations, artifact.viewAccessId, 1, String(args["title"] ?? "SDLC artifact"));
-    return okCited(
-      prefixChunk(1, "SDLC artifact created", [
-        `Canvas ID: ${artifact.canvasId}`,
-        `URL: ${artifact.url ?? `/chat/canvas/${artifact.canvasId}`}`,
-      ]),
-      citations,
-    );
-  } catch (e) {
-    return err(`Create SDLC artifact error: ${errMsg(e)}`);
-  }
-}
-
-/** The bound repository wins, so a pinned run cannot write outside its own Wiki. */
-function sdlcWikiScope(args: Record<string, unknown>): Record<string, unknown> {
-  const repoIds = Array.isArray(args["repoIds"]) ? args["repoIds"] : [];
-  const repoId = String(args["repoId"] ?? "").trim() || repoIds.find((id): id is string => typeof id === "string" && id.length > 0);
-  return {
-    workspaceId: args["workspaceId"],
-    actorUserId: args["actorUserId"],
-    channelId: args["channelId"],
-    ...(repoId ? { repoId } : {}),
-  };
-}
-
-async function writeSdlcWikiPage(args: Record<string, unknown>, ctx: HandlerContext): Promise<ToolResult> {
-  const page = Object.fromEntries(
-    ["action", "canvasId", "folderPath", "title", "markdown", "heading"]
-      .filter((key) => args[key] !== undefined)
-      .map((key) => [key, args[key]]),
-  );
-  try {
-    const data = (await sdlcInternalFetch("/api/internal/sdlc/wiki/pages/write", {
-      ...sdlcWikiScope(args),
-      ...(args["generationCommit"] ? { generationCommit: args["generationCommit"] } : {}),
-      page,
-    }, ctx)) as { page: unknown };
-    return ok(JSON.stringify(data.page));
-  } catch (e) {
-    return err(`SDLC Wiki page error: ${errMsg(e)}`);
-  }
-}
-
-async function mutateSdlcArtifact(args: Record<string, unknown>, ctx: HandlerContext): Promise<ToolResult> {
-  const action = String(args["action"] ?? "");
-  if (args["artifactType"] === "WIKI") return writeSdlcWikiPage(args, ctx);
-  const folderId = String(args["folderId"] ?? "").trim();
-  if (action === "create" && folderId) {
-    return createSdlcArtifact(args, ctx);
-  }
-  if (action === "update" && String(args["canvasId"] ?? "").trim()) {
-    try {
-      const data = (await spacesFetch("/api/sdlc/claw/artifacts/update", {
-        method: "POST",
-        headers: { "x-xyne-acting-user-id": ctx.userId },
-        body: JSON.stringify(args),
-      }, sdlcSpacesAuth())) as { artifact: { canvasId: string; viewAccessId?: string; url?: string } };
-      return ok(JSON.stringify(data.artifact));
-    } catch (e) {
-      return err(`Update SDLC artifact error: ${errMsg(e)}`);
-    }
-  }
-  return err("Unsupported SDLC artifact action: create takes folderId, update takes canvasId, Wiki pages take artifactType WIKI.");
-}
-
-async function sdlcInternalFetch(path: string, body: Record<string, unknown>, ctx: HandlerContext): Promise<unknown> {
-  const s2sKey = process.env["INTERNAL_S2S_KEY"] ?? process.env["XYNE_CLAW_S2S_KEY"] ?? "";
-  if (!s2sKey) throw new Error("Internal S2S key is unavailable for SDLC tools.");
-  return spacesFetch(
-    path,
-    {
-      method: "POST",
-      headers: { "x-xyne-acting-user-id": ctx.userId },
-      body: JSON.stringify(body),
-    },
-    { s2sKey },
-  );
-}
-
-async function callSdlcArtifactHistory(
-  path: string,
-  args: Record<string, unknown>,
-  ctx: HandlerContext,
-): Promise<ToolResult> {
-  try {
-    return ok(JSON.stringify(await sdlcInternalFetch(`/api/internal/sdlc/artifact-versions${path}`, args, ctx)));
-  } catch (e) {
-    return err(`SDLC artifact history error: ${errMsg(e)}`);
-  }
-}
-
-async function listSdlcArtifacts(args: Record<string, unknown>, ctx: HandlerContext): Promise<ToolResult> {
-  const kinds = Array.isArray(args["kinds"]) ? args["kinds"].map(String) : [];
-  try {
-    const result: Record<string, unknown> = {};
-    if (kinds.length === 0 || kinds.includes("ARTIFACT")) {
-      Object.assign(result, await sdlcInternalFetch("/api/internal/sdlc/artifact-versions/current/list", args, ctx));
-    }
-    if (kinds.includes("WIKI")) {
-      const data = (await sdlcInternalFetch("/api/internal/sdlc/wiki/pages/list", {
-        ...sdlcWikiScope(args),
-        ...(args["includeArchived"] === true ? { includeArchived: true } : {}),
-      }, ctx)) as { pages: unknown };
-      result["pages"] = data.pages;
-    }
-    return ok(JSON.stringify(result));
-  } catch (e) {
-    return err(`SDLC artifact list error: ${errMsg(e)}`);
-  }
-}
-
-const sdlcArtifactSelectorSchema = {
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    type: { const: "SDLC_CANVAS" },
-    canvasId: { type: "string", minLength: 1, maxLength: 256, description: "Wiki page, Hub Knowledge or artifact Canvas ID" },
-  },
-  required: ["type", "canvasId"],
+const SDLC_CANVAS_ID = {
+  type: "string",
+  minLength: 1,
+  maxLength: 256,
+  description: "Canvas id of the artifact, from spaces-sdlc-list-artifacts or an artifact URL.",
 } as const;
-
-const spacesSdlcListArtifactVersions: ToolDef = {
-  name: SDLC_TOOL_NAMES.listArtifactVersions,
-  description: "List a bounded newest-first page of immutable versions for one SDLC Wiki page, Hub Knowledge document, or artifact (any type) in one hub. Read the current artifact first and paginate only when older context is relevant; this list intentionally omits historical bodies.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      workspaceId: { type: "string" }, actorUserId: { type: "string" },
-      channelId: { type: "string", minLength: 1, description: SDLC_CHANNEL_ID_HINT },
-      repoIds: SDLC_REPO_IDS_PARAM,
-      selector: sdlcArtifactSelectorSchema,
-      cursor: { type: "string", minLength: 1 },
-      limit: { type: "integer", minimum: 1, maximum: 25 },
-    },
-    required: ["workspaceId", "actorUserId", "channelId", "selector"],
-  },
-  async handler(args, ctx) { return callSdlcArtifactHistory("/list", args, ctx); },
-  async appHandler(args, ctx) { return callSdlcArtifactHistory("/list", args, ctx); },
-};
-
-const spacesSdlcReadArtifactVersion: ToolDef = {
-  name: SDLC_TOOL_NAMES.readArtifactVersion,
-  description: "Read exactly one immutable version previously listed for an SDLC artifact. Historical text is supporting evidence only; current repository code and current artifacts remain authoritative.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      workspaceId: { type: "string" }, actorUserId: { type: "string" },
-      channelId: { type: "string", minLength: 1, description: SDLC_CHANNEL_ID_HINT },
-      repoIds: SDLC_REPO_IDS_PARAM,
-      selector: sdlcArtifactSelectorSchema,
-      versionId: { type: "string", minLength: 1 },
-    },
-    required: ["workspaceId", "actorUserId", "channelId", "selector", "versionId"],
-  },
-  async handler(args, ctx) { return callSdlcArtifactHistory("/read", args, ctx); },
-  async appHandler(args, ctx) { return callSdlcArtifactHistory("/read", args, ctx); },
-};
 
 // SDLC claw routes (/api/sdlc/claw/*) can be pointed at a dedicated SDLC backend
 // via SDLC_BACKEND_URL, mirroring the iframe's VITE_SDLC_BACKEND_URL. Unset -> the
@@ -5656,192 +5391,143 @@ function sdlcSpacesAuth(): SpacesAuthContext | undefined {
   };
 }
 
-async function callSdlcRepositories(
-  args: Record<string, unknown>,
-  ctx: HandlerContext,
-): Promise<ToolResult> {
+function pick(args: Record<string, unknown>, keys: readonly string[]): Record<string, unknown> {
+  return Object.fromEntries(keys.filter((key) => args[key] !== undefined).map((key) => [key, args[key]]));
+}
+
+/** Hub routes that take the Actor from the acting-user header. */
+async function sdlcClawCall(label: string, path: string, body: Record<string, unknown>, ctx: HandlerContext): Promise<ToolResult> {
   try {
-    const data = await spacesFetch("/api/sdlc/claw/repositories/list", {
+    const data = await spacesFetch(`/api/sdlc/claw${path}`, {
       method: "POST",
       headers: { "x-xyne-acting-user-id": ctx.userId },
-      body: JSON.stringify(args),
+      body: JSON.stringify(body),
     }, sdlcSpacesAuth());
     return ok(JSON.stringify(data));
   } catch (e) {
-    return err(`SDLC repositories error: ${errMsg(e)}`);
+    return err(`${label} error: ${errMsg(e)}`);
   }
 }
 
-const spacesSdlcListRepositories: ToolDef = {
+/** Internal routes that take the bound Actor pair in the body. */
+async function sdlcInternalFetch(path: string, body: Record<string, unknown>, ctx: HandlerContext): Promise<unknown> {
+  const s2sKey = process.env["INTERNAL_S2S_KEY"] ?? process.env["XYNE_CLAW_S2S_KEY"] ?? "";
+  if (!s2sKey) throw new Error("Internal S2S key is unavailable for SDLC tools.");
+  return spacesFetch(
+    path,
+    {
+      method: "POST",
+      headers: { "x-xyne-acting-user-id": ctx.userId },
+      body: JSON.stringify(body),
+    },
+    { s2sKey },
+  );
+}
+
+async function sdlcInternalCall(label: string, path: string, body: Record<string, unknown>, ctx: HandlerContext): Promise<ToolResult> {
+  try {
+    return ok(JSON.stringify(await sdlcInternalFetch(path, body, ctx)));
+  } catch (e) {
+    return err(`${label} error: ${errMsg(e)}`);
+  }
+}
+
+function sdlcActor(args: Record<string, unknown>): Record<string, unknown> {
+  return pick(args, ["workspaceId", "actorUserId"]);
+}
+
+function sdlcTool(def: Omit<ToolDef, "appHandler">): ToolDef {
+  return { ...def, appHandler: def.handler };
+}
+
+const spacesSdlcListRepositories = sdlcTool({
   name: SDLC_TOOL_NAMES.listRepositories,
   description:
-    "Resolve a Spaces channel to the SDLC repositories it covers. An SDLC Hub is a channel and repositories are its members. "
-    + "The conversation's channelId is supplied by the platform, so call this with no arguments to learn which repositories "
-    + "this hub works on. Returns repoId, channelId, name, clone url, and base branch per repository — pass the repoId and "
-    + "channelId together to every hub-scoped SDLC tool. An empty result means this hub has no repositories yet, or the channel is not an SDLC hub. "
-    + "Use it to orient yourself or to offer the user a choice; never use it to override a repository already pinned by trusted run context.",
+    "List the repositories of one SDLC Hub: repoId, name, clone url and base branch. Pass the hub's channelId. " +
+    "An empty result means the hub has no repositories yet.",
   inputSchema: {
     type: "object",
     properties: {
-      channelId: {
-        type: "string",
-        minLength: 1,
-        description: "Channel id of the SDLC Hub. Supplied by the platform; omit it.",
-      },
+      channelId: SDLC_CHANNEL_ID,
       query: { type: "string", maxLength: 120, description: "Optional case-insensitive filter on repository name or URL." },
       limit: { type: "integer", minimum: 1, maximum: 50, default: 20 },
     },
-  },
-  async handler(args, ctx) {
-    return callSdlcRepositories(args, ctx);
-  },
-  async appHandler(args, ctx) {
-    return callSdlcRepositories(args, ctx);
-  },
-};
-
-async function callSdlcTracks(
-  path: string,
-  args: Record<string, unknown>,
-  ctx: HandlerContext,
-): Promise<ToolResult> {
-  try {
-    const data = await spacesFetch(`/api/sdlc/claw/tracks${path}`, {
-      method: "POST",
-      headers: { "x-xyne-acting-user-id": ctx.userId },
-      body: JSON.stringify(args),
-    }, sdlcSpacesAuth());
-    return ok(JSON.stringify(data));
-  } catch (e) {
-    return err(`SDLC tracks error: ${errMsg(e)}`);
-  }
-}
-
-const spacesSdlcListTracks: ToolDef = {
-  name: SDLC_TOOL_NAMES.listTracks,
-  description:
-    "List the SDLC tracks (workstreams) in one SDLC Hub. Tracks belong to the hub and are shared by every repository in it, so this needs only the channelId — no repository. Call this before creating a PRD or Tech Doc so the user can pick an existing track; if none fit, use spaces-sdlc-create-track.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      repoId: { type: "string", minLength: 1 },
-      channelId: { type: "string", minLength: 1, description: SDLC_CHANNEL_ID_HINT },
-    },
     required: ["channelId"],
   },
-  async handler(args, ctx) {
-    return callSdlcTracks("/list", args, ctx);
-  },
-  async appHandler(args, ctx) {
-    return callSdlcTracks("/list", args, ctx);
-  },
-};
+  handler: (args, ctx) =>
+    sdlcClawCall("SDLC repositories", "/repositories/list", pick(args, ["channelId", "query", "limit"]), ctx),
+});
 
-const spacesSdlcCreateTrack: ToolDef = {
-  name: SDLC_TOOL_NAMES.createTrack,
+const SDLC_ARTIFACT_TYPE =
+  "Artifact type: what kind of document it is (PRD, Tech Doc, Hub Knowledge or a custom type). " +
+  "Ids come from spaces-sdlc-list-artifact-types. Not a track folder.";
+
+const SDLC_TRACK_FOLDER =
+  "Track folder: a folder a user made inside a track to group its items. Ids come from spaces-sdlc-list-tracks " +
+  "(each track's folders). Not an artifact type.";
+
+const spacesSdlcListTracks = sdlcTool({
+  name: SDLC_TOOL_NAMES.listTracks,
   description:
-    "Create a new SDLC track (workstream) in one SDLC Hub. The track belongs to the hub and is visible to every repository in it, so this needs only the channelId — no repository. Use this when the user wants a brand-new track for a PRD/Tech Doc rather than an existing one. Returns the new track id to pass as trackId in spaces-sdlc-mutate-artifact.",
+    "List the tracks (workstreams) of one SDLC Hub with each track's folders ({ id, name, parentId }; parentId is the track id for a " +
+    "top-level folder). Call it before creating a PRD or Tech Doc so the user can pick a track.",
+  inputSchema: { type: "object", properties: { channelId: SDLC_CHANNEL_ID }, required: ["channelId"] },
+  handler: (args, ctx) => sdlcClawCall("SDLC tracks", "/tracks/list", pick(args, ["channelId"]), ctx),
+});
+
+const spacesSdlcCreateTrack = sdlcTool({
+  name: SDLC_TOOL_NAMES.createTrack,
+  description: "Create a track (workstream) in one SDLC Hub. Returns the track id to pass as trackId when creating artifacts.",
   inputSchema: {
     type: "object",
     properties: {
-      repoId: { type: "string", minLength: 1 },
-      channelId: { type: "string", minLength: 1, description: SDLC_CHANNEL_ID_HINT },
+      channelId: SDLC_CHANNEL_ID,
       name: { type: "string", minLength: 1, maxLength: 120 },
       description: { type: "string", maxLength: 2000 },
     },
     required: ["channelId", "name"],
   },
-  async handler(args, ctx) {
-    return callSdlcTracks("", args, ctx);
-  },
-  async appHandler(args, ctx) {
-    return callSdlcTracks("", args, ctx);
-  },
-};
+  handler: (args, ctx) => sdlcClawCall("SDLC tracks", "/tracks", pick(args, ["channelId", "name", "description"]), ctx),
+});
 
-async function callSdlcArtifactTypes(
-  path: string,
-  args: Record<string, unknown>,
-  ctx: HandlerContext,
-): Promise<ToolResult> {
-  try {
-    const data = await spacesFetch(`/api/sdlc/claw/artifact-types${path}`, {
-      method: "POST",
-      headers: { "x-xyne-acting-user-id": ctx.userId },
-      body: JSON.stringify(args),
-    }, sdlcSpacesAuth());
-    return ok(JSON.stringify(data));
-  } catch (e) {
-    return err(`SDLC artifact types error: ${errMsg(e)}`);
-  }
-}
+const spacesSdlcCreateTrackFolder = sdlcTool({
+  name: SDLC_TOOL_NAMES.createTrackFolder,
+  description:
+    "Create a track folder: a folder inside one track to group its artifacts and tickets. Returns its id to pass as trackFolderId. " +
+    "This is not an artifact type; for a new type use the hub's artifact types.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      channelId: SDLC_CHANNEL_ID,
+      trackId: { type: "string", minLength: 1, description: "The track the folder belongs to, from spaces-sdlc-list-tracks." },
+      name: { type: "string", minLength: 1, maxLength: 120 },
+      parentTrackFolderId: { type: "string", minLength: 1, description: `Optional parent in the same track; omit for the track's top level. ${SDLC_TRACK_FOLDER}` },
+    },
+    required: ["channelId", "trackId", "name"],
+  },
+  handler: (args, ctx) =>
+    sdlcClawCall("SDLC track folder", "/track-folders", pick(args, ["channelId", "trackId", "name", "parentTrackFolderId"]), ctx),
+});
 
-const spacesSdlcListArtifactTypes: ToolDef = {
+const spacesSdlcListArtifactTypes = sdlcTool({
   name: SDLC_TOOL_NAMES.listArtifactTypes,
   description:
-    "List the SDLC artifact types (canvas folders) in one SDLC Hub. Each type is a folder on the hub's channel and is shared by every repository in that hub, so this needs only the channelId — no repository; PRD and Tech Doc are seeded built-in types and users can add more custom types. Call this before creating an artifact of a custom type to get its folderId, then pass that folderId to spaces-sdlc-mutate-artifact create.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      repoId: { type: "string", minLength: 1 },
-      channelId: { type: "string", minLength: 1, description: SDLC_CHANNEL_ID_HINT },
-    },
-    required: ["channelId"],
-  },
-  async handler(args, ctx) {
-    return callSdlcArtifactTypes("/list", args, ctx);
-  },
-  async appHandler(args, ctx) {
-    return callSdlcArtifactTypes("/list", args, ctx);
-  },
-};
+    "List the artifact types of one SDLC Hub with their id. PRD and Tech Doc are built in; users add custom types. " +
+    "Pass the id as artifactTypeId to spaces-sdlc-write-artifact create.",
+  inputSchema: { type: "object", properties: { channelId: SDLC_CHANNEL_ID }, required: ["channelId"] },
+  handler: (args, ctx) => sdlcClawCall("SDLC artifact types", "/artifact-types/list", pick(args, ["channelId"]), ctx),
+});
 
-const spacesSdlcListArtifacts: ToolDef = {
-  name: SDLC_TOOL_NAMES.listArtifacts,
-  description: "List current SDLC documents in one SDLC Hub without historical bodies. ARTIFACT (the default) lists artifacts of every type, seeded or custom. WIKI lists one Wiki's pages with their folderPath: the run's pinned repository's Wiki, else the repository named in repoIds, else the Hub Wiki. Read a page by its canvasId with spaces-sdlc-read-artifact.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      workspaceId: { type: "string" }, actorUserId: { type: "string" },
-      channelId: { type: "string", minLength: 1, description: SDLC_CHANNEL_ID_HINT },
-      repoIds: SDLC_REPO_IDS_PARAM,
-      kinds: { type: "array", items: { type: "string", enum: ["WIKI", "ARTIFACT"] }, description: "What to list. Defaults to ARTIFACT." },
-      includeArchived: { type: "boolean", description: "Include archived Wiki pages." },
-    },
-    required: ["workspaceId", "actorUserId", "channelId"],
-  },
-  async handler(args, ctx) { return listSdlcArtifacts(args, ctx); },
-  async appHandler(args, ctx) { return listSdlcArtifacts(args, ctx); },
-};
-
-const spacesSdlcReadArtifact: ToolDef = {
-  name: SDLC_TOOL_NAMES.readArtifact,
-  description: "Read one current Wiki page, Hub Knowledge document, or artifact as Markdown with its live content hash.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      workspaceId: { type: "string" }, actorUserId: { type: "string" },
-      channelId: { type: "string", minLength: 1, description: SDLC_CHANNEL_ID_HINT },
-      repoIds: SDLC_REPO_IDS_PARAM,
-      selector: sdlcArtifactSelectorSchema,
-    },
-    required: ["workspaceId", "actorUserId", "channelId", "selector"],
-  },
-  async handler(args, ctx) { return callSdlcArtifactHistory("/current/read", args, ctx); },
-  async appHandler(args, ctx) { return callSdlcArtifactHistory("/current/read", args, ctx); },
-};
-
-// ── spaces-sdlc-list-entity-links ─────────────────────────────────
-const spacesSdlcListEntityLinks: ToolDef = {
+const spacesSdlcListEntityLinks = sdlcTool({
   name: SDLC_TOOL_NAMES.listEntityLinks,
   description:
     "List everything linked to one thing in an SDLC Hub, one hop in both directions: the tickets, artifacts, " +
-    "tracks, conversations, calls, pull requests and repositories related to it. Each link names the other end " +
+    "tracks, folders, conversations, calls, pull requests and repositories related to it. Each link names the other end " +
     "(type, id, display name) and the relation. Call it again on a result to follow a link further.",
   inputSchema: {
     type: "object",
     properties: {
-      channelId: { type: "string", minLength: 1, description: SDLC_CHANNEL_ID_HINT },
+      channelId: SDLC_CHANNEL_ID,
       entityType: {
         type: "string",
         enum: ["CANVAS", "TICKET", "CHANNEL", "CONVERSATION", "MESSAGE", "EMAIL", "CALL", "RECORDING", "ATTACHMENT", "PULL_REQUEST", "REPOSITORY", "WORKFLOW_EXECUTION", "WORKFLOW", "TRACK", "FOLDER"],
@@ -5853,78 +5539,227 @@ const spacesSdlcListEntityLinks: ToolDef = {
     },
     required: ["channelId", "entityType", "entityId"],
   },
-  async handler(args, ctx) {
-    return callSdlcEntityLinks(args, ctx);
-  },
-  async appHandler(args, ctx) {
-    return callSdlcEntityLinks(args, ctx);
-  },
-};
+  handler: (args, ctx) =>
+    sdlcClawCall(
+      "SDLC entity links",
+      "/entity-links/list",
+      pick(args, ["channelId", "entityType", "entityId", "relationType", "otherType", "limit"]),
+      ctx,
+    ),
+});
 
-async function callSdlcEntityLinks(args: Record<string, unknown>, ctx: HandlerContext): Promise<ToolResult> {
-  try {
-    const data = await spacesFetch("/api/sdlc/claw/entity-links/list", {
-      method: "POST",
-      headers: { "x-xyne-acting-user-id": ctx.userId },
-      body: JSON.stringify(args),
-    }, sdlcSpacesAuth());
-    return ok(JSON.stringify(data));
-  } catch (e) {
-    return err(`SDLC entity links error: ${errMsg(e)}`);
+const spacesSdlcListArtifacts = sdlcTool({
+  name: SDLC_TOOL_NAMES.listArtifacts,
+  description:
+    "List one SDLC Hub's artifacts without their bodies. kind ARTIFACT (default) lists PRDs, Tech Docs, custom types and Hub Knowledge " +
+    "with url, artifactType, track and trackFolder; filter by artifactTypeId, trackId or trackFolderId. kind WIKI lists one Wiki's pages with their folderPath: " +
+    "pass repoId for that repository's Wiki, omit it for the Hub Wiki. Read one with spaces-sdlc-read-artifact.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      channelId: SDLC_CHANNEL_ID,
+      kind: { type: "string", enum: ["ARTIFACT", "WIKI"], default: "ARTIFACT" },
+      artifactTypeId: { type: "string", minLength: 1, description: SDLC_ARTIFACT_TYPE },
+      trackId: { type: "string", minLength: 1, description: "Artifacts of one track, from spaces-sdlc-list-tracks." },
+      trackFolderId: { type: "string", minLength: 1, description: `Artifacts filed directly in one track folder. ${SDLC_TRACK_FOLDER}` },
+      repoId: { type: "string", minLength: 1, description: "WIKI only: the repository whose Wiki to list." },
+      includeArchived: { type: "boolean", description: "Include archived artifacts and pages." },
+    },
+    required: ["channelId"],
+  },
+  handler: (args, ctx) =>
+    args["kind"] === "WIKI"
+      ? sdlcInternalCall("SDLC Wiki", "/api/internal/sdlc/wiki/pages/list", {
+          ...sdlcActor(args),
+          ...pick(args, ["channelId", "repoId", "includeArchived"]),
+        }, ctx)
+      : sdlcInternalCall("SDLC artifacts", "/api/internal/sdlc/artifact-versions/current/list", {
+          ...sdlcActor(args),
+          ...pick(args, ["channelId", "artifactTypeId", "trackId", "trackFolderId", "includeArchived"]),
+        }, ctx),
+});
+
+const spacesSdlcReadArtifact = sdlcTool({
+  name: SDLC_TOOL_NAMES.readArtifact,
+  description:
+    "Read one SDLC artifact or Wiki page as Markdown. Pass versionId (from spaces-sdlc-list-artifact-versions) to read an older version; " +
+    "old text is supporting evidence only, current code and the current artifact win.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      canvasId: SDLC_CANVAS_ID,
+      versionId: { type: "string", minLength: 1 },
+    },
+    required: ["canvasId"],
+  },
+  handler: (args, ctx) =>
+    sdlcInternalCall("SDLC artifact", "/api/internal/sdlc/artifact-versions/current/read", {
+      ...sdlcActor(args),
+      ...pick(args, ["canvasId", "versionId"]),
+    }, ctx),
+});
+
+const spacesSdlcListArtifactVersions = sdlcTool({
+  name: SDLC_TOOL_NAMES.listArtifactVersions,
+  description: "List a newest-first page of one SDLC artifact's versions, without their bodies. Read the current artifact first.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      canvasId: SDLC_CANVAS_ID,
+      cursor: { type: "string", minLength: 1 },
+      limit: { type: "integer", minimum: 1, maximum: 25 },
+    },
+    required: ["canvasId"],
+  },
+  handler: (args, ctx) =>
+    sdlcInternalCall("SDLC artifact history", "/api/internal/sdlc/artifact-versions/list", {
+      ...sdlcActor(args),
+      ...pick(args, ["canvasId", "cursor", "limit"]),
+    }, ctx),
+});
+
+const SDLC_WRITE_ACTIONS = ["create", "update", "replace_section", "insert_section", "remove_section", "move"] as const;
+
+async function writeSdlcArtifact(args: Record<string, unknown>, ctx: HandlerContext): Promise<ToolResult> {
+  const action = String(args["action"] ?? "");
+  if (args["kind"] === "WIKI") {
+    return sdlcInternalCall("SDLC Wiki page", "/api/internal/sdlc/wiki/pages/write", {
+      ...sdlcActor(args),
+      ...pick(args, ["channelId", "repoId", "generationCommit"]),
+      page: pick(args, ["action", "canvasId", "folderPath", "title", "markdown", "heading"]),
+    }, ctx);
+  }
+  switch (action) {
+    case "create":
+      return createSdlcArtifact(args, ctx);
+    case "update":
+      return sdlcClawCall("Update SDLC artifact", "/artifacts/update", pick(args, ["canvasId", "title", "markdown", "relatedCanvasIds"]), ctx);
+    case "replace_section":
+    case "insert_section":
+    case "remove_section":
+      return sdlcClawCall("Edit SDLC artifact section", "/artifacts/section", pick(args, ["canvasId", "action", "heading", "markdown"]), ctx);
+    case "move":
+      return sdlcClawCall("Move SDLC artifact", "/artifacts/move", pick(args, ["canvasId", "parentId"]), ctx);
+    default:
+      return err(`Unsupported SDLC artifact action: ${action}`);
   }
 }
 
-// ── spaces-sdlc-create-pull-request ───────────────────────────────
-const spacesSdlcCreatePullRequest: ToolDef = {
+async function createSdlcArtifact(args: Record<string, unknown>, ctx: HandlerContext): Promise<ToolResult> {
+  try {
+    const data = (await spacesFetch("/api/sdlc/claw/artifacts", {
+      method: "POST",
+      headers: { "x-xyne-acting-user-id": ctx.userId },
+      // Spaces stores the artifact type as a folder and names it folderId; the dashboard posts to the same route.
+      body: JSON.stringify({
+        ...pick(args, ["channelId", "trackId", "trackFolderId", "title", "markdown", "repoIds", "relatedCanvasIds"]),
+        folderId: args["artifactTypeId"],
+      }),
+    }, sdlcSpacesAuth())) as { artifact: { canvasId: string; viewAccessId?: string; url?: string } };
+    const artifact = data.artifact;
+    const citations: Citation[] = [];
+    pushCanvasCitation(citations, artifact.viewAccessId, 1, String(args["title"] ?? "SDLC artifact"));
+    return okCited(
+      prefixChunk(1, "SDLC artifact created", [
+        `Canvas ID: ${artifact.canvasId}`,
+        `URL: ${artifact.url ?? `/chat/canvas/${artifact.canvasId}`}`,
+      ]),
+      citations,
+    );
+  } catch (e) {
+    return err(`Create SDLC artifact error: ${errMsg(e)}`);
+  }
+}
+
+const spacesSdlcWriteArtifact = sdlcTool({
+  name: SDLC_TOOL_NAMES.writeArtifact,
+  description:
+    "Create or change one SDLC artifact (PRD, Tech Doc, custom type, Hub Knowledge) or, with kind WIKI, one Wiki page. " +
+    "create: artifacts take channelId, artifactTypeId (from spaces-sdlc-list-artifact-types), trackId (every type except Hub Knowledge), " +
+    "optional trackFolderId (a folder inside that track, from spaces-sdlc-list-tracks), title, markdown, optional repoIds and relatedCanvasIds; " +
+    "Wiki pages take channelId, optional repoId (omit for the Hub Wiki), folderPath, title, markdown. " +
+    "update: canvasId plus any of markdown, title, relatedCanvasIds (links are added, never removed). " +
+    "replace_section / insert_section: canvasId, heading (an existing heading), markdown starting with a heading; remove_section: canvasId, heading. " +
+    "Prefer section actions for focused edits so unrelated content survives. " +
+    "move: artifacts take canvasId and parentId (a track folder in the same track, or the track id for its root); Wiki pages take canvasId and folderPath. " +
+    "Wiki actions always take channelId and the repoId of that Wiki. Cite code as markdown links pinned to a commit.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      action: { type: "string", enum: [...SDLC_WRITE_ACTIONS] },
+      kind: { type: "string", enum: ["ARTIFACT", "WIKI"], default: "ARTIFACT" },
+      channelId: SDLC_CHANNEL_ID,
+      canvasId: SDLC_CANVAS_ID,
+      title: { type: "string", minLength: 1, maxLength: 255 },
+      markdown: { type: "string", minLength: 1, maxLength: 5_000_000 },
+      heading: { type: "string", minLength: 1, maxLength: 255, description: "Exact existing heading the section action targets." },
+      artifactTypeId: { type: "string", minLength: 1, description: `For create. ${SDLC_ARTIFACT_TYPE}` },
+      trackId: { type: "string", minLength: 1, description: "Track id, for create." },
+      trackFolderId: { type: "string", minLength: 1, description: `For create, optional: file the artifact in this folder of trackId instead of the track's top level. ${SDLC_TRACK_FOLDER}` },
+      parentId: { type: "string", minLength: 1, description: "Artifact move target: a track folder id in the same track, or the track id for its top level." },
+      folderPath: { type: "string", maxLength: 512, description: "Wiki folders separated by \"/\", e.g. \"architecture/payments\". Empty is the Wiki's top level." },
+      repoId: { type: "string", minLength: 1, description: "Wiki only: the repository whose Wiki the page belongs to." },
+      repoIds: { type: "array", items: { type: "string", minLength: 1 }, maxItems: 50, description: "Artifact create only: repositories the artifact is about." },
+      relatedCanvasIds: { type: "array", items: { type: "string", minLength: 1 }, description: "Existing artifacts to link as related context." },
+    },
+    required: ["action"],
+  },
+  handler: writeSdlcArtifact,
+});
+
+const spacesSdlcArchiveArtifact = sdlcTool({
+  name: SDLC_TOOL_NAMES.archiveArtifact,
+  description: "Archive or restore one SDLC artifact or Wiki page. Archived items are hidden from lists unless includeArchived is set.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      canvasId: SDLC_CANVAS_ID,
+      action: { type: "string", enum: ["archive", "restore"] },
+    },
+    required: ["canvasId", "action"],
+  },
+  handler: (args, ctx) =>
+    sdlcClawCall("Archive SDLC artifact", "/artifacts/archive", {
+      canvasId: args["canvasId"],
+      archived: args["action"] === "archive",
+    }, ctx),
+});
+
+const spacesSdlcCreatePullRequest = sdlcTool({
   name: SDLC_TOOL_NAMES.createPullRequest,
   description:
-    "Open a pull request on GitHub or Bitbucket after a safe feature branch has been pushed. " +
-    "The Spaces backend checks the run's user can reach the repository, verifies the pushed commit and " +
-    "head/base, and opens it with the repository's own credential. draft defaults to true; Bitbucket " +
-    "servers without draft support open a normal pull request with no reviewers. " +
+    "Open a pull request on GitHub or Bitbucket from a pushed branch, using the repository's own credential. " +
+    "Any head and base branch; the provider rejects a missing branch or head equal to base. draft defaults to true. " +
     "Never use generic GitHub or Bitbucket credentials for SDLC work.",
   inputSchema: {
     type: "object",
     properties: {
-      workspaceId: { type: "string" },
-      actorUserId: { type: "string" },
-      repoId: { type: "string", description: "SDLC repository id from spaces-sdlc-list-repositories." },
+      repoId: { type: "string", minLength: 1, description: "SDLC repository id from spaces-sdlc-list-repositories." },
       title: { type: "string", minLength: 1, maxLength: 256 },
       body: { type: "string", maxLength: 65_536 },
-      head: { type: "string", minLength: 1, maxLength: 255 },
-      base: { type: "string", minLength: 1, maxLength: 255 },
-      commitHash: { type: "string", pattern: "^[0-9a-fA-F]{40}$" },
+      head: { type: "string", minLength: 1, maxLength: 255, description: "Branch with the changes." },
+      base: { type: "string", minLength: 1, maxLength: 255, description: "Branch to merge into." },
       draft: { type: "boolean", default: true },
     },
-    required: ["repoId", "title", "head", "base", "commitHash"],
+    required: ["repoId", "title", "head", "base"],
   },
   handler: withToolErrors("Create SDLC pull request error", async (args, ctx) => {
-      const s2sKey = process.env["INTERNAL_S2S_KEY"] ?? process.env["XYNE_CLAW_S2S_KEY"] ?? "";
-      if (!s2sKey) return err("Internal S2S key is unavailable for SDLC pull request creation.");
-      const data = (await spacesFetch(
-        "/api/internal/sdlc/vcs/pull-requests",
-        { method: "POST", headers: { "x-xyne-acting-user-id": ctx.userId }, body: JSON.stringify(args) },
-        { s2sKey },
-      )) as {
-        pullRequest?: { url?: string; number?: number; draft?: boolean; head?: string; base?: string };
-      };
-      if (!data.pullRequest?.url) {
-        return err("Spaces returned an invalid pull request result.");
-      }
-      return ok(
-        [
-          `${data.pullRequest.draft ? "Draft pull request" : "Pull request"} created and verified.`,
-          `URL: ${data.pullRequest.url}`,
-          `Number: ${data.pullRequest.number ?? "unknown"}`,
-          `Head: ${data.pullRequest.head ?? "unknown"}`,
-          `Base: ${data.pullRequest.base ?? "unknown"}`,
-        ].join("\n"),
-      );
-    }),
-  async appHandler(args, ctx) {
-    return spacesSdlcCreatePullRequest.handler(args, ctx);
-  },
-};
+    const data = (await sdlcInternalFetch("/api/internal/sdlc/vcs/pull-requests", {
+      ...sdlcActor(args),
+      ...pick(args, ["repoId", "title", "body", "head", "base", "draft"]),
+    }, ctx)) as { pullRequest?: { url?: string; number?: number; draft?: boolean; head?: string; base?: string } };
+    if (!data.pullRequest?.url) return err("Spaces returned an invalid pull request result.");
+    return ok(
+      [
+        `${data.pullRequest.draft ? "Draft pull request" : "Pull request"} created.`,
+        `URL: ${data.pullRequest.url}`,
+        `Number: ${data.pullRequest.number ?? "unknown"}`,
+        `Head: ${data.pullRequest.head ?? "unknown"}`,
+        `Base: ${data.pullRequest.base ?? "unknown"}`,
+      ].join("\n"),
+    );
+  }),
+});
 
 // ── spaces-emails ──────────────────────────────────────────────────
 
@@ -10464,12 +10299,13 @@ export const tools: ToolDef[] = [
   spacesSdlcListRepositories,
   spacesSdlcListTracks,
   spacesSdlcCreateTrack,
+  spacesSdlcCreateTrackFolder,
   spacesSdlcListArtifactTypes,
-  spacesSdlcMutateArtifact,
+  spacesSdlcWriteArtifact,
+  spacesSdlcArchiveArtifact,
   spacesSdlcCreatePullRequest,
   spacesSdlcListEntityLinks,
   spacesSdlcListArtifactVersions,
-  spacesSdlcReadArtifactVersion,
   spacesAutomationsList,
   // /api/automations/* needs a user session; hide these in app-mode runs.
   ...[
