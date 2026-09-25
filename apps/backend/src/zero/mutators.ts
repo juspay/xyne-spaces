@@ -10415,7 +10415,7 @@ export function createMutators(
           canvasId: z.string(),
           blockId: z.string().min(1),
           anchorText: z.string().optional(),
-          body: z.string().min(1),
+          body: z.string(),
           mentionedUserIds: z.array(z.string()).default([]),
           timestamp: z.number(),
         }),
@@ -10462,7 +10462,7 @@ export function createMutators(
           commentId: z.string(),
           threadId: z.string(),
           canvasId: z.string(),
-          body: z.string().min(1),
+          body: z.string(),
           mentionedUserIds: z.array(z.string()).default([]),
           timestamp: z.number(),
         }),
@@ -10580,6 +10580,19 @@ export function createMutators(
             mentionedUserIds: '[]',
             deletedAt: timestamp,
           });
+
+          const attachments = await tx.run(
+            zql.message_attachments
+              .where('entityId', commentId)
+              .where('entityType', AttachmentEntityType.CANVAS_COMMENT)
+              .where('isDeleted', false),
+          );
+          for (const attachment of attachments) {
+            await tx.mutate.message_attachments.update({
+              id: attachment.id,
+              isDeleted: true,
+            });
+          }
 
           const thread = await tx.run(
             zql.canvas_comment_threads

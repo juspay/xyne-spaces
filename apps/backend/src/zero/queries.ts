@@ -3766,7 +3766,12 @@ export const queries: AnyQueryRegistry = defineQueries({
       return zql.canvas_comments
         .where('workspaceId', ctx.workspaceId)
         .where('threadId', threadId)
-        .orderBy('createdAt', 'asc');
+        .orderBy('createdAt', 'asc')
+        .related('attachments', attachment =>
+          attachment
+            .where('entityType', AttachmentEntityType.CANVAS_COMMENT)
+            .where('isDeleted', false),
+        );
     },
   ),
 
