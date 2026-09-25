@@ -115,6 +115,10 @@ const envSchema = Joi.object({
   ENABLE_DELAYED_MESSAGE_WORKER: Joi.boolean().default(false),
   ENABLE_EMAIL_FETCH_WORKER: Joi.boolean().default(false),
   ENABLE_CALENDAR_SYNC_WORKER: Joi.boolean().default(false),
+  // Calendar sync jobs drained in parallel; Bull defaults to 1. Scoped per named
+  // processor, so the real ceiling is 2x this per provider. Same-source jobs stay
+  // serialised by withCalendarSourceLock.
+  CALENDAR_SYNC_QUEUE_CONCURRENCY: Joi.number().integer().min(1).max(20).default(5),
   ENABLE_SOCIAL_MEDIA_SYNC_WORKER: Joi.boolean().default(false),
 
   DESK_TICKET_DEBUG: Joi.boolean().default(false),
@@ -786,6 +790,7 @@ export const config = {
   enableDelayedMessageWorker: envVars.ENABLE_DELAYED_MESSAGE_WORKER,
   enableEmailFetchWorker: envVars.ENABLE_EMAIL_FETCH_WORKER,
   enableCalendarSyncWorker: envVars.ENABLE_CALENDAR_SYNC_WORKER,
+  calendarSyncQueueConcurrency: envVars.CALENDAR_SYNC_QUEUE_CONCURRENCY as number,
   enableSocialMediaSyncWorker: envVars.ENABLE_SOCIAL_MEDIA_SYNC_WORKER,
   deskTicketDebug: envVars.DESK_TICKET_DEBUG as boolean,
   enableEmailClassificationWorker: envVars.ENABLE_EMAIL_CLASSIFICATION_WORKER,

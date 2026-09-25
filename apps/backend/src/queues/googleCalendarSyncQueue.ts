@@ -35,6 +35,8 @@ import {
   MAX_CALENDAR_EVENTS_PER_SYNC,
 } from '@/services/calendarSyncConfig';
 import { calendarSyncErrorMessage, isPermanentCalendarAuthError } from './calendarSyncErrorUtils';
+import { config } from '@/config/env';
+import { withCalendarSourceLock } from './calendarSourceLock';
 
 const TAG = '[CALENDAR_SYNC][GOOGLE][QUEUE]';
 
@@ -349,22 +351,28 @@ class GoogleCalendarSyncQueue {
     const queue = await this.ensureQueue();
     if (this.processorRegistered) return;
 
-    queue.process('manual-sync', async (job) => {
+    // Drain several sources at once instead of Bull's default of 1; same-source
+    // jobs stay serialised by withCalendarSourceLock.
+    const concurrency = config.calendarSyncQueueConcurrency;
+
+    queue.process('manual-sync', concurrency, async (job) => {
       const sourceId = await resolveSourceId(job.data as CalendarSyncJobData);
       try {
-        await performManualSync(sourceId);
+        await withCalendarSourceLock('google', sourceId, () => performManualSync(sourceId));
       } catch (err) {
         await deactivateSourceOnPermanentAuthError(sourceId, err);
         throw err;
       }
     });
 
-    queue.process('incremental-sync', async (job) => {
+    queue.process('incremental-sync', concurrency, async (job) => {
       const jobData = job.data as CalendarSyncJobData;
       const sourceId = await resolveSourceId(jobData);
       let continuation: GoogleIncrementalContinuation | null;
       try {
-        continuation = await performIncrementalSync(sourceId, jobData);
+        continuation = await withCalendarSourceLock('google', sourceId, () =>
+          performIncrementalSync(sourceId, jobData)
+        );
       } catch (err) {
         await deactivateSourceOnPermanentAuthError(sourceId, err);
         throw err;
@@ -393,7 +401,7 @@ class GoogleCalendarSyncQueue {
     });
 
     this.processorRegistered = true;
-    logger.info(`${TAG} Sync queue processors registered`);
+    logger.info(`${TAG} Sync queue processors registered`, { concurrency });
   }
 
   async enqueueManualSync(sourceId: string): Promise<void> {

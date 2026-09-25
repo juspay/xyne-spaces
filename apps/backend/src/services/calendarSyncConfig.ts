@@ -4,6 +4,12 @@ export const CALENDAR_SYNC_LOOKAHEAD_DAYS = 30;
 export const MAX_CALENDAR_EVENTS_PER_SYNC = 100;
 export const CALENDAR_INCREMENTAL_CONTINUATION_DELAY_MS = 5_000;
 
+// Per-source mutex bounds, used once the sync queues drain more than one job at
+// a time. TTL outlives the slowest sync; the wait absorbs a short overlap before
+// the job gives up and lets Bull retry it.
+export const CALENDAR_SOURCE_LOCK_TTL_SECONDS = 300;
+export const CALENDAR_SOURCE_LOCK_WAIT_MS = 30_000;
+
 const XYNE_TEAM_ELIGIBILITY_FLAG_KEY = 'xyne-team-domains';
 
 export interface TeamEligibilityConfig {
