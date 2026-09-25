@@ -1,3 +1,10 @@
+## [1.405.0](https://github.com/juspay/xyne-spaces/compare/v1.404.2...v1.405.0) (2026-09-25)
+
+
+### Features
+
+* A/B split subagent traffic between the fast model and Kimi ([#2328](https://github.com/juspay/xyne-spaces/issues/2328)) ([4d5c6f7](https://github.com/juspay/xyne-spaces/commit/4d5c6f779f2e0b85fc339b743e5fd68da7a4c233))
+
 ## [1.404.2](https://github.com/juspay/xyne-spaces/compare/v1.404.1...v1.404.2) (2026-09-25)
 
 
