@@ -65,6 +65,7 @@ export class AdapterFactory {
       sendInteractionReply: interactionReplySender?.sendReply.bind(interactionReplySender),
     };
 
+    adapter.supportsPolling = true;
     adapterRegistry.register(platform, adapter);
     return adapter;
   }

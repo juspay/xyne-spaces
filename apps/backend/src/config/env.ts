@@ -119,10 +119,18 @@ const envSchema = Joi.object({
 
   DESK_TICKET_DEBUG: Joi.boolean().default(false),
   ENABLE_EMAIL_CLASSIFICATION_WORKER: Joi.boolean().default(false),
+  // One switch for the whole feature, read by both processes: the API gates
+  // its producer on it, the worker gates its drain loop on it. A separate
+  // worker flag only bought states that are a no-op or actively bad (enqueuing
+  // with nothing draining), and idling the worker alone is a replicas:0
+  // decision, not a config one. Toggling loses nothing — watermarks persist,
+  // so the next enqueue replays everything above them.
   ENABLE_RADAR_EXECUTION: Joi.boolean().default(false),
   RADAR_PARSER_MODEL: Joi.string().default('open-fast-sa'),
   RADAR_PARSER_TIMEOUT_MS: Joi.number().integer().min(1000).max(300_000).default(30_000),
   RADAR_EXECUTION_LITELLM_API_KEY: Joi.string().allow('').default(''),
+  // Kept as a knob deliberately: this is the hard ceiling on how much text can
+  // enter one parse, so it is the emergency brake on parser spend.
   RADAR_MAX_WINDOW_MESSAGES: Joi.number().integer().min(1).max(200).default(60),
   RADAR_MAX_OPEN_ITEMS: Joi.number().integer().min(1).max(500).default(50),
   RADAR_CONTEXT_MESSAGES: Joi.number().integer().min(0).max(100).default(20),
