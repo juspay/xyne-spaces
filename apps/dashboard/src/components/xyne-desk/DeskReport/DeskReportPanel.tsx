@@ -15,7 +15,9 @@ import { inlineAuthenticatedImages } from '../../../utils/inlineAuthenticatedIma
 const withBaseHref = (html: string, href: string): string => {
   if (/<base\s/i.test(html)) return html;
   const tag = `<base href="${href.replace(/"/g, '&quot;')}">`;
-  return /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, m => `${m}${tag}`) : `${tag}${html}`;
+  return /<head[^>]*>/i.test(html)
+    ? html.replace(/<head[^>]*>/i, m => `${m}${tag}`)
+    : `${tag}${html}`;
 };
 
 export interface DeskReportPanelProps {

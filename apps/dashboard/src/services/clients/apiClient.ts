@@ -49,8 +49,9 @@ const refreshSessionOnce = (): Promise<RefreshOutcome> =>
   (refreshInFlight ??= axios
     .get(`${BASE_URL}/auth/refresh-session`, { withCredentials: true })
     .then((): RefreshOutcome => 'ok')
-    .catch((e): RefreshOutcome =>
-      axios.isAxiosError(e) && e.response?.status === 401 ? 'dead' : 'transient',
+    .catch(
+      (e): RefreshOutcome =>
+        axios.isAxiosError(e) && e.response?.status === 401 ? 'dead' : 'transient',
     )
     .finally((): void => {
       refreshInFlight = null;

@@ -30,8 +30,7 @@ const blobToDataUri = (blob: Blob): Promise<string> =>
   new Promise((resolve, reject): void => {
     const reader = new FileReader();
     reader.onload = (): void => resolve(reader.result as string);
-    reader.onerror = (): void =>
-      reject(new Error(reader.error?.message ?? 'FileReader failed'));
+    reader.onerror = (): void => reject(new Error(reader.error?.message ?? 'FileReader failed'));
     reader.readAsDataURL(blob);
   });
 

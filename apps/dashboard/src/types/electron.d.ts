@@ -73,9 +73,7 @@ export interface ElectronAPI {
     }) => void,
   ) => () => void;
   onAuthSuccess: (callback: () => void) => void;
-  onTokenExpired: (
-    callback: (payload?: { url?: string; resourceType?: string }) => void,
-  ) => void;
+  onTokenExpired: (callback: (payload?: { url?: string; resourceType?: string }) => void) => void;
   showBrowserView: (config: {
     url: string;
     userAgent: string;
