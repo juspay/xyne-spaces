@@ -2571,6 +2571,7 @@ model Activity {
   channelId       String?  // Channel where the activity occurred (optional, not present for ticket activities)
   pullRequestId   String?  // FK to pull_requests.id (optional, present only for PR-related ticket activities)
   canvasId        String?  // FK to canvas.id for canvas mention activities (no constraint)
+  savedViewId     String?  // FK to saved_user_configurations.id for view-share activities (no constraint)
   trackId         String?  // FK to sdlc_tracks.id (no constraint)
   blockId         String?  // Block ID within the canvas for canvas mention activities
   actorId         String  // User who performed the action (no FK constraint)
@@ -2606,6 +2607,7 @@ model Activity {
   @@index([reactionId]) // Fast lookup by reaction
   @@index([callId]) // Fast lookup by call
   @@index([ticketId]) // Fast lookup by ticket
+  @@index([savedViewId]) // Fast lookup by saved view
   @@index([channelId]) // Fast lookup by channel
   @@index([conversationId, userId]) // Fast lookup for reply batching
   @@index([actorId])

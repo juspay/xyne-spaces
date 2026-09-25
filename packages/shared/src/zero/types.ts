@@ -665,6 +665,7 @@ export enum NotificationType {
   EMAIL_FETCH_FAILED = "EMAIL_FETCH_FAILED",
   EMAIL_BACKFILL_REQUIRED = "EMAIL_BACKFILL_REQUIRED",
   CANVAS_SHARED = "CANVAS_SHARED",
+  VIEW_SHARED = "VIEW_SHARED",
   RECORDING_SHARED = "RECORDING_SHARED",
   RECORDING_SUMMARY_READY = "RECORDING_SUMMARY_READY",
   SUMMARY_TEMPLATE_SHARED = "SUMMARY_TEMPLATE_SHARED",
@@ -1019,10 +1020,12 @@ export enum SavedConfigEntityName {
   FORM_ENTITY_VALUE = 'FORM_ENTITY_VALUE',
 }
 
-// Who a saved-view share grant targets. USER today; USER_GROUP / CHANNEL slots reserved.
+// Who a saved-view share grant targets. USER shares with an individual; CHANNEL shares
+// with every current & future member of a channel. USER_GROUP slot reserved.
 // @ts-ignore TS1294
 export enum ViewAccessEntityType {
   USER = 'USER',
+  CHANNEL = 'CHANNEL',
 }
 
 // @ts-ignore TS1294
