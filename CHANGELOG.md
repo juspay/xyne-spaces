@@ -1,3 +1,18 @@
+## [1.401.0](https://github.com/juspay/xyne-spaces/compare/v1.400.0...v1.401.0) (2026-09-25)
+
+
+### Features
+
+* ADDED DRAG AND DROP FUNCTIONALITY FOR THE CHANNEL CANVAS ([#2316](https://github.com/juspay/xyne-spaces/issues/2316)) ([ef3cef7](https://github.com/juspay/xyne-spaces/commit/ef3cef7a784bbd260fe83a1f68c8eabd7da9e6fd))
+* SDLC tools and context for every agent in a hub ([#2292](https://github.com/juspay/xyne-spaces/issues/2292)) ([8a27cf1](https://github.com/juspay/xyne-spaces/commit/8a27cf1eb06f6ed0bae09babb3b2a298747da801))
+
+
+### Bug Fixes
+
+* added custom fields in table view ([#2310](https://github.com/juspay/xyne-spaces/issues/2310)) ([ca63528](https://github.com/juspay/xyne-spaces/commit/ca6352863f285f531f48db14a0fd249a079fad77))
+* serve MCP tool lists from a shared cache instead of spawning a server per user ([#2318](https://github.com/juspay/xyne-spaces/issues/2318)) ([70c9104](https://github.com/juspay/xyne-spaces/commit/70c9104b37734782b6ecdea8690176ef4d986db4))
+* widen Meet-with-people calendar read to workspace scope with safe projection ([#2311](https://github.com/juspay/xyne-spaces/issues/2311)) ([c690194](https://github.com/juspay/xyne-spaces/commit/c690194b17c55dad76e8d5263a1af970d90c5cc9))
+
 ## [1.400.0](https://github.com/juspay/xyne-spaces/compare/v1.399.2...v1.400.0) (2026-09-25)
 
 
