@@ -810,7 +810,7 @@ async function sendDigitalTwinApprovalDm(
   // types — the earlier USER_MENTIONED gate already rejected runs where we
   // couldn't resolve the workspaceId, so this should always have a real value.
   const dmResult = (await spacesAppFetch("/channel/openDm", {
-    targetUserId: ctx.mentionedUserId,
+    targetUserId: ctx.mentionedSpacesUserId ?? ctx.mentionedUserId,
     workspaceId: ctx.workspaceId ?? "",
   }, token)) as { channelId: string };
 
@@ -819,9 +819,12 @@ async function sendDigitalTwinApprovalDm(
     ...(ctx.sourceMessageId ? { sourceMessageId: ctx.sourceMessageId } : {}),
     targetChannelId: ctx.channelId,
     targetConversationId: ctx.conversationId,
-    mentionedUserId: ctx.mentionedUserId,
+    // Flow data bounces back into flow-action → executeTwinApprovalDelivery
+    // (Spaces-side reactAsUser/getOrCreateDm/postAsUser) — it must carry the
+    // RAW workspace-scoped ids, not the canonical Claw keys.
+    mentionedUserId: ctx.mentionedSpacesUserId ?? ctx.mentionedUserId,
     workspaceId: ctx.workspaceId ?? "",
-    senderId: ctx.senderId,
+    senderId: ctx.senderSpacesUserId ?? ctx.senderId,
     senderName: ctx.senderName,
     channelName: ctx.channelName,
     task: ctx.task,
@@ -922,9 +925,12 @@ async function sendTwinReplyDraft(
   }
 
   const dest = effectiveDelivery.destination;
+  // Spaces owns the draft (Redis, owner-partitioned by RAW Spaces user id) and
+  // forwards it back to twin-draft.ts, whose owner check + postAsUser also run
+  // against Spaces ids — so every user id in this payload is the raw form.
   const draft = {
     conversationId: ctx.conversationId,
-    ownerUserId: ctx.mentionedUserId,
+    ownerUserId: ctx.mentionedSpacesUserId ?? ctx.mentionedUserId,
     channelId: ctx.channelId,
     action: effectiveDelivery.action,
     ...(effectiveDelivery.message ? { message: effectiveDelivery.message } : {}),
@@ -944,9 +950,9 @@ async function sendTwinReplyDraft(
     ...(dest?.kind === "dm_sender" && ctx.senderName ? { destinationUserName: ctx.senderName } : {}),
     ...(effectiveDelivery.destinationReason ? { destinationReason: effectiveDelivery.destinationReason } : {}),
     ...(ctx.sourceMessageId ? { sourceMessageId: ctx.sourceMessageId } : {}),
-    mentionedUserId: ctx.mentionedUserId,
+    mentionedUserId: ctx.mentionedSpacesUserId ?? ctx.mentionedUserId,
     workspaceId: ctx.workspaceId ?? "",
-    ...(ctx.senderId ? { senderId: ctx.senderId } : {}),
+    ...(ctx.senderId ? { senderId: ctx.senderSpacesUserId ?? ctx.senderId } : {}),
     ...(ctx.senderName ? { senderName: ctx.senderName } : {}),
     ...(ctx.channelName ? { channelName: ctx.channelName } : {}),
     ...(ctx.task ? { incomingTask: ctx.task } : {}),
@@ -2007,6 +2013,12 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     // progressMessageId is assigned post-placeholder below; everything else is final here.
     const sessionContext: SessionContext = {
       mentionedUserId: eventType === "USER_MENTIONED" ? targetUserId : agent.spacesAppUserId,
+      // Spaces-facing payloads (openDm / twin draft / post-as-user) need the RAW
+      // workspace-scoped ids — see SessionContext.mentionedSpacesUserId.
+      ...(eventType === "USER_MENTIONED" && allMentionedIds[0]
+        ? { mentionedSpacesUserId: allMentionedIds[0] }
+        : {}),
+      senderSpacesUserId: spacesSenderId,
       targetUserId,
       senderId: clawSenderId,
       senderName: payload.senderName ?? spacesSenderId,
@@ -5901,7 +5913,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
         // with a single-field Zod error, the catch above swallows it, and
         // the reply never posts.
         const dmResult = (await spacesAppFetch("/channel/openDm", {
-          targetUserId: ctx.mentionedUserId,
+          targetUserId: ctx.mentionedSpacesUserId ?? ctx.mentionedUserId,
           workspaceId: ctx.workspaceId ?? "",
         }, token)) as { channelId: string };
 
@@ -5910,9 +5922,10 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           ...(ctx.sourceMessageId ? { sourceMessageId: ctx.sourceMessageId } : {}),
           targetChannelId: ctx.channelId,
           targetConversationId: ctx.conversationId,
-          mentionedUserId: ctx.mentionedUserId,
+          // Same id-domain rule as sendDigitalTwinApprovalDm (Spaces-facing flow data).
+          mentionedUserId: ctx.mentionedSpacesUserId ?? ctx.mentionedUserId,
           workspaceId: ctx.workspaceId ?? "",
-          senderId: ctx.senderId,
+          senderId: ctx.senderSpacesUserId ?? ctx.senderId,
           senderName: ctx.senderName,
           channelName: ctx.channelName,
           task: ctx.task,
