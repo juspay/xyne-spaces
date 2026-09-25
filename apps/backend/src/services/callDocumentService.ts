@@ -9,7 +9,14 @@ import { DatabaseClient } from '@/database/client';
 import { withWorkspaceScope } from '@/database/tenant/context';
 import { repositories } from '@/database/repositories';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
-import { CallOrigin, DEFAULT_SUMMARY_FIELDS, MessageType, CanvasRole, CanvasVisibility } from '@xyne/shared';
+import {
+  CallOrigin,
+  DEFAULT_SUMMARY_FIELDS,
+  MessageType,
+  CanvasRole,
+  CanvasVisibility,
+  SUMMARY_MAX_INPUT_CHARS,
+} from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { formatToISTLocaleString } from '@/utils/dateUtils';
 import type { Prisma, SummaryTemplate } from '@prisma/client';
@@ -95,8 +102,8 @@ function sanitizeInput(input: string | null): string {
   // Remove null bytes and other control characters except newlines and tabs
   const sanitized = input.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
 
-  // Limit length to prevent excessive token usage (adjust as needed)
-  const maxLength = 100000; // ~100K chars
+  // Limit length to prevent excessive token usage
+  const maxLength = SUMMARY_MAX_INPUT_CHARS;
   return sanitized.length > maxLength ? sanitized.substring(0, maxLength) : sanitized;
 }
 
@@ -145,7 +152,7 @@ const CITATION_TOKEN_RE = /\[clf-(\d+)\]/g;
 const MAX_CITATION_SNIPPET = 300;
 const INITIAL_DETAILED_SUMMARY_CANVAS_VERSION = 1;
 
-interface CitationSegment {
+export interface CitationSegment {
   n: number;
   timestamp: string; // "MM:SS" or "HH:MM:SS"
   speaker: string;
@@ -1151,6 +1158,53 @@ export class CallDocumentService {
       return null;
     }
 
+    const rendered = await this.renderRecordingSummary(transcript, template, callId, {
+      onDelta,
+      citationSegments,
+      modelType,
+    });
+    return rendered ? { ...rendered, template } : null;
+  }
+
+  /**
+   * Summarize a pasted transcript with an unsaved draft template, through the same prompt
+   * and post-processing as a real recording. Nothing is persisted.
+   */
+  async previewRecordingSummary(
+    transcript: string,
+    workspaceId: string,
+    userId: string,
+    draft: Pick<SummaryTemplate, 'name' | 'autoTriggerPrompt' | 'sections' | 'systemPrompt'>,
+  ): Promise<{ summary: string; segments: CitationSegment[] } | null> {
+    const requestId = `summary-template-output-test:${workspaceId}:${userId}`;
+    const systemPrompt = await summaryTemplateService.resolveDraftSystemPrompt(draft, requestId);
+    if (!systemPrompt) return null;
+
+    const { numbered, segments } = numberTranscriptSegments(transcript);
+    const rendered = await this.renderRecordingSummary(
+      numbered,
+      { ...draft, systemPrompt },
+      requestId,
+      {
+        citationSegments: new Map(segments.map(segment => [segment.n, segment])),
+        credentialUserId: userId,
+      },
+    );
+    return rendered ? { summary: rendered.summary, segments } : null;
+  }
+
+  private async renderRecordingSummary(
+    transcript: string,
+    template: Pick<SummaryTemplate, 'autoTriggerPrompt' | 'sections' | 'systemPrompt'>,
+    callId: string,
+    options: {
+      onDelta?: (accumulatedContent: string) => void | Promise<void>;
+      citationSegments?: CitationContext['segments'];
+      modelType?: SummaryModelType;
+      credentialUserId?: string;
+    },
+  ): Promise<{ summary: string; markedItems: RecordingSummaryMarkedItem[] } | null> {
+    const { onDelta, citationSegments, modelType, credentialUserId } = options;
     // A Scribe admin may have switched off Decisions / Action Items on this template;
     // the prompt must then stop asking for those sections and their annotations.
     const mandatorySections = getMandatorySummarySectionState(template.sections);
@@ -1170,6 +1224,7 @@ export class CallDocumentService {
           )
         : undefined,
       modelType,
+      credentialUserId,
     );
 
     if (!rawSummary) return null;
@@ -1184,7 +1239,7 @@ export class CallDocumentService {
     );
     const summary = stripRecordingSummaryMarkedItemAnnotations(normalizedSummary);
 
-    return { summary, template, markedItems };
+    return { summary, markedItems };
   }
 
   /**
@@ -1200,6 +1255,7 @@ export class CallDocumentService {
     defaultSummaryFields = DEFAULT_SUMMARY_FIELDS,
     onDelta?: (accumulatedContent: string) => void | Promise<void>,
     modelType?: SummaryModelType,
+    credentialUserId?: string,
   ): Promise<string | null> {
     // Use people who actually spoke in the transcript. A channel roster can contain
     // members who never joined or contributed to this particular call.
@@ -1269,6 +1325,7 @@ MANDATORY OUTPUT CONTRACT:
       userPrompt: buildPrompt(),
       operation: 'detailed_summary_generation',
       callId,
+      ...(credentialUserId ? { userId: credentialUserId } : {}),
       ...(effectiveSystemPrompt ? { systemPrompt: effectiveSystemPrompt } : {}),
       ...(modelType ? { modelType } : {}),
       onDelta,

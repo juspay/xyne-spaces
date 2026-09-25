@@ -1,3 +1,34 @@
+## [1.395.1](https://github.com/juspay/xyne-spaces/compare/v1.395.0...v1.395.1) (2026-09-24)
+
+## [1.395.0](https://github.com/juspay/xyne-spaces/compare/v1.394.0...v1.395.0) (2026-09-24)
+
+
+### Features
+
+* adding resolvedat checkbox and resolved at column  ([#2232](https://github.com/juspay/xyne-spaces/issues/2232)) ([051efc1](https://github.com/juspay/xyne-spaces/commit/051efc1ba7699dce3080a5d82765a3dfec1069df))
+* api first zero next ([#2289](https://github.com/juspay/xyne-spaces/issues/2289)) ([5ce78a3](https://github.com/juspay/xyne-spaces/commit/5ce78a315828006caa73dd6b3887f4093ec82f47))
+
+## [1.394.0](https://github.com/juspay/xyne-spaces/compare/v1.393.0...v1.394.0) (2026-09-24)
+
+
+### Features
+
+* classify cmd+K queries with Jev and answer them inline ([#2204](https://github.com/juspay/xyne-spaces/issues/2204)) ([5a41597](https://github.com/juspay/xyne-spaces/commit/5a41597ed01dc272457186a7e3db7aa665d4e4e4))
+
+## [1.393.0](https://github.com/juspay/xyne-spaces/compare/v1.392.0...v1.393.0) (2026-09-24)
+
+
+### Features
+
+* xyne-claw active tool cap and direct subagent tools ([#2286](https://github.com/juspay/xyne-spaces/issues/2286)) ([5c55e8d](https://github.com/juspay/xyne-spaces/commit/5c55e8d24d7faee2539fe2ac57a03a195e306dc8))
+
+## [1.392.0](https://github.com/juspay/xyne-spaces/compare/v1.391.2...v1.392.0) (2026-09-24)
+
+
+### Features
+
+* Update test template output ([#2279](https://github.com/juspay/xyne-spaces/issues/2279)) ([70d279f](https://github.com/juspay/xyne-spaces/commit/70d279f75dd029d0f40e9c5fecda31c07f93cd03))
+
 ## [1.391.2](https://github.com/juspay/xyne-spaces/compare/v1.391.1...v1.391.2) (2026-09-24)
 
 
