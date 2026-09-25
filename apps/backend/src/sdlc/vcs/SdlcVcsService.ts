@@ -2,7 +2,6 @@ import { Prisma, type PrismaClient } from '@prisma/client';
 import {
   ACLAuditEventType,
   ACLAuditTargetType,
-  SDLC_AGENT_SLUG,
   SDLC_GITHUB_HOST,
   sdlcTokenSchemaFor,
   type BootstrapSdlcRuntimeCredentialInput,
@@ -15,7 +14,7 @@ import { DatabaseClient } from '@/database/client';
 import { AppError } from '@/middleware/errorHandler';
 import { logger } from '@/utils/logger';
 import type { SdlcActor } from '../types';
-import { isSafeSdlcGitRef, requireSdlcBaseBranch } from '../sdlcRepositoryContext';
+import { requireSdlcBaseBranch } from '../sdlcRepositoryContext';
 import { GitHubVcsAdapter } from './GitHubVcsAdapter';
 import { BitbucketServerVcsAdapter } from './BitbucketServerVcsAdapter';
 import { SdlcVcsCredentialStore, type StoredSdlcVcsCredential } from './SdlcVcsCredentialStore';
@@ -37,7 +36,6 @@ import type {
   VcsProviderAdapter,
 } from './types';
 import { VcsProviderError } from './types';
-import { sdlcGrantCoversRepo, verifySdlcInteractiveGrant } from './sdlcInteractiveGrant';
 import { findSdlcMembershipForActor } from '../sdlcChannelMembership';
 import { requireSdlcProjectAccess } from '../sdlcProjectAccess';
 
@@ -68,10 +66,6 @@ interface RepositoryAccess {
 export interface SandboxCredentialBootstrap {
   envelope: SandboxCredentialEnvelope | null;
   repository: { name: string; cloneUrl: string; baseBranch: string };
-}
-
-function grantSecret(): string {
-  return process.env['INTERNAL_S2S_KEY'] || process.env['XYNE_CLAW_S2S_KEY'] || '';
 }
 
 function isUsable(credential: StoredSdlcVcsCredential | null): credential is StoredSdlcVcsCredential & {
@@ -594,13 +588,12 @@ export class SdlcVcsService implements SdlcVcs {
     }
   }
 
-  // The grant branch serves only the claw deployed before Actor-based access.
   async bootstrapSandboxCredential(
     binding: BootstrapSdlcRuntimeCredentialInput
   ): Promise<SandboxCredentialBootstrap> {
     const repo = await this.prisma.repo.findUnique({ where: { id: binding.repoId } });
     if (!repo?.workspaceId) throw new AppError('SDLC repository not found', 404);
-    const { actor, legacy } = this.runActor(binding, repo);
+    const actor = this.runActor(binding, repo);
     await this.requireRepositoryMember(actor, repo.id);
     let sandboxPublicKey: ReturnType<typeof parseSandboxPublicKey>;
     try {
@@ -640,13 +633,6 @@ export class SdlcVcsService implements SdlcVcs {
         sandboxId: binding.sandboxId,
         credentialRevision: credential.revision,
         expiresAt: new Date(Date.now() + 15 * 60_000).toISOString(),
-        ...(legacy
-          ? {
-              agentSlug: SDLC_AGENT_SLUG,
-              operation: 'INTERACTIVE',
-              conversationId: binding.conversationId!,
-            }
-          : {}),
       },
       sandboxPublicKey
     );
@@ -656,21 +642,13 @@ export class SdlcVcsService implements SdlcVcs {
   async createPullRequest(input: CreateSdlcPullRequestInput) {
     const repo = await this.prisma.repo.findUnique({ where: { id: input.repoId } });
     if (!repo?.workspaceId) throw new AppError('SDLC repository not found', 404);
-    // Single-repo claim only: a grant's repoIds must never authorize a write.
-    const { actor } = this.runActor(input, repo, { singleRepository: true });
+    const actor = this.runActor(input, repo);
     await this.requireRepositoryMember(actor, repo.id);
     await this.requireCapabilities(actor, repo.id, ['READ_REPOSITORY', 'CREATE_PULL_REQUEST']);
-    const expectedBase = requireSdlcBaseBranch(repo.baseBranch);
-    if (!expectedBase || input.base !== expectedBase) {
-      throw new AppError('Pull request base must match the configured base branch', 409);
-    }
-    if (!isSafeSdlcGitRef(input.head) || input.head === input.base) {
-      throw new AppError('Refusing to create a pull request from the default branch', 409);
-    }
+    // Any head/base pair: the provider rejects missing branches and head === base itself.
     const { adapter, repository, token } = await this.repositoryAccess(this.prisma, repo);
     if (!token) throw new AppError('Repository credential is not connected', 409);
     try {
-      await adapter.verifyRemoteCommit(token, repository, input.head, input.commitHash);
       const result = await adapter.createPullRequest(token, {
         owner: repository.owner,
         repository: repository.name,
@@ -728,30 +706,6 @@ export class SdlcVcsService implements SdlcVcs {
         );
       }
       throw this.toAppError(mapped);
-    }
-  }
-
-  async verifySourcePaths(repoId: string, commitHash: string, paths: string[]): Promise<void> {
-    if (paths.length === 0) return;
-    const { adapter, repository, token } = await this.repositoryAccessById(repoId);
-    try {
-      await adapter.verifyPathsAtCommit(token, repository, commitHash, paths);
-    } catch (error) {
-      throw this.toAppError(this.providerError(error));
-    }
-  }
-
-  async verifySourceRanges(
-    repoId: string,
-    commitHash: string,
-    references: import('./types').SourceLineRange[]
-  ): Promise<void> {
-    if (references.length === 0) return;
-    const { adapter, repository, token } = await this.repositoryAccessById(repoId);
-    try {
-      await adapter.verifySourceRangesAtCommit(token, repository, commitHash, references);
-    } catch (error) {
-      throw this.toAppError(this.providerError(error));
     }
   }
 
@@ -827,40 +781,13 @@ export class SdlcVcsService implements SdlcVcs {
   }
 
   private runActor(
-    input: {
-      workspaceId?: string | undefined;
-      actorUserId?: string | undefined;
-      interactiveGrant?: string | undefined;
-      conversationId?: string | undefined;
-      agentSlug?: string | undefined;
-    },
-    repo: { id: string; workspaceId: string | null },
-    options: { singleRepository?: boolean } = {}
-  ): { actor: SdlcActor; legacy: boolean } {
-    if (input.workspaceId && input.actorUserId) {
-      if (input.workspaceId !== repo.workspaceId) {
-        throw new AppError('SDLC repository not found', 404);
-      }
-      return { actor: { userId: input.actorUserId, workspaceId: input.workspaceId }, legacy: false };
+    input: { workspaceId: string; actorUserId: string },
+    repo: { id: string; workspaceId: string | null }
+  ): SdlcActor {
+    if (input.workspaceId !== repo.workspaceId) {
+      throw new AppError('SDLC repository not found', 404);
     }
-    let grant;
-    try {
-      grant = verifySdlcInteractiveGrant(input.interactiveGrant ?? '', grantSecret());
-    } catch {
-      throw new AppError('Invalid or expired SDLC interactive grant', 403);
-    }
-    const covers = options.singleRepository
-      ? grant.repoId === repo.id
-      : sdlcGrantCoversRepo(grant, repo.id);
-    if (
-      (input.agentSlug !== undefined && input.agentSlug !== SDLC_AGENT_SLUG) ||
-      !covers ||
-      grant.workspaceId !== repo.workspaceId ||
-      grant.conversationId !== input.conversationId
-    ) {
-      throw new AppError('SDLC interactive binding mismatch', 403);
-    }
-    return { actor: { userId: grant.actorUserId, workspaceId: grant.workspaceId }, legacy: true };
+    return { userId: input.actorUserId, workspaceId: input.workspaceId };
   }
 
   private refreshAfterCredentialInvalidation(

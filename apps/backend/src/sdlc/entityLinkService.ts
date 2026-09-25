@@ -77,10 +77,12 @@ export async function validateOwnerInChannel(
 
 export async function resolveInheritedOwner(
   db: Db,
-  conversationId: string
+  conversationId: string,
+  channelId?: string
 ): Promise<EntityLinkOwner | null> {
   const link = await db.sdlcEntityLink.findFirst({
     where: {
+      ...(channelId ? { channelId } : {}),
       targetType: 'CONVERSATION',
       targetId: conversationId,
       relationType: 'DISCUSSION',

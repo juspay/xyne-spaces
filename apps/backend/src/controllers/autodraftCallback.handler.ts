@@ -1,8 +1,7 @@
 import type { Request, Response } from 'express';
 import { logger } from '@/utils/logger';
-import { emailService } from '@/services/emailService';
 import { db } from '@/database/client';
-import { runAsServiceActor } from '@/database/tenant/context';
+import { clearAutoDraftGeneratingFromCallback, persistAutoDraftFromCallback } from '@/bypassAcl/emailFetchServices';
 
 export async function handleAutoDraftCallback(
   req: Request<{ conversationId: string; channelId: string }>,
@@ -46,9 +45,6 @@ export async function handleAutoDraftCallback(
       });
       throw new Error(`AutoDraft callback: channel ${channelId} not found or has no workspaceId`);
     }
-    const runScoped = <T>(fn: () => Promise<T>): Promise<T> =>
-      runAsServiceActor('autodraft-callback', channel.workspaceId, fn);
-
     if (status !== 'completed' || !result || !result.trim()) {
       logger.warn('[AutoDraft] callback skip: non-success or empty result', {
         mode: 'autodraft',
@@ -58,19 +54,17 @@ export async function handleAutoDraftCallback(
         status,
         error,
       });
-      await runScoped(() => emailService.clearAutoDraftGenerating(conversationId));
+      await clearAutoDraftGeneratingFromCallback(channel.workspaceId, conversationId);
       res.json({ success: true, persisted: false });
       return;
     }
 
-    await runScoped(() =>
-      emailService.persistAutoDraft({
-        conversationId,
-        channelId,
-        summary: result,
-        sessionId,
-      }),
-    );
+    await persistAutoDraftFromCallback(channel.workspaceId, {
+      conversationId,
+      channelId,
+      summary: result,
+      sessionId,
+    });
 
     res.json({ success: true, persisted: true });
   } catch (err) {
