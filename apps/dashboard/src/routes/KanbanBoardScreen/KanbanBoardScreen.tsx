@@ -2366,24 +2366,22 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     if (kanbanSourceTickets && fevFieldIds.length > 0) {
       (kanbanSourceTickets as KanbanLocalTicket[]).forEach(ticket => {
         const ticketFEVs = ticket.formEntityValues;
-        if (ticketFEVs && ticketFEVs.length > 0) {
-          // Filter to only include FEVs for the fieldIds we're interested in
-          if (ticketFEVs.length > 0) {
-            valuesMap.set(ticket.id, ticketFEVs);
+        // An array — empty included — means the values were loaded with the ticket;
+        // `undefined` means they weren't (a column's page can arrive from Vespa, whose rows
+        // carry none). Recording only the loaded ones keeps this map meaning "values are
+        // known", which is what lets groupTicketsByFormField tell empty from unloaded.
+        if (!ticketFEVs) return;
+        valuesMap.set(ticket.id, ticketFEVs);
 
-            // Build field metadata map from the related formField data
-            ticketFEVs.forEach(fev => {
-              if (fev.formField && !fieldsMap.has(fev.fieldId)) {
-                fieldsMap.set(fev.fieldId, {
-                  fieldType: fev.formField.fieldType,
-                  fieldEnum: parseFieldOptions(
-                    fev.formField.fieldOptions ?? fev.formField.fieldEnum,
-                  ),
-                });
-              }
+        // Build field metadata map from the related formField data
+        ticketFEVs.forEach(fev => {
+          if (fev.formField && !fieldsMap.has(fev.fieldId)) {
+            fieldsMap.set(fev.fieldId, {
+              fieldType: fev.formField.fieldType,
+              fieldEnum: parseFieldOptions(fev.formField.fieldOptions ?? fev.formField.fieldEnum),
             });
           }
-        }
+        });
       });
     }
 
@@ -3905,8 +3903,12 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         ...(isFormFieldGroup(groupBy) && hasGroupValue
           ? {
               dynamicFields: {
+                // Only MULTI_SELECT and USER take an array; a scalar field rejects one.
                 [groupBy.fieldName]:
-                  groupBy.fieldType === FormFieldType.SINGLE_SELECT ? group.key : [group.key],
+                  groupBy.fieldType === FormFieldType.MULTI_SELECT ||
+                  groupBy.fieldType === FormFieldType.USER
+                    ? [group.key]
+                    : group.key,
               },
             }
           : {}),

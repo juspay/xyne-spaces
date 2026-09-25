@@ -46,15 +46,19 @@ export const matchesDynamicFieldValue = (
       } else if (typeof actualFieldValue === 'number' || typeof actualFieldValue === 'boolean') {
         ticketValue = String(actualFieldValue);
       }
-      ticketValue = ticketValue.toLowerCase();
+      // A lone value is typed free text, so it stays a substring match; several are exact
+      // picks matched as OR. Same split as kanbanCountsService.matchesDynamicFilter, so a
+      // filter counts the same tickets it shows.
+      if (filterValue.length > 1) return filterValue.includes(ticketValue);
       const searchTerm = (filterValue[0] || '').toLowerCase();
-      return ticketValue.includes(searchTerm);
+      return ticketValue.toLowerCase().includes(searchTerm);
     }
     if (fieldType === FormFieldType.NUMBER) {
       const ticketValue =
         typeof actualFieldValue === 'number' || typeof actualFieldValue === 'string'
           ? String(actualFieldValue)
           : '';
+      if (filterValue.length > 1) return filterValue.some(value => String(value) === ticketValue);
       return ticketValue === String(filterValue[0] || '');
     }
     if (fieldType === FormFieldType.USER) {
