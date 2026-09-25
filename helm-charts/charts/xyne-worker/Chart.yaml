@@ -2,8 +2,8 @@ apiVersion: v2
 name: xyne-worker
 description: Xyne Spaces background worker (Node.js) - the backend codebase started with its worker entrypoint; install once per worker role
 type: application
-version: 0.1.0-app.1.393.0
-appVersion: "1.393.0"
+version: 0.1.0-app.1.395.1
+appVersion: "1.395.1"
 keywords:
   - xyne
   - worker

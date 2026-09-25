@@ -2,7 +2,7 @@ apiVersion: v2
 name: xyne-ysweet
 description: y-sweet collaboration server (Yjs document sync) used by Xyne Spaces for collaborative editing
 type: application
-version: 0.1.0-app.1.393.0
+version: 0.1.0-app.1.395.1
 appVersion: "sha-221d5af"
 keywords:
   - xyne
