@@ -7,7 +7,7 @@ import { automationQueue } from '../queue/automation.queue';
 import { storedSecretMatches } from '../services/webhook-secret.service';
 import { assertMatchesSchema } from '../engine/declared-schema';
 import { isSensitiveHeader } from '../engine/webhook-step-encryption';
-import { AutomationStatus, AutomationRunStatus } from '../types/status';
+import { AutomationStatus } from '../types/status';
 import {
   AUTOMATION_WORKFLOW_TYPE,
   parseAutomationConfig,
@@ -97,28 +97,11 @@ router.post(
     // Unauthenticated webhook — no HTTP session to derive the tenant from, so open
     // a tenant scope explicitly off the workflow's workspaceId. This stamps
     // workspaceId onto the execution rows (and the downstream job's step writes).
-    const execution = await createAutomationExecutionForWebhook(workflow.workspaceId,
-      () =>
-        db.$transaction(async tx => {
-          const created = await tx.workflowExecution.create({
-            data: {
-              workflowId: workflow.id,
-              workflowType: AUTOMATION_WORKFLOW_TYPE,
-              status: AutomationRunStatus.PENDING,
-              tag: 'root',
-              workspaceId: workflow.workspaceId,
-            },
-          });
-          await tx.workflowExecutionState.create({
-            data: {
-              workflowExecutionId: created.id,
-              context: JSON.stringify(initialContext),
-              workspaceId: workflow.workspaceId,
-            },
-          });
-          return created;
-        }),
-    );
+    const execution = await createAutomationExecutionForWebhook({
+      workspaceId: workflow.workspaceId,
+      workflowId: workflow.id,
+      initialContext,
+    });
 
     await automationQueue.enqueueRun(
       { executionId: execution.id },

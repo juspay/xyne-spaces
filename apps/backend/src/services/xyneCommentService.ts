@@ -134,15 +134,9 @@ export class XyneCommentService {
       where: { id: workflowInfo.ticketId },
       select: { workspaceId: true },
     });
-    const continueWork = (): Promise<void> => this.continueWorkflowWithPRComments(
-      workflowInfo.ticketId,
-      filteredComments,
-      prId,
-      prUrl
-    );
     await (ticketForScope?.workspaceId
-      ? continueXyneCommentWorkflow(ticketForScope.workspaceId, continueWork)
-      : continueWork());
+      ? continueXyneCommentWorkflow(ticketForScope.workspaceId, this, workflowInfo.ticketId, filteredComments, prId, prUrl)
+      : this.continueWorkflowWithPRComments(workflowInfo.ticketId, filteredComments, prId, prUrl));
 
     logger.info(`[Xyne-Comment] Triggered workflow continuation with ${filteredComments.length} PR comments`, {
       version: '1.0',
@@ -249,7 +243,7 @@ export class XyneCommentService {
   /**
    * Continue workflow execution with PR comments
    */
-  private async continueWorkflowWithPRComments(
+  async continueWorkflowWithPRComments(
     ticketId: string,
     comments: ProcessedComment[],
     prId: number,

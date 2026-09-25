@@ -6,6 +6,7 @@ import {
   trackMembershipRowsFor,
   type LegacySdlcHub,
 } from '@/sdlc/sdlcMembershipRows';
+import type { XyneCommentService } from '@/services/xyneCommentService';
 import { asSystem, asService } from './base';
 import type { SdlcMultirepoBackfillInput, SdlcMultirepoBackfillResult } from '@/sdlc/cleanup/multirepoBackfill';
 import { repositoryHost } from '@/sdlc/vcs/repositoryHost';
@@ -20,13 +21,17 @@ const MULTIREPO_BACKFILL_TAG = '[SdlcMultirepoBackfill]';
  * workflow continuation — no request context, so scope is opened off the ticket's own
  * workspaceId before resuming the workflow with the reviewer's comments.
  */
-export function continueXyneCommentWorkflow<T>(workspaceId: string, fn: () => Promise<T>): Promise<T> {
+export function continueXyneCommentWorkflow(
+  workspaceId: string,
+  service: XyneCommentService,
+  ...args: Parameters<XyneCommentService['continueWorkflowWithPRComments']>
+): Promise<void> {
   return asService(
     ['WorkflowExecution'],
     'xyne PR comment continuation: webhook-triggered, no request context, scope opened off the ticket\'s own workspaceId',
     'xyne-comment',
     workspaceId,
-    fn,
+    () => service.continueWorkflowWithPRComments(...args),
   );
 }
 

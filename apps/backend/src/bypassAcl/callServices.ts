@@ -2,6 +2,9 @@ import type { Prisma } from '@prisma/client';
 import { repositories } from '@/database/repositories';
 import { DatabaseClient } from '@/database/client';
 import type { GoogleCalendarPushState } from '@/database/repositories/callRepository';
+import { db } from '@/database/client';
+import { MessageType } from '@xyne/shared';
+import { pushCallToCalendar } from '@/services/callCalendarPushService';
 import { asSystem, asService, rawQuery } from './base';
 
 /**
@@ -24,32 +27,69 @@ export function findCallForCalendarPush(
  * no request context, actor is the call's creator since the calendar event is pushed on their
  * behalf.
  */
-export function syncCallToGoogleCalendarAsCreator<T>(
-  createdByUserId: string,
-  workspaceId: string,
-  fn: () => Promise<T>,
-): Promise<T> {
+export function syncCallToGoogleCalendarAsCreator(
+  call: NonNullable<Awaited<ReturnType<typeof findCallForCalendarPush>>>,
+): Promise<void> {
   return asService(
     ['Call'],
     'calendar push job: background job has no request context, pushed on behalf of the call\'s creator',
-    createdByUserId,
-    workspaceId,
-    fn,
+    call.createdByUserId,
+    call.workspaceId,
+    () => pushCallToCalendar(call),
   );
 }
 
 /**
  * Relocated from controllers/meetCallbackController.ts. SAM webhook → no HTTP tenant context;
  * opens one from the resolved workspace so the call-summary system message insert gets
- * workspaceId stamped instead of leaking NULL.
+ * workspaceId stamped instead of leaking NULL. The message, the thread's reply count and the
+ * participants' last-reply time are written in one transaction.
  */
-export function insertMeetCallbackSummaryMessage<T>(workspaceId: string, fn: () => Promise<T>): Promise<T> {
+export function insertMeetCallbackSummaryMessage(input: {
+  workspaceId: string;
+  conversationId: string;
+  senderId: string;
+  content: string;
+  now: Date;
+}) {
+  const { workspaceId, conversationId, senderId, content, now } = input;
   return asService(
-    ['Message'],
+    ['Message', 'Conversation', 'ConversationParticipant'],
     'meet callback: SAM webhook has no HTTP tenant context, scope opened from the resolved workspace',
     'meet-callback',
     workspaceId,
-    fn,
+    () => db.$transaction(async (tx) => {
+      const createdMessage = await tx.message.create({
+        data: {
+          conversationId,
+          workspaceId,
+          senderId,
+          content,
+          msgType: MessageType.BOT,
+          metadata: {
+            contentFormat: 'markdown',
+            messageSubtype: 'call_summary',
+          },
+        },
+      });
+
+      await tx.conversation.update({
+        where: { conversationId },
+        data: {
+          replyCount: {
+            increment: 1,
+          },
+          lastActivityAt: now,
+        },
+      });
+
+      await tx.conversationParticipant.updateMany({
+        where: { conversationId },
+        data: { lastReplyAt: now },
+      });
+
+      return createdMessage;
+    }),
   );
 }
 

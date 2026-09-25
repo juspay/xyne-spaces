@@ -5,7 +5,7 @@ import { config } from '@/config/env';
 import { runScopedClawAgent } from '@/services/clawAgentService';
 import { MessageAttachmentRepository } from '@/database/repositories/messageAttachmentRepository';
 import { storageService } from '@/services/storage';
-import { runScheduledDeskReport } from '@/bypassAcl/deskReportServices';
+import { generateScheduledDeskReport } from '@/bypassAcl/deskReportServices';
 import { AttachmentEntityType, AttachmentUploadStatus } from '@xyne/shared';
 
 const DESK_REPORT_ENTITY_TYPE = AttachmentEntityType.DESK_REPORT;
@@ -47,9 +47,7 @@ export class DeskReportGenerationService {
     const results: DeskReportGenerationResult[] = [];
     for (const pref of preferences) {
       try {
-        const result = await runScheduledDeskReport(pref.workspaceId, () =>
-          this.generateReportForChannel(pref),
-        );
+        const result = await generateScheduledDeskReport(this, pref);
         results.push(result);
       } catch (error) {
         logger.error(`[DeskReport] Unexpected error for channel ${pref.channelId}:`, error);

@@ -3,37 +3,22 @@ import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { Prisma } from '@prisma/client';
 import { repositories } from '@/database/repositories';
-import { runIncomingWebhook } from '@/bypassAcl/appServices';
+import {
+  processSlackIncoming,
+  processSentinelIncoming,
+  processAmazonSnsIncoming,
+  processPingdomIncoming,
+  processGcpIncoming,
+} from '@/bypassAcl/appServices';
 import { logger } from '@/utils/logger';
 import { encrypt, decrypt } from '@/services/encryptionService';
-import { findOrCreateConversation } from '../core/conversationUtils';
-import { createTicketWithConversation } from '../core/ticketutils';
-import { SlackBlockKitParser } from '@/integrations/adapters/slack-webhook-tickets/utils/slackBlockKitParser';
-import { resolveSlackMessageParts } from '@/integrations/adapters/slack-webhook-tickets/utils/slackUtils';
-import { MessageType, AppIncomingWebhookAction, AppIncomingWebhookType } from '@xyne/shared';
-import { config } from '@/config/env';
+import {  AppIncomingWebhookAction, AppIncomingWebhookType } from '@xyne/shared';
 import { assertWebhookUrlSafe, safeWebhookFetch, SsrfBlockedError } from '@/utils/ssrfGuard';
 import {
-  buildSentinelRawFallbackMessage,
-  buildSentinelRawFallbackTicketDescription,
-  buildSentinelRawFallbackTicketText,
-  createEmptySentinelNormalizedPayload,
-  formatSentinelOneMessage,
-  formatSentinelOneTicketDescription,
-  formatSentinelOneTicketText,
-  parseExactSentinelPayload,
-} from './sentinelWebhookParser';
-import {
-  buildAmazonSnsFlow,
-  buildSubscriptionConfirmationFlow,
-  buildUnsubscribeConfirmationFlow,
   parseSnsEnvelope,
-  parseSnsMessage,
 } from './amazonSnsWebhookParser';
-import { buildPingdomFlow, normalizePingdom, parsePingdomPayload } from './pingdomWebhookParser';
-import { buildGcpFlow, normalizeGcp, parseGcpPayload } from './gcpWebhookParser';
-import { validateFlowDefinition } from '@xyne/shared';
-import type { FlowDefinition } from '@xyne/shared';
+import {   parsePingdomPayload } from './pingdomWebhookParser';
+import {   parseGcpPayload } from './gcpWebhookParser';
 
 const WEBHOOK_NAME_MAX_LENGTH = 84;
 type IncomingWebhookType = AppIncomingWebhookType;
@@ -45,22 +30,6 @@ const IncomingWebhookParamsSchema = z.object({
   appId: z.string().min(1).trim(),
   secret: z.string().min(1).trim(),
 });
-
-const IncomingWebhookBodySchema = z.object({
-  text: z.string().optional(),
-  blocks: z.array(z.any()).optional(),
-  attachments: z.array(z.any()).optional(),
-  conversationId: z.string().optional(),
-}).refine(
-  (data) =>
-    !!data.text ||
-    (data.blocks && data.blocks.length > 0) ||
-    (data.attachments && data.attachments.length > 0),
-  {
-    message: 'text, blocks, or attachments is required',
-    path: ['text'],
-  },
-);
 
 const CreateWebhookBodySchema = z.object({
   installedAppId: z.string().min(1),
@@ -104,13 +73,16 @@ const ListWebhooksQuerySchema = z.object({
   includeInactive: BooleanQueryParamSchema,
 });
 
+export type WebhookContext = {
+  workspaceId: string;
+  appId: string;
+  installedApp: NonNullable<Awaited<ReturnType<typeof repositories.installedApps.findFirst>>>;
+  channelId: string;
+  webhook: StoredIncomingWebhook;
+  body: unknown;
+};
+
 class IncomingWebhookController {
-  private blockKitParser: SlackBlockKitParser;
-
-  constructor() {
-    this.blockKitParser = new SlackBlockKitParser();
-  }
-
   buildIncomingWebhookUrl = (
     workspaceId: string | undefined,
     installedAppId: string,
@@ -173,14 +145,7 @@ class IncomingWebhookController {
   private async resolveWebhookContext(
     req: Request,
     expectedType: IncomingWebhookType,
-  ): Promise<{
-    workspaceId: string;
-    appId: string;
-    installedApp: NonNullable<Awaited<ReturnType<typeof repositories.installedApps.findFirst>>>;
-    channelId: string;
-    webhook: StoredIncomingWebhook;
-    body: unknown;
-  } | null> {
+  ): Promise<WebhookContext | null> {
     const paramsResult = IncomingWebhookParamsSchema.safeParse(req.params);
     if (!paramsResult.success) {
       logger.warn('[Incoming-Webhook] Invalid incoming webhook params', {
@@ -280,50 +245,7 @@ class IncomingWebhookController {
         body: context.body,
       });
 
-      // Unauthenticated webhook: no req.user, so open an explicit tenant scope from the
-      // validated :workspaceId URL param so the workspaceId stamper fills downstream writes.
-      await runIncomingWebhook(context.workspaceId,
-        async () => {
-          const bodyResult = IncomingWebhookBodySchema.safeParse(context.body);
-          if (!bodyResult.success) {
-            logger.warn('[Incoming-Webhook] Invalid incoming webhook body', {
-              workspaceId: context.workspaceId,
-              appId: context.appId,
-              issues: bodyResult.error.issues,
-            });
-            res.status(400).send('no_text');
-            return;
-          }
-
-          const { text, blocks, attachments, conversationId } = bodyResult.data;
-
-          const resolvedMessageParts = await resolveSlackMessageParts({
-            text,
-            blocks,
-            attachments,
-          }, config.slackBotToken, context.workspaceId);
-
-          const content = this.blockKitParser.parse({
-            text: resolvedMessageParts.text,
-            blocks: resolvedMessageParts.blocks,
-            attachments: resolvedMessageParts.attachments,
-          });
-
-          // Post the message to the channel
-          await findOrCreateConversation(
-            context.channelId,
-            context.installedApp.userId,
-            content,
-            false,
-            conversationId,
-            undefined,
-            MessageType.BOT,
-            {},
-          );
-
-          res.status(200).send('ok');
-        },
-      );
+      await processSlackIncoming(context, res);
     } catch (error) {
       logger.error('[Incoming-Webhook] Error handling incoming webhook', {
         params: req.params,
@@ -341,76 +263,7 @@ class IncomingWebhookController {
         return;
       }
 
-      // Unauthenticated webhook: no req.user, so open an explicit tenant scope from the
-      // validated :workspaceId URL param so the workspaceId stamper fills downstream writes.
-      await runIncomingWebhook(context.workspaceId,
-        async () => {
-          const payload = parseExactSentinelPayload(context.body);
-          const webhookAction =
-            (context.webhook.action as IncomingWebhookAction | undefined) ??
-            AppIncomingWebhookAction.MESSAGE;
-
-          if (webhookAction === AppIncomingWebhookAction.TICKET) {
-            if (!context.webhook.boardId) {
-              logger.warn('[Incoming-Webhook] Ticket webhook missing boardId', {
-                webhookId: context.webhook.id,
-                installedAppId: context.installedApp.id,
-              });
-              res.status(400).send('invalid_payload');
-              return;
-            }
-
-            const board = await repositories.boards.findById(context.webhook.boardId);
-            if (!board) {
-              logger.warn('[Incoming-Webhook] Invalid board configuration for ticket webhook', {
-                webhookId: context.webhook.id,
-                boardId: context.webhook.boardId,
-                channelId: context.channelId,
-              });
-              res.status(400).send('invalid_payload');
-              return;
-            }
-
-            const normalizedPayload = payload ?? createEmptySentinelNormalizedPayload();
-            const result = await createTicketWithConversation({
-              title: payload ? payload.threatName || 'Unknown threat' : 'SentinelOne webhook received',
-              description: payload
-                ? formatSentinelOneTicketDescription(payload)
-                : buildSentinelRawFallbackTicketDescription(context.body),
-              projectId: board.projectId,
-              boardId: board.id,
-              channelId: context.channelId,
-              userId: context.installedApp.userId,
-              text: payload
-                ? formatSentinelOneTicketText(normalizedPayload)
-                : buildSentinelRawFallbackTicketText(),
-            });
-
-            res.status(201).json(result);
-            return;
-          }
-
-          const content = payload
-            ? formatSentinelOneMessage(payload)
-            : buildSentinelRawFallbackMessage(
-                context.body,
-                createEmptySentinelNormalizedPayload(),
-              );
-
-          await findOrCreateConversation(
-            context.channelId,
-            context.installedApp.userId,
-            content,
-            false,
-            undefined,
-            undefined,
-            MessageType.BOT,
-            {},
-          );
-
-          res.status(200).send('ok');
-        },
-      );
+      await processSentinelIncoming(context, res);
     } catch (error) {
       logger.error('[Incoming-Webhook] Error handling SentinelOne webhook', {
         params: req.params,
@@ -419,23 +272,6 @@ class IncomingWebhookController {
       res.status(500).send('rollup_error');
     }
   };
-
-  /**
-   * Serialize a flow into the message-content form the dashboard renders.
-   * Mirrors the encoding used by chatController for app-authored flow messages.
-   */
-  private encodeFlowContent(flow: FlowDefinition): string | null {
-    const result = validateFlowDefinition(flow);
-    if (!result.success) {
-      logger.warn('[Incoming-Webhook] Built an invalid flow definition', {
-        issues: result.error.issues,
-      });
-      return null;
-    }
-
-    const escapedJSON = JSON.stringify(result.data).replace(/"/g, '&quot;');
-    return `<div data-flow-json="${escapedJSON}">Flow JSON</div>`;
-  }
 
   handleAmazonSnsIncoming = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -458,53 +294,7 @@ class IncomingWebhookController {
       // No signature check: the encrypted secret in the URL is the only
       // credential here, as it is for the Slack and SentinelOne webhook types.
 
-      // Unauthenticated webhook: no req.user, so open an explicit tenant scope from the
-      // validated :workspaceId URL param so the workspaceId stamper fills downstream writes.
-      await runIncomingWebhook(context.workspaceId,
-        async () => {
-          let flow: FlowDefinition;
-          switch (envelope.Type) {
-            case 'SubscriptionConfirmation':
-              // SNS delivers nothing until SubscribeURL is visited. Post the link
-              // and let an admin click it rather than fetching it server-side.
-              logger.info('[Incoming-Webhook] SNS subscription confirmation received', {
-                workspaceId: context.workspaceId,
-                topicArn: envelope.TopicArn,
-              });
-              flow = buildSubscriptionConfirmationFlow(envelope);
-              break;
-            case 'UnsubscribeConfirmation':
-              logger.info('[Incoming-Webhook] SNS unsubscribe confirmation received', {
-                workspaceId: context.workspaceId,
-                topicArn: envelope.TopicArn,
-              });
-              flow = buildUnsubscribeConfirmationFlow(envelope);
-              break;
-            default:
-              flow = buildAmazonSnsFlow(parseSnsMessage(envelope));
-              break;
-          }
-
-          const content = this.encodeFlowContent(flow);
-          if (!content) {
-            res.status(400).send('invalid_payload');
-            return;
-          }
-
-          await findOrCreateConversation(
-            context.channelId,
-            context.installedApp.userId,
-            content,
-            false,
-            undefined,
-            undefined,
-            MessageType.BOT,
-            {},
-          );
-
-          res.status(200).send('ok');
-        },
-      );
+      await processAmazonSnsIncoming(context, res, envelope);
     } catch (error) {
       logger.error('[Incoming-Webhook] Error handling Amazon SNS webhook', {
         params: req.params,
@@ -535,28 +325,7 @@ class IncomingWebhookController {
       // No signature check: the encrypted secret in the URL is the only
       // credential here, as it is for the Slack and Amazon SNS webhook types.
 
-      // Unauthenticated webhook: no req.user, so open an explicit tenant scope from the
-      // validated :workspaceId URL param so the workspaceId stamper fills downstream writes.
-      await runIncomingWebhook(context.workspaceId, async () => {
-        const content = this.encodeFlowContent(buildPingdomFlow(normalizePingdom(payload)));
-        if (!content) {
-          res.status(400).send('invalid_payload');
-          return;
-        }
-
-        await findOrCreateConversation(
-          context.channelId,
-          context.installedApp.userId,
-          content,
-          false,
-          undefined,
-          undefined,
-          MessageType.BOT,
-          {},
-        );
-
-        res.status(200).send('ok');
-      });
+      await processPingdomIncoming(context, res, payload);
     } catch (error) {
       logger.error('[Incoming-Webhook] Error handling Pingdom webhook', {
         params: req.params,
@@ -588,28 +357,7 @@ class IncomingWebhookController {
       // credential here, replacing the HTTP Basic auth infra-switch uses on its
       // shared /alertProxy/gcp endpoint.
 
-      // Unauthenticated webhook: no req.user, so open an explicit tenant scope from the
-      // validated :workspaceId URL param so the workspaceId stamper fills downstream writes.
-      await runIncomingWebhook(context.workspaceId, async () => {
-        const content = this.encodeFlowContent(buildGcpFlow(normalizeGcp(payload)));
-        if (!content) {
-          res.status(400).send('invalid_payload');
-          return;
-        }
-
-        await findOrCreateConversation(
-          context.channelId,
-          context.installedApp.userId,
-          content,
-          false,
-          undefined,
-          undefined,
-          MessageType.BOT,
-          {},
-        );
-
-        res.status(200).send('ok');
-      });
+      await processGcpIncoming(context, res, payload);
     } catch (error) {
       logger.error('[Incoming-Webhook] Error handling GCP Monitoring webhook', {
         params: req.params,

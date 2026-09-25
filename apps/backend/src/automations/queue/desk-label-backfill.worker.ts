@@ -1,9 +1,8 @@
 import type Bull from 'bull';
 import { logger } from '@/utils/logger';
-import { runDeskLabelBackfillJob } from '@/bypassAcl/automationServices';
+import { runDeskLabelBackfillForRule } from '@/bypassAcl/automationServices';
 import {
   resolveBackfillRule,
-  runDeskLabelBackfill,
   type DeskLabelBackfillProgress,
 } from '../services/desk-label-backfill.service';
 import {
@@ -72,9 +71,7 @@ class DeskLabelBackfillWorker {
 
     // Background job → no HTTP tenant scope. Open one from the rule's workspace so
     // every write in the run gets workspaceId stamped.
-    const progress = await runDeskLabelBackfillJob(rule.workspaceId, () =>
-      runDeskLabelBackfill(rule, next => publishProgress(job, next)),
-    );
+    const progress = await runDeskLabelBackfillForRule(rule, next => publishProgress(job, next));
 
     // The final progress is what the rules list reads back, so it has to land
     // before the job completes — awaited, unlike the per-page updates.

@@ -1,7 +1,6 @@
 import { repositories } from '@/database/repositories';
-import { AccessType, MessageType } from '@xyne/shared';
+import { AccessType } from '@xyne/shared';
 import { logger } from '@/utils/logger';
-import { conversationService } from '@/services/conversationService';
 import { sendApprovalNotificationAsUser } from '@/bypassAcl/automationServices';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service';
 import { config } from '@/config/env';
@@ -71,21 +70,7 @@ async function dmToUser(
   workspaceId: string,
   content: string,
 ): Promise<void> {
-  await sendApprovalNotificationAsUser(fromUserId, workspaceId, async () => {
-    const channelId = await repositories.channels.findOrCreateDMChannel(
-      fromUserId,
-      [toUserId],
-      repositories.channelParticipants,
-      workspaceId,
-    );
-    await conversationService.createConversationWithMessage({
-      channelId,
-      userId: fromUserId,
-      content,
-      msgType: MessageType.BOT,
-      isBot: true,
-    });
-  });
+  await sendApprovalNotificationAsUser(fromUserId, toUserId, workspaceId, content);
 }
 
 function proposerIdOf(proposal: AutomationView): string | null {

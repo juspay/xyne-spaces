@@ -2,7 +2,7 @@ import type Bull from 'bull';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
 import { db } from '@/database/client';
-import { runScheduledAutomationJob } from '@/bypassAcl/automationServices';
+import { runScheduledAutomation } from '@/bypassAcl/automationServices';
 import { stepRegistry } from '../steps/step-registry';
 import { AutomationExecutor } from '../engine/automation-executor';
 import {
@@ -61,9 +61,7 @@ class AutomationScheduleWorker {
       return;
     }
 
-    await runScheduledAutomationJob(workspaceId, () =>
-      this.executor!.runExecution(executionId),
-    );
+    await runScheduledAutomation(workspaceId, this.executor, executionId);
   }
 }
 
