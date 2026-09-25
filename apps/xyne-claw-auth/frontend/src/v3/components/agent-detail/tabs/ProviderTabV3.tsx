@@ -59,20 +59,6 @@ const AUTH_TYPE_DISPLAY: Record<string, string> = {
 
 const ALL_PROVIDERS: ProviderKey[] = ["codex", "claude", "copilot", "openrouter", "litellm", "spaces"];
 
-type SubagentMode = "spaces" | "fast-model" | "parent";
-
-const SUBAGENT_MODE_OPTIONS: ReadonlyArray<readonly [SubagentMode, string]> = [
-  ["spaces", "Spaces default"],
-  ["fast-model", "Fast model"],
-  ["parent", "Follow parent"],
-];
-
-const SUBAGENT_MODE_DESCRIPTIONS: Record<SubagentMode, string> = {
-  spaces: "Spaces default — subagents run on the Spaces platform model (cheaper/faster), even when this agent is on a premium provider.",
-  "fast-model": "Fast model — subagents run on the platform's fast model and fall back to the Spaces default model if it fails.",
-  parent: "Follow parent — subagents run on the same provider as this agent.",
-};
-
 /* ─────────────────────────────────────────────────────────────────────
  * Ordered provider list + "Available providers" chips. Used twice: for the
  * standard provider order and for the fast-mode profile's own order (which
@@ -262,15 +248,14 @@ export function ProviderTabV3({ agent, userId }: Props) {
    *   "spaces" — subagents run on the Spaces platform default (LiteLLM). DEFAULT.
    *   "parent" — subagents inherit this agent's resolved provider (uses more
    *              tokens/credits on paid plans).
-   *   "fast-model" — subagents run on the platform's fast model, falling back
-   *              to the Spaces default model if it fails.
    * Stored at agent.config.subagentProviderMode; undefined ⇒ "spaces".
    */
-  const storedSubagentMode = (agent.config as Record<string, unknown> | undefined)?.["subagentProviderMode"];
-  const seedSubagentMode: SubagentMode =
-    storedSubagentMode === "parent" || storedSubagentMode === "fast-model" ? storedSubagentMode : "spaces";
-  const [subagentMode, setSubagentMode] = useState<SubagentMode>(seedSubagentMode);
-  const [savedSubagentMode, setSavedSubagentMode] = useState<SubagentMode>(seedSubagentMode);
+  const seedSubagentMode: "parent" | "spaces" =
+    (agent.config as Record<string, unknown> | undefined)?.["subagentProviderMode"] === "parent"
+      ? "parent"
+      : "spaces";
+  const [subagentMode, setSubagentMode] = useState<"parent" | "spaces">(seedSubagentMode);
+  const [savedSubagentMode, setSavedSubagentMode] = useState<"parent" | "spaces">(seedSubagentMode);
 
   /**
    * Which provider AUTOMATION / SCHEDULED / error-pipeline runs use.
@@ -602,8 +587,8 @@ export function ProviderTabV3({ agent, userId }: Props) {
       else cfg.providerFallbackToSpaces = false;
       // Subagent provider routing. Omit when "spaces" (the default) to keep the
       // JSON config minimal — the backend/runtime treat undefined as "spaces".
-      if (subagentMode === "spaces") delete cfg.subagentProviderMode;
-      else cfg.subagentProviderMode = subagentMode;
+      if (subagentMode === "parent") cfg.subagentProviderMode = "parent";
+      else delete cfg.subagentProviderMode;
       // Automation/scheduled downgrade. Omit when "default" so the JSON stays
       // minimal — the backend treats undefined as "same provider as chat".
       if (automationMode !== "default") cfg.automationProvider = automationMode;
@@ -837,7 +822,9 @@ export function ProviderTabV3({ agent, userId }: Props) {
                 <div className="min-w-0">
                   <div className="text-[13px] font-medium text-xyne-fg-primary">Subagents</div>
                   <p className="mt-1 text-[12px] text-xyne-fg-secondary leading-relaxed">
-                    {SUBAGENT_MODE_DESCRIPTIONS[subagentMode]}
+                    {subagentMode === "spaces"
+                      ? "Spaces default — subagents run on the Spaces fast model (falling back to the standard Spaces model if it fails), even when this agent is on a premium provider."
+                      : "Follow parent — subagents run on the same provider as this agent."}
                     {" "}A per-subagent override, when set, always wins.
                   </p>
                 </div>
@@ -846,22 +833,32 @@ export function ProviderTabV3({ agent, userId }: Props) {
                   aria-label="Which provider subagents run on"
                   className="flex shrink-0 rounded-full border border-xyne-border bg-xyne-surface p-0.5"
                 >
-                  {SUBAGENT_MODE_OPTIONS.map(([mode, label]) => (
-                    <button
-                      key={mode}
-                      type="button"
-                      role="radio"
-                      aria-checked={subagentMode === mode}
-                      onClick={() => setSubagentMode(mode)}
-                      className={`rounded-full px-3 py-1 text-[11px] font-medium transition-colors ${
-                        subagentMode === mode
-                          ? "bg-xyne-fg-primary text-xyne-fg-inverse"
-                          : "text-xyne-fg-secondary hover:text-xyne-fg-primary"
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  ))}
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={subagentMode === "spaces"}
+                    onClick={() => setSubagentMode("spaces")}
+                    className={`rounded-full px-3 py-1 text-[11px] font-medium transition-colors ${
+                      subagentMode === "spaces"
+                        ? "bg-xyne-fg-primary text-xyne-fg-inverse"
+                        : "text-xyne-fg-secondary hover:text-xyne-fg-primary"
+                    }`}
+                  >
+                    Spaces default
+                  </button>
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={subagentMode === "parent"}
+                    onClick={() => setSubagentMode("parent")}
+                    className={`rounded-full px-3 py-1 text-[11px] font-medium transition-colors ${
+                      subagentMode === "parent"
+                        ? "bg-xyne-fg-primary text-xyne-fg-inverse"
+                        : "text-xyne-fg-secondary hover:text-xyne-fg-primary"
+                    }`}
+                  >
+                    Follow parent
+                  </button>
                 </div>
               </div>
 

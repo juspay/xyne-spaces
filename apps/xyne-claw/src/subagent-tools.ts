@@ -998,9 +998,7 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
 
         // Apply copilot proxy (no-op for other providers) then register model via the same helper the parent uses
         const effectiveConfig = await applyCopilotProxyIfNeeded(resolvedProvider?.provider, resolvedProvider?.config);
-        // fast-model is EXPLICIT opt-in. Default/undefined/"spaces" all keep
-        // today's LITELLM.model routing.
-        const useFastModel = !resolvedProvider && providerResolution?.subagentProviderMode === "fast-model";
+        const useFastModel = !resolvedProvider;
         const litellmFallbackModel = useFastModel ? LITELLM.subagentFastModel : LITELLM.model;
         const model = resolveModel(modelRegistry, resolvedProvider?.provider, effectiveConfig, {
           model: resolvedProvider ? undefined : litellmFallbackModel,
