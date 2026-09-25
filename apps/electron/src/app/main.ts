@@ -1,4 +1,4 @@
-import { app, dialog, Menu, MenuItem, MenuItemConstructorOptions } from 'electron';
+import { app, dialog, Menu, MenuItem } from 'electron';
 import path from 'path';
 import log from 'electron-log/main';
 import { config, ENABLE_LOCAL_HARNESS } from './config';
@@ -95,8 +95,17 @@ app.on('before-quit', async () => {
 
 
 
-function buildBetaMenuItem(): MenuItem {
-  return new MenuItem({
+function setupApplicationMenu(): void {
+  // Append to Electron's existing default menu instead of rebuilding it from
+  // a template. Copying `role`-derived `click` handlers off built MenuItems
+  // into a fresh Menu.buildFromTemplate() call detaches Electron's internal
+  // role dispatcher from its original context, which throws
+  // "e.getOwnerBrowserWindow is not a function" the next time a role item
+  // (e.g. macOS Window menu's zoom/front) is clicked and crashes the main
+  // process.
+  const menu = Menu.getApplicationMenu() ?? new Menu();
+
+  menu.append(new MenuItem({
     label: 'Beta',
     submenu: [
       {
@@ -119,25 +128,9 @@ function buildBetaMenuItem(): MenuItem {
         },
       },
     ],
-  });
-}
+  }));
 
-function setupApplicationMenu(): void {
-  // Append to Electron's existing default menu instead of rebuilding it from
-  // a template. Copying `role`-derived `click` handlers off built MenuItems
-  // into a fresh Menu.buildFromTemplate() call detaches Electron's internal
-  // role dispatcher from its original context, which throws
-  // "e.getOwnerBrowserWindow is not a function" the next time a role item
-  // (e.g. macOS Window menu's zoom/front) is clicked and crashes the main
-  // process.
-  const existingMenu = Menu.getApplicationMenu();
-
-  if (existingMenu) {
-    existingMenu.append(buildBetaMenuItem());
-    Menu.setApplicationMenu(existingMenu);
-  } else {
-    Menu.setApplicationMenu(Menu.buildFromTemplate([buildBetaMenuItem()]));
-  }
+  Menu.setApplicationMenu(menu);
 }
 
 async function initializeApp(): Promise<void> {

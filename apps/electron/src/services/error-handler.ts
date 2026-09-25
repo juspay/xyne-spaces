@@ -8,23 +8,22 @@
 import { app, BrowserWindow } from 'electron';
 import log from 'electron-log/main';
 import { getIsQuitting } from '../app/app-state';
+import { getMainWindow } from '../window/manager';
 import { Logger, errorLogger } from './logger/Logger';
 import ElectronEvent from './logger/electron-events';
 
 const MAX_RENDERER_RELOAD_ATTEMPTS = 3;
-const rendererReloadAttempts = new Map<number, number>();
+// A crash long after the last one is treated as a fresh incident rather than
+// counting against the same retry budget - otherwise a window that crashes
+// once every few hours eventually exhausts its attempts and stops recovering.
+const RENDERER_CRASH_RESET_WINDOW_MS = 60_000;
 
-// child-process-gone fires for on-demand utility processes (e.g. the video
-// capture service) tearing down normally, not just for real crashes. Only
-// escalate to an error log for reasons that indicate an actual problem so
-// routine camera/screen-share lifecycle churn doesn't flood error logs.
-const CHILD_PROCESS_ERROR_REASONS = new Set<string>([
-  'crashed',
-  'abnormal-exit',
-  'oom',
-  'launch-failed',
-  'integrity-failure',
-]);
+interface RendererCrashInfo {
+  count: number;
+  lastCrashAt: number;
+}
+
+const rendererCrashes = new Map<number, RendererCrashInfo>();
 
 /**
  * Setup all global error handlers
@@ -114,26 +113,56 @@ function setupRendererErrorHandlers(): void {
       return;
     }
 
-    const attempts = rendererReloadAttempts.get(windowId) ?? 0;
-    if (attempts >= MAX_RENDERER_RELOAD_ATTEMPTS) {
-      log.error(`[ErrorHandler] Renderer for window ${windowId} crashed ${attempts} times, giving up on auto-reload`);
+    // Scope auto-reload to the main window's own top-level renderer only.
+    // - The recording pill and Claw overlay windows already run their own
+    //   render-process-gone recovery (recording-pill-window.ts,
+    //   claw-overlay-window.ts); reloading them here too would double-fire.
+    // - `webContents` can belong to a <webview> guest or an attached
+    //   BrowserView (e.g. the link preview) whose owner window resolves to
+    //   the main window via BrowserWindow.fromWebContents, but reloading
+    //   `window.webContents` in that case would reload the healthy main app
+    //   and drop an active call/recording while leaving the actually-crashed
+    //   guest blank.
+    if (window !== getMainWindow() || webContents !== window.webContents) {
       return;
     }
 
-    rendererReloadAttempts.set(windowId, attempts + 1);
-    log.warn(`[ErrorHandler] Reloading crashed renderer for window ${windowId} (attempt ${attempts + 1}/${MAX_RENDERER_RELOAD_ATTEMPTS}, reason: ${details.reason})`);
+    const now = Date.now();
+    const previous = rendererCrashes.get(windowId);
+    const count = previous && now - previous.lastCrashAt < RENDERER_CRASH_RESET_WINDOW_MS
+      ? previous.count + 1
+      : 1;
+    rendererCrashes.set(windowId, { count, lastCrashAt: now });
+
+    if (count > MAX_RENDERER_RELOAD_ATTEMPTS) {
+      Logger.error(ElectronEvent.UNCAUGHT_EXCEPTION, {
+        source: 'renderer_process',
+        origin: 'render_process_gone_recovery',
+        window_id: windowId,
+        attempt: count,
+        max_attempts: MAX_RENDERER_RELOAD_ATTEMPTS,
+        reason: details.reason,
+        action: 'give_up',
+      }, 'ErrorHandler');
+      Logger.flushLogs();
+      return;
+    }
+
+    Logger.warn(ElectronEvent.UNCAUGHT_EXCEPTION, {
+      source: 'renderer_process',
+      origin: 'render_process_gone_recovery',
+      window_id: windowId,
+      attempt: count,
+      max_attempts: MAX_RENDERER_RELOAD_ATTEMPTS,
+      reason: details.reason,
+      action: 'reload',
+    }, 'ErrorHandler');
+    Logger.flushLogs();
     window.webContents.reload();
   });
 
   // Monitor new windows as they're created
   app.on('browser-window-created', (_event, window) => {
-
-    // A successful load means the renderer recovered; reset its crash count
-    // so a later, unrelated crash still gets the full retry budget.
-    window.webContents.on('did-finish-load', () => {
-      rendererReloadAttempts.delete(window.id);
-    });
-
     // Handle unresponsive renderer
     window.webContents.on('unresponsive', () => {
       Logger.warn(ElectronEvent.UNCAUGHT_EXCEPTION, {
@@ -163,13 +192,20 @@ function setupChildProcessHandlers(): void {
       process_name: details.name,
     };
 
-    if (CHILD_PROCESS_ERROR_REASONS.has(details.reason)) {
+    // Routine teardown, not an error: a clean exit is always benign, and a
+    // Utility process (e.g. the video capture service) being killed is the
+    // normal way Chromium tears down an on-demand service. 'killed' on any
+    // other process type (GPU, network, etc.) still indicates a real problem
+    // and is logged as an error.
+    const isRoutineTeardown =
+      details.reason === 'clean-exit' ||
+      (details.reason === 'killed' && details.type === 'Utility');
+
+    if (isRoutineTeardown) {
+      Logger.info(ElectronEvent.UNCAUGHT_EXCEPTION, logPayload, 'ErrorHandler');
+    } else {
       Logger.error(ElectronEvent.UNCAUGHT_EXCEPTION, logPayload, 'ErrorHandler');
       Logger.flushLogs();
-    } else {
-      // Routine teardown (e.g. 'clean-exit', or 'killed' when Chromium tears
-      // down an on-demand utility process like video capture) - not an error.
-      Logger.info(ElectronEvent.UNCAUGHT_EXCEPTION, logPayload, 'ErrorHandler');
     }
   });
 }
