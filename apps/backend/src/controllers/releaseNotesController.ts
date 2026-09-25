@@ -223,7 +223,10 @@ Release notes have been generated for **${ticket.title}**
       }
 
       const connectId = newConnectId();
-      await prisma.canvas.create({
+      // Atomic: a canvas with a connectId but no connect_group row is invisible to connectReach
+      // (matches neither branch) and unrepairable via the app. Create both or neither.
+      await prisma.$transaction(async (tx) => {
+      await tx.canvas.create({
         data: {
           id: canvasId,
           title: finalTitle,
@@ -248,11 +251,12 @@ Release notes have been generated for **${ticket.title}**
           },
         },
       });
-      await createConnectGroupForEntity(prisma, {
+      await createConnectGroupForEntity(tx, {
         entityType: 'canvas',
         entityId: canvasId,
         hostWorkspaceId: workspaceId,
         connectId,
+      });
       });
 
       await prisma.canvasParticipant.create({

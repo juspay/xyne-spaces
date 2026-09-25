@@ -68,7 +68,10 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
     // Slack Connect: mint a connectId, stamp it on the channel, and create its private
     // connect_group row so every new channel has a group entry from creation.
     const connectId = newConnectId();
-    const result = await this.db.channel.create({
+    // Atomic: a channel with a connectId but no connect_group row is invisible to connectReach
+    // (matches neither branch) and unrepairable via the app. Create both or neither.
+    const result = await this.db.$transaction(async (tx) => {
+    const channel = await tx.channel.create({
       data: {
         scopeType: data.scopeType,
         name: data.name,
@@ -82,11 +85,13 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
         ...(data.type && { type: data.type }),
       }
     });
-    await createConnectGroupForEntity(this.db, {
+    await createConnectGroupForEntity(tx, {
       entityType: 'channel',
-      entityId: result.id,
-      hostWorkspaceId: result.workspaceId,
+      entityId: channel.id,
+      hostWorkspaceId: channel.workspaceId,
       connectId,
+    });
+    return channel;
     });
 
     // Dual-write: mirror the channel→project board set into ChannelBoardMapping so

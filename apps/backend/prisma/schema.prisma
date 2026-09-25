@@ -1927,6 +1927,8 @@ model ConnectGroup {
   @@unique([connectId, invitedWorkspaceId])
   @@index([connectId])
   @@index([entityId])
+  @@index([hostWorkspaceId])
+  @@index([invitedWorkspaceId])
   @@map("connect_group")
   @@schema("public")
 }

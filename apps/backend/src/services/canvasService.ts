@@ -242,7 +242,10 @@ export async function createKnowledgeCanvas(
 
     // Create the canvas with PUBLIC visibility
     const connectId = newConnectId();
-    await prisma.canvas.create({
+    // Atomic: a canvas with a connectId but no connect_group row is invisible to connectReach
+    // (matches neither branch) and unrepairable via the app. Create both or neither.
+    await prisma.$transaction(async (tx) => {
+    await tx.canvas.create({
       data: {
         id: canvasId,
         title: finalTitle,
@@ -269,11 +272,12 @@ export async function createKnowledgeCanvas(
         },
       },
     });
-    await createConnectGroupForEntity(prisma, {
+    await createConnectGroupForEntity(tx, {
       entityType: 'canvas',
       entityId: canvasId,
       hostWorkspaceId: workspaceId,
       connectId,
+    });
     });
 
     // Add creator as OWNER participant

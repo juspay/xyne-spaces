@@ -943,7 +943,10 @@ async function persistNewAnalysisCanvas(args: {
     throw new Error(`Failed to save commit analysis canvas ${canvasId} to Y-Sweet`);
   }
 
-  await prisma.canvas.create({
+  // Atomic: a canvas with a connectId but no connect_group row is invisible to connectReach
+  // (matches neither branch) and unrepairable via the app. Create both or neither.
+  await prisma.$transaction(async (tx) => {
+  await tx.canvas.create({
     data: {
       id: canvasId,
       title: finalTitle,
@@ -975,11 +978,12 @@ async function persistNewAnalysisCanvas(args: {
       },
     },
   });
-  await createConnectGroupForEntity(prisma, {
+  await createConnectGroupForEntity(tx, {
     entityType: 'canvas',
     entityId: canvasId,
     hostWorkspaceId: creator.workspaceId,
     connectId,
+  });
   });
 
   await prisma.canvasParticipant.create({

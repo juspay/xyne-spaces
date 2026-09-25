@@ -2,6 +2,7 @@ import type { QueryContext, TableName } from './types';
 import { BaseACL } from './base-acl';
 import { ActivitiesACL } from '../tables/activities-acl';
 import { GuestAccessACL } from '../tables/guest-access-acl';
+import { ConnectGroupACL } from '../tables/connect-group-acl';
 import { CallParticipantsACL } from '../tables/call-participants-acl';
 import { CallsACL } from '../tables/calls-acl';
 import { CanvasFoldersACL } from '../tables/canvas-folders-acl';
@@ -151,6 +152,10 @@ const GUEST_MUTATION_ALLOWLIST: readonly TableName[] = [
   'call_participants',
   'canvas_participants',
   'canvases',
+  // Slack Connect: canvas/channel creation co-inserts the private connect_group row inside the
+  // mutator. Guests may create canvases (above), so they must reach ConnectGroupACL (which pins
+  // the row to their own workspace) instead of the DenyGuests short-circuit.
+  'connect_group',
   'user_profiles',
   'user_preferences',
   'email_signatures',
@@ -448,8 +453,9 @@ export class ACLFactory {
       case 'guest_access':
         return new GuestAccessACL(ctx, table);
       case 'connect_group':
-        // Slack Connect reach table — no mutation ACL in Phase 1 (default pass-through).
-        return new BaseACL<any>(ctx);
+        // Slack Connect: allow the mutator-driven insert (pinned to the caller's own workspace);
+        // BaseACL would throw on the nested insert and roll back canvas/channel creation.
+        return new ConnectGroupACL(ctx);
     }
   }
 }
