@@ -6,26 +6,11 @@ import path from 'path';
 import { existsSync, mkdirSync } from 'fs';
 import Logger from 'electron-log';
 import { EnrollmentEvent } from './logger/enrollment-events';
-import { Logger as XyneLogger } from './logger/Logger';
-import ElectronEvent from './logger/electron-events';
 import { showScreenPicker } from './screen-picker';
 import Store from 'electron-store';
 
 let mainWindow: BrowserWindow | null = null;
 const store = new Store();
-
-/**
- * Matches backend API routes (`/api/*`, routed to xyne-backend, whose
- * `authenticate` middleware auto-refreshes — so a 401 here means refresh
- * already failed = session truly invalid). Excludes `/claw/*` and `/zero/*`.
- */
-function isBackendApiUrl(rawUrl: string): boolean {
-  try {
-    return new URL(rawUrl).pathname.startsWith('/api/');
-  } catch {
-    return false;
-  }
-}
 
 export function setMainWindow(window: BrowserWindow | null): void {
   mainWindow = window;
@@ -344,64 +329,6 @@ export function setupRequestInterceptor(): void {
   session.defaultSession.webRequest.onHeadersReceived(
     { urls: [`${config.BACKEND_URL}/*`] },
     (details, callback) => {
-      if (details.statusCode === 401) {
-        const contentType = details.responseHeaders?.['content-type']?.[0];
-        const isJson = contentType?.includes('application/json') ?? false;
-
-        // A 401 only means the session is dead when it is a JSON response from
-        // a backend API route (/api/*). This is the phantom-logout amplifier
-        // fix — config.BACKEND_URL is the whole origin, so the old check fired
-        // on /claw/*, /zero/* and other non-API routes, logging users out for
-        // 401s that don't mean the session ended. A 401 on /api/* means the
-        // backend's authenticate middleware already tried and failed to
-        // refresh, so the session is genuinely invalid.
-        const shouldLogout = isJson && isBackendApiUrl(details.url);
-
-        if (shouldLogout) {
-          // Snapshot the cookie jar BEFORE wiping it, then AWAIT the clear so
-          // cookie state is deterministic, and only then signal the renderer.
-          // (Race fix: the IPC used to fire before the fire-and-forget clear
-          // settled, so the renderer could observe half-wiped cookie state.)
-          void (async () => {
-            let jar: Electron.Cookie[] = [];
-            try {
-              jar = await session.defaultSession.cookies.get({ url: details.url });
-            } catch {
-              jar = [];
-            }
-            XyneLogger.warn(ElectronEvent.AUTH_401_INTERCEPTED, {
-              url: details.url,
-              method: details.method,
-              resource_type: details.resourceType,
-              referrer: details.referrer,
-              jar_cookie_count: jar.length,
-              jar_cookie_names: jar.map((cookie) => cookie.name).join(','),
-            });
-            await clearAllCookies('401_json_from_backend_api');
-            mainWindow?.webContents.send('auth:token-expired', {
-              url: details.url,
-              resourceType: details.resourceType,
-            });
-            XyneLogger.info(ElectronEvent.AUTH_TOKEN_EXPIRED_SENT, {
-              url: details.url,
-              resource_type: details.resourceType,
-              main_window_present: !!mainWindow,
-            });
-          })();
-        } else {
-          // Observed-but-ignored 401: keep the record for future analysis but
-          // never tear the session down.
-          XyneLogger.info(ElectronEvent.AUTH_401_INTERCEPTED, {
-            url: details.url,
-            method: details.method,
-            resource_type: details.resourceType,
-            referrer: details.referrer,
-            ignored: true,
-            is_json: isJson,
-          });
-        }
-      }
-
       if (details.url.includes('/logout') && details.statusCode === 200) {
         void clearAllCookies('logout_response');
       }
