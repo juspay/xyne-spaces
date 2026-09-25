@@ -58,7 +58,7 @@ import {logger} from '@/utils/logger';
 import { messageMetadataService } from '@/services/messageMetadataService';
 import { extractSpecialMentions, getChannelParticipantsForMention, getOnlineChannelParticipants } from '@/utils/mentionUtils';
 import { activityService } from '@/services/activity/activityService';
-import { encrypt, decrypt } from '@/services/encryptionService';
+import { decryptAsync, encryptScoped, workspaceScope } from '@/services/encryptionService';
 import { vespaService } from '@/services/vespaSearch';
 import { ChannelEmailAliasService } from '@/services/channelEmailAliasService';
 import { ensureDmConversationAuthorParticipant } from '@/utils/dmConversationParticipants';
@@ -1252,11 +1252,14 @@ export class ChannelController {
             res.status(503).json({ error: 'Slack is not connected for this workspace' });
             return;
           }
-          const slackCreds = JSON.parse(decrypt(slackWorkspaceSource.credentials));
-          const credentials = encrypt(JSON.stringify({
-            signingSecret: slackCreds.signingSecret,
-            botOauthToken: slackCreds.botOauthToken,
-          }));
+          const slackCreds = JSON.parse(await decryptAsync(slackWorkspaceSource.credentials));
+          const credentials = await encryptScoped(
+            JSON.stringify({
+              signingSecret: slackCreds.signingSecret,
+              botOauthToken: slackCreds.botOauthToken,
+            }),
+            workspaceScope(req.user!.workspaceId!),
+          );
 
           // Reactivate existing or create new ExternalSource. Workspace-scoped for
           // the same reason as the pre-check above.

@@ -61,7 +61,7 @@ export class ZohoFlow extends BaseFlow {
 
       logger.info('[ZohoFlow.preprocess] Fetching email fields from Zoho API', { ticketId, threadId });
 
-      const zohoService = ZohoService.fromEncryptedCredentials(source.credentials, source.id);
+      const zohoService = await ZohoService.fromEncryptedCredentials(source.credentials, source.id);
       const threadDetails = await zohoService.getThreadDetails(ticketId, threadId);
 
       if (!threadDetails) {

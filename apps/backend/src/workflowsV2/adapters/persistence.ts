@@ -49,7 +49,7 @@ import type { ResumePayload } from '@xyne/workflow-sdk/common';
 import type { Prisma } from '@prisma/client';
 import { db } from '@/database/client';
 import { runAsSystem } from '@/database/tenant/context';
-import { decrypt, encrypt } from '@/services/encryptionService';
+import { decryptAsync, encryptScoped, workspaceScope } from '@/services/encryptionService';
 import { triggerTypeToEventType } from '@/automations/types/workflow-adapter';
 import {
   CREDENTIAL_ACTIVE,
@@ -594,7 +594,7 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
         name: input.name,
         credType: input.credType,
         authType: input.authType,
-        data: encrypt(JSON.stringify(values)),
+        data: await encryptScoped(JSON.stringify(values), workspaceScope(workspaceId)),
         status: CREDENTIAL_ACTIVE,
         createdAt: now,
         updatedAt: now,
@@ -619,7 +619,7 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
     const row = await db.workflowCredential.update({
       where: { workspaceId_name: { workspaceId, name } },
       data: {
-        data: encrypt(JSON.stringify(validated)),
+        data: await encryptScoped(JSON.stringify(validated), workspaceScope(workspaceId)),
         status: CREDENTIAL_ACTIVE,
         updatedAt: new Date(),
       },
@@ -675,7 +675,7 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
     });
     if (!row || row.status !== CREDENTIAL_ACTIVE) return null;
 
-    const values = JSON.parse(decrypt(row.data)) as unknown;
+    const values = JSON.parse(await decryptAsync(row.data)) as unknown;
     const auth = validateCredentialAuth(row.authType as CredentialAuthType, values);
     return { name: row.name, credType: row.credType, status: row.status as CredentialStatus, ...auth };
   }

@@ -2,7 +2,7 @@ import { DatabaseClient } from '@/database/client';
 import { config } from '@/config/env';
 import { TicketRepository } from '@/database/repositories/ticketRepository';
 import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
-import { encrypt } from '@/services/encryptionService';
+import { encryptScoped, workspaceScope } from '@/services/encryptionService';
 import { dualWriteTicketTags } from '@/services/ticketTagDualWriteService';
 import { logger } from '@/utils/logger';
 import { resolveFormFieldDefinitionsForForm } from '@/utils/fieldDefinition';
@@ -2829,6 +2829,13 @@ export class JiraMigrationImportService {
     channelId: string,
     boardId: string,
   ): Promise<{ externalSourceId: string; created: boolean }> {
+    // Set by the import run before this point; without it the credentials would be
+    // encrypted under an empty tenant, which encryptScoped rejects anyway.
+    const workspaceId = this.currentWorkspaceId;
+    if (!workspaceId) {
+      throw new Error('ensureExternalSource requires currentWorkspaceId to be set');
+    }
+
     const externalSourceName = `jira-${jiraProjectKey}-${channelId}`.toLowerCase();
     const existingSource = await this.externalSourceRepository.findByName(externalSourceName);
 
@@ -2851,11 +2858,12 @@ export class JiraMigrationImportService {
       displayName: `Jira (${jiraProjectKey})`,
       channelId,
       boardId,
-      credentials: encrypt(
+      credentials: await encryptScoped(
         JSON.stringify({
           baseUrl: config.jira.baseUrl,
           projectKey: jiraProjectKey,
         }),
+        workspaceScope(workspaceId),
       ),
     });
 

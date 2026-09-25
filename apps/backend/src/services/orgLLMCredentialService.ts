@@ -5,7 +5,7 @@ import {
 } from '@xyne/shared';
 import { config } from '@/config/env';
 import { DatabaseClient } from '@/database/client';
-import { decrypt } from '@/services/encryptionService';
+import { decryptAsync } from '@/services/encryptionService';
 import { logger } from '@/utils/logger';
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
@@ -258,7 +258,7 @@ class OrgLLMCredentialService {
     }
 
     try {
-      const parsed = JSON.parse(decrypt(row.credentials)) as StoredOrgLLMCredentials;
+      const parsed = JSON.parse(await decryptAsync(row.credentials)) as StoredOrgLLMCredentials;
       if (!parsed.key || !parsed.providerUrl) {
         this.cache.set(key, {
           value: null,

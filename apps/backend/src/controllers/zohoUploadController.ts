@@ -21,7 +21,7 @@ import { ChannelExternalSourceResolver } from '@/services/channelExternalSourceR
 import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { ConversationRepository } from '@/database/repositories/conversationRepository';
 import { ChannelParticipantRepository } from '@/database/repositories/channelParticipantRepository';
-import { decrypt } from '@/services/encryptionService';
+import { decryptAsync } from '@/services/encryptionService';
 import { uploadFiles } from '@/services/fileUploadService';
 import { repositories } from '@/database/repositories';
 import { config } from '@/config/env';
@@ -189,7 +189,7 @@ export class ZohoUploadController {
   // ─── Zoho strategy (unchanged behavior) ────────────────────────────────────
 
   private async uploadToZoho(ctx: UploadContext): Promise<UploadOutcome> {
-    const credentials = JSON.parse(decrypt(ctx.externalSource.credentials));
+    const credentials = JSON.parse(await decryptAsync(ctx.externalSource.credentials));
 
     let accessToken: string;
     let orgId: string;

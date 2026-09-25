@@ -16,7 +16,7 @@ import crypto from 'crypto';
 import { authV2Middleware } from '@/middleware/authV2Middleware';
 import { db } from '@/database/client';
 import { redisService } from '@/services/redisService';
-import { encrypt, decrypt } from '@/services/encryptionService';
+import { decryptAsync, encryptScoped, workspaceScope } from '@/services/encryptionService';
 import { logger } from '@/utils/logger';
 import { getBackendUrl, getFrontendUrl } from '@/utils/publicUrls';
 
@@ -55,7 +55,7 @@ router.get(
         return;
       }
 
-      const creds = JSON.parse(decrypt(slackSource.credentials)) as {
+      const creds = JSON.parse(await decryptAsync(slackSource.credentials)) as {
         clientId?: string;
         clientSecret?: string;
       };
@@ -138,7 +138,7 @@ router.get('/callback', async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    const creds = JSON.parse(decrypt(slackSource.credentials)) as {
+    const creds = JSON.parse(await decryptAsync(slackSource.credentials)) as {
       clientId?: string;
       clientSecret?: string;
     };
@@ -181,7 +181,7 @@ router.get('/callback', async (req: Request, res: Response): Promise<void> => {
     const { id: slackUserId, access_token: userToken } = tokenData.authed_user;
 
     // Upsert UserExternalToken
-    const encryptedToken = encrypt(userToken);
+    const encryptedToken = await encryptScoped(userToken, workspaceScope(stateData.workspaceId));
     await db.userExternalToken.upsert({
       where: {
         userId_provider: {

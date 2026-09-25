@@ -5,7 +5,7 @@
 import { ExternalSource } from '@prisma/client';
 import { BaseFlow } from '../../core/baseFlow';
 import { TestPayloadResult } from '../../core/types';
-import { decrypt } from '../../../services/encryptionService';
+import { decryptAsync } from '../../../services/encryptionService';
 import { resolveSlackMentions } from './utils/slackUserResolver';
 import { ChannelRepository } from '../../../database/repositories/channelRepository';
 
@@ -28,7 +28,7 @@ export class SlackFlow extends BaseFlow {
         return payload;
       }
 
-      const decryptedCreds = decrypt(source.credentials);
+      const decryptedCreds = await decryptAsync(source.credentials);
       const creds = JSON.parse(decryptedCreds);
 
       if (!creds.botOauthToken) {

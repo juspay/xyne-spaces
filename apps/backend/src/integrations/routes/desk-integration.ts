@@ -23,7 +23,7 @@
 import express, { Request, Response } from 'express';
 import { authV2Middleware } from '@/middleware/authV2Middleware';
 import { db } from '@/database/client';
-import { decrypt } from '@/services/encryptionService';
+import { decryptAsync } from '@/services/encryptionService';
 import { logger } from '@/utils/logger';
 import { microsoftDeskService } from '@/services/microsoftDeskService';
 import { ExternalSourcePlatform } from '../core/types';
@@ -169,7 +169,7 @@ router.post(
       // inactive regardless, and the user can retry if needed.
       try {
         if (source.sourceType === ExternalSourcePlatform.GOOGLE) {
-          const creds = JSON.parse(decrypt(source.credentials)) as {
+          const creds = JSON.parse(await decryptAsync(source.credentials)) as {
             refreshToken?: string;
             accessToken?: string;
           };

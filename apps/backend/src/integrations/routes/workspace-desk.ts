@@ -18,7 +18,7 @@ import { WorkspaceRole } from '@xyne/shared';
 import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
 import { authV2Middleware } from '@/middleware/authV2Middleware';
 import { db } from '@/database/client';
-import { decrypt } from '@/services/encryptionService';
+import { decryptAsync } from '@/services/encryptionService';
 import { ChannelEmailAliasService } from '@/services/channelEmailAliasService';
 import { logger } from '@/utils/logger';
 import { stopGmailWatchBeforeDeactivation } from '@/services/gmailWatchStopService';
@@ -110,7 +110,7 @@ router.post(
       // Best-effort token revocation at the provider.
       try {
         if (source.sourceType === 'google') {
-          const creds = JSON.parse(decrypt(source.credentials)) as {
+          const creds = JSON.parse(await decryptAsync(source.credentials)) as {
             refreshToken?: string;
             accessToken?: string;
           };

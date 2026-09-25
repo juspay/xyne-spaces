@@ -16,7 +16,7 @@ import { WebClient } from '@slack/web-api';
 import { logger } from '@/utils/logger';
 import { slackDeskService } from '@/services/slackDeskService';
 import { DESK_SOURCE_PREFIXES, extractSlackChannelId } from '@/integrations/core/deskSources';
-import { decrypt } from '@/services/encryptionService';
+import { decryptAsync } from '@/services/encryptionService';
 import { redisService } from '@/services/redisService';
 
 const TAG = '[SlackDesk]';
@@ -40,7 +40,7 @@ router.get(
         res.status(503).json({ error: 'Slack is not connected for this workspace. Please connect Slack first.' });
         return;
       }
-      const slackCreds = JSON.parse(decrypt(slackSource.credentials));
+      const slackCreds = JSON.parse(await decryptAsync(slackSource.credentials));
       const botToken = slackCreds.botOauthToken;
       if (!botToken) {
         res.status(503).json({ error: 'Slack bot token not found in workspace credentials' });
@@ -251,7 +251,7 @@ router.get(
         return;
       }
 
-      const slackCreds = JSON.parse(decrypt(slackSource.credentials));
+      const slackCreds = JSON.parse(await decryptAsync(slackSource.credentials));
       const botToken = slackCreds.botOauthToken;
       if (!botToken) {
         res.status(503).json({ error: 'Slack bot token not found' });

@@ -24,7 +24,7 @@ import {
   buildSupportPath,
   sanitizeReturnPath,
 } from './urlHelpers';
-import { encrypt } from '@/services/encryptionService';
+import { encryptScoped, workspaceScope } from '@/services/encryptionService';
 import { emailFetchQueue, enqueueCursorCatchup } from '@/queues/emailFetchQueue';
 import { getFrontendUrl, getBackendUrl } from '@/utils/publicUrls';
 import { pubSubWatchService } from '@/pubsub';
@@ -754,12 +754,13 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
         throw new Error(`Recording ${isRecordingDoc ? 'Google Docs' : 'email'} connection is owned by another user`);
       }
 
-      const credentials = encrypt(
+      const credentials = await encryptScoped(
         JSON.stringify({
           accessToken: tokens.access_token,
           refreshToken: tokens.refresh_token,
           email: emailAddress,
         }),
+        workspaceScope(stateData.workspaceId),
       );
       await db.externalSource.upsert({
         where: { name: sourceName },
@@ -869,7 +870,7 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
             sourceType: ExternalSourcePlatform.GOOGLE,
             NOT: { name: { startsWith: 'google-dl-sync' } },
           },
-          select: { id: true },
+          select: { id: true, workspaceId: true },
           orderBy: { createdAt: 'desc' },
         }));
       if (!sourceRow) {
@@ -888,6 +889,7 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
         emailAddress,
         accessToken: tokens.access_token,
         refreshToken: tokens.refresh_token,
+        workspaceId: sourceRow.workspaceId,
       });
       await db.externalSource.update({
         where: { id: sourceRow.id },
@@ -942,6 +944,7 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
         emailAddress,
         accessToken: tokens.access_token,
         refreshToken: tokens.refresh_token,
+        workspaceId,
       });
 
       if (existingForWorkspace) {
@@ -1031,7 +1034,10 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
         refreshToken: tokens.refresh_token ?? undefined,
         email: emailAddress,
       };
-      const encryptedCredentials = encrypt(JSON.stringify(credentials));
+      const encryptedCredentials = await encryptScoped(
+        JSON.stringify(credentials),
+        workspaceScope(stateData.workspaceId),
+      );
       const sanitized = emailAddress.split('@')[0].replace(/[^a-zA-Z0-9._-]/g, '_');
       const sourceName = `google-dl-sync--${sanitized}--${stateData.channelId.slice(0, 8)}`;
 
@@ -1121,6 +1127,7 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
         accessToken: tokens.access_token,
         refreshToken: tokens.refresh_token,
         sourceName,
+        workspaceId,
       });
 
       const existingSource = await db.externalSource.findFirst({
@@ -1219,6 +1226,7 @@ router.get('/auth/callback', async (req: Request, res: Response): Promise<void> 
         emailAddress,
         accessToken: tokens.access_token,
         refreshToken: tokens.refresh_token,
+        workspaceId: cd.workspaceId,
       });
 
       const txResult = await db.$transaction(async (tx) => {

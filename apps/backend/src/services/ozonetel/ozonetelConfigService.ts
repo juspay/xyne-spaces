@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { DatabaseClient } from '@/database/client';
-import { encrypt, decrypt } from '@/services/encryptionService';
+import { decryptAsync, encryptScoped, workspaceScope } from '@/services/encryptionService';
 import { ChannelType } from '@xyne/shared';
 
 export interface OzonetelAgent {
@@ -133,7 +133,7 @@ export const ozonetelConfigService = {
       orderBy: [{ isActive: 'desc' }, { createdAt: 'desc' }],
     });
     if (!source || !source.isActive) return null;
-    const config = JSON.parse(decrypt(source.credentials)) as OzonetelConfig;
+    const config = JSON.parse(await decryptAsync(source.credentials)) as OzonetelConfig;
     const normalizedTicketRules = normalizeTicketRules(config.ticketRules);
     if (normalizedTicketRules) {
       config.ticketRules = normalizedTicketRules;
@@ -164,7 +164,7 @@ export const ozonetelConfigService = {
       ...(ticketRules ? { ticketRules } : {}),
       webhookSecret: config.webhookSecret ?? randomBytes(24).toString('hex'),
     };
-    const credentials = encrypt(JSON.stringify(full));
+    const credentials = await encryptScoped(JSON.stringify(full), workspaceScope(workspaceId));
     const name = buildSourceName(workspaceId, full.webhookSecret);
     const db = DatabaseClient.getInstance();
     const existing = await db.externalSource.findFirst({

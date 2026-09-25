@@ -4,7 +4,7 @@
  */
 
 import axios, { AxiosInstance } from 'axios';
-import { decrypt } from './encryptionService';
+import { decryptAsync } from './encryptionService';
 import { logger } from '@/utils/logger';
 
 interface ZohoCredentials {
@@ -104,11 +104,11 @@ export class ZohoService {
   /**
    * Create ZohoService from encrypted credentials
    */
-  static fromEncryptedCredentials(
+  static async fromEncryptedCredentials(
     encryptedCredentials: string,
     sourceId: string
-  ): ZohoService {
-    const decrypted = decrypt(encryptedCredentials);
+  ): Promise<ZohoService> {
+    const decrypted = await decryptAsync(encryptedCredentials);
     const credentials = JSON.parse(decrypted) as ZohoCredentials;
     return new ZohoService(credentials, sourceId);
   }

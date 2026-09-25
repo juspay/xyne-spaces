@@ -7,7 +7,7 @@ import { Request, Response, NextFunction } from 'express';
 import { ExternalSource } from '@prisma/client';
 import { logger } from '../../utils/logger';
 import { ExternalSourceRepository } from '../../database/repositories/externalSourceRepository';
-import { decrypt, encrypt } from '../../services/encryptionService';
+import { decryptAsync, encryptScoped, workspaceScope } from '../../services/encryptionService';
 import { config } from '@/config/env';
 import { RawBodyRequest } from '../../types/express';
 
@@ -104,7 +104,7 @@ export async function authenticate(
     // Decrypt credentials from database
     let decryptedCredentials: string;
     try {
-      decryptedCredentials = decrypt(source.credentials);
+      decryptedCredentials = await decryptAsync(source.credentials);
     } catch (error) {
       logger.error(`Failed to decrypt credentials for source: ${resolvedSourceName}`, error);
       res.status(500).json({
@@ -142,7 +142,10 @@ export async function authenticate(
         const credentials = JSON.parse(decryptedCredentials) as { clientState?: string; [key: string]: unknown };
         if (!credentials.clientState) {
           credentials.clientState = observedClientState;
-          const encryptedCredentials = encrypt(JSON.stringify(credentials));
+          const encryptedCredentials = await encryptScoped(
+            JSON.stringify(credentials),
+            workspaceScope(source.workspaceId),
+          );
           await externalSourceRepository.update(source.id, {
             credentials: encryptedCredentials,
           });

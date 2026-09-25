@@ -5,7 +5,7 @@ import z from 'zod';
 import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { callShareService } from '@/services/callShareService';
-import { decrypt, encrypt } from '@/services/encryptionService';
+import { decryptAsync, encryptScoped, workspaceScope } from '@/services/encryptionService';
 import { convertBlockNoteToMarkdown } from '@/services/canvasService';
 import { GoogleDocsApiError, googleDocsService } from '@/services/googleDocsService';
 import { callSubject } from '@/utils/callTypeUtils';
@@ -40,7 +40,7 @@ async function getRecordingDocAccessToken(userId: string): Promise<string | null
   );
   if (!source) return null;
 
-  const credentials = JSON.parse(decrypt(source.credentials)) as {
+  const credentials = JSON.parse(await decryptAsync(source.credentials)) as {
     accessToken?: string;
     refreshToken?: string;
     email?: string;
@@ -52,7 +52,10 @@ async function getRecordingDocAccessToken(userId: string): Promise<string | null
   if (!accessToken) return null;
 
   await repositories.externalSources.update(source.id, {
-    credentials: encrypt(JSON.stringify({ ...credentials, accessToken })),
+    credentials: await encryptScoped(
+      JSON.stringify({ ...credentials, accessToken }),
+      workspaceScope(source.workspaceId),
+    ),
   });
   return accessToken;
 }

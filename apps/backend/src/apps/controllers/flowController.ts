@@ -4,7 +4,7 @@ import { repositories } from '@/database/repositories';
 import { SsrfBlockedError, safeWebhookFetch } from '@/utils/ssrfGuard';
 import { signWebhookPayload } from '@/apps/core/eventSubscriptionUtils';
 import { prepareAppWebhookDispatch } from '@/apps/core/appUrlResolver';
-import { decrypt } from '@/services/encryptionService';
+import { decryptAsync } from '@/services/encryptionService';
 import { SNS_CONFIRM_ACTION_ID } from './amazonSnsWebhookParser';
 import { mintFlowToken, verifyFlowToken } from '@/apps/core/flowToken';
 import { incomingWebhookController } from './incomingWebhookController';
@@ -152,7 +152,7 @@ export class FlowController {
       };
       // Serialize exactly once: the HMAC must cover the same bytes fetch sends.
       const body = JSON.stringify(appPayload);
-      const signature = signWebhookPayload(body, decrypt(app.signingSecret));
+      const signature = signWebhookPayload(body, await decryptAsync(app.signingSecret));
 
       logger.info('[FLOW-ACTION] Calling app backend', { appId, actionId, type, messageId });
 

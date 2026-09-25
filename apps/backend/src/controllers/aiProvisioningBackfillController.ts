@@ -11,7 +11,7 @@ import {
 import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
-import { decrypt, encrypt } from '@/services/encryptionService';
+import { decryptAsync, encryptScoped, orgScope } from '@/services/encryptionService';
 import {
   clawSpacesSyncClient,
   ClawSyncOrgPayload,
@@ -221,7 +221,7 @@ export class AiProvisioningBackfillController {
     }
 
     try {
-      const parsed = JSON.parse(decrypt(credential.credentials)) as Partial<OrgLiteLLMServiceAccountCredentials>;
+      const parsed = JSON.parse(await decryptAsync(credential.credentials)) as Partial<OrgLiteLLMServiceAccountCredentials>;
       return typeof parsed.litellmTeamId === 'string' && parsed.litellmTeamId.trim()
         ? parsed.litellmTeamId
         : null;
@@ -350,7 +350,10 @@ export class AiProvisioningBackfillController {
       provisionedAt: now.toISOString(),
     };
 
-    const encrypted = encrypt(JSON.stringify(credentials));
+    const encrypted = await encryptScoped(
+      JSON.stringify(credentials),
+      orgScope(orgPayload.spacesOrgId),
+    );
 
     await this.prisma.orgLLMServiceAccountCredential.upsert({
       where: {

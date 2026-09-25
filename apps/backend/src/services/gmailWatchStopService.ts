@@ -28,7 +28,7 @@ export async function stopGmailWatchBeforeDeactivation(
   }
 
   try {
-    const svc = GoogleService.fromEncryptedCredentials(source.credentials, source.id);
+    const svc = await GoogleService.fromEncryptedCredentials(source.credentials, source.id);
     await svc.stopGmailWatch();
   } catch (err) {
     logger.warn(`${tag} Best-effort Gmail watch stop failed`, {

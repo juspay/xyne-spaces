@@ -25,7 +25,7 @@ import {
   LiteLLMProvisioningError,
   litellmProvisioningClient,
 } from '@/services/litellmProvisioningClient';
-import { decrypt, encrypt } from '@/services/encryptionService';
+import { decryptAsync, encryptScoped, orgScope } from '@/services/encryptionService';
 import { logger } from '@/utils/logger';
 
 interface OrgLiteLLMServiceAccountCredentials {
@@ -336,7 +336,7 @@ class AIProvisioningWorker {
     }
 
     try {
-      const parsed = JSON.parse(decrypt(credential.credentials)) as Partial<OrgLiteLLMServiceAccountCredentials>;
+      const parsed = JSON.parse(await decryptAsync(credential.credentials)) as Partial<OrgLiteLLMServiceAccountCredentials>;
       return typeof parsed.litellmTeamId === 'string' && parsed.litellmTeamId.trim()
         ? parsed.litellmTeamId
         : null;
@@ -547,7 +547,10 @@ class AIProvisioningWorker {
     const now = new Date();
     let encryptedCredentials: string;
     try {
-      encryptedCredentials = encrypt(JSON.stringify(credentials));
+      encryptedCredentials = await encryptScoped(
+        JSON.stringify(credentials),
+        orgScope(orgPayload.spacesOrgId),
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       throw new LiteLLMProvisioningError(

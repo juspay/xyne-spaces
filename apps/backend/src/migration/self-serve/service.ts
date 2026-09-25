@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
 import { WebClient } from '@slack/web-api';
 import { AccessType } from '@xyne/shared';
-import { encrypt } from '@/services/encryptionService';
+import { encryptScoped, workspaceScope } from '@/services/encryptionService';
 import { logger } from '@/utils/logger';
 import { repositories } from '@/database/repositories';
 import { ChannelRepository } from '@/database/repositories/channelRepository';
@@ -73,7 +73,7 @@ export class SlackMigrationService {
 
     const job = this.build(MigrationType.DM, actor, workspaceId, auth.team_id as string, {
       ownerSlackId: auth.user_id as string,
-      encryptedToken: encrypt(token),
+      encryptedToken: await encryptScoped(token, workspaceScope(workspaceId)),
     });
     return this.persistAndQueue(job);
   }
@@ -133,7 +133,7 @@ export class SlackMigrationService {
     }
 
     const job = this.build(MigrationType.CHANNEL, actor, actor.workspaceId, auth.team_id as string, {
-      encryptedToken: encrypt(token),
+      encryptedToken: await encryptScoped(token, workspaceScope(actor.workspaceId)),
       channelInput: input,
       slackChannelName,
       xyneChannelName: xyneChannel.name,

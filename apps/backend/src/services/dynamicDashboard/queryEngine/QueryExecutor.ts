@@ -9,7 +9,7 @@ import { repositories } from '@/database/repositories';
 import { logger } from '@/utils/logger';
 import { createConnector } from '../dataSource/connectors/ConnectorFactory';
 import type { ConnectionConfig } from '../dataSource/connectors/types';
-import { decrypt } from '@/services/encryptionService';
+import { decryptAsync } from '@/services/encryptionService';
 import { queryCache } from '@/services/queryCache';
 import { JoinResolutionError, resolveJoinedTablesMetadata } from './joinResolver';
 import { compileQueryPlan as compilePg } from './compilers/postgres';
@@ -185,7 +185,7 @@ export class QueryExecutor {
       throw e;
     }
 
-    const credsJson = decrypt(dataSource.credentials);
+    const credsJson = await decryptAsync(dataSource.credentials);
     const config: ConnectionConfig = JSON.parse(credsJson);
 
     const cacheInputs = {

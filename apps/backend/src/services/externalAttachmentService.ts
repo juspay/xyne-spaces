@@ -2,7 +2,7 @@ import { storageService, getStorageService } from './storage/index';
 import { decryptStream } from '../migration/self-serve/migrationCrypto';
 import { logger } from '../utils/logger';
 import { ExternalSourceRepository } from '../database/repositories/externalSourceRepository';
-import { decrypt } from './encryptionService';
+import { decryptAsync } from './encryptionService';
 import fetch from 'node-fetch';
 import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
@@ -182,7 +182,7 @@ export class ExternalAttachmentService {
         if (options.overrideToken) {
           authHeaders = this.getAuthHandler(source.sourceType).getHeaders({ botToken: options.overrideToken });
         } else {
-          const credentials = JSON.parse(decrypt(source.credentials));
+          const credentials = JSON.parse(await decryptAsync(source.credentials));
           authHeaders = this.getAuthHandler(source.sourceType).getHeaders(credentials);
         }
       } catch (error) {

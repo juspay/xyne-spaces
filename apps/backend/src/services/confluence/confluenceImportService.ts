@@ -20,7 +20,7 @@ import { sanitizeProjectCode,
   MessageDirection, ChannelRole, ChannelScopeType, ChannelVisibility } from '@xyne/shared';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
-import { encrypt } from '@/services/encryptionService';
+import { encryptScoped, workspaceScope } from '@/services/encryptionService';
 import { ConfluenceClient, type ConfluenceContentRestrictions, type ConfluencePage } from './confluenceClient';
 import { resolveConfluenceCanvasVisibility, type ConfluenceRestrictionDecision } from './contentRestrictions';
 import {
@@ -586,11 +586,11 @@ export class ConfluenceImportService {
     target: ResolvedImportTarget,
   ): Promise<string> {
     const sourceName = `confluence-${input.spaceKey}-${target.projectId}`.toLowerCase();
-    const credentials = encrypt(JSON.stringify({
+    const credentials = await encryptScoped(JSON.stringify({
       baseUrl: this.client.getBaseUrl(),
       spaceKey: input.spaceKey,
       projectId: target.projectId,
-    }));
+    }), workspaceScope(target.workspaceId));
 
     const existingSource = await db.externalSource.findUnique({
       where: { name: sourceName },

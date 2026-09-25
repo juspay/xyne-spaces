@@ -2,7 +2,7 @@ import { InstalledAppsRepository } from '@/database/repositories/installedAppsRe
 import { isValidUrl } from '@/utils/urlUtils';
 import { BaseAppEvent } from '@/apps/types';
 import { logger } from '@/utils/logger';
-import { decrypt } from '@/services/encryptionService';
+import { decryptAsync } from '@/services/encryptionService';
 import { prepareAppWebhookDispatch } from './appUrlResolver';
 import { safeWebhookFetch } from '@/utils/ssrfGuard';
 import crypto from 'crypto';
@@ -99,7 +99,7 @@ export async function handleEventSubscriptionsForUsers(
                 logger.warn(`App has no signing secret; skipping webhook`, { userId: app.userId });
                 return { success: false, userId: app.userId, webhookUrl: app.webhookUrl };
             }
-            const decryptedSigningSecret = decrypt(secretEnc);
+            const decryptedSigningSecret = await decryptAsync(secretEnc);
             await sendWebhookNotification(app.webhookUrl!, event, decryptedSigningSecret);
             return { success: true, userId: app.userId, webhookUrl: app.webhookUrl };
         } catch (error) {

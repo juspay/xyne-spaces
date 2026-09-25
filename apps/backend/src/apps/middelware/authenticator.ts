@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { logger } from '@/utils/logger';
-import { decrypt } from '@/services/encryptionService';
+import { decryptAsync } from '@/services/encryptionService';
 import { repositories } from '@/database/repositories';
 import jwt from 'jsonwebtoken';
 
@@ -73,7 +73,7 @@ export async function authenticateApp(
       sendError(res, 401);
       return;
     }
-    const signingSecret = decrypt(app.signingSecret);
+    const signingSecret = await decryptAsync(app.signingSecret);
 
     let verified: unknown;
     try {

@@ -2,7 +2,7 @@ import { google, type androidpublisher_v3 } from 'googleapis';
 import { CodeChallengeMethod } from 'google-auth-library';
 import type { ExternalSource } from '@prisma/client';
 import { db } from '@/database/client';
-import { decrypt, encrypt } from '@/services/encryptionService';
+import { decryptAsync, encryptScoped, workspaceScope } from '@/services/encryptionService';
 import { GOOGLE_PLAY_SCOPE } from './constants';
 
 const GOOGLE_PLAY_REQUEST_TIMEOUT_MS = 2 * 60 * 1000;
@@ -115,7 +115,7 @@ export class GooglePlayClient {
     source: ExternalSource,
     modifiedAfter?: Date
   ): Promise<NormalizedGooglePlayReview[]> {
-    const credentials = JSON.parse(decrypt(source.credentials)) as GooglePlayCredentials;
+    const credentials = JSON.parse(await decryptAsync(source.credentials)) as GooglePlayCredentials;
     const auth = this.createOAuthClient(credentials);
     auth.on('tokens', (tokens) => {
       if (!tokens.access_token && !tokens.expiry_date) return;
@@ -125,14 +125,17 @@ export class GooglePlayClient {
         ...(tokens.refresh_token && { refreshToken: tokens.refresh_token }),
         ...(tokens.expiry_date && { expiryDate: tokens.expiry_date }),
       };
-      void db.externalSource
-        .update({
-          where: { id: source.id },
-          data: { credentials: encrypt(JSON.stringify(next)) },
-        })
-        .catch(() => {
+      void (async () => {
+        try {
+          const credentials = await encryptScoped(
+            JSON.stringify(next),
+            workspaceScope(source.workspaceId),
+          );
+          await db.externalSource.update({ where: { id: source.id }, data: { credentials } });
+        } catch {
           // The refresh token remains valid, so a later request can refresh again.
-        });
+        }
+      })();
     });
 
     const publisher = google.androidpublisher({ version: 'v3', auth });
@@ -204,7 +207,7 @@ export class GooglePlayClient {
 
   async reply(sourceId: string, reviewId: string, body: string): Promise<Date> {
     const source = await db.externalSource.findUniqueOrThrow({ where: { id: sourceId } });
-    const credentials = JSON.parse(decrypt(source.credentials)) as GooglePlayCredentials;
+    const credentials = JSON.parse(await decryptAsync(source.credentials)) as GooglePlayCredentials;
     const publisher = google.androidpublisher({
       version: 'v3',
       auth: this.createOAuthClient(credentials),

@@ -107,7 +107,7 @@ export class MigrationWorkers {
   private async collect(job: MigrationJob): Promise<void> {
     // Idempotency: a duplicate/stale delivery must not reprocess past collection (re-collecting after the token was dropped fails it).
     if ([MigrationStatus.AWAITING_APPROVAL, MigrationStatus.INGESTING, MigrationStatus.COMPLETED].includes(job.status)) return;
-    const token = this.engine.decryptToken(job);
+    const token = await this.engine.decryptToken(job);
     await this.store.update(job.id, { status: MigrationStatus.COLLECTING });
     logger.info('[SlackMigration] collection started', { id: job.id, type: job.type });
 
@@ -201,7 +201,7 @@ export class MigrationWorkers {
   private async refresh(job: MigrationJob): Promise<void> {
     if (![MigrationStatus.AWAITING_APPROVAL, MigrationStatus.REFRESHING].includes(job.status)) return;
     let token: string;
-    try { token = this.engine.decryptToken(job); }
+    try { token = await this.engine.decryptToken(job); }
     catch { await this.store.update(job.id, { status: MigrationStatus.AWAITING_APPROVAL, refreshRequested: false, error: 'Refresh needs the Slack token, which is no longer available. Re-submit to migrate newer messages.' }); return; }
     // Keep refreshRequested set through the run so an orphaned refresh (pod died) is re-dispatched as a refresh, not a collect.
     await this.store.update(job.id, { status: MigrationStatus.REFRESHING });

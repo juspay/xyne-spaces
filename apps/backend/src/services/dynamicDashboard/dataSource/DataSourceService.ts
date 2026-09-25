@@ -1,6 +1,6 @@
 import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
-import { encrypt } from '@/services/encryptionService';
+import { encryptScoped, workspaceScope } from '@/services/encryptionService';
 import type { DataSource } from '@/types/database';
 import { logger } from '@/utils/logger';
 import { dataSourceIngestQueue } from '@/queues/dataSourceIngestQueue';
@@ -210,7 +210,7 @@ export class DataSourceService {
     }
 
     const plaintext = JSON.stringify(input.connectionConfig);
-    const ciphertext = encrypt(plaintext);
+    const ciphertext = await encryptScoped(plaintext, workspaceScope(input.workspaceId));
 
     const dataSource = await db.$transaction(async (tx) => {
       const created = await tx.dataSource.create({

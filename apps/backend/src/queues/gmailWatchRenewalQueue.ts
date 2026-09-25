@@ -46,7 +46,7 @@ async function renewSource(source: {
   credentials: string;
 }): Promise<RenewResult> {
   try {
-    const svc = GoogleService.fromEncryptedCredentials(source.credentials, source.id);
+    const svc = await GoogleService.fromEncryptedCredentials(source.credentials, source.id);
     const result = await svc.renewGmailWatch();
     logger.info(`${TAG} renewed`, {
       sourceName: source.name,

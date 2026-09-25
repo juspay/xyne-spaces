@@ -6,7 +6,7 @@
 import { DatabaseClient } from '../client';
 import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
 import { buildChannelAppSourceName, resolveAppDeskInstalledAppId } from '@/integrations/core/deskSources';
-import { encrypt, decrypt } from '@/services/encryptionService';
+import { decrypt, encrypt, encryptScoped, workspaceScope } from '@/services/encryptionService';
 import { logger } from '@/utils/logger';
 import type { ExternalSource } from '@prisma/client';
 
@@ -307,7 +307,10 @@ export class ExternalSourceRepository {
       displayName,
       channelId,
       externalIdentifier: installedAppId,
-      credentials: encrypt(JSON.stringify({ installedAppId })),
+      credentials: await encryptScoped(
+        JSON.stringify({ installedAppId }),
+        workspaceScope(workspaceId),
+      ),
       isActive: true,
       workspaceId,
     });

@@ -5,7 +5,7 @@ import { Prisma } from '@prisma/client';
 import { repositories } from '@/database/repositories';
 import { runAsServiceActor } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
-import { encrypt, decrypt } from '@/services/encryptionService';
+import { decryptAsync, encryptScoped, workspaceScope } from '@/services/encryptionService';
 import { findOrCreateConversation } from '../core/conversationUtils';
 import { createTicketWithConversation } from '../core/ticketutils';
 import { SlackBlockKitParser } from '@/integrations/adapters/slack-webhook-tickets/utils/slackBlockKitParser';
@@ -216,7 +216,7 @@ class IncomingWebhookController {
 
     for (const webhook of activeWebhooks) {
       try {
-        const decryptedSecret = decrypt(webhook.secret);
+        const decryptedSecret = await decryptAsync(webhook.secret);
         const storedBuffer = Buffer.from(decryptedSecret, 'utf8');
         if (
           storedBuffer.length === secretBuffer.length &&
@@ -711,7 +711,7 @@ class IncomingWebhookController {
       }
 
       const rawSecret = crypto.randomBytes(32).toString('hex');
-      const encryptedSecret = encrypt(rawSecret);
+      const encryptedSecret = await encryptScoped(rawSecret, workspaceScope(workspaceId));
 
       const webhook = await repositories.incomingWebhooks.create({
         installedAppId,
@@ -803,11 +803,11 @@ class IncomingWebhookController {
       const botUser = await repositories.users.findById(installedApp.userId) as
         (Awaited<ReturnType<typeof repositories.users.findById>> & { workspaceId?: string }) | null;
 
-      const result = webhooks.map(webhook => {
+      const result = await Promise.all(webhooks.map(async webhook => {
         let webhookUrl = '';
         if (webhook.isActive) {
           try {
-            const rawSecret = decrypt(webhook.secret);
+            const rawSecret = await decryptAsync(webhook.secret);
             const webhookType =
               (webhook.type as IncomingWebhookType | undefined) ?? AppIncomingWebhookType.SLACK;
             webhookUrl = this.buildIncomingWebhookUrl(
@@ -842,7 +842,7 @@ class IncomingWebhookController {
           createdAt: webhook.createdAt,
           webhookUrl,
         };
-      });
+      }));
 
       res.status(200).json({ webhooks: result, total, limit, offset });
     } catch (error) {

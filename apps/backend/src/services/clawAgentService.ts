@@ -11,7 +11,7 @@ import type { Response } from 'express';
 import { randomUUID } from 'crypto';
 import { sendWebhookNotification, signWebhookPayload } from '@/apps/core/eventSubscriptionUtils';
 import { BaseAppEvent, AppEventType } from '@/apps/types';
-import { decrypt } from '@/services/encryptionService';
+import { decryptAsync } from '@/services/encryptionService';
 import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
 import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
 import { Agent } from 'undici';
@@ -1573,7 +1573,7 @@ async function dispatchClawAgent(
     ...(req.sdlcContext ? { sdlcContext: req.sdlcContext } : {}),
     ...(req.allowWriteInReadOnlyJob ? { allowWriteInReadOnlyJob: true } : {}),
   });
-  const signature = signWebhookPayload(body, decrypt(app.signingSecret));
+  const signature = signWebhookPayload(body, await decryptAsync(app.signingSecret));
   let res: globalThis.Response;
   try {
     res = await fetch(url, {
@@ -1745,7 +1745,7 @@ export async function runClawAgent(req: AppMentionAgentRequest): Promise<{ dispa
     },
     timestamp: new Date().toISOString(),
   };
-  await sendWebhookNotification(installedApp.webhookUrl, event, decrypt(signingSecretEnc));
+  await sendWebhookNotification(installedApp.webhookUrl, event, await decryptAsync(signingSecretEnc));
   return { dispatched: true };
 }
 

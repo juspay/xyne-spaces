@@ -11,7 +11,7 @@
 
 import { google } from 'googleapis';
 import { repositories } from '@/database/repositories';
-import { decrypt, encrypt } from '@/services/encryptionService';
+import { decryptAsync, encryptScoped, workspaceScope } from '@/services/encryptionService';
 import { logger } from '@/utils/logger';
 
 export const DRIVE_SOURCE_TYPE = 'google-drive';
@@ -59,7 +59,7 @@ export async function persistDriveOAuthCredentials(params: {
     DRIVE_SOURCE_TYPE,
   );
   const existingCreds: DriveCredentials | null = existing
-    ? (JSON.parse(decrypt(existing.credentials)) as DriveCredentials)
+    ? (JSON.parse(await decryptAsync(existing.credentials)) as DriveCredentials)
     : null;
 
   const refreshToken = params.refreshToken ?? existingCreds?.refreshToken;
@@ -67,12 +67,13 @@ export async function persistDriveOAuthCredentials(params: {
     throw new Error('Google did not return a Drive refresh token');
   }
 
-  const credentials = encrypt(
+  const credentials = await encryptScoped(
     JSON.stringify({
       accessToken: params.accessToken,
       refreshToken,
       email: params.email,
     } satisfies DriveCredentials),
+    workspaceScope(params.workspaceId),
   );
 
   if (existing) {
@@ -108,7 +109,7 @@ export async function getDriveAccessToken(userId: string): Promise<string | null
   );
   if (!source) return null;
 
-  const credentials = JSON.parse(decrypt(source.credentials)) as DriveCredentials;
+  const credentials = JSON.parse(await decryptAsync(source.credentials)) as DriveCredentials;
   if (!credentials.refreshToken) return null;
 
   const client = new google.auth.OAuth2(
@@ -149,7 +150,10 @@ export async function getDriveAccessToken(userId: string): Promise<string | null
   if (!accessToken) return null;
 
   await repositories.externalSources.update(source.id, {
-    credentials: encrypt(JSON.stringify({ ...credentials, accessToken } satisfies DriveCredentials)),
+    credentials: await encryptScoped(
+      JSON.stringify({ ...credentials, accessToken } satisfies DriveCredentials),
+      workspaceScope(source.workspaceId),
+    ),
   });
   return accessToken;
 }

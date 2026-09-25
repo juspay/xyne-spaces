@@ -4,7 +4,7 @@ import { vespaQueue } from '@/queues/vespaQueue';
 import { appSchema } from '@/vespa/src/types';
 import { logger } from '@/utils/logger';
 import crypto from 'crypto';
-import { encrypt } from '@/services/encryptionService';
+import { encryptScoped, workspaceScope } from '@/services/encryptionService';
 
 export interface CreateAppInput {
   name: string;
@@ -66,7 +66,10 @@ export class AppsRepository extends BaseRepository<
       workspaceId: creator.workspaceId,
       scope: "ORG",
       version: 1,
-      signingSecret: await encrypt(crypto.randomBytes(32).toString('hex')),
+      signingSecret: await encryptScoped(
+        crypto.randomBytes(32).toString('hex'),
+        workspaceScope(creator.workspaceId),
+      ),
       createdAt: now,
       updatedAt: now,
     };

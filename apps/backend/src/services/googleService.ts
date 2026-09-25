@@ -8,7 +8,7 @@ import { google, gmail_v1 } from 'googleapis';
 import { DeskType } from '@xyne/shared';
 import { OAuth2Client } from 'google-auth-library';
 import { PubSub } from '@google-cloud/pubsub';
-import { decrypt, encrypt } from './encryptionService';
+import { decryptAsync, encryptScoped, workspaceScope } from './encryptionService';
 import { logger } from '@/utils/logger';
 import {
   GmailMessageData,
@@ -110,6 +110,24 @@ interface MimeOptions {
   }>;
 }
 
+/**
+ * Token-refresh handlers are handed only a source id, so the tenant is read back
+ * off the row before re-encrypting under that workspace's key. Refreshes are
+ * infrequent, so the extra lookup is cheaper than threading the workspace through
+ * every OAuth client construction.
+ */
+async function encryptCredentialsForSource(
+  repo: ExternalSourceRepository,
+  sourceId: string,
+  credentials: GoogleCredentials,
+): Promise<string> {
+  const source = await repo.findById(sourceId);
+  if (!source) {
+    throw new Error(`External source ${sourceId} not found while re-encrypting Google credentials`);
+  }
+  return encryptScoped(JSON.stringify(credentials), workspaceScope(source.workspaceId));
+}
+
 // ─── Service ────────────────────────────────────────────────────────────────
 
 export class GoogleService {
@@ -128,7 +146,7 @@ export class GoogleService {
           if (tokens.access_token) this.credentials.accessToken = tokens.access_token;
           if (tokens.refresh_token) this.credentials.refreshToken = tokens.refresh_token;
           await externalSourceRepo.update(sourceId, {
-            credentials: encrypt(JSON.stringify(this.credentials)),
+            credentials: await encryptCredentialsForSource(externalSourceRepo, sourceId, this.credentials),
           });
           logger.info(`${TAG} Google tokens refreshed and persisted (instance)`, { sourceId });
         } catch (error) {
@@ -140,8 +158,8 @@ export class GoogleService {
     this.gmail = google.gmail({ version: 'v1', auth: this.oauth2Client as any });
   }
 
-  static fromEncryptedCredentials(encryptedCredentials: string, sourceId: string): GoogleService {
-    const credentials = JSON.parse(decrypt(encryptedCredentials)) as GoogleCredentials;
+  static async fromEncryptedCredentials(encryptedCredentials: string, sourceId: string): Promise<GoogleService> {
+    const credentials = JSON.parse(await decryptAsync(encryptedCredentials)) as GoogleCredentials;
     return new GoogleService(credentials, sourceId);
   }
 
@@ -530,6 +548,7 @@ export class GoogleService {
     emailAddress: string;
     accessToken: string;
     refreshToken: string;
+    workspaceId: string;
     sourceName?: string;
   }): Promise<{
     sourceName: string;
@@ -541,7 +560,10 @@ export class GoogleService {
     const { emailAddress, accessToken, refreshToken } = params;
     const sourceName = params.sourceName || GoogleService.getSourceName(emailAddress);
     const credentials: GoogleCredentials = { accessToken, refreshToken, email: emailAddress };
-    const encryptedCredentials = encrypt(JSON.stringify(credentials));
+    const encryptedCredentials = await encryptScoped(
+      JSON.stringify(credentials),
+      workspaceScope(params.workspaceId),
+    );
 
     const watchResult = await new GoogleService(credentials).setupGmailWatch();
     const webhookUrl = GoogleService.generateWebhookUrl();
@@ -555,8 +577,14 @@ export class GoogleService {
 
     const sourceName = GoogleService.getSourceName(emailAddress);
     const channel = await new ChannelRepository().findById(channelId);
+    if (!channel) {
+      throw new Error(`Channel ${channelId} not found while setting up the Google external source`);
+    }
     const credentials: GoogleCredentials = { accessToken, refreshToken, email: emailAddress };
-    const encryptedCredentials = encrypt(JSON.stringify(credentials));
+    const encryptedCredentials = await encryptScoped(
+      JSON.stringify(credentials),
+      workspaceScope(channel.workspaceId),
+    );
 
     const watchResult = await new GoogleService(credentials).setupGmailWatch();
 
@@ -741,9 +769,8 @@ export class GoogleService {
       }
 
       try {
-        const historyId = await GoogleService.fromEncryptedCredentials(
-          source.credentials,
-          source.id,
+        const historyId = await (
+          await GoogleService.fromEncryptedCredentials(source.credentials, source.id)
         ).getCurrentHistoryId();
 
         if (!historyId) {
@@ -876,7 +903,7 @@ export class GoogleService {
     encryptedCredentials: string,
     sourceId: string,
   ): Promise<Array<{ name: string | null; email: string }>> {
-    const credentials = JSON.parse(decrypt(encryptedCredentials)) as GoogleCredentials;
+    const credentials = JSON.parse(await decryptAsync(encryptedCredentials)) as GoogleCredentials;
     const externalSourceRepo = new ExternalSourceRepository();
     const oauth2Client = GoogleService.createOAuth2Client(credentials);
     oauth2Client.on('tokens', async tokens => {
@@ -884,7 +911,7 @@ export class GoogleService {
         if (tokens.access_token) credentials.accessToken = tokens.access_token;
         if (tokens.refresh_token) credentials.refreshToken = tokens.refresh_token;
         await externalSourceRepo.update(sourceId, {
-          credentials: encrypt(JSON.stringify(credentials)),
+          credentials: await encryptCredentialsForSource(externalSourceRepo, sourceId, credentials),
         });
       } catch (error) {
         logger.warn(`${TAG} Failed to persist refreshed Google tokens`, error);
@@ -973,8 +1000,8 @@ export class GoogleService {
    * The googleapis OAuth2 client auto-refreshes expired access tokens via the
    * refresh token; the 'tokens' listener persists new tokens back to ExternalSource.
    */
-  static createEmailSender(encryptedCredentials: string, sourceId: string) {
-    const credentials = JSON.parse(decrypt(encryptedCredentials)) as GoogleCredentials;
+  static async createEmailSender(encryptedCredentials: string, sourceId: string) {
+    const credentials = JSON.parse(await decryptAsync(encryptedCredentials)) as GoogleCredentials;
     const externalSourceRepo = new ExternalSourceRepository();
 
     const oauth2Client = GoogleService.createOAuth2Client(credentials);
@@ -983,7 +1010,7 @@ export class GoogleService {
         if (tokens.access_token) credentials.accessToken = tokens.access_token;
         if (tokens.refresh_token) credentials.refreshToken = tokens.refresh_token;
         await externalSourceRepo.update(sourceId, {
-          credentials: encrypt(JSON.stringify(credentials)),
+          credentials: await encryptCredentialsForSource(externalSourceRepo, sourceId, credentials),
         });
         logger.info(`${TAG} Google tokens refreshed and persisted`, { sourceId });
       } catch (error) {

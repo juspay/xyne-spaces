@@ -35,7 +35,7 @@ export class GoogleFlow extends BaseFlow {
         return [{ __skipIngestion: true, __skipReason: 'no-credentials' }];
       }
 
-      const googleService = GoogleService.fromEncryptedCredentials(source.credentials, source.id);
+      const googleService = await GoogleService.fromEncryptedCredentials(source.credentials, source.id);
 
       // Resume from the persisted cursor, not the push's own historyId — self-heals anything an earlier push missed.
       const startHistoryId = source.lastSyncCursor ?? pubsubData.historyId;

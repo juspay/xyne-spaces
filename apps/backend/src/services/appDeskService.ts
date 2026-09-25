@@ -13,7 +13,7 @@ import { ConversationRepository } from '@/database/repositories/conversationRepo
 import { EmailRepository } from '@/database/repositories/emailRepository';
 import { ExternalMessageRepository } from '@/database/repositories/externalMessageRepository';
 import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
-import { decrypt } from '@/services/encryptionService';
+import { decryptAsync } from '@/services/encryptionService';
 import { syncTicketEmailCount } from '@/database/syncTicketEmailCount';
 import { resolveAppDeskInstalledAppId, scopeExternalMessageIdToSource } from '@/integrations/core/deskSources';
 import { dispatchEmailEventForEmailId } from '@/apps/core/emailUtils';
@@ -141,7 +141,7 @@ class AppDeskService {
     });
 
     const ack = outboundConfigured
-      ? await sendWebhookNotification(installedApp.webhookUrl!, event, decrypt(signingSecret!))
+      ? await sendWebhookNotification(installedApp.webhookUrl!, event, await decryptAsync(signingSecret!))
       : null;
 
     const ackExternalId =

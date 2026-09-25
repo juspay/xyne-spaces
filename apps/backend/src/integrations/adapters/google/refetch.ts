@@ -41,7 +41,7 @@ export class GoogleRefetch extends BaseRefetch {
       throw new Error(`[GoogleRefetch] source ${source.name} has no channel to ingest into`);
     }
 
-    const google = GoogleService.fromEncryptedCredentials(source.credentials, source.id);
+    const google = await GoogleService.fromEncryptedCredentials(source.credentials, source.id);
     const preference = await preferenceRepo.findByChannelId(ingestChannelId);
     const userId = preference?.ownerUserId ?? source.displayName;
     const dlAddresses = options.dlEmail
@@ -271,7 +271,7 @@ export async function catchUpFromCursor(
   adapter: ExternalSourceAdapter,
   startHistoryId: string,
 ): Promise<RefetchResult> {
-  const google = GoogleService.fromEncryptedCredentials(source.credentials, source.id);
+  const google = await GoogleService.fromEncryptedCredentials(source.credentials, source.id);
   const { messages, historyId } = await google.listMessageRefsFromHistory(startHistoryId);
   const existing = await externalMessageRepo.findByExternalIds(
     source.id,

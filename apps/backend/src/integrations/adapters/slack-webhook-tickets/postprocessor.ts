@@ -7,7 +7,7 @@ import { PostprocessContext } from '../../core/types';
 import { ConversationRepository } from '../../../database/repositories/conversationRepository';
 import { ExternalSourceRepository } from '../../../database/repositories/externalSourceRepository';
 import { logger } from '../../../utils/logger';
-import { decrypt } from '../../../services/encryptionService';
+import { decryptAsync } from '../../../services/encryptionService';
 import { botProcessor } from '../../../services/bots/botProcessor';
 
 export class SlackPostprocessor extends BasePostprocessor {
@@ -37,7 +37,7 @@ export class SlackPostprocessor extends BasePostprocessor {
         return;
       }
 
-      const ticketOwnerId = this.getTicketOwnerId(source);
+      const ticketOwnerId = await this.getTicketOwnerId(source);
       const timestamp = new Date().toISOString().slice(0, 19).replace('T', ' ');
       const contentPreview = context.normalizedData.content.substring(0, 40) || 'Untitled';
       const title = `Alert: ${contentPreview} [${timestamp}]`;
@@ -79,7 +79,7 @@ export class SlackPostprocessor extends BasePostprocessor {
     xyneChannelId: string
   ): Promise<void> {
     try {
-      const decryptedCreds = decrypt(source.credentials);
+      const decryptedCreds = await decryptAsync(source.credentials);
       const creds = JSON.parse(decryptedCreds);
 
       if (!creds.botOauthToken) {
@@ -125,8 +125,8 @@ export class SlackPostprocessor extends BasePostprocessor {
   /**
    * Get ticket owner ID from Slack integration credentials
    */
-  private getTicketOwnerId(source: any): string {
-    const decryptedCreds = decrypt(source.credentials);
+  private async getTicketOwnerId(source: any): Promise<string> {
+    const decryptedCreds = await decryptAsync(source.credentials);
     const creds = JSON.parse(decryptedCreds);
 
     if (!creds.ticketOwnerId) {

@@ -11,7 +11,7 @@ import { DatabaseClient } from '@/database/client';
 import { ConversationRepository } from '@/database/repositories/conversationRepository';
 import { EmailRepository } from '@/database/repositories/emailRepository';
 import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
-import { decrypt } from '@/services/encryptionService';
+import { decryptAsync } from '@/services/encryptionService';
 import { syncTicketEmailCount } from '@/database/syncTicketEmailCount';
 import { extractSlackChannelId } from '@/integrations/core/deskSources';
 import { dispatchEmailEventForEmailId } from '@/apps/core/emailUtils';
@@ -53,7 +53,7 @@ class SlackDeskService {
     if (!threadTs) throw new Error(`No thread_ts found for conversation ${conversationId}`);
 
     // 2. Get Slack channel ID and bot token from credentials
-    const decryptedCreds = decrypt(externalSource.credentials);
+    const decryptedCreds = await decryptAsync(externalSource.credentials);
     const creds = JSON.parse(decryptedCreds) as { botOauthToken?: string; signingSecret?: string };
     if (!creds.botOauthToken) {
       throw new Error('No botOauthToken in ExternalSource credentials');
@@ -73,7 +73,7 @@ class SlackDeskService {
       where: { userId_provider: { userId, provider: 'slack' } },
     });
     if (userExternalToken) {
-      authToken = decrypt(userExternalToken.encryptedToken);
+      authToken = await decryptAsync(userExternalToken.encryptedToken);
       const user = await this.prisma.user.findUnique({
         where: { id: userId },
         select: { name: true, email: true },

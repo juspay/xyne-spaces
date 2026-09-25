@@ -12,7 +12,7 @@ import {
  */
 export class GoogleMailReplySender extends BaseMailReplySender {
   async sendReply(ctx: MailReplyContext): Promise<MailReplyResult> {
-    const sender = GoogleService.createEmailSender(ctx.encryptedCredentials, ctx.sourceId);
+    const sender = await GoogleService.createEmailSender(ctx.encryptedCredentials, ctx.sourceId);
     return sender.replyToConversation({
       content: ctx.body,
       subject: ctx.subject,
@@ -27,7 +27,7 @@ export class GoogleMailReplySender extends BaseMailReplySender {
   }
 
   async sendNew(ctx: NewMailContext): Promise<MailReplyResult> {
-    const sender = GoogleService.createEmailSender(ctx.encryptedCredentials, ctx.sourceId);
+    const sender = await GoogleService.createEmailSender(ctx.encryptedCredentials, ctx.sourceId);
     const { messageId, threadId } = await sender.sendNewEmail({
       subject: ctx.subject,
       content: ctx.body,

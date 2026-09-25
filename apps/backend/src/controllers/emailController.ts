@@ -318,7 +318,7 @@ export class EmailController {
           ...(fileAttachments.length > 0 && { attachments: fileAttachments }),
         });
       } else if (externalSource.sourceType === ExternalSourcePlatform.GOOGLE) {
-        const sender = GoogleService.createEmailSender(
+        const sender = await GoogleService.createEmailSender(
           externalSource.credentials,
           externalSource.id
         );
@@ -346,7 +346,7 @@ export class EmailController {
         const ticketId = initialEmail.externalThreadId;
         const sourceId = externalSource.id;
 
-        const zohoService = ZohoService.fromEncryptedCredentials(
+        const zohoService = await ZohoService.fromEncryptedCredentials(
           externalSource.credentials,
           sourceId
         );

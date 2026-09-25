@@ -48,7 +48,7 @@ export class GmailWatchProvider extends BaseWatchProvider {
     name: string;
     credentials: string;
   }): Promise<WatchResult> {
-    const googleService = GoogleService.fromEncryptedCredentials(
+    const googleService = await GoogleService.fromEncryptedCredentials(
       source.credentials,
       source.id
     );

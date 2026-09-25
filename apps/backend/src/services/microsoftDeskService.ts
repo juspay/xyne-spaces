@@ -9,7 +9,7 @@ import { EmailMergeMode, DeskType, ChannelRole, ChannelScopeType, ChannelType } 
 import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
 import { AuthorizationCode } from 'simple-oauth2';
 import { logger } from '../utils/logger';
-import { decrypt, encrypt } from './encryptionService';
+import { decryptAsync, encryptScoped, workspaceScope } from './encryptionService';
 import { redisService } from './redisService';
 import { db } from '../database/client';
 import { config } from '../config/env';
@@ -212,13 +212,17 @@ export class MicrosoftDeskService {
 
   // ─── Webhook ───
 
-  private prepareCredentials(
+  private async prepareCredentials(
     credentials: { accessToken: string; refreshToken?: string; email: string; expiresAt?: string; clientState?: string },
-  ): { encryptedCredentials: string; clientState: string } {
+    workspaceId: string,
+  ): Promise<{ encryptedCredentials: string; clientState: string }> {
     const clientState = credentials.clientState || crypto.randomBytes(16).toString('hex');
     const signedCredentials = { ...credentials, clientState };
     return {
-      encryptedCredentials: encrypt(JSON.stringify(signedCredentials)),
+      encryptedCredentials: await encryptScoped(
+        JSON.stringify(signedCredentials),
+        workspaceScope(workspaceId),
+      ),
       clientState,
     };
   }
@@ -272,7 +276,7 @@ export class MicrosoftDeskService {
   ): Promise<{ channelId: string }> {
     const safeEmail = credentials.email.replace('@', '--');
     const sourceName = `microsoft-${safeEmail}`;
-    const { encryptedCredentials, clientState } = this.prepareCredentials(credentials);
+    const { encryptedCredentials, clientState } = await this.prepareCredentials(credentials, channelData.workspaceId);
     const webhookUrl = `${publicUrl}/api/external-source-sync/${sourceName}/ingest`;
 
     // If this Microsoft account is already connected, update credentials and reuse the channel
@@ -443,7 +447,7 @@ export class MicrosoftDeskService {
   ): Promise<{ sourceName: string }> {
     const safeEmail = credentials.email.replace('@', '--');
     const sourceName = `microsoft-${safeEmail}`;
-    const { encryptedCredentials, clientState } = this.prepareCredentials(credentials);
+    const { encryptedCredentials, clientState } = await this.prepareCredentials(credentials, channelData.workspaceId);
     const webhookUrl = `${publicUrl}/api/external-source-sync/${sourceName}/ingest`;
 
     const existingByName = await db.externalSource.findUnique({ where: { name: sourceName } });
@@ -506,7 +510,7 @@ export class MicrosoftDeskService {
   ): Promise<{ sourceName: string }> {
     const safeEmail = credentials.email.replace('@', '--');
     const sourceName = `microsoft-channel-email-${safeEmail}`;
-    const { encryptedCredentials, clientState } = this.prepareCredentials(credentials);
+    const { encryptedCredentials, clientState } = await this.prepareCredentials(credentials, channelData.workspaceId);
     const webhookUrl = `${publicUrl}/api/external-source-sync/${sourceName}/ingest`;
     const existingByName = await db.externalSource.findUnique({ where: { name: sourceName } });
 
@@ -571,7 +575,7 @@ export class MicrosoftDeskService {
    * Used by webhook preprocessing, email sending, and manual reload.
    */
   static async getValidAccessToken(encryptedCredentials: string, sourceId: string): Promise<string> {
-    const credentials = JSON.parse(decrypt(encryptedCredentials)) as MicrosoftCredentials;
+    const credentials = JSON.parse(await decryptAsync(encryptedCredentials)) as MicrosoftCredentials;
     const externalSourceRepo = new ExternalSourceRepository();
 
     // Check if token is still valid (with 5 min buffer)
@@ -630,8 +634,17 @@ export class MicrosoftDeskService {
 
     // Persist updated tokens to DB
     try {
+      // Only the source id is in hand here, so read the tenant back off the row
+      // before re-encrypting under that workspace's key.
+      const source = await externalSourceRepo.findById(sourceId);
+      if (!source) {
+        throw new Error(`External source ${sourceId} not found while persisting refreshed tokens`);
+      }
       await externalSourceRepo.update(sourceId, {
-        credentials: encrypt(JSON.stringify(credentials)),
+        credentials: await encryptScoped(
+          JSON.stringify(credentials),
+          workspaceScope(source.workspaceId),
+        ),
       });
       logger.info('Microsoft tokens refreshed and persisted');
     } catch (error) {

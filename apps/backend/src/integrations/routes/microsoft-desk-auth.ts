@@ -16,7 +16,7 @@ import {
   isChannelEmailWorkspaceData,
   MICROSOFT_OAUTH_SCOPES,
 } from '../../services/microsoftDeskService';
-import { decrypt, encrypt } from '../../services/encryptionService';
+import { decryptAsync, encryptScoped, workspaceScope } from '../../services/encryptionService';
 import { db } from '../../database/client';
 import { emailFetchQueue } from '../../queues/emailFetchQueue';
 import { logger } from '../../utils/logger';
@@ -512,7 +512,7 @@ router.get('/callback', async (req: Request, res: Response) => {
 
       const source = await db.externalSource.findFirst({
         where: { channelId: channelData.channelId },
-        select: { id: true, name: true, credentials: true, isActive: true },
+        select: { id: true, name: true, credentials: true, isActive: true, workspaceId: true },
         orderBy: { createdAt: 'desc' },
       });
       if (!source) {
@@ -531,9 +531,9 @@ router.get('/callback', async (req: Request, res: Response) => {
       const expiresAt = token.expires_at
         ? new Date(token.expires_at as string).toISOString()
         : undefined;
-      const existingCredentials = (() => {
+      const existingCredentials = await (async () => {
         try {
-          return source.credentials ? JSON.parse(decrypt(source.credentials)) as { clientState?: string } : {};
+          return source.credentials ? JSON.parse(await decryptAsync(source.credentials)) as { clientState?: string } : {};
         } catch {
           return {};
         }
@@ -549,7 +549,10 @@ router.get('/callback', async (req: Request, res: Response) => {
       await db.externalSource.update({
         where: { id: source.id },
         data: {
-          credentials: encrypt(JSON.stringify(reconnectCreds)),
+          credentials: await encryptScoped(
+            JSON.stringify(reconnectCreds),
+            workspaceScope(source.workspaceId),
+          ),
           isActive: true,
         },
       });
@@ -645,12 +648,15 @@ router.get('/callback', async (req: Request, res: Response) => {
 
       const sanitizedEmail = email.replace(/[^a-zA-Z0-9._-]/g, '_');
       const sourceName = `microsoft-dl-sync--${sanitizedEmail}--${channelData.channelId.slice(0, 8)}`;
-      const encryptedCredentials = encrypt(JSON.stringify({
-        accessToken,
-        refreshToken: (token.refresh_token as string) ?? undefined,
-        email,
-        expiresAt,
-      }));
+      const encryptedCredentials = await encryptScoped(
+        JSON.stringify({
+          accessToken,
+          refreshToken: (token.refresh_token as string) ?? undefined,
+          email,
+          expiresAt,
+        }),
+        workspaceScope(channelData.workspaceId),
+      );
 
       const tempSource = await db.externalSource.upsert({
         where: { name: sourceName },

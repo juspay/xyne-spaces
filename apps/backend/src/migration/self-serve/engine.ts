@@ -6,7 +6,7 @@ import { WebClient, LogLevel } from '@slack/web-api';
 import { ChannelRole } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
-import { decrypt } from '@/services/encryptionService';
+import { decryptAsync } from '@/services/encryptionService';
 import { getStorageService } from '@/services/storage';
 import { createRedisClient } from '@/services/redisFactory';
 import { runAsServiceActor } from '@/database/tenant/context';
@@ -701,9 +701,9 @@ export class SlackMigrationEngine {
     }
   }
 
-  decryptToken(job: MigrationJob): string {
+  async decryptToken(job: MigrationJob): Promise<string> {
     if (!job.encryptedToken) throw new Error('migration token missing');
-    return decrypt(job.encryptedToken);
+    return decryptAsync(job.encryptedToken);
   }
 
   /** Snapshot path a refresh writes new messages to (base file stays untouched). */

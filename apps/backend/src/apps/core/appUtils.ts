@@ -1,7 +1,7 @@
 import { repositories } from '@/database/repositories';
 import { AuthProvider, UserType, OrgRole } from '@xyne/shared';
 import { logger } from '@/utils/logger';
-import { encrypt, decrypt } from '@/services/encryptionService';
+import { decryptAsync, encryptScoped, workspaceScope } from '@/services/encryptionService';
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import { isValidUrl } from '@/utils/urlUtils';
@@ -87,13 +87,18 @@ export async function installApp(appId: string, workspaceId: string) {
     // first writer sets it and every caller reads back the persisted (winning) value.
     let signingSecretEnc = app.signingSecret;
     if (!signingSecretEnc) {
-      const fresh = await encrypt(crypto.randomBytes(32).toString('hex'));
+      // Scoped to the app's own workspace, not the installing one — the secret
+      // belongs to the app and every workspace that installs it reads this value.
+      const fresh = await encryptScoped(
+        crypto.randomBytes(32).toString('hex'),
+        workspaceScope(app.workspaceId),
+      );
       const rows = await db.$queryRaw<{ signingSecret: string | null }[]>`
         UPDATE apps SET "signingSecret" = COALESCE("signingSecret", ${fresh})
         WHERE id = ${appId} RETURNING "signingSecret"`;
       signingSecretEnc = rows[0]?.signingSecret ?? fresh;
     }
-    const signingSecret = decrypt(signingSecretEnc);
+    const signingSecret = await decryptAsync(signingSecretEnc);
 
     // 1. Update path — already installed IN THIS WORKSPACE (scoped via the app user's workspace,
     // since installs have no workspaceId column). Re-mint token, re-sync commands + permissions, bump version.
@@ -235,7 +240,7 @@ export async function regenerateJwt(appId: string, workspaceId: string) {
     }
 
     // Decrypt the app-level signing secret
-    const signingSecret = decrypt(app.signingSecret);
+    const signingSecret = await decryptAsync(app.signingSecret);
 
     // Generate new JWT token
     const jwtToken = jwt.sign(
@@ -282,7 +287,7 @@ export async function getSigningSecret(appId: string, userId: string, isAdmin: b
     }
 
     // Decrypt the app-level signing secret
-    const signingSecret = decrypt(app.signingSecret);
+    const signingSecret = await decryptAsync(app.signingSecret);
 
     logger.info(`[GET-SIGNING-SECRET] Retrieved signing secret for app ${appId} by user ${userId}`);
 

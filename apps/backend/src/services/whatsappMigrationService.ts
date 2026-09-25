@@ -7,7 +7,7 @@ import { withWorkspaceScope } from '@/database/tenant/context';
 import { ChannelParticipantRepository } from '@/database/repositories/channelParticipantRepository';
 import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
 import { ExternalMessageRepository } from '@/database/repositories/externalMessageRepository';
-import { decrypt, encrypt } from '@/services/encryptionService';
+import { decryptAsync, encryptScoped, workspaceScope } from '@/services/encryptionService';
 import { conversationService } from '@/services/conversationService';
 import { ExternalAttachmentService, type ExternalAttachment } from '@/services/externalAttachmentService';
 import type { UploadedFileResult } from '@/services/fileUploadService';
@@ -293,14 +293,16 @@ async function buildPreviewContext(
 async function ensureWhatsAppExternalSource(
   targetChannelId: string,
   chatName: string | null,
+  workspaceId: string,
 ): Promise<{ externalSourceId: string; created: boolean; sourceName: string }> {
   const sourceName = `whatsapp-${targetChannelId}-${slugify(chatName || 'chat')}`;
-  const encryptedCredentials = encrypt(
+  const encryptedCredentials = await encryptScoped(
     JSON.stringify({
       archiveType: 'zip',
       importedAt: new Date().toISOString(),
       chatName,
     }),
+    workspaceScope(workspaceId),
   );
 
   try {
@@ -733,12 +735,12 @@ export class WhatsAppMigrationService {
       }
     }
 
-    return sources.map(source => {
+    return await Promise.all(sources.map(async source => {
       const sourceMappings = externalMessagesBySourceId.get(source.id) || [];
       let chatName: string | null = null;
       try {
         const credentials = JSON.parse(
-          source.credentials ? decrypt(String(source.credentials)) : '{}',
+          source.credentials ? await decryptAsync(String(source.credentials)) : '{}',
         ) as {
           chatName?: string | null;
         };
@@ -762,7 +764,7 @@ export class WhatsAppMigrationService {
         importedMessageCount,
         attachmentCount,
       };
-    });
+    }));
   }
 
   private async buildPurgePreview(params: {
@@ -1262,7 +1264,11 @@ export class WhatsAppMigrationService {
         return;
       }
 
-      const externalSource = await ensureWhatsAppExternalSource(input.targetChannelId, parsedChat.chatName);
+      const externalSource = await ensureWhatsAppExternalSource(
+        input.targetChannelId,
+        parsedChat.chatName,
+        input.workspaceId,
+      );
       const existingMappings = await externalMessageRepository.findByExternalIds(
         externalSource.externalSourceId,
         importableMessages.map(message => message.externalId),

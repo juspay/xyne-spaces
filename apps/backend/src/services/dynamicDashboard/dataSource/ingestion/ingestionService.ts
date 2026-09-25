@@ -1,6 +1,6 @@
 import { config } from '@/config/env';
 import { repositories } from '@/database/repositories';
-import { decrypt } from '@/services/encryptionService';
+import { decryptAsync } from '@/services/encryptionService';
 import { redisService } from '@/services/redisService';
 import type { IngestTableSelection } from '@/queues/dataSourceIngestQueue';
 import { ColumnSummaryCodec, type DataTypeCanonical } from '@/types/dataSource';
@@ -171,7 +171,7 @@ export class IngestionService {
 
   /** Decrypt credentials and open the connector. */
   private async connect(ds: LoadedDataSource): Promise<LiveConnector> {
-    const connConfig: ConnectionConfig = JSON.parse(decrypt(ds.credentials));
+    const connConfig: ConnectionConfig = JSON.parse(await decryptAsync(ds.credentials));
     const connector = await ConnectorFactory.create(ds.sourceType, connConfig);
     await connector.connect();
     return connector;

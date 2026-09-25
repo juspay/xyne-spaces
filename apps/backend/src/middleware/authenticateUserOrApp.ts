@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import { authMiddleware } from './auth';
-import { decrypt } from '@/services/encryptionService';
+import { decryptAsync } from '@/services/encryptionService';
 import { repositories } from '@/database/repositories';
 import { logger } from '@/utils/logger';
 
@@ -83,7 +83,7 @@ async function handleAppAuth(
       res.status(401).json({ error: 'Unauthorized', message: 'Authentication failed' });
       return;
     }
-    const signingSecret = decrypt(app.signingSecret);
+    const signingSecret = await decryptAsync(app.signingSecret);
 
     let verified: unknown;
     try {

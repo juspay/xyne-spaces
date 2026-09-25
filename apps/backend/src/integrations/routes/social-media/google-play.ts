@@ -12,7 +12,7 @@ import {
 import { z } from 'zod';
 import { authV2Middleware } from '@/middleware/authV2Middleware';
 import { db } from '@/database/client';
-import { decrypt, encrypt } from '@/services/encryptionService';
+import { decryptAsync, encryptScoped, workspaceScope } from '@/services/encryptionService';
 import { getBackendUrl, getFrontendUrl } from '@/utils/publicUrls';
 import { logger } from '@/utils/logger';
 import { buildSupportPath } from '../urlHelpers';
@@ -295,7 +295,7 @@ router.post(
       }
 
       const credentials = JSON.parse(
-        decrypt(credentialSource.credentials)
+        await decryptAsync(credentialSource.credentials)
       ) as GooglePlayCredentials;
       await validatePackages(credentials, parsed.data.applications);
 
@@ -483,7 +483,10 @@ router.get('/google-play/oauth/callback', async (req: Request, res: Response): P
     });
     await validatePackages(authorization.credentials, state.applications);
 
-    const encryptedCredentials = encrypt(JSON.stringify(authorization.credentials));
+    const encryptedCredentials = await encryptScoped(
+      JSON.stringify(authorization.credentials),
+      workspaceScope(state.workspaceId),
+    );
     const now = new Date();
     const result = await db.$transaction(async (tx) => {
       if (state.mode === 'reconnect' && state.channelId) {
@@ -761,7 +764,7 @@ router.post(
         return;
       }
 
-      const credentials = JSON.parse(decrypt(source.credentials)) as GooglePlayCredentials;
+      const credentials = JSON.parse(await decryptAsync(source.credentials)) as GooglePlayCredentials;
       await googlePlayClient.validatePackage(credentials, source.externalIdentifier);
       await db.externalSource.update({
         where: { id: source.id },

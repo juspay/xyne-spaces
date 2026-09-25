@@ -1,6 +1,6 @@
 import { config } from '@/config/env';
 import { db } from '@/database/client';
-import { decrypt } from '@/services/encryptionService';
+import { decryptAsync } from '@/services/encryptionService';
 import { logger } from '@/utils/logger';
 import crypto from 'crypto';
 
@@ -141,7 +141,7 @@ async function resolveAppSigningSecret(spacesAppId: string, agentSlug: string): 
       `[claw-client] runAgent: no app signing secret for agent "${agentSlug}" (spacesAppId=${spacesAppId})`,
     );
   }
-  return decrypt(app.signingSecret);
+  return await decryptAsync(app.signingSecret);
 }
 
 async function safeReadText(res: Response): Promise<string> {
