@@ -183,6 +183,7 @@ import { conversationIngestQueue } from '@/queues/conversationIngestQueue';
 import { documentIngestQueue } from '@/queues/documentIngestQueue';
 import { teamIntelligenceQueue } from '@/team-intelligence/queue';
 import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
+import { callTranscriptionQueue } from '@/queues/callTranscriptionQueue';
 import { autoDraftQueue } from '@/queues/autoDraftQueue';
 import { entityExtractionQueue } from '@/queues/entityExtractionQueue';
 import { initStorage } from '@/services/storage';
@@ -905,6 +906,10 @@ export class App {
           logger.info('Initializing email classification queue...');
           await emailClassificationQueue.initialize();
         })(),
+        (async () => {
+          logger.info('Initializing call transcription queue...');
+          callTranscriptionQueue.startConsumer();
+        })(),
       ]);
 
       logger.info('[TEST MODE] All queues initialized');
@@ -950,6 +955,12 @@ export class App {
 
       logger.info('Initializing email classification queue...');
       await emailClassificationQueue.initialize();
+
+      // Ozonetel call-recording transcription (manual "Transcribe" button). The audio
+      // work runs in the Python agent; this consumer only holds the Bull job while it
+      // waits for the agent, then writes the transcript attachment.
+      logger.info('Initializing call transcription queue...');
+      callTranscriptionQueue.startConsumer();
 
       // Producer only — messages are enqueued here at ingest; the worker (a
       // separate process) drains each thread once its debounce window elapses.
