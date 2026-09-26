@@ -1307,6 +1307,14 @@ const BoardEditScreen = ({
           const formUpdateResult = zero.mutate(
             mutators.form.update({
               formId: existingFormId,
+              // Release boards share one seeded form; these let the mutator give this board
+              // its own copy before editing. Ids are generated here so the mutator stays
+              // deterministic, and are ignored when the form is not shared.
+              boardId,
+              forkFormId: uuidv4(),
+              forkFieldIds: Object.fromEntries(
+                (activeFormMapping?.formFields ?? []).map(row => [row.id, uuidv4()]),
+              ),
               projectId,
               formDescription: `Custom fields for ${boardName || 'board'}`,
               fields: customFields.map(f => ({
@@ -1416,6 +1424,7 @@ const BoardEditScreen = ({
     zero,
     fields,
     customFieldsFormId,
+    activeFormMapping,
     mode,
     projectId,
     boardMetadata,

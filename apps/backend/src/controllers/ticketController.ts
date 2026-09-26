@@ -621,7 +621,9 @@ export class TicketController {
       // is sent) — an incomplete repo would otherwise be silently dropped when
       // persisting releaseRepos, quietly covering fewer repos than configured.
       const rawReleaseRepos = dynamicFields?.['releaseRepos'];
-      if (rawReleaseRepos !== undefined) {
+      // Version-mode releases carry no commit range, so gate on the ticket being a
+      // release rather than on the payload shape.
+      if (rawReleaseRepos !== undefined || isReleaseTicket(ticketType as BaseTicketType)) {
         if (!req.user) {
           res.status(401).json({ error: 'Authentication required' });
           return;

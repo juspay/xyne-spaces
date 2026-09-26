@@ -71,6 +71,9 @@ export interface CommitAnalysisCanvasMetadata {
   channelId?: string;
   workspace: string;
   repoSlug: string;
+  // Version-tracked releases have no commit range; the version identifies the
+  // release instead, and the commit-range line is replaced by it.
+  releaseVersion?: string;
   deployedCommitId: string;
   newCommitId: string;
   affectedApplicationCount: number;
@@ -413,10 +416,15 @@ async function buildMainAnalysisBlocks(
     blocks.push({
       id: uuidv4(),
       type: 'paragraph',
-      content: [
-        { type: 'text', text: 'Commit Range: ', styles: { bold: true } },
-        { type: 'text', text: `${metadata.deployedCommitId.slice(0, 8)}...${metadata.newCommitId.slice(0, 8)}`, styles: { code: true } },
-      ],
+      content: metadata.releaseVersion
+        ? [
+          { type: 'text', text: 'Version: ', styles: { bold: true } },
+          { type: 'text', text: metadata.releaseVersion, styles: { code: true } },
+        ]
+        : [
+          { type: 'text', text: 'Commit Range: ', styles: { bold: true } },
+          { type: 'text', text: `${metadata.deployedCommitId.slice(0, 8)}...${metadata.newCommitId.slice(0, 8)}`, styles: { code: true } },
+        ],
     });
   }
 
@@ -856,7 +864,10 @@ export async function upsertCommitAnalysisCanvas(
       await prisma.canvas.update({
         where: { id: existing.id },
         data: {
-          content: [],
+          // Keep a snapshot in the row as well as Y-Sweet: this canvas is fully
+          // regenerated on every sync, so the snapshot can't drift, and it lets
+          // the release view render the report inline instead of a "open canvas" card.
+          content: content as unknown as object[],
           isCollaborative: true,
           lastEditedBy: createdByUserId,
           lastEditedAt: now,
@@ -945,7 +956,8 @@ async function persistNewAnalysisCanvas(args: {
     data: {
       id: canvasId,
       title: finalTitle,
-      content: [],
+      // Snapshot alongside Y-Sweet — see the update path for why.
+      content: content as unknown as object[],
       workspaceId: creator.workspaceId,
       createdBy: createdByUserId,
       visibility: CanvasVisibility.PUBLIC,

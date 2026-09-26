@@ -1011,6 +1011,10 @@ export enum ReleaseTrackingMode {
   VERSION = 'VERSION',
 }
 
+// Seeded release-board form templates (scripts/seed-release.ts), one per tracking mode.
+export const RELEASE_COMMIT_FORM_NAME = 'xyne_release_specs_form';
+export const RELEASE_VERSION_FORM_NAME = 'xyne_release_version_specs_form';
+
 export enum ProjectType {
   DEFAULT = "DEFAULT",
   DM = "DM",

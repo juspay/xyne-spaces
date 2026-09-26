@@ -269,6 +269,10 @@ export function useReleaseConfigForm({
           mainBoardName: mainBoardName.trim(),
           releaseTrackingMode: releaseTrackingMode as ReleaseTrackingMode,
           channelId: channelIdToSave,
+          // Ids are generated here because mutators must stay deterministic.
+          devVersionFieldId: uuidv4(),
+          devFormId: uuidv4(),
+          devFormMappingId: uuidv4(),
           applications: applicationsData,
         }),
       );

@@ -31,6 +31,8 @@ import {
   FormEntityType,
   BoardType,
   ReleaseTrackingMode,
+  RELEASE_COMMIT_FORM_NAME,
+  RELEASE_VERSION_FORM_NAME,
 } from '@xyne/shared';
 import { XyneFormSchemaProvider, XyneChangeType } from '../../src/services/release/xyne/xyneReleaseForm';
 import { v4 as uuidv4 } from 'uuid';
@@ -104,8 +106,6 @@ async function ensureBoardTicketForm(input: {
 async function seedReleaseSpecsFormAndMappings(): Promise<void> {
   console.log('\n📝 Ensuring release ticket spec forms + board mappings...');
 
-  const RELEASE_SPEC_FORM_NAME = 'xyne_release_specs_form';
-  const RELEASE_VERSION_SPEC_FORM_NAME = 'xyne_release_version_specs_form';
   const schemaProvider = new XyneFormSchemaProvider();
   const specsSchema = schemaProvider.getFormSchema(XyneChangeType.DEPLOYEDMENT_SPECS);
   const versionSpecsSchema = schemaProvider.getFormSchema(XyneChangeType.VERSION_SPECS);
@@ -133,7 +133,7 @@ async function seedReleaseSpecsFormAndMappings(): Promise<void> {
     const commitForm = await ensureBoardTicketForm({
       workspaceId: ws.id,
       seederUserId: seederUser.id,
-      formName: RELEASE_SPEC_FORM_NAME,
+      formName: RELEASE_COMMIT_FORM_NAME,
       formDescription: 'Form for getting release specs (branch, deployedCommitId, newCommitId)',
       schema: specsSchema,
     });
@@ -142,7 +142,7 @@ async function seedReleaseSpecsFormAndMappings(): Promise<void> {
     const versionForm = await ensureBoardTicketForm({
       workspaceId: ws.id,
       seederUserId: seederUser.id,
-      formName: RELEASE_VERSION_SPEC_FORM_NAME,
+      formName: RELEASE_VERSION_FORM_NAME,
       formDescription: 'Form for getting release specs (releaseVersion)',
       schema: versionSpecsSchema,
     });
