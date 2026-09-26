@@ -171,6 +171,7 @@ import { gcsUploadResultMarker, gcsDownloadResultMarker } from "../storage.js";
 import { takeLlmCitations } from "xyne-claw-shared";
 import { ingestAttachments } from "../attachment-ingest.js";
 import { metric } from "../metrics.js";
+import { decidePlanTracking } from "../plan-gate.js";
 import { runWithProviderFallback } from "../provider-fallback.js";
 import { isDraining } from "../drain.js";
 import { routeTaskMode } from "../mode-router.js";
@@ -2927,14 +2928,17 @@ export async function processTask(
     // pay the whole cost.
     const planTrackingEnabled =
       agentConfig?.["planTracking"] !== false && agentConfig?.["planTracking"] !== "false";
-    const planToolsDefaultOn =
+    const planGateEligible =
       planTrackingEnabled &&
       (!!channelId || (progressUrl && typeof progressUrl !== "string")) &&
       !isScheduledOrAutomationRun(eventType, conversationId) &&
       !isTwinMentionFlow &&
       !isPlanMode &&
       !isDailyBrief;
+    const planGate = planGateEligible ? await decidePlanTracking(task, agentConfig) : null;
+    const planToolsDefaultOn = planGateEligible && (planGate?.plan ?? true);
     if (!planTrackingEnabled) log("[plan] planTracking=false — todo tools and primer suppressed");
+    if (planGate && !planGate.plan) log(`[plan] jev says direct reply (p=${planGate.probability?.toFixed(2)}) — todo tools and primer skipped`);
     const planTools = remainingCustomTools.filter((t) => isPlanToolSlug(t.name));
     allTools = allTools.filter((t) => !isPlanToolSlug(t.name));
     if (planToolsDefaultOn) {
