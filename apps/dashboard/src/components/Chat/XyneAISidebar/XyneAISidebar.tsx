@@ -91,6 +91,7 @@ import {
   flattenCanvasContexts,
 } from '../../../machines/xyneAIMachine';
 import { xyneAIStreamManager } from '../../../services/XyneAI';
+import { useFlowActionComplete } from '../../../hooks/useFlowActionComplete';
 import {
   buildXyneAIStreamThreadId,
   getChannelIdFromStreamThreadId,
@@ -821,7 +822,41 @@ const XyneAISidebar = ({
 
   // Ask AI v1 has been removed; everything runs on v2 (xyne-claw) now.
   const isV2 = true;
+
   const effectiveAgentSlug = selectedAgentSlug;
+  // Same key the sidebar's own streams register under (see the adopt/attach
+  // sites below), so the shared handler targets this surface's stream.
+  const flowThreadId = useMemo(
+    () =>
+      buildXyneAIStreamThreadId({
+        channelId: channelId ?? null,
+        threadConversationId: activeThreadInfo?.conversationId ?? null,
+        streamSessionKey: conversationId,
+      }),
+    [channelId, activeThreadInfo?.conversationId, conversationId],
+  );
+  const detachFlowLiveViewer = useCallback((): void => {
+    liveViewerDetachRef.current?.();
+  }, []);
+  const storeFlowLiveViewer = useCallback((detach: () => void): void => {
+    liveViewerDetachRef.current = detach;
+  }, []);
+  const handleFlowActionComplete = useFlowActionComplete({
+    conversationId,
+    agentSlug: effectiveAgentSlug,
+    threadId: flowThreadId,
+    enabled: isV2,
+    messages,
+    setMessages,
+    detachLiveViewer: detachFlowLiveViewer,
+    storeLiveViewer: storeFlowLiveViewer,
+  });
+  // MessageItem is memoized — a fresh object here would re-render every row.
+  const flowCards = useMemo(
+    () =>
+      conversationId ? { conversationId, onActionComplete: handleFlowActionComplete } : undefined,
+    [conversationId, handleFlowActionComplete],
+  );
   // Per-run model pin. The model list is scoped to the AGENT's LiteLLM key, so
   // it refetches per agent and the pin resets on agent change — a model from
   // the previous agent's key may not exist on the new one.
@@ -2475,6 +2510,7 @@ const XyneAISidebar = ({
                                   feedbackValue={feedbackMap[message.id] || null}
                                   isV2={isV2}
                                   trackContext={messageTrackContext}
+                                  {...(flowCards ? { flowCards } : {})}
                                   onRatingChange={handleRatingChange}
                                   onRegenerate={
                                     !isLegacyConversation && isLatestBotMessage

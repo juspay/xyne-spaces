@@ -38,6 +38,10 @@ import { recordUploadedArtifacts } from "../lib/conversation-artifact-signals.js
 import { attachArtifactToSessionApp } from "../lib/artifact-app-session.js";
 import { recordDeliveredArtifacts } from "../lib/delivered-artifacts.js";
 import { publishLiveEvent } from "../lib/live-conversation-bus.js";
+import {
+  withAiScreenPresentationTools,
+  withAiScreenPresentationInstructions,
+} from "../lib/ai-screen-presentation-tools.js";
 import { pushDelta, endDeltaCoalescer } from "../lib/live-delta-coalescer.js";
 import { redisService } from "../redis.js";
 import {
@@ -1219,7 +1223,14 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
     // resolve the placeholder without depending on local pendingStreams.
     const internalCallbackUrl = `${CONFIG.internalUrl}/claw/api/v1/internal/run-stream/${streamId}/callback` +
       (assistantMsg ? `?assistantMessageId=${encodeURIComponent(assistantMsg.id)}` : "");
-    const internalProgressUrl = `${CONFIG.internalUrl}/claw/api/v1/internal/run-stream/${streamId}/progress`;
+    // A card needs the row it belongs on, which claw cannot know; conversation
+    // + agent ride in on the widget body instead.
+    const internalProgressUrl = `${CONFIG.internalUrl}/claw/api/v1/internal/run-stream/${streamId}/progress` +
+      (assistantMsg ? `?assistantMessageId=${encodeURIComponent(assistantMsg.id)}` : "");
+    // Composed here so both the base field and the design/page override use it.
+    const aiScreenInstructions = withAiScreenPresentationInstructions(
+      typeof additionalInstructions === "string" ? additionalInstructions : undefined,
+    );
     const incomingAgentConfig = agentConfig && typeof agentConfig === "object" && !Array.isArray(agentConfig)
       ? agentConfig as Record<string, unknown>
       : {};
@@ -1342,12 +1353,15 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       researchContext,
       webSearchEnabled,
       deepResearchEnabled,
-      agentConfig: enrichedAgentConfig,
-      additionalInstructions,
+      agentConfig: withAiScreenPresentationTools(
+        enrichedAgentConfig,
+        (agentRow.config as Record<string, unknown> | null)?.["tools"],
+      ),
+      additionalInstructions: aiScreenInstructions,
       ...(designSelectionInstruction || pageSelectionInstruction || openItemsInstruction
         ? {
             additionalInstructions: [
-              typeof additionalInstructions === "string" ? additionalInstructions.trim() : "",
+              aiScreenInstructions,
               designSelectionInstruction,
               pageSelectionInstruction,
               openItemsInstruction,
@@ -1863,6 +1877,44 @@ internalRouter.post("/:streamId/progress", (req: Request<{ streamId: string }>, 
       events.push({ event: "delta", data: { content: body.textDelta } });
     } else if (Array.isArray(body.todos)) {
       events.push({ event: "plan", data: { todos: body.todos, ...(typeof body.planTitle === "string" ? { title: body.planTitle } : {}) } });
+    } else if (body.kind === "ui-widget" && body.widget) {
+      // Async, so it can't join the `events` batch. streamMeta is a same-pod
+      // fast path only — a late card needs the identity on the body/URL.
+      const meta = streamMeta.get(streamId);
+      const bodyStr = (key: string): string | undefined =>
+        typeof body[key] === "string" && body[key] ? (body[key] as string) : undefined;
+      const widgetConversationId = bodyStr("conversationId") ?? meta?.conversationId;
+      const widgetAgentSlug = bodyStr("agentSlug") ?? meta?.agentSlug;
+      const queryAssistantMessageId = req.query["assistantMessageId"];
+      const widgetAssistantMessageId =
+        (typeof queryAssistantMessageId === "string" && queryAssistantMessageId
+          ? queryAssistantMessageId
+          : undefined) ?? meta?.assistantMessageId;
+      if (widgetConversationId && widgetAgentSlug) {
+        void (async () => {
+          try {
+            const { isUiWidget } = await import("xyne-claw-shared");
+            if (!isUiWidget(body.widget)) return;
+            const { deliverXyneAiWidget } = await import("./webhook.js");
+            const flow = await deliverXyneAiWidget({
+              widget: body.widget,
+              agentSlug: widgetAgentSlug,
+              conversationId: widgetConversationId,
+              userId: meta?.userId,
+              orgId: meta?.orgId,
+              assistantMessageId: widgetAssistantMessageId,
+            });
+            if (!flow) return;
+            const target = pendingStreams.get(streamId);
+            if (target) target.sendEvent("ui-flow", { flow });
+            else publishStreamEvent({ kind: "progress", streamId, events: [{ event: "ui-flow", data: { flow } }] });
+          } catch (err) {
+            log.warn(`[run-stream] ui-flow progress delivery failed: ${errMsg(err)}`);
+          }
+        })();
+      } else {
+        log.warn(`[run-stream] ui-widget progress with no conversation identity stream=${streamId}; card dropped`);
+      }
     } else if (body.attachment) {
       events.push({ event: "attachment", data: body.attachment });
     } else if (body.debugEvent) {
@@ -2302,9 +2354,24 @@ async function runViaSseTransport(opts: RunViaSseOpts): Promise<void> {
       onUiWidget: (_sid, widget) => {
         if (widget.type === "plan") {
           stream.sendEvent("plan", { todos: widget.payload.todos });
-        } else {
-          stream.sendEvent("ui-widget", { widget });
+          return;
         }
+        void (async () => {
+          try {
+            const { deliverXyneAiWidget } = await import("./webhook.js");
+            const flow = await deliverXyneAiWidget({
+              widget,
+              agentSlug: slug,
+              conversationId: convId,
+              userId,
+              orgId,
+              assistantMessageId,
+            });
+            if (flow) stream.sendEvent("ui-flow", { flow });
+          } catch (err) {
+            log.warn(`[run-stream/sse] ui-flow emit failed: ${errMsg(err)}`);
+          }
+        })();
       },
       onSandboxPreview: (sessionId, payload) => {
         // Sandbox preview today lands on /webhook/progress which posts the

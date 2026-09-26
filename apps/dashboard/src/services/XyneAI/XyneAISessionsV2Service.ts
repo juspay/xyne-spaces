@@ -3,6 +3,7 @@
  * Proxies through the Spaces backend to xyne-claw-auth conversation APIs.
  */
 
+import type { FlowDefinition } from '@xyne/shared';
 import { apiInstance } from '../clients/apiClient';
 import type {
   ConversationHistory as ConversationHistoryType,
@@ -61,6 +62,8 @@ interface ClawChatMessage {
   /** Context the user attached to this turn, persisted by claw-auth on the user
    *  message. Rendered read-only in the transcript. Absent on assistant/legacy rows. */
   attachedContext?: AttachedContextItem[];
+  /** FlowUI artifact cards, re-tokenized by the Spaces proxy. */
+  uiFlows?: FlowDefinition[];
 }
 
 interface ClawMessagesResponse {
@@ -275,6 +278,7 @@ export async function fetchV2ConversationMessages(
         : {}),
       // Read-only context pills for a user turn (persisted per message in claw-auth).
       ...(isUser && msg.attachedContext?.length ? { attachedContext: msg.attachedContext } : {}),
+      ...(!isUser && msg.uiFlows?.length ? { uiFlows: msg.uiFlows } : {}),
     };
 
     // Map attachments from claw format to frontend format
