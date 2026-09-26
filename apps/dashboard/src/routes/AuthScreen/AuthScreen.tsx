@@ -72,7 +72,6 @@ const AuthScreen = (): ReactElement | null => {
   const [orgName, setOrgName] = useState('');
   const [workspaceName, setWorkspaceName] = useState('');
   const [showCreateOrgForm, setShowCreateOrgForm] = useState(false);
-  const [showEmailForm, setShowEmailForm] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [pendingCommunityWorkspaceName, setPendingCommunityWorkspaceName] = useState<string | null>(
@@ -106,8 +105,8 @@ const AuthScreen = (): ReactElement | null => {
   const [fpLoading, setFpLoading] = useState(false);
   const fpSubmitLockRef = useRef(false);
 
-  // Registration flow
-  const [showRegisterForm, setShowRegisterForm] = useState(false);
+  // Registration flow — sign up is the default landing flow on this screen.
+  const [showRegisterForm, setShowRegisterForm] = useState(true);
   const [regName, setRegName] = useState('');
   const [regEmail, setRegEmail] = useState('');
   const [regPassword, setRegPassword] = useState('');
@@ -261,7 +260,6 @@ const AuthScreen = (): ReactElement | null => {
     }
 
     setShowForgotPassword(false);
-    setShowEmailForm(true);
   }, [error]);
 
   const handleGoogleSignIn = (): void => {
@@ -612,7 +610,10 @@ const AuthScreen = (): ReactElement | null => {
                   <div className='mb-8'>
                     <img src='/svgs/xyne.svg' alt='Xyne Logo' />
                   </div>
-                  <h2 className='text-lg lg:text-xl font-medium md:font-semibold text-foreground'>
+                  <p className='text-lg lg:text-xl font-medium md:font-semibold text-foreground'>
+                    {isLoading ? 'Signing you in...' : 'Collaboration platform for Humans and AI'}
+                  </p>
+                  <h2 className='text-base md:text-lg text-muted-foreground'>
                     Log in to Xyne Spaces
                   </h2>
                   {pendingCommunityWorkspaceName ? (
@@ -622,11 +623,6 @@ const AuthScreen = (): ReactElement | null => {
                       </p>
                     </div>
                   ) : null}
-                  <p className='text-xs sm:text-sm md:text-sm text-muted-foreground pb-4'>
-                    {isLoading
-                      ? 'Signing you in...'
-                      : 'Communicate, collaborate & 10x your daily productivity'}
-                  </p>
                 </div>
               )}
 
@@ -994,36 +990,8 @@ const AuthScreen = (): ReactElement | null => {
                         <div className='flex-1 h-px bg-border' />
                       </div>
 
-                      {/* Email Sign In / Sign Up Toggle */}
-                      {!showEmailForm && !showRegisterForm ? (
-                        <div className='w-full max-w-[280px] md:max-w-[320px] flex flex-col gap-3'>
-                          <button
-                            onClick={() => {
-                              clearError();
-                              setShowEmailForm(true);
-                            }}
-                            className='appearance-none outline-none font-inherit cursor-pointer opacity-100 flex items-center justify-center gap-4 px-4 py-[9px] w-full relative bg-[#2F2F2F] text-white border border-white/10 rounded-[10px] overflow-hidden h-12'
-                            data-track-category='Auth'
-                            data-track-name='EmailSignInToggle'
-                          >
-                            <span className='text-sm font-semibold text-center text-white'>
-                              Sign in with Email
-                            </span>
-                          </button>
-                          <button
-                            onClick={() => {
-                              clearError();
-                              setShowEmailForm(true);
-                              setShowRegisterForm(true);
-                            }}
-                            className='text-xs text-muted-foreground hover:text-foreground text-center'
-                            data-track-category='Auth'
-                            data-track-name='EmailRegisterToggle'
-                          >
-                            Don&apos;t have an account? Sign up
-                          </button>
-                        </div>
-                      ) : showRegisterForm ? (
+                      {/* Email Sign Up (default) / Sign In Flow */}
+                      {showRegisterForm ? (
                         /* Registration Flow */
                         <div className='w-full max-w-[280px] md:max-w-[320px] flex flex-col gap-3'>
                           {regStep === 'register' && (
@@ -1033,12 +1001,7 @@ const AuthScreen = (): ReactElement | null => {
                               }}
                               className='flex flex-col gap-3'
                             >
-                              <p className='text-sm font-medium text-foreground'>
-                                {pendingCommunityWorkspaceName
-                                  ? `Join ${pendingCommunityWorkspaceName}`
-                                  : 'Create Account'}
-                              </p>
-                              <p className='text-xs text-muted-foreground'>
+                              <p className='text-xs text-muted-foreground text-center'>
                                 Register with your email to join the community.
                               </p>
                               <input
@@ -1051,6 +1014,7 @@ const AuthScreen = (): ReactElement | null => {
                                 }}
                                 placeholder='Full name'
                                 required
+                                autoComplete='off'
                                 className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 bg-background text-foreground text-sm ${
                                   regNameError
                                     ? 'border-red-500 focus:ring-red-500'
@@ -1097,6 +1061,7 @@ const AuthScreen = (): ReactElement | null => {
                                 }}
                                 placeholder='Password (min 8 chars, 1 uppercase, 1 number, 1 special)'
                                 required
+                                autoComplete='new-password'
                                 className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 bg-background text-foreground text-sm ${
                                   regPasswordError
                                     ? 'border-red-500 focus:ring-red-500'
@@ -1118,6 +1083,7 @@ const AuthScreen = (): ReactElement | null => {
                                 }}
                                 placeholder='Confirm password'
                                 required
+                                autoComplete='new-password'
                                 className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 bg-background text-foreground text-sm ${
                                   regConfirmPasswordError
                                     ? 'border-red-500 focus:ring-red-500'
@@ -1137,8 +1103,33 @@ const AuthScreen = (): ReactElement | null => {
                                 data-track-category='Auth'
                                 data-track-name='RegisterSubmit'
                               >
-                                {regLoading ? 'Sending...' : 'Send Verification Code'}
+                                {regLoading ? 'Creating...' : 'Create Account'}
                               </button>
+                              <p className='text-xs text-muted-foreground text-center'>
+                                By signing up you are agreeing to the{' '}
+                                <a
+                                  href='/terms'
+                                  target='_blank'
+                                  rel='noopener noreferrer'
+                                  className='underline underline-offset-2 hover:text-foreground'
+                                  data-track-category='Auth'
+                                  data-track-name='TermsOfServiceLink'
+                                >
+                                  Terms of Service
+                                </a>{' '}
+                                and{' '}
+                                <a
+                                  href='/privacy'
+                                  target='_blank'
+                                  rel='noopener noreferrer'
+                                  className='underline underline-offset-2 hover:text-foreground'
+                                  data-track-category='Auth'
+                                  data-track-name='PrivacyPolicyLink'
+                                >
+                                  Privacy Policy
+                                </a>
+                                .
+                              </p>
                             </form>
                           )}
 
@@ -1196,18 +1187,21 @@ const AuthScreen = (): ReactElement | null => {
                             </form>
                           )}
 
-                          <button
-                            type='button'
-                            onClick={() => {
-                              clearError();
-                              resetRegistrationState();
-                            }}
-                            className='text-xs text-muted-foreground hover:text-foreground text-center'
-                            data-track-category='Auth'
-                            data-track-name='BackToSignIn'
-                          >
-                            Back to sign in
-                          </button>
+                          <p className='text-base text-muted-foreground text-center'>
+                            Already have an account?{' '}
+                            <button
+                              type='button'
+                              onClick={() => {
+                                clearError();
+                                resetRegistrationState();
+                              }}
+                              className='cursor-pointer font-medium text-foreground underline-offset-4 hover:underline'
+                              data-track-category='Auth'
+                              data-track-name='BackToSignIn'
+                            >
+                              Log In
+                            </button>
+                          </p>
                         </div>
                       ) : showForgotPassword ? (
                         <div className='w-full max-w-[280px] md:max-w-[320px] flex flex-col gap-3'>
@@ -1348,6 +1342,7 @@ const AuthScreen = (): ReactElement | null => {
                             onChange={e => setEmail(e.target.value)}
                             placeholder='Email address'
                             required
+                            autoComplete='off'
                             className='w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground text-sm'
                             data-track-category='Auth'
                             data-track-name='EmailInput'
@@ -1383,19 +1378,22 @@ const AuthScreen = (): ReactElement | null => {
                           >
                             {isLoading ? 'Please wait...' : 'Sign In'}
                           </button>
-                          <button
-                            type='button'
-                            onClick={() => {
-                              clearError();
-                              setShowRegisterForm(true);
-                              setShowForgotPassword(false);
-                            }}
-                            className='text-xs text-muted-foreground hover:text-foreground text-center'
-                            data-track-category='Auth'
-                            data-track-name='SwitchToRegister'
-                          >
-                            Don&apos;t have an account? Sign up
-                          </button>
+                          <p className='text-base text-muted-foreground text-center'>
+                            Don&apos;t have an account?{' '}
+                            <button
+                              type='button'
+                              onClick={() => {
+                                clearError();
+                                setShowRegisterForm(true);
+                                setShowForgotPassword(false);
+                              }}
+                              className='cursor-pointer font-medium text-foreground underline-offset-4 hover:underline'
+                              data-track-category='Auth'
+                              data-track-name='SwitchToRegister'
+                            >
+                              Sign up
+                            </button>
+                          </p>
                         </form>
                       )}
                     </div>

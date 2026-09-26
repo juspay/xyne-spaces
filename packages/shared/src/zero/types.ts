@@ -145,6 +145,8 @@ export enum ChannelScopeType {
   GROUP_DM = 'GROUP_DM',
 }
 
+export const default_seeded_channel_name = 'getting-started';
+
 // @ts-ignore TS1294
 export enum ChannelRole {
   ADMIN = 'ADMIN',

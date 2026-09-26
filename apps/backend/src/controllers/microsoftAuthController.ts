@@ -530,13 +530,23 @@ export class MicrosoftAuthController {
           let publicEmailError = null;
 
           if (!userExistsButRemoved) {
-            if (peekedState?.enterpriseLogin) {
+            // Public email domains can never create enterprise workspaces, so fail
+            // fast on them regardless of the entry flow (mirrors Google's
+            // handleCallback). The remaining domain-conflict assert stays gated on
+            // the explicit enterprise intent.
+            try {
+              await organizationDomainService.assertNotPublicEmailDomain(microsoftUserData.email);
+            } catch (error) {
+              if (error instanceof PublicEmailDomainError) {
+                publicEmailError = error;
+              }
+            }
+
+            if (peekedState?.enterpriseLogin && !publicEmailError) {
               try {
                 await organizationDomainService.assertCanCreateOrgForEmail(microsoftUserData.email);
               } catch (error) {
-                if (error instanceof PublicEmailDomainError) {
-                  publicEmailError = error;
-                } else if (error instanceof OrganizationDomainConflictError) {
+                if (error instanceof OrganizationDomainConflictError) {
                   domainConflictError = error;
                 }
               }
@@ -942,13 +952,23 @@ export class MicrosoftAuthController {
       let domainConflictError = null;
       let publicEmailError = null;
 
-        if (stateData.enterpriseLogin) {
+        // Public email domains can never create enterprise workspaces, so fail fast
+        // on them regardless of the entry flow (mirrors Google's
+        // exchangeElectronCode). The remaining domain-conflict assert stays gated
+        // on the explicit enterprise intent.
+        try {
+          await organizationDomainService.assertNotPublicEmailDomain(email);
+        } catch (error) {
+          if (error instanceof PublicEmailDomainError) {
+            publicEmailError = error;
+          }
+        }
+
+        if (stateData.enterpriseLogin && !publicEmailError) {
           try {
             await organizationDomainService.assertCanCreateOrgForEmail(email);
           } catch (error) {
-            if (error instanceof PublicEmailDomainError) {
-              publicEmailError = error;
-            } else if (error instanceof OrganizationDomainConflictError) {
+            if (error instanceof OrganizationDomainConflictError) {
               domainConflictError = error;
             }
           }
