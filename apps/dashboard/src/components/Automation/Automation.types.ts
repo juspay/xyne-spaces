@@ -42,6 +42,8 @@ export {
 
 export { WorkflowEventType } from '@xyne/shared';
 
+/** Mirrors `WEBHOOK_EVENT` in apps/backend/src/automations/triggers/webhook.trigger.ts. */
+export const WEBHOOK_TRIGGER_TYPE = 'WEBHOOK';
 export const CONDITIONAL_STEP_TYPE = 'CONDITIONAL';
 export const SWITCH_STEP_TYPE = 'SWITCH';
 
