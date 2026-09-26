@@ -192,6 +192,7 @@ open -a OrbStack
 Docker Desktop and Podman also work. Details in
 [Prerequisites](docs/setup/prerequisites.md) — or, for a machine with nothing installed
 yet, follow [Local Setup](docs/setup/local-setup.md) end to end.
+For the native Nix development environment, follow [Nix setup](docs/setup/nix.md).
 
 ```bash
 git clone https://github.com/juspay/xyne-spaces.git
