@@ -5,7 +5,7 @@
  * Reads each agent's signing secret directly from the Spaces DB
  * (`installed_apps.signingSecret`) via the existing SPACES_DB_URL read-only
  * connection — the same path used for user-session reads. Decrypts with
- * SPACES_ENCRYPTION_KEY, re-encrypts with claw-auth's own AES-256-GCM,
+ * the original Spaces key or optional key ring, re-encrypts with claw-auth's own AES-256-GCM,
  * persists. No per-user Spaces ACL involved (the API path was subject to
  * Spaces' "admin or app creator" check, which failed for agents created by
  * other users — the DB path sidesteps it entirely).
@@ -31,8 +31,15 @@ import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
 import { decrypt, decryptSpacesCbc } from "../crypto.js";
 import { getRequesterId, isClawAdmin } from "../middleware/agent-acl.js";
-import { backfillSigningSecretFromSpacesDb } from "../lib/spaces-app-secret.js";
+import { backfillSigningSecretFromSpacesDbDetailed } from "../lib/spaces-app-secret.js";
 import { getInstalledAppSigningSecret } from "../lib/spaces-db.js";
+import {
+  buildBackfillBatchResponse,
+  parseBackfillLimit,
+  planBackfillPage,
+  type BackfillRowResult,
+} from "../lib/backfill-pagination.js";
+import { loadSpacesEncryptionRuntimeConfig } from "../spaces-encryption-key-ring-config.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("admin-backfill-signing-secrets");
@@ -104,23 +111,66 @@ router.get("/diagnose-signing-secret/:slug", async (req: Request<{ slug: string 
     }
   }
 
-  // Fresh secret from the Spaces DB (CBC, SPACES_ENCRYPTION_KEY).
-  let db: { ok: boolean; fp?: string; len?: number; error?: string };
+  // Fresh secret from the Spaces DB.
+  let db: {
+    ok: boolean;
+    fp?: string;
+    len?: number;
+    error?: string;
+  };
+
   if (!agent.spacesAppId) {
-    db = { ok: false, error: "agent has no spacesAppId" };
-  } else if (CONFIG.spacesEncryptionKey.length === 0) {
-    db = { ok: false, error: "SPACES_ENCRYPTION_KEY unset" };
+    db = {
+      ok: false,
+      error: "agent has no spacesAppId",
+    };
   } else {
-    try {
-      const blob = await getInstalledAppSigningSecret(agent.spacesAppId);
-      if (!blob) {
-        db = { ok: false, error: "no installed_apps row / null signingSecret" };
-      } else {
-        const p = decryptSpacesCbc(blob, CONFIG.spacesEncryptionKey);
-        db = { ok: true, fp: fingerprint(p), len: p.length };
+    const spacesEncryptionConfig =
+      loadSpacesEncryptionRuntimeConfig();
+
+    const legacyKeyAvailable =
+      CONFIG.spacesEncryptionKey.length === 32;
+
+    if (
+      !legacyKeyAvailable &&
+      spacesEncryptionConfig.mode === "legacy"
+    ) {
+      db = {
+        ok: false,
+        error:
+          "no usable Spaces encryption configuration",
+      };
+    } else {
+      try {
+        const blob =
+          await getInstalledAppSigningSecret(
+            agent.spacesAppId,
+          );
+
+        if (!blob) {
+          db = {
+            ok: false,
+            error:
+              "no installed_apps row / null signingSecret",
+          };
+        } else {
+          const plaintext = decryptSpacesCbc(
+            blob,
+            CONFIG.spacesEncryptionKey,
+          );
+
+          db = {
+            ok: true,
+            fp: fingerprint(plaintext),
+            len: plaintext.length,
+          };
+        }
+      } catch (err) {
+        db = {
+          ok: false,
+          error: errMsg(err),
+        };
       }
-    } catch (err) {
-      db = { ok: false, error: errMsg(err) };
     }
   }
 
@@ -146,51 +196,217 @@ router.get("/diagnose-signing-secret/:slug", async (req: Request<{ slug: string 
  * `?slug=<slug>`: restrict to a single agent — run this first with
  * `overwrite=true` to fix one mismatching agent, confirm its webhook starts
  * verifying, then run the full overwrite.
+ *
+ * `?dryRun=true`: decrypt and re-encrypt each secret
+ * without changing the agents table.
+ *
+ * `?limit=100&after=<agentId>`: process a bounded,
+ * resumable page. Pass `nextAfter` into the next request.
+ * When `limit` is omitted it defaults to 100; the route never
+ * processes an unbounded batch. Pagination over-fetches by one
+ * row (limit + 1) so `nextAfter` is returned only when another
+ * row actually exists — a final page of exactly `limit` rows
+ * does not yield a phantom cursor. Top-level `success` is false
+ * whenever any row failed (`data.partialFailure` is true then);
+ * successful rows are still returned alongside the failures.
  */
-router.post("/backfill-signing-secrets", async (req: Request, res: Response) => {
-  const requesterId = getRequesterId(req);
-  if (!requesterId) {
-    res.status(401).json({ success: false, error: "x-user-id required" });
-    return;
-  }
-  if (!(await isClawAdmin(requesterId))) {
-    res.status(403).json({ success: false, error: "admin only" });
-    return;
-  }
 
-  const overwrite = req.query["overwrite"] === "true";
-  const slug = typeof req.query["slug"] === "string" ? req.query["slug"] : undefined;
+router.post(
+  "/backfill-signing-secrets",
+  async (
+    req: Request,
+    res: Response,
+  ) => {
+    const requesterId = getRequesterId(req);
 
-  const agents = await prisma.agent.findMany({
-    where: {
-      spacesAppId: { not: null },
-      // Default only touches NULL rows; overwrite also re-syncs existing secrets.
-      ...(overwrite ? {} : { signingSecret: null }),
-      ...(slug ? { slug } : {}),
-    },
-    select: { id: true, slug: true, spacesAppId: true },
-  });
+    if (!requesterId) {
+      res.status(401).json({
+        success: false,
+        error: "x-user-id required",
+      });
+      return;
+    }
 
-  log.info(`[admin-backfill] requesterId=${requesterId} overwrite=${overwrite} slug=${slug ?? "(all)"} agents-to-sync=${agents.length}`);
+    if (!(await isClawAdmin(requesterId))) {
+      res.status(403).json({
+        success: false,
+        error: "admin only",
+      });
+      return;
+    }
 
-  const results: Array<{ slug: string; agentId: string; ok: boolean }> = [];
-  let okCount = 0;
-  let failCount = 0;
-  for (const agent of agents) {
-    const ok = await backfillSigningSecretFromSpacesDb({
-      agentId: agent.id,
-      spacesAppId: agent.spacesAppId!,
+    const rawDryRun = req.query["dryRun"];
+
+    if (
+      rawDryRun !== undefined &&
+      rawDryRun !== "true" &&
+      rawDryRun !== "false"
+    ) {
+      res.status(400).json({
+        success: false,
+        error:
+          "dryRun must be true or false",
+      });
+      return;
+    }
+
+    const dryRun = rawDryRun === "true";
+    const overwrite =
+      req.query["overwrite"] === "true";
+
+    const rawSlug = req.query["slug"];
+
+    if (
+      rawSlug !== undefined &&
+      (
+        typeof rawSlug !== "string" ||
+        !rawSlug.trim()
+      )
+    ) {
+      res.status(400).json({
+        success: false,
+        error:
+          "slug must be a non-empty string",
+      });
+      return;
+    }
+
+    const slug =
+      typeof rawSlug === "string"
+        ? rawSlug.trim()
+        : undefined;
+
+    const rawAfter = req.query["after"];
+
+    if (
+      rawAfter !== undefined &&
+      (
+        typeof rawAfter !== "string" ||
+        !rawAfter.trim()
+      )
+    ) {
+      res.status(400).json({
+        success: false,
+        error:
+          "after must be a non-empty agent ID",
+      });
+      return;
+    }
+
+    const after =
+      typeof rawAfter === "string"
+        ? rawAfter.trim()
+        : undefined;
+
+    const limitResult = parseBackfillLimit(
+      req.query["limit"],
+    );
+
+    if (!limitResult.ok) {
+      res.status(400).json({
+        success: false,
+        error: limitResult.error,
+      });
+      return;
+    }
+
+    const limit = limitResult.limit;
+
+    // Fetch limit + 1: the extra row only signals that another
+    // page exists; it is never processed.
+    const fetchedAgents = await prisma.agent.findMany({
+      where: {
+        spacesAppId: {
+          not: null,
+        },
+        ...(overwrite
+          ? {}
+          : {
+              signingSecret: null,
+            }),
+        ...(slug
+          ? {
+              slug,
+            }
+          : {}),
+      },
+      select: {
+        id: true,
+        slug: true,
+        spacesAppId: true,
+      },
+      orderBy: {
+        id: "asc",
+      },
+      ...(after
+        ? {
+            cursor: {
+              id: after,
+            },
+            skip: 1,
+          }
+        : {}),
+      take: limit + 1,
     });
-    results.push({ slug: agent.slug, agentId: agent.id, ok });
-    if (ok) okCount += 1; else failCount += 1;
-  }
 
-  log.info(`[admin-backfill] requesterId=${requesterId} overwrite=${overwrite} ok=${okCount} failed=${failCount}`);
+    const {
+      page: agents,
+      nextAfter,
+    } = planBackfillPage(fetchedAgents, limit);
 
-  res.json({
-    success: true,
-    data: { overwrite, slug: slug ?? null, total: agents.length, ok: okCount, failed: failCount, results },
-  });
-});
+    log.info(
+      `[admin-backfill] requesterId=${requesterId} dryRun=${dryRun} overwrite=${overwrite} slug=${slug ?? "(all)"} after=${after ?? "(start)"} limit=${limit} agents-to-sync=${agents.length}`,
+    );
+
+    const results: BackfillRowResult[] = [];
+    let okCount = 0;
+    let failCount = 0;
+
+    for (const agent of agents) {
+      const result =
+        await backfillSigningSecretFromSpacesDbDetailed({
+          agentId: agent.id,
+          spacesAppId: agent.spacesAppId!,
+          dryRun,
+        });
+
+      if (result.ok) {
+        results.push({
+          slug: agent.slug,
+          agentId: agent.id,
+          ok: true,
+          action: result.action,
+        });
+
+        okCount += 1;
+      } else {
+        results.push({
+          slug: agent.slug,
+          agentId: agent.id,
+          ok: false,
+          reason: result.reason,
+        });
+
+        failCount += 1;
+      }
+    }
+
+    log.info(
+      `[admin-backfill] requesterId=${requesterId} dryRun=${dryRun} overwrite=${overwrite} ok=${okCount} failed=${failCount} nextAfter=${nextAfter ?? "(complete)"}`,
+    );
+
+    res.json(
+      buildBackfillBatchResponse({
+        dryRun,
+        overwrite,
+        slug: slug ?? null,
+        after: after ?? null,
+        limit,
+        nextAfter,
+        results,
+      }),
+    );
+  },
+);
 
 export { router as adminBackfillSigningSecretsRouter };
