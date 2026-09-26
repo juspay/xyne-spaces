@@ -155,16 +155,23 @@ variable "storage_credentials" {
 
 variable "identities" {
   type = object({
-    backend        = object({ annotations = map(string), labels = map(string) })
-    worker         = object({ annotations = map(string), labels = map(string), ksa_names = optional(list(string), []) })
-    dashboard_edge = object({ annotations = map(string), labels = map(string) })
-    ysweet         = object({ annotations = map(string), labels = map(string) })
-    claw           = object({ annotations = map(string), labels = map(string) })
-    claw_auth      = object({ annotations = map(string), labels = map(string) })
-    transcription  = object({ annotations = map(string), labels = map(string) })
-    lb_controller  = optional(object({ annotations = map(string), labels = map(string) }), { annotations = {}, labels = {} })
-    external_dns   = optional(object({ annotations = map(string), labels = map(string) }), { annotations = {}, labels = {} })
+    backend            = object({ annotations = map(string), labels = map(string) })
+    worker             = object({ annotations = map(string), labels = map(string), ksa_names = optional(list(string), []) })
+    dashboard_edge     = object({ annotations = map(string), labels = map(string) })
+    ysweet             = object({ annotations = map(string), labels = map(string) })
+    claw               = object({ annotations = map(string), labels = map(string) })
+    claw_auth          = object({ annotations = map(string), labels = map(string) })
+    transcription      = object({ annotations = map(string), labels = map(string) })
+    lb_controller      = optional(object({ annotations = map(string), labels = map(string) }), { annotations = {}, labels = {} })
+    cluster_autoscaler = optional(object({ annotations = map(string), labels = map(string) }), { annotations = {}, labels = {} })
+    external_dns       = optional(object({ annotations = map(string), labels = map(string) }), { annotations = {}, labels = {} })
+    zero               = optional(object({ annotations = map(string), labels = map(string) }), { annotations = {}, labels = {} })
   })
+}
+
+variable "zero_backup_url" {
+  type    = string
+  default = ""
 }
 
 variable "node_pools" {
@@ -276,6 +283,11 @@ variable "argocd_chart_version" {
 variable "argocd_apps_chart_version" {
   type    = string
   default = "2.0.5"
+}
+
+variable "db_init_image" {
+  type    = string
+  default = "docker.io/library/postgres:16"
 }
 
 variable "argocd_namespace" {

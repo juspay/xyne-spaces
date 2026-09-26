@@ -123,6 +123,8 @@ resolve_env() {
   ENV_CONF="$ENV_DIR/env.conf"
   INFRA_TFVARS="$ENV_DIR/01-infra.tfvars"
   PLATFORM_TFVARS="$ENV_DIR/02-platform.tfvars"
+  INFRA_SECRETS="$ENV_DIR/01-infra.secrets.tfvars"
+  PLATFORM_SECRETS="$ENV_DIR/02-platform.secrets.tfvars"
   OVERLAY_DIR="$ENV_DIR/overlay"
   OVERLAY_TFVARS="$ENV_DIR/overlay.tfvars"
 }
@@ -270,8 +272,18 @@ bootstrap_backend() {
   "bootstrap_backend_$CLOUD"
 }
 
+infra_var_args() {
+  INFRA_ARGS=(-var-file "$INFRA_TFVARS")
+  if [ -f "$INFRA_SECRETS" ]; then
+    INFRA_ARGS+=(-var-file "$INFRA_SECRETS")
+  fi
+}
+
 platform_var_args() {
   PLATFORM_ARGS=(-var-file "$PLATFORM_TFVARS")
+  if [ -f "$PLATFORM_SECRETS" ]; then
+    PLATFORM_ARGS+=(-var-file "$PLATFORM_SECRETS")
+  fi
   case "$CLOUD" in
     gcp)
       PLATFORM_ARGS+=(-var "state_bucket=$STATE_BUCKET" -var "state_prefix=$(state_key_for 01-infra)")

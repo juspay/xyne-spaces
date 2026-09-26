@@ -59,6 +59,7 @@ module "platform" {
   ingress             = local.infra.ingress
   livekit             = local.infra.livekit
   livekit_keys        = local.infra.livekit_keys
+  zero_backup_url     = try(local.infra.zero_backup_url, "")
 
   namespace                 = var.namespace
   domain                    = var.domain

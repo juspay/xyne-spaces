@@ -6,7 +6,7 @@
 {{- $base := dict
   "domain" .Values.global.domain
   "namespace" .Values.global.namespace
-  "gateway" (dict "namespace" $istio.gatewayNamespace "name" "xyne-gateway" "selector" (dict "istio" "ingressgateway") "tlsSecret" $ing.tlsSecret "httpsRedirect" (not $ing.edgeTerminated) "tls" $ing.tls)
+  "gateway" (dict "namespace" $istio.gatewayNamespace "name" "xyne-gateway" "selector" (dict "istio" "ingressgateway") "tlsSecret" $ing.tlsSecret "httpsRedirect" (not $ing.edgeTerminated) "edgeTerminated" $ing.edgeTerminated "tls" $ing.tls)
   "certManager" (dict "enabled" (and $cm.enabled (not (has $ing.tls (list "existing" "none")))) "mode" $ing.tls "email" $cm.email "issuer" $cm.issuer "server" $cm.server "wildcard" (or $cm.wildcard (eq $ing.tls "internal")))
   "peerAuthentication" (dict "enabled" (ne $istio.peerAuthentication "") "mode" ($istio.peerAuthentication | default "STRICT"))
   "routes" (dict "externalDashboard" ((index .Values.apps "xyne-dashboard-external").enabled | default false) "clawAuthFrontend" ((index .Values.apps "xyne-claw-auth-frontend").enabled | default false) "health" $ing.edgeTerminated)

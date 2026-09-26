@@ -128,7 +128,8 @@ EOF
     log "no reservable address on $CLOUD in $mode mode, continuing"
     return 0
   fi
-  args=(-var-file "$INFRA_TFVARS" "${args[@]}")
+  infra_var_args
+  args=("${INFRA_ARGS[@]}" "${args[@]}")
 
   tf "$INFRA_STACK" init -reconfigure -input=false
   confirm "Reserve the public address(es) for $domain now?" || die "stopped before reserving addresses"
@@ -167,7 +168,8 @@ build_cluster_first() {
 
   log "stage cluster (cloud-lb on gcp needs the node pools before the load balancer)"
   tf "$INFRA_STACK" init -reconfigure -input=false
-  tf "$INFRA_STACK" apply -input=false -auto-approve -var-file "$INFRA_TFVARS" -target module.cluster
+  infra_var_args
+  tf "$INFRA_STACK" apply -input=false -auto-approve "${INFRA_ARGS[@]}" -target module.cluster
 }
 
 if [ "$DO_INFRA" = "1" ]; then
@@ -177,7 +179,8 @@ if [ "$DO_INFRA" = "1" ]; then
   fi
   build_cluster_first
   log "stage 01-infra"
-  tf_plan_apply "$INFRA_STACK" 01-infra -var-file "$INFRA_TFVARS"
+  infra_var_args
+  tf_plan_apply "$INFRA_STACK" 01-infra "${INFRA_ARGS[@]}"
 fi
 
 if [ "$DO_PLATFORM" = "1" ] || [ "$DO_OVERLAY" = "1" ]; then

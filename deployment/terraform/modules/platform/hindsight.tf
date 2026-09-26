@@ -1,5 +1,5 @@
 locals {
-  hindsight_llm_key_set = var.app_secrets.hindsight_llm_api_key != ""
+  hindsight_llm_key_set = nonsensitive(var.app_secrets.hindsight_llm_api_key != "")
   hindsight_secret      = var.enable_hindsight && local.hindsight_llm_key_set
 }
 

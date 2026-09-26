@@ -45,7 +45,8 @@ scripts `source` the file and export every key.
 | `STATE_BUCKET` | gcp, aws | yes | state bucket, created if missing |
 | `STATE_LOCATION` | gcp | no (`region` from `01-infra.tfvars`) | location of the state bucket |
 | `STATE_REGION` | aws | yes | region of the state bucket |
-| `PROFILE` | aws | no | named profile; exported as `AWS_PROFILE`, written into `backend.tf`, passed as `-var profile=` to `02-platform` |
+| `PROFILE` | aws | no | named profile; exported as `AWS_PROFILE`, written into `backend.tf`, passed as `-var profile=` to `02-platform`. Empty uses the default credentials: confirm the account with `aws sts get-caller-identity` first |
+| `DNS_DOMAIN` | all | no (`domain`) | the zone `dns.sh` registers and creates; `domain` must be it or a name under it. See [dns.md](dns.md) |
 | `SUBSCRIPTION_ID` | azure | yes | exported as `ARM_SUBSCRIPTION_ID`; `az account set` |
 | `LOCATION` | azure | yes | location of the state resource group and storage account |
 | `STATE_RESOURCE_GROUP` | azure | yes | created if missing |
@@ -261,7 +262,7 @@ Exactly one certificate source must resolve in `cloud-lb` mode, checked by a pre
 
 | Variable | Type | Default | Meaning |
 |---|---|---|---|
-| `kubernetes_version` | string | `1.31` | |
+| `kubernetes_version` | string | `1.35` | must be in EKS standard support unless `cluster_support_type = "EXTENDED"` (billed extra); `aws eks describe-cluster-versions` lists each version's status |
 | `enable_private_endpoint` | bool | `false` | disable the public API endpoint |
 | `eks_public_access_cidrs` | list(string) | `[]` | who may reach the public endpoint. Empty switches the public endpoint off, so `kubectl` then has to run from inside the VPC. See [security.md](security.md#reaching-the-kubernetes-api) |
 | `deployer_principal_arn` | string | `""` | extra principal given `AmazonEKSClusterAdminPolicy` through an access entry |
@@ -562,7 +563,7 @@ identical on the three clouds; only the state and provider variables differ.
 
 | Variable | Type | Default | Meaning |
 |---|---|---|---|
-| `namespace` | string | `xyne` | application namespace |
+| `namespace` | string | `xyne` | application namespace; set the same value in `01-infra`. **Use `xyne-apps` with the published images**: the dashboard's nginx and the claw tools address `xyne-backend.xyne-apps` and `xyne-claw-auth.xyne-apps`, so in any other namespace the dashboard does not start |
 | `domain` | string | `""` | apex; `ingress.domain` from `01-infra` when empty |
 | `repo_url` | string | `https://github.com/juspay/xyne-spaces.git` | repository Argo CD reads charts from |
 | `chart_revision` | string | **required** | revision of `helm-charts/charts/*` (a `chart-<version>` tag) |

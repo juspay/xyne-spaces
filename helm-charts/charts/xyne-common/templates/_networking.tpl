@@ -64,7 +64,7 @@ spec:
     {{- if .Values.istio.destinationRule.subsets }}
     {{- toYaml .Values.istio.destinationRule.subsets | nindent 4 }}
     {{- else }}
-    - name: {{ include "xyne-common.version" . | quote }}
+    - name: {{ include "xyne-common.subsetName" . | quote }}
       labels:
         version: {{ include "xyne-common.version" . | quote }}
     {{- end }}
@@ -99,7 +99,7 @@ spec:
         - destination:
             host: {{ include "xyne-common.fullname" . }}
             {{- if .Values.istio.destinationRule.enabled }}
-            subset: {{ include "xyne-common.version" . | quote }}
+            subset: {{ include "xyne-common.subsetName" . | quote }}
             {{- end }}
           weight: 100
       {{- with .Values.istio.virtualService.timeout }}

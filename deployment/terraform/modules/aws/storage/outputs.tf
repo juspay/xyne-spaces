@@ -13,14 +13,14 @@ output "storage" {
     endpoint = ""
     region   = var.region
     buckets = {
-      main          = aws_s3_bucket.this["main"].id
-      docs          = aws_s3_bucket.this["docs"].id
-      canvas        = aws_s3_bucket.this["canvas"].id
-      recordings    = aws_s3_bucket.this["recordings"].id
-      workflows     = aws_s3_bucket.this["workflows"].id
-      transcription = aws_s3_bucket.this["transcription"].id
-      bundles       = aws_s3_bucket.this["bundles"].id
-      claw          = aws_s3_bucket.this["claw"].id
+      main          = try(aws_s3_bucket.this["main"].id, "")
+      docs          = try(aws_s3_bucket.this["docs"].id, "")
+      canvas        = try(aws_s3_bucket.this["canvas"].id, "")
+      recordings    = try(aws_s3_bucket.this["recordings"].id, "")
+      workflows     = try(aws_s3_bucket.this["workflows"].id, "")
+      transcription = try(aws_s3_bucket.this["transcription"].id, "")
+      bundles       = try(aws_s3_bucket.this["bundles"].id, "")
+      claw          = try(aws_s3_bucket.this["claw"].id, "")
     }
   }
 }

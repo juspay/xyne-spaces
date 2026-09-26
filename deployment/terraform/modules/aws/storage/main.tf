@@ -1,5 +1,5 @@
 locals {
-  keys = ["main", "docs", "canvas", "recordings", "workflows", "transcription", "bundles", "claw"]
+  keys = var.keys
 
   names = {
     for key in local.keys : key => lookup(var.bucket_names, key, "${var.prefix}-${key}")

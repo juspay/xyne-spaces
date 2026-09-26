@@ -46,7 +46,6 @@ spec:
             host: {{ $s.zero.host }}
             port:
               number: {{ $s.zero.port }}
-      timeout: 0s
     - name: ysweet
       match:
         - uri:
@@ -56,7 +55,6 @@ spec:
             host: {{ $s.ysweet.host }}
             port:
               number: {{ $s.ysweet.port }}
-      timeout: 0s
     {{- if .Values.routes.externalDashboard }}
     - name: external
       match:

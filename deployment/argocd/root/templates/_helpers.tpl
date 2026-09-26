@@ -353,6 +353,8 @@ LIVEKIT_SERVER_URL: {{ $lk.url | quote }}
 {{- define "xyne-root.backendSecretEnv" -}}
 {{- $root := .root }}
 {{- $sec := dict "REDIS_PASSWORD" (dict "name" "xyne-backend-secrets" "key" "REDIS_PASSWORD" "optional" true) }}
+{{- $_ := set $sec "GOOGLE_CLIENT_ID" (dict "name" "xyne-backend-secrets" "key" "GOOGLE_CLIENT_ID" "optional" true) }}
+{{- $_ := set $sec "GOOGLE_CLIENT_SECRET" (dict "name" "xyne-backend-secrets" "key" "GOOGLE_CLIENT_SECRET" "optional" true) }}
 {{- if .readReplica }}
 {{- $_ := set $sec "DATABASE_READ_REPLICA_POOL_URL" (dict "name" "xyne-backend-secrets" "key" "DATABASE_READ_REPLICA_POOL_URL" "optional" true) }}
 {{- end }}
@@ -409,17 +411,28 @@ LIVEKIT_SERVER_URL: {{ $lk.url | quote }}
 {{- toYaml $v }}
 {{- end }}
 
+{{- define "xyne-root.zeroBackupUrl" -}}
+{{- ((.Values.infra.zero | default dict).backupUrl) | default "" }}
+{{- end }}
+
 {{- define "xyne-root.appValues.xyne-zero" -}}
 {{- $root := .root }}
-{{- $v := include "xyne-root.appBase" (dict "root" $root "xyneImage" false "pool" "zero") | fromYaml }}
-{{- $_ := set $v "env" (dict "ZERO_CHANGE_STREAMER_URI" "http://xyne-zero-replication:80") }}
+{{- $v := include "xyne-root.appBase" (dict "root" $root "xyneImage" false "pool" "zero" "identity" "zero") | fromYaml }}
+{{- $env := dict "ZERO_CHANGE_STREAMER_URI" "http://xyne-zero-replication:80" }}
+{{- with include "xyne-root.zeroBackupUrl" $root }}
+{{- $_ := set $env "ZERO_LITESTREAM_BACKUP_URL" . }}
+{{- end }}
+{{- $_ := set $v "env" $env }}
 {{- toYaml $v }}
 {{- end }}
 
 {{- define "xyne-root.appValues.xyne-zero-replication" -}}
 {{- $root := .root }}
-{{- $v := include "xyne-root.appBase" (dict "root" $root "xyneImage" false "pool" "zero") | fromYaml }}
+{{- $v := include "xyne-root.appBase" (dict "root" $root "xyneImage" false "pool" "zero" "identity" "zero") | fromYaml }}
 {{- $v = mergeOverwrite $v (include "xyne-root.zeroReplicationOverrides" $root | fromYaml) }}
+{{- with include "xyne-root.zeroBackupUrl" $root }}
+{{- $_ := set $v.env "ZERO_LITESTREAM_BACKUP_URL" . }}
+{{- end }}
 {{- toYaml $v }}
 {{- end }}
 

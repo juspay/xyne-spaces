@@ -15,6 +15,10 @@
 {{- regexReplaceAll "[^a-zA-Z0-9_.-]" $version "-" | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
+{{- define "xyne-common.subsetName" -}}
+{{- regexReplaceAll "[^a-z0-9-]" (include "xyne-common.version" . | lower) "-" | trunc 63 | trimSuffix "-" | trimPrefix "-" }}
+{{- end }}
+
 {{- define "xyne-common.workloadName" -}}
 {{- if .Values.versionedName }}
 {{- printf "%s-%s" (include "xyne-common.fullname" .) (include "xyne-common.version" . | replace "." "-" | lower) | trunc 63 | trimSuffix "-" }}

@@ -75,7 +75,7 @@ one stops the install at a different point if it is missing.
 | A **domain you control at a registrar**, and a DNS zone for it in the cloud (or the ability to add records by hand) | the app is served over HTTPS at `xyne.example.com`; by default certificates are issued by Let's Encrypt over HTTP, which needs the name to resolve to your gateway | step 3 of your cloud guide delegates the zone's name servers at the registrar |
 | A **TLS certificate**, only if you put a cloud load balancer or your own in front (`ingress_mode` other than `gateway`) | the edge terminates TLS with a certificate you supply; nothing here generates one | [ingress.md](docs/ingress.md#certificates) |
 | **Quota headroom** in the region: CPUs, in-use external IPs, and NAT or Elastic IPs | a regional cluster plus a managed database asks for roughly 24 CPUs before it scales | the quota commands in step 1 of your cloud guide |
-| The **secret values** you will supply: no password or key is generated for you | Terraform writes exactly what you give it, so they can be rotated and audited | [secrets.md](docs/secrets.md) lists every one and how to generate it |
+| The **secret values**: `scripts/secrets.sh` generates them on your workstation into files kept apart from the tfvars | Terraform writes exactly what those files hold, so they can be rotated and audited | [secrets.md](docs/secrets.md) lists every one and how to generate it |
 
 Budget roughly an hour, most of it waiting for the cloud, and expect a first bill in the low
 hundreds of dollars a month for the defaults (see the cost notes in each guide). Everything else
@@ -226,6 +226,7 @@ IP addresses; AWS Elastic IPs (one NAT per AZ) and, for the sandbox pool, bare-m
 | [docs/gcp.md](docs/gcp.md), [docs/aws.md](docs/aws.md), [docs/azure.md](docs/azure.md) | you are installing; the complete path for one cloud |
 | [docs/configuration.md](docs/configuration.md) | you need a variable, a default, or a recipe (enable claw, add a worker, pin images, in-cluster Postgres) |
 | [docs/ingress.md](docs/ingress.md) | how traffic reaches the install: a cloud load balancer, the Istio gateway, or one you run on-prem |
+| [docs/dns.md](docs/dns.md) | registering the domain, creating its zone, running installs on subdomains |
 | [docs/secrets.md](docs/secrets.md) | generating, placing and rotating secrets |
 | [docs/security.md](docs/security.md) | who can reach the API server, egress, storage ACLs, encryption, and what the scanners flag |
 | [docs/operations.md](docs/operations.md) | upgrades, scaling, backups, certificates, observability, destroy, troubleshooting |
