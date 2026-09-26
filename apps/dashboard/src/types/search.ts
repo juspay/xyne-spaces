@@ -161,6 +161,11 @@ export interface VespaSearchFilters {
   // Cmd-K "Include my channels" toggle. Default on → backend scopes to member channels.
   onlyMyChannels?: boolean;
 
+  // When true, the backend drops results that resolve to an archived ticket. Default off
+  // (undefined) preserves current behavior. Set true by cmd+k always, and by the full-page
+  // Desk tab unless its "Show archived" toggle is on.
+  excludeArchived?: boolean;
+
   // Override Vespa grouping. Empty string => flat ranked list (no grouping).
   groupBy?: string;
 }

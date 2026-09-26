@@ -441,6 +441,7 @@ export const userAssignmentStateTable = table('user_assignment_states')
   })
   .primaryKey('id');
 
+
 export const boardComplexityScoreTable = table('board_complexity_scores')
   .columns({
     workspaceId: string(), // denormalized tenant key (stamped on insert)

@@ -364,6 +364,12 @@ export const vespaSearchQuerySchema = Joi.object({
     'any.only': 'onlyMyChannels must be "true" or "false"'
   }),
 
+  // When true, drop results resolving to an archived ticket. cmd+k always sends true; the
+  // full-page Desk tab sends it unless its "Show archived" toggle is on.
+  excludeArchived: Joi.string().valid('true', 'false').optional().messages({
+    'any.only': 'excludeArchived must be "true" or "false"'
+  }),
+
   // Debug flag
   includeDebugInfo: Joi.boolean().optional().messages({
     'boolean.base': 'Include debug info must be a boolean'

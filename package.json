@@ -1,13 +1,13 @@
 {
   "name": "xyne-spaces",
   "license": "Apache-2.0",
-  "version": "1.395.1",
+  "version": "1.405.1",
   "description": "Xyne Spaces - Monorepo with Backend and Dashboard",
   "scripts": {
     "prepare": "husky",
     "setup": "pnpm install && pnpm run build:shared",
     "install:all": "pnpm install",
-    "build:shared": "pnpm --filter @xyne/shared --filter @xyne/storage --filter @xyne/icons --filter agentic-framework --filter @xyne/litellm-client run build",
+    "build:shared": "pnpm --filter @xyne/shared --filter @xyne/storage --filter @xyne/icons --filter agentic-framework --filter @xyne/litellm-client --filter @xyne/cache run build",
     "doctor": "node scripts/xyne-doctor.mjs",
     "doctor:demo": "node scripts/xyne-doctor.mjs --demo",
     "doctor:test": "node --test scripts/xyne-doctor.test.mjs",

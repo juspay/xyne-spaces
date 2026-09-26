@@ -12,7 +12,7 @@ import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { activityService } from '@/services/activity/activityService';
 import type { BoardMetadata } from '@xyne/shared';
 import { emitTicketUpdated } from '@/automations/triggers/ticket-updated.trigger';
-import { runAsServiceActor } from '@/database/tenant/context';
+import { classifyAndAssignTicket } from '@/bypassAcl/emailFetchServices';
 import { getAutomationsBotUserId } from '@/automations/steps/automations-bot';
 import type { TicketLike } from '@/automations/triggers/ticket-context';
 
@@ -36,7 +36,7 @@ function shouldAssignTicketPerson(
   );
 }
 
-class EmailClassificationWorker {
+export class EmailClassificationWorker {
   private isInitialized = false;
 
   async start(): Promise<void> {
@@ -76,12 +76,10 @@ class EmailClassificationWorker {
       });
       throw new Error(`EmailClassificationWorker: channel ${job.data.channelId} not found or has no workspaceId`);
     }
-    return runAsServiceActor('email-classification-worker', channel.workspaceId,
-      () => this.classifyAndAssign(job, channel.workspaceId),
-    );
+    return classifyAndAssignTicket(this, channel.workspaceId, job);
   }
 
-  private async classifyAndAssign(job: Bull.Job<EmailClassificationJobData>, workspaceId: string): Promise<void> {
+  async classifyAndAssign(job: Bull.Job<EmailClassificationJobData>, workspaceId: string): Promise<void> {
     const { ticketId, channelId, emailId, groupId } = job.data;
     const systemActorId = await getAutomationsBotUserId(workspaceId);
     // If explicit flags provided (retrigger path), respect them; otherwise run both (normal ingestion path)

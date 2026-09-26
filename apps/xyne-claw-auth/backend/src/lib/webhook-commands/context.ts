@@ -23,6 +23,7 @@ export interface WebhookCommandCtx {
   taskCommandText: string;
   immediateTaskCommand: boolean;
   autoGoalEnabled: boolean;
+  isTwin: boolean;
   reply: (markdownText: string, failureLabel: string) => Promise<void>;
   reconcileStoppedRuns: (
     conversationId: string,

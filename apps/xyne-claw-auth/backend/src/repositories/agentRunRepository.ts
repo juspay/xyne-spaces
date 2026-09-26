@@ -85,6 +85,112 @@ async function withSessionWriteLock<T>(
   );
 }
 
+const TOOL_INVOCATION_FLUSH_MS = Number(process.env["TOOL_INVOCATION_FLUSH_MS"] ?? 2000);
+
+interface PendingToolInvocations {
+  entries: Map<string, Record<string, unknown>>;
+  waiters: Array<{ resolve: () => void; reject: (err: unknown) => void }>;
+  timer: NodeJS.Timeout | null;
+}
+
+const pendingToolInvocations = new Map<string, PendingToolInvocations>();
+const inflightToolInvocationFlushes = new Map<string, Promise<void>>();
+let anonymousInvocationSeq = 0;
+
+function invocationKey(inv: Record<string, unknown>): string {
+  const id = inv["toolCallId"];
+  if (id) return `id:${String(id)}`;
+  anonymousInvocationSeq += 1;
+  return `anon:${anonymousInvocationSeq}`;
+}
+
+function supersedes(incoming: Record<string, unknown>, current: Record<string, unknown>): boolean {
+  return !(incoming["status"] === "running" && current["status"] !== undefined && current["status"] !== "running");
+}
+
+export function mergeToolInvocations(
+  existing: Array<Record<string, unknown>>,
+  batch: Array<Record<string, unknown>>,
+  max: number = MAX_TOOL_INVOCATIONS,
+): Array<Record<string, unknown>> {
+  const next = [...existing];
+  const indexById = new Map<unknown, number>();
+  next.forEach((inv, i) => {
+    if (inv["toolCallId"]) indexById.set(inv["toolCallId"], i);
+  });
+  for (const inv of batch) {
+    const id = inv["toolCallId"];
+    const at = id ? indexById.get(id) : undefined;
+    if (at !== undefined) {
+      if (supersedes(inv, next[at] as Record<string, unknown>)) next[at] = inv;
+    } else {
+      next.push(inv);
+      if (id) indexById.set(id, next.length - 1);
+    }
+  }
+  return next.length > max ? next.slice(next.length - max) : next;
+}
+
+async function writePendingToolInvocations(sessionId: string): Promise<void> {
+  const pending = pendingToolInvocations.get(sessionId);
+  if (!pending || pending.entries.size === 0) return;
+  pendingToolInvocations.delete(sessionId);
+  if (pending.timer) clearTimeout(pending.timer);
+  const batch = [...pending.entries.values()];
+  try {
+    await withSessionWriteLock(sessionId, async (tx) => {
+      const run = await tx.agentRun.findUnique({ where: { sessionId }, select: { toolInvocations: true } });
+      const existing = Array.isArray(run?.toolInvocations)
+        ? (run!.toolInvocations as Array<Record<string, unknown>>)
+        : [];
+      await tx.agentRun.update({
+        where: { sessionId },
+        data: { toolInvocations: mergeToolInvocations(existing, batch) as Prisma.InputJsonValue },
+      });
+    });
+    for (const waiter of pending.waiters) waiter.resolve();
+  } catch (err) {
+    log.warn(
+      `[agent-run] tool invocation flush failed session=${sessionId} batch=${batch.length}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    for (const waiter of pending.waiters) waiter.reject(err);
+  }
+}
+
+function flushToolInvocations(sessionId: string): Promise<void> {
+  const prior = inflightToolInvocationFlushes.get(sessionId) ?? Promise.resolve();
+  const run = prior.then(() => writePendingToolInvocations(sessionId));
+  inflightToolInvocationFlushes.set(sessionId, run);
+  return run.finally(() => {
+    if (inflightToolInvocationFlushes.get(sessionId) === run) inflightToolInvocationFlushes.delete(sessionId);
+  });
+}
+
+async function flushAllToolInvocations(): Promise<void> {
+  await Promise.all([...pendingToolInvocations.keys()].map((sessionId) => flushToolInvocations(sessionId)));
+}
+
+function enqueueToolInvocation(sessionId: string, invocation: unknown): Promise<void> {
+  const inv = stripNulDeep(invocation) as Record<string, unknown>;
+  let pending = pendingToolInvocations.get(sessionId);
+  if (!pending) {
+    pending = { entries: new Map(), waiters: [], timer: null };
+    pendingToolInvocations.set(sessionId, pending);
+  }
+  const key = invocationKey(inv);
+  const buffered = pending.entries.get(key);
+  if (!buffered || supersedes(inv, buffered)) pending.entries.set(key, inv);
+  const target = pending;
+  const done = new Promise<void>((resolve, reject) => target.waiters.push({ resolve, reject }));
+  if (!target.timer) {
+    target.timer = setTimeout(() => {
+      void flushToolInvocations(sessionId);
+    }, TOOL_INVOCATION_FLUSH_MS);
+    target.timer.unref?.();
+  }
+  return done;
+}
+
 /** Inclusive window for time-series padding. `null` = all time (unbounded left). */
 export type TimeWindow = { start: Date; end: Date } | null;
 
@@ -333,6 +439,24 @@ export const agentRunRepository = {
     }
   },
 
+  /** Close a run that never reached a terminal callback. Guarded on status
+   *  "running" so a late failure path can't flip a run the result callback has
+   *  already finalized — same discipline as services/orphan-run-finalizer.ts.
+   *  Returns the number of rows actually updated (0 = already terminal). */
+  failIfRunning: async (sessionId: string, error: string) => {
+    const res = await prisma.agentRun.updateMany({
+      where: { sessionId, status: "running" },
+      data: { status: "failed", error, completedAt: new Date(), currentToolLabel: null },
+    });
+    return res.count;
+  },
+
+  /** Hard-delete one run row. Used only when a chat turn pre-created its run and
+   *  the dispatch was then DEFERRED — another worker already owned the
+   *  conversation and its run carries the answer. `deleteMany` (not `delete`) so
+   *  a missing row is a no-op rather than a throw. */
+  deleteBySessionId: (sessionId: string) => prisma.agentRun.deleteMany({ where: { sessionId } }),
+
   updateProgress: (sessionId: string, currentToolLabel: string) =>
     prisma.agentRun.updateMany({
       where: { sessionId },
@@ -352,6 +476,7 @@ export const agentRunRepository = {
     // the lock waits for in-flight appends on this sessionId (from any pod)
     // to commit before reading `existing`, guaranteeing finalize sees every
     // persisted invocation. All DB ops use `tx`.
+    await flushToolInvocations(sessionId);
     return withSessionWriteLock(sessionId, async (tx) => {
     let finalInvocations: unknown[] | undefined;
     // Always merge once the run is finalizing, even if the callback didn't
@@ -486,41 +611,12 @@ export const agentRunRepository = {
       data: { rating, ratingComment: comment ?? null, ratedAt: new Date() },
     }),
 
-  appendToolInvocation: async (sessionId: string, invocation: unknown) => {
-    // Read-modify-write with merge-by-toolCallId semantics:
-    //   - A "running" placeholder is pushed on tool_execution_start
-    //   - A "completed" row is pushed on tool_execution_end with the SAME toolCallId
-    // We replace the placeholder in place so the JSON column mirrors the live
-    // frontend state (single row per tool call, not duplicated).
-    //
-    // Serialized via `withSessionWriteLock` (Postgres advisory lock) so
-    // concurrent appends on the same sessionId — within one pod OR across
-    // multiple pods — don't race and clobber each other. All DB ops below
-    // run through `tx` so they're covered by the lock.
-    await withSessionWriteLock(sessionId, async (tx) => {
-      const run = await tx.agentRun.findUnique({ where: { sessionId }, select: { toolInvocations: true } });
-      const existing = Array.isArray(run?.toolInvocations) ? (run!.toolInvocations as Array<Record<string, unknown>>) : [];
-      // Strip NULs so the jsonb write doesn't throw (this is the root cause of the
-      // "appendToolInvocation failed" storm on sandbox-heavy runs).
-      const inv = stripNulDeep(invocation) as Record<string, unknown>;
-      const incomingId = inv["toolCallId"];
-      let next: Array<Record<string, unknown>>;
-      if (incomingId && existing.some((p) => p["toolCallId"] === incomingId)) {
-        next = existing.map((p) => p["toolCallId"] === incomingId ? inv : p);
-      } else {
-        next = [...existing, inv];
-      }
-      // Bound the column — keep the most recent rows so a heavy investigation
-      // can't grow it without limit (it's rewritten in full on every event).
-      if (next.length > MAX_TOOL_INVOCATIONS) {
-        next = next.slice(next.length - MAX_TOOL_INVOCATIONS);
-      }
-      await tx.agentRun.update({
-        where: { sessionId },
-        data: { toolInvocations: next as Prisma.InputJsonValue },
-      });
-    });
-  },
+  appendToolInvocation: (sessionId: string, invocation: unknown): Promise<void> =>
+    enqueueToolInvocation(sessionId, invocation),
+
+  flushToolInvocations: (sessionId: string): Promise<void> => flushToolInvocations(sessionId),
+
+  flushAllToolInvocations: (): Promise<void> => flushAllToolInvocations(),
 
   listByUser: (userId: string, opts?: { status?: string; limit?: number; conversationId?: string; agentSlug?: string }) =>
     prisma.agentRun.findMany({

@@ -2,6 +2,7 @@ import { jevEnabled, jevScoreItems, jevThreshold } from "./jev.js";
 import { recordJudgeOutcome } from "./judge-backend.js";
 import { optEnabled } from "./optimizations.js";
 import { metric } from "./metrics.js";
+import { runWithSubagentMcpId } from "./subagent-mcp-context.js";
 import { Type } from "@sinclair/typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import {
@@ -166,6 +167,20 @@ function addUnique(
   });
 }
 
+export function subagentScopedToolName(subagentName: string, toolName: string): string {
+  return `${subagentName}__${extractRuntimeToolName(toolName)}`.replace(/[^a-zA-Z0-9_-]/g, "_");
+}
+
+function scopeToSubagent(tool: ToolDefinition, subagentName: string, subagentId: string): ToolDefinition {
+  const execute = tool.execute.bind(tool) as (...args: unknown[]) => unknown;
+  return {
+    ...tool,
+    name: subagentScopedToolName(subagentName, tool.name),
+    description: `[${subagentName}] ${tool.description ?? ""}`.trim(),
+    execute: ((...args: unknown[]) => runWithSubagentMcpId(subagentId, () => execute(...args))) as ToolDefinition["execute"],
+  } as ToolDefinition;
+}
+
 function resolveCustomSubagentTools(
   toolsConfig: { direct?: string[]; custom?: string[] },
   groups: McpToolGroup[],
@@ -180,13 +195,13 @@ function resolveCustomSubagentTools(
       const writeSet = new Set(group.writeTools.map(String));
       for (const tool of group.tools) {
         const runtimeName = extractRuntimeToolName(tool.name);
-        if (directNames.has(runtimeName) && !writeSet.has(runtimeName)) out.push(tool);
+        if (directNames.has(runtimeName) && !(excludeWritesFromCatalog() && writeSet.has(runtimeName))) out.push(tool);
       }
     }
   }
   if (customSlugs.size > 0 && customTools) {
     for (const tool of customTools) {
-      if (customSlugs.has(customToolSelectionKey(tool)) && !isCustomWriteTool(tool)) out.push(tool);
+      if (customSlugs.has(customToolSelectionKey(tool)) && !(excludeWritesFromCatalog() && isCustomWriteTool(tool))) out.push(tool);
     }
   }
   return out;
@@ -252,10 +267,19 @@ export function buildToolCatalog(params: {
       }
     }
 
+    const serverOf = new Map<ToolDefinition, string>();
+    for (const group of params.groups) {
+      for (const tool of group.tools) serverOf.set(tool, group.serverType);
+    }
     for (const spec of params.customSubagents ?? []) {
       const palette = resolveCustomSubagentTools(spec.tools, params.groups, params.customTools);
       for (const tool of palette) {
-        addUnique(items, seen, tool, `custom-subagent:${spec.name}`);
+        const server = serverOf.get(tool);
+        if (server && spec.id) {
+          addUnique(items, seen, scopeToSubagent(tool, spec.name, spec.id), `custom-subagent:${spec.name}`, server);
+        } else {
+          addUnique(items, seen, tool, `custom-subagent:${spec.name}`, server);
+        }
       }
     }
   }
@@ -452,6 +476,10 @@ async function matchScopedSifted(
  * two servers can share a bare tool name, and loading the wrong one silently
  * is worse than asking for the qualified name.
  */
+export function normalizeToolName(value: string): string {
+  return value.trim().toLowerCase().replace(/[\s_]+/g, "-");
+}
+
 function resolveCatalogName(
   requested: string,
   byName: Map<string, ToolCatalogEntry>,
@@ -459,8 +487,8 @@ function resolveCatalogName(
 ): { name: string } | { ambiguous: string[] } | null {
   if (byName.has(requested)) return { name: requested };
 
-  const norm = (v: string): string => v.toLowerCase().replace(/_/g, "-");
-  const wanted = norm(requested);
+  const wanted = normalizeToolName(requested);
+  const norm = normalizeToolName;
 
   const matches = catalog.filter((entry) => {
     const name = entry.name;
@@ -877,8 +905,10 @@ export function buildFastModeMetaTools(options: {
         const activeByName = new Map((options.activeTools ?? []).map((e) => [e.name, e]));
         const activeMatch = (requested: string): string | null => {
           if (activeByName.has(requested)) return requested;
-          const bare = requested.split("__").pop() ?? requested;
-          const hits = [...activeByName.keys()].filter((n) => (n.split("__").pop() ?? n) === bare);
+          const wanted = normalizeToolName(requested.split("__").pop() ?? requested);
+          const hits = [...activeByName.keys()].filter(
+            (n) => normalizeToolName(n) === normalizeToolName(requested) || normalizeToolName(n.split("__").pop() ?? n) === wanted,
+          );
           return hits.length === 1 ? hits[0]! : null;
         };
         for (const requested of names) {
@@ -1001,7 +1031,7 @@ export function renderToolCatalogForPrompt(
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([name, entries]): [string, ToolCatalogEntry[]] => [name, entries.slice().sort((a, b) => a.name.localeCompare(b.name))]);
 
-  const subagentCatalogs = [...new Set(catalog.filter((e) => e.source.startsWith("subagent:")).map((e) => e.catalog))].sort();
+  const subagentCatalogs = [...new Set(catalog.filter((e) => e.source.startsWith("subagent:") || e.source.startsWith("custom-subagent:")).map((e) => e.catalog))].sort();
   const directFirst =
     opts?.preferDirect && !opts.subagentDelegationDisabled && subagentCatalogs.length
       ? [`The ${subagentCatalogs.join(", ")} catalog${subagentCatalogs.length === 1 ? " holds" : "s hold"} the same tools your subagent${subagentCatalogs.length === 1 ? "" : "s"} of that name use${subagentCatalogs.length === 1 ? "s" : ""}, writes included. Call them yourself first: a subagent is a slow nested model run, so delegate only for open-ended research that needs many queries.`]

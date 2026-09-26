@@ -117,6 +117,7 @@ export function FiltersModal({
       before: '',
       onlyMyChannels: DEFAULT_SEARCH_FILTERS.onlyMyChannels,
       includeBotMessages: false,
+      showArchived: DEFAULT_SEARCH_FILTERS.showArchived,
     }));
     setTextDrafts({});
     setDateMode('');
@@ -209,6 +210,15 @@ export function FiltersModal({
               </div>
             ))}
           </div>
+        );
+      case 'checkbox':
+        return (
+          <Checkbox
+            checked={value === true}
+            onChange={() => write(value !== true)}
+            label={entry.label}
+            labelClassName={CHECK_LABEL}
+          />
         );
       case 'enumSingle':
         return (
@@ -333,9 +343,12 @@ export function FiltersModal({
         {/* Fields in registry order — this component knows control kinds, not filters. */}
         {fieldEntries.map(entry => (
           <div key={entry.id}>
-            <label className={FIELD_LABEL} htmlFor={`filter-${entry.id}`}>
-              {entry.label}
-            </label>
+            {/* A checkbox carries its own label; a separate field label would just repeat it. */}
+            {entry.control?.kind !== 'checkbox' && (
+              <label className={FIELD_LABEL} htmlFor={`filter-${entry.id}`}>
+                {entry.label}
+              </label>
+            )}
             {renderControl(entry)}
           </div>
         ))}

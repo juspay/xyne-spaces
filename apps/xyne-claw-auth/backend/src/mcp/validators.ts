@@ -316,71 +316,61 @@ register("xyne-spaces", "spaces-edit-canvas", async (params) => {
   return null;
 });
 
-register("xyne-spaces", SDLC_TOOL_NAMES.mutateArtifact, async (params) => {
+register("xyne-spaces", SDLC_TOOL_NAMES.writeArtifact, async (params) => {
   const action = String(params["action"] ?? "");
-  if (params["artifactType"] === "WIKI") return null;
-  const folderId = String(params["folderId"] ?? "").trim();
-  if (folderId && action === "create") {
-    for (const key of ["title", "markdown"]) {
-      if (!String(params[key] ?? "").trim()) return `${key} is required for create`;
-    }
-    return null;
+  const has = (key: string) => String(params[key] ?? "").trim().length > 0;
+  const wiki = params["kind"] === "WIKI";
+  const required: Record<string, string[]> = {
+    create: wiki ? ["channelId", "title", "markdown"] : ["artifactTypeId", "title", "markdown"],
+    update: wiki ? ["canvasId", "markdown"] : ["canvasId"],
+    replace_section: ["canvasId", "heading", "markdown"],
+    insert_section: ["canvasId", "heading", "markdown"],
+    remove_section: ["canvasId", "heading"],
+    move: wiki ? ["canvasId", "folderPath"] : ["canvasId", "parentId"],
+  };
+  const keys = required[action];
+  if (!keys) return `action must be one of ${Object.keys(required).join(", ")}`;
+  if (wiki && !has("channelId")) return "channelId is required for Wiki pages";
+  const missing = keys.find((key) => key !== "folderPath" && !has(key));
+  if (missing) return `${missing} is required for ${action}`;
+  if (action === "move" && wiki && typeof params["folderPath"] !== "string") return "folderPath is required for move";
+  if (action === "update" && !wiki && !has("markdown") && !has("title") && !(params["relatedCanvasIds"] as unknown[] | undefined)?.length) {
+    return "update needs markdown, title or relatedCanvasIds";
   }
-  if (action === "update") {
-    for (const key of ["canvasId", "markdown"]) {
-      if (!String(params[key] ?? "").trim()) return `${key} is required for update`;
-    }
-    return null;
-  }
-  return "artifact creates use folderId; updates use canvasId";
-});
-
-register("xyne-spaces", SDLC_TOOL_NAMES.createPullRequest, async (params) => {
-  for (const key of ["workspaceId", "actorUserId", "repoId", "title", "head", "base", "commitHash"]) {
-    if (!String(params[key] ?? "").trim()) return `${key} is required`;
-  }
-  if (!/^[0-9a-f]{40}$/i.test(String(params["commitHash"]))) {
-    return "commitHash must be a full 40-character Git commit SHA";
-  }
-  if (String(params["title"]).trim().length > 256) return "title must be at most 256 characters";
-  if (String(params["body"] ?? "").length > 65_536) return "body must be at most 65536 characters";
-  if (String(params["head"]).trim().length > 255) return "head must be at most 255 characters";
-  if (String(params["base"]).trim().length > 255) return "base must be at most 255 characters";
-  if (params["head"] === params["base"]) return "head must differ from base";
+  if (has("trackFolderId") && !has("trackId")) return "trackFolderId needs the trackId it sits in";
   return null;
 });
 
-for (const tool of [
-  SDLC_TOOL_NAMES.listArtifacts,
-  SDLC_TOOL_NAMES.readArtifact,
-  SDLC_TOOL_NAMES.listArtifactVersions,
-  SDLC_TOOL_NAMES.readArtifactVersion,
-]) {
+register("xyne-spaces", SDLC_TOOL_NAMES.createTrackFolder, async (params) => {
+  for (const key of ["channelId", "trackId", "name"]) {
+    if (!String(params[key] ?? "").trim()) return `${key} is required`;
+  }
+  if (String(params["name"]).trim().length > 120) return "name must be at most 120 characters";
+  return null;
+});
+
+register("xyne-spaces", SDLC_TOOL_NAMES.createPullRequest, async (params) => {
+  for (const key of ["workspaceId", "actorUserId", "repoId", "title", "head", "base"]) {
+    if (!String(params[key] ?? "").trim()) return `${key} is required`;
+  }
+  if (String(params["title"]).trim().length > 256) return "title must be at most 256 characters";
+  if (String(params["body"] ?? "").length > 65_536) return "body must be at most 65536 characters";
+  return null;
+});
+
+for (const tool of [SDLC_TOOL_NAMES.readArtifact, SDLC_TOOL_NAMES.listArtifactVersions, SDLC_TOOL_NAMES.archiveArtifact]) {
   register("xyne-spaces", tool, async (params) => {
-    for (const key of ["workspaceId", "actorUserId", "channelId"]) {
-      if (!String(params[key] ?? "").trim()) return `${key} is required`;
-    }
-    if (tool === SDLC_TOOL_NAMES.listArtifacts) return null;
-    const selector = params["selector"];
-    if (!selector || typeof selector !== "object" || Array.isArray(selector)) {
-      return "selector is required";
-    }
-    const selected = selector as Record<string, unknown>;
-    if (selected["type"] !== "SDLC_CANVAS") return "selector.type must be SDLC_CANVAS";
-    const canvasId = String(selected["canvasId"] ?? "").trim();
-    if (!canvasId) return "selector.canvasId is required";
-    if (canvasId.length > 256) return "selector.canvasId must be at most 256 characters";
-    if (tool === SDLC_TOOL_NAMES.readArtifactVersion && !String(params["versionId"] ?? "").trim()) {
-      return "versionId is required";
+    const canvasId = String(params["canvasId"] ?? "").trim();
+    if (!canvasId) return "canvasId is required";
+    if (canvasId.length > 256) return "canvasId must be at most 256 characters";
+    if (tool === SDLC_TOOL_NAMES.archiveArtifact && !["archive", "restore"].includes(String(params["action"]))) {
+      return "action must be archive or restore";
     }
     if (tool === SDLC_TOOL_NAMES.listArtifactVersions && params["limit"] !== undefined) {
       const limit = Number(params["limit"]);
       if (!Number.isInteger(limit) || limit < 1 || limit > 25) {
         return "limit must be an integer between 1 and 25";
       }
-    }
-    if (tool === SDLC_TOOL_NAMES.listArtifactVersions && params["cursor"] !== undefined) {
-      if (!String(params["cursor"] ?? "").trim()) return "cursor must not be empty";
     }
     return null;
   });

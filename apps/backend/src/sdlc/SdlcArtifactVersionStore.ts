@@ -1,23 +1,30 @@
 import { createHash } from 'crypto';
-import { sdlcRepoIds, SDLC_MEMBERSHIP_RELATION } from '@xyne/shared';
-import { Prisma, type PrismaClient } from '@prisma/client';
+import {
+  buildSdlcPath,
+  sdlcSectionForCanvas,
+  SDLC_CONTAINMENT_RELATION,
+  SDLC_TRACK_FLAT_RELATION,
+} from '@xyne/shared';
+import { type PrismaClient } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
 import { AppError } from '@/middleware/errorHandler';
 import { convertBlockNoteToMarkdown } from '@/services/canvasService';
 import type { BlockNoteBlock } from '@/types/blockNoteTypes';
-import { canvasIdsForRepos } from './sdlcChannelMembership';
+import { requireSdlcHubReader } from './sdlcChannelMembership';
 
-export interface SdlcArtifactVersionSelector {
-  type: 'SDLC_CANVAS';
-  canvasId: string;
-}
-
-export interface SdlcArtifactScopeInput {
+export interface SdlcActorInput {
   workspaceId: string;
   userId: string;
-  channelId?: string;
-  repoId?: string;
-  repoIds?: string[];
+}
+
+export interface SdlcArtifactListInput extends SdlcActorInput {
+  channelId: string;
+  /** The artifact type (PRDs, Tech Docs, ...); stored as a CanvasFolder. */
+  artifactTypeId?: string;
+  trackId?: string;
+  /** An SdlcFolder inside a track; lists what sits directly in it. */
+  trackFolderId?: string;
+  includeArchived?: boolean;
 }
 
 interface ResolvedArtifact {
@@ -46,34 +53,75 @@ export class SdlcArtifactVersionStore {
   constructor(private readonly prisma: PrismaClient = DatabaseClient.getInstance()) {}
 
   /** Wiki pages are listed by the wiki tree, not here. */
-  async listArtifacts(input: SdlcArtifactScopeInput) {
-    const scope = await this.requireScope(input);
-    const canvases = await this.prisma.canvas.findMany({
+  async listArtifacts(input: SdlcArtifactListInput) {
+    await requireSdlcHubReader(this.prisma, input, input.channelId);
+    const all = await this.prisma.canvas.findMany({
       where: {
-        channelId: scope.channelId,
+        channelId: input.channelId,
         workspaceId: input.workspaceId,
-        projectId: scope.projectId,
-        ...(await this.canvasFilter(scope)),
-        sdlcArtifact: { is: { artifactType: { not: 'WIKI' } } },
+        ...(input.artifactTypeId ? { folderId: input.artifactTypeId } : {}),
+        sdlcArtifact: {
+          is: {
+            artifactType: { not: 'WIKI' },
+            ...(input.includeArchived ? {} : { artifactStatus: 'ACTIVE' }),
+          },
+        },
       },
       orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
       select: {
         id: true,
         title: true,
-        sdlcArtifact: { select: { repoId: true } },
+        folderId: true,
         updatedAt: true,
+        sdlcArtifact: { select: { artifactType: true, artifactStatus: true } },
       },
     });
-    return canvases.map((canvas) => ({
-      canvasId: canvas.id,
-      title: canvas.title,
-      artifactKind: 'ARTIFACT' as const,
-      repoId: canvas.sdlcArtifact?.repoId ?? null,
-      updatedAt: canvas.updatedAt.toISOString(),
-    }));
+    const edges = await this.prisma.sdlcEntityLink.findMany({
+      where: {
+        channelId: input.channelId,
+        targetType: 'CANVAS',
+        targetId: { in: all.map((canvas) => canvas.id) },
+        OR: [
+          { sourceType: 'TRACK', relationType: SDLC_TRACK_FLAT_RELATION },
+          { sourceType: 'FOLDER', relationType: SDLC_CONTAINMENT_RELATION },
+        ],
+      },
+      select: { sourceType: true, sourceId: true, targetId: true },
+    });
+    const trackOf = new Map(edges.filter((edge) => edge.sourceType === 'TRACK').map((edge) => [edge.targetId, edge.sourceId]));
+    const trackFolderOf = new Map(edges.filter((edge) => edge.sourceType === 'FOLDER').map((edge) => [edge.targetId, edge.sourceId]));
+    const canvases = all.filter(
+      (canvas) =>
+        (!input.trackId || trackOf.get(canvas.id) === input.trackId) &&
+        (!input.trackFolderId || trackFolderOf.get(canvas.id) === input.trackFolderId)
+    );
+    const [types, tracks, trackFolders] = await Promise.all([
+      this.prisma.canvasFolder.findMany({
+        where: { id: { in: canvases.map((canvas) => canvas.folderId).filter((id): id is string => !!id) } },
+        select: { id: true, name: true },
+      }),
+      this.prisma.sdlcTrack.findMany({ where: { id: { in: [...trackOf.values()] } }, select: { id: true, name: true } }),
+      this.prisma.sdlcFolder.findMany({ where: { id: { in: [...trackFolderOf.values()] } }, select: { id: true, name: true } }),
+    ]);
+    const nameOf = new Map([...types, ...tracks, ...trackFolders].map((row) => [row.id, row.name]));
+    const ref = (id: string | null | undefined) => (id ? { id, name: nameOf.get(id) ?? '' } : null);
+    return canvases.map((canvas) => {
+      const trackId = trackOf.get(canvas.id);
+      const place = sdlcSectionForCanvas(canvas.sdlcArtifact?.artifactType, canvas.folderId);
+      return {
+        canvasId: canvas.id,
+        title: canvas.title,
+        url: buildSdlcPath({ channelId: input.channelId, ...place, canvasId: canvas.id, ...(trackId ? { trackId } : {}) }),
+        artifactType: ref(canvas.folderId),
+        track: ref(trackId),
+        trackFolder: ref(trackFolderOf.get(canvas.id)),
+        archived: canvas.sdlcArtifact?.artifactStatus === 'ARCHIVED',
+        updatedAt: canvas.updatedAt.toISOString(),
+      };
+    });
   }
 
-  async readArtifact(input: SdlcArtifactScopeInput & { selector: SdlcArtifactVersionSelector }) {
+  async readArtifact(input: SdlcActorInput & { canvasId: string }) {
     const artifact = await this.resolveArtifact(input);
     const canvas = await this.prisma.canvas.findUnique({
       where: { id: artifact.canvasId },
@@ -91,13 +139,7 @@ export class SdlcArtifactVersionStore {
     };
   }
 
-  async listVersions(
-    input: SdlcArtifactScopeInput & {
-      selector: SdlcArtifactVersionSelector;
-      cursor?: string;
-      limit: number;
-    }
-  ) {
+  async listVersions(input: SdlcActorInput & { canvasId: string; cursor?: string; limit: number }) {
     const artifact = await this.resolveArtifact(input);
     if (input.cursor) {
       const cursor = await this.prisma.canvasVersion.findFirst({
@@ -129,12 +171,7 @@ export class SdlcArtifactVersionStore {
     };
   }
 
-  async readVersion(
-    input: SdlcArtifactScopeInput & {
-      selector: SdlcArtifactVersionSelector;
-      versionId: string;
-    }
-  ) {
+  async readVersion(input: SdlcActorInput & { canvasId: string; versionId: string }) {
     const artifact = await this.resolveArtifact(input);
     const version = await this.prisma.canvasVersion.findFirst({
       where: { id: input.versionId, canvasId: artifact.canvasId },
@@ -162,97 +199,17 @@ export class SdlcArtifactVersionStore {
     };
   }
 
-  private async resolveArtifact(
-    input: SdlcArtifactScopeInput & { selector: SdlcArtifactVersionSelector }
-  ): Promise<ResolvedArtifact> {
-    const scope = await this.requireScope(input);
+  /** The hub comes from the canvas, so reads need only the canvas id. */
+  private async resolveArtifact(input: SdlcActorInput & { canvasId: string }): Promise<ResolvedArtifact> {
     const canvas = await this.prisma.canvas.findFirst({
-      where: {
-        id: input.selector.canvasId,
-        channelId: scope.channelId,
-        workspaceId: input.workspaceId,
-        projectId: scope.projectId,
-        sdlcArtifact: { isNot: null },
-      },
-      select: { id: true, title: true, sdlcArtifact: { select: { artifactType: true } } },
+      where: { id: input.canvasId, workspaceId: input.workspaceId, sdlcArtifact: { isNot: null } },
+      select: { id: true, title: true, channelId: true, sdlcArtifact: { select: { artifactType: true } } },
     });
-    if (!canvas) throw new AppError('SDLC artifact not found', 404);
+    if (!canvas?.channelId) throw new AppError('SDLC artifact not found', 404);
+    await requireSdlcHubReader(this.prisma, input, canvas.channelId);
     const artifactKind = canvas.sdlcArtifact?.artifactType === 'WIKI' ? 'WIKI' : 'ARTIFACT';
-    // Wiki pages belong to a folder in the hub, not to a repository column.
-    if (artifactKind === 'ARTIFACT' && scope.repoIds) {
-      const inScope = await this.prisma.canvas.count({
-        where: { id: canvas.id, ...(await this.canvasFilter(scope)) },
-      });
-      if (inScope === 0) throw new AppError('SDLC artifact not found', 404);
-    }
     return { canvasId: canvas.id, title: canvas.title, artifactKind };
   }
 
-  private async requireScope(input: SdlcArtifactScopeInput): Promise<{
-    repoIds: string[] | null;
-    channelId: string;
-    projectId: string;
-  }> {
-    const named = sdlcRepoIds(input);
-    if (named.length === 0) {
-      if (!input.channelId) throw new AppError('An SDLC hub is required', 400);
-      const channel = await this.prisma.channel.findFirst({
-        where: {
-          id: input.channelId,
-          workspaceId: input.workspaceId,
-          type: 'SDLC',
-          participants: { some: { userId: input.userId } },
-        },
-        select: { id: true, projectId: true },
-      });
-      if (!channel?.projectId) throw new AppError('SDLC hub not found', 404);
-      return { repoIds: null, channelId: channel.id, projectId: channel.projectId };
-    }
-
-    const memberships = await this.prisma.sdlcEntityLink.findMany({
-      where: {
-        workspaceId: input.workspaceId,
-        sourceType: 'CHANNEL',
-        targetType: 'REPOSITORY',
-        targetId: { in: named },
-        relationType: SDLC_MEMBERSHIP_RELATION,
-        ...(input.channelId ? { channelId: input.channelId } : {}),
-        channel: { participants: { some: { userId: input.userId } } },
-      },
-      orderBy: { createdAt: 'asc' },
-      select: { channelId: true, targetId: true },
-    });
-    const reachable = new Set(memberships.map((m) => m.targetId));
-    const channelId = input.channelId ?? memberships[0]?.channelId;
-    if (!channelId || named.some((id: string) => !reachable.has(id))) {
-      throw new AppError('SDLC artifact not found', 404);
-    }
-    if (!input.channelId && new Set(memberships.map((m) => m.channelId)).size > 1) {
-      throw new AppError(
-        'These repositories are reachable through more than one SDLC hub. Name the hub with channelId.',
-        409
-      );
-    }
-    // The hub's project, not the repository's: a hub may cover repositories from other projects.
-    const channel = await this.prisma.channel.findFirst({
-      where: { id: channelId, workspaceId: input.workspaceId },
-      select: { projectId: true },
-    });
-    if (!channel?.projectId) throw new AppError('SDLC hub not found', 404);
-    return { repoIds: named, channelId, projectId: channel.projectId };
-  }
-
-  private async canvasFilter(scope: {
-    channelId: string;
-    repoIds: string[] | null;
-  }): Promise<Prisma.CanvasWhereInput> {
-    if (!scope.repoIds) return {};
-    const canvasIds = await canvasIdsForRepos(this.prisma, scope.channelId, scope.repoIds);
-    return {
-      OR: [
-        ...(canvasIds.length > 0 ? [{ id: { in: canvasIds } }] : []),
-        { sdlcArtifact: { is: { repoId: { in: scope.repoIds } } } },
-      ],
-    };
-  }
+  // Every canvas in a hub is readable by the hub today; per-canvas privacy would need a canvas check here.
 }

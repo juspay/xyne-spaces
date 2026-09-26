@@ -1,8 +1,15 @@
 // Barrel export - allows clean imports from @xyne/shared
 export * from './zero/schema';
+export * from './zero/audit';
 export { defineQuery } from './zero/acl';
-export { encryptedFieldsConfig, type EncryptedTableConfig } from './zero/encrypted-fields';
-export { EncryptedFieldQueryError, validateQueryWhereClause, type Condition, type QueryAST } from './zero/client-transaction-wrapper';
+export {
+  EncryptedFieldQueryError,
+  validateQueryWhereClause,
+  isEncryptionScopeEmpty,
+  isWorkspaceInEncryptionScope,
+  type EncryptedWorkspaceScope,
+  type EncryptedTableConfig,
+} from './zero/query-validation';
 export * from './ai';
 export * from './dashboard';
 export * from './types/activity';
@@ -27,6 +34,7 @@ export * from './utils/radarRules';
 export * from './utils/canvasHierarchy';
 export * from './utils/canvasDestinationAccess';
 export * from './utils/canvasFolderNameConflict';
+export * from './utils/recordingAccess';
 export * from './utils/origins';
 export * from './utils/linkPreviewParser';
 export * from './utils/messageContent';

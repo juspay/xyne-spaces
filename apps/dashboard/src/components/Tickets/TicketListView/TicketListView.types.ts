@@ -20,5 +20,6 @@ export interface TicketListItem {
   emailDrafts?: readonly { userId: string | null; autoDraftStatus?: string | null }[] | null;
   emailReads?: readonly unknown[] | null;
   conversation?: unknown;
+  formEntityValues?: readonly { fieldId: string; actualFieldValue?: unknown }[] | null;
   _raw?: Record<string, unknown>;
 }

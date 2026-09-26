@@ -581,35 +581,104 @@ const applyKanbanTicketPageV3Conditions = (
   return query;
 };
 
+// Without the public arm every branch is bounded by the viewer, so each is flipped and
+// the viewer's own canvases / participations drive instead of every canvas in the workspace.
+const applyPrivateCanvasVisibilityQueryFilter = (query: any, userId: string) => {
+  const flip = { flip: true };
+  return query.where((helpers: any) =>
+    helpers.or(
+      helpers.exists('createdByUser', (u: any) => u.where('id', userId), flip),
+      helpers.exists('participants', (p: any) => p.where('userId', userId), flip),
+      helpers.exists(
+        'participants',
+        (p: any) =>
+          p.whereExists(
+            'userGroup',
+            (ug: any) => ug.whereExists('userGroupMappings', (m: any) => m.where('userId', userId), flip),
+            flip,
+          ),
+        flip,
+      ),
+      helpers.exists(
+        'participants',
+        (p: any) =>
+          p.whereExists(
+            'channel',
+            (ch: any) => ch.whereExists('participants', (cp: any) => cp.where('userId', userId), flip),
+            flip,
+          ),
+        flip,
+      ),
+    ),
+  );
+};
+
 const applyCanvasVisibilityQueryFilter = (
   query: any,
   userId: string,
   includePublicVisibility = true,
 ) =>
-  query.where((helpers: any) =>
-    helpers.or(
-      helpers.cmp('createdBy', userId),
-      helpers.exists('participants', (p: any) =>
-        p.where(({ or, cmp, exists: ex }: any) =>
-          or(
-            cmp('userId', userId),
-            ex('userGroup', (ug: any) =>
-              ug.whereExists('userGroupMappings', (m: any) => m.where('userId', userId)),
-            ),
-            ex('channel', (ch: any) =>
-              ch.whereExists('participants', (cp: any) => cp.where('userId', userId)),
+  !includePublicVisibility
+    ? applyPrivateCanvasVisibilityQueryFilter(query, userId)
+    : query.where((helpers: any) =>
+        helpers.or(
+          helpers.cmp('createdBy', userId),
+          helpers.exists('participants', (p: any) =>
+            p.where(({ or, cmp, exists: ex }: any) =>
+              or(
+                cmp('userId', userId),
+                ex('userGroup', (ug: any) =>
+                  ug.whereExists('userGroupMappings', (m: any) => m.where('userId', userId)),
+                ),
+                ex('channel', (ch: any) =>
+                  ch.whereExists('participants', (cp: any) => cp.where('userId', userId)),
+                ),
+              ),
             ),
           ),
-        ),
-      ),
-      ...(includePublicVisibility ? [helpers.cmp('visibility', CanvasVisibility.PUBLIC)] : []),
-    )
-  );
+          helpers.cmp('visibility', CanvasVisibility.PUBLIC),
+        )
+      );
 
 const includeCurrentUserCanvasStatus = (query: any, userId: string) =>
   query.related('userStatuses', (status: any) => status.where('userId', userId));
 
 // Keep in sync with the identical helper in packages/shared/src/zero/queries.ts if archive-filter behavior changes.
+// The calls ACL's user-bounded arms, flipped so the viewer's own rows drive the scan
+// instead of every call in the workspace. The ACL still applies on top; this only
+// narrows. HEADLESS arms are omitted: callers exclude HEADLESS or (SCHEDULED) never
+// hold one, since note-taker calls are created ACTIVE without endsAt.
+const callsReachableByUser = (eb: any, userId: string, workspaceId: string) => {
+  const liveCallShare = (share: any) =>
+    share
+      .where('workspaceId', workspaceId)
+      .where('shareableEntityType', ShareableEntityType.CALL)
+      .where('entityUserAccess', '!=', EntityUserAccess.REVOKED);
+  const flip = { flip: true };
+  return eb.or(
+    eb.exists('createdByUser', (u: any) => u.where('id', userId), flip),
+    eb.exists('participants', (p: any) => p.where('userId', userId), flip),
+    eb.exists(
+      'channel',
+      (ch: any) => ch.whereExists('participants', (p: any) => p.where('userId', userId), flip),
+      flip,
+    ),
+    eb.exists('shares', (s: any) => liveCallShare(s).where('userId', userId), flip),
+    eb.exists(
+      'shares',
+      (s: any) =>
+        liveCallShare(s).whereExists('userGroupMemberships', (m: any) => m.where('userId', userId), flip),
+      flip,
+    ),
+    eb.exists(
+      'shares',
+      (s: any) =>
+        liveCallShare(s).whereExists('channelMembers', (m: any) => m.where('userId', userId), flip),
+      flip,
+    ),
+  );
+};
+
 const applyArchiveFilter = <T extends { where: Function }>(
   query: T,
   { includeArchived, onlyArchived }: { includeArchived?: boolean; onlyArchived?: boolean },
@@ -2130,6 +2199,7 @@ export const queries: AnyQueryRegistry = defineQueries({
       createdAtEnd: z.number().optional(),
       conversationLabelId: z.string().optional(),
       dynamicFieldFilters: supportDynamicFieldFiltersSchema,
+      formEntityValueFieldIds: z.array(z.string()).optional(),
       limit: z.number(),
       start: z.object({ id: z.string(), lastEmailAt: z.number() }).nullable(),
       dir: z.literal('forward').or(z.literal('backward')),
@@ -2137,7 +2207,7 @@ export const queries: AnyQueryRegistry = defineQueries({
       args => args.createdAtStart === undefined || args.createdAtEnd === undefined || args.createdAtStart <= args.createdAtEnd,
       'createdAtStart must be less than or equal to createdAtEnd',
     ),
-    ({ ctx, args: { channelId, assignedTo, createdBy, priority, stageName, aiCategory, hasAiDraft, hasSubTickets, mailboxFolder, userGroups, lastEmailAtStart, lastEmailAtEnd, createdAtStart, createdAtEnd, conversationLabelId, dynamicFieldFilters, limit, start, dir } }) => {
+    ({ ctx, args: { channelId, assignedTo, createdBy, priority, stageName, aiCategory, hasAiDraft, hasSubTickets, mailboxFolder, userGroups, lastEmailAtStart, lastEmailAtEnd, createdAtStart, createdAtEnd, conversationLabelId, dynamicFieldFilters, formEntityValueFieldIds, limit, start, dir } }) => {
       let query = zql.tickets.where('channelId', channelId);
       query = query.where('isArchived', false);
 
@@ -2291,7 +2361,7 @@ export const queries: AnyQueryRegistry = defineQueries({
         // overlay row defaults to Inbox.
         .related('userMailbox', q => q.where('userId', ctx.userID))
         .related('formEntityValues', (fev) =>
-          relateSupportDynamicFieldValues(fev, dynamicFieldFilters),
+          relateSupportDynamicFieldValues(fev, dynamicFieldFilters, formEntityValueFieldIds),
         );
     }
   ),
@@ -2997,6 +3067,7 @@ export const queries: AnyQueryRegistry = defineQueries({
   userScheduledCallsV2: defineQuery(({ ctx }) => {
     return zql.calls
       .where('status', CallStatus.SCHEDULED)
+      .where(eb => callsReachableByUser(eb, ctx.userID, ctx.workspaceId))
       .orderBy('startsAt', 'asc')
       .related('participants', p => p.where('userId', ctx.userID));
   }),
@@ -3014,6 +3085,7 @@ export const queries: AnyQueryRegistry = defineQueries({
       return zql.calls
         .where('status', CallStatus.SCHEDULED)
         .where(helpers => helpers.cmp('startsAt', '<', startsBefore))
+        .where(eb => callsReachableByUser(eb, ctx.userID, ctx.workspaceId))
         .orderBy('startsAt', 'asc')
         .related('participants', p => p.where('userId', ctx.userID));
     },
@@ -3056,6 +3128,7 @@ export const queries: AnyQueryRegistry = defineQueries({
             CallStatus.CANCELLED,
           ]),
         )
+        .where(eb => callsReachableByUser(eb, ctx.userID, ctx.workspaceId))
         .orderBy('startedAt', 'desc')
         .orderBy('id', 'desc');
 
@@ -3089,7 +3162,7 @@ export const queries: AnyQueryRegistry = defineQueries({
             CallStatus.CANCELLED,
           ]),
         )
-        .whereExists('participants', p => p.where('userId', ctx.userID))
+        .whereExists('participants', p => p.where('userId', ctx.userID), { flip: true })
         .orderBy('startedAt', 'desc')
         .orderBy('id', 'desc');
 
@@ -3167,12 +3240,49 @@ export const queries: AnyQueryRegistry = defineQueries({
       participantId: z.string().nullable(),
     }),
     ({ ctx, args: { limit, start, participantId } }) => {
+      const liveNoteTakerShare = (share: typeof zql.entity_access) =>
+        share
+          .where('shareableEntityType', ShareableEntityType.NOTE_TAKER)
+          .where('entityUserAccess', '!=', EntityUserAccess.REVOKED);
+
       let query = zql.calls
         .where('workspaceId', ctx.workspaceId)
         .where('callType', CallType.HEADLESS)
         .where('createdByUserId', '!=', ctx.userID)
-        .whereExists('shares', share =>
-          share
+        // One exists per way a share can reach the viewer, each flipped so it starts
+        // from their own rows. A single exists with the `or` inside cannot drive the
+        // query, leaving Zero to walk every recording in the workspace and probe its
+        // shares. Both flip levels matter: flipping only the outer exists, or only the
+        // inner membership one, is dramatically slower.
+        .where(({ or, exists }) =>
+          or(
+            exists('shares', share => liveNoteTakerShare(share).where('userId', ctx.userID), {
+              flip: true,
+            }),
+            exists(
+              'shares',
+              share =>
+                liveNoteTakerShare(share).whereExists(
+                  'userGroupMemberships',
+                  m => m.where('userId', ctx.userID),
+                  { flip: true },
+                ),
+              { flip: true },
+            ),
+            exists(
+              'shares',
+              share =>
+                liveNoteTakerShare(share).whereExists(
+                  'channelMembers',
+                  m => m.where('userId', ctx.userID),
+                  { flip: true },
+                ),
+              { flip: true },
+            ),
+          ),
+        )
+        .related('shares', shares =>
+          shares
             .where('shareableEntityType', ShareableEntityType.NOTE_TAKER)
             .where('entityUserAccess', '!=', EntityUserAccess.REVOKED)
             .where(({ or, cmp, exists }) =>
@@ -3236,7 +3346,11 @@ export const queries: AnyQueryRegistry = defineQueries({
             .where('entityUserAccess', '!=', EntityUserAccess.REVOKED)
             .related('user')
             .related('userGroup')
-            .related('channel'),
+            .related('channel')
+            .related('userGroupMemberships', memberships =>
+              memberships.where('userId', ctx.userID),
+            )
+            .related('channelMembers', members => members.where('userId', ctx.userID)),
         )
         .one(),
   ),

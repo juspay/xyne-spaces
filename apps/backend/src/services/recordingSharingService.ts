@@ -6,9 +6,7 @@ import {
   parseRepliesMd,
   buildInitialMessageMd,
   serializeRepliesMd,
-  ShareableEntityType,
   type GrantableEntityUserAccess,
-  CallType,
   CallVisibility,
   CanvasRole,
   CanvasVisibility,
@@ -17,8 +15,8 @@ import {
 } from '@xyne/shared';
 import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
-import { callShareService } from '@/services/callShareService';
-import { isRecording } from '@/utils/callTypeUtils';
+import { callShareService, type CallAccessLevel } from '@/services/callShareService';
+import { isRecording, shareEntityTypeFor } from '@/utils/callTypeUtils';
 import { sanitizeMessageContent } from '@/utils/contentUtils';
 import { logger } from '@/utils/logger';
 import {
@@ -71,7 +69,10 @@ interface LoadedRecording {
 
 interface AccessChange {
   share: EntityAccess;
+  /** The share went from absent or revoked to active. */
   activated: boolean;
+  /** An already-active share moved between VIEW and EDIT. */
+  levelChanged: boolean;
 }
 
 type RecordingShareIntent = 'direct_share' | 'ticket_link';
@@ -81,8 +82,13 @@ const RECORDING_SHARE_INTENT = {
   TICKET_LINK: 'ticket_link',
 } as const satisfies Record<string, RecordingShareIntent>;
 
-const shareEntityTypeFor = (callType: string): string =>
-  callType === CallType.HEADLESS ? ShareableEntityType.NOTE_TAKER : ShareableEntityType.CALL;
+/**
+ * The role a recording grant confers on the recording's summary/notes canvases.
+ * Editing the summary is the substance of recording edit access, so the two
+ * stay in step rather than being managed separately.
+ */
+const canvasRoleFor = (access: GrantableEntityUserAccess): CanvasRole =>
+  access === EntityUserAccess.EDIT ? CanvasRole.EDITOR : CanvasRole.VIEWER;
 
 export class RecordingSharingError extends Error {
   constructor(
@@ -177,12 +183,6 @@ export class RecordingSharingService {
     await this.runTransaction(async tx => {
       const recording = await this.loadManageableRecording(tx, callId, actor);
       this.assertRecordingOnly(recording, 'Link access');
-      if (recording.createdByUserId !== actor.userId) {
-        throw new RecordingSharingError(
-          'Only the recording creator can change link access',
-          403,
-        );
-      }
       await tx.call.update({
         where: { id: recording.id },
         data: { visibility },
@@ -211,12 +211,13 @@ export class RecordingSharingService {
       await this.validateTargets(tx, recording, actor.workspaceId, targets);
     });
 
-    // Resolve a separate 1:1 DM for each user.
+    // Resolved only for a target about to be posted to: findOrCreateDMChannel
+    // enrols both users, so resolving up front left an empty DM behind on every
+    // level change. Memoised outside the transaction to survive its retries.
     const dmChannelIds = new Map<string, string>();
-    const userIds = [
-      ...new Set(targets.flatMap(target => (target.type === 'user' ? [target.id] : []))),
-    ];
-    for (const userId of userIds) {
+    const dmChannelFor = async (userId: string): Promise<string> => {
+      const cached = dmChannelIds.get(userId);
+      if (cached) return cached;
       const channelId = await repositories.channels.findOrCreateDMChannel(
         actor.userId,
         [userId],
@@ -224,7 +225,8 @@ export class RecordingSharingService {
         actor.workspaceId,
       );
       dmChannelIds.set(userId, channelId);
-    }
+      return channelId;
+    };
 
     const { shares, activities } = await this.runTransaction(async tx => {
       const recording = await this.loadManageableRecording(tx, callId, actor);
@@ -242,8 +244,12 @@ export class RecordingSharingService {
           RECORDING_SHARE_INTENT.DIRECT_SHARE,
         );
         shares.push({ id: change.share.id, target, access: change.share.entityUserAccess });
-        if (change.activated && target.type !== 'channel') {
-          activities.push({ shareId: change.share.id, action: 'recording_shared' });
+        if (target.type !== 'channel') {
+          if (change.activated) {
+            activities.push({ shareId: change.share.id, action: 'recording_shared' });
+          } else if (change.levelChanged) {
+            activities.push({ shareId: change.share.id, action: 'recording_access_changed' });
+          }
         }
 
         // Post once for channel and user shares.
@@ -251,10 +257,8 @@ export class RecordingSharingService {
           (target.type === 'channel' || target.type === 'user') &&
           !asSharePost(change.share.metadata)
         ) {
-          const channelId = target.type === 'channel' ? target.id : dmChannelIds.get(target.id);
-          if (!channelId) {
-            throw new RecordingSharingError('Unable to resolve DM channel for user', 500);
-          }
+          const channelId =
+            target.type === 'channel' ? target.id : await dmChannelFor(target.id);
           const post = await this.createRecordingPostMessage(
             tx,
             recording,
@@ -466,15 +470,26 @@ export class RecordingSharingService {
     actor: RecordingSharingActor,
     targets: RecordingShareTarget[],
   ): Promise<RecordingSharingResult> {
+    // Leaving is self-service: anyone the recording reaches may drop their own access.
+    const isSelfRevoke =
+      targets.length > 0 &&
+      targets.every(target => target.type === 'user' && target.id === actor.userId);
+
     logger.info('[RecordingSharingService] Revoke access request received', {
       callId,
       actorUserId: actor.userId,
       workspaceId: actor.workspaceId,
       targets,
+      isSelfRevoke,
     });
 
     const { shares, activities } = await this.runTransaction(async tx => {
-      const recording = await this.loadManageableRecording(tx, callId, actor);
+      const recording = await this.loadManageableRecording(
+        tx,
+        callId,
+        actor,
+        isSelfRevoke ? 'view' : 'edit',
+      );
       const shares: Array<{ id: string; target: RecordingShareTarget; access: string }> = [];
       const activities: RecordingAccessActivity[] = [];
       const uniqueTargets = [
@@ -518,7 +533,7 @@ export class RecordingSharingService {
             updatedAt: new Date(),
           },
         });
-        await this.syncCanvasAccess(tx, recording, actor.workspaceId, target, 'revoke');
+        await this.syncCanvasAccess(tx, recording, actor.workspaceId, target);
         shares.push({ id: share.id, target, access: share.entityUserAccess });
         if (wasActive && target.type !== 'channel') {
           activities.push({ shareId: share.id, action: 'recording_access_revoked' });
@@ -787,7 +802,7 @@ export class RecordingSharingService {
         updatedAt: new Date(),
       },
     });
-    await this.syncCanvasAccess(tx, recording, actor.workspaceId, target, 'revoke');
+    await this.syncCanvasAccess(tx, recording, actor.workspaceId, target);
 
     await Promise.all([
       tx.messageAttachment.deleteMany({ where: { entityId: message.messageId } }),
@@ -854,10 +869,19 @@ export class RecordingSharingService {
     return { share: revokedShare, channelId: ticket.channelId };
   }
 
+  /**
+   * Load a recording the actor is allowed to act on, or refuse.
+   *
+   * `required` is the strength the action demands on a recording: managing
+   * sharing is an editor action, while leaving (revoking only yourself) needs
+   * no more than the access you already hold.
+   *
+   */
   private async loadManageableRecording(
     tx: Prisma.TransactionClient,
     callId: string,
     actor: RecordingSharingActor,
+    required: CallAccessLevel = 'edit',
   ): Promise<LoadedRecording> {
     const call = await tx.call.findUnique({
       where: { externalId: callId },
@@ -870,6 +894,7 @@ export class RecordingSharingService {
         channelId: true,
         workspaceId: true,
         createdByUserId: true,
+        visibility: true,
         startedAt: true,
         endedAt: true,
       },
@@ -878,18 +903,19 @@ export class RecordingSharingService {
       throw new RecordingSharingError('Recording not found', 404);
     }
     if (call.createdByUserId === actor.userId) return call;
-    const canManage =
-      (await this.hasActiveShare(tx, call, actor)) ||
-      (!isRecording(call) && (await callShareService.isCallAudience(call, actor.userId)));
-    if (!canManage) {
-      throw new RecordingSharingError(
-        isRecording(call)
-          ? 'Only the recording creator or people it is shared with can manage sharing'
-          : 'Only people in this call, or people it is shared with, can share it',
-        403,
-      );
+
+    const recording = isRecording(call);
+    const needed: CallAccessLevel = recording ? required : 'view';
+    if (await callShareService.hasAtLeast(call, actor.userId, actor.workspaceId, needed, tx)) {
+      return call;
     }
-    return call;
+
+    throw new RecordingSharingError(
+      recording
+        ? 'Only the recording owner or an editor can manage sharing'
+        : 'Only people in this call, or people it is shared with, can share it',
+      403,
+    );
   }
 
   /**
@@ -901,44 +927,6 @@ export class RecordingSharingService {
     if (!isRecording(recording)) {
       throw new RecordingSharingError(`${feature} is only available for recordings`, 400);
     }
-  }
-
-  /**
-   * Mirrors `entityAccessService.hasActiveShare`, but reads through the caller's
-   * transaction so the permission check sees the same snapshot as the write it
-   * guards.
-   */
-  private async hasActiveShare(
-    tx: Prisma.TransactionClient,
-    call: Pick<LoadedRecording, 'id' | 'callType'>,
-    actor: RecordingSharingActor,
-  ): Promise<boolean> {
-    const groupMappings = await tx.userGroupMapping.findMany({
-      where: { userId: actor.userId },
-      select: { userGroupId: true },
-    });
-    const channelParticipations = await tx.channelParticipant.findMany({
-      where: { userId: actor.userId },
-      select: { channelId: true },
-    });
-    const userGroupIds = groupMappings.map(mapping => mapping.userGroupId);
-    const channelIds = channelParticipations.map(participation => participation.channelId);
-
-    const share = await tx.entityAccess.findFirst({
-      where: {
-        workspaceId: actor.workspaceId,
-        shareableEntityType: shareEntityTypeFor(call.callType),
-        entityId: call.id,
-        entityUserAccess: { not: EntityUserAccess.REVOKED },
-        OR: [
-          { userId: actor.userId },
-          ...(userGroupIds.length ? [{ userGroupId: { in: userGroupIds } }] : []),
-          ...(channelIds.length ? [{ channelId: { in: channelIds } }] : []),
-        ],
-      },
-      select: { id: true },
-    });
-    return share !== null;
   }
 
   private async runTransaction<T>(
@@ -1021,6 +1009,7 @@ export class RecordingSharingService {
   ): Promise<AccessChange> {
     const existing = await this.findShare(tx, recording, workspaceId, target, intent);
     const activated = !existing || existing.entityUserAccess === EntityUserAccess.REVOKED;
+    const levelChanged = !!existing && !activated && existing.entityUserAccess !== access;
     const share = existing
       ? await tx.entityAccess.update({
           where: { id: existing.id },
@@ -1044,18 +1033,68 @@ export class RecordingSharingService {
             ...targetData(target),
           },
         });
-    await this.syncCanvasAccess(tx, recording, workspaceId, target, 'grant');
-    return { share, activated };
+    await this.syncCanvasAccess(tx, recording, workspaceId, target);
+    return { share, activated, levelChanged };
   }
 
+  /**
+   * Pushes a recording grant onto its summary/notes canvases, so editing the
+   * summary follows editing the recording (PRD §6.5).
+   *
+   * Known gap (PRD §11.3, case 1): this runs on recording sharing changes only,
+   * so it enforces recording -> canvas and never the reverse. A canvas shared
+   * directly through its own share modal can hand someone EDITOR on a summary
+   * whose recording grants them only VIEW, and nothing re-checks it. Closing it
+   * means either refusing direct shares on a recording's canvases or clamping
+   * the effective canvas role to the recording's level in the canvas auth path.
+   */
   private async syncCanvasAccess(
     tx: Prisma.TransactionClient,
     recording: LoadedRecording,
     workspaceId: string,
     target: RecordingShareTarget,
-    action: 'grant' | 'revoke',
   ): Promise<void> {
     const canvasIds = this.getShareCanvasIds(recording);
+    if (canvasIds.length === 0) return;
+
+    const targetFields =
+      target.type === 'user'
+        ? { userId: target.id }
+        : target.type === 'user_group'
+          ? { userGroupId: target.id }
+          : { channelId: target.id };
+
+    // `entity_access` keeps a row per intent, `canvas_participants` one per
+    // target, so a view-only ticket link and a direct EDIT share share a canvas
+    // row. Take the level from every live grant, not the triggering one, or the
+    // last write wins. Callers write their row first, so this read includes it.
+    const liveGrants = await tx.entityAccess.findMany({
+      where: {
+        workspaceId,
+        shareableEntityType: shareEntityTypeFor(recording.callType),
+        entityId: recording.id,
+        entityUserAccess: { not: EntityUserAccess.REVOKED },
+        ...targetWhere(target),
+      },
+      select: { entityUserAccess: true },
+    });
+
+    if (liveGrants.length === 0) {
+      await tx.canvasParticipant.deleteMany({
+        where: { canvasId: { in: canvasIds }, ...targetFields },
+      });
+      return;
+    }
+
+    // Recording access is authoritative for these canvases: the update arm
+    // overwrites, so a promotion and a demotion both take effect. That also
+    // clobbers any role granted directly through the canvas's own share modal
+    const role = canvasRoleFor(
+      liveGrants.some(grant => grant.entityUserAccess === EntityUserAccess.EDIT)
+        ? EntityUserAccess.EDIT
+        : EntityUserAccess.VIEW,
+    );
+
     for (const canvasId of canvasIds) {
       const where =
         target.type === 'user'
@@ -1063,38 +1102,17 @@ export class RecordingSharingService {
           : target.type === 'user_group'
             ? { canvasId_userGroupId: { canvasId, userGroupId: target.id } }
             : { canvasId_channelId: { canvasId, channelId: target.id } };
-      const targetFields =
-        target.type === 'user'
-          ? { userId: target.id }
-          : target.type === 'user_group'
-            ? { userGroupId: target.id }
-            : { channelId: target.id };
-      if (action === 'grant') {
-        await tx.canvasParticipant.upsert({
-          where,
-          create: {
-            id: randomUUID(),
-            canvasId,
-            workspaceId,
-            role: CanvasRole.VIEWER,
-            ...targetFields,
-          },
-          update: {},
-        });
-      } else {
-        const remainingAccess = await tx.entityAccess.findFirst({
-          where: {
-            workspaceId,
-            shareableEntityType: shareEntityTypeFor(recording.callType),
-            entityId: recording.id,
-            entityUserAccess: { not: EntityUserAccess.REVOKED },
-            ...targetWhere(target),
-          },
-          select: { id: true },
-        });
-        if (remainingAccess) continue;
-        await tx.canvasParticipant.deleteMany({ where: { canvasId, ...targetFields } });
-      }
+      await tx.canvasParticipant.upsert({
+        where,
+        create: {
+          id: randomUUID(),
+          canvasId,
+          workspaceId,
+          role,
+          ...targetFields,
+        },
+        update: { role },
+      });
     }
   }
 
@@ -1113,7 +1131,6 @@ export class RecordingSharingService {
 
     return [...new Set(canvasIds)];
   }
-
 }
 
 export const recordingSharingService = new RecordingSharingService();
