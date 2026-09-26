@@ -45,8 +45,12 @@ async function handleUnreadCountInner(
               where: whereClause
             });
             if (unreadCount !== status.unreadCount) {
-              await db.channelUserStatus.update({
-                where: { channelId_userId: { channelId, userId: status.userId } },
+              // Conditional on lastViewedAt being unchanged since it was read above: if the
+              // recipient opened the DM meanwhile (markChannelAsViewed zeroes unreadCount and
+              // moves lastViewedAt), this stale count must not overwrite that zero. A lost
+              // race writes nothing; the next message recounts.
+              await db.channelUserStatus.updateMany({
+                where: { channelId, userId: status.userId, lastViewedAt: status.lastViewedAt },
                 data: { unreadCount, updatedAt: new Date() }
               });
             }

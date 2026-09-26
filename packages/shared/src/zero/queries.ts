@@ -29,6 +29,7 @@ import {
   SDLC_WIKI_WORKFLOW_RELATION,
   SDLC_HUB_ITEM_RELATION,
 } from '../sdlc';
+import { DESK_CHANNEL_TYPES } from '../utils/channel';
 import {
   ActivityClassification,
   AttachmentEntityType,
@@ -2332,13 +2333,7 @@ export const queries = defineQueries({
       .where('isDeleted', false)
       .related('channel', ch =>
         ch
-          .where('type', 'NOT IN', [
-            ChannelType.EMAIL,
-            ChannelType.SLACK,
-            ChannelType.APP,
-            ChannelType.CALL,
-            ChannelType.SOCIAL_MEDIA,
-          ])
+          .where('type', 'NOT IN', [...DESK_CHANNEL_TYPES])
           .related('channelStats'),
       );
   }),

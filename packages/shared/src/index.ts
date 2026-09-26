@@ -15,6 +15,8 @@ export * from './dashboard';
 export * from './types/activity';
 export * from './forwardedMessage';
 export * from './activity';
+export * from './unread/bellCountRules';
+export * from './unread/countPredicates';
 export * from './types/index';
 export * from './config/index';
 export * from './utils/mentionRanking';

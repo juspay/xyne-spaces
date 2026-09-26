@@ -104,6 +104,13 @@ export const MAX_RETRIES = 3;
 export const ENABLE_SUMMARY_ACTION_BUTTON: boolean =
   import.meta.env['VITE_ENABLE_SUMMARY_ACTION_BUTTON'] === 'true';
 
+// Feature flag: dock badge source. On (default) = the cross-workspace unread poll
+// (useWorkspaceUnreadCounts — dm + bell + call over all workspaces, matching
+// the workspace switcher). Set VITE_DOCK_BADGE_POLL_SOURCE=false to roll back to
+// the legacy Zero-synced active-workspace per-channel sum (useAllUnreadCount).
+export const DOCK_BADGE_POLL_SOURCE: boolean =
+  import.meta.env['VITE_DOCK_BADGE_POLL_SOURCE'] !== 'false';
+
 // Workspace ID used to rewrite legacy in-app links that don't contain a workspace segment.
 // Set VITE_DEFAULT_WORKSPACE_ID in .env.local to the default workspace ID.
 export const DEFAULT_WORKSPACE_ID: string =

@@ -1,5 +1,8 @@
 import { PrismaClient } from '@prisma/client';
-import { ActivityClassification, ActivityClassificationJobType } from '@xyne/shared';
+import {
+  ActivityClassification,
+  ActivityClassificationJobType,
+} from '@xyne/shared';
 import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { currentWorkspaceId, withWorkspaceScope } from '@/database/tenant/context';
@@ -744,10 +747,16 @@ export class ActivityService {
     });
   }
 
+  /**
+   * Per-workspace unread counts spanning the caller's own identities.
+   *
+   * `count` = dmCount + bellCount + callCount (the unread badge invariant; see
+   * getWorkspaceActivityCountsQuery for how each shelf is computed). The query spans every
+   * workspace the member belongs to, so it lives under bypassAcl/ and runs as system.
+   */
   async getWorkspaceActivityCounts(memberId: string): Promise<
     Array<{
       workspaceId: string;
-      userId: string;
       count: number;
     }>
   > {

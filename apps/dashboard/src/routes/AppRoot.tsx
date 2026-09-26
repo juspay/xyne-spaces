@@ -67,6 +67,7 @@ import { MobileCallHeader } from '../components/Call/MobileCallHeader/MobileCall
 import { NotificationHandler } from '../components/NotificationHandler/NotificationHandler';
 import { EphemeralFlowHost } from '../components/flowUI/EphemeralFlowHost';
 import { ElectronBadgeSync } from '../components/ElectronBadgeSync/ElectronBadgeSync';
+import { WorkspaceUnreadCountsProvider } from '../hooks/useWorkspaceUnreadCounts';
 import {
   ElectronUpdateNudge,
   ELECTRON_UPDATE_NUDGE_ENABLED,
@@ -764,270 +765,236 @@ const AppRoot = (): ReactElement => {
 
   return (
     <InstrumentationProvider value={dashboardInstrumentation}>
-      <EncryptionBootstrapProvider>
-        <EncryptionInit />
-        <ZeroProvider>
-          <ZeroFallbackProvider>
-            <InitialStateLoader>
-              <ShareRecordingHandler />
-              <AIOnboardingProvider>
-                <AIOnboardingTrigger isOnboarding={isOnboarding} />
-                <AIOnboardingOverlay />
-                <SlashCommandArtifactSideEffectProvider>
-                  {!isInPanelWebview && <SlashCommandArtifactBanner />}
-                  <EditProvider>
-                    {/* Above the layout branches, so leaving /sdlc hides the frame
+      <WorkspaceUnreadCountsProvider>
+        <EncryptionBootstrapProvider>
+          <EncryptionInit />
+          <ZeroProvider>
+            <ZeroFallbackProvider>
+              <InitialStateLoader>
+                <ShareRecordingHandler />
+                <AIOnboardingProvider>
+                  <AIOnboardingTrigger isOnboarding={isOnboarding} />
+                  <AIOnboardingOverlay />
+                  <SlashCommandArtifactSideEffectProvider>
+                    {!isInPanelWebview && <SlashCommandArtifactBanner />}
+                    <EditProvider>
+                      {/* Above the layout branches, so leaving /sdlc hides the frame
                       rather than destroying it. */}
-                    <SdlcFrameProvider>
-                      {!isSdlcSurface && <SdlcFrameHost />}
-                      {shouldShowMobileHeader && externalId && (
-                        <MobileCallHeader
-                          participants={participants}
-                          activeCalls={activeCalls}
-                          externalId={externalId}
-                          isMicEnabled={isMicEnabled}
-                          onToggleMic={() => roomActor.send({ type: 'TOGGLE_MIC' })}
-                          onDisconnect={() => roomActor.send({ type: 'DISCONNECT' })}
-                          onExpand={() => roomActor.send({ type: 'TOGGLE_VIEW' })}
-                        />
-                      )}
-                      {isInPanelWebview ? (
-                        // Inside the browser-panel webview / SDLC lane: only the route
-                        // content, no GlobalTopBar / AppSidebar / right panels /
-                        // ChatDirectory. The Ask AI panel joins it as a sibling.
-                        //
-                        // The group is rendered whether or not Ask AI is open, and only
-                        // the assistant's own Panel is conditional. Swapping between two
-                        // different layouts moved <Outlet /> to another position in the
-                        // tree, so React unmounted the whole route and built it again —
-                        // opening Ask AI rebuilt the canvas editor and its Y-Sweet
-                        // connection, and the reader lost their place in the document.
-                        <div className='flex h-screen flex-col'>
-                          <ResizableGroup
-                            orientation='horizontal'
-                            className='flex-1 no-scrollbar overflow-auto'
-                            autoSaveId='sdlc-frame-xyneai'
-                            // The assistant's Panel is conditional, so the group
-                            // has to say which panels it is rendering — without
-                            // it the saved two-panel layout is restored over one
-                            // panel, and the split comes back wrong after Ask AI
-                            // has been closed and opened again.
-                            panelIds={
-                              showSdlcFrameXyneAI
-                                ? ['sdlc-frame-content', 'sdlc-frame-xyneai']
-                                : ['sdlc-frame-content']
-                            }
-                          >
-                            {/* defaultSize is read once, on mount: with the
+                      <SdlcFrameProvider>
+                        {!isSdlcSurface && <SdlcFrameHost />}
+                        {shouldShowMobileHeader && externalId && (
+                          <MobileCallHeader
+                            participants={participants}
+                            activeCalls={activeCalls}
+                            externalId={externalId}
+                            isMicEnabled={isMicEnabled}
+                            onToggleMic={() => roomActor.send({ type: 'TOGGLE_MIC' })}
+                            onDisconnect={() => roomActor.send({ type: 'DISCONNECT' })}
+                            onExpand={() => roomActor.send({ type: 'TOGGLE_VIEW' })}
+                          />
+                        )}
+                        {isInPanelWebview ? (
+                          // Inside the browser-panel webview / SDLC lane: only the route
+                          // content, no GlobalTopBar / AppSidebar / right panels /
+                          // ChatDirectory. The Ask AI panel joins it as a sibling.
+                          //
+                          // The group is rendered whether or not Ask AI is open, and only
+                          // the assistant's own Panel is conditional. Swapping between two
+                          // different layouts moved <Outlet /> to another position in the
+                          // tree, so React unmounted the whole route and built it again —
+                          // opening Ask AI rebuilt the canvas editor and its Y-Sweet
+                          // connection, and the reader lost their place in the document.
+                          <div className='flex h-screen flex-col'>
+                            <ResizableGroup
+                              orientation='horizontal'
+                              className='flex-1 no-scrollbar overflow-auto'
+                              autoSaveId='sdlc-frame-xyneai'
+                              // The assistant's Panel is conditional, so the group
+                              // has to say which panels it is rendering — without
+                              // it the saved two-panel layout is restored over one
+                              // panel, and the split comes back wrong after Ask AI
+                              // has been closed and opened again.
+                              panelIds={
+                                showSdlcFrameXyneAI
+                                  ? ['sdlc-frame-content', 'sdlc-frame-xyneai']
+                                  : ['sdlc-frame-content']
+                              }
+                            >
+                              {/* defaultSize is read once, on mount: with the
                                 group now always rendered it must describe the
                                 whole width, and the split comes from the saved
                                 layout the ids above select. */}
-                            <Panel id='sdlc-frame-content' defaultSize='100%'>
-                              <main className='h-full flex-1 no-scrollbar overflow-auto'>
+                              <Panel id='sdlc-frame-content' defaultSize='100%'>
+                                <main className='h-full flex-1 no-scrollbar overflow-auto'>
+                                  <EditWarningModal />
+                                  <Outlet />
+                                </main>
+                              </Panel>
+                              {showSdlcFrameXyneAI && (
+                                <>
+                                  <Separator className='group flex w-[2px] cursor-col-resize items-center justify-center transition-colors'>
+                                    <div className='h-full w-[2px] bg-transparent group-hover:bg-primary group-active:bg-primary' />
+                                  </Separator>
+                                  <Panel
+                                    id='sdlc-frame-xyneai'
+                                    defaultSize={`${XYNE_AI_PANEL_DEFAULT_SIZE}%`}
+                                    maxSize={isXyneDebuggerOpen ? '55%' : '50%'}
+                                    minSize={
+                                      isXyneDebuggerOpen ? `${XYNE_AI_PANEL_MIN_SIZE}%` : '25%'
+                                    }
+                                  >
+                                    <XyneAISidebarZIndexShell>
+                                      <XyneAISidebar
+                                        channelId={xyneAIChannelId}
+                                        threadInfo={xyneAIThreadInfo}
+                                        startFreshChat={xyneAIStartFreshChat}
+                                        canvasInfo={xyneAICanvasInfo}
+                                        initialContextSelections={xyneAIInitialContextSelections}
+                                        contextOpenNonce={xyneAIContextOpenNonce}
+                                        kbCollectionId={xyneAIKbCollectionId ?? ''}
+                                        kbChannelId={xyneAIKbChannelId ?? ''}
+                                        kbDocId={xyneAIKbDocId ?? ''}
+                                        workflowInfo={xyneAIWorkflowInfo}
+                                        workflowDismissed={xyneAIWorkflowDismissed}
+                                        kbDocName={xyneAIKbDocName ?? ''}
+                                        kbFolderId={xyneAIKbFolderId ?? ''}
+                                        kbFolderName={xyneAIKbFolderName ?? ''}
+                                        kbOpenNonce={xyneAIKbOpenNonce}
+                                        researchContext={xyneAIResearchContext}
+                                        initialQuery={xyneAIInitialQuery ?? undefined}
+                                        autoSendNonce={xyneAIAutoSendNonce}
+                                        onDebuggerOpenChange={setIsXyneDebuggerOpen}
+                                      />
+                                    </XyneAISidebarZIndexShell>
+                                  </Panel>
+                                </>
+                              )}
+                            </ResizableGroup>
+                          </div>
+                        ) : isOnboarding ? (
+                          // Onboarding screen - full width without sidebar
+                          <main
+                            className={`flex-1 h-screen ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
+                          >
+                            <EditWarningModal />
+                            <Outlet />
+                          </main>
+                        ) : (
+                          <AppSidebarHost
+                            panels={renderPanels}
+                            mainPanelRef={browserPanelLeftRef}
+                            forceRender={
+                              webviewState === 'closed' ||
+                              webviewState === 'idle' ||
+                              browserPanelState === 'open'
+                            }
+                            fallback={
+                              <div className='flex flex-col h-screen'>
+                                <ResizableGroup
+                                  orientation='horizontal'
+                                  className='flex-1 overflow-hidden'
+                                  autoSaveId='app-root'
+                                >
+                                  <Panel
+                                    id='app-root-left'
+                                    panelRef={leftPanelRef}
+                                    defaultSize='50%'
+                                  >
+                                    <div
+                                      className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
+                                    >
+                                      <AppSidebar />
+                                      <main className='flex-1 no-scrollbar overflow-auto'>
+                                        <EditWarningModal />
+                                        <Outlet />
+                                      </main>
+                                    </div>
+                                  </Panel>
+                                  <Separator className='w-2 hover:bg-sidebar-divider active:bg-sidebar-divider transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
+                                    <div className='w-0.5 h-8 bg-transparent group-hover:bg-sidebar-divider group-active:bg-sidebar-divider transition-colors duration-200 rounded-full'></div>
+                                  </Separator>
+                                  <Panel
+                                    id='app-root-webview'
+                                    panelRef={rightPanelRef}
+                                    defaultSize='50%'
+                                  >
+                                    <WebView />
+                                  </Panel>
+                                </ResizableGroup>
+                              </div>
+                            }
+                          >
+                            <div
+                              className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
+                            >
+                              <AppSidebar />
+                              <main className='flex-1 no-scrollbar overflow-auto'>
                                 <EditWarningModal />
                                 <Outlet />
                               </main>
-                            </Panel>
-                            {showSdlcFrameXyneAI && (
-                              <>
-                                <Separator className='group flex w-[2px] cursor-col-resize items-center justify-center transition-colors'>
-                                  <div className='h-full w-[2px] bg-transparent group-hover:bg-primary group-active:bg-primary' />
-                                </Separator>
-                                <Panel
-                                  id='sdlc-frame-xyneai'
-                                  defaultSize={`${XYNE_AI_PANEL_DEFAULT_SIZE}%`}
-                                  maxSize={isXyneDebuggerOpen ? '55%' : '50%'}
-                                  minSize={
-                                    isXyneDebuggerOpen ? `${XYNE_AI_PANEL_MIN_SIZE}%` : '25%'
-                                  }
-                                >
-                                  <XyneAISidebarZIndexShell>
-                                    <XyneAISidebar
-                                      channelId={xyneAIChannelId}
-                                      threadInfo={xyneAIThreadInfo}
-                                      startFreshChat={xyneAIStartFreshChat}
-                                      canvasInfo={xyneAICanvasInfo}
-                                      initialContextSelections={xyneAIInitialContextSelections}
-                                      contextOpenNonce={xyneAIContextOpenNonce}
-                                      kbCollectionId={xyneAIKbCollectionId ?? ''}
-                                      kbChannelId={xyneAIKbChannelId ?? ''}
-                                      kbDocId={xyneAIKbDocId ?? ''}
-                                      workflowInfo={xyneAIWorkflowInfo}
-                                      workflowDismissed={xyneAIWorkflowDismissed}
-                                      kbDocName={xyneAIKbDocName ?? ''}
-                                      kbFolderId={xyneAIKbFolderId ?? ''}
-                                      kbFolderName={xyneAIKbFolderName ?? ''}
-                                      kbOpenNonce={xyneAIKbOpenNonce}
-                                      researchContext={xyneAIResearchContext}
-                                      initialQuery={xyneAIInitialQuery ?? undefined}
-                                      autoSendNonce={xyneAIAutoSendNonce}
-                                      onDebuggerOpenChange={setIsXyneDebuggerOpen}
-                                    />
-                                  </XyneAISidebarZIndexShell>
-                                </Panel>
-                              </>
-                            )}
-                          </ResizableGroup>
-                        </div>
-                      ) : isOnboarding ? (
-                        // Onboarding screen - full width without sidebar
-                        <main
-                          className={`flex-1 h-screen ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
-                        >
-                          <EditWarningModal />
-                          <Outlet />
-                        </main>
-                      ) : (
-                        <AppSidebarHost
-                          panels={renderPanels}
-                          mainPanelRef={browserPanelLeftRef}
-                          forceRender={
-                            webviewState === 'closed' ||
-                            webviewState === 'idle' ||
-                            browserPanelState === 'open'
-                          }
-                          fallback={
-                            <div className='flex flex-col h-screen'>
-                              <ResizableGroup
-                                orientation='horizontal'
-                                className='flex-1 overflow-hidden'
-                                autoSaveId='app-root'
-                              >
-                                <Panel id='app-root-left' panelRef={leftPanelRef} defaultSize='50%'>
-                                  <div
-                                    className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
-                                  >
-                                    <AppSidebar />
-                                    <main className='flex-1 no-scrollbar overflow-auto'>
-                                      <EditWarningModal />
-                                      <Outlet />
-                                    </main>
-                                  </div>
-                                </Panel>
-                                <Separator className='w-2 hover:bg-sidebar-divider active:bg-sidebar-divider transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
-                                  <div className='w-0.5 h-8 bg-transparent group-hover:bg-sidebar-divider group-active:bg-sidebar-divider transition-colors duration-200 rounded-full'></div>
-                                </Separator>
-                                <Panel
-                                  id='app-root-webview'
-                                  panelRef={rightPanelRef}
-                                  defaultSize='50%'
-                                >
-                                  <WebView />
-                                </Panel>
-                              </ResizableGroup>
                             </div>
-                          }
-                        >
-                          <div
-                            className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
-                          >
-                            <AppSidebar />
-                            <main className='flex-1 no-scrollbar overflow-auto'>
-                              <EditWarningModal />
-                              <Outlet />
-                            </main>
-                          </div>
-                        </AppSidebarHost>
-                      )}
-                      {/* Global overlays and IPC handlers — skipped in the panel
+                          </AppSidebarHost>
+                        )}
+                        {/* Global overlays and IPC handlers — skipped in the panel
                     webview (we don't want nested CMDK, nested browser panel,
                     duplicated call UIs, etc. inside the embedded view).
                     AttachmentGalleryModal stays because it's triggered by
                     attachments inside the conversation itself. */}
-                      {!isInPanelWebview && (
-                        <>
-                          <IncomingCallModal />
-                          {import.meta.env.DEV &&
-                            new URLSearchParams(window.location.search).has('devIncomingCall') && (
-                              <IncomingCallDevHarness />
+                        {!isInPanelWebview && (
+                          <>
+                            <IncomingCallModal />
+                            {import.meta.env.DEV &&
+                              new URLSearchParams(window.location.search).has(
+                                'devIncomingCall',
+                              ) && <IncomingCallDevHarness />}
+                            <GlobalCallOverlay />
+                            {recordingVersion === 'v2' ? (
+                              <NoteTakerOverlayHost />
+                            ) : (
+                              <RecordingOverlay />
                             )}
-                          <GlobalCallOverlay />
-                          {recordingVersion === 'v2' ? (
-                            <NoteTakerOverlayHost />
-                          ) : (
-                            <RecordingOverlay />
-                          )}
-                          <RecordingCameraBubble />
-                          <ScreenPickerHost />
-                          <GlobalUploadProgress />
-                          <NotificationHandler />
-                          <EphemeralFlowHost />
-                          <ElectronBadgeSync />
-                          {ELECTRON_UPDATE_NUDGE_ENABLED && <ElectronUpdateNudge />}
-                          <SosAlertBanner />
-                          <CallFromRecentsHandler />
-                          <CloudAgentFloatingHost />
-                          <BrowserPanelHandler />
-                          <GlobalCommandMenu aiOverview />
-                          <ShortcutsHelpModal
-                            isOpen={isShortcutsModalOpen}
-                            onClose={() => setIsShortcutsModalOpen(false)}
-                          />
-                        </>
-                      )}
-                      <AttachmentGalleryModal />
-                      <ThreadCitationModal />
-                      <TranscriptCitationModal />
-                      <AttachmentCitationPreview />
-                      <ErrorReportModal
-                        isOpen={isErrorReportOpen}
-                        onClose={() => setIsErrorReportOpen(false)}
-                        pendingRecording={pendingRecording}
-                        pendingRecordingFilePath={pendingRecordingFilePath}
-                        onSourceSelected={(source: ScreenSource, withMic: boolean) =>
-                          void startRecording(source, withMic)
-                        }
-                        onSubmitSuccess={() => {
-                          setPendingRecording(null);
-                          setPendingRecordingFilePath(null);
-                        }}
-                        onDiscard={() => {
-                          setPendingRecording(null);
-                          setPendingRecordingFilePath(null);
-                        }}
-                      />
+                            <RecordingCameraBubble />
+                            <ScreenPickerHost />
+                            <GlobalUploadProgress />
+                            <NotificationHandler />
+                            <EphemeralFlowHost />
+                            <ElectronBadgeSync />
+                            {ELECTRON_UPDATE_NUDGE_ENABLED && <ElectronUpdateNudge />}
+                            <SosAlertBanner />
+                            <CallFromRecentsHandler />
+                            <CloudAgentFloatingHost />
+                            <BrowserPanelHandler />
+                            <GlobalCommandMenu aiOverview />
+                            <ShortcutsHelpModal
+                              isOpen={isShortcutsModalOpen}
+                              onClose={() => setIsShortcutsModalOpen(false)}
+                            />
+                          </>
+                        )}
+                        <AttachmentGalleryModal />
+                        <ThreadCitationModal />
+                        <TranscriptCitationModal />
+                        <AttachmentCitationPreview />
+                        <ErrorReportModal
+                          isOpen={isErrorReportOpen}
+                          onClose={() => setIsErrorReportOpen(false)}
+                          pendingRecording={pendingRecording}
+                          pendingRecordingFilePath={pendingRecordingFilePath}
+                          onSourceSelected={(source: ScreenSource, withMic: boolean) =>
+                            void startRecording(source, withMic)
+                          }
+                          onSubmitSuccess={() => {
+                            setPendingRecording(null);
+                            setPendingRecordingFilePath(null);
+                          }}
+                          onDiscard={() => {
+                            setPendingRecording(null);
+                            setPendingRecordingFilePath(null);
+                          }}
+                        />
 
-                      {!isXyneAIDrawerOpen && hasXyneAIStreaming && (
-                        <div className='hidden' aria-hidden='true'>
-                          <XyneAISidebar
-                            channelId={xyneAIChannelId}
-                            threadInfo={xyneAIThreadInfo}
-                            startFreshChat={xyneAIStartFreshChat}
-                            canvasInfo={xyneAICanvasInfo}
-                            initialContextSelections={xyneAIInitialContextSelections}
-                            contextOpenNonce={xyneAIContextOpenNonce}
-                            kbCollectionId={xyneAIKbCollectionId ?? ''}
-                            kbChannelId={xyneAIKbChannelId ?? ''}
-                            kbDocId={xyneAIKbDocId ?? ''}
-                            workflowInfo={xyneAIWorkflowInfo}
-                            workflowDismissed={xyneAIWorkflowDismissed}
-                            kbDocName={xyneAIKbDocName ?? ''}
-                            kbFolderId={xyneAIKbFolderId ?? ''}
-                            kbFolderName={xyneAIKbFolderName ?? ''}
-                            kbOpenNonce={xyneAIKbOpenNonce}
-                            researchContext={xyneAIResearchContext}
-                            initialQuery={xyneAIInitialQuery ?? undefined}
-                            autoSendNonce={xyneAIAutoSendNonce}
-                            onDebuggerOpenChange={setIsXyneDebuggerOpen}
-                            visible={false}
-                          />
-                        </div>
-                      )}
-                      {/* XyneAI Mobile Drawer */}
-                      {isMobile &&
-                        !isInPanelWebview &&
-                        !isOnAIChatExperiencePage &&
-                        !isOnStreamsPage && (
-                          <Drawer
-                            open={isXyneAIDrawerOpen}
-                            onOpenChange={open => {
-                              // Don't allow closing during AI onboarding
-                              if (!open && isAIOnboardingActive()) return;
-                              xyneAIActor.send({ type: open ? 'OPEN' : 'CLOSE' });
-                            }}
-                            title='Xyne AI'
-                            description='Ask questions about your channel'
-                          >
+                        {!isXyneAIDrawerOpen && hasXyneAIStreaming && (
+                          <div className='hidden' aria-hidden='true'>
                             <XyneAISidebar
                               channelId={xyneAIChannelId}
                               threadInfo={xyneAIThreadInfo}
@@ -1048,17 +1015,57 @@ const AppRoot = (): ReactElement => {
                               initialQuery={xyneAIInitialQuery ?? undefined}
                               autoSendNonce={xyneAIAutoSendNonce}
                               onDebuggerOpenChange={setIsXyneDebuggerOpen}
+                              visible={false}
                             />
-                          </Drawer>
+                          </div>
                         )}
-                    </SdlcFrameProvider>
-                  </EditProvider>
-                </SlashCommandArtifactSideEffectProvider>
-              </AIOnboardingProvider>
-            </InitialStateLoader>
-          </ZeroFallbackProvider>
-        </ZeroProvider>
-      </EncryptionBootstrapProvider>
+                        {/* XyneAI Mobile Drawer */}
+                        {isMobile &&
+                          !isInPanelWebview &&
+                          !isOnAIChatExperiencePage &&
+                          !isOnStreamsPage && (
+                            <Drawer
+                              open={isXyneAIDrawerOpen}
+                              onOpenChange={open => {
+                                // Don't allow closing during AI onboarding
+                                if (!open && isAIOnboardingActive()) return;
+                                xyneAIActor.send({ type: open ? 'OPEN' : 'CLOSE' });
+                              }}
+                              title='Xyne AI'
+                              description='Ask questions about your channel'
+                            >
+                              <XyneAISidebar
+                                channelId={xyneAIChannelId}
+                                threadInfo={xyneAIThreadInfo}
+                                startFreshChat={xyneAIStartFreshChat}
+                                canvasInfo={xyneAICanvasInfo}
+                                initialContextSelections={xyneAIInitialContextSelections}
+                                contextOpenNonce={xyneAIContextOpenNonce}
+                                kbCollectionId={xyneAIKbCollectionId ?? ''}
+                                kbChannelId={xyneAIKbChannelId ?? ''}
+                                kbDocId={xyneAIKbDocId ?? ''}
+                                workflowInfo={xyneAIWorkflowInfo}
+                                workflowDismissed={xyneAIWorkflowDismissed}
+                                kbDocName={xyneAIKbDocName ?? ''}
+                                kbFolderId={xyneAIKbFolderId ?? ''}
+                                kbFolderName={xyneAIKbFolderName ?? ''}
+                                kbOpenNonce={xyneAIKbOpenNonce}
+                                researchContext={xyneAIResearchContext}
+                                initialQuery={xyneAIInitialQuery ?? undefined}
+                                autoSendNonce={xyneAIAutoSendNonce}
+                                onDebuggerOpenChange={setIsXyneDebuggerOpen}
+                              />
+                            </Drawer>
+                          )}
+                      </SdlcFrameProvider>
+                    </EditProvider>
+                  </SlashCommandArtifactSideEffectProvider>
+                </AIOnboardingProvider>
+              </InitialStateLoader>
+            </ZeroFallbackProvider>
+          </ZeroProvider>
+        </EncryptionBootstrapProvider>
+      </WorkspaceUnreadCountsProvider>
     </InstrumentationProvider>
   );
 };
