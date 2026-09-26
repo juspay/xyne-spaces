@@ -1,3 +1,10 @@
+## [1.406.0](https://github.com/juspay/xyne-spaces/compare/v1.405.1...v1.406.0) (2026-09-26)
+
+
+### Features
+
+* use jev to skip the forced plan card for direct questions ([#2330](https://github.com/juspay/xyne-spaces/issues/2330)) ([4404719](https://github.com/juspay/xyne-spaces/commit/4404719a8c2110c415bd4b023c7a8526625bded5))
+
 ## [1.405.1](https://github.com/juspay/xyne-spaces/compare/v1.405.0...v1.405.1) (2026-09-25)
 
 
