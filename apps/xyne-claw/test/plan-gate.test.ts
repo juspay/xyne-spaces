@@ -1,5 +1,8 @@
+import { mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { decidePlanTracking, planGateForced } from "../src/plan-gate.js";
+import { buildGateState, decidePlanTracking, isShortFollowUp, planGateForced, readPreviousAgentReply } from "../src/plan-gate.js";
 
 const answer = (p: number) => async () => ({ multiStep: { type: "noul", noul: p } });
 
@@ -60,5 +63,66 @@ describe("decidePlanTracking", () => {
 
   it("keeps the plan for an empty task", async () => {
     expect((await decidePlanTracking("   ", {}, { enabled: () => true, ask: answer(0.01) })).plan).toBe(true);
+  });
+});
+
+describe("previous agent reply for short follow-ups", () => {
+  const dirs: string[] = [];
+  const makeDir = () => {
+    const d = mkdtempSync(path.join(tmpdir(), "plan-gate-"));
+    dirs.push(d);
+    return d;
+  };
+  const line = (role: string, content: unknown) => JSON.stringify({ type: "message", message: { role, content } });
+
+  afterEach(() => {
+    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+    delete process.env["JEV_PLAN_GATE_CONTEXT_MAX_TASK_CHARS"];
+  });
+
+  it("returns the last assistant text from the newest session file", () => {
+    const d = makeDir();
+    const older = path.join(d, "2026-09-25T10-00-00-000Z_a.jsonl");
+    const newer = path.join(d, "2026-09-26T10-00-00-000Z_b.jsonl");
+    writeFileSync(older, [line("assistant", [{ type: "text", text: "old reply" }])].join("\n"));
+    writeFileSync(newer, [
+      JSON.stringify({ type: "session", version: 3 }),
+      line("user", [{ type: "text", text: "find drivers" }]),
+      line("assistant", [{ type: "text", text: "Which city should I look in?" }]),
+      line("assistant", [{ type: "toolCall", name: "search", arguments: {} }]),
+    ].join("\n"));
+    utimesSync(older, new Date("2026-09-25T10:00:00Z"), new Date("2026-09-25T10:00:00Z"));
+    expect(readPreviousAgentReply(d)).toBe("Which city should I look in?");
+  });
+
+  it("returns undefined for a missing or empty session directory", () => {
+    expect(readPreviousAgentReply(path.join(tmpdir(), "does-not-exist-plan-gate"))).toBeUndefined();
+    expect(readPreviousAgentReply(makeDir())).toBeUndefined();
+  });
+
+  it("skips malformed lines", () => {
+    const d = makeDir();
+    writeFileSync(path.join(d, "s.jsonl"), [line("assistant", "plain string reply"), "{not json \"assistant\""].join("\n"));
+    expect(readPreviousAgentReply(d)).toBe("plain string reply");
+  });
+
+  it("treats only short messages as follow-ups, configurable by env", () => {
+    expect(isShortFollowUp("BANGALORE")).toBe(true);
+    expect(isShortFollowUp("x".repeat(201))).toBe(false);
+    process.env["JEV_PLAN_GATE_CONTEXT_MAX_TASK_CHARS"] = "5";
+    expect(isShortFollowUp("BANGALORE")).toBe(false);
+  });
+
+  it("puts the previous reply ahead of the user's message in the jev state", () => {
+    expect(buildGateState("BANGALORE", "Which city?")).toContain("previously told the user:\nWhich city?");
+    expect(buildGateState("BANGALORE", "Which city?")).toContain("latest message is:\nBANGALORE");
+    expect(buildGateState("hi")).toBe("A user sent this request to an engineering assistant agent:\nhi");
+  });
+
+  it("sends the previous reply to jev and reports it", async () => {
+    const ask = vi.fn(async () => ({ multiStep: { type: "noul", noul: 0.9 } }));
+    const d = await decidePlanTracking("BANGALORE", {}, { enabled: () => true, ask }, "Which city should I pull inactive drivers for?");
+    expect(d).toMatchObject({ plan: true, withPreviousReply: true });
+    expect(ask.mock.calls[0]?.[0]).toContain("Which city should I pull inactive drivers for?");
   });
 });
