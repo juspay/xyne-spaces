@@ -32,6 +32,7 @@ import ReactFlow, {
   getSmoothStepPath,
   useNodesState,
   useReactFlow,
+  useStore,
   type Edge,
   type EdgeProps,
   type Node,
@@ -115,6 +116,9 @@ const MINIMAP_WIDTH_RATIO = 0.2;
 const MINIMAP_MIN_WIDTH = 120;
 const MINIMAP_MAX_WIDTH = 180;
 const FIT_VIEW_OPTIONS = { padding: 0.2, duration: 200 } as const;
+/** Passed to ReactFlow and read back from the store to disable the zoom buttons at the limits. */
+const MIN_ZOOM = 0.2;
+const MAX_ZOOM = 1.5;
 /** One localStorage entry holding the last viewport per automation, most recent last. */
 const VIEWPORT_STORAGE_KEY = 'automation-flow-viewport';
 const VIEWPORT_STORAGE_LIMIT = 20;
@@ -751,6 +755,9 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
   } = props;
 
   const { setCenter, getZoom, getViewport, setViewport, fitView, zoomIn, zoomOut } = useReactFlow();
+  // Same guard React Flow's own <Controls /> applies, so the buttons cannot be clicked into a no-op.
+  const minZoomReached = useStore(state => state.transform[2] <= state.minZoom);
+  const maxZoomReached = useStore(state => state.transform[2] >= state.maxZoom);
   const rootRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -1597,7 +1604,7 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
     'flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground hover:bg-accent focus-visible:bg-accent focus-visible:outline-none';
 
   const zoomButtonClass =
-    'flex size-7 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+    'flex size-7 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring aria-disabled:cursor-not-allowed aria-disabled:opacity-40 aria-disabled:hover:bg-transparent aria-disabled:hover:text-muted-foreground';
 
   return (
     <div ref={rootRef} className='flex flex-1 overflow-hidden'>
@@ -1643,9 +1650,13 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
             <button
               type='button'
               className={zoomButtonClass}
-              onClick={() => void zoomOut({ duration: 200 })}
+              onClick={() => {
+                if (minZoomReached) return;
+                void zoomOut({ duration: 200 });
+              }}
+              aria-disabled={minZoomReached}
               aria-label='Zoom out'
-              title='Zoom out'
+              title={minZoomReached ? 'Minimum zoom' : 'Zoom out'}
               data-track-category={TRACK_CATEGORY}
               data-track-name='zoom-out'
             >
@@ -1654,9 +1665,13 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
             <button
               type='button'
               className={zoomButtonClass}
-              onClick={() => void zoomIn({ duration: 200 })}
+              onClick={() => {
+                if (maxZoomReached) return;
+                void zoomIn({ duration: 200 });
+              }}
+              aria-disabled={maxZoomReached}
               aria-label='Zoom in'
-              title='Zoom in'
+              title={maxZoomReached ? 'Maximum zoom' : 'Zoom in'}
               data-track-category={TRACK_CATEGORY}
               data-track-name='zoom-in'
             >
@@ -1700,8 +1715,8 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
             deleteKeyCode={editable ? ['Backspace', 'Delete'] : null}
             multiSelectionKeyCode={null}
             selectionKeyCode={null}
-            minZoom={0.2}
-            maxZoom={1.5}
+            minZoom={MIN_ZOOM}
+            maxZoom={MAX_ZOOM}
             nodesDraggable={false}
             nodesConnectable={false}
             elementsSelectable
