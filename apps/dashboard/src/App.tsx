@@ -26,7 +26,11 @@ import { SwitchLoadingOverlay } from './components/SwitchLoadingOverlay/SwitchLo
 import { InterruptGuard } from './components/InterruptGuard/InterruptGuard';
 import { WorkspaceSwitchToastListener } from './components/WorkspaceSwitchToastListener';
 import { TRUSTED_ORIGINS } from '@xyne/shared';
-import { parseCallInviteLink } from './components/Chat/RenderMessageWithHTML/internalLinkUtils';
+import {
+  parseCallInviteLink,
+  parseInternalXyneLink,
+} from './components/Chat/RenderMessageWithHTML/internalLinkUtils';
+import { crossWorkspaceNavigate } from './hooks/useCrossWorkspaceNavigate';
 import { joinCallSwitchingIfNeeded } from './machines/roomMachine';
 import { detectPlatform } from './hooks/usePlatform';
 import { DEFAULT_WORKSPACE_ID } from './config';
@@ -106,8 +110,37 @@ const App = (): ReactElement => {
         const pathname = anchor.pathname;
         const pathSegments = pathname.split('/').filter(Boolean);
 
-        // Check if first segment looks like a workspaceId (cuid format: 20+ alphanumeric chars)
+        // A workspace-scoped link must switch the authenticated session before
+        // navigation; otherwise the URL and Zero/auth workspace diverge — the
+        // address bar shows the target workspace while the sidebar, Zero data
+        // and channel resolution all stay on the old one ("Unknown Channel").
         const hasWorkspaceId = pathSegments[0]?.match(/^[a-z0-9-]{20,}$/i);
+
+        // The ACTIVE workspace must come from where we currently are, never from
+        // the link being clicked. Reading it from `anchor.pathname` compares the
+        // target against itself, so the guard below was false by construction
+        // and the switch never ran.
+        const activeWorkspaceId =
+          router.state.location.pathname
+            .split('/')
+            .filter(Boolean)[0]
+            ?.match(/^[a-z0-9-]{20,}$/i)?.[0] ||
+          DEFAULT_WORKSPACE_ID ||
+          undefined;
+
+        const parsedInternalLink = parseInternalXyneLink(anchor.href);
+        if (
+          parsedInternalLink?.workspaceId &&
+          parsedInternalLink.workspaceId !== activeWorkspaceId
+        ) {
+          void crossWorkspaceNavigate({
+            href: anchor.href,
+            currentWorkspaceId: activeWorkspaceId,
+            // Bound: passing the bare method trips @typescript-eslint/unbound-method.
+            navigate: router.navigate.bind(router),
+          }).catch(() => undefined);
+          return;
+        }
 
         // If no workspaceId and we have a default, prepend it
         if (!hasWorkspaceId && DEFAULT_WORKSPACE_ID) {
