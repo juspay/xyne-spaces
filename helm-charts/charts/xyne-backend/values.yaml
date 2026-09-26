@@ -245,4 +245,18 @@ serviceMonitor:
   interval: 30s
   scrapeTimeout: ""
 
+migrations:
+  enabled: true
+  secretName: xyne-backend-secrets
+  workingDir: /repo/apps/backend
+  schemas:
+    - prisma/schema.prisma
+    - prisma-common/schema.prisma
+  backoffLimit: 2
+  activeDeadlineSeconds: 900
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+
 extraObjects: []
