@@ -26,12 +26,14 @@ import { Platform,
   serializeMessagePreviewMd,
   serializeLinkPreviewMd,
   parseLinkPreviewMd,
+  serializeCallPreviewMd,
   parseForwardedMessageXml,
   type MessagePreviewData,
   type TicketPreviewSnapshot,
   ActivityClassification,
   ActivityClassificationJobType,
   AttachmentEntityType,
+  CallType,
   ChannelScopeType,
   NotificationDeliveryMethod,
   NotificationType,
@@ -43,7 +45,7 @@ import { MessageAttachmentRepository } from '@/database/repositories/messageAtta
 import { syncMessageArtifact } from '@/database/repositories/messageArtifactRepository';
 import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { InstalledAppsRepository } from '@/database/repositories/installedAppsRepository';
-import { extractInternalUrl, parseInternalUrl, extractFirstUrl } from '@/utils/urlUtils';
+import { extractInternalUrl, parseInternalUrl, extractFirstUrl, extractCallLink } from '@/utils/urlUtils';
 import { linkPreviewService, type ExternalLinkMetadata } from '@/services/linkPreviewService';
 import { botCatalog } from '@/bots/unified/catalog/bot-catalog';
 import { extractBotMentions, executeBotForMention, CHAT_ENABLED_BOT_IDS } from '@/services/bots';
@@ -1124,7 +1126,15 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     );
     if (resolvedInternal) return;
 
-    // 2) Try Bitbucket PR link preview (API-first with URL-derived fallback)
+    // 2) Try Xyne call link preview (DB lookup, no HTTP fetch)
+    const resolvedCall = await this.resolveCallLinkPreview(
+      messageId,
+      conversationId,
+      contentWithoutMentions,
+    );
+    if (resolvedCall) return;
+
+    // 3) Try Bitbucket PR link preview (API-first with URL-derived fallback)
     const url = extractFirstUrl(contentWithoutMentions);
     if (url) {
       const resolvedBitbucket = await this.resolveBitbucketLinkPreview(
@@ -1135,8 +1145,58 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       if (resolvedBitbucket) return;
     }
 
-    // 3) Fall through to external OG-based preview
+    // 4) Fall through to external OG-based preview
     await this.resolveExternalLinkPreview(messageId, conversationId, contentWithoutMentions);
+  }
+
+  /**
+   * Detect a Xyne call link and write a pointer block (url + externalId) — no HTTP fetch. The
+   * card reads title and status live (see CallLinkPreview); this only checks the call exists.
+   *
+   * Returns true even when the call is unresolved: falling through hands the link to the OG
+   * scraper, which fetches our own SPA and produces a generic "Xyne Spaces" card.
+   */
+  private async resolveCallLinkPreview(
+    messageId: string,
+    conversationId: string,
+    content: string,
+  ): Promise<boolean> {
+    const callLink = extractCallLink(content);
+    if (!callLink) return false;
+
+    logger.info('[MessagesSideEffect] Detected Xyne call URL:', {
+      url: callLink.url,
+      externalId: callLink.externalId,
+    });
+
+    const call = await db.call.findUnique({
+      where: { externalId: callLink.externalId },
+      select: { externalId: true, callType: true },
+    });
+
+    if (!call) {
+      logger.info(
+        `[MessagesSideEffect] No call for externalId ${callLink.externalId}; skipping preview`,
+      );
+      return true;
+    }
+
+    // Recordings share this table: a HEADLESS row gets no card, but is still claimed.
+    if (call.callType === CallType.HEADLESS) return true;
+
+    const md = serializeCallPreviewMd({ url: callLink.url, externalId: call.externalId });
+    if (!md) return true;
+
+    // The message may be a bot's, so the write runs above the caller's own scope.
+    await withWorkspaceScope(() => db.message.update({
+      where: { messageId },
+      data: { link_preview_md: md },
+    }));
+
+    await this.syncConversationMessageMetadata(conversationId);
+
+    logger.info(`[MessagesSideEffect] Updated message ${messageId} with call preview`);
+    return true;
   }
 
   /**

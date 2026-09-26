@@ -2814,6 +2814,17 @@ export const queries = defineQueries({
         .one(),
   ),
 
+  // Backs the status pill on a call link's unfurl card. Keyed by externalId (what the link
+  // carries) and relation-free: many cards render to a screen, each needing only the row.
+  callPreviewByExternalId: defineQuery(
+    z.object({ externalId: z.string() }),
+    ({ args: { externalId } }) =>
+      zql.calls
+        .where('callType', '!=', CallType.HEADLESS)
+        .where('externalId', externalId)
+        .one(),
+  ),
+
   // Fetches the HEADLESS recording (+ shares) by its public
   // externalId (what's in the URL / RecordingDetail.externalId) — used by
   // the Share modal and the detail screen alike.
