@@ -513,6 +513,7 @@ export class App {
     this.app.use('/api/conversations/claw', authenticateUserOrApp, conversationRoutes);
     this.app.use('/api/conversations', authMiddleware.authenticate, conversationRoutes);
     this.app.use('/api/conversation-labels', authMiddleware.authenticate, conversationLabelRoutes);
+    this.app.use('/api/radar/claw', authenticateUserOrApp, radarExecutionRoutes);
     this.app.use('/api/radar', authMiddleware.authenticate, radarExecutionRoutes);
     this.app.use('/api/organizations', authMiddleware.authenticate, organizationRoutes);
     this.app.use('/api/invitations', invitationRoutes);
