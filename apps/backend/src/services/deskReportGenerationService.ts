@@ -141,7 +141,7 @@ export class DeskReportGenerationService {
 
     const rangeLabel = rangeDays === 1 ? 'the last 1 day' : `the last ${rangeDays} days`;
     const task = `Generate a desk html report for ${channelName} for ${rangeLabel}.`;
-    const callbackUrl = `${config.xyneClaw.callbackUrl.replace(/\/$/, '')}/api/internal/desk-report/callback/${encodeURIComponent(channelId)}/${encodeURIComponent(pending.id)}`;
+    const callbackUrl = `${config.backendUrl.replace(/\/$/, '')}/api/internal/desk-report/callback/${encodeURIComponent(channelId)}/${encodeURIComponent(pending.id)}`;
 
     const dispatched = await runScopedClawAgent({
       identity: { userId: owner.id, orgId: owner.workspace.orgId, workspaceId },
