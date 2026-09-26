@@ -17,7 +17,7 @@ import { UseVariableButton } from '../SchemaForm/VariableFieldParts';
 import { SchemaJsonEditor, type SchemaTree } from '../SchemaForm/SchemaJsonEditor';
 
 const HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;
-type HttpMethod = (typeof HTTP_METHODS)[number];
+export type HttpMethod = (typeof HTTP_METHODS)[number];
 
 const ENCODING_OPTIONS = [
   { value: 'JSON', label: 'JSON — application/json' },
@@ -124,6 +124,8 @@ interface WebhookStepFormProps {
   pathPrefix: string;
   variableSources: VariablePickerSource[];
   readOnly?: boolean;
+  showResponseSchema?: boolean;
+  methods?: readonly HttpMethod[];
 }
 
 export function WebhookStepForm({
@@ -133,6 +135,8 @@ export function WebhookStepForm({
   pathPrefix,
   variableSources,
   readOnly = false,
+  showResponseSchema = true,
+  methods = HTTP_METHODS,
 }: WebhookStepFormProps): React.ReactElement {
   const responseSchemaRaw = value['responseSchema'];
   const responseSchema: SchemaTree =
@@ -141,7 +145,7 @@ export function WebhookStepForm({
       : {};
   const url = typeof value['url'] === 'string' ? value['url'] : '';
   const methodRaw = value['method'];
-  const method: HttpMethod = (HTTP_METHODS as readonly string[]).includes(methodRaw as string)
+  const method: HttpMethod = (methods as readonly string[]).includes(methodRaw as string)
     ? (methodRaw as HttpMethod)
     : 'POST';
   const encodingRaw = value['encoding'];
@@ -211,7 +215,7 @@ export function WebhookStepForm({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {HTTP_METHODS.map(m => (
+                {methods.map(m => (
                   <SelectItem key={m} value={m}>
                     {m}
                   </SelectItem>
@@ -300,22 +304,24 @@ export function WebhookStepForm({
         </FieldGroup>
       )}
 
-      <FieldGroup
-        label='Expected response body'
-        description='Declare the JSON shape of the response body so downstream steps can drill into it. This shape becomes responseJson inside the full step output: { status, ok, responseBody, responseJson: <your shape> }. Open the Input / output peek above this form to see the complete output. Leaves are type strings ("string" | "number" | "boolean" | "object" | "array"); nest objects for nested fields.'
-      >
-        <SchemaJsonEditor
-          value={responseSchema}
-          onChange={next => {
-            const cleaned = { ...value };
-            if (Object.keys(next).length === 0) delete cleaned['responseSchema'];
-            else cleaned['responseSchema'] = next;
-            onChange(cleaned);
-          }}
-          readOnly={readOnly}
-          emptyHint='Empty schema — downstream steps see responseJson as an opaque blob.'
-        />
-      </FieldGroup>
+      {showResponseSchema && (
+        <FieldGroup
+          label='Expected response body'
+          description='Declare the JSON shape of the response body so downstream steps can drill into it. This shape becomes responseJson inside the full step output: { status, ok, responseBody, responseJson: <your shape> }. Open the Input / output peek above this form to see the complete output. Leaves are type strings ("string" | "number" | "boolean" | "object" | "array"); nest objects for nested fields.'
+        >
+          <SchemaJsonEditor
+            value={responseSchema}
+            onChange={next => {
+              const cleaned = { ...value };
+              if (Object.keys(next).length === 0) delete cleaned['responseSchema'];
+              else cleaned['responseSchema'] = next;
+              onChange(cleaned);
+            }}
+            readOnly={readOnly}
+            emptyHint='Empty schema — downstream steps see responseJson as an opaque blob.'
+          />
+        </FieldGroup>
+      )}
 
       <Collapsible
         open={advancedOpen}
@@ -441,10 +447,7 @@ function AuthEditor({
 }): React.ReactElement {
   return (
     <div className='flex flex-col gap-3'>
-      <FieldGroup
-        label='Type'
-        description='Adds an Authorization header to the request. Credentials are stored with the automation.'
-      >
+      <FieldGroup label='Type' description='Adds an Authorization header to the request.'>
         <Select value={auth.type} onValueChange={v => onChange({ ...auth, type: v as AuthType })}>
           <SelectTrigger className='w-full'>
             <SelectValue />
@@ -688,6 +691,7 @@ function HeadersEditor({
         ))
       )}
       <Button
+        type='button'
         variant='outline'
         size='sm'
         onClick={addRow}

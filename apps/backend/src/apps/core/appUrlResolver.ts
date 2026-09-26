@@ -13,6 +13,15 @@ export interface ResolvedAppWebhook {
  * INTERNAL_APP_HOST_MAP stringified-JSON env var), rewrite it to the in-cluster
  * pod URL; otherwise pass the stored webhookUrl through unchanged.
  */
+/**
+ * True when this host is rewritten to an in-cluster pod URL, which also means
+ * the SSRF guard is skipped for it. Callers that accept a URL from anyone other
+ * than the app itself must check this — see dispatchAppFetch.
+ */
+export function isInternalMappedHost(host: string): boolean {
+  return Boolean(config.apps.internalHostMap[host.trim().toLowerCase()]);
+}
+
 export function resolveAppWebhookUrl(webhookUrl: string): ResolvedAppWebhook {
   let parsed: URL;
   try {
