@@ -33,6 +33,9 @@ export interface JevChoiceQuestion {
 
 export type JevQuestion = JevNoulQuestion | JevChoiceQuestion;
 
+/** Background Jev judges against: plain text, or structured JSON with named parts. */
+export type JevState = string | Record<string, unknown>;
+
 export type JevAnswer =
   | { type: 'noul'; noul: number }
   | {
@@ -137,7 +140,7 @@ export const askJevNouls = async (
  * Never throws.
  */
 export const askJev = async (
-  state: string | Record<string, unknown>,
+  state: JevState,
   questions: Record<string, JevQuestion>,
   timeoutMs: number,
   signal?: AbortSignal,

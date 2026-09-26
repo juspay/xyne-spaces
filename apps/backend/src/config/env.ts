@@ -330,6 +330,9 @@ const envSchema = Joi.object({
   JEV_API_KEY: Joi.string().allow('').default(''),
   JEV_URL: Joi.string().allow('').default(''),
   JEV_MODEL: Joi.string().allow('').default(''),
+  // Voice and text assistant (services/assistant). The LiteLLM model that reads details such
+  // as names and messages out of a request. Empty => the assistant is off.
+  ASSISTANT_MODEL: Joi.string().allow('').default(''),
   // Genius Bot API Configuration
   GENIUS_API_URL: Joi.string().uri().default('http://localhost:8000'),
   GENIUS_API_KEY: Joi.string().allow('').default(''),
@@ -990,6 +993,9 @@ export const config = {
     apiKey: envVars.JEV_API_KEY,
     url: envVars.JEV_URL,
     model: envVars.JEV_MODEL,
+  },
+  assistant: {
+    model: envVars.ASSISTANT_MODEL,
   },
   genius: {
     apiUrl: envVars.GENIUS_API_URL,
