@@ -4,6 +4,7 @@ import Cookies from 'js-cookie';
 import { useAuth } from '../../hooks/useAuth';
 import { useUser } from '../../hooks/useUsers';
 import { useMigratedChannels, useChannelByName } from '../../hooks/useChannels';
+import { default_seeded_channel_name } from '@xyne/shared';
 import { useProfilePictureUrl } from '../../hooks/useProfilePicture';
 import { authActor } from '../../machines/authMachine';
 import Confetti from 'react-confetti';
@@ -21,9 +22,9 @@ const OnboardingScreen: React.FC = () => {
   // Get migrated channels using the hook
   const migratedChannels = useMigratedChannels();
 
-  // Resolve the default "general" channel so first-time users land there after
-  // onboarding instead of the user guide.
-  const generalChannel = useChannelByName('general');
+  // Resolve the default "getting-started" channel so first-time users land there
+  // after onboarding instead of the user guide.
+  const generalChannel = useChannelByName(default_seeded_channel_name);
 
   const [localHarnesses, setLocalHarnesses] = useState<LocalHarnessInstallation[]>([]);
   const currentStepRef = useRef(0);

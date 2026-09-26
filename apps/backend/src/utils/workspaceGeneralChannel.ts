@@ -1,6 +1,7 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import { sanitizeProjectCode, ProjectType, ChannelRole, ChannelScopeType, ChannelVisibility } from '@xyne/shared';
 import { repositories } from '@/database/repositories';
+import { config } from '@/config/env';
 
 type PrismaClientLike = PrismaClient | Prisma.TransactionClient;
 
@@ -19,22 +20,23 @@ interface GeneralChannelResult {
 }
 
 /**
- * Ensure a workspace has a "general" channel (created with a DEFAULT project when
- * missing) and that `workspace.landingChannelId` points at it when unset.
- * Optionally joins the given user to it (idempotent).
+ * Ensure a workspace has a default "getting-started" channel (created with a
+ * DEFAULT project when missing) and that `workspace.landingChannelId` points at
+ * it when unset. Optionally joins the given user to it (idempotent).
  *
  * Shared by enterprise and community workspace flows so both create and join the
- * general channel through the same code path.
+ * default channel through the same code path.
  */
 export async function ensureGeneralChannelForWorkspace(
   params: EnsureGeneralChannelParams,
 ): Promise<GeneralChannelResult> {
   const { db, workspaceId, workspaceName, createdBy, userId, role = ChannelRole.MEMBER } = params;
+  const channelName = config.defaultSeededChannelName;
 
   const existing = await db.channel.findFirst({
     where: {
       workspaceId,
-      name: { equals: 'general', mode: 'insensitive' },
+      name: { equals: channelName, mode: 'insensitive' },
       isArchived: false,
     },
     select: { id: true },
@@ -65,7 +67,7 @@ export async function ensureGeneralChannelForWorkspace(
 
     channel = await db.channel.create({
       data: {
-        name: 'general',
+        name: channelName,
         scopeType: ChannelScopeType.DEFAULT,
         visibility: ChannelVisibility.PUBLIC,
         createdBy,
@@ -114,9 +116,9 @@ export async function ensureGeneralChannelForWorkspace(
 }
 
 /**
- * Join a user to an existing workspace "general" channel (scoped to the workspace,
- * unlike a global name lookup). Returns the channel id, or null when the workspace
- * has no general channel yet.
+ * Join a user to an existing workspace "getting-started" channel (scoped to the
+ * workspace, unlike a global name lookup). Returns the channel id, or null when
+ * the workspace has no default channel yet.
  */
 export async function ensureUserInGeneralChannel(
   db: PrismaClientLike,
@@ -127,7 +129,7 @@ export async function ensureUserInGeneralChannel(
   const generalChannel = await db.channel.findFirst({
     where: {
       workspaceId,
-      name: { equals: 'general', mode: 'insensitive' },
+      name: { equals: config.defaultSeededChannelName, mode: 'insensitive' },
       isArchived: false,
     },
     select: { id: true },
