@@ -88,6 +88,8 @@ const planStep = z
 export const actionDefinitionSchema = z
   .object({
     id: identifier,
+    /** A short name for buttons and questions: "Send a direct message". */
+    title: z.string().min(1).max(60),
     intent,
     effect,
     /** Only when this action needs a different rule from its effect's default. */

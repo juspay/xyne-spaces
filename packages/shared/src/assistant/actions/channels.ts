@@ -7,6 +7,7 @@ export const CHANNELS = {
   actions: [
     {
       id: 'create_channel',
+      title: 'Create a channel',
       intent: {
         description:
           'Create a new channel, even when details are missing; missing details are asked for, never guessed.',

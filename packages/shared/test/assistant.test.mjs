@@ -147,6 +147,16 @@ test('switching to something else parks the request; "continue" brings it back',
   assert.equal(resumed.state.parked.length, 0);
 });
 
+test('a new request for the same action is new: the waiting one is set aside, not overwritten', () => {
+  const [, second] = converse(
+    request('send_dm', set('recipient', daniel, false), set('message', 'hello')),
+    request('send_dm', set('recipient', priya, false), set('message', 'the build is green')),
+  );
+  assert.equal(second.step.summary, 'Send “the build is green” to Priya Shah');
+  assert.equal(second.state.parked.length, 1);
+  assert.equal(second.state.parked[0].values.recipient, daniel);
+});
+
 test(`at most ${MAX_PARKED} requests are held; the oldest goes first`, () => {
   const results = converse(
     ...['A1', 'B2', 'C3', 'D4', 'E5'].flatMap(name => [
@@ -437,6 +447,7 @@ function area(...actions) {
 function minimal() {
   return {
     id: 'open_page',
+    title: 'Open a page',
     intent: { description: 'Open a page.', examples: ['open tickets', 'go to settings'] },
     effect: 'send',
     fields: {

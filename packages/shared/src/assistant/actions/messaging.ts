@@ -7,6 +7,7 @@ export const MESSAGING = {
   actions: [
     {
       id: 'send_dm',
+      title: 'Send a direct message',
       intent: {
         description:
           'Send a direct message with the user’s words to one named person or app, starting the DM if needed.',

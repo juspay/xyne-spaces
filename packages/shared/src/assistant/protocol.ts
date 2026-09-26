@@ -1,5 +1,6 @@
-import type { OperationResult, Plan } from './core/operations.js';
-import type { ChoiceOption, EntityRef } from './core/references.js';
+import { z } from 'zod';
+import type { Plan } from './core/operations.js';
+import { entityRefSchema, type ChoiceOption } from './core/references.js';
 
 /**
  * The messages the dashboard and the assistant backend exchange, and nothing else.
@@ -10,35 +11,55 @@ import type { ChoiceOption, EntityRef } from './core/references.js';
  * one follow-up turn, and the backend replies with the final words.
  */
 
-export interface ClientContext {
-  /** The page route, for tracing and page-specific help. */
-  route: string;
-  /** What is open on screen: the channel or DM, the thread inside it. */
-  onScreen: EntityRef[];
-  /** What the user attached to the Ask AI panel as context. */
-  attached: EntityRef[];
-}
+const clientContext = z
+  .object({
+    /** The page route, for tracing and page-specific help. */
+    route: z.string().max(500),
+    /** What is open on screen: the channel or DM, the thread inside it. */
+    onScreen: z.array(entityRefSchema).max(10),
+    /** What the user attached to the Ask AI panel as context. */
+    attached: z.array(entityRefSchema).max(20),
+  })
+  .strict();
 
-export type TurnInput =
-  | { kind: 'text'; text: string; via: 'voice' | 'typed' }
+const operationResult = z
+  .object({ ok: z.boolean(), produced: entityRefSchema.optional(), error: z.string().max(500).optional() })
+  .strict();
+
+const turnInput = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('text'), text: z.string().min(1).max(2000), via: z.enum(['voice', 'typed']) }).strict(),
   /** A button tap: the option id from the last response. */
-  | { kind: 'choose'; optionId: string }
+  z.object({ kind: z.literal('choose'), optionId: z.string().min(1).max(200) }).strict(),
   /** The results of the plan in the last response, one per operation, in order. */
-  | { kind: 'planResult'; runId: string; results: OperationResult[] };
+  z
+    .object({
+      kind: z.literal('planResult'),
+      runId: z.string().min(1).max(100),
+      results: z.array(operationResult).max(20),
+    })
+    .strict(),
+]);
 
-export interface TurnRequest {
-  /** One conversation; the dashboard keeps it for the life of the panel. */
-  sessionId: string;
-  /** Correlates logs and traces across speech-to-text, the backend, and the plan runner. */
-  requestId: string;
-  input: TurnInput;
-  context: ClientContext;
-}
+/** What the dashboard sends for every turn. Checked on arrival. */
+export const turnRequestSchema = z
+  .object({
+    /** One conversation; the dashboard keeps it for the life of the panel. */
+    sessionId: z.string().min(1).max(100),
+    /** Correlates logs across speech-to-text, the backend, and the plan runner. */
+    requestId: z.string().min(1).max(100),
+    input: turnInput,
+    context: clientContext,
+  })
+  .strict();
+
+export type TurnRequest = z.infer<typeof turnRequestSchema>;
+export type TurnInput = z.infer<typeof turnInput>;
+export type ClientContext = z.infer<typeof clientContext>;
 
 export type Display =
   /** A question with buttons ("Public or private?", "Which Daniel?"). */
   | { kind: 'choices'; prompt: string; options: ChoiceOption[] }
-  /** "Shall I…?" before an action runs. */
+  /** "Shall I…?" before an action runs. Its buttons send the option ids `yes` and `no`. */
   | { kind: 'preview'; summary: string; confirmLabel: string; cancelLabel: string }
   /** Results to pick from, such as found threads. */
   | { kind: 'list'; title: string; items: ChoiceOption[]; hasMore: boolean };

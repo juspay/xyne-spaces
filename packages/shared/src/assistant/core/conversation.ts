@@ -84,7 +84,7 @@ export type FieldUpdate =
   | { field: string; op: 'unknown'; mention: string };
 
 export type TurnEvent =
-  /** A request for an action, with whatever details it included. */
+  /** A new request for an action, with whatever details it included. */
   | { type: 'request'; action: string; updates: FieldUpdate[] }
   /** More details (or corrections) for the request in progress. */
   | { type: 'details'; updates: FieldUpdate[] }
@@ -192,8 +192,8 @@ export function advance(
     case 'request': {
       const definition = catalog.get(event.action);
       if (!definition) return finish(active, { kind: 'idle', reason: 'unknown-action' });
-      // Restating the same request adds to it; a different request sets the current one aside.
-      if (active?.action === definition.id) return update(active, event.updates);
+      // A request is always new, even for the same action ("tell Priya…" while a DM to Daniel
+      // waits): the current one is set aside. Corrections to it arrive as `details`.
       if (active && hasContent(active)) park(active);
       seq += 1;
       return update(newDraft(`d${seq}`, definition.id), event.updates);
