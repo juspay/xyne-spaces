@@ -248,6 +248,9 @@ serviceMonitor:
 migrations:
   enabled: true
   secretName: xyne-backend-secrets
+  secretKeys:
+    - DATABASE_URL
+    - COMMON_DATABASE_URL
   workingDir: /repo/apps/backend
   schemas:
     - prisma/schema.prisma

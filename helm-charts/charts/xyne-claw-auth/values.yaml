@@ -263,4 +263,19 @@ serviceMonitor:
   interval: 30s
   scrapeTimeout: ""
 
+migrations:
+  enabled: true
+  secretName: xyne-claw-auth-secrets
+  secretKeys:
+    - DATABASE_URL
+  workingDir: /repo/apps/xyne-claw-auth/backend
+  schemas:
+    - prisma/schema.prisma
+  backoffLimit: 2
+  activeDeadlineSeconds: 900
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+
 extraObjects: []
