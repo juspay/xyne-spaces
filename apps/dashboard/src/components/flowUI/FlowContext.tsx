@@ -17,7 +17,9 @@ export interface FlowContextValue {
   updateFieldValue: (name: string, value: unknown) => void;
   validateField: (name: string, value: unknown) => string | null;
   validateAllFields: () => boolean;
-  executeAction: (action: FlowAction) => Promise<void>;
+  /** Resolves false when the action failed — the caller keeps whatever UI it
+   *  would otherwise tear down (an open editor, an expanded preview). */
+  executeAction: (action: FlowAction) => Promise<boolean>;
   onAppAction: (response: AppActionResponse) => void;
   messageId: string;
   conversationId: string;

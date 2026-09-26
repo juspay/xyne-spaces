@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactElement } from 'react';
+import { useCallback, useMemo, useState, type ReactElement } from 'react';
 import { PencilEditLine } from '@xyne/icons';
 import {
   Select,
@@ -15,7 +15,18 @@ import {
   DetailSection,
   DetailValue,
 } from '../../../../../routes/AIScreen/library/shared/primitives/DetailPrimitives';
-import { ProseBox } from '../../../../../routes/AIScreen/library/shared/primitives/ProseBox';
+import {
+  PROSE_BOX_HEIGHT,
+  ProseBox,
+} from '../../../../../routes/AIScreen/library/shared/primitives/ProseBox';
+import {
+  ClickToEdit,
+  DESCRIPTION_EDITOR,
+  PROMPT_EDITOR,
+  fitToContent,
+  useCaretHandoff,
+  type CaretHint,
+} from '../../../../../routes/AIScreen/library/shared/primitives/ClickToEdit';
 import { ProviderOrderDialog } from '../../../../../routes/AIScreen/library/agents/detail/persona/model/ProviderOrderDialog';
 import { AgentKeysDialog } from '../../../../../routes/AIScreen/library/agents/detail/persona/credentials/AgentKeysDialog';
 import { userCredentialScope } from '../../../../../routes/AIScreen/library/agents/detail/persona/credentials/credentialScope';
@@ -37,6 +48,32 @@ export function AgentPreviewPersonaTab({ agent, editor }: AgentPreviewEditablePr
   const [orderOpen, setOrderOpen] = useState(false);
   const [connectOpen, setConnectOpen] = useState(false);
   const editable = editor?.editable ?? false;
+  const editingIdentity = editor?.editingIdentity ? editor : null;
+  const caret = useCaretHandoff();
+
+  const attachDescription = useCallback(
+    (el: HTMLTextAreaElement | null): void => {
+      if (!el) return;
+      fitToContent(el);
+      caret.claim('description', el);
+    },
+    [caret],
+  );
+
+  const attachPrompt = useCallback(
+    (el: HTMLTextAreaElement | null): void => {
+      if (!el) return;
+      caret.claim('systemPrompt', el);
+    },
+    [caret],
+  );
+
+  const startWithCaret =
+    (field: string) =>
+    (hint: CaretHint | null): void => {
+      caret.arm(field, hint);
+      editor?.startIdentityEdit();
+    };
 
   const posterSlug = typeof data['agentSlug'] === 'string' ? data['agentSlug'] : '';
   const cardUserId = typeof data['userId'] === 'string' ? data['userId'] : '';
@@ -77,13 +114,37 @@ export function AgentPreviewPersonaTab({ agent, editor }: AgentPreviewEditablePr
   return (
     <div className='flex flex-col gap-6'>
       <DetailSection label='Description' info='What this agent is for'>
-        <DetailCard>
-          {agent.description ? (
-            <DetailProse>{agent.description}</DetailProse>
-          ) : (
-            <DetailEmpty>No description added</DetailEmpty>
-          )}
-        </DetailCard>
+        {editingIdentity ? (
+          <textarea
+            value={editingIdentity.identityDraft.description}
+            onChange={event => {
+              editingIdentity.setIdentityField('description', event.target.value);
+              fitToContent(event.target);
+            }}
+            aria-label='Agent description'
+            placeholder='What this agent is for'
+            rows={1}
+            ref={attachDescription}
+            data-track-category='AGENT_ARTIFACT'
+            data-track-name='EDIT_DRAFT_DESCRIPTION'
+            className={DESCRIPTION_EDITOR}
+          />
+        ) : (
+          <ClickToEdit
+            enabled={editable}
+            label='Edit description'
+            trackName='EDIT_DRAFT_DESCRIPTION_BOX'
+            onEdit={startWithCaret('description')}
+          >
+            <DetailCard>
+              {agent.description ? (
+                <DetailProse>{agent.description}</DetailProse>
+              ) : (
+                <DetailEmpty>No description added</DetailEmpty>
+              )}
+            </DetailCard>
+          </ClickToEdit>
+        )}
       </DetailSection>
 
       <DetailSection label='Model' info='Which provider and model this agent runs on'>
@@ -168,12 +229,33 @@ export function AgentPreviewPersonaTab({ agent, editor }: AgentPreviewEditablePr
       </DetailSection>
 
       <DetailSection label='System Prompt' info='The instructions this agent runs with'>
-        {agent.systemPrompt ? (
-          <ProseBox>{agent.systemPrompt}</ProseBox>
+        {editingIdentity ? (
+          <textarea
+            value={editingIdentity.identityDraft.systemPrompt}
+            onChange={event => editingIdentity.setIdentityField('systemPrompt', event.target.value)}
+            aria-label='Agent system prompt'
+            placeholder='The instructions this agent runs with'
+            ref={attachPrompt}
+            style={{ height: PROSE_BOX_HEIGHT }}
+            data-track-category='AGENT_ARTIFACT'
+            data-track-name='EDIT_DRAFT_SYSTEM_PROMPT'
+            className={PROMPT_EDITOR}
+          />
         ) : (
-          <DetailCard>
-            <DetailEmpty>No system prompt set</DetailEmpty>
-          </DetailCard>
+          <ClickToEdit
+            enabled={editable}
+            label='Edit system prompt'
+            trackName='EDIT_DRAFT_SYSTEM_PROMPT_BOX'
+            onEdit={startWithCaret('systemPrompt')}
+          >
+            {agent.systemPrompt ? (
+              <ProseBox>{agent.systemPrompt}</ProseBox>
+            ) : (
+              <DetailCard>
+                <DetailEmpty>No system prompt set</DetailEmpty>
+              </DetailCard>
+            )}
+          </ClickToEdit>
         )}
       </DetailSection>
 

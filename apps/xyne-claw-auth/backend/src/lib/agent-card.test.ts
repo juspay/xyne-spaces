@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  agentDraftIdentityError,
   applyDraftEdits,
   draftToolTokens,
   narrowToKeptCapabilities,
@@ -10,6 +11,7 @@ import {
   isValidAgentSlug,
   parseAgentDraftEdits,
   resolveAgentCapabilities,
+  specWithAppliedEdits,
   toConfigTools,
   toolIdsFromConfig,
   unknownToolsNote,
@@ -379,6 +381,77 @@ describe("applyDraftEdits", () => {
 
   it("clears the model pin when the user picks the platform default", () => {
     expect(applyDraftEdits(spec, extras, { modelId: "" }).modelId).toBe("");
+  });
+
+  it("carries a retyped identity through", () => {
+    const applied = applyDraftEdits(spec, extras, {
+      name: "Reddit Digest",
+      slug: "reddit-digest",
+      description: "Summarises reddit.",
+      systemPrompt: "You summarise reddit.",
+    });
+    expect(specWithAppliedEdits(spec, applied)).toMatchObject({
+      name: "Reddit Digest",
+      slug: "reddit-digest",
+      description: "Summarises reddit.",
+      systemPrompt: "You summarise reddit.",
+    });
+  });
+
+  it("keeps the drafted identity for fields the user did not touch", () => {
+    const applied = applyDraftEdits(spec, extras, { name: "Reddit Digest" });
+    const draft = specWithAppliedEdits(spec, applied);
+    expect(draft.name).toBe("Reddit Digest");
+    expect(draft.slug).toBe("read-reddit");
+    expect(draft.systemPrompt).toBe("You read reddit.");
+  });
+});
+
+describe("parseAgentDraftEdits — identity", () => {
+  it("trims and lowercases a retyped identifier", () => {
+    expect(parseAgentDraftEdits({ slug: "  Reddit-Digest " })?.slug).toBe("reddit-digest");
+  });
+
+  it("reads each identity field and ignores non-strings", () => {
+    const edits = parseAgentDraftEdits({
+      name: "  Reddit Digest ",
+      description: " Summarises reddit. ",
+      systemPrompt: " You summarise reddit. ",
+      slug: 7,
+    });
+    expect(edits).toEqual({
+      name: "Reddit Digest",
+      description: "Summarises reddit.",
+      systemPrompt: "You summarise reddit.",
+    });
+  });
+
+  it("caps a pasted prompt rather than rejecting it", () => {
+    const edits = parseAgentDraftEdits({ systemPrompt: "x".repeat(200_000) });
+    expect(edits?.systemPrompt).toHaveLength(100_000);
+  });
+});
+
+describe("agentDraftIdentityError", () => {
+  it("passes an untouched draft", () => {
+    expect(agentDraftIdentityError(undefined)).toBeUndefined();
+    expect(agentDraftIdentityError({ modelId: "kimi-latest" })).toBeUndefined();
+  });
+
+  it("rejects an emptied name or prompt", () => {
+    expect(agentDraftIdentityError({ name: "" })).toBe("The agent needs a name.");
+    expect(agentDraftIdentityError({ systemPrompt: "" })).toBe("The agent needs a system prompt.");
+  });
+
+  it("allows an emptied description — that clears the field", () => {
+    expect(agentDraftIdentityError({ description: "" })).toBeUndefined();
+  });
+
+  it("rejects an identifier the create route would refuse", () => {
+    expect(agentDraftIdentityError({ slug: "Reddit Digest" })).toContain("isn't a valid identifier");
+    expect(agentDraftIdentityError({ slug: "read--reddit" })).toContain("isn't a valid identifier");
+    expect(agentDraftIdentityError({ slug: "-reddit" })).toContain("isn't a valid identifier");
+    expect(agentDraftIdentityError({ slug: "read-reddit" })).toBeUndefined();
   });
 });
 
