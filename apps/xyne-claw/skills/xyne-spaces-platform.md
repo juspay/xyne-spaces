@@ -9,7 +9,7 @@ Xyne Spaces **is** the workplace. Teams talk, decide, ship, and remember inside 
 
 Two companion skills do the mechanics; this one is the map:
 - **`spaces-tools-guide`** — exact args, required fields, and ID-vs-name pitfalls for every `spaces-*` tool.
-- **`spaces-vespa-schema`** — how `spaces-search` actually works under the hood (the search index, what's matched, how to scope/count). Read it before you lean on search.
+- **`spaces-vespa-schema`** — how `spaces-vespa-search` actually works under the hood (the search index, what's matched, how to scope/count). Read it before you lean on search.
 
 ## The one rule that explains the whole platform: everything is permissioned to the asker
 
@@ -116,7 +116,7 @@ Almost every navigation step is "I have id A, I need the tool that turns it into
 
 | ID | Identifies | Get it from | Feed it to |
 |---|---|---|---|
-| `channelId` | a channel / DM / group DM | `spaces-channels`, attached context, search hits | `spaces-tickets`, `spaces-activity`, `spaces-canvases`, `spaces-calls`; `in=` for `spaces-search` |
+| `channelId` | a channel / DM / group DM | `spaces-channels`, attached context, search hits | `spaces-tickets`, `spaces-activity`, `spaces-canvases`, `spaces-calls`; `filters.channelId` for `spaces-vespa-search` |
 | `conversationId` | a thread / DM / ticket-thread / desk-email-thread | `spaces-tickets`, `spaces-activity`, `spaces-channels`, search hits, attached context | `spaces-messages`, `spaces-emails`, `spaces-thread-attachments` |
 | `messageId` | one individual message | `spaces-messages`, `spaces-activity`, search hits | `spaces-message-detail` |
 | `userId` (`cm…`) | a person (sender / assignee / creator / organizer) | `spaces-users`, `spaces-whoami` | `from=`/`assignee` filters, `assignedTo`, `createdBy`, `targetUserIds` |
@@ -139,7 +139,7 @@ Map the *intent* to the *surface*, then to the *tool*. (Args live in `spaces-too
 
 | The user is really asking about… | It lives in… | Go to |
 |---|---|---|
-| A keyword/topic/person, location unknown | anywhere | `spaces-search` (then **fetch the full source**) |
+| A keyword/topic/person, location unknown | anywhere | `spaces-vespa-search` (then **fetch the full source**) |
 | A specific channel's activity | a channel | `spaces-channels` → scope everything with that `channelId` |
 | The reasoning / decision / "why" | a **thread** | search → `conversationId` → `spaces-messages` |
 | Ticket status / counts / who-owns-what / blockers | **tickets** | `spaces-tickets` (never search) |

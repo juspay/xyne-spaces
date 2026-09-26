@@ -14,7 +14,6 @@ import * as attachment from "./attachment/index.js";
 import * as researchAgent from "./research-agent/index.js";
 import * as sandbox from "./sandbox/index.js";
 import * as sandboxPw from "./sandbox-pw/index.js";
-import * as createPpt from "./create-ppt/index.js";
 import * as createReport from "./create-report/index.js";
 import * as deskReport from "./desk-report/index.js";
 import * as genius from "./genius/index.js";
@@ -22,7 +21,6 @@ import * as visualize from "./visualize/index.js";
 import * as webSearch from "./web-search/index.js";
 import * as deepResearch from "./deep-research/index.js";
 import * as generateImage from "./generate-image/index.js";
-import * as createPdf from "./create-pdf/index.js";
 import * as fillPdfForm from "./fill-pdf-form/index.js";
 import * as getAgentRuns from "./get-agent-runs/index.js";
 import * as postmanSbx from "./postman-sbx/index.js";
@@ -145,9 +143,12 @@ register(researchAgent.listProductTools);
 register(researchAgent.queryCodebase);
 register(researchAgent.reviewPullRequest);
 
-// Register create-ppt tools
-register(createPpt.createPptTool);
-register(createPpt.editPptTool);
+// create-ppt / edit-ppt are NOT registered (2026-09-26). Slide decks are built
+// in the sandbox now — `sandbox-run` with python-pptx produces a real .pptx and
+// `sandbox-deliver-files` sends it, which also covers xlsx/docx/csv and every
+// other format these single-purpose tools never handled. The definitions stay
+// in the tree because agent-chat.ts still parses the SLIDE_JSON markers on
+// historical messages; only the registration is gone.
 register(reactArtifact.createReactArtifactTool);
 register(reactArtifact.readArtifactAppFileTool);
 
@@ -156,10 +157,6 @@ register(reactArtifact.readArtifactAppFileTool);
 // chat. See xyne-claw-shared/src/tools/create-report/tools.ts.
 register(createReport.createHtmlReportTool);
 register(deskReport.createDeskReportTool);
-
-// Register create-pdf tools
-// register(createPdf.createPdfTool);
-// register(createPdf.editPdfTool);
 
 // Register genius tools
 register(genius.geniusAnalyticsTool);
@@ -176,11 +173,13 @@ register(deepResearch.deepResearchTool);
 // Register generate-image tool
 register(generateImage.generateImageTool);
 
-// Register create-pdf tools (create + edit round-trip via doc JSON; readPdfTool
-// removed — its tools.ts export was dropped in the cherry-pick, re-add when
-// the implementation lands.)
-register(createPdf.createPdfTool);
-register(createPdf.editPdfTool);
+// create-pdf / edit-pdf are NOT registered (2026-09-26), same reasoning as
+// create-ppt above: the sandbox builds PDFs (reportlab, pandoc, LibreOffice)
+// and delivers them, without a bespoke doc-JSON round trip.
+//
+// fill-pdf-form / inspect-pdf-form below are deliberately KEPT — they are not
+// document *creation*. They fill an AcroForm PDF the user attached or an admin
+// uploaded as a skill file, which is a different job from "make me a PDF".
 
 // Register fill-pdf-form tools — work with AcroForm fillable PDFs the
 // agent has access to (admin-uploaded as Skill files, OR user-attached in
