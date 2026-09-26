@@ -50,7 +50,7 @@ import {
   FormContextType,
   FormEntityType,
   DocType,
-  ProjectType, UserPresenceStatus } from '@xyne/shared';
+  ProjectType, UserPresenceStatus, default_seeded_channel_name } from '@xyne/shared';
 import { createId } from '@paralleldrive/cuid2';
 
 const prisma = new PrismaClient();
@@ -526,7 +526,7 @@ async function main() {
       console.log('  Creating Channels...');
       const generalChannel = await tx.channel.create({
         data: {
-          name: 'general',
+          name: default_seeded_channel_name,
           description: 'General discussions',
           type: ChannelType.DEFAULT,
           scopeType: ChannelScopeType.DEFAULT,

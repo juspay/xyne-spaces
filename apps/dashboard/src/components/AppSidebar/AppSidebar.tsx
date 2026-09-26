@@ -28,7 +28,6 @@ import {
   TicketToken,
   UserPlus,
 } from '@xyne/icons';
-import { WorkspaceType } from '@xyne/shared';
 
 import Avatar from '../ui/Avatar/Avatar';
 import { Popover } from '../ui/Popover/Popover';
@@ -49,8 +48,6 @@ import { reactNativeBridge } from '../../utils/reactNativeBridge';
 import { useVisibleNavigationItems } from '../../hooks/useVisibleNavigationItems';
 import { AppIcon } from '../AppIcon/AppIcon';
 import { toolbarItemsStore, useAppSnapshots, appIdOf } from '../../hooks/barItems';
-import { useCachedQuery } from '../../hooks/useCachedQuery';
-import { queries } from '../../zero/queries';
 import type { NavigationItem } from './navigationConfig';
 
 /** One slot in the rail: a built-in destination or an artifact app. */
@@ -189,10 +186,6 @@ const AppSidebar = (): ReactElement => {
   const { isMobile } = usePlatform();
   const visibleChannels = useAllVisibleChannels();
   const unreadCounts = useAllUnreadCount();
-  const [workspace] = useCachedQuery(queries.getWorkspaceById({ workspaceId: workspaceId || '' }), {
-    enabled: !!workspaceId,
-  });
-  const isCommunityWorkspace = workspace?.workspaceType === WorkspaceType.COMMUNITY;
 
   const [windowWidth, setWindowWidth] = useState(window.innerWidth);
 
@@ -628,27 +621,25 @@ const AppSidebar = (): ReactElement => {
         >
           <ZeroConnectionStatus className='mb-2' />
 
-          {isCommunityWorkspace && (
-            <Tooltip content='Invite people' side='right' delayDuration={0}>
-              <button
-                type='button'
-                aria-label='Invite people to workspace'
-                title='Invite people'
-                onClick={() => setIsInviteDialogOpen(true)}
-                data-testid='nav-invite-people'
-                data-track-category='App_Sidebar'
-                data-track-name='Sidebar_InvitePeople_Open'
-                className={cn(
-                  'size-8 mb-2 translate-y-[10px] flex items-center justify-center rounded-lg cursor-pointer border border-transparent transition-colors',
-                  isInviteDialogOpen
-                    ? 'bg-sidebar-accent border-sidebar-border text-sidebar-accent-foreground'
-                    : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
-                )}
-              >
-                <UserPlus size={18} variant='Solid' className='text-black' />
-              </button>
-            </Tooltip>
-          )}
+          <Tooltip content='Invite people' side='right' delayDuration={0}>
+            <button
+              type='button'
+              aria-label='Invite people to workspace'
+              title='Invite people'
+              onClick={() => setIsInviteDialogOpen(true)}
+              data-testid='nav-invite-people'
+              data-track-category='App_Sidebar'
+              data-track-name='Sidebar_InvitePeople_Open'
+              className={cn(
+                'size-8 mb-2 translate-y-[10px] flex items-center justify-center rounded-lg cursor-pointer border border-transparent transition-colors',
+                isInviteDialogOpen
+                  ? 'bg-sidebar-accent border-sidebar-border text-sidebar-accent-foreground'
+                  : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+              )}
+            >
+              <UserPlus size={18} variant='Solid' className='text-black' />
+            </button>
+          </Tooltip>
 
           <Popover
             open={isSupportOpen}

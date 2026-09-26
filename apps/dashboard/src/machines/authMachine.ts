@@ -14,6 +14,31 @@ import {
 
 export const PENDING_WORKSPACE_ID_KEY = 'pending_workspace_id';
 export const PENDING_WORKSPACE_NAME_KEY = 'pending_workspace_name';
+
+const ENTERPRISE_LOGIN_INTENT_KEY = 'enterprise_login_intent';
+
+/**
+ * Marks the current sign-in attempt as an enterprise ("Continue with work
+ * email") flow. The backend stores this in OAuth state and uses it to fail
+ * fast on public email domains and filter community workspaces.
+ */
+export const setEnterpriseLoginIntent = (): void => {
+  sessionStorage.setItem(ENTERPRISE_LOGIN_INTENT_KEY, 'true');
+};
+
+export const clearEnterpriseLoginIntent = (): void => {
+  sessionStorage.removeItem(ENTERPRISE_LOGIN_INTENT_KEY);
+};
+
+/**
+ * The enterprise intent only applies when the user is not joining a pending
+ * community workspace — a pending community join always wins so gmail users
+ * can still sign in to join communities.
+ */
+const shouldRequestEnterpriseLogin = (): boolean =>
+  sessionStorage.getItem(ENTERPRISE_LOGIN_INTENT_KEY) === 'true' &&
+  !localStorage.getItem(PENDING_WORKSPACE_ID_KEY);
+
 import { clearAllSessionKeys } from '../services/sessionKeyStore';
 import { indexedDBService } from '../services/indexedDBService';
 import { resetEncryption } from './encryptionMachine';
@@ -1206,6 +1231,7 @@ export const authMachine = createMachine(
         localStorage.removeItem('user_email');
         localStorage.removeItem(PENDING_WORKSPACE_ID_KEY);
         localStorage.removeItem(PENDING_WORKSPACE_NAME_KEY);
+        clearEnterpriseLoginIntent();
         clearOnboardingCookie();
         decryptionCache.clear();
         resetEncryption();
@@ -1260,6 +1286,9 @@ export const authMachine = createMachine(
           if (invitationId) {
             loginParams.set('invitationId', invitationId);
           }
+          if (shouldRequestEnterpriseLogin()) {
+            loginParams.set('enterpriseLogin', 'true');
+          }
           const loginQuery = loginParams.toString();
           const loginUrl = `${API_BASE_URL}/auth/login${loginQuery ? `?${loginQuery}` : ''}`;
 
@@ -1304,6 +1333,9 @@ export const authMachine = createMachine(
           }
           if (invitationId) {
             loginParams.set('invitationId', invitationId);
+          }
+          if (shouldRequestEnterpriseLogin()) {
+            loginParams.set('enterpriseLogin', 'true');
           }
           const loginQuery = loginParams.toString();
           const loginUrl = `${API_BASE_URL}/v2/auth/microsoft/login${loginQuery ? `?${loginQuery}` : ''}`;

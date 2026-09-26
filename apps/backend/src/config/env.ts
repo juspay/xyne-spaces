@@ -4,11 +4,13 @@ import Joi from 'joi';
 dotenv.config();
 
 import { parseInternalAppHostMap } from '@/utils/internalHostMap';
+import { default_seeded_channel_name } from '@xyne/shared';
 
 const envSchema = Joi.object({
   NODE_ENV: Joi.string().valid('development', 'production', 'test').default('development'),
   SANDBOX_TEST_MODE: Joi.boolean().default(false),
   ORG_MEMBER_LIMIT: Joi.number().integer().min(1).allow(null).default(null),
+  DEFAULT_SEEDED_CHANNEL_NAME: Joi.string().allow('').default(''),
   RESEARCH_AGENT_URL: Joi.string().default('http://localhost:8000'),
   // Python transcription agent (health server also exposes /embed-voice)
   PYTHON_AGENT_URL: Joi.string().default('http://localhost:8080'),
@@ -642,6 +644,10 @@ export const config = {
   isTestEnv: envVars.NODE_ENV === 'test',
   isSandboxTestMode: envVars.SANDBOX_TEST_MODE === true,
   orgMemberLimit: (envVars.ORG_MEMBER_LIMIT as number | null) ?? null,
+  // Resolved default workspace channel name: DEFAULT_SEEDED_CHANNEL_NAME when set,
+  // otherwise the shared default ("getting-started").
+  defaultSeededChannelName:
+    (envVars.DEFAULT_SEEDED_CHANNEL_NAME as string).trim() || default_seeded_channel_name,
   research_agent_url: envVars.RESEARCH_AGENT_URL,
   pythonAgentUrl: envVars.PYTHON_AGENT_URL as string,
   nx_graph_server_url: envVars.NX_GRAPH_SERVER_URL,

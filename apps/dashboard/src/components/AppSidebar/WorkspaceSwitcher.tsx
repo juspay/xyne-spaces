@@ -5,6 +5,7 @@ import axios from 'axios';
 import { Plus, Check, Loader2, LogIn, ChevronDown, ChevronRight } from 'lucide-react';
 import { WorkspaceType } from '@xyne/shared';
 import { API_BASE_URL } from '../../config';
+import { Tooltip } from '../ui/Tooltip/Tooltip';
 import {
   getLastActiveWorkspaceId,
   getLastActiveWorkspaceName,
@@ -290,6 +291,28 @@ export const WorkspaceSwitcher: React.FC = () => {
   const totalUnread = workspaceId ? (activityCounts.get(workspaceId) ?? 0) : 0;
   const createLabel = 'Create enterprise workspace';
 
+  // Always rendered so community members in community workspaces see the action
+  // exists; they just can't use it — the disabled state carries an upsell tooltip.
+  // disabled:pointer-events-none lifts hit-testing to the wrapper span below, so
+  // Radix's pointermove-based tooltip trigger actually fires over a disabled button.
+  const createWorkspaceButton = (
+    <button
+      onClick={() => {
+        setCreateWorkspaceType(WorkspaceType.ENTERPRISE);
+        setShowCreateForm(true);
+      }}
+      disabled={!canCreateWorkspace}
+      data-track-category='Workspace_Switcher'
+      data-track-name='Show_Create_Workspace_Form'
+      className='w-full flex items-center gap-3 px-3 py-2.5 hover:bg-muted transition-colors text-left disabled:pointer-events-none disabled:opacity-50'
+    >
+      <div className='size-7 rounded-md flex items-center justify-center bg-muted shrink-0'>
+        <Plus size={14} className='text-foreground' />
+      </div>
+      <span className='text-sm text-foreground'>{createLabel}</span>
+    </button>
+  );
+
   return (
     <div className='relative'>
       {/* Trigger: shows initials with deterministic color */}
@@ -378,153 +401,157 @@ export const WorkspaceSwitcher: React.FC = () => {
 
           <div className='border-t border-border' />
 
-          {/* Add a workspace — hidden for members without create permission */}
-          {canCreateWorkspace && (
-            <div className='py-1'>
-              <p className='px-3 pt-2 pb-1 text-xs font-semibold text-muted-foreground uppercase tracking-wider'>
-                Add a workspace
-              </p>
+          {/* Add a workspace — the create action is always visible; only members
+              with create permission can open the form (see createWorkspaceButton) */}
+          <div className='py-1'>
+            <p className='px-3 pt-2 pb-1 text-xs font-semibold text-muted-foreground uppercase tracking-wider'>
+              Add a workspace
+            </p>
 
-              {/* Sign in to another workspace — expands list of user's workspaces */}
-              <button
-                onClick={() => setShowSignInList(prev => !prev)}
-                data-track-category='Workspace_Switcher'
-                data-track-name='Sign_In_Another_Workspace'
-                className='w-full flex items-center gap-3 px-3 py-2.5 hover:bg-muted transition-colors text-left'
-              >
-                <div className='size-7 rounded-md flex items-center justify-center bg-muted shrink-0'>
-                  <LogIn size={14} className='text-foreground' />
-                </div>
-                <span className='text-sm text-foreground flex-1'>Sign in to another workspace</span>
-                {showSignInList ? (
-                  <ChevronDown size={14} className='text-muted-foreground shrink-0' />
-                ) : (
-                  <ChevronRight size={14} className='text-muted-foreground shrink-0' />
-                )}
-              </button>
-
-              {showSignInList && (
-                <div className='ml-4 border-l border-border pl-2 pb-1'>
-                  {loading ? (
-                    <div className='flex items-center justify-center py-3'>
-                      <Loader2 size={14} className='animate-spin text-muted-foreground' />
-                    </div>
-                  ) : workspaces.length === 0 ? (
-                    <p className='text-xs text-muted-foreground px-2 py-2'>
-                      No other workspaces found.
-                    </p>
-                  ) : (
-                    workspaces.map(ws => {
-                      const isActive = ws.id === workspaceId;
-                      const isSwitching = switching === ws.id;
-                      const count = activityCounts.get(ws.id) || 0;
-                      return (
-                        <button
-                          key={ws.id}
-                          onClick={() => void handleSwitch(ws.id)}
-                          data-ph-capture-attribute-track-id='switch_workspace_signin'
-                          disabled={isSwitching}
-                          data-track-category='Workspace_Switcher'
-                          data-track-name='Switch_Workspace_SignIn'
-                          className='h-auto w-full flex items-center justify-start gap-2 px-2 py-1.5 hover:bg-muted transition-colors text-left rounded-md disabled:opacity-60'
-                        >
-                          <div
-                            className='size-6 rounded flex items-center justify-center text-white text-xs font-bold shrink-0'
-                            style={{ backgroundColor: getInitialColor(ws.name) }}
-                          >
-                            {ws.name[0]?.toUpperCase() ?? '?'}
-                          </div>
-                          <div className='flex-1 min-w-0'>
-                            <p className='text-xs font-medium text-foreground truncate'>
-                              {ws.name}
-                            </p>
-                            <p className='text-xs text-muted-foreground truncate'>{ws.orgName}</p>
-                          </div>
-                          <div className='flex items-center gap-1 shrink-0'>
-                            {count > 0 && (
-                              <span className='min-w-[16px] h-4 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1'>
-                                {count > 99 ? '99+' : count}
-                              </span>
-                            )}
-                            {isSwitching ? (
-                              <Loader2 size={12} className='animate-spin text-muted-foreground' />
-                            ) : isActive ? (
-                              <Check size={12} className='text-green-500' />
-                            ) : null}
-                          </div>
-                        </button>
-                      );
-                    })
-                  )}
-                </div>
-              )}
-
-              {/* Create a new workspace */}
-              {showCreateForm ? (
-                <form
-                  onSubmit={e => void handleCreate(e)}
-                  className='px-3 pb-3 pt-1 flex flex-col gap-2'
+            {/* Sign in to another workspace — hidden for members without create permission */}
+            {canCreateWorkspace && (
+              <>
+                <button
+                  onClick={() => setShowSignInList(prev => !prev)}
+                  data-track-category='Workspace_Switcher'
+                  data-track-name='Sign_In_Another_Workspace'
+                  className='w-full flex items-center gap-3 px-3 py-2.5 hover:bg-muted transition-colors text-left'
                 >
-                  {error && <p className='text-xs text-red-500'>{error}</p>}
-                  <p className='text-xs font-medium text-foreground'>{createLabel}</p>
-                  <input
-                    type='text'
-                    placeholder='Workspace name'
-                    value={workspaceName}
-                    onChange={e => setWorkspaceName(e.target.value)}
-                    data-track-category='Workspace_Switcher'
-                    data-track-name='Workspace_Name_Input'
-                    className='w-full px-2 py-1.5 text-sm border border-border rounded-md bg-background focus:outline-none focus:ring-1 focus:ring-ring'
-                    required
-                    // eslint-disable-next-line jsx-a11y/no-autofocus
-                    autoFocus
-                  />
-                  <div className='flex gap-2'>
-                    <button
-                      type='submit'
-                      data-ph-capture-attribute-track-id='create_workspace'
-                      disabled={creating || !workspaceName.trim()}
-                      data-track-category='Workspace_Switcher'
-                      data-track-name='Create_Workspace'
-                      className='h-auto flex-1 py-1.5 text-xs font-medium bg-primary text-primary-foreground rounded-md disabled:opacity-50 hover:bg-primary hover:opacity-90'
-                    >
-                      {creating ? 'Creating…' : 'Create'}
-                    </button>
-                    <button
-                      type='button'
-                      onClick={() => {
-                        setShowCreateForm(false);
-                        setCreateWorkspaceType(WorkspaceType.ENTERPRISE);
-                        setError(null);
-                      }}
-                      data-track-category='Workspace_Switcher'
-                      data-track-name='Cancel_Create_Workspace'
-                      className='flex-1 py-1.5 text-xs font-medium border border-border rounded-md hover:bg-muted'
-                    >
-                      Cancel
-                    </button>
+                  <div className='size-7 rounded-md flex items-center justify-center bg-muted shrink-0'>
+                    <LogIn size={14} className='text-foreground' />
                   </div>
-                </form>
-              ) : (
-                <div className='flex flex-col'>
+                  <span className='text-sm text-foreground flex-1'>
+                    Sign in to another workspace
+                  </span>
+                  {showSignInList ? (
+                    <ChevronDown size={14} className='text-muted-foreground shrink-0' />
+                  ) : (
+                    <ChevronRight size={14} className='text-muted-foreground shrink-0' />
+                  )}
+                </button>
+
+                {showSignInList && (
+                  <div className='ml-4 border-l border-border pl-2 pb-1'>
+                    {loading ? (
+                      <div className='flex items-center justify-center py-3'>
+                        <Loader2 size={14} className='animate-spin text-muted-foreground' />
+                      </div>
+                    ) : workspaces.length === 0 ? (
+                      <p className='text-xs text-muted-foreground px-2 py-2'>
+                        No other workspaces found.
+                      </p>
+                    ) : (
+                      workspaces.map(ws => {
+                        const isActive = ws.id === workspaceId;
+                        const isSwitching = switching === ws.id;
+                        const count = activityCounts.get(ws.id) || 0;
+                        return (
+                          <button
+                            key={ws.id}
+                            onClick={() => void handleSwitch(ws.id)}
+                            data-ph-capture-attribute-track-id='switch_workspace_signin'
+                            disabled={isSwitching}
+                            data-track-category='Workspace_Switcher'
+                            data-track-name='Switch_Workspace_SignIn'
+                            className='h-auto w-full flex items-center justify-start gap-2 px-2 py-1.5 hover:bg-muted transition-colors text-left rounded-md disabled:opacity-60'
+                          >
+                            <div
+                              className='size-6 rounded flex items-center justify-center text-white text-xs font-bold shrink-0'
+                              style={{ backgroundColor: getInitialColor(ws.name) }}
+                            >
+                              {ws.name[0]?.toUpperCase() ?? '?'}
+                            </div>
+                            <div className='flex-1 min-w-0'>
+                              <p className='text-xs font-medium text-foreground truncate'>
+                                {ws.name}
+                              </p>
+                              <p className='text-xs text-muted-foreground truncate'>{ws.orgName}</p>
+                            </div>
+                            <div className='flex items-center gap-1 shrink-0'>
+                              {count > 0 && (
+                                <span className='min-w-[16px] h-4 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1'>
+                                  {count > 99 ? '99+' : count}
+                                </span>
+                              )}
+                              {isSwitching ? (
+                                <Loader2 size={12} className='animate-spin text-muted-foreground' />
+                              ) : isActive ? (
+                                <Check size={12} className='text-green-500' />
+                              ) : null}
+                            </div>
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* Create a new workspace */}
+            {showCreateForm ? (
+              <form
+                onSubmit={e => void handleCreate(e)}
+                className='px-3 pb-3 pt-1 flex flex-col gap-2'
+              >
+                {error && <p className='text-xs text-red-500'>{error}</p>}
+                <p className='text-xs font-medium text-foreground'>{createLabel}</p>
+                <input
+                  type='text'
+                  placeholder='Workspace name'
+                  value={workspaceName}
+                  onChange={e => setWorkspaceName(e.target.value)}
+                  data-track-category='Workspace_Switcher'
+                  data-track-name='Workspace_Name_Input'
+                  className='w-full px-2 py-1.5 text-sm border border-border rounded-md bg-background focus:outline-none focus:ring-1 focus:ring-ring'
+                  required
+                  // eslint-disable-next-line jsx-a11y/no-autofocus
+                  autoFocus
+                />
+                <div className='flex gap-2'>
                   <button
+                    type='submit'
+                    data-ph-capture-attribute-track-id='create_workspace'
+                    disabled={creating || !workspaceName.trim()}
+                    data-track-category='Workspace_Switcher'
+                    data-track-name='Create_Workspace'
+                    className='h-auto flex-1 py-1.5 text-xs font-medium bg-primary text-primary-foreground rounded-md disabled:opacity-50 hover:bg-primary hover:opacity-90'
+                  >
+                    {creating ? 'Creating…' : 'Create'}
+                  </button>
+                  <button
+                    type='button'
                     onClick={() => {
+                      setShowCreateForm(false);
                       setCreateWorkspaceType(WorkspaceType.ENTERPRISE);
-                      setShowCreateForm(true);
+                      setError(null);
                     }}
                     data-track-category='Workspace_Switcher'
-                    data-track-name='Show_Create_Workspace_Form'
-                    className='w-full flex items-center gap-3 px-3 py-2.5 hover:bg-muted transition-colors text-left'
+                    data-track-name='Cancel_Create_Workspace'
+                    className='flex-1 py-1.5 text-xs font-medium border border-border rounded-md hover:bg-muted'
                   >
-                    <div className='size-7 rounded-md flex items-center justify-center bg-muted shrink-0'>
-                      <Plus size={14} className='text-foreground' />
-                    </div>
-                    <span className='text-sm text-foreground'>Create enterprise workspace</span>
+                    Cancel
                   </button>
                 </div>
-              )}
-            </div>
-          )}
+              </form>
+            ) : (
+              <div className='flex flex-col'>
+                {canCreateWorkspace ? (
+                  createWorkspaceButton
+                ) : (
+                  /* A disabled <button> emits no pointer events, so the tooltip
+                     trigger is a wrapping <span>. */
+                  <Tooltip
+                    content='Create Enterprise workspace to enable this option'
+                    side='bottom'
+                    delayDuration={0}
+                  >
+                    <span className='block w-full cursor-not-allowed'>{createWorkspaceButton}</span>
+                  </Tooltip>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>

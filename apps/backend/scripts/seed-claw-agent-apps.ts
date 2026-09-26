@@ -4,6 +4,7 @@ import crypto from 'crypto';
 import { PrismaClient } from '@prisma/client';
 import { ChannelRole, UserType } from '@xyne/shared';
 import { db } from '../src/database/client';
+import { config } from '../src/config/env';
 import { repositories } from '../src/database/repositories/index';
 import { runWithContext } from '../src/database/tenant/context';
 import { installApp, configureWebhook } from '../src/apps/core/appUtils';
@@ -22,17 +23,18 @@ const CLAW_APP_PERMISSIONS = [
   'email:read',
 ];
 
+const defaultChannel = config.defaultSeededChannelName;
 const AGENT_CHANNELS: Record<string, string[]> = {
-  'ask-ai': ['general', 'ai-help', 'knowledge'],
-  'claw': ['general', 'ai-help', 'claw-lab', 'engineering'],
-  'digital-twin': ['general', 'ai-help'],
-  'doctor-agent': ['general', 'ai-help', 'incidents'],
-  'google-agent': ['general', 'ai-help'],
-  'microsoft-agent': ['general', 'ai-help'],
-  'grafana-agent': ['general', 'ai-help', 'incidents'],
-  'sandbox-agent': ['general', 'ai-help', 'claw-lab'],
+  'ask-ai': [defaultChannel, 'ai-help', 'knowledge'],
+  'claw': [defaultChannel, 'ai-help', 'claw-lab', 'engineering'],
+  'digital-twin': [defaultChannel, 'ai-help'],
+  'doctor-agent': [defaultChannel, 'ai-help', 'incidents'],
+  'google-agent': [defaultChannel, 'ai-help'],
+  'microsoft-agent': [defaultChannel, 'ai-help'],
+  'grafana-agent': [defaultChannel, 'ai-help', 'incidents'],
+  'sandbox-agent': [defaultChannel, 'ai-help', 'claw-lab'],
 };
-const DEFAULT_AGENT_CHANNELS = ['general', 'ai-help'];
+const DEFAULT_AGENT_CHANNELS = [defaultChannel, 'ai-help'];
 
 const CLAW_AUTH_URL = process.env.XYNE_CLAW_AUTH_URL || 'http://localhost:3003';
 
