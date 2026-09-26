@@ -1,8 +1,9 @@
-import { useEffect, useRef } from 'react';
+import { type RefObject, useEffect, useRef } from 'react';
 import { useShortcutById } from '../../../shortcuts';
 import type { ShortcutId } from '../../../shortcuts';
-import { hoveredMessage } from '../ChatBubble/hoveredMessageRef';
+import { hoveredMessage, messageInteractionModality } from '../ChatBubble/hoveredMessageRef';
 import {
+  getMessageHoverActions,
   getMessageHoverActionsByMessageId,
   type MessageHoverToolbarActions,
 } from './messageHoverActionsRegistry';
@@ -13,18 +14,38 @@ import {
  * registered (mobile/pinned/search rows).
  */
 const resolveHoveredEntry = (): MessageHoverToolbarActions | undefined => {
+  // Last input wins: a pointer the user has not moved since their last
+  // keystroke does not own the shortcuts, however many rows have scrolled
+  // underneath it.
+  if (messageInteractionModality.current !== 'pointer') return undefined;
   const hovered = hoveredMessage.current;
   if (!hovered) return undefined;
   return getMessageHoverActionsByMessageId(hovered.messageId);
 };
 
+const resolveKeyboardSelectedEntry = (
+  containerRef: RefObject<HTMLElement | null>,
+  keyboardSelectedMessageId: string | null | undefined,
+): MessageHoverToolbarActions | undefined => {
+  if (!keyboardSelectedMessageId) return undefined;
+  const row = containerRef.current?.querySelector<HTMLElement>(
+    `[data-message-id="${CSS.escape(keyboardSelectedMessageId)}"]`,
+  );
+  const hoverKey = row?.getAttribute('data-hover-key');
+  return hoverKey ? getMessageHoverActions(hoverKey) : undefined;
+};
+
+const resolveActiveEntry = (
+  containerRef: RefObject<HTMLElement | null>,
+  keyboardSelectedMessageId: string | null | undefined,
+): MessageHoverToolbarActions | undefined =>
+  resolveHoveredEntry() ?? resolveKeyboardSelectedEntry(containerRef, keyboardSelectedMessageId);
+
 /**
  * Several MessageHoverToolbar instances can be mounted at once (channel list +
- * thread panel). Each registers the same shortcut set, so only the first
- * mounted instance "owns" them at keypress time — the others' `when`
- * predicates return false, keeping shortcut resolution unambiguous. Ownership
- * is checked lazily in `when`, so it transfers on unmount without any
- * re-registration.
+ * thread panel). Pointer-driven shortcuts keep the existing first-mounted
+ * owner. When no pointer target exists, the list with a keyboard selection owns
+ * the shortcut instead, so a selected row in a secondary panel still works.
  */
 const owners: symbol[] = [];
 
@@ -32,13 +53,14 @@ const owners: symbol[] = [];
 const useHoverShortcut = (
   id: ShortcutId,
   isOwner: () => boolean,
+  resolveEntry: () => MessageHoverToolbarActions | undefined,
   canRun: (entry: MessageHoverToolbarActions) => boolean,
   run: (entry: MessageHoverToolbarActions) => void,
 ): void => {
   useShortcutById(
     id,
     () => {
-      const entry = resolveHoveredEntry();
+      const entry = resolveEntry();
       if (entry && canRun(entry)) run(entry);
     },
     {
@@ -46,7 +68,7 @@ const useHoverShortcut = (
       // time, so a disabled combo never preventDefaults the key event.
       when: () => {
         if (!isOwner()) return false;
-        const entry = resolveHoveredEntry();
+        const entry = resolveEntry();
         return entry !== undefined && canRun(entry);
       },
     },
@@ -54,16 +76,18 @@ const useHoverShortcut = (
 };
 
 /**
- * Centralized keyboard shortcuts for the message under the pointer.
+ * Centralized keyboard shortcuts for the hovered or keyboard-selected message.
  *
  * These used to be registered by EVERY mounted ChatBubble (~6 shortcuts × ~40
  * bubbles = ~240 effect setups per channel open). Now they are registered ONCE
- * per list by the shared MessageHoverToolbar: each handler reads the
- * module-level `hoveredMessage` ref at keypress time, resolves that message's
- * entry in the hover-actions registry, checks the relevant capability flag and
- * invokes the entry's handler.
+ * per list by the shared MessageHoverToolbar: each handler resolves the
+ * pointer target first, then the keyboard-selected row in its own container,
+ * checks the relevant capability flag, and invokes the entry's handler.
  */
-export const useMessageHoverShortcuts = (): void => {
+export const useMessageHoverShortcuts = (
+  containerRef: RefObject<HTMLElement | null>,
+  keyboardSelectedMessageId?: string | null,
+): void => {
   const instanceIdRef = useRef<symbol | null>(null);
   instanceIdRef.current ??= Symbol('messageHoverShortcuts');
 
@@ -77,11 +101,22 @@ export const useMessageHoverShortcuts = (): void => {
     };
   }, []);
 
-  const isOwner = (): boolean => owners[0] === instanceIdRef.current;
+  const isOwner = (): boolean => {
+    // Mirrors resolveHoveredEntry: a hover that no longer owns the shortcuts
+    // must not decide ownership either.
+    const pointerOwns =
+      messageInteractionModality.current === 'pointer' && hoveredMessage.current !== null;
+    if (pointerOwns) return owners[0] === instanceIdRef.current;
+    if (keyboardSelectedMessageId) return true;
+    return owners[0] === instanceIdRef.current;
+  };
+  const resolveEntry = (): MessageHoverToolbarActions | undefined =>
+    resolveActiveEntry(containerRef, keyboardSelectedMessageId);
 
   useHoverShortcut(
     'message.edit',
     isOwner,
+    resolveEntry,
     entry => entry.canEditMessage && entry.onEditMessage !== undefined,
     entry => entry.onEditMessage?.(),
   );
@@ -89,6 +124,7 @@ export const useMessageHoverShortcuts = (): void => {
   useHoverShortcut(
     'message.delete',
     isOwner,
+    resolveEntry,
     entry => entry.canEditMessage && entry.onDeleteMessage !== undefined,
     entry => entry.onDeleteMessage?.(),
   );
@@ -96,6 +132,7 @@ export const useMessageHoverShortcuts = (): void => {
   useHoverShortcut(
     'message.pin',
     isOwner,
+    resolveEntry,
     entry =>
       entry.conversation !== undefined &&
       !entry.isMessageDeleted &&
@@ -106,6 +143,7 @@ export const useMessageHoverShortcuts = (): void => {
   useHoverShortcut(
     'message.bookmark',
     isOwner,
+    resolveEntry,
     entry => !entry.isMessageDeleted && entry.onBookmark !== undefined,
     entry => entry.onBookmark?.(),
   );
@@ -113,6 +151,7 @@ export const useMessageHoverShortcuts = (): void => {
   useHoverShortcut(
     'message.copyLink',
     isOwner,
+    resolveEntry,
     entry => entry.onCopyLink !== undefined,
     entry => entry.onCopyLink?.(),
   );
@@ -120,6 +159,7 @@ export const useMessageHoverShortcuts = (): void => {
   useHoverShortcut(
     'message.copyContent',
     isOwner,
+    resolveEntry,
     entry => !entry.isMessageDeleted && entry.onCopyContent !== undefined,
     entry => entry.onCopyContent?.(),
   );

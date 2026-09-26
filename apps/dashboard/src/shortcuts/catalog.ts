@@ -428,6 +428,24 @@ export const shortcuts = {
     preventDefault: true,
   },
 
+  // ===== MESSAGE NAVIGATION =====
+  'message.selectPrevious': {
+    keys: 'up',
+    scope: 'channel',
+    description: 'Select previous message',
+    category: 'Messages',
+    allowInInputs: false,
+    priority: 30,
+  },
+  'message.selectNext': {
+    keys: 'down',
+    scope: 'channel',
+    description: 'Select next message',
+    category: 'Messages',
+    allowInInputs: false,
+    priority: 30,
+  },
+
   // ===== MESSAGE ACTIONS =====
   'message.edit': {
     keys: 'e',

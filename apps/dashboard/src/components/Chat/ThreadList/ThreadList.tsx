@@ -1,11 +1,21 @@
-import { ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ReactElement,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+} from 'react';
 import { queries } from '../../../zero/queries';
 import { QueryResultType } from '@rocicorp/zero';
 import { useAuthContext } from '../../../providers/AuthProvider';
 import { useLocation } from 'react-router-dom';
 import { ChatBubble } from '../ChatBubble/ChatBubble';
 import { PendingSendStatus } from '../PendingSendStatus/PendingSendStatus';
+import { messageInteractionModality } from '../ChatBubble/hoveredMessageRef';
 import { MessageHoverToolbar } from '../HoverActionsToolbar/MessageHoverToolbar';
+import { usePlatform } from '../../../hooks/usePlatform';
 import { useThreadListInitialScroll } from './useThreadListInitialScroll';
 import type { ThreadListItemWithSeparator } from '../../../utils/chatUtils';
 import { DatePill } from '../DatePill';
@@ -50,6 +60,15 @@ type ThreadListProps = {
     ChatListV4. Applied as padding-bottom on the scroll container, so scroll-to-bottom
     (`scrollHeight - clientHeight`) naturally lands with the last message clear of it. */
 const ACTIVITY_BAR_PADDING = 28;
+
+/** Breathing room at both edges before a keyboard-selected row counts as visible. */
+const SELECTION_VIEWPORT_PADDING = 8;
+/**
+ * Where a selection that had to scroll comes to rest, measured from the top of
+ * the panel. No sticky date pill here (thread separators scroll inline), so
+ * this is just the container's own `pt-4` worth of breathing room.
+ */
+const SELECTION_SCROLL_TOP_OFFSET = 16;
 
 const ThreadList = ({
   channelId,
@@ -301,6 +320,167 @@ const ThreadList = ({
     );
   }, [visibleMessages, conversationParticipant?.lastReadAt, user?.id]);
 
+  // ── Keyboard navigation ────────────────────────────────────────────────────
+  // Same contract as ChatListV4: Up/Down walk a selection through the rendered
+  // rows, the shared toolbar arms whichever row is selected, and a click moves
+  // the (invisible) starting point without painting anything. The thread list
+  // is not virtualized, so every row is mounted and scrolling is plain DOM.
+  const { isMobile } = usePlatform();
+  const [keyboardSelectedMessageId, setKeyboardSelectedMessageId] = useState<string | null>(null);
+  const messageListFocusRef = useRef<HTMLButtonElement>(null);
+  /** Where the next arrow press starts from; a ref, so it never paints a row. */
+  const navigationAnchorRef = useRef<string | null>(null);
+
+  /** The rows this list actually renders, in order — the two render paths differ. */
+  const navigableMessages =
+    isTicketThread && messagesWithSeparators
+      ? messagesWithSeparators.flatMap(item => (item.type === 'message' ? [item.data] : []))
+      : visibleMessages;
+
+  const isMessageListNavigationEvent = useCallback((event: KeyboardEvent): boolean => {
+    const focusTarget = messageListFocusRef.current;
+    if (!focusTarget || event.target !== focusTarget) return false;
+    return document.activeElement === focusTarget;
+  }, []);
+
+  /** Scrolls only when the row is not already readable, then parks it at the top. */
+  const scrollSelectionIntoView = useCallback((messageId: string): void => {
+    const container = scrollContainerRef.current;
+    const row = container?.querySelector<HTMLElement>(
+      `[data-message-id="${CSS.escape(messageId)}"]`,
+    );
+    if (!container || !row) return;
+
+    const containerRect = container.getBoundingClientRect();
+    const rowRect = row.getBoundingClientRect();
+    const top = containerRect.top + SELECTION_VIEWPORT_PADDING;
+    const bottom = containerRect.bottom - SELECTION_VIEWPORT_PADDING;
+    // A row taller than the viewport can never be fully contained, so any
+    // overlap counts for those.
+    const isReadable =
+      rowRect.height >= containerRect.height
+        ? rowRect.top < bottom && rowRect.bottom > top
+        : rowRect.top >= top && rowRect.bottom <= bottom;
+    if (isReadable) return;
+
+    // scrollTop rather than scrollIntoView: this panel is mounted inside
+    // dialogs and split views, and scrollIntoView walks every ancestor
+    // scroller on its way up. Assigning past either end is clamped by the
+    // browser, so the last replies land as far down as the content allows.
+    container.scrollTop += rowRect.top - containerRect.top - SELECTION_SCROLL_TOP_OFFSET;
+  }, []);
+
+  const selectMessageAtIndex = useCallback(
+    (index: number): void => {
+      const message = navigableMessages[index];
+      // Out of range at either end: the selection stays where it is.
+      if (!message) return;
+      navigationAnchorRef.current = message.messageId;
+      setKeyboardSelectedMessageId(message.messageId);
+      scrollSelectionIntoView(message.messageId);
+    },
+    [navigableMessages, scrollSelectionIntoView],
+  );
+
+  const findSelectedMessageIndex = useCallback((): number => {
+    const anchorMessageId = keyboardSelectedMessageId ?? navigationAnchorRef.current;
+    if (!anchorMessageId) return -1;
+    return navigableMessages.findIndex(message => message.messageId === anchorMessageId);
+  }, [keyboardSelectedMessageId, navigableMessages]);
+
+  const selectPreviousMessage = useCallback((): void => {
+    // Claims the shortcuts back from a pointer the user has stopped moving.
+    messageInteractionModality.current = 'keyboard';
+    const selectedIndex = findSelectedMessageIndex();
+    selectMessageAtIndex(selectedIndex === -1 ? navigableMessages.length - 1 : selectedIndex - 1);
+  }, [findSelectedMessageIndex, navigableMessages.length, selectMessageAtIndex]);
+
+  const selectNextMessage = useCallback((): void => {
+    messageInteractionModality.current = 'keyboard';
+    const selectedIndex = findSelectedMessageIndex();
+    // -1 means the anchored message is gone (deleted, or collapsed away), so
+    // both directions fall back to the newest reply rather than going dead.
+    selectMessageAtIndex(selectedIndex === -1 ? navigableMessages.length - 1 : selectedIndex + 1);
+  }, [findSelectedMessageIndex, navigableMessages.length, selectMessageAtIndex]);
+
+  // Registered under the 'thread' scope, not the catalog's 'channel': the panel
+  // also mounts where no channel scope exists (ticket views, citation panels,
+  // the preview dialog), and a 'channel'-scoped entry is filtered out there
+  // entirely. Both lists can register the same shortcut safely — `when` is
+  // evaluated before any tie-break, and only the focused list's predicate passes.
+  useShortcutById('message.selectPrevious', selectPreviousMessage, {
+    scope: 'thread',
+    enabled: navigableMessages.length > 0,
+    when: isMessageListNavigationEvent,
+  });
+  useShortcutById('message.selectNext', selectNextMessage, {
+    scope: 'thread',
+    // Down needs somewhere to start: a highlighted row, or a click anchor.
+    enabled: navigableMessages.length > 0,
+    when: event =>
+      (keyboardSelectedMessageId !== null || navigationAnchorRef.current !== null) &&
+      isMessageListNavigationEvent(event),
+  });
+
+  useEffect(() => {
+    navigationAnchorRef.current = null;
+    setKeyboardSelectedMessageId(null);
+  }, [conversationId]);
+
+  const handleMessageListClick = useCallback(
+    (event: ReactMouseEvent<HTMLDivElement>): void => {
+      // Mobile taps belong to the actions drawer, and there is no keyboard to
+      // hand the selection to.
+      if (isMobile) return;
+      if (!(event.target instanceof Element)) return;
+      if (
+        event.target.closest(
+          'a, button, input, textarea, select, [contenteditable="true"], [role="button"], [role="menuitem"]',
+        )
+      ) {
+        return;
+      }
+      // A click that ends a text drag must leave that text selected: moving
+      // focus to the nav button would collapse it.
+      const textSelection = window.getSelection();
+      if (textSelection !== null && !textSelection.isCollapsed) return;
+
+      const row = event.target.closest<HTMLElement>('[data-message-id]');
+      const messageId = row?.getAttribute('data-message-id');
+      if (
+        messageId !== null &&
+        messageId !== undefined &&
+        navigableMessages.some(message => message.messageId === messageId)
+      ) {
+        navigationAnchorRef.current = messageId;
+        // A highlight left over from earlier arrow navigation would now be
+        // somewhere else entirely, so drop it.
+        setKeyboardSelectedMessageId(null);
+      }
+
+      messageListFocusRef.current?.focus({ preventScroll: true });
+    },
+    [isMobile, navigableMessages],
+  );
+
+  const handleMessageListBlur = useCallback((): void => {
+    setKeyboardSelectedMessageId(null);
+  }, []);
+
+  /** Shared by both render paths — the target that owns the arrow keys. */
+  const messageNavigationFocusTarget = (
+    <button
+      ref={messageListFocusRef}
+      type='button'
+      className='sr-only'
+      aria-label='Navigate thread messages with the up and down arrow keys'
+      data-track-category='THREAD_PANEL'
+      data-track-name='FOCUS_MESSAGE_NAVIGATION'
+      onClick={selectPreviousMessage}
+      onBlur={handleMessageListBlur}
+    />
+  );
+
   /**
    * 2️⃣ Auto-scroll on new messages
    *    - Always scroll if the latest message is from current user
@@ -433,12 +613,20 @@ const ThreadList = ({
   // Render with date separators for ticket threads
   if (isTicketThread && messagesWithSeparators) {
     return (
-      <div ref={hoverToolbarContainerRef} className='relative min-h-0 max-h-full bg-background'>
+      <div
+        ref={hoverToolbarContainerRef}
+        className='relative min-h-0 max-h-full bg-background isolate'
+      >
         {/* ONE shared hover-actions toolbar for the thread (zero-render hover). */}
-        <MessageHoverToolbar containerRef={hoverToolbarContainerRef} />
+        <MessageHoverToolbar
+          containerRef={hoverToolbarContainerRef}
+          keyboardSelectedMessageId={keyboardSelectedMessageId}
+        />
+        {messageNavigationFocusTarget}
         <div
           data-component='ThreadList'
           ref={scrollContainerRef}
+          onClickCapture={handleMessageListClick}
           className='h-full overflow-auto no-scrollbar pt-4'
           style={{ paddingBottom: ACTIVITY_BAR_PADDING }}
         >
@@ -562,12 +750,20 @@ const ThreadList = ({
 
   // Default render without date separators
   return (
-    <div ref={hoverToolbarContainerRef} className='relative min-h-0 max-h-full bg-background'>
+    <div
+      ref={hoverToolbarContainerRef}
+      className='relative min-h-0 max-h-full bg-background isolate'
+    >
       {/* ONE shared hover-actions toolbar for the thread (zero-render hover). */}
-      <MessageHoverToolbar containerRef={hoverToolbarContainerRef} />
+      <MessageHoverToolbar
+        containerRef={hoverToolbarContainerRef}
+        keyboardSelectedMessageId={keyboardSelectedMessageId}
+      />
+      {messageNavigationFocusTarget}
       <div
         data-component='ThreadList'
         ref={scrollContainerRef}
+        onClickCapture={handleMessageListClick}
         className='h-full overflow-auto no-scrollbar pt-4'
         style={{ paddingBottom: ACTIVITY_BAR_PADDING }}
       >

@@ -14,6 +14,7 @@ import { useChannelParticipation, useVisibleChannel } from '../../../hooks/useCh
 import { useZero } from '../../../hooks/useZero';
 import { queries } from '../../../zero/queries';
 import { useQuery } from '../../../hooks/useQuery';
+import { messageInteractionModality } from '../ChatBubble/hoveredMessageRef';
 import { ChatListItem } from '../ChatListItem/ChatListItem';
 import { DatePill } from '../DatePill';
 import { useVirtualizer } from '@tanstack/react-virtual';
@@ -192,6 +193,14 @@ function reconcileConversationWindow(
 
 type CombinedMessage = ReturnType<typeof useCombinedMesseges>['combinedMessages'][number];
 const VISIBLE_CONVERSATION_EPSILON_PX = 1;
+/** Breathing room at both edges before a keyboard-selected row counts as visible. */
+const SELECTION_VIEWPORT_PADDING = 8;
+/**
+ * Where a selection that had to scroll comes to rest, measured from the top of
+ * the list: clear of the sticky date pill (its wrapper's py-2, the pill's own
+ * py-2, and the badge) rather than tucked behind it.
+ */
+const SELECTION_SCROLL_TOP_OFFSET = 56;
 
 function computeNewConvIdx(
   messages: CombinedMessage[],
@@ -294,6 +303,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
   const latestConversationsListRef = useRef<Conversation[]>([]);
   const [stickyDate, setStickyDate] = useState<string | null>(null);
   const [showScrollButton, setShowScrollButton] = useState(false);
+  const [keyboardSelectedMessageId, setKeyboardSelectedMessageId] = useState<string | null>(null);
   const [isFirstItemScrolledOff, setIsFirstItemScrolledOff] = useState(false);
 
   const scrollStopTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -323,6 +333,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
 
   // ── Scroll container ──────────────────────────────────────────────────────────
   const parentRef = useRef<HTMLDivElement>(null);
+  const messageListFocusRef = useRef<HTMLButtonElement>(null);
   const dateObserverRef = useRef<IntersectionObserver | null>(null);
   const visibleDatesRef = useRef<
     Map<Element, { timestamp: number; conversationId: string; rect: DOMRect }>
@@ -1218,6 +1229,170 @@ const ChatListV4: React.FC<ChatListProps> = ({
     when: isEventFromChannelInput,
   });
 
+  const isMessageListNavigationEvent = useCallback((event: KeyboardEvent): boolean => {
+    const focusTarget = messageListFocusRef.current;
+    if (!focusTarget || event.target !== focusTarget) return false;
+    return document.activeElement === focusTarget;
+  }, []);
+
+  /**
+   * Where the next arrow press starts from. A ref, not state, because the
+   * anchor must never paint anything: only keyboard navigation highlights a
+   * row, while clicks and hovers just move the starting point. It outlives
+   * blur too, so refocusing the list resumes from where the user left off
+   * instead of jumping back to the newest message.
+   */
+  const navigationAnchorRef = useRef<string | null>(null);
+
+  const findSelectedMessageIndex = useCallback((): number => {
+    const anchorMessageId = keyboardSelectedMessageId ?? navigationAnchorRef.current;
+    if (!anchorMessageId) return -1;
+    return combinedMessages.findIndex(item => {
+      const message = getInitialMessageFromConversation(item.data);
+      return message?.messageId === anchorMessageId;
+    });
+  }, [combinedMessages, keyboardSelectedMessageId]);
+
+  /** Keyboard navigation: moves the anchor AND highlights the row it lands on. */
+  const selectMessage = useCallback((messageId: string): void => {
+    navigationAnchorRef.current = messageId;
+    setKeyboardSelectedMessageId(messageId);
+  }, []);
+
+  /**
+   * Scrolls only when the row the selection lands on is not already readable,
+   * then parks it at the top, just below the sticky date pill. Scrolling on
+   * every arrow press makes the whole list lurch under a selection that was
+   * perfectly visible where it was.
+   *
+   * A row taller than the viewport can never be "fully visible", so any
+   * overlap counts for those — otherwise every press on a long message would
+   * scroll.
+   */
+  const scrollSelectionIntoView = useCallback(
+    (index: number): void => {
+      const container = parentRef.current;
+      const row = container?.querySelector<HTMLElement>(`[data-index="${index}"]`);
+      if (container && row) {
+        const containerRect = container.getBoundingClientRect();
+        const rowRect = row.getBoundingClientRect();
+        // Leaves room for the sticky date pill, so a row tucked under it is
+        // treated as out of view rather than readable.
+        const top = containerRect.top + SELECTION_VIEWPORT_PADDING;
+        const bottom = containerRect.bottom - SELECTION_VIEWPORT_PADDING;
+        const isReadable =
+          rowRect.height >= containerRect.height
+            ? rowRect.top < bottom && rowRect.bottom > top
+            : rowRect.top >= top && rowRect.bottom <= bottom;
+        if (isReadable) return;
+      }
+      const offsetInfo = virtualizer.getOffsetForIndex(index, 'start');
+      if (!offsetInfo) return;
+      virtualizer.scrollToOffset(offsetInfo[0] - SELECTION_SCROLL_TOP_OFFSET);
+    },
+    [virtualizer],
+  );
+
+  const selectMessageAtIndex = useCallback(
+    (index: number, direction: -1 | 1): void => {
+      for (let i = index; i >= 0 && i < combinedMessages.length; i += direction) {
+        const item = combinedMessages[i];
+        if (!item) continue;
+        const message = getInitialMessageFromConversation(item.data);
+        if (!message) continue;
+        selectMessage(message.messageId);
+        scrollSelectionIntoView(i);
+        return;
+      }
+    },
+    [combinedMessages, scrollSelectionIntoView, selectMessage],
+  );
+
+  const selectPreviousMessage = useCallback((): void => {
+    // Claims the shortcuts back from a pointer the user has stopped moving.
+    messageInteractionModality.current = 'keyboard';
+    const selectedIndex = findSelectedMessageIndex();
+    selectMessageAtIndex(
+      selectedIndex === -1 ? combinedMessages.length - 1 : selectedIndex - 1,
+      -1,
+    );
+  }, [combinedMessages.length, findSelectedMessageIndex, selectMessageAtIndex]);
+
+  const selectNextMessage = useCallback((): void => {
+    messageInteractionModality.current = 'keyboard';
+    const selectedIndex = findSelectedMessageIndex();
+    // -1 means the selected message is gone (deleted, or no longer loaded).
+    // Both directions then fall back to the newest message, so neither key
+    // goes dead after the anchor disappears.
+    selectMessageAtIndex(selectedIndex === -1 ? combinedMessages.length - 1 : selectedIndex + 1, 1);
+  }, [combinedMessages.length, findSelectedMessageIndex, selectMessageAtIndex]);
+
+  useShortcutById('message.selectPrevious', selectPreviousMessage, {
+    enabled: combinedMessages.length > 0,
+    when: isMessageListNavigationEvent,
+  });
+  useShortcutById('message.selectNext', selectNextMessage, {
+    enabled: combinedMessages.length > 0,
+    // Down needs somewhere to start: a highlighted row, or a click anchor.
+    when: event =>
+      (keyboardSelectedMessageId !== null || navigationAnchorRef.current !== null) &&
+      isMessageListNavigationEvent(event),
+  });
+
+  useEffect(() => {
+    navigationAnchorRef.current = null;
+    setKeyboardSelectedMessageId(null);
+  }, [channelId]);
+
+  const handleMessageListClick = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      // Mobile taps belong to the actions drawer, and there is no keyboard to
+      // hand the selection to.
+      if (isMobile) return;
+      if (!(event.target instanceof Element)) return;
+      if (
+        event.target.closest(
+          'a, button, input, textarea, select, [contenteditable="true"], [role="button"], [role="menuitem"]',
+        )
+      ) {
+        return;
+      }
+      // A click that ends a text drag must leave that text selected: moving
+      // focus to the nav button would collapse it.
+      const textSelection = window.getSelection();
+      if (textSelection !== null && !textSelection.isCollapsed) return;
+
+      // Move the anchor to the clicked row, so the next Up/Down continues from
+      // the message the user just pointed at. Nothing is highlighted here —
+      // the row keeps its ordinary hover treatment and loses it when the
+      // pointer leaves. Clicks on empty space — a date pill, the gap between
+      // rows, the padding under the last message — carry no row and leave the
+      // anchor where it was.
+      const row = event.target.closest<HTMLElement>('[data-conversation-id]');
+      const conversationId = row?.getAttribute('data-conversation-id');
+      if (conversationId !== null && conversationId !== undefined) {
+        // Resolved through the conversation rather than the clicked bubble's
+        // own id: a row can render more than one message, but only the
+        // conversation's initial message is a navigation stop.
+        const item = combinedMessages.find(entry => entry.data.conversationId === conversationId);
+        const message = item ? getInitialMessageFromConversation(item.data) : null;
+        if (message) {
+          navigationAnchorRef.current = message.messageId;
+          // A highlight left over from earlier arrow navigation would now be
+          // somewhere else entirely, so drop it.
+          setKeyboardSelectedMessageId(null);
+        }
+      }
+
+      messageListFocusRef.current?.focus({ preventScroll: true });
+    },
+    [combinedMessages, isMobile],
+  );
+
+  const handleMessageListBlur = useCallback((): void => {
+    setKeyboardSelectedMessageId(null);
+  }, []);
+
   // ── onScroll (replaces Virtuoso rangeChanged + atTopStateChange + atBottomStateChange) ──
   const handleScroll = useCallback(() => {
     const el = parentRef.current;
@@ -1433,7 +1608,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
       ref={hoverToolbarContainerRef}
       data-component='ChatListV11'
       data-testid='chat-message-list'
-      className='flex-1 relative no-scrollbar min-h-0'
+      className='flex-1 relative no-scrollbar min-h-0 isolate'
     >
       {/* Sticky date pill overlay */}
       {stickyDate && isFirstItemScrolledOff && (
@@ -1444,10 +1619,22 @@ const ChatListV4: React.FC<ChatListProps> = ({
         </div>
       )}
 
+      <button
+        ref={messageListFocusRef}
+        type='button'
+        className='sr-only'
+        aria-label='Navigate messages with the up and down arrow keys'
+        data-track-category='CHAT_LIST'
+        data-track-name='FOCUS_MESSAGE_NAVIGATION'
+        onClick={selectPreviousMessage}
+        onBlur={handleMessageListBlur}
+      />
+
       {/* Scroll container — replaces <Virtuoso> */}
       <div
         ref={parentRef}
         onScroll={handleScroll}
+        onClickCapture={handleMessageListClick}
         style={{ height: '100%', overflow: 'auto', zIndex: 0, overflowAnchor: 'none' }}
         className='no-scrollbar'
         data-virtuoso-scroller='true'
@@ -1546,7 +1733,10 @@ const ChatListV4: React.FC<ChatListProps> = ({
         </div>
       </div>
 
-      <MessageHoverToolbar containerRef={hoverToolbarContainerRef} />
+      <MessageHoverToolbar
+        containerRef={hoverToolbarContainerRef}
+        keyboardSelectedMessageId={keyboardSelectedMessageId}
+      />
 
       {/* New messages pill */}
       {newConversationBoundary !== null && newConversationBoundary.seenConvId === null && (

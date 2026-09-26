@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { HoverActionsToolbar } from './HoverActionsToolbar';
-import { hoveredMessage } from '../ChatBubble/hoveredMessageRef';
+import { hoveredMessage, messageInteractionModality } from '../ChatBubble/hoveredMessageRef';
 import {
   getMessageHoverActions,
   subscribeMessageHoverActions,
@@ -10,6 +10,8 @@ import { useMessageHoverShortcuts } from './useMessageHoverShortcuts';
 interface MessageHoverToolbarProps {
   /** The positioned (position: relative) list container the overlay lives in. */
   containerRef: React.RefObject<HTMLElement | null>;
+  /** Message selected through Up/Down navigation in this list. */
+  keyboardSelectedMessageId?: string | null;
 }
 
 interface ActiveRow {
@@ -34,10 +36,13 @@ interface ActiveRow {
  * open the overlay is "pinned": it ignores pointerover/pointerleave/scroll
  * until the popover closes.
  */
-export const MessageHoverToolbar: React.FC<MessageHoverToolbarProps> = ({ containerRef }) => {
+export const MessageHoverToolbar: React.FC<MessageHoverToolbarProps> = ({
+  containerRef,
+  keyboardSelectedMessageId,
+}) => {
   // Keyboard shortcuts for whichever message is hovered — registered once per
   // list here instead of once per mounted ChatBubble (~6 × ~40 effects saved).
-  useMessageHoverShortcuts();
+  useMessageHoverShortcuts(containerRef, keyboardSelectedMessageId);
 
   const [activeRow, setActiveRow] = useState<ActiveRow | null>(null);
   const [isEmojiPickerOpen, setIsEmojiPickerOpen] = useState(false);
@@ -53,6 +58,10 @@ export const MessageHoverToolbar: React.FC<MessageHoverToolbarProps> = ({ contai
   // or clear the row highlight (the toolbar floats over/near rows).
   const overlayRef = useRef<HTMLDivElement | null>(null);
 
+  // Last seen pointer coordinates, so a `pointermove` that reports the same
+  // position (fired by scrolling, not by the user) is not mistaken for intent.
+  const pointerPositionRef = useRef<{ x: number; y: number } | null>(null);
+
   // Imperative row-background highlight (single source of truth, no renders).
   // The previously highlighted [data-message-id] root keeps `data-hovered`
   // until a NEW row is entered or the toolbar hides — so in the gap between
@@ -67,6 +76,24 @@ export const MessageHoverToolbar: React.FC<MessageHoverToolbarProps> = ({ contai
     highlightedRowRef.current = row;
   }, []);
 
+  const keyboardHighlightedRowRef = useRef<HTMLElement | null>(null);
+  const setKeyboardHighlightedRow = useCallback((row: HTMLElement | null): void => {
+    const prev = keyboardHighlightedRowRef.current;
+    if (prev === row) return;
+    prev?.removeAttribute('data-keyboard-selected');
+    row?.setAttribute('data-keyboard-selected', 'true');
+    keyboardHighlightedRowRef.current = row;
+  }, []);
+
+  const findKeyboardSelectedRow = useCallback((): HTMLElement | null => {
+    if (!keyboardSelectedMessageId) return null;
+    return (
+      containerRef.current?.querySelector<HTMLElement>(
+        `[data-message-id="${CSS.escape(keyboardSelectedMessageId)}"]`,
+      ) ?? null
+    );
+  }, [containerRef, keyboardSelectedMessageId]);
+
   // Pending delayed clear (scheduled when the pointer enters something that is
   // NOT a message row — date pills, gaps, empty list areas). ~200ms so that
   // brushing the few-px gap between rows or travelling row→toolbar never
@@ -79,18 +106,50 @@ export const MessageHoverToolbar: React.FC<MessageHoverToolbarProps> = ({ contai
     }
   }, []);
 
+  /**
+   * Parks the toolbar on the keyboard-selected row. The toolbar is the clearest
+   * statement of which message the next shortcut hits, so while the keyboard
+   * owns the shortcuts it must sit on the selected row rather than disappear.
+   * Returns false when there is nothing to park on (no selection, or the row is
+   * virtualized away), leaving the caller to hide as usual.
+   */
+  const showToolbarOnKeyboardSelection = useCallback((): boolean => {
+    const container = containerRef.current;
+    const row = findKeyboardSelectedRow();
+    if (!container || !row) return false;
+    const hoverKey = row.getAttribute('data-hover-key');
+    const messageId = row.getAttribute('data-message-id');
+    if (!hoverKey || !messageId) return false;
+
+    const top = Math.round(row.getBoundingClientRect().top - container.getBoundingClientRect().top);
+    const prev = activeRowRef.current;
+    if (prev && prev.hoverKey === hoverKey && prev.top === top) return true;
+    setActiveRow({ hoverKey, messageId, top });
+    return true;
+  }, [containerRef, findKeyboardSelectedRow]);
+
   const hide = useCallback((): void => {
     cancelPendingClear();
     hoveredMessage.current = null;
     setHighlightedRow(null);
+    setKeyboardHighlightedRow(findKeyboardSelectedRow());
+    // With the hover gone the shortcuts resolve to the keyboard selection, so
+    // the toolbar follows them there rather than leaving the armed row bare.
+    if (showToolbarOnKeyboardSelection()) return;
     if (activeRowRef.current !== null) setActiveRow(null);
-  }, [cancelPendingClear, setHighlightedRow]);
+  }, [
+    cancelPendingClear,
+    findKeyboardSelectedRow,
+    setHighlightedRow,
+    setKeyboardHighlightedRow,
+    showToolbarOnKeyboardSelection,
+  ]);
 
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
-    const handlePointerOver = (event: MouseEvent): void => {
+    const applyHover = (event: MouseEvent): void => {
       // While a picker/dropdown is pinned open, freeze the toolbar in place.
       if (pinnedOpenRef.current) return;
       if (!(event.target instanceof Element)) return;
@@ -117,6 +176,10 @@ export const MessageHoverToolbar: React.FC<MessageHoverToolbarProps> = ({ contai
       const hoverKey = row.getAttribute('data-hover-key');
       if (!messageId || !hoverKey) return;
 
+      // The keyboard selection keeps its outline while the pointer is
+      // elsewhere: it is only dropped when the selection itself is cleared.
+      // The two treatments are distinct (hover tints, selection outlines), so
+      // both can be on screen at once without reading as one thing.
       setHighlightedRow(row);
       const actions = getMessageHoverActions(hoverKey);
       hoveredMessage.current = {
@@ -132,6 +195,28 @@ export const MessageHoverToolbar: React.FC<MessageHoverToolbarProps> = ({ contai
       setActiveRow({ hoverKey, messageId, top });
     };
 
+    /**
+     * `pointerover` also fires when rows scroll under a stationary cursor, so
+     * while the keyboard owns the shortcuts it is ignored; the next genuine
+     * `pointermove` hands ownership back.
+     */
+    const handlePointerOver = (event: MouseEvent): void => {
+      if (messageInteractionModality.current !== 'pointer') return;
+      applyHover(event);
+    };
+
+    const handlePointerMove = (event: MouseEvent): void => {
+      const previous = pointerPositionRef.current;
+      if (previous && previous.x === event.clientX && previous.y === event.clientY) return;
+      pointerPositionRef.current = { x: event.clientX, y: event.clientY };
+
+      const wasKeyboard = messageInteractionModality.current === 'keyboard';
+      messageInteractionModality.current = 'pointer';
+      // Coming back from keyboard ownership the row under the cursor never got
+      // a pointerover, so resolve it from this move instead.
+      if (wasKeyboard) applyHover(event);
+    };
+
     const handlePointerLeave = (): void => {
       if (pinnedOpenRef.current) return;
       hide();
@@ -143,6 +228,7 @@ export const MessageHoverToolbar: React.FC<MessageHoverToolbarProps> = ({ contai
     };
 
     container.addEventListener('pointerover', handlePointerOver);
+    container.addEventListener('pointermove', handlePointerMove, { passive: true });
     container.addEventListener('pointerleave', handlePointerLeave);
     container.addEventListener('mouseover', handlePointerOver);
     container.addEventListener('mouseleave', handlePointerLeave);
@@ -151,12 +237,13 @@ export const MessageHoverToolbar: React.FC<MessageHoverToolbarProps> = ({ contai
     return (): void => {
       cancelPendingClear();
       container.removeEventListener('pointerover', handlePointerOver);
+      container.removeEventListener('pointermove', handlePointerMove);
       container.removeEventListener('pointerleave', handlePointerLeave);
       container.removeEventListener('mouseover', handlePointerOver);
       container.removeEventListener('mouseleave', handlePointerLeave);
       container.removeEventListener('scroll', handleScroll, { capture: true });
     };
-  }, [cancelPendingClear, containerRef, hide, setHighlightedRow]);
+  }, [cancelPendingClear, containerRef, hide, setHighlightedRow, setKeyboardHighlightedRow]);
 
   const activeHoverKey = activeRow?.hoverKey ?? null;
   const getSnapshot = useCallback(
@@ -171,8 +258,53 @@ export const MessageHoverToolbar: React.FC<MessageHoverToolbarProps> = ({ contai
     if (activeHoverKey !== null && actions === undefined && !pinnedOpenRef.current) hide();
   }, [activeHoverKey, actions, hide]);
 
-  // On unmount, drop the highlight from whatever row still carries it.
-  useEffect((): (() => void) => (): void => setHighlightedRow(null), [setHighlightedRow]);
+  // Keyboard navigation takes ownership from a stationary pointer. Moving the
+  // pointer again restores normal hover precedence.
+  useEffect(() => {
+    if (!keyboardSelectedMessageId) {
+      setKeyboardHighlightedRow(null);
+      return;
+    }
+    cancelPendingClear();
+    hoveredMessage.current = null;
+    setHighlightedRow(null);
+    setKeyboardHighlightedRow(findKeyboardSelectedRow());
+    // The toolbar moves with the selection, so the armed row always carries it.
+    if (!showToolbarOnKeyboardSelection()) {
+      activeRowRef.current = null;
+      setActiveRow(null);
+    }
+  }, [
+    cancelPendingClear,
+    findKeyboardSelectedRow,
+    keyboardSelectedMessageId,
+    setHighlightedRow,
+    setKeyboardHighlightedRow,
+    showToolbarOnKeyboardSelection,
+  ]);
+
+  // Keep keyboard selection attached as virtualized rows mount/unmount. Runs
+  // regardless of any active hover: the outline belongs to the selection, so a
+  // row remounting while the pointer is elsewhere must get it back.
+  useEffect(() => {
+    const sync = (): void => {
+      setKeyboardHighlightedRow(findKeyboardSelectedRow());
+      // A row that scrolled back into view takes its toolbar back with it,
+      // unless the pointer is currently hovering something of its own.
+      if (hoveredMessage.current === null) showToolbarOnKeyboardSelection();
+    };
+    sync();
+    return subscribeMessageHoverActions(sync);
+  }, [findKeyboardSelectedRow, setKeyboardHighlightedRow, showToolbarOnKeyboardSelection]);
+
+  // On unmount, drop highlights from rows that still carry them.
+  useEffect(
+    (): (() => void) => (): void => {
+      setHighlightedRow(null);
+      setKeyboardHighlightedRow(null);
+    },
+    [setHighlightedRow, setKeyboardHighlightedRow],
+  );
 
   if (!activeRow || !actions) return null;
 
