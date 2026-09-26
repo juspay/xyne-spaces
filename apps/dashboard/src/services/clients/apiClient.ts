@@ -41,6 +41,25 @@ function sanitizeUrl(url: string): string {
   );
 }
 
+// Single-flight refresh: concurrent 401s share one /auth/refresh-session call.
+// Plain axios (not apiInstance) so the refresh's own 401 never re-enters this interceptor.
+type RefreshOutcome = 'ok' | 'dead' | 'transient';
+let refreshInFlight: Promise<RefreshOutcome> | null = null;
+const refreshSessionOnce = (): Promise<RefreshOutcome> =>
+  (refreshInFlight ??= axios
+    .get(`${BASE_URL}/auth/refresh-session`, { withCredentials: true })
+    .then((): RefreshOutcome => 'ok')
+    .catch(
+      (e): RefreshOutcome =>
+        axios.isAxiosError(e) && e.response?.status === 401 ? 'dead' : 'transient',
+    )
+    .finally((): void => {
+      refreshInFlight = null;
+    }));
+
+// Logout runs once even when many requests 401 together.
+let loggingOut = false;
+
 // Create the main Axios instance with interceptors
 const apiConfig: AxiosInstance = axios.create({
   baseURL: BASE_URL,
@@ -225,6 +244,35 @@ apiConfig.interceptors.response.use(
 
     // External guests have no session to lose, so a 401 must not log them out of the call.
     if (axiosError.response?.status === 401 && !isExternalApp) {
+      const originalConfig = axiosError.config as
+        | (InternalAxiosRequestConfig & { _retry?: boolean })
+        | undefined;
+      const isRefreshCall = !!originalConfig?.url?.includes('/auth/refresh-session');
+
+      if (originalConfig && !isRefreshCall && originalConfig._retry !== true) {
+        originalConfig._retry = true;
+        const outcome = await refreshSessionOnce();
+        if (outcome === 'ok') {
+          logger.info(Logger.Event.AUTH_REFRESH_SUCCESS, {
+            url: sanitizedUrl,
+            message: 'Session refresh succeeded after 401. Retrying original request.',
+          });
+          return apiInstance(originalConfig);
+        }
+        if (outcome === 'transient') {
+          // Refresh failed for a non-auth reason — keep the session, surface the error.
+          return Promise.reject(axiosError);
+        }
+        // outcome === 'dead' → fall through to logout.
+      } else if (originalConfig?._retry === true && !isRefreshCall) {
+        // Refresh already succeeded; a 2nd 401 is not session death (permission/workspace) — don't log out.
+        return Promise.reject(axiosError);
+      }
+
+      if (loggingOut) {
+        return Promise.reject(new Error('Session refresh failed - please re-authenticate'));
+      }
+      loggingOut = true;
       logger.warn(Logger.Event.AUTH_SESSION_EXPIRED, {
         url: sanitizedUrl,
         message: 'Received 401 Unauthorized. Logging out.',
