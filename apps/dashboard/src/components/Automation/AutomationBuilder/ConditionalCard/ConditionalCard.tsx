@@ -30,6 +30,7 @@ export function ConditionalCard({
   operators,
   variableSources,
   index,
+  displayIndex,
   total,
   onChange,
   onMoveUp,
@@ -86,7 +87,7 @@ export function ConditionalCard({
           </div>
           <div className='flex flex-col'>
             <span className='text-[10px] font-medium uppercase tracking-wide text-muted-foreground'>
-              Step {index} · control
+              Step {displayIndex ?? index} · control
             </span>
             <span className='text-sm font-medium text-foreground'>If / Else</span>
             <span className='mt-1 text-xs text-muted-foreground'>

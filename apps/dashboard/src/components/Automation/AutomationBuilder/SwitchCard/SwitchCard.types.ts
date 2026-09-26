@@ -16,6 +16,8 @@ export interface SwitchCardProps {
   operators: OperatorMeta[];
   variableSources: VariablePickerSource[];
   index: number;
+  /** Label shown instead of `index`, e.g. the flow view's nested "1.2". */
+  displayIndex?: string;
   total: number;
   onChange: (next: SwitchStepConfig) => void;
   onMoveUp: () => void;

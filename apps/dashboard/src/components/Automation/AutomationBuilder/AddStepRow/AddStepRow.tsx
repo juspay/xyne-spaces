@@ -10,6 +10,8 @@ export function AddStepRow({
   catalog,
   onPick,
   variant = 'full',
+  trigger,
+  onOpenChange,
 }: AddStepRowProps): React.ReactElement {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -37,13 +39,17 @@ export function AddStepRow({
   return (
     <div
       data-slot='automation-add-step'
-      className={cn('flex flex-col items-center', variant === 'full' ? 'py-1' : 'py-0.5')}
+      className={cn(
+        trigger ? 'contents' : 'flex flex-col items-center',
+        !trigger && (variant === 'full' ? 'py-1' : 'py-0.5'),
+      )}
     >
-      <div className={cn('w-px bg-border', variant === 'full' ? 'h-3' : 'h-2')} />
+      {!trigger && <div className={cn('w-px bg-border', variant === 'full' ? 'h-3' : 'h-2')} />}
       <Popover
         open={open}
         onOpenChange={(o): void => {
           setOpen(o);
+          onOpenChange?.(o);
           if (!o) setQuery('');
         }}
         align='center'
@@ -51,22 +57,24 @@ export function AddStepRow({
         sideOffset={4}
         className='w-[340px] max-h-[440px] overflow-hidden rounded-xl p-0 flex flex-col'
         trigger={
-          <button
-            type='button'
-            aria-label='Add step'
-            aria-haspopup='listbox'
-            aria-expanded={open}
-            data-track-category='automation-builder'
-            data-track-name='add-step-open'
-            className={cn(
-              'flex items-center justify-center rounded-full border border-border bg-background',
-              'text-muted-foreground hover:text-foreground hover:bg-accent/40 transition-colors',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/40',
-              variant === 'full' ? 'size-8' : 'size-6',
-            )}
-          >
-            <Plus className={variant === 'full' ? 'size-4' : 'size-3'} aria-hidden='true' />
-          </button>
+          trigger ?? (
+            <button
+              type='button'
+              aria-label='Add step'
+              aria-haspopup='listbox'
+              aria-expanded={open}
+              data-track-category='automation-builder'
+              data-track-name='add-step-open'
+              className={cn(
+                'flex items-center justify-center rounded-full border border-border bg-background',
+                'text-muted-foreground hover:text-foreground hover:bg-accent/40 transition-colors',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/40',
+                variant === 'full' ? 'size-8' : 'size-6',
+              )}
+            >
+              <Plus className={variant === 'full' ? 'size-4' : 'size-3'} aria-hidden='true' />
+            </button>
+          )
         }
       >
         <div className='flex items-center gap-2 border-b border-border px-3 py-2'>
@@ -107,6 +115,7 @@ export function AddStepRow({
                     onClick={() => {
                       onPick(item.type);
                       setOpen(false);
+                      onOpenChange?.(false);
                       setQuery('');
                     }}
                     className={cn(
@@ -137,7 +146,7 @@ export function AddStepRow({
           )}
         </div>
       </Popover>
-      <div className={cn('w-px bg-border', variant === 'full' ? 'h-3' : 'h-2')} />
+      {!trigger && <div className={cn('w-px bg-border', variant === 'full' ? 'h-3' : 'h-2')} />}
     </div>
   );
 }

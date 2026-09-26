@@ -115,6 +115,8 @@ interface EmailEditorProps {
   /** Called after the editor handles an external file drop so the parent
    * composer can reset its drag overlay state. */
   onFileDropHandled?: () => void;
+  /** Focus the editor when it mounts (default: true). */
+  focusOnMount?: boolean;
 }
 
 export const EmailEditor = ({
@@ -139,6 +141,7 @@ export const EmailEditor = ({
   bubbleToolbar = false,
   onDropAttachmentIntoEditor,
   onFileDropHandled,
+  focusOnMount = true,
 }: EmailEditorProps): ReactElement => {
   const cb = useRef({
     onChange,
@@ -304,7 +307,7 @@ export const EmailEditor = ({
     onCreate: ({ editor }) => {
       cb.current.onEditorReady?.(editor);
     },
-    autofocus: 'end',
+    autofocus: focusOnMount ? 'end' : false,
     content: value || '',
     editable: !disabled && !readOnly,
     onUpdate: ({ editor }) => {

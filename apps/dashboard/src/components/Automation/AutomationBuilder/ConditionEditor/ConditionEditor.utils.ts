@@ -57,10 +57,18 @@ const OPERATOR_VERBS: Record<string, string> = {
   has_tag: 'has tag',
 };
 
+/** True when the condition has nothing the user has filled in yet. */
+export function isConditionUnset(condition: Condition | undefined): boolean {
+  if (!condition) return true;
+  if (isLeaf(condition)) return isEmptyLeaf(condition);
+  if (isAndGroup(condition)) return condition.all.length === 0;
+  if (isOrGroup(condition)) return condition.any.length === 0;
+  return false;
+}
+
 export function summarizeCondition(condition: Condition | undefined): string {
-  if (!condition) return 'Click to set a condition';
+  if (!condition || isConditionUnset(condition)) return 'Click to set a condition';
   if (isLeaf(condition)) {
-    if (isEmptyLeaf(condition)) return 'Click to set a condition';
     const lhs = formatVariableRef(condition.variable);
     const verb = OPERATOR_VERBS[condition.operator] ?? condition.operator;
     if (condition.operator === 'exists') return `${lhs} ${verb}`;
@@ -68,11 +76,9 @@ export function summarizeCondition(condition: Condition | undefined): string {
     return `${lhs} ${verb} ${rhs}`;
   }
   if (isAndGroup(condition)) {
-    if (condition.all.length === 0) return 'Click to set a condition';
     return `(${condition.all.map(summarizeCondition).join(' AND ')})`;
   }
   if (isOrGroup(condition)) {
-    if (condition.any.length === 0) return 'Click to set a condition';
     return `(${condition.any.map(summarizeCondition).join(' OR ')})`;
   }
   return 'Condition';

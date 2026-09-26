@@ -9,6 +9,8 @@ import {
   Copy,
   GitBranch,
   History,
+  LayoutGrid,
+  List,
   Pencil,
   Power,
   Save as SaveIcon,
@@ -33,10 +35,12 @@ import {
   type ScheduleConfig,
   CONDITIONAL_STEP_TYPE,
   SWITCH_STEP_TYPE,
+  WEBHOOK_TRIGGER_TYPE,
   AutomationStatusValues,
   makeStepId,
   type SaveResult,
   type ValidationResult,
+  type ValidationIssue,
 } from '../Automation.types';
 import { useIsAutomationsAdmin } from '../useIsAutomationsAdmin';
 import {
@@ -71,6 +75,13 @@ import {
 } from './AutomationBuilder.utils';
 import type { AutomationBuilderProps } from './AutomationBuilder.types';
 import type { StepSchema } from '../Automation.types';
+import { FlowAutomationView } from './FlowAutomationView/FlowAutomationView';
+import type { ViewStepPath } from './FlowAutomationView/FlowAutomationView.types';
+import {
+  ROOT_CONTAINER,
+  findUnknownSummaryKeys,
+  insertStepAtPath,
+} from './FlowAutomationView/FlowAutomationView.utils';
 
 const MAX_AUTOMATION_NAME_LENGTH = 80;
 
@@ -182,7 +193,20 @@ export function AutomationBuilder({
     collectStepTypes(automation?.config?.steps ?? config.steps),
   );
 
+  const [builderView, setBuilderView] = useState<'list' | 'flow'>(() => {
+    const stored =
+      typeof localStorage !== 'undefined' ? localStorage.getItem('automation-builder-view') : null;
+    return stored === 'flow' ? 'flow' : 'list';
+  });
+  useEffect(() => {
+    localStorage.setItem('automation-builder-view', builderView);
+  }, [builderView]);
+
   const [savedId, setSavedId] = useState<string | null>(automation?.id ?? null);
+  const [flowFocusRequest, setFlowFocusRequest] = useState<{
+    issuePath: string;
+    seq: number;
+  } | null>(null);
   const [savedStatus, setSavedStatus] = useState<string>(
     automation?.status ?? AutomationStatusValues.DRAFT,
   );
@@ -261,6 +285,26 @@ export function AutomationBuilder({
     });
     return cache;
   }, [stepSchemaQueries, stepSchemaTypes]);
+
+  // Dev-only drift check: the flow view's node summaries allow-list config
+  // fields by name, so flag any listed field a fetched schema doesn't declare.
+  const checkedSummarySchemas = useRef(new Set<string>());
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    const schemas = [...Object.values(stepSchemaCache), triggerSchemaQuery.data];
+    for (const schema of schemas) {
+      if (!schema || checkedSummarySchemas.current.has(schema.type)) continue;
+      checkedSummarySchemas.current.add(schema.type);
+      const unknownKeys = findUnknownSummaryKeys(schema.type, schema.configSchema);
+      if (unknownKeys.length) {
+        logger.warn(LogEvent.FRONTEND_ERROR, {
+          message: 'Flow view summary allow-list names fields missing from the config schema',
+          type: schema.type,
+          unknownKeys,
+        });
+      }
+    }
+  }, [stepSchemaCache, triggerSchemaQuery.data]);
 
   const stepSchemaLoadingFor = useCallback(
     (type: string): boolean => {
@@ -620,14 +664,8 @@ export function AutomationBuilder({
   }, []);
 
   const handleAddStep = useCallback(
-    (type: string, insertAt?: number): void => {
-      const insertInto = (steps: AutomationStepConfig[], step: AutomationStepConfig) => {
-        if (insertAt === undefined || insertAt < 0 || insertAt > steps.length) {
-          return [...steps, step];
-        }
-        return [...steps.slice(0, insertAt), step, ...steps.slice(insertAt)];
-      };
-
+    (type: string, insertAt?: number, container: ViewStepPath = ROOT_CONTAINER): string => {
+      let step: AutomationStepConfig;
       if (type === CONDITIONAL_STEP_TYPE) {
         const cond: ConditionalStepConfig = {
           id: makeStepId(),
@@ -638,69 +676,35 @@ export function AutomationBuilder({
             if_false: [],
           },
         };
-        setConfig(prev => {
-          const next = insertInto(prev.steps, cond);
-          logger.info(LogEvent.INFO, {
-            type: 'migrated_console_info',
-            message: String('[automations] step added'),
-            context: [
-              {
-                type,
-                insertAt,
-                finalIndex: next.indexOf(cond),
-              },
-            ],
-          });
-          return { ...prev, steps: next };
-        });
-        return;
-      }
-      if (type === SWITCH_STEP_TYPE) {
+        step = cond;
+      } else if (type === SWITCH_STEP_TYPE) {
         const sw: SwitchStepConfig = {
           id: makeStepId(),
           type: SWITCH_STEP_TYPE,
           config: { cases: [], default: [] },
         };
-        setConfig(prev => {
-          const next = insertInto(prev.steps, sw);
-          logger.info(LogEvent.INFO, {
-            type: 'migrated_console_info',
-            message: String('[automations] step added'),
-            context: [
-              {
-                type,
-                insertAt,
-                finalIndex: next.indexOf(sw),
-              },
-            ],
-          });
-          return { ...prev, steps: next };
-        });
-        return;
+        step = sw;
+      } else {
+        // A new "run agent" step starts with a { result: 'string' } output schema so
+        // downstream steps have a usable variable by default. Other actions start empty.
+        const action: ActionStepConfig = {
+          id: makeStepId(),
+          type,
+          config: type === 'RUN_AGENT' ? { outputSchema: { result: 'string' } } : {},
+        };
+        step = action;
       }
-      // A new "run agent" step starts with a { result: 'string' } output schema so
-      // downstream steps have a usable variable by default. Other actions start empty.
-      const action: ActionStepConfig = {
-        id: makeStepId(),
-        type,
-        config: type === 'RUN_AGENT' ? { outputSchema: { result: 'string' } } : {},
-      };
       setConfig(prev => {
-        const next = insertInto(prev.steps, action);
+        const next = insertStepAtPath(prev, container, insertAt, step);
         logger.info(LogEvent.INFO, {
           type: 'migrated_console_info',
           message: String('[automations] step added'),
-          context: [
-            {
-              type,
-              insertAt,
-              finalIndex: next.indexOf(action),
-            },
-          ],
+          context: [{ type, insertAt, container: container.join('.') }],
         });
-        return { ...prev, steps: next };
+        return next;
       });
-      ensureSchema(type);
+      if (type !== CONDITIONAL_STEP_TYPE && type !== SWITCH_STEP_TYPE) ensureSchema(type);
+      return step.id;
     },
     [ensureSchema],
   );
@@ -1152,202 +1156,283 @@ export function AutomationBuilder({
         </div>
       </div>
 
-      <div
-        className={cn(
-          'flex-1 overflow-y-auto bg-muted/30',
-          !editMode && canEdit && !readOnlyPreview && 'cursor-pointer',
-        )}
-        {...(!editMode && canEdit && !readOnlyPreview
-          ? {
-              onClick: (): void => {
-                if (forksOnEdit) setProposeChangeConfirmOpen(true);
-                else setEditConfirmOpen(true);
-              },
-            }
-          : {})}
-      >
-        <div
-          className={cn(
-            'mx-auto flex w-full max-w-6xl flex-col gap-6 px-6 py-6',
-            !editMode && 'pointer-events-none select-none opacity-90',
-          )}
-          aria-readonly={!editMode}
-          // pointer-events-none only blocks the mouse — it doesn't remove step/trigger
-          // form fields from the tab order, so they could still be focused and typed
-          // into via keyboard. `inert` fully removes this subtree from focus/interaction.
-          inert={readOnlyPreview}
-        >
-          <LockBanner status={savedStatus} isLiveRow={isLiveRow} />
-          <RuleSummaryCard
-            config={config}
-            triggerSchema={triggerSchema}
-            stepCatalog={stepCatalog}
-          />
-          <BuilderSection
-            number={1}
-            kicker='event'
-            title='When this happens'
-            description='The event that fires this automation.'
-          >
-            <TriggerCard
-              view='event'
-              trigger={config.trigger}
-              catalog={triggerCatalog}
-              schema={triggerSchema}
-              schemaLoading={triggerSchemaQuery.isLoading && !!config.trigger.type}
-              onChangeType={handleTriggerTypeChange}
-              onConfigChange={handleTriggerConfigChange}
-              issues={triggerIssues}
-            />
-            {config.trigger.type === 'WEBHOOK' && (
-              <div className='mt-4'>
-                <WebhookEndpointPanel automationId={savedId} />
-              </div>
+      <div className='flex items-center justify-end gap-2 border-b border-border bg-background px-6 py-2'>
+        <span className='text-xs text-muted-foreground'>View</span>
+        <div className='flex items-center rounded-md border border-border p-0.5'>
+          <button
+            type='button'
+            aria-label='List view'
+            data-track-category='automation-builder'
+            data-track-name='switch-to-list-view'
+            onClick={() => setBuilderView('list')}
+            className={cn(
+              'flex h-7 w-7 items-center justify-center rounded-sm text-muted-foreground transition-colors',
+              builderView === 'list' && 'bg-accent text-foreground',
+              'hover:text-foreground',
             )}
-          </BuilderSection>
-
-          <BuilderSection
-            number={2}
-            kicker='timing'
-            title='Run timing'
-            description='Run now, or wait a fixed time after a date field on the trigger.'
           >
-            <ScheduleCard
-              schedule={config.schedule}
-              triggerSchema={triggerSchema}
-              onChange={handleScheduleChange}
-            />
-          </BuilderSection>
-
-          <BuilderSection
-            number={3}
-            kicker='condition'
-            title='With these conditions'
-            description='Evaluated against fresh state when the actions are about to run.'
-          >
-            <TriggerCard
-              view='condition'
-              trigger={config.trigger}
-              catalog={triggerCatalog}
-              schema={triggerSchema}
-              schemaLoading={triggerSchemaQuery.isLoading && !!config.trigger.type}
-              onChangeType={handleTriggerTypeChange}
-              onConfigChange={handleTriggerConfigChange}
-              issues={triggerIssues}
-              onFormFieldNamesResolved={handleFormFieldNamesResolved}
-            />
-          </BuilderSection>
-
-          <BuilderSection
-            number={4}
-            kicker='action'
-            isLast
-            title='Then do this'
-            description='One or more actions run in order. Conditionals can branch inside a step.'
-          >
-            <AddStepRow catalog={stepCatalog} onPick={type => handleAddStep(type, 0)} />
-
-            {config.steps.map((step, index) => {
-              const isLast = index === config.steps.length - 1;
-              const variableSources = buildVariableSources(
-                triggerSchema,
-                config.trigger.config,
-                config.steps,
-                stepSchemaCache,
-                index,
-                formFieldNameMap,
-              );
-              const stepIssues = issuesUnder(validation?.issues, `steps[${index}]`);
-
-              const card =
-                step.type === CONDITIONAL_STEP_TYPE ? (
-                  <ConditionalCard
-                    step={step as ConditionalStepConfig}
-                    catalog={stepCatalog}
-                    schemaCache={stepSchemaCache}
-                    schemaLoadingFor={stepSchemaLoadingFor}
-                    operators={operators}
-                    variableSources={variableSources}
-                    index={index + 1}
-                    total={config.steps.length}
-                    onChange={next => updateStepAt(index, next)}
-                    onMoveUp={() => handleMoveStep(index, -1)}
-                    onMoveDown={() => handleMoveStep(index, 1)}
-                    onDelete={() => handleDeleteStep(index)}
-                    issues={stepIssues}
-                    pathPrefix={`steps[${index}]`}
-                    readOnly={!editMode}
-                    ensureSchema={ensureSchema}
-                    renderConditionalCard={renderConditionalCard}
-                    renderSwitchCard={renderSwitchCard}
-                  />
-                ) : step.type === SWITCH_STEP_TYPE ? (
-                  <SwitchCard
-                    step={step as SwitchStepConfig}
-                    catalog={stepCatalog}
-                    schemaCache={stepSchemaCache}
-                    schemaLoadingFor={stepSchemaLoadingFor}
-                    operators={operators}
-                    variableSources={variableSources}
-                    index={index + 1}
-                    total={config.steps.length}
-                    onChange={next => updateStepAt(index, next)}
-                    onMoveUp={() => handleMoveStep(index, -1)}
-                    onMoveDown={() => handleMoveStep(index, 1)}
-                    onDelete={() => handleDeleteStep(index)}
-                    issues={stepIssues}
-                    pathPrefix={`steps[${index}]`}
-                    readOnly={!editMode}
-                    ensureSchema={ensureSchema}
-                    renderConditionalCard={renderConditionalCard}
-                    renderSwitchCard={renderSwitchCard}
-                  />
-                ) : (
-                  <StepCard
-                    step={step as ActionStepConfig}
-                    catalogItem={
-                      stepCatalog.find(c => c.type === (step as ActionStepConfig).type) ?? null
-                    }
-                    schema={stepSchemaCache[(step as ActionStepConfig).type] ?? null}
-                    schemaLoading={stepSchemaLoadingFor((step as ActionStepConfig).type)}
-                    index={index + 1}
-                    total={config.steps.length}
-                    variableSources={variableSources}
-                    onConfigChange={cfg => handleStepConfigChange(index, cfg)}
-                    onMoveUp={() => handleMoveStep(index, -1)}
-                    onMoveDown={() => handleMoveStep(index, 1)}
-                    onDelete={() => handleDeleteStep(index)}
-                    issues={stepIssues}
-                    pathPrefix={`steps[${index}].config.`}
-                    readOnly={!editMode}
-                  />
-                );
-
-              return (
-                <div key={step.id} className='flex flex-col'>
-                  {card}
-                  {!isLast && (
-                    <AddStepRow
-                      catalog={stepCatalog}
-                      onPick={type => handleAddStep(type, index + 1)}
-                    />
-                  )}
-                </div>
-              );
-            })}
-
-            {config.steps.length > 0 && (
-              <AddStepRow catalog={stepCatalog} onPick={type => handleAddStep(type)} />
+            <List className='size-4' />
+          </button>
+          <button
+            type='button'
+            aria-label='Flow view'
+            data-track-category='automation-builder'
+            data-track-name='switch-to-flow-view'
+            onClick={() => setBuilderView('flow')}
+            className={cn(
+              'flex h-7 w-7 items-center justify-center rounded-sm text-muted-foreground transition-colors',
+              builderView === 'flow' && 'bg-accent text-foreground',
+              'hover:text-foreground',
             )}
-          </BuilderSection>
+          >
+            <LayoutGrid className='size-4' />
+          </button>
         </div>
       </div>
+
+      {builderView === 'flow' ? (
+        <FlowAutomationView
+          config={config}
+          onConfigChange={next => {
+            setConfig(next);
+            setStepSchemaTypes(collectStepTypes(next.steps));
+          }}
+          triggerCatalog={triggerCatalog}
+          triggerSchema={triggerSchema}
+          stepCatalog={stepCatalog}
+          stepSchemaCache={stepSchemaCache}
+          schemaLoadingFor={stepSchemaLoadingFor}
+          ensureSchema={ensureSchema}
+          operators={operators}
+          validation={validation}
+          readOnly={!editMode || readOnlyPreview}
+          editMode={editMode}
+          onAddStep={handleAddStep}
+          formFieldNameMap={formFieldNameMap}
+          onFormFieldNamesResolved={handleFormFieldNamesResolved}
+          onRequestEdit={
+            !editMode && canEdit && !readOnlyPreview
+              ? (): void => {
+                  if (forksOnEdit) setProposeChangeConfirmOpen(true);
+                  else setEditConfirmOpen(true);
+                }
+              : undefined
+          }
+          triggerExtras={
+            config.trigger.type === WEBHOOK_TRIGGER_TYPE ? (
+              <WebhookEndpointPanel automationId={savedId} />
+            ) : undefined
+          }
+          viewportKey={savedId ?? undefined}
+          focusRequest={flowFocusRequest}
+        />
+      ) : (
+        <div
+          className={cn(
+            'flex-1 overflow-y-auto bg-muted/30',
+            !editMode && canEdit && !readOnlyPreview && 'cursor-pointer',
+          )}
+          {...(!editMode && canEdit && !readOnlyPreview
+            ? {
+                onClick: (): void => {
+                  if (forksOnEdit) setProposeChangeConfirmOpen(true);
+                  else setEditConfirmOpen(true);
+                },
+              }
+            : {})}
+        >
+          <div
+            className={cn(
+              'mx-auto flex w-full max-w-6xl flex-col gap-6 px-6 py-6',
+              !editMode && 'pointer-events-none select-none opacity-90',
+            )}
+            aria-readonly={!editMode}
+            // pointer-events-none only blocks the mouse — it doesn't remove step/trigger
+            // form fields from the tab order, so they could still be focused and typed
+            // into via keyboard. `inert` fully removes this subtree from focus/interaction.
+            inert={readOnlyPreview}
+          >
+            <LockBanner status={savedStatus} isLiveRow={isLiveRow} />
+            <RuleSummaryCard
+              config={config}
+              triggerSchema={triggerSchema}
+              stepCatalog={stepCatalog}
+            />
+            <BuilderSection
+              number={1}
+              kicker='event'
+              title='When this happens'
+              description='The event that fires this automation.'
+            >
+              <TriggerCard
+                view='event'
+                trigger={config.trigger}
+                catalog={triggerCatalog}
+                schema={triggerSchema}
+                schemaLoading={triggerSchemaQuery.isLoading && !!config.trigger.type}
+                onChangeType={handleTriggerTypeChange}
+                onConfigChange={handleTriggerConfigChange}
+                issues={triggerIssues}
+              />
+              {config.trigger.type === WEBHOOK_TRIGGER_TYPE && (
+                <div className='mt-4'>
+                  <WebhookEndpointPanel automationId={savedId} />
+                </div>
+              )}
+            </BuilderSection>
+
+            <BuilderSection
+              number={2}
+              kicker='timing'
+              title='Run timing'
+              description='Run now, or wait a fixed time after a date field on the trigger.'
+            >
+              <ScheduleCard
+                schedule={config.schedule}
+                triggerSchema={triggerSchema}
+                onChange={handleScheduleChange}
+              />
+            </BuilderSection>
+
+            <BuilderSection
+              number={3}
+              kicker='condition'
+              title='With these conditions'
+              description='Evaluated against fresh state when the actions are about to run.'
+            >
+              <TriggerCard
+                view='condition'
+                trigger={config.trigger}
+                catalog={triggerCatalog}
+                schema={triggerSchema}
+                schemaLoading={triggerSchemaQuery.isLoading && !!config.trigger.type}
+                onChangeType={handleTriggerTypeChange}
+                onConfigChange={handleTriggerConfigChange}
+                issues={triggerIssues}
+                onFormFieldNamesResolved={handleFormFieldNamesResolved}
+              />
+            </BuilderSection>
+
+            <BuilderSection
+              number={4}
+              kicker='action'
+              isLast
+              title='Then do this'
+              description='One or more actions run in order. Conditionals can branch inside a step.'
+            >
+              <AddStepRow catalog={stepCatalog} onPick={type => handleAddStep(type, 0)} />
+
+              {config.steps.map((step, index) => {
+                const isLast = index === config.steps.length - 1;
+                const variableSources = buildVariableSources(
+                  triggerSchema,
+                  config.trigger.config,
+                  config.steps,
+                  stepSchemaCache,
+                  index,
+                  formFieldNameMap,
+                );
+                const stepIssues = issuesUnder(validation?.issues, `steps[${index}]`);
+
+                const card =
+                  step.type === CONDITIONAL_STEP_TYPE ? (
+                    <ConditionalCard
+                      step={step as ConditionalStepConfig}
+                      catalog={stepCatalog}
+                      schemaCache={stepSchemaCache}
+                      schemaLoadingFor={stepSchemaLoadingFor}
+                      operators={operators}
+                      variableSources={variableSources}
+                      index={index + 1}
+                      total={config.steps.length}
+                      onChange={next => updateStepAt(index, next)}
+                      onMoveUp={() => handleMoveStep(index, -1)}
+                      onMoveDown={() => handleMoveStep(index, 1)}
+                      onDelete={() => handleDeleteStep(index)}
+                      issues={stepIssues}
+                      pathPrefix={`steps[${index}]`}
+                      readOnly={!editMode}
+                      ensureSchema={ensureSchema}
+                      renderConditionalCard={renderConditionalCard}
+                      renderSwitchCard={renderSwitchCard}
+                    />
+                  ) : step.type === SWITCH_STEP_TYPE ? (
+                    <SwitchCard
+                      step={step as SwitchStepConfig}
+                      catalog={stepCatalog}
+                      schemaCache={stepSchemaCache}
+                      schemaLoadingFor={stepSchemaLoadingFor}
+                      operators={operators}
+                      variableSources={variableSources}
+                      index={index + 1}
+                      total={config.steps.length}
+                      onChange={next => updateStepAt(index, next)}
+                      onMoveUp={() => handleMoveStep(index, -1)}
+                      onMoveDown={() => handleMoveStep(index, 1)}
+                      onDelete={() => handleDeleteStep(index)}
+                      issues={stepIssues}
+                      pathPrefix={`steps[${index}]`}
+                      readOnly={!editMode}
+                      ensureSchema={ensureSchema}
+                      renderConditionalCard={renderConditionalCard}
+                      renderSwitchCard={renderSwitchCard}
+                    />
+                  ) : (
+                    <StepCard
+                      step={step as ActionStepConfig}
+                      catalogItem={
+                        stepCatalog.find(c => c.type === (step as ActionStepConfig).type) ?? null
+                      }
+                      schema={stepSchemaCache[(step as ActionStepConfig).type] ?? null}
+                      schemaLoading={stepSchemaLoadingFor((step as ActionStepConfig).type)}
+                      index={index + 1}
+                      total={config.steps.length}
+                      variableSources={variableSources}
+                      onConfigChange={cfg => handleStepConfigChange(index, cfg)}
+                      onMoveUp={() => handleMoveStep(index, -1)}
+                      onMoveDown={() => handleMoveStep(index, 1)}
+                      onDelete={() => handleDeleteStep(index)}
+                      issues={stepIssues}
+                      pathPrefix={`steps[${index}].config.`}
+                      readOnly={!editMode}
+                    />
+                  );
+
+                return (
+                  <div key={step.id} className='flex flex-col'>
+                    {card}
+                    {!isLast && (
+                      <AddStepRow
+                        catalog={stepCatalog}
+                        onPick={type => handleAddStep(type, index + 1)}
+                      />
+                    )}
+                  </div>
+                );
+              })}
+
+              {config.steps.length > 0 && (
+                <AddStepRow catalog={stepCatalog} onPick={type => handleAddStep(type)} />
+              )}
+            </BuilderSection>
+          </div>
+        </div>
+      )}
 
       <div className='border-t border-border bg-background px-6 py-3'>
         <ValidationBanner
           result={validation}
           isSaving={saveMutation.isPending}
           errorMessage={errorMessage}
+          {...(builderView === 'flow'
+            ? {
+                onIssueClick: (issue: ValidationIssue): void =>
+                  setFlowFocusRequest(prev => ({
+                    issuePath: issue.path,
+                    seq: (prev?.seq ?? 0) + 1,
+                  })),
+              }
+            : {})}
         />
       </div>
 
