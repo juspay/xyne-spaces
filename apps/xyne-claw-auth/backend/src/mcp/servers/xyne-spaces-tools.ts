@@ -9080,6 +9080,112 @@ const spacesDeskMetrics: ToolDef = {
     }),
 };
 
+const RADAR_FEEDS = ["pending-me", "waiting-on", "pending-others"] as const;
+
+interface RadarFeedItem {
+  id: string;
+  conversationId: string;
+  channelId: string;
+  title: string;
+  contextSummary: string | null;
+  requestedBy: string[];
+  pendingOn: string[];
+  updatedAt: string;
+  muted: boolean;
+}
+
+interface RadarFeedThread {
+  scopeKey: string;
+  conversationId: string;
+  channelId: string;
+  threadPreview: string | null;
+  lastActivityAt: string | null;
+  items: RadarFeedItem[];
+}
+
+const spacesRadar: ToolDef = {
+  name: "spaces-radar",
+  description:
+    "The current user's Radar — actionable asks the engine has parsed out of their threads, " +
+    "grouped by thread. `feed` selects the surface: " +
+    "`pending-me` = open asks waiting on YOU; " +
+    "`waiting-on` = asks YOU made that somebody else still owes you (includes ownerless ones); " +
+    "`pending-others` = open asks held by someone else in threads you can see. " +
+    "Use it for 'what is on my plate', 'what am I blocked on', 'what is my team holding'. " +
+    "READ-ONLY and always scoped to the calling user's channel access — it cannot resolve or reassign anything. " +
+    "Items the user's own Radar rules mute are hidden unless includeMuted=true.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      feed: {
+        type: "string",
+        enum: [...RADAR_FEEDS],
+        description: "Which Radar feed to read.",
+      },
+      includeMuted: {
+        type: "boolean",
+        default: false,
+        description: "Include items muted by the user's own Radar rules. Default false.",
+      },
+      limit: {
+        type: "number",
+        minimum: 1,
+        maximum: 100,
+        default: 25,
+        description: "Max threads to return (default 25).",
+      },
+    },
+    required: ["feed"],
+  },
+  handler: withToolErrors("Radar error", async (args, ctx) => {
+      if (!ctx.userId) return err("Could not determine current user.");
+      const feed = String(args["feed"] ?? "");
+      if (!(RADAR_FEEDS as readonly string[]).includes(feed)) {
+        return err(`Unknown feed "${feed}". Use one of: ${RADAR_FEEDS.join(", ")}.`);
+      }
+      const includeMuted = args["includeMuted"] === true;
+      const limit = Math.min(Math.max(Number(args["limit"] ?? 25), 1), 100);
+
+      const res = (await spacesFetch(`/api/radar/claw/feed/${feed}`)) as {
+        data?: { threads?: RadarFeedThread[] };
+      };
+      const all = res?.data?.threads ?? [];
+
+      const threads = all
+        .map((t) => ({ ...t, items: t.items.filter((i) => includeMuted || !i.muted) }))
+        .filter((t) => t.items.length > 0);
+
+      if (threads.length === 0) {
+        return ok(
+          `No items in the "${feed}" Radar feed.` +
+            (includeMuted ? "" : " (Muted items are excluded — retry with includeMuted=true to see them.)"),
+        );
+      }
+
+      const page = threads.slice(0, limit);
+      const chunks = page.map((t, idx) => {
+        const url = buildTicketUrl(t.channelId, t.conversationId);
+        const header = t.threadPreview?.trim() || t.conversationId;
+        const lines = t.items.map((i) => {
+          const who =
+            feed === "pending-me"
+              ? ""
+              : i.pendingOn.length > 0
+                ? ` — pending on ${i.pendingOn.length} person(s)`
+                : " — nobody holds this yet";
+          const summary = i.contextSummary?.trim() ? ` (${i.contextSummary.trim()})` : "";
+          return `  • ${i.title}${summary}${who}${i.muted ? " [muted]" : ""}`;
+        });
+        if (url) lines.push(`  ${url}`);
+        return prefixChunk(idx, header, lines);
+      });
+
+      const result = ok(chunks.join("\n\n"));
+      appendText(result, paginationFooter({ returned: page.length, limit, offset: 0, total: threads.length }));
+      return result;
+    }),
+};
+
 export const tools: ToolDef[] = [
   spacesWhoami,
   ...(CONFIG.directVespaSearch ? [spacesVespaSearch, spacesCorpusScan, spacesEvidencePack] : []),
@@ -9087,6 +9193,7 @@ export const tools: ToolDef[] = [
   spacesSearch,
   spacesSearchV2,
   spacesMyItems,
+  spacesRadar,
   spacesSavedViews,
   spacesWorkflowStats,
   spacesDeskMetrics,
