@@ -14,6 +14,7 @@ import {
 import { useAuth } from '../../hooks/useAuth';
 import { useZero } from '../../hooks/useZero';
 import { useChannelByName } from '../../hooks/useChannels';
+import { default_seeded_channel_name } from '@xyne/shared';
 import { useProfilePictureUrl } from '../../hooks/useProfilePicture';
 import { authActor } from '../../machines/authMachine';
 import { mutators } from '../../zero/mutators';
@@ -62,7 +63,7 @@ const QuestionnaireScreen = (): ReactElement | null => {
   const { user } = useAuth();
   const z = useZero();
 
-  const generalChannel = useChannelByName('general');
+  const generalChannel = useChannelByName(default_seeded_channel_name);
 
   const [currentStep, setCurrentStep] = useState(getInitialStepIndex);
   const [isCompleting, setIsCompleting] = useState(false);

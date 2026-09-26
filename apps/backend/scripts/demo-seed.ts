@@ -43,6 +43,7 @@ import {
   UserStatus,
   OrgRole,
   WorkspaceRole,
+  default_seeded_channel_name,
 } from '@xyne/shared';
 import { CHANNELS, DEMO_USERS, TICKETS, type Line } from './demo-seed-content';
 
@@ -450,7 +451,7 @@ async function createChannels(
         },
       });
       await prisma.channelUserStatus.create({
-        data: { channelId, userId: members[m].id, unreadCount: 0, isStarred: spec.slug === 'general', workspaceId },
+        data: { channelId, userId: members[m].id, unreadCount: 0, isStarred: spec.slug === default_seeded_channel_name, workspaceId },
       });
     }
 
@@ -517,13 +518,13 @@ const STATUS_TO_STAGE: Record<string, string> = {
 const TICKET_CHANNEL: Record<number, string> = {
   0: 'product',
   1: 'engineering',
-  2: 'general',
+  2: default_seeded_channel_name,
   3: 'product',
   4: 'design',
-  5: 'general',
+  5: default_seeded_channel_name,
   6: 'engineering',
   7: 'engineering',
-  8: 'general',
+  8: default_seeded_channel_name,
   9: 'product',
   10: 'design',
   11: 'engineering',
@@ -564,13 +565,13 @@ async function createTickets(
   channels: Array<{ id: string; slug: string; conversationId: string }>
 ) {
   const bySlug = new Map(channels.map((c) => [c.slug, c]));
-  const fallback = bySlug.get('general') ?? channels[0];
+  const fallback = bySlug.get(default_seeded_channel_name) ?? channels[0];
 
   for (let i = 0; i < TICKETS.length; i++) {
     const spec = TICKETS[i];
     const reporter = users[spec.reporter % users.length];
     const assignee = users[spec.assignee % users.length];
-    const channel = bySlug.get(TICKET_CHANNEL[i] ?? 'general') ?? fallback;
+    const channel = bySlug.get(TICKET_CHANNEL[i] ?? default_seeded_channel_name) ?? fallback;
     const createdAt = minsAgo(600 - i * 30);
 
     // The conversation that carries this ticket in the channel feed.

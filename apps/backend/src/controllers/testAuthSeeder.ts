@@ -14,6 +14,7 @@ import {
   InvitationResponse,
   MeetingStatus,
   ProjectType, OrgRole, WorkspaceRole } from '@xyne/shared';
+import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 
 export class TestAuthSeeder {
@@ -622,7 +623,7 @@ export class TestAuthSeeder {
     }
 
     const seededChannelIds: string[] = [];
-    for (const channelName of ['general', 'test-automation']) {
+    for (const channelName of [config.defaultSeededChannelName, 'test-automation']) {
       let channel = await db.channel.findFirst({
         where: { workspaceId, projectId: project.id, name: channelName },
       });
@@ -644,7 +645,7 @@ export class TestAuthSeeder {
 
       seededChannelIds.push(channel.id);
 
-      if (channelName === 'general') {
+      if (channelName === config.defaultSeededChannelName) {
         await this.seedChannelConversations(workspaceId, channel.id, userId, requestId);
       }
 

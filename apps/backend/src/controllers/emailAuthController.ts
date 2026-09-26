@@ -894,6 +894,20 @@ export class EmailAuthController {
         });
         return;
       }
+      if (!workspaceId && !invitationId) {
+        try {
+          await organizationDomainService.assertNotPublicEmailDomain(normalizedEmail);
+        } catch (error) {
+          if (error instanceof PublicEmailDomainError) {
+            logger.warn(`[AUTH] Email registration blocked for ${normalizedEmail} (reason=public_email_domain)`);
+            res.status(403).json({
+              error: error.code,
+              message: error.message,
+            });
+            return;
+          }
+        }
+      }
 
       // Dashboard already sends the register password as a SHA-256 hash.
       // Store that credential directly so we do not hash it again.

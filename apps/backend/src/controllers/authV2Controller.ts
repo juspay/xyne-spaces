@@ -543,13 +543,19 @@ export class AuthV2Controller {
       let publicEmailError = null;
 
       if (workspaces.length === 0 && !userExistsButRemoved) {
-        if (stateData.enterpriseLogin) {
+        try {
+          await organizationDomainService.assertNotPublicEmailDomain(googleUserData.email);
+        } catch (error) {
+          if (error instanceof PublicEmailDomainError) {
+            publicEmailError = error;
+          }
+        }
+
+        if (stateData.enterpriseLogin && !publicEmailError) {
           try {
             await organizationDomainService.assertCanCreateOrgForEmail(googleUserData.email);
           } catch (error) {
-            if (error instanceof PublicEmailDomainError) {
-              publicEmailError = error;
-            } else if (error instanceof OrganizationDomainConflictError) {
+            if (error instanceof OrganizationDomainConflictError) {
               domainConflictError = error;
             }
           }
@@ -940,13 +946,19 @@ export class AuthV2Controller {
       let publicEmailError = null;
 
       if (workspaces.length === 0 && !userExistsButRemoved) {
-        if (stateData.enterpriseLogin) {
+        try {
+          await organizationDomainService.assertNotPublicEmailDomain(googleUserData.email);
+        } catch (error) {
+          if (error instanceof PublicEmailDomainError) {
+            publicEmailError = error;
+          }
+        }
+
+        if (stateData.enterpriseLogin && !publicEmailError) {
           try {
             await organizationDomainService.assertCanCreateOrgForEmail(googleUserData.email);
           } catch (error) {
-            if (error instanceof PublicEmailDomainError) {
-              publicEmailError = error;
-            } else if (error instanceof OrganizationDomainConflictError) {
+            if (error instanceof OrganizationDomainConflictError) {
               domainConflictError = error;
             }
           }
