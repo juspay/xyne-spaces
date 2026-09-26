@@ -2,7 +2,7 @@ import { Router, type Request, type Response } from "express";
 import { prisma } from "../db.js";
 import { encrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
-import { type OAuthTokenProvider, TokenRefreshError } from "./oauth-token-endpoint.js";
+import { type OAuthAuthorizeOptions, type OAuthTokenProvider, TokenRefreshError } from "./oauth-token-endpoint.js";
 import { signOAuthState, verifyOAuthState, OAuthStateError } from "./oauth-state.js";
 import { defaultOAuthReturn, resolveOAuthReturn, withOAuthResult } from "./oauth-return.js";
 import { oauthLimiter } from "../middleware/rate-limiters.js";
@@ -94,9 +94,25 @@ export function createClassicOAuthProvider(config: ClassicOAuthConfig): ClassicO
     }
   }
 
+  async function authorize(userId: string, opts: OAuthAuthorizeOptions = {}): Promise<string> {
+    const callbackUri = opts.redirectUri ?? `${process.env["AUTH_SERVICE_URL"] ?? "http://localhost:3003"}/claw/api/v1/${type}/callback`;
+
+    const { clientId } = getCredentials();
+
+    const url = new URL(resolve(config.authUrl));
+    url.searchParams.set("client_id", clientId);
+    url.searchParams.set("redirect_uri", callbackUri);
+    url.searchParams.set("response_type", "code");
+    url.searchParams.set("scope", config.scope);
+    for (const [k, v] of Object.entries(config.extraAuthParams ?? {})) url.searchParams.set(k, v);
+    url.searchParams.set("state", signOAuthState(userId, { returnTo: resolveOAuthReturn(opts.returnTo) }));
+    return url.toString();
+  }
+
   const provider: OAuthTokenProvider = {
     serverType: type,
     label,
+    authorize,
     async refresh(creds) {
       const { clientId, clientSecret } = getCredentials();
       const response = await fetch(resolve(config.tokenUrl), {
@@ -129,20 +145,7 @@ export function createClassicOAuthProvider(config: ClassicOAuthConfig): ClassicO
   router.post(`/:userId/oauth/${type}/authorize`, oauthLimiter, asyncHandler(async (req: Request<{ userId: string }>, res: Response) => {
     const { userId } = req.params;
     const { redirectUri, returnTo } = req.body as { redirectUri?: string; returnTo?: string };
-
-    const callbackUri = redirectUri ?? `${process.env["AUTH_SERVICE_URL"] ?? "http://localhost:3003"}/claw/api/v1/${type}/callback`;
-
-    const { clientId } = getCredentials();
-
-    const url = new URL(resolve(config.authUrl));
-    url.searchParams.set("client_id", clientId);
-    url.searchParams.set("redirect_uri", callbackUri);
-    url.searchParams.set("response_type", "code");
-    url.searchParams.set("scope", config.scope);
-    for (const [k, v] of Object.entries(config.extraAuthParams ?? {})) url.searchParams.set(k, v);
-    url.searchParams.set("state", signOAuthState(userId, { returnTo: resolveOAuthReturn(returnTo) }));
-
-    ok(res, { authUrl: url.toString() });
+    ok(res, { authUrl: await authorize(userId, { redirectUri, returnTo }) });
   }));
 
   router.post(`/:userId/oauth/${type}/callback`, asyncHandler(async (req: Request<{ userId: string }>, res: Response) => {

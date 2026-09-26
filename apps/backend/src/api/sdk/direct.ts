@@ -35,6 +35,16 @@ import {
   ClawAgentNotAvailableError,
   type ScopedClawIdentity,
 } from '@/services/clawAgentService';
+import {
+  callConnectorTool,
+  listConnectorTools,
+  listConnectors,
+  startConnectorConnect,
+  ConnectorNotConnectedError,
+  ConnectorNotFoundError,
+  ConnectorValidationError,
+  ConnectorWriteToolError,
+} from '@/services/clawConnectorsService';
 import { uploadMultiple } from '@/middleware/upload';
 import { config } from '@/config/env';
 import { SdkApiError } from './errors';
@@ -144,6 +154,46 @@ const clawRunBody = z.object({
   channelId: z.string().min(1).optional(),
   context: z.string().optional(),
 });
+
+/** A connector's `McpServer.type`, as it appears in `/connectors/:type/...`. */
+const CONNECTOR_TYPE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+
+function connectorType(req: Request): string {
+  const type = req.params['type'];
+  if (!type || !CONNECTOR_TYPE.test(type)) {
+    throw new SdkApiError('validation_failed', 'Invalid connector type.');
+  }
+  return type;
+}
+
+const connectorCallBody = z
+  .object({
+    tool: z.string().min(1).max(200),
+    args: z.record(z.unknown()).optional(),
+  })
+  .strict();
+
+const connectorConnectBody = z
+  .object({
+    returnTo: z.string().url().max(2048).optional(),
+  })
+  .strict();
+
+/**
+ * Where the browser lands after an OAuth consent: the dashboard that made the
+ * request. claw-auth re-validates it against its own allowlist regardless.
+ */
+function defaultReturnTo(req: Request): string {
+  const origin = req.headers.origin;
+  if (origin && /^https?:\/\//.test(origin)) return origin;
+  return config.frontendUrl;
+}
+
+/** The dashboard's connector page, where credential-form connectors are set up. */
+function connectorSettingsUrl(authData: AuthData, type: string): string {
+  const base = config.frontendUrl.replace(/\/+$/, '');
+  return `${base}/${encodeURIComponent(authData.workspaceId)}/ai/library/mcp/${encodeURIComponent(type)}`;
+}
 
 const ROUTES: readonly DirectRoute[] = [
   {
@@ -304,6 +354,49 @@ const ROUTES: readonly DirectRoute[] = [
       return status;
     },
   },
+
+  /*
+   * Connectors: an app reads external data through the VIEWER's own claw-auth
+   * connection (personal, or the org's shared one). The call is relayed to
+   * claw-auth, which runs the MCP tool server-side, so the credential never
+   * reaches the app. Read-only in v1 — write tools are refused with 403.
+   */
+  {
+    method: 'get',
+    path: '/connectors',
+    // COOKIE-BASED AUTH (ACTIVE) - runs as authData.sub
+    service: async (_req, authData) => ({ connectors: await listConnectors(authData.sub) }),
+  },
+  {
+    method: 'get',
+    path: '/connectors/:type/tools',
+    service: async (req, authData) => ({
+      tools: await listConnectorTools(authData.sub, connectorType(req)),
+    }),
+  },
+  {
+    method: 'post',
+    path: '/connectors/:type/call',
+    body: connectorCallBody,
+    service: async (req, authData) => {
+      const type = connectorType(req);
+      const input = connectorCallBody.parse(req.body);
+      return callConnectorTool(authData.sub, type, input.tool, input.args ?? {});
+    },
+  },
+  {
+    method: 'post',
+    path: '/connectors/:type/connect',
+    body: connectorConnectBody,
+    service: async (req, authData) => {
+      const type = connectorType(req);
+      const input = connectorConnectBody.parse(req.body);
+      return startConnectorConnect(authData.sub, type, {
+        returnTo: input.returnTo ?? defaultReturnTo(req),
+        settingsUrl: connectorSettingsUrl(authData, type),
+      });
+    },
+  },
 ];
 
 /** Build the router for every direct operation. */
@@ -329,7 +422,7 @@ export function createDirectRouter(): Router {
             if (err instanceof ClawAgentNotAvailableError) {
               throw new SdkApiError('not_found', err.message, { cause: err });
             }
-            throw new SdkApiError('internal', serviceMessage(err), { cause: err });
+            throw connectorError(err) ?? new SdkApiError('internal', serviceMessage(err), { cause: err });
           }
           return;
         }
@@ -509,6 +602,33 @@ function controllerError(status: number, body: unknown): SdkApiError {
     default:
       return new SdkApiError('internal', 'The handler failed.', { cause: body });
   }
+}
+
+/**
+ * The connector failures an app can act on, in the SDK envelope. `details` is
+ * part of the contract: the SDK reads `connector`, and `reason: 'write_tool'`
+ * to name the refused tool.
+ */
+function connectorError(err: unknown): SdkApiError | undefined {
+  if (err instanceof ConnectorNotConnectedError) {
+    return new SdkApiError('not_connected', err.message, {
+      details: { connector: err.connector },
+      cause: err,
+    });
+  }
+  if (err instanceof ConnectorWriteToolError) {
+    return new SdkApiError('forbidden', err.message, {
+      details: { connector: err.connector, tool: err.tool, reason: 'write_tool' },
+      cause: err,
+    });
+  }
+  if (err instanceof ConnectorNotFoundError) {
+    return new SdkApiError('not_found', err.message, { cause: err });
+  }
+  if (err instanceof ConnectorValidationError) {
+    return new SdkApiError('validation_failed', err.message, { cause: err });
+  }
+  return undefined;
 }
 
 /**
