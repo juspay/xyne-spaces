@@ -194,7 +194,8 @@ export function AutomationBuilder({
   );
 
   const [builderView, setBuilderView] = useState<'list' | 'flow'>(() => {
-    const stored = typeof localStorage !== 'undefined' ? localStorage.getItem('automation-builder-view') : null;
+    const stored =
+      typeof localStorage !== 'undefined' ? localStorage.getItem('automation-builder-view') : null;
     return stored === 'flow' ? 'flow' : 'list';
   });
   useEffect(() => {
@@ -1231,191 +1232,191 @@ export function AutomationBuilder({
             'flex-1 overflow-y-auto bg-muted/30',
             !editMode && canEdit && !readOnlyPreview && 'cursor-pointer',
           )}
-        {...(!editMode && canEdit && !readOnlyPreview
-          ? {
-              onClick: (): void => {
-                if (forksOnEdit) setProposeChangeConfirmOpen(true);
-                else setEditConfirmOpen(true);
-              },
-            }
-          : {})}
-      >
-        <div
-          className={cn(
-            'mx-auto flex w-full max-w-6xl flex-col gap-6 px-6 py-6',
-            !editMode && 'pointer-events-none select-none opacity-90',
-          )}
-          aria-readonly={!editMode}
-          // pointer-events-none only blocks the mouse — it doesn't remove step/trigger
-          // form fields from the tab order, so they could still be focused and typed
-          // into via keyboard. `inert` fully removes this subtree from focus/interaction.
-          inert={readOnlyPreview}
+          {...(!editMode && canEdit && !readOnlyPreview
+            ? {
+                onClick: (): void => {
+                  if (forksOnEdit) setProposeChangeConfirmOpen(true);
+                  else setEditConfirmOpen(true);
+                },
+              }
+            : {})}
         >
-          <LockBanner status={savedStatus} isLiveRow={isLiveRow} />
-          <RuleSummaryCard
-            config={config}
-            triggerSchema={triggerSchema}
-            stepCatalog={stepCatalog}
-          />
-          <BuilderSection
-            number={1}
-            kicker='event'
-            title='When this happens'
-            description='The event that fires this automation.'
-          >
-            <TriggerCard
-              view='event'
-              trigger={config.trigger}
-              catalog={triggerCatalog}
-              schema={triggerSchema}
-              schemaLoading={triggerSchemaQuery.isLoading && !!config.trigger.type}
-              onChangeType={handleTriggerTypeChange}
-              onConfigChange={handleTriggerConfigChange}
-              issues={triggerIssues}
-            />
-            {config.trigger.type === WEBHOOK_TRIGGER_TYPE && (
-              <div className='mt-4'>
-                <WebhookEndpointPanel automationId={savedId} />
-              </div>
+          <div
+            className={cn(
+              'mx-auto flex w-full max-w-6xl flex-col gap-6 px-6 py-6',
+              !editMode && 'pointer-events-none select-none opacity-90',
             )}
-          </BuilderSection>
-
-          <BuilderSection
-            number={2}
-            kicker='timing'
-            title='Run timing'
-            description='Run now, or wait a fixed time after a date field on the trigger.'
+            aria-readonly={!editMode}
+            // pointer-events-none only blocks the mouse — it doesn't remove step/trigger
+            // form fields from the tab order, so they could still be focused and typed
+            // into via keyboard. `inert` fully removes this subtree from focus/interaction.
+            inert={readOnlyPreview}
           >
-            <ScheduleCard
-              schedule={config.schedule}
+            <LockBanner status={savedStatus} isLiveRow={isLiveRow} />
+            <RuleSummaryCard
+              config={config}
               triggerSchema={triggerSchema}
-              onChange={handleScheduleChange}
+              stepCatalog={stepCatalog}
             />
-          </BuilderSection>
-
-          <BuilderSection
-            number={3}
-            kicker='condition'
-            title='With these conditions'
-            description='Evaluated against fresh state when the actions are about to run.'
-          >
-            <TriggerCard
-              view='condition'
-              trigger={config.trigger}
-              catalog={triggerCatalog}
-              schema={triggerSchema}
-              schemaLoading={triggerSchemaQuery.isLoading && !!config.trigger.type}
-              onChangeType={handleTriggerTypeChange}
-              onConfigChange={handleTriggerConfigChange}
-              issues={triggerIssues}
-              onFormFieldNamesResolved={handleFormFieldNamesResolved}
-            />
-          </BuilderSection>
-
-          <BuilderSection
-            number={4}
-            kicker='action'
-            isLast
-            title='Then do this'
-            description='One or more actions run in order. Conditionals can branch inside a step.'
-          >
-            <AddStepRow catalog={stepCatalog} onPick={type => handleAddStep(type, 0)} />
-
-            {config.steps.map((step, index) => {
-              const isLast = index === config.steps.length - 1;
-              const variableSources = buildVariableSources(
-                triggerSchema,
-                config.trigger.config,
-                config.steps,
-                stepSchemaCache,
-                index,
-                formFieldNameMap,
-              );
-              const stepIssues = issuesUnder(validation?.issues, `steps[${index}]`);
-
-              const card =
-                step.type === CONDITIONAL_STEP_TYPE ? (
-                  <ConditionalCard
-                    step={step as ConditionalStepConfig}
-                    catalog={stepCatalog}
-                    schemaCache={stepSchemaCache}
-                    schemaLoadingFor={stepSchemaLoadingFor}
-                    operators={operators}
-                    variableSources={variableSources}
-                    index={index + 1}
-                    total={config.steps.length}
-                    onChange={next => updateStepAt(index, next)}
-                    onMoveUp={() => handleMoveStep(index, -1)}
-                    onMoveDown={() => handleMoveStep(index, 1)}
-                    onDelete={() => handleDeleteStep(index)}
-                    issues={stepIssues}
-                    pathPrefix={`steps[${index}]`}
-                    readOnly={!editMode}
-                    ensureSchema={ensureSchema}
-                    renderConditionalCard={renderConditionalCard}
-                    renderSwitchCard={renderSwitchCard}
-                  />
-                ) : step.type === SWITCH_STEP_TYPE ? (
-                  <SwitchCard
-                    step={step as SwitchStepConfig}
-                    catalog={stepCatalog}
-                    schemaCache={stepSchemaCache}
-                    schemaLoadingFor={stepSchemaLoadingFor}
-                    operators={operators}
-                    variableSources={variableSources}
-                    index={index + 1}
-                    total={config.steps.length}
-                    onChange={next => updateStepAt(index, next)}
-                    onMoveUp={() => handleMoveStep(index, -1)}
-                    onMoveDown={() => handleMoveStep(index, 1)}
-                    onDelete={() => handleDeleteStep(index)}
-                    issues={stepIssues}
-                    pathPrefix={`steps[${index}]`}
-                    readOnly={!editMode}
-                    ensureSchema={ensureSchema}
-                    renderConditionalCard={renderConditionalCard}
-                    renderSwitchCard={renderSwitchCard}
-                  />
-                ) : (
-                  <StepCard
-                    step={step as ActionStepConfig}
-                    catalogItem={
-                      stepCatalog.find(c => c.type === (step as ActionStepConfig).type) ?? null
-                    }
-                    schema={stepSchemaCache[(step as ActionStepConfig).type] ?? null}
-                    schemaLoading={stepSchemaLoadingFor((step as ActionStepConfig).type)}
-                    index={index + 1}
-                    total={config.steps.length}
-                    variableSources={variableSources}
-                    onConfigChange={cfg => handleStepConfigChange(index, cfg)}
-                    onMoveUp={() => handleMoveStep(index, -1)}
-                    onMoveDown={() => handleMoveStep(index, 1)}
-                    onDelete={() => handleDeleteStep(index)}
-                    issues={stepIssues}
-                    pathPrefix={`steps[${index}].config.`}
-                    readOnly={!editMode}
-                  />
-                );
-
-              return (
-                <div key={step.id} className='flex flex-col'>
-                  {card}
-                  {!isLast && (
-                    <AddStepRow
-                      catalog={stepCatalog}
-                      onPick={type => handleAddStep(type, index + 1)}
-                    />
-                  )}
+            <BuilderSection
+              number={1}
+              kicker='event'
+              title='When this happens'
+              description='The event that fires this automation.'
+            >
+              <TriggerCard
+                view='event'
+                trigger={config.trigger}
+                catalog={triggerCatalog}
+                schema={triggerSchema}
+                schemaLoading={triggerSchemaQuery.isLoading && !!config.trigger.type}
+                onChangeType={handleTriggerTypeChange}
+                onConfigChange={handleTriggerConfigChange}
+                issues={triggerIssues}
+              />
+              {config.trigger.type === WEBHOOK_TRIGGER_TYPE && (
+                <div className='mt-4'>
+                  <WebhookEndpointPanel automationId={savedId} />
                 </div>
-              );
-            })}
+              )}
+            </BuilderSection>
 
-            {config.steps.length > 0 && (
-              <AddStepRow catalog={stepCatalog} onPick={type => handleAddStep(type)} />
-            )}
-          </BuilderSection>
+            <BuilderSection
+              number={2}
+              kicker='timing'
+              title='Run timing'
+              description='Run now, or wait a fixed time after a date field on the trigger.'
+            >
+              <ScheduleCard
+                schedule={config.schedule}
+                triggerSchema={triggerSchema}
+                onChange={handleScheduleChange}
+              />
+            </BuilderSection>
+
+            <BuilderSection
+              number={3}
+              kicker='condition'
+              title='With these conditions'
+              description='Evaluated against fresh state when the actions are about to run.'
+            >
+              <TriggerCard
+                view='condition'
+                trigger={config.trigger}
+                catalog={triggerCatalog}
+                schema={triggerSchema}
+                schemaLoading={triggerSchemaQuery.isLoading && !!config.trigger.type}
+                onChangeType={handleTriggerTypeChange}
+                onConfigChange={handleTriggerConfigChange}
+                issues={triggerIssues}
+                onFormFieldNamesResolved={handleFormFieldNamesResolved}
+              />
+            </BuilderSection>
+
+            <BuilderSection
+              number={4}
+              kicker='action'
+              isLast
+              title='Then do this'
+              description='One or more actions run in order. Conditionals can branch inside a step.'
+            >
+              <AddStepRow catalog={stepCatalog} onPick={type => handleAddStep(type, 0)} />
+
+              {config.steps.map((step, index) => {
+                const isLast = index === config.steps.length - 1;
+                const variableSources = buildVariableSources(
+                  triggerSchema,
+                  config.trigger.config,
+                  config.steps,
+                  stepSchemaCache,
+                  index,
+                  formFieldNameMap,
+                );
+                const stepIssues = issuesUnder(validation?.issues, `steps[${index}]`);
+
+                const card =
+                  step.type === CONDITIONAL_STEP_TYPE ? (
+                    <ConditionalCard
+                      step={step as ConditionalStepConfig}
+                      catalog={stepCatalog}
+                      schemaCache={stepSchemaCache}
+                      schemaLoadingFor={stepSchemaLoadingFor}
+                      operators={operators}
+                      variableSources={variableSources}
+                      index={index + 1}
+                      total={config.steps.length}
+                      onChange={next => updateStepAt(index, next)}
+                      onMoveUp={() => handleMoveStep(index, -1)}
+                      onMoveDown={() => handleMoveStep(index, 1)}
+                      onDelete={() => handleDeleteStep(index)}
+                      issues={stepIssues}
+                      pathPrefix={`steps[${index}]`}
+                      readOnly={!editMode}
+                      ensureSchema={ensureSchema}
+                      renderConditionalCard={renderConditionalCard}
+                      renderSwitchCard={renderSwitchCard}
+                    />
+                  ) : step.type === SWITCH_STEP_TYPE ? (
+                    <SwitchCard
+                      step={step as SwitchStepConfig}
+                      catalog={stepCatalog}
+                      schemaCache={stepSchemaCache}
+                      schemaLoadingFor={stepSchemaLoadingFor}
+                      operators={operators}
+                      variableSources={variableSources}
+                      index={index + 1}
+                      total={config.steps.length}
+                      onChange={next => updateStepAt(index, next)}
+                      onMoveUp={() => handleMoveStep(index, -1)}
+                      onMoveDown={() => handleMoveStep(index, 1)}
+                      onDelete={() => handleDeleteStep(index)}
+                      issues={stepIssues}
+                      pathPrefix={`steps[${index}]`}
+                      readOnly={!editMode}
+                      ensureSchema={ensureSchema}
+                      renderConditionalCard={renderConditionalCard}
+                      renderSwitchCard={renderSwitchCard}
+                    />
+                  ) : (
+                    <StepCard
+                      step={step as ActionStepConfig}
+                      catalogItem={
+                        stepCatalog.find(c => c.type === (step as ActionStepConfig).type) ?? null
+                      }
+                      schema={stepSchemaCache[(step as ActionStepConfig).type] ?? null}
+                      schemaLoading={stepSchemaLoadingFor((step as ActionStepConfig).type)}
+                      index={index + 1}
+                      total={config.steps.length}
+                      variableSources={variableSources}
+                      onConfigChange={cfg => handleStepConfigChange(index, cfg)}
+                      onMoveUp={() => handleMoveStep(index, -1)}
+                      onMoveDown={() => handleMoveStep(index, 1)}
+                      onDelete={() => handleDeleteStep(index)}
+                      issues={stepIssues}
+                      pathPrefix={`steps[${index}].config.`}
+                      readOnly={!editMode}
+                    />
+                  );
+
+                return (
+                  <div key={step.id} className='flex flex-col'>
+                    {card}
+                    {!isLast && (
+                      <AddStepRow
+                        catalog={stepCatalog}
+                        onPick={type => handleAddStep(type, index + 1)}
+                      />
+                    )}
+                  </div>
+                );
+              })}
+
+              {config.steps.length > 0 && (
+                <AddStepRow catalog={stepCatalog} onPick={type => handleAddStep(type)} />
+              )}
+            </BuilderSection>
+          </div>
         </div>
-      </div>
       )}
 
       <div className='border-t border-border bg-background px-6 py-3'>
