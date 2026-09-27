@@ -50,6 +50,11 @@ const FILE_PAGE_FACTOR = 3;
  * posted is not related context for what they write next.
  */
 const OWN_RECENT_MS = 30 * 60 * 1000;
+/**
+ * Threads whose text is read at once. Each is its own query, so a long thread can't
+ * crowd out the rest, and a lookup holds no more of the connection pool than this.
+ */
+const THREAD_QUERY_CONCURRENCY = 4;
 
 /**
  * One search per kind. A single list across schemas does not work: message scores
@@ -152,11 +157,14 @@ async function search(
     );
     const vespaMs = Date.now() - started;
     if (signal?.aborted) return null;
-    const hits = ((response.root.children ?? []) as VespaSearchHit[])
+    const raw = ((response.root.children ?? []) as VespaSearchHit[])
       .filter(
         (hit) => !kind.subApp || ('subApp' in hit.fields && hit.fields.subApp === kind.subApp)
       )
       .slice(0, limit);
+    // Message hits become one per thread before they are enriched, which costs
+    // database lookups: most of a page is replies to a few threads.
+    const hits = kind.kind === 'thread' ? firstHitPerThread(raw, ctx) : raw;
     stage = 'transform';
     const results = await transformVespaResults(hits, db);
     logger.info('[RelatedContext] vespa search', {
@@ -178,18 +186,34 @@ async function search(
 }
 
 /**
- * Collapses message hits into threads. Replies come back as separate hits, and one
- * well-matched thread can fill the page; the best-scoring hit stands for its thread
- * and is where a click lands.
+ * One message hit per thread — the best-scoring, where a click lands — read from the
+ * search's own fields, before anything is enriched. Left out: the thread being
+ * replied in, and the person's own messages from the last OWN_RECENT_MS (what they
+ * just posted is not related context for what they write next).
  */
-function toThreads(hits: TransformedSearchResult[]) {
-  const threads = new Map<string, TransformedSearchResult>();
-  for (const hit of hits) {
+function firstHitPerThread(hits: VespaSearchHit[], ctx: RetrievalContext): VespaSearchHit[] {
+  const seen = new Set<string>();
+  return hits.filter((hit) => {
+    const { fields } = hit;
+    const threadId = 'threadId' in fields ? fields.threadId : undefined;
+    if (!threadId || threadId === ctx.conversationId || seen.has(threadId)) return false;
+    const recentlyOwn =
+      'userId' in fields &&
+      fields.userId === ctx.auth.userId &&
+      'createdAtTimestamp' in fields &&
+      Date.now() - fields.createdAtTimestamp < OWN_RECENT_MS;
+    if (recentlyOwn) return false;
+    seen.add(threadId);
+    return true;
+  });
+}
+
+/** Each thread hit keyed by its thread, in the order the search ranked them. */
+function toThreads(hits: TransformedSearchResult[]): Array<[string, TransformedSearchResult]> {
+  return hits.flatMap((hit): Array<[string, TransformedSearchResult]> => {
     const conversationId = hit.searchContext?.conversationId;
-    if (!conversationId) continue;
-    if (!threads.has(conversationId)) threads.set(conversationId, hit);
-  }
-  return [...threads.entries()];
+    return conversationId ? [[conversationId, hit]] : [];
+  });
 }
 
 /**
@@ -215,28 +239,22 @@ function withoutTicketThreads(
  */
 async function threadTexts(conversationIds: string[]): Promise<Map<string, string>> {
   const texts = new Map<string, string>();
-  if (conversationIds.length === 0) return texts;
-  // One query for every thread, earliest first, then each thread's first messages. The
-  // cap bounds a long thread; one that misses out falls back to its search snippet.
-  // The thread came from the person's own search; a reply meant for someone else
-  // still stays out.
-  const messages = await db.message.findMany({
-    where: { conversationId: { in: conversationIds }, isDeleted: false, visibleTo: null },
-    orderBy: { createdAt: 'asc' },
-    take: conversationIds.length * THREAD_MESSAGES * 4,
-    select: { conversationId: true, content: true },
-  });
-  const byThread = new Map<string, string[]>();
-  for (const message of messages) {
-    const lines = byThread.get(message.conversationId) ?? [];
-    const text = plain(message.content);
-    if (text && lines.length < THREAD_MESSAGES) lines.push(text);
-    byThread.set(message.conversationId, lines);
-  }
-  for (const [conversationId, [opening, ...replies]] of byThread) {
-    if (!opening) continue;
+  const readThread = async (conversationId: string): Promise<void> => {
+    // The thread came from the person's own search; a reply meant for someone else
+    // still stays out.
+    const messages = await db.message.findMany({
+      where: { conversationId, isDeleted: false, visibleTo: null },
+      orderBy: { createdAt: 'asc' },
+      take: THREAD_MESSAGES,
+      select: { content: true },
+    });
+    const [opening, ...replies] = messages.map((m) => plain(m.content)).filter(Boolean);
+    if (!opening) return;
     const lines = [`Opening message: ${opening}`, ...replies.map((r, i) => `Reply ${i + 1}: ${r}`)];
     texts.set(conversationId, clip(lines.join('\n')));
+  };
+  for (let i = 0; i < conversationIds.length; i += THREAD_QUERY_CONCURRENCY) {
+    await Promise.all(conversationIds.slice(i, i + THREAD_QUERY_CONCURRENCY).map(readThread));
   }
   return texts;
 }
@@ -301,14 +319,10 @@ export async function retrieveCandidates(
     (found.get(kind) ?? []).filter(
       (result) => !ctx.conversationId || result.searchContext?.conversationId !== ctx.conversationId
     );
-  // Nor what the person posted moments ago.
-  const recentlyOwn = (hit: TransformedSearchResult): boolean =>
-    hit.searchContext?.senderId === ctx.auth.userId &&
-    Date.now() - (hit.searchContext?.createdAtTimestamp ?? 0) < OWN_RECENT_MS;
-  const threads = withoutTicketThreads(
-    toThreads(hitsOf('thread').filter((hit) => !recentlyOwn(hit))),
-    hitsOf('ticket')
-  ).slice(0, limits.perKind);
+  const threads = withoutTicketThreads(toThreads(hitsOf('thread')), hitsOf('ticket')).slice(
+    0,
+    limits.perKind
+  );
   let texts = new Map<string, string>();
   try {
     texts = await threadTexts(threads.map(([conversationId]) => conversationId));

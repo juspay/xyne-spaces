@@ -124,11 +124,32 @@ const sameRelatedContext = (
   saved.items.length === items.length &&
   saved.items.every((item, i) => item === items[i]);
 
+/** A saved entry in the shape this machine writes; storage can hold anything. */
+const isDraftRelatedContext = (value: unknown): value is DraftRelatedContext => {
+  if (!value || typeof value !== 'object') return false;
+  const { draft, items, savedAt } = value as Record<string, unknown>;
+  return (
+    typeof draft === 'string' &&
+    Array.isArray(items) &&
+    typeof savedAt === 'number' &&
+    Number.isFinite(savedAt)
+  );
+};
+
+/**
+ * What was saved, keeping only well-formed entries. The actions below rely on that
+ * shape, and one of them throwing would stop this whole machine — drafts, channels
+ * and users with it — so nothing unchecked gets into its context.
+ */
 const loadRelatedContext = (): DraftRelatedContexts => {
   try {
     const parsed = JSON.parse(draftStorage().getItem(RELATED_CONTEXT_STORAGE_KEY) || '{}') as unknown;
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      return pruneRelatedContext(parsed as DraftRelatedContexts);
+      const valid = Object.entries(parsed).flatMap(
+        ([lookupId, entry]): Array<[string, DraftRelatedContext]> =>
+          isDraftRelatedContext(entry) ? [[lookupId, entry]] : [],
+      );
+      return pruneRelatedContext(Object.fromEntries(valid));
     }
   } catch { /* unreadable: start empty */ }
   return {};

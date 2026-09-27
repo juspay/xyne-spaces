@@ -15,8 +15,10 @@ import { channelOf, plain, whereOf } from './relatedContextDisplay';
 
 /** Two names at most, then how many more: "Arjun Rao, Mei Tanaka +3". */
 export const peopleLabel = (names: string[], total: number): string => {
-  const shown = names.slice(0, 2).join(', ');
-  return total > 2 ? `${shown} +${total - 2}` : shown;
+  const shown = names.slice(0, 2);
+  // Everyone not named, including anyone whose name hasn't synced yet.
+  const hidden = total - shown.length;
+  return hidden > 0 ? `${shown.join(', ')} +${hidden}` : shown.join(', ');
 };
 
 const isDmScope = (scopeType: string | undefined): boolean =>
