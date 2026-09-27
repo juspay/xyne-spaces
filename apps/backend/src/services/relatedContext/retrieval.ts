@@ -134,7 +134,7 @@ async function search(
     const vespaMs = Date.now() - started;
     const hits = (response.root.children ?? []) as VespaSearchHit[];
     stage = 'transform';
-    const results = await transformVespaResults(hits, db, false, true);
+    const results = await transformVespaResults(hits, db);
     logger.info('[RelatedContext] vespa search', {
       kind: kind.kind,
       vespaMs,
