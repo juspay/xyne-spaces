@@ -21,12 +21,11 @@ import {
   agentChainWorkflowRepository,
   activeGoalRepository,
   experimentRepository,
-  userProviderCredentialsRepository,
 } from "../repositories/index.js";
 import { hashSkillContent } from "xyne-claw-shared";
 import { agentRequestRepository } from "../repositories/agentRequestRepository.js";
 import { buildAvailableToolsCatalog } from "./tools.js";
-import { isVisibleToUser, parseConnectorMeta } from "./servers.js";
+import { } from "./servers.js";
 import {
   identityFromDraftSpec,
   isValidAgentSlug,
@@ -82,6 +81,7 @@ import { redisService } from "../redis.js";
 import { publishLiveEvent } from "../lib/live-conversation-bus.js";
 import { deliverXyneAiFlow, postFlowCard, resolveXyneAiCardTarget } from "../lib/flow-card-delivery.js";
 import { renderAgentProfileCard, renderAgentProfileListCard, renderAgentSummaryCard } from "../lib/agent-card-render.js";
+import { renderConnectorSuggestCard, renderProviderSuggestCard, resolveConnectorSuggestions } from "../lib/connector-card-render.js";
 import { UNREGISTERED_USER_TEMPLATE } from "../constants.js";
 import {
   registerRunRecovery,
@@ -145,8 +145,6 @@ import {
   buildGoalSuggestionFlow,
   buildPlanFlow,
   buildAgentCardFlow,
-  buildMcpSuggestFlow,
-  buildProviderSuggestFlow,
   buildCodeFlow,
   buildDiffFlow,
   buildChartFlow,
@@ -160,18 +158,13 @@ import type { TwinDelivery, UiWidget, PrProvider, PrStatus, FlowDefinition } fro
 import { isAgentInvocableBy } from "xyne-claw-shared";
 import { isSupportedInboundAttachment } from "xyne-claw-shared";
 import type { Todo } from "xyne-claw-shared";
-import { connectorTypesFromText, connectorTypesUserAskedFor, wantsConnectorRoster } from "../lib/connector-hints.js";
+import { } from "../lib/connector-hints.js";
 import {
-  SUPPORTED_PROVIDERS,
-  PROVIDER_LABELS,
-  PROVIDER_DESCRIPTIONS,
-  PROVIDER_CONNECT_METHOD,
   providersUserAskedFor,
   stripAddressedAgentMention,
-  unsupportedProvidersFromText,
   wantsProviderRoster,
 } from "../lib/provider-hints.js";
-import { availabilityForServerIds } from "../lib/connector-availability.js";
+import { } from "../lib/connector-availability.js";
 import { countTrailingBase64Padding, safePathSegment } from "../lib/url-path.js";
 import { assertSafeOutboundUrl } from "../mcpgateway/services/http-client.js";
 
@@ -569,12 +562,10 @@ import {
 
 /** Owner display name + id for an agent's card chin ("Created by @x"). */
 /** Connectors shown before the card defers to "Browse MCPs". */
-const MCP_SUGGEST_ROSTER_SAMPLE = 5;
 
 /** Agents listed on the roster card before it defers to "Browse agents". */
 
 /** Cap on connectors the server offers unprompted, so a card never becomes a list. */
-const MCP_SUGGEST_INFERRED_MAX = 3;
 
 /**
  * Connector cards to post alongside a reply. The model requests these
@@ -4870,6 +4861,13 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
         spacesAppId: ctx.spacesAppId ?? undefined,
       }
     : null;
+  const connectorCardIdentity = {
+    agentSlug: ctx.agentSlug,
+    userId: ctx.senderId,
+    conversationId: ctx.conversationId,
+    channelId: ctx.channelId,
+    spacesAppId: ctx.spacesAppId ?? undefined,
+  };
   const agentCardTarget = {
     kind: "spaces" as const,
     channelId: ctx.channelId,
@@ -4886,141 +4884,19 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       log.warn("Failed to post agent profile card (non-fatal)", { error: errMsg(err) });
     }
   }
-  // Fall back to the server's own reading of the request when the model did not
-  // ask for cards. It routinely misses the moment — most often by assuming a
-  // connector is already connected — and a missing capability is exactly when
-  // the user most needs the offer. Only unconnected connectors survive the
-  // filter below, so a wrong guess costs nothing.
-  // Fail-safe: this runs before the reply is posted, so a throw here would cost
-  // the user their answer. A suggestion is never worth that.
-  let inferredTypes: string[] = [];
-  if (!payload.pendingConnectorSuggestions) {
+  const connectorSuggestions = resolveConnectorSuggestions(
+    payload.pendingConnectorSuggestions,
+    ctx.rootTask ?? ctx.task ?? "",
+  );
+  if (connectorSuggestions && agentCardDeliverable) {
     try {
-      inferredTypes = connectorTypesFromText(ctx.rootTask ?? ctx.task ?? "", {
-        includeKeywords: true,
-      }).slice(0, MCP_SUGGEST_INFERRED_MAX);
-    } catch (err) {
-      log.warn("[mcp-suggest] connector inference failed (non-fatal)", {
-        error: err instanceof Error ? err.message : String(err),
+      await renderConnectorSuggestCard({
+        suggestions: connectorSuggestions,
+        blockedConnectors: payload.blockedConnectors,
+        taskText: ctx.rootTask ?? ctx.task ?? "",
+        id: connectorCardIdentity,
+        target: agentCardTarget,
       });
-    }
-  }
-
-  const rosterAsked =
-    !payload.pendingConnectorSuggestions && wantsConnectorRoster(ctx.rootTask ?? ctx.task ?? "");
-
-  const pendingConnectorSuggestions: PendingConnectorSuggestions | undefined =
-    payload.pendingConnectorSuggestions ??
-    (rosterAsked
-      ? { serverTypes: [], listAll: true, inferred: true }
-      : inferredTypes.length > 0
-        ? { serverTypes: inferredTypes, inferred: true }
-        : undefined);
-  if (pendingConnectorSuggestions && agentCardDeliverable) {
-    try {
-      // Roster mode: the user asked what exists, so the SERVER picks the sample
-      // — the model must not decide which connectors represent the catalog.
-      const listAll = pendingConnectorSuggestions.listAll === true;
-      const totalCount = listAll
-        ? await prisma.mcpServer.count({ where: { enabled: true } })
-        : undefined;
-
-      // Resolve every requested type against the catalog. The model supplies
-      // names only — descriptions and display names come from the row, and an
-      // unknown type is dropped rather than rendered as an empty card.
-      const candidates = listAll
-        ? await prisma.mcpServer.findMany({
-            where: { enabled: true },
-            select: { id: true, type: true, name: true, description: true, connectorMeta: true },
-            orderBy: { name: "asc" },
-          })
-        : await prisma.mcpServer.findMany({
-            where: { type: { in: pendingConnectorSuggestions.serverTypes }, enabled: true },
-            select: { id: true, type: true, name: true, description: true, connectorMeta: true },
-          });
-      const visibleRows = candidates.filter((row) =>
-        isVisibleToUser(parseConnectorMeta(row.connectorMeta), ctx.senderId),
-      );
-      const rows = listAll ? visibleRows.slice(0, MCP_SUGGEST_ROSTER_SAMPLE) : visibleRows;
-      const byType = new Map(rows.map((row) => [row.type, row]));
-
-      const availability = await availabilityForServerIds(
-        ctx.senderId,
-        rows.map((r) => r.id),
-      );
-      const blockedTypes = new Set(payload.blockedConnectors ?? []);
-
-      // Roster mode is already ordered by the query; otherwise preserve the
-      // model's ordering, since it ranked them by relevance.
-      const ordered = listAll
-        ? rows
-        : pendingConnectorSuggestions.serverTypes
-            .map((type) => byType.get(type))
-            .filter((row): row is NonNullable<typeof row> => !!row);
-
-      const inferred = pendingConnectorSuggestions.inferred === true;
-
-      // Derived from the user's own words, never from the model's claim: a model
-      // that wants its card shown will assert explicit intent for a plain task
-      // request, which is exactly how an already-usable connector slipped
-      // through. The server owns this fact like every other on the card.
-      const askedToConnect = new Set(
-        connectorTypesUserAskedFor(ctx.rootTask ?? ctx.task ?? ""),
-      );
-
-      const connectors = ordered
-        // An unsolicited suggestion only earns its place when the connector is
-        // not already usable — personally connected or shared org-wide. Two
-        // exceptions, both genuine user intent: roster mode ("what exists?"),
-        // and the user naming a connector they want to connect, where a personal
-        // connection is a legitimate want even under an org credential.
-        .filter((row) => {
-          if (listAll || askedToConnect.has(row.type)) return true;
-          if (availability.personal.has(row.id)) return false;
-          if (availability.org.has(row.id)) return blockedTypes.has(row.type);
-          return true;
-        })
-        .map((row) => ({
-          serverType: row.type,
-          name: row.name,
-          ...(row.description ? { description: row.description } : {}),
-          connected: availability.personal.has(row.id) || availability.org.has(row.id),
-        }));
-
-      if (connectors.length === 0) {
-        log.info(
-          `[mcp-suggest] skipped — none of ${pendingConnectorSuggestions.serverTypes.join(", ")} are known connectors`,
-        );
-      } else {
-        const flow = withSpacesAppId(
-          buildMcpSuggestFlow({
-            connectors,
-            ...(pendingConnectorSuggestions.title
-              ? { title: pendingConnectorSuggestions.title }
-              : listAll
-                ? { title: "Connectors you can add" }
-                : {}),
-            ...(listAll ? { browseAll: true } : {}),
-            ...(inferred && !pendingConnectorSuggestions.title
-              ? { title: "Connect to unlock this" }
-              : {}),
-            ...(totalCount !== undefined ? { totalCount } : {}),
-            screenKey: `${ctx.senderId}-${connectors.map((c) => c.serverType).join("-")}`,
-            ...(ctx.agentSlug ? { agentSlug: ctx.agentSlug } : {}),
-            userId: ctx.senderId,
-            conversationId: ctx.conversationId,
-            channelId: ctx.channelId,
-          }),
-          ctx.spacesAppId,
-        );
-        await spacesAppFetch("/chat/postMessage", {
-          channelId: ctx.channelId,
-          conversationId: ctx.conversationId,
-          flow,
-          userId: ctx.spacesAppUserId,
-        }, ctx.appToken);
-        log.info(`[mcp-suggest] posted ${connectors.length} connector cards conv=${ctx.conversationId}`);
-      }
     } catch (err) {
       log.warn("Failed to post connector suggestions (non-fatal)", {
         error: err instanceof Error ? err.message : String(err),
@@ -5035,60 +4911,11 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
   // a card that will never render.
   if (agentCardDeliverable) {
     try {
-      const askText = stripAddressedAgentMention(ctx.rootTask ?? ctx.task ?? "", ctx.agentSlug);
-      const namedProviders = providersUserAskedFor(askText);
-      const unsupported = unsupportedProvidersFromText(askText);
-      const providerRoster = wantsProviderRoster(askText);
-
-      if (namedProviders.length > 0 || providerRoster) {
-        const creds = await userProviderCredentialsRepository
-          .listByUser(ctx.senderId)
-          .catch(() => []);
-        const connectedByProvider = new Map(creds.map((c) => [c.provider, c] as const));
-
-        const shown = providerRoster ? [...SUPPORTED_PROVIDERS] : namedProviders;
-        const providers = shown.map((provider) => {
-          const cred = connectedByProvider.get(provider);
-          return {
-            provider,
-            name: PROVIDER_LABELS[provider] ?? provider,
-            ...(PROVIDER_DESCRIPTIONS[provider]
-              ? { description: PROVIDER_DESCRIPTIONS[provider] as string }
-              : {}),
-            connected: provider === "spaces" ? true : !!cred,
-            ...(cred?.sharedCredentialId ? { sharedName: "Shared with your org" } : {}),
-            ...(PROVIDER_CONNECT_METHOD[provider]
-              ? { connectMethod: PROVIDER_CONNECT_METHOD[provider] as "oauth" | "device" | "api_key" | "none" }
-              : {}),
-          };
-        });
-
-        const flow = withSpacesAppId(
-          buildProviderSuggestFlow({
-            providers,
-            title: providerRoster ? "AI providers you can connect" : "Connect this provider",
-            ...(providerRoster ? { browseAll: true, totalCount: SUPPORTED_PROVIDERS.length } : {}),
-            ...(unsupported.length > 0
-              ? { reason: `${unsupported.join(", ")} ${unsupported.length === 1 ? "is" : "are"} not available on Xyne.` }
-              : {}),
-            screenKey: `${ctx.senderId}-${shown.join("-")}`,
-            ...(ctx.agentSlug ? { agentSlug: ctx.agentSlug } : {}),
-            userId: ctx.senderId,
-            conversationId: ctx.conversationId,
-            channelId: ctx.channelId,
-          }),
-          ctx.spacesAppId,
-        );
-        await spacesAppFetch("/chat/postMessage", {
-          channelId: ctx.channelId,
-          conversationId: ctx.conversationId,
-          flow,
-          userId: ctx.spacesAppUserId,
-        }, ctx.appToken);
-        log.info(`[provider-suggest] posted ${providers.length} provider cards conv=${ctx.conversationId}`);
-      } else if (unsupported.length > 0) {
-        log.info(`[provider-suggest] unsupported only: ${unsupported.join(", ")} — no card`);
-      }
+      await renderProviderSuggestCard({
+        taskText: ctx.rootTask ?? ctx.task ?? "",
+        id: connectorCardIdentity,
+        target: agentCardTarget,
+      });
     } catch (err) {
       log.warn("Failed to post provider suggestions (non-fatal)", {
         error: err instanceof Error ? err.message : String(err),

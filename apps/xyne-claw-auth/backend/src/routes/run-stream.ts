@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from "express";
 import { errMsg } from "../lib/errors.js";
 import { randomUUID } from "node:crypto";
 import { CONFIG } from "../config.js";
+import type { FlowDefinition } from "xyne-claw-shared";
 import { requireAuth, requireNoAccessToken, requireResultToken } from "../middleware/require-auth.js";
 import { getRequesterId, getAgentEditAccess, isClawAdmin } from "../middleware/agent-acl.js";
 import { prisma } from "../db.js";
@@ -2145,6 +2146,83 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
       } catch (cardErr) {
         log.warn(`[agent-card] xyne-ai card failed:`, errMsg(cardErr));
       }
+    }
+
+    // Connector + provider suggestion cards. Both are display plus client-side
+    // connect, so there is no server action or terminal state to make
+    // surface-aware — delivery is the whole job. Triggers 2 and 3 are inferred
+    // from the user's own words, so these need no claw tool.
+    try {
+      const { resolveXyneAiCardTarget } = await import("../lib/flow-card-delivery.js");
+      const suggestTarget = await resolveXyneAiCardTarget({ assistantMessageId });
+      if (suggestTarget) {
+        // The user's own words, read off the row rather than streamMeta.
+        const ask = await prisma.chatMessage
+          .findFirst({
+            where: { conversationId: suggestTarget.conversationId, role: "user" },
+            orderBy: { createdAt: "desc" },
+            select: { content: true },
+          })
+          .catch(() => null);
+        const taskText = ask?.content ?? "";
+        if (taskText) {
+          const {
+            renderConnectorSuggestCard,
+            renderProviderSuggestCard,
+            resolveConnectorSuggestions,
+          } = await import("../lib/connector-card-render.js");
+          const suggestIdentity = {
+            agentSlug: suggestTarget.agentSlug,
+            userId: suggestTarget.userId,
+            conversationId: suggestTarget.conversationId,
+            channelId: "",
+            spacesAppId: suggestTarget.spacesAppId,
+          };
+          const blocked = Array.isArray(body["blockedConnectors"])
+            ? (body["blockedConnectors"] as string[])
+            : undefined;
+          const connectorSuggestions = resolveConnectorSuggestions(
+            body["pendingConnectorSuggestions"] as
+              | { serverTypes: string[]; listAll?: boolean; inferred?: boolean; title?: string }
+              | undefined,
+            taskText,
+          );
+          const delivered: Array<FlowDefinition | null> = [];
+          if (connectorSuggestions) {
+            delivered.push(
+              await renderConnectorSuggestCard({
+                suggestions: connectorSuggestions,
+                blockedConnectors: blocked,
+                taskText,
+                id: suggestIdentity,
+                target: suggestTarget,
+              }),
+            );
+          }
+          delivered.push(
+            await renderProviderSuggestCard({
+              taskText,
+              id: suggestIdentity,
+              target: suggestTarget,
+            }),
+          );
+          // Same reason as the agent cards: the terminal payload has no uiFlows
+          // slot, so a card must go on the wire to paint without a refetch.
+          for (const flow of delivered) {
+            if (!flow) continue;
+            const suggestStream = pendingStreams.get(streamId);
+            if (suggestStream) suggestStream.sendEvent("ui-flow", { flow });
+            else
+              publishStreamEvent({
+                kind: "progress",
+                streamId,
+                events: [{ event: "ui-flow", data: { flow } }],
+              });
+          }
+        }
+      }
+    } catch (suggestErr) {
+      log.warn(`[connector-card] xyne-ai suggestion cards failed:`, errMsg(suggestErr));
     }
 
     // Finalize AgentRun (same pattern as /agent-chat). Pod-independent —
