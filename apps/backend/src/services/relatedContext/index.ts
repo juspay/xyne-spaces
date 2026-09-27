@@ -171,9 +171,9 @@ const quoteCandidate = (candidate: Candidate): string =>
  * a double charge because the charge runbook sat next to it.)
  *
  * The price of this shape: other people's text sits in the instructions, so a message
- * written to argue its own relevance could get itself shown. Every candidate has
- * already passed the reader's access checks, so the worst it can do is show up where
- * it doesn't belong — never reveal something the reader couldn't open.
+ * written to argue its own relevance could get itself shown. Every candidate came from
+ * the reader's own permission-filtered search, so the worst it can do is show up where
+ * it doesn't belong.
  */
 const verdictQuestions = (candidates: Candidate[]): Record<string, JevQuestion> =>
   Object.fromEntries(
