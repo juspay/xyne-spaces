@@ -5,9 +5,10 @@
 > (`useXyneMutate`), agent invocation (`useXyneAgent`), save/publish, and
 > host-side name resolution (`useXyneDirectory`).
 >
-> **Step 1 (one app per conversation) is shipped and verified** — see below.
-> Steps 2–5 remain planned: in-place updates, version restore, collaborative
-> creation, and fork / change-requests.
+> **Steps 1, 3 and 6 are shipped** — one app per conversation, version restore,
+> and the App Creation mode split view — plus the sandbox boot loader. Steps 2, 4
+> and 5 remain planned: in-place updates, collaborative creation, and fork /
+> change-requests. **Step 2 is next**; see "What is next" under Sequencing.
 
 ## The problem being fixed
 
@@ -210,7 +211,7 @@ validates. Output tokens for a small fix drop from ~10–16k to hundreds.
 
 ---
 
-## Step 3 — Restore version
+## Step 3 — Restore version ✅ **SHIPPED 2026-09-01**
 
 **Goal:** requirement 3 — one click back to any earlier iteration, same app.
 
@@ -224,24 +225,120 @@ duplicates content, it just declares which immutable version is current.
 
 - `POST /artifact-apps/:id/restore { versionId }` — owner (later: collaborator)
   only; validates the version belongs to the app; sets `headVersionId`.
+  Restoring to the version that is *already* head returns the app unchanged
+  rather than 400: the caller asked for a state that holds, and logging it
+  would put an event in the transcript that explains nothing.
+- Deliberately does **not** touch `publishedVersionId`. Head is what the owner
+  and the agent work on; the pin is what everyone else sees, so rolling back a
+  draft must never silently republish.
+- `artifact_app_restores` — **the audit trail, and the reason restore is
+  legible at all.** The move is a pointer write, so afterwards a restored app is
+  byte-for-byte indistinguishable from one that was always on that version:
+  nothing in `artifact_app_versions` changes and no chat message is written.
+  Without this row, a thread whose newest generation is v5 while the pane shows
+  v2 has no explanation anywhere in it. Written in the **same transaction** as
+  the head move — a head that moved without its event is exactly the silent
+  rollback the table exists to prevent — and carrying `fromVersionId` /
+  `fromVersionNumber`, since the pointer no longer records what was left behind.
+- **Not modelled as a `chat_messages` row**, though those live in the same
+  database and would have been ordered and replayed for free. Chat messages form
+  the branching tree the transcript projects (`parentId`, sibling pagers,
+  regenerate): a non-conversational node there would become a selectable branch,
+  and would need a third value in a role column the client models as
+  `user | assistant` — a change that ripples through every Ask AI surface.
+- `GET /:id` returns `restores` oldest-first, **owner only**. Restore history
+  names versions a non-owner is never served and describes edits behind the
+  published pin; non-owners get `[]` so the thread renders identically whether
+  the app has no events or the caller has no right to them.
 - Reads: **already done in Step 1** — the owner payload route serves
   `requestedVersionId ?? headVersionId ?? publishedVersionId`; non-owner
-  behaviour unchanged (pinned published version only). Only the write half
-  (the restore route) and the UI remain.
+  behaviour unchanged (pinned published version only).
 - Step 2's update mode bases on head — so after a restore, "now add X" edits
   the restored iteration, which is exactly what a user means.
 
-### UI
+### UI — three surfaces, one verb
 
-The expanded dialog (and `ArtifactAppScreen`) gains a version dropdown —
-`GET /:id` already returns the full version list for owners — with per-version
-"Restore" . Restoring updates the card in place. Publish keeps offering "publish
-current head".
+- **The pane's version dropdown** (`ArtifactAppPane`) — every non-current row
+  carries a Restore control. Selecting a row only *previews*; restoring moves
+  head. Two verbs on one row, hence the nested control and the
+  `stopPropagation`, so restoring never reads as "view".
+- **The transcript card** (`ArtifactPaneReference`) — this is where restore is
+  actually discoverable. A dropdown row inside a header chip is about as hidden
+  as an action gets, whereas scrolling the thread is already how you navigate an
+  app's history. The card is a `div` holding two sibling buttons rather than one
+  big button: viewing moves the pane, restoring moves head on the server, and
+  nesting the second inside the first would be invalid markup *and* would make
+  the durable verb reachable by a stray click on the card.
+- **`ArtifactRestoreNotice`** — the event itself, rendered in the transcript at
+  the point in time it happened. Centred and chromeless, so it reads as
+  something that happened *to* the thread rather than something someone said in
+  it. **Not interactive**: it is a log entry, and every version in the thread
+  already has a card that selects it, so making the event selectable too would
+  add a second, weaker route to the same place and invite it to be read as an
+  action rather than a fact. It therefore subscribes to nothing and does not
+  re-render when the viewed version changes.
+
+Merging is by **anchoring**, not concatenation: each event attaches to the last
+message whose timestamp precedes it, and renders after that bubble. The render
+loop stays driven by `displayMessages` alone, so branch selection, sibling
+pagers and bot-turn indices keep counting messages and only messages. The
+bubble's key moved to the wrapping keyed `Fragment`, which preserves the
+"don't remount when the id swaps temp→server" property that keeps the
+live→done reasoning transition from hard-swapping.
+
+Events come from `AppCreationModeSignal`, not from props, so they **survive
+closing the pane** — history that vanishes when a panel is dismissed is not
+history.
+
+Icon is `RotateLeft` from `@xyne/icons` on all three surfaces (it replaced
+lucide's `RotateCcw` in the dropdown for consistency).
+
+### The card's weight — settled by two wrong answers
+
+Worth recording, because both extremes were tried and both were wrong.
+
+The card began as a bordered box holding a tiled icon and an outlined Restore
+button: **three nested rectangles**, competing with the app they point at, which
+is already on screen a few hundred pixels to the right. Stripping all of it —
+borderless, unfilled, one line — went too far the other way: it blended into the
+answer text and stopped reading as an object at all.
+
+What works is **one soft filled surface**, no border and no inner tile. The fill
+is what separates it from the paragraph above, so it does not need an edge to do
+that job as well. "View" was deleted outright: the row itself is the click
+target, so the affordance is the hover state, and that removed a control and a
+border together.
+
+One prop, `fill`, carries **both** the scale and the surface, because they always
+move together — the panel fills `--background` and wants a bigger mark, the
+inline card sits on `--card` and wants a smaller one. Those two tokens are the
+same white in light mode but `#1A1A1F` vs `#22232A` in dark, so an overlay or
+card hard-coded to either shows as a wrong-shade rectangle inside the other. It
+stays a plain boolean so `ArtifactSandpack`'s shallow-compare memo holds and the
+iframe is never torn down for it.
+
+### A duplicate the card exposed
+
+Every generated app was rendering **twice**: once as the running app, and again
+underneath as `artifact.json (click to download)` — the raw bytes of the thing
+directly above it. `MessageReactArtifacts` renders artifacts, and the generic
+bot-attachment list rendered them a second time. Assistant attachments now
+filter through `toArtifactRef`, the same predicate that component selects on, so
+the two cannot disagree. Non-artifact attachments (generated PDFs and so on) are
+untouched.
 
 ### Verification
 
 v1→v2→v3, restore v1 → head=v1, card shows v1, agent update produces v4 based
-on v1 (v2/v3 still in history). Published pin untouched by restore.
+on v1 (v2/v3 still in history). Published pin untouched by restore. The thread
+shows "Restored to Version 1 from Version 3" at the point it happened, still
+there after a reload and after closing the pane. Restoring to current is a
+no-op and adds no line.
+
+Verified in the database rather than by eye: the restore route's writes were
+exercised inside a rolled-back transaction, and two genuine events written by
+the running server through the real HTTP path were read back with correct
+`from`/`to` version numbers.
 
 ---
 
@@ -337,109 +434,184 @@ auto-rejected.
 
 ---
 
-## Step 6 — App Creation mode (persistent split view)
+## Step 6 — App Creation mode (persistent split view) ✅ **SHIPPED 2026-08-31**
 
-**Goal:** the v0 / Lovable / Replit shape. Chat on the left, the app itself
-persistent on the right, versions switchable from a dropdown. Requested
-2026-08-31 with a reference screenshot; the target is the *layout*, not the
-theme.
+**The v0 / Lovable / Replit shape.** Chat on the left, the app itself persistent
+on the right, versions switchable from a dropdown.
 
-Today the app is a card inside the transcript and "expand" is a **modal**
-(`ReactArtifactDialog`). That is backwards for a build session: the thing you
-are iterating on disappears behind the thing you are typing into, and every
-open/close remounts the Sandpack iframe. Step 1 made a conversation own exactly
-one app — which is precisely what makes a single persistent pane correct rather
-than ambiguous.
+Before this, the app was a card inside the transcript and "expand" was a
+**modal** (`ReactArtifactDialog`) — backwards for a build session: the thing you
+iterate on disappeared behind the thing you type into, and every open/close
+remounted the Sandpack iframe. Step 1 made a conversation own exactly one app,
+which is what makes a single persistent pane unambiguous rather than "which
+artifact does the right side mean?".
 
-### What already exists (do not rebuild)
+### What shipped
 
-| Need | Already there |
+| File | Role |
 |---|---|
-| Split layout | `AIShell` is a `ResizableGroup[Panel(sidebar) │ Separator │ Panel(main)]` |
-| Sidebar collapse | `react-resizable-panels@4`: `collapsible` + handle `.collapse()`/`.expand()`; `AIShell` already holds `sidebarPanelRef` |
-| The renderer | `ReactArtifactView` with `fill` — the dialog already uses it this way |
-| "Which app is this thread's?" | Step 1's `conversationId @unique` + `headVersionId` |
-| Version list | `GET /artifact-apps/:id` already returns every version for the owner |
-| Serving one version | payload route already honours `requestedVersionId` for the owner |
+| `AIShell.tsx` | optional `rightPanel` → third Panel; `panelIds` for the conditional tree |
+| `useAppCreationMode.ts` | which app, which version, is the mode on; owns the URL param |
+| `ArtifactAppPane.tsx` | supplies `titleSlot` + `onClose` to `ReactArtifactView fill` |
+| `appCreationModeContext.ts` | tells transcript cards the app is already on screen |
+| `ArtifactPaneReference.tsx` | what a card becomes instead of running a second copy |
+| `AIChatThread.tsx` | reports the thread's `appId` + newest `versionId` upward |
+| `AIScreen.tsx` | holds the state, provides context, passes the pane |
+| `topBarHeight.ts` | `TOP_BAR_HEIGHT_CLASS` — the 52px every top bar shares |
 
-So Step 6 is **composition plus one new panel**, not new infrastructure. The
-only genuinely new UI is the version dropdown and the mode's empty state.
+It is **composition, not new infrastructure**: `AIShell` was already a
+`ResizableGroup`, `react-resizable-panels@4` already had collapsible panels, and
+`ReactArtifactView fill` is what the modal already used.
 
-### Design
+### Three corrections to the original plan
 
-Three panels when the mode is on:
+The plan was wrong in three places, each found by shipping it:
 
-```
-[ sidebar (collapsed) │ chat thread │ app pane (persistent) ]
-```
-
-- **The sidebar is not auto-collapsed** (reversed 2026-08-31, after shipping it
-  the other way). Driving the panel imperatively means racing the group's own
-  deferred re-layout: `expand()` is a no-op unless the panel is collapsed *at
-  the instant it is called*, so a single call fired in the commit where the
-  third panel unmounts gets clobbered a frame later and the sidebar stays shut.
-  Worse, auto-collapse/auto-expand overrides whatever width the user chose.
-  The Panel stays `collapsible`, so it is one drag away. If this ever returns,
-  it needs a settle strategy and a user preference, not a one-shot call.
-- **Entering the mode.** DECISION: auto-enter the first time the conversation
-  materializes an app, and expose an explicit toggle to leave. Rationale: it
-  matches the reference products (you type, it builds, the preview appears),
-  needs no new affordance to discover, and Step 1 guarantees there is exactly
-  one app to show. The trigger lives in ONE predicate so it can be changed to
-  explicit-only without touching the layout.
-- **The pane renders head by default**, and whatever version the dropdown
-  selects otherwise. Selecting an old version is a *view*, not a restore: head
-  does not move. Restore stays Step 3's verb, and lands in this same dropdown.
-- **A new generation updates the pane in place** — the pane is keyed by the
-  conversation's app, not by a message, so when head advances the pane follows.
+1. **One `autoSaveId`, plus `panelIds` — not a second `autoSaveId`.** The plan
+   said the mode should use its own persistence key. That is not how the wrapper
+   works: `ResizableGroup` documents `panelIds` precisely "for groups whose
+   Panels are conditional". Without it the group restores whichever layout was
+   written last — a two-panel layout onto a three-panel tree — recomputes, fires
+   `onLayoutChanged`, and churns. Swapping `autoSaveId` on mode change made it
+   worse by re-initializing `useDefaultLayout` mid-flight. Pass `panelIds`
+   (memoized; a fresh array re-initializes and reproduces the churn).
+2. **Sidebar collapse is opt-in, and applied with a settle loop.** Shipped
+   unconditionally, reverted, then reinstated 2026-09-01 behind the
+   "Collapse sidebar when building an app" preference (default OFF,
+   `useAppModeCollapseSidebar`, localStorage — same shape as
+   `useAILandingDefault`). It needed both conditions the reversal named.
+   Driving the panel imperatively races the group's deferred re-layout:
+   `expand()` is a no-op unless the panel is collapsed *at the instant it is
+   called*, so a one-shot fired in the commit where the third panel unmounts is
+   clobbered a frame later and the sidebar stays shut. `AIShell` now enforces
+   the intent for up to 10 animation frames against the panel's real
+   `isCollapsed()`, only on a transition, so it never fights a width the user
+   set afterwards. Do not replace that loop with a single call.
+3. **One header row, not two.** The pane originally drew its own bar above
+   `ReactArtifactView`'s, which already carries the Preview/Code tabs and saved
+   state — two stacked bars showing two different titles (the app's vs
+   `payload.title`, which legitimately differ once a build renames itself).
+   `ReactArtifactView` now takes an optional `titleSlot` that replaces its title
+   span, and the pane supplies icon + app title + version dropdown.
 
 ### The hazard that decides the implementation: two live Sandpacks
 
-If the pane renders the app while the transcript still renders its inline
-cards, the same app runs **twice** — two iframes, two `useXyneData` bridges, two
-agent bridges, double the queries, and writes firing from whichever the user
-happens to click. In the mode, the inline cards must therefore degrade to a
-compact, non-executing reference ("Version 3 — shown in the pane") that scrolls
-to / selects in the pane rather than mounting a second preview.
+If the pane renders the app while the transcript still renders live cards, the
+same app runs **twice** — two iframes, two `useXyneData` bridges, two agent
+bridges, duplicate queries, and writes firing from whichever copy was clicked.
+In the mode, inline cards therefore become a non-executing
+`ArtifactPaneReference`: it states the version this turn produced and, clicked,
+points the pane at that build. It is card-weight on purpose — scrolling a thread
+is how you navigate an app's history.
 
-Two further remount rules, both already learned the hard way:
+Two remount rules, both learned the hard way:
 
 - `ArtifactSandpack` is `memo`'d with a shallow compare — anything crossing that
-  boundary must stay a stable ref or a plain boolean, never a fresh object or
-  callback. This is why the directory/data bridges read the store imperatively.
-- The pane must be **mounted once and kept**, not conditionally re-created per
-  turn. A new version should change its `payload`, not its identity — otherwise
-  every generation costs a full iframe boot and the running app's state.
+  boundary must be a stable ref or a plain boolean, never a fresh object or
+  callback. Everything the pane hands down is memoized for this reason: an
+  unmemoized mode object, context value, or `rightPanel` element each re-render
+  the pane and the iframe under it.
+- The pane is **mounted once and kept**. A new version changes its `payload`,
+  never its identity.
 
-### Layout persistence
+### State lives in the URL
 
-`AIShell`'s group persists under `autoSaveId='ai-screen-resize'`. A saved
-two-panel layout must not be applied to the three-panel arrangement, so the
-mode uses its own `autoSaveId` and the plain chat layout keeps the existing one.
-`AIShell` is shared with `AISectionLayout` (knowledge, library) — those must
-render byte-identically, so the third panel is strictly opt-in via prop.
+`?mode=create-app` is the open/closed state, written with `{ replace: true }` so
+toggling a panel does not stack history. A reload — or a pasted link — returns to
+the same layout. Everything else is keyed to the CONVERSATION and reset on
+switch; a version pinned in one thread is meaningless in another. The param is
+stripped on a blank new chat, where there is no app for it to describe.
 
-### What must be built
+Auto-enter fires **once per conversation**, tracked in a ref, so an explicit
+close sticks: closing marks that thread handled and a later generation reopens
+nothing, while switching threads starts fresh.
 
-1. `AIShell` gains an optional `rightPanel` (ReactNode). Absent → today's exact
-   two-panel tree. **No `collapseSidebar`**: see the decision below.
-2. `ArtifactAppPane` — header (title, version dropdown, publish/expand), body
-   `ReactArtifactView fill`. Owns the `['artifact-app', appId]` query the
-   Saved/Newer chip already uses, so both stay consistent and a restore
-   invalidates one key.
-3. Mode state on the conversation (which app, which version is being viewed,
-   is the mode on) — one hook, so the trigger predicate is single-sourced.
-4. Inline cards become compact references while the mode is on.
+### Keeping the pane fresh
 
-### Verification
+The pane reads the app through the `['artifact-app', appId]` query, which is
+cached. Nothing invalidated it when a generation landed, so the pane sat on the
+old head until a refocus. The thread now reports the newest artifact's stamped
+`versionId`; when that id is absent from the cached version list, the hook
+invalidates once (guarded by a ref, not by the versions array — a version the
+server has not surfaced yet would otherwise refetch forever). The Saved / "Newer
+version" chips read the same key, so they were fixed by the same change.
 
-Generate in `/ai/chat/new` → pane appears, sidebar is left ALONE, exactly ONE
-Sandpack iframe in the DOM. Ask for a change → the SAME pane shows the new
-build; the iframe is not re-created (watch for a preview flash / lost app
-state). Dropdown to v1 → pane shows v1, `headVersionId` in the DB is unchanged.
-Toggle the mode off → sidebar returns, inline cards render live again, and the
-knowledge/library screens are untouched. A thread with no app never enters the
-mode.
+### A routing bug this exposed
+
+Adding the thread to the URL (`/ai/chat/:sessionId`, matching how channels
+address a conversation) was first done as **two route entries** — `chat/new`
+*and* `chat/:sessionId`. React Router treats those as distinct routes, so moving
+between them unmounted and remounted `AIScreen`, wiping its state; the remount
+re-seeded from `sessionStorage`, the URL effect navigated back, and the screen
+bounced between routes. There is now **one** route with `new` as an ordinary
+param value. The old `sessionStorage` restore is gone: it predated threads
+having URLs and turned "new chat" into "whatever you had open last".
+
+Two-way URL↔state sync guards on **whether its own source changed** (a ref), not
+on the dep array firing — effects run in commits where the other side is still
+stale, which is what made "New Chat" snap back to the previous thread.
+
+### Deferred
+
+Both items that used to sit here have since shipped: **restore** (Step 3, with
+its own audit trail in the transcript) and the **sidebar auto-collapse
+preference**. The preference is off by default; when on it fires once per app,
+and only for an app generated live in this mount — an artifact loaded from
+history never collapses anything, which is what `streamedMessageIds` in
+`AIChatThread` exists to distinguish. It is a counter *event*, not state:
+steady state re-asserts itself on every thread switch and would undo a sidebar
+the user deliberately reopened.
+
+What remains unverified is whether the pane's Sandpack survives a new version
+**without remounting** — see "Open, unowned" below.
+
+---
+
+## Sandbox boot loader ✅ **SHIPPED 2026-09-01**
+
+Not a numbered step — a rendering fix that Step 6 made impossible to ignore, now
+that an app sits on screen for the whole conversation instead of inside a card
+you scroll past.
+
+Sandpack does not bundle in-page: the preview is an iframe served by the
+CodeSandbox bundler, which must be fetched, resolve the app's dependencies and
+transpile before anything paints. That is **seconds**, and what filled them was
+CodeSandbox's own loader — someone else's brand, in the middle of ours.
+
+`AppLoaderMark` is the Xyne logo + wordmark extracted out of `AppLoader` in three
+sizes. `AppLoader` keeps everything else it had (fixed backdrop, `--root-bg`, the
+React-Native-webview bail, the animation log) and renders the mark at `lg`.
+Deliberately **static** — no pulse, no spinner.
+
+Four things here are load-bearing and will be re-derived by anyone who touches
+it:
+
+- **`sandpack.status` is the wrong signal.** It flips to `running` the moment the
+  client is instantiated, seconds before anything compiles, so an overlay keyed
+  to it disappears against a blank iframe. The truth is the message stream:
+  `done` means compiled and painted, and `start` with `firstLoad` means a real
+  restart (not the incremental recompiles that follow, which must not throw the
+  loader back over a running app). This is exactly what Sandpack's own overlay
+  listens to — see `useLoadingOverlayState` in its dist.
+- **The overlay is a sibling of `SandpackLayout`, not a child of
+  `SandpackPreview`.** `.sp-wrapper` is already `position: absolute; inset: 0`
+  from `sandpackOverrides.css`, so `inset-0` there covers *everything* Sandpack
+  draws — including the bottom-left progress line and the stdout preview, which
+  live outside the loading overlay and carry their own stacking.
+- **`.sp-overlay.sp-loading` must be hidden**, and this is not cosmetic:
+  `SandpackPreview` always renders its own overlay (there is no prop to disable
+  it), and it fades out over 400ms starting at `done` while ours unmounts
+  instantly — so without the rule you get a flash of the CodeSandbox loader on
+  every boot. Scoped to `.sp-loading` on purpose: timeout and runtime errors use
+  `.sp-error` and must stay visible. The rule lives in **both**
+  `sandpackOverrides.css` and the inline `SANDPACK_FILL_CSS` copy, for the reason
+  that constant already documents.
+- **Timeout is left alone.** `sandpack.status === 'timeout'` returns null so
+  Sandpack's error overlay and its retry button show through. Covering it would
+  turn a reported failure into a loader that never ends.
+
+The payload fetch uses the same mark, so fetching and booting read as one
+continuous wait instead of a spinner handing off to a logo.
 
 ---
 
@@ -449,30 +621,78 @@ mode.
 |---|---|---|---|
 | ~~1. One app per conversation~~ **done** | killed the clutter (reqs 1, 2, 4) | — | S — schema + shared hook on *both* persistence paths + card addressing |
 | 2. Incremental updates | kills truncation + regressions | 1 | M — S2S read route, merge+validate in tool, `read-app-file` |
-| 3. Restore | req 3 | 1 (head pointer lands with 1) | S — one route + version dropdown |
+| ~~3. Restore~~ **done** | req 3 | 1 (head pointer lands with 1) | S — one route + restore-event table + three UI surfaces |
 | 4. Group-DM collaboration | req 5 | 1–3 stable | M/L — re-key flow, channel-surface parity, membership ACL |
 | 5. Fork + change requests | req 6 | 1–3 (4 independent) | M — two routes + CR model + review UI on existing diff view |
-| 6. App Creation mode (split view) | the v0/Lovable build surface | 1 (3 folds into its dropdown) | M — `AIShell` right panel + app pane + compact inline cards |
+| ~~6. App Creation mode (split view)~~ **done** | the v0/Lovable build surface | 1 (3 folds into its dropdown) | M — `AIShell` right panel + app pane + compact inline cards |
 
-Recommended order: **~~1~~ → 6 → 3 → 2 → 4 → 5.** Step 1 is done. Step 6 comes
-next because it is where the rest is *seen*: restore needs a version dropdown to
-live in, and incremental updates only feel different if you are watching the app
-change. Step 3 follows immediately — its read half already landed with Step 1,
-so it is one route plus a Restore item in Step 6's dropdown, and it de-risks
-Step 1's last-write-wins choice.
+Recommended order: **~~1~~ → ~~6~~ → ~~3~~ → 2 → 4 → 5.** Steps 1, 3 and 6 are
+done. Step 3 de-risked Step 1's last-write-wins choice — there is now a recovery
+path when a regenerate clobbers a good version, and the rollback is legible in
+the thread afterwards rather than silently changing what the pane shows.
+
+### What is next
+
+**Step 2 (incremental updates) is the one to do.** It is now the largest source
+of avoidable failure: every "change the header colour" regenerates the whole
+project, which costs ~10–16k output tokens, truncates large apps, and reintroduces
+bugs the previous iteration had already fixed. Restore softens the consequence but
+does not remove the cause — you can roll back to the good build, but the agent
+still cannot make a small edit. Steps 4 and 5 both assume a stable single-app
+model and should wait for it.
+
+### Open, unowned
+
+Carried over so they are not lost — none of these block Step 2:
+
+- **`deleteWorkspace()` has zero callers.** Conversation-scoped workspaces grow
+  unbounded; something has to reap them.
+- **A run that fails every LLM turn still finalizes as `status: completed`** with
+  a zero-length result, so failure is indistinguishable from an empty answer.
+- **Never measured:** whether the pane's Sandpack survives a new version without
+  remounting. Reasoned about and coded for throughout Step 6 — the memo, the
+  stable `payload` identity, the plain-boolean props — but never actually
+  observed.
+- **`release-20260825` cannot take the restore backport** as-is: it has neither
+  `headVersionId` nor `conversationId` on `ArtifactApp`, and five of the dashboard
+  files the change edits do not exist there. It needs Steps 1 and 6 backported
+  first. `release-20260827` and `feature/deploy-xyneclaw` are done.
 
 ## Standing constraints (do not rediscover)
 
 - Tool descriptions live in `xyne-claw-shared`; **`tsx --watch` does not reload
   it** — claw + claw-auth restarts are required after every description change.
-- The four CAC flags (`react_artifact_config`, `_publish_`, `_write_`,
-  `_agent_`) all default `true` for local testing and **must flip to `false`
-  before merge**.
+- **There are no feature flags any more.** The four CAC configs
+  (`react_artifact_config`, `_publish_`, `_write_`, `_agent_`) were deleted
+  2026-09-01: they had shipped defaulting to `true`, so they gated nothing while
+  still implying they did. Artifact apps, save/publish, writes and agent
+  invocation are now unconditional. The per-app manifest flags (`payload.writes`,
+  `payload.invokesAgents`) remain — those are declarations by an app about
+  itself, not feature toggles. The Superposition keys may still exist
+  server-side; nothing reads them.
 - The wire markers `REACT_ARTIFACT_START/END` and the `metadata.reactArtifact`
   key are frozen — persisted data depends on them.
 - Migrations on both DBs use the `migrate diff` / `db execute` /
-  `migrate resolve --applied` path; and the local Spaces DB has **no
-  `_prisma_migrations` ledger** — never run `migrate deploy` against it.
+  `migrate resolve --applied` path. **Never run `prisma migrate deploy` against
+  either local DB.** The Spaces DB has no `_prisma_migrations` ledger at all.
+  The claw-auth DB has a *partial* one — 5 records against 158 migrations —
+  which is more dangerous, because it looks safe: `migrate deploy` replays from
+  `init` and dies on `relation "users" already exists`, leaving a failed row
+  that blocks every later migration until `migrate resolve` clears it (done
+  2026-09-01; no data was lost, the failing statement was a `CREATE TABLE` that
+  aborted). Apply migration SQL by hand after checking the objects actually
+  exist, and re-run `prisma generate` afterwards.
+- **`prisma migrate status` output is long — never read it through `tail`.**
+  Doing so showed 10 pending when ~153 were, which is what prompted the
+  `migrate deploy` above. The same truncation mistake invalidated a typecheck
+  baseline comparison the same day. Capture full output, then filter.
+- The local claw-auth DB has **no `experiment_*` tables**, so the three
+  `experiment_*` migrations cannot apply there. Pre-existing, unrelated to
+  artifact apps; that feature is simply not provisioned locally.
+- After pulling main, run **`pnpm install`** before starting services. A pull
+  that adds a dependency (e.g. `express-rate-limit`) leaves the package in the
+  pnpm store but unlinked in the consuming workspace, and the service dies at
+  import with `ERR_MODULE_NOT_FOUND`.
 - **Two assistant-result persistence paths exist** (`agent-chat.ts` and
   `run-stream.ts`); the AI screen uses the latter. Any new artifact surface must
   call `attachArtifactToSessionApp` from both, or it creates orphan apps.
@@ -485,6 +705,9 @@ Step 1's last-write-wins choice.
 - **`deleteWorkspace()` has zero callers.** Now that workspaces are
   conversation-scoped they are long-lived and unbounded — a reaper is owed
   before this ships anywhere real.
+- **One route per screen.** Declaring `chat/new` and `chat/:sessionId` as two
+  entries for the same component makes React Router remount it on every switch,
+  wiping state and bouncing between routes. `new` is a param value, not a route.
 - Agent `orderBy` must be an **array**; the AST gateway 400s on the object form
   models naturally write. Normalized client-side in `artifactAstClient.ts`.
 
@@ -503,3 +726,26 @@ Step 1's last-write-wins choice.
   agent pinned to it that loses its direct-Claude creds falls back to `spaces`
   carrying that model name and 403s on every call. Allowed ids include
   `claude-sonnet-4-6`, `claude-opus-4-6`, `kimi-latest`.
+- **`pnpm install` after every branch switch or pull**, before believing any
+  typecheck or lint result. Stale workspace packages produce errors that look
+  damning and are entirely phantom: ~15 "no exported member" errors from
+  `@xyne/shared` in files you never touched, and a wave of
+  "type that could not be resolved" lint errors against the Zero schema. Both
+  cleared by an install, twice in one session. The same applies to
+  `prisma generate` when a branch's schema differs — the client is generated
+  from whichever schema was on disk last.
+- **The pre-commit hook cannot run without a TTY.** `.husky/pre-commit` line 6 is
+  `exec < /dev/tty`, so in any non-interactive shell it aborts before running a
+  single check — it does not fail, it cannot start. Its real checks (gitleaks on
+  staged, `validate-workspace-id.sh`, `change-analysis.sh`,
+  `validate-schema-migrations.sh`, the enum guard, and a dashboard
+  `lint:errors-only` fallback) can all be run by hand.
+- **Squash merges make `git merge-base --is-ancestor` lie about backports.** It
+  reports NO for a branch whose content is fully merged, because the squash
+  commit is a different object. Check for the *content* — a migration directory,
+  a symbol in a file — not for ancestry.
+- **GitHub lags behind a force-push.** After rebasing and force-pushing, an open
+  PR can keep its old `head.sha` for a minute or more and go on showing a stale
+  conflict banner computed against the pre-rebase commit. Confirm locally with
+  `git merge-tree --write-tree <base> HEAD` before believing it; `mergeable_state`
+  `dirty` means conflicts, `blocked` means only checks and review are pending.
