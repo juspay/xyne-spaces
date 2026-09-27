@@ -6,6 +6,7 @@ import type { TransformedSearchResult } from '@/services/vespaSearch/resultTrans
 import {
   askJev,
   isJevConfigured,
+  type JevAnswer,
   type JevNoulQuestion,
   type JevQuestion,
 } from '@/services/queryIntent/jevClient';
@@ -37,6 +38,11 @@ export interface RelatedContext {
    * Absent when that could not be decided (Jev did not answer).
    */
   ready?: boolean;
+  /**
+   * The lookup failed — Jev or the search did not answer. Nothing to show for now, but
+   * not an answer to remember: the next pause is worth asking again.
+   */
+  failed?: boolean;
 }
 
 /** Who is typing (their full ACL context) and the thread they are typing in, if any. */
@@ -158,9 +164,12 @@ const KIND_NAMES: Record<CandidateKind, string> = {
 
 const LABELS: RelatedLabel[] = ['answers_it', 'same_question', 'related_discussion'];
 
-/** A candidate as one fenced quote. The fence is taken out of the text, so it can't end early. */
+/**
+ * A candidate as one fenced quote. Any run of three or more quote marks is taken out
+ * of the text in one pass, so nothing left over can close the fence early.
+ */
 const quoteCandidate = (candidate: Candidate): string =>
-  `Candidate ${KIND_NAMES[candidate.kind]}:\n"""\n${candidate.text.replace(/"""/g, '"')}\n"""`;
+  `Candidate ${KIND_NAMES[candidate.kind]}:\n"""\n${candidate.text.replace(/"{3,}/g, '"')}\n"""`;
 
 /**
  * Every candidate's questions, for one Jev request. Jev answers each question on its
@@ -201,10 +210,26 @@ const verdictQuestions = (candidates: Candidate[]): Record<string, JevQuestion> 
   );
 
 /**
+ * How an on-topic candidate relates. The likeliest of the three related answers, since
+ * once an item is on topic "unrelated" is not a choice left to make; when Jev gave no
+ * probabilities for them, its own choice, and failing that the mildest claim.
+ */
+const labelOf = (relation: Extract<JevAnswer, { type: 'choice' }>): RelatedLabel => {
+  const scored = LABELS.filter((label) => relation.probabilities[label] !== undefined);
+  if (scored.length > 0) {
+    return scored.reduce((best, next) =>
+      (relation.probabilities[next] ?? 0) > (relation.probabilities[best] ?? 0) ? next : best
+    );
+  }
+  const chosen = LABELS.find((label) => label === relation.choice);
+  return chosen ?? 'related_discussion';
+};
+
+/**
  * The candidates that are about what the draft is about, most relevant first, each
  * with how it relates; null when Jev could not say. Relevance decides whether it
- * shows; the label is the likeliest of the three related answers, since once an item
- * is on topic "unrelated" is not a choice left to make.
+ * shows. A candidate whose answers came back unusable is skipped on its own; the
+ * others still count.
  */
 async function classify(
   draft: string,
@@ -213,7 +238,9 @@ async function classify(
   signal: AbortSignal | undefined
 ): Promise<RelatedItem[] | null> {
   const started = Date.now();
-  const answers = await askJev({ draft }, verdictQuestions(candidates), config.timeoutMs, signal);
+  const answers = await askJev({ draft }, verdictQuestions(candidates), config.timeoutMs, signal, {
+    partial: true,
+  });
   const ms = Date.now() - started;
   logger.info('[RelatedContext] jev verdicts', {
     candidates: candidates.length,
@@ -236,14 +263,11 @@ async function classify(
     const relation = answers[`relation${i}`];
     if (relevant?.type !== 'noul' || relation?.type !== 'choice') return [];
     if (relevant.noul < config.minRelevance) return [];
-    const label = LABELS.reduce((best, next) =>
-      (relation.probabilities[next] ?? 0) > (relation.probabilities[best] ?? 0) ? next : best
-    );
     return [
       {
         id: candidate.id,
         kind: candidate.kind,
-        label,
+        label: labelOf(relation),
         confidence: relevant.noul,
         result: candidate.result,
       },
@@ -266,8 +290,9 @@ async function classify(
  *
  * Returns null only when the feature is off for this user (not configured, or turned
  * off in Superposition) — the client stops asking for a while. Anything that fails
- * for this one draft (Jev down or slow, a search error) is `{ items: [] }`: nothing
- * to show now, but the next pause in typing is worth trying. Never throws.
+ * for this one draft (Jev down or slow, every search erroring) is
+ * `{ items: [], failed: true }`: nothing to show now, but not an answer to keep — the
+ * next pause in typing is worth trying. Never throws.
  *
  * `signal` is the caller's client going away — they typed on, or left. Work that has
  * not started yet is skipped and a Jev call in flight is cancelled.
@@ -295,6 +320,7 @@ export async function findRelatedContext(
   if (!config.enabled) return null;
 
   const nothing: RelatedContext = { items: [] };
+  const failed: RelatedContext = { items: [], failed: true };
   const started = Date.now();
   try {
     const draft = text.trim().replace(/\s+/g, ' ').slice(0, config.maxDraftChars);
@@ -306,7 +332,7 @@ export async function findRelatedContext(
     if (!gate) {
       logger.error('[RelatedContext] jev is_complete call failed', { ms: jevGateMs });
       logger.info('[RelatedContext] lookup', { jevGateMs, outcome: 'jev_failed' });
-      return nothing;
+      return failed;
     }
     const isComplete = gate.is_complete;
     if (isComplete.type !== 'noul' || isComplete.noul < config.completeThreshold) {
@@ -315,11 +341,12 @@ export async function findRelatedContext(
     }
 
     const retrievalStarted = Date.now();
-    const candidates = await retrieveCandidates(draft, req, {
+    const found = await retrieveCandidates(draft, req, {
       messageHits: config.messageHits,
       perKind: config.perKind,
     });
     const retrievalMs = Date.now() - retrievalStarted;
+    const candidates = found ?? [];
     // One line per lookup: where the time went and how it ended. Never the draft.
     const summary = (extra: Record<string, unknown>): void => {
       logger.info('[RelatedContext] lookup', {
@@ -336,6 +363,10 @@ export async function findRelatedContext(
       summary({ outcome: 'abandoned' });
       return nothing;
     }
+    if (!found) {
+      summary({ outcome: 'search_failed' });
+      return { ...failed, ready: true };
+    }
     if (candidates.length === 0) {
       summary({ outcome: 'no_candidates' });
       return searched([]);
@@ -348,7 +379,7 @@ export async function findRelatedContext(
     }
     if (!items) {
       summary({ outcome: 'jev_failed' });
-      return searched([]);
+      return { ...failed, ready: true };
     }
     summary({ outcome: 'ok', items: items.length });
     return searched(items);
@@ -358,6 +389,6 @@ export async function findRelatedContext(
       error: error instanceof Error ? error.name : 'unknown',
       totalMs: Date.now() - started,
     });
-    return nothing;
+    return failed;
   }
 }

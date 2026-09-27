@@ -158,6 +158,12 @@ apiConfig.interceptors.response.use(
     return response;
   },
   async (error: unknown) => {
+    // Cancelled by the caller — it moved on, e.g. the user typed on. Not a failure, so
+    // it is neither logged nor counted as one.
+    if (axios.isCancel(error)) {
+      return Promise.reject(error);
+    }
+
     // Type guard to ensure error has the expected structure
     if (!error || typeof error !== 'object' || !('config' in error)) {
       logger.error(Logger.Event.API_CALL_FAILED, {

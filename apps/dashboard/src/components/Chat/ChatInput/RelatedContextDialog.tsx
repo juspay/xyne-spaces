@@ -23,6 +23,9 @@ import { differenceInCalendarDays, format, isToday, isYesterday } from 'date-fns
 
 import Dialog from '../../ui/Dialog';
 import { AskAIAvailabilityContext } from '../../../contexts/AskAIAvailabilityContext';
+import { RelatedContextAvailabilityContext } from '../../../contexts/RelatedContextAvailabilityContext';
+import { useAllChannels } from '../../../hooks/useChannels';
+import type { Channel } from '@xyne/shared';
 import { Tooltip } from '../../ui/Tooltip/Tooltip';
 import UserAvatar, { AvatarSize } from '../../UserAvatar/UserAvatar';
 import { SearchResultsSidePanel } from '../SearchResults/SidePanel/SidePanel';
@@ -50,19 +53,33 @@ const LIST_WIDTH_PX = 340;
 function panelFor(
   item: RelatedItem,
   canHostRecording: boolean,
+  channels: readonly Channel[],
 ): NonNullable<SidePanelState> | null {
   const { externalId, callType } = item.result.searchContext ?? {};
   if (item.kind === 'call' && canHostRecording && externalId && callType === 'HEADLESS') {
     return { kind: 'recording', externalId, title: plain(item.result.title) };
   }
-  const action = resolveResultClick(item.result, []);
+  // The channel list is how a Desk ticket is told apart, as on the search screen.
+  const action = resolveResultClick(item.result, channels);
   return action?.kind === 'panel' ? action.panel : null;
+}
+
+/**
+ * When the item happened. Messages and tickets carry it as a number; everything else
+ * only as text the server formats in UTC without saying so, read here as UTC.
+ */
+function timeOf(item: RelatedItem): Date | null {
+  const at = item.result.searchContext?.createdAtTimestamp;
+  if (at !== undefined) {
+    return new Date(at);
+  }
+  const text = item.result.metadata.timestamp;
+  return text && text !== 'N/A' ? new Date(`${text} UTC`) : null;
 }
 
 /** Same wording as the Activity list's timestamps. */
 function whenOf(item: RelatedItem): string {
-  const raw = item.result.searchContext?.createdAtTimestamp ?? item.result.metadata.timestamp;
-  const date = raw !== undefined ? new Date(raw) : null;
+  const date = timeOf(item);
   if (!date || Number.isNaN(date.getTime())) {
     return '';
   }
@@ -313,6 +330,7 @@ export function RelatedContextDialog({
 }: RelatedContextDialogProps): ReactElement {
   const reduceMotion = useReducedMotion();
   const { recordingVersion } = useRecordingVersion();
+  const channels = useAllChannels();
   const listRef = useRef<HTMLDivElement>(null);
   const [filter, setFilter] = useState<Filter>('all');
 
@@ -352,7 +370,7 @@ export function RelatedContextDialog({
     },
     [groups, items, selectedId, onSelect],
   );
-  const panel = selected ? panelFor(selected, recordingVersion === 'v2') : null;
+  const panel = selected ? panelFor(selected, recordingVersion === 'v2', channels) : null;
 
   // Keep the picked row in view as ↑/↓ walk past the fold.
   useEffect(() => {
@@ -509,7 +527,9 @@ export function RelatedContextDialog({
                 // A second assistant opening from inside the popup would stack a
                 // panel behind a modal; the screens shown here leave Ask AI out.
                 <AskAIAvailabilityContext.Provider value={false}>
-                  <SearchResultsSidePanel panel={panel} onClose={onClose} />
+                  <RelatedContextAvailabilityContext.Provider value={false}>
+                    <SearchResultsSidePanel panel={panel} onClose={onClose} />
+                  </RelatedContextAvailabilityContext.Provider>
                 </AskAIAvailabilityContext.Provider>
               ) : (
                 <NoPreview item={selected} onJump={event => onJump(selected, event)} />

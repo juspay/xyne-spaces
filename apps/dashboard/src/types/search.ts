@@ -203,6 +203,8 @@ export interface RelatedContext {
   items: RelatedItem[];
   /** False when the draft was not searched — not ready (half-typed, or nothing to look up). */
   ready?: boolean;
+  /** The lookup failed; nothing to show, but worth asking again at the next pause. */
+  failed?: boolean;
 }
 
 export interface VespaSearchResponse {

@@ -14,6 +14,7 @@
  * coming back to the same draft brings the chips back without a new lookup.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { isAxiosError } from 'axios';
 
 import { stateMachineActor } from '../machines/stateMachine';
 import { searchService } from '../services/searchService';
@@ -21,14 +22,22 @@ import type { RelatedItem } from '../types/search';
 
 /** The shortest wait allowed after the last keystroke, and the default. */
 export const MIN_RELATED_CONTEXT_DEBOUNCE_MS = 1000;
-/** The server's floor too; checked here so short drafts never leave the browser. */
-const MIN_WORDS = 4;
+/**
+ * Only keeps one-word drafts from leaving the browser. How many words a draft needs is
+ * the server's call (`minWords`, tuned in Superposition); a shorter one comes back as
+ * not ready, which leaves the chips as they are.
+ */
+const MIN_WORDS = 2;
+/** The API's limit on the draft; the server reads less than this anyway. */
+const MAX_DRAFT_CHARS = 4000;
 /**
  * After a "no verdict" answer — the feature is off for this user — stay quiet this
  * long rather than sending a request every pause. A lookup that merely failed comes
- * back as an empty answer instead, so it never silences the next one.
+ * back marked as failed instead, so it never silences the next one.
  */
 const NO_VERDICT_BACKOFF_MS = 60_000;
+/** When rate-limited and the server doesn't say for how long. */
+const RATE_LIMITED_BACKOFF_MS = 60_000;
 const CACHE_SIZE = 20;
 
 const normalize = (text: string): string => text.trim().replace(/\s+/g, ' ');
@@ -36,10 +45,19 @@ const normalize = (text: string): string => text.trim().replace(/\s+/g, ' ');
 /** Keeps the same empty array, so clearing on every keystroke never re-renders. */
 const cleared = (items: RelatedItem[]): RelatedItem[] => (items.length ? [] : items);
 
+/** The server's check, less its word count: slash commands, links and mentions don't count. */
 const isWorthLookingUp = (draft: string): boolean =>
   !draft.startsWith('/') &&
-  draft.split(' ').filter(word => /\p{L}{2,}/u.test(word) && !word.startsWith('@')).length >=
-    MIN_WORDS;
+  draft
+    .replace(/https?:\/\/\S+/g, ' ')
+    .split(/\s+/)
+    .filter(word => /\p{L}{2,}/u.test(word) && !word.startsWith('@')).length >= MIN_WORDS;
+
+/** How long a 429 asks us to wait: its Retry-After, in seconds, or a minute. */
+const retryAfterMs = (value: unknown): number => {
+  const seconds = Number(value);
+  return Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : RATE_LIMITED_BACKOFF_MS;
+};
 
 const KINDS = new Set(['thread', 'ticket', 'canvas', 'call']);
 const LABELS = new Set(['answers_it', 'same_question', 'related_discussion']);
@@ -182,15 +200,20 @@ export function useRelatedContext({
     inFlight.current = controller;
     setLoading(true);
     try {
-      const data = await searchService.getRelatedContext(draft, conversationId, controller.signal);
+      const data = await searchService.getRelatedContext(
+        draft.slice(0, MAX_DRAFT_CHARS),
+        conversationId,
+        controller.signal,
+      );
       if (controller.signal.aborted || draft !== latestDraft.current) return;
       if (!data) {
         quietUntil.current = Date.now() + NO_VERDICT_BACKOFF_MS;
         return;
       }
-      // Not ready to search — a pause mid-sentence: keep what is showing until a
-      // finished draft replaces it. Not cached, so the same words asked again are.
-      if (data.ready === false) return;
+      // Not ready to search — a pause mid-sentence — or the lookup failed: keep what is
+      // showing until a real answer replaces it. Neither is cached, so the same words
+      // are asked again at the next pause.
+      if (data.ready === false || data.failed) return;
       cache.current.set(cacheKey, data.items);
       if (cache.current.size > CACHE_SIZE) {
         cache.current.delete(cache.current.keys().next().value as string);
@@ -200,8 +223,12 @@ export function useRelatedContext({
         setItemsDraft(draft);
         remember(draftKey, draft, data.items);
       }
-    } catch {
-      // Cancelled, rate-limited or offline — suggestions are optional, so say nothing.
+    } catch (error) {
+      // Suggestions are optional, so a failure says nothing. Rate-limited, though,
+      // asking again at every pause would only be refused again: wait it out.
+      if (isAxiosError(error) && error.response?.status === 429) {
+        quietUntil.current = Date.now() + retryAfterMs(error.response.headers['retry-after']);
+      }
     } finally {
       if (inFlight.current === controller) {
         inFlight.current = null;

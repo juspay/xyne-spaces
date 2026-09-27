@@ -58,7 +58,10 @@ const readAnswer = (question: JevQuestion, raw: unknown): JevAnswer | null => {
   }
 
   const choice = answer.choice;
-  if (typeof choice !== 'string' || !(choice in question.criteria)) return null;
+  // Own keys only: `in` would also accept "constructor" and the like.
+  const isOption =
+    typeof choice === 'string' && Object.prototype.hasOwnProperty.call(question.criteria, choice);
+  if (!isOption) return null;
   const probabilities: Record<string, number> = {};
   if (answer.probabilities && typeof answer.probabilities === 'object') {
     for (const [option, p] of Object.entries(answer.probabilities as Record<string, unknown>)) {
@@ -108,14 +111,18 @@ export const askJevNouls = async (
  * Answers to any mix of questions about one `state`, in a single request. `state` is
  * a string or a JSON object; questions can point into an object with backticked paths
  * like `candidate.text`. Keyed like `questions`, and null when Jev can't answer or any
- * answer is unusable — same all-or-nothing rule as askJevNouls. `signal` cancels the
- * request early, e.g. when the caller's own client has gone. Never throws.
+ * answer is unusable — same all-or-nothing rule as askJevNouls. With `partial`, an
+ * unusable answer is left out instead, for a batch of independent questions where
+ * one bad answer should not cost the rest; null then only when none is usable.
+ * `signal` cancels the request early, e.g. when the caller's own client has gone.
+ * Never throws.
  */
 export const askJev = async (
   state: string | Record<string, unknown>,
   questions: Record<string, JevQuestion>,
   timeoutMs: number,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  { partial = false }: { partial?: boolean } = {}
 ): Promise<Record<string, JevAnswer> | null> => {
   const { apiKey, url, model } = envConfig.jev;
   if (!apiKey) return null;
@@ -130,28 +137,41 @@ export const askJev = async (
         : AbortSignal.timeout(timeoutMs),
     });
     if (!response.ok) {
-      // Status only: an error body can echo the request, which carries user text.
+      // Status only: an error body can echo the request, which carries user text. The
+      // body is still released, so the connection goes back to the pool.
       logger.warn('Jev request failed', { status: response.status });
+      await response.body?.cancel();
       return null;
     }
 
     const body = (await response.json()) as { answers?: Record<string, unknown> };
     const answers: Record<string, JevAnswer> = {};
+    const unusable: string[] = [];
     for (const [key, question] of Object.entries(questions)) {
       const answer = readAnswer(question, body.answers?.[key]);
-      if (!answer) {
-        logger.warn('Jev answered with no usable probability', { question: key });
-        return null;
+      if (answer) {
+        answers[key] = answer;
+      } else {
+        unusable.push(key);
       }
-      answers[key] = answer;
+    }
+    if (unusable.length > 0) {
+      logger.warn('Jev answered with no usable probability', {
+        questions: unusable.slice(0, 5),
+        unusable: unusable.length,
+        of: Object.keys(questions).length,
+      });
+      if (!partial || unusable.length === Object.keys(questions).length) return null;
     }
     return answers;
   } catch (error) {
     // Cancelled by the caller: nothing went wrong, so nothing to report.
     if (signal?.aborted) return null;
     const timedOut = error instanceof Error && error.name === 'TimeoutError';
+    // The error's name only: a reply that isn't JSON fails with a message quoting it,
+    // and it can echo the request.
     logger.warn(`Jev request ${timedOut ? `timed out after ${timeoutMs}ms` : 'errored'}`, {
-      error,
+      error: error instanceof Error ? error.name : 'unknown',
     });
     return null;
   }

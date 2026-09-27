@@ -25,7 +25,7 @@ import {
   CommandAccessibility,
 } from '@xyne/shared';
 import { BLOCKED_EXTENSIONS } from '../../ui/utils/files';
-import { useChannel, useChannelMentionSearch } from '../../../hooks/useChannels';
+import { useAllChannels, useChannel, useChannelMentionSearch } from '../../../hooks/useChannels';
 import { ConversationTabContext } from '../ConversationTabContext';
 import { intentClassifier } from '../../../services/onDeviceIntent';
 import { useIntentSuggestionToast } from '../../../hooks/useIntentSuggestionToast';
@@ -44,6 +44,7 @@ import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import type { InputBoxHandle } from '../../../hooks/useDragAndDropAreaRef';
 import { CreateTicketModal } from '../../Tickets/CreateTicketModal/CreateTicketModal';
 import { EntityLinkContext } from '../../../contexts/EntityLinkContext';
+import { useRelatedContextAvailable } from '../../../contexts/RelatedContextAvailabilityContext';
 import type { FocusPosition } from '@tiptap/react';
 import type { MentionResult } from '@xyne/shared';
 import { getSlashCommandArtifactDefinition } from '@xyne/shared';
@@ -245,8 +246,16 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
     // slash-command artifact being declared.
     const relatedPreferenceOn = useUserPreference('relatedContextEnabled');
     const relatedDebounceMs = useUserPreference('relatedContextDebounceMs');
+    // Off in the screens the related-context popup embeds, so a reply typed there
+    // doesn't open a popup of its own.
+    const relatedAvailable = useRelatedContextAvailable();
     const relatedEnabled =
-      relatedPreferenceOn && !messageId && !twinEdit && !isMobile && !activeArtifactCommand;
+      relatedPreferenceOn &&
+      relatedAvailable &&
+      !messageId &&
+      !twinEdit &&
+      !isMobile &&
+      !activeArtifactCommand;
     const relatedContext = useRelatedContext({
       enabled: relatedEnabled,
       conversationId,
@@ -256,17 +265,27 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
     const { onDraftChange: onRelatedDraftChange, interrupt: interruptRelated } = relatedContext;
 
     // A chip opens the related-context popup on that item; ⌘/Ctrl-click, or "open
-    // where it is" inside the popup, goes to the item's own place instead.
-    const [relatedPopupItemId, setRelatedPopupItemId] = useState<string | null>(null);
+    // where it is" inside the popup, goes to the item's own place instead. The popup
+    // keeps the items it opened with: a lookup that lands while it is open changes the
+    // chips, not the list the user is reading.
+    const [relatedPopup, setRelatedPopup] = useState<{
+      open: boolean;
+      items: RelatedItem[];
+      draft: string;
+      selectedId: string | null;
+    }>({ open: false, items: [], draft: '', selectedId: null });
+    // The channel list lets a Desk ticket open where Desk tickets live, as in cmd+K.
+    const allChannelsForNav = useAllChannels();
     const jumpToRelated = useCallback(
       (item: RelatedItem, event: React.MouseEvent | React.KeyboardEvent): void => {
         void openSearchResult(
           item.result,
           { modifier: event.metaKey || event.ctrlKey, isElectron: isElectronApp(), isMobile },
           navigate,
+          allChannelsForNav,
         );
       },
-      [isMobile, navigate],
+      [isMobile, navigate, allChannelsForNav],
     );
     const openRelated = useCallback(
       (item: RelatedItem, event: React.MouseEvent): void => {
@@ -274,10 +293,18 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
           jumpToRelated(item, event);
           return;
         }
-        setRelatedPopupItemId(item.id);
+        setRelatedPopup({
+          open: true,
+          items: relatedContext.items,
+          draft: relatedContext.draft,
+          selectedId: item.id,
+        });
       },
-      [jumpToRelated],
+      [jumpToRelated, relatedContext.items, relatedContext.draft],
     );
+    const closeRelatedPopup = useCallback((): void => {
+      setRelatedPopup(popup => ({ ...popup, open: false }));
+    }, []);
 
     // Slash commands for this channel — filtered by context (thread vs chat).
     // Global shortcuts are not filtered by thread/chat.
@@ -666,8 +693,6 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
 
     const handleSendMessage = useCallback(
       (_plainText: string, html: string, files: File[]): void => {
-        // Clearing the editor after a send emits no content change, so clear here.
-        onRelatedDraftChange('');
         if (twinEdit) {
           if (isOffline) {
             toast.warning("You're offline", {
@@ -737,6 +762,9 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
           });
           throw new Error(ATTACHMENT_STILL_UPLOADING);
         }
+        // Past every check that can stop the send. Clearing the editor after a send
+        // emits no content change, so the suggestions are cleared here.
+        onRelatedDraftChange('');
         const hasThreadBroadcastMention =
           !!conversationId &&
           !messageId &&
@@ -1252,7 +1280,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
               headerSlot={
                 <RelatedContextStrip
                   items={relatedContext.items}
-                  suppressPreviews={relatedPopupItemId !== null}
+                  suppressPreviews={relatedPopup.open}
                   onOpen={openRelated}
                   onDismiss={relatedContext.dismiss}
                 />
@@ -1388,14 +1416,14 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
         ) : null}
         {relatedEnabled && (
           <RelatedContextDialog
-            open={relatedPopupItemId !== null && relatedContext.items.length > 0}
-            items={relatedContext.items}
-            draft={relatedContext.draft}
-            selectedId={relatedPopupItemId}
-            onSelect={setRelatedPopupItemId}
-            onClose={() => setRelatedPopupItemId(null)}
+            open={relatedPopup.open}
+            items={relatedPopup.items}
+            draft={relatedPopup.draft}
+            selectedId={relatedPopup.selectedId}
+            onSelect={id => setRelatedPopup(popup => ({ ...popup, selectedId: id }))}
+            onClose={closeRelatedPopup}
             onJump={(item, event) => {
-              setRelatedPopupItemId(null);
+              closeRelatedPopup();
               jumpToRelated(item, event);
             }}
           />
