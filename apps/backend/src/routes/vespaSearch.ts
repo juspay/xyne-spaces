@@ -1,4 +1,4 @@
-import { Router, type NextFunction, type Request, type Response } from 'express';
+import { Router } from 'express';
 import { searchHandler } from '../services/vespaSearch';
 import { validate, validateQuery, validateSearchFilters } from '../middleware/validation';
 import { relatedContextLimiter } from '../middleware/rateLimiters';
@@ -13,6 +13,13 @@ import { queryIntentHandler } from '../services/queryIntent/handler';
 import { relatedContextHandler } from '../services/relatedContext/handler';
 
 const router = Router();
+/**
+ * The composer's lookup, apart from `router`: that one is also mounted under
+ * /api/vespaSearch/claw for installed apps acting as a user, and a draft classifier
+ * built for someone typing isn't theirs. This one is mounted at
+ * /api/vespaSearch/related only, behind user login.
+ */
+export const relatedContextRouter = Router();
 
 /**
  * @route GET /api/vespaSearch
@@ -70,28 +77,16 @@ router.get('/intent', validateQuery(queryIntentQuerySchema), queryIntentHandler)
  * @route POST /api/vespaSearch/related
  * @desc What the chat composer's draft relates to: threads, tickets, canvases and calls
  *       where it is answered, was asked before, or was discussed. `data` is null only
- *       when the feature is off for the user; a lookup that fails is `{ items: [] }`.
+ *       when the feature is off for the user; a lookup that fails is
+ *       `{ items: [], failed: true }`.
  *       Dropping the request (the user typed on) stops the work behind it. POST so the
  *       unsent draft never lands in a URL.
  * @access Private
  * @body {string} text - The draft (required)
  * @body {string} conversationId - The thread being replied in (optional)
  */
-/**
- * The composer's lookup only. This router is also mounted under /claw for installed
- * apps acting as a user; a draft classifier built for someone typing isn't theirs.
- */
-const composerOnly = (req: Request, res: Response, next: NextFunction): void => {
-  if (req.baseUrl.endsWith('/claw')) {
-    res.status(404).json({ success: false, error: 'Not found' });
-    return;
-  }
-  next();
-};
-
-router.post(
-  '/related',
-  composerOnly,
+relatedContextRouter.post(
+  '/',
   relatedContextLimiter,
   validate(relatedContextBodySchema),
   relatedContextHandler

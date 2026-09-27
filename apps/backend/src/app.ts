@@ -103,7 +103,7 @@ import recordingPointerBackfillRoutes from '@/routes/recordingPointerBackfill';
 import sdlcRepoCredentialBackfillRoutes from '@/routes/sdlcRepoCredentialBackfill';
 import searchMetricsRoutes from '@/routes/searchMetrics';
 import knowledgeRoutes from '@/routes/knowledge';
-import vespaSearchRoutes from '@/routes/vespaSearch';
+import vespaSearchRoutes, { relatedContextRouter } from '@/routes/vespaSearch';
 import { dashboardClawRouter } from '@/routes/dashboardClaw';
 import summarizeRoutes from '@/routes/summarize';
 import xyneAIRoutes from '@/routes/xyneAI';
@@ -772,6 +772,8 @@ export class App {
     this.app.use('/api/drafts', authMiddleware.authenticate, draftRoutes);
 
     // Vespa search routes (auth required)
+    // Ahead of the general mount, so a lookup is answered here and nothing else runs.
+    this.app.use('/api/vespaSearch/related', authMiddleware.authenticate, relatedContextRouter);
     this.app.use('/api/vespaSearch', authMiddleware.authenticate, vespaSearchRoutes);
 
     // Product Insights routes (auth and ACL required)

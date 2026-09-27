@@ -84,7 +84,11 @@ export function snippetOf(item: RelatedItem): string {
     (item.result.context ?? '')
       .replace(/^\s*#{1,6}\s+/gm, '')
       .replace(/^\s*(?:[-*]|\d+\.)\s+/gm, '')
-      .replace(/[`*_]{1,3}/g, ''),
+      // Paired emphasis and inline code only: VPN_ACCESS_GROUP or a*b keep their marks.
+      .replace(/`([^`\n]+)`/g, '$1')
+      .replace(/(\*\*|__)(?=\S)([^\n]*?\S)\1/g, '$2')
+      .replace(/(^|[^\w*])\*(?=\S)([^*\n]*?\S)\*(?![\w*])/g, '$1$2')
+      .replace(/(^|[^\w_])_(?=\S)([^_\n]*?\S)_(?![\w_])/g, '$1$2'),
   );
   const title = plain(item.result.title);
   return title && text.startsWith(title) ? text.slice(title.length).trim() : text;

@@ -7,6 +7,7 @@ import {
   askJev,
   isJevConfigured,
   type JevAnswer,
+  type JevFailure,
   type JevNoulQuestion,
   type JevQuestion,
 } from '@/services/queryIntent/jevClient';
@@ -231,11 +232,17 @@ const labelOf = (relation: Extract<JevAnswer, { type: 'choice' }>): RelatedLabel
 };
 
 /**
- * While Jev is failing, lookups end at once instead of each waiting out the timeout.
- * Set when the small readiness call fails — a verdict call can fail on its size alone.
+ * While Jev is down, lookups end at once instead of each waiting out the timeout. Set
+ * when the small readiness call fails the way an outage does — a timeout, no
+ * connection, a 5xx. A 4xx or an odd answer is about one draft, not everyone's; and a
+ * verdict call can fail on its size alone.
  */
 const JEV_COOLDOWN_MS = 30_000;
 let jevDownUntil = 0;
+const isOutage = (failure: JevFailure): boolean =>
+  failure.kind === 'timeout' ||
+  failure.kind === 'network' ||
+  (failure.kind === 'status' && failure.status >= 500);
 
 /**
  * The candidates that are about what the draft is about, most relevant first, each
@@ -342,11 +349,14 @@ export async function findRelatedContext(
       return failed;
     }
 
-    const gate = await askJev({ draft }, { is_complete: IS_COMPLETE }, config.timeoutMs, signal);
+    const gate = await askJev({ draft }, { is_complete: IS_COMPLETE }, config.timeoutMs, signal, {
+      onFailure: (failure) => {
+        if (isOutage(failure)) jevDownUntil = Date.now() + JEV_COOLDOWN_MS;
+      },
+    });
     const jevGateMs = Date.now() - started;
     if (signal?.aborted) return nothing;
     if (!gate) {
-      jevDownUntil = Date.now() + JEV_COOLDOWN_MS;
       logger.error('[RelatedContext] jev is_complete call failed', { ms: jevGateMs });
       logger.info('[RelatedContext] lookup', { jevGateMs, outcome: 'jev_failed' });
       return failed;

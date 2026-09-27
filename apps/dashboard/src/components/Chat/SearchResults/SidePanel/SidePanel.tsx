@@ -26,8 +26,17 @@ import type {
 
 // Every side-panel component is closable — the one shared prop across the whole family.
 // Each specific panel adds its own `panel` variant on top (below).
+/** How a host other than the search screen embeds the panes; the search screen passes none. */
+export interface PanelEmbedding {
+  /** Leave focus where the host put it: the panes' composers don't take it. */
+  suppressAutoFocus?: boolean;
+  /** A channel whose composer the host already shows, so its pane leaves its own out. */
+  composerChannelId?: string;
+}
+
 interface BasePanelProps {
   onClose: () => void;
+  embedding?: PanelEmbedding;
 }
 
 interface SearchResultsSidePanelProps extends BasePanelProps {
@@ -38,6 +47,7 @@ interface SearchResultsSidePanelProps extends BasePanelProps {
 export function SearchResultsSidePanel({
   panel,
   onClose,
+  embedding,
 }: SearchResultsSidePanelProps): ReactElement {
   // Single cast at the dispatch boundary is the standard idiom for a registry over a
   // discriminated union — each renderer is typed to its own panel variant in PANEL_RENDERERS.
@@ -46,7 +56,7 @@ export function SearchResultsSidePanel({
   ) => ReactElement;
   return (
     <div className='h-full flex flex-col min-h-0 bg-background'>
-      <Renderer panel={panel} onClose={onClose} />
+      <Renderer panel={panel} onClose={onClose} {...(embedding && { embedding })} />
     </div>
   );
 }
@@ -121,12 +131,14 @@ interface ChannelPanelProps extends BasePanelProps {
   panel: ChannelPanelState;
 }
 
-function ChannelPanel({ panel, onClose }: ChannelPanelProps): ReactElement {
+function ChannelPanel({ panel, onClose, embedding }: ChannelPanelProps): ReactElement {
   return (
     <ConversationPanelV2
       channelId={panel.channelId}
       previousChannelId={null}
       useLocalTabState
+      {...(embedding?.suppressAutoFocus && { suppressInputAutoFocus: true })}
+      {...(panel.channelId === embedding?.composerChannelId && { hideComposer: true })}
       {...(panel.conversationId !== undefined && {
         linkedConversationIdOverride: panel.conversationId,
       })}
@@ -140,10 +152,11 @@ interface ThreadPanelProps extends BasePanelProps {
   panel: ThreadPanelState;
 }
 
-function ThreadPanel({ panel, onClose }: ThreadPanelProps): ReactElement {
+function ThreadPanel({ panel, onClose, embedding }: ThreadPanelProps): ReactElement {
   const navigate = useNavigate();
   return (
     <ThreadMessages
+      {...(embedding?.suppressAutoFocus && { skipInputAutoFocus: true })}
       channelId={panel.thread.channelId}
       conversationId={panel.thread.conversationId}
       matchedMessageId={panel.thread.matchedMessageId ?? null}

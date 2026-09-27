@@ -53,7 +53,7 @@ export function CanvasToolbarAttachedActions({
   onLinkTicket,
 }: {
   onAddComment: () => void;
-} & CanvasFormattingToolbarOptions): ReactElement {
+} & CanvasFormattingToolbarOptions): ReactElement | null {
   const selectedTextRef = useRef('');
   const editor = useBlockNoteEditor();
 
@@ -175,6 +175,10 @@ export function CanvasToolbarAttachedActions({
       : 'canvas-formatting-menu__attached-button--middle';
   };
 
+  if (actions.length === 0) {
+    return null;
+  }
+
   return (
     <div className='canvas-formatting-menu__attached-actions'>
       {askAIAvailable && (
@@ -255,11 +259,13 @@ export const createCanvasFormattingToolbar = (
     blockTypeSelectItems,
   }: FormattingToolbarProps): ReactElement | null => {
     const Components = useComponentsContext();
+    const askAIAvailable = useAskAIAvailable();
     const canComment = options.canComment ?? true;
     const canCreateTicket = options.canCreateTicket ?? false;
     const hasEditorActions = canComment || canCreateTicket;
 
-    if (!Components) return null;
+    // Nothing to offer: no editing, and Ask AI left out by the host screen.
+    if (!Components || (!hasEditorActions && !askAIAvailable)) return null;
 
     return (
       <Components.FormattingToolbar.Root

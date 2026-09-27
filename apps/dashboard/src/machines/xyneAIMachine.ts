@@ -928,6 +928,8 @@ export const xyneAIMachine = setup({
     open: {
       on: {
         OPEN: {
+          // Nor may an already-open assistant be pointed somewhere else behind it.
+          guard: () => askAIHolds === 0,
           actions: 'updateOpen',
         },
         CLOSE: {

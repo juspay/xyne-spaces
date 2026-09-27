@@ -19,7 +19,7 @@ import {
 } from 'react';
 import { motion, useReducedMotion } from 'framer-motion';
 import { ArrowUpRight, Sparkles } from 'lucide-react';
-import { differenceInCalendarDays, format, isToday, isYesterday } from 'date-fns';
+import { differenceInCalendarDays, format, isToday, isYesterday, parse } from 'date-fns';
 
 import Dialog from '../../ui/Dialog';
 import { AskAIAvailabilityContext } from '../../../contexts/AskAIAvailabilityContext';
@@ -75,8 +75,23 @@ function timeOf(item: RelatedItem): Date | null {
   if (at) {
     return new Date(at);
   }
+  // Parsed by pattern, not by the browser: engines other than V8 may reject this form.
   const text = item.result.metadata.timestamp;
-  return text && text !== 'N/A' ? new Date(`${text} UTC`) : null;
+  if (!text || text === 'N/A') {
+    return null;
+  }
+  const local = parse(text.replace(/\s+/g, ' '), 'MMM d, yyyy, h:mm a', new Date(0));
+  return Number.isNaN(local.getTime())
+    ? null
+    : new Date(
+        Date.UTC(
+          local.getFullYear(),
+          local.getMonth(),
+          local.getDate(),
+          local.getHours(),
+          local.getMinutes(),
+        ),
+      );
 }
 
 /** Same wording as the Activity list's timestamps. */
@@ -311,6 +326,8 @@ function isBackdropClick(target: EventTarget | null): boolean {
 
 interface RelatedContextDialogProps {
   open: boolean;
+  /** The channel being typed in: a pane for it leaves out its composer, which would edit the same draft. */
+  channelId: string;
   items: RelatedItem[];
   /** The draft the items were found for, quoted in the header. */
   draft: string;
@@ -323,6 +340,7 @@ interface RelatedContextDialogProps {
 
 export function RelatedContextDialog({
   open,
+  channelId,
   items,
   draft,
   selectedId,
@@ -537,7 +555,12 @@ export function RelatedContextDialog({
                 // panel behind a modal; the screens shown here leave Ask AI out.
                 <AskAIAvailabilityContext.Provider value={false}>
                   <RelatedContextAvailabilityContext.Provider value={false}>
-                    <SearchResultsSidePanel panel={panel} onClose={onClose} />
+                    <SearchResultsSidePanel
+                      panel={panel}
+                      onClose={onClose}
+                      // The list keeps focus for ↑/↓ and ↵; the panes' composers don't take it.
+                      embedding={{ suppressAutoFocus: true, composerChannelId: channelId }}
+                    />
                   </RelatedContextAvailabilityContext.Provider>
                 </AskAIAvailabilityContext.Provider>
               ) : (
