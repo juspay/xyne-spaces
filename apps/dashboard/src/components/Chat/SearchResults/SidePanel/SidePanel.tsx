@@ -1,5 +1,5 @@
-import { ReactElement } from 'react';
-import { useNavigate, useLocation, Routes, Route } from 'react-router-dom';
+import { ReactElement, useContext } from 'react';
+import { useNavigate, Routes, Route, UNSAFE_RouteContext } from 'react-router-dom';
 import { X } from 'lucide-react';
 import ThreadMessages from '../../ThreadPannel';
 import { UserProfile } from '../../../ui/UserProfile/UserProfile';
@@ -224,9 +224,14 @@ interface DeskTicketPanelProps extends BasePanelProps {
 // useParams/useSearchParams/location.state, while useNavigate keeps hitting the real router — so the rare
 // in-ticket edit navigations (e.g. unmerge) open the full app instead of blanking the pane.
 function DeskTicketPanel({ panel, onClose }: DeskTicketPanelProps): ReactElement {
-  const { pathname } = useLocation();
+  // A descendant <Routes> matches what is left after its parent route's matched base,
+  // so the synthetic path hangs off that base. The full pathname can run past it — the
+  // composer's related-context popup sits under a route whose splat holds the open
+  // thread — and would leave a remainder the ticket route never matches.
+  const { matches } = useContext(UNSAFE_RouteContext);
+  const base = (matches[matches.length - 1]?.pathnameBase ?? '/').replace(/\/$/, '');
   const ticketLocation = {
-    pathname: `${pathname}/ticket/${panel.channelId}/${panel.ticketXyneId}`,
+    pathname: `${base}/ticket/${panel.channelId}/${panel.ticketXyneId}`,
     search: panel.mailId ? `?mail=${panel.mailId}` : '',
     hash: '',
     state: { conversationId: panel.conversationId, ticketId: panel.ticketId },

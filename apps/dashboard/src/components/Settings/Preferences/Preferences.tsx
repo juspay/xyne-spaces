@@ -89,7 +89,11 @@ import ChannelIcon from '../../Chat/ChannelIcon/ChannelIcon';
 import { Popover } from '../../ui/Popover/Popover';
 import Input from '../../ui/Input/Input';
 import { setUserPreference, useUserPreference } from '../../../machines/userPreferencesMachine';
-import { MIN_RELATED_CONTEXT_DEBOUNCE_MS } from '../../../hooks/useRelatedContext';
+import {
+  MAX_RELATED_CONTEXT_DEBOUNCE_MS,
+  MIN_RELATED_CONTEXT_DEBOUNCE_MS,
+  clampDebounceMs,
+} from '../../../hooks/useRelatedContext';
 import { useToolbarBuiltIns, useInboxBuiltIns, useChannelTabBuiltIns } from '../../BarCustomize';
 import { BarCustomizer } from './BarCustomizer';
 import type { PreferenceSection, PreferencesProps, NavItem } from '.';
@@ -832,9 +836,7 @@ const RelatedContextPreference: FC = () => {
 
   const commitDelay = (): void => {
     const parsed = Number.parseInt(delayDraft, 10);
-    const next = Number.isFinite(parsed)
-      ? Math.max(MIN_RELATED_CONTEXT_DEBOUNCE_MS, parsed)
-      : debounceMs;
+    const next = Number.isFinite(parsed) ? clampDebounceMs(parsed) : debounceMs;
     setDelayDraft(String(next));
     if (next !== debounceMs) {
       setUserPreference('relatedContextDebounceMs', next);
@@ -862,7 +864,8 @@ const RelatedContextPreference: FC = () => {
           <div>
             <p className='text-sm font-medium text-foreground'>Look up after</p>
             <p className='text-xs text-muted-foreground mt-0.5'>
-              Milliseconds after you stop typing. Minimum {MIN_RELATED_CONTEXT_DEBOUNCE_MS}.
+              Milliseconds after you stop typing, from {MIN_RELATED_CONTEXT_DEBOUNCE_MS} to{' '}
+              {MAX_RELATED_CONTEXT_DEBOUNCE_MS}.
             </p>
           </div>
           <div className='flex items-center gap-1.5'>
@@ -870,6 +873,7 @@ const RelatedContextPreference: FC = () => {
               type='number'
               inputMode='numeric'
               min={MIN_RELATED_CONTEXT_DEBOUNCE_MS}
+              max={MAX_RELATED_CONTEXT_DEBOUNCE_MS}
               step={100}
               value={delayDraft}
               onChange={e => setDelayDraft(e.target.value)}

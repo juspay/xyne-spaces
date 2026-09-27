@@ -2,6 +2,7 @@ export {
   searchChannels,
   searchChannelsWithScores,
   useAllChannels,
+  getAllChannels,
   useAllVisibleChannels,
   useVisibleProjects,
   useChannel,

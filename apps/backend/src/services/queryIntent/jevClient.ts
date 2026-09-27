@@ -97,7 +97,15 @@ export const askJevNouls = async (
   questions: Record<string, JevNoulQuestion>,
   timeoutMs: number
 ): Promise<Record<string, number> | null> => {
-  const answers = await askJev(state, questions, timeoutMs);
+  // Asked as yes/no whatever `type` says: questions can come from remote config,
+  // where it may be missing.
+  const asNoul = Object.fromEntries(
+    Object.entries(questions).map(([key, question]): [string, JevNoulQuestion] => [
+      key,
+      { ...question, type: 'noul' },
+    ])
+  );
+  const answers = await askJev(state, asNoul, timeoutMs);
   if (!answers) return null;
   const probabilities: Record<string, number> = {};
   for (const [key, answer] of Object.entries(answers)) {

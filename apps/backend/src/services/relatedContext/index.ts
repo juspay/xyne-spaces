@@ -166,10 +166,14 @@ const LABELS: RelatedLabel[] = ['answers_it', 'same_question', 'related_discussi
 
 /**
  * A candidate as one fenced quote. Any run of three or more quote marks is taken out
- * of the text in one pass, so nothing left over can close the fence early.
+ * of the text in one pass, so nothing left over can close the fence early. Backticks
+ * become plain quotes: in Jev's instructions they point into the state, and a quoted
+ * `draft` would pull the user's own draft into someone else's message.
  */
-const quoteCandidate = (candidate: Candidate): string =>
-  `Candidate ${KIND_NAMES[candidate.kind]}:\n"""\n${candidate.text.replace(/"{3,}/g, '"')}\n"""`;
+const quoteCandidate = (candidate: Candidate): string => {
+  const text = candidate.text.replace(/"{3,}/g, '"').replace(/`/g, "'");
+  return `Candidate ${KIND_NAMES[candidate.kind]}:\n"""\n${text}\n"""`;
+};
 
 /**
  * Every candidate's questions, for one Jev request. Jev answers each question on its
@@ -211,19 +215,27 @@ const verdictQuestions = (candidates: Candidate[]): Record<string, JevQuestion> 
 
 /**
  * How an on-topic candidate relates. The likeliest of the three related answers, since
- * once an item is on topic "unrelated" is not a choice left to make; when Jev gave no
- * probabilities for them, its own choice, and failing that the mildest claim.
+ * once an item is on topic "unrelated" is not a choice left to make; a tie goes to the
+ * milder claim. When Jev left any of the three unscored, its own choice, and failing
+ * that the mildest claim.
  */
 const labelOf = (relation: Extract<JevAnswer, { type: 'choice' }>): RelatedLabel => {
-  const scored = LABELS.filter((label) => relation.probabilities[label] !== undefined);
-  if (scored.length > 0) {
-    return scored.reduce((best, next) =>
-      (relation.probabilities[next] ?? 0) > (relation.probabilities[best] ?? 0) ? next : best
+  const { probabilities, choice } = relation;
+  if (LABELS.every((label) => probabilities[label] !== undefined)) {
+    // LABELS runs from the strongest claim to the mildest, so `>=` hands ties onward.
+    return LABELS.reduce((best, next) =>
+      (probabilities[next] ?? 0) >= (probabilities[best] ?? 0) ? next : best
     );
   }
-  const chosen = LABELS.find((label) => label === relation.choice);
-  return chosen ?? 'related_discussion';
+  return LABELS.find((label) => label === choice) ?? 'related_discussion';
 };
+
+/**
+ * While Jev is failing, lookups end at once instead of each waiting out the timeout.
+ * Set when the small readiness call fails — a verdict call can fail on its size alone.
+ */
+const JEV_COOLDOWN_MS = 30_000;
+let jevDownUntil = 0;
 
 /**
  * The candidates that are about what the draft is about, most relevant first, each
@@ -325,11 +337,16 @@ export async function findRelatedContext(
   try {
     const draft = text.trim().replace(/\s+/g, ' ').slice(0, config.maxDraftChars);
     if (!isWorthLookingUp(draft, config.minWords)) return { items: [], ready: false };
+    if (Date.now() < jevDownUntil) {
+      logger.info('[RelatedContext] lookup', { outcome: 'jev_cooling_down' });
+      return failed;
+    }
 
     const gate = await askJev({ draft }, { is_complete: IS_COMPLETE }, config.timeoutMs, signal);
     const jevGateMs = Date.now() - started;
     if (signal?.aborted) return nothing;
     if (!gate) {
+      jevDownUntil = Date.now() + JEV_COOLDOWN_MS;
       logger.error('[RelatedContext] jev is_complete call failed', { ms: jevGateMs });
       logger.info('[RelatedContext] lookup', { jevGateMs, outcome: 'jev_failed' });
       return failed;
@@ -341,10 +358,12 @@ export async function findRelatedContext(
     }
 
     const retrievalStarted = Date.now();
-    const found = await retrieveCandidates(draft, req, {
-      messageHits: config.messageHits,
-      perKind: config.perKind,
-    });
+    const found = await retrieveCandidates(
+      draft,
+      req,
+      { messageHits: config.messageHits, perKind: config.perKind },
+      signal
+    );
     const retrievalMs = Date.now() - retrievalStarted;
     const candidates = found ?? [];
     // One line per lookup: where the time went and how it ended. Never the draft.

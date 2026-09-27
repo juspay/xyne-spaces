@@ -14,6 +14,7 @@ import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import type { FC, ReactElement } from 'react';
 import { useCallback, useEffect, useRef } from 'react';
 import { xyneAIActor, type SelectionInfo } from '../../../machines/xyneAIMachine';
+import { useAskAIAvailable } from '../../../contexts/AskAIAvailabilityContext';
 
 /**
  * Whether cells of a table are selected.
@@ -38,6 +39,8 @@ type CanvasFormattingToolbarOptions = {
   onCreateTicket?: (selectedText: string) => void;
   onLinkTicket?: (selectedText: string) => void;
 };
+
+type AttachedAction = 'ask' | 'comment' | 'ticket';
 
 export function CanvasToolbarAttachedActions({
   onAddComment,
@@ -151,33 +154,48 @@ export function CanvasToolbarAttachedActions({
     onLinkTicket?.(selectedText);
   }, [onLinkTicket]);
 
-  const hasSecondaryAction = canComment || canCreateTicket;
+  // Ask AI is left out where the host screen turns it off (the related-context popup).
+  const askAIAvailable = useAskAIAvailable();
+  const actions = [
+    askAIAvailable && 'ask',
+    canComment && 'comment',
+    canCreateTicket && 'ticket',
+  ].filter((action): action is AttachedAction => Boolean(action));
+  // The group's rounded edges go to whichever buttons end up first and last.
+  const edgeOf = (action: AttachedAction): string => {
+    const index = actions.indexOf(action);
+    if (actions.length === 1) {
+      return 'canvas-formatting-menu__attached-button--left canvas-formatting-menu__attached-button--single';
+    }
+    if (index === 0) {
+      return 'canvas-formatting-menu__attached-button--left';
+    }
+    return index === actions.length - 1
+      ? 'canvas-formatting-menu__attached-button--right'
+      : 'canvas-formatting-menu__attached-button--middle';
+  };
 
   return (
     <div className='canvas-formatting-menu__attached-actions'>
-      <button
-        type='button'
-        className={`canvas-formatting-menu__attached-button canvas-formatting-menu__attached-button--left ${
-          hasSecondaryAction ? '' : 'canvas-formatting-menu__attached-button--single'
-        }`}
-        onMouseDown={event => event.preventDefault()}
-        onClick={handleAskAI}
-        disabled={!canvasId}
-        data-track-category='CANVAS'
-        data-track-name='Selection_Ask_AI'
-        data-track-metadata={JSON.stringify({ canvasId })}
-      >
-        <img alt='AI' width='14' height='14' src='/svgs/icons/ai-bot-gradient-star.svg' />
-        <span>Ask AI</span>
-      </button>
+      {askAIAvailable && (
+        <button
+          type='button'
+          className={`canvas-formatting-menu__attached-button ${edgeOf('ask')}`}
+          onMouseDown={event => event.preventDefault()}
+          onClick={handleAskAI}
+          disabled={!canvasId}
+          data-track-category='CANVAS'
+          data-track-name='Selection_Ask_AI'
+          data-track-metadata={JSON.stringify({ canvasId })}
+        >
+          <img alt='AI' width='14' height='14' src='/svgs/icons/ai-bot-gradient-star.svg' />
+          <span>Ask AI</span>
+        </button>
+      )}
       {canComment && (
         <button
           type='button'
-          className={`canvas-formatting-menu__attached-button ${
-            canCreateTicket
-              ? 'canvas-formatting-menu__attached-button--middle'
-              : 'canvas-formatting-menu__attached-button--right'
-          }`}
+          className={`canvas-formatting-menu__attached-button ${edgeOf('comment')}`}
           onMouseDown={event => event.preventDefault()}
           onClick={onAddComment}
           data-track-category='CANVAS'
@@ -193,7 +211,7 @@ export function CanvasToolbarAttachedActions({
           <DropdownMenu.Trigger asChild>
             <button
               type='button'
-              className='canvas-formatting-menu__attached-button canvas-formatting-menu__attached-button--right'
+              className={`canvas-formatting-menu__attached-button ${edgeOf('ticket')}`}
               onMouseDown={event => event.preventDefault()}
               data-track-category='CANVAS'
               data-track-name='Selection_Ticket_Menu'

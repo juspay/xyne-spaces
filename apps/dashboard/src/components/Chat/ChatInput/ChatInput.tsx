@@ -25,7 +25,7 @@ import {
   CommandAccessibility,
 } from '@xyne/shared';
 import { BLOCKED_EXTENSIONS } from '../../ui/utils/files';
-import { useAllChannels, useChannel, useChannelMentionSearch } from '../../../hooks/useChannels';
+import { getAllChannels, useChannel, useChannelMentionSearch } from '../../../hooks/useChannels';
 import { ConversationTabContext } from '../ConversationTabContext';
 import { intentClassifier } from '../../../services/onDeviceIntent';
 import { useIntentSuggestionToast } from '../../../hooks/useIntentSuggestionToast';
@@ -256,10 +256,11 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
       !twinEdit &&
       !isMobile &&
       !activeArtifactCommand;
+    const relatedDraftKey = conversationId ?? channelId;
     const relatedContext = useRelatedContext({
       enabled: relatedEnabled,
       conversationId,
-      draftKey: conversationId ?? channelId,
+      draftKey: relatedDraftKey,
       debounceMs: relatedDebounceMs,
     });
     const { onDraftChange: onRelatedDraftChange, interrupt: interruptRelated } = relatedContext;
@@ -274,18 +275,23 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
       draft: string;
       selectedId: string | null;
     }>({ open: false, items: [], draft: '', selectedId: null });
-    // The channel list lets a Desk ticket open where Desk tickets live, as in cmd+K.
-    const allChannelsForNav = useAllChannels();
     const jumpToRelated = useCallback(
       (item: RelatedItem, event: React.MouseEvent | React.KeyboardEvent): void => {
-        void openSearchResult(
+        // The channel list lets a Desk ticket open where Desk tickets live, as in cmd+K.
+        // Read at the click, so composers don't re-render as channels change.
+        openSearchResult(
           item.result,
           { modifier: event.metaKey || event.ctrlKey, isElectron: isElectronApp(), isMobile },
           navigate,
-          allChannelsForNav,
-        );
+          getAllChannels(),
+        ).catch((error: unknown) => {
+          logger.error(Event.FRONTEND_ERROR, {
+            message: 'Opening a related-context item failed',
+            error,
+          });
+        });
       },
-      [isMobile, navigate, allChannelsForNav],
+      [isMobile, navigate],
     );
     const openRelated = useCallback(
       (item: RelatedItem, event: React.MouseEvent): void => {
@@ -303,8 +309,13 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
       [jumpToRelated, relatedContext.items, relatedContext.draft],
     );
     const closeRelatedPopup = useCallback((): void => {
-      setRelatedPopup(popup => ({ ...popup, open: false }));
+      setRelatedPopup(popup => (popup.open ? { ...popup, open: false } : popup));
     }, []);
+    // The popup belongs to this draft while suggestions are on: turning them off, or
+    // moving to another channel or thread, closes it, so it can't come back by itself.
+    useEffect(() => {
+      closeRelatedPopup();
+    }, [relatedEnabled, relatedDraftKey, closeRelatedPopup]);
 
     // Slash commands for this channel — filtered by context (thread vs chat).
     // Global shortcuts are not filtered by thread/chat.

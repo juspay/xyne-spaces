@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, type NextFunction, type Request, type Response } from 'express';
 import { searchHandler } from '../services/vespaSearch';
 import { validate, validateQuery, validateSearchFilters } from '../middleware/validation';
 import { relatedContextLimiter } from '../middleware/rateLimiters';
@@ -77,8 +77,21 @@ router.get('/intent', validateQuery(queryIntentQuerySchema), queryIntentHandler)
  * @body {string} text - The draft (required)
  * @body {string} conversationId - The thread being replied in (optional)
  */
+/**
+ * The composer's lookup only. This router is also mounted under /claw for installed
+ * apps acting as a user; a draft classifier built for someone typing isn't theirs.
+ */
+const composerOnly = (req: Request, res: Response, next: NextFunction): void => {
+  if (req.baseUrl.endsWith('/claw')) {
+    res.status(404).json({ success: false, error: 'Not found' });
+    return;
+  }
+  next();
+};
+
 router.post(
   '/related',
+  composerOnly,
   relatedContextLimiter,
   validate(relatedContextBodySchema),
   relatedContextHandler
