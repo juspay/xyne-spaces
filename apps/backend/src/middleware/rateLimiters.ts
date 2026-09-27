@@ -73,3 +73,17 @@ export const webhookLimiter: RateLimitRequestHandler = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
 });
+
+/** Per-user limiter for the composer's related-context lookup: each call runs four searches and a Jev call. The client sends one per pause in typing; this caps a stuck loop or a script. */
+export const relatedContextLimiter: RateLimitRequestHandler = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 30,
+  keyGenerator: (req): string => req.user?.id ?? ipKeyGenerator(req.ip ?? 'unknown'),
+  message: {
+    success: false,
+    error: 'Too many related-context requests. Please slow down.',
+    timestamp: new Date().toISOString(),
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});

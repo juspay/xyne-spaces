@@ -435,3 +435,16 @@ export const queryIntentQuerySchema = Joi.object({
     'any.required': 'Query parameter "q" is required'
   }),
 });
+
+/**
+ * Body for the composer's related-context lookup: the draft being typed, and the
+ * thread it is being typed in, if any.
+ */
+export const relatedContextBodySchema = Joi.object({
+  text: Joi.string().trim().min(1).max(4000).required().messages({
+    'string.empty': '"text" cannot be empty',
+    'string.max': 'Text cannot exceed 4000 characters',
+    'any.required': '"text" is required'
+  }),
+  conversationId: Joi.string().max(64).optional(),
+});

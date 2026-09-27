@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { useAskAIAvailable } from '../../../contexts/AskAIAvailabilityContext';
 import { ReactElement, useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useParams, useLocation, useSearchParams, useOutletContext } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
@@ -169,6 +170,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   showAskAiAction = true,
 }): ReactElement => {
   const { canvasId: paramsCanvasId } = useParams<{ canvasId?: string }>();
+  const askAIAvailable = useAskAIAvailable();
   const canvasId = propCanvasId || paramsCanvasId;
   const navigate = useNavigate();
   const shareableOrigin = useShareableOrigin();
@@ -1485,7 +1487,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
 
                         {/* Icon button group */}
                         <div className='flex items-center gap-1'>
-                          {showAskAiAction && (
+                          {showAskAiAction && askAIAvailable && (
                             <button
                               type='button'
                               onClick={handleAskAI}

@@ -52,6 +52,55 @@ export interface DraftMessages {
 
 const DRAFT_STORAGE_KEY = 'channel-draft-message';
 
+// The composer's related-context chips (threads, tickets, canvases and calls a
+// draft relates to), kept beside the draft they were found for so it brings them
+// back when you return to it. They quote other people's messages, so only a few
+// recent ones are kept, and they are cleared on sign-out (CLEAR_RELATED_CONTEXT).
+export interface DraftRelatedContext {
+  /** The draft text the items were found for, which the related-context popup quotes. */
+  draft: string;
+  /** The dashboard's related items, stored as given; the dashboard checks them on read. */
+  items: unknown[];
+  savedAt: number;
+}
+
+export interface DraftRelatedContexts {
+  [lookupId: string]: DraftRelatedContext | undefined;
+}
+
+const RELATED_CONTEXT_STORAGE_KEY = 'composer-related-context';
+const RELATED_CONTEXT_MAX_DRAFTS = 20;
+const RELATED_CONTEXT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+/** The newest entries, within the age limit. */
+const pruneRelatedContext = (all: DraftRelatedContexts): DraftRelatedContexts => {
+  const now = Date.now();
+  return Object.fromEntries(
+    Object.entries(all)
+      .flatMap(([lookupId, entry]): Array<[string, DraftRelatedContext]> =>
+        entry && now - entry.savedAt < RELATED_CONTEXT_MAX_AGE_MS ? [[lookupId, entry]] : [],
+      )
+      .sort(([, a], [, b]) => b.savedAt - a.savedAt)
+      .slice(0, RELATED_CONTEXT_MAX_DRAFTS),
+  );
+};
+
+const persistRelatedContext = (all: DraftRelatedContexts): void => {
+  try {
+    draftStorage().setItem(RELATED_CONTEXT_STORAGE_KEY, JSON.stringify(all));
+  } catch { /* storage unavailable */ }
+};
+
+const loadRelatedContext = (): DraftRelatedContexts => {
+  try {
+    const parsed = JSON.parse(draftStorage().getItem(RELATED_CONTEXT_STORAGE_KEY) || '{}') as unknown;
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return pruneRelatedContext(parsed as DraftRelatedContexts);
+    }
+  } catch { /* unreadable: start empty */ }
+  return {};
+};
+
 export type User = QueryResultType<typeof queries.getUsersV2>[number];
 export type Bookmarks = QueryResultType<typeof queries.userBookmarks>[number];
 export type VisibleChannel = NonNullable<QueryResultType<typeof queries.userVisibleChannelsV3>[number]['channel']>;
@@ -198,6 +247,8 @@ interface StateMachineContext {
   /** Per-route-keyword saved paths, populated by the SaveRoute HOC. */
   savedRoutes: Record<string, string>;
   drafts: DraftMessages; // Draft messages per channel/conversation
+  /** Related-context chips per draft, keyed like `drafts`. */
+  relatedContext: DraftRelatedContexts;
   draftMessages: DraftMessageDB[];
   twinDrafts: TwinDraftDB[];
   delayedMessages: DelayedMessageDB[];
@@ -233,6 +284,9 @@ type StateMachineEvent =
   | { type: 'SET_SAVED_ROUTE'; keyword: string; path: string | null }
   | { type: 'SAVE_DRAFT'; lookupId: string; html: string; text: string }
   | { type: 'REMOVE_DRAFT'; lookupId: string }
+  | { type: 'SAVE_RELATED_CONTEXT'; lookupId: string; draft: string; items: unknown[] }
+  | { type: 'REMOVE_RELATED_CONTEXT'; lookupId: string }
+  | { type: 'CLEAR_RELATED_CONTEXT' }
   | { type: 'ADD_ALL_USER_GROUPS'; userGroups: UserGroup[] }
   | { type: 'RESET_ALL_USER_GROUPS' }
   | { type: 'ADD_USER_GROUP_MAPPINGS'; userGroupMappings: UserGroupMapping[] }
@@ -453,6 +507,37 @@ export const stateMachine = setup({
           return rest;
         }
         return context.drafts;
+      },
+    }),
+    saveRelatedContext: assign({
+      relatedContext: ({ context, event }) => {
+        if (event.type === 'SAVE_RELATED_CONTEXT') {
+          const next = pruneRelatedContext({
+            ...context.relatedContext,
+            [event.lookupId]: { draft: event.draft, items: event.items, savedAt: Date.now() },
+          });
+          persistRelatedContext(next);
+          return next;
+        }
+        return context.relatedContext;
+      },
+    }),
+    removeRelatedContext: assign({
+      relatedContext: ({ context, event }) => {
+        if (event.type === 'REMOVE_RELATED_CONTEXT' && context.relatedContext[event.lookupId]) {
+          const { [event.lookupId]: _, ...rest } = context.relatedContext;
+          persistRelatedContext(rest);
+          return rest;
+        }
+        return context.relatedContext;
+      },
+    }),
+    clearRelatedContext: assign({
+      relatedContext: () => {
+        try {
+          draftStorage().removeItem(RELATED_CONTEXT_STORAGE_KEY);
+        } catch { /* storage unavailable */ }
+        return {};
       },
     }),
     addAllUserGroups: assign({
@@ -751,6 +836,7 @@ export const stateMachine = setup({
       return {};
     })(),
     drafts: JSON.parse(draftStorage().getItem(DRAFT_STORAGE_KEY) || '{}') as DraftMessages,
+    relatedContext: loadRelatedContext(),
     draftMessages: [],
     twinDrafts: [],
     delayedMessages: [],
@@ -808,6 +894,15 @@ export const stateMachine = setup({
         },
         REMOVE_DRAFT: {
           actions: 'removeDraft',
+        },
+        SAVE_RELATED_CONTEXT: {
+          actions: 'saveRelatedContext',
+        },
+        REMOVE_RELATED_CONTEXT: {
+          actions: 'removeRelatedContext',
+        },
+        CLEAR_RELATED_CONTEXT: {
+          actions: 'clearRelatedContext',
         },
         ADD_ALL_USER_GROUPS: {
           actions: 'addAllUserGroups',
