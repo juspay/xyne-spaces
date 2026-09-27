@@ -13,6 +13,7 @@ import {
   truncateFileName,
 } from '../utils/files';
 import type { AttachmentPreviewProps, UploadedFile } from './Files.types';
+import { AttachmentUploadRowStatus, AttachmentUploadTileOverlay } from './AttachmentUploadOverlay';
 import { generateWebThumbnail, isVideoFile } from '../../../services/thumbnailService';
 import {
   convertHeicFileToPreviewBlob,
@@ -46,8 +47,13 @@ export const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({
   onRemove,
   onPreview,
   isUploading = false,
+  upload,
+  onRetry,
   variant = 'compact',
 }) => {
+  const uploadInFlight = !!upload && upload.phase !== 'failed';
+  const uploadFailed = upload?.phase === 'failed';
+  const removeLabel = uploadInFlight ? 'Cancel upload' : 'Remove attachment';
   const { isMobile } = usePlatform();
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
   const [videoThumbnailUrl, setVideoThumbnailUrl] = useState<string | null>(null);
@@ -441,8 +447,8 @@ export const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({
               {!isUploading && (
                 <button
                   type='button'
-                  title='Remove attachment'
-                  aria-label={`Remove attachment ${getFileName(file)}`}
+                  title={removeLabel}
+                  aria-label={`${removeLabel} ${getFileName(file)}`}
                   onClick={e => {
                     e.stopPropagation();
                     onRemove();
@@ -454,7 +460,15 @@ export const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({
                 </button>
               )}
             </span>
-            <p className='text-muted-foreground text-xs'>{getFileExtension(getFileName(file))}</p>
+            {upload ? (
+              <AttachmentUploadRowStatus
+                upload={upload}
+                fileName={getFileName(file)}
+                onRetry={onRetry}
+              />
+            ) : (
+              <p className='text-muted-foreground text-xs'>{getFileExtension(getFileName(file))}</p>
+            )}
           </div>
         </div>
       </div>
@@ -501,7 +515,9 @@ export const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({
       )}
       <div
         data-testid='attachment-preview'
-        className='relative flex items-center justify-center bg-background cursor-pointer group rounded-xl border border-border hover:border-input shadow-sm hover:shadow-md transition-all duration-200'
+        className={`relative flex items-center justify-center bg-background cursor-pointer group rounded-xl border shadow-sm hover:shadow-md transition-all duration-200 ${
+          uploadFailed ? 'border-destructive' : 'border-border hover:border-input'
+        }`}
         style={{ width: '64px', height: '64px' }}
         onClick={() => {
           if (category === 'video' && isBrowserFile(file)) {
@@ -533,8 +549,16 @@ export const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({
           {renderPreview()}
         </div>
 
+        {upload && (
+          <AttachmentUploadTileOverlay
+            upload={upload}
+            fileName={getFileName(file)}
+            onRetry={onRetry}
+          />
+        )}
+
         {/* Upload loading overlay */}
-        {isUploading && (
+        {isUploading && !upload && (
           <div className='absolute inset-0 flex items-center justify-center backdrop-blur-sm bg-background/80 rounded-xl z-10'>
             <Loader2 className='h-8 w-8 text-foreground animate-spin' />
           </div>
@@ -551,10 +575,10 @@ export const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({
             data-track-category='MESSAGE_ATTACHMENT'
             data-track-name='REMOVE_ATTACHMENT'
             className={`absolute -top-2 -right-2 p-1 bg-background hover:bg-destructive/10 rounded-full transition-colors shadow-md border border-border z-10 ${
-              isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+              isMobile || upload ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
             }`}
-            title='Remove attachment'
-            aria-label={`Remove attachment ${getFileName(file)}`}
+            title={removeLabel}
+            aria-label={`${removeLabel} ${getFileName(file)}`}
           >
             <X className='h-3.5 w-3.5 text-red-600' />
           </button>
