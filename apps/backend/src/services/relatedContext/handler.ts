@@ -29,8 +29,6 @@ export const relatedContextHandler = async (req: Request, res: Response): Promis
   });
 
   const { text, conversationId } = req.body as { text: string; conversationId?: string };
-  // The whole ACL context, not just the id: every result is checked against the
-  // caller's read rules, and those depend on their role (a guest sees less).
   const auth = {
     userId,
     workspaceId,

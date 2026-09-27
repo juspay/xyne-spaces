@@ -1,6 +1,5 @@
 import { db } from '@/database/client';
 import type { ACLContext } from '@/database/acl/base-acl';
-import { MessagesACL } from '@/database/acl/tables/messages-acl';
 import { logger } from '@/utils/logger';
 import { stripHtml } from '@/agents/xyne-ai/tools/helpers';
 import { vespaService } from '@/services/vespaSearch';
@@ -9,7 +8,6 @@ import {
   type TransformedSearchResult,
 } from '@/services/vespaSearch/resultTransform';
 import { SubApp, VespaDocType, type VespaSearchHit } from '@/vespa/src/types';
-import { keepReadable } from './access';
 
 export type CandidateKind = 'thread' | 'ticket' | 'canvas' | 'call';
 
@@ -25,10 +23,7 @@ export interface Candidate {
 }
 
 export interface RetrievalContext {
-  /**
-   * Who is typing. Searches run as them, and every result is then checked against
-   * their read rules (see access.ts) — role included, since a guest sees less.
-   */
+  /** Who is typing. Searches run as them. */
   auth: ACLContext;
   /** The thread being replied in — never suggested back to itself. */
   conversationId?: string;
@@ -97,9 +92,17 @@ function describeError(error: unknown, draft: string): { name: string; message: 
 }
 
 /**
- * Searches as the person typing — the same permission-gated query cmd+K runs — and
- * then keeps only what their read rules let them open. The draft is marked private
- * so it stays out of search logs and analytics. A kind whose search fails is skipped.
+ * Searches as the person typing — the same permission-gated query cmd+K runs, and
+ * like cmd+K it trusts that filter's answer. The draft is marked private so it stays
+ * out of search logs and analytics. A kind whose search fails is skipped.
+ *
+ * TODO: re-check results against the app's own read rules, here and in cmd+K
+ * together. The search's permission fields are copies and differ from those rules:
+ * - a call transcript matches for everyone in the call's channel, while a recording
+ *   opens only for the people it is shared with;
+ * - public-channel messages match for guests, who see only the channels granted to them;
+ * - the copies trail changes, so someone removed from a private channel, or a deleted
+ *   ticket, still matches until the index catches up.
  */
 async function search(
   draft: string,
@@ -108,7 +111,7 @@ async function search(
   limit: number
 ): Promise<TransformedSearchResult[]> {
   const started = Date.now();
-  let stage: 'vespa' | 'transform' | 'access' = 'vespa';
+  let stage: 'vespa' | 'transform' = 'vespa';
   try {
     const response = await vespaService.searchService.searchVespa(
       draft,
@@ -132,16 +135,13 @@ async function search(
     const hits = (response.root.children ?? []) as VespaSearchHit[];
     stage = 'transform';
     const results = await transformVespaResults(hits, db, false, true);
-    stage = 'access';
-    const readable = await keepReadable(kind.kind, results, ctx.auth);
     logger.info('[RelatedContext] vespa search', {
       kind: kind.kind,
       vespaMs,
       totalMs: Date.now() - started,
       hits: hits.length,
-      readable: readable.length,
     });
-    return readable;
+    return results;
   } catch (error) {
     logger.error('[RelatedContext] vespa search failed', {
       kind: kind.kind,
@@ -201,18 +201,14 @@ async function withoutTicketThreads(
  * replies, which the matching hit alone does not show. Messages visible only to
  * someone else, and deleted ones, are left out.
  */
-async function threadTexts(
-  conversationIds: string[],
-  auth: ACLContext
-): Promise<Map<string, string>> {
+async function threadTexts(conversationIds: string[]): Promise<Map<string, string>> {
   const texts = new Map<string, string>();
-  const readable = await new MessagesACL(auth, db).getWhereClause();
   await Promise.all(
     conversationIds.map(async (conversationId) => {
-      // Only messages this person may read go to the classifier — a reply meant for
-      // someone else stays out even when the thread itself is open to them.
+      // The thread came from the person's own search; a reply meant for someone else
+      // still stays out.
       const messages = await db.message.findMany({
-        where: { AND: [{ conversationId, isDeleted: false, visibleTo: null }, readable] },
+        where: { conversationId, isDeleted: false, visibleTo: null },
         orderBy: { createdAt: 'asc' },
         take: THREAD_MESSAGES,
         select: { content: true },
@@ -283,10 +279,7 @@ export async function retrieveCandidates(
   );
   let texts = new Map<string, string>();
   try {
-    texts = await threadTexts(
-      threads.map(([conversationId]) => conversationId),
-      ctx.auth
-    );
+    texts = await threadTexts(threads.map(([conversationId]) => conversationId));
   } catch (error) {
     logger.error('[RelatedContext] thread fetch failed', { error: describeError(error, draft) });
   }
