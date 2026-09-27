@@ -51,6 +51,11 @@ const SEARCHES: Array<{
   kind: CandidateKind;
   apps: string[];
   filters: Record<string, unknown>;
+  /**
+   * The file sub-app a hit must be. The search's TRANSCRIPT filter also lets chat and
+   * ticket attachments through, which would come back as calls.
+   */
+  subApp?: SubApp;
 }> = [
   {
     kind: 'thread',
@@ -67,6 +72,7 @@ const SEARCHES: Array<{
       file: { docType: [VespaDocType.FILE], subApp: [SubApp.CANVAS] },
       presentationSummary: 'default',
     },
+    subApp: SubApp.CANVAS,
   },
   {
     kind: 'call',
@@ -75,6 +81,7 @@ const SEARCHES: Array<{
       file: { docType: [VespaDocType.FILE], subApp: [SubApp.TRANSCRIPT] },
       presentationSummary: 'default',
     },
+    subApp: SubApp.TRANSCRIPT,
   },
 ];
 
@@ -94,7 +101,8 @@ function describeError(error: unknown, draft: string): { name: string; message: 
 /**
  * Searches as the person typing — the same permission-gated query cmd+K runs, and
  * like cmd+K it trusts that filter's answer. The draft is marked private so it stays
- * out of search logs and analytics. A kind whose search fails is skipped.
+ * out of search logs and analytics, and searched as plain text: a draft's "today" is
+ * a word in a sentence, not a time filter. Null when the search fails.
  *
  * TODO: re-check results against the app's own read rules, here and in cmd+K
  * together. The search's permission fields are copies and differ from those rules:
@@ -109,7 +117,7 @@ async function search(
   ctx: RetrievalContext,
   kind: (typeof SEARCHES)[number],
   limit: number
-): Promise<TransformedSearchResult[]> {
+): Promise<TransformedSearchResult[] | null> {
   const started = Date.now();
   let stage: 'vespa' | 'transform' = 'vespa';
   try {
@@ -128,11 +136,14 @@ async function search(
         call: {},
         workspaceId: ctx.auth.workspaceId,
         privateQuery: true,
+        literalQuery: true,
         ...kind.filters,
       }
     );
     const vespaMs = Date.now() - started;
-    const hits = (response.root.children ?? []) as VespaSearchHit[];
+    const hits = ((response.root.children ?? []) as VespaSearchHit[]).filter(
+      (hit) => !kind.subApp || ('subApp' in hit.fields && hit.fields.subApp === kind.subApp)
+    );
     stage = 'transform';
     const results = await transformVespaResults(hits, db);
     logger.info('[RelatedContext] vespa search', {
@@ -149,7 +160,7 @@ async function search(
       ms: Date.now() - started,
       error: describeError(error, draft),
     });
-    return [];
+    return null;
   }
 }
 
@@ -248,12 +259,12 @@ function describe(kind: CandidateKind, result: TransformedSearchResult): string 
   }
 }
 
-/** Candidates for `draft`, best first within each kind. Never throws. */
+/** Candidates for `draft`, best first within each kind; null when every search failed. Never throws. */
 export async function retrieveCandidates(
   draft: string,
   ctx: RetrievalContext,
   limits: RetrievalLimits
-): Promise<Candidate[]> {
+): Promise<Candidate[] | null> {
   const found = new Map(
     await Promise.all(
       SEARCHES.map(
@@ -270,6 +281,9 @@ export async function retrieveCandidates(
       )
     )
   );
+  // Every search failing is a failed lookup, not an empty one; one failing just leaves
+  // its kind out.
+  if ([...found.values()].every((results) => results === null)) return null;
   const hitsOf = (kind: CandidateKind): TransformedSearchResult[] => found.get(kind) ?? [];
 
   const ticketIds = new Set(hitsOf('ticket').map((ticket) => ticket.id));

@@ -108,6 +108,12 @@ interface SearchOptions {
    * the logs and the search analytics; the search itself is unchanged.
    */
   privateQuery?: boolean;
+  /**
+   * Search the query as plain text: words like "today" or "latest" stay search terms
+   * instead of turning into a time filter. For prose, such as a draft, rather than a
+   * search someone typed.
+   */
+  literalQuery?: boolean;
 }
 
 export interface ILogger {
@@ -309,6 +315,7 @@ export class SearchService {
         workspaceId,
         captureDebug,
         privateQuery = false,
+        literalQuery = false,
       } = options;
 
       // Derive workspaceId from userId when not explicitly provided
@@ -328,7 +335,7 @@ export class SearchService {
 
       // Parse time keywords from query — skipped for exact match so a quoted word like
       // "yesterday" is searched literally instead of being consumed as a time filter.
-      const parsedQuery: ParsedTimeQuery = parseTimeKeywords(isExactMatch ? '' : query);
+      const parsedQuery: ParsedTimeQuery = parseTimeKeywords(isExactMatch || literalQuery ? '' : query);
       const searchQuery = isExactMatch
         ? rawTrimmedQuery.slice(1, -1).trim()
         : parsedQuery.cleanedQuery || query;
@@ -518,7 +525,7 @@ export class SearchService {
 
       const totalStartTime = Date.now();
       const exactStartTime = Date.now();
-      let response = await this.vespa.search<VespaSearchResponse>(payload);
+      let response = await this.vespa.search<VespaSearchResponse>(payload, { privateQuery });
       const exactDuration = Date.now() - exactStartTime;
 
        // Filter by nativerank if enabled
@@ -605,7 +612,7 @@ export class SearchService {
               vespaParams: fuzzyPayload as Record<string, unknown>,
             });
           }
-          return this.vespa.search<VespaSearchResponse>(fuzzyPayload);
+          return this.vespa.search<VespaSearchResponse>(fuzzyPayload, { privateQuery });
         },
         
         {
