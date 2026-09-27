@@ -309,9 +309,9 @@ async function classify(
  * `signal` is the caller's client going away — they typed on, or left. Work that has
  * not started yet is skipped and a Jev call in flight is cancelled.
  *
- * Drafts include DMs and private channels, so like radar dedup this only runs
- * against a Jev that was pointed at explicitly (JEV_URL and JEV_MODEL set), never
- * the public default endpoint.
+ * Drafts include DMs and private channels, so this only runs against a Jev that was
+ * pointed at explicitly (JEV_URL and JEV_MODEL set), never the public default
+ * endpoint.
  */
 export async function findRelatedContext(
   text: string,
