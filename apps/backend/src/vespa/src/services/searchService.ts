@@ -103,6 +103,11 @@ interface SearchOptions {
   captureDebug?: (info: VespaSearchDebugInfo) => void;
   // Display name(s) of scoped mention chips, highlighted as exact phrases in results (not in YQL).
   mentionHighlights?: string[];
+  /**
+   * The query is text the user has not sent — a composer draft. It is kept out of
+   * the logs and the search analytics; the search itself is unchanged.
+   */
+  privateQuery?: boolean;
 }
 
 export interface ILogger {
@@ -303,6 +308,7 @@ export class SearchService {
         mentionHighlights = [],
         workspaceId,
         captureDebug,
+        privateQuery = false,
       } = options;
 
       // Derive workspaceId from userId when not explicitly provided
@@ -501,7 +507,7 @@ export class SearchService {
         {}
       );
       const payload = buildPayload(false, useSemanticAnyway, enableWorkspaceFiltering ? effectiveWorkspaceId : undefined);
-      this.logger.info(`Payload: ${JSON.stringify(payload)}`);
+      this.logger.info(`Payload: ${privateQuery ? '(private query, not logged)' : JSON.stringify(payload)}`);
       if (captureDebug) {
         captureDebug({
           stage: "exact",
@@ -589,7 +595,9 @@ export class SearchService {
         response,
         async () => {
           const fuzzyPayload = buildPayload(true, useSemanticAnyway, enableWorkspaceFiltering ? effectiveWorkspaceId : undefined);
-          this.logger.info(`Fuzzy Search Payload: ${JSON.stringify(fuzzyPayload)}`);
+          this.logger.info(
+            `Fuzzy Search Payload: ${privateQuery ? '(private query, not logged)' : JSON.stringify(fuzzyPayload)}`
+          );
           if (captureDebug) {
             captureDebug({
               stage: "fuzzy-fallback",
@@ -682,7 +690,7 @@ export class SearchService {
         searchId: searchId || '',
         userId,
         apps: app.join(','),
-        searchQuery: searchQuery || '',
+        searchQuery: privateQuery ? '' : searchQuery || '',
         queryLength: searchQuery?.trim()?.split(/\s+/)?.filter(Boolean)?.length || 0,
         rankProfile,
         useSemanticAnyway,
@@ -699,7 +707,8 @@ export class SearchService {
       return response;
 
     } catch (error) {
-      this.logger.error(`Error in searchVespa with query "${query}": ${getErrorMessage(error)}`);
+      const loggedQuery = options.privateQuery ? '(private)' : `"${query}"`;
+      this.logger.error(`Error in searchVespa with query ${loggedQuery}: ${getErrorMessage(error)}`);
       throw error;
     }
   };

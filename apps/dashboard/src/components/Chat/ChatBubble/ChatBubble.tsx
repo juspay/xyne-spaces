@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useId, useMemo } from 'react';
+import { useAskAIAvailable } from '../../../contexts/AskAIAvailabilityContext';
 import { useZero } from '../../../hooks/useZero';
 import { useSummaryCache } from '../../../hooks/useSummaryQuery';
 import { MessageBubble } from '../../ui/MessageBubble/MessageBubble';
@@ -170,6 +171,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   afterTextContent,
 }) => {
   const { user } = useAuthContext();
+  // Off inside hosts that embed chat for one purpose (the related-context popup).
+  const askAIAvailable = useAskAIAvailable();
   const { copyImage } = useClipboard();
   const [isCreateTicketModalOpen, setIsCreateTicketModalOpen] = useState(false);
   const [isSubTicketModalOpen, setIsSubTicketModalOpen] = useState(false);
@@ -1122,6 +1125,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
           onPinMessage: handlePinMessage,
         }),
       ...(!disableAskAI &&
+        askAIAvailable &&
         ((conversation && (context === 'channel' || isFirstInThread)) || isCallMessage) &&
         (!isSystemMessage || isCallMessage) &&
         !isMessageDeleted && { onAskAI: handleAskAI }),
@@ -1469,6 +1473,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                   onPinMessage: handlePinMessage,
                 })}
               {...(!disableAskAI &&
+                askAIAvailable &&
                 ((conversation && (context === 'channel' || isFirstInThread)) || isCallMessage) &&
                 (!isSystemMessage || isCallMessage) &&
                 !isMessageDeleted && { onAskAI: handleAskAI })}
