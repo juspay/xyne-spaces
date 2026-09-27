@@ -766,15 +766,14 @@ export class YqlBuilder {
       );
     }
 
-    // Chat/Ticket/Transcript attachments: require owner/channelPermissions/isPrivate check.
-    // Only the sub-apps asked for: a transcript search must not bring back attachments.
-    const channelFileSubApps = subApps.filter(
-      (s) => s === 'CHAT_ATTACHMENT' || s === 'TICKET_ATTACHMENT' || s === 'TRANSCRIPT'
-    );
-    if (channelFileSubApps.length > 0) {
-      const subAppMatch = channelFileSubApps.map((s) => `subApp contains "${s}"`).join(' or ');
+    // Chat/Ticket/Transcript attachments: require owner/channelPermissions/isPrivate check
+    if (
+      subApps.some(
+        (s) => s === 'CHAT_ATTACHMENT' || s === 'TICKET_ATTACHMENT' || s === 'TRANSCRIPT'
+      )
+    ) {
       subAppConditions.push(
-        `((${subAppMatch}) and (ownerId contains ${accessUser} or channelPermissions contains ${accessUser} or isPrivate contains "false"))`
+        `((subApp contains "CHAT_ATTACHMENT" or subApp contains "TICKET_ATTACHMENT" or subApp contains "TRANSCRIPT") and (ownerId contains ${accessUser} or channelPermissions contains ${accessUser} or isPrivate contains "false"))`
       );
     }
 

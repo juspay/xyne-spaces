@@ -97,6 +97,14 @@ export function RelatedContextStrip({
 }: RelatedContextStripProps): ReactElement {
   const reduceMotion = useReducedMotion();
   const [measureRef, bounds] = useMeasure<HTMLDivElement>();
+  // Which chip's preview is open. Kept here, always controlled: a card that switched
+  // between controlled and not would reopen by itself once the popup closed.
+  const [previewId, setPreviewId] = useState<string | null>(null);
+  useEffect(() => {
+    if (suppressPreviews) {
+      setPreviewId(null);
+    }
+  }, [suppressPreviews]);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const [edges, setEdges] = useState({ left: false, right: false });
 
@@ -240,7 +248,12 @@ export function RelatedContextStrip({
                       return (
                         <motion.div key={item.id} className='shrink-0' {...chipMotion(index)}>
                           <HoverCard
-                            {...(suppressPreviews && { open: false })}
+                            open={!suppressPreviews && previewId === item.id}
+                            onOpenChange={open =>
+                              setPreviewId(current =>
+                                open ? item.id : current === item.id ? null : current,
+                              )
+                            }
                             side='top'
                             align='start'
                             sideOffset={8}

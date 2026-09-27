@@ -40,9 +40,16 @@ export type JevAnswer =
       choice: string;
       /** Probability per option id. */
       probabilities: Record<string, number>;
-      /** Jev's confidence in `choice`. */
-      confidence: number;
+      /** Jev's confidence in `choice`, when it gave one. */
+      confidence?: number;
     };
+
+/** Why a Jev call came back empty; a caller cancelling it is not a failure. */
+export type JevFailure =
+  | { kind: 'timeout' }
+  | { kind: 'network' }
+  | { kind: 'status'; status: number }
+  | { kind: 'unusable' };
 
 export const isJevConfigured = (): boolean => Boolean(envConfig.jev.apiKey);
 
@@ -69,8 +76,12 @@ const readAnswer = (question: JevQuestion, raw: unknown): JevAnswer | null => {
     }
   }
   const confidence = isProbability(answer.confidence) ? answer.confidence : probabilities[choice];
-  if (!isProbability(confidence)) return null;
-  return { type: 'choice', choice, probabilities, confidence };
+  return {
+    type: 'choice',
+    choice,
+    probabilities,
+    ...(isProbability(confidence) ? { confidence } : {}),
+  };
 };
 
 /**
@@ -130,7 +141,10 @@ export const askJev = async (
   questions: Record<string, JevQuestion>,
   timeoutMs: number,
   signal?: AbortSignal,
-  { partial = false }: { partial?: boolean } = {}
+  {
+    partial = false,
+    onFailure,
+  }: { partial?: boolean; onFailure?: (failure: JevFailure) => void } = {}
 ): Promise<Record<string, JevAnswer> | null> => {
   const { apiKey, url, model } = envConfig.jev;
   if (!apiKey) return null;
@@ -149,6 +163,7 @@ export const askJev = async (
       // body is still released, so the connection goes back to the pool.
       logger.warn('Jev request failed', { status: response.status });
       await response.body?.cancel();
+      onFailure?.({ kind: 'status', status: response.status });
       return null;
     }
 
@@ -169,7 +184,10 @@ export const askJev = async (
         unusable: unusable.length,
         of: Object.keys(questions).length,
       });
-      if (!partial || unusable.length === Object.keys(questions).length) return null;
+      if (!partial || unusable.length === Object.keys(questions).length) {
+        onFailure?.({ kind: 'unusable' });
+        return null;
+      }
     }
     return answers;
   } catch (error) {
@@ -181,6 +199,7 @@ export const askJev = async (
     logger.warn(`Jev request ${timedOut ? `timed out after ${timeoutMs}ms` : 'errored'}`, {
       error: error instanceof Error ? error.name : 'unknown',
     });
+    onFailure?.({ kind: timedOut ? 'timeout' : 'network' });
     return null;
   }
 };

@@ -70,8 +70,14 @@ export interface DraftRelatedContexts {
 
 const RELATED_CONTEXT_STORAGE_KEY = 'composer-related-context';
 const RELATED_CONTEXT_MAX_DRAFTS = 20;
-/** Items kept per draft — more than the chip row shows at once. */
-const RELATED_CONTEXT_MAX_ITEMS = 20;
+/** Items kept per draft: all a lookup returns at the default settings (10 of each kind). */
+const RELATED_CONTEXT_MAX_ITEMS = 40;
+/**
+ * The most the saved chips may take, in characters, oldest drafts dropped first. Drafts
+ * share this storage and the web fallback swallows a failed write, so staying well
+ * under the quota is the only way to be sure suggestions never cost a draft its save.
+ */
+const RELATED_CONTEXT_MAX_CHARS = 500_000;
 const RELATED_CONTEXT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 /** The newest entries, within the age limit. */
@@ -87,16 +93,24 @@ const pruneRelatedContext = (all: DraftRelatedContexts): DraftRelatedContexts =>
   );
 };
 
-const persistRelatedContext = (all: DraftRelatedContexts): void => {
-  try {
-    draftStorage().setItem(RELATED_CONTEXT_STORAGE_KEY, JSON.stringify(all));
-  } catch {
-    // Most likely out of space, which drafts share: give the space back rather than
-    // let suggestions cost a draft its save.
-    try {
-      draftStorage().removeItem(RELATED_CONTEXT_STORAGE_KEY);
-    } catch { /* storage unavailable */ }
+/** Oldest drafts dropped until what is left fits RELATED_CONTEXT_MAX_CHARS; its JSON too. */
+const withinBudget = (
+  all: DraftRelatedContexts,
+): { kept: DraftRelatedContexts; json: string } => {
+  // pruneRelatedContext leaves them newest first.
+  const entries = Object.entries(all);
+  let json = JSON.stringify(all);
+  while (json.length > RELATED_CONTEXT_MAX_CHARS && entries.length > 0) {
+    entries.pop();
+    json = JSON.stringify(Object.fromEntries(entries));
   }
+  return { kept: Object.fromEntries(entries), json };
+};
+
+const persistRelatedContext = (json: string): void => {
+  try {
+    draftStorage().setItem(RELATED_CONTEXT_STORAGE_KEY, json);
+  } catch { /* storage unavailable */ }
 };
 
 /** The same draft with the same items, in order — nothing new to write. */
@@ -535,12 +549,14 @@ export const stateMachine = setup({
           if (sameRelatedContext(context.relatedContext[event.lookupId], event.draft, items)) {
             return context.relatedContext;
           }
-          const next = pruneRelatedContext({
-            ...context.relatedContext,
-            [event.lookupId]: { draft: event.draft, items, savedAt: Date.now() },
-          });
-          persistRelatedContext(next);
-          return next;
+          const { kept, json } = withinBudget(
+            pruneRelatedContext({
+              ...context.relatedContext,
+              [event.lookupId]: { draft: event.draft, items, savedAt: Date.now() },
+            }),
+          );
+          persistRelatedContext(json);
+          return kept;
         }
         return context.relatedContext;
       },
@@ -549,7 +565,7 @@ export const stateMachine = setup({
       relatedContext: ({ context, event }) => {
         if (event.type === 'REMOVE_RELATED_CONTEXT' && context.relatedContext[event.lookupId]) {
           const { [event.lookupId]: _, ...rest } = context.relatedContext;
-          persistRelatedContext(rest);
+          persistRelatedContext(JSON.stringify(rest));
           return rest;
         }
         return context.relatedContext;

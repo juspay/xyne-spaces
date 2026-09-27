@@ -110,8 +110,8 @@ interface SearchOptions {
   privateQuery?: boolean;
   /**
    * Search the query as plain text: words like "today" or "latest" stay search terms
-   * instead of turning into a time filter. For prose, such as a draft, rather than a
-   * search someone typed.
+   * instead of turning into a time filter, and a query in double quotes is not an
+   * exact phrase. For prose, such as a draft, rather than a search someone typed.
    */
   literalQuery?: boolean;
 }
@@ -328,6 +328,7 @@ export class SearchService {
       // with no fuzzy/semantic broadening. Detect on the raw query, before any keyword stripping.
       const rawTrimmedQuery = query?.trim() ?? '';
       const isExactMatch =
+        !literalQuery &&
         rawTrimmedQuery.length >= 2 &&
         rawTrimmedQuery.startsWith('"') &&
         rawTrimmedQuery.endsWith('"') &&

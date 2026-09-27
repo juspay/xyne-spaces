@@ -1428,6 +1428,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
         {relatedEnabled && (
           <RelatedContextDialog
             open={relatedPopup.open}
+            channelId={channelId}
             items={relatedPopup.items}
             draft={relatedPopup.draft}
             selectedId={relatedPopup.selectedId}
