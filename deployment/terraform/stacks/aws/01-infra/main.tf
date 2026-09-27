@@ -32,6 +32,11 @@ locals {
     labels      = {}
   }
 
+  cluster_autoscaler_identity = {
+    annotations = module.iam.cluster_autoscaler_role_arn != "" ? { "eks.amazonaws.com/role-arn" = module.iam.cluster_autoscaler_role_arn } : {}
+    labels      = {}
+  }
+
   ingress_edge = var.ingress_mode == "cloud-lb"
 
   ingress_tls = var.ingress_tls != "" ? var.ingress_tls : (local.ingress_edge ? "internal" : "")
@@ -227,6 +232,20 @@ module "storage" {
   tags = var.tags
 }
 
+module "zero_backup" {
+  count  = var.zero_backup_enabled ? 1 : 0
+  source = "../../../modules/aws/storage"
+
+  region        = var.region
+  prefix        = local.bucket_prefix
+  keys          = ["zero"]
+  bucket_names  = var.zero_backup_bucket_name != "" ? { zero = var.zero_backup_bucket_name } : {}
+  versioning    = false
+  force_destroy = var.storage_force_destroy
+  kms_key_arn   = var.storage_kms_key_arn
+  tags          = var.tags
+}
+
 module "iam" {
   source = "../../../modules/aws/iam"
 
@@ -236,9 +255,11 @@ module "iam" {
   oidc_provider_arn     = module.cluster.oidc_provider_arn
   oidc_provider_url     = module.cluster.oidc_provider_url
   worker_names          = var.worker_names
-  buckets               = local.storage_managed ? module.storage[0].bucket_names : {}
+  buckets               = merge(local.storage_managed ? module.storage[0].bucket_names : {}, var.zero_backup_enabled ? module.zero_backup[0].bucket_names : {})
   use_pod_identity      = var.use_pod_identity
   lb_controller_enabled = var.lb_controller_enabled
+
+  cluster_autoscaler_enabled = var.cluster_autoscaler_enabled
 
   external_dns_enabled         = local.external_dns_enabled
   external_dns_hosted_zone_ids = local.external_dns_enabled ? [var.dns_zone] : []

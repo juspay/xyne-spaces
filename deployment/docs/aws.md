@@ -34,7 +34,7 @@ own.
 | Resource | AWS product | Name |
 |---|---|---|
 | Network | VPC `10.10.0.0/16` across three AZs, one public and one private subnet per AZ, one NAT gateway per AZ, interface endpoints for `ecr.api`, `ecr.dkr`, `sts`, `logs` | `xyne` |
-| Cluster | EKS 1.31, private nodes, public endpoint restricted to `eks_public_access_cidrs`, addons `vpc-cni`, `kube-proxy`, `coredns`, `eks-pod-identity-agent`, `aws-ebs-csi-driver`, control-plane logs `api`, `audit`, `authenticator` (30 days), one managed node group per enabled pool (AL2023, `m6i.xlarge` 1–5 for `general`) | `xyne` |
+| Cluster | EKS 1.35, private nodes, public endpoint restricted to `eks_public_access_cidrs`, addons `vpc-cni`, `kube-proxy`, `coredns`, `eks-pod-identity-agent`, `aws-ebs-csi-driver`, control-plane logs `api`, `audit`, `authenticator` (30 days), one managed node group per enabled pool (AL2023, `m6i.xlarge` 1–5 for `general`) | `xyne` |
 | Postgres | RDS for PostgreSQL 16, `db.m6g.large`, Multi-AZ, 20 GB, backups 02:00–03:00 UTC kept 7 days, Performance Insights, `rds.logical_replication=1`, database `xyne`, master user `xyne` | `xyne` |
 | Redis | ElastiCache for Redis 7.1, `cache.m6g.large`, 1 replica, Multi-AZ, in-transit TLS and AUTH token, at-rest encryption, snapshots 01:00–02:00 kept 7 days | `xyne` |
 | Object storage | eight S3 buckets `210987654321-xyne-{main,docs,canvas,recordings,workflows,transcription,bundles,claw}`, CORS for `https://xyne.example.com` | |
@@ -114,17 +114,21 @@ The install needs `xyne.example.com`, `*.xyne.example.com`, and with LiveKit
 **Option A, Route 53 (recommended):** Terraform then creates the LiveKit records and validates
 the LiveKit ACM certificate on its own, and external-dns creates the application records from
 inside the cluster once the gateway Service has its NLB hostname (step 12). Nothing about DNS
-is manual.
+is manual. `dns.sh` needs `env.conf` and `domain` in `01-infra.tfvars` (steps 4 to 6), so
+write those first and come back here.
 
 ```bash
-aws route53 create-hosted-zone --name xyne.example.com --caller-reference "$(date +%s)" \
-  --query 'HostedZone.Id' --output text
-# /hostedzone/Z08ACMEXYNE1234
-aws route53 get-hosted-zone --id Z08ACMEXYNE1234 --query 'DelegationSet.NameServers'
+deployment/scripts/dns.sh --env prod check      # a new domain: is it free, what it costs
+deployment/scripts/dns.sh --env prod register   # a new domain: register it with Route 53
+deployment/scripts/dns.sh --env prod zone       # create or find the hosted zone
+# set in 01-infra.tfvars:
+#   dns_zone = "Z08ACMEXYNE1234"
+deployment/scripts/dns.sh --env prod status     # delegation matches the zone
 ```
 
-Delegate `xyne.example.com` to those name servers at your registrar. `dns_zone =
-"Z08ACMEXYNE1234"` (the hosted zone id, without `/hostedzone/`) in step 6.
+For a domain registered elsewhere, `zone` prints the name servers to set at your registrar. Set
+`DNS_DOMAIN` in `env.conf` to run the install on a subdomain of a zone you share. See
+[dns.md](dns.md).
 
 **Option B, DNS elsewhere:** `dns_zone = ""`. LiveKit then needs a certificate you issue
 yourself (`livekit_certificate_arn`), see [TLS](#13-tls).
@@ -457,7 +461,12 @@ run `setup.sh --env prod --only platform` to watch it turn `Healthy`.
 ## 11. One-time SQL
 
 RDS creates only the `xyne` database (`db_name`) and gives the master user no replication
-privilege. Run once, connected as `xyne` to database `xyne`:
+privilege. With `postgres_mode = "managed"`, `02-platform` fixes both before Argo CD starts
+any app: the `xyne-db-init` Job in `namespace` runs the SQL below, skipping databases that
+exist, and `setup.sh` waits for it. Nothing is left to do by hand. The rest of this step is for
+`postgres_mode = "external"`, or for a Job that failed (`kubectl -n xyne logs job/xyne-db-init`).
+
+The SQL, connected as `xyne` to database `xyne`:
 
 ```sql
 GRANT rds_replication TO xyne;

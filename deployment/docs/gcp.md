@@ -127,14 +127,18 @@ on, `livekit.xyne.example.com` and `turn.xyne.example.com`.
 **Option A, Cloud DNS (recommended):** host the zone in this project and Terraform writes the
 records.
 
+Once `env.conf` and `domain` in `01-infra.tfvars` exist (steps 4 to 6):
+
 ```bash
-gcloud dns managed-zones create xyne-example-com \
-  --dns-name=xyne.example.com. --description="Xyne Spaces" --visibility=public
-gcloud dns managed-zones describe xyne-example-com --format="value(nameServers)"
+deployment/scripts/dns.sh --env prod zone
+# set in 01-infra.tfvars:
+#   dns_zone = "xyne-example-com"
+deployment/scripts/dns.sh --env prod status
 ```
 
-Delegate `xyne.example.com` to the four name servers printed, at your registrar or in the
-parent zone. `dns_zone = "xyne-example-com"` (the zone *name*, not the DNS name) in step 6.
+`zone` creates the managed zone when it is missing and prints its four name servers. Set them at
+your registrar, or as `NS` records in the parent zone. `dns_zone` is the zone *name*, not the DNS
+name. See [dns.md](dns.md).
 
 **Option B, DNS elsewhere:** leave `dns_zone = ""`; `setup.sh` prints the records to create in
 step 12.
@@ -490,7 +494,11 @@ running any (no cloud login needed). `--only infra|platform|overlay` reruns one 
 
 Zero's replication manager opens a logical replication connection as the `xyne` role. Cloud SQL
 creates the role without the `REPLICATION` attribute, so until you grant it `xyne-zero-replication`
-crash-loops with `must be superuser or replication role to start walsender`. Run once:
+crash-loops with `must be superuser or replication role to start walsender`. With
+`postgres_mode = "managed"`, `02-platform` grants it before Argo CD starts any app, through the
+`xyne-db-init` Job, which also creates any missing database; nothing is left to do by hand. The
+rest of this step is for an external database, or for a Job that failed
+(`kubectl -n xyne logs job/xyne-db-init`). The SQL:
 
 ```sql
 ALTER USER xyne WITH REPLICATION;

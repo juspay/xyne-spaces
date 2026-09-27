@@ -21,6 +21,10 @@ output "lb_controller_role_arn" {
   value = var.lb_controller_enabled ? aws_iam_role.lb_controller[0].arn : ""
 }
 
+output "cluster_autoscaler_role_arn" {
+  value = var.cluster_autoscaler_enabled ? aws_iam_role.cluster_autoscaler[0].arn : ""
+}
+
 output "external_dns_role_arn" {
   value = var.external_dns_enabled ? aws_iam_role.external_dns[0].arn : ""
 }

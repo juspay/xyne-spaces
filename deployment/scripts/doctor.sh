@@ -18,8 +18,9 @@ are ready for setup.sh.
 
 Checks: terraform >= $MIN_TERRAFORM, helm >= $MIN_HELM, kubectl, jq, yq, the
 cloud CLI for CLOUD in env.conf and its authentication, env.conf,
-01-infra.tfvars and 02-platform.tfvars, every required stack variable, and
-that no placeholder value from the examples remains.
+01-infra.tfvars and 02-platform.tfvars, every required stack variable, that
+dns_zone exists and the domain is delegated to it, and that no placeholder
+value from the examples remains.
 EOF
 }
 
@@ -119,16 +120,20 @@ script_supplied() {
 }
 
 check_required_vars() {
-  local stack="$1" tfvars="$2" name label
+  local stack="$1" tfvars="$2" secrets="$3" name label
   label="$(basename "$stack")"
   [ -f "$tfvars" ] || return 0
   for name in $(required_variables "$stack/variables.tf"); do
-    if tfvar_set "$tfvars" "$name"; then
+    if tfvar_set "$tfvars" "$name" && tfvar_set "$secrets" "$name"; then
+      record FAIL "$label: $name" "set in both $(basename "$tfvars") and $(basename "$secrets"); keep it in one"
+    elif tfvar_set "$tfvars" "$name"; then
       record PASS "$label: $name" "set"
+    elif tfvar_set "$secrets" "$name"; then
+      record PASS "$label: $name" "set in $(basename "$secrets")"
     elif script_supplied "$name"; then
       record PASS "$label: $name" "supplied by setup.sh from env.conf"
     else
-      record FAIL "$label: $name" "required, not set in $(basename "$tfvars")"
+      record FAIL "$label: $name" "required, not set in $(basename "$tfvars"); secrets.sh generates the secret ones"
     fi
   done
 }
@@ -174,6 +179,7 @@ check_hindsight() {
   if [ "$enabled" = "true" ]; then
     record PASS "hindsight" "deployed by this install"
     llm_key="$(tfvar_value "$PLATFORM_TFVARS" hindsight_llm_api_key)"
+    [ -n "$llm_key" ] || llm_key="$(tfvar_value "$PLATFORM_SECRETS" hindsight_llm_api_key)"
     if [ -n "$llm_key" ]; then
       record PASS "hindsight_llm_api_key" "set"
     else
@@ -183,6 +189,28 @@ check_hindsight() {
     record PASS "hindsight" "using an existing instance at $url"
   else
     record WARN "hindsight" "no instance: claw long-term memory stays off (enable_hindsight, or hindsight.url)"
+  fi
+}
+
+check_google() {
+  local file id secret found=""
+  for file in "$PLATFORM_SECRETS" "$PLATFORM_TFVARS"; do
+    [ -f "$file" ] || continue
+    id="$(tfvar_block_value "$file" app_secrets google_client_id)"
+    secret="$(tfvar_block_value "$file" app_secrets google_client_secret)"
+    if [ -n "$id$secret" ]; then
+      found="$(basename "$file")"
+      break
+    fi
+  done
+  if [ -z "$found" ] || [ -z "$id" ] || [ -z "$secret" ]; then
+    record FAIL "google sign-in client" "google_client_id and google_client_secret are required in app_secrets; see docs/secrets.md#google-sign-in"
+  elif printf '%s %s' "$id" "$secret" | grep -q 'replace-with-'; then
+    record FAIL "google sign-in client" "still a placeholder in $found; see docs/secrets.md#google-sign-in"
+  elif ! printf '%s' "$id" | grep -qE '\.apps\.googleusercontent\.com$'; then
+    record WARN "google sign-in client" "google_client_id in $found does not end in .apps.googleusercontent.com; sign-in will fail"
+  else
+    record PASS "google sign-in client" "set in $found"
   fi
 }
 
@@ -236,8 +264,10 @@ check_ingress() {
       fi
       ;;
     aws)
-      if tfvar_set "$INFRA_TFVARS" ingress_certificate_arn || tfvar_set "$INFRA_TFVARS" dns_zone; then
-        record PASS "ingress certificate" "set"
+      if [ -n "$(tfvar_value "$INFRA_TFVARS" ingress_certificate_arn)" ]; then
+        record PASS "ingress certificate" "ingress_certificate_arn"
+      elif [ -n "$(tfvar_value "$INFRA_TFVARS" dns_zone)" ]; then
+        record PASS "ingress certificate" "ACM, validated in dns_zone"
       else
         record FAIL "ingress certificate" "cloud-lb needs ingress_certificate_arn, or dns_zone so ACM can validate"
       fi
@@ -256,6 +286,85 @@ check_ingress() {
       fi
       ;;
   esac
+}
+
+check_kubernetes_version() {
+  local version support status
+  [ "$CLOUD" = "aws" ] || return 0
+  [ -f "$INFRA_TFVARS" ] || return 0
+  if [ "$DRY_RUN" = "1" ]; then
+    record SKIP "kubernetes_version" "not checked with --dry-run"
+    return 0
+  fi
+  version="$(tfvar_value "$INFRA_TFVARS" kubernetes_version)"
+  [ -n "$version" ] || version="$(awk '/^variable "kubernetes_version"/ { f = 1 } f && /default/ { gsub(/"/, "", $3); print $3; exit }' "$INFRA_STACK/variables.tf")"
+  support="$(tfvar_value "$INFRA_TFVARS" cluster_support_type)"
+  [ -n "$support" ] || support="STANDARD"
+  status="$(aws eks describe-cluster-versions --cluster-versions "$version" --query 'clusterVersions[0].versionStatus' --output text 2>/dev/null || true)"
+  case "$status" in
+    STANDARD_SUPPORT) record PASS "kubernetes_version" "$version, standard support" ;;
+    EXTENDED_SUPPORT)
+      if [ "$support" = "EXTENDED" ]; then
+        record WARN "kubernetes_version" "$version is in extended support, billed extra"
+      else
+        record FAIL "kubernetes_version" "$version is only in extended support; raise kubernetes_version, or set cluster_support_type = \"EXTENDED\""
+      fi
+      ;;
+    ""|None) record FAIL "kubernetes_version" "EKS does not offer $version (aws eks describe-cluster-versions)" ;;
+    *) record WARN "kubernetes_version" "$version: $status" ;;
+  esac
+}
+
+check_dns() {
+  local zone domain zone_json zone_name zone_ns live rg
+  [ -f "$INFRA_TFVARS" ] || return 0
+  zone="$(tfvar_value "$INFRA_TFVARS" dns_zone)"
+  domain="$(tfvar_value "$INFRA_TFVARS" domain)"
+  if [ -z "$zone" ]; then
+    record PASS "dns_zone" "empty: setup.sh prints the records to create by hand"
+    return 0
+  fi
+  if [ "$DRY_RUN" = "1" ]; then
+    record SKIP "dns_zone" "not checked with --dry-run"
+    return 0
+  fi
+
+  case "$CLOUD" in
+    aws)
+      zone_json="$(aws route53 get-hosted-zone --id "$zone" --output json 2>/dev/null | jq -c '{name: .HostedZone.Name, ns: .DelegationSet.NameServers}' || true)"
+      ;;
+    gcp)
+      zone_json="$(gcloud dns managed-zones describe "$zone" --project "$PROJECT" --format json 2>/dev/null | jq -c '{name: .dnsName, ns: .nameServers}' || true)"
+      ;;
+    azure)
+      rg="$(tfvar_value "$INFRA_TFVARS" dns_zone_resource_group)"
+      if [ -z "$rg" ]; then
+        record WARN "dns_zone" "not checked: dns_zone_resource_group is empty, so the zone would have to live in the resource group 01-infra creates"
+        return 0
+      fi
+      zone_json="$(az network dns zone show --resource-group "$rg" --name "$zone" --output json 2>/dev/null | jq -c '{name: .name, ns: .nameServers}' || true)"
+      ;;
+  esac
+  if [ -z "$zone_json" ]; then
+    record FAIL "dns_zone" "$zone not found; create it with dns.sh --env $ENV_NAME zone"
+    return 0
+  fi
+
+  zone_name="$(printf '%s' "$zone_json" | jq -r '.name | ascii_downcase | sub("\\.$"; "")')"
+  case "$domain" in
+    "$zone_name"|*".$zone_name") record PASS "dns_zone" "$zone ($zone_name)" ;;
+    *) record FAIL "dns_zone" "domain $domain is not $zone_name or a name under it"; return 0 ;;
+  esac
+
+  zone_ns="$(printf '%s' "$zone_json" | jq -r '.ns[] | ascii_downcase | sub("\\.$"; "")' | sort -u)"
+  live="$(dig +short NS "$zone_name" 2>/dev/null | tr '[:upper:]' '[:lower:]' | sed -E 's/\.$//' | grep -v '^$' | sort -u || true)"
+  if [ -z "$live" ]; then
+    record WARN "dns delegation" "$zone_name has no public NS yet; certificates cannot be issued until it does (dns.sh --env $ENV_NAME status)"
+  elif [ "$live" = "$zone_ns" ]; then
+    record PASS "dns delegation" "$zone_name points at the zone"
+  else
+    record WARN "dns delegation" "$zone_name points at other name servers; fix with dns.sh --env $ENV_NAME zone"
+  fi
 }
 
 print_table() {
@@ -318,14 +427,19 @@ esac
 
 check_file "$INFRA_TFVARS"
 check_file "$PLATFORM_TFVARS"
-check_required_vars "$INFRA_STACK" "$INFRA_TFVARS"
-check_required_vars "$PLATFORM_STACK" "$PLATFORM_TFVARS"
+check_required_vars "$INFRA_STACK" "$INFRA_TFVARS" "$INFRA_SECRETS"
+check_required_vars "$PLATFORM_STACK" "$PLATFORM_TFVARS" "$PLATFORM_SECRETS"
 check_network
 check_ingress
+check_kubernetes_version
+check_dns
+check_google
 check_hindsight
 check_placeholders "$ENV_CONF"
 check_placeholders "$INFRA_TFVARS"
 check_placeholders "$PLATFORM_TFVARS"
+check_placeholders "$INFRA_SECRETS"
+check_placeholders "$PLATFORM_SECRETS"
 if [ -f "$OVERLAY_TFVARS" ]; then
   check_placeholders "$OVERLAY_TFVARS"
 fi

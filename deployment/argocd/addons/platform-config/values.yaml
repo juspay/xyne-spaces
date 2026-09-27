@@ -9,6 +9,7 @@ gateway:
     istio: ingressgateway
   tlsSecret: xyne-gateway-tls
   httpsRedirect: true
+  edgeTerminated: false
   tls: acme
   extraHosts: []
 

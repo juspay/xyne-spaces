@@ -86,6 +86,7 @@ locals {
     coredns                = { role_arn = null }
     eks-pod-identity-agent = { role_arn = null }
     aws-ebs-csi-driver     = { role_arn = aws_iam_role.ebs_csi.arn }
+    metrics-server         = { role_arn = null }
   }
 
   user_data = {

@@ -151,17 +151,18 @@ locals {
   ]
 
   addon_enabled = {
-    lbController = var.cluster.cloud == "aws" && length(var.identities.lb_controller.annotations) > 0
-    externalDns  = var.ingress.mode == "gateway" && var.ingress.dns_zone != "" && length(var.identities.external_dns.annotations) > 0
-    istio        = true
-    certManager  = true
-    cnpg         = local.postgres_incluster
-    redis        = local.redis_incluster
-    minio        = local.storage_incluster
-    vespa        = var.enable_vespa
-    monitoring   = var.enable_monitoring
-    sandbox      = var.enable_sandbox
-    hindsight    = var.enable_hindsight
+    lbController      = var.cluster.cloud == "aws" && length(var.identities.lb_controller.annotations) > 0
+    clusterAutoscaler = var.cluster.cloud == "aws" && length(var.identities.cluster_autoscaler.annotations) > 0
+    externalDns       = var.ingress.mode == "gateway" && var.ingress.dns_zone != "" && length(var.identities.external_dns.annotations) > 0
+    istio             = true
+    certManager       = true
+    cnpg              = local.postgres_incluster
+    redis             = local.redis_incluster
+    minio             = local.storage_incluster
+    vespa             = var.enable_vespa
+    monitoring        = var.enable_monitoring
+    sandbox           = var.enable_sandbox
+    hindsight         = var.enable_hindsight
   }
 
   addon_extra = merge(
@@ -193,6 +194,7 @@ locals {
   )
 
   root_values = {
+    platformRevision = var.root_revision
     global = {
       cloud         = var.cluster.cloud
       domain        = local.domain
@@ -240,15 +242,20 @@ locals {
         buckets           = var.storage.buckets
       }
       identities = {
-        backend       = var.identities.backend
-        worker        = var.identities.worker
-        dashboardEdge = var.identities.dashboard_edge
-        ysweet        = var.identities.ysweet
-        claw          = var.identities.claw
-        clawAuth      = var.identities.claw_auth
-        transcription = var.identities.transcription
-        lbController  = var.identities.lb_controller
-        externalDns   = var.identities.external_dns
+        backend           = var.identities.backend
+        worker            = var.identities.worker
+        dashboardEdge     = var.identities.dashboard_edge
+        ysweet            = var.identities.ysweet
+        claw              = var.identities.claw
+        clawAuth          = var.identities.claw_auth
+        transcription     = var.identities.transcription
+        lbController      = var.identities.lb_controller
+        clusterAutoscaler = var.identities.cluster_autoscaler
+        externalDns       = var.identities.external_dns
+        zero              = var.identities.zero
+      }
+      zero = {
+        backupUrl = var.zero_backup_url
       }
       nodePools = local.node_pools
       ingress = {

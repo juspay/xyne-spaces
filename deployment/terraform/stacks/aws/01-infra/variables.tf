@@ -103,7 +103,7 @@ variable "bastion_ami_ssm_parameter" {
 
 variable "kubernetes_version" {
   type    = string
-  default = "1.31"
+  default = "1.35"
 }
 
 variable "enable_private_endpoint" {
@@ -530,6 +530,21 @@ variable "external_dns_enabled" {
 variable "lb_controller_enabled" {
   type    = bool
   default = true
+}
+
+variable "cluster_autoscaler_enabled" {
+  type    = bool
+  default = true
+}
+
+variable "zero_backup_enabled" {
+  type    = bool
+  default = true
+}
+
+variable "zero_backup_bucket_name" {
+  type    = string
+  default = ""
 }
 
 variable "ingress_mode" {

@@ -87,9 +87,17 @@ infra:
     lbController:
       annotations: {}
       labels: {}
+    clusterAutoscaler:
+      annotations: {}
+      labels: {}
     externalDns:
       annotations: {}
       labels: {}
+    zero:
+      annotations: {}
+      labels: {}
+  zero:
+    backupUrl: ""
   nodePools:
     general:
       enabled: false
@@ -137,6 +145,12 @@ addons:
     version: 3.5.0
     namespace: kube-system
     serviceAccountName: aws-load-balancer-controller
+    values: {}
+  clusterAutoscaler:
+    enabled: null
+    version: 9.59.0
+    namespace: kube-system
+    serviceAccountName: cluster-autoscaler
     values: {}
   externalDns:
     enabled: null

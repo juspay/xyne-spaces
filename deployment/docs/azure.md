@@ -122,14 +122,20 @@ az account show --query name --output tsv
 **Option A, Azure DNS (recommended):** the zone may live in any resource group of the
 subscription; Terraform reads it and writes the records.
 
+The resource group must exist before `01-infra`. Once `env.conf` exists, and `domain` and
+`dns_zone_resource_group` are set in `01-infra.tfvars` (steps 4 to 6):
+
 ```bash
 az group create --name acme-dns --location centralindia
-az network dns zone create --resource-group acme-dns --name xyne.example.com
-az network dns zone show --resource-group acme-dns --name xyne.example.com --query nameServers
+deployment/scripts/dns.sh --env prod zone
+# set in 01-infra.tfvars:
+#   dns_zone                = "xyne.example.com"
+#   dns_zone_resource_group = "acme-dns"
+deployment/scripts/dns.sh --env prod status
 ```
 
-Delegate `xyne.example.com` to those name servers at your registrar. In step 6:
-`dns_zone = "xyne.example.com"` (the zone name) and `dns_zone_resource_group = "acme-dns"`.
+`zone` creates the zone when it is missing and prints its name servers. Set them at your
+registrar. See [dns.md](dns.md).
 `domain` must equal the zone name or be a subdomain of it; the stack computes the record names
 relative to the zone (`@` and `*` here).
 
@@ -520,7 +526,10 @@ deployment/scripts/setup.sh --env prod
 
 ## 11. One-time SQL
 
-Flexible Server creates the five databases but the admin role lacks `REPLICATION`. Run once:
+Flexible Server creates the five databases but the admin role lacks `REPLICATION`. With
+`postgres_mode = "managed"`, `02-platform` grants it before Argo CD starts any app, through the
+`xyne-db-init` Job; nothing is left to do by hand. The rest of this step is for an external
+database, or for a Job that failed (`kubectl -n xyne logs job/xyne-db-init`). The SQL:
 
 ```sql
 ALTER ROLE xyne WITH REPLICATION;

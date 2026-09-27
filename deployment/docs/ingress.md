@@ -205,11 +205,18 @@ itself. That is why it belongs to `gateway` mode.
 `internal` exists only to satisfy the inner leg. It is never seen by a
 browser. GCP backend services and AWS NLB target groups do not verify it.
 
-The certificate the *public* sees in `cloud-lb` mode is the edge one, supplied
-per cloud: `ingress_certificate_ids` or `ingress_certificate_pem` on GCP,
-`ingress_certificate_arn` on AWS, `ingress_certificate_key_vault_secret_id` or
-`ingress_certificate_pfx_data` on Azure. Nothing in this repository generates a
-certificate for you.
+The certificate the *public* sees in `cloud-lb` mode is the edge one, issued
+and renewed by the cloud itself where it can be:
+
+| Cloud | Issued by the cloud | Or supply your own |
+|---|---|---|
+| GCP | a Google-managed certificate for `ingress_certificate_domains` | `ingress_certificate_ids`, `ingress_certificate_pem` |
+| AWS | an ACM certificate for `domain` and `*.domain` (or `ingress_certificate_domains`), validated in `dns_zone` | `ingress_certificate_arn` |
+| Azure | none | `ingress_certificate_key_vault_secret_id`, `ingress_certificate_pfx_data` |
+
+On AWS that makes `cloud-lb` with `dns_zone` set the fully managed path: no
+Let's Encrypt, no certificate in the cluster that the public sees, and the NLB
+keeps its Elastic IPs.
 
 ## Node ports
 
