@@ -11,6 +11,7 @@ import {
   clearAuthTokenTotal,
 } from '../otel';
 import { getDynamicHeaders } from './dynamicHeaders';
+import { stateMachineActor } from '../../machines/stateMachine';
 import {
   encryptionRequestInterceptor,
   encryptionResponseInterceptor,
@@ -328,6 +329,9 @@ export function clearAuthTokens(): void {
     document.cookie = 'user_data=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
   }
   logger.info(Logger.Event.CLEAR_AUTH_TOKEN_CALLED);
+  // The composer's saved related-context chips quote other people's messages; a
+  // session that ends this way (a 401, say) must not leave them behind.
+  stateMachineActor.send({ type: 'CLEAR_RELATED_CONTEXT' });
 
   safeRecordMetric(() => {
     clearAuthTokenTotal.add(1, {

@@ -51,11 +51,6 @@ const SEARCHES: Array<{
   kind: CandidateKind;
   apps: string[];
   filters: Record<string, unknown>;
-  /**
-   * The file sub-app a hit must be. The search's TRANSCRIPT filter also lets chat and
-   * ticket attachments through, which would come back as calls.
-   */
-  subApp?: SubApp;
 }> = [
   {
     kind: 'thread',
@@ -72,7 +67,6 @@ const SEARCHES: Array<{
       file: { docType: [VespaDocType.FILE], subApp: [SubApp.CANVAS] },
       presentationSummary: 'default',
     },
-    subApp: SubApp.CANVAS,
   },
   {
     kind: 'call',
@@ -81,7 +75,6 @@ const SEARCHES: Array<{
       file: { docType: [VespaDocType.FILE], subApp: [SubApp.TRANSCRIPT] },
       presentationSummary: 'default',
     },
-    subApp: SubApp.TRANSCRIPT,
   },
 ];
 
@@ -102,7 +95,9 @@ function describeError(error: unknown, draft: string): { name: string; message: 
  * Searches as the person typing — the same permission-gated query cmd+K runs, and
  * like cmd+K it trusts that filter's answer. The draft is marked private so it stays
  * out of search logs and analytics, and searched as plain text: a draft's "today" is
- * a word in a sentence, not a time filter. Null when the search fails.
+ * a word in a sentence, not a time filter. Null when the search fails or `signal`
+ * says the caller has gone — the search in flight still finishes, but nothing after it
+ * runs.
  *
  * TODO: re-check results against the app's own read rules, here and in cmd+K
  * together. The search's permission fields are copies and differ from those rules:
@@ -116,7 +111,8 @@ async function search(
   draft: string,
   ctx: RetrievalContext,
   kind: (typeof SEARCHES)[number],
-  limit: number
+  limit: number,
+  signal: AbortSignal | undefined
 ): Promise<TransformedSearchResult[] | null> {
   const started = Date.now();
   let stage: 'vespa' | 'transform' = 'vespa';
@@ -141,9 +137,8 @@ async function search(
       }
     );
     const vespaMs = Date.now() - started;
-    const hits = ((response.root.children ?? []) as VespaSearchHit[]).filter(
-      (hit) => !kind.subApp || ('subApp' in hit.fields && hit.fields.subApp === kind.subApp)
-    );
+    if (signal?.aborted) return null;
+    const hits = (response.root.children ?? []) as VespaSearchHit[];
     stage = 'transform';
     const results = await transformVespaResults(hits, db);
     logger.info('[RelatedContext] vespa search', {
@@ -169,11 +164,11 @@ async function search(
  * well-matched thread can fill the page; the best-scoring hit stands for its thread
  * and is where a click lands.
  */
-function toThreads(hits: TransformedSearchResult[], ctx: RetrievalContext) {
+function toThreads(hits: TransformedSearchResult[]) {
   const threads = new Map<string, TransformedSearchResult>();
   for (const hit of hits) {
     const conversationId = hit.searchContext?.conversationId;
-    if (!conversationId || conversationId === ctx.conversationId) continue;
+    if (!conversationId) continue;
     if (!threads.has(conversationId)) threads.set(conversationId, hit);
   }
   return [...threads.entries()];
@@ -259,11 +254,16 @@ function describe(kind: CandidateKind, result: TransformedSearchResult): string 
   }
 }
 
-/** Candidates for `draft`, best first within each kind; null when every search failed. Never throws. */
+/**
+ * Candidates for `draft`, best first within each kind; null when every search failed.
+ * The thread being replied in is never among them, nor the ticket or call it belongs
+ * to. Once `signal` says the caller has gone, the rest is skipped. Never throws.
+ */
 export async function retrieveCandidates(
   draft: string,
   ctx: RetrievalContext,
-  limits: RetrievalLimits
+  limits: RetrievalLimits,
+  signal?: AbortSignal
 ): Promise<Candidate[] | null> {
   const found = new Map(
     await Promise.all(
@@ -275,7 +275,8 @@ export async function retrieveCandidates(
               draft,
               ctx,
               kind,
-              kind.kind === 'thread' ? limits.messageHits : limits.perKind
+              kind.kind === 'thread' ? limits.messageHits : limits.perKind,
+              signal
             ),
           ] as const
       )
@@ -284,13 +285,19 @@ export async function retrieveCandidates(
   // Every search failing is a failed lookup, not an empty one; one failing just leaves
   // its kind out.
   if ([...found.values()].every((results) => results === null)) return null;
-  const hitsOf = (kind: CandidateKind): TransformedSearchResult[] => found.get(kind) ?? [];
+  if (signal?.aborted) return [];
+  // The item being replied in is not related context to itself.
+  const hitsOf = (kind: CandidateKind): TransformedSearchResult[] =>
+    (found.get(kind) ?? []).filter(
+      (result) => !ctx.conversationId || result.searchContext?.conversationId !== ctx.conversationId
+    );
 
   const ticketIds = new Set(hitsOf('ticket').map((ticket) => ticket.id));
-  const threads = (await withoutTicketThreads(toThreads(hitsOf('thread'), ctx), ticketIds)).slice(
+  const threads = (await withoutTicketThreads(toThreads(hitsOf('thread')), ticketIds)).slice(
     0,
     limits.perKind
   );
+  if (signal?.aborted) return [];
   let texts = new Map<string, string>();
   try {
     texts = await threadTexts(threads.map(([conversationId]) => conversationId));

@@ -4906,6 +4906,8 @@ img.inline-emoji,
     linear-gradient(#000 0 0) content-box exclude,
     linear-gradient(#000 0 0);
   animation: xyne-border-spin 2.4s linear infinite;
+  /* Paused while idle: a hidden ring still costs a style recalc every frame. */
+  animation-play-state: paused;
   opacity: 0;
   visibility: hidden;
   transition:
@@ -4914,6 +4916,7 @@ img.inline-emoji,
 }
 
 .xyne-related-scan[data-active="true"]::after {
+  animation-play-state: running;
   opacity: 1;
   visibility: visible;
   transition:

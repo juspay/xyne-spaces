@@ -82,7 +82,9 @@ export const askJevNoul = async (
   question: JevNoulQuestion,
   timeoutMs: number
 ): Promise<number | null> => {
-  const answers = await askJev(state, { q: question }, timeoutMs);
+  // Asked as yes/no whatever `type` says: the question can come from remote config,
+  // where it may be missing.
+  const answers = await askJev(state, { q: { ...question, type: 'noul' } }, timeoutMs);
   const answer = answers?.q;
   return answer?.type === 'noul' ? answer.noul : null;
 };

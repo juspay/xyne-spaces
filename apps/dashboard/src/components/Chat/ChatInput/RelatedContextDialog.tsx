@@ -24,7 +24,8 @@ import { differenceInCalendarDays, format, isToday, isYesterday } from 'date-fns
 import Dialog from '../../ui/Dialog';
 import { AskAIAvailabilityContext } from '../../../contexts/AskAIAvailabilityContext';
 import { RelatedContextAvailabilityContext } from '../../../contexts/RelatedContextAvailabilityContext';
-import { useAllChannels } from '../../../hooks/useChannels';
+import { getAllChannels } from '../../../hooks/useChannels';
+import { holdAskAIClosed } from '../../../machines/xyneAIMachine';
 import type { Channel } from '@xyne/shared';
 import { Tooltip } from '../../ui/Tooltip/Tooltip';
 import UserAvatar, { AvatarSize } from '../../UserAvatar/UserAvatar';
@@ -69,8 +70,9 @@ function panelFor(
  * only as text the server formats in UTC without saying so, read here as UTC.
  */
 function timeOf(item: RelatedItem): Date | null {
+  // 0 is how the index stores "no date".
   const at = item.result.searchContext?.createdAtTimestamp;
-  if (at !== undefined) {
+  if (at) {
     return new Date(at);
   }
   const text = item.result.metadata.timestamp;
@@ -330,7 +332,10 @@ export function RelatedContextDialog({
 }: RelatedContextDialogProps): ReactElement {
   const reduceMotion = useReducedMotion();
   const { recordingVersion } = useRecordingVersion();
-  const channels = useAllChannels();
+
+  // Nothing in the embedded screens may open the assistant behind the popup; hiding
+  // their buttons covers most, this covers the rest.
+  useEffect(() => (open ? holdAskAIClosed() : undefined), [open]);
   const listRef = useRef<HTMLDivElement>(null);
   const [filter, setFilter] = useState<Filter>('all');
 
@@ -370,7 +375,11 @@ export function RelatedContextDialog({
     },
     [groups, items, selectedId, onSelect],
   );
-  const panel = selected ? panelFor(selected, recordingVersion === 'v2', channels) : null;
+  // The channel list is read when the selection changes, not subscribed to.
+  const panel = useMemo(
+    () => (selected ? panelFor(selected, recordingVersion === 'v2', getAllChannels()) : null),
+    [selected, recordingVersion],
+  );
 
   // Keep the picked row in view as ↑/↓ walk past the fold.
   useEffect(() => {

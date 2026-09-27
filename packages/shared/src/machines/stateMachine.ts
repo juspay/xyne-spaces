@@ -70,6 +70,8 @@ export interface DraftRelatedContexts {
 
 const RELATED_CONTEXT_STORAGE_KEY = 'composer-related-context';
 const RELATED_CONTEXT_MAX_DRAFTS = 20;
+/** Items kept per draft — more than the chip row shows at once. */
+const RELATED_CONTEXT_MAX_ITEMS = 20;
 const RELATED_CONTEXT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 /** The newest entries, within the age limit. */
@@ -88,8 +90,25 @@ const pruneRelatedContext = (all: DraftRelatedContexts): DraftRelatedContexts =>
 const persistRelatedContext = (all: DraftRelatedContexts): void => {
   try {
     draftStorage().setItem(RELATED_CONTEXT_STORAGE_KEY, JSON.stringify(all));
-  } catch { /* storage unavailable */ }
+  } catch {
+    // Most likely out of space, which drafts share: give the space back rather than
+    // let suggestions cost a draft its save.
+    try {
+      draftStorage().removeItem(RELATED_CONTEXT_STORAGE_KEY);
+    } catch { /* storage unavailable */ }
+  }
 };
+
+/** The same draft with the same items, in order — nothing new to write. */
+const sameRelatedContext = (
+  saved: DraftRelatedContext | undefined,
+  draft: string,
+  items: unknown[],
+): boolean =>
+  !!saved &&
+  saved.draft === draft &&
+  saved.items.length === items.length &&
+  saved.items.every((item, i) => item === items[i]);
 
 const loadRelatedContext = (): DraftRelatedContexts => {
   try {
@@ -512,9 +531,13 @@ export const stateMachine = setup({
     saveRelatedContext: assign({
       relatedContext: ({ context, event }) => {
         if (event.type === 'SAVE_RELATED_CONTEXT') {
+          const items = event.items.slice(0, RELATED_CONTEXT_MAX_ITEMS);
+          if (sameRelatedContext(context.relatedContext[event.lookupId], event.draft, items)) {
+            return context.relatedContext;
+          }
           const next = pruneRelatedContext({
             ...context.relatedContext,
-            [event.lookupId]: { draft: event.draft, items: event.items, savedAt: Date.now() },
+            [event.lookupId]: { draft: event.draft, items, savedAt: Date.now() },
           });
           persistRelatedContext(next);
           return next;
