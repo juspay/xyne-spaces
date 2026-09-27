@@ -82,40 +82,19 @@ export const askJevNoul = async (
   question: JevNoulQuestion,
   timeoutMs: number
 ): Promise<number | null> => {
-  const answers = await askJevNouls(state, { q: question }, timeoutMs);
-  return answers?.q ?? null;
-};
-
-/**
- * P(yes) for several questions about one `state`, in a single request — Jev answers a
- * batch in about the time it takes to answer one. Keyed like `questions`. Null when
- * Jev can't answer, or when any answer is unusable: a partial batch would read as
- * "every missing question is a no". Never throws.
- */
-export const askJevNouls = async (
-  state: string,
-  questions: Record<string, JevNoulQuestion>,
-  timeoutMs: number
-): Promise<Record<string, number> | null> => {
-  const answers = await askJev(state, questions, timeoutMs);
-  if (!answers) return null;
-  const probabilities: Record<string, number> = {};
-  for (const [key, answer] of Object.entries(answers)) {
-    if (answer.type !== 'noul') return null;
-    probabilities[key] = answer.noul;
-  }
-  return probabilities;
+  const answers = await askJev(state, { q: question }, timeoutMs);
+  const answer = answers?.q;
+  return answer?.type === 'noul' ? answer.noul : null;
 };
 
 /**
  * Answers to any mix of questions about one `state`, in a single request. `state` is
  * a string or a JSON object; questions can point into an object with backticked paths
  * like `candidate.text`. Keyed like `questions`, and null when Jev can't answer or any
- * answer is unusable — same all-or-nothing rule as askJevNouls. With `partial`, an
- * unusable answer is left out instead, for a batch of independent questions where
- * one bad answer should not cost the rest; null then only when none is usable.
- * `signal` cancels the request early, e.g. when the caller's own client has gone.
- * Never throws.
+ * answer is unusable. With `partial`, an unusable answer is left out instead, for a
+ * batch of independent questions where one bad answer should not cost the rest; null
+ * then only when none is usable. `signal` cancels the request early, e.g. when the
+ * caller's own client has gone. Never throws.
  */
 export const askJev = async (
   state: string | Record<string, unknown>,
