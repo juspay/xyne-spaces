@@ -20,7 +20,9 @@
  * Every failure is `{ success:false, code, error }` so Spaces can map `code`
  * onto its SDK error envelope without parsing prose.
  */
+import { createHash } from "node:crypto";
 import { Router, type Request, type Response } from "express";
+import rateLimit from "express-rate-limit";
 import { z } from "zod";
 import { prisma } from "../db.js";
 import { asyncHandler, ok, HttpError } from "../lib/http.js";
@@ -137,6 +139,71 @@ async function resolveForCall(type: string, uid: string) {
   return { row, definition, credentials: effective.credentials };
 }
 
+/**
+ * Tool names per (user, connector, credential), so /call can refuse a name the
+ * server doesn't advertise without a listTools round-trip on every call.
+ *
+ * Keyed on a hash of the resolved credential as well as the user: tools can
+ * differ per credential, and a reconnect must not serve the old list. A miss on
+ * the requested name refetches once before refusing, so a tool added upstream
+ * shows up without waiting out the TTL. In-memory and bounded; the hash never
+ * leaves the process.
+ */
+const TOOL_NAMES_TTL_MS = 60_000;
+const TOOL_NAMES_MAX_ENTRIES = 1_000;
+const toolNamesCache = new Map<string, { names: Set<string>; at: number }>();
+
+function toolNamesKey(uid: string, type: string, credentials: Record<string, unknown>): string {
+  const fingerprint = createHash("sha256").update(JSON.stringify(credentials)).digest("hex").slice(0, 16);
+  return `${uid}:${type}:${fingerprint}`;
+}
+
+function rememberToolNames(key: string, tools: ReadonlyArray<{ name: string }>): Set<string> {
+  const names = new Set(tools.map((t) => t.name));
+  toolNamesCache.delete(key); // re-insert at the end: Map order is the eviction order
+  toolNamesCache.set(key, { names, at: Date.now() });
+  while (toolNamesCache.size > TOOL_NAMES_MAX_ENTRIES) {
+    const oldest = toolNamesCache.keys().next().value;
+    if (oldest === undefined) break;
+    toolNamesCache.delete(oldest);
+  }
+  return names;
+}
+
+function cachedToolNames(key: string): Set<string> | null {
+  const hit = toolNamesCache.get(key);
+  if (!hit) return null;
+  if (Date.now() - hit.at > TOOL_NAMES_TTL_MS) {
+    toolNamesCache.delete(key);
+    return null;
+  }
+  return hit.names;
+}
+
+/**
+ * /connect runs a provider's authorize(), which for MCP-OAuth connectors does a
+ * live dynamic client registration upstream. The browser route for the same
+ * thing sits behind oauthLimiter; this is the S2S equivalent, keyed on the
+ * viewer (the S2S caller is one IP for everyone) with the same budget.
+ */
+const connectLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  keyGenerator: (req) => {
+    const uid = (req.body as { userId?: unknown } | undefined)?.userId;
+    return typeof uid === "string" && uid ? `app-connect:${uid}` : "app-connect:anonymous";
+  },
+  handler: (_req, res) => {
+    res.status(429).json({
+      success: false,
+      code: "rate_limited",
+      error: "Too many sign-in attempts. Please wait a moment and try again.",
+    });
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 export const appConnectorsInternalRouter = Router();
 
 // POST /list { userId } → { connectors: Connector[] }
@@ -172,11 +239,13 @@ appConnectorsInternalRouter.post("/tools", asyncHandler(async (req: Request, res
 
   let listed;
   try {
-    listed = await listToolsForUser(body.userId, body.serverType, row.name, credentials);
+    listed = await listToolsForUser(body.userId, body.serverType, row.name, credentials, undefined, "app");
   } catch (err) {
     log.error(`[app-connectors] list tools failed type=${body.serverType} user=${body.userId}: ${errMsg(err)}`);
     throw new HttpError(502, `${row.name} did not respond`, "upstream_failed");
   }
+
+  rememberToolNames(toolNamesKey(body.userId, body.serverType, credentials), listed.tools);
 
   ok(res, {
     tools: listed.tools.map((t) => ({
@@ -201,13 +270,19 @@ appConnectorsInternalRouter.post("/call", asyncHandler(async (req: Request, res:
 
   try {
     // Only a tool the server actually advertises may be invoked, so an app
-    // cannot probe for unlisted/hidden names.
-    const listed = await listToolsForUser(body.userId, body.serverType, row.name, credentials);
-    if (!listed.tools.some((t) => t.name === body.tool)) {
+    // cannot probe for unlisted/hidden names. Cached (see toolNamesCache); a
+    // miss refetches once so a newly added tool isn't refused for a minute.
+    const namesKey = toolNamesKey(body.userId, body.serverType, credentials);
+    let names = cachedToolNames(namesKey);
+    if (!names?.has(body.tool)) {
+      const listed = await listToolsForUser(body.userId, body.serverType, row.name, credentials, undefined, "app");
+      names = rememberToolNames(namesKey, listed.tools);
+    }
+    if (!names.has(body.tool)) {
       throw new HttpError(400, `${row.name} has no tool "${body.tool}"`, "validation_failed");
     }
 
-    const result = await callTool(body.userId, body.serverType, credentials, body.tool, body.params ?? {});
+    const result = await callTool(body.userId, body.serverType, credentials, body.tool, body.params ?? {}, undefined, "app");
     log.info(`[app-connectors] called type=${body.serverType} tool=${body.tool} user=${body.userId}`);
     ok(res, { content: result.content });
   } catch (err) {
@@ -220,7 +295,7 @@ appConnectorsInternalRouter.post("/call", asyncHandler(async (req: Request, res:
 }));
 
 // POST /connect { userId, serverType, returnTo? } → ConnectResult
-appConnectorsInternalRouter.post("/connect", asyncHandler(async (req: Request, res: Response) => {
+appConnectorsInternalRouter.post("/connect", connectLimiter, asyncHandler(async (req: Request, res: Response) => {
   const body = parse(connectBody, req.body);
   const row = await loadVisibleConnector(body.serverType, body.userId);
 

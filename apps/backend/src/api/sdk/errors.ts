@@ -20,6 +20,7 @@ export const ERROR_CODES = [
   'forbidden',
   'not_found',
   'not_connected',
+  'rate_limited',
   'internal',
 ] as const;
 
@@ -61,6 +62,12 @@ export const ERROR_CATALOG: Readonly<Record<ErrorCode, ErrorDefinition>> = {
     retryable: false,
     description:
       'The connector exists but the acting user has no usable connection to it (personal or org). `details.connector` names it; connect it, then retry.',
+  },
+  rate_limited: {
+    status: 429,
+    retryable: true,
+    description:
+      'Too many requests of this kind from the acting user in a short window (today: starting a connector sign-in). Wait a minute, then retry.',
   },
   internal: {
     status: 500,

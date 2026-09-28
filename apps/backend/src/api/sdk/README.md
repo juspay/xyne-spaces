@@ -136,7 +136,11 @@ Grafana, …), relayed through Spaces by `clawConnectorsService`:
   `details: { connector, tool, reason: 'write_tool' }`.
 - No connection yet is `409 not_connected`, `details: { connector }`; the app can
   call `connect` and open the returned `authUrl` (or send the user to
-  `settingsUrl` for connectors set up with a credential form).
+  `settingsUrl` for connectors set up with a credential form). `connect` is
+  limited to 10 per minute per viewer (it can register an OAuth client with the
+  provider); past that it is `429 rate_limited`.
+- App calls get their own MCP session in claw-auth, never one an agent run
+  opened, so an agent's pinned credential can't serve a viewer's call.
 - Claw's own plumbing (`xyne-spaces`, `xyne-dashboard`, `xyne-workflows`,
   `xyne-spaces-app-tools`, `heisenberg`, `research-agent-mcp`) is never listed
   and reads as `404`.
@@ -174,13 +178,15 @@ produce lands on exactly one of them.
 | `forbidden` | 403 | | The Zero ACL said no |
 | `not_found` | 404 | | No such endpoint, operation, or visible resource |
 | `not_connected` | 409 | | The viewer has no usable connection for this connector |
+| `rate_limited` | 429 | ✓ | Too many connector sign-ins started; wait, then retry |
 | `internal` | 500 | ✓ | Everything else |
 
 This replaced a twelve-code vocabulary. Three of those codes had no producer
 anywhere in the codebase, `rate_limited` described a limiter that does not
 exist, and `retry_after_seconds` was declared, read, and never once set — so
 callers were branching on distinctions the server could not actually make.
-`not_connected` was added as a sixth code with its own status, 409. Adding a
+`not_connected` (409) and `rate_limited` (429, now backed by a real limiter on
+connector `connect`) were added later, each with its own status. Adding a
 code means adding a status; two failures that share a status
 share a code and differ in `message`.
 

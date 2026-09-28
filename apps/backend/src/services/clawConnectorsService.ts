@@ -65,6 +65,14 @@ export class ConnectorNotFoundError extends Error {
   }
 }
 
+/** claw-auth throttled this user (today only /connect, which may register an OAuth client upstream). */
+export class ConnectorRateLimitedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ConnectorRateLimitedError';
+  }
+}
+
 /** The tool is not one the connector advertises, or the input was refused. */
 export class ConnectorValidationError extends Error {
   constructor(message: string) {
@@ -126,6 +134,9 @@ async function post<T>(
     }
     if (connector && res.status === 404 && code === 'not_found') {
       throw new ConnectorNotFoundError(connector);
+    }
+    if (res.status === 429 && code === 'rate_limited') {
+      throw new ConnectorRateLimitedError(json?.error ?? 'Too many requests. Try again shortly.');
     }
     if (res.status === 400 && code === 'validation_failed' && json?.error) {
       throw new ConnectorValidationError(json.error);

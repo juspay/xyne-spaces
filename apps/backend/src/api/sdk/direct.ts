@@ -43,6 +43,7 @@ import {
   ConnectorNotConnectedError,
   ConnectorNotFoundError,
   ConnectorValidationError,
+  ConnectorRateLimitedError,
   ConnectorWriteToolError,
 } from '@/services/clawConnectorsService';
 import { uploadMultiple } from '@/middleware/upload';
@@ -624,6 +625,9 @@ function connectorError(err: unknown): SdkApiError | undefined {
   }
   if (err instanceof ConnectorNotFoundError) {
     return new SdkApiError('not_found', err.message, { cause: err });
+  }
+  if (err instanceof ConnectorRateLimitedError) {
+    return new SdkApiError('rate_limited', err.message, { cause: err });
   }
   if (err instanceof ConnectorValidationError) {
     return new SdkApiError('validation_failed', err.message, { cause: err });
