@@ -3,7 +3,7 @@ import type { Session } from "@xyne/kata-sdk";
 import type { ToolDefinition, ToolExecutionContext } from "../types.js";
 import { SDLC_META_KEYS } from "../../sdlc/meta.js";
 import { redactSecrets, redactAndStringify } from "./redact.js";
-import { rotateTemplate, isSameTemplateFamily } from "./template-rotation.js";
+import { rotateTemplate, isSameTemplateFamily, rotatedTemplateNames } from "./template-rotation.js";
 import { formatSandboxUnavailable, isSandboxUnavailableDeferEnabled } from "./unavailable-signal.js";
 import { createLogger } from "../../logger.js";
 import { createReadStream } from "node:fs";
@@ -645,6 +645,18 @@ async function pinnedTemplateForContext(context: ToolExecutionContext): Promise<
   return REPO_CONFIGS[pinnedRepo]?.template;
 }
 
+/** An unknown template name from the LLM falls back to the agent's or default template instead of failing the claim. */
+async function knownTemplate(value: unknown): Promise<string | undefined> {
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  const { REPO_CONFIGS } = await import("./repo-configs.js");
+  const known = new Set([
+    "kata-workspace-template",
+    ...Object.values(REPO_CONFIGS).map((config) => config.template),
+    ...rotatedTemplateNames(),
+  ]);
+  return known.has(value.trim()) ? value.trim() : undefined;
+}
+
 /**
  * Create a persistent sandbox session. Returns a sessionId for follow-up tool calls.
  */
@@ -690,7 +702,7 @@ export const sandboxCreate: ToolDefinition = {
     // A UI-pinned sandbox repo wins over whatever template the LLM passed —
     // a pinned agent must always get its own sandbox, never the legacy kata one.
     const pinnedTemplate = await pinnedTemplateForContext(context);
-    const requestedTemplate = pinnedTemplate ?? (params["template"] as string | undefined);
+    const requestedTemplate = pinnedTemplate ?? (await knownTemplate(params["template"]));
     // ROTATE, exactly as the repo-setup path does. Without this, every
     // sandbox-create on a pinned agent clones the BASE template's single
     // snapshot: pinnedTemplateForContext returns REPO_CONFIGS[repo].template,

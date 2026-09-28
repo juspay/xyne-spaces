@@ -93,7 +93,7 @@ jobs:
       # errors-only (warnings ignored).
       - name: Lint (errors only)
         if: matrix.task == 'lint'
-        run: pnpm --filter xyne-spaces-dashboard run lint:errors-only
+        run: pnpm --filter xyne-spaces-dashboard run lint:errors-only:ci
 
       # --- typecheck leg ----------------------------------------------------
       - name: Format check

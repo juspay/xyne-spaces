@@ -2563,6 +2563,11 @@ export class TicketController {
         try {
           req.body.additionalFormFields = JSON.parse(req.body.additionalFormFields);
         } catch {
+          logger.warn('[AppDeskInbound] additionalFormFields is not valid JSON - ignoring all additional form fields', {
+            channelId: req.body.channelId,
+            threadId: req.body.threadId,
+            rawAdditionalFormFields: String(req.body.additionalFormFields).slice(0, 500),
+          });
           additionalFormFieldValidationErrors.push({
             error: 'additionalFormFields must be valid JSON',
             code: 'VALIDATION_ERROR',
@@ -2572,10 +2577,29 @@ export class TicketController {
       }
 
       const bodyResult = AppDeskInboundBodySchema.safeParse(req.body);
+      const receivedPayload = {
+        channelId: req.body?.channelId,
+        threadId: req.body?.threadId,
+        externalId: req.body?.externalId,
+        subject: req.body?.subject,
+        senderName: req.body?.senderName,
+        senderEmail: req.body?.senderEmail,
+        bodyLength: typeof req.body?.body === 'string' ? req.body.body.length : 0,
+        additionalFormFields: req.body?.additionalFormFields,
+        receivedKeys: Object.keys(req.body ?? {}),
+        fileFields: req.files && !Array.isArray(req.files)
+          ? Object.fromEntries(Object.entries(req.files).map(([name, list]) => [name, list.length]))
+          : undefined,
+      };
       if (!bodyResult.success) {
+        logger.warn('[AppDeskInbound] returning 400: payload validation failed', {
+          ...receivedPayload,
+          schemaIssues: bodyResult.error.errors,
+        });
         res.status(400).json({ error: 'Validation error', code: 'VALIDATION_ERROR', details: bodyResult.error.errors });
         return;
       }
+      logger.info('[AppDeskInbound] payload received', receivedPayload);
 
       const {
         channelId, threadId, externalId: bodyExternalId, subject, body,
@@ -2590,14 +2614,29 @@ export class TicketController {
         ? (req.files as Record<string, Express.Multer.File[]>)
         : {};
       const files = reqFiles['files'] ?? [];
+      if (reqFiles['thumbnails']?.length) {
+        logger.warn('[AppDeskInbound] thumbnails received but not used - ignoring them', {
+          channelId,
+          threadId,
+          thumbnailCount: reqFiles['thumbnails'].length,
+        });
+      }
       const emailBody = body ?? '';
       if (!emailBody && files.length === 0) {
+        logger.warn('[AppDeskInbound] returning 400: no body and no files', {
+          channelId,
+          threadId,
+          bodyProvided: body !== undefined,
+          filesFieldCount: files.length,
+          fileFields: Object.keys(reqFiles),
+        });
         res.status(400).json({ error: 'body or at least one file is required', code: 'VALIDATION_ERROR' });
         return;
       }
 
       const channel = await repositories.channels.findById(channelId);
       if (!channel) {
+        logger.warn('[AppDeskInbound] returning 404: channel not found', { channelId, threadId });
         res.status(404).json({ error: `Channel with ID ${channelId} not found`, code: 'CHANNEL_NOT_FOUND' });
         return;
       }
@@ -2607,21 +2646,40 @@ export class TicketController {
         select: { sendAsEmail: true, ownerUserId: true, boardId: true },
       });
       if (!channelPref || !isDeskChannelType(channel.type)) {
+        logger.warn('[AppDeskInbound] returning 400: channel is not a desk channel', {
+          channelId,
+          threadId,
+          channelType: channel.type,
+          hasEmailChannelPreference: !!channelPref,
+          isDeskChannelType: isDeskChannelType(channel.type),
+        });
         res.status(400).json({ error: 'Channel is not a desk channel', code: 'NOT_DESK_CHANNEL' });
         return;
       }
 
       const installedAppId = (req as any).auth?.installedAppId as string | undefined;
       if (!installedAppId) {
+        logger.warn('[AppDeskInbound] returning 403: app identity not established', { channelId, threadId });
         res.status(403).json({ error: 'App identity not established', code: 'APP_NOT_CONNECTED' });
         return;
       }
       const externalSource = await externalSourceRepo.findChannelAppSource(channelId, installedAppId);
       if (!externalSource) {
+        logger.warn('[AppDeskInbound] returning 403: app is not connected to this channel', {
+          channelId,
+          threadId,
+          installedAppId,
+        });
         res.status(403).json({ error: 'App is not connected to this channel', code: 'APP_NOT_CONNECTED' });
         return;
       }
       if (!externalSource.isActive) {
+        logger.warn('[AppDeskInbound] returning 409: app desk is disconnected', {
+          channelId,
+          threadId,
+          installedAppId,
+          externalSourceId: externalSource.id,
+        });
         res.status(409).json({ error: 'App desk is disconnected', code: 'DESK_DISCONNECTED' });
         return;
       }
@@ -2648,6 +2706,20 @@ export class TicketController {
         emailFrom = botUser?.email
           ? `${botUser.name} <${botUser.email}>`
           : botUser?.name ?? 'External user';
+        logger.warn('[AppDeskInbound] senderName/senderEmail not sent - using app bot user as sender', {
+          channelId,
+          threadId,
+          senderNameReceived: senderName,
+          senderEmailReceived: senderEmail,
+          fallbackEmailFrom: emailFrom,
+        });
+      }
+      if (!senderEmail) {
+        logger.warn('[AppDeskInbound] senderEmail not sent - reporterEmail/fromEmailAddress will not be set on the ticket', {
+          channelId,
+          threadId,
+          senderNameReceived: senderName,
+        });
       }
       const uploadedFiles = files.length > 0 ? await uploadFiles(files) : [];
 
@@ -2664,6 +2736,16 @@ export class TicketController {
         extractEmailAddress(mailboxSource?.displayName ?? '') ||
         ownerUser?.email ||
         `desk-${channelId}@apps.xyne.ai`;
+
+      if (!channelPref.sendAsEmail) {
+        logger.warn('[AppDeskInbound] channel has no sendAsEmail - recipient email resolved via fallback', {
+          channelId,
+          threadId,
+          mailboxSourceDisplayName: mailboxSource?.displayName,
+          ownerUserEmail: ownerUser?.email,
+          recipientEmail,
+        });
+      }
 
       logger.info('[AppDeskInbound] received', {
         channelId,
@@ -2734,6 +2816,12 @@ export class TicketController {
 
         if (additionalFormFields && existingTicket?.id) {
           if (!existingTicket.boardId) {
+            logger.warn('[AppDeskInbound] additionalFormFields not saved: existing ticket has no board', {
+              channelId,
+              threadId: externalThreadId,
+              ticketId: existingTicket.id,
+              receivedFieldNames: Object.keys(additionalFormFields),
+            });
             additionalFormFieldValidationErrors.push({
               error: 'Ticket board is not configured for additional form fields',
               code: 'VALIDATION_ERROR',
@@ -2748,13 +2836,30 @@ export class TicketController {
             customFieldValues = partialResult.customFieldValues;
             additionalFormFieldValidationErrors.push(...partialResult.validationErrors);
 
+            logger[partialResult.validationErrors.length > 0 ? 'warn' : 'info']('[AppDeskInbound] additionalFormFields result for existing ticket', {
+              channelId,
+              threadId: externalThreadId,
+              ticketId: existingTicket.id,
+              boardId: existingTicket.boardId,
+              receivedFieldNames: Object.keys(additionalFormFields),
+              savedFieldNames: customFieldValues?.fieldValues.map(fv => fv.fieldName) ?? [],
+              validationErrors: partialResult.validationErrors,
+            });
+
             if (customFieldValues && customFieldValues.fieldValues.length > 0) {
               await syncCustomFieldValues(existingTicket.id, customFieldValues, userId);
             }
           }
+        } else if (additionalFormFields) {
+          logger.warn('[AppDeskInbound] additionalFormFields not saved: no ticket found for existing thread', {
+            channelId,
+            threadId: externalThreadId,
+            conversationId: threadEmail.conversationId,
+            receivedFieldNames: Object.keys(additionalFormFields),
+          });
         }
 
-        logger.info('[AppDeskInbound] appended message to existing thread', {
+        logger[additionalFormFieldValidationErrors.length > 0 ? 'warn' : 'info']('[AppDeskInbound] appended message to existing thread', {
           threadId: externalThreadId,
           conversationId: threadEmail.conversationId,
           emailId: email.id,
@@ -2762,6 +2867,8 @@ export class TicketController {
           xyneId: existingTicket?.xyneId,
           fileCount: uploadedFiles.length,
           additionalFormFieldsCount: additionalFormFields ? Object.keys(additionalFormFields).length : 0,
+          savedFieldNames: customFieldValues?.fieldValues.map(fv => fv.fieldName) ?? [],
+          validationErrors: additionalFormFieldValidationErrors,
         });
         res.status(200).json({
           ticketId: existingTicket?.id,
@@ -2777,6 +2884,11 @@ export class TicketController {
 
       const effectiveBoardId = channelPref.boardId || undefined;
       if (!effectiveBoardId) {
+        logger.warn('[AppDeskInbound] returning 503: desk channel has no board configured', {
+          channelId,
+          threadId: externalThreadId,
+          receivedFieldNames: additionalFormFields ? Object.keys(additionalFormFields) : [],
+        });
         res.status(503).json({ error: 'App desk board is not configured', code: 'MISCONFIGURED' });
         return;
       }
@@ -2789,6 +2901,15 @@ export class TicketController {
         );
         customFieldValues = partialResult.customFieldValues;
         additionalFormFieldValidationErrors.push(...partialResult.validationErrors);
+
+        logger[partialResult.validationErrors.length > 0 ? 'warn' : 'info']('[AppDeskInbound] additionalFormFields result for new ticket', {
+          channelId,
+          threadId: externalThreadId,
+          boardId: effectiveBoardId,
+          receivedFieldNames: Object.keys(additionalFormFields),
+          savedFieldNames: customFieldValues?.fieldValues.map(fv => fv.fieldName) ?? [],
+          validationErrors: partialResult.validationErrors,
+        });
       }
 
       // Duplicate detection fires inside createConversationWithEmail BEFORE the
@@ -2826,10 +2947,21 @@ export class TicketController {
       });
 
       if (result && 'blocked' in result && result.blocked) {
+        logger.warn('[AppDeskInbound] returning 403: ticket creation blocked by configuration', {
+          channelId,
+          threadId: externalThreadId,
+          boardId: effectiveBoardId,
+        });
         res.status(403).json({ error: 'Ticket creation blocked by configuration', code: 'BLOCKED' });
         return;
       }
       if (result && 'isDuplicate' in result && result.isDuplicate) {
+        logger.warn('[AppDeskInbound] returning 409: duplicate ticket', {
+          channelId,
+          threadId: externalThreadId,
+          boardId: effectiveBoardId,
+          scopeFieldIds: scopeFieldValues?.map(sfv => sfv.fieldId) ?? [],
+        });
         res.status(409).json({ error: 'Duplicate ticket', code: 'DUPLICATE' });
         return;
       }
@@ -2838,9 +2970,16 @@ export class TicketController {
 
       if (customFieldValues && customFieldValues.fieldValues.length > 0 && ticket?.id) {
         await syncCustomFieldValues(ticket.id, customFieldValues, userId);
+      } else if (customFieldValues && customFieldValues.fieldValues.length > 0) {
+        logger.warn('[AppDeskInbound] custom fields not saved: created ticket has no id', {
+          channelId,
+          threadId: externalThreadId,
+          conversationId: conversation?.conversationId,
+          acceptedFieldNames: customFieldValues.fieldValues.map(fv => fv.fieldName),
+        });
       }
 
-      logger.info('[AppDeskInbound] created new ticket', {
+      logger[additionalFormFieldValidationErrors.length > 0 ? 'warn' : 'info']('[AppDeskInbound] created new ticket', {
         threadId: externalThreadId,
         ticketId: ticket?.id,
         xyneId: ticket?.xyneId,
@@ -2849,6 +2988,8 @@ export class TicketController {
         boardId: effectiveBoardId,
         fileCount: uploadedFiles.length,
         additionalFormFieldsCount: additionalFormFields ? Object.keys(additionalFormFields).length : 0,
+        savedFieldNames: customFieldValues?.fieldValues.map(fv => fv.fieldName) ?? [],
+        validationErrors: additionalFormFieldValidationErrors,
       });
 
       res.status(201).json({
@@ -2861,6 +3002,11 @@ export class TicketController {
         }),
       });
     } catch (error) {
+      logger.error('[AppDeskInbound] returning 500: unhandled error', {
+        channelId: req.body?.channelId,
+        threadId: req.body?.threadId,
+        externalId: req.body?.externalId,
+      });
       logger.error('[TicketController] appDeskInbound error:', error);
       res.status(500).json({ error: 'Internal server error', code: 'INTERNAL_ERROR' });
     }

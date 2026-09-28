@@ -89,6 +89,7 @@ import { CollaborativeCanvasEditor } from '../../components/Canvas/Collaborative
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { sendRecordingEvent, useRecordingStore } from '../../hooks/useRecordingStore';
 import { useMarkMoment } from '../../hooks/useMarkMoment';
+import { useRecordingAccessLevel } from '../../hooks/useRecordingAccessLevel';
 import { useRecordingTitleState } from '../../hooks/useRecordingTitleState';
 import { queries } from '../../zero/queries';
 import {
@@ -145,6 +146,18 @@ const DEFAULT_SUMMARY_TEMPLATE_OPTION: RecordingSummaryTemplate = {
   id: 'default',
   name: 'Default summary',
   icon: '✨',
+};
+
+/**
+ * Stands in for a template the recording uses but this user cannot read — it is
+ * private to someone else. The empty id is load-bearing: it reads as "nothing
+ * to regenerate with", which disables the regenerate control rather than
+ * quietly substituting the default and rewriting the summary in another style.
+ */
+const PRIVATE_SUMMARY_TEMPLATE_OPTION: RecordingSummaryTemplate = {
+  id: '',
+  name: 'Private template',
+  icon: '🔒',
 };
 
 const POST_SPLIT_BUTTON_CLASS =
@@ -227,10 +240,18 @@ export default function RecordingDetailV2Screen({
   const storedSummaryTemplateId = recording?.summaryTemplateId ?? '';
   const shouldQueryStoredSummaryTemplate =
     storedSummaryTemplateId.length > 0 && storedSummaryTemplateId !== 'default';
-  const [storedSummaryTemplate] = useCachedQuery(
+  const [storedSummaryTemplate, storedSummaryTemplateDetails] = useCachedQuery(
     queries.summaryTemplateById({ templateId: storedSummaryTemplateId }),
     { enabled: shouldQueryStoredSummaryTemplate },
   );
+  // The recording names a template the summary_templates ACL won't hand over —
+  // it is private to someone else and was never shared. Editors reach this: a
+  // recording share does not carry its template along (PRD §11.1). Held apart
+  // from "still loading", which also yields no row.
+  const storedSummaryTemplateDenied =
+    shouldQueryStoredSummaryTemplate &&
+    storedSummaryTemplateDetails.type === 'complete' &&
+    !storedSummaryTemplate;
   const [isRegeneratingSummary, setIsRegeneratingSummary] = useState(false);
   const [pendingSummaryTemplateId, setPendingSummaryTemplateId] = useState<string | null>(null);
   const [summaryCanvasNonce, setSummaryCanvasNonce] = useState(0);
@@ -483,6 +504,17 @@ export default function RecordingDetailV2Screen({
     queries.oatsRecordingByExternalId({ callId: recordingId ?? '' }),
     { enabled: !!recordingId },
   );
+  // Editors get every editing surface the owner has. Delete stays owner-only
+  // (PRD §5.2). The Google Docs list is not gated on this at all: it is shown to
+  // everyone who has the recording, attributing the exports they cannot open
+  // (§11.4).
+  const { canEdit: canEditFromGrants } = useRecordingAccessLevel(recordingRow);
+  // The screen renders as soon as REST lands, which can beat the Zero row, and
+  // access alone would read `null` and show the creator their own recording
+  // read-only. REST carries no grants, so this floor is owner-only; an editor
+  // still waits for the row. The server re-checks every one of these actions.
+  const isCreator = !!currentUser?.id && recording?.createdByUserId === currentUser.id;
+  const canEdit = canEditFromGrants || isCreator;
 
   const titleState = useRecordingTitleState({
     title: recordingRow ? recordingRow.title : (recording?.title ?? null),
@@ -736,6 +768,22 @@ export default function RecordingDetailV2Screen({
   ): Promise<void> => {
     if (!recording || isRegeneratingSummary) return;
 
+    // Re-running a template we cannot read is not possible: asking for it by id
+    // fails the server's own template check, and omitting it resolves to the
+    // default, quietly rewriting the summary in a different style. Both the
+    // regenerate controls and the "Retry with …" footer land here, so make the
+    // choice explicit instead (PRD §11.1).
+    if (
+      storedSummaryTemplateDenied &&
+      (!summaryTemplateId || summaryTemplateId === storedSummaryTemplateId)
+    ) {
+      toast.error("You don't have access to this recording's template", {
+        description: 'Pick a template you can use to regenerate the summary.',
+      });
+      handleOpenSummaryTemplates();
+      return;
+    }
+
     // Picking the template the existing summary was already written with is a no-op —
     // unless a specific model tier is being requested (e.g. "Try the thinking model").
     if (
@@ -985,7 +1033,6 @@ export default function RecordingDetailV2Screen({
   // only an explicit `false` counts as "still generating".
   const hasDetailedSummary =
     !!recording.detailedSummaryCanvasId && recording.detailedSummaryReady !== false;
-  const isOwner = recording.createdByUserId === currentUser?.id;
   const isGeneratingTitle = titleState?.kind === 'generating';
   // Sharing needs a summary canvas to share, and a live recording has nothing final yet.
   const canShare = !isLive && Boolean(recording.detailedSummaryCanvasId);
@@ -1014,7 +1061,9 @@ export default function RecordingDetailV2Screen({
           name: storedSummaryTemplate.name,
           icon: getTemplateIcon(storedSummaryTemplate.name),
         }
-      : DEFAULT_SUMMARY_TEMPLATE_OPTION);
+      : storedSummaryTemplateDenied
+        ? PRIVATE_SUMMARY_TEMPLATE_OPTION
+        : DEFAULT_SUMMARY_TEMPLATE_OPTION);
 
   const secondTab = isLive ? 'transcript' : 'summary';
   const visibleTab = tabPreference === 'notes' ? 'notes' : secondTab;
@@ -1188,6 +1237,7 @@ export default function RecordingDetailV2Screen({
           <RecordingDetailV2Header
             recording={recording}
             isLive={isLive}
+            canEdit={canEdit}
             titleState={titleState}
             onTitleUpdated={handleTitleUpdated}
             onLabelsUpdated={handleLabelsUpdated}
@@ -1224,7 +1274,7 @@ export default function RecordingDetailV2Screen({
                 onSelect={handleTabSelect}
                 hasSummary={hasDetailedSummary}
                 selectedTemplate={selectedSummaryTemplate}
-                {...(isLive || !isOwner
+                {...(isLive || !canEdit
                   ? {}
                   : {
                       // showSummaryShimmer covers both a click in this tab and a
@@ -1264,7 +1314,7 @@ export default function RecordingDetailV2Screen({
                   <Flag size={15} strokeWidth={2.2} variant='Solid' aria-hidden='true' />
                   Mark this moment
                 </Button>
-              ) : isOwner && hasDetailedSummary ? (
+              ) : canEdit && hasDetailedSummary ? (
                 <DropdownMenu>
                   <div className='inline-flex h-8 items-stretch overflow-hidden rounded-lg bg-foreground text-background shadow-sm'>
                     <Button
@@ -1398,11 +1448,12 @@ export default function RecordingDetailV2Screen({
                     key={`${recording.detailedSummaryCanvasId}:${summaryCanvasNonce}`}
                     canvasId={recording.detailedSummaryCanvasId!}
                   />
-                  {/* Model footer (owner-only). Fast summaries offer an upgrade to
-                      Thinking; Thinking summaries offer a downgrade to Fast. Each
-                      "Retry with …" opens a popover to apply the tier to just this
-                      summary or make it the default for future recordings. */}
-                  {isOwner &&
+                  {/* Model footer (owner and editors). Fast summaries offer an
+                      upgrade to Thinking; Thinking summaries offer a downgrade to
+                      Fast. Each "Retry with …" opens a popover to apply the tier to
+                      just this summary or make it the default for future
+                      recordings. */}
+                  {canEdit &&
                     (recording.summaryModelUsed === 'thinking' ? (
                       <div className='mt-5 flex items-center justify-between gap-2.5 border-t border-border pt-3'>
                         <span className='text-xs text-muted-foreground'>
@@ -1557,9 +1608,11 @@ export default function RecordingDetailV2Screen({
                   onReadTranscript={transcriptText ? openTranscriptPanel : undefined}
                 />
               )}
-              {/* Owner-only: the docs live in the owner's Drive, so these links are
-                  dead ends for anyone the recording was merely shared with. */}
-              {isOwner ? <RecordingGoogleDocsList documents={recording.googleDocs ?? []} /> : null}
+              {/* Shown to everyone with the recording. Each doc lives in the
+                  exporting user's own Drive, so the list attributes the ones you
+                  did not export — "ask them for access" is all Xyne can offer
+                  (PRD §11.4). */}
+              <RecordingGoogleDocsList documents={recording.googleDocs ?? []} />
             </section>
           )}
         </div>
@@ -1600,7 +1653,7 @@ export default function RecordingDetailV2Screen({
         </Dialog>
       )}
 
-      {isOwner && showPostToChannelModal && hasDetailedSummary && (
+      {canEdit && showPostToChannelModal && hasDetailedSummary && (
         <Dialog
           open={showPostToChannelModal}
           onOpenChange={open => !open && setShowPostToChannelModal(false)}
@@ -1615,7 +1668,7 @@ export default function RecordingDetailV2Screen({
         </Dialog>
       )}
 
-      {isOwner && showPostToEmailModal && hasDetailedSummary && (
+      {canEdit && showPostToEmailModal && hasDetailedSummary && (
         <Dialog
           open={showPostToEmailModal}
           onOpenChange={open => !open && setShowPostToEmailModal(false)}
@@ -1632,7 +1685,7 @@ export default function RecordingDetailV2Screen({
         </Dialog>
       )}
 
-      {isOwner && showGoogleDocPreviewModal && hasDetailedSummary && (
+      {canEdit && showGoogleDocPreviewModal && hasDetailedSummary && (
         <Dialog
           open={showGoogleDocPreviewModal}
           onOpenChange={open => !open && setShowGoogleDocPreviewModal(false)}
@@ -1651,7 +1704,7 @@ export default function RecordingDetailV2Screen({
         </Dialog>
       )}
 
-      {isOwner && currentUser && templatesModalMode && (
+      {canEdit && currentUser && templatesModalMode && (
         <Dialog
           open={templatesModalMode !== null}
           onOpenChange={open => !open && setTemplatesModalMode(null)}

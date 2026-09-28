@@ -1356,25 +1356,29 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                     <div
                       className={`jp-message-html whitespace-pre-wrap break-all-words inline-block ${getEmojiFontSizeClass(noteHtml)}`}
                     >
-                      <RenderMessageWithHTML
-                        disableLinks={disableLinks}
-                        message={noteHtml}
-                        showEdited={message.edited}
-                        messageId={message.messageId}
-                        conversationId={message.conversationId}
-                        preserveThreadRoute={context === 'thread'}
-                      />
+                      <ExpandableMessage maxHeight={500}>
+                        <RenderMessageWithHTML
+                          disableLinks={disableLinks}
+                          message={noteHtml}
+                          showEdited={message.edited}
+                          messageId={message.messageId}
+                          conversationId={message.conversationId}
+                          preserveThreadRoute={context === 'thread'}
+                        />
+                      </ExpandableMessage>
                     </div>
                   )}
                   afterContent={afterTextContent}
                 />
               ) : isMarkdownContent ? (
                 <>
-                  <MarkdownMessageRenderer
-                    content={citationContent}
-                    markdownComponents={markdownComponents}
-                    messageSubtype={metadata?.messageSubtype}
-                  />
+                  <ExpandableMessage maxHeight={500}>
+                    <MarkdownMessageRenderer
+                      content={citationContent}
+                      markdownComponents={markdownComponents}
+                      messageSubtype={metadata?.messageSubtype}
+                    />
+                  </ExpandableMessage>
                   {metadata?.messageSubtype === 'recording' &&
                     metadata?.callId &&
                     (metadata?.['recordingType'] && metadata['recordingType'] !== 'AUDIO_ONLY' ? (

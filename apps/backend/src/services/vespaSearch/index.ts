@@ -238,6 +238,7 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       presentationSummary, // Optional Vespa presentation.summary profile (e.g. 'lean')
       includeBotMessages,  // 'true'|'false' string from cmd-K toggle; default behavior excludes BOT messages
       onlyMyChannels,      // 'true'|'false' string from cmd-K toggle; default behavior includes public channels
+      excludeArchived,     // 'true' => drop results resolving to an archived ticket (cmd+k + full-page Desk)
       includeDebugInfo,    // 'true' => attach matchfeatures/rankfeatures debug info to each result
       groupBy,    // Override Vespa grouping. Empty string => flat ranked list (no grouping).
       // Chunk-level KB drill-in mode used by claw-auth's kb-get-chunks /
@@ -257,6 +258,7 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
     // Joi validateQuery (convert: true) coerces includeDebugInfo to a boolean,
     // so normalize before comparing
     const wantDebugInfo = String(includeDebugInfo) === 'true';
+    const wantExcludeArchived = String(excludeArchived) === 'true';
 
     const userId = (req as any).user?.id;
     const userEmail = (req as any).user?.email;
@@ -1028,6 +1030,7 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
               hitsWithMatchFeatures,
               db,
               wantDebugInfo,
+              wantExcludeArchived,
             ),
           );
           return {
@@ -1058,6 +1061,7 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
         parsedResults.hits || [],
         db,
         wantDebugInfo,
+        wantExcludeArchived,
       );
 
       res.json({

@@ -44,6 +44,8 @@ import {
   resolveAllRadarItems,
   resolveRadarItem,
   RadarItemTrail,
+  RadarDedupCheck,
+  RadarDedupTrail,
   RadarRunLog,
   RadarRunsResult,
   RadarThreadCard,
@@ -162,6 +164,19 @@ const FEED_PAGE = 5;
 /** Cards keep the feed they have always had: drawn in blocks as the reader
  *  scrolls, never paged. */
 const CARDS_PAGE = 20;
+
+/** Debug-trail styling for Jev's verdict on a create, and for what the parser
+ *  did after being sent back over it. */
+const verdictPill: Record<RadarDedupCheck['verdict'], string> = {
+  duplicate: 'bg-amber-500/10 text-amber-600',
+  distinct: 'bg-emerald-500/10 text-emerald-600',
+  unscored: 'bg-muted text-muted-foreground',
+};
+const outcomeWords: Record<NonNullable<RadarDedupCheck['outcome']>, [string, string]> = {
+  reassigned: ['parser reassigned instead', 'text-emerald-600'],
+  dropped: ['parser dropped it', 'text-emerald-600'],
+  kept: ['parser kept the create', 'text-red-600'],
+};
 
 /**
  * The creation window a time filter stands for, or null for any time. Shared
@@ -461,6 +476,9 @@ const RadarPanel = (): ReactElement => {
         if (!isCurrent()) return;
         setPending(p);
         if (!othersPaged) {
+          // A paged read still in flight from before the switch must not land
+          // on top of this feed.
+          othersSeq.current += 1;
           setOthersPageData(null);
           setWaiting(w as RadarThreadCard[]);
         }
@@ -850,6 +868,7 @@ const RadarPanel = (): ReactElement => {
     item: RadarFeedItem,
     index: number,
     showPendingOn = true,
+    numbered = true,
   ) => (
     <>
       <button
@@ -866,7 +885,8 @@ const RadarPanel = (): ReactElement => {
           openThread(card, item.conversationId, item.sourceMessageId);
         }}
       >
-        {index + 1}. {cleanText(item.title)}
+        {numbered && `${index + 1}. `}
+        {cleanText(item.title)}
       </button>
       {item.contextSummary && (
         <ul className='mt-2 space-y-1'>
@@ -1299,10 +1319,15 @@ const RadarPanel = (): ReactElement => {
     </span>
   );
 
-  const renderTableItemRow = (card: RadarThreadCard, item: RadarFeedItem, index: number) => (
+  const renderTableItemRow = (
+    card: RadarThreadCard,
+    item: RadarFeedItem,
+    index: number,
+    numbered = true,
+  ) => (
     <div key={item.id} className={cn(tableGrid(), 'group items-start py-3 hover:bg-accent/40')}>
       <div className={cn('min-w-0', TABLE_ITEM_INDENT)}>
-        {itemMainBlock(card, item, index, false)}
+        {itemMainBlock(card, item, index, false, numbered)}
       </div>
       <div className='min-w-0 pt-0.5'>
         <span className='block text-sm text-muted-foreground truncate'>
@@ -1395,6 +1420,17 @@ const RadarPanel = (): ReactElement => {
   const renderTableGroup = (card: RadarThreadCard, kind: 'pending' | 'waiting') => {
     const collapsed = collapsedGroups.has(card.scopeKey);
     const key = `table:${kind}:${card.scopeKey}`;
+    // A thread with a single item is shown as that item's row alone — its
+    // title and context bullet, no thread heading, chevron or numbering. The
+    // row keeps its own open, resolve and dismiss actions.
+    const [onlyItem] = card.items;
+    if (card.items.length === 1 && onlyItem) {
+      return (
+        <div key={key} className='border-b border-border last:border-b-0'>
+          {renderTableItemRow(card, onlyItem, 0, false)}
+        </div>
+      );
+    }
     return (
       <div key={key} className='border-b border-border last:border-b-0'>
         <div className='group/thread flex items-center gap-2 px-5 py-2 bg-muted/30'>
@@ -1492,15 +1528,12 @@ const RadarPanel = (): ReactElement => {
   // Requesters are excluded, never included: "everyone but Bob" has to keep
   // meaning everyone as new people ask, which a stored list of who is in can
   // never do. An item with no requester on record is nobody's to exclude.
+  const keepsRequester = (card: RadarThreadCard): boolean =>
+    card.items.some(
+      i => i.requestedBy.length === 0 || i.requestedBy.some(id => !excludedRequesters.has(id)),
+    );
   const pendingCards =
-    pendingMe && excludedRequesters.size
-      ? pending.filter(card =>
-          card.items.some(
-            i =>
-              i.requestedBy.length === 0 || i.requestedBy.some(id => !excludedRequesters.has(id)),
-          ),
-        )
-      : pending;
+    pendingMe && excludedRequesters.size ? pending.filter(keepsRequester) : pending;
 
   // A ticked team is shorthand for its members, so team and person selections
   // union rather than intersect: picking Platform Pod and then one more name
@@ -1510,11 +1543,11 @@ const RadarPanel = (): ReactElement => {
     if (!teamIds.has(team.id)) continue;
     for (const memberId of team.memberIds) effectivePendingUsers.add(memberId);
   }
+  const keepsHolder = (card: RadarThreadCard): boolean =>
+    card.items.some(i => i.pendingOn.some(id => effectivePendingUsers.has(id)));
   const waitingCards =
     pendingOthers && effectivePendingUsers.size && !othersFromServer
-      ? waiting.filter(card =>
-          card.items.some(i => i.pendingOn.some(id => effectivePendingUsers.has(id))),
-        )
+      ? waiting.filter(keepsHolder)
       : waiting;
 
   // Merged on activity, not concatenated. Each feed arrives sorted, but
@@ -1541,22 +1574,20 @@ const RadarPanel = (): ReactElement => {
       : cards.map(c => c.card.channelId),
   );
 
-  const clientTimeWindow = othersFromServer ? null : createdWindow(timeRange, customFrom, customTo);
-  if (clientTimeWindow) {
-    // When the item was raised, not when the thread was last touched: a
-    // months-old ask does not become recent because someone replied today.
-    const createdOf = (card: RadarThreadCard): number =>
-      card.items.reduce((min, i) => Math.min(min, new Date(i.createdAt).getTime()), Infinity);
-    const { from, to } = clientTimeWindow;
-    cards = cards.filter(({ card }) => {
+  // The time and channel pickers, shared by the list and the tab counts.
+  const timeWindow = createdWindow(timeRange, customFrom, customTo);
+  // When the item was raised, not when the thread was last touched: a
+  // months-old ask does not become recent because someone replied today.
+  const createdOf = (card: RadarThreadCard): number =>
+    card.items.reduce((min, i) => Math.min(min, new Date(i.createdAt).getTime()), Infinity);
+  const passesPickers = (card: RadarThreadCard): boolean => {
+    if (timeWindow) {
       const t = createdOf(card);
-      return Number.isFinite(t) && t >= from && t <= to;
-    });
-  }
-
-  if (filterChannels.size && !othersFromServer) {
-    cards = cards.filter(({ card }) => filterChannels.has(card.channelId));
-  }
+      if (!Number.isFinite(t) || t < timeWindow.from || t > timeWindow.to) return false;
+    }
+    return !filterChannels.size || filterChannels.has(card.channelId);
+  };
+  if (!othersFromServer) cards = cards.filter(({ card }) => passesPickers(card));
   // The server has already said which items this viewer's rules mute; the panel
   // only places them. Nothing is dropped — a rule written too wide stays
   // findable by whoever wrote it. A card whose items disagree is split, because
@@ -1697,16 +1728,19 @@ const RadarPanel = (): ReactElement => {
     );
   };
 
-  // Tab counts: total open items on each side, muted excluded — independent
-  // of the channel/time/requester pickers, which narrow what's drawn, not
-  // what the tab itself claims to hold.
-  const pendingMeTabCount = pending.reduce(
-    (n, card) => n + card.items.filter(i => !i.muted).length,
-    0,
+  // Tab counts: the open items each tab would list under the current filters,
+  // muted excluded. Each side applies its own person filter whichever tab is
+  // open, so a badge does not change just because the reader switched tabs.
+  const openItemsIn = (list: RadarThreadCard[]): number =>
+    list.filter(passesPickers).reduce((n, card) => n + card.items.filter(i => !i.muted).length, 0);
+  const pendingMeTabCount = openItemsIn(
+    excludedRequesters.size ? pending.filter(keepsRequester) : pending,
   );
-  const pendingOthersTabCount = othersPageData
-    ? othersPageData.openItemCount
-    : waiting.reduce((n, card) => n + card.items.filter(i => !i.muted).length, 0);
+  // The paged feed is filtered on the server, which counts it too.
+  const pendingOthersTabCount =
+    othersPaged && othersPageData
+      ? othersPageData.openItemCount
+      : openItemsIn(effectivePendingUsers.size ? waiting.filter(keepsHolder) : waiting);
 
   const runBadge = (run: RadarRunLog) =>
     run.error ? (
@@ -1742,6 +1776,48 @@ const RadarPanel = (): ReactElement => {
       .filter(Boolean)
       .join(' · ');
 
+  // What Jev made of each create: the open item it matched best, the score
+  // against the threshold, and — when the parser was sent back — what came of it.
+  const dedupSection = (trail: RadarDedupTrail): ReactElement => (
+    <div className='mt-1.5 px-2 py-1.5 rounded-lg bg-violet-500/5'>
+      <div className='flex flex-wrap items-baseline gap-x-2'>
+        <span className='text-[10px] font-bold uppercase tracking-wide text-violet-600'>
+          Jev duplicate check
+        </span>
+        <span className='text-[11px] text-muted-foreground'>
+          threshold {trail.threshold.toFixed(2)}
+          {trail.recalled && ' · parser recalled'}
+        </span>
+      </div>
+      <ul className='mt-1 space-y-1'>
+        {trail.checks.map((c, i) => (
+          <li key={`${c.sourceMessageId}-${i}`} className='break-words'>
+            <span className='text-foreground'>“{c.title}”</span>
+            {c.itemTitle ? (
+              <span className='text-muted-foreground'> ~ “{c.itemTitle}”</span>
+            ) : (
+              <span className='text-muted-foreground'> — Jev gave no answer</span>
+            )}{' '}
+            <span
+              className={cn(
+                'inline-block px-1.5 rounded-full text-[10px] font-semibold',
+                verdictPill[c.verdict],
+              )}
+            >
+              {c.probability !== null && `${c.probability.toFixed(2)} · `}
+              {c.verdict}
+            </span>
+            {c.outcome && (
+              <span className={cn('ml-1 font-semibold', outcomeWords[c.outcome][1])}>
+                → {outcomeWords[c.outcome][0]}
+              </span>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+
   // Consecutive quiet runs collapse into one row. Grouping by adjacency rather
   // than pulling them all to the bottom keeps the timeline in order, and every
   // run is still there behind the disclosure.
@@ -1772,6 +1848,7 @@ const RadarPanel = (): ReactElement => {
         </div>
       )}
       {run.error && <div className='mt-1.5 text-red-500 break-words'>{run.error}</div>}
+      {run.dedupChecks && run.dedupChecks.checks.length > 0 && dedupSection(run.dedupChecks)}
       {opCount(run.droppedOps) > 0 && (
         <div className='mt-1.5 px-2 py-1.5 rounded-lg bg-red-500/5 text-red-600'>
           <span className='font-semibold'>

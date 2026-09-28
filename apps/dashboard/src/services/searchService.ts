@@ -332,6 +332,10 @@ export class SearchService {
       params['onlyMyChannels'] = filters.onlyMyChannels.toString();
     }
 
+    if (filters.excludeArchived !== undefined) {
+      params['excludeArchived'] = filters.excludeArchived.toString();
+    }
+
     if (filters.groupBy !== undefined) {
       params['groupBy'] = filters.groupBy;
     }
