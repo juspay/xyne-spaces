@@ -134,6 +134,7 @@ import {
 } from "../lib/session-context.js";
 import { emitAgentWorkingSignal } from "../surfaces/spaces/client.js";
 import { emitAgentProgressDone, emitAgentProgressWorking } from "../surfaces/spaces/agent-progress.js";
+import { systemNote } from "../lib/notice-format.js";
 import JSZip from "jszip";
 
 import {
@@ -1742,7 +1743,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
               {
                 channelId: payload.channelId,
                 conversationId: payload.conversationId,
-                markdownText: `Recording **${att.fileName ?? att.attachmentId}** was skipped: ${reason}. The run will continue without it.`,
+                markdownText: systemNote(`Recording **${att.fileName ?? att.attachmentId}** was skipped: ${reason}. The run will continue without it.`),
                 metadata: { contentFormat: "markdown" },
               }
             ).catch(() => {});
@@ -2200,8 +2201,8 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     if (!(body.success && body.sessionId) && eventType !== "USER_MENTIONED" && !resultForwardUrl && payload.conversationId) {
       const refusal = body.error ?? "the run could not be started";
       const notice = /disabled/i.test(refusal)
-        ? `**${agent.slug}** is currently disabled — an admin can re-enable it in the agent dashboard.`
-        : `I couldn't start this request: ${refusal}`;
+        ? systemNote(`**${agent.slug}** is currently disabled — an admin can re-enable it in the agent dashboard.`)
+        : systemNote(`I couldn't start this request: ${refusal}`);
       await postAgentMessage(
         { spacesAppUserId: agent.spacesAppUserId, appToken: agent.appToken },
         {
@@ -2334,7 +2335,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
             {
               channelId: payload.channelId,
               conversationId: payload.conversationId,
-              markdownText: `**${agent.slug}** is restricted — you don't have access to it. Ask the agent's owner to add you.`,
+              markdownText: systemNote(`**${agent.slug}** is restricted — you don't have access to it. Ask the agent's owner to add you.`),
               metadata: { contentFormat: "markdown" },
             }
           ).catch((err) =>
@@ -7245,12 +7246,12 @@ router.post("/progress", requireStrictS2S, async (req: Request, res: Response) =
           channelId: ctx.channelId,
           conversationId: ctx.conversationId,
           markdownText: [
-            "**Live preview**",
+            systemNote("**Live preview**"),
             "",
-            "This agent is working in a browser you can watch — and take over — from this channel.",
+            systemNote("This agent is working in a browser you can watch — and take over — from this channel."),
             "",
-            `Browser: ${sandboxPreviewUrl}`,
-            ...(sandboxCodePreviewUrl ? [`Code changes: ${sandboxCodePreviewUrl}/`] : []),
+            systemNote(`Browser: ${sandboxPreviewUrl}`),
+            ...(sandboxCodePreviewUrl ? [systemNote(`Code changes: ${sandboxCodePreviewUrl}/`)] : []),
           ].join("\n"),
           metadata: { contentFormat: "markdown" },
         }

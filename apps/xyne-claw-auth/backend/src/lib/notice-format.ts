@@ -18,7 +18,25 @@
  *   - State only what is true and non-zero. Silence beats "dropped 0 messages".
  *   - Prose over delimiter-joined fragments; a real list only when there
  *     genuinely are several independent items.
+ *   - Italic, so the reader can tell the system's voice from the agent's at a
+ *     glance. Everything claw says about itself is set in italic; everything
+ *     the model produced stays in plain type.
+ *
+ * Italic is written `_like this_`, never `*like this*`, so it nests cleanly
+ * inside a `**bold**` lead — `_**Stopped.** Cancelled 1 run._` — without the
+ * two asterisk runs colliding into one ambiguous token.
  */
+
+/**
+ * Set one line of system text in italic. Idempotent, and a no-op on empty
+ * input so an absent optional clause does not emit a stray `__`.
+ */
+export function systemNote(text: string): string {
+  const body = text.trim();
+  if (!body) return "";
+  if (body.startsWith("_") && body.endsWith("_")) return body;
+  return `_${body}_`;
+}
 
 /** Join clauses as prose: "a", "a and b", "a, b, and c". */
 export function sentenceList(parts: readonly string[]): string {
@@ -35,10 +53,11 @@ export function pluralize(count: number, singular: string, plural = `${singular}
 }
 
 /**
- * A notice: bold lead, then the detail as a sentence. The lead is the part a
- * reader skimming the thread will actually take in, so it carries the outcome.
+ * A notice: bold lead, then the detail as a sentence, the whole thing italic.
+ * The lead is the part a reader skimming the thread will actually take in, so
+ * it carries the outcome.
  */
 export function notice(lead: string, detail?: string): string {
   const body = detail?.trim();
-  return body ? `**${lead}** ${body}` : `**${lead}**`;
+  return systemNote(body ? `**${lead}** ${body}` : `**${lead}**`);
 }

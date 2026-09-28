@@ -1,6 +1,6 @@
 import { clearQueue, peekQueue, queueDepth } from "../message-queue.js";
 import type { WebhookCommandCtx } from "./context.js";
-import { notice, pluralize } from "../notice-format.js";
+import { notice, pluralize, systemNote } from "../notice-format.js";
 
 // ── /queue ── show messages waiting behind the active run, then stop.
 export async function handleQueueShow(ctx: WebhookCommandCtx): Promise<void> {
@@ -10,7 +10,7 @@ export async function handleQueueShow(ctx: WebhookCommandCtx): Promise<void> {
   const waiting = convId ? await peekQueue(convId, agent.slug) : [];
   const lines =
     depth === 0
-      ? ["**Message queue**", "", "Nothing is waiting behind the current run."]
+      ? [systemNote("**Message queue** — nothing is waiting behind the current run.")]
       : [
           notice("Message queue.", `${pluralize(depth, "message")} waiting behind the active run.`),
           "",
@@ -35,6 +35,6 @@ export async function handleQueueClear(ctx: WebhookCommandCtx): Promise<void> {
           "Queue cleared.",
           `Dropped ${pluralize(discarded, "waiting message")}. The current run continues.`,
         )
-      : "The queue is already empty.";
+      : systemNote("The queue is already empty.");
   await ctx.reply(reply, "Failed to post /queue clear reply");
 }

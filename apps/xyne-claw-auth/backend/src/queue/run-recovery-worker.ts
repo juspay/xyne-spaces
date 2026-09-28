@@ -6,6 +6,7 @@ import { prisma } from "../db.js";
 import { spacesAppFetch } from "../lib/spaces-api.js";
 import { enqueueMessage, type QueuedMessage } from "../lib/message-queue.js";
 
+import { systemNote } from "../lib/notice-format.js";
 import { createLogger } from "../logger.js";
 const log = createLogger("run-recovery-worker");
 
@@ -301,9 +302,9 @@ async function notifySandboxDeferred(state: RunRecoveryState): Promise<void> {
     channelId: ctx.channelId,
     conversationId: ctx.conversationId,
     markdownText: [
-      "**Waiting for a sandbox**",
+      systemNote("**Waiting for a sandbox**"),
       "",
-      `Every dev sandbox is busy. This will start automatically as soon as one frees up, for up to ${waitMinutes} minutes — no need to tag me again.`,
+      systemNote(`Every dev sandbox is busy. This will start automatically as soon as one frees up, for up to ${waitMinutes} minutes — no need to tag me again.`),
     ].join("\n"),
     userId: ctx.spacesAppUserId,
     metadata: { contentFormat: "markdown" },
@@ -513,15 +514,15 @@ async function notifyExhausted(state: RunRecoveryState): Promise<void> {
       ? `I retried this request **${state.retriesUsed}/${state.maxRetries}** times after interruptions, but it still failed.`
       : "This request was interrupted and could not be resumed automatically.";
   const message = [
-    "**Could not finish this run**",
+    systemNote("**Could not finish this run**"),
     "",
-    headline,
+    systemNote(headline),
     "",
-    tail,
+    systemNote(tail),
     "",
     // Session ids are support-desk detail, not part of the explanation — kept,
     // but demoted below the human-readable part instead of interrupting it.
-    `Session \`${state.activeSessionId}\` (root \`${state.rootSessionId}\`)`,
+    systemNote(`Session \`${state.activeSessionId}\` (root \`${state.rootSessionId}\`)`),
   ].join("\n");
 
   await spacesAppFetch("/chat/postMessage", {

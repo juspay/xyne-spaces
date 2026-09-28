@@ -1,6 +1,6 @@
 import { activeGoalRepository } from "../../repositories/index.js";
 import type { WebhookCommandCtx } from "./context.js";
-import { notice, pluralize, sentenceList } from "../notice-format.js";
+import { notice, pluralize, sentenceList, systemNote } from "../notice-format.js";
 
 // ── /stop (and /goal clear) ── halt THE ADDRESSED AGENT in this thread:
 // cancel its in-flight runs, drop its queued messages, and clear any active
@@ -44,7 +44,7 @@ export function formatStopReply(
 ): string {
   const didSomething = result.hadRunningRows || goalWasActive || result.queued > 0;
   if (!didSomething) {
-    return `Nothing is running for ${agentSlug} in this thread right now.`;
+    return systemNote(`Nothing is running for ${agentSlug} in this thread right now.`);
   }
 
   const parts: string[] = [];

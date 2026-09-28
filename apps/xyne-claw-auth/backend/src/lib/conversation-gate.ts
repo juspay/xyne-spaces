@@ -1,6 +1,7 @@
 import { CONFIG } from "../config.js";
 import { createLogger } from "../logger.js";
 import { errMsg } from "./errors.js";
+import { systemNote } from "./notice-format.js";
 import {
   QUEUE_CAP,
   enqueueMessage,
@@ -70,8 +71,13 @@ export async function requestInterruptWithReply(sessionId: string, userId: strin
   }
 }
 
-/** See lib/notice-format.ts for the house style these follow. */
+/** See lib/notice-format.ts for the house style these follow — italic, so the
+ *  reader can tell claw's voice from the agent's. */
 export function queuedNotice(enq: EnqueueResult, interrupted: boolean, explicitQueueOnly: boolean, place: "thread" | "chat"): string {
+  return systemNote(queuedNoticeText(enq, interrupted, explicitQueueOnly, place));
+}
+
+function queuedNoticeText(enq: EnqueueResult, interrupted: boolean, explicitQueueOnly: boolean, place: "thread" | "chat"): string {
   if (enq.enqueued && interrupted) return "Finishing the current reply first, then picking up your new message.";
   if (enq.enqueued) {
     return explicitQueueOnly
