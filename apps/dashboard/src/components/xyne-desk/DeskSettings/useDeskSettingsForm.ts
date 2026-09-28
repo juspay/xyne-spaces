@@ -628,7 +628,6 @@ export function useDeskSettingsForm(
     setDuplicateDetectionEnabled,
     duplicateScopeFieldIds,
     setDuplicateScopeFieldIds,
-    projectId: selectedChannelForSettings?.projectId,
     deskReportEnabled,
     setDeskReportEnabled,
     deskReportAgentSlug,

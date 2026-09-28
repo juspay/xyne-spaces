@@ -435,3 +435,116 @@ describe("main.ts requireAuth mount policy", () => {
     ).toEqual([]);
   });
 });
+
+/**
+ * A cookie-authed `/claw/*` request that could not be VERIFIED must never come
+ * back as 401.
+ *
+ * The dashboard's axios interceptor (apps/dashboard/src/services/clients/
+ * apiClient.ts) treats any 401 from its own origin as session expiry: it calls
+ * clearAuthTokens() and redirects to /auth. Because `/claw/*` is served from the
+ * same host as Spaces, a claw-auth 401 caused by nothing worse than a slow
+ * /api/auth/me logged real users out. Prod showed 417 such 401s in 6h clustered
+ * at p50 5007ms — exactly the identity-lookup timeout.
+ *
+ * So: upstream timeout / unreachable / 5xx => 503. Only Spaces actually saying
+ * "not you" (or no cookie at all) is a 401.
+ */
+describe("requireAuth: unverifiable identity is 503, not 401", () => {
+  const COOKIE = { headers: { cookie: "xyne-session=abc" } } as unknown as Request;
+
+  function mockRes(): Response & { _status?: number; _body?: unknown } {
+    const res = {
+      _status: undefined as number | undefined,
+      _body: undefined as unknown,
+      setHeader: vi.fn(),
+      status: vi.fn(function (this: { _status?: number }, code: number) {
+        this._status = code;
+        return this as unknown as Response;
+      }),
+      json: vi.fn(function (this: { _body?: unknown }, body: unknown) {
+        this._body = body;
+        return this as unknown as Response;
+      }),
+    };
+    return res as unknown as Response & { _status?: number; _body?: unknown };
+  }
+
+  beforeEach(() => {
+    state.config.cliTokensEnabled = false;
+  });
+
+  it("returns 503 when /api/auth/me times out", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      const err = new Error("The operation was aborted due to timeout");
+      err.name = "TimeoutError";
+      throw err;
+    }));
+    const { requireAuth } = await import("./require-auth.js");
+    const res = mockRes();
+    const next: NextFunction = vi.fn();
+
+    await requireAuth({ ...COOKIE, headers: { ...COOKIE.headers } } as Request, res, next);
+
+    expect(next).not.toHaveBeenCalled();
+    expect(res._status).toBe(503);
+    expect((res._body as { code?: string }).code).toBe("AUTH_UPSTREAM_UNAVAILABLE");
+    expect(res.setHeader).toHaveBeenCalledWith("Retry-After", "1");
+    vi.unstubAllGlobals();
+  });
+
+  it("returns 503 when /api/auth/me answers 5xx", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 503 })));
+    const { requireAuth } = await import("./require-auth.js");
+    const res = mockRes();
+    const next: NextFunction = vi.fn();
+
+    await requireAuth({ ...COOKIE, headers: { ...COOKIE.headers } } as Request, res, next);
+
+    expect(res._status).toBe(503);
+    vi.unstubAllGlobals();
+  });
+
+  it("still returns 401 when Spaces actively rejects the session", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 401 })));
+    const { requireAuth } = await import("./require-auth.js");
+    const res = mockRes();
+    const next: NextFunction = vi.fn();
+
+    await requireAuth({ ...COOKIE, headers: { ...COOKIE.headers } } as Request, res, next);
+
+    expect(res._status).toBe(401);
+    vi.unstubAllGlobals();
+  });
+
+  it("still returns 401 when there is no cookie at all", async () => {
+    const { requireAuth } = await import("./require-auth.js");
+    const res = mockRes();
+    const next: NextFunction = vi.fn();
+
+    await requireAuth({ headers: {} } as unknown as Request, res, next);
+
+    expect(res._status).toBe(401);
+  });
+
+  it("lets a valid s2s key through even while /api/auth/me is timing out", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      const err = new Error("timeout");
+      err.name = "TimeoutError";
+      throw err;
+    }));
+    const { requireAuth } = await import("./require-auth.js");
+    const res = mockRes();
+    const next: NextFunction = vi.fn();
+
+    await requireAuth(
+      { headers: { cookie: "xyne-session=abc", "x-s2s-key": "s2s-secret" } } as unknown as Request,
+      res,
+      next,
+    );
+
+    expect(next).toHaveBeenCalledOnce();
+    expect(res._status).toBeUndefined();
+    vi.unstubAllGlobals();
+  });
+});

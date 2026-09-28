@@ -79,6 +79,7 @@ import {
   toStepRecord,
   toWorkflowRecord,
 } from '../utils';
+import { createExecutionTx } from '@/bypassAcl/transactions/adaptersPersistence';
 
 // ─── Adapter ─────────────────────────────────────────────────────────────────
 
@@ -303,33 +304,7 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
     attributes: ResourceAttributes<'workflow'>;
   }): Promise<string> {
     const workspaceId = requireWorkspaceId(data.attributes, 'createExecution');
-    const row = await db.$transaction(async (tx) => {
-      const created = await tx.workflowExecution.create({
-        data: {
-          workspaceId,
-          workflowId: data.workflowId,
-          workflowType: WORKFLOWS_TYPE,
-          status: data.status,
-          ...(data.sourceExecutionId
-            ? { parentWorkflowExecutionId: data.sourceExecutionId, tag: 'rerun' }
-            : { tag: 'root' }),
-        },
-        select: { id: true },
-      });
-
-      await tx.workflowExecutionState.create({
-        data: {
-          workflowExecutionId: created.id,
-          workspaceId,
-          context: data.context,
-          currentStepIndex: 0,
-          ...(data.fireAt !== undefined ? { fireAt: data.fireAt } : {}),
-          ...(data.origin !== undefined ? { origin: JSON.stringify(data.origin) } : {}),
-        },
-      });
-
-      return created;
-    });
+    const row = await createExecutionTx(workspaceId, data);
 
     return row.id;
   }
@@ -780,3 +755,4 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
     return Promise.resolve();
   }
 }
+

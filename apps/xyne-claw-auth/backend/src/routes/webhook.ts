@@ -116,6 +116,7 @@ import { sendStoredExternalResultCallback, isInternalCallbackOrigin, isAllowedEx
 import { encryptSurfaceSecret } from "../lib/surface-resolver.js";
 import { deliverSlackResult, type SlackDeliveryTarget } from "../surfaces/slack/delivery.js";
 import { deliverChannelResult } from "../surfaces/messaging/delivery.js";
+import { claimOrQueue } from "../lib/conversation-gate.js";
 import { designShareUrl, upsertDesignShare } from "./design-shares.js";
 import {
   getActivePlanCard,
@@ -134,7 +135,6 @@ import { emitAgentWorkingSignal } from "../surfaces/spaces/client.js";
 import JSZip from "jszip";
 
 import {
-  sdlcAgentToolProfile,
   buildWriteApprovalFlow,
   buildTicketProposalFlow,
   buildTwinApprovalFlow,
@@ -161,7 +161,6 @@ import type { TwinDelivery, UiWidget, PrProvider, PrStatus } from "xyne-claw-sha
 import { isAgentInvocableBy } from "xyne-claw-shared";
 import { isSupportedInboundAttachment } from "xyne-claw-shared";
 import type { Todo } from "xyne-claw-shared";
-import { tools as xyneSpacesTools } from "../mcp/servers/xyne-spaces-tools.js";
 import { connectorTypesFromText, connectorTypesUserAskedFor, wantsConnectorRoster } from "../lib/connector-hints.js";
 import {
   SUPPORTED_PROVIDERS,
@@ -178,9 +177,6 @@ import { countTrailingBase64Padding, safePathSegment } from "../lib/url-path.js"
 import { assertSafeOutboundUrl } from "../mcpgateway/services/http-client.js";
 
 const clog = createLogger("webhook");
-const SDLC_AGENT_TOOL_PROFILE = sdlcAgentToolProfile(
-  xyneSpacesTools.map((tool) => tool.name),
-);
 
 /** A run that died because the model provider was over capacity (429 / quota /
  *  overloaded / 5xx after fallback), as opposed to a real agent error. */
@@ -1584,6 +1580,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     taskCommandText,
     immediateTaskCommand,
     autoGoalEnabled,
+    isTwin: runAsTwin,
     reply: async (markdownText, failureLabel) => {
       await postAgentMessage(
         { spacesAppUserId: commandAgent.spacesAppUserId, appToken: commandAgent.appToken },
@@ -1625,15 +1622,8 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
   // Claim the conversation slot before slow provider/history/attachment setup.
   // Ack-only commands must not reserve a run slot.
   if (eventType !== "USER_MENTIONED" && payload.conversationId && task) {
-    const slot = await tryAcquireSlot(payload.conversationId, runAgentSlug, undefined, targetUserId);
-    slotToken = slot;
-    if (!slot) {
-      const slotOwner = await getSlotOwner(payload.conversationId, runAgentSlug).catch(() => null);
-      const activeRunToInterrupt =
-        !explicitQueueOnly && slotOwner?.sessionId
-          ? { sessionId: slotOwner.sessionId, ownerUserId: slotOwner.userId }
-          : null;
-      const queuedMsg: QueuedMessage = {
+    const gate = await claimOrQueue({
+      message: {
         eventId: (payload as { messageId?: string }).messageId ?? traceId,
         conversationId: payload.conversationId,
         channelId: payload.channelId,
@@ -1644,59 +1634,24 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         orgId: agent.orgId,
         task,
         eventType,
-        queueReason: activeRunToInterrupt ? "interrupt_followup" : explicitQueueOnly ? "explicit_queue" : "busy",
-        interruptMode: activeRunToInterrupt ? "interrupt_with_reply" : "queue_only",
-        ts: Date.now(),
-      };
-      const enq = await enqueueMessage(queuedMsg);
-      let interruptRequested = false;
-      if (enq.enqueued && activeRunToInterrupt) {
-        try {
-          const interruptRes = await fetch(
-            `${CONFIG.internalUrl}/claw/api/v1/internal/run/${encodeURIComponent(activeRunToInterrupt.sessionId)}/interrupt-with-reply`,
-            {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
-                "x-user-id": targetUserId,
-              },
-            },
-          );
-          interruptRequested = interruptRes.ok;
-          if (!interruptRes.ok) {
-            const body = await interruptRes.text().catch(() => "");
-            log.warn(`[msg-queue] interrupt-with-reply rejected session=${activeRunToInterrupt.sessionId} owner=${activeRunToInterrupt.ownerUserId ?? "?"} by=${targetUserId} status=${interruptRes.status} body=${body.slice(0, 200)}`);
-          }
-        } catch (err) {
-          log.warn("Failed to request interrupt-with-reply", { error: errMsg(err) });
-        }
-      }
-      const notice = activeRunToInterrupt && interruptRequested
-        ? `⏸️ I’ll wrap up my current reply first, then continue with your new message.`
-        : enq.enqueued
-          ? explicitQueueOnly
-            ? `🕒 Queued after the current run (position ${enq.position}).`
-            : `🕒 I’m still working on your previous message — this one is queued (position ${enq.position}). I’ll get to it as soon as I’m done.`
-          : enq.deduped
-            ? `🕒 Already queued — I’ll get to it as soon as I’m done with the current one.`
-            : enq.full
-              ? `⚠️ I’m still working and this thread’s queue is full (${QUEUE_CAP}). Please resend once I’ve caught up.`
-              : `⚠️ I’m still working on your previous message and couldn’t queue this one. Please resend in a moment.`;
+      },
+      explicitQueueOnly,
+    });
+    if (gate.kind === "queued") {
       await postAgentMessage(
         { spacesAppUserId: agent.spacesAppUserId, appToken: agent.appToken },
         {
           channelId: payload.channelId,
           conversationId: payload.conversationId,
-          markdownText: notice,
+          markdownText: gate.notice,
           metadata: { contentFormat: "markdown" },
         }
       ).catch((err) => {
         log.warn("Failed to post queue notice", { error: errMsg(err) });
       });
-      log.info(`[msg-queue] conv ${payload.conversationId} busy — queued eventId=${queuedMsg.eventId} reason=${queuedMsg.queueReason} interruptRequested=${interruptRequested} (enqueued=${enq.enqueued} pos=${enq.position} deduped=${enq.deduped} full=${enq.full})`);
       return;
     }
+    slotToken = gate.slotToken;
   }
 
   try {
@@ -2620,12 +2575,13 @@ export async function drainNextQueued(conversationId: string, agentSlug: string,
     return;
   }
   try {
-    // Twin FIFO entries carry a fully-built replay blob (dispatchPayload +
-    // sessionContext) and are replayed VERBATIM (approval mode preserved, user
-    // message created fresh on drain). Conversation-mode entries carry a thin
-    // task and re-derive context — the legacy path.
+    // Twin and messaging-channel FIFO entries carry a fully-built replay blob
+    // (dispatchPayload + sessionContext) and are replayed VERBATIM (approval
+    // mode and channel delivery preserved, user message created fresh on
+    // drain). Conversation-mode entries carry a thin task and re-derive
+    // context — the legacy path.
     if (next.dispatchPayload && next.sessionContext) {
-      await redispatchTwinQueuedMessage(next);
+      await redispatchStoredQueuedMessage(next);
     } else {
       await redispatchQueuedMessage(next);
     }
@@ -2648,7 +2604,7 @@ export async function drainNextQueued(conversationId: string, agentSlug: string,
 // dispatched, so its user ChatMessage must be created NOW (this is what keeps the
 // chat sequential: one query + reply at a time, no branch). A fresh traceId is
 // minted per drained attempt.
-async function redispatchTwinQueuedMessage(msg: QueuedMessage): Promise<void> {
+async function redispatchStoredQueuedMessage(msg: QueuedMessage): Promise<void> {
   const traceId = createTraceId();
   const dispatch = { ...(msg.dispatchPayload as Record<string, unknown>), traceId };
   const res = await fetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run`, {
@@ -2665,6 +2621,14 @@ async function redispatchTwinQueuedMessage(msg: QueuedMessage): Promise<void> {
   }
   const sessionContext = { ...(msg.sessionContext as unknown as SessionContext), traceId };
   await setSession(body.sessionId, sessionContext);
+  if (sessionContext.channelDelivery) {
+    const target = sessionContext.channelDelivery;
+    await attachSlotSession(msg.conversationId, msg.agentSlug, body.sessionId).catch(() => {});
+    const { rememberActiveRun } = await import("../surfaces/messaging/commands.js");
+    await rememberActiveRun(target.connectedSurfaceId, target.chatId, { sessionId: body.sessionId, agentSlug: msg.agentSlug, startedAt: Date.now() });
+    clog.info(`[msg-queue] redispatched queued ${target.channel} message sessionId=${body.sessionId} conv=${msg.conversationId}`);
+    return;
+  }
   await registerRunRecovery({
     rootSessionId: body.sessionId,
     maxRetries: CONFIG.runRecoveryMaxRetries,
@@ -2978,27 +2942,13 @@ export async function handleAutomationWebhook(
     agentSlug === SDLC_AGENT_SLUG &&
     s2sKeyMatches(req.headers["x-s2s-key"]);
   const baseAgentConfig = (agent.config as Record<string, unknown> | null) ?? {};
-  const baseTools = (baseAgentConfig["tools"] as Record<string, unknown> | undefined) ?? {};
+  // SDLC tools are merged in /internal/run (start-run) for any run carrying hub context.
   const forwardedAgentConfig: Record<string, unknown> | undefined =
     agent.config || payload.allowWriteInReadOnlyJob || sdlcProfile
       ? {
           ...baseAgentConfig,
           ...(payload.allowWriteInReadOnlyJob || sdlcProfile ? { allowWriteInReadOnlyJob: true } : {}),
-          ...(sdlcProfile
-            ? {
-                tools: {
-                  ...baseTools,
-                  direct: SDLC_AGENT_TOOL_PROFILE.tools.direct,
-                  custom: SDLC_AGENT_TOOL_PROFILE.tools.custom,
-                  subagents: SDLC_AGENT_TOOL_PROFILE.tools.subagents,
-                },
-                toolPermissions: {
-                  ...((baseAgentConfig["toolPermissions"] as Record<string, unknown> | undefined) ?? {}),
-                  ...SDLC_AGENT_TOOL_PROFILE.toolPermissions,
-                },
-                sdlcContext: payload.sdlcContext,
-              }
-            : {}),
+          ...(sdlcProfile ? { sdlcContext: payload.sdlcContext } : {}),
         }
       : undefined;
   const resultToken = interpose
@@ -4012,7 +3962,14 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     let sessionLockRecovered = Boolean(
       recoveryFailure && !recoveryFailure.exhausted && recoveryFailure.terminalDrop !== true,
     );
-    if (!recoveryFailure && ctx?.responseMode === "conversation" && ctx.conversationId && ctx.agentSlug) {
+    if (!recoveryFailure && ctx?.channelDelivery) {
+      const { notifyChannelRunLocked } = await import("../surfaces/messaging/busy.js");
+      await notifyChannelRunLocked(ctx.channelDelivery).catch((err) => {
+        clog.warn(`[webhook/result] channel lock notice failed session=${sessionId}: ${errMsg(err)}`);
+      });
+      await deleteSession(sessionId);
+      sessionLockRecovered = true;
+    } else if (!recoveryFailure && ctx?.responseMode === "conversation" && ctx.conversationId && ctx.agentSlug) {
       const queuedMsg: QueuedMessage = {
         eventId: `lock:${sessionId || ctx.traceId || createTraceId()}`,
         conversationId: ctx.conversationId,

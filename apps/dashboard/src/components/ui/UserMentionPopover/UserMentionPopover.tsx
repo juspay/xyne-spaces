@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Headphones, ChatDefault } from '@xyne/icons';
+import { ChatDefault, PhoneDefault } from '@xyne/icons';
 import { HoverCard } from '../HoverCard/HoverCard';
 import Avatar from '../Avatar/Avatar';
 import { Button } from '../Button/Button';
@@ -255,7 +255,7 @@ const UserHoverWrapperInner: React.FC<UserHoverWrapperProps> = ({
               data-track-name='START_HUDDLE_FROM_MENTION'
               className='flex items-center gap-2'
             >
-              <Headphones className='size-4' />
+              <PhoneDefault className='size-4' />
               <span>Huddle</span>
             </Button>
           </div>

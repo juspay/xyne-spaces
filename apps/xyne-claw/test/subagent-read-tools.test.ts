@@ -45,66 +45,55 @@ const unwrapped: McpToolGroup = {
 
 const names = (items: ReturnType<typeof buildToolCatalog>): string[] => items.map((i) => i.entry.name).sort();
 
-describe("subagent read tools in the catalog", () => {
+describe("subagent tools in the catalog", () => {
+  const withSwitch = (groups: McpToolGroup[]) => buildToolCatalog({ groups, includeSubagentTools: true });
+
   it("adds nothing from subagents when the switch is off, as before", () => {
-    const items = buildToolCatalog({ groups: [spaces, github] });
-    expect(names(items)).toEqual([]);
+    expect(names(buildToolCatalog({ groups: [spaces, github] }))).toEqual([]);
   });
 
-  it("catalogues only the read tools of the agent's own subagent servers", () => {
-    const items = buildToolCatalog({ groups: [spaces, github], includeSubagentReadTools: true });
-    expect(names(items)).toEqual([
+  it("catalogues every tool of the agent's own subagent servers, writes included", () => {
+    expect(names(withSwitch([spaces, github]))).toEqual([
+      "GitHub__create_issue",
+      "GitHub__create_pull_request",
+      "GitHub__fork_repository",
       "GitHub__get_file_content",
+      "GitHub__push_files",
       "GitHub__search_code",
+      "Xyne_Spaces__spaces-delete-message",
       "Xyne_Spaces__spaces-messages",
       "Xyne_Spaces__spaces-search",
+      "Xyne_Spaces__spaces-send-message",
       "Xyne_Spaces__spaces-users",
     ]);
   });
 
-  it("never catalogues a subagent's write tools, declared or not", () => {
-    const items = buildToolCatalog({ groups: [spaces, github], includeSubagentReadTools: true });
-    const all = names(items);
-    for (const w of ["Xyne_Spaces__spaces-send-message", "Xyne_Spaces__spaces-delete-message", "GitHub__create_pull_request", "GitHub__push_files", "GitHub__create_issue", "GitHub__fork_repository"]) {
-      expect(all).not.toContain(w);
-    }
-  });
-
   it("labels each tool with its subagent so search-tools and the index group them", () => {
-    const items = buildToolCatalog({ groups: [spaces, github], includeSubagentReadTools: true });
-    const sources = new Set(items.map((i) => i.entry.source));
-    expect(sources).toEqual(new Set(["subagent:spaces", "subagent:github"]));
+    expect(new Set(withSwitch([spaces, github]).map((i) => i.entry.source))).toEqual(new Set(["subagent:spaces", "subagent:github"]));
   });
 
   it("leaves servers no subagent wraps alone", () => {
-    const items = buildToolCatalog({ groups: [spaces, unwrapped], includeSubagentReadTools: true });
-    expect(names(items)).not.toContain("Heisenberg_Pipeline__heisenberg_get_status");
+    expect(names(withSwitch([spaces, unwrapped]))).not.toContain("Heisenberg_Pipeline__heisenberg_get_status");
   });
 
   it("only sees servers the session was actually given", () => {
-    const items = buildToolCatalog({ groups: [github], includeSubagentReadTools: true });
-    expect(names(items).every((n) => n.startsWith("GitHub__"))).toBe(true);
-  });
-
-  it("defers to fast mode, which already catalogues subagent tools including writes", () => {
-    const fast = buildToolCatalog({ groups: [spaces], includeSubagentTools: true });
-    const both = buildToolCatalog({ groups: [spaces], includeSubagentTools: true, includeSubagentReadTools: true });
-    expect(names(both)).toEqual(names(fast));
+    expect(names(withSwitch([github])).every((n) => n.startsWith("GitHub__"))).toBe(true);
   });
 
   it("is registered and off by default", () => {
     expect(OPTIMIZATIONS.subagent_read_tools.defaultOn).toBe(false);
   });
 
-  it("tells the model in the index to call a subagent's tools itself first", () => {
-    const catalog = buildToolCatalog({ groups: [spaces, github], includeSubagentReadTools: true }).map((i) => i.entry);
+  it("tells the model in the index to call a subagent's tools, writes included, itself first", () => {
+    const catalog = withSwitch([spaces, github]).map((i) => i.entry);
     const out = renderToolCatalogForPrompt(catalog, { fullIndex: true, preferDirect: true });
-    expect(out).toContain("The github, spaces catalogs hold the same read tools your subagents of that name use.");
+    expect(out).toContain("The github, spaces catalogs hold the same tools your subagents of that name use, writes included.");
     expect(out).toContain("Call them yourself first");
+    expect(out).not.toContain("delegate only for a write");
   });
 
   it("adds no direct-first line when the switch is off or delegation is disabled", () => {
-    const catalog = buildToolCatalog({ groups: [spaces], includeSubagentReadTools: true }).map((i) => i.entry);
+    const catalog = withSwitch([spaces]).map((i) => i.entry);
     expect(renderToolCatalogForPrompt(catalog, { fullIndex: true })).not.toContain("Call them yourself first");
     expect(renderToolCatalogForPrompt(catalog, { fullIndex: true, preferDirect: true, subagentDelegationDisabled: true })).not.toContain("Call them yourself first");
   });
@@ -121,6 +110,8 @@ describe("subagent tool description", () => {
     const d = await description(true);
     expect(d).toContain("[Subagent — nested LLM run, expensive] Slow: this runs a whole nested model.");
     expect(d).toContain("call them yourself first");
+    expect(d).toContain("writes included");
+    expect(d).not.toContain("only for a write");
   });
 
   it("is unchanged when the switch is off", async () => {

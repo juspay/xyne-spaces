@@ -41,6 +41,25 @@ export interface RadarApplyResult {
   dismissed: number;
 }
 
+export interface RadarDedupCheck {
+  title: string;
+  sourceMessageId: string;
+  /** Best-matching open item; null when Jev gave no answer. */
+  itemId: string | null;
+  itemTitle: string | null;
+  probability: number | null;
+  verdict: 'duplicate' | 'distinct' | 'unscored';
+  /** Only on a flagged create the parser was sent back over: what it did. */
+  outcome?: 'reassigned' | 'dropped' | 'kept';
+}
+
+export interface RadarDedupTrail {
+  threshold: number;
+  /** Whether the parser was sent back — for a duplicate, a no-op reassign, or both. */
+  recalled: boolean;
+  checks: RadarDedupCheck[];
+}
+
 export interface RadarRunLog {
   id: string;
   conversationId: string;
@@ -54,6 +73,8 @@ export interface RadarRunLog {
   applied: { created: number; resolved: number; reassigned: number } | null;
   /** Model's one-sentence read of the window — why these ops, or why none. */
   assessment: string | null;
+  /** Jev's duplicate verdict on each create the parser proposed, when the check ran. */
+  dedupChecks: RadarDedupTrail | null;
   error: string | null;
   durationMs: number | null;
   createdAt: string;
@@ -103,7 +124,7 @@ export interface RadarPendingOthersPage {
   mutedTotalThreads: number;
   mutedItemCount: number;
   mutedPage: number;
-  /** Unmuted open items before any filter — the tab's badge. */
+  /** Unmuted open items left after the filters — the tab's badge. */
   openItemCount: number;
   facets: { holderIds: string[]; channelIds: string[] };
 }

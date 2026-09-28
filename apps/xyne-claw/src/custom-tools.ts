@@ -8,7 +8,7 @@
 
 import { Type } from "@sinclair/typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { getAllCustomTools, parseToolsConfig, PLATFORM_ONLY_CONFIG_KEYS, type ToolExecutionContext, type PendingQuestion, type PendingResponse } from "xyne-claw-shared";
+import { getAllCustomTools, parseToolsConfig, openPaletteModeFromTools, PLATFORM_ONLY_CONFIG_KEYS, type ToolExecutionContext, type PendingQuestion, type PendingResponse } from "xyne-claw-shared";
 import { SERVER, PATHS } from "./config.js";
 import { join } from "node:path";
 
@@ -182,24 +182,45 @@ export function loadCustomTools(
   // is gone; nothing writes that anymore.)
   const hasSandboxSelected = [...selectedCustom].some((s) => s.startsWith("sandbox-"));
 
+  // The open palette exists to "let an agent reach tools nobody granted it"
+  // (see open-palette.ts). That only works if un-granted tools survive long
+  // enough for the palette to judge them: routes/run.ts admits per tool by risk
+  // and routes whatever it admits into the CATALOG, never into the always-active
+  // set (`paletteAdmittedNames`).
+  //
+  // The selection gates below used to drop whole sources here, one layer above
+  // that decision, so the palette had nothing left to admit — an agent with
+  // `openPalette: "all"` saw exactly what `"off"` saw, and `load-tools
+  // sandbox-read-file` came back "Unknown" for a source the deployment has.
+  // When the palette is on, a failed selection gate therefore means
+  // "not granted" (palette decides), not "does not exist".
+  const paletteMode = openPaletteModeFromTools(toolsConfig ?? undefined);
+  const paletteOpen = paletteMode !== "off";
+
   // Filter tools by agent — google/microsoft/research-agent are allowed
   // for any agent whose config selects at least one of those tools (or the
   // built-in agent slugs for backward compat).
   const customTools = allCustomTools.filter((ct) => {
-    let allowed = true;
+    // Hard exclusions: these are correctness rules, not grants, so the palette
+    // never overrides them. Loading them in-process would duplicate tool names
+    // that claw-auth already executes.
     // Google + Microsoft migrated to claw-auth stdio MCP connectors — never
     // load them as in-process custom tools anymore.
-    if (ct.source === "custom:google" || ct.source === "custom:microsoft") allowed = false;
+    if (ct.source === "custom:google" || ct.source === "custom:microsoft") return false;
     // Auth-executed System Tools are surfaced via /mcp/tools with selectionKey
     // gating; loading them in-process would create duplicate tool names.
-    else if (ct.source === "custom:orchestrator" || ct.source === "custom:agent-introspect" || ct.source === "custom:webfetch") allowed = false;
-    else if (ct.source === "custom:research-agent") allowed = agentSlug === "research-agent" || agentSlug === "ask-ai" || hasResearchAgentSelected;
+    if (ct.source === "custom:orchestrator" || ct.source === "custom:agent-introspect" || ct.source === "custom:webfetch") return false;
+
+    // Selection gates: a miss means "this agent was not granted it", which the
+    // open palette is allowed to reconsider.
+    let selected = true;
+    if (ct.source === "custom:research-agent") selected = agentSlug === "research-agent" || agentSlug === "ask-ai" || hasResearchAgentSelected;
     // web-search / deep-research are unrestricted — any agent gets them.
     // Removed the prior agentSlug + config-flag gate per request.
-    else if (ct.source === "custom:generate-image") allowed = agentSlug === "ask-ai" || forcedCustom.has(ct.slug);
-    else if (ct.source === "custom:sandbox") allowed = hasSandboxSelected;
+    else if (ct.source === "custom:generate-image") selected = agentSlug === "ask-ai" || forcedCustom.has(ct.slug);
+    else if (ct.source === "custom:sandbox") selected = hasSandboxSelected;
 
-    return allowed;
+    return selected || paletteOpen;
   });
   const allAttachments: Attachment[] = [];
   const allPendingQuestions: PendingQuestion[] = [];
@@ -285,7 +306,16 @@ export function loadCustomTools(
       description: ct.description,
       source: ct.source,
       slug: ct.slug,
-      isWriteTool: ct.isWriteTool === true,
+      // Tri-state on purpose, matching mcp.ts: `false` is a CLAIM that the tool
+      // is read-only, and `classifyToolRisk` trusts it ("absence is not evidence
+      // of read" — tool-risk.ts). Flattening undefined to false told the open
+      // palette that every undeclared custom tool was a read tool, which would
+      // have let `openPalette: "read"` admit sandbox-write-file and
+      // sandbox-edit-file. Undeclared now falls through to name-pattern
+      // classification instead. Every other consumer tests `=== true`, so this
+      // changes nothing for them — including the write-approval branch below,
+      // which reads the registry value directly.
+      ...(ct.isWriteTool !== undefined ? { isWriteTool: ct.isWriteTool } : {}),
       parameters: Type.Unsafe(ct.inputSchema),
       async execute(_toolCallId: string, params: unknown) {
         // Pass the framework-assigned tool call ID into the context

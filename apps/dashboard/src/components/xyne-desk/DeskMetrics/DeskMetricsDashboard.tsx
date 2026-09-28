@@ -31,6 +31,7 @@ import {
 import * as PopoverPrimitive from '@radix-ui/react-popover';
 import { Popover } from '../../ui/Popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../ui/Select';
+import { Checkbox } from '../../ui/Checkbox/Checkbox';
 import {
   AICategorySubmenu,
   DynamicFieldSubmenu,
@@ -66,6 +67,7 @@ import {
   TicketStatusV2,
   WorkspaceRole,
   type DeskMetricsAgentRow,
+  type DeskMetricsDateBasis,
   type DeskMetricsPerDeskRow,
   type DeskMetricsSkippedDesk,
   type DeskMetricsTicketRow,
@@ -239,6 +241,15 @@ export const formatDuration = (seconds: number | null): string => {
 const ageInDays = (createdAtMs: number): number =>
   Math.max(0, Math.floor((Date.now() - createdAtMs) / DAY_MS));
 
+// Created At / Resolved At, likewise shared by the table and its CSV export.
+const formatTicketTimestamp = (epochMs: number): string =>
+  new Date(epochMs).toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+
 const HOUR_S = 3600;
 const DAY_S = 86400;
 // Recharts spaces ticks evenly in seconds, landing on values like 45000 ("1d 13h").
@@ -283,9 +294,13 @@ const tickIntervalFor = (pointCount: number): number => {
 };
 
 // The same desk-wide number as the Avg Resolution KPI, just over time — so on desks saved
-// before this chart existed it follows whatever that KPI is set to.
-const inheritedVisibilityKey = (key: string): string | undefined =>
-  key === 'chart:resolutionTrend' ? 'kpi:avgResolution' : undefined;
+// before this chart existed it follows whatever that KPI is set to. Resolved At follows RT
+// the same way, since Created At + RT gives it away.
+const inheritedVisibilityKey = (key: string): string | undefined => {
+  if (key === 'chart:resolutionTrend') return 'kpi:avgResolution';
+  if (key === 'column:resolvedAt') return 'column:rt';
+  return undefined;
+};
 
 interface SeriesChart {
   rows: Array<Record<string, number | string>>;
@@ -339,11 +354,17 @@ const buildResolutionTrend = (
   granularity: TrendGranularity,
 ): SeriesChart => {
   const byBucket = new Map<string, { total: number; count: number }>();
+  const inRange = new Set(trend.map(point => point.date));
   let resolved = 0;
   for (const ticket of tickets) {
     if (ticket.rtSeconds === null || ticket.rtSeconds < 0) continue;
+    // Tickets created before the range ("previously created" on) plot on their resolution date.
+    const createdInRange = inRange.has(istBucketKey(ticket.createdAt, granularity));
+    const plottedAt = createdInRange ? ticket.createdAt : ticket.resolvedAt;
+    if (plottedAt === null) continue;
+    const bucket = istBucketKey(plottedAt, granularity);
+    if (!inRange.has(bucket)) continue;
     resolved += 1;
-    const bucket = istBucketKey(ticket.createdAt, granularity);
     const cell = byBucket.get(bucket) ?? { total: 0, count: 0 };
     cell.total += ticket.rtSeconds;
     cell.count += 1;
@@ -429,6 +450,7 @@ const downloadCsv = (tickets: DeskMetricsTicketRow[]): string => {
     'Tags',
     ...customKeys,
     'Created At',
+    'Resolved At',
     'Age',
   ];
   const rows = tickets.map(t => [
@@ -446,7 +468,8 @@ const downloadCsv = (tickets: DeskMetricsTicketRow[]): string => {
       .join('; ')
       .replace(/"/g, '""')}"`,
     ...customKeys.map(k => `"${(t.customFields?.[k] ?? '').replace(/"/g, '""')}"`),
-    `"${new Date(t.createdAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}"`,
+    `"${formatTicketTimestamp(t.createdAt)}"`,
+    t.resolvedAt !== null ? `"${formatTicketTimestamp(t.resolvedAt)}"` : '—',
     `${ageInDays(t.createdAt)}d`,
   ]);
   const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
@@ -599,12 +622,14 @@ const agentSortValue = (row: DeskMetricsAgentRow, key: AgentSortKey): string | n
 
 const MetricsAgentTable = ({
   agents,
+  dateBasis,
   onDownload,
   onAgentClick,
   canDownload,
   trackMetadata,
 }: {
   agents: DeskMetricsAgentRow[];
+  dateBasis: DeskMetricsDateBasis;
   onDownload: () => void;
   onAgentClick: (assigneeId: string | null) => void;
   canDownload: boolean;
@@ -616,18 +641,28 @@ const MetricsAgentTable = ({
   const [page, setPage] = useState(0);
 
   const stageNames = useMemo(() => getAgentStageNames(agents), [agents]);
+  const includesActive = dateBasis === 'active';
   const agentColumns = useMemo(
-    () => [
-      ...AGENT_COLUMNS.slice(0, 2),
-      ...stageNames.map(stageName => ({
-        key: `stage:${stageName}` as AgentSortKey,
-        label: stageName,
-        numeric: true,
-        title: `Tickets currently in the ${stageName} stage`,
-      })),
-      ...AGENT_COLUMNS.slice(2),
-    ],
-    [stageNames],
+    () =>
+      [
+        ...AGENT_COLUMNS.slice(0, 2),
+        ...stageNames.map(stageName => ({
+          key: `stage:${stageName}` as AgentSortKey,
+          label: stageName,
+          numeric: true,
+          title: `Tickets currently in the ${stageName} stage`,
+        })),
+        ...AGENT_COLUMNS.slice(2),
+      ].map(col =>
+        includesActive && col.key === 'assigned'
+          ? {
+              ...col,
+              title:
+                'Tickets created or active in this range that are currently assigned to this agent',
+            }
+          : col,
+      ),
+    [stageNames, includesActive],
   );
 
   const sorted = useMemo(() => {
@@ -937,7 +972,8 @@ const MetricsTicketTable = ({
             hide('rt') && '[&_td:nth-child(7)]:hidden [&_th:nth-child(7)]:hidden',
             hide('csat') && '[&_td:nth-child(8)]:hidden [&_th:nth-child(8)]:hidden',
             hide('tags') && '[&_td:nth-child(9)]:hidden [&_th:nth-child(9)]:hidden',
-            hide('createdAt') && '[&_td:nth-last-child(2)]:hidden [&_th:nth-last-child(2)]:hidden',
+            hide('createdAt') && '[&_td:nth-last-child(3)]:hidden [&_th:nth-last-child(3)]:hidden',
+            hide('resolvedAt') && '[&_td:nth-last-child(2)]:hidden [&_th:nth-last-child(2)]:hidden',
             hide('age') && '[&_td:nth-last-child(1)]:hidden [&_th:nth-last-child(1)]:hidden',
           )}
         >
@@ -981,6 +1017,9 @@ const MetricsTicketTable = ({
               ))}
               <th className='px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground'>
                 Created At
+              </th>
+              <th className='px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground'>
+                Resolved At
               </th>
               <th className='px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground'>
                 Age
@@ -1103,12 +1142,10 @@ const MetricsTicketTable = ({
                   </td>
                 ))}
                 <td className='whitespace-nowrap px-4 py-2 font-mono text-xs text-muted-foreground'>
-                  {new Date(row.createdAt).toLocaleString(undefined, {
-                    month: 'short',
-                    day: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  })}
+                  {formatTicketTimestamp(row.createdAt)}
+                </td>
+                <td className='whitespace-nowrap px-4 py-2 font-mono text-xs text-muted-foreground'>
+                  {row.resolvedAt !== null ? formatTicketTimestamp(row.resolvedAt) : '—'}
                 </td>
                 <td className='whitespace-nowrap px-4 py-2 font-mono text-xs text-muted-foreground'>
                   {ageInDays(row.createdAt)}d
@@ -1344,7 +1381,9 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
     selectedTagValues,
     selectedAiCategories,
     selectedCustomFieldValues,
+    dateBasis: storedDateBasis,
     setDateRange: persistDateRange,
+    setDateBasis,
     setSelectedAssigneeIds,
     setSelectedStageNames,
     setSelectedPriorities,
@@ -1360,6 +1399,8 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
     activeTab,
     setActiveTab,
   } = usePersistedDeskMetricsFilters(user?.id, channelId);
+  // Guests stay on created: the owner's guest visibility settings were chosen for that view.
+  const dateBasis: DeskMetricsDateBasis = isGuest ? 'created' : storedDateBasis;
 
   const [deskPickerOpen, setDeskPickerOpen] = useState(false);
   const [deskSearch, setDeskSearch] = useState('');
@@ -1520,6 +1561,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
     selectedUserGroupIds,
     selectedTagValues,
     isMultiDesk ? [] : selectedAiCategories,
+    dateBasis,
   );
 
   // Guests see what the desk owner didn't turn off (Desk Settings → Metrics); others see everything.
@@ -1639,6 +1681,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
       deskCount: selectedDeskIds.length,
       rangeDays,
       rangePreset: matchPreset(dateRange) ?? 'custom',
+      dateBasis,
       activeFilterKeys,
       chartView,
       isGuest,
@@ -1652,6 +1695,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
     channelId,
     rangeDays,
     dateRange,
+    dateBasis,
     activeFilterKeys,
     chartView,
     isGuest,
@@ -1667,9 +1711,10 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
         channelId,
         deskCount: selectedDeskIds.length,
         rangeDays,
+        dateBasis,
         chart: chartView,
       }),
-    [channelId, selectedDeskIds.length, rangeDays, chartView],
+    [channelId, selectedDeskIds.length, rangeDays, dateBasis, chartView],
   );
   const chartViewLabel = (view: ChartView): string =>
     (CHART_VIEW_LABELS as Record<string, string>)[view] ?? view.slice(view.indexOf(':') + 1);
@@ -2714,6 +2759,20 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                 >
                   <RefreshCw size={16} className={cn(isFetching && 'animate-spin')} />
                 </button>
+
+                {!isGuest && (
+                  <div title='Also include tickets created before this range whose stage or status changed in it (e.g. started, paused, resolved, closed)'>
+                    <Checkbox
+                      checked={dateBasis === 'active'}
+                      onChange={checked => setDateBasis(checked ? 'active' : 'created')}
+                      size='sm'
+                      label='Include previously created tickets'
+                      labelClassName='text-sm text-foreground'
+                      data-track-category='DeskMetrics'
+                      data-track-name='ToggleIncludeActiveTickets'
+                    />
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -2783,7 +2842,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                     <tr className='border-b border-desk-border bg-muted/30 text-left dark:border-border'>
                       <th className='px-4 py-2.5 font-medium text-muted-foreground'>Desk</th>
                       <th className='px-4 py-2.5 text-right font-medium text-muted-foreground'>
-                        Opened
+                        {dateBasis === 'active' ? 'Tickets' : 'Opened'}
                       </th>
                       <th className='px-4 py-2.5 text-right font-medium text-muted-foreground'>
                         Avg first response
@@ -2869,8 +2928,9 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                       No agent activity in this time range
                     </p>
                     <p className='max-w-[420px] text-xs text-muted-foreground'>
-                      Agent performance is derived from tickets created in this range and replies
-                      sent within it.
+                      Agent performance is derived from tickets{' '}
+                      {dateBasis === 'active' ? 'created or active' : 'created'} in this range and
+                      replies sent within it.
                     </p>
                   </div>
                 ) : (
@@ -2948,6 +3008,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
 
                     <MetricsAgentTable
                       agents={agents}
+                      dateBasis={dateBasis}
                       onDownload={handleDownloadAgents}
                       onAgentClick={handleAgentClick}
                       canDownload={canSee('csvDownload')}

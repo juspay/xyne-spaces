@@ -13,3 +13,6 @@ export type MandatorySummarySectionId =
 
 /** Transcript characters the template-selection prompt keeps; anything beyond is dropped. */
 export const SUMMARY_TEMPLATE_SELECTION_MAX_TRANSCRIPT_CHARS = 60_000;
+
+/** Characters of any single summary input (transcript, notes, prompts) the summary prompt keeps. */
+export const SUMMARY_MAX_INPUT_CHARS = 100_000;

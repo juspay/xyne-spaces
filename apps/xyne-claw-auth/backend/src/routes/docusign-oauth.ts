@@ -24,7 +24,7 @@ import { CONFIG } from "../config.js";
 import { syncToolsForServer } from "../tool-sync.js";
 import { evictSession } from "../mcp/runner.js";
 import { pinUserIdParam } from "../middleware/pin-user-id-param.js";
-import { type OAuthTokenProvider, TokenRefreshError } from "../lib/oauth-token-endpoint.js";
+import { type OAuthAuthorizeOptions, type OAuthTokenProvider, TokenRefreshError } from "../lib/oauth-token-endpoint.js";
 import {
   DOCUSIGN_AUTH_URL,
   DOCUSIGN_TOKEN_URL,
@@ -107,6 +107,7 @@ router.use("/:userId", pinUserIdParam);
 export const docusignOAuthProvider: OAuthTokenProvider = {
   serverType: "docusign",
   label: "DocuSign",
+  authorize: authorizeDocuSign,
   responseData: (creds) => ({
     accessToken: creds.accessToken,
     accountId: creds.accountId,
@@ -160,8 +161,12 @@ export const docusignOAuthProvider: OAuthTokenProvider = {
 router.post("/:userId/oauth/docusign/authorize", oauthLimiter, asyncHandler(async (req: Request<{ userId: string }>, res: Response, next?: NextFunction) => {
   const { userId } = req.params;
   const { redirectUri, returnTo } = req.body as { redirectUri?: string; returnTo?: string };
+  ok(res, { authUrl: await authorizeDocuSign(userId, { redirectUri, returnTo }) });
+}));
 
-  const callbackUri = redirectUri ?? defaultCallbackUri();
+/** The consent URL the route above returns; also `docusignOAuthProvider.authorize`. */
+async function authorizeDocuSign(userId: string, opts: OAuthAuthorizeOptions = {}): Promise<string> {
+  const callbackUri = opts.redirectUri ?? defaultCallbackUri();
 
   const { clientId } = getDocuSignClientCredentials();
 
@@ -170,10 +175,9 @@ router.post("/:userId/oauth/docusign/authorize", oauthLimiter, asyncHandler(asyn
   authUrl.searchParams.set("redirect_uri", callbackUri);
   authUrl.searchParams.set("response_type", "code");
   authUrl.searchParams.set("scope", DOCUSIGN_SCOPES);
-  authUrl.searchParams.set("state", signOAuthState(userId, { redirectUri: callbackUri, returnTo: resolveOAuthReturn(returnTo) }));
-
-  ok(res, { authUrl: authUrl.toString() });
-}));
+  authUrl.searchParams.set("state", signOAuthState(userId, { redirectUri: callbackUri, returnTo: resolveOAuthReturn(opts.returnTo) }));
+  return authUrl.toString();
+}
 
 // ── Programmatic callback (POST) ───────────────────────────────────────────
 

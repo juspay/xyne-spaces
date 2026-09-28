@@ -1,5 +1,15 @@
 import React, { useMemo, useState } from 'react';
-import { ChevronDown, ChevronRight, FileText, Folder, Plus, Search } from 'lucide-react';
+import {
+  ChevronDown,
+  ChevronRight,
+  FileText,
+  Folder,
+  FolderOpen,
+  Plus,
+  Search,
+  Trash2,
+} from 'lucide-react';
+import { cn } from '../../../utils/classNames';
 import type { Canvas, CanvasFolder } from '../Canvas.types';
 import Input from '../../ui/Input';
 
@@ -10,6 +20,11 @@ import { getDisplayedCanvases } from '../canvasListFilters';
 import { filterStarredCanvases, withStarredCanvasState } from '../canvasFilters';
 import { useCanvasesWithRestLabels } from '../useCanvasLabels';
 import { DelayedSpinner } from '../../ui/DelayedSpinner';
+import {
+  ChannelCanvasDropTarget,
+  ChannelCanvasMoveDndProvider,
+  DraggableChannelCanvas,
+} from './ChannelCanvasMoveDnd';
 
 type FilterTab = 'all' | 'created_by_me' | 'shared';
 
@@ -36,9 +51,13 @@ interface ChannelCanvasListProps {
   onDelete?: (id: string) => void;
   onArchiveToggle?: (canvas: Canvas) => void;
   onCreateCanvasInFolder?: (folder: CanvasFolder) => void;
+  onDeleteFolder?: (folder: CanvasFolder, canvasCount: number) => void;
+  canManageAllFolders?: boolean;
   isCreatingCanvas?: boolean;
   showStarredOnly?: boolean;
   onToggleStar?: (canvas: Canvas) => void;
+  onMoveCanvas?: (canvas: Canvas, folderId: string | null) => Promise<void>;
+  moveDisabled?: boolean;
 }
 
 function sortByName<T>(items: T[], getName: (item: T) => string): T[] {
@@ -56,10 +75,14 @@ export const ChannelCanvasList: React.FC<ChannelCanvasListProps> = ({
   onDelete,
   onArchiveToggle,
   onCreateCanvasInFolder,
+  onDeleteFolder,
+  canManageAllFolders = false,
   isCreatingCanvas = false,
   showStarredOnly = false,
   onToggleStar,
   loading = false,
+  onMoveCanvas,
+  moveDisabled = false,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set());
@@ -129,200 +152,223 @@ export const ChannelCanvasList: React.FC<ChannelCanvasListProps> = ({
     });
   };
 
+  const isDragDisabled = (canvas: Canvas): boolean =>
+    moveDisabled || !onMoveCanvas || !!searchQuery.trim() || !!canvas.isArchived;
+
+  const renderCanvasRow = (canvas: Canvas, indentClassName: string): React.ReactElement => (
+    <DraggableChannelCanvas key={canvas.id} canvas={canvas} disabled={isDragDisabled(canvas)}>
+      {dragHandle => (
+        <CanvasRow
+          canvas={canvas}
+          indentClassName={indentClassName}
+          onSelect={onSelect}
+          selectedCanvasId={selectedCanvasId}
+          currentUserId={currentUserId}
+          trackNames={channelCanvasRowTrackNames}
+          onToggleStar={onToggleStar}
+          onArchiveToggle={onArchiveToggle}
+          dragHandle={dragHandle}
+          onDelete={
+            onDelete
+              ? (id): void => {
+                  const targetCanvas = canvases.find(item => item.id === id) ?? null;
+                  if (targetCanvas) setDeletingCanvas(targetCanvas);
+                }
+              : undefined
+          }
+        />
+      )}
+    </DraggableChannelCanvas>
+  );
+
   return (
     <>
-      <div
-        className='flex flex-col h-full bg-background'
-        data-testid='canvas-list'
-        data-component='channel-canvas-list'
-      >
-        <div className='px-4 md:px-6 py-4 border-b border-border'>
-          <div className='flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-0'>
-            <div className='flex items-center gap-2'>
-              <button
-                onClick={() => onFilterChange('all')}
-                className={`px-3 md:px-4 py-1.5 md:py-2 text-sm font-medium rounded-full transition-all ${
-                  activeFilter === 'all'
-                    ? 'bg-muted text-foreground'
-                    : 'text-muted-foreground hover:bg-accent'
-                }`}
-                data-testid='canvas-filter-all'
-                data-track-category='CANVAS'
-                data-track-name='Filter_Channel_Canvases_All'
-              >
-                All
-              </button>
-              <button
-                onClick={() => onFilterChange('created_by_me')}
-                className={`px-3 md:px-4 py-1.5 md:py-2 text-sm font-medium rounded-full transition-all ${
-                  activeFilter === 'created_by_me'
-                    ? 'bg-muted text-foreground'
-                    : 'text-muted-foreground hover:bg-accent'
-                }`}
-                data-testid='canvas-filter-created-by-me'
-                data-track-category='CANVAS'
-                data-track-name='Filter_Channel_Canvases_Created_By_Me'
-              >
-                Created by me
-              </button>
-              <button
-                onClick={() => onFilterChange('shared')}
-                className={`px-3 md:px-4 py-1.5 md:py-2 text-sm font-medium rounded-full transition-all ${
-                  activeFilter === 'shared'
-                    ? 'bg-muted text-foreground'
-                    : 'text-muted-foreground hover:bg-accent'
-                }`}
-                data-testid='canvas-filter-shared'
-                data-track-category='CANVAS'
-                data-track-name='Filter_Channel_Canvases_Shared'
-              >
-                Shared
-              </button>
-            </div>
+      <ChannelCanvasMoveDndProvider onMoveCanvas={onMoveCanvas}>
+        <div
+          className='flex flex-col h-full bg-background'
+          data-testid='canvas-list'
+          data-component='channel-canvas-list'
+        >
+          <div className='px-4 md:px-6 py-4 border-b border-border'>
+            <div className='flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-0'>
+              <div className='flex items-center gap-2'>
+                <button
+                  onClick={() => onFilterChange('all')}
+                  className={`px-3 md:px-4 py-1.5 md:py-2 text-sm font-medium rounded-full transition-all ${
+                    activeFilter === 'all'
+                      ? 'bg-muted text-foreground'
+                      : 'text-muted-foreground hover:bg-accent'
+                  }`}
+                  data-testid='canvas-filter-all'
+                  data-track-category='CANVAS'
+                  data-track-name='Filter_Channel_Canvases_All'
+                >
+                  All
+                </button>
+                <button
+                  onClick={() => onFilterChange('created_by_me')}
+                  className={`px-3 md:px-4 py-1.5 md:py-2 text-sm font-medium rounded-full transition-all ${
+                    activeFilter === 'created_by_me'
+                      ? 'bg-muted text-foreground'
+                      : 'text-muted-foreground hover:bg-accent'
+                  }`}
+                  data-testid='canvas-filter-created-by-me'
+                  data-track-category='CANVAS'
+                  data-track-name='Filter_Channel_Canvases_Created_By_Me'
+                >
+                  Created by me
+                </button>
+                <button
+                  onClick={() => onFilterChange('shared')}
+                  className={`px-3 md:px-4 py-1.5 md:py-2 text-sm font-medium rounded-full transition-all ${
+                    activeFilter === 'shared'
+                      ? 'bg-muted text-foreground'
+                      : 'text-muted-foreground hover:bg-accent'
+                  }`}
+                  data-testid='canvas-filter-shared'
+                  data-track-category='CANVAS'
+                  data-track-name='Filter_Channel_Canvases_Shared'
+                >
+                  Shared
+                </button>
+              </div>
 
-            <div className='relative w-full sm:w-auto'>
-              <Search className='absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground' />
-              <Input
-                type='text'
-                value={searchQuery}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                  setSearchQuery(e.target.value)
-                }
-                placeholder='Search canvases'
-                className='pl-9 w-full sm:w-48 md:w-64'
-              />
+              <div className='relative w-full sm:w-auto'>
+                <Search className='absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground' />
+                <Input
+                  type='text'
+                  value={searchQuery}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                    setSearchQuery(e.target.value)
+                  }
+                  placeholder='Search canvases'
+                  className='pl-9 w-full sm:w-48 md:w-64'
+                />
+              </div>
             </div>
           </div>
-        </div>
 
-        <div className='flex-1 overflow-auto'>
-          {loading ? (
-            <DelayedSpinner className='flex h-full items-center justify-center' />
-          ) : isEmpty ? (
-            <div className='flex flex-col items-center justify-center h-full text-center py-16'>
-              <FileText className='w-16 h-16 text-muted-foreground mb-4' />
-              <h3 className='text-lg font-medium text-foreground mb-2'>
-                {searchQuery ? 'No canvases found' : 'No canvases yet'}
-              </h3>
-              <p className='text-muted-foreground text-sm'>
-                {searchQuery ? 'Try a different search' : 'Create your first canvas to get started'}
-              </p>
-            </div>
-          ) : searchQuery.trim() ? (
-            <div className='p-2 space-y-0.5'>
-              {displayedCanvases.map(canvas => (
-                <CanvasRow
-                  key={canvas.id}
-                  canvas={canvas}
-                  indentClassName='pl-2'
-                  onSelect={onSelect}
-                  selectedCanvasId={selectedCanvasId}
-                  currentUserId={currentUserId}
-                  trackNames={channelCanvasRowTrackNames}
-                  onToggleStar={onToggleStar}
-                  onArchiveToggle={onArchiveToggle}
-                  onDelete={
-                    onDelete
-                      ? (id): void => {
-                          const targetCanvas = canvases.find(item => item.id === id) ?? null;
-                          if (targetCanvas) setDeletingCanvas(targetCanvas);
-                        }
-                      : undefined
-                  }
-                />
-              ))}
-            </div>
-          ) : (
-            <div className='p-2 space-y-1'>
-              {folderGroups.map(folderGroup => {
-                const isCollapsed = collapsedFolders.has(folderGroup.folder.id);
-                return (
-                  <section key={folderGroup.folder.id}>
-                    <div className='flex items-center group pl-2 pr-2 py-1.5 hover:bg-accent rounded-md'>
-                      <button
-                        className='flex min-w-0 flex-1 items-center gap-2 text-left'
-                        onClick={() => toggleFolder(folderGroup.folder.id)}
-                        data-track-category='CANVAS'
-                        data-track-name='Toggle_Channel_Folder'
+          <div className='flex-1 overflow-auto'>
+            {loading ? (
+              <DelayedSpinner className='flex h-full items-center justify-center' />
+            ) : isEmpty ? (
+              <div className='flex flex-col items-center justify-center h-full text-center py-16'>
+                <FileText className='w-16 h-16 text-muted-foreground mb-4' />
+                <h3 className='text-lg font-medium text-foreground mb-2'>
+                  {searchQuery ? 'No canvases found' : 'No canvases yet'}
+                </h3>
+                <p className='text-muted-foreground text-sm'>
+                  {searchQuery
+                    ? 'Try a different search'
+                    : 'Create your first canvas to get started'}
+                </p>
+              </div>
+            ) : searchQuery.trim() ? (
+              <div className='p-2 space-y-0.5'>
+                {displayedCanvases.map(canvas => renderCanvasRow(canvas, 'pl-2'))}
+              </div>
+            ) : (
+              <div className='p-2 space-y-1'>
+                {folderGroups.map(folderGroup => {
+                  const isCollapsed = collapsedFolders.has(folderGroup.folder.id);
+                  const folderCanvasCount = canvases.filter(
+                    canvas => canvas.folderId === folderGroup.folder.id,
+                  ).length;
+                  const canDeleteFolder =
+                    !!onDeleteFolder &&
+                    folderCanvasCount === 0 &&
+                    (canManageAllFolders || folderGroup.folder.createdBy === currentUserId);
+                  return (
+                    <section key={folderGroup.folder.id}>
+                      <ChannelCanvasDropTarget
+                        id={`channel-folder:${folderGroup.folder.id}`}
+                        folderId={folderGroup.folder.id}
+                        disabled={moveDisabled}
                       >
-                        {isCollapsed ? (
-                          <ChevronRight className='w-3.5 h-3.5 text-muted-foreground shrink-0' />
-                        ) : (
-                          <ChevronDown className='w-3.5 h-3.5 text-muted-foreground shrink-0' />
+                        {isOver => (
+                          <div
+                            className={cn(
+                              'flex items-center group pl-2 pr-2 py-1.5 hover:bg-accent rounded-md border border-transparent',
+                              isOver && 'bg-accent border-primary',
+                            )}
+                          >
+                            <button
+                              className='flex min-w-0 flex-1 items-center gap-2 text-left'
+                              onClick={() => toggleFolder(folderGroup.folder.id)}
+                              data-track-category='CANVAS'
+                              data-track-name='Toggle_Channel_Folder'
+                            >
+                              {isCollapsed ? (
+                                <ChevronRight className='w-3.5 h-3.5 text-muted-foreground shrink-0' />
+                              ) : (
+                                <ChevronDown className='w-3.5 h-3.5 text-muted-foreground shrink-0' />
+                              )}
+                              <Folder className='w-3.5 h-3.5 text-amber-500 shrink-0' />
+                              <span className='text-sm truncate'>{folderGroup.folder.name}</span>
+                              <span className='ml-auto text-xs text-muted-foreground'>
+                                {folderGroup.canvases.length}
+                              </span>
+                            </button>
+                            {onCreateCanvasInFolder && (
+                              <button
+                                className='p-1 opacity-70 group-hover:opacity-100 hover:bg-muted rounded transition-all disabled:opacity-40'
+                                onClick={() => onCreateCanvasInFolder(folderGroup.folder)}
+                                disabled={isCreatingCanvas}
+                                title='Create canvas in folder'
+                                data-testid={`channel-folder-create-canvas-${folderGroup.folder.id}`}
+                                data-ph-capture-attribute-track-id='create_canvas_in_channel_folder'
+                                data-track-category='CANVAS'
+                                data-track-name='Create_Canvas_In_Channel_Folder'
+                              >
+                                <Plus className='w-4 h-4 text-muted-foreground' />
+                              </button>
+                            )}
+                            {canDeleteFolder && (
+                              <button
+                                type='button'
+                                className='p-1 opacity-70 group-hover:opacity-100 hover:bg-muted rounded transition-all text-destructive disabled:opacity-40'
+                                onClick={event => {
+                                  event.stopPropagation();
+                                  onDeleteFolder(folderGroup.folder, folderCanvasCount);
+                                }}
+                                disabled={moveDisabled}
+                                title='Delete folder'
+                                aria-label={`Delete ${folderGroup.folder.name}`}
+                                data-testid={`channel-folder-delete-${folderGroup.folder.id}`}
+                                data-track-category='CANVAS'
+                                data-track-name='DELETE_CHANNEL_CANVAS_FOLDER'
+                              >
+                                <Trash2 className='size-4' />
+                              </button>
+                            )}
+                          </div>
                         )}
-                        <Folder className='w-3.5 h-3.5 text-amber-500 shrink-0' />
-                        <span className='text-sm truncate'>{folderGroup.folder.name}</span>
-                        <span className='ml-auto text-xs text-muted-foreground'>
-                          {folderGroup.canvases.length}
-                        </span>
-                      </button>
-                      {onCreateCanvasInFolder && (
-                        <button
-                          className='p-1 opacity-70 group-hover:opacity-100 hover:bg-muted rounded transition-all disabled:opacity-40'
-                          onClick={() => onCreateCanvasInFolder(folderGroup.folder)}
-                          disabled={isCreatingCanvas}
-                          title='Create canvas in folder'
-                          data-testid={`channel-folder-create-canvas-${folderGroup.folder.id}`}
-                          data-ph-capture-attribute-track-id='create_canvas_in_channel_folder'
-                          data-track-category='CANVAS'
-                          data-track-name='Create_Canvas_In_Channel_Folder'
-                        >
-                          <Plus className='w-4 h-4 text-muted-foreground' />
-                        </button>
-                      )}
-                    </div>
-                    {!isCollapsed &&
-                      folderGroup.canvases.map(canvas => (
-                        <CanvasRow
-                          key={canvas.id}
-                          canvas={canvas}
-                          indentClassName='pl-6'
-                          onSelect={onSelect}
-                          selectedCanvasId={selectedCanvasId}
-                          currentUserId={currentUserId}
-                          trackNames={channelCanvasRowTrackNames}
-                          onToggleStar={onToggleStar}
-                          onArchiveToggle={onArchiveToggle}
-                          onDelete={
-                            onDelete
-                              ? (id): void => {
-                                  const targetCanvas =
-                                    canvases.find(item => item.id === id) ?? null;
-                                  if (targetCanvas) setDeletingCanvas(targetCanvas);
-                                }
-                              : undefined
-                          }
-                        />
-                      ))}
-                  </section>
-                );
-              })}
+                      </ChannelCanvasDropTarget>
+                      {!isCollapsed &&
+                        folderGroup.canvases.map(canvas => renderCanvasRow(canvas, 'pl-6'))}
+                    </section>
+                  );
+                })}
 
-              {rootCanvases.map(canvas => (
-                <CanvasRow
-                  key={canvas.id}
-                  canvas={canvas}
-                  indentClassName='pl-2'
-                  onSelect={onSelect}
-                  selectedCanvasId={selectedCanvasId}
-                  currentUserId={currentUserId}
-                  trackNames={channelCanvasRowTrackNames}
-                  onToggleStar={onToggleStar}
-                  onArchiveToggle={onArchiveToggle}
-                  onDelete={
-                    onDelete
-                      ? (id): void => {
-                          const targetCanvas = canvases.find(item => item.id === id) ?? null;
-                          if (targetCanvas) setDeletingCanvas(targetCanvas);
-                        }
-                      : undefined
-                  }
-                />
-              ))}
-            </div>
-          )}
+                <ChannelCanvasDropTarget id='channel-root' folderId={null} disabled={moveDisabled}>
+                  {isOver => (
+                    <div
+                      className={cn(
+                        'flex h-9 items-center gap-2 rounded-md border border-transparent px-3 text-sm text-muted-foreground',
+                        isOver && 'border-primary bg-accent text-foreground',
+                      )}
+                    >
+                      <FolderOpen className='size-4 shrink-0' />
+                      <span>Channel root</span>
+                    </div>
+                  )}
+                </ChannelCanvasDropTarget>
+                {rootCanvases.map(canvas => renderCanvasRow(canvas, 'pl-2'))}
+              </div>
+            )}
+          </div>
         </div>
-      </div>
+      </ChannelCanvasMoveDndProvider>
 
       <Dialog
         open={!!deletingCanvas}

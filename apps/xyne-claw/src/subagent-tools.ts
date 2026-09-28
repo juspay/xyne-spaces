@@ -26,7 +26,6 @@ import { ensureSessionDebugDir, sessionDir } from "./session-store.js";
 import { SUBAGENT_DEFINITIONS, findSubagentDefinitionForServer, isPresentationToolSource, getSandboxSession, probeSession, REPO_CONFIGS, buildSandboxStoreKey, type SubagentDefinition, type SetupStep } from "xyne-claw-shared";
 import { acquireFollowUpLock, isValidFollowUpHandle } from "./subagent-followup.js";
 import { optEnabled } from "./optimizations.js";
-import { looksReadOnly } from "./read-only-tools.js";
 import type { McpToolGroup } from "./mcp.js";
 import { resolveModel, applyCopilotProxyIfNeeded, capCustomToolOutput, pushDebugProgress, pushInvocation, type CopilotConfig, type ClaudeConfig, type CodexConfig, type DebugEventRecord, type ProgressDest, type ToolInvocation } from "./agent.js";
 import {
@@ -55,6 +54,8 @@ import type { ClawStreamMeta } from "xyne-claw-shared";
 import { takeCitations, recordCitations } from "./citations.js";
 import { writeSessionSkills, deleteSessionSkills } from "./session-skills.js";
 import { installLlmCallMetrics } from "./llm-call-metrics.js";
+import { installStreamModelFallback } from "./stream-model-fallback.js";
+import { pickSubagentLitellmModel } from "./subagent-model-split.js";
 import { installToolBudget, type ToolBudgetTracker } from "./tool-budget.js";
 import { metric } from "./metrics.js";
 import { track, type ChildTaskRegistry } from "./child-tasks.js";
@@ -569,8 +570,8 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
   // from direct MCP tools. The "[Subagent]" marker is what the parent's
   // PARENT_PARALLELISM_PREAMBLE refers to when it says "subagent calls are
   // expensive" — without the tag the rule has no concrete anchor.
-  const directFirst = optEnabled("subagent_read_tools") && tools.some((t) => looksReadOnly(t.name))
-    ? "Slow: this runs a whole nested model. Its read tools are listed in your tool catalog — load them with load-tools and call them yourself first. Delegate here only for a write, or for open-ended research that needs many queries. "
+  const directFirst = optEnabled("subagent_read_tools") && tools.length > 0
+    ? "Slow: this runs a whole nested model. Its tools, writes included, are listed in your tool catalog — load them with load-tools and call them yourself first. Delegate here only for open-ended research that needs many queries. "
     : "";
   const taggedDescription =
     `[Subagent — nested LLM run, expensive] ${directFirst}${def.description} ` +
@@ -788,8 +789,16 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
         envelope: { parentToolCallId: _toolCallId, subagentName: def.name, childRunId },
       });
       const childStartedIso = new Date(execStartedAt).toISOString();
+      const litellmPick = resolvedProvider
+        ? undefined
+        : pickSubagentLitellmModel({
+            key: progressCtx?.parentSessionId,
+            fastModel: LITELLM.subagentFastModel,
+            standardModel: LITELLM.model,
+            fastPercent: LITELLM.subagentFastModelPercent,
+          });
       const childProvider = resolvedProvider?.provider ?? "litellm";
-      const childModelId = resolvedProvider?.config.model ?? "shared";
+      const childModelId = resolvedProvider?.config.model ?? litellmPick?.model ?? LITELLM.model;
       const childTokenUsage: TokenUsage = emptyTokenUsage();
       let childTurns = 0;
       let childToolMs = 0;
@@ -998,17 +1007,16 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
 
         // Apply copilot proxy (no-op for other providers) then register model via the same helper the parent uses
         const effectiveConfig = await applyCopilotProxyIfNeeded(resolvedProvider?.provider, resolvedProvider?.config);
-        // fast-model is EXPLICIT opt-in (no faster grid model exists yet —
-        // fast-mode-plan.md Slice A deferred 2026-07-15). Default/undefined/
-        // "spaces" all keep today's LITELLM.model routing.
-        const litellmFallbackModel =
-          providerResolution?.subagentProviderMode === "fast-model"
-            ? LITELLM.fastModel
-            : LITELLM.model;
+        const useFastModel = litellmPick?.arm === "fast";
+        const litellmFallbackModel = litellmPick?.model ?? LITELLM.model;
         const model = resolveModel(modelRegistry, resolvedProvider?.provider, effectiveConfig, {
           model: resolvedProvider ? undefined : litellmFallbackModel,
         });
-        log.info(`[${def.name}] Using provider=${resolvedProvider?.provider ?? "litellm"} model=${resolvedProvider?.config.model ?? litellmFallbackModel}`);
+        const slowModelFallback =
+          useFastModel && litellmFallbackModel !== LITELLM.model
+            ? resolveModel(ModelRegistry.create(AuthStorage.create()), undefined, undefined, { model: LITELLM.model })
+            : undefined;
+        log.info(`[${def.name}] Using provider=${resolvedProvider?.provider ?? "litellm"} model=${resolvedProvider?.config.model ?? litellmFallbackModel}${litellmPick ? ` arm=${litellmPick.arm}` : ""}`);
 
         // Materialize skills onto disk so the child session loads them as
         // proper pi resources (same path the parent takes in agent.ts),
@@ -1147,6 +1155,12 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
         });
         sessionRef = session;
         installLlmCallMetrics(session.agent, parentSessionId ?? `subagent-${def.name}`);
+        if (slowModelFallback) {
+          installStreamModelFallback(session.agent, model, slowModelFallback, {
+            label: def.name,
+            onFallback: (reason) => pushDebugEvent("model_fallback", { from: model.id, to: slowModelFallback.id, reason }),
+          });
+        }
         toolBudget = installToolBudget(session.agent, {
           sessionId: parentSessionId ?? `subagent-${def.name}`,
           budgetScale: 0.5,

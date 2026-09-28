@@ -53,11 +53,18 @@ import { transientProviderCallback } from "../transient-provider-callback.js";
 import { loadMcpToolsForUser,
   searchDeploymentTools,
 } from "../mcp.js";
-import { packSdlcRunMeta, SDLC_META_KEYS, trustedSdlcToolBindings } from "xyne-claw-shared";
+import {
+  buildSdlcRunContextSection,
+  packSdlcRunMeta,
+  SDLC_DIRECT_TOOL_NAMES,
+  SDLC_META_KEYS,
+  trustedSdlcToolBindings,
+} from "xyne-claw-shared";
 import { loadCustomTools } from "../custom-tools.js";
 import { buildCopilotTool } from "../copilot.js";
 import { pinRunJudgeBackend } from "../judge-backend.js";
 import { optEnabled, pinRunOptimizations } from "../optimizations.js";
+import { activeToolCap, demotedCatalogItem, planActiveToolCap, readToolUsageRank } from "../active-tool-cap.js";
 import { buildExperimentTools, buildExperimentReviewTools, type ExperimentContext } from "../experiment.js";
 import {
   executeRunFromPayload,
@@ -159,11 +166,12 @@ import {
   writeWorkspaceTextFiles,
   writeWorkspaceBinaryFiles,
 } from "../workspace.js";
-import { toolOutputBaseDir, deleteSession, branchSession } from "../session-store.js";
+import { toolOutputBaseDir, deleteSession, branchSession, sessionDir } from "../session-store.js";
 import { gcsUploadResultMarker, gcsDownloadResultMarker } from "../storage.js";
 import { takeLlmCitations } from "xyne-claw-shared";
 import { ingestAttachments } from "../attachment-ingest.js";
 import { metric } from "../metrics.js";
+import { decidePlanTracking, isShortFollowUp, readPreviousAgentReply } from "../plan-gate.js";
 import { runWithProviderFallback } from "../provider-fallback.js";
 import { isDraining } from "../drain.js";
 import { routeTaskMode } from "../mode-router.js";
@@ -2189,7 +2197,9 @@ export async function processTask(
     // should still expose that one tool to the parent. Without this, picking
     // individual tools from a subagent-backed connector was a silent no-op.
     const toolsConfigEarly = parseToolsConfig(effectiveConfig);
-    const directPickSuffixes = toolsConfigEarly?.direct ?? [];
+    // An agent with no tools selection still gets the SDLC tools out of the spaces wrapper in a hub;
+    // one with a selection already has them from claw-auth's per-run merge.
+    const directPickSuffixes = toolsConfigEarly?.direct ?? (trustedSdlcContext ? SDLC_DIRECT_TOOL_NAMES : []);
     // Hoisted above the catalog build: the palette decides what gets catalogued,
     // not just what survives filtering (see `includeSubagentTools` below).
     const paletteMode = openPaletteModeFromTools(toolsConfigEarly);
@@ -2219,13 +2229,12 @@ export async function processTask(
       // here the palette has nothing to admit and load-tools nothing to load.
       // The palette itself still refuses wrappers (a wrapper grants a whole
       // server, not one tool).
-      includeSubagentTools: fastModeEnabled || paletteMode !== "off",
+      includeSubagentTools: fastModeEnabled || paletteMode !== "off" || optEnabled("subagent_read_tools"),
       // Without this, def-less servers' tools and in-process custom tools are
       // admitted straight into the always-active set instead of the catalog —
       // bigger prompt, not wider reach.
       catalogUnwrapped: paletteMode !== "off",
       catalogUnwrappedWrites: paletteMode !== "off" && optEnabled("lean_palette"),
-      includeSubagentReadTools: optEnabled("subagent_read_tools"),
     });
     const fastCatalogCandidateByName = new Map(fastCatalogCandidateItems.map((item) => [item.entry.name, item]));
     let fastCatalogItems: ToolCatalogItem[] = [];
@@ -2919,14 +2928,28 @@ export async function processTask(
     // pay the whole cost.
     const planTrackingEnabled =
       agentConfig?.["planTracking"] !== false && agentConfig?.["planTracking"] !== "false";
-    const planToolsDefaultOn =
+    const planGateEligible =
       planTrackingEnabled &&
       (!!channelId || (progressUrl && typeof progressUrl !== "string")) &&
       !isScheduledOrAutomationRun(eventType, conversationId) &&
       !isTwinMentionFlow &&
       !isPlanMode &&
       !isDailyBrief;
+    const planGatePreviousReply =
+      planGateEligible && isShortFollowUp(task)
+        ? readPreviousAgentReply(
+            sessionDir(
+              buildSandboxStoreKey(userId, piSessionConversationId ?? conversationId, agentSlug) ??
+                piSessionConversationId ??
+                conversationId ??
+                "",
+            ),
+          )
+        : undefined;
+    const planGate = planGateEligible ? await decidePlanTracking(task, agentConfig, {}, planGatePreviousReply) : null;
+    const planToolsDefaultOn = planGateEligible && (planGate?.plan ?? true);
     if (!planTrackingEnabled) log("[plan] planTracking=false — todo tools and primer suppressed");
+    if (planGate && !planGate.plan) log(`[plan] jev says direct reply (p=${planGate.probability?.toFixed(2)}) — todo tools and primer skipped`);
     const planTools = remainingCustomTools.filter((t) => isPlanToolSlug(t.name));
     allTools = allTools.filter((t) => !isPlanToolSlug(t.name));
     if (planToolsDefaultOn) {
@@ -3308,6 +3331,43 @@ export async function processTask(
     }
 
     allTools = dedupeToolsByName(allTools);
+    if (optEnabled("active_tool_cap")) {
+      const demotable = new Set(
+        [...directTools, ...remainingCustomTools, ...parentHoistedTools, ...kbHoistedTools].map((tool) => tool.name),
+      );
+      const capPlan = planActiveToolCap({
+        activeNames: allTools
+          .filter((tool) =>
+            !duplicatesMetaTool(tool.name) &&
+            (!fastCatalogCandidateByName.has(tool.name) ||
+              (fastAlwaysActiveToolNames.has(tool.name) && !paletteAdmittedNames.has(tool.name))),
+          )
+          .map((tool) => tool.name),
+        demotable,
+        pinned: new Set([
+          PROPOSE_PLAN_TOOL_NAME,
+          EMIT_BRIEF_TOOL_NAME,
+          "ask-user-question",
+          ...forcedTaskCommandTools,
+          ...(taskCommand?.requiredTool ? [taskCommand.requiredTool] : []),
+        ]),
+        usageRank: readToolUsageRank(agentConfig),
+        cap: activeToolCap(agentConfig),
+        fixedExtra: 7,
+      });
+      const toolByName = new Map(allTools.map((tool) => [tool.name, tool]));
+      for (const name of capPlan.demote) {
+        const tool = toolByName.get(name);
+        if (!tool) continue;
+        const item = demotedCatalogItem(tool, isWriteTool(tool, allGroups));
+        fastCatalogCandidateItems.push(item);
+        fastCatalogCandidateByName.set(name, item);
+        fastAlwaysActiveToolNames.delete(name);
+      }
+      log(
+        `[active-tool-cap] outcome=${capPlan.outcome} cap=${capPlan.cap} total=${capPlan.total} budget=${capPlan.budget} demoted=${capPlan.demote.length}${capPlan.demote.length ? ` (${capPlan.demote.join(", ")})` : ""}`,
+      );
+    }
     // Derived predicate, not a new config knob: the catalog machinery runs when
     // there is something to catalogue. `fastModeEnabled ||` keeps fast mode
     // byte-identical — a fast-mode run with an EMPTY catalog still gets its
@@ -3325,7 +3385,7 @@ export async function processTask(
       fastCatalogNames = fastCatalogItems.map((item) => item.entry.name);
       const finalFastCatalogNameSet = new Set(fastCatalogNames);
       const activeToolEntries: ToolCatalogEntry[] | undefined =
-        optEnabled("catalog_full_index") || optEnabled("subagent_read_tools")
+        optEnabled("catalog_full_index") || optEnabled("subagent_read_tools") || optEnabled("active_tool_cap")
           ? allTools
               .filter((tool) =>
                 !duplicatesMetaTool(tool.name) &&
@@ -3606,7 +3666,7 @@ export async function processTask(
       const sandboxLines: string[] = [
         "## Sandbox usage",
         sdlcRepositoryAccessEnabled
-          ? "SDLC hub repositories: call `sandbox-create`, then `sdlc-repository-access` with the repoId and that sessionId, and clone with the exact cloneUrl it returns. Git then works normally for fetch, commit and push, with commits made as the repository's credential account. Capability is not authorization: inspect only unless the task explicitly requires implementation. Follow the repository's declared package manager and setup instructions. If a required package-manager command is unavailable, make one bounded attempt to install/enable it; use npm as a fallback only when the repository's scripts and lockfiles support npm. Do not loop on environment repair. If setup or verification still fails, stop cleanly and report the exact command/error, changes already completed, checks not run, and branch/commit/PR state. Open pull requests for these repositories with `spaces-sdlc-create-pull-request`, not a github or bitbucket subagent."
+          ? "SDLC hub repositories: follow the SDLC Run Context section for sandbox, repository access and pull requests. Capability is not authorization: inspect only unless the task explicitly requires implementation. Follow the repository's declared package manager and setup instructions. If a required package-manager command is unavailable, make one bounded attempt to install/enable it; use npm as a fallback only when the repository's scripts and lockfiles support npm. Do not loop on environment repair. If setup or verification still fails, stop cleanly and report the exact command/error, changes already completed, checks not run, and branch/commit/PR state."
           : "READ vs WRITE — this matters. For read-first repos (e.g. xyne-spaces) `sandbox-repo-setup` DEFAULTS to an instant READ-ONLY git sandbox (no wait): use it for reading, grepping, and inspecting code / PR review — which is almost everything. Only call `sandbox-repo-setup` with `write:true` when you must actually EDIT files, build, run tests, or commit — that claims a short-lived, auto-expiring writable dev sandbox. Do NOT request write just to look at code; default to read and escalate to write only when you're about to change something.",
         "Sandbox tools (sandbox-create, sandbox-run, sandbox-write-file, sandbox-read-file, sandbox-deliver-files, sandbox-pw-*) run code/commands in an isolated VM. Use them whenever you need execution, file generation, screenshots, or browser automation.",
         "- To send a file BACK to the user, you MUST call `sandbox-deliver-files` with the path(s). Returning file contents as text in your reply is NOT delivery — Spaces won't render it as an attachment.",
@@ -3921,9 +3981,7 @@ export async function processTask(
       : experiment
       ? `\n\n## Experiment mode\nYou are in a time-boxed experiment (epoch ${experiment.epoch}; deadline ${experiment.deadlineAt}; focus ${experiment.focus ?? "unspecified"}). You cannot finish early — end-experiment refuses before the deadline. Loop: read the ledger → declare a hypothesis (experiment-ledger action=hypothesis) → gather PROOF in the sandbox (failing test, benchmark delta, profile) → record the finding with its proof path. Never re-test refuted hypotheses. If your current lead dies, pick a different subsystem. Prose without a recorded finding is wasted time.`
       : "";
-    const authoritativeSdlcContext = trustedSdlcContext
-      ? `\n\n## Authoritative SDLC Run Context\n\nThe platform verified this immutable run context. Use these exact IDs and repository coordinates; never infer or replace them. Runtime credentials are intentionally absent.\n\n\`\`\`json\n${JSON.stringify({ ...trustedSdlcContext, interactiveGrant: undefined }, null, 2)}\n\`\`\``
-      : "";
+    const authoritativeSdlcContext = trustedSdlcContext ? buildSdlcRunContextSection(trustedSdlcContext) : "";
     const effectiveSystemPrompt = ((channelId
       ? `${basePrompt}${citationGuide}${SPACES_MENTION_GUIDE}`
       : `${basePrompt}${citationGuide}`) + authoritativeSdlcContext) + twinMandate + experimentGuide;
@@ -3942,7 +4000,7 @@ export async function processTask(
           // Only fast mode actually turns delegation off; asserting it on a
           // normal run would be a lie the model acts on.
           subagentDelegationDisabled: fastModeEnabled,
-          fullIndex: optEnabled("catalog_full_index") || optEnabled("subagent_read_tools"),
+          fullIndex: optEnabled("catalog_full_index") || optEnabled("subagent_read_tools") || optEnabled("active_tool_cap"),
           preferDirect: optEnabled("subagent_read_tools"),
         })
       : "";

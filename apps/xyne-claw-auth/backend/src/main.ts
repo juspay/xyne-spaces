@@ -12,6 +12,7 @@ import { bootWorkers, shutdownWorkers } from "./boot/workers.js";
 import { initializeOpenTelemetry, shutdownOpenTelemetry } from "./otel/telemetry.js";
 import { registerDailyBriefGauges } from "./otel/daily-brief-metrics.js";
 import { redisService } from "./redis.js";
+import { agentRunRepository } from "./repositories/agentRunRepository.js";
 
 const app = express();
 // How many reverse proxies sit in front of this process. Without it Express
@@ -35,10 +36,13 @@ listen(CONFIG.port, () => {
 
 async function shutdown(signal: string): Promise<void> {
   log.info(`[xyne-claw-auth] ${signal}. Shutting down.`);
+  await agentRunRepository.flushAllToolInvocations().catch(() => {});
   await shutdownWorkers();
   await redisService.disconnect().catch(() => {});
   await shutdownOpenTelemetry().catch(() => {});
-  server.close(() => process.exit(0));
+  server.close(() => {
+    void agentRunRepository.flushAllToolInvocations().finally(() => process.exit(0));
+  });
   setTimeout(() => process.exit(1), 10_000).unref();
 }
 

@@ -17,6 +17,7 @@ export const PENDING_WORKSPACE_NAME_KEY = 'pending_workspace_name';
 import { clearAllSessionKeys } from '../services/sessionKeyStore';
 import { indexedDBService } from '../services/indexedDBService';
 import { resetEncryption } from './encryptionMachine';
+import { stateMachineActor } from './stateMachine';
 import { decryptionCache } from '@xyne/shared';
 import { resetGlobalEncryptionBootstrap } from '@xyne/shared/hooks';
 import { dropAllZeroDatabases, dropZeroDatabases } from '../zero/dropZeroDatabases';
@@ -1211,6 +1212,8 @@ export const authMachine = createMachine(
         resetEncryption();
         resetGlobalEncryptionBootstrap();
         void clearAllSessionKeys();
+        // The composer's saved related-context chips quote other people's messages.
+        stateMachineActor.send({ type: 'CLEAR_RELATED_CONTEXT' });
       },
       clearOnboardingCookie: () => {
         clearOnboardingCookie();

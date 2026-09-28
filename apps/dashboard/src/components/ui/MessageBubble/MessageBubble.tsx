@@ -67,8 +67,7 @@ import { NonParticipantActions } from './NonParticipantActions';
 import { PostedInLink } from './PostedInLink';
 import { MessageHeader } from './MessageHeader';
 import { RunOriginChip } from './RunOriginChip';
-import HuddleIcon from '../../icons/HuddleIcon';
-import { MicOn } from '@xyne/icons';
+import { MicOn, PhoneDefault } from '@xyne/icons';
 import workflowBotAvatar from './workflowBotAvatar.png';
 import { downloadAttachment } from '../../Chat/MessageAttachment/utils';
 import { PendingIcon } from '../../../assets/icons/WorkflowIcons';
@@ -899,7 +898,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               <div
                 className={`w-8 h-8 rounded-md flex items-center justify-center ${isActiveCall ? 'bg-stage-completed' : 'bg-muted-foreground/10'}`}
               >
-                <HuddleIcon
+                <PhoneDefault
+                  size={16}
                   color={isActiveCall ? 'var(--status-success)' : 'hsl(var(--foreground) / 0.8)'}
                 />
               </div>
@@ -1356,25 +1356,29 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                     <div
                       className={`jp-message-html whitespace-pre-wrap break-all-words inline-block ${getEmojiFontSizeClass(noteHtml)}`}
                     >
-                      <RenderMessageWithHTML
-                        disableLinks={disableLinks}
-                        message={noteHtml}
-                        showEdited={message.edited}
-                        messageId={message.messageId}
-                        conversationId={message.conversationId}
-                        preserveThreadRoute={context === 'thread'}
-                      />
+                      <ExpandableMessage maxHeight={500}>
+                        <RenderMessageWithHTML
+                          disableLinks={disableLinks}
+                          message={noteHtml}
+                          showEdited={message.edited}
+                          messageId={message.messageId}
+                          conversationId={message.conversationId}
+                          preserveThreadRoute={context === 'thread'}
+                        />
+                      </ExpandableMessage>
                     </div>
                   )}
                   afterContent={afterTextContent}
                 />
               ) : isMarkdownContent ? (
                 <>
-                  <MarkdownMessageRenderer
-                    content={citationContent}
-                    markdownComponents={markdownComponents}
-                    messageSubtype={metadata?.messageSubtype}
-                  />
+                  <ExpandableMessage maxHeight={500}>
+                    <MarkdownMessageRenderer
+                      content={citationContent}
+                      markdownComponents={markdownComponents}
+                      messageSubtype={metadata?.messageSubtype}
+                    />
+                  </ExpandableMessage>
                   {metadata?.messageSubtype === 'recording' &&
                     metadata?.callId &&
                     (metadata?.['recordingType'] && metadata['recordingType'] !== 'AUDIO_ONLY' ? (
@@ -1449,7 +1453,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                     <div className='flex items-center gap-2 mb-1'>
                       {forwardedMessageData.originalSenderName === 'Xyne Call' ? (
                         <div className='w-5 h-5 rounded-md flex items-center justify-center bg-muted'>
-                          <HuddleIcon color='hsl(var(--muted-foreground))' size={14} />
+                          <PhoneDefault color='hsl(var(--muted-foreground))' size={14} />
                         </div>
                       ) : (
                         forwardedMessageData.originalSenderId && (

@@ -1,5 +1,11 @@
 import { apiInstance } from './clients/apiClient';
-import { DisplaySearchResult, VespaSearchResponse, VespaSearchFilters } from '../types/search';
+import {
+  DisplaySearchResult,
+  QueryIntent,
+  RelatedContext,
+  VespaSearchResponse,
+  VespaSearchFilters,
+} from '../types/search';
 import { buildVespaSearchCacheKey } from './vespaSearchCacheKey';
 import { toSearchQuery } from '../utils/exactSearch';
 /**
@@ -129,6 +135,37 @@ export class SearchService {
 
       throw new Error('Vespa search request failed');
     }
+  }
+
+  /**
+   * Classify a cmd+K query as a keyword lookup or a question that needs AI.
+   * Separate from vespaSearch so a slow classifier never delays results.
+   * Null means "no verdict" (feature off, clearly lexical, or classifier down).
+   */
+  async getQueryIntent(query: string, signal?: AbortSignal): Promise<QueryIntent | null> {
+    const response = await apiInstance.get<{ success: boolean; data: QueryIntent | null }>(
+      `${this.vespaBaseUrl}/intent`,
+      { params: { q: query }, ...(signal ? { signal } : {}) },
+    );
+    return response.data.success ? response.data.data : null;
+  }
+
+  /**
+   * What a composer draft relates to: threads, tickets, canvases and calls where it
+   * is answered, was asked before, or was discussed. POST so the unsent draft never
+   * lands in a URL. Null means "no verdict" (feature off or classifier down).
+   */
+  async getRelatedContext(
+    text: string,
+    conversationId: string | undefined,
+    signal?: AbortSignal,
+  ): Promise<RelatedContext | null> {
+    const response = await apiInstance.post<{ success: boolean; data: RelatedContext | null }>(
+      `${this.vespaBaseUrl}/related`,
+      { text, ...(conversationId ? { conversationId } : {}) },
+      signal ? { signal } : {},
+    );
+    return response.data.success ? response.data.data : null;
   }
 
   /**
@@ -312,6 +349,10 @@ export class SearchService {
 
     if (filters.onlyMyChannels !== undefined) {
       params['onlyMyChannels'] = filters.onlyMyChannels.toString();
+    }
+
+    if (filters.excludeArchived !== undefined) {
+      params['excludeArchived'] = filters.excludeArchived.toString();
     }
 
     if (filters.groupBy !== undefined) {

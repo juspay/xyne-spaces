@@ -5,6 +5,11 @@ import { TagsConfigShapeSchema } from './schema';
 import { DESK_EMAIL_SOURCE_TYPE, DEFAULT_DESK_EMAIL_CONFIG } from './deskEmail';
 import { syncTicketTagsFromEmail } from './deskTicket';
 import type { CategoryCatalogEntry, CategoryConfig, GeneratedTag, PersistedTag, TagsConfigShape } from './types';
+import { updateConfigTx } from '@/bypassAcl/transactions/tagsService';
+import { upsertConfigTx } from '@/bypassAcl/transactions/tagsService';
+import { updateTagTx } from '@/bypassAcl/transactions/tagsService';
+import { setManualTagsTx } from '@/bypassAcl/transactions/tagsService';
+import { replaceTagsForCategoriesTx } from '@/bypassAcl/transactions/tagsService';
 
 export class TagServiceError extends Error {
   constructor(
@@ -16,7 +21,7 @@ export class TagServiceError extends Error {
   }
 }
 
-const TAG_METHOD_MAP: Record<string, TagMethod> = {
+export const TAG_METHOD_MAP: Record<string, TagMethod> = {
   llm: TagMethod.LLM,
   manual: TagMethod.MANUAL,
 };
@@ -51,23 +56,7 @@ export class TagService {
     newConfig: TagsConfigShape,
     updatedBy?: string | null,
   ): Promise<TagsConfig> {
-    return tagRepository.getDb().$transaction(async (tx) => {
-      const existing = await tagRepository.getActiveConfigByKey(configKey, tx);
-      if (!existing) {
-        throw new TagServiceError(`No active config found for configKey "${configKey}"`, 404);
-      }
-
-      await tagRepository.softDeleteConfigRow(existing.id, updatedBy, tx);
-
-      return tagRepository.insertConfigRow({
-        configKey,
-        sourceType: existing.sourceType,
-        workspaceId: existing.workspaceId,
-        config: newConfig as unknown as Prisma.InputJsonValue,
-        createdBy: existing.createdBy,
-        updatedBy,
-      }, tx);
-    });
+    return updateConfigTx(configKey, updatedBy, newConfig);
   }
 
   async upsertConfig(
@@ -77,22 +66,7 @@ export class TagService {
     newConfig: TagsConfigShape,
     updatedBy?: string | null,
   ): Promise<TagsConfig> {
-    return tagRepository.getDb().$transaction(async (tx) => {
-      const existing = await tagRepository.getActiveConfigByKey(configKey, tx);
-
-      if (existing) {
-        await tagRepository.softDeleteConfigRow(existing.id, updatedBy, tx);
-      }
-
-      return tagRepository.insertConfigRow({
-        configKey,
-        sourceType: existing?.sourceType ?? sourceType,
-        workspaceId: existing?.workspaceId ?? workspaceId,
-        config: newConfig as unknown as Prisma.InputJsonValue,
-        createdBy: existing?.createdBy ?? updatedBy,
-        updatedBy,
-      }, tx);
-    });
+    return upsertConfigTx(configKey, updatedBy, sourceType, workspaceId, newConfig);
   }
 
   async deleteConfig(configKey: string, deletedBy?: string | null): Promise<void> {
@@ -199,31 +173,7 @@ export class TagService {
     this.assertTagNameFormat(oldTag, 'Tag');
     this.assertTagNameFormat(newTag, 'Tag');
 
-    const updated = await tagRepository.getDb().$transaction(async (tx) => {
-      const existing = await tagRepository.findActiveTag(sourceId, sourceType, tagCategory, oldTag, tx);
-      if (!existing) {
-        throw new TagServiceError(
-          `No active tag "${oldTag}" found for ${sourceType}/${sourceId} in category "${tagCategory}"`,
-          404,
-        );
-      }
-
-      await this.assertManualCategoryOrOverride(configKey, tagCategory, override);
-
-      await tagRepository.softDeleteTagRow(existing.id, updatedBy, tx);
-
-      return tagRepository.insertTagRow({
-        sourceId,
-        sourceType,
-        workspaceId: existing.workspaceId,
-        configKey: existing.configKey,
-        tagCategory,
-        tag: newTag,
-        method: existing.method as TagMethod,
-        createdBy: existing.createdBy,
-        updatedBy,
-      }, tx);
-    });
+    const updated = await updateTagTx(sourceId, sourceType, tagCategory, oldTag, this, configKey, override, updatedBy, newTag);
 
     if (sourceType === DESK_EMAIL_SOURCE_TYPE) void syncTicketTagsFromEmail(sourceId);
 
@@ -316,35 +266,7 @@ export class TagService {
     }
     await this.assertManualCategoryOrOverride(configKey, tagCategory, override);
 
-    const result = await tagRepository.getDb().$transaction(async (tx) => {
-      const current = await tagRepository.findActiveTags(sourceId, sourceType, tagCategory, tx);
-      const currentTagValues = new Set(current.map((row) => row.tag));
-      const desiredTagValues = new Set(tags);
-
-      const toAdd = tags.filter((tag) => !currentTagValues.has(tag));
-      const toRemove = current.filter((row) => !desiredTagValues.has(row.tag));
-
-      for (const row of toRemove) {
-        await tagRepository.softDeleteTagRow(row.id, userId, tx);
-      }
-
-      for (const tag of toAdd) {
-        await tagRepository.insertTagRow({
-          sourceId,
-          sourceType,
-          workspaceId,
-          configKey,
-          tagCategory,
-          tag,
-          method: TagMethod.MANUAL,
-          createdBy: userId,
-          updatedBy: userId,
-        }, tx);
-      }
-
-      const updated = await tagRepository.findActiveTags(sourceId, sourceType, tagCategory, tx);
-      return updated.map((row) => ({ tagCategory: row.tagCategory, tag: row.tag, method: row.method as TagMethod }));
-    });
+    const result = await setManualTagsTx(sourceId, sourceType, tagCategory, tags, userId, workspaceId, configKey);
 
     if (sourceType === DESK_EMAIL_SOURCE_TYPE) void syncTicketTagsFromEmail(sourceId);
 
@@ -366,47 +288,14 @@ export class TagService {
       generatedByCategory.set(item.category, list);
     }
 
-    const persisted = await tagRepository.getDb().$transaction(async (tx) => {
-      const result: PersistedTag[] = [];
-
-      for (const [category, categoryConfig] of Object.entries(categories)) {
-        if (categoryConfig.method === 'manual') continue;
-        this.assertTagNameFormat(category, 'Tag category');
-
-        const method = TAG_METHOD_MAP[categoryConfig.method];
-        if (!method) continue;
-
-        const existing = await tagRepository.findActiveTags(sourceId, sourceType, category, tx);
-        for (const row of existing) {
-          await tagRepository.softDeleteTagRow(row.id, undefined, tx);
-        }
-
-        const tagsForCategory = generatedByCategory.get(category) ?? [];
-        for (const item of tagsForCategory) {
-          const reason = item.reason ?? null;
-          await tagRepository.insertTagRow({
-            sourceId,
-            sourceType,
-            workspaceId,
-            configKey,
-            tagCategory: category,
-            tag: item.tag,
-            method,
-            reason,
-          }, tx);
-          result.push({ tagCategory: category, tag: item.tag, method, reason });
-        }
-      }
-
-      return result;
-    });
+    const persisted = await replaceTagsForCategoriesTx(categories, this, sourceId, sourceType, generatedByCategory, workspaceId, configKey);
 
     if (sourceType === DESK_EMAIL_SOURCE_TYPE) void syncTicketTagsFromEmail(sourceId);
 
     return persisted;
   }
 
-  private assertTagNameFormat(value: string, label: 'Tag' | 'Tag category'): void {
+  assertTagNameFormat(value: string, label: 'Tag' | 'Tag category'): void {
     if (!TAG_FORMAT_REGEX.test(value)) {
       throw new TagServiceError(
         `${label} "${value}" does not match required format (lowercase, hyphen-separated, alphanumeric segments)`,
@@ -415,7 +304,7 @@ export class TagService {
     }
   }
 
-  private async assertManualCategoryOrOverride(
+  async assertManualCategoryOrOverride(
     configKey: string | null | undefined,
     tagCategory: string,
     override?: boolean,
@@ -451,3 +340,8 @@ export class TagService {
 }
 
 export const tagService = new TagService();
+
+
+
+
+

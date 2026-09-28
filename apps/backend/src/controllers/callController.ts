@@ -54,6 +54,7 @@ import { canvasAuthService } from '@/services/canvasAuthService';
 import { isTrackInChannel } from '@/sdlc/sdlcChannelMembership';
 import { buildCallInviteUrl } from '@/utils/urlUtils';
 import { readRecordingGoogleDocLinks } from '@/utils/recordingGoogleDocs';
+import { hideCallTx } from '@/bypassAcl/transactions/callController';
 
 const RecordingParticipantsCommandSchema = z.object({
   action: z.enum(['add', 'remove']),
@@ -340,26 +341,7 @@ export class CallController {
         return;
       }
 
-      const updatedCount = await db.$transaction(async tx => {
-        await repositories.calls.updateParticipantMeetingStatus(
-          participant.id,
-          MeetingStatus.HIDDEN,
-          now,
-          tx,
-        );
-
-        if (isSeries && call.recurringSeriesId) {
-          return repositories.calls.updateRecurringSeriesMeetingStatus({
-            recurringSeriesId: call.recurringSeriesId,
-            userId,
-            meetingStatus: MeetingStatus.HIDDEN,
-            respondedAt: now,
-            tx,
-          });
-        }
-
-        return 1;
-      });
+      const updatedCount = await hideCallTx(participant, now, isSeries, call, userId);
 
       res.json({
         success: true,
@@ -1377,7 +1359,12 @@ export class CallController {
         return;
       }
 
-      const canView = await callShareService.canView(call, userId, req.user!.workspaceId);
+      const canView = await callShareService.hasAtLeast(
+        call,
+        userId,
+        req.user!.workspaceId,
+        'view',
+      );
       if (!canView) {
         res.status(403).json({ success: false, error: 'Access denied' });
         return;
@@ -1584,7 +1571,7 @@ export class CallController {
         return;
       }
 
-      if (call.createdByUserId !== userId) {
+      if (!(await callShareService.hasAtLeast(call, userId, req.user!.workspaceId, 'edit'))) {
         res.status(403).json({ success: false, error: 'Access denied' });
         return;
       }
@@ -1636,8 +1623,8 @@ export class CallController {
         return;
       }
 
-      // Verify ownership
-      if (call.createdByUserId !== userId) {
+      // Editing a recording's title, labels or template is an editor action.
+      if (!(await callShareService.hasAtLeast(call, userId, req.user!.workspaceId, 'edit'))) {
         res.status(403).json({ success: false, error: 'Access denied' });
         return;
       }
@@ -1786,7 +1773,7 @@ export class CallController {
       }
 
       const canRegenerate = isRecording(call)
-        ? call.createdByUserId === userId
+        ? await callShareService.hasAtLeast(call, userId, req.user!.workspaceId, 'edit')
         : await callShareService.isCallAudience(call, userId);
       if (!canRegenerate) {
         res.status(403).json({ success: false, error: 'Access denied' });
@@ -1840,7 +1827,7 @@ export class CallController {
         return;
       }
 
-      if (call.createdByUserId !== userId) {
+      if (!(await callShareService.hasAtLeast(call, userId, req.user!.workspaceId, 'edit'))) {
         res.status(403).json({ success: false, error: 'Access denied' });
         return;
       }
@@ -2061,7 +2048,7 @@ export class CallController {
       }
       if (
         call.callType === CallType.HEADLESS &&
-        !(await callShareService.canView(call, userId, req.user!.workspaceId))
+        !(await callShareService.hasAtLeast(call, userId, req.user!.workspaceId, 'view'))
       ) {
         res.status(403).json({ success: false, error: 'Access denied' });
         return;
@@ -2165,7 +2152,7 @@ export class CallController {
       }
       if (
         call.callType === CallType.HEADLESS &&
-        !(await callShareService.canView(call, userId, req.user!.workspaceId))
+        !(await callShareService.hasAtLeast(call, userId, req.user!.workspaceId, 'view'))
       ) {
         res.status(403).json({ success: false, error: 'Access denied' });
         return;
@@ -3573,3 +3560,4 @@ export class CallController {
 }
 
 export const callController = new CallController();
+

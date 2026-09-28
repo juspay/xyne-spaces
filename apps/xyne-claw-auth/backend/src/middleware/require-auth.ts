@@ -88,19 +88,47 @@ export function s2sKeyMatches(provided: string | string[] | undefined): boolean 
 // without this each layer would re-fetch /me for the same request.
 const SPACES_USER_ID = Symbol("spacesUserId");
 
-async function resolveUserIdFromSpaces(req: Request): Promise<string | undefined> {
-  const cached = (req as unknown as Record<symbol, string | undefined>)[SPACES_USER_ID];
-  if (cached !== undefined) return cached || undefined;
+/** Identity lookups are on the hot path of every cookie-authed request, so the
+ *  budget stays short. Env-tunable because the right value depends on how
+ *  loaded the Spaces pods are, and raising it should not need a code change. */
+const SPACES_ME_TIMEOUT_MS = Math.max(
+  500,
+  Number(process.env["SPACES_ME_TIMEOUT_MS"]) || 5000,
+);
 
-  const userId = await resolveUserIdFromSpacesUncached(req);
-  // Store "" for a failed resolution so repeat lookups are also skipped.
-  (req as unknown as Record<symbol, string | undefined>)[SPACES_USER_ID] = userId ?? "";
-  return userId;
+/** `fetch`'s Response, aliased so it isn't shadowed by Express's `Response`. */
+type Response_ = Awaited<ReturnType<typeof fetch>>;
+
+/**
+ * The outcome of asking Spaces who the caller is.
+ *
+ * The three cases MUST stay distinct. Collapsing "we could not reach Spaces"
+ * into "this caller is not authenticated" is what logs real users out: the
+ * browser sees a 401 from its own origin and the dashboard's axios interceptor
+ * (apps/dashboard/src/services/clients/apiClient.ts) responds by clearing auth
+ * tokens and redirecting to /auth. A `/claw/*` request that merely timed out
+ * would end a healthy session.
+ */
+type SpacesIdentity =
+  | { kind: "user"; userId: string }
+  /** Spaces answered, and the answer was "nobody" — a real auth failure. */
+  | { kind: "anonymous" }
+  /** Spaces could not be asked (timeout / network / 5xx). Says NOTHING about
+   *  whether the caller is authenticated, so it must never become a 401. */
+  | { kind: "unavailable"; reason: string };
+
+async function resolveSpacesIdentity(req: Request): Promise<SpacesIdentity> {
+  const cached = (req as unknown as Record<symbol, SpacesIdentity | undefined>)[SPACES_USER_ID];
+  if (cached !== undefined) return cached;
+
+  const identity = await resolveSpacesIdentityUncached(req);
+  (req as unknown as Record<symbol, SpacesIdentity | undefined>)[SPACES_USER_ID] = identity;
+  return identity;
 }
 
-async function resolveUserIdFromSpacesUncached(req: Request): Promise<string | undefined> {
+async function resolveSpacesIdentityUncached(req: Request): Promise<SpacesIdentity> {
   const cookieHeader = req.headers.cookie;
-  if (!cookieHeader) return undefined;
+  if (!cookieHeader) return { kind: "anonymous" };
 
   const headers: Record<string, string> = {
     cookie: cookieHeader,
@@ -111,17 +139,63 @@ async function resolveUserIdFromSpacesUncached(req: Request): Promise<string | u
     headers["x-workspace-id"] = workspaceId.trim();
   }
 
-  const res = await fetch(`${CONFIG.spacesInternalUrl}/api/auth/me`, {
-    method: "GET",
-    headers,
-    signal: AbortSignal.timeout(5000),
-  });
+  let res: Response_;
+  try {
+    res = await fetch(`${CONFIG.spacesInternalUrl}/api/auth/me`, {
+      method: "GET",
+      headers,
+      signal: AbortSignal.timeout(SPACES_ME_TIMEOUT_MS),
+    });
+  } catch (err) {
+    // AbortError (the timeout) or a transport failure. Previously this threw
+    // into a `.catch(() => undefined)` at every call site and became a 401.
+    const reason = err instanceof Error && err.name === "TimeoutError" ? "timeout" : "unreachable";
+    log.warn(`[require-auth] /api/auth/me ${reason}: ${err instanceof Error ? err.message : String(err)}`);
+    return { kind: "unavailable", reason };
+  }
 
-  if (!res.ok) return undefined;
+  // 401/403 is Spaces actively saying "not you" — the only non-2xx that is a
+  // real authentication answer. 5xx/429 mean the auth service is degraded and
+  // the caller's session is simply unknown.
+  if (res.status === 401 || res.status === 403) return { kind: "anonymous" };
+  if (!res.ok) {
+    log.warn(`[require-auth] /api/auth/me upstream ${res.status}`);
+    return { kind: "unavailable", reason: `upstream_${res.status}` };
+  }
 
   const body = (await res.json().catch(() => null)) as SpacesMeResponse | null;
   const userId = body?.user?.id;
-  return typeof userId === "string" && userId.trim() ? userId.trim() : undefined;
+  return typeof userId === "string" && userId.trim()
+    ? { kind: "user", userId: userId.trim() }
+    : { kind: "anonymous" };
+}
+
+/** Back-compat shim for call sites that only care whether a user resolved. */
+async function resolveUserIdFromSpaces(req: Request): Promise<string | undefined> {
+  const identity = await resolveSpacesIdentity(req);
+  return identity.kind === "user" ? identity.userId : undefined;
+}
+
+/**
+ * Terminal response for a request that produced no identity.
+ *
+ * 503 when Spaces could not be reached: the caller may well be perfectly
+ * logged in, so this is a liveness failure and must not read as an auth
+ * failure. `Retry-After` tells well-behaved clients to come back rather than
+ * treat it as terminal.
+ */
+function denyUnverified(res: Response, identity: SpacesIdentity, unauthorizedMessage: string): void {
+  if (identity.kind === "unavailable") {
+    res.setHeader("Retry-After", "1");
+    res.status(503).json({
+      success: false,
+      error: "Authentication service unavailable",
+      code: "AUTH_UPSTREAM_UNAVAILABLE",
+      reason: identity.reason,
+    });
+    return;
+  }
+  res.status(401).json({ success: false, error: unauthorizedMessage });
 }
 
 function bearerToken(req: Request): string | undefined {
@@ -149,7 +223,8 @@ export async function requireAuth(
 ): Promise<void> {
   stripClientOrgHeaders(req);
   // 1. Verify browser cookies through Spaces backend auth middleware.
-  const userId = await resolveUserIdFromSpaces(req).catch(() => undefined);
+  const identity = await resolveSpacesIdentity(req);
+  const userId = identity.kind === "user" ? identity.userId : undefined;
   if (userId) {
     // JIT-mirror the user row from Spaces if we've never seen them. Lets a
     // brand-new Spaces user hit any claw-auth route without first POSTing
@@ -197,8 +272,9 @@ export async function requireAuth(
     return;
   }
 
-  // 4. No valid auth
-  res.status(401).json({ success: false, error: "Authentication required" });
+  // 4. No valid auth. A Spaces lookup that never completed is reported as 503,
+  // not 401 — see denyUnverified.
+  denyUnverified(res, identity, "Authentication required");
 }
 
 export async function optionalAuth(
@@ -245,7 +321,8 @@ export async function requireS2S(
     return;
   }
 
-  const userId = await resolveUserIdFromSpaces(req).catch(() => undefined);
+  const identity = await resolveSpacesIdentity(req);
+  const userId = identity.kind === "user" ? identity.userId : undefined;
   if (userId) {
     await ensureUserExists(userId, "require-auth").catch((err) => {
       log.warn(`[require-auth/s2s] ensureUserExists(${userId}) failed:`, err instanceof Error ? err.message : err);
@@ -256,7 +333,7 @@ export async function requireS2S(
     return;
   }
 
-  res.status(401).json({ success: false, error: "s2s key required" });
+  denyUnverified(res, identity, "s2s key required");
 }
 
 /**
@@ -351,9 +428,10 @@ export async function requireUserAuth(
   next: NextFunction,
 ): Promise<void> {
   stripClientOrgHeaders(req);
-  const userId = await resolveUserIdFromSpaces(req).catch(() => undefined);
+  const identity = await resolveSpacesIdentity(req);
+  const userId = identity.kind === "user" ? identity.userId : undefined;
   if (!userId) {
-    res.status(401).json({ success: false, error: "User session required" });
+    denyUnverified(res, identity, "User session required");
     return;
   }
   // `ensureUserExists` keys its caller arg off SpacesAuthCaller for query

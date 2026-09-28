@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { AWAKENING_SEND_TOOL } from "../awakening/send-tool.js";
 import { errMsg } from "../lib/errors.js";
+import { withSdlcRunTools } from "../lib/sdlc-run-tools.js";
 import crypto from "node:crypto";
 import { prisma } from "../db.js";
 import { decrypt } from "../crypto.js";
@@ -855,7 +856,8 @@ export async function withSurfaceDefaultToolsConfig(
     effective = withDirectTool(effective, AWAKENING_SEND_TOOL);
   }
 
-  return effective;
+  // A run in an SDLC hub gets the SDLC tools; start-run adds the same ones to the config claw filters by.
+  return withSdlcRunTools(effective, sessionId);
 }
 
 async function loadEffectiveCredentialsWithSpacesFallback(
@@ -1806,12 +1808,15 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
         .json({ success: false, error: `No connection found for user and server type: ${serverType}` });
       return;
     }
+    const globalGateToolsConfig =
+      effective.source === "global" ? await withSdlcRunTools(sessionAgentTools?.toolsConfig, req.params.sessionId) : undefined;
     if (
       isStrictAgentToolsEnabled() &&
       effective.source === "global" &&
-      sessionAgentTools?.toolsConfig &&
+      globalGateToolsConfig &&
+      sessionAgentTools &&
       !isMcpToolAllowedByAgentConfig(
-        sessionAgentTools.toolsConfig,
+        globalGateToolsConfig,
         serverType,
         callServerName,
         tool,

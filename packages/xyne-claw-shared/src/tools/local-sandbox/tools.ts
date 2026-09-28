@@ -6,8 +6,13 @@ export const deliverFiles: ToolDefinition = {
   slug: "deliver-files",
   name: "Deliver Files",
   description:
-    "Deliver finished files from your working directory to the user: pass workspace-relative paths. " +
-    "The user sees them in the workspace panel and, for /design and /dashboard, gets a live share link.",
+    "LOCAL-HARNESS delivery: send finished files from the LOCAL working directory to the user " +
+    "(workspace-relative paths). They appear in the workspace panel, and /design and /dashboard also get a " +
+    "live share link.\n\n" +
+    "Pick the right delivery tool — all three send a file, from different places:\n" +
+    "- `deliver-files` (this one) — files on the USER'S machine, desktop app only.\n" +
+    "- `sandbox-deliver-files` — files inside the server Kata/QEMU sandbox. Use on any server run.\n" +
+    "- `send-attachment` — a file you already hold as bytes in this turn, posted to the channel.",
   source: SOURCE,
   harness: "local",
   inputSchema: {

@@ -441,6 +441,7 @@ export const userAssignmentStateTable = table('user_assignment_states')
   })
   .primaryKey('id');
 
+
 export const boardComplexityScoreTable = table('board_complexity_scores')
   .columns({
     workspaceId: string(), // denormalized tenant key (stamped on insert)
@@ -3506,11 +3507,16 @@ export const sdlcTrackTableRelationships = relationships(sdlcTrackTable, ({ many
   }),
 }));
 
-export const channelStatsTableRelationships = relationships(channelStatsTable, ({ one }) => ({
+export const channelStatsTableRelationships = relationships(channelStatsTable, ({ one, many }) => ({
   channel: one({
     sourceField: ['channelId'],
     destField: ['id'],
     destSchema: channelTable,
+  }),
+  participants: many({
+    sourceField: ['channelId'],
+    destField: ['channelId'],
+    destSchema: channelParticipantTable,
   }),
 }));
 

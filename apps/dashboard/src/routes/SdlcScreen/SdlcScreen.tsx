@@ -13,6 +13,7 @@ import {
 } from 'react';
 import { globalClickTracker } from '../../services/Analytics/globalClickTracker';
 import {
+  ChannelRole,
   SDLC_ENTITY_TYPES,
   SDLC_RELATION_TYPES,
   SDLC_HUB_KNOWLEDGE_FOLDER,
@@ -64,6 +65,7 @@ import {
 import { EntitySelector } from '../../components/ui/EntitySelector/EntitySelector';
 import { Tabs } from '../../components/ui/Tabs';
 import NotFoundScreen from '../NotFoundScreen/NotFoundScreen';
+import { SdlcArchiveMenu } from './SdlcArchiveMenu';
 import { SdlcHubDialog } from './SdlcHubDialog';
 import { SdlcHubRepositoriesDialog } from './SdlcHubRepositoriesDialog';
 import {
@@ -83,6 +85,7 @@ import {
 import { toast } from 'sonner';
 import AppNavigator from '../../components/AppNavigator/AppNavigator';
 import { Button } from '../../components/ui/Button';
+import { Checkbox } from '../../components/ui/Checkbox/Checkbox';
 import { XyneAIStar } from '../../components/icons/xyne-ai';
 import { TicketToken } from '@xyne/icons';
 import { CreateTicketModal } from '../../components/Tickets/CreateTicketModal/CreateTicketModal';
@@ -116,9 +119,12 @@ import {
 } from '../../utils/electronApp';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
 import KanbanBoardScreen from '../KanbanBoardScreen/KanbanBoardScreen';
-import { buildSdlcArtifactCreationPrompt } from './artifactCreationPrompt';
+import {
+  buildSdlcArtifactCreationPrompt,
+  buildSdlcWikiPageCreationPrompt,
+} from './artifactCreationPrompt';
 import { SdlcWikiSection } from './SdlcWikiSection';
-import { type SdlcWikiPage, type WikiCanvas, wikiScopePages, wikiScopes } from './sdlcWikiTree';
+import { type WikiCanvas, wikiScopePages, wikiScopes } from './sdlcWikiTree';
 import SdlcWorkflowsSection from './SdlcWorkflowsSection';
 import { SdlcActivityPreview } from './SdlcActivityPreview';
 import { EntityLinkContext, type EntityLinkScope } from '../../contexts/EntityLinkContext';
@@ -240,6 +246,20 @@ const EMPTY_CONTEXT_SELECTIONS: ContextSelections = {
   localFolders: [],
 };
 
+/** Which document the shared create form is filling in. */
+type SdlcDocumentKind = 'artifact' | 'knowledge' | 'wiki';
+
+const HUB_DOCUMENT_HINT: Record<SdlcDocumentKind, string> = {
+  artifact: 'Adding to this hub',
+  knowledge: 'Read by SDLC Assistant in every chat in this hub',
+  wiki: 'Adding to the Wiki you are viewing',
+};
+
+function AddItemHeaderIcon({ kind }: { kind: SdlcDocumentKind }): ReactElement {
+  const Icon = kind === 'knowledge' ? ShieldCheck : kind === 'wiki' ? BookOpen : FileText;
+  return <Icon className='size-5 shrink-0 text-primary/70' />;
+}
+
 function updatedAtLabel(value?: number): string {
   if (typeof value !== 'number') return 'Not updated yet';
   const date = new Date(value);
@@ -318,7 +338,12 @@ export default function SdlcScreen(): ReactElement {
     setSdlcCommentContext({ zero: zero as never });
   }, [zero]);
   const [busy, setBusy] = useState<string | null>(null);
-  const [artifactDialog, setArtifactDialog] = useState<{ id: string; name: string } | null>(null);
+  const [artifactDialog, setArtifactDialog] = useState<{
+    id: string;
+    name: string;
+    kind: SdlcDocumentKind;
+  } | null>(null);
+  const [artifactFolderPath, setArtifactFolderPath] = useState('');
   const [relatedCanvasIds, setRelatedCanvasIds] = useState<string[]>([]);
   const [relatedSearchQuery, setRelatedSearchQuery] = useState('');
   const [relatedSearchResults, setRelatedSearchResults] = useState<
@@ -332,6 +357,7 @@ export default function SdlcScreen(): ReactElement {
   );
   const [deriveTypeId, setDeriveTypeId] = useState<string | null>(null);
   const [hubDialog, setHubDialog] = useState<'create' | 'manage' | null>(null);
+  const [showArchivedKnowledge, setShowArchivedKnowledge] = useState(false);
   const [typeDialogOpen, setTypeDialogOpen] = useState(false);
   const [typeName, setTypeName] = useState('');
   const [renameTypeId, setRenameTypeId] = useState<string | null>(null);
@@ -551,6 +577,22 @@ export default function SdlcScreen(): ReactElement {
         ?.id ?? null,
     [channel],
   );
+  // Adding and archiving hub documents is admin-only; the server enforces it too.
+  const isHubAdmin = useMemo(
+    () =>
+      (channel?.participants ?? []).some(
+        participant => participant.userId === auth.userID && participant.role === ChannelRole.ADMIN,
+      ),
+    [channel, auth.userID],
+  );
+  const archiveArtifact = (canvasId: string, archived: boolean): void => {
+    void call(
+      `archive-${canvasId}`,
+      () =>
+        apiInstance.post(`/sdlc/channels/${channelId}/artifacts/${canvasId}/archive`, { archived }),
+      archived ? 'Archived' : 'Restored',
+    );
+  };
   const selectedCanvasId = routeSearchParams.get('canvas');
   const selectedCanvas = canvases.find(canvas => canvas.id === selectedCanvasId);
   const [trackRows] = useCachedQuery(queries.getSdlcTracks({ channelId: channelId || '' }), {
@@ -678,6 +720,10 @@ export default function SdlcScreen(): ReactElement {
       wikiPagesByScope.get(scope.folderId)?.some(page => page.canvasId === selectedCanvasId),
     ) ??
     null;
+  const wikiScopeRepo = useMemo(
+    () => channelRepos.find(item => item.id === wikiScope?.repoId) ?? null,
+    [channelRepos, wikiScope],
+  );
   const [showArchivedWiki, setShowArchivedWiki] = useState(false);
   const wikiScopeAllPages = useMemo(
     () => (wikiScope ? (wikiPagesByScope.get(wikiScope.folderId) ?? []) : []),
@@ -699,8 +745,14 @@ export default function SdlcScreen(): ReactElement {
   );
   const knowledgeDocs = useMemo(
     () =>
-      knowledgeFolderId ? canvases.filter(canvas => canvas.folderId === knowledgeFolderId) : [],
-    [canvases, knowledgeFolderId],
+      knowledgeFolderId
+        ? canvases.filter(
+            canvas =>
+              canvas.folderId === knowledgeFolderId &&
+              (showArchivedKnowledge || canvas.sdlcArtifact?.artifactStatus !== 'ARCHIVED'),
+          )
+        : [],
+    [canvases, knowledgeFolderId, showArchivedKnowledge],
   );
   const folders = useMemo(() => channel?.canvasFolders ?? [], [channel]);
   const typeFolders = useMemo(
@@ -1501,10 +1553,10 @@ export default function SdlcScreen(): ReactElement {
     );
   };
 
-  const openWikiPage = (page: SdlcWikiPage): void => {
+  const openWikiPage = (canvasId: string): void => {
     if (!channelId) return;
     setRelatedSourceId(null);
-    const search = new URLSearchParams({ canvas: page.canvasId });
+    const search = new URLSearchParams({ canvas: canvasId });
     if (wikiScope) search.set('wiki', wikiScope.folderId);
     navigateWithinSdlc(`/sdlc/${channelId}/wiki`, `?${search.toString()}`);
   };
@@ -1830,6 +1882,7 @@ export default function SdlcScreen(): ReactElement {
     setRelatedSearchResults([]);
     setRelatedListOpen(false);
     setRelatedChipsExpanded(false);
+    setArtifactFolderPath('');
   };
 
   const resetArtifactDialog = (): void => {
@@ -1862,17 +1915,29 @@ export default function SdlcScreen(): ReactElement {
       .map(canvas => ({ canvasId: canvas.id, title: canvas.title }));
 
   const createArtifact = (): void => {
-    if (!channel || !artifactDialog || !artifactTitle.trim() || !artifactTrack) return;
+    if (!channel || !artifactDialog || !canSubmitArtifactDialog) return;
+    const title = artifactTitle.trim();
+    const direction = artifactAiPrompt.trim();
+    const folderPath = artifactFolderPath.trim();
     const related = relatedArtifactsForPayload();
-    const query = buildSdlcArtifactCreationPrompt({
-      typeLabel: artifactDialog.name,
-      folderId: artifactDialog.id,
-      title: artifactTitle.trim(),
-      ...(repo && { repositoryName: repo.name }),
-      ...(artifactAiPrompt.trim() && { direction: artifactAiPrompt.trim() }),
-      ...(related.length > 0 && { relatedArtifacts: related }),
-      track: artifactTrack,
-    });
+    const query =
+      artifactDialog.kind === 'wiki'
+        ? buildSdlcWikiPageCreationPrompt({
+            title,
+            ...(wikiScopeRepo && { repositoryName: wikiScopeRepo.name, repoId: wikiScopeRepo.id }),
+            ...(folderPath && { folderPath }),
+            ...(direction && { direction }),
+          })
+        : buildSdlcArtifactCreationPrompt({
+            typeLabel:
+              artifactDialog.kind === 'knowledge' ? SDLC_HUB_KNOWLEDGE_FOLDER : artifactDialog.name,
+            folderId: artifactDialog.id,
+            title,
+            ...(repo && artifactDialog.kind !== 'knowledge' && { repositoryName: repo.name }),
+            ...(direction && { direction }),
+            ...(related.length > 0 && { relatedArtifacts: related }),
+            ...(artifactTrack && { track: artifactTrack }),
+          });
     askSdlcAssistant(query, undefined, true);
     resetArtifactDialog();
   };
@@ -1888,9 +1953,26 @@ export default function SdlcScreen(): ReactElement {
   };
 
   const createBlankArtifact = async (): Promise<void> => {
-    if (!channel || !artifactDialog || !artifactTitle.trim() || !artifactTrack) return;
+    if (!channel || !artifactDialog || !canSubmitArtifactDialog) return;
     const folder = artifactDialog;
     const title = artifactTitle.trim();
+    if (folder.kind === 'wiki') {
+      const folderPath = artifactFolderPath.trim();
+      const wikiResponse = await apiInstance.post<{ artifact: { canvasId: string } }>(
+        '/sdlc/claw/artifacts',
+        {
+          artifactType: 'WIKI',
+          channelId: channel.id,
+          title,
+          markdown: `# ${title}\n`,
+          ...(wikiScopeRepo && { repoId: wikiScopeRepo.id }),
+          ...(folderPath && { folderPath }),
+        },
+      );
+      resetArtifactDialog();
+      openWikiPage(wikiResponse.data.artifact.canvasId);
+      return;
+    }
     const response = await apiInstance.post<{ artifact: { canvasId: string } }>(
       '/sdlc/claw/artifacts',
       {
@@ -1899,7 +1981,7 @@ export default function SdlcScreen(): ReactElement {
         folderId: folder.id,
         title,
         markdown: `# ${title}\n`,
-        trackId: artifactTrack.id,
+        ...(artifactTrack && { trackId: artifactTrack.id }),
         ...(relatedCanvasIds.length > 0 && { relatedCanvasIds }),
       },
     );
@@ -1907,6 +1989,11 @@ export default function SdlcScreen(): ReactElement {
     resetArtifactDialog();
     setAddItemParent(null);
     const newCanvasId = response.data.artifact.canvasId;
+    if (folder.kind === 'knowledge') {
+      setRelatedSourceId(null);
+      openCanvas(newCanvasId);
+      return;
+    }
     if (fileIntoFolder && channel) {
       await fileNewArtifactIntoFolder(newCanvasId, fileIntoFolder);
     }
@@ -2072,7 +2159,16 @@ export default function SdlcScreen(): ReactElement {
 
   const openArtifactCreate = (folder: { id: string; name: string }): void => {
     clearArtifactDialogFields();
-    setArtifactDialog({ id: folder.id, name: folder.name });
+    setArtifactDialog({ id: folder.id, name: folder.name, kind: 'artifact' });
+  };
+
+  const openHubDocumentCreate = (kind: 'knowledge' | 'wiki'): void => {
+    clearArtifactDialogFields();
+    setArtifactDialog(
+      kind === 'knowledge'
+        ? { id: knowledgeFolderId ?? '', name: 'Hub Knowledge document', kind }
+        : { id: wikiScope?.folderId ?? '', name: 'Wiki page', kind },
+    );
   };
 
   const openArtifactCreateFrom = (
@@ -2083,7 +2179,7 @@ export default function SdlcScreen(): ReactElement {
       track: trackByCanvasId.get(sourceCanvasId) ?? null,
       relatedCanvasIds: [sourceCanvasId],
     });
-    setArtifactDialog({ id: folder.id, name: folder.name });
+    setArtifactDialog({ id: folder.id, name: folder.name, kind: 'artifact' });
   };
 
   const renderArtifacts = (folder: (typeof typeFolders)[number]): ReactElement => {
@@ -2369,6 +2465,12 @@ export default function SdlcScreen(): ReactElement {
     );
   };
 
+  const artifactDialogKind: SdlcDocumentKind = artifactDialog?.kind ?? 'artifact';
+  const addItemView = addItemParent ? addItemTab : 'artifact';
+  // Only a type artifact belongs to a track; hub documents are hub-scoped.
+  const canSubmitArtifactDialog =
+    Boolean(artifactTitle.trim()) && (artifactDialogKind !== 'artifact' || Boolean(artifactTrack));
+
   const artifactDetailsStep = (
     <form
       className='flex flex-1 flex-col'
@@ -2398,7 +2500,33 @@ export default function SdlcScreen(): ReactElement {
           />
         </div>
 
-        {tracks.filter(track => track.status !== 'ARCHIVED').length > 0 ? (
+        {artifactDialogKind === 'wiki' && (
+          <div className='flex flex-col gap-1.5'>
+            <div className='flex items-baseline gap-1.5'>
+              <label htmlFor='sdlc-wiki-folder-path' className='text-[12.5px] font-medium'>
+                Folder
+              </label>
+              <span className='text-xs text-muted-foreground'>optional</span>
+            </div>
+            <Input
+              id='sdlc-wiki-folder-path'
+              value={artifactFolderPath}
+              onChange={event => setArtifactFolderPath(event.target.value)}
+              maxLength={512}
+              className='h-[38px] text-[13.5px]'
+              placeholder='e.g. services/payments'
+              data-track-category='SdlcHub'
+              data-track-name='WikiFolderPathChanged'
+            />
+            <span className='text-xs text-muted-foreground'>
+              Separate folders with &quot;/&quot;. Missing folders are created.
+            </span>
+          </div>
+        )}
+
+        {artifactDialogKind !== 'artifact' ? null : tracks.filter(
+            track => track.status !== 'ARCHIVED',
+          ).length > 0 ? (
           <div className='flex flex-col gap-1.5'>
             <div className='flex items-center gap-1.5'>
               <label htmlFor='sdlc-prd-track' className='text-[12.5px] font-medium'>
@@ -2428,7 +2556,7 @@ export default function SdlcScreen(): ReactElement {
           </p>
         )}
 
-        <div className='flex flex-col gap-1.5'>
+        <div className={cn('flex flex-col gap-1.5', artifactDialogKind !== 'artifact' && 'hidden')}>
           <div className='flex items-baseline gap-1.5'>
             <span className='text-[12.5px] font-medium'>Related artifacts</span>
             <span className='text-xs text-muted-foreground'>optional</span>
@@ -2580,7 +2708,7 @@ export default function SdlcScreen(): ReactElement {
         </div>
       </div>
 
-      <div className='sticky bottom-0 -mx-6 mt-auto flex items-center gap-2.5 border-t border-border bg-background px-6 py-3.5'>
+      <div className='sticky bottom-0 -mx-6 mt-auto flex items-center gap-2.5 rounded-b-lg border-t border-border bg-background px-6 py-3.5'>
         <button
           type='button'
           onClick={resetArtifactDialog}
@@ -2596,7 +2724,7 @@ export default function SdlcScreen(): ReactElement {
             variant='outline'
             className='h-[34px]'
             loading={busy === 'artifact-blank'}
-            disabled={!artifactTitle.trim() || !artifactTrack}
+            disabled={!canSubmitArtifactDialog}
             title='Create an empty document with just the title — no AI'
             onClick={() =>
               void call(
@@ -2615,7 +2743,7 @@ export default function SdlcScreen(): ReactElement {
             type='submit'
             className='h-[34px]'
             loading={busy === 'artifact'}
-            disabled={!artifactTitle.trim() || !artifactTrack}
+            disabled={!canSubmitArtifactDialog}
           >
             <Sparkles />
             Ask AI to create
@@ -3839,9 +3967,32 @@ export default function SdlcScreen(): ReactElement {
                           'Given to SDLC Assistant in every chat. Admins edit; members read.',
                         workflow: state,
                       })}
+                      <div className='mb-4 flex items-center justify-between gap-3'>
+                        <Checkbox
+                          size='sm'
+                          label='Show archived'
+                          checked={showArchivedKnowledge}
+                          onChange={setShowArchivedKnowledge}
+                          data-track-category='SdlcHub'
+                          data-track-name='HubKnowledgeArchivedToggled'
+                        />
+                        {isHubAdmin && knowledgeFolderId && (
+                          <Button
+                            type='button'
+                            size='sm'
+                            onClick={() => openHubDocumentCreate('knowledge')}
+                            data-track-category='SdlcHub'
+                            data-track-name='HubKnowledgeDocCreateOpened'
+                          >
+                            <Plus size={15} />
+                            New document
+                          </Button>
+                        )}
+                      </div>
                       <div className='grid grid-cols-2 gap-4'>
                         {knowledgeDocs.map(canvas => {
                           const generating = canvas.sdlcArtifact?.artifactStatus === 'DRAFT';
+                          const archived = canvas.sdlcArtifact?.artifactStatus === 'ARCHIVED';
                           return (
                             <div
                               key={canvas.id}
@@ -3852,27 +4003,47 @@ export default function SdlcScreen(): ReactElement {
                               data-track-name='HubKnowledgeCanvasOpened'
                               data-track-metadata={JSON.stringify({ canvasId: canvas.id })}
                               onKeyDown={event => {
+                                // The archive menu lives inside this card.
+                                if (event.target !== event.currentTarget) return;
                                 if (event.key === 'Enter' || event.key === ' ') {
                                   event.preventDefault();
                                   openCanvas(canvas.id);
                                 }
                               }}
-                              className='group cursor-pointer rounded-xl border bg-background p-5 transition-colors hover:border-primary/35 hover:bg-muted/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+                              className={cn(
+                                'group cursor-pointer rounded-xl border bg-background p-5 transition-colors hover:border-primary/35 hover:bg-muted/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                                archived && 'opacity-60',
+                              )}
                             >
-                              <div className='flex items-start justify-between'>
+                              <div className='flex items-start justify-between gap-2'>
                                 <div className='grid size-9 place-items-center rounded-lg bg-primary/10 text-primary'>
                                   <BookOpen size={18} />
                                 </div>
-                                {generating ? (
-                                  <span className='rounded-full bg-amber-500/10 px-2 py-1 text-xs font-medium text-amber-700'>
-                                    Generating
-                                  </span>
-                                ) : (
-                                  <span className='flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-1 text-xs font-medium text-emerald-700 dark:text-emerald-300'>
-                                    <Check size={12} />
-                                    Ready
-                                  </span>
-                                )}
+                                <div className='flex items-start gap-1'>
+                                  {archived ? (
+                                    <span className='rounded-full bg-muted px-2 py-1 text-xs font-medium text-muted-foreground'>
+                                      Archived
+                                    </span>
+                                  ) : generating ? (
+                                    <span className='rounded-full bg-amber-500/10 px-2 py-1 text-xs font-medium text-amber-700'>
+                                      Generating
+                                    </span>
+                                  ) : (
+                                    <span className='flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-1 text-xs font-medium text-emerald-700 dark:text-emerald-300'>
+                                      <Check size={12} />
+                                      Ready
+                                    </span>
+                                  )}
+                                  {isHubAdmin && (
+                                    <SdlcArchiveMenu
+                                      title={canvas.title}
+                                      archived={archived}
+                                      trackingScope='HubKnowledge'
+                                      className='-mr-1'
+                                      onToggle={next => archiveArtifact(canvas.id, next)}
+                                    />
+                                  )}
+                                </div>
                               </div>
                               <h3 className='mt-4 font-semibold'>{canvas.title}</h3>
                               <p className='mt-1 text-xs text-muted-foreground'>
@@ -3895,7 +4066,9 @@ export default function SdlcScreen(): ReactElement {
                             text={
                               knowledgeRunning
                                 ? 'Hub Knowledge generation is in progress.'
-                                : 'Start the Hub Knowledge workflow to generate these documents.'
+                                : isHubAdmin
+                                  ? 'Start the Hub Knowledge workflow, or add a document yourself.'
+                                  : 'Start the Hub Knowledge workflow to generate these documents.'
                             }
                           />
                         )}
@@ -3926,7 +4099,10 @@ export default function SdlcScreen(): ReactElement {
                       }
                       onAddRepository={() => setHubDialog('manage')}
                       onShowArchivedChange={setShowArchivedWiki}
-                      onOpen={openWikiPage}
+                      onOpen={page => openWikiPage(page.canvasId)}
+                      canManage={isHubAdmin}
+                      onCreatePage={() => openHubDocumentCreate('wiki')}
+                      onArchivePage={(page, archived) => archiveArtifact(page.canvasId, archived)}
                     />
                   )}
 
@@ -4279,30 +4455,36 @@ export default function SdlcScreen(): ReactElement {
       {/* One way in for everything a folder can hold. The three journeys differ
           enough to need their own space but not enough to be three doors. */}
       <Dialog
-        open={addItemParent !== null}
+        open={addItemParent !== null || artifactDialog !== null}
         onOpenChange={open => {
           if (!open) closeAddItemDialog();
         }}
-        title='Add to folder'
+        title={addItemParent ? 'Add to folder' : `New ${artifactDialog?.name ?? 'document'}`}
         className='max-w-[860px]'
       >
         <div className='flex max-h-[78vh] min-h-[440px] flex-col'>
           <div className='flex items-center gap-2.5 px-6 pt-5'>
-            {addItemParent?.type === 'FOLDER' ? (
+            {!addItemParent ? (
+              <AddItemHeaderIcon kind={artifactDialogKind} />
+            ) : addItemParent.type === 'FOLDER' ? (
               <Folder className='size-5 shrink-0 fill-primary/25 text-primary/70' />
             ) : (
               <Layers className='size-5 shrink-0 text-muted-foreground' />
             )}
             <div className='min-w-0 flex-1'>
               <h2 className='truncate text-[17px] font-semibold leading-tight tracking-[-0.01em]'>
-                {addItemParent?.type === 'FOLDER'
-                  ? addItemParent.name
-                  : (selectedTrack?.name ?? 'Track')}
+                {!addItemParent
+                  ? `New ${artifactDialog?.name ?? 'document'}`
+                  : addItemParent.type === 'FOLDER'
+                    ? addItemParent.name
+                    : (selectedTrack?.name ?? 'Track')}
               </h2>
               <p className='truncate text-[11.5px] text-muted-foreground'>
-                {addItemParent?.type === 'FOLDER'
-                  ? `Adding to this folder in ${selectedTrack?.name ?? 'the track'}`
-                  : 'Adding to this track'}
+                {!addItemParent
+                  ? HUB_DOCUMENT_HINT[artifactDialogKind]
+                  : addItemParent.type === 'FOLDER'
+                    ? `Adding to this folder in ${selectedTrack?.name ?? 'the track'}`
+                    : 'Adding to this track'}
               </p>
             </div>
             <button
@@ -4317,37 +4499,41 @@ export default function SdlcScreen(): ReactElement {
               <X size={15} />
             </button>
           </div>
-          <Tabs
-            className='border-b border-border px-6 pb-2.5 pt-4'
-            items={[
-              { id: 'artifact', label: 'Artifact' },
-              { id: 'upload', label: 'Upload files' },
-              { id: 'link', label: 'Link' },
-            ]}
-            activeId={addItemTab}
-            onSelect={(id: string) => setAddItemTab(id as 'artifact' | 'upload' | 'link')}
-            trackCategory='SdlcHub'
-            trackPrefix='AddItemTab'
-          />
+          {addItemParent && (
+            <Tabs
+              className='border-b border-border px-6 pb-2.5 pt-4'
+              items={[
+                { id: 'artifact', label: 'Artifact' },
+                { id: 'upload', label: 'Upload files' },
+                { id: 'link', label: 'Link' },
+              ]}
+              activeId={addItemTab}
+              onSelect={(id: string) => setAddItemTab(id as 'artifact' | 'upload' | 'link')}
+              trackCategory='SdlcHub'
+              trackPrefix='AddItemTab'
+            />
+          )}
 
           <div className='flex min-h-0 flex-1 flex-col overflow-y-auto px-6 pt-5'>
-            {addItemTab === 'artifact' && artifactDialog && (
+            {addItemView === 'artifact' && artifactDialog && (
               <div className='flex flex-1 flex-col'>
-                <button
-                  type='button'
-                  onClick={() => resetArtifactDialog()}
-                  className='mb-3 flex items-center gap-1 text-[12.5px] text-muted-foreground transition-colors hover:text-foreground'
-                  data-track-category='SdlcHub'
-                  data-track-name='ArtifactTypeReopened'
-                >
-                  <ChevronRight className='size-3.5 rotate-180' />
-                  {artifactDialog.name}
-                </button>
+                {addItemParent && (
+                  <button
+                    type='button'
+                    onClick={() => resetArtifactDialog()}
+                    className='mb-3 flex items-center gap-1 text-[12.5px] text-muted-foreground transition-colors hover:text-foreground'
+                    data-track-category='SdlcHub'
+                    data-track-name='ArtifactTypeReopened'
+                  >
+                    <ChevronRight className='size-3.5 rotate-180' />
+                    {artifactDialog.name}
+                  </button>
+                )}
                 {artifactDetailsStep}
               </div>
             )}
 
-            {addItemTab === 'artifact' && !artifactDialog && (
+            {addItemView === 'artifact' && !artifactDialog && (
               <div className='flex flex-1 flex-col pb-5'>
                 <p className='mb-3 text-sm text-muted-foreground'>
                   Choose a type. The details come next.
@@ -4365,7 +4551,7 @@ export default function SdlcScreen(): ReactElement {
                             track: { id: selectedTrack.id, name: selectedTrack.name },
                           });
                         }
-                        setArtifactDialog({ id: folder.id, name: folder.name });
+                        setArtifactDialog({ id: folder.id, name: folder.name, kind: 'artifact' });
                       }}
                       className='flex w-full items-center gap-3 rounded-xl border border-border px-4 py-3.5 text-left text-sm transition-colors hover:border-foreground/20 hover:bg-muted'
                       data-track-category='SdlcHub'
@@ -4387,7 +4573,7 @@ export default function SdlcScreen(): ReactElement {
               </div>
             )}
 
-            {addItemTab === 'upload' && (
+            {addItemView === 'upload' && (
               <div className='flex flex-1 flex-col'>
                 <div className='flex flex-1 flex-col pb-5'>
                   <label
@@ -4451,7 +4637,7 @@ export default function SdlcScreen(): ReactElement {
                     </ul>
                   )}
                 </div>
-                <div className='sticky bottom-0 -mx-6 mt-auto flex justify-end gap-2 border-t border-border bg-background px-6 py-3.5'>
+                <div className='sticky bottom-0 -mx-6 mt-auto flex justify-end gap-2 rounded-b-lg border-t border-border bg-background px-6 py-3.5'>
                   <Button
                     type='button'
                     variant='outline'
@@ -4476,7 +4662,7 @@ export default function SdlcScreen(): ReactElement {
               </div>
             )}
 
-            {addItemTab === 'link' && (
+            {addItemView === 'link' && (
               <form
                 className='flex flex-1 flex-col'
                 onSubmit={event => {
@@ -4547,7 +4733,7 @@ export default function SdlcScreen(): ReactElement {
                   )}
                 </div>
                 <div className='flex-1' />
-                <div className='sticky bottom-0 -mx-6 mt-auto flex justify-end gap-2 border-t border-border bg-background px-6 py-3.5'>
+                <div className='sticky bottom-0 -mx-6 mt-auto flex justify-end gap-2 rounded-b-lg border-t border-border bg-background px-6 py-3.5'>
                   <Button
                     type='button'
                     variant='outline'

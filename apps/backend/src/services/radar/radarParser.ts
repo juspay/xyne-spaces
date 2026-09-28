@@ -79,11 +79,13 @@ export interface ParsedTransitions {
 }
 
 /**
- * A caller-side judgment on a schema-valid response — in practice the
- * validator's rejects. A string is sent back to the model for ONE more
- * attempt; null accepts the response as it stands.
+ * A caller-side judgment on a schema-valid response — the validator's rejects
+ * and the duplicate scorer's flags. A string is sent back to the model for ONE
+ * more attempt; null accepts the response as it stands.
  */
-export type SemanticCheck = (operations: ParserOperation[]) => string | null;
+export type SemanticCheck = (
+  operations: ParserOperation[],
+) => string | null | Promise<string | null>;
 
 /**
  * Everything the model may return, structurally. Per-op required fields
@@ -366,14 +368,16 @@ class RadarParser {
         const errors = validate(parsed.value, TRANSITIONS_SCHEMA);
         if (errors.length === 0) {
           const value = parsed.value as ParsedTransitions;
-          const feedback = !repair && semanticCheck ? semanticCheck(value.operations) : null;
+          const feedback = !repair && semanticCheck ? await semanticCheck(value.operations) : null;
           if (!feedback) return repair ? { ...value, repair } : value;
           // Structurally fine, but the caller can show it is empty: hand the
           // model its own answer and the reason, once. The second answer is
           // final either way — the validator still stands behind it.
           repair = { feedback, firstAttempt: value.operations };
+          // The feedback quotes item titles, which can come from DMs and
+          // private channels, so only its size is logged.
           logger.warn(`${TAG} response rejected by semantic check, retrying once`, {
-            feedback: feedback.slice(0, 300),
+            feedbackChars: feedback.length,
           });
           messages.push({ role: 'assistant', content: raw.slice(0, 4000) });
           messages.push({

@@ -31,6 +31,7 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
 COPY packages/shared/package.json           packages/shared/
 COPY packages/storage/package.json          packages/storage/
 COPY packages/framework/package.json        packages/framework/
+COPY packages/cache/package.json            packages/cache/
 COPY apps/backend/package.json              apps/backend/
 COPY apps/backend/eslint-rules/package.json apps/backend/eslint-rules/
 RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
@@ -42,7 +43,8 @@ RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
 COPY packages/shared    packages/shared
 COPY packages/storage   packages/storage
 COPY packages/framework packages/framework
-RUN pnpm --filter @xyne/shared --filter @xyne/storage --filter agentic-framework run build
+COPY packages/cache     packages/cache
+RUN pnpm --filter @xyne/shared --filter @xyne/storage --filter agentic-framework --filter @xyne/cache run build
 COPY apps/backend apps/backend
 RUN ln -s /repo/apps/backend /app
 WORKDIR /repo/apps/backend

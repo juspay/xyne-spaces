@@ -19,7 +19,6 @@ import {
   Megaphone,
   MessageCircle,
   Mic,
-  Phone,
   PieChart,
   Search,
   Settings,
@@ -28,6 +27,7 @@ import {
   User,
 } from 'lucide-react';
 import { MockFrame } from './MockFrame';
+import { PhoneDefault } from '@xyne/icons';
 
 /* ─────────────────────────────────────────────────────────────────────────── */
 /*  Shared primitives — actual Xyne Spaces design tokens                       */
@@ -85,7 +85,7 @@ export const TBadge = ({ label }: { label: string }): ReactElement => {
 export const IconRail = ({ active }: { active: string }): ReactElement => {
   const items: Array<{ key: string; icon: ReactElement }> = [
     { key: 'chat', icon: <Inbox size={13} /> },
-    { key: 'calls', icon: <Phone size={13} /> },
+    { key: 'calls', icon: <PhoneDefault size={13} /> },
     { key: 'tickets', icon: <Ticket size={13} /> },
     { key: 'insights', icon: <PieChart size={13} /> },
     { key: 'analytics', icon: <BarChart2 size={13} /> },
@@ -528,7 +528,7 @@ export const FeatureMock = ({ visualKey, title }: FeatureMockProps): ReactElemen
                   <div
                     className={`h-7 w-7 rounded-md flex items-center justify-center shrink-0 ${c.live ? 'bg-[#57ab02]/10 text-[#57ab02]' : 'bg-muted text-muted-foreground'}`}
                   >
-                    <Phone size={12} />
+                    <PhoneDefault size={12} />
                   </div>
                   <div className='flex-1 min-w-0'>
                     <p className='text-[10px] font-medium text-foreground'>{c.title}</p>

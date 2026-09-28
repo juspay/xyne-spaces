@@ -496,8 +496,6 @@ export function MiniCallView({
           callId={callId}
           isOpen={isPresentationMode}
           participant={presentationParticipant ?? null}
-          aiController={aiController}
-          requestedAiController={requestedAiController}
           onExit={() => setIsPresentationMode(false)}
         />
       </>
@@ -742,8 +740,6 @@ export function MiniCallView({
         callId={callId}
         isOpen={isPresentationMode}
         participant={presentationParticipant ?? null}
-        aiController={aiController}
-        requestedAiController={requestedAiController}
         onExit={() => setIsPresentationMode(false)}
       />
     </>

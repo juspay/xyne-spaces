@@ -15617,6 +15617,19 @@ export function createMutators(
             );
           }
 
+          // Cross-user public name uniqueness — desk channels only.
+          if (isDeskContext && visibility === SavedConfigVisibility.PUBLIC) {
+            const publicConfigs = await tx.run(
+              zql.saved_user_configurations
+                .where('contextType', contextType)
+                .where('contextId', contextId)
+                .where('visibility', SavedConfigVisibility.PUBLIC)
+            );
+            if (publicConfigs.some(c => c.name.trim().toLowerCase() === name.trim().toLowerCase())) {
+              throw new Error('A public view with this name already exists for this channel');
+            }
+          }
+
           await tx.mutate.saved_user_configurations.insert({
             workspaceId: authData.workspaceId,
             id,
@@ -15670,7 +15683,7 @@ export function createMutators(
             throw new Error('You can only edit your own saved views');
           }
 
-          // If renaming, check for duplicate name (case-insensitive)
+          // If renaming, check for duplicate name (case-insensitive) within own views
           if (name && name.toLowerCase() !== config.name.toLowerCase()) {
             const allUserConfigs = await tx.run(
               zql.saved_user_configurations
@@ -15685,6 +15698,36 @@ export function createMutators(
                   ? 'A saved view with this name already exists for this channel'
                   : 'A saved view with this name already exists for this board',
               );
+            }
+          }
+
+          // Cross-user public name uniqueness — desk channels only (covers rename + visibility flip).
+          const isDesk = config.contextType === SavedConfigContextType.DESK_TICKET;
+          const effectiveName = name ?? config.name;
+          const effectiveVisibility = visibility ?? config.visibility;
+          const nameChanged = name !== undefined && name.toLowerCase() !== config.name.toLowerCase();
+          const flippedToPublic =
+            visibility === SavedConfigVisibility.PUBLIC &&
+            config.visibility !== SavedConfigVisibility.PUBLIC;
+          if (
+            isDesk &&
+            effectiveVisibility === SavedConfigVisibility.PUBLIC &&
+            (nameChanged || flippedToPublic)
+          ) {
+            const publicConfigs = await tx.run(
+              zql.saved_user_configurations
+                .where('contextType', config.contextType)
+                .where('contextId', config.contextId)
+                .where('visibility', SavedConfigVisibility.PUBLIC)
+            );
+            if (
+              publicConfigs.some(
+                c =>
+                  c.id !== configId &&
+                  c.name.trim().toLowerCase() === effectiveName.trim().toLowerCase(),
+              )
+            ) {
+              throw new Error('A public view with this name already exists for this channel');
             }
           }
 

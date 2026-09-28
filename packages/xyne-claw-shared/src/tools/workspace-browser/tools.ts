@@ -30,7 +30,19 @@ export const pageRead: ToolDefinition = {
   harness: "local",
   inputSchema: { type: "object", properties: {}, required: [] },
   async execute(_params, context) {
-    return viaSandbox("sandbox-pw-snapshot", {}, context);
+    // Server-side fallback only — the desktop path runs READ_SCRIPT in the
+    // webview (dashboard executePageTool). This used to call
+    // `sandbox-pw-snapshot`, which returns the ARIA element tree, so a
+    // page-read on the fallback path silently answered with element refs
+    // instead of the page's title/URL/text this tool promises.
+    return viaSandbox(
+      "sandbox-pw-evaluate",
+      {
+        function:
+          "() => ({ title: document.title, url: location.href, text: document.body ? document.body.innerText : '' })",
+      },
+      context,
+    );
   },
 };
 

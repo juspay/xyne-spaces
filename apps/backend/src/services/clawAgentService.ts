@@ -22,6 +22,9 @@ import { Agent } from 'undici';
 const briefStreamDispatcher = new Agent({ headersTimeout: 0, bodyTimeout: 0, connectTimeout: 10_000 });
 
 
+/** Claw agent that answers the cmd+K AI overview in one turn (claw-auth provisions it). */
+export const CMDK_ANSWER_AGENT_SLUG = 'cmdk-answer';
+
 export interface ClawRunRequest {
   userId: string;
   /**
@@ -84,6 +87,8 @@ export interface ClawRunRequest {
   /** Single search + single answer pass instead of the full agentic tool
    *  loop — see xyne-claw-auth's run-stream.ts POST / instant branch. */
   instant?: boolean;
+  /** cmd+K AI overview: the palette tab claw searches before answering (its `agentConfig.answerScope`). */
+  answerScope?: string;
   researchContext?: { type: string; id?: string; name: string } | null;
   createCanvasEnabled: boolean;
   sessionId?: string;
@@ -580,6 +585,7 @@ export async function runClawAgentStream(
     agentConfig: {
       webSearchEnabled: String(request.webSearchEnabled),
       deepResearchEnabled: String(request.deepResearchEnabled),
+      ...(request.answerScope && { answerScope: request.answerScope }),
       ...(config.xyneAiExtended.url && { XYNE_AI_EXTENDED_URL: config.xyneAiExtended.url }),
       ...(request.conversationId && { SPACES_CONVERSATION_ID: request.conversationId }),
       ...(request.canvasId && { SPACES_CANVAS_ID: request.canvasId }),

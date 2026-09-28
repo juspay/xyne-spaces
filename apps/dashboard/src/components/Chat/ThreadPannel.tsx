@@ -59,6 +59,7 @@ import { BotBubble } from './BotBubble';
 import { ThreadTags, parseThreadTypes, useSetThreadTypes } from '../tags/ThreadTags';
 import { ThreadTagMenuItems } from '../tags/ThreadTagMenuItems';
 import { useShowThreadTags } from '../../hooks/useShowThreadTags';
+import { useAskAIAvailable } from '../../contexts/AskAIAvailabilityContext';
 import { toast } from 'sonner';
 import { TicketDetails } from '../Tickets/TicketDetails/TicketDetails';
 import { FileBubble } from '../ui/FileBubble/FileBubble';
@@ -729,6 +730,7 @@ export const ThreadMessages = ({
   const initialMessageSender = useUser(initialMessage?.senderId || '');
   const setThreadTypes = useSetThreadTypes(derivedConversationId);
   const { showThreadTags } = useShowThreadTags();
+  const askAIAvailable = useAskAIAvailable();
   // Which tag's evidence is on screen. Owned here because this component renders both the
   // chips and the message list; cleared on thread change so it never leaks across threads.
   const [inspectedTag, setInspectedTag] = useState<string | null>(null);
@@ -1248,7 +1250,7 @@ export const ThreadMessages = ({
   const simpleViewHeaderActions = (
     <div className='flex items-center gap-1 shrink-0' style={APP_NO_DRAG_STYLE}>
       {/* Ask AI */}
-      {!isStandaloneWindow() && (
+      {!isStandaloneWindow() && askAIAvailable && (
         <Tooltip content='Ask AI Conversation'>
           <Button
             size='sm'
@@ -1518,7 +1520,7 @@ export const ThreadMessages = ({
             </div>
             <div className='flex gap-x-2 shrink-0'>
               {/* Ask AI */}
-              {!isStandaloneWindow() && (
+              {!isStandaloneWindow() && askAIAvailable && (
                 <Tooltip content='Ask AI Conversation'>
                   <Button
                     size='sm'

@@ -1,3 +1,5 @@
+import { createDetailedSummaryCanvasTx } from '@/bypassAcl/transactions/callDocumentService';
+import { createPRDCanvasTx } from '@/bypassAcl/transactions/callDocumentService';
 /**
  * Call Document Service - Generates documents from call transcripts
  * Handles both PRD (Product Requirements Documents) and Detailed Summaries
@@ -9,7 +11,14 @@ import { DatabaseClient } from '@/database/client';
 import { withWorkspaceScope } from '@/database/tenant/context';
 import { repositories } from '@/database/repositories';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
-import { CallOrigin, DEFAULT_SUMMARY_FIELDS, MessageType, CanvasRole, CanvasVisibility } from '@xyne/shared';
+import {
+  
+  DEFAULT_SUMMARY_FIELDS,
+  MessageType,
+  
+  
+  SUMMARY_MAX_INPUT_CHARS,
+} from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { formatToISTLocaleString } from '@/utils/dateUtils';
 import type { Prisma, SummaryTemplate } from '@prisma/client';
@@ -75,7 +84,7 @@ interface CanvasSideEffectContext {
 
 import { executeStreamingLlmRequest, type SummaryModelType } from './callLlmRetry';
 import { initializeYSweetDoc, syncToYSweet } from '@/utils/ysweetUtils.js';
-import { lockMessageMetadata } from '@/bypassAcl/rowLockServices';
+import { updateCallMessageMetadataTx } from '@/bypassAcl/transactions/callDocumentService';
 
 export interface RecordingSummaryTemplateSelection<T extends SummaryTemplateCandidate = SummaryTemplate> {
   template: T | null;
@@ -95,8 +104,8 @@ function sanitizeInput(input: string | null): string {
   // Remove null bytes and other control characters except newlines and tabs
   const sanitized = input.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
 
-  // Limit length to prevent excessive token usage (adjust as needed)
-  const maxLength = 100000; // ~100K chars
+  // Limit length to prevent excessive token usage
+  const maxLength = SUMMARY_MAX_INPUT_CHARS;
   return sanitized.length > maxLength ? sanitized.substring(0, maxLength) : sanitized;
 }
 
@@ -143,9 +152,9 @@ function renderPromptTemplate(template: string, values: Record<string, string>):
 // frontend chip can open the transcript at that moment.
 const CITATION_TOKEN_RE = /\[clf-(\d+)\]/g;
 const MAX_CITATION_SNIPPET = 300;
-const INITIAL_DETAILED_SUMMARY_CANVAS_VERSION = 1;
+export const INITIAL_DETAILED_SUMMARY_CANVAS_VERSION = 1;
 
-interface CitationSegment {
+export interface CitationSegment {
   n: number;
   timestamp: string; // "MM:SS" or "HH:MM:SS"
   speaker: string;
@@ -1151,6 +1160,53 @@ export class CallDocumentService {
       return null;
     }
 
+    const rendered = await this.renderRecordingSummary(transcript, template, callId, {
+      onDelta,
+      citationSegments,
+      modelType,
+    });
+    return rendered ? { ...rendered, template } : null;
+  }
+
+  /**
+   * Summarize a pasted transcript with an unsaved draft template, through the same prompt
+   * and post-processing as a real recording. Nothing is persisted.
+   */
+  async previewRecordingSummary(
+    transcript: string,
+    workspaceId: string,
+    userId: string,
+    draft: Pick<SummaryTemplate, 'name' | 'autoTriggerPrompt' | 'sections' | 'systemPrompt'>,
+  ): Promise<{ summary: string; segments: CitationSegment[] } | null> {
+    const requestId = `summary-template-output-test:${workspaceId}:${userId}`;
+    const systemPrompt = await summaryTemplateService.resolveDraftSystemPrompt(draft, requestId);
+    if (!systemPrompt) return null;
+
+    const { numbered, segments } = numberTranscriptSegments(transcript);
+    const rendered = await this.renderRecordingSummary(
+      numbered,
+      { ...draft, systemPrompt },
+      requestId,
+      {
+        citationSegments: new Map(segments.map(segment => [segment.n, segment])),
+        credentialUserId: userId,
+      },
+    );
+    return rendered ? { summary: rendered.summary, segments } : null;
+  }
+
+  private async renderRecordingSummary(
+    transcript: string,
+    template: Pick<SummaryTemplate, 'autoTriggerPrompt' | 'sections' | 'systemPrompt'>,
+    callId: string,
+    options: {
+      onDelta?: (accumulatedContent: string) => void | Promise<void>;
+      citationSegments?: CitationContext['segments'];
+      modelType?: SummaryModelType;
+      credentialUserId?: string;
+    },
+  ): Promise<{ summary: string; markedItems: RecordingSummaryMarkedItem[] } | null> {
+    const { onDelta, citationSegments, modelType, credentialUserId } = options;
     // A Scribe admin may have switched off Decisions / Action Items on this template;
     // the prompt must then stop asking for those sections and their annotations.
     const mandatorySections = getMandatorySummarySectionState(template.sections);
@@ -1170,6 +1226,7 @@ export class CallDocumentService {
           )
         : undefined,
       modelType,
+      credentialUserId,
     );
 
     if (!rawSummary) return null;
@@ -1184,7 +1241,7 @@ export class CallDocumentService {
     );
     const summary = stripRecordingSummaryMarkedItemAnnotations(normalizedSummary);
 
-    return { summary, template, markedItems };
+    return { summary, markedItems };
   }
 
   /**
@@ -1200,6 +1257,7 @@ export class CallDocumentService {
     defaultSummaryFields = DEFAULT_SUMMARY_FIELDS,
     onDelta?: (accumulatedContent: string) => void | Promise<void>,
     modelType?: SummaryModelType,
+    credentialUserId?: string,
   ): Promise<string | null> {
     // Use people who actually spoke in the transcript. A channel roster can contain
     // members who never joined or contributed to this particular call.
@@ -1269,6 +1327,7 @@ MANDATORY OUTPUT CONTRACT:
       userPrompt: buildPrompt(),
       operation: 'detailed_summary_generation',
       callId,
+      ...(credentialUserId ? { userId: credentialUserId } : {}),
       ...(effectiveSystemPrompt ? { systemPrompt: effectiveSystemPrompt } : {}),
       ...(modelType ? { modelType } : {}),
       onDelta,
@@ -1314,72 +1373,6 @@ MANDATORY OUTPUT CONTRACT:
   }
 
   /**
-   * Grant the standard access policy for a canvas generated from a call.
-   */
-  private async createCallCanvasAccess(
-    tx: Prisma.TransactionClient,
-    params: {
-      canvasId: string;
-      workspaceId: string;
-      callId: string;
-      createdByUserId: string;
-      callCreatorUserId: string;
-      channelId: string | null;
-      now: Date;
-    },
-  ): Promise<string> {
-    const { canvasId, workspaceId, callId, createdByUserId, callCreatorUserId, channelId, now } = params;
-    const call = await tx.call.findUnique({
-      where: { externalId: callId },
-      select: { id: true, callOrigin: true },
-    });
-    const isChannelThreadCall = call?.callOrigin === CallOrigin.CONVERSATION && channelId !== null;
-
-    await tx.canvasParticipant.create({
-      data: {
-        id: uuidv4(), canvasId, workspaceId, userId: createdByUserId, role: CanvasRole.OWNER,
-        joinedAt: now, updatedAt: now,
-      },
-    });
-    await tx.canvasParticipant.create({
-      data: {
-        id: uuidv4(), canvasId, workspaceId, userId: callCreatorUserId, role: CanvasRole.OWNER,
-        joinedAt: now, updatedAt: now,
-      },
-    });
-
-    if (isChannelThreadCall && call) {
-      const callParticipants = await tx.callParticipant.findMany({
-        where: { callId: call.id, isExternal: false },
-        select: { userId: true },
-      });
-      const editorUserIds = [...new Set(callParticipants.map(({ userId }) => userId))]
-        .filter((userId) => userId !== createdByUserId && userId !== callCreatorUserId);
-      if (editorUserIds.length > 0) {
-        await tx.canvasParticipant.createMany({
-          data: editorUserIds.map((userId) => ({
-            id: uuidv4(), canvasId, workspaceId, userId, role: CanvasRole.EDITOR,
-            joinedAt: now, updatedAt: now,
-          })),
-        });
-      }
-    }
-
-    if (channelId) {
-      await tx.canvasParticipant.create({
-        data: {
-          id: uuidv4(), canvasId, workspaceId, channelId,
-          role: isChannelThreadCall ? CanvasRole.VIEWER : CanvasRole.EDITOR,
-          joinedAt: now, updatedAt: now,
-        },
-      });
-    }
-
-    if (isChannelThreadCall) return 'thread participants as editors and channel as viewer';
-    return channelId ? 'channel as editor' : 'private access';
-  }
-
-  /**
    * Create PRD Canvas in database
    */
   async createPRDCanvas(
@@ -1401,42 +1394,7 @@ MANDATORY OUTPUT CONTRACT:
       const content = formatPRDToBlockNote(prd, callId);
 
       let accessMode = 'private access';
-      await prisma.$transaction(async (tx) => {
-        // Keep PRD canvases private and grant the same explicit access as
-        // detailed-summary canvases generated from this call.
-        await tx.canvas.create({
-          data: {
-            id: canvasId,
-            title,
-            content: [],
-            channelId,
-            workspaceId,
-            createdBy: createdByUserId,
-            visibility: CanvasVisibility.PRIVATE,
-            isTemplate: false,
-            isCollaborative: true,
-            lastEditedBy: createdByUserId,
-            lastEditedAt: now,
-            createdAt: now,
-            updatedAt: now,
-            metadata: {
-              source: 'call_prd',
-              callId,
-              conversationId,
-              generatedAt: now.toISOString(),
-            },
-          },
-        });
-        accessMode = await this.createCallCanvasAccess(tx, {
-          canvasId,
-          workspaceId,
-          callId,
-          createdByUserId,
-          callCreatorUserId,
-          channelId,
-          now,
-        });
-      });
+      ({ accessMode } = await createPRDCanvasTx(prisma, canvasId, title, channelId, workspaceId, createdByUserId, now, callId, conversationId, accessMode, callCreatorUserId));
 
       // Initialize Y-Sweet for collaborative editing
       const ysweetInitialized = await initializeYSweetDoc(canvasId, content, createdByUserId);
@@ -1513,50 +1471,7 @@ MANDATORY OUTPUT CONTRACT:
       // otherwise deny the second insert since the requester isn't a
       // participant yet); regular canvas access after this stays ACL-gated.
       let accessMode = 'private access';
-      await prisma.$transaction(async (tx) => {
-        await tx.canvas.create({
-          data: {
-            id: canvasId,
-            title,
-            content: [],
-            channelId,
-            workspaceId,
-            createdBy: createdByUserId,
-            visibility: CanvasVisibility.PRIVATE,
-            isTemplate: false,
-            isCollaborative: true,
-            lastEditedBy: createdByUserId,
-            lastEditedAt: now,
-            createdAt: now,
-            updatedAt: now,
-            metadata: {
-              source: 'call_detailed_summary',
-              callId,
-              conversationId,
-              isAiGenerated: true,
-              generatedAt: now.toISOString(),
-              mentionedUserIds, // Store mentioned users for side effect handler
-              version: INITIAL_DETAILED_SUMMARY_CANVAS_VERSION,
-              // Recording summary LLM tier the client carried from its
-              // localStorage at recording start; read back on the headless
-              // call-end path (see noteTakerTranscriptService.getSummaryModelPreference).
-              ...(options.summaryModelPreference
-                ? { summaryModelPreference: options.summaryModelPreference }
-                : {}),
-            },
-          },
-        });
-
-        accessMode = await this.createCallCanvasAccess(tx, {
-          canvasId,
-          workspaceId,
-          callId,
-          createdByUserId,
-          callCreatorUserId,
-          channelId,
-          now,
-        });
-      });
+      ({ accessMode } = await createDetailedSummaryCanvasTx(prisma, canvasId, title, channelId, workspaceId, createdByUserId, now, callId, conversationId, mentionedUserIds, options, accessMode, callCreatorUserId));
 
       // Initialize Y-Sweet for collaborative editing
       const ysweetInitialized = await initializeYSweetDoc(canvasId, sanitizedContent as unknown as BlockNoteBlock[], createdByUserId);
@@ -2103,28 +2018,7 @@ A comprehensive detailed summary has been generated from this call.
       });
 
       if (callMessage) {
-        await prisma.$transaction(async (tx) => {
-          // Title generation and first-chunk Canvas publication can now update
-          // this message concurrently. Lock the row and merge from the latest
-          // metadata so neither write erases the other's key.
-          const lockedMessage = await lockMessageMetadata(tx, callMessage.messageId);
-          if (!lockedMessage) {
-            return;
-          }
-
-          // Set the canvas URL, or drop the key entirely when clearing (null).
-          const currentMetadata = (lockedMessage.metadata as Record<string, any>) || {};
-          const nextMetadata = { ...currentMetadata };
-          if (canvasUrl === null) {
-            delete nextMetadata[metadataKey];
-          } else {
-            nextMetadata[metadataKey] = canvasUrl;
-          }
-          await tx.message.update({
-            where: { messageId: callMessage.messageId },
-            data: { metadata: nextMetadata },
-          });
-        });
+        await updateCallMessageMetadataTx(prisma, callMessage, canvasUrl, metadataKey);
         logger.info(`[CallDocumentService] Updated call message ${callMessage.messageId} with ${metadataKey}`);
       } else {
         logger.warn(`[CallDocumentService] Call message not found for callId ${callId}`);

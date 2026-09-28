@@ -154,7 +154,8 @@ async function fetchFromClaw(ctx: WebhookCommandCtx, run: ResolvedRun): Promise<
   const url =
     `${CONFIG.xyneClawUrl.replace(/\/+$/, "")}/internal/sessions/${encodeURIComponent(run.conversationId)}/debug` +
     `?agentSlug=${encodeURIComponent(run.agentSlug)}&limit=${CLAW_RUN_LIMIT}` +
-    `${run.userId ? `&userId=${encodeURIComponent(run.userId)}` : ""}`;
+    `${run.userId ? `&userId=${encodeURIComponent(run.userId)}` : ""}` +
+    `${run.status === "running" ? `&sessionId=${encodeURIComponent(run.sessionId)}` : ""}`;
   const res = await fetch(url, {
     headers: { ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}) },
     signal: AbortSignal.timeout(Number(process.env["DEBUG_PROXY_TIMEOUT_MS"] ?? 30_000)),

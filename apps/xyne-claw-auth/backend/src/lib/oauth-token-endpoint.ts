@@ -69,6 +69,20 @@ export interface OAuthTokenProvider {
    * accountId/baseUri (DocuSign) or domain (Egnyte).
    */
   responseData?(creds: BaseOAuthCreds): Record<string, unknown>;
+  /**
+   * Build the provider consent URL — the body of the connector's
+   * `POST /users/:userId/oauth/<type>/authorize` route, exposed so an internal
+   * caller (routes/app-connectors-internal.ts) can start the same flow without
+   * an HTTP hop to itself. `returnTo` is validated inside (lib/oauth-return.ts).
+   */
+  authorize?(userId: string, opts?: OAuthAuthorizeOptions): Promise<string>;
+}
+
+export interface OAuthAuthorizeOptions {
+  redirectUri?: string | undefined;
+  returnTo?: string | undefined;
+  /** Only honoured by providers whose route accepts a scope override. */
+  scope?: string | undefined;
 }
 
 const defaultResponseData = (creds: BaseOAuthCreds): Record<string, unknown> => ({

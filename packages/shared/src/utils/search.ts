@@ -1,5 +1,5 @@
 import Fuse from 'fuse.js';
-import { UserStatus } from '../zero/schema.js';
+import { UserStatus } from '../zero/types.js';
 import { matchesAllTokens } from './tokenMatch.js';
 
 interface Searchable {
@@ -19,6 +19,35 @@ const isDeactivated = (user: UserLike): boolean => user.status === UserStatus.IN
 // Score for token-AND recall matches: below prefix/substring/email boosts (all negative),
 // at/above weak fuzzy matches. Mirrors the score-0 convention used for channel token matches.
 const TOKEN_MATCH_SCORE = 0;
+
+function isWithinEditDistance(left: string, right: string, maxDistance: number): boolean {
+  if (Math.abs(left.length - right.length) > maxDistance) return false;
+
+  let previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+    const current = [leftIndex];
+    let rowMinimum = leftIndex;
+    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+      const substitutionCost = left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1;
+      const distance = Math.min(
+        (current[rightIndex - 1] ?? 0) + 1,
+        (previous[rightIndex] ?? 0) + 1,
+        (previous[rightIndex - 1] ?? 0) + substitutionCost,
+      );
+      current[rightIndex] = distance;
+      rowMinimum = Math.min(rowMinimum, distance);
+    }
+    if (rowMinimum > maxDistance) return false;
+    previous = current;
+  }
+
+  return (previous[right.length] ?? maxDistance + 1) <= maxDistance;
+}
+
+function isReasonableTokenTypo(queryToken: string, nameToken: string): boolean {
+  const maxDistance = queryToken.length >= 8 ? 2 : queryToken.length >= 4 ? 1 : 0;
+  return maxDistance > 0 && isWithinEditDistance(queryToken, nameToken, maxDistance);
+}
 
 /**
  * Search users and return scored results, mirroring `searchChannelsWithScores`.
@@ -201,12 +230,12 @@ export function searchChannelsWithScores<T extends Searchable>(
   // Fuse.js bitap requires contiguous characters, so multi-word queries like
   // "xyne feedback" fail to match "xyne spaces feedback" (extra word breaks
   // contiguity). Add a token-based AND-contains pass to catch these cases.
-  const fuseMatchedNames = new Set(rescored.map(r => r.item.name));
+  const matchedChannels = new Set(rescored.map(r => r.item));
   const queryTokens = q.split(/\s+/).filter(Boolean);
   if (queryTokens.length > 1) {
     const tokenMatched = channels
       .filter(c => {
-        if (fuseMatchedNames.has(c.name)) return false; // already included
+        if (matchedChannels.has(c)) return false; // already included
         const name = c.name.toLowerCase().replace(/-/g, ' ');
         return queryTokens.every(t => name.includes(t));
       })
@@ -214,6 +243,25 @@ export function searchChannelsWithScores<T extends Searchable>(
       // and fuzzy-only matches (score 0.01–0.3): all-tokens-present > fuzzy, but prefix > all-tokens.
       .map(c => ({ item: c, score: 0 }));
     rescored.push(...tokenMatched);
+    tokenMatched.forEach(result => matchedChannels.add(result.item));
+
+    // A whole-string Fuse search can reject a multi-word query when one token is
+    // misspelled (for example, "xyne feedjback"). Add a bounded token-level typo
+    // pass, while requiring every query token to match the same channel. Short
+    // tokens must remain exact to avoid noisy results.
+    for (const channel of channels) {
+      if (matchedChannels.has(channel)) continue;
+      const nameTokens = channel.name.toLowerCase().replace(/-/g, ' ').split(/\s+/).filter(Boolean);
+      const everyTokenMatches = queryTokens.every(queryToken =>
+        nameTokens.some(
+          nameToken =>
+            nameToken.includes(queryToken) || isReasonableTokenTypo(queryToken, nameToken),
+        ),
+      );
+      if (everyTokenMatches) {
+        rescored.push({ item: channel, score: 0.3 });
+      }
+    }
   }
 
   return rescored

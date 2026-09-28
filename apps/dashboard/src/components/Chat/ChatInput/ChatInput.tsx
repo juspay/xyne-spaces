@@ -25,7 +25,7 @@ import {
   CommandAccessibility,
 } from '@xyne/shared';
 import { BLOCKED_EXTENSIONS } from '../../ui/utils/files';
-import { useChannel, useChannelSearch } from '../../../hooks/useChannels';
+import { getAllChannels, useChannel, useChannelMentionSearch } from '../../../hooks/useChannels';
 import { ConversationTabContext } from '../ConversationTabContext';
 import { intentClassifier } from '../../../services/onDeviceIntent';
 import { useIntentSuggestionToast } from '../../../hooks/useIntentSuggestionToast';
@@ -44,6 +44,7 @@ import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import type { InputBoxHandle } from '../../../hooks/useDragAndDropAreaRef';
 import { CreateTicketModal } from '../../Tickets/CreateTicketModal/CreateTicketModal';
 import { EntityLinkContext } from '../../../contexts/EntityLinkContext';
+import { useRelatedContextAvailable } from '../../../contexts/RelatedContextAvailabilityContext';
 import type { FocusPosition } from '@tiptap/react';
 import type { MentionResult } from '@xyne/shared';
 import { getSlashCommandArtifactDefinition } from '@xyne/shared';
@@ -93,6 +94,13 @@ import {
   stripSlashCommandFromHtml,
 } from '../SlashCommandArtifacts';
 import { useSlashCommandArtifactSideEffects } from '../SlashCommandArtifactSideEffects';
+import { useRelatedContext } from '../../../hooks/useRelatedContext';
+import { useUserPreference } from '../../../machines/userPreferencesMachine';
+import { RelatedContextStrip } from './RelatedContextStrip';
+import { RelatedContextDialog } from './RelatedContextDialog';
+import { openSearchResult } from '../../../utils/searchNavigation';
+import { isElectronApp } from '../../../utils/electronApp';
+import type { RelatedItem } from '../../../types/search';
 
 const CHAT_MESSAGE_SENT_EVENT = 'xyne:chat-message-sent';
 
@@ -210,7 +218,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
 
     const { allowThreadBroadcastMentions } = useThreadBroadcastMentions();
     const [channelSearchQuery, setChannelSearchQuery] = useState('');
-    const channelResults = useChannelSearch(channelSearchQuery, 10);
+    const channelResults = useChannelMentionSearch(channelSearchQuery, 10);
     const conversationId = conversation?.conversationId;
 
     // A thread is one incident's workspace, so it holds at most one open artifact
@@ -232,6 +240,82 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
     // Registry command id of the artifact currently being drafted, if any.
     const [activeArtifactCommand, setActiveArtifactCommand] = useState<string | null>(null);
     const [shortcutModalOpen, setShortcutModalOpen] = useState(false);
+
+    // Threads, tickets, canvases and calls the draft relates to. Opt-in per device
+    // (Preferences → Messaging), for new messages only — not edits, twin replies or a
+    // slash-command artifact being declared.
+    const relatedPreferenceOn = useUserPreference('relatedContextEnabled');
+    const relatedDebounceMs = useUserPreference('relatedContextDebounceMs');
+    // Off in the screens the related-context popup embeds, so a reply typed there
+    // doesn't open a popup of its own.
+    const relatedAvailable = useRelatedContextAvailable();
+    const relatedEnabled =
+      relatedPreferenceOn &&
+      relatedAvailable &&
+      !messageId &&
+      !twinEdit &&
+      !isMobile &&
+      !activeArtifactCommand;
+    const relatedDraftKey = conversationId ?? channelId;
+    const relatedContext = useRelatedContext({
+      enabled: relatedEnabled,
+      conversationId,
+      draftKey: relatedDraftKey,
+      debounceMs: relatedDebounceMs,
+    });
+    const { onDraftChange: onRelatedDraftChange, interrupt: interruptRelated } = relatedContext;
+
+    // A chip opens the related-context popup on that item; ⌘/Ctrl-click, or "open
+    // where it is" inside the popup, goes to the item's own place instead. The popup
+    // keeps the items it opened with: a lookup that lands while it is open changes the
+    // chips, not the list the user is reading.
+    const [relatedPopup, setRelatedPopup] = useState<{
+      open: boolean;
+      items: RelatedItem[];
+      draft: string;
+      selectedId: string | null;
+    }>({ open: false, items: [], draft: '', selectedId: null });
+    const jumpToRelated = useCallback(
+      (item: RelatedItem, event: React.MouseEvent | React.KeyboardEvent): void => {
+        // The channel list lets a Desk ticket open where Desk tickets live, as in cmd+K.
+        // Read at the click, so composers don't re-render as channels change.
+        openSearchResult(
+          item.result,
+          { modifier: event.metaKey || event.ctrlKey, isElectron: isElectronApp(), isMobile },
+          navigate,
+          getAllChannels(),
+        ).catch((error: unknown) => {
+          logger.error(Event.FRONTEND_ERROR, {
+            message: 'Opening a related-context item failed',
+            error,
+          });
+        });
+      },
+      [isMobile, navigate],
+    );
+    const openRelated = useCallback(
+      (item: RelatedItem, event: React.MouseEvent): void => {
+        if (event.metaKey || event.ctrlKey) {
+          jumpToRelated(item, event);
+          return;
+        }
+        setRelatedPopup({
+          open: true,
+          items: relatedContext.items,
+          draft: relatedContext.draft,
+          selectedId: item.id,
+        });
+      },
+      [jumpToRelated, relatedContext.items, relatedContext.draft],
+    );
+    const closeRelatedPopup = useCallback((): void => {
+      setRelatedPopup(popup => (popup.open ? { ...popup, open: false } : popup));
+    }, []);
+    // The popup belongs to this draft while suggestions are on: turning them off, or
+    // moving to another channel or thread, closes it, so it can't come back by itself.
+    useEffect(() => {
+      closeRelatedPopup();
+    }, [relatedEnabled, relatedDraftKey, closeRelatedPopup]);
 
     // Slash commands for this channel — filtered by context (thread vs chat).
     // Global shortcuts are not filtered by thread/chat.
@@ -311,6 +395,12 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
     }, [channelId, conversationId]);
     const agentProgressConversationId = conversationId ?? pendingConversationId ?? undefined;
     const { handleTyping, stopTyping } = useTypingIndicator(currentSessionId);
+    // Every edit, as it happens: typing indicator, and the related-context lookup
+    // dropped the moment the draft it was for changes.
+    const handleComposerTyping = useCallback((): void => {
+      handleTyping();
+      interruptRelated();
+    }, [handleTyping, interruptRelated]);
     const [typingUsers, setTypingUsers] = useState<Array<{ userId: string; username: string }>>([]);
     const [alsoSendToChannel, setAlsoSendToChannel] = useState(false);
     const [isCreateTicketModalOpen, setIsCreateTicketModalOpen] = useState(false);
@@ -575,18 +665,15 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
     const channelItems = React.useMemo(() => {
       if (!channelResults || channelResults.length === 0) return [];
 
-      // Filter channels to only show DEFAULT scope (exclude DM, GROUP_DM, TICKET, DOCUMENT)
-      const items = channelResults
-        .filter(channel => channel.scopeType === ChannelScopeType.DEFAULT)
-        .map(channel => {
-          return {
-            id: channel.id,
-            name: channel.name,
-            isPrivate: channel.visibility === ChannelVisibility.PRIVATE,
-            ...(channel.description && { description: channel.description }),
-            hasAccess: true,
-          };
-        });
+      const items = channelResults.map(channel => {
+        return {
+          id: channel.id,
+          name: channel.name,
+          isPrivate: channel.visibility === ChannelVisibility.PRIVATE,
+          ...(channel.description && { description: channel.description }),
+          hasAccess: true,
+        };
+      });
 
       return items;
     }, [channelResults]);
@@ -598,6 +685,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
     // Track current editor content (both HTML and plain text)
     const handleContentChange = useCallback(
       (html: string, text: string): void => {
+        onRelatedDraftChange(text);
         try {
           const processedHtml = processMessageForSending(html, allUsersForMentionResolution);
           if (messageId || twinEdit) return;
@@ -611,7 +699,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
           // Unable to save draft
         }
       },
-      [lookupId, messageId, twinEdit],
+      [lookupId, messageId, twinEdit, onRelatedDraftChange],
     );
 
     const handleSendMessage = useCallback(
@@ -685,6 +773,9 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
           });
           throw new Error(ATTACHMENT_STILL_UPLOADING);
         }
+        // Past every check that can stop the send. Clearing the editor after a send
+        // emits no content change, so the suggestions are cleared here.
+        onRelatedDraftChange('');
         const hasThreadBroadcastMention =
           !!conversationId &&
           !messageId &&
@@ -995,6 +1086,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
         channelDraftForSend,
         activeArtifactCommand,
         openArtifactCommandsInThread,
+        onRelatedDraftChange,
       ],
     );
 
@@ -1166,7 +1258,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
               onChannelSearch={handleChannelSearch}
               onSendMessage={handleSendMessage}
               onContentChange={handleContentChange}
-              onTyping={handleTyping}
+              onTyping={handleComposerTyping}
               placeholder={
                 getSlashCommandArtifactDefinition(activeArtifactCommand)?.composerPlaceholder ??
                 placeholderText
@@ -1195,6 +1287,15 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
               {...(conversationId && { conversationId })}
               className={className}
               dockSlot={dockSlot}
+              {...(relatedEnabled && { borderActivity: relatedContext.loading })}
+              headerSlot={
+                <RelatedContextStrip
+                  items={relatedContext.items}
+                  suppressPreviews={relatedPopup.open}
+                  onOpen={openRelated}
+                  onDismiss={relatedContext.dismiss}
+                />
+              }
               features={{
                 richText: true,
                 commands: true,
@@ -1324,6 +1425,21 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
             onTicketCreated={handleTicketCreated}
           />
         ) : null}
+        {relatedEnabled && (
+          <RelatedContextDialog
+            open={relatedPopup.open}
+            channelId={channelId}
+            items={relatedPopup.items}
+            draft={relatedPopup.draft}
+            selectedId={relatedPopup.selectedId}
+            onSelect={id => setRelatedPopup(popup => ({ ...popup, selectedId: id }))}
+            onClose={closeRelatedPopup}
+            onJump={(item, event) => {
+              closeRelatedPopup();
+              jumpToRelated(item, event);
+            }}
+          />
+        )}
         {/* Opened by the intent-suggestion toast. */}
         <ScheduleCallModal
           isOpen={scheduleCallOpen}
