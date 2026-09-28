@@ -13,8 +13,9 @@ export type SecretSummary = {
   name: string;
   rotationState: string;
   createdBy: string;
+  updatedBy: string;
   createdAt: string;
-  liveVersion: SecretVersionSummary | null;
+  activeVersion: SecretVersionSummary | null;
 };
 
 export const secretsVaultApi = {
