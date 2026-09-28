@@ -1250,6 +1250,9 @@ importers:
       '@commitlint/config-conventional':
         specifier: ^20.0.0
         version: 20.5.3
+      '@csstools/postcss-is-pseudo-class':
+        specifier: ^6.0.1
+        version: 6.0.1(postcss@8.5.23)
       '@eslint/js':
         specifier: 8.57.1
         version: 8.57.1
@@ -3492,9 +3495,21 @@ packages:
       '@csstools/css-parser-algorithms': ^3.0.5
       '@csstools/css-tokenizer': ^3.0.4
 
+  '@csstools/postcss-is-pseudo-class@6.0.1':
+    resolution: {integrity: sha512-JV0xha7XZD1sTKlwA4rkLSjDZHCilzHVMLOdlDJqlKjaAYvpE38HjCuzmAUx+ZPHWWwBEkL/jZRjMQfk830laA==}
+    engines: {node: '>=20.19.0'}
+    peerDependencies:
+      postcss: 8.5.23
+
   '@csstools/selector-specificity@5.0.0':
     resolution: {integrity: sha512-PCqQV3c4CoVm3kdPhyeZ07VmBRdH2EpMFA/pd9OASpOEC3aXNGoqPDAZ80D0cLpMBxnmk0+yNhGsEx31hq7Gtw==}
     engines: {node: '>=18'}
+    peerDependencies:
+      postcss-selector-parser: 6.1.4
+
+  '@csstools/selector-specificity@6.0.0':
+    resolution: {integrity: sha512-4sSgl78OtOXEX/2d++8A83zHNTgwCJMaR24FvsYL7Uf/VS8HZk9PTwR51elTbGqMuwH3szLvvOXEaVnqn0Z3zA==}
+    engines: {node: '>=20.19.0'}
     peerDependencies:
       postcss-selector-parser: 6.1.4
 
@@ -22256,7 +22271,17 @@ snapshots:
       '@csstools/css-parser-algorithms': 3.0.5(@csstools/css-tokenizer@3.0.4)
       '@csstools/css-tokenizer': 3.0.4
 
+  '@csstools/postcss-is-pseudo-class@6.0.1(postcss@8.5.23)':
+    dependencies:
+      '@csstools/selector-specificity': 6.0.0(postcss-selector-parser@6.1.4)
+      postcss: 8.5.23
+      postcss-selector-parser: 6.1.4
+
   '@csstools/selector-specificity@5.0.0(postcss-selector-parser@6.1.4)':
+    dependencies:
+      postcss-selector-parser: 6.1.4
+
+  '@csstools/selector-specificity@6.0.0(postcss-selector-parser@6.1.4)':
     dependencies:
       postcss-selector-parser: 6.1.4
 

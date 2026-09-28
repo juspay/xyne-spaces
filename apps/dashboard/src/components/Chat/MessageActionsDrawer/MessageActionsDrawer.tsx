@@ -168,11 +168,11 @@ export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
       onOpenChange={handleOpenChange}
       title='Message Actions'
       description='Choose an action for this message'
+      bodyClassName='overflow-visible'
     >
       <motion.div
         animate={{ height: drawerHeight }}
         transition={{ duration: 0.3, ease: [0.25, 1, 0.5, 1] }}
-        className='[*:has(>*>&)]:overflow-visible'
       >
         <div ref={drawerContentRef} className='px-2 py-4'>
           <AnimatePresence initial={false} mode='popLayout' custom={view}>
