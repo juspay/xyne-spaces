@@ -21,6 +21,7 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
 COPY packages/kata-sdk/package.json           packages/kata-sdk/
 COPY packages/icons/package.json              packages/icons/
 COPY packages/storage/package.json            packages/storage/
+COPY packages/logger/package.json             packages/logger/
 COPY packages/shared/package.json             packages/shared/
 COPY packages/xyne-claw-shared/package.json   packages/xyne-claw-shared/
 COPY apps/xyne-claw-auth/backend/package.json apps/xyne-claw-auth/backend/
@@ -33,6 +34,7 @@ RUN pnpm install --frozen-lockfile --prod=false --ignore-scripts --filter xyne-c
 COPY packages/kata-sdk         packages/kata-sdk
 COPY packages/icons            packages/icons
 COPY packages/storage          packages/storage
+COPY packages/logger           packages/logger
 COPY packages/shared           packages/shared
 COPY packages/xyne-claw-shared packages/xyne-claw-shared
 COPY apps/xyne-claw-auth/backend/prisma        apps/xyne-claw-auth/backend/prisma
@@ -47,6 +49,7 @@ RUN npx prisma generate
 # the typecheck. @xyne/icons is here for its React-free `meta` entrypoint, which
 # src/routes/artifact-apps.ts and xyne-claw-shared's react-artifact tool import
 # to validate icon names.
+RUN pnpm --filter @xyne/logger run build
 RUN pnpm --filter @xyne/storage run build
 RUN pnpm --filter @xyne/shared run build
 RUN pnpm --filter @xyne/icons run build

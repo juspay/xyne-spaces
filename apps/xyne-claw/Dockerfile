@@ -47,6 +47,7 @@ COPY packages/kata-sdk/package.json         packages/kata-sdk/
 COPY packages/icons/package.json            packages/icons/
 COPY packages/litellm-client/package.json   packages/litellm-client/
 COPY packages/storage/package.json          packages/storage/
+COPY packages/logger/package.json           packages/logger/
 COPY packages/xyne-claw-shared/package.json packages/xyne-claw-shared/
 COPY apps/xyne-claw/package.json            apps/xyne-claw/
 
@@ -60,6 +61,7 @@ COPY packages/kata-sdk         packages/kata-sdk
 COPY packages/icons            packages/icons
 COPY packages/litellm-client   packages/litellm-client
 COPY packages/storage          packages/storage
+COPY packages/logger           packages/logger
 COPY packages/xyne-claw-shared packages/xyne-claw-shared
 COPY apps/xyne-claw/tsconfig.json apps/xyne-claw/
 COPY apps/xyne-claw/src           apps/xyne-claw/src
@@ -72,6 +74,7 @@ COPY apps/xyne-claw/scripts       apps/xyne-claw/scripts
 # @xyne/icons is here for its React-free `meta` entrypoint, which
 # xyne-claw-shared's react-artifact tool imports to validate icon names.
 RUN pnpm --filter @xyne/litellm-client run build && \
+    pnpm --filter @xyne/logger run build && \
     pnpm --filter @xyne/storage run build && \
     pnpm --filter @xyne/icons run build && \
     pnpm --filter xyne-claw run typecheck
