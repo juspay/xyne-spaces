@@ -17,11 +17,7 @@ spec:
     spec:
       containers:
         - name: tei-batch-proxy
-          # Published by `make push-tei-batch-proxy` (root Makefile / Jenkins "Push Images" stage).
-          # Tag is the git short commit (SOURCE_SHORT_COMMIT). Pin the exact tag at deploy, e.g.:
-          #   kubectl -n xyne-vespa set image deploy/tei-batch-proxy \
-          #     tei-batch-proxy=asia.gcr.io/xyne-spaces/xyne-spaces-tei-batch-proxy:<commit>
-          image: asia.gcr.io/xyne-spaces/xyne-spaces-tei-batch-proxy:latest
+          image: <REGISTRY>/tei-batch-proxy:<tag>
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080
