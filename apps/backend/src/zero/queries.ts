@@ -1863,16 +1863,20 @@ export const queries: AnyQueryRegistry = defineQueries({
         stage: z.string(),
         otherStageNames: z.array(z.string()).optional(),
         limit: z.number(),
+        updatedAfter: z.number().optional(),
       })
       .refine(isCreatedAtRangeValid, CREATED_AT_RANGE_MESSAGE),
     ({ ctx, args }) => {
-      const { stage, otherStageNames, limit } = args;
+      const { stage, otherStageNames, limit, updatedAfter } = args;
       let query = applySupportTicketFilters(args);
       query = otherStageNames
         ? query.where(({ or, cmp }) =>
             or(cmp('stageName', stage), cmp('stageName', 'NOT IN', [stage, ...otherStageNames])),
           )
         : query.where('stageName', stage);
+      if (updatedAfter !== undefined) {
+        query = query.where('updatedAt', '>=', updatedAfter);
+      }
 
       return query
         .orderBy('updatedAt', 'desc')

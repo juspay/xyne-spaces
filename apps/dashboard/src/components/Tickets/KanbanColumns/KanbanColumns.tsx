@@ -528,6 +528,7 @@ const DeskPaginatedStageList: React.FC<{
   otherStageNames?: string[] | undefined;
   dynamicFieldEntries?: DynamicFieldFilterEntry[] | undefined;
   onPageComplete?: ((pageArgs: SupportKanbanPageBaseArgs) => void) | undefined;
+  expectedCount?: number | undefined;
   onTicketsChange?: ((columnKey: string, tickets: Ticket[]) => void) | undefined;
   availableTags: string[];
   visibleColumns?: Set<string> | undefined;
@@ -542,6 +543,7 @@ const DeskPaginatedStageList: React.FC<{
   otherStageNames,
   dynamicFieldEntries,
   onPageComplete,
+  expectedCount,
   ...listProps
 }) => {
   const { tickets, isComplete, hasMore, isLoadingMore, loadMore } = useSupportKanbanTicketsPage({
@@ -549,6 +551,7 @@ const DeskPaginatedStageList: React.FC<{
     stage: stage.name,
     ...(otherStageNames ? { otherStageNames } : {}),
     ...(dynamicFieldEntries ? { dynamicFieldEntries } : {}),
+    ...(expectedCount !== undefined ? { expectedCount } : {}),
   });
 
   React.useEffect(() => {
@@ -867,6 +870,7 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
                     }
                     dynamicFieldEntries={deskPaginationConfig.dynamicFieldEntries}
                     onPageComplete={deskPaginationConfig.onPageComplete}
+                    {...(serverStageCount !== undefined ? { expectedCount: serverStageCount } : {})}
                     {...(onTicketsChange !== undefined ? { onTicketsChange } : {})}
                     availableTags={availableTags}
                     visibleColumns={visibleColumns}
