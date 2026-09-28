@@ -9,7 +9,9 @@ import { AssignmentTab } from './tabs/AssignmentTab';
 import { AutomationTab } from './tabs/AutomationTab';
 import { AIFeaturesTab } from './tabs/AIFeaturesTab';
 import { MetricsTab } from './tabs/MetricsTab';
-import { Inbox, Route, Zap, Bot, X, BarChart3 } from 'lucide-react';
+import { AuditLogSection } from '../../UserGroup/AssignmentConfigScreen/AuditLogSection';
+import { AuditEntityType } from '@xyne/shared';
+import { Inbox, Route, Zap, Bot, X, BarChart3, History } from 'lucide-react';
 
 /** Props for the DeskSettings modal component */
 export interface DeskSettingsProps {
@@ -19,7 +21,7 @@ export interface DeskSettingsProps {
   userID: string | null | undefined;
 }
 
-export type TabId = 'inbox' | 'assignment' | 'automation' | 'Agent' | 'metrics';
+export type TabId = 'inbox' | 'assignment' | 'automation' | 'Agent' | 'metrics' | 'history';
 
 /** Configuration for a single settings tab */
 export interface TabConfig {
@@ -40,6 +42,7 @@ export const DESK_SETTINGS_TABS: { id: TabId; label: string; icon: React.Element
   { id: 'automation', label: 'Automations', icon: Zap },
   { id: 'Agent', label: 'Agent', icon: Bot },
   { id: 'metrics', label: 'Metrics', icon: BarChart3 },
+  { id: 'history', label: 'History', icon: History },
 ];
 
 export type AIFeaturesSubTabId =
@@ -94,7 +97,7 @@ export const DeskSettings: React.FC<DeskSettingsProps> = ({ open, onClose, chann
 
   const availableTabs = useMemo(() => {
     if (isCall) {
-      return DESK_SETTINGS_TABS.filter(tab => ['assignment', 'Agent'].includes(tab.id));
+      return DESK_SETTINGS_TABS.filter(tab => ['assignment', 'Agent', 'history'].includes(tab.id));
     }
     return isEmail ? DESK_SETTINGS_TABS : DESK_SETTINGS_TABS.filter(tab => tab.id !== 'automation');
   }, [isCall, isEmail]);
@@ -211,6 +214,9 @@ export const DeskSettings: React.FC<DeskSettingsProps> = ({ open, onClose, chann
                       />
                     )}
                     {activeTab === 'metrics' && <MetricsTab form={form} />}
+                    {activeTab === 'history' && (
+                      <AuditLogSection entityType={AuditEntityType.DESK} entityId={channelId} />
+                    )}
                   </div>
                 </div>
               )}

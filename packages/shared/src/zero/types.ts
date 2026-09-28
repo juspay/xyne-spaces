@@ -600,6 +600,7 @@ export enum AuditAction {
 export enum AuditEntityType {
   USER_GROUP_ASSIGNMENT_CONFIG = 'USER_GROUP_ASSIGNMENT_CONFIG',
   BOARD = 'BOARD',
+  DESK = 'DESK',
 }
 
 // @ts-ignore TS1294
