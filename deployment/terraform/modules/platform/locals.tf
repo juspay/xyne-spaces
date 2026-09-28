@@ -73,6 +73,8 @@ locals {
       GOOGLE_CLIENT_SECRET           = var.app_secrets.google_client_secret
       AWS_ACCESS_KEY_ID              = local.storage_access_key
       AWS_SECRET_ACCESS_KEY          = local.storage_secret_key
+      LIVEKIT_API_KEY                = local.livekit_api_key
+      LIVEKIT_API_SECRET             = local.livekit_api_secret
     }
     "xyne-zero-secrets" = {
       ZERO_UPSTREAM_DB    = local.pg_urls.zero_app

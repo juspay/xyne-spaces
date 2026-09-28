@@ -393,6 +393,11 @@ LIVEKIT_SERVER_URL: {{ $lk.url | quote }}
 {{- if .ysweet }}
 {{- $_ := set $sec "Y_SWEET_SERVER_TOKEN" (dict "name" "xyne-backend-secrets" "key" "Y_SWEET_SERVER_TOKEN") }}
 {{- end }}
+{{- $lk := $root.Values.infra.livekit | default dict }}
+{{- if and $lk.enabled $lk.url }}
+{{- $_ := set $sec "LIVEKIT_API_KEY" (dict "name" "xyne-backend-secrets" "key" "LIVEKIT_API_KEY" "optional" true) }}
+{{- $_ := set $sec "LIVEKIT_API_SECRET" (dict "name" "xyne-backend-secrets" "key" "LIVEKIT_API_SECRET" "optional" true) }}
+{{- end }}
 {{- $sec = mergeOverwrite $sec (include "xyne-root.storageSecretEnv" (dict "root" $root "secret" "xyne-backend-secrets") | fromYaml) }}
 {{- toYaml $sec }}
 {{- end }}

@@ -368,7 +368,7 @@ resource "aws_launch_template" "this" {
 
   tag_specifications {
     resource_type = "instance"
-    tags          = merge(var.tags, { Name = "${var.name}-livekit-${each.key}", role = "livekit-${each.key}" })
+    tags          = merge(var.tags, { Name = "${var.name}-livekit-${each.key}", role = "livekit-${each.key}", config = nonsensitive(substr(sha256(local.configs[each.key]), 0, 16)) })
   }
 
   tag_specifications {
