@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import type { MutatorResultDetails } from '@rocicorp/zero';
 import type { ChannelRef, PersonRef, Plan } from '@xyne/shared/assistant';
 import { runPlan, type AppActions, type PlanStep } from './planRunner';
+import { requireServerMutation } from './serverMutation';
 
 const daniel: PersonRef = { kind: 'person', id: 'u-daniel', name: 'Daniel Okafor' };
 const dm: ChannelRef = { kind: 'channel', id: 'c-dm', name: 'Daniel Okafor', isDirect: true };
@@ -77,6 +79,33 @@ describe('running a plan', () => {
     expect(results).toEqual([
       { ok: true, produced: dm },
       { ok: false, error: 'You cannot message this user' },
+    ]);
+  });
+
+  it('does not continue after Zero reports a server-side mutation error', async () => {
+    const { actions, calls } = recordingActions({
+      openOrCreateDm: async user => {
+        calls.push(`dm ${user.id}`);
+        const server: Promise<MutatorResultDetails> = Promise.resolve({
+          type: 'error',
+          error: { type: 'app', message: 'The conversation is unavailable.', details: undefined },
+        });
+        await requireServerMutation({ server }, 'Could not reopen the direct message.');
+        return dm;
+      },
+    });
+
+    const results = await runPlan(
+      [
+        { op: 'open_or_create_dm', user: daniel },
+        { op: 'navigate', target: { fromStep: 0 } },
+      ],
+      actions,
+    );
+
+    expect(calls).toEqual(['dm u-daniel']);
+    expect(results).toEqual([
+      { ok: false, error: 'Could not reopen the direct message. The conversation is unavailable.' },
     ]);
   });
 

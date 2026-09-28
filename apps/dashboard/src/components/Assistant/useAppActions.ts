@@ -9,6 +9,7 @@ import { processMessageForSending } from '../Chat/ChatInput/ChatInput.utils';
 import type { ChannelRef } from '@xyne/shared/assistant';
 import { userToMentionResult } from '@xyne/shared/utils';
 import type { AppActions } from './planRunner';
+import { requireServerMutation } from './serverMutation';
 
 /**
  * The app's own actions, as the plan runner needs them. Each one is the path the normal UI
@@ -25,7 +26,10 @@ export function useAppActions(): AppActions {
       openOrCreateDm: async (user): Promise<ChannelRef> => {
         const dm = await channelService.createDm({ participantIds: [user.id] });
         if (dm.isExisting) {
-          void zero.mutate(mutators.channel.reopenDm({ channelId: dm.id, updatedAt: Date.now() }));
+          await requireServerMutation(
+            zero.mutate(mutators.channel.reopenDm({ channelId: dm.id, updatedAt: Date.now() })),
+            'Could not reopen the existing direct message.',
+          );
         }
         return { kind: 'channel', id: dm.id, name: user.name, isDirect: true };
       },
@@ -40,14 +44,17 @@ export function useAppActions(): AppActions {
         });
         if (members.length > 0) {
           const userIds = members.map(member => member.id);
-          void zero.mutate(
-            mutators.channel.addParticipants({
-              channelId: channel.id,
-              userIds,
-              timestamp: Date.now(),
-              participantIds: Object.fromEntries(userIds.map(id => [id, uuidv4()])),
-              userStatusIds: Object.fromEntries(userIds.map(id => [id, uuidv4()])),
-            }),
+          await requireServerMutation(
+            zero.mutate(
+              mutators.channel.addParticipants({
+                channelId: channel.id,
+                userIds,
+                timestamp: Date.now(),
+                participantIds: Object.fromEntries(userIds.map(id => [id, uuidv4()])),
+                userStatusIds: Object.fromEntries(userIds.map(id => [id, uuidv4()])),
+              }),
+            ),
+            'The channel was created, but its members could not be added.',
           );
         }
         return { kind: 'channel', id: channel.id, name: channel.name || name };
