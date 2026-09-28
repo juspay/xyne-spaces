@@ -11,30 +11,19 @@ import type { CategoryConfig, GeneratedTag } from '../types';
 
 /**
  * Asks Jev the same tag categories the LLM was just asked and logs both answers side
- * by side, so a candidate model can be compared against the live one on real traffic.
+ * by side, to compare a candidate model against the live one on real traffic.
  *
- * Inert by construction: returns void, persists nothing, is never awaited. Its result
- * cannot reach replaceTagsForCategories, upsertConfig, Vespa or the tagGenerated event.
+ * Logs and drops the result — it is never persisted and never awaited.
  *
- * Two independent CAC gates, both default false:
- *   shadow_tag_generation_enabled      — whether the Jev call happens
- *   shadow_tag_generation_log_enabled  — whether its answers are logged
- *
- * Endpoint, key and model all come from the existing JEV_* env via jevClient, so the
- * model is whatever JEV_MODEL is — shared with queryIntent/radar/relatedContext and not
- * pinnable here without changing that client.
+ * Gated by CAC `shadow_tag_generation_enabled` (whether the call happens) and
+ * `shadow_tag_generation_log_enabled` (whether answers are logged), both default false.
  */
 
-// Jev answers a warm batch in ~200ms, but the worker's first call also pays DNS, TLS
-// and connection setup. Generous because nothing waits on this: the job has already
-// moved on, so a long ceiling costs only a background socket.
 const SHADOW_TIMEOUT_MS = 30_000;
 
 /**
- * A `choice` question per LLM category with a fixed tag list. Jev's `criteria` wants a
- * description per option but CategoryConfig only has the names, so each option
- * describes itself and the category prompt becomes `instructions` — Jev is working
- * from less guidance than the LLM, which matters when reading the comparison.
+ * Jev's `criteria` wants a description per option, but CategoryConfig only carries the
+ * names, so each option describes itself — Jev works from less guidance than the LLM.
  */
 function buildQuestions(
   categories: Record<string, CategoryConfig>,
@@ -43,7 +32,6 @@ function buildQuestions(
 
   for (const [name, category] of Object.entries(categories)) {
     const options = category.tags ?? [];
-    // Nothing to choose between without a fixed vocabulary of at least two options.
     if (category.method !== 'llm' || options.length < 2) continue;
 
     questions[name] = {
@@ -63,7 +51,6 @@ export async function runShadowTagGeneration(
   meta: { jobId: string; sourceId: string; sourceType: string },
 ): Promise<void> {
   try {
-    // Sync and free, so an instance with no Jev key never reaches the CAC fetch.
     if (!isJevConfigured()) return;
 
     const cacConfig = await AgentsConfig.fetch();
@@ -73,11 +60,7 @@ export async function runShadowTagGeneration(
     const questions = buildQuestions(categories);
     if (Object.keys(questions).length === 0) return;
 
-    // partial: one unusable answer must not discard the rest of the batch.
-    // onFailure: askJev collapses timeout / HTTP status / network / unusable into a
-    // plain null, and logs the detail under its own 'Jev request failed' prefix.
-    // Capturing the kind here keeps the cause on the same line as the email it
-    // belongs to, instead of leaving two unrelated log lines to be correlated.
+    // askJev collapses every failure into a plain null; onFailure recovers the cause.
     let failure: JevFailure | undefined;
     const answers = await askJev(context, questions, SHADOW_TIMEOUT_MS, undefined, {
       partial: true,
@@ -106,13 +89,10 @@ export async function runShadowTagGeneration(
       return;
     }
 
-    // A category may carry several tags (count > 1), so collect rather than overwrite —
-    // keying by last-wins would silently misreport agreement on multi-tag categories.
+    // A category may hold several tags (count > 1), so collect rather than overwrite.
     const primaryByCategory: Record<string, string[]> = {};
     for (const tag of primary) (primaryByCategory[tag.category] ??= []).push(tag.tag);
 
-    // buildQuestions only asks `choice`, so the non-choice branch is unreachable;
-    // flatMap narrows the answer union once rather than guarding every field.
     const comparison = Object.entries(answers).flatMap(([category, answer]) => {
       if (answer.type !== 'choice') return [];
       const primaryTags = primaryByCategory[category] ?? [];
@@ -127,15 +107,11 @@ export async function runShadowTagGeneration(
       ];
     });
 
-    // Both model names, because a comparison is meaningless without knowing what was
-    // compared, and both are runtime config that can change between two log lines.
     const primaryModel = cacConfig.tagGenerationModelName;
-    const shadowModel = envConfig.jev.model || 'jev-1.13.0 (jevClient default)';
+    const shadowModel = envConfig.jev.model;
     const agreedCount = comparison.filter((c) => c.agreed).length;
 
-    // The message is written to be read by a human scanning the worker output:
-    //   priority  low == low (0.35)
-    // '==' agree, '!=' differ, the number is Jev's confidence in its own pick.
+    // Reads as: priority low == low (0.35) — '==' agree, '!=' differ, Jev's confidence.
     const perCategory = comparison
       .map((c) => {
         const primaryText = c.primary.length > 0 ? c.primary.join('/') : '(none)';
@@ -144,10 +120,7 @@ export async function runShadowTagGeneration(
       })
       .join('  |  ');
 
-    // sourceId is the Email.id — the key to look a comparison up by. Deliberately not
-    // called emailId: the logger injects its own `emailId` meaning the user's address.
-    // The structured fields are kept for querying; the message carries the same facts
-    // in a form you can read without parsing JSON.
+    // Not named emailId: the logger injects its own `emailId` meaning the user's address.
     logger.info(
       `[TAG][SHADOW] ${meta.sourceId}  ${agreedCount}/${comparison.length} agree  ` +
         `[${primaryModel} vs ${shadowModel}]  ${perCategory}`,
@@ -157,8 +130,6 @@ export async function runShadowTagGeneration(
         shadowModel,
         agreedCount,
         totalCount: comparison.length,
-        // `context` is a whole uncapped thread while every other askJev caller passes
-        // something short — worth seeing when a call is slow or a result looks odd.
         stateChars: context.length,
         comparison,
       },
