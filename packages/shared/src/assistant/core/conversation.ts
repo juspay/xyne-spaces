@@ -100,6 +100,8 @@ export type EngineStep =
       field: string;
       prompt: string;
       options?: ChoiceOption[];
+      /** The user said "no" to a detail the request needs, so the question comes again. */
+      declined?: boolean;
     }
   | {
       kind: 'confirm';
@@ -249,7 +251,8 @@ export function advance(
       if (active.asking && field && !field.required) {
         return proceed({ ...active, skipped: [...active.skipped, active.asking], asking: null });
       }
-      return proceed(active);
+      const next = proceed(active);
+      return next.step.kind === 'ask' ? { ...next, step: { ...next.step, declined: true } } : next;
     }
 
     case 'cancel':

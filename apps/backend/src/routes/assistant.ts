@@ -1,6 +1,11 @@
 import { Router, type Request, type Response } from 'express';
-import { turnRequestSchema } from '@xyne/shared/assistant';
-import { assistantServices, handleTurn, jevConnection } from '@/services/assistant';
+import { turnRequestSchema, type TurnResponse } from '@xyne/shared/assistant';
+import { assistantServices, handleTurn, isAssistantOn, jevConnection } from '@/services/assistant';
+import {
+  getAssistantTurnDuration,
+  getAssistantTurnsTotal,
+  type AssistantTurnAttributes,
+} from '@/services/otel/assistantMetrics';
 import { UnavailableError } from '@/services/assistant/records';
 import { logger } from '@/utils/logger';
 
@@ -19,6 +24,10 @@ router.post('/turn', async (req: Request, res: Response) => {
   }
   if (!jevConnection()) {
     res.status(503).json({ error: 'The assistant is not set up on this server.' });
+    return;
+  }
+  if (!(await isAssistantOn(user.workspaceId, user.id))) {
+    res.status(503).json({ error: 'The assistant is turned off right now.' });
     return;
   }
   const parsed = turnRequestSchema.safeParse(req.body);
@@ -40,15 +49,18 @@ router.post('/turn', async (req: Request, res: Response) => {
       }),
       context
     );
+    const outcome = outcomeOf(response);
+    record({ input: input.kind, outcome }, startedAt);
     // Metadata only: what the user said stays out of the logs.
     logger.info('[assistant] turn', {
       requestId,
       input: input.kind,
-      ranPlan: Boolean(response.run),
+      outcome,
       durationMs: Date.now() - startedAt,
     });
     res.json(response);
   } catch (error) {
+    record({ input: input.kind, outcome: 'failed' }, startedAt);
     logger.error('[assistant] turn failed', {
       requestId,
       error: error instanceof Error ? error.message : String(error),
@@ -60,5 +72,16 @@ router.post('/turn', async (req: Request, res: Response) => {
     res.status(500).json({ error: 'Something went wrong. Please try again.' });
   }
 });
+
+function outcomeOf(response: TurnResponse): string {
+  if (response.run) return 'plan';
+  if (response.tone === 'error') return 'error';
+  return response.expectsReply ? 'question' : 'reply';
+}
+
+function record(attributes: AssistantTurnAttributes, startedAt: number): void {
+  getAssistantTurnsTotal().add(1, attributes);
+  getAssistantTurnDuration().record(Date.now() - startedAt, attributes);
+}
 
 export default router;

@@ -1,5 +1,6 @@
 import { ACTIONS } from '@xyne/shared/assistant';
 import type { JevAnswer } from '@/services/queryIntent/jevClient';
+import { createBreaker } from './breaker';
 import { readingFor, sentencePieces, type FieldReading } from './fields';
 import { buildIntentQuestions, decideIntent, rankActions } from './intent';
 import { quickChoice, quickText } from './quickReplies';
@@ -255,5 +256,27 @@ describe('the stored session', () => {
     expect(parseSession(null)).toBe(EMPTY_SESSION);
     expect(parseSession('not json')).toBe(EMPTY_SESSION);
     expect(parseSession(JSON.stringify({ ...EMPTY_SESSION, version: 2 }))).toBe(EMPTY_SESSION);
+  });
+});
+
+describe('pausing a failing service', () => {
+  it('pauses after repeated failures, and a success resets the count', () => {
+    const breaker = createBreaker(3, 30_000);
+    breaker.record(false, 0);
+    breaker.record(false, 0);
+    breaker.record(true, 0);
+    breaker.record(false, 0);
+    breaker.record(false, 0);
+    expect(breaker.allows(0)).toBe(true);
+    breaker.record(false, 1_000);
+    expect(breaker.allows(1_000)).toBe(false);
+    expect(breaker.allows(31_000)).toBe(true);
+  });
+
+  it('pauses again at once when the first try after a pause fails', () => {
+    const breaker = createBreaker(3, 30_000);
+    for (let i = 0; i < 3; i += 1) breaker.record(false, 0);
+    breaker.record(false, 30_000);
+    expect(breaker.allows(30_001)).toBe(false);
   });
 });

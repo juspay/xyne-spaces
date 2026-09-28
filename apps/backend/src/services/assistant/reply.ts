@@ -33,8 +33,11 @@ export function replyForStep(
   switch (step.kind) {
     case 'ask': {
       const options = step.options ?? [];
+      const prompt = step.declined
+        ? `No problem. ${step.prompt} Or say “cancel” to stop.`
+        : step.prompt;
       return {
-        say: lead + step.prompt,
+        say: lead + prompt,
         ...(options.length ? { display: { kind: 'choices', prompt: step.prompt, options } } : {}),
         question: { kind: 'detail', field: step.field, options },
         expectsReply: true,

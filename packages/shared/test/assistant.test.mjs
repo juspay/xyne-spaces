@@ -180,6 +180,16 @@ test('cancel drops the request at any point; nothing runs', () => {
   assert.deepEqual(nothing.step, { kind: 'idle', reason: 'nothing-pending' });
 });
 
+test('"no" to a detail the request needs asks for it again, marked as declined', () => {
+  const [asked, declined] = converse(request('create_channel'), { type: 'no' });
+  assert.equal(asked.step.kind, 'ask');
+  assert.equal(asked.step.declined, undefined);
+  assert.equal(declined.step.kind, 'ask');
+  assert.equal(declined.step.field, 'name');
+  assert.equal(declined.step.declined, true);
+  assert.ok(declined.state.active, 'the request is kept');
+});
+
 test('"no" to a preview cancels it', () => {
   const [preview, no] = converse(
     request('send_dm', set('recipient', priya, false), set('message', 'hi')),

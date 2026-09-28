@@ -503,6 +503,15 @@ describe('a turn', () => {
     expect(reply).toMatchObject({ tone: 'error' });
   });
 
+  it('asks again, gently, when told "no" for a detail it needs', async () => {
+    const chat = assistant();
+    chat.hears({ area: 'channels', action: 'create_channel' });
+    await chat.say('create a channel');
+    const again = await chat.say('no');
+    expect(again.say).toBe('No problem. What should I name the channel? Or say “cancel” to stop.');
+    expect(chat.session().conversation.active?.action).toBe('create_channel');
+  });
+
   it('cancels at any time without a model', async () => {
     const chat = assistant();
     chat.hears({ area: 'channels', action: 'create_channel' });
