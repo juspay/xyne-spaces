@@ -98,6 +98,35 @@ export async function listRunnableAccounts(channels: MessagingChannelKey[]): Pro
     .filter((account) => account.config.desiredState === "running" && account.config.connState !== "logged_out");
 }
 
+/** The oldest running account on this number, in any org the sender has linked their number in. */
+export async function findAccountOnNumberForSender(input: {
+  surfaceId: string;
+  selfId: string;
+  senderId: string;
+}): Promise<ChannelAccount | null> {
+  const identities = await prisma.userSurfaceIdentity.findMany({
+    where: { surfaceId: input.surfaceId, surfaceUserId: input.senderId, status: "ACTIVE", userId: { not: null } },
+    select: { orgId: true },
+  });
+  if (identities.length === 0) return null;
+  const row = await prisma.connectedSurface.findFirst({
+    where: {
+      orgId: { in: identities.map((identity) => identity.orgId) },
+      surfaceId: input.surfaceId,
+      surfaceTenantId: { startsWith: ACCOUNT_KEY_PREFIX },
+      status: "ACTIVE",
+      AND: [
+        { config: { path: ["selfId"], equals: input.selfId } },
+        { config: { path: ["desiredState"], equals: "running" } },
+        { NOT: { config: { path: ["connState"], equals: "logged_out" } } },
+      ],
+    },
+    include: WITH_SURFACE_KEY,
+    orderBy: { createdAt: "asc" },
+  });
+  return row ? toChannelAccount(row) : null;
+}
+
 const AGENT_FOR_DISPATCH = {
   select: { id: true, slug: true, name: true, orgId: true, config: true, enabled: true },
 } as const;
