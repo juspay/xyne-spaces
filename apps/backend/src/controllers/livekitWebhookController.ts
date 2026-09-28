@@ -36,11 +36,12 @@ const SDLC_CALL_OWNER_TYPES: readonly string[] = [
 ];
 import { activityService } from '@/services/activity/activityService';
 import { userActivityStatusService } from '@/services/userActivityStatusService';
+import { handleParticipantJoinedTx } from '@/bypassAcl/transactions/livekitWebhookController';
 
-class LiveKitWebhookController {
+export class LiveKitWebhookController {
   private receiver: WebhookReceiver;
 
-  private get db() {
+  get db() {
     return DatabaseClient.getInstance();
   }
 
@@ -721,14 +722,7 @@ class LiveKitWebhookController {
         } else {
           // Update participant to ACCEPTED with joinedAt timestamp using repository method
           const now = new Date();
-          await this.db.$transaction(async (tx) => {
-            await repositories.calls.updateParticipantResponse(
-              existingParticipant.id,
-              InvitationResponse.ACCEPTED,
-              now,
-              tx
-            );
-          });
+          await handleParticipantJoinedTx(this, existingParticipant, now);
           logger.info(`[LiveKit Webhook] Updated participant ${participant.identity} to ACCEPTED for call ${roomName}`);
 
           // Trigger side effects for participant response (dismiss notification, cleanup timeout).
@@ -956,3 +950,4 @@ class LiveKitWebhookController {
 }
 
 export const livekitWebhookController = new LiveKitWebhookController();
+
