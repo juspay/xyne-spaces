@@ -2350,6 +2350,31 @@ internalRouter.post("/:slug/chat/:convId/progress", async (req: Request<{ slug: 
     })();
   }
 
+  // PR card over the same transport. Display-only, so nothing routes back.
+  if (progressBody["kind"] === "pr" && progressBody["pr"]) {
+    const assistantMessageId = req.query["assistantMessageId"] as string | undefined;
+    void (async () => {
+      try {
+        const { readPrProgressFact, renderXyneAiPrCard } = await import("../lib/pr-card-render.js");
+        const fact = readPrProgressFact(progressBody["pr"]);
+        if (!fact) return;
+        const { resolveXyneAiCardTarget } = await import("../lib/flow-card-delivery.js");
+        const target = await resolveXyneAiCardTarget({
+          assistantMessageId,
+          conversationId: req.params.convId,
+          agentSlug: req.params.slug,
+        });
+        if (!target) return;
+        const flow = await renderXyneAiPrCard({ pr: fact, target });
+        if (!flow) return;
+        if (stream) stream.sendEvent("ui-flow", { flow });
+        else if (callbackId) publishChatEvent({ kind: "progress", callbackId, events: [{ event: "ui-flow", data: { flow } }] });
+      } catch (err) {
+        log.warn(`[agent-chat] pr card delivery failed: ${errMsg(err)}`);
+      }
+    })();
+  }
+
   if (events.length > 0 && callbackId) {
     if (stream) {
       // `debug` is withheld unless the subscriber was resolved as elevated when

@@ -1916,6 +1916,40 @@ internalRouter.post("/:streamId/progress", (req: Request<{ streamId: string }>, 
       } else {
         log.warn(`[run-stream] ui-widget progress with no conversation identity stream=${streamId}; card dropped`);
       }
+    } else if (body.kind === "pr" && body.pr) {
+      // Display-only, so nothing routes back. Same identity resolution as the
+      // ui-widget branch above.
+      const meta = streamMeta.get(streamId);
+      const queryAssistantMessageId = req.query["assistantMessageId"];
+      const prAssistantMessageId =
+        (typeof queryAssistantMessageId === "string" && queryAssistantMessageId
+          ? queryAssistantMessageId
+          : undefined) ?? meta?.assistantMessageId;
+      void (async () => {
+        try {
+          const { readPrProgressFact, renderXyneAiPrCard } = await import("../lib/pr-card-render.js");
+          const fact = readPrProgressFact(body.pr);
+          if (!fact) return;
+          const { resolveXyneAiCardTarget } = await import("../lib/flow-card-delivery.js");
+          const target = await resolveXyneAiCardTarget({
+            assistantMessageId: prAssistantMessageId,
+            conversationId:
+              (typeof body["conversationId"] === "string" ? body["conversationId"] : undefined) ??
+              meta?.conversationId,
+            agentSlug:
+              (typeof body["agentSlug"] === "string" ? body["agentSlug"] : undefined) ??
+              meta?.agentSlug,
+          });
+          if (!target) return;
+          const flow = await renderXyneAiPrCard({ pr: fact, target });
+          if (!flow) return;
+          const stream = pendingStreams.get(streamId);
+          if (stream) stream.sendEvent("ui-flow", { flow });
+          else publishStreamEvent({ kind: "progress", streamId, events: [{ event: "ui-flow", data: { flow } }] });
+        } catch (err) {
+          log.warn(`[run-stream] pr card delivery failed: ${errMsg(err)}`);
+        }
+      })();
     } else if (body.attachment) {
       events.push({ event: "attachment", data: body.attachment });
     } else if (body.debugEvent) {
