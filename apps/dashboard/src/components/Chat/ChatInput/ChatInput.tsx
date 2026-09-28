@@ -1390,7 +1390,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
                       <button
                         type='button'
                         onClick={() => setShortcutModalOpen(true)}
-                        className='p-1.5 rounded hover:bg-accent transition-all duration-200 ease-in-out'
+                        className='p-1.5 rounded hover:bg-accent transition duration-200 ease-in-out'
                         aria-label='Open shortcuts'
                         data-track-category='CHAT_INPUT'
                         data-track-name='open-global-shortcuts'
