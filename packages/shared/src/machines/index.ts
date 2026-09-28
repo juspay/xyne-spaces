@@ -44,6 +44,8 @@ export {
 export type {
   DraftMessage,
   DraftMessages,
+  DraftRelatedContext,
+  DraftRelatedContexts,
   TwinDraftDB,
   User,
   Bookmarks,

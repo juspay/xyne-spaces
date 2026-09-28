@@ -2,6 +2,7 @@
   The Xyne Scribe Details Screen
  */
 
+import { useAskAIAvailable } from '../../contexts/AskAIAvailabilityContext';
 import { type ReactElement, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
@@ -172,13 +173,27 @@ interface RecordingDetailV2ScreenProps {
    * navigator and a list to go back to, so this copy drops both.
    */
   embedded?: boolean;
+  /**
+   * The recording to show (its call's externalId) when there is no route for it —
+   * e.g. inside the composer's related-context popup. Defaults to the route param.
+   */
+  recordingId?: string;
+  /**
+   * Replaces "go back" wherever this screen would navigate away — for a host that
+   * has no page to go back to, like a popup that should just close.
+   */
+  onBack?: () => void;
 }
 
 export default function RecordingDetailV2Screen({
   embedded = false,
+  recordingId: recordingIdOverride,
+  onBack,
 }: RecordingDetailV2ScreenProps): ReactElement {
   const { isMobile } = usePlatform();
-  const { recordingId } = useParams<{ recordingId: string }>();
+  const askAIAvailable = useAskAIAvailable();
+  const params = useParams<{ recordingId: string }>();
+  const recordingId = recordingIdOverride ?? params.recordingId;
   const navigate = useNavigate();
   const location = useLocation();
   const requestedTab = useMemo(
@@ -410,6 +425,16 @@ export default function RecordingDetailV2Screen({
   // Embedded, the only list behind this panel is the activity feed — the
   // recordings list would be a detour the user never came through.
   const backTo = embedded ? ACTIVITY_LIST_PATH : (navState?.from ?? '/recordings');
+  const goBack = useCallback(
+    (options?: { replace: boolean }): void => {
+      if (onBack) {
+        onBack();
+        return;
+      }
+      void navigate(backTo, options);
+    },
+    [onBack, navigate, backTo],
+  );
   const currentIndex = useMemo(
     () => (recordingId ? (recordingIds?.indexOf(recordingId) ?? -1) : -1),
     [recordingId, recordingIds],
@@ -693,8 +718,8 @@ export default function RecordingDetailV2Screen({
 
   const handleMinimize = useCallback((): void => {
     sendRecordingEvent({ type: 'setTranscriptMinimized', isMinimized: false });
-    void navigate(backTo);
-  }, [backTo, navigate]);
+    goBack();
+  }, [goBack]);
 
   /**
    * The panels differ wildly in height — a long transcript against a short notes
@@ -968,7 +993,7 @@ export default function RecordingDetailV2Screen({
       <RecordingLoadError
         failure={resolvedFailure}
         viewerEmail={currentUser?.email}
-        onBack={() => void navigate(backTo)}
+        onBack={() => goBack()}
       />
     );
   }
@@ -1112,7 +1137,7 @@ export default function RecordingDetailV2Screen({
                 type='button'
                 variant='ghost'
                 size='iconSm'
-                onClick={() => void navigate(backTo, { replace: true })}
+                onClick={() => goBack({ replace: true })}
                 className='size-8 shrink-0 rounded-lg text-muted-foreground hover:text-foreground'
                 aria-label='Back to activity'
                 data-track-category='RecordingDetailV2'
@@ -1130,7 +1155,7 @@ export default function RecordingDetailV2Screen({
                   <li>
                     <button
                       type='button'
-                      onClick={() => void navigate(backTo)}
+                      onClick={() => goBack()}
                       className='flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground duration-300'
                       data-track-category='RecordingDetailV2'
                       data-track-name='breadcrumb_recordings'
@@ -1167,7 +1192,7 @@ export default function RecordingDetailV2Screen({
                   </Button>
                 </Tooltip>
               )}
-              {!isLive && (
+              {!isLive && askAIAvailable && (
                 <Tooltip content='Ask AI about this recording' side='bottom'>
                   <Button
                     type='button'

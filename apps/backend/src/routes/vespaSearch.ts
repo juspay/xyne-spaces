@@ -1,15 +1,25 @@
 import { Router } from 'express';
 import { searchHandler } from '../services/vespaSearch';
-import { validateQuery, validateSearchFilters } from '../middleware/validation';
+import { validate, validateQuery, validateSearchFilters } from '../middleware/validation';
+import { relatedContextLimiter } from '../middleware/rateLimiters';
 import {
   vespaSearchQuerySchema,
   vespaSchemaQuerySchema,
   queryIntentQuerySchema,
+  relatedContextBodySchema,
 } from '../validators/vespaSearchValidator';
 import { schemaHandler } from '../services/vespaSearch/schemaHandler';
 import { queryIntentHandler } from '../services/queryIntent/handler';
+import { relatedContextHandler } from '../services/relatedContext/handler';
 
 const router = Router();
+/**
+ * The composer's lookup, apart from `router`: that one is also mounted under
+ * /api/vespaSearch/claw for installed apps acting as a user, and a draft classifier
+ * built for someone typing isn't theirs. This one is mounted at
+ * /api/vespaSearch/related only, behind user login.
+ */
+export const relatedContextRouter = Router();
 
 /**
  * @route GET /api/vespaSearch
@@ -62,5 +72,24 @@ router.get('/schema', validateQuery(vespaSchemaQuerySchema), schemaHandler);
  * @param {string} q - The query text (required)
  */
 router.get('/intent', validateQuery(queryIntentQuerySchema), queryIntentHandler);
+
+/**
+ * @route POST /api/vespaSearch/related
+ * @desc What the chat composer's draft relates to: threads, tickets, canvases and calls
+ *       where it is answered, was asked before, or was discussed. `data` is null only
+ *       when the feature is off for the user; a lookup that fails is
+ *       `{ items: [], failed: true }`.
+ *       Dropping the request (the user typed on) stops the work behind it. POST so the
+ *       unsent draft never lands in a URL.
+ * @access Private
+ * @body {string} text - The draft (required)
+ * @body {string} conversationId - The thread being replied in (optional)
+ */
+relatedContextRouter.post(
+  '/',
+  relatedContextLimiter,
+  validate(relatedContextBodySchema),
+  relatedContextHandler
+);
 
 export default router;

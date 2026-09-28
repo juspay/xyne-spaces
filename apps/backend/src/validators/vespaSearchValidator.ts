@@ -1,4 +1,5 @@
 import Joi from 'joi';
+import { RELATED_CONTEXT_MAX_DRAFT_CHARS } from '@xyne/shared';
 
 /**
  * Validation schema for Vespa search queries
@@ -434,4 +435,18 @@ export const queryIntentQuerySchema = Joi.object({
     'string.max': 'Query cannot exceed 500 characters',
     'any.required': 'Query parameter "q" is required'
   }),
+});
+
+/**
+ * Body for the composer's related-context lookup: the draft being typed, and the
+ * thread it is being typed in, if any.
+ */
+export const relatedContextBodySchema = Joi.object({
+  // The composer never sends more than it uses.
+  text: Joi.string().trim().min(1).max(RELATED_CONTEXT_MAX_DRAFT_CHARS).required().messages({
+    'string.empty': '"text" cannot be empty',
+    'string.max': `Text cannot exceed ${RELATED_CONTEXT_MAX_DRAFT_CHARS} characters`,
+    'any.required': '"text" is required'
+  }),
+  conversationId: Joi.string().max(64).optional(),
 });
