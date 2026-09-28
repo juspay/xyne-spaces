@@ -28,7 +28,7 @@ const MessageReceivedConfigSchema = z.object({
       z.array(z.string()).optional(),
     )
     .describe(
-      'Fire when the message body contains ANY of these substrings. Start a value with ^ to match only the start of the message (e.g. ^ALARM |). Press Enter after each one. Case-insensitive. Empty matches any message.',
+      'Fire when the message contains ANY of these. Prefix with ^ to match the start (e.g. ^ALARM). Case-insensitive.',
     ),
   messageTypes: z
     .array(z.nativeEnum(MessageType))
