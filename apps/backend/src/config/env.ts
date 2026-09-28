@@ -274,8 +274,6 @@ const envSchema = Joi.object({
   CALL_RECORDING_FAST_LITELLM_MODEL: Joi.string().allow('').default(''),
   CALL_RECORDING_THINKING_LITELLM_MODEL: Joi.string().allow('').default(''),
   ACTIVITY_CLASSIFICATION_MODEL: Joi.string().default(''),
-  PRODUCT_INSIGHTS_RECLUSTER_CRON: Joi.string().default('0 2 * * *'),
-  PRODUCT_INSIGHTS_RECLUSTER_WINDOW_DAYS: Joi.number().default(30),
   // Working Hours Configuration (in IST)
   WORKING_HOUR_START: Joi.number().default(11),
   WORKING_HOUR_END: Joi.number().default(19),
@@ -985,12 +983,6 @@ export const config = {
     pgStatementTimeoutMs: envVars.DASHBOARD_PG_STATEMENT_TIMEOUT_MS,
     pgConnectionTimeoutMs: envVars.DASHBOARD_PG_CONNECTION_TIMEOUT_MS,
     chRequestTimeoutMs: envVars.DASHBOARD_CH_REQUEST_TIMEOUT_MS,
-  },
-  productInsights: {
-    recluster: {
-      cron: envVars.PRODUCT_INSIGHTS_RECLUSTER_CRON,
-      windowDays: envVars.PRODUCT_INSIGHTS_RECLUSTER_WINDOW_DAYS,
-    },
   },
   messageClassifier: {
     url: envVars.MESSAGE_CLASSIFIER_URL,

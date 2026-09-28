@@ -1,18 +1,28 @@
-import { ReactElement, useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactElement } from 'react';
 import { toast } from 'sonner';
-import { Laptop } from 'lucide-react';
-import { cn } from '@/utils/classNames';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/Select/index';
 import { useAuth } from '@/hooks/useAuth';
-import type { LocalHarnessInstallation } from '@/types/electron';
 import {
   clearUserAgentProvider,
   getLocalHarnessDefaultProvider,
   getUserAgentProvider,
   setUserAgentProvider,
 } from '@/services/claw/localHarnessService';
+import { clawErrorText } from '@/services/claw/clawRequest';
 import { PROVIDER_DISPLAY } from '@/services/claw/modelProviderConfig';
+import type { LocalHarnessInstallation } from '@/types/electron';
+import {
+  DetailCard,
+  DetailRow,
+  DetailSection,
+} from '../../../../shared/primitives/DetailPrimitives';
 
-/** Clearing the per-agent row is how an agent follows the account-wide default. */
 const INHERIT = '__inherit__';
 const HOSTED = 'spaces';
 
@@ -28,11 +38,13 @@ const HARNESS_LABEL: Record<string, string> = {
 const providerLabel = (provider: string): string =>
   HARNESS_LABEL[provider] ?? PROVIDER_DISPLAY[provider] ?? provider;
 
-interface Props {
-  agentSlug: string;
-}
-
-const PersonalHarnessSection = ({ agentSlug }: Props): ReactElement | null => {
+/**
+ * Per-user, per-agent override for where *my* runs of this agent go — distinct
+ * from the agent-level provider order in {@link ModelCard}, which is the same
+ * for everyone who runs it. Only renders when the viewer's Electron app has at
+ * least one authenticated local harness installed.
+ */
+export function PersonalHarnessSection({ agentSlug }: { agentSlug: string }): ReactElement | null {
   const { user } = useAuth();
   const userId = user?.id ?? '';
   const api = typeof window !== 'undefined' ? window.electronAPI?.localHarness : undefined;
@@ -91,7 +103,7 @@ const PersonalHarnessSection = ({ agentSlug }: Props): ReactElement | null => {
       );
     } catch (err) {
       setCurrent(previous);
-      toast.error(err instanceof Error ? err.message : 'Could not save your choice');
+      toast.error(clawErrorText(err, 'Could not save your choice'));
     } finally {
       setSaving(false);
     }
@@ -103,82 +115,54 @@ const PersonalHarnessSection = ({ agentSlug }: Props): ReactElement | null => {
       label: accountDefault
         ? `Use my default (${providerLabel(accountDefault)})`
         : 'Workspace default',
-      detail: accountDefault ? 'Set in Claw Agents → Settings.' : 'Runs on Xyne’s servers.',
     },
     ...installations.map(install => ({
       value: install.provider,
-      label: providerLabel(install.provider),
-      detail: install.version ? `${install.version} · this device` : 'this device',
+      label: `${providerLabel(install.provider)} — this device`,
     })),
     ...(accountDefault
-      ? [{ value: HOSTED, label: 'Xyne’s servers', detail: 'Ignore my default for this agent.' }]
+      ? [{ value: HOSTED, label: "Xyne's servers (ignore my default for this agent)" }]
       : []),
   ];
 
-  // A provider picked on another surface (a personal Anthropic/Codex key, a
-  // harness that has since been disconnected) still has to render as THE
-  // selection — otherwise this list would show "inherit" and one stray click
-  // would clear a setting the user never touched here.
+  // A provider picked on another surface (a personal key, a harness that has
+  // since been disconnected) still has to render as THE selection — otherwise
+  // this list would show "inherit" and one stray click would clear a setting
+  // the user never touched here.
   if (effective !== INHERIT && !options.some(option => option.value === effective)) {
-    options.push({
-      value: effective,
-      label: providerLabel(effective),
-      detail: 'your current pick for this agent',
-    });
+    options.push({ value: effective, label: `${providerLabel(effective)} (current pick)` });
   }
 
   return (
-    <section className='flex max-w-2xl flex-col gap-3'>
-      <div className='flex flex-col gap-0.5'>
-        <div className='flex items-center gap-2'>
-          <Laptop className='size-4 text-muted-foreground' />
-          <h2 className='text-sm font-semibold text-foreground'>Run this agent on my machine</h2>
-        </div>
-        <p className='text-xs text-muted-foreground'>
-          Applies to your runs only — it doesn’t change the agent for anyone else.
-        </p>
-      </div>
-
-      <div
-        className='flex flex-col'
-        role='radiogroup'
-        aria-label='Where your runs of this agent go'
-      >
-        {options.map((option, i) => {
-          const selected = option.value === effective;
-          return (
-            <button
-              key={option.value}
-              type='button'
-              role='radio'
-              aria-checked={selected}
+    <DetailSection
+      label='Run this agent on my machine'
+      info='Applies to your runs only — it does not change the agent for anyone else.'
+    >
+      <DetailCard>
+        <DetailRow title='Where your runs go' last>
+          <Select value={effective} onValueChange={v => void choose(v)}>
+            <SelectTrigger
+              size='sm'
+              aria-label='Where your runs of this agent go'
               disabled={saving}
-              onClick={() => void choose(option.value)}
               data-track-category='Claw Agents'
-              data-track-name={`Personal provider: ${option.value}`}
-              className={cn(
-                'flex items-center gap-3 py-2.5 text-left transition-opacity disabled:opacity-60',
-                i > 0 && 'border-t border-border',
-              )}
+              data-track-name='Agent detail v2: set personal harness'
+              className='h-9 w-auto min-w-0 max-w-[260px] gap-2 rounded-[10px]'
             >
-              <span
-                className={cn(
-                  'flex size-4 shrink-0 items-center justify-center rounded-full border transition-colors',
-                  selected ? 'border-foreground' : 'border-border',
-                )}
-              >
-                {selected && <span className='size-1.5 rounded-full bg-foreground' />}
-              </span>
-              <span className='flex min-w-0 flex-1 items-baseline gap-2'>
-                <span className='text-sm text-foreground'>{option.label}</span>
-                <span className='truncate text-xs text-muted-foreground'>{option.detail}</span>
-              </span>
-            </button>
-          );
-        })}
-      </div>
-    </section>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent align='end'>
+              {options.map(option => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </DetailRow>
+      </DetailCard>
+    </DetailSection>
   );
-};
+}
 
 export default PersonalHarnessSection;

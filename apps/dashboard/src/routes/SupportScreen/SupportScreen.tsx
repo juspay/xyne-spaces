@@ -304,7 +304,7 @@ const ChannelInfoModal = ({
   if (!channel) return null;
   return (
     <Dialog
-      className='max-w-[620px] rounded-2xl overflow-hidden'
+      className='max-w-[760px] rounded-2xl overflow-hidden'
       open={isOpen}
       onOpenChange={open => {
         if (!open) onClose();

@@ -18,7 +18,6 @@ import {
   Brain,
   CalendarClock,
   ArrowRightLeft,
-  Lightbulb,
   FileText,
   ShieldUser,
   AppWindow,
@@ -1515,7 +1514,6 @@ function genericScenes(visualKey: string): SceneConfig[] {
     scheduled: 'chat',
     'projects-board': 'tickets',
     'list-projects': 'tickets',
-    insights: 'tickets',
     forms: 'tickets',
     support: 'tickets',
     workflows: 'tickets',
@@ -1587,11 +1585,6 @@ function genericScenes(visualKey: string): SceneConfig[] {
         'Platform Migration · BK · On Hold',
         'Design System · MR · Active',
       ],
-    },
-    insights: {
-      title: 'Insights',
-      icon: <Lightbulb size={10} />,
-      lines: ['Messages: 2,340 (+12%)', 'Resolved tickets: 87 (+5%)', 'Call hours: 14h (−2%)'],
     },
     forms: {
       title: 'Forms',

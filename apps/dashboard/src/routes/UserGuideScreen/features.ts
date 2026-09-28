@@ -21,7 +21,6 @@ import {
   MessagesSquare,
   Mic,
   Phone,
-  PieChart,
   Search,
   ShieldUser,
   SlidersHorizontal,
@@ -110,7 +109,7 @@ export const GUIDE_CATEGORIES: GuideCategoryInfo[] = [
   {
     id: 'data',
     title: 'Data & Reporting',
-    description: 'Analytics, dashboards, product insights, and forms',
+    description: 'Analytics, dashboards, and forms',
     icon: BarChart2,
   },
   {
@@ -252,10 +251,11 @@ export const USER_GUIDE_FEATURES: UserGuideFeature[] = [
     title: 'Scheduled Messages',
     tagline: 'Write now, send later at the right time.',
     path: '/scheduled-messages',
-    findIn: 'Sidebar -> Scheduled Messages',
+    findIn:
+      "Chat sidebar -> Scheduled Messages, or a channel's info panel -> Scheduled Messages tab",
     actions: ['Create scheduled message', 'Choose send time', 'Edit or cancel pending schedules'],
     steps: [
-      'Click Scheduled Messages [[CalendarClock]] in the left sidebar to open the scheduled messages page.',
+      "Click Scheduled Messages [[CalendarClock]] in the chat sidebar to see your scheduled messages across every channel, DM, and group DM — or open a channel's info panel and go to its Scheduled Messages tab to manage that channel's schedule.",
       'Click "Create Scheduled Message" in the top-right to open the compose form.',
       'Select the target channel, write your message, and choose the days and time to send — e.g. "Weekdays (Mon–Fri) at 9:00 AM".',
       'Click "Save" to confirm — the message appears in the list with its channel, schedule, and send time.',
@@ -519,25 +519,6 @@ export const USER_GUIDE_FEATURES: UserGuideFeature[] = [
     visualKey: 'projects-board',
   },
 
-  {
-    id: 'product-insights',
-    title: 'Product Insights',
-    tagline: 'Understand usage and behavior trends.',
-    path: '/product-insights',
-    findIn: 'Sidebar -> Insights',
-    actions: ['Open insight dashboards', 'Review trend signals', 'Share product learnings'],
-    steps: [
-      'Click Insights [[PieChart]] in the left sidebar to open the Product Insights view.',
-      'The overview shows ticket data grouped by theme — a pie chart displays cluster counts across categories.',
-      'Click a cluster in the chart to drill into the individual tickets for that theme.',
-      'Review the ticket list for a cluster to understand patterns and recurring issues.',
-    ],
-    tip: 'Set a weekly reminder to review Insights every Monday — spot trends before they become problems.',
-    keywords: ['insights', 'product', 'trends'],
-    category: 'data',
-    icon: PieChart,
-    visualKey: 'insights',
-  },
   {
     id: 'forms',
     title: 'Forms',
