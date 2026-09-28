@@ -17,8 +17,10 @@ non-production test identity and a conversation that the identity is allowed to 
 }
 ```
 
-`userId`, `token`, `workspaceId` and `conversationId` are required. `channelId` is optional: the
-`zero-query-transform` scenario adds the channel-conversation read only for identities that supply one.
+`userId`, `token`, `workspaceId` and `conversationId` are required. Two fields are optional:
+`channelId`, which lets `zero-query-transform` add the channel-conversation read, and
+`searchTerms` (an array of strings), which the `search` scenario uses instead of its built-in
+generic terms. Supply `searchTerms` only if the terms are safe to commit to a Jenkins credential.
 
 Never commit the real file, archive it in Jenkins, print it in logs, or use customer/production data.
 
@@ -45,8 +47,8 @@ A longer `PERF_THINK_TIME_SECONDS` lowers the requirement proportionally. If the
 configured with a higher limit for the test window, pass the real value as
 `PERF_ZERO_MAX_REQUESTS` so the guard sizes against the environment instead of the source default.
 
-The `rest-messaging` scenario goes through `authMiddleware.authenticate` rather than the Zero
-limiter, so it carries no identity floor — but spreading load across identities still produces more
+The `search` and `rest-messaging` scenarios go through `authMiddleware.authenticate` rather than
+the Zero limiter, so they carry no identity floor — but spreading load across identities still produces more
 realistic contention.
 
 ## Token lifetime

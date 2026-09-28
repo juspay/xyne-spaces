@@ -9,6 +9,7 @@ a future GitHub Actions workflow can call the same `pnpm perf:run` command.
 | --- | --- | --- | --- |
 | `smoke` | `GET /api/health/readiness` | no | Connectivity and database readiness. Start here. |
 | `zero-query-transform` | `POST /api/zero/query` | no | The query-transform step: auth, rate limit, ACL, tenant scoping, AST compile. |
+| `search` | `GET /api/vespaSearch/` | no | ACL-filtered Vespa retrieval. Executes a real search and returns rows. |
 | `rest-messaging` | `POST /api/conversations/:id/messages` | **yes** | The REST send path used by bots, the Claw MCP route and attachment uploads. **Gated — see below.** |
 
 ### `zero-query-transform` — what it is, precisely
@@ -61,6 +62,7 @@ What is built here covers a slice of that, and the gap is deliberate, not forgot
 | 0 — reconnect/retry characterisation (Socket.IO) | **not built.** Needs a socket client; k6 HTTP cannot reach it. |
 | 1 — steady-state message send | **not built.** The real send path is the Zero mutator `messages.send` → `POST /api/zero/push`, whose request envelope is undocumented (Zero's own docs say to read the `handleMutateRequest` source). `rest-messaging` hits a REST endpoint the chat UI does not use. |
 | 2 — participant fan-out wall | **not built.** Depends on scenario 1. |
+| Wave 2 — search (Vespa + ACL) | `search`. Executes retrieval, so unlike the Zero scenario its latency is real work. |
 | 3 — mixed human + external-source ingest | **not built.** |
 | 4 — soak and recovery | profile exists; the pipeline it should soak does not. |
 | — readiness / connectivity | `smoke`. |
@@ -177,7 +179,7 @@ implemented yet**. Decide one of: a k6 `teardown()` that deletes by marker, a do
 reset job, or a throwaway workspace per run — before running a capacity profile of
 `rest-messaging` against pre-production.
 
-`zero-query-transform` is unaffected: it writes nothing.
+`zero-query-transform` and `search` are unaffected: they write nothing.
 
 ## 6. Send metrics to VictoriaMetrics
 
