@@ -36,65 +36,16 @@ import {
   DM_SIDEBAR_MAX_WIDTH,
   DM_SIDEBAR_MIN_WIDTH,
 } from './dmSidebarWidth';
-import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import Button from '../../ui/Button';
-import Avatar from '../../ui/Avatar/Avatar';
 import { useDmsPaginatedMessages } from '../../../hooks/useDmsPaginatedMessages';
 import { useDmsSearch } from '../../../hooks/useDmsSearch';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
-import { Channel, ChannelScopeType, User } from '@xyne/shared';
-import { StatusIndicator } from '../../ui/StatusIndicator';
+import { Channel, ChannelScopeType } from '@xyne/shared';
 import { FilterPills, type FilterPillOption } from '../../ui/FilterPills';
 import * as Tabs from '@radix-ui/react-tabs';
 import { cn } from '../../../utils/classNames';
 import { ShortcutTooltip } from '../../ui/ShortcutTooltip';
-import { getUserDisplayName } from '../../../utils/userDisplayName';
-
-const DM_SEARCH_ROW_CLASS =
-  'flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-foreground/[6%]';
-
-// Simple component for DM search results (no message preview)
-const DmSearchResultItem = ({ channel }: { channel: Channel }): ReactElement => {
-  const context = useAuthContextValues();
-  const { displayName, avatarUserId } = useChannelDisplayName(channel, context.userID);
-
-  return (
-    <>
-      <Avatar userId={avatarUserId} size='rg' showActiveStatus={false} className='shrink-0' />
-      <span className='min-w-0 flex-1 truncate'>{displayName}</span>
-    </>
-  );
-};
-
-// Component for people search results
-interface DmUserSearchResultItemProps {
-  user: User;
-  isCurrentUser?: boolean;
-}
-
-const DmUserSearchResultItem = ({
-  user,
-  isCurrentUser,
-}: DmUserSearchResultItemProps): ReactElement => {
-  return (
-    <>
-      <Avatar userId={user.id} size='rg' className='shrink-0' />
-      <span className='min-w-0 truncate'>
-        {getUserDisplayName(user)}
-        {isCurrentUser ? ' (you)' : ''}
-      </span>
-      {(user.activityStatus || user.statusEmoji || user.statusContent) && (
-        <StatusIndicator
-          statusEmoji={user.statusEmoji}
-          statusContent={user.statusContent}
-          statusExpiryAt={user.statusExpiryAt}
-          activityStatus={user.activityStatus}
-          size='sm'
-        />
-      )}
-    </>
-  );
-};
+import { DmSearchDropdown } from './DmSearchDropdown';
 
 // Hardcoded item heights derived from CSS (avoids DOM measurement via ref)
 // Desktop: py-2 (16px) + 19px title + 1px + 20px preview + 2px border
@@ -232,6 +183,7 @@ const DmsPage = (): ReactElement => {
     setDmSearchQuery,
     peopleResults,
     groupDmResults,
+    isSearchStale,
     showDmSearchDropdown,
     setShowDmSearchDropdown,
     selectedDmSearchIndex,
@@ -391,86 +343,27 @@ const DmsPage = (): ReactElement => {
     [navigate, setDmSearchQuery, setShowDmSearchDropdown],
   );
 
-  // Shared search dropdown JSX to avoid duplication between mobile and desktop
-  const renderSearchDropdown = (): ReactElement | null => {
-    if (!showDmSearchDropdown || !dmSearchQuery.trim()) return null;
+  // Stable void-wrapper (handleDmSelect is async; the dropdown's prop type is sync).
+  const handleSearchSelectChannel = useCallback(
+    (selectedChannelId: string): void => void handleDmSelect(selectedChannelId),
+    [handleDmSelect],
+  );
 
-    const noResults = peopleResults.length === 0 && groupDmResults.length === 0;
-
-    return (
-      <div className='absolute top-full left-0 right-0 z-50 mt-2 max-h-80 overflow-y-auto rounded-xl border border-border bg-background p-1.5 shadow-lg'>
-        {noResults ? (
-          <div className='px-2 py-1.5 text-sm text-muted-foreground'>No results found</div>
-        ) : (
-          <>
-            {/* Order: People → Group DMs */}
-            {peopleResults.map((person, index) => {
-              const personChannelId = person.channelId;
-              return (
-                <button
-                  key={person.user.id}
-                  type='button'
-                  className={cn(
-                    DM_SEARCH_ROW_CLASS,
-                    index === selectedDmSearchIndex && 'bg-foreground/[6%]',
-                  )}
-                  onClick={() =>
-                    personChannelId
-                      ? void handleDmSelect(personChannelId)
-                      : handleUserSelect(person.user.id)
-                  }
-                  data-track-category='DM'
-                  data-track-name={
-                    personChannelId ? 'SELECT_DM_SEARCH_RESULT' : 'SELECT_NEW_DM_USER'
-                  }
-                  data-track-metadata={JSON.stringify({
-                    channelId: personChannelId,
-                    resultCount: filteredDirectMessages.length,
-                    queryLength: dmSearchQuery.length,
-                  })}
-                >
-                  <DmUserSearchResultItem
-                    user={person.user}
-                    isCurrentUser={person.user.id === context.userID}
-                  />
-                </button>
-              );
-            })}
-            {groupDmResults.length > 0 && (
-              <>
-                {peopleResults.length > 0 && <div className='my-1 h-px bg-border' />}
-                <div className='px-2 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground'>
-                  Group DMs
-                </div>
-                {groupDmResults.map((channel, index) => (
-                  <button
-                    key={channel.id}
-                    type='button'
-                    className={cn(
-                      DM_SEARCH_ROW_CLASS,
-                      peopleResults.length + index === selectedDmSearchIndex &&
-                        'bg-foreground/[6%]',
-                    )}
-                    onClick={() => void handleDmSelect(channel.id)}
-                    data-track-category='DM'
-                    data-track-name='SELECT_DM_SEARCH_RESULT'
-                    data-track-label='Select DM search result'
-                    data-track-metadata={JSON.stringify({
-                      channelId: channel.id,
-                      resultCount: filteredDirectMessages.length,
-                      queryLength: dmSearchQuery.length,
-                    })}
-                  >
-                    <DmSearchResultItem channel={channel} />
-                  </button>
-                ))}
-              </>
-            )}
-          </>
-        )}
-      </div>
-    );
-  };
+  // Shared search dropdown props — identical for mobile and desktop layouts
+  const searchDropdown = (
+    <DmSearchDropdown
+      isVisible={showDmSearchDropdown && dmSearchQuery.trim().length > 0}
+      peopleResults={peopleResults}
+      groupDmResults={groupDmResults}
+      selectedIndex={selectedDmSearchIndex}
+      isStale={isSearchStale}
+      queryLength={dmSearchQuery.length}
+      trackedResultCount={filteredDirectMessages.length}
+      currentUserId={context.userID}
+      onSelectChannel={handleSearchSelectChannel}
+      onSelectUser={handleUserSelect}
+    />
+  );
 
   if (isMobile) {
     // If on a specific DM route, render the outlet for chat view
@@ -558,7 +451,7 @@ const DmsPage = (): ReactElement => {
                 <X className='size-4 text-muted-foreground hover:text-foreground' />
               </Button>
             )}
-            {renderSearchDropdown()}
+            {searchDropdown}
           </div>
           <FilterPills
             tabs={dmFilterTabs}
@@ -741,7 +634,7 @@ const DmsPage = (): ReactElement => {
                       <X className='size-4 text-muted-foreground hover:text-foreground' />
                     </Button>
                   )}
-                  {renderSearchDropdown()}
+                  {searchDropdown}
                 </div>
               </div>
 
