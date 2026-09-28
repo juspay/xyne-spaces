@@ -38,8 +38,8 @@ test('everything in one sentence: a clear DM runs without a preview', () => {
   assert.equal(result.step.kind, 'run');
   assert.deepEqual(result.step.plan, [
     { op: 'open_or_create_dm', user: daniel },
-    { op: 'send_message', target: { fromStep: 0 }, text: 'hello' },
     { op: 'navigate', target: { fromStep: 0 } },
+    { op: 'send_message', target: { fromStep: 0 }, text: 'hello' },
   ]);
   assert.equal(result.step.done, 'Sent to Daniel Okafor.');
   assert.equal(result.state.active, null);
@@ -216,7 +216,7 @@ test('creating a channel always previews, even when every detail is clear', () =
   );
 });
 
-test('a first message is posted into the new channel, then it opens', () => {
+test('a new channel opens first, then its first message is posted', () => {
   const run = converse(
     request(
       'create_channel',
@@ -229,8 +229,8 @@ test('a first message is posted into the new channel, then it opens', () => {
   ).at(-1);
   assert.deepEqual(run.step.plan, [
     { op: 'create_channel', name: 'ABC', visibility: 'public', members: [] },
-    { op: 'send_message', target: { fromStep: 0 }, text: 'hello' },
     { op: 'navigate', target: { fromStep: 0 } },
+    { op: 'send_message', target: { fromStep: 0 }, text: 'hello' },
   ]);
   assert.equal(run.step.done, 'Created “ABC” and posted “hello”. It’s open now.');
 });

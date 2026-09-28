@@ -92,8 +92,10 @@ export function useAssistant({
     onTrace: note,
   });
 
-  const addTurn = useCallback((turn: Omit<AssistantTurn, 'id' | 'at'>): void => {
-    setTurns(previous => [...previous, { ...turn, id: uuidv4(), at: new Date() }]);
+  const addTurn = useCallback((turn: Omit<AssistantTurn, 'id' | 'at'>): string => {
+    const id = uuidv4();
+    setTurns(previous => [...previous, { ...turn, id, at: new Date() }]);
+    return id;
   }, []);
 
   const reply = useCallback(
@@ -138,7 +140,12 @@ export function useAssistant({
         reply(response);
         if (!response.run) return;
         const ranAt = performance.now();
-        const results = await runPlan(response.run.plan, appActions);
+        const stepsTurn = addTurn({ role: 'assistant', text: '', steps: [] });
+        const results = await runPlan(response.run.plan, appActions, steps => {
+          setTurns(previous =>
+            previous.map(turn => (turn.id === stepsTurn ? { ...turn, steps } : turn)),
+          );
+        });
         note(
           'Plan ran',
           `${Math.round(performance.now() - ranAt)} ms · ${describeResults(results)}`,
@@ -146,7 +153,7 @@ export function useAssistant({
         next = { kind: 'planResult', runId: response.run.runId, results };
       }
     },
-    [appActions, note, reply],
+    [addTurn, appActions, note, reply],
   );
 
   const enqueue = useCallback(

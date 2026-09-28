@@ -6,10 +6,11 @@ import {
   type ReactElement,
   type ReactNode,
 } from 'react';
-import { Bug, MessageSquareText, Volume2, VolumeX, X } from 'lucide-react';
+import { Bug, Check, Circle, Loader2, MessageSquareText, Volume2, VolumeX, X } from 'lucide-react';
 import { cn } from '../../../utils/classNames';
 import type { VoiceLevelStore } from '../audio/levelStore';
 import type { TraceEntry } from '../diagnostics';
+import type { PlanStep } from '../planRunner';
 import type { AssistantPhase, Chip, StageContent } from '../transcript';
 import { Diagnostics } from './Diagnostics';
 import { VoiceOrb } from './VoiceOrb';
@@ -100,6 +101,34 @@ function ChipButton({ chip, onClick }: { chip: Chip; onClick: () => void }): Rea
     >
       <span className='line-clamp-1 text-foreground'>{chip.label}</span>
     </button>
+  );
+}
+
+const STEP_ICON: Record<PlanStep['status'], ReactElement> = {
+  waiting: <Circle className='h-3.5 w-3.5' aria-hidden />,
+  running: <Loader2 className='h-3.5 w-3.5 motion-safe:animate-spin' aria-hidden />,
+  done: <Check className='h-3.5 w-3.5' aria-hidden />,
+  failed: <X className='h-3.5 w-3.5' aria-hidden />,
+};
+
+const STEP_TONE: Record<PlanStep['status'], string> = {
+  waiting: 'text-muted-foreground',
+  running: 'text-foreground',
+  done: 'text-foreground',
+  failed: 'text-destructive',
+};
+
+/** What the assistant is doing right now, one line per step, ticked off as each finishes. */
+function StepList({ steps }: { steps: PlanStep[] }): ReactElement {
+  return (
+    <ol aria-label='Progress' className='mx-auto flex flex-col gap-1 text-[13px] leading-snug'>
+      {steps.map((step, index) => (
+        <li key={index} className={cn('flex items-center gap-2', STEP_TONE[step.status])}>
+          {STEP_ICON[step.status]}
+          <span>{step.label}</span>
+        </li>
+      ))}
+    </ol>
   );
 }
 
@@ -198,8 +227,9 @@ export function VoiceStage({
         </div>
       </div>
 
-      {(content.caption || content.chips.length > 0) && (
+      {(content.caption || content.chips.length > 0 || content.steps.length > 0) && (
         <div className='flex max-h-[45%] w-full min-h-0 flex-col gap-2 overflow-y-auto py-2'>
+          {content.steps.length > 0 && <StepList steps={content.steps} />}
           {content.caption && (
             <p
               className={cn(

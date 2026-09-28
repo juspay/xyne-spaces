@@ -22,6 +22,9 @@ export interface NewChannel {
   members: PersonRef[];
 }
 
+/** A step's target: a channel or thread that was found, or what an earlier step produced. */
+type Target = Extract<Operation, { op: 'navigate' }>['target'];
+
 /** Where a step acts: a channel or DM, or a thread inside one. */
 export interface Conversation {
   channelId: string;
@@ -37,14 +40,39 @@ export interface AppActions {
   navigate(to: Conversation): void;
 }
 
-export async function runPlan(plan: Plan, actions: AppActions): Promise<OperationResult[]> {
+/** One step as the user sees it while the plan runs. */
+export interface PlanStep {
+  label: string;
+  status: 'waiting' | 'running' | 'done' | 'failed';
+}
+
+/** Runs the plan, reporting every step's status to `onProgress` as it changes. */
+export async function runPlan(
+  plan: Plan,
+  actions: AppActions,
+  onProgress: (steps: PlanStep[]) => void = () => undefined,
+): Promise<OperationResult[]> {
+  const labels = plan.map(step => stepLabels(step, plan));
+  let steps: PlanStep[] = labels.map(({ doing }) => ({ label: doing, status: 'waiting' }));
+  const show = (index: number, status: PlanStep['status']): void => {
+    const { doing, done } = labels[index] ?? { doing: '', done: '' };
+    steps = steps.map((step, at) =>
+      at === index ? { label: status === 'done' ? done : doing, status } : step,
+    );
+    onProgress(steps);
+  };
+  onProgress(steps);
+
   const results: OperationResult[] = [];
-  for (const step of plan) {
+  for (const [index, step] of plan.entries()) {
+    show(index, 'running');
     try {
       const produced = await runStep(step, results, actions);
       results.push(produced ? { ok: true, produced } : { ok: true });
+      show(index, 'done');
     } catch (error) {
       results.push({ ok: false, error: getApiErrorMessage(error, 'something went wrong') });
+      show(index, 'failed');
       break;
     }
   }
@@ -78,10 +106,7 @@ async function runStep(
 }
 
 /** Where a step acts: a channel or thread that was found, or what an earlier step produced. */
-function conversationOf(
-  target: Extract<Operation, { op: 'navigate' }>['target'],
-  earlier: readonly OperationResult[],
-): Conversation {
+function conversationOf(target: Target, earlier: readonly OperationResult[]): Conversation {
   if ('fromStep' in target) {
     const produced = earlier[target.fromStep]?.produced;
     if (produced?.kind !== 'channel') {
@@ -92,4 +117,45 @@ function conversationOf(
   return target.kind === 'thread'
     ? { channelId: target.channelId, threadId: target.id }
     : { channelId: target.id };
+}
+
+const MAX_QUOTED = 40;
+
+/** What a step says while it runs, and once it is done. */
+function stepLabels(step: Operation, plan: Plan): { doing: string; done: string } {
+  switch (step.op) {
+    case 'open_or_create_dm':
+      return {
+        doing: `Finding your DM with ${step.user.name}`,
+        done: `Found your DM with ${step.user.name}`,
+      };
+    case 'create_channel': {
+      const withMembers = step.members.length
+        ? ` with ${step.members.map(member => member.name).join(', ')}`
+        : '';
+      return {
+        doing: `Creating “${step.name}”${withMembers}`,
+        done: `Created “${step.name}”${withMembers}`,
+      };
+    }
+    case 'navigate': {
+      const place = placeOf(step.target, plan);
+      return { doing: `Opening ${place}`, done: `Opened ${place}` };
+    }
+    case 'send_message': {
+      const text =
+        step.text.length > MAX_QUOTED ? `${step.text.slice(0, MAX_QUOTED - 1)}…` : step.text;
+      return { doing: `Sending “${text}”`, done: `Sent “${text}”` };
+    }
+  }
+}
+
+function placeOf(target: Target, plan: Plan): string {
+  if ('fromStep' in target) {
+    const origin = plan[target.fromStep];
+    if (origin?.op === 'open_or_create_dm') return `your DM with ${origin.user.name}`;
+    if (origin?.op === 'create_channel') return `“${origin.name}”`;
+    return 'it';
+  }
+  return target.kind === 'thread' ? 'the thread' : `#${target.name}`;
 }

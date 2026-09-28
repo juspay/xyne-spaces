@@ -1,5 +1,6 @@
 import { ACTIONS, starterActions, type ChoiceOption, type Display } from '@xyne/shared/assistant';
 import type { Message } from '../Chat/XyneAISidebar/utils/XyneAITypes';
+import type { PlanStep } from './planRunner';
 
 /**
  * The assistant conversation as the panel shows it: chat bubbles in the Ask AI transcript,
@@ -36,6 +37,8 @@ export interface AssistantTurn {
   expectsReply?: boolean;
   /** Buttons that answer this turn. Only the latest turn's buttons are live. */
   chips?: Chip[];
+  /** The steps of a plan being carried out, updated as each one runs. */
+  steps?: PlanStep[];
 }
 
 export interface StageContent {
@@ -44,6 +47,8 @@ export interface StageContent {
   chips: Chip[];
   /** The latest reply as text, so it is never only heard. */
   caption: { text: string; tone: 'error' | 'default' } | null;
+  /** The steps of the current request's plan, as they run. */
+  steps: PlanStep[];
 }
 
 const MESSAGE_ID_PREFIX = 'assistant-';
@@ -83,10 +88,21 @@ export function toChatMessages(turns: readonly AssistantTurn[]): Message[] {
   return turns.map(turn => ({
     id: `${MESSAGE_ID_PREFIX}${turn.id}`,
     type: turn.role === 'user' ? 'user' : 'bot',
-    content: turn.text,
+    content: turn.steps ? stepsAsText(turn.steps) : turn.text,
     timestamp: turn.at,
     ...(turn.chips?.length ? { followUpSuggestions: turn.chips.map(chip => chip.label) } : {}),
   }));
+}
+
+const STEP_MARK: Record<PlanStep['status'], string> = {
+  waiting: '○',
+  running: '…',
+  done: '✓',
+  failed: '✗',
+};
+
+function stepsAsText(steps: readonly PlanStep[]): string {
+  return steps.map(step => `- ${STEP_MARK[step.status]} ${step.label}`).join('\n');
 }
 
 export function isAssistantMessage(messageId: string): boolean {
@@ -104,16 +120,28 @@ export function chipWithLabel(turns: readonly AssistantTurn[], label: string): C
  */
 export function stageContent(turns: readonly AssistantTurn[]): StageContent {
   const latest = turns.at(-1);
-  if (!latest) return { prompt: 'What can I help with?', chips: STARTERS, caption: null };
+  if (!latest)
+    return { prompt: 'What can I help with?', chips: STARTERS, caption: null, steps: [] };
   // The user just spoke or tapped; the reply is on its way.
-  if (latest.role !== 'assistant') return { prompt: null, chips: [], caption: null };
+  if (latest.role !== 'assistant') return { prompt: null, chips: [], caption: null, steps: [] };
+  const steps = currentSteps(turns);
   const caption = latest.text.trim()
     ? {
         text: latest.text,
         tone: latest.tone === 'error' ? ('error' as const) : ('default' as const),
       }
     : null;
-  if (latest.chips?.length) return { prompt: null, chips: latest.chips, caption };
-  if (latest.expectsReply) return { prompt: null, chips: [], caption };
-  return { prompt: 'Anything else?', chips: STARTERS, caption };
+  if (latest.chips?.length) return { prompt: null, chips: latest.chips, caption, steps };
+  const running = steps.some(step => step.status === 'waiting' || step.status === 'running');
+  if (latest.expectsReply || running) return { prompt: null, chips: [], caption, steps };
+  return { prompt: 'Anything else?', chips: STARTERS, caption, steps };
+}
+
+/** The steps of the plan run since the user last spoke. */
+function currentSteps(turns: readonly AssistantTurn[]): PlanStep[] {
+  for (const turn of [...turns].reverse()) {
+    if (turn.role === 'user') return [];
+    if (turn.steps) return turn.steps;
+  }
+  return [];
 }

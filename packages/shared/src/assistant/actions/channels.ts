@@ -65,8 +65,8 @@ export const CHANNELS = {
         'Create a {visibility} channel named “{name}”[ with {members}][ and post “{firstMessage}”]',
       plan: [
         { op: 'create_channel', name: '$name', visibility: '$visibility', members: '$members' },
-        { op: 'send_message', if: 'firstMessage', target: { fromStep: 0 }, text: '$firstMessage' },
         { op: 'navigate', target: { fromStep: 0 } },
+        { op: 'send_message', if: 'firstMessage', target: { fromStep: 0 }, text: '$firstMessage' },
       ],
       done: 'Created “{name}”[ and posted “{firstMessage}”]. It’s open now.',
     },

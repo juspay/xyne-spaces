@@ -162,8 +162,8 @@ describe('a turn', () => {
     expect(planned.say).toBe('');
     expect(planned.run?.plan).toEqual([
       { op: 'open_or_create_dm', user: daniel.record },
-      { op: 'send_message', target: { fromStep: 0 }, text: 'hello' },
       { op: 'navigate', target: { fromStep: 0 } },
+      { op: 'send_message', target: { fromStep: 0 }, text: 'hello' },
     ]);
     // Two Jev requests and no other model: which action, then which words are its details.
     expect(chat.jevCalls()).toBe(2);
@@ -285,8 +285,8 @@ describe('a turn', () => {
     expect(preview.say).toBe('Post “hello” in general mentioning Daniel Okafor?');
     const posted = await chat.tap('yes');
     expect(posted.run?.plan).toEqual([
-      { op: 'send_message', target: general.record, text: 'hello', mentions: [daniel.record] },
       { op: 'navigate', target: general.record },
+      { op: 'send_message', target: general.record, text: 'hello', mentions: [daniel.record] },
     ]);
   });
 
@@ -423,7 +423,7 @@ describe('a turn', () => {
 
     chat.hears({ kind: 'greeting', area: 'none', continues: 0.2 });
     const sent = await chat.say('hello');
-    expect(sent.run?.plan[1]).toMatchObject({ op: 'send_message', text: 'hello' });
+    expect(sent.run?.plan[2]).toMatchObject({ op: 'send_message', text: 'hello' });
   });
 
   it('asks "did you mean" when two actions are close, and uses the original words after the tap', async () => {

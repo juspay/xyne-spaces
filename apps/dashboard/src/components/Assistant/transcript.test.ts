@@ -63,6 +63,7 @@ describe('the assistant transcript', () => {
       prompt: 'What can I help with?',
       chips: STARTERS,
       caption: null,
+      steps: [],
     });
     expect(STARTERS.map(chip => chip.label)).toEqual(['Send a direct message', 'Create a channel']);
     expect(STARTERS[0]?.text).toBe('Send a direct message');
@@ -82,6 +83,7 @@ describe('the assistant transcript', () => {
       prompt: null,
       chips: [{ id: 'yes', label: 'Yes' }],
       caption: { text: 'Send “hi” to Daniel?', tone: 'default' },
+      steps: [],
     });
   });
 
@@ -99,5 +101,38 @@ describe('the assistant transcript', () => {
     });
     const failed: AssistantTurn = { ...done, text: 'That didn’t finish.', tone: 'error' };
     expect(stageContent([failed]).caption?.tone).toBe('error');
+  });
+
+  it('shows the running plan as a checklist, with no starters until it is done', () => {
+    const running: AssistantTurn[] = [
+      { id: '1', role: 'user', text: 'post hello in general', at },
+      {
+        id: '2',
+        role: 'assistant',
+        text: '',
+        at,
+        steps: [
+          { label: 'Opened #general', status: 'done' },
+          { label: 'Sending “hello”', status: 'running' },
+        ],
+      },
+    ];
+    expect(stageContent(running)).toMatchObject({ chips: [], prompt: null });
+    expect(stageContent(running).steps).toHaveLength(2);
+    expect(toChatMessages(running)[1]?.content).toBe('- ✓ Opened #general\n- … Sending “hello”');
+
+    const finished: AssistantTurn[] = [
+      running[0]!,
+      {
+        ...running[1]!,
+        steps: [
+          { label: 'Opened #general', status: 'done' },
+          { label: 'Sent “hello”', status: 'done' },
+        ],
+      },
+      { id: '3', role: 'assistant', text: 'Posted in general.', at },
+    ];
+    expect(stageContent(finished)).toMatchObject({ prompt: 'Anything else?', chips: STARTERS });
+    expect(stageContent(finished).steps).toHaveLength(2);
   });
 });

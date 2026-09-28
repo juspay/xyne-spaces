@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ChannelRef, PersonRef, Plan } from '@xyne/shared/assistant';
-import { runPlan, type AppActions } from './planRunner';
+import { runPlan, type AppActions, type PlanStep } from './planRunner';
 
 const daniel: PersonRef = { kind: 'person', id: 'u-daniel', name: 'Daniel Okafor' };
 const dm: ChannelRef = { kind: 'channel', id: 'c-dm', name: 'Daniel Okafor', isDirect: true };
@@ -35,15 +35,15 @@ function recordingActions(overrides: Partial<AppActions> = {}): {
 }
 
 describe('running a plan', () => {
-  it('opens the DM, sends in it, and goes there', async () => {
+  it('finds the DM, opens it, then sends, so the message lands in view', async () => {
     const { actions, calls } = recordingActions();
     const plan: Plan = [
       { op: 'open_or_create_dm', user: daniel },
-      { op: 'send_message', target: { fromStep: 0 }, text: 'hello' },
       { op: 'navigate', target: { fromStep: 0 } },
+      { op: 'send_message', target: { fromStep: 0 }, text: 'hello' },
     ];
     const results = await runPlan(plan, actions);
-    expect(calls).toEqual(['dm u-daniel', 'send c-dm hello', 'go c-dm']);
+    expect(calls).toEqual(['dm u-daniel', 'go c-dm', 'send c-dm hello']);
     expect(results).toEqual([{ ok: true, produced: dm }, { ok: true }, { ok: true }]);
   });
 
@@ -114,5 +114,27 @@ describe('running a plan', () => {
     const { actions } = recordingActions();
     const results = await runPlan([{ op: 'navigate', target: { fromStep: 0 } }], actions);
     expect(results).toEqual([{ ok: false, error: 'step 0 did not open a conversation' }]);
+  });
+
+  it('reports each step as it runs, in words, and marks the one that failed', async () => {
+    const { actions } = recordingActions({
+      sendMessage: () => Promise.reject(new Error('offline')),
+    });
+    const updates: PlanStep[][] = [];
+    await runPlan(
+      [
+        { op: 'create_channel', name: 'ops', visibility: 'public', members: [daniel] },
+        { op: 'navigate', target: { fromStep: 0 } },
+        { op: 'send_message', target: { fromStep: 0 }, text: 'hello' },
+      ],
+      actions,
+      steps => updates.push(steps),
+    );
+    expect(updates[0]?.map(step => step.status)).toEqual(['waiting', 'waiting', 'waiting']);
+    expect(updates.at(-1)).toEqual([
+      { label: 'Created “ops” with Daniel Okafor', status: 'done' },
+      { label: 'Opened “ops”', status: 'done' },
+      { label: 'Sending “hello”', status: 'failed' },
+    ]);
   });
 });

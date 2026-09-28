@@ -53,8 +53,8 @@ export const MESSAGING = {
       summarize: 'Send “{message}” to {recipient}',
       plan: [
         { op: 'open_or_create_dm', user: '$recipient' },
-        { op: 'send_message', target: { fromStep: 0 }, text: '$message' },
         { op: 'navigate', target: { fromStep: 0 } },
+        { op: 'send_message', target: { fromStep: 0 }, text: '$message' },
       ],
       done: 'Sent to {recipient}.',
     },
@@ -108,8 +108,8 @@ export const MESSAGING = {
       },
       summarize: 'Post “{message}” in {channel}[ mentioning {mentions}]',
       plan: [
-        { op: 'send_message', target: '$channel', text: '$message', mentions: '$mentions' },
         { op: 'navigate', target: '$channel' },
+        { op: 'send_message', target: '$channel', text: '$message', mentions: '$mentions' },
       ],
       done: 'Posted in {channel}.',
     },
