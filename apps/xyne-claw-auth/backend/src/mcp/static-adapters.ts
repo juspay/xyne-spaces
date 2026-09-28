@@ -52,10 +52,16 @@ import { xNewsAdapter } from "./adapters/x-news.js";
 import { jusbizMcpAdapter } from "./adapters/jusbiz-mcp.js";
 import { heisenbergAdapter } from "./adapters/heisenberg.js";
 import { jenkinsAdapter } from "./adapters/jenkins.js";
+import { klaviyoAdapter } from "./adapters/klaviyo.js";
+import { mondayAdapter } from "./adapters/monday.js";
+import { neo4jAuraAdapter } from "./adapters/neo4j-aura.js";
 
 export const STATIC_ADAPTERS: Record<string, McpAdapter> = {
   grafana: grafanaAdapter,
   jenkins: jenkinsAdapter,
+  klaviyo: klaviyoAdapter,
+  monday: mondayAdapter,
+  "neo4j-aura": neo4jAuraAdapter,
   bitbucket: bitbucketAdapter,
   kibana: kibanaAdapter,
   "xyne-spaces": xyneSpacesAdapter,
