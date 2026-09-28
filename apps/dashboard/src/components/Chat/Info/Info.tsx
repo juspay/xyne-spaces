@@ -753,21 +753,20 @@ const ChannelMembers = ({
     return () => cancelAnimationFrame(rafId);
   }, [isMobile]);
 
-  // Paginated humans-only list for the Members tab. Skipped for the Agents &
+  // Paginated humans-only list for the Members tab, ordered by join time
+  // (earliest first). Skipped for the Agents &
   // Apps tab (which reads directly from appParticipants) and while searching
   // (which filters the parent's already-loaded allParticipants).
   const [humanPage, setHumanPage] = useState<
-    QueryResultType<typeof queries.channelHumanParticipantsPaginated>
+    QueryResultType<typeof queries.channelHumanParticipantsByJoinedAt>
   >([]);
-  const [humanCursor, setHumanCursor] = useState<{ role: ChannelRole; userId: string } | null>(
-    null,
-  );
+  const [humanCursor, setHumanCursor] = useState<{ joinedAt: number; id: string } | null>(null);
   const [humanHasMore, setHumanHasMore] = useState(true);
 
   const paginationEnabled = filterMode === 'members' && !searchQuery.trim();
 
   const [paginatedHumans] = useCachedQuery(
-    queries.channelHumanParticipantsPaginated({
+    queries.channelHumanParticipantsByJoinedAt({
       channelId: channel.id,
       limit: PAGE_SIZE,
       start: humanCursor,
@@ -800,7 +799,7 @@ const ChannelMembers = ({
     if (!humanHasMore || humanPage.length === 0) return;
     const last = humanPage[humanPage.length - 1];
     if (!last) return;
-    setHumanCursor({ role: last.role, userId: last.userId });
+    setHumanCursor({ joinedAt: last.joinedAt, id: last.id });
   }, [humanHasMore, humanPage]);
 
   const currentUserParticipant = useMemo(

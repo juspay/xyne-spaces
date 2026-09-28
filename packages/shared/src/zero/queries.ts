@@ -2448,6 +2448,30 @@ export const queries = defineQueries({
       return query.limit(limit);
     },
   ),
+  // Human members of a channel ordered by join time (earliest first) — used
+  // by the channel details Members tab. `id` breaks ties for bulk adds that
+  // share a joinedAt timestamp so cursor pagination stays stable.
+  channelHumanParticipantsByJoinedAt: defineQuery(
+    z.object({
+      channelId: z.string(),
+      limit: z.number(),
+      start: z.object({ joinedAt: z.number(), id: z.string() }).nullable(),
+    }),
+    ({ args: { channelId, limit, start } }) => {
+      let query = zql.channel_participants
+        .where('channelId', channelId)
+        .whereExists('user', u => u.where('userType', '=', UserType.USER))
+        .orderBy('joinedAt', 'asc')
+        .orderBy('id', 'asc');
+
+      if (start) {
+        query = query.start({ joinedAt: start.joinedAt, id: start.id }, { inclusive: false });
+      }
+
+      return query.limit(limit);
+    },
+  ),
+
   channelParticipantsPaginated: defineQuery(
     z.object({
       channelId: z.string(),
