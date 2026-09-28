@@ -4,16 +4,9 @@ import { ENTITY_KINDS } from './references.js';
 import { isFromStep, templateFields, type PlanStepDef } from './templates.js';
 
 /**
- * The action format.
- *
- * An action is one thing a user can ask the assistant to do, such as "send a direct
- * message". It is written as plain data: how to recognise the request, which details it
- * needs, what to ask for each one, and which app operations carry it out. Actions contain no
- * code, so every action behaves the same way and can be checked when the app starts.
- *
- * Actions are grouped into areas (messaging, channels, …). The assistant first decides which
- * area a request belongs to, then which action in that area, so each decision stays small
- * and fast however many actions exist.
+ * The action format. An action is one thing the assistant can do, written as plain data: how
+ * to recognise it, the details it needs, and the app operations that carry it out. Actions are
+ * grouped into areas, so Jev picks an area, then an action in it, and each choice stays small.
  */
 
 /** Keeps every choice small for the intent model. Split an area before it grows past this. */
@@ -61,6 +54,8 @@ const field = z
     ask: z.string().min(1),
     /** For optional details: asked once ("Want to add anyone?"). "No" skips it. */
     offer: z.string().min(1).optional(),
+    /** For record details: the question when several records match; `{mention}` is what was said. */
+    choose: z.string().min(1).optional(),
     /** For `choice` fields: the allowed answers, shown as buttons. */
     options: z.array(choiceOption).min(2).optional(),
     /** For the language model: what this detail means, with a short example if it helps. */
@@ -123,28 +118,23 @@ export type ConfirmPolicy = z.infer<typeof confirmPolicy>;
 /** Every loaded action, by id and by area. Built only by `loadActions`, so all of it is valid. */
 export class ActionCatalog {
   private readonly byId = new Map<string, ActionDefinition>();
-  private readonly areaById = new Map<string, string>();
 
   constructor(readonly areas: readonly ActionArea[]) {
-    for (const area of areas) {
-      for (const action of area.actions) {
-        this.byId.set(action.id, action);
-        this.areaById.set(action.id, area.id);
-      }
-    }
+    for (const action of areas.flatMap(area => area.actions)) this.byId.set(action.id, action);
   }
 
   get(id: string): ActionDefinition | undefined {
     return this.byId.get(id);
   }
 
-  areaOf(id: string): string | undefined {
-    return this.areaById.get(id);
-  }
-
   values(): IterableIterator<ActionDefinition> {
     return this.byId.values();
   }
+}
+
+/** Ways to start: the first action of each area, so every area is represented. */
+export function starterActions(catalog: ActionCatalog, limit = 4): ActionDefinition[] {
+  return catalog.areas.flatMap(area => area.actions.slice(0, 1)).slice(0, limit);
 }
 
 const DEFAULT_CONFIRM: Record<Effect, ConfirmPolicy> = {

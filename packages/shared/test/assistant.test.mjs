@@ -425,7 +425,21 @@ test('every mistake in a definition stops startup and names the problem', () => 
 });
 
 test('every shipped action loads and renders with sample values', () => {
-  const samples = { recipient: priya, message: 'hi', name: 'ABC', visibility: 'public' };
+  const android = { kind: 'channel', id: 'c-android', name: 'android' };
+  const samples = {
+    recipient: priya,
+    message: 'hi',
+    name: 'ABC',
+    visibility: 'public',
+    channel: android,
+    conversation: {
+      kind: 'thread',
+      id: 't-perf',
+      name: 'Reduce startup work',
+      channelId: 'c-perf',
+      channelName: 'mobile-perf',
+    },
+  };
   for (const definition of ACTIONS.values()) {
     const values = Object.fromEntries(
       Object.entries(definition.fields)
@@ -436,6 +450,14 @@ test('every shipped action loads and renders with sample values', () => {
     assert.ok(renderTemplate(definition.summarize, values).length > 0);
     assert.ok(renderTemplate(definition.done, values).length > 0);
   }
+});
+
+test('opening a channel navigates to the channel that was found', () => {
+  const android = { kind: 'channel', id: 'c-android', name: 'android' };
+  const open = ACTIONS.get('open_channel');
+  assert.deepEqual(bindPlan(open.plan, new Set(), { channel: android }), [
+    { op: 'navigate', target: android },
+  ]);
 });
 
 /** An area holding the given actions. */

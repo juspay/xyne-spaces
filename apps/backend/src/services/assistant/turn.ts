@@ -4,20 +4,33 @@ import {
   type ActionDefinition,
   type PlanRun,
   type TurnEvent,
+  type ClientContext,
+  type TurnDebug,
   type TurnInput,
   type TurnResponse,
 } from '@xyne/shared/assistant';
 import type { JevAnswer, JevQuestion, JevState } from '@/services/queryIntent/jevClient';
-import { NO_DETAILS, type ReadDetails } from './details';
 import { toFieldUpdates } from './fieldUpdates';
-import { buildIntentQuestions, continuesProbability, decideIntent, rankActions } from './intent';
+import { readingFor, type FieldWords } from './fields';
+import {
+  buildIntentQuestions,
+  continuesProbability,
+  decideIntent,
+  rankActions,
+  sentenceKind,
+  type RankedAction,
+  type SentenceKind,
+} from './intent';
 import { quickChoice, quickText, type QuickReply } from './quickReplies';
-import type { RecordFinder } from './records';
+import { withScreen, type RecordFinder } from './records';
 import {
   reminderFor,
   replyForActionChoice,
+  replyForAside,
   replyForError,
+  replyForKind,
   replyForNothingFits,
+  replyForQuestion,
   replyForStep,
   type Reply,
 } from './reply';
@@ -27,7 +40,7 @@ import type { AssistantSession, SessionIdentity, SessionStore } from './session'
  * One turn of the conversation, start to finish:
  *
  *   load the session → answer instantly if the reply needs no model
- *   → otherwise ask Jev which action (and, in parallel, read the details with LiteLLM)
+ *   → otherwise ask Jev which action, then ask Jev which words of the sentence are its details
  *   → find the records the user named → let the engine decide the next step
  *   → reply with words, buttons, a preview, or a plan → save the session.
  *
@@ -39,49 +52,51 @@ export interface TurnServices {
   records: RecordFinder;
   askJev: (
     state: JevState,
-    questions: Record<string, JevQuestion>,
+    questions: Record<string, JevQuestion>
   ) => Promise<Record<string, JevAnswer> | null>;
-  readDetails: (
-    text: string,
-    candidates: readonly ActionDefinition[],
-    inProgress: { action: string; asking: string | null } | null,
-  ) => Promise<ReadDetails>;
   newId: () => string;
+  /** Adds how each sentence was understood to the response, for the Diagnose log. */
+  debug: boolean;
 }
 
 /** Treat a sentence as part of the request in progress when Jev is at least this sure. */
 const CONTINUE_PROBABILITY = 0.5;
+/** Actions offered when nothing fits, closest first. */
+const MAX_SUGGESTIONS = 4;
 
 interface Outcome {
   session: AssistantSession;
   reply: Reply;
   run?: PlanRun;
+  debug?: TurnDebug;
 }
 
 export async function handleTurn(
   input: TurnInput,
   identity: SessionIdentity,
   services: TurnServices,
+  context: ClientContext
 ): Promise<TurnResponse> {
   const session = await services.sessions.load(identity);
-  const outcome = await respond(input, session, services);
+  const records = withScreen(services.records, context.onScreen);
+  const outcome = await respond(input, session, { ...services, records });
   await services.sessions.save(identity, outcome.session);
-  const { conversation } = outcome.session;
   return {
     turnId: services.newId(),
     say: outcome.reply.say,
     ...(outcome.reply.display ? { display: outcome.reply.display } : {}),
     ...(outcome.run ? { run: outcome.run } : {}),
     expectsReply: outcome.reply.expectsReply,
-    session: { hasDraft: Boolean(conversation.active), parked: conversation.parked.length },
     ...(outcome.reply.tone ? { tone: outcome.reply.tone } : {}),
+    ...(outcome.reply.handoff ? { handoff: outcome.reply.handoff } : {}),
+    ...(services.debug && outcome.debug ? { debug: outcome.debug } : {}),
   };
 }
 
 async function respond(
   input: TurnInput,
   session: AssistantSession,
-  services: TurnServices,
+  services: TurnServices
 ): Promise<Outcome> {
   switch (input.kind) {
     case 'planResult':
@@ -104,50 +119,104 @@ async function respond(
 async function applyQuickReply(
   quick: QuickReply,
   session: AssistantSession,
-  services: TurnServices,
+  services: TurnServices
 ): Promise<Outcome> {
   if (quick.kind === 'event') return applyEvent(quick.event, session, services);
   // "Did you mean …?" answered: read the original words again for the chosen action.
   const text = session.question?.kind === 'action' ? session.question.text : '';
-  return startAction(quick.action, text, session, services, null);
+  return startAction(quick.action, text, session, services);
 }
 
-/** A sentence that needs understanding: Jev picks the action while LiteLLM reads the details. */
+/** A sentence that needs understanding: Jev picks the action, then the words that are its details. */
 async function understand(
   text: string,
   session: AssistantSession,
-  services: TurnServices,
+  services: TurnServices
 ): Promise<Outcome> {
   const { catalog } = services;
   const draft = session.conversation.active;
   const { state, questions } = buildIntentQuestions(text, catalog, draft);
-  // Details are read for every action while Jev decides, so neither waits for the other. Only
-  // the answers that need details wait for them; "nothing fits" replies as soon as Jev does.
-  const inProgress = draft && { action: draft.action, asking: draft.asking };
-  const pendingDetails = services
-    .readDetails(text, [...catalog.values()], inProgress)
-    .catch((): ReadDetails => NO_DETAILS);
   const answers = await services.askJev(state, questions);
   if (!answers) {
-    return { session, reply: replyForError('I couldn’t work that out just now. Please try again.') };
+    return {
+      session,
+      reply: replyForError('I couldn’t work that out just now. Please try again.'),
+    };
   }
 
-  if (draft && inProgress && (continuesProbability(answers) ?? 0) >= CONTINUE_PROBABILITY) {
-    const words = await wordsFor(draft.action, text, await pendingDetails, services, inProgress);
-    const action = catalog.get(draft.action);
-    if (!action) return { session, reply: replyForError('That request is no longer available.') };
-    const updates = await toFieldUpdates(action, words, services.records, true);
-    return applyEvent({ type: 'details', updates }, session, services);
+  const ranked = rankActions(answers, catalog);
+  const decision = decideIntent(ranked);
+  const kind = sentenceKind(answers);
+  const continuesChance = continuesProbability(answers);
+  const continues = (continuesChance ?? 0) >= CONTINUE_PROBABILITY;
+  const debug: TurnDebug = {
+    ...(answers.kind?.type === 'choice' ? { kind: answers.kind.probabilities } : {}),
+    actions: ranked.slice(0, 3),
+    ...(continuesChance !== null ? { continues: continuesChance } : {}),
+  };
+  const withDebug = (outcome: Outcome): Outcome => ({ ...outcome, debug });
+
+  if (draft) {
+    // Help or a question mid-request is answered, and the request's question asked again.
+    if (draft.asking && !continues && (kind === 'help' || kind === 'question')) {
+      const openQuestion = applyEvent({ type: 'details', updates: [] }, session, services);
+      return withDebug({
+        ...openQuestion,
+        reply: replyForAside(kind, text, catalog, openQuestion.reply),
+      });
+    }
+    // Otherwise it continues the request when Jev says so, or when a question is open: then
+    // anything but a clear new request is its answer ("Random." when asked for a name).
+    if (continues || (draft.asking && decision.kind !== 'act')) {
+      const action = catalog.get(draft.action);
+      if (!action) return { session, reply: replyForError('That request is no longer available.') };
+      const words = await wordsFor(action, text, services);
+      // Answering "which one?" with more details ("the one with Karan") looks again with the
+      // same words, narrowed by the new ones.
+      const { choosing } = draft;
+      if (choosing && !words[choosing.field]) words[choosing.field] = choosing.mention;
+      const answer =
+        draft.asking && !words[draft.asking] ? { [draft.asking]: bareAnswer(text) } : {};
+      const updates = await toFieldUpdates(
+        action,
+        { ...words, ...answer },
+        services.records,
+        true,
+        draft.values
+      );
+      return withDebug(applyEvent({ type: 'details', updates }, session, services));
+    }
   }
 
-  const decision = decideIntent(rankActions(answers, catalog));
   switch (decision.kind) {
-    case 'none':
-      return withReply(session, replyForNothingFits(catalog));
-    case 'ask':
-      return withReply(session, replyForActionChoice(decision.actions, catalog, text));
     case 'act':
-      return startAction(decision.action, text, session, services, await pendingDetails);
+      return withDebug(await startAction(decision.action, text, session, services));
+    case 'ask':
+      return withDebug(withReply(session, replyForActionChoice(decision.actions, catalog, text)));
+    case 'none':
+      return withDebug(withReply(session, replyWhenNothingFits(kind, text, ranked, catalog)));
+  }
+}
+
+/** No action fits: reply to what kind of sentence it was. */
+function replyWhenNothingFits(
+  kind: SentenceKind,
+  text: string,
+  ranked: readonly RankedAction[],
+  catalog: ActionCatalog
+): Reply {
+  switch (kind) {
+    case 'question':
+      return replyForQuestion(text);
+    case 'action': {
+      // A task the assistant cannot do yet: offer the closest ones it can.
+      const closest = ranked.length
+        ? ranked.map(({ action }) => action)
+        : [...catalog.values()].map(({ id }) => id);
+      return replyForNothingFits(catalog, closest.slice(0, MAX_SUGGESTIONS));
+    }
+    default:
+      return replyForKind(kind, catalog);
   }
 }
 
@@ -156,31 +225,30 @@ async function startAction(
   actionId: string,
   text: string,
   session: AssistantSession,
-  services: TurnServices,
-  details: ReadDetails | null,
+  services: TurnServices
 ): Promise<Outcome> {
   const action = services.catalog.get(actionId);
   if (!action) return withReply(session, replyForError('I can’t do that yet.'));
-  const words = text ? await wordsFor(actionId, text, details, services, null) : {};
+  const words = text ? await wordsFor(action, text, services) : {};
   const updates = await toFieldUpdates(action, words, services.records, true);
   return applyEvent({ type: 'request', action: actionId, updates }, session, services);
 }
 
-/**
- * The details for `actionId`: reused when LiteLLM already read them for that action, read
- * again for just that action otherwise.
- */
+/** The details the sentence gives for `action`: the words of it that Jev picked. */
 async function wordsFor(
-  actionId: string,
+  action: ActionDefinition,
   text: string,
-  details: ReadDetails | null,
-  services: TurnServices,
-  inProgress: { action: string; asking: string | null } | null,
-): Promise<ReadDetails['fields']> {
-  if (details?.action === actionId) return details.fields;
-  const action = services.catalog.get(actionId);
-  if (!action) return {};
-  return (await services.readDetails(text, [action], inProgress)).fields;
+  services: TurnServices
+): Promise<FieldWords> {
+  const reading = readingFor(action, text);
+  if (Object.keys(reading.questions).length === 0) return {};
+  const answers = await services.askJev(reading.state, reading.questions);
+  return answers ? reading.read(answers) : {};
+}
+
+/** A reply given as is, when nothing more could be read from it: "Random." → "Random". */
+function bareAnswer(text: string): string {
+  return text.trim().replace(/[.!?]+$/, '');
 }
 
 /** Runs one engine event and turns the step into a reply, or into a plan to run. */
@@ -206,14 +274,14 @@ function applyEvent(event: TurnEvent, session: AssistantSession, services: TurnS
 function finishRun(
   runId: string,
   results: ReadonlyArray<{ ok: boolean; error?: string | undefined }>,
-  session: AssistantSession,
+  session: AssistantSession
 ): Outcome {
   const { run } = session;
   if (!run || run.runId !== runId) {
     return { session, reply: replyForError('That result doesn’t match anything I’m running.') };
   }
   const cleared: AssistantSession = { ...session, run: null };
-  const failed = results.find(result => !result.ok);
+  const failed = results.find((result) => !result.ok);
   if (failed || results.length === 0) {
     const reason = failed?.error ? `: ${failed.error}` : '.';
     return { session: cleared, reply: replyForError(`That didn’t finish${reason}`) };

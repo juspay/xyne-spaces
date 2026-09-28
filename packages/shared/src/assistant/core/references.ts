@@ -34,26 +34,34 @@ export interface ThreadRef extends EntityBase<'thread'> {
 
 export type EntityRef = PersonRef | ChannelRef | ThreadRef;
 
+export const personRefSchema = z
+  .object({ kind: z.literal('person'), id: z.string().min(1), name: z.string() })
+  .strict();
+
+export const channelRefSchema = z
+  .object({
+    kind: z.literal('channel'),
+    id: z.string().min(1),
+    name: z.string(),
+    isDirect: z.boolean().optional(),
+  })
+  .strict();
+
+export const threadRefSchema = z
+  .object({
+    kind: z.literal('thread'),
+    id: z.string().min(1),
+    name: z.string(),
+    channelId: z.string().min(1),
+    channelName: z.string(),
+  })
+  .strict();
+
 /** Checks a record that arrives from outside (the dashboard), so only these shapes get in. */
 export const entityRefSchema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('person'), id: z.string().min(1), name: z.string() }).strict(),
-  z
-    .object({
-      kind: z.literal('channel'),
-      id: z.string().min(1),
-      name: z.string(),
-      isDirect: z.boolean().optional(),
-    })
-    .strict(),
-  z
-    .object({
-      kind: z.literal('thread'),
-      id: z.string().min(1),
-      name: z.string(),
-      channelId: z.string().min(1),
-      channelName: z.string(),
-    })
-    .strict(),
+  personRefSchema,
+  channelRefSchema,
+  threadRefSchema,
 ]) satisfies z.ZodType<EntityRef>;
 
 /** A collected detail: text (or a choice id), one record, or several records. */

@@ -13,12 +13,8 @@ import { entityRefSchema, type ChoiceOption } from './core/references.js';
 
 const clientContext = z
   .object({
-    /** The page route, for tracing and page-specific help. */
-    route: z.string().max(500),
-    /** What is open on screen: the channel or DM, the thread inside it. */
+    /** What is open on screen, so "here" means it. */
     onScreen: z.array(entityRefSchema).max(10),
-    /** What the user attached to the Ask AI panel as context. */
-    attached: z.array(entityRefSchema).max(20),
   })
   .strict();
 
@@ -60,9 +56,7 @@ export type Display =
   /** A question with buttons ("Public or private?", "Which Daniel?"). */
   | { kind: 'choices'; prompt: string; options: ChoiceOption[] }
   /** "Shall I…?" before an action runs. Its buttons send the option ids `yes` and `no`. */
-  | { kind: 'preview'; summary: string; confirmLabel: string; cancelLabel: string }
-  /** Results to pick from, such as found threads. */
-  | { kind: 'list'; title: string; items: ChoiceOption[]; hasMore: boolean };
+  | { kind: 'preview'; summary: string; confirmLabel: string; cancelLabel: string };
 
 /** A plan for the dashboard to run now. */
 export interface PlanRun {
@@ -80,6 +74,16 @@ export interface TurnResponse {
   run?: PlanRun;
   /** The assistant asked something (listen again after speaking, in hands-free mode). */
   expectsReply: boolean;
-  session: { hasDraft: boolean; parked: number };
   tone?: 'error';
+  /** A question for Xyne AI rather than a task: the dashboard offers to ask it. */
+  handoff?: { to: 'ask_ai'; text: string };
+  /** How the sentence was understood, for the Diagnose log. Never sent in production. */
+  debug?: TurnDebug;
+}
+
+/** Jev's view of one sentence: what kind it is, and the most likely actions. */
+export interface TurnDebug {
+  kind?: Record<string, number>;
+  actions?: Array<{ action: string; probability: number }>;
+  continues?: number;
 }

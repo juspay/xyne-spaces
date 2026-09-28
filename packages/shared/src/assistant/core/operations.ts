@@ -1,5 +1,11 @@
 import { z } from 'zod';
-import type { EntityKind, EntityRef } from './references.js';
+import {
+  channelRefSchema,
+  personRefSchema,
+  threadRefSchema,
+  type EntityKind,
+  type EntityRef,
+} from './references.js';
 
 /**
  * The fixed set of things the assistant can actually do in the app. Actions combine these in
@@ -10,18 +16,15 @@ import type { EntityKind, EntityRef } from './references.js';
  * something none of these can express, and teach the dashboard's runner to perform it.
  */
 
-const personRef = z
-  .object({ kind: z.literal('person'), id: z.string().min(1), name: z.string() })
-  .strict();
-
-/** A conversation to act in: a known one, or the one an earlier step produced. */
+/** A conversation to act in: a channel or thread the backend found, or one an earlier step made. */
 const conversation = z.union([
-  z.object({ channelId: z.string().min(1) }).strict(),
+  channelRefSchema,
+  threadRefSchema,
   z.object({ fromStep: z.number().int().min(0) }).strict(),
 ]);
 
 const openOrCreateDm = z
-  .object({ op: z.literal('open_or_create_dm'), user: personRef })
+  .object({ op: z.literal('open_or_create_dm'), user: personRefSchema })
   .strict()
   .describe('Finds the DM with this person, or creates it; reopens it if it was closed.');
 
@@ -30,12 +33,18 @@ const createChannel = z
     op: z.literal('create_channel'),
     name: z.string().trim().min(2).max(80),
     visibility: z.enum(['public', 'private']),
-    members: z.array(personRef),
+    members: z.array(personRefSchema),
   })
   .strict();
 
 const sendMessage = z
-  .object({ op: z.literal('send_message'), target: conversation, text: z.string().min(1) })
+  .object({
+    op: z.literal('send_message'),
+    target: conversation,
+    text: z.string().min(1),
+    /** People or agents to @mention; an agent mentioned in a channel it is in answers. */
+    mentions: z.array(personRefSchema).optional(),
+  })
   .strict()
   .describe('A new top-level message in a channel or DM.');
 

@@ -41,7 +41,6 @@ export const EMPTY_SESSION: AssistantSession = {
   run: null,
 };
 
-/** Forgotten after two idle hours. */
 export const SESSION_IDLE_SECONDS = 2 * 60 * 60;
 /** Far above any real conversation; stops a runaway session from growing without bound. */
 const MAX_BYTES = 64 * 1024;

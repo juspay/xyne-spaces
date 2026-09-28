@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from 'express';
 import { turnRequestSchema } from '@xyne/shared/assistant';
-import { assistantServices, handleTurn, isAssistantConfigured } from '@/services/assistant';
+import { assistantServices, handleTurn, jevConnection } from '@/services/assistant';
+import { UnavailableError } from '@/services/assistant/records';
 import { logger } from '@/utils/logger';
 
 /**
@@ -16,7 +17,7 @@ router.post('/turn', async (req: Request, res: Response) => {
     res.status(401).json({ error: 'Sign in to use the assistant.' });
     return;
   }
-  if (!isAssistantConfigured()) {
+  if (!jevConnection()) {
     res.status(503).json({ error: 'The assistant is not set up on this server.' });
     return;
   }
@@ -26,13 +27,14 @@ router.post('/turn', async (req: Request, res: Response) => {
     return;
   }
 
-  const { sessionId, requestId, input } = parsed.data;
+  const { sessionId, requestId, input, context } = parsed.data;
   const startedAt = Date.now();
   try {
     const response = await handleTurn(
       input,
       { workspaceId: user.workspaceId, userId: user.id, sessionId },
       assistantServices(user.id),
+      context
     );
     // Metadata only: what the user said stays out of the logs.
     logger.info('[assistant] turn', {
@@ -47,6 +49,10 @@ router.post('/turn', async (req: Request, res: Response) => {
       requestId,
       error: error instanceof Error ? error.message : String(error),
     });
+    if (error instanceof UnavailableError) {
+      res.status(503).json({ error: error.message });
+      return;
+    }
     res.status(500).json({ error: 'Something went wrong. Please try again.' });
   }
 });

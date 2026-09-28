@@ -11,14 +11,56 @@ export type QuickReply =
   /** The user picked one of the actions offered by "Did you mean …?". */
   | { kind: 'pick-action'; action: string };
 
-const YES = ['yes', 'yeah', 'yep', 'yup', 'sure', 'ok', 'okay', 'go ahead', 'do it', 'confirm', 'please do'];
-const NO = ['no', 'nope', 'no thanks', 'not now', 'skip', 'none', 'nobody', 'no one', 'done', "that's all", 'thats all'];
+const YES = [
+  'yes',
+  'yeah',
+  'yep',
+  'yup',
+  'sure',
+  'ok',
+  'okay',
+  'go ahead',
+  'do it',
+  'confirm',
+  'please do',
+];
+const NO = [
+  'no',
+  'nope',
+  'no thanks',
+  'not now',
+  'skip',
+  'none',
+  'nobody',
+  'no one',
+  'done',
+  "that's all",
+  'thats all',
+];
 const CANCEL = ['cancel', 'never mind', 'nevermind', 'forget it', 'stop', 'abort'];
 const RESUME = ['continue', 'resume', 'carry on', 'go back to it', 'where were we'];
 
 const ORDINALS: Record<string, number> = {
-  first: 1, one: 1, second: 2, two: 2, third: 3, three: 3, fourth: 4, four: 4, fifth: 5, five: 5,
-  sixth: 6, six: 6, seventh: 7, seven: 7, eighth: 8, eight: 8, ninth: 9, nine: 9, tenth: 10, ten: 10,
+  first: 1,
+  one: 1,
+  second: 2,
+  two: 2,
+  third: 3,
+  three: 3,
+  fourth: 4,
+  four: 4,
+  fifth: 5,
+  five: 5,
+  sixth: 6,
+  six: 6,
+  seventh: 7,
+  seven: 7,
+  eighth: 8,
+  eight: 8,
+  ninth: 9,
+  nine: 9,
+  tenth: 10,
+  ten: 10,
 };
 
 /** A button tap, answered against the question it belongs to. */
@@ -29,7 +71,7 @@ export function quickChoice(optionId: string, question: OpenQuestion | null): Qu
     if (optionId === 'no') return event({ type: 'no' });
     return null;
   }
-  if (!question.options.some(option => option.id === optionId)) return null;
+  if (!question.options.some((option) => option.id === optionId)) return null;
   return question.kind === 'action'
     ? { kind: 'pick-action', action: optionId }
     : { kind: 'event', event: { type: 'choose', optionId } };
@@ -44,7 +86,7 @@ export function quickText(text: string, question: OpenQuestion | null): QuickRep
 
   // An option on screen wins over yes/no, so an option labelled "None" is picked, not read as "no".
   if (question.kind !== 'preview') {
-    const byLabel = question.options.find(option => normalize(option.label) === words);
+    const byLabel = question.options.find((option) => normalize(option.label) === words);
     const byNumber = question.options[optionNumber(words) - 1];
     const option = byLabel ?? byNumber;
     if (option) return quickChoice(option.id, question);

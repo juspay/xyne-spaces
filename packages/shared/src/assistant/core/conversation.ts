@@ -21,13 +21,9 @@ import {
 } from './templates.js';
 
 /**
- * The conversation engine: one pure function that decides the next step of a request that
- * may take several turns. Every action goes through it, so speaking everything at once,
- * one detail at a time, out of order, correcting, cancelling, or switching to something else
- * and coming back behave the same everywhere.
- *
- * It does no I/O. The backend interprets what the user said into an event (intent model +
- * resolvers), calls `advance`, stores the new state, and acts on the step.
+ * The conversation engine: a pure function that decides the next step of a request that may
+ * take several turns (ask, choose, preview, or run). Every action goes through it, so they all
+ * behave the same. The backend turns what the user said into an event and calls `advance`.
  */
 
 /** A request being filled in. */
@@ -292,6 +288,7 @@ function nextStep(draft: Draft, definition: ActionDefinition): Next {
 
   if (draft.choosing) {
     const { field, mention, candidates } = draft.choosing;
+    const question = definition.fields[field]?.choose ?? 'Which one do you mean by “{mention}”?';
     const options = candidates.map(({ id, label, detail }) => ({
       id,
       label,
@@ -300,7 +297,7 @@ function nextStep(draft: Draft, definition: ActionDefinition): Next {
     return {
       kind: 'step',
       draft: { ...draft, asking: field },
-      step: ask(field, `Which one do you mean by “${mention}”?`, options),
+      step: ask(field, question.replace('{mention}', mention), options),
     };
   }
 

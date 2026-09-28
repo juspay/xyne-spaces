@@ -1,6 +1,6 @@
 /**
  * The assistant: what it can do (actions/), how it works (core/), and the messages the
- * dashboard and the backend exchange (protocol.ts). Start with README.md.
+ * dashboard and the backend exchange (protocol.ts).
  */
 export * from './core/action.js';
 export * from './core/conversation.js';

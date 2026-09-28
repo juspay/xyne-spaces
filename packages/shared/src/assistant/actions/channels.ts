@@ -1,9 +1,10 @@
 import type { ActionArea } from '../core/action.js';
 
-/** Creating and managing channels. Describe only what exists: the intent model reads it. */
+/** Creating and opening channels. Describe only what exists: the intent model reads it. */
 export const CHANNELS = {
   id: 'channels',
-  description: 'Creating a new channel, with its name, visibility, members, and a first message.',
+  description:
+    'Channels: going to or opening an existing channel ("open …", "take me to …", "go to …"), or creating a new one with its name, visibility, members, and a first message.',
   actions: [
     {
       id: 'create_channel',
@@ -68,6 +69,32 @@ export const CHANNELS = {
         { op: 'navigate', target: { fromStep: 0 } },
       ],
       done: 'Created “{name}”[ and posted “{firstMessage}”]. It’s open now.',
+    },
+    {
+      id: 'open_channel',
+      title: 'Open a channel',
+      intent: {
+        description: 'Open an existing channel the user can access, by its name or part of it.',
+        examples: ['Open the Android channel', 'Take me to release planning', 'Go to design review'],
+        notFor: [
+          {
+            when: 'creating a new channel, or posting a message or @mentioning someone in one',
+            instead: 'those are different actions, even when they say “open” or “go to” the channel',
+          },
+        ],
+      },
+      effect: 'navigate',
+      fields: {
+        channel: {
+          kind: 'channel',
+          required: true,
+          ask: 'Which channel should I open?',
+          describe: 'the name of the existing channel to open',
+        },
+      },
+      summarize: 'Open {channel}',
+      plan: [{ op: 'navigate', target: '$channel' }],
+      done: 'Opened {channel}.',
     },
   ],
 } satisfies ActionArea;

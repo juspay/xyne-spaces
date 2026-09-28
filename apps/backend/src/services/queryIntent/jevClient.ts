@@ -56,6 +56,25 @@ export type JevFailure =
 
 export const isJevConfigured = (): boolean => Boolean(envConfig.jev.apiKey);
 
+/** Explicit Jev endpoint credentials, used by the assistant's existing LiteLLM gateway. */
+export interface JevConnection {
+  url: string;
+  apiKey: string;
+  model: string;
+}
+
+function configuredConnection(): JevConnection | null {
+  const { apiKey, url, model } = envConfig.jev;
+  return apiKey ? { apiKey, url: url || DEFAULT_URL, model: model || DEFAULT_MODEL } : null;
+}
+
+interface JevRequestOptions {
+  partial?: boolean;
+  onFailure?: (failure: JevFailure) => void;
+  /** Overrides environment config for callers that use a distinct Jev gateway. */
+  connection?: JevConnection | null;
+}
+
 const isProbability = (p: unknown): p is number => typeof p === 'number' && p >= 0 && p <= 1;
 
 /** The answer to `question`, or null when Jev's reply for it is unusable. */
@@ -144,19 +163,20 @@ export const askJev = async (
   questions: Record<string, JevQuestion>,
   timeoutMs: number,
   signal?: AbortSignal,
-  {
-    partial = false,
-    onFailure,
-  }: { partial?: boolean; onFailure?: (failure: JevFailure) => void } = {}
+  { partial = false, onFailure, connection: overrideConnection }: JevRequestOptions = {}
 ): Promise<Record<string, JevAnswer> | null> => {
-  const { apiKey, url, model } = envConfig.jev;
-  if (!apiKey) return null;
+  const connection =
+    overrideConnection === undefined ? configuredConnection() : overrideConnection;
+  if (!connection) return null;
 
   try {
-    const response = await fetch(url || DEFAULT_URL, {
+    const response = await fetch(connection.url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({ model: model || DEFAULT_MODEL, state, questions }),
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${connection.apiKey}`,
+      },
+      body: JSON.stringify({ model: connection.model, state, questions }),
       signal: signal
         ? AbortSignal.any([AbortSignal.timeout(timeoutMs), signal])
         : AbortSignal.timeout(timeoutMs),

@@ -1,6 +1,5 @@
-import { ACTIONS, type TurnInput, type TurnResponse } from '@xyne/shared/assistant';
+import { ACTIONS, type EntityRef, type TurnInput, type TurnResponse } from '@xyne/shared/assistant';
 import type { JevAnswer } from '@/services/queryIntent/jevClient';
-import type { ReadDetails } from './details';
 import type { FoundRecord } from './records';
 import { EMPTY_SESSION, type AssistantSession } from './session';
 import { handleTurn, type TurnServices } from './turn';
@@ -14,18 +13,61 @@ const danielPark: FoundRecord = {
   detail: 'park@x.io',
 };
 
+const android: FoundRecord = {
+  record: { kind: 'channel', id: 'c-android', name: 'android' },
+  detail: '#android',
+};
+
+const general: FoundRecord = {
+  record: { kind: 'channel', id: 'c-general', name: 'general' },
+  detail: '#general',
+};
+/** What a search for the topic finds, best first. */
+const perfThreads: FoundRecord[] = [
+  {
+    record: {
+      kind: 'thread',
+      id: 't-1',
+      name: 'Reduce startup work',
+      channelId: 'c-perf',
+      channelName: 'mobile-perf',
+    },
+    detail: '#mobile-perf · Deepanshu Sharma',
+  },
+  {
+    record: {
+      kind: 'thread',
+      id: 't-2',
+      name: 'Cold start regression',
+      channelId: 'c-perf',
+      channelName: 'mobile-perf',
+    },
+    detail: '#mobile-perf · Vinit',
+  },
+];
+
+const karan: FoundRecord = {
+  record: { kind: 'person', id: 'u-karan', name: 'Karan Mehta' },
+  detail: 'karan@x.io',
+};
+
 const identity = { workspaceId: 'w1', userId: 'me', sessionId: 's1' };
 
-/** Jev's answers as scripted by each test: which area, which action, and whether it continues. */
+/** Jev's answers as scripted by each test: what the sentence is, and the words of each field. */
 interface JevScript {
+  kind?: string;
   area?: string;
   action?: string;
   continues?: number;
+  /** The words Jev picks for each field, as they appear in the sentence. */
+  fields?: Record<string, string>;
 }
+
+const INTENT_QUESTIONS = /^(kind|area|action_in_.+)$/;
 
 function choiceOf(chosen: string, labels: string[]): JevAnswer {
   const probabilities = Object.fromEntries(
-    labels.map(label => [label, label === chosen ? 0.9 : 0.1 / (labels.length - 1)]),
+    labels.map((label) => [label, label === chosen ? 0.9 : 0.1 / (labels.length - 1)])
   );
   return { type: 'choice', choice: chosen, confidence: 0.9, probabilities };
 }
@@ -35,8 +77,8 @@ function assistant(people: FoundRecord[] = [daniel]) {
   let session: AssistantSession = EMPTY_SESSION;
   let ids = 0;
   let jev: JevScript = {};
-  let details: ReadDetails = { action: null, fields: {} };
-  const detailCalls: string[][] = [];
+  let jevCalls = 0;
+  let onScreen: EntityRef[] = [];
 
   const services: TurnServices = {
     catalog: ACTIONS,
@@ -47,12 +89,20 @@ function assistant(people: FoundRecord[] = [daniel]) {
       },
     },
     records: {
-      find: async (kind, mention) =>
+      // Like the real lookup: everyone in the workspace; `matchName` does the matching.
+      // A search narrowed to Karan finds only the thread he was in.
+      find: async (kind, _mention, hints) =>
         kind === 'person'
-          ? people.filter(({ record }) => record.name.toLowerCase().includes(mention.toLowerCase()))
-          : [],
+          ? people
+          : kind === 'channel'
+            ? [android]
+            : hints?.people.includes('u-karan')
+              ? [perfThreads[1]!]
+              : perfThreads,
+      get: async (kind, id) => (kind === 'channel' && id === general.record.id ? general : null),
     },
     askJev: async (_state, questions) => {
+      jevCalls += 1;
       const answers: Record<string, JevAnswer> = {};
       for (const [id, question] of Object.entries(questions)) {
         if (question.type === 'noul') {
@@ -60,27 +110,38 @@ function assistant(people: FoundRecord[] = [daniel]) {
           continue;
         }
         const labels = Object.keys(question.criteria);
-        const wanted = id === 'area' ? jev.area : jev.action;
-        answers[id] = choiceOf(wanted && labels.includes(wanted) ? wanted : 'none', labels);
+        if (INTENT_QUESTIONS.test(id)) {
+          const wanted =
+            id === 'area' ? jev.area : id === 'kind' ? (jev.kind ?? 'action') : jev.action;
+          answers[id] = choiceOf(wanted && labels.includes(wanted) ? wanted : 'none', labels);
+          continue;
+        }
+        // A field: pick the option that is the scripted words (a piece, or a choice's id).
+        const wanted = jev.fields?.[id]?.toLowerCase();
+        const picked = Object.entries(question.criteria).find(
+          ([label, text]) => label === wanted || String(text).toLowerCase() === `“${wanted}”`
+        );
+        answers[id] = choiceOf(picked?.[0] ?? 'none', labels);
       }
       return answers;
     },
-    readDetails: async (_text, candidates) => {
-      detailCalls.push(candidates.map(action => action.id));
-      return details;
-    },
     newId: () => `id-${++ids}`,
+    debug: false,
   };
 
-  const send = (input: TurnInput): Promise<TurnResponse> => handleTurn(input, identity, services);
+  const send = (input: TurnInput): Promise<TurnResponse> =>
+    handleTurn(input, identity, services, { onScreen });
   return {
     services,
-    detailCalls,
+    jevCalls: () => jevCalls,
     session: () => session,
-    /** Scripts what Jev and LiteLLM will answer for the next sentence. */
-    hears(script: JevScript, read: ReadDetails): void {
+    /** Scripts what Jev will answer for the next sentence. */
+    hears(script: JevScript): void {
       jev = script;
-      details = read;
+    },
+    /** What the user has open on the left. */
+    lookingAt(refs: EntityRef[]): void {
+      onScreen = refs;
     },
     say: (text: string) => send({ kind: 'text', text, via: 'voice' }),
     tap: (optionId: string) => send({ kind: 'choose', optionId }),
@@ -92,10 +153,11 @@ function assistant(people: FoundRecord[] = [daniel]) {
 describe('a turn', () => {
   it('sends a DM said in one sentence: one plan, then "Sent to …" once it ran', async () => {
     const chat = assistant();
-    chat.hears(
-      { area: 'messaging', action: 'send_dm' },
-      { action: 'send_dm', fields: { recipient: 'Daniel Okafor', message: 'hello' } },
-    );
+    chat.hears({
+      area: 'messaging',
+      action: 'send_dm',
+      fields: { recipient: 'Daniel Okafor', message: 'hello' },
+    });
     const planned = await chat.say('create a DM with Daniel Okafor and message hello');
     expect(planned.say).toBe('');
     expect(planned.run?.plan).toEqual([
@@ -103,8 +165,8 @@ describe('a turn', () => {
       { op: 'send_message', target: { fromStep: 0 }, text: 'hello' },
       { op: 'navigate', target: { fromStep: 0 } },
     ]);
-    // Details were read once, for every action, alongside Jev — not again afterwards.
-    expect(chat.detailCalls).toEqual([['send_dm', 'create_channel']]);
+    // Two Jev requests and no other model: which action, then which words are its details.
+    expect(chat.jevCalls()).toBe(2);
 
     const done = await chat.ran(planned.run!.runId, [{ ok: true }, { ok: true }, { ok: true }]);
     expect(done.say).toBe('Sent to Daniel Okafor.');
@@ -113,10 +175,11 @@ describe('a turn', () => {
 
   it('previews when a name only partly matched, and runs on "yes" without a model', async () => {
     const chat = assistant();
-    chat.hears(
-      { area: 'messaging', action: 'send_dm' },
-      { action: 'send_dm', fields: { recipient: 'Daniel', message: 'hi' } },
-    );
+    chat.hears({
+      area: 'messaging',
+      action: 'send_dm',
+      fields: { recipient: 'Daniel', message: 'hi' },
+    });
     const preview = await chat.say('tell daniel hi');
     expect(preview.say).toBe('Send “hi” to Daniel Okafor?');
     expect(preview.display).toEqual({
@@ -125,18 +188,92 @@ describe('a turn', () => {
       confirmLabel: 'Yes',
       cancelLabel: 'Cancel',
     });
-    chat.hears({}, { action: null, fields: {} });
+    const before = chat.jevCalls();
     const yes = await chat.say('yes');
     expect(yes.run?.plan).toHaveLength(3);
-    expect(chat.detailCalls).toHaveLength(1);
+    expect(chat.jevCalls()).toBe(before);
+  });
+
+  it('opens a channel said by name, without a preview', async () => {
+    const chat = assistant();
+    chat.hears({ area: 'channels', action: 'open_channel', fields: { channel: 'Android' } });
+    const planned = await chat.say('open the Android channel');
+    expect(planned.run?.plan).toEqual([{ op: 'navigate', target: android.record }]);
+    const done = await chat.ran(planned.run!.runId, [{ ok: true }]);
+    expect(done.say).toBe('Opened android.');
+  });
+
+  it('finds a conversation by its topic: the matches are buttons, and a tap opens one', async () => {
+    const chat = assistant();
+    chat.hears({
+      area: 'messaging',
+      action: 'find_conversation',
+      fields: { conversation: 'mobile par' },
+    });
+    const which = await chat.say('find the messages about mobile par');
+    expect(which.display).toMatchObject({
+      kind: 'choices',
+      options: [
+        { id: 't-1', label: 'Reduce startup work', detail: '#mobile-perf · Deepanshu Sharma' },
+        { id: 't-2', label: 'Cold start regression', detail: '#mobile-perf · Vinit' },
+      ],
+    });
+    const opened = await chat.tap('t-2');
+    expect(opened.run?.plan).toEqual([{ op: 'navigate', target: perfThreads[1]!.record }]);
+  });
+
+  it('narrows a search to the people named with it', async () => {
+    const chat = assistant([daniel, karan]);
+    chat.hears({
+      area: 'messaging',
+      action: 'find_conversation',
+      fields: { conversation: 'mobile perf', with: 'Karan' },
+    });
+    const opened = await chat.say('find the thread where Karan and I discussed mobile perf');
+    expect(opened.run?.plan).toEqual([{ op: 'navigate', target: perfThreads[1]!.record }]);
+  });
+
+  it('asks which one, and searches again when told who was in it', async () => {
+    const chat = assistant([daniel, karan]);
+    chat.hears({
+      area: 'messaging',
+      action: 'find_conversation',
+      fields: { conversation: 'mobile perf' },
+    });
+    const which = await chat.say('find the messages about mobile perf');
+    expect(which.say).toBe(
+      'Here are the closest matches for “mobile perf”. Tap one, or tell me who was in it or which channel.'
+    );
+
+    chat.hears({ continues: 0.9, fields: { with: 'Karan' } });
+    const opened = await chat.say('the one with Karan');
+    expect(opened.run?.plan).toEqual([{ op: 'navigate', target: perfThreads[1]!.record }]);
+  });
+
+  it('posts "here" in the channel open on screen, mentioning people', async () => {
+    const chat = assistant();
+    chat.lookingAt([{ kind: 'channel', id: 'c-general', name: '' }]);
+    chat.hears({
+      area: 'messaging',
+      action: 'post_message',
+      fields: { channel: 'here', mentions: 'Daniel Okafor', message: 'hello' },
+    });
+    const preview = await chat.say('post hello here and mention Daniel Okafor');
+    expect(preview.say).toBe('Post “hello” in general mentioning Daniel Okafor?');
+    const posted = await chat.tap('yes');
+    expect(posted.run?.plan).toEqual([
+      { op: 'send_message', target: general.record, text: 'hello', mentions: [daniel.record] },
+      { op: 'navigate', target: general.record },
+    ]);
   });
 
   it('asks which Daniel, with buttons, and continues from the tap', async () => {
     const chat = assistant([daniel, danielPark]);
-    chat.hears(
-      { area: 'messaging', action: 'send_dm' },
-      { action: 'send_dm', fields: { recipient: 'Daniel', message: 'hi' } },
-    );
+    chat.hears({
+      area: 'messaging',
+      action: 'send_dm',
+      fields: { recipient: 'Daniel', message: 'hi' },
+    });
     const which = await chat.say('message Daniel hi');
     expect(which.say).toBe('Which one do you mean by “Daniel”?');
     expect(which.display).toEqual({
@@ -153,10 +290,10 @@ describe('a turn', () => {
 
   it('collects a channel step by step, answering each question from the next sentence', async () => {
     const chat = assistant();
-    chat.hears({ area: 'channels', action: 'create_channel' }, { action: 'create_channel', fields: {} });
+    chat.hears({ area: 'channels', action: 'create_channel' });
     expect((await chat.say('create a channel')).say).toBe('What should I name the channel?');
 
-    chat.hears({ continues: 0.95 }, { action: 'create_channel', fields: { name: 'ABC' } });
+    chat.hears({ continues: 0.95, fields: { name: 'ABC' } });
     const visibility = await chat.say('call it ABC');
     expect(visibility.say).toBe('Should it be public or private?');
 
@@ -174,51 +311,166 @@ describe('a turn', () => {
     });
   });
 
+  it('takes a bare reply as the answer to the open question', async () => {
+    const chat = assistant();
+    chat.hears({ area: 'channels', action: 'create_channel' });
+    await chat.say('create a channel');
+
+    // Jev sees no action in "Random." and doubts it continues; the reader finds no fields.
+    chat.hears({ area: 'none', continues: 0.1 });
+    const next = await chat.say('Random.');
+    expect(next.say).toBe('Should it be public or private?');
+    expect(chat.session().conversation.active?.values).toEqual({ name: 'Random' });
+  });
+
+  it('still starts a clear new request while a question is open', async () => {
+    const chat = assistant();
+    chat.hears({ area: 'channels', action: 'create_channel', fields: { name: 'Ops' } });
+    expect((await chat.say('create a channel called Ops')).say).toBe(
+      'Should it be public or private?'
+    );
+
+    chat.hears({
+      area: 'messaging',
+      action: 'send_dm',
+      continues: 0.1,
+      fields: { recipient: 'Daniel Okafor', message: 'hi' },
+    });
+    const sent = await chat.say('tell Daniel Okafor hi');
+    expect(sent.run?.plan[0]).toEqual({ op: 'open_or_create_dm', user: daniel.record });
+    expect(chat.session().conversation.parked).toHaveLength(1);
+  });
+
+  it('finds a person whose name was spelled the way it sounds', async () => {
+    const deepanshu: FoundRecord = {
+      record: { kind: 'person', id: 'u-deep', name: 'Deepanshu Sharma' },
+      detail: 'deepanshu@x.io',
+    };
+    const chat = assistant([daniel, deepanshu]);
+    chat.hears({ area: 'messaging', action: 'send_dm', fields: { recipient: 'Dipanshu' } });
+    const next = await chat.say('Send a direct message to Dipanshu.');
+    expect(next.say).toBe('What should I say to Deepanshu Sharma?');
+  });
+
+  it('answers "what can you do?", greetings, and thanks instead of "I can’t do that"', async () => {
+    const chat = assistant();
+    chat.hears({ kind: 'help', area: 'none' });
+    const help = await chat.say('What can you do?');
+    expect(help.say).toBe(
+      'I can send a direct message, or create a channel. Tap one, or just tell me what you need.'
+    );
+    expect(help.display).toMatchObject({ kind: 'choices' });
+
+    chat.hears({ kind: 'greeting', area: 'none' });
+    expect((await chat.say('hi')).say).toBe('Hi! What can I do for you?');
+
+    chat.hears({ kind: 'thanks', area: 'none' });
+    expect(await chat.say('thanks')).toMatchObject({ say: 'You’re welcome.', expectsReply: false });
+  });
+
+  it('offers to ask Xyne AI a question', async () => {
+    const chat = assistant();
+    chat.hears({ kind: 'question', area: 'none' });
+    const reply = await chat.say('what did we decide about the launch?');
+    expect(reply).toMatchObject({
+      say: 'That’s one for Xyne AI. Want me to ask it?',
+      handoff: { to: 'ask_ai', text: 'what did we decide about the launch?' },
+    });
+  });
+
+  it('answers help in the middle of a request, then asks its question again', async () => {
+    const chat = assistant();
+    chat.hears({ area: 'channels', action: 'create_channel' });
+    await chat.say('create a channel');
+
+    chat.hears({ kind: 'help', area: 'none', continues: 0.1 });
+    const reply = await chat.say('what can you do?');
+    expect(reply.say).toBe(
+      'I can send a direct message, or create a channel. Now, what should I name the channel?'
+    );
+    expect(chat.session().conversation.active?.asking).toBe('name');
+  });
+
+  it('takes a greeting as the message when asked what to say', async () => {
+    const chat = assistant();
+    chat.hears({ area: 'messaging', action: 'send_dm', fields: { recipient: 'Daniel Okafor' } });
+    expect((await chat.say('message Daniel Okafor')).say).toBe(
+      'What should I say to Daniel Okafor?'
+    );
+
+    chat.hears({ kind: 'greeting', area: 'none', continues: 0.2 });
+    const sent = await chat.say('hello');
+    expect(sent.run?.plan[1]).toMatchObject({ op: 'send_message', text: 'hello' });
+  });
+
   it('asks "did you mean" when two actions are close, and uses the original words after the tap', async () => {
     const chat = assistant();
-    const close: TurnServices['askJev'] = async (_state, questions) =>
-      Object.fromEntries(
-        Object.entries(questions).map(([id, question]) => {
-          if (question.type === 'noul') return [id, { type: 'noul', noul: 0 }];
-          const labels = Object.keys(question.criteria);
-          const probabilities = Object.fromEntries(labels.map(label => [label, 1 / labels.length]));
-          if (id === 'area') Object.assign(probabilities, { messaging: 0.45, channels: 0.45, none: 0.1 });
-          if (id === 'action_in_messaging') Object.assign(probabilities, { send_dm: 0.95, none: 0.05 });
-          if (id === 'action_in_channels') Object.assign(probabilities, { create_channel: 0.95, none: 0.05 });
-          return [id, { type: 'choice', choice: labels[0], confidence: 0.5, probabilities }];
-        }),
-      );
+    const scripted = chat.services.askJev;
+    // Two actions equally likely; the later request for the words is answered as scripted.
+    const close: TurnServices['askJev'] = async (state, questions) =>
+      !('area' in questions)
+        ? scripted(state, questions)
+        : Object.fromEntries(
+            Object.entries(questions).map(([id, question]) => {
+              if (question.type === 'noul') return [id, { type: 'noul', noul: 0 }];
+              const labels = Object.keys(question.criteria);
+              const probabilities = Object.fromEntries(
+                labels.map((label) => [label, 1 / labels.length])
+              );
+              if (id === 'area')
+                Object.assign(probabilities, { messaging: 0.45, channels: 0.45, none: 0.1 });
+              if (id === 'action_in_messaging')
+                Object.assign(probabilities, { send_dm: 0.95, none: 0.05 });
+              if (id === 'action_in_channels')
+                Object.assign(probabilities, { create_channel: 0.95, none: 0.05 });
+              return [id, { type: 'choice', choice: labels[0], confidence: 0.5, probabilities }];
+            })
+          );
     chat.services.askJev = close;
-    chat.hears({}, { action: null, fields: {} });
+    chat.hears({});
     const which = await chat.say('ABC hello');
     expect(which.say).toBe('Did you mean to send a direct message, or create a channel?');
 
-    chat.hears({}, { action: 'create_channel', fields: { name: 'ABC', firstMessage: 'hello' } });
+    chat.hears({ fields: { name: 'ABC', firstMessage: 'hello' } });
     const next = await chat.tap('create_channel');
     expect(next.say).toBe('Should it be public or private?');
-    expect(chat.session().conversation.active?.values).toEqual({ name: 'ABC', firstMessage: 'hello' });
+    expect(chat.session().conversation.active?.values).toEqual({
+      name: 'ABC',
+      firstMessage: 'hello',
+    });
   });
 
-  it('says what it can do when nothing fits', async () => {
+  it('offers what it can do when nothing fits, and a tap starts that action', async () => {
     const chat = assistant();
-    chat.hears({ area: 'none' }, { action: null, fields: {} });
+    chat.hears({ area: 'none' });
     const reply = await chat.say('what is the weather');
-    expect(reply.say).toBe('I can’t do that yet. I can send a direct message, or create a channel.');
+    expect(reply.say).toMatch(/^I can’t do that yet\. I can /);
+    // The closest actions, at most four, as buttons that start them.
+    expect(
+      reply.display?.kind === 'choices' && reply.display.options.map((option) => option.id)
+    ).toEqual(expect.arrayContaining(['create_channel', 'send_dm']));
+    expect(reply.display?.kind === 'choices' && reply.display.options).toHaveLength(4);
+    const started = await chat.tap('create_channel');
+    expect(started.say).toBe('What should I name the channel?');
   });
 
   it('reports a name it could not find, and a plan that failed', async () => {
     const chat = assistant();
-    chat.hears(
-      { area: 'messaging', action: 'send_dm' },
-      { action: 'send_dm', fields: { recipient: 'Zorro', message: 'hi' } },
-    );
+    chat.hears({
+      area: 'messaging',
+      action: 'send_dm',
+      fields: { recipient: 'Zorro', message: 'hi' },
+    });
     expect((await chat.say('message Zorro hi')).say).toBe(
-      "I couldn't find “Zorro”. Who should I message?",
+      "I couldn't find “Zorro”. Who should I message?"
     );
 
-    chat.hears({ continues: 0.9 }, { action: 'send_dm', fields: { recipient: 'Daniel Okafor' } });
+    chat.hears({ continues: 0.9, fields: { recipient: 'Daniel Okafor' } });
     const planned = await chat.say('Daniel Okafor');
-    const failed = await chat.ran(planned.run!.runId, [{ ok: true }, { ok: false, error: 'the DM is closed' }]);
+    const failed = await chat.ran(planned.run!.runId, [
+      { ok: true },
+      { ok: false, error: 'the DM is closed' },
+    ]);
     expect(failed).toMatchObject({ say: 'That didn’t finish: the DM is closed', tone: 'error' });
   });
 
@@ -230,12 +482,12 @@ describe('a turn', () => {
 
   it('cancels at any time without a model', async () => {
     const chat = assistant();
-    chat.hears({ area: 'channels', action: 'create_channel' }, { action: 'create_channel', fields: {} });
+    chat.hears({ area: 'channels', action: 'create_channel' });
     await chat.say('create a channel');
-    const detailsBefore = chat.detailCalls.length;
+    const before = chat.jevCalls();
     const cancelled = await chat.say('never mind');
     expect(cancelled.say).toBe('Okay, I’ve cancelled that.');
-    expect(chat.detailCalls).toHaveLength(detailsBefore);
+    expect(chat.jevCalls()).toBe(before);
     expect(chat.session().conversation.active).toBeNull();
   });
 });
