@@ -1,4 +1,5 @@
 import type { JsonValue } from '@openfeature/server-sdk';
+import { isRelatedDraftWorthLookingUp, normalizeRelatedDraft } from '@xyne/shared';
 import { config as envConfig } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { superpositionClient } from '@/services/superpositionClient';
@@ -57,10 +58,6 @@ const CONFIG_KEY = 'chat_related_context_config';
 
 interface RelatedContextConfig {
   enabled: boolean;
-  /** Drafts shorter than this are acknowledgements and names, not questions. */
-  minWords: number;
-  /** Longer drafts are cut here before search and classification. */
-  maxDraftChars: number;
   /**
    * Message hits fetched before they are collapsed into threads. Several replies of
    * one thread come back as separate hits, so this runs well above perKind to leave
@@ -90,8 +87,6 @@ interface RelatedContextConfig {
 
 const DEFAULT_CONFIG: RelatedContextConfig = {
   enabled: false,
-  minWords: 4,
-  maxDraftChars: 600,
   messageHits: 50,
   perKind: 10,
   completeThreshold: 0.5,
@@ -105,19 +100,6 @@ const getConfig = async (req: RelatedContextRequest): Promise<RelatedContextConf
     workspaceId: req.auth.workspaceId,
   })) as Partial<RelatedContextConfig> | null;
   return { ...DEFAULT_CONFIG, ...remote };
-};
-
-/**
- * Drafts not worth a search: short ones, slash commands, and ones that are only
- * mentions, links or emoji. Most keystroke pauses end here, at no cost.
- */
-const isWorthLookingUp = (draft: string, minWords: number): boolean => {
-  if (draft.startsWith('/')) return false;
-  const words = draft
-    .replace(/https?:\/\/\S+/g, ' ')
-    .split(/\s+/)
-    .filter((word) => /\p{L}{2,}/u.test(word) && !word.startsWith('@'));
-  return words.length >= minWords;
 };
 
 /**
@@ -342,8 +324,10 @@ export async function findRelatedContext(
   const failed: RelatedContext = { items: [], failed: true };
   const started = Date.now();
   try {
-    const draft = text.trim().replace(/\s+/g, ' ').slice(0, config.maxDraftChars);
-    if (!isWorthLookingUp(draft, config.minWords)) return { items: [], ready: false };
+    // The composer's own rule, checked again: short drafts, slash commands and ones
+    // that are only mentions or links end here, at no cost.
+    const draft = normalizeRelatedDraft(text);
+    if (!isRelatedDraftWorthLookingUp(draft)) return { items: [], ready: false };
     if (Date.now() < jevDownUntil) {
       logger.info('[RelatedContext] lookup', { outcome: 'jev_cooling_down' });
       return failed;

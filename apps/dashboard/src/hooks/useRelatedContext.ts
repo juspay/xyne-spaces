@@ -14,6 +14,7 @@
  * coming back to the same draft brings the chips back without a new lookup.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { isRelatedDraftWorthLookingUp, normalizeRelatedDraft } from '@xyne/shared';
 
 import { stateMachineActor } from '../machines/stateMachine';
 import { searchService } from '../services/searchService';
@@ -24,14 +25,6 @@ export const MIN_RELATED_CONTEXT_DEBOUNCE_MS = 1000;
 /** The longest; well inside what a browser timer can hold. */
 export const MAX_RELATED_CONTEXT_DEBOUNCE_MS = 60_000;
 /**
- * Only keeps one-word drafts from leaving the browser. How many words a draft needs is
- * the server's call (`minWords`, tuned in Superposition); a shorter one comes back as
- * not ready.
- */
-const MIN_WORDS = 2;
-/** The API's limit on the draft; the server reads less than this anyway. */
-const MAX_DRAFT_CHARS = 4000;
-/**
  * After a "no verdict" answer — the feature is off for this user — stay quiet this
  * long rather than sending a request every pause. A lookup that merely failed comes
  * back marked as failed instead, so it never silences the next one.
@@ -41,18 +34,8 @@ const NO_VERDICT_BACKOFF_MS = 60_000;
 const RATE_LIMITED_BACKOFF_MS = 60_000;
 const CACHE_SIZE = 20;
 
-const normalize = (text: string): string => text.trim().replace(/\s+/g, ' ');
-
 /** Keeps the same empty array, so clearing on every keystroke never re-renders. */
 const cleared = (items: RelatedItem[]): RelatedItem[] => (items.length ? [] : items);
-
-/** The server's check, less its word count: slash commands, links and mentions don't count. */
-const isWorthLookingUp = (draft: string): boolean =>
-  !draft.startsWith('/') &&
-  draft
-    .replace(/https?:\/\/\S+/g, ' ')
-    .split(/\s+/)
-    .filter(word => /\p{L}{2,}/u.test(word) && !word.startsWith('@')).length >= MIN_WORDS;
 
 /** The wait to use: the preference, held between the shortest and the longest. */
 export const clampDebounceMs = (ms: number): number =>
@@ -109,7 +92,7 @@ const restore = (
 ): { draft: string; foundFor: string; items: RelatedItem[] } | null => {
   const { drafts, relatedContext } = stateMachineActor.getSnapshot().context;
   const saved: unknown = relatedContext[draftKey];
-  const draft = normalize(drafts[draftKey]?.text ?? '');
+  const draft = normalizeRelatedDraft(drafts[draftKey]?.text ?? '');
   if (!isRecord(saved) || !draft) return null;
   const { draft: foundFor, items } = saved;
   if (typeof foundFor !== 'string' || !continues(draft, foundFor) || !Array.isArray(items)) {
@@ -230,7 +213,7 @@ export function useRelatedContext({
       setLoading(true);
       try {
         const data = await searchService.getRelatedContext(
-          draft.slice(0, MAX_DRAFT_CHARS),
+          draft,
           conversationId,
           controller.signal,
         );
@@ -288,7 +271,7 @@ export function useRelatedContext({
     timer.current = setTimeout(() => {
       timer.current = undefined;
       const draft = latestDraft.current;
-      if (draft && isWorthLookingUp(draft) && !dismissed.current) {
+      if (draft && isRelatedDraftWorthLookingUp(draft) && !dismissed.current) {
         void lookUp(draft);
       }
     }, wait.current);
@@ -296,7 +279,7 @@ export function useRelatedContext({
 
   const onDraftChange = useCallback(
     (text: string): void => {
-      const draft = normalize(text);
+      const draft = normalizeRelatedDraft(text);
       latestDraft.current = draft;
       if (!isEnabled.current) return;
 
@@ -310,7 +293,7 @@ export function useRelatedContext({
         forget(key.current);
         return;
       }
-      if (!isWorthLookingUp(draft)) {
+      if (!isRelatedDraftWorthLookingUp(draft)) {
         cancel();
         setItems(cleared);
         forget(key.current);
