@@ -194,6 +194,29 @@ describe('a turn', () => {
     expect(chat.jevCalls()).toBe(before);
   });
 
+  it('offers long message text whole and requires a preview before sending', async () => {
+    const chat = assistant();
+    const message =
+      'the deploy is blocked because the migration failed on staging and we need to roll back tonight';
+    const request = `tell Daniel Okafor ${message}`;
+    chat.hears({
+      area: 'messaging',
+      action: 'send_dm',
+      fields: { recipient: 'Daniel Okafor', message },
+    });
+
+    const preview = await chat.say(request);
+
+    expect(preview.say).toBe(`Send “${message}” to Daniel Okafor?`);
+    expect(preview.display).toMatchObject({
+      kind: 'preview',
+      summary: `Send “${message}” to Daniel Okafor`,
+      confirmLabel: 'Yes',
+      cancelLabel: 'Cancel',
+    });
+    expect(preview.run).toBeUndefined();
+  });
+
   it('opens a channel said by name, without a preview', async () => {
     const chat = assistant();
     chat.hears({ area: 'channels', action: 'open_channel', fields: { channel: 'Android' } });

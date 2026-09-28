@@ -33,7 +33,11 @@ router.post('/turn', async (req: Request, res: Response) => {
     const response = await handleTurn(
       input,
       { workspaceId: user.workspaceId, userId: user.id, sessionId },
-      assistantServices(user.id),
+      assistantServices({
+        workspaceId: user.workspaceId,
+        userId: user.id,
+        role: user.role,
+      }),
       context
     );
     // Metadata only: what the user said stays out of the logs.

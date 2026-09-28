@@ -6,12 +6,13 @@ import {
   type TurnEvent,
   type ClientContext,
   type TurnDebug,
+  type FieldUpdate,
   type TurnInput,
   type TurnResponse,
 } from '@xyne/shared/assistant';
 import type { JevAnswer, JevQuestion, JevState } from '@/services/queryIntent/jevClient';
 import { toFieldUpdates } from './fieldUpdates';
-import { readingFor, type FieldWords } from './fields';
+import { MAX_VALUE_WORDS, readingFor, type FieldWords } from './fields';
 import {
   buildIntentQuestions,
   continuesProbability,
@@ -184,7 +185,13 @@ async function understand(
         true,
         draft.values
       );
-      return withDebug(applyEvent({ type: 'details', updates }, session, services));
+      return withDebug(
+        applyEvent(
+          { type: 'details', updates: requireLongTextPreview(action, text, updates) },
+          session,
+          services
+        )
+      );
     }
   }
 
@@ -231,7 +238,38 @@ async function startAction(
   if (!action) return withReply(session, replyForError('I can’t do that yet.'));
   const words = text ? await wordsFor(action, text, services) : {};
   const updates = await toFieldUpdates(action, words, services.records, true);
-  return applyEvent({ type: 'request', action: actionId, updates }, session, services);
+  return applyEvent(
+    {
+      type: 'request',
+      action: actionId,
+      updates: requireLongTextPreview(action, text, updates),
+    },
+    session,
+    services
+  );
+}
+
+/** A long request can produce a plausible but incomplete text span. Make the send preview
+ * explicit while leaving exact people and channel matches certain. */
+function requireLongTextPreview(
+  action: ActionDefinition,
+  text: string,
+  updates: FieldUpdate[]
+): FieldUpdate[] {
+  const wordCount = text.trim().split(/\s+/).filter(Boolean).length;
+  if (
+    action.effect !== 'send' ||
+    wordCount <= MAX_VALUE_WORDS ||
+    !Object.values(action.fields).some((field) => field.kind === 'text')
+  ) {
+    return updates;
+  }
+
+  return updates.map((update) =>
+    action.fields[update.field]?.kind === 'text' && update.op === 'set'
+      ? { ...update, certain: false }
+      : update
+  );
 }
 
 /** The details the sentence gives for `action`: the words of it that Jev picked. */

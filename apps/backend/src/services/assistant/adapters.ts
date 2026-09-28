@@ -1,5 +1,8 @@
 import type { Prisma } from '@prisma/client';
 import type { ChannelRef, PersonRef, ThreadRef } from '@xyne/shared/assistant';
+import type { ACLContext } from '@/database/acl/base-acl';
+import { ChannelsACL } from '@/database/acl/tables/channels-acl';
+import { UsersACL } from '@/database/acl/tables/users-acl';
 import { db } from '@/database/client';
 import { redisService } from '@/services/redisService';
 import { vespaService } from '@/services/vespaSearch';
@@ -40,10 +43,13 @@ export const redisSessionStore: SessionStore = {
  * Looks names up inside the request, so the app's own rules apply: people in the user's
  * workspace, and channels the user can open.
  */
-export function databaseFinder(selfId: string): RecordFinder {
+export function databaseFinder(context: ACLContext): RecordFinder {
+  const usersAcl = new UsersACL(context, db);
+  const channelsAcl = new ChannelsACL(context, db);
+
   return {
     async find(kind, mention, hints) {
-      if (kind === 'thread') return findConversations(mention, selfId, hints);
+      if (kind === 'thread') return findConversations(mention, context.userId, hints);
       const words = normalizeName(mention)
         .split(' ')
         .filter((word) => word.length >= 2)
@@ -51,15 +57,17 @@ export function databaseFinder(selfId: string): RecordFinder {
       if (!words.length) return [];
       switch (kind) {
         case 'person':
-          return findPeople(words, selfId);
+          return findPeople(words, context.userId, (await usersAcl.getWhereClause()) ?? {});
         case 'channel':
-          return findChannels(words);
+          return findChannels(words, (await channelsAcl.getWhereClause()) ?? {});
       }
     },
     async get(kind, id) {
       if (kind !== 'channel') return null;
       const row = await db.channel.findFirst({
-        where: { id, isArchived: false },
+        where: {
+          AND: [{ id, isArchived: false }, (await channelsAcl.getWhereClause()) ?? {}],
+        },
         select: { id: true, name: true },
       });
       return row ? channelRecord(row) : null;
@@ -76,8 +84,12 @@ const MAX_CHANNELS = 25;
  * "Deepanshu") matches none, so then the people whose name starts with the same letter are
  * fetched, and `matchName` compares how they sound.
  */
-async function findPeople(words: string[], selfId: string): Promise<FoundRecord[]> {
-  const byName = await people(selfId, {
+async function findPeople(
+  words: string[],
+  selfId: string,
+  access: Prisma.UserWhereInput
+): Promise<FoundRecord[]> {
+  const byName = await people(selfId, access, {
     AND: words.map((word) => ({
       OR: [
         { name: { contains: word, mode: 'insensitive' as const } },
@@ -87,7 +99,7 @@ async function findPeople(words: string[], selfId: string): Promise<FoundRecord[
   });
   if (byName.length > 0) return byName;
   const initial = words[0]?.charAt(0) ?? '';
-  return people(selfId, {
+  return people(selfId, access, {
     OR: [
       { name: { startsWith: initial, mode: 'insensitive' as const } },
       { displayName: { startsWith: initial, mode: 'insensitive' as const } },
@@ -95,9 +107,15 @@ async function findPeople(words: string[], selfId: string): Promise<FoundRecord[
   });
 }
 
-async function people(selfId: string, match: Prisma.UserWhereInput): Promise<FoundRecord[]> {
+async function people(
+  selfId: string,
+  access: Prisma.UserWhereInput,
+  match: Prisma.UserWhereInput
+): Promise<FoundRecord[]> {
   const rows = await db.user.findMany({
-    where: { status: 'ACTIVE', id: { not: selfId }, ...match },
+    where: {
+      AND: [{ status: 'ACTIVE', id: { not: selfId }, ...match }, access],
+    },
     select: { id: true, name: true, displayName: true, email: true },
     take: MAX_PEOPLE,
   });
@@ -107,12 +125,20 @@ async function people(selfId: string, match: Prisma.UserWhereInput): Promise<Fou
   });
 }
 
-async function findChannels(words: string[]): Promise<FoundRecord[]> {
+async function findChannels(
+  words: string[],
+  access: Prisma.ChannelWhereInput
+): Promise<FoundRecord[]> {
   const rows = await db.channel.findMany({
     where: {
-      scopeType: 'DEFAULT',
-      isArchived: false,
-      AND: words.map((word) => ({ name: { contains: word, mode: 'insensitive' as const } })),
+      AND: [
+        {
+          scopeType: 'DEFAULT',
+          isArchived: false,
+          AND: words.map((word) => ({ name: { contains: word, mode: 'insensitive' as const } })),
+        },
+        access,
+      ],
     },
     select: { id: true, name: true },
     take: MAX_CHANNELS,

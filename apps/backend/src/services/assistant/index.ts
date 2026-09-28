@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { ACTIONS } from '@xyne/shared/assistant';
+import type { ACLContext } from '@/database/acl/base-acl';
 import { config } from '@/config/env';
 import {
   askJev,
@@ -32,11 +33,11 @@ async function askJevWithRetry(
 }
 
 /** The real services for one user's request. */
-export function assistantServices(userId: string): TurnServices {
+export function assistantServices(context: ACLContext): TurnServices {
   return {
     catalog: ACTIONS,
     sessions: redisSessionStore,
-    records: databaseFinder(userId),
+    records: databaseFinder(context),
     askJev: askJevWithRetry,
     newId: randomUUID,
     debug: config.env !== 'production',

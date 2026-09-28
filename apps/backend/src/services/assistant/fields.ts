@@ -24,8 +24,8 @@ const FRAME_WORDS = new Set(
     'named open ping please post say saying send show tell that to with'
   ).split(' ')
 );
-/** The longest value, in words. */
-const MAX_VALUE_WORDS = 12;
+/** The longest value, in words, except for the rest of the sentence (see `sentencePieces`). */
+export const MAX_VALUE_WORDS = 12;
 /** Jev takes 2–52 options per choice; one of them is "none". */
 const MAX_PIECES = 51;
 const NONE = 'none';
@@ -41,7 +41,10 @@ export function sentencePieces(text: string): string[] {
   const pieces = new Set<string>();
   for (let start = 0; start < words.length; start += 1) {
     const last = Math.min(words.length, start + MAX_VALUE_WORDS);
-    for (let end = start + 1; end <= last; end += 1) {
+    const ends = Array.from({ length: last - start }, (_, index) => start + index + 1);
+    // A long message runs to the end of the sentence: "tell Priya <message>".
+    if (start < MAX_VALUE_WORDS && last < words.length) ends.push(words.length);
+    for (const end of ends) {
       const run = words.slice(start, end);
       if (isFrame(run[0]) || isFrame(run.at(-1))) continue;
       const piece = run.join(' ').replace(EDGE_PUNCTUATION, '');
