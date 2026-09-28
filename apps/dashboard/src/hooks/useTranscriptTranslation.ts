@@ -56,8 +56,10 @@ export function useTranscriptTranslation({
 
     let cancelled = false;
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    let attempts = 0;
 
     const POLL_INTERVAL_MS = 3000;
+    const MAX_POLL_ATTEMPTS = 20;
 
     const fetchStatus = (): void => {
       void recordingService
@@ -67,6 +69,14 @@ export function useTranscriptTranslation({
           cacheRef.current.set(language, result);
 
           if (result.status === 'pending') {
+            attempts += 1;
+            if (attempts >= MAX_POLL_ATTEMPTS) {
+              setErrors(current =>
+                new Map(current).set(language, 'Translation failed. Please try again.'),
+              );
+              setTranslatingLanguage(current => (current === language ? null : current));
+              return;
+            }
             setTranslatingLanguage(language);
             timeoutId = setTimeout(fetchStatus, POLL_INTERVAL_MS);
             return;

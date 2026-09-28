@@ -860,17 +860,24 @@ export class TranscriptService {
 
   async transcriptExists(callId: string): Promise<boolean> {
     try {
-      return await this.transcriptStorage.fileExists(`attachments/${callId}_formatted.txt`);
+      const [formatted, raw] = await Promise.all([
+        this.transcriptStorage.fileExists(`attachments/${callId}_formatted.txt`),
+        this.transcriptStorage.fileExists(`transcriptions/${callId}.jsonl`),
+      ]);
+      return formatted || raw;
     } catch (error) {
       logger.error(`Failed to check transcript existence for ${callId}:`, error);
       return false;
     }
   }
 
-  // fileExists()-only check, no download and no raw-JSONL fallback (unlike getIdentifiedTranscriptContent).
   async identifiedTranscriptExists(callId: string): Promise<boolean> {
     try {
-      return await this.transcriptStorage.fileExists(`attachments/${callId}_identified_formatted.txt`);
+      const [formatted, raw] = await Promise.all([
+        this.transcriptStorage.fileExists(`attachments/${callId}_identified_formatted.txt`),
+        this.transcriptStorage.fileExists(`transcriptions/${callId}_identified.jsonl`),
+      ]);
+      return formatted || raw;
     } catch (error) {
       logger.error(`Failed to check identified transcript existence for ${callId}:`, error);
       return false;
@@ -994,8 +1001,7 @@ export class TranscriptService {
         });
 
         if (!translated.ok) {
-          logger.warn(`${operation}_failed | reason=${translated.reason} | using_original=true`);
-          return transcript;
+          throw new Error(`${operation}_failed | reason=${translated.reason}`);
         }
 
         logger.info(`Successfully processed transcript via ${operation} (streaming)`);
@@ -1030,25 +1036,19 @@ export class TranscriptService {
           `Processing chunk ${chunk.chunkIndex}/${totalChunks} via ${operation} (lines ${chunk.startLine}-${chunk.endLine})`
         );
 
-        try {
-          const translated = await executeStreamingLlmRequest({
-            userPrompt: chunk.chunkText,
-            systemPrompt: systemInstructions,
-            operation,
-            callId,
-          });
+        const translated = await executeStreamingLlmRequest({
+          userPrompt: chunk.chunkText,
+          systemPrompt: systemInstructions,
+          operation,
+          callId,
+        });
 
-          if (!translated.ok) {
-            logger.warn(`${operation}_chunk_failed | chunk=${chunk.chunkIndex}/${totalChunks} | reason=${translated.reason} | using_original=true`);
-            return chunk.chunkText;
-          }
-
-          logger.info(`Chunk ${chunk.chunkIndex}/${totalChunks} completed`);
-          return translated.content;
-        } catch (error) {
-          logger.error(`Error processing chunk ${chunk.chunkIndex}:`, error);
-          return chunk.chunkText;
+        if (!translated.ok) {
+          throw new Error(`${operation}_chunk_failed | chunk=${chunk.chunkIndex}/${totalChunks} | reason=${translated.reason}`);
         }
+
+        logger.info(`Chunk ${chunk.chunkIndex}/${totalChunks} completed`);
+        return translated.content;
       };
 
       const results = await mapWithConcurrency(chunks, CHUNK_CONCURRENCY, processChunk);
@@ -1057,7 +1057,7 @@ export class TranscriptService {
       return results.join('\n');
     } catch (error) {
       logger.error(`Error during ${operation}:`, error);
-      return transcript; // Fallback to original if processing fails
+      throw error;
     }
   }
 

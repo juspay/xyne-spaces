@@ -38,6 +38,7 @@ import {
 import AppNavigator from '../../components/AppNavigator/AppNavigator';
 import { usePlatform } from '../../hooks/usePlatform';
 import { useTranscriptTranslation } from '../../hooks/useTranscriptTranslation';
+import { useSpeakerIdentificationEnabled } from '../../components/SpeakerIdentification/useSpeakerIdentificationEnabled';
 import {
   Spinner,
   Flag,
@@ -97,7 +98,7 @@ import {
   TranscriptSidePanel,
   type TranscriptPanelTarget,
 } from '../../components/Chat/TranscriptCitationModal/TranscriptSidePanel';
-import { ORIGINAL_TRANSCRIPT_LANGUAGE } from '@xyne/shared';
+import { ORIGINAL_TRANSCRIPT_LANGUAGE, SUPPORTED_TRANSCRIPT_LANGUAGES } from '@xyne/shared';
 import { transcriptCitationStore } from '../../components/Chat/TranscriptCitationModal';
 import { parseMarkedItems, type MarkedItem } from '../../components/CallTimeline/markedItems';
 import type { Canvas } from '../../components/Canvas/Canvas.types';
@@ -248,8 +249,11 @@ export default function RecordingDetailV2Screen({
   useEffect(() => {
     const lang = new URLSearchParams(location.search).get('lang');
     if (!lang) return;
+    const isValid =
+      lang === ORIGINAL_TRANSCRIPT_LANGUAGE ||
+      SUPPORTED_TRANSCRIPT_LANGUAGES.some(language => language.code === lang);
     setShowTranscriptPanel(true);
-    setSelectedTranscriptLanguage(lang);
+    setSelectedTranscriptLanguage(isValid ? lang : ORIGINAL_TRANSCRIPT_LANGUAGE);
   }, [location.search]);
 
   const [showShareModal, setShowShareModal] = useState(false);
@@ -989,7 +993,13 @@ export default function RecordingDetailV2Screen({
     // getRecordingDetail no longer embedding the transcript body.
     enabled: showTranscriptPanel,
   });
-  const transcriptText = transcript.text;
+  const speakerIdentificationEnabled = useSpeakerIdentificationEnabled();
+  const transcriptText =
+    selectedTranscriptLanguage === ORIGINAL_TRANSCRIPT_LANGUAGE &&
+    speakerIdentificationEnabled &&
+    recording?.hasIdentifiedTranscript
+      ? (recording.identifiedTranscript ?? transcript.text)
+      : transcript.text;
 
   const markedMomentSeconds = useMemo(
     () =>

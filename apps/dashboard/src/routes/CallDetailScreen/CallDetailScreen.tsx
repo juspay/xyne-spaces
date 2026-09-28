@@ -3,7 +3,7 @@ import { useSelector } from '@xstate/react';
 import { useNavigate, useLocation, useParams } from 'react-router-dom';
 import { AnimatePresence } from 'framer-motion';
 import { ChevronLeft, ChevronRight, ChevronDown, Loader2, FileText } from 'lucide-react';
-import { ORIGINAL_TRANSCRIPT_LANGUAGE } from '@xyne/shared';
+import { ORIGINAL_TRANSCRIPT_LANGUAGE, SUPPORTED_TRANSCRIPT_LANGUAGES } from '@xyne/shared';
 import {
   SidebarRightClose,
   SidebarRightOpen,
@@ -268,8 +268,11 @@ export default function CallDetailScreen(): ReactElement {
   useEffect(() => {
     const lang = new URLSearchParams(location.search).get('lang');
     if (!lang) return;
+    const isValid =
+      lang === ORIGINAL_TRANSCRIPT_LANGUAGE ||
+      SUPPORTED_TRANSCRIPT_LANGUAGES.some(language => language.code === lang);
     setShowTranscriptPanel(true);
-    setSelectedTranscriptLanguage(lang);
+    setSelectedTranscriptLanguage(isValid ? lang : ORIGINAL_TRANSCRIPT_LANGUAGE);
   }, [location.search]);
 
   // Route canvas citations (detailed-summary pills carry callId = externalId) into this

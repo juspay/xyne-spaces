@@ -6,7 +6,9 @@ import {
   CopyDefault,
   DownloadDown,
   FileText,
+  Globe,
   MultipleCrossCancelDefault,
+  Refresh,
   SearchBig,
   Spinner,
   Translate,
@@ -344,11 +346,32 @@ export function TranscriptSidePanel({
         {!isLoading && error ? (
           <div className='flex flex-col items-center gap-3 py-6 text-center'>
             <p className='text-sm text-destructive'>{error}</p>
-            {onRetry ? (
-              <Button type='button' variant='outline' size='sm' onClick={onRetry}>
-                Try again
-              </Button>
-            ) : null}
+            <div className='flex   gap-2'>
+              {onRetry ? (
+                <Button
+                  type='button'
+                  variant='outline'
+                  size='sm'
+                  className='gap-1.5'
+                  onClick={onRetry}
+                >
+                  <Refresh size={14} aria-hidden='true' />
+                  Try again
+                </Button>
+              ) : null}
+              {onLanguageChange && selectedLanguage !== ORIGINAL_TRANSCRIPT_LANGUAGE ? (
+                <Button
+                  type='button'
+                  variant='outline'
+                  size='sm'
+                  className='gap-1.5'
+                  onClick={() => onLanguageChange(ORIGINAL_TRANSCRIPT_LANGUAGE)}
+                >
+                  <Globe size={14} aria-hidden='true' />
+                  View original
+                </Button>
+              ) : null}
+            </div>
           </div>
         ) : null}
         {!isLoading && !error && lines.length === 0 ? (

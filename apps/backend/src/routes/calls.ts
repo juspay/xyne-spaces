@@ -81,7 +81,7 @@ router.post('/:callId/process-transcript', callController.processTranscript);
 // Download transcript endpoint (downloads transcript file from GCS)
 router.get('/:callId/download-transcript', callController.downloadTranscript);
 
-// Translate transcript into a user-picked language (synchronous — returns text directly).
+// Translate transcript endpoint (downloads transcript file from GCS)
 router.post('/:callId/translate-transcript', callController.translateTranscript);
 
 // Download recording endpoint (streams the call's latest recording — legacy/headless player)
