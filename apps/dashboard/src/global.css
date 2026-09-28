@@ -5447,8 +5447,10 @@ img.inline-emoji,
    28px pills for this row only, so scope the override instead of restyling the trigger. */
 [data-ticket-chip-row] button,
 [data-ticket-chip-row] [role="button"],
+[data-ticket-chip-row] [role="combobox"],
 [data-ticket-chip-row] button > div,
-[data-ticket-chip-row] > div > div {
+[data-ticket-chip-row] > div > div,
+[data-ticket-chip-row] > span {
   border-radius: 9999px;
 }
 
