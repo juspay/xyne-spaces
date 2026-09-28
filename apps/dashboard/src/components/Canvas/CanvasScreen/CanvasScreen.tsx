@@ -31,13 +31,13 @@ import { Popover } from '../../ui/Popover';
 import Input from '../../ui/Input';
 import AvatarGroup from '../../ui/Avatar/AvatarGroup';
 import {
-  AudioLines,
   ArrowLeft,
   Archive,
   CheckCircle,
   GitCompare,
   Loader2,
   MessageSquare,
+  Phone,
   RotateCcw,
 } from 'lucide-react';
 import {
@@ -1479,7 +1479,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                               recordingId: recordingCallId,
                             })}
                           >
-                            <AudioLines size={16} strokeWidth={2.2} className='shrink-0' />
+                            <Phone size={16} strokeWidth={2.2} className='shrink-0' />
                           </button>
                         )}
 
