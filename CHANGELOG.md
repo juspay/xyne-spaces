@@ -1,3 +1,10 @@
+## [1.396.0-release-20260925.2](https://github.com/juspay/xyne-spaces/compare/v1.396.0-release-20260925.1...v1.396.0-release-20260925.2) (2026-09-28)
+
+
+### Bug Fixes
+
+* fixed config to allow board fields ([#2320](https://github.com/juspay/xyne-spaces/issues/2320)) ([#2342](https://github.com/juspay/xyne-spaces/issues/2342)) ([515fe6d](https://github.com/juspay/xyne-spaces/commit/515fe6dd6a2a822fef056b9d399164fce57354d9))
+
 ## [1.396.0-release-20260925.1](https://github.com/juspay/xyne-spaces/compare/v1.395.2-release-20260925.1...v1.396.0-release-20260925.1) (2026-09-28)
 
 
