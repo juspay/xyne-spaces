@@ -1,3 +1,10 @@
+## [1.416.3](https://github.com/juspay/xyne-spaces/compare/v1.416.2...v1.416.3) (2026-09-28)
+
+
+### Bug Fixes
+
+* bump mcp-grafana to 1.6.1 (0.15.2 no longer on PyPI) ([#2389](https://github.com/juspay/xyne-spaces/issues/2389)) ([8ffbdd4](https://github.com/juspay/xyne-spaces/commit/8ffbdd4ea67b36add9b90a7aa67805e2acb17f58))
+
 ## [1.416.2](https://github.com/juspay/xyne-spaces/compare/v1.416.1...v1.416.2) (2026-09-28)
 
 
