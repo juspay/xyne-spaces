@@ -218,6 +218,7 @@ test('every supported profile selects an existing scenario entry file', () => {
     ['release', 'rest-messaging'],
     ['release', 'search'],
     ['release', 'attachments'],
+    ['release', 'zero-push'],
   ];
 
   for (const [profile, scenario] of combinations) {
@@ -236,7 +237,7 @@ function exists(file) {
 }
 
 test('requires an identity fixture for every authenticated scenario', () => {
-  for (const scenario of ['zero-query-transform', 'rest-messaging', 'search', 'attachments']) {
+  for (const scenario of ['zero-query-transform', 'zero-push', 'rest-messaging', 'search', 'attachments']) {
     assert.throws(
       () => validateRuntime({
         root,
@@ -402,5 +403,74 @@ test('search needs a fixture but not the Zero identity floor', () => {
       },
     }).identityCount,
     1,
+  );
+});
+
+test('zero-push carries the Zero identity floor, because push is rate limited too', () => {
+  const { temporaryRoot, write } = fixtureWorkspace();
+  write('one.json', identities(1));
+
+  // handleMutate calls checkRateLimit("mutate", sub, batchSize), so the same per-user
+  // budget applies as for queries.
+  assert.throws(
+    () => validateRuntime({
+      root: temporaryRoot,
+      config: { scenario: 'zero-push', profile: 'load' },
+      env: {
+        PERF_BASE_URL: 'https://preprod.example',
+        PERF_USERS_FILE: path.join(temporaryRoot, 'performance', 'test-data', 'one.json'),
+      },
+    }),
+    /at least 20 identities/,
+  );
+});
+
+test('forwards the Zero push parameters from runtime, not the ambient environment', () => {
+  const invocation = buildDockerInvocation(
+    { environment: 'preprod', profile: 'release', scenario: 'zero-push' },
+    {
+      root: '/repo', reportDirectory: '/repo/performance/reports/r', runId: 'r',
+      baseUrl: 'https://preprod.example', releaseVersion: 'abc', thinkTimeSeconds: 1,
+      zeroSchema: 'xyne', zeroAppId: 'zero',
+    },
+  );
+
+  assert.ok(invocation.args.includes('PERF_ZERO_SCHEMA'));
+  assert.ok(invocation.args.includes('PERF_ZERO_APP_ID'));
+  assert.equal(invocation.env.PERF_ZERO_SCHEMA, 'xyne');
+  assert.equal(invocation.env.PERF_ZERO_APP_ID, 'zero');
+});
+
+test('refuses a zero-push run that cannot address the endpoint', () => {
+  const { temporaryRoot, write } = fixtureWorkspace();
+  write('many.json', identities(20));
+  const usersFile = path.join(temporaryRoot, 'performance', 'test-data', 'many.json');
+  const base = { PERF_BASE_URL: 'https://preprod.example', PERF_USERS_FILE: usersFile };
+
+  // The push endpoint parses schema and appID from the querystring, so a run without
+  // them would fail inside k6 after Docker has started. Refuse earlier.
+  assert.throws(
+    () => validateRuntime({
+      root: temporaryRoot,
+      config: { scenario: 'zero-push', profile: 'load' },
+      env: base,
+    }),
+    /PERF_ZERO_SCHEMA is required/,
+  );
+  assert.throws(
+    () => validateRuntime({
+      root: temporaryRoot,
+      config: { scenario: 'zero-push', profile: 'load' },
+      env: { ...base, PERF_ZERO_SCHEMA: 'xyne' },
+    }),
+    /PERF_ZERO_APP_ID is required/,
+  );
+  assert.equal(
+    validateRuntime({
+      root: temporaryRoot,
+      config: { scenario: 'zero-push', profile: 'load' },
+      env: { ...base, PERF_ZERO_SCHEMA: 'xyne', PERF_ZERO_APP_ID: 'zero' },
+    }).zeroSchema,
+    'xyne',
   );
 });

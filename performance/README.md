@@ -11,6 +11,7 @@ a future GitHub Actions workflow can call the same `pnpm perf:run` command.
 | `zero-query-transform` | `POST /api/zero/query` | no | The query-transform step: auth, rate limit, ACL, tenant scoping, AST compile. |
 | `search` | `GET /api/vespaSearch/` | no | ACL-filtered Vespa retrieval. Executes a real search and returns rows. |
 | `attachments` | `GET /api/attachments/:id/{download,thumbnail}` | no | Object-storage retrieval and access checking. Moves real bytes — see the cost note. |
+| `zero-push` | `POST /api/zero/push` | **yes** | The chat-send mutation path — `messages.send`, its ACL, Vespa enqueue and side-effect cascade. **Gated.** Needs `PERF_ZERO_SCHEMA` and `PERF_ZERO_APP_ID`. |
 | `rest-messaging` | `POST /api/conversations/:id/messages` | **yes** | The REST send path used by bots, the Claw MCP route and attachment uploads. **Gated — see below.** |
 
 ### `zero-query-transform` — what it is, precisely
@@ -61,7 +62,7 @@ What is built here covers a slice of that, and the gap is deliberate, not forgot
 | Approved scenario | Status |
 | --- | --- |
 | 0 — reconnect/retry characterisation (Socket.IO) | **not built.** Needs a socket client; k6 HTTP cannot reach it. |
-| 1 — steady-state message send | **not built.** The real send path is the Zero mutator `messages.send` → `POST /api/zero/push`, whose request envelope is undocumented (Zero's own docs say to read the `handleMutateRequest` source). `rest-messaging` hits a REST endpoint the chat UI does not use. |
+| 1 — steady-state message send | `zero-push`, gated. The envelope was resolved from `@rocicorp/zero` 1.9.0 source: `{clientGroupID, mutations:[{type:'custom', id, clientID, name:'messages.send', args:[…], timestamp}], pushVersion:1, timestamp, requestID}` with `schema` and `appID` as querystring parameters. **Caveat:** `ZERO_MUTATE_URL` shows zero-cache calls this endpoint, so hitting it directly covers the mutator and its side effects but bypasses the sync layer where hydration and serving lag live. |
 | 2 — participant fan-out wall | **not built.** Depends on scenario 1. |
 | Wave 2 — search (Vespa + ACL) | `search`. Executes retrieval, so unlike the Zero scenario its latency is real work. |
 | Wave 2 — attachment downloads | `attachments`. Needs `attachmentIds` in the fixture and has a bandwidth cost. |

@@ -16,14 +16,26 @@ parameters {
   )
   choice(
     name: 'PERF_SCENARIO',
-    choices: ['zero-query-transform', 'search', 'attachments', 'rest-messaging', 'smoke'],
-    description: 'zero-query-transform, search and attachments read; rest-messaging writes rows'
+    choices: [
+      'zero-query-transform', 'search', 'attachments', 'zero-push', 'rest-messaging', 'smoke',
+    ],
+    description: 'first three read; zero-push and rest-messaging write rows and need the opt-in'
   )
   string(name: 'PERF_VUS_OVERRIDE', defaultValue: '', description: 'Optional bounded VU override')
   string(
     name: 'PERF_DURATION_OVERRIDE',
     defaultValue: '',
     description: 'Optional steady duration such as 10m'
+  )
+  string(
+    name: 'PERF_ZERO_SCHEMA',
+    defaultValue: '',
+    description: 'Required for zero-push: the schema name from this environment\'s zero-cache config'
+  )
+  string(
+    name: 'PERF_ZERO_APP_ID',
+    defaultValue: '',
+    description: 'Required for zero-push: the appID from this environment\'s zero-cache config'
   )
   string(
     name: 'PERF_ZERO_MAX_REQUESTS',
@@ -54,6 +66,8 @@ stage('Performance and load test') {
     PERF_DURATION_OVERRIDE = "${params.PERF_DURATION_OVERRIDE}"
     PERF_ENFORCE_THRESHOLDS = "${params.PERF_ENFORCE_THRESHOLDS}"
     PERF_ZERO_MAX_REQUESTS = "${params.PERF_ZERO_MAX_REQUESTS}"
+    PERF_ZERO_SCHEMA = "${params.PERF_ZERO_SCHEMA}"
+    PERF_ZERO_APP_ID = "${params.PERF_ZERO_APP_ID}"
     PERF_RELEASE_VERSION = "${env.GIT_COMMIT}"
   }
   steps {
