@@ -3,12 +3,6 @@ import { cn } from '@/utils/classNames';
 import { Pill } from '../../primitives/Pill';
 import { McpLogo } from './McpLogo';
 
-export const EnabledBadge = (): ReactElement => (
-  <Pill tone='success' size='sm'>
-    Enabled
-  </Pill>
-);
-
 export const StatusBadge = ({
   tone,
   children,

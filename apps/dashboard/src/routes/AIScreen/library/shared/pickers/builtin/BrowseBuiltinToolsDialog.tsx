@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type ReactElement } from 'react';
 import { cn } from '@/utils/classNames';
 import { searchByNameThenDescription } from '../../librarySearch';
 import { BROWSE_CARD, BROWSE_CARD_IDLE, BROWSE_CARD_SELECTED } from '../../primitives/browseCard';
-import { ChevronRight, MultipleCrossCancelDefault, PlusDefault } from '@xyne/icons';
+import { MultipleCrossCancelDefault, PlusDefault } from '@xyne/icons';
 import {
   BrowseDialog,
   handleBrowseDialogOpenChange,
@@ -59,23 +59,14 @@ const BuiltinCard = ({
       data-track-name='Create agent v2: open built-in detail'
       className={cn(BROWSE_CARD, enabled ? BROWSE_CARD_SELECTED : BROWSE_CARD_IDLE)}
     >
-      <span className='flex w-full items-center justify-between gap-2'>
+      <span className='flex w-full items-center gap-2'>
         <span className='flex min-w-0 items-center gap-2'>
           <span className='truncate text-sm font-medium leading-5 text-foreground'>
             {entry.label}
           </span>
-          {enabled ? (
-            <Pill tone='success' size='sm'>
-              Enabled
-            </Pill>
-          ) : (
-            <Pill tone={RISK_TONE[entry.risk]} size='sm'>
-              {RISK_LABEL[entry.risk]}
-            </Pill>
-          )}
-        </span>
-        <span className='flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground'>
-          <ChevronRight className='size-4' aria-hidden />
+          <Pill tone={RISK_TONE[entry.risk]} size='sm'>
+            {RISK_LABEL[entry.risk]}
+          </Pill>
         </span>
       </span>
       <span className='w-full truncate text-xs leading-4 tracking-[-0.24px] text-muted-foreground'>
@@ -92,7 +83,7 @@ const BuiltinCard = ({
       title={enabled ? `Remove ${entry.label}` : `Add all ${entry.label} tools`}
       data-track-category='Claw Agents'
       data-track-name='Create agent v2: quick toggle built-in group'
-      className='absolute right-11 top-4 flex size-7 items-center justify-center rounded-lg text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100'
+      className='absolute right-4 top-4 flex size-7 items-center justify-center rounded-lg text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100'
     >
       {enabled ? (
         <MultipleCrossCancelDefault className='size-4' aria-hidden />
@@ -203,6 +194,7 @@ export function BrowseBuiltinToolsDialog({
                 key={`selected-${entry.source}`}
                 label={entry.label}
                 selected
+                onOpen={() => setOpenSource(entry.source)}
                 onToggle={() => onSelectionChange(disableEntry(selection, entry))}
               />
             ))}

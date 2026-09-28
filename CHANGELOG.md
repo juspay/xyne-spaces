@@ -1,3 +1,24 @@
+## [1.407.1](https://github.com/juspay/xyne-spaces/compare/v1.407.0...v1.407.1) (2026-09-28)
+
+
+### Bug Fixes
+
+* simplify desk mail back button to plain browser back ([#2324](https://github.com/juspay/xyne-spaces/issues/2324)) ([0c29e69](https://github.com/juspay/xyne-spaces/commit/0c29e690abd4833c12729c24d9c6911f9c21c397))
+
+## [1.407.0](https://github.com/juspay/xyne-spaces/compare/v1.406.0...v1.407.0) (2026-09-26)
+
+
+### Features
+
+* edit a draft agent's identity before creating it ([#2288](https://github.com/juspay/xyne-spaces/issues/2288)) ([f5e4d22](https://github.com/juspay/xyne-spaces/commit/f5e4d22c04153876228e88f58955c46f1f21e9b6))
+
+## [1.406.0](https://github.com/juspay/xyne-spaces/compare/v1.405.1...v1.406.0) (2026-09-26)
+
+
+### Features
+
+* use jev to skip the forced plan card for direct questions ([#2330](https://github.com/juspay/xyne-spaces/issues/2330)) ([4404719](https://github.com/juspay/xyne-spaces/commit/4404719a8c2110c415bd4b023c7a8526625bded5))
+
 ## [1.405.1](https://github.com/juspay/xyne-spaces/compare/v1.405.0...v1.405.1) (2026-09-25)
 
 
