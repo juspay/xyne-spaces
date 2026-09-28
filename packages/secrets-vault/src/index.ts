@@ -5,3 +5,5 @@ export { createSecretsVaultRouter } from './router.js';
 export type { SecretsVaultRouterDeps } from './router.js';
 export { EncryptionImpl, RotationState, SecretVersionStatus } from './types.js';
 export type { EncryptionAdapter, SecretDefinitionRow, SecretVersionRow, VaultPrismaClient } from './types.js';
+export { createSecretHandler } from './secretHandler.js';
+export type { SecretHandler } from './secretHandler.js';
