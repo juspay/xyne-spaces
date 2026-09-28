@@ -162,7 +162,7 @@ function fromStaticAdapter(serverType: string): ResolvedConnectorDefinition | un
  */
 // clickup: DB row is a dead manual-token form — ClickUp only accepts OAuth
 // PKCE tokens from routes/clickup-oauth.ts, so the code adapter must win.
-const STATIC_FIRST_TYPES = new Set<string>(["rapidapi-linkedin", "clickup"]);
+const STATIC_FIRST_TYPES = new Set<string>(["rapidapi-linkedin", "clickup", "webflow"]);
 
 export async function resolveConnectorDefinition(serverType: string): Promise<ResolvedConnectorDefinition | undefined> {
   if (STATIC_FIRST_TYPES.has(serverType)) {
