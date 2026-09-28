@@ -12,6 +12,8 @@ export interface TelephonyTranscriptionState {
   status: TelephonyTranscriptionStatus;
   error?: string;
   attachmentId?: string;
+  /** AI summary (Markdown) generated from the transcript once it is done. */
+  summary?: string;
   updatedAt: string;
 }
 
@@ -30,8 +32,33 @@ export function sanitizeTranscriptionState(value: unknown): TelephonyTranscripti
     status: raw.status as TelephonyTranscriptionStatus,
     ...(typeof raw.error === 'string' && raw.error.trim() && { error: raw.error.trim() }),
     ...(typeof raw.attachmentId === 'string' && raw.attachmentId.trim() && { attachmentId: raw.attachmentId }),
+    ...(typeof raw.summary === 'string' && raw.summary.trim() && { summary: raw.summary.trim() }),
     updatedAt: typeof raw.updatedAt === 'string' && raw.updatedAt ? raw.updatedAt : new Date(0).toISOString(),
   };
+}
+
+/**
+ * The shared call-summary prompt expects a numbered transcript ("[N] text") so it
+ * can cite segments. Ozonetel transcripts are plain paragraphs, so number them by
+ * sentence; the citation tokens are stripped again by `cleanCallSummary`.
+ */
+export function numberTranscriptForSummary(text: string): string {
+  const sentences = text
+    .replace(/\s+/g, ' ')
+    .trim()
+    .split(/(?<=[.!?])\s+(?=\S)/)
+    .map(s => s.trim())
+    .filter(Boolean);
+  return sentences.map((sentence, index) => `[${index + 1}] ${sentence}`).join('\n');
+}
+
+/** Strip the citation tokens and host marker the shared prompt emits; the desk UI has no anchors for them. */
+export function cleanCallSummary(markdown: string): string {
+  return markdown
+    .replace(/\[clf-\d+\]/g, '')
+    .replace(/\s*\{HOST\}/g, '')
+    .replace(/[ \t]+$/gm, '')
+    .trim();
 }
 
 /**
@@ -113,6 +140,14 @@ export function formatCallTranscript(source: CallTranscriptHeaderSource, result:
   lines.push('---------------', '');
   lines.push(result.text.trim(), '');
   return lines.join('\n');
+}
+
+const TRANSCRIPT_SEPARATOR = '---------------';
+
+/** Inverse of `formatCallTranscript`: the spoken text without the header block. */
+export function extractTranscriptBody(fileContent: string): string {
+  const index = fileContent.indexOf(`\n${TRANSCRIPT_SEPARATOR}\n`);
+  return (index === -1 ? fileContent : fileContent.slice(index + TRANSCRIPT_SEPARATOR.length + 2)).trim();
 }
 
 /** `call-transcript-<ucid|monitorUcid|emailId>-<yyyymmdd>.txt` */

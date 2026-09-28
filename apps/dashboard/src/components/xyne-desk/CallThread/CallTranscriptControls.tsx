@@ -1,10 +1,20 @@
 import { ReactElement, useCallback, useMemo, useState } from 'react';
-import { AlertCircle, ChevronDown, ChevronUp, Download, FileText, Loader2 } from 'lucide-react';
+import {
+  AlertCircle,
+  ChevronDown,
+  ChevronUp,
+  Download,
+  FileText,
+  Loader2,
+  Sparkles,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '../../ui/Button/Button';
+import { MarkdownMessageRenderer } from '../../ui/MessageBubble/MarkdownMessageRenderer';
 import { apiInstance } from '../../../services/clients/apiClient';
 import { downloadFile, fetchFile } from '../../../services/clients/fileFetchService';
 import { cn } from '../../../utils/classNames';
+import { createMarkdownComponents } from '../../../utils/markdownComponents';
 
 export type CallTranscriptionStatus = 'queued' | 'processing' | 'done' | 'failed';
 
@@ -13,6 +23,8 @@ export interface CallTranscriptionState {
   status: CallTranscriptionStatus;
   error?: string;
   attachmentId?: string;
+  /** AI summary (Markdown), written by the backend after the transcript. */
+  summary?: string;
   updatedAt?: string;
 }
 
@@ -39,6 +51,7 @@ export function parseCallTranscriptionState(value: unknown): CallTranscriptionSt
   const rawStatus = raw['status'];
   const rawError = raw['error'];
   const rawAttachmentId = raw['attachmentId'];
+  const rawSummary = raw['summary'];
   const rawUpdatedAt = raw['updatedAt'];
   const status = typeof rawStatus === 'string' ? rawStatus.toLowerCase() : '';
   if (!TRANSCRIPTION_STATUSES.has(status)) return undefined;
@@ -46,6 +59,7 @@ export function parseCallTranscriptionState(value: unknown): CallTranscriptionSt
     status: status as CallTranscriptionStatus,
     ...(typeof rawError === 'string' && rawError.trim() ? { error: rawError.trim() } : {}),
     ...(typeof rawAttachmentId === 'string' ? { attachmentId: rawAttachmentId } : {}),
+    ...(typeof rawSummary === 'string' && rawSummary.trim() ? { summary: rawSummary.trim() } : {}),
     ...(typeof rawUpdatedAt === 'string' ? { updatedAt: rawUpdatedAt } : {}),
   };
 }
@@ -73,6 +87,15 @@ export function findCallTranscriptAttachment(
       parseAttachmentMetadata(att.metadata)?.['type'] === 'call_transcript',
   );
 }
+
+/** `call-transcript-TXR9dcf5ba965…20260925.txt` style: keep the start and the tail, cap at ~20 chars. */
+const shortFilename = (name: string, max = 20): string => {
+  if (name.length <= max) return name;
+  const dot = name.lastIndexOf('.');
+  const tail = dot > 0 ? name.slice(Math.max(dot - 4, 0)) : '';
+  const head = name.slice(0, Math.max(max - tail.length - 1, 4));
+  return `${head}…${tail}`;
+};
 
 const serverErrorMessage = (error: unknown): string | undefined => {
   const message = (error as { response?: { data?: { error?: unknown } } })?.response?.data?.error;
@@ -125,6 +148,9 @@ export function CallTranscriptControls({
     return (
       <CallTranscriptViewer
         attachment={transcriptAttachment}
+        summary={transcription?.summary}
+        emailId={emailId}
+        ticketId={ticketId}
         rowClass={rowClass}
         buttonClass={buttonClass}
         isCompact={isCompact}
@@ -195,13 +221,64 @@ export function CallTranscriptControls({
   );
 }
 
+function CallSummaryPanel({
+  summary,
+  attachmentId,
+  buttonClass,
+}: {
+  summary: string;
+  attachmentId: string;
+  buttonClass: string;
+}): ReactElement {
+  const [open, setOpen] = useState(true);
+  const markdownComponents = useMemo(
+    () => createMarkdownComponents(`call-summary-${attachmentId}`),
+    [attachmentId],
+  );
+
+  return (
+    <div className='mt-2'>
+      <div className='flex items-center gap-2'>
+        <span className='flex items-center gap-1.5 text-xs font-medium text-muted-foreground'>
+          <Sparkles className='size-3.5 shrink-0' />
+          AI summary
+        </span>
+        <Button
+          type='button'
+          variant='ghost'
+          size='inline'
+          className={cn(buttonClass, 'ml-auto')}
+          onClick={() => setOpen(prev => !prev)}
+          aria-expanded={open}
+          data-track-category='Support'
+          data-track-name={open ? 'HideCallSummary' : 'ShowCallSummary'}
+        >
+          {open ? <ChevronUp className='size-3.5' /> : <ChevronDown className='size-3.5' />}
+          {open ? 'Hide summary' : 'View summary'}
+        </Button>
+      </div>
+      {open ? (
+        <div className='mt-2 rounded-xl border border-border bg-background px-3 py-2 text-xs text-foreground [&_h2]:mt-2 [&_h2]:mb-1 [&_h2]:text-xs [&_h2]:font-semibold [&_h2:first-child]:mt-0 [&_ol]:list-decimal [&_ol]:pl-4 [&_ul]:list-disc [&_ul]:pl-4 [&_p]:my-1'>
+          <MarkdownMessageRenderer content={summary} markdownComponents={markdownComponents} />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function CallTranscriptViewer({
   attachment,
+  summary,
+  emailId,
+  ticketId,
   rowClass,
   buttonClass,
   isCompact,
 }: {
   attachment: CallThreadAttachment;
+  summary?: string | undefined;
+  emailId: string;
+  ticketId: string;
   rowClass: string;
   buttonClass: string;
   isCompact: boolean;
@@ -210,6 +287,24 @@ function CallTranscriptViewer({
   const [text, setText] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  // Summary returned by the manual request, shown until Zero delivers the stored one.
+  const [requestedSummary, setRequestedSummary] = useState<string | null>(null);
+  const [summarizing, setSummarizing] = useState(false);
+  const effectiveSummary = summary ?? requestedSummary ?? undefined;
+
+  const requestSummary = useCallback(async (): Promise<void> => {
+    setSummarizing(true);
+    try {
+      const { data } = await apiInstance.post<{ summary: string }>(
+        `/tickets/${encodeURIComponent(ticketId)}/emails/${encodeURIComponent(emailId)}/summarize`,
+      );
+      if (data?.summary) setRequestedSummary(data.summary);
+    } catch (error) {
+      toast.error(serverErrorMessage(error) ?? 'Failed to generate summary');
+    } finally {
+      setSummarizing(false);
+    }
+  }, [emailId, ticketId]);
 
   const loadTranscript = useCallback(async (): Promise<void> => {
     setLoading(true);
@@ -245,38 +340,61 @@ function CallTranscriptViewer({
 
   return (
     <div className={isCompact ? 'mt-2' : 'mt-3'}>
-      <div className={cn(rowClass, 'mt-0')}>
+      {/* File name is capped and ellipsised so the actions stay in a fixed column on the right. */}
+      <div className={cn(rowClass, 'mt-0 flex-nowrap')}>
         <span className='flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground'>
           <FileText className='size-3.5 shrink-0' />
-          <span className='truncate' title={attachment.originalFilename}>
-            {attachment.originalFilename}
+          <span className='whitespace-nowrap' title={attachment.originalFilename}>
+            {shortFilename(attachment.originalFilename)}
           </span>
         </span>
-        <Button
-          type='button'
-          variant='outline'
-          size='inline'
-          className={buttonClass}
-          onClick={handleDownload}
-          data-track-category='Support'
-          data-track-name='DownloadCallTranscript'
-        >
-          <Download className='size-3.5' />
-          Download
-        </Button>
-        <Button
-          type='button'
-          variant='ghost'
-          size='inline'
-          className={buttonClass}
-          onClick={toggleOpen}
-          aria-expanded={open}
-          data-track-category='Support'
-          data-track-name={open ? 'HideCallTranscript' : 'ViewCallTranscript'}
-        >
-          {open ? <ChevronUp className='size-3.5' /> : <ChevronDown className='size-3.5' />}
-          {open ? 'Hide transcript' : 'View transcript'}
-        </Button>
+        <div className='ml-auto flex shrink-0 items-center gap-2'>
+          <Button
+            type='button'
+            variant='outline'
+            size='inline'
+            className={cn(buttonClass, 'px-2')}
+            onClick={handleDownload}
+            aria-label={`Download ${attachment.originalFilename}`}
+            title='Download transcript'
+            data-track-category='Support'
+            data-track-name='DownloadCallTranscript'
+          >
+            <Download className='size-3.5' />
+          </Button>
+          <Button
+            type='button'
+            variant='ghost'
+            size='inline'
+            className={buttonClass}
+            onClick={toggleOpen}
+            aria-expanded={open}
+            data-track-category='Support'
+            data-track-name={open ? 'HideCallTranscript' : 'ViewCallTranscript'}
+          >
+            {open ? <ChevronUp className='size-3.5' /> : <ChevronDown className='size-3.5' />}
+            {open ? 'Hide transcript' : 'View transcript'}
+          </Button>
+          {!effectiveSummary ? (
+            <Button
+              type='button'
+              variant='outline'
+              size='inline'
+              className={buttonClass}
+              onClick={() => void requestSummary()}
+              disabled={summarizing}
+              data-track-category='Support'
+              data-track-name='SummarizeCallTranscript'
+            >
+              {summarizing ? (
+                <Loader2 className='size-3.5 animate-spin' />
+              ) : (
+                <Sparkles className='size-3.5' />
+              )}
+              {summarizing ? 'Summarizing…' : 'Summarize'}
+            </Button>
+          ) : null}
+        </div>
       </div>
       {open ? (
         <div className='mt-2 rounded-xl border border-border bg-background px-3 py-2 text-xs text-foreground'>
@@ -309,6 +427,13 @@ function CallTranscriptViewer({
             </pre>
           )}
         </div>
+      ) : null}
+      {effectiveSummary ? (
+        <CallSummaryPanel
+          summary={effectiveSummary}
+          attachmentId={attachment.id}
+          buttonClass={buttonClass}
+        />
       ) : null}
     </div>
   );
