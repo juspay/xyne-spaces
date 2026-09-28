@@ -21,9 +21,13 @@ const FIXTURE_SCENARIOS = new Set([
   'zero-query-transform',
   'search',
   'attachments',
+  'zero-push',
   'rest-messaging',
 ]);
-const ZERO_METERED_SCENARIOS = new Set(['zero-query-transform']);
+const ZERO_METERED_SCENARIOS = new Set(['zero-query-transform', 'zero-push']);
+// Scenarios that address the push endpoint, which parses schema and appID from the
+// querystring. Missing either fails inside k6 after Docker has started, so require them here.
+const PUSH_SCENARIOS = new Set(['zero-push']);
 
 export function parseCliArgs(argv) {
   const parsed = { dryRun: false };
@@ -181,11 +185,30 @@ export function validateRuntime({ root, config = {}, env }) {
     }
   }
 
+  let zeroSchema;
+  let zeroAppId;
+  if (PUSH_SCENARIOS.has(config.scenario)) {
+    for (const name of ['PERF_ZERO_SCHEMA', 'PERF_ZERO_APP_ID']) {
+      if (!env[name]) {
+        throw new Error(
+          `${name} is required for the ${config.scenario} scenario: the push endpoint reads `
+          + 'schema and appID from the querystring. Take both from the zero-cache '
+          + 'configuration for this environment.',
+        );
+      }
+    }
+    zeroSchema = requireSafeMetadata(env.PERF_ZERO_SCHEMA, 'PERF_ZERO_SCHEMA', '');
+    zeroAppId = requireSafeMetadata(env.PERF_ZERO_APP_ID, 'PERF_ZERO_APP_ID', '');
+  }
+
   return {
     baseUrl,
     releaseVersion,
     thinkTimeSeconds,
     identityCount,
+    zeroSchema,
+    zeroAppId,
+    messageType: env.PERF_MESSAGE_TYPE,
     token: env.PERF_TEST_TOKEN,
     workspaceId: env.PERF_WORKSPACE_ID,
     usersFile,
@@ -229,6 +252,9 @@ export function buildDockerInvocation(config, runtime) {
     PERF_RUN_ID: runtime.runId,
     PERF_RELEASE_VERSION: runtime.releaseVersion,
     PERF_THINK_TIME_SECONDS: runtime.thinkTimeSeconds,
+    PERF_ZERO_SCHEMA: runtime.zeroSchema,
+    PERF_ZERO_APP_ID: runtime.zeroAppId,
+    PERF_MESSAGE_TYPE: runtime.messageType,
     PERF_VUS_OVERRIDE: config.vusOverride,
     PERF_DURATION_OVERRIDE: config.durationOverride,
     PERF_ENFORCE_THRESHOLDS: runtime.enforceThresholds ? 'true' : undefined,

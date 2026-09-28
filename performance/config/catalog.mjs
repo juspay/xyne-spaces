@@ -19,6 +19,7 @@ export const SCENARIOS = new Set([
   'zero-query-transform',
   'search',
   'attachments',
+  'zero-push',
   'rest-messaging',
 ]);
 const SANDBOX_PROFILES = new Set(['smoke', 'release']);
@@ -28,7 +29,7 @@ const SANDBOX_PROFILES = new Set(['smoke', 'release']);
 // No teardown exists yet (performance/README.md, "Cleanup"), so running one leaves a
 // workspace that has to be cleaned by hand and skews search relevance meanwhile. Gated
 // behind an explicit opt-in until a reset is implemented.
-export const WRITE_SCENARIOS = new Set(['rest-messaging']);
+export const WRITE_SCENARIOS = new Set(['zero-push', 'rest-messaging']);
 
 const DURATION_PATTERN = /^(\d+)(s|m|h)$/;
 

@@ -252,7 +252,8 @@
         }
       ],
       "title": "Message-send latency",
-      "type": "timeseries"
+      "type": "timeseries",
+      "description": "message_send_duration: emitted by both zero-push (the Zero mutation path) and rest-messaging (the REST path). Filter by scenario to tell them apart."
     },
     {
       "datasource": {
