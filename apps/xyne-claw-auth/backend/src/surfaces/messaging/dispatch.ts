@@ -78,6 +78,8 @@ function channelSurfaceInstructions(channel: MessagingChannelKey): string {
   return lines.join("\n");
 }
 
+export const CHANNEL_RUN_OPTIMIZATIONS = "+subagent_direct_only";
+
 /** A photo or PDF is the same weight here as in Spaces, so it takes the same
  *  route: bytes to object storage and a ref in the body, falling back to
  *  base64 when the flag is off or the upload fails — a storage hiccup must
@@ -146,7 +148,8 @@ export async function dispatchChannelRun(input: {
       ...(runAttachments.length ? { attachments: runAttachments } : {}),
       additionalInstructions: channelSurfaceInstructions(input.target.channel),
       subagentProviderMode: resolveSubagentProviderMode(input.agent.config),
-      ...(input.agent.config ? { agentConfig: input.agent.config } : {}),
+      optimizations: CHANNEL_RUN_OPTIMIZATIONS,
+      agentConfig: { ...((input.agent.config as Record<string, unknown> | null) ?? {}), planTracking: false },
     }),
   });
   const body = (await response.json().catch(() => null)) as {

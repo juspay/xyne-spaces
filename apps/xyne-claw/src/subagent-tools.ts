@@ -1735,6 +1735,11 @@ function resolveCustomSubagentTools(
   return out;
 }
 
+export function withoutBuiltinSubagents(tools: ToolDefinition[]): ToolDefinition[] {
+  const builtin = new Set(SUBAGENT_DEFINITIONS.map((d) => d.name));
+  return tools.filter((tool) => !builtin.has(tool.name));
+}
+
 /**
  * Group MCP tool groups into subagent wrappers based on serverType.
  * Also wraps custom tools whose `source` matches a subagent definition.
