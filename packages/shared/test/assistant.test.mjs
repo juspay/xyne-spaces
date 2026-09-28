@@ -8,8 +8,8 @@ import {
   confirmPolicyOf,
   EMPTY_CONVERSATION,
   intentCriteria,
+  isEntityRef,
   loadActions,
-  MAX_ACTIONS_PER_AREA,
   MAX_PARKED,
   renderTemplate,
 } from '../dist/assistant/index.js';
@@ -315,6 +315,31 @@ test('a preview whose details changed underneath is not run by "yes"', () => {
   assert.equal(result.step.summary, 'Send “bye” to Priya Shah');
 });
 
+test('a saved preview cannot approve a changed action definition', () => {
+  const [preview] = converse(
+    request('send_dm', set('recipient', daniel, false), set('message', 'hello')),
+  );
+  const updatedCatalog = loadActions(
+    ACTIONS.areas.map(area => ({
+      ...area,
+      actions: area.actions.map(action =>
+        action.id === 'send_dm'
+          ? {
+              ...action,
+              plan: action.plan.map(step =>
+                step.op === 'send_message' ? { ...step, text: 'changed message' } : step,
+              ),
+            }
+          : action,
+      ),
+    })),
+  );
+
+  const result = advance(preview.state, { type: 'yes' }, updatedCatalog);
+  assert.equal(result.step.kind, 'confirm');
+  assert.equal(result.step.summary, 'Send “hello” to Daniel Okafor');
+});
+
 test('unknown actions and fields are reported, never guessed', () => {
   const [unknown, ignored] = converse(
     request('launch_rocket'),
@@ -407,8 +432,9 @@ test('every mistake in a definition stops startup and names the problem', () => 
           { op: 'navigate', target: { fromStep: 0 } },
         ],
       },
-      /step 0 \(send_message\) produces nothing to use/,
+      /step 0 \(send_message\) does not produce a channel/,
     ],
+    [{ plan: [{ op: 'navigate' }] }, /plan step 0 \(navigate\): missing parameter target/],
     [
       {
         fields: {
@@ -418,6 +444,22 @@ test('every mistake in a definition stops startup and names the problem', () => 
         summarize: 'Send {body} to {to}',
       },
       /field body ask needs \{to\} before it is asked; wrap it in \[ \]/,
+    ],
+    [
+      {
+        fields: {
+          note: {
+            kind: 'text',
+            required: false,
+            ask: 'What is the note?',
+            offer: 'Add a note?',
+            describe: 'an optional note',
+          },
+          to: { kind: 'person', required: true, ask: 'Who?', describe: 'recipient' },
+          body: { kind: 'text', required: true, ask: 'What to {note}?', describe: 'body' },
+        },
+      },
+      /field body ask needs \{note\} before it is asked; wrap it in \[ \]/,
     ],
     [
       {
@@ -460,6 +502,12 @@ test('every shipped action loads and renders with sample values', () => {
     assert.ok(renderTemplate(definition.summarize, values).length > 0);
     assert.ok(renderTemplate(definition.done, values).length > 0);
   }
+});
+
+test('entity reference guard validates the full supported shape', () => {
+  assert.equal(isEntityRef(priya), true);
+  assert.equal(isEntityRef({ kind: 'person', id: 'u-priya' }), false);
+  assert.equal(isEntityRef({ ...priya, email: 'priya@example.com' }), false);
 });
 
 test('opening a channel navigates to the channel that was found', () => {

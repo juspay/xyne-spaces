@@ -4,9 +4,8 @@ import { z } from 'zod';
  * Real records the assistant talks about: people, channels, threads. Only the backend's
  * resolvers create these, from names the user said; the language model never produces an id.
  *
- * Every record has the same base (kind, id, name), so the engine, templates, and resolvers
- * handle any kind the same way. Adding a kind means adding it to ENTITY_KINDS and giving it
- * an interface here; nothing else changes.
+ * Every record has the same base (kind, id, name). Adding a kind also needs changes to the
+ * backend resolver and any operation or client code that consumes that record.
  */
 
 export const ENTITY_KINDS = ['person', 'channel', 'thread'] as const;
@@ -57,7 +56,7 @@ export const threadRefSchema = z
   })
   .strict();
 
-/** Checks a record that arrives from outside (the dashboard), so only these shapes get in. */
+/** Checks a complete, supported record shape. */
 export const entityRefSchema = z.discriminatedUnion('kind', [
   personRefSchema,
   channelRefSchema,
@@ -68,12 +67,7 @@ export const entityRefSchema = z.discriminatedUnion('kind', [
 export type FieldValue = string | EntityRef | EntityRef[];
 
 export function isEntityRef(value: unknown): value is EntityRef {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    !Array.isArray(value) &&
-    ENTITY_KINDS.includes((value as { kind?: EntityKind }).kind as EntityKind)
-  );
+  return entityRefSchema.safeParse(value).success;
 }
 
 /** One choice offered to the user, shown as a button and answerable by voice. */

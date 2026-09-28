@@ -1,16 +1,18 @@
 import { z } from 'zod';
-import { OPERATION_PARAMS, OPERATION_PRODUCES, type OperationName } from './operations.js';
+import {
+  OPERATION_PARAMS,
+  OPERATION_PRODUCES,
+  OPERATION_REQUIRED_PARAMS,
+  type OperationName,
+} from './operations.js';
 import { ENTITY_KINDS } from './references.js';
 import { isFromStep, templateFields, type PlanStepDef } from './templates.js';
 
 /**
  * The action format. An action is one thing the assistant can do, written as plain data: how
  * to recognise it, the details it needs, and the app operations that carry it out. Actions are
- * grouped into areas, so Jev picks an area, then an action in it, and each choice stays small.
+ * grouped into areas so the backend can compare related actions together.
  */
-
-/** Keeps every choice small for the intent model. Split an area before it grows past this. */
-export const MAX_ACTIONS_PER_AREA = 12;
 
 const identifier = z.string().regex(/^[a-z][a-z0-9_]*$/, 'must be snake_case');
 
@@ -103,9 +105,9 @@ export const actionDefinitionSchema = z
 export const actionAreaSchema = z
   .object({
     id: identifier,
-    /** One sentence: what requests in this area are about. The intent model picks an area first. */
+    /** One sentence describing the requests covered by this group. */
     description: z.string().min(1),
-    actions: z.array(actionDefinitionSchema).min(1).max(MAX_ACTIONS_PER_AREA),
+    actions: z.array(actionDefinitionSchema).min(1),
   })
   .strict();
 
@@ -115,7 +117,7 @@ export type FieldDefinition = z.infer<typeof field>;
 export type Effect = z.infer<typeof effect>;
 export type ConfirmPolicy = z.infer<typeof confirmPolicy>;
 
-/** Every loaded action, by id and by area. Built only by `loadActions`, so all of it is valid. */
+/** Action lookup by id, alongside the original area grouping. */
 export class ActionCatalog {
   private readonly byId = new Map<string, ActionDefinition>();
 
@@ -168,10 +170,7 @@ export function intentCriteria(action: Pick<ActionDefinition, 'intent'>): string
   return parts.join(' ');
 }
 
-/**
- * Checks every area and action and builds the catalog. A mistake stops the app at startup
- * and names the action and the problem, instead of surfacing in the middle of a conversation.
- */
+/** Validates action definitions and plan references before building the catalog. */
 export function loadActions(areas: readonly unknown[]): ActionCatalog {
   const loaded: ActionArea[] = [];
   const actionIds = new Set<string>();
@@ -214,98 +213,124 @@ function describeIssues(error: z.ZodError, rawArea: unknown): string {
     .join('; ');
 }
 
-/** Checks the schema cannot express: references between fields, templates, and plan steps. */
+/** Checks references and rules that the action schema cannot express. */
 function checkAction(action: ActionDefinition): string[] {
-  const problems: string[] = [];
-  const fieldIds = Object.keys(action.fields);
-  const known = new Set(fieldIds);
-  const reportUnknown = (where: string, used: readonly string[]): void => {
-    for (const name of used) {
-      if (!known.has(name)) problems.push(`${where} uses unknown field {${name}}`);
-    }
-  };
+  return [...checkFields(action), ...checkTextTemplates(action), ...checkPlan(action)];
+}
 
-  fieldIds.forEach((id, order) => {
-    const definition = action.fields[id];
-    if (!definition) return;
-    if (definition.kind === 'choice') {
-      if (!definition.options) problems.push(`field ${id}: a choice needs options`);
-      const optionIds = definition.options?.map(option => option.id) ?? [];
+function checkFields(action: ActionDefinition): string[] {
+  const problems: string[] = [];
+  const ids = Object.keys(action.fields);
+  const known = new Set(ids);
+
+  for (const [order, id] of ids.entries()) {
+    const field = action.fields[id];
+    if (!field) continue;
+
+    if (field.kind === 'choice') {
+      if (!field.options) problems.push(`field ${id}: a choice needs options`);
+      const optionIds = field.options?.map(option => option.id) ?? [];
       if (new Set(optionIds).size !== optionIds.length) {
         problems.push(`field ${id}: duplicate option ids`);
       }
-    } else if (definition.options) {
+    } else if (field.options) {
       problems.push(`field ${id}: only choice fields have options`);
     }
-    if (definition.many && (definition.kind === 'text' || definition.kind === 'choice')) {
+    if (field.many && (field.kind === 'text' || field.kind === 'choice')) {
       problems.push(`field ${id}: only record fields can hold several values`);
     }
-    if (definition.offer && definition.required) {
+    if (field.offer && field.required) {
       problems.push(`field ${id}: only optional fields are offered`);
     }
-    // Required details are asked in order, so a question can only rely on earlier details.
-    const { always, optional } = templateFields(definition.ask);
-    reportUnknown(`field ${id} ask`, [...always, ...optional]);
-    const earlier = new Set(fieldIds.slice(0, order));
-    for (const used of always) {
-      if (!earlier.has(used)) {
+
+    const ask = templateFields(field.ask);
+    for (const used of [...ask.always, ...ask.optional]) {
+      if (!known.has(used)) problems.push(`field ${id} ask uses unknown field {${used}}`);
+    }
+    const earlier = new Set(ids.slice(0, order));
+    for (const used of ask.always) {
+      if (!earlier.has(used) || !action.fields[used]?.required) {
         problems.push(`field ${id} ask needs {${used}} before it is asked; wrap it in [ ]`);
       }
     }
-    if (definition.offer) {
-      const offered = templateFields(definition.offer);
-      reportUnknown(`field ${id} offer`, [...offered.always, ...offered.optional]);
+
+    if (field.offer) {
+      const offer = templateFields(field.offer);
+      for (const used of [...offer.always, ...offer.optional]) {
+        if (!known.has(used)) problems.push(`field ${id} offer uses unknown field {${used}}`);
+      }
     }
-  });
+  }
+
+  return problems;
+}
+
+function checkTextTemplates(action: ActionDefinition): string[] {
+  const problems: string[] = [];
+  const known = new Set(Object.keys(action.fields));
 
   for (const [name, template] of [
     ['summarize', action.summarize],
     ['done', action.done],
   ] as const) {
-    const { always, optional } = templateFields(template);
-    reportUnknown(name, [...always, ...optional]);
-    for (const used of always) {
+    const fields = templateFields(template);
+    for (const used of [...fields.always, ...fields.optional]) {
+      if (!known.has(used)) problems.push(`${name} uses unknown field {${used}}`);
+    }
+    for (const used of fields.always) {
       if (!action.fields[used]?.required) {
         problems.push(`${name} always shows optional field {${used}}; wrap it in [ ]`);
       }
     }
   }
 
+  return problems;
+}
+
+function checkPlan(action: ActionDefinition): string[] {
+  const problems: string[] = [];
   const steps = action.plan as PlanStepDef[];
-  steps.forEach((step, index) => {
+
+  for (const [index, step] of steps.entries()) {
     const where = `plan step ${index} (${step.op})`;
     const params = OPERATION_PARAMS.get(step.op);
     if (!params) {
       problems.push(`${where}: unknown operation`);
-      return;
+      continue;
+    }
+
+    for (const parameter of OPERATION_REQUIRED_PARAMS.get(step.op as OperationName) ?? []) {
+      if (!(parameter in step)) problems.push(`${where}: missing parameter ${parameter}`);
     }
     if (step.if !== undefined) {
       const condition = action.fields[step.if];
       if (!condition) problems.push(`${where}: "if" uses unknown field ${step.if}`);
       else if (condition.required) problems.push(`${where}: "if" on required field ${step.if}`);
     }
+
     for (const [key, value] of Object.entries(step)) {
       if (key === 'op' || key === 'if') continue;
       if (!params.has(key)) problems.push(`${where}: unknown parameter ${key}`);
       if (typeof value === 'string' && value.startsWith('$')) {
-        const bound = action.fields[value.slice(1)];
-        if (!bound) problems.push(`${where}: ${key} uses unknown field ${value}`);
-        else if (!bound.required && !bound.many && step.if !== value.slice(1)) {
-          problems.push(`${where}: optional ${value} needs "if": "${value.slice(1)}"`);
+        const fieldId = value.slice(1);
+        const field = action.fields[fieldId];
+        if (!field) problems.push(`${where}: ${key} uses unknown field ${value}`);
+        else if (!field.required && !field.many && step.if !== fieldId) {
+          problems.push(`${where}: optional ${value} needs "if": "${fieldId}"`);
         }
       }
       if (isFromStep(value)) {
         const target = steps[value.fromStep];
         if (value.fromStep >= index || !target) {
           problems.push(`${where}: fromStep must point to an earlier step`);
-        } else if (!OPERATION_PRODUCES.has(target.op as OperationName)) {
-          problems.push(`${where}: step ${value.fromStep} (${target.op}) produces nothing to use`);
+        } else if (OPERATION_PRODUCES.get(target.op as OperationName) !== 'channel') {
+          problems.push(`${where}: step ${value.fromStep} (${target.op}) does not produce a channel`);
         } else if (target.if !== undefined) {
           problems.push(`${where}: fromStep points to conditional step ${value.fromStep}`);
         }
       }
     }
-  });
+  }
 
   return problems;
 }

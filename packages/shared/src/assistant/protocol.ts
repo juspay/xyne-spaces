@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { Plan } from './core/operations.js';
+import { operationResultSchema, type Plan } from './core/operations.js';
 import { entityRefSchema, type ChoiceOption } from './core/references.js';
 
 /**
@@ -18,10 +18,6 @@ const clientContext = z
   })
   .strict();
 
-const operationResult = z
-  .object({ ok: z.boolean(), produced: entityRefSchema.optional(), error: z.string().max(500).optional() })
-  .strict();
-
 const turnInput = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('text'), text: z.string().min(1).max(2000), via: z.enum(['voice', 'typed']) }).strict(),
   /** A button tap: the option id from the last response. */
@@ -31,7 +27,7 @@ const turnInput = z.discriminatedUnion('kind', [
     .object({
       kind: z.literal('planResult'),
       runId: z.string().min(1).max(100),
-      results: z.array(operationResult).max(20),
+      results: z.array(operationResultSchema).max(20),
     })
     .strict(),
 ]);

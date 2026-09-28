@@ -1,10 +1,10 @@
 import { z } from 'zod';
 import {
   channelRefSchema,
+  entityRefSchema,
   personRefSchema,
   threadRefSchema,
   type EntityKind,
-  type EntityRef,
 } from './references.js';
 
 /**
@@ -42,7 +42,7 @@ const sendMessage = z
     op: z.literal('send_message'),
     target: conversation,
     text: z.string().min(1),
-    /** People or agents to @mention; an agent mentioned in a channel it is in answers. */
+    /** People or agents to @mention in the message. */
     mentions: z.array(personRefSchema).optional(),
   })
   .strict()
@@ -77,13 +77,28 @@ export const OPERATION_PARAMS: ReadonlyMap<string, ReadonlySet<string>> = new Ma
   ]),
 );
 
-/** The outcome of one operation, reported by the dashboard's runner. */
-export interface OperationResult {
-  ok: boolean;
-  /** The record the operation created or opened, for later steps and the final reply. */
-  produced?: EntityRef;
-  error?: string;
-}
+/** Required parameter names, derived from the operation schemas. */
+export const OPERATION_REQUIRED_PARAMS: ReadonlyMap<OperationName, ReadonlySet<string>> = new Map(
+  operationSchema.options.map(option => [
+    option.shape.op.value,
+    new Set(
+      Object.entries(option.shape)
+        .filter(([key, schema]) => key !== 'op' && !schema.isOptional())
+        .map(([key]) => key),
+    ),
+  ]),
+);
+
+/** One operation outcome returned by the dashboard. */
+export const operationResultSchema = z
+  .object({
+    ok: z.boolean(),
+    produced: entityRefSchema.optional(),
+    error: z.string().max(500).optional(),
+  })
+  .strict();
+
+export type OperationResult = z.infer<typeof operationResultSchema>;
 
 /** Operations in order; a later step may use what an earlier step produced. */
 export type Plan = Operation[];

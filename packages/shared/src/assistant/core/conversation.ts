@@ -46,10 +46,7 @@ export interface Draft {
   resolutionQueue: PendingResolution[];
   /** A search term held until its requested person or channel filters are resolved. */
   pendingLookup: { field: string; mention: string } | null;
-  /**
-   * Set while a preview waits for "yes": a fingerprint of exactly what the preview showed.
-   * Any change to the draft clears it, so "yes" only ever runs what the user saw.
-   */
+  /** Set while a preview waits for approval; cleared whenever the draft changes. */
   previewFingerprint: string | null;
 }
 
@@ -118,7 +115,7 @@ export type EngineStep =
       draftId: string;
       action: string;
       summary: string;
-      /** What "yes" will approve; see `Draft.previewFingerprint`. */
+      /** Compared with the draft before "yes" can run the plan. */
       fingerprint: string;
     }
   | {
@@ -126,7 +123,7 @@ export type EngineStep =
       draftId: string;
       action: string;
       plan: Plan;
-      /** The fingerprint of what ran, for traces and matching it to the preview. */
+      /** The fingerprint used to match this run to its preview. */
       fingerprint: string;
       /** Said once the plan succeeded. */
       done: string;
@@ -235,7 +232,9 @@ export function advance(
       if (!active) return idle();
       if (active.previewFingerprint) {
         // Runs only what the preview showed: if the draft changed since, preview again.
-        if (active.previewFingerprint !== fingerprintOf(active)) return proceed(invalidate(active));
+        if (active.previewFingerprint !== fingerprintOf(active, definitionOf(active))) {
+          return proceed(invalidate(active));
+        }
         return run(active, active.previewFingerprint);
       }
       // "Yes" to "want to add anyone?" means "yes, I'll name them".
@@ -379,7 +378,7 @@ function nextStep(draft: Draft, definition: ActionDefinition): Next {
     };
   }
 
-  const fingerprint = fingerprintOf(draft);
+  const fingerprint = fingerprintOf(draft, definition);
   const clear = Object.keys(draft.values).every(id => draft.certain[id]);
   const policy = confirmPolicyOf(definition);
   if (policy === 'never' || (policy === 'when-unclear' && clear)) {
@@ -612,12 +611,12 @@ export function summarizeDraft(draft: Draft, definition: ActionDefinition): stri
   return known ? `${definition.id} (${known})` : definition.id;
 }
 
-/**
- * A fingerprint of exactly what would run: the action, the draft, and every value. It is not a
- * secret; it only tells whether anything changed since a preview was shown.
- */
-export function fingerprintOf(draft: Pick<Draft, 'id' | 'action' | 'values'>): string {
-  return `${draft.id}.${fnv1a(stableStringify([draft.action, draft.values]))}`;
+/** A compact check that the action definition and collected values still match the preview. */
+function fingerprintOf(
+  draft: Pick<Draft, 'id' | 'action' | 'values'>,
+  definition: ActionDefinition,
+): string {
+  return `${draft.id}.${fnv1a(stableStringify([definition, draft.values]))}`;
 }
 
 function stableStringify(value: unknown): string {
