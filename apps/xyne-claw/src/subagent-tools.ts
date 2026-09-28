@@ -1631,6 +1631,16 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
         await writeLegacyChildSnapshot("subagent_error", { status: failedStatus, error: msg });
         return { content: [{ type: "text" as const, text: `${def.name} subagent failed: ${msg}` }], details: {} };
       } finally {
+        // Belt-and-braces for the sticky-label interval. The success path
+        // (above) and the catch path both clear it, but an exit that reaches
+        // neither — an early return added later, or a throw from inside the
+        // catch — would leave a 4s timer republishing a stale tool label under
+        // the PARENT's sessionId, long after the parent run finalized. That is
+        // one of the two ways the Spaces "working" pill used to get stuck
+        // (prod 2026-09-28). clearInterval is idempotent, so clearing twice on
+        // the normal paths costs nothing.
+        if (stickyTimer) clearInterval(stickyTimer);
+        stickyLabel = null;
         // Dispose the child session even on the error path — the success path
         // already disposed it (dispose() is idempotent), but the catch path
         // didn't, leaking the session's listeners/extension context on every

@@ -300,9 +300,11 @@ async function notifySandboxDeferred(state: RunRecoveryState): Promise<void> {
   await spacesAppFetch("/chat/postMessage", {
     channelId: ctx.channelId,
     conversationId: ctx.conversationId,
-    markdownText:
-      "⏳ Waiting for a dev sandbox — all of them are busy right now. " +
-      `I'll pick this up automatically as soon as one frees (up to ~${waitMinutes} min); no need to re-tag me.`,
+    markdownText: [
+      "**Waiting for a sandbox**",
+      "",
+      `Every dev sandbox is busy. This will start automatically as soon as one frees up, for up to ${waitMinutes} minutes — no need to tag me again.`,
+    ].join("\n"),
     userId: ctx.spacesAppUserId,
     metadata: { contentFormat: "markdown" },
   }, ctx.appToken);
@@ -511,13 +513,15 @@ async function notifyExhausted(state: RunRecoveryState): Promise<void> {
       ? `I retried this request **${state.retriesUsed}/${state.maxRetries}** times after interruptions, but it still failed.`
       : "This request was interrupted and could not be resumed automatically.";
   const message = [
-    "⚠️ **Run recovery exhausted**",
+    "**Could not finish this run**",
     "",
     headline,
-    `Session ID: \`${state.activeSessionId}\``,
-    `Root Session ID: \`${state.rootSessionId}\``,
     "",
     tail,
+    "",
+    // Session ids are support-desk detail, not part of the explanation — kept,
+    // but demoted below the human-readable part instead of interrupting it.
+    `Session \`${state.activeSessionId}\` (root \`${state.rootSessionId}\`)`,
   ].join("\n");
 
   await spacesAppFetch("/chat/postMessage", {

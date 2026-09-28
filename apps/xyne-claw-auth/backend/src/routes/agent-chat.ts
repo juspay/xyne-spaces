@@ -1673,6 +1673,9 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
         conversationId,
         agentSlug: slug,
         userId,
+        // See run-stream.ts: beginChatRun wrote this session at status "running"
+        // before dispatch, so it must be excluded from the in-flight lookup.
+        currentSessionId: runSessionId,
         onLabel: (label) => pendingStreams.get(callbackId)?.sendEvent("progress", { toolLabel: label }),
       });
       if (handoff.handedOff) {

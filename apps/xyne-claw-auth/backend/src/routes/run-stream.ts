@@ -1208,6 +1208,10 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
         conversationId: convId,
         agentSlug: slug,
         userId,
+        // Our own run row was written at status "running" above, before dispatch.
+        // Without this the handoff finds it, interrupts a session claw has never
+        // started, and polls itself for the full 30s timeout.
+        currentSessionId: runSessionId,
         onLabel: (label) => pendingStreams.get(streamId)?.sendEvent("label", { toolLabel: label }),
       });
       if (handoff.handedOff) {
@@ -1948,7 +1952,7 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
       : undefined;
 
     const harnessUnreachableNotice = body["localHarnessUnreachable"] === true
-      ? `⚠️ I couldn't reach **${localHarnessProviderLabel(typeof body["localHarnessProvider"] === "string" ? body["localHarnessProvider"] : "your local harness")}** on your machine, and running this on Xyne's servers instead didn't start either. Open the Xyne desktop app (or turn off the local harness for this agent) and try again.`
+      ? `I couldn't reach **${localHarnessProviderLabel(typeof body["localHarnessProvider"] === "string" ? body["localHarnessProvider"] : "your local harness")}** on your machine, and running this on Xyne's servers instead didn't start either. Open the Xyne desktop app (or turn off the local harness for this agent) and try again.`
       : undefined;
 
     const content = harnessUnreachableNotice

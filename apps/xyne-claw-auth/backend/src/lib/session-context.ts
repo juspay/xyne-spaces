@@ -87,7 +87,7 @@ export interface SessionContext {
    */
   isExperiment?: boolean;
   /**
-   * MessageId of the "⏳ Working on it…" placeholder we posted at webhook-arrival
+   * MessageId of the "Working on it…" placeholder we posted at webhook-arrival
    * time. Used ONLY when USE_EPHEMERAL_PROGRESS=false — we edit this message
    * in-place as tools run, and replace its content with the final agent
    * response in the result handler. Undefined under the ephemeral path.

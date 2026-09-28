@@ -70,14 +70,15 @@ export async function requestInterruptWithReply(sessionId: string, userId: strin
   }
 }
 
+/** See lib/notice-format.ts for the house style these follow. */
 export function queuedNotice(enq: EnqueueResult, interrupted: boolean, explicitQueueOnly: boolean, place: "thread" | "chat"): string {
-  if (enq.enqueued && interrupted) return "⏸️ I’ll wrap up my current reply first, then continue with your new message.";
+  if (enq.enqueued && interrupted) return "Finishing the current reply first, then picking up your new message.";
   if (enq.enqueued) {
     return explicitQueueOnly
-      ? `🕒 Queued after the current run (position ${enq.position}).`
-      : `🕒 I’m still working on your previous message — this one is queued (position ${enq.position}). I’ll get to it as soon as I’m done.`;
+      ? `Queued behind the current run, at position ${enq.position}.`
+      : `Still working on your previous message — this one is queued at position ${enq.position}, and I'll get to it as soon as I'm done.`;
   }
-  if (enq.deduped) return "🕒 Already queued — I’ll get to it as soon as I’m done with the current one.";
-  if (enq.full) return `⚠️ I’m still working and this ${place}’s queue is full (${QUEUE_CAP}). Please resend once I’ve caught up.`;
-  return "⚠️ I’m still working on your previous message and couldn’t queue this one. Please resend in a moment.";
+  if (enq.deduped) return "Already queued — I'll get to it as soon as the current one is done.";
+  if (enq.full) return `Still working, and this ${place}'s queue is full at ${QUEUE_CAP}. Please resend once I've caught up.`;
+  return "Still working on your previous message, and this one could not be queued. Please resend in a moment.";
 }
