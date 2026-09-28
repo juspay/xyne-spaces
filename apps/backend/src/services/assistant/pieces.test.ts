@@ -2,7 +2,7 @@ import { ACTIONS, type Draft } from '@xyne/shared/assistant';
 import type { JevAnswer } from '@/services/queryIntent/jevClient';
 import { createBreaker } from './breaker';
 import { readingFor, sentencePieces, type FieldReading } from './fields';
-import { buildIntentQuestions, decideIntent, rankActions } from './intent';
+import { decideIntent, readSentence } from './intent';
 import { quickChoice, quickText } from './quickReplies';
 import { matchName, type FoundRecord } from './records';
 import { EMPTY_SESSION, parseSession, serializeSession, type OpenQuestion } from './session';
@@ -157,87 +157,85 @@ describe('choosing the action', () => {
     };
   };
 
-  it('asks what kind of sentence it is and one question per area, all in one request', () => {
-    const { questions, state } = buildIntentQuestions('tell Priya hi', ACTIONS, null);
-    expect(Object.keys(questions).sort()).toEqual([
-      'action_in_channels',
-      'action_in_messaging',
-      'area',
-      'kind',
-    ]);
-    expect(questions.kind?.type === 'choice' && Object.keys(questions.kind.criteria)).toEqual([
-      'action',
-      'help',
-      'greeting',
-      'thanks',
-      'question',
-      'unclear',
-    ]);
-    expect(state).toEqual({ request: 'tell Priya hi' });
-    expect(questions.area?.type === 'choice' && Object.keys(questions.area.criteria)).toEqual([
-      'messaging',
-      'channels',
+  it('asks the kind, the action, and every action’s details, all in one request', () => {
+    const { questions, state } = readSentence('tell Priya hi', ACTIONS, { draft: null });
+    expect(Object.keys(questions)).toEqual(
+      expect.arrayContaining([
+        'kind',
+        'action',
+        'send_dm.recipient',
+        'send_dm.message',
+        'create_channel.name',
+      ])
+    );
+    expect(questions.continues).toBeUndefined();
+    expect(questions.action?.type === 'choice' && Object.keys(questions.action.criteria)).toEqual([
+      ...[...ACTIONS.values()].map((action) => action.id),
       'none',
     ]);
+    expect(state).toEqual({ request: 'tell Priya hi' });
   });
 
-  it('asks whether a sentence continues the request in progress', () => {
-    const { questions } = buildIntentQuestions('ABC', ACTIONS, {
-      ...emptyDraft('create_channel'),
-      awaiting: { kind: 'field', field: 'name' },
+  it('gives Jev the channel on screen and the question on screen', () => {
+    const { questions, state } = readSentence('ABC', ACTIONS, {
+      draft: { ...emptyDraft('create_channel'), awaiting: { kind: 'field', field: 'name' } },
+      screen: 'design',
     });
     expect(questions.continues?.type).toBe('noul');
+    expect(state).toEqual({
+      request: 'ABC',
+      screen: { channel: 'design' },
+      inProgress: { request: 'create_channel', question: 'What should I name the channel?' },
+    });
   });
 
-  it('gives Jev the topic and visible choices for a pending message search', () => {
-    const { state } = buildIntentQuestions('open the Android one', ACTIONS, {
-      ...emptyDraft('find_conversation'),
-      awaiting: { kind: 'field', field: 'conversation' },
-      open: [
-        {
-          field: 'conversation',
-          said: 'mobile performance',
-          options: [
-            {
-              id: 'thread-1',
-              label: 'Android startup delay',
-              detail: '#android · Vinit',
-              value: {
-                kind: 'thread',
+  it('shows the matches on screen when a search asks which one', () => {
+    const { state } = readSentence('open the Android one', ACTIONS, {
+      draft: {
+        ...emptyDraft('find_conversation'),
+        awaiting: { kind: 'field', field: 'conversation' },
+        open: [
+          {
+            field: 'conversation',
+            said: 'mobile performance',
+            options: [
+              {
                 id: 'thread-1',
-                name: 'Android startup delay',
-                channelId: 'channel-android',
-                channelName: 'android',
+                label: 'Android startup delay',
+                detail: '#android · Vinit',
+                value: {
+                  kind: 'thread',
+                  id: 'thread-1',
+                  name: 'Android startup delay',
+                  channelId: 'channel-android',
+                  channelName: 'android',
+                },
               },
-            },
-          ],
-        },
-      ],
+            ],
+          },
+        ],
+      },
     });
-
     expect(state).toMatchObject({
       inProgress: {
-        request: 'find_conversation',
-        awaiting: {
-          question:
-            'Here are the closest matches for “mobile performance”. Tap one, or tell me who was in it or which channel.',
-          options: [{ label: 'Android startup delay', detail: '#android · Vinit' }],
-        },
+        question:
+          'Here are the closest matches for “mobile performance”. Tap one, or tell me who was in it or which channel.',
+        options: ['Android startup delay · #android · Vinit'],
       },
     });
   });
 
-  it('scores area × action and acts on a clear winner', () => {
-    const ranked = rankActions(
-      {
-        area: choice({ messaging: 0.9, channels: 0.08, none: 0.02 }),
-        action_in_messaging: choice({ send_dm: 0.95, none: 0.05 }),
-        action_in_channels: choice({ create_channel: 0.7, none: 0.3 }),
-      },
-      ACTIONS
-    );
-    expect(ranked[0]).toEqual({ action: 'send_dm', probability: 0.9 * 0.95 });
-    expect(decideIntent(ranked)).toEqual({ kind: 'act', action: 'send_dm' });
+  it('ranks actions by Jev’s probability and reads the chosen action’s details', () => {
+    const reading = readSentence('tell Priya hi', ACTIONS, { draft: null });
+    const priya = `p${sentencePieces('tell Priya hi').indexOf('Priya')}`;
+    const heard = reading.read({
+      kind: choice({ action: 0.9, question: 0.1 }),
+      action: choice({ send_dm: 0.9, post_message: 0.05, none: 0.05 }),
+      'send_dm.recipient': choice({ [priya]: 0.8, none: 0.2 }),
+    });
+    expect(heard.ranked[0]).toEqual({ action: 'send_dm', probability: 0.9 });
+    expect(heard.decision).toEqual({ kind: 'act', action: 'send_dm' });
+    expect(heard.words(ACTIONS.get('send_dm')!)).toEqual({ recipient: 'Priya' });
   });
 
   it('asks "did you mean" when two actions are close, and says none when nothing fits', () => {

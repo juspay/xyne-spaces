@@ -2,26 +2,19 @@ import {
   advance,
   type ActionCatalog,
   type ActionDefinition,
-  type PlanRun,
-  type TurnEvent,
   type ClientContext,
-  type TurnDebug,
+  type EntityRef,
   type FieldUpdate,
+  type PlanRun,
+  type TurnDebug,
+  type TurnEvent,
   type TurnInput,
   type TurnResponse,
 } from '@xyne/shared/assistant';
 import type { JevAnswer, JevQuestion, JevState } from '@/services/queryIntent/jevClient';
 import { toFieldUpdates } from './fieldUpdates';
 import { MAX_VALUE_WORDS, readingFor, type FieldWords } from './fields';
-import {
-  buildIntentQuestions,
-  continuesProbability,
-  decideIntent,
-  rankActions,
-  sentenceKind,
-  type RankedAction,
-  type SentenceKind,
-} from './intent';
+import { readSentence, type RankedAction, type SentenceKind, type Understanding } from './intent';
 import { quickChoice, quickText, type QuickReply } from './quickReplies';
 import { withScreen, type RecordFinder } from './records';
 import {
@@ -40,7 +33,7 @@ import type { AssistantSession, SessionIdentity, SessionStore } from './session'
  * One turn of the conversation, start to finish:
  *
  *   load the session → answer instantly if the reply needs no model
- *   → otherwise ask Jev which action, then ask Jev which words of the sentence are its details
+ *   → otherwise ask Jev, in one request, which action and which words are its details
  *   → find the records the user named → let the engine decide the next step
  *   → reply with words, buttons, a preview, or a plan → save the session.
  *
@@ -79,7 +72,7 @@ export async function handleTurn(
 ): Promise<TurnResponse> {
   const session = await services.sessions.load(identity);
   const records = withScreen(services.records, context.onScreen);
-  const outcome = await respond(input, session, { ...services, records });
+  const outcome = await respond(input, session, { ...services, records }, context.onScreen);
   await services.sessions.save(identity, outcome.session);
   return {
     turnId: services.newId(),
@@ -96,7 +89,8 @@ export async function handleTurn(
 async function respond(
   input: TurnInput,
   session: AssistantSession,
-  services: TurnServices
+  services: TurnServices,
+  onScreen: readonly EntityRef[]
 ): Promise<Outcome> {
   switch (input.kind) {
     case 'planResult':
@@ -111,7 +105,7 @@ async function respond(
       const quick = quickText(input.text, session.question);
       return quick
         ? applyQuickReply(quick, session, services)
-        : understand(input.text, session, services);
+        : understand(input.text, session, services, onScreen);
     }
   }
 }
@@ -127,16 +121,18 @@ async function applyQuickReply(
   return startAction(quick.action, text, session, services);
 }
 
-/** A sentence that needs understanding: Jev picks the action, then the words that are its details. */
+/** A sentence that needs understanding: one Jev request reads the action and its details. */
 async function understand(
   text: string,
   session: AssistantSession,
-  services: TurnServices
+  services: TurnServices,
+  onScreen: readonly EntityRef[]
 ): Promise<Outcome> {
   const { catalog } = services;
   const draft = session.conversation.active;
-  const { state, questions } = buildIntentQuestions(text, catalog, draft);
-  const answers = await services.askJev(state, questions);
+  const screen = await channelName(onScreen, services.records);
+  const reading = readSentence(text, catalog, { draft, ...(screen ? { screen } : {}) });
+  const answers = await services.askJev(reading.state, reading.questions);
   if (!answers) {
     return {
       session,
@@ -144,15 +140,13 @@ async function understand(
     };
   }
 
-  const ranked = rankActions(answers, catalog);
-  const decision = decideIntent(ranked);
-  const kind = sentenceKind(answers);
-  const continuesChance = continuesProbability(answers);
-  const continues = (continuesChance ?? 0) >= CONTINUE_PROBABILITY;
+  const heard = reading.read(answers);
+  const { kind, decision, ranked } = heard;
+  const continues = (heard.continues ?? 0) >= CONTINUE_PROBABILITY;
   const debug: TurnDebug = {
     ...(answers.kind?.type === 'choice' ? { kind: answers.kind.probabilities } : {}),
     actions: ranked.slice(0, 3),
-    ...(continuesChance !== null ? { continues: continuesChance } : {}),
+    ...(heard.continues !== null ? { continues: heard.continues } : {}),
   };
   const withDebug = (outcome: Outcome): Outcome => ({ ...outcome, debug });
 
@@ -171,7 +165,7 @@ async function understand(
     if (continues || (asking && decision.kind !== 'act')) {
       const action = catalog.get(draft.action);
       if (!action) return { session, reply: replyForError('That request is no longer available.') };
-      const words = await wordsFor(action, text, services);
+      const words = heard.words(action) ?? (await wordsFor(action, text, services));
       // Answering "which one?" with more details ("the one with Meera") looks again with the
       // same words, narrowed by the new ones.
       const [name] = draft.open;
@@ -197,12 +191,21 @@ async function understand(
 
   switch (decision.kind) {
     case 'act':
-      return withDebug(await startAction(decision.action, text, session, services));
+      return withDebug(await startAction(decision.action, text, session, services, heard));
     case 'ask':
       return withDebug(withReply(session, replyForActionChoice(decision.actions, catalog, text)));
     case 'none':
       return withDebug(withReply(session, replyWhenNothingFits(kind, text, ranked, catalog)));
   }
+}
+
+/** The name of the channel open on screen, read again under the user's access. */
+async function channelName(
+  onScreen: readonly EntityRef[],
+  records: RecordFinder
+): Promise<string | undefined> {
+  const open = onScreen.find((ref) => ref.kind === 'channel');
+  return open ? (await records.get('channel', open.id))?.record.name : undefined;
 }
 
 /** No action fits: reply to what kind of sentence it was. */
@@ -232,11 +235,12 @@ async function startAction(
   actionId: string,
   text: string,
   session: AssistantSession,
-  services: TurnServices
+  services: TurnServices,
+  heard?: Understanding
 ): Promise<Outcome> {
   const action = services.catalog.get(actionId);
   if (!action) return withReply(session, replyForError('I can’t do that yet.'));
-  const words = text ? await wordsFor(action, text, services) : {};
+  const words = text ? (heard?.words(action) ?? (await wordsFor(action, text, services))) : {};
   const updates = await toFieldUpdates(action, words, services.records, true, {}, text);
   return applyEvent(
     {

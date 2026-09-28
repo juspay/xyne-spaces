@@ -58,8 +58,16 @@ export function sentencePieces(text: string): string[] {
   return [...endings, ...rest].slice(0, MAX_PIECES);
 }
 
-/** One Jev question per field of `action`, answered from the pieces of `text`. */
-export function readingFor(action: ActionDefinition, text: string): FieldReading {
+/**
+ * One Jev question per field of `action`, answered from the pieces of `text`. When the same
+ * request also asks about other actions, `key` keeps the question ids apart and `premise` says
+ * which action the questions are about.
+ */
+export function readingFor(
+  action: ActionDefinition,
+  text: string,
+  { key = (field: string) => field, premise = '' } = {}
+): FieldReading {
   const pieces = sentencePieces(text);
   const pieceOptions = Object.fromEntries(
     pieces.map((piece, index) => [`p${index}`, `“${piece}”`])
@@ -70,15 +78,15 @@ export function readingFor(action: ActionDefinition, text: string): FieldReading
       const options = Object.fromEntries(
         (field.options ?? []).map((option) => [option.id, option.label])
       );
-      questions[id] = {
+      questions[key(id)] = {
         type: 'choice',
-        instructions: `Which option does \`request\` give for ${field.describe}?`,
+        instructions: `${premise}Which option does \`request\` give for ${field.describe}?`,
         criteria: { ...options, [NONE]: 'The request does not say.' },
       };
     } else if (pieces.length > 0) {
-      questions[id] = {
+      questions[key(id)] = {
         type: 'choice',
-        instructions: `Which option is exactly ${field.describe}, in the user’s own words?`,
+        instructions: `${premise}Which option is exactly ${field.describe}, in the user’s own words?`,
         criteria: { ...pieceOptions, [NONE]: 'The request does not say it.' },
       };
     }
@@ -89,12 +97,11 @@ export function readingFor(action: ActionDefinition, text: string): FieldReading
     questions,
     read(answers) {
       const words: FieldWords = {};
-      for (const id of Object.keys(questions)) {
-        const answer = answers[id];
-        if (answer?.type !== 'choice' || answer.choice === NONE) continue;
+      for (const id of Object.keys(action.fields)) {
+        const choice = stated(answers[key(id)]);
+        if (!choice) continue;
         const field = action.fields[id];
-        const value =
-          field?.kind === 'choice' ? answer.choice : pieces[Number(answer.choice.slice(1))];
+        const value = field?.kind === 'choice' ? choice : pieces[Number(choice.slice(1))];
         if (!value) continue;
         words[id] = field?.many ? value.split(/\s*,\s*|\s+and\s+/).filter(Boolean) : value;
       }
@@ -110,6 +117,20 @@ export function readingFor(action: ActionDefinition, text: string): FieldReading
       return words;
     },
   };
+}
+
+/**
+ * The option Jev picked. Overlapping pieces split the probability ("the deploy finished",
+ * "deploy finished", …), so the value counts as said when all options together outweigh "none".
+ */
+function stated(answer: JevAnswer | undefined): string | null {
+  if (answer?.type !== 'choice') return null;
+  if (answer.choice !== NONE) return answer.choice;
+  if ((answer.probabilities[NONE] ?? 1) >= 0.5) return null;
+  const [best] = Object.entries(answer.probabilities)
+    .filter(([option]) => option !== NONE)
+    .sort(([, left], [, right]) => right - left);
+  return best?.[0] ?? null;
 }
 
 function isFrame(word: string | undefined): boolean {

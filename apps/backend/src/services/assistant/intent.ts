@@ -3,24 +3,27 @@ import {
   renderTemplate,
   summarizeDraft,
   type ActionCatalog,
+  type ActionDefinition,
   type Draft,
 } from '@xyne/shared/assistant';
 import type { JevAnswer, JevQuestion, JevState } from '@/services/queryIntent/jevClient';
+import { readingFor, type FieldReading, type FieldWords } from './fields';
 
 /**
- * Which action a sentence asks for, judged by Jev in ONE request:
- * - "what kind of sentence is it?" (a request, help, a greeting, thanks, a question, unclear),
- * - "which area?" (messaging, channels, …, or none of them),
- * - for every area, "which action in this area?",
- * - and, when a request is in progress, "does this sentence continue it?".
- *
- * Jev answers the questions in parallel, so more areas barely add time, while each choice
- * stays small. `rankActions` then scores every area-and-action pair.
+ * Understanding a sentence in one Jev request, asked all at once:
+ * - `kind`: what kind of sentence it is,
+ * - `action`: which action it asks for, or none,
+ * - `continues`: whether it answers the request in progress, when there is one,
+ * - and for every action, which words of the sentence are each of its details.
+ * The state carries the sentence, the channel on screen, and the question the assistant just
+ * asked, so every answer is read in context. Code then uses the answers of the chosen action.
  */
 
-export interface IntentQuestions {
-  state: JevState;
-  questions: Record<string, JevQuestion>;
+export interface SentenceContext {
+  /** The request in progress, with the question on screen. */
+  draft: Draft | null;
+  /** The name of the channel open on screen, which "here" means. */
+  screen?: string;
 }
 
 export interface RankedAction {
@@ -30,16 +33,20 @@ export interface RankedAction {
 
 export type IntentDecision =
   | { kind: 'act'; action: string }
-  /** Too close to call: ask "Did you mean … or …?". */
+  /** Too close to call: "Did you mean … or …?". */
   | { kind: 'ask'; actions: string[] }
   | { kind: 'none' };
 
-const NONE = 'none';
+export interface Understanding {
+  kind: SentenceKind;
+  ranked: RankedAction[];
+  decision: IntentDecision;
+  /** P(the sentence answers the request in progress), when there is one. */
+  continues: number | null;
+  /** The words for each detail of `action`, or null when this request did not ask. */
+  words(action: ActionDefinition): FieldWords | null;
+}
 
-/**
- * What kind of sentence it is. Used when no action fits, so that "what can you do?", "hi", or
- * a question gets a fitting reply instead of "I can't do that".
- */
 const SENTENCE_KINDS = {
   action:
     'Asks the assistant to do something in the workspace, such as sending a message or creating a channel, in any wording ("can you help me …", "I want …", "let’s …").',
@@ -52,118 +59,142 @@ const SENTENCE_KINDS = {
 } as const;
 
 export type SentenceKind = keyof typeof SENTENCE_KINDS;
-/** Below this, the best action is not a real candidate. */
+
+const NONE = 'none';
+/** Below this, an action is not a real candidate. */
 const MIN_PROBABILITY = 0.2;
 /** Act without asking when the best action is this likely … */
 const ACT_PROBABILITY = 0.5;
 /** … and this far ahead of the next one. */
 const ACT_LEAD = 0.2;
+/** Past this many detail questions, only the chosen action's details are asked, afterwards. */
+const MAX_FIELD_QUESTIONS = 40;
 
-export function buildIntentQuestions(
-  text: string,
-  catalog: ActionCatalog,
-  inProgress: Draft | null
-): IntentQuestions {
-  const areaCriteria: Record<string, string> = {};
-  const questions: Record<string, JevQuestion> = {};
-  for (const area of catalog.areas) {
-    areaCriteria[area.id] = area.description;
-    const actionCriteria: Record<string, string> = {};
-    for (const action of area.actions) actionCriteria[action.id] = intentCriteria(action);
-    actionCriteria[NONE] = 'None of these actions.';
-    questions[areaQuestionId(area.id)] = {
-      type: 'choice',
-      instructions: `Suppose \`request\` is about this: ${area.description} Which action does it ask for?`,
-      criteria: actionCriteria,
-    };
-  }
-  areaCriteria[NONE] =
-    'None of these: a question to answer, small talk, or something the assistant cannot do.';
-  questions.area = {
-    type: 'choice',
-    instructions: 'Which kind of task does `request` ask the assistant to do?',
-    criteria: areaCriteria,
-  };
-  questions.kind = {
-    type: 'choice',
-    instructions: 'What kind of sentence is `request`, said to an assistant in a work chat app?',
-    criteria: SENTENCE_KINDS,
-  };
+const CONTINUES: JevQuestion = {
+  type: 'noul',
+  instructions:
+    '`inProgress` is a request the assistant is still working on, and `inProgress.question` is what it just asked. Does `request` answer that question, or correct or add to that request, rather than start a new one?',
+  criteria: {
+    true: 'It answers or adjusts the request in progress: "call it ABC", "private", "also add Priya", "actually make it Daniel Park", "the one with Meera".',
+    false:
+      'It is a complete request of its own, even for the same kind of action: "tell Priya the build is green" while a message to Daniel is waiting, or "create a channel called Ops".',
+  },
+};
 
-  const state: Record<string, unknown> = { request: text };
-  const definition = inProgress && catalog.get(inProgress.action);
-  if (inProgress && definition) {
-    const [name, ...queued] = inProgress.open;
-    const nameField = name && definition.fields[name.field];
-    const askingId = inProgress.awaiting?.kind === 'field' ? inProgress.awaiting.field : null;
-    const askingField = askingId && definition.fields[askingId];
-    const awaiting =
-      name && nameField
-        ? name.options.length
-          ? {
-              question: (nameField.choose ?? nameField.ask).replace('{mention}', name.said),
-              options: name.options.map(({ label, detail }) => ({
-                label,
-                ...(detail ? { detail } : {}),
-              })),
-            }
-          : {
-              question: `I couldn't find “${name.said}”. ${renderTemplate(nameField.ask, inProgress.values)}`,
-            }
-        : askingField
-          ? { question: renderTemplate(askingField.ask, inProgress.values) }
-          : undefined;
-    const [waiting] = inProgress.later;
-    const summary = summarizeDraft(inProgress, definition);
-    state.inProgress = {
-      request: waiting ? `${summary} (message topic: “${waiting.said}”)` : summary,
-      ...(awaiting ? { awaiting } : {}),
-      ...(queued.length
-        ? {
-            queued: queued.map(({ field, said, options }) => ({
-              field,
-              mention: said,
-              kind: options.length ? 'choice' : 'notFound',
-            })),
-          }
-        : {}),
-    };
-    questions.continues = {
-      type: 'noul',
-      instructions:
-        '`inProgress` is a request the assistant is still working on. Use its current question and ' +
-        'choices when deciding whether `request` answers that request, corrects it, or starts a new one.',
-      criteria: {
-        true: 'It answers or adjusts the request in progress: "call it ABC", "private", "also add Priya", "actually make it Daniel Park".',
-        false:
-          'It is a complete request of its own, even for the same kind of action: "tell Priya the build is ' +
-          'green" while a message to Daniel is waiting, or "create a channel called Ops".',
-      },
-    };
-  }
-  return { state, questions };
+export interface SentenceReading {
+  state: JevState;
+  questions: Record<string, JevQuestion>;
+  read(answers: Record<string, JevAnswer>): Understanding;
 }
 
-/** Every area-and-action pair, scored as P(area) × P(action within area), best first. */
+export function readSentence(
+  text: string,
+  catalog: ActionCatalog,
+  context: SentenceContext
+): SentenceReading {
+  const actions = [...catalog.values()];
+  const inProgress = context.draft ? catalog.get(context.draft.action) : undefined;
+  const fields = fieldReadings(text, actions, inProgress);
+  const questions: Record<string, JevQuestion> = {
+    kind: {
+      type: 'choice',
+      instructions: 'What kind of sentence is `request`, said to an assistant in a work chat app?',
+      criteria: SENTENCE_KINDS,
+    },
+    action: {
+      type: 'choice',
+      instructions: 'Which action does `request` ask the assistant to do?',
+      criteria: {
+        ...Object.fromEntries(actions.map((action) => [action.id, intentCriteria(action)])),
+        [NONE]:
+          'None of these: a question to answer, small talk, or something the assistant cannot do.',
+      },
+    },
+    ...(inProgress ? { continues: CONTINUES } : {}),
+    ...Object.assign({}, ...[...fields.values()].map((reading) => reading.questions)),
+  };
+  const state = {
+    request: text,
+    ...(context.screen ? { screen: { channel: context.screen } } : {}),
+    ...(context.draft && inProgress
+      ? { inProgress: describeInProgress(context.draft, inProgress) }
+      : {}),
+  };
+
+  return {
+    state,
+    questions,
+    read(answers) {
+      const ranked = rankActions(answers, actions);
+      const { kind, continues } = answers;
+      return {
+        kind:
+          kind?.type === 'choice' && kind.choice in SENTENCE_KINDS
+            ? (kind.choice as SentenceKind)
+            : 'action',
+        ranked,
+        decision: decideIntent(ranked),
+        continues: continues?.type === 'noul' ? continues.noul : null,
+        words: (action) => fields.get(action.id)?.read(answers) ?? null,
+      };
+    },
+  };
+}
+
+/**
+ * The detail questions: every action's while they fit in one request, so the chosen action's
+ * details come back with it. Past that, only the request in progress is read now.
+ */
+function fieldReadings(
+  text: string,
+  actions: readonly ActionDefinition[],
+  inProgress: ActionDefinition | undefined
+): Map<string, FieldReading> {
+  const count = actions.reduce((sum, action) => sum + Object.keys(action.fields).length, 0);
+  const asked = count <= MAX_FIELD_QUESTIONS ? actions : inProgress ? [inProgress] : [];
+  return new Map(
+    asked.map((action) => {
+      const answers = action === inProgress ? '`request` answers `inProgress` or ' : '`request` ';
+      const premise = `If ${answers}asks to ${lowerFirst(action.title)}: `;
+      const key = (field: string): string => `${action.id}.${field}`;
+      return [action.id, readingFor(action, text, { key, premise })];
+    })
+  );
+}
+
+/** What Jev needs to read an answer: the request so far, and the question on screen. */
+function describeInProgress(draft: Draft, action: ActionDefinition): Record<string, unknown> {
+  const [name] = draft.open;
+  const asked = name?.field ?? (draft.awaiting?.kind === 'field' ? draft.awaiting.field : '');
+  const field = action.fields[asked];
+  const ask = field && renderTemplate(field.ask, draft.values);
+  const question = !field
+    ? undefined
+    : !name
+      ? ask
+      : name.options.length
+        ? (field.choose ?? field.ask).replace('{mention}', name.said)
+        : `I couldn't find “${name.said}”. ${ask}`;
+  const options = name?.options.map(({ label, detail }) =>
+    detail ? `${label} · ${detail}` : label
+  );
+  return {
+    request: summarizeDraft(draft, action),
+    ...(question ? { question } : {}),
+    ...(options?.length ? { options } : {}),
+  };
+}
+
+/** Every action, best first, by Jev's probability that the sentence asks for it. */
 export function rankActions(
   answers: Record<string, JevAnswer>,
-  catalog: ActionCatalog
+  actions: readonly ActionDefinition[]
 ): RankedAction[] {
-  const area = answers.area;
-  if (area?.type !== 'choice') return [];
-  const ranked: RankedAction[] = [];
-  for (const { id, actions } of catalog.areas) {
-    const inArea = answers[areaQuestionId(id)];
-    if (inArea?.type !== 'choice') continue;
-    const pArea = area.probabilities[id] ?? 0;
-    for (const action of actions) {
-      ranked.push({
-        action: action.id,
-        probability: pArea * (inArea.probabilities[action.id] ?? 0),
-      });
-    }
-  }
-  return ranked.sort((left, right) => right.probability - left.probability);
+  const answer = answers.action;
+  if (answer?.type !== 'choice') return [];
+  return actions
+    .map((action) => ({ action: action.id, probability: answer.probabilities[action.id] ?? 0 }))
+    .sort((left, right) => right.probability - left.probability);
 }
 
 /** Act on a clear winner, ask between close ones, or say none fits. */
@@ -181,20 +212,6 @@ export function decideIntent(ranked: readonly RankedAction[]): IntentDecision {
   return close.length > 1 ? { kind: 'ask', actions: close } : { kind: 'none' };
 }
 
-/** The kind of sentence; a request for an action when Jev could not tell. */
-export function sentenceKind(answers: Record<string, JevAnswer>): SentenceKind {
-  const answer = answers.kind;
-  return answer?.type === 'choice' && answer.choice in SENTENCE_KINDS
-    ? (answer.choice as SentenceKind)
-    : 'action';
-}
-
-/** P(the sentence continues the request in progress), when one was asked about. */
-export function continuesProbability(answers: Record<string, JevAnswer>): number | null {
-  const answer = answers.continues;
-  return answer?.type === 'noul' ? answer.noul : null;
-}
-
-function areaQuestionId(areaId: string): string {
-  return `action_in_${areaId}`;
+function lowerFirst(text: string): string {
+  return text.charAt(0).toLowerCase() + text.slice(1);
 }

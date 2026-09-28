@@ -56,14 +56,13 @@ const identity = { workspaceId: 'w1', userId: 'me', sessionId: 's1' };
 /** Jev's answers as scripted by each test: what the sentence is, and the words of each field. */
 interface JevScript {
   kind?: string;
-  area?: string;
   action?: string;
   continues?: number;
   /** The words Jev picks for each field, as they appear in the sentence. */
   fields?: Record<string, string>;
 }
 
-const INTENT_QUESTIONS = /^(kind|area|action_in_.+)$/;
+const INTENT_QUESTIONS = /^(kind|action)$/;
 
 function choiceOf(chosen: string, labels: string[]): JevAnswer {
   const probabilities = Object.fromEntries(
@@ -112,13 +111,17 @@ function assistant(people: FoundRecord[] = [daniel]) {
         }
         const labels = Object.keys(question.criteria);
         if (INTENT_QUESTIONS.test(id)) {
-          const wanted =
-            id === 'area' ? jev.area : id === 'kind' ? (jev.kind ?? 'action') : jev.action;
+          const wanted = id === 'kind' ? (jev.kind ?? 'action') : jev.action;
           answers[id] = choiceOf(wanted && labels.includes(wanted) ? wanted : 'none', labels);
           continue;
         }
-        // A field: pick the option that is the scripted words (a piece, or a choice's id).
-        const wanted = jev.fields?.[id]?.toLowerCase();
+        // A detail ("send_dm.message"): pick the option that is the scripted words, for the
+        // scripted action, or for any action when the sentence answers a question.
+        const [action, field] = id.includes('.') ? id.split('.') : [undefined, id];
+        const wanted =
+          !jev.action || !action || action === jev.action
+            ? jev.fields?.[field ?? '']?.toLowerCase()
+            : undefined;
         const picked = Object.entries(question.criteria).find(
           ([label, text]) => label === wanted || String(text).toLowerCase() === `“${wanted}”`
         );
@@ -155,7 +158,6 @@ describe('a turn', () => {
   it('sends a DM said in one sentence: one plan, then "Sent to …" once it ran', async () => {
     const chat = assistant();
     chat.hears({
-      area: 'messaging',
       action: 'send_dm',
       fields: { recipient: 'Daniel Okafor', message: 'hello' },
     });
@@ -166,8 +168,8 @@ describe('a turn', () => {
       { op: 'navigate', target: { fromStep: 0 } },
       { op: 'send_message', target: { fromStep: 0 }, text: 'hello' },
     ]);
-    // Two Jev requests and no other model: which action, then which words are its details.
-    expect(chat.jevCalls()).toBe(2);
+    // One Jev request reads both the action and the words that are its details.
+    expect(chat.jevCalls()).toBe(1);
 
     const done = await chat.ran(planned.run!.runId, [{ ok: true }, { ok: true }, { ok: true }]);
     expect(done.say).toBe('Sent to Daniel Okafor.');
@@ -177,7 +179,6 @@ describe('a turn', () => {
   it('does not report success when an all-success result list is incomplete', async () => {
     const chat = assistant();
     chat.hears({
-      area: 'messaging',
       action: 'send_dm',
       fields: { recipient: 'Daniel Okafor', message: 'hello' },
     });
@@ -196,7 +197,6 @@ describe('a turn', () => {
   it('previews when a name only partly matched, and runs on "yes" without a model', async () => {
     const chat = assistant();
     chat.hears({
-      area: 'messaging',
       action: 'send_dm',
       fields: { recipient: 'Daniel', message: 'hi' },
     });
@@ -220,7 +220,6 @@ describe('a turn', () => {
       'the deploy is blocked because the migration failed on staging and we need to roll back tonight';
     const request = `tell Daniel Okafor ${message}`;
     chat.hears({
-      area: 'messaging',
       action: 'send_dm',
       fields: { recipient: 'Daniel Okafor', message },
     });
@@ -239,7 +238,7 @@ describe('a turn', () => {
 
   it('opens a channel said by name, without a preview', async () => {
     const chat = assistant();
-    chat.hears({ area: 'channels', action: 'open_channel', fields: { channel: 'Android' } });
+    chat.hears({ action: 'open_channel', fields: { channel: 'Android' } });
     const planned = await chat.say('open the Android channel');
     expect(planned.run?.plan).toEqual([{ op: 'navigate', target: android.record }]);
     const done = await chat.ran(planned.run!.runId, [{ ok: true }]);
@@ -249,7 +248,6 @@ describe('a turn', () => {
   it('finds a conversation by its topic: the matches are buttons, and a tap opens one', async () => {
     const chat = assistant();
     chat.hears({
-      area: 'messaging',
       action: 'find_conversation',
       fields: { conversation: 'release nots' },
     });
@@ -268,7 +266,6 @@ describe('a turn', () => {
   it('narrows a search to the people named with it', async () => {
     const chat = assistant([daniel, meera]);
     chat.hears({
-      area: 'messaging',
       action: 'find_conversation',
       fields: { conversation: 'release notes', with: 'Meera' },
     });
@@ -279,7 +276,6 @@ describe('a turn', () => {
   it('asks which one, and searches again when told who was in it', async () => {
     const chat = assistant([daniel, meera]);
     chat.hears({
-      area: 'messaging',
       action: 'find_conversation',
       fields: { conversation: 'release notes' },
     });
@@ -347,7 +343,6 @@ describe('a turn', () => {
       return [];
     };
     chat.hears({
-      area: 'messaging',
       action: 'find_conversation',
       fields: { conversation: 'release notes', [scenario.field]: scenario.mention },
     });
@@ -384,7 +379,6 @@ describe('a turn', () => {
       return [];
     };
     chat.hears({
-      area: 'messaging',
       action: 'find_conversation',
       fields: {
         conversation: 'release notes',
@@ -421,7 +415,6 @@ describe('a turn', () => {
       return [];
     };
     chat.hears({
-      area: 'messaging',
       action: 'find_conversation',
       fields: { conversation: 'release notes', with: 'Missing Person' },
     });
@@ -430,7 +423,7 @@ describe('a turn', () => {
     expect(clarification.say).toContain('Missing Person');
     expect(threadSearches).toEqual([]);
 
-    chat.hears({ kind: 'help', area: 'none', continues: 0.1 });
+    chat.hears({ kind: 'help', continues: 0.1 });
     const help = await chat.say('what can you do?');
     expect(help.say).toContain('Who was in it?');
     expect(chat.session().conversation.active?.open[0]).toMatchObject({
@@ -464,7 +457,6 @@ describe('a turn', () => {
       return [];
     };
     chat.hears({
-      area: 'messaging',
       action: 'find_conversation',
       fields: { conversation: 'release notes', with: 'Daneel and Missing Meera' },
     });
@@ -513,7 +505,6 @@ describe('a turn', () => {
       return [];
     };
     chat.hears({
-      area: 'messaging',
       action: 'find_conversation',
       fields: { conversation: 'release notes', in: 'Ops' },
     });
@@ -547,7 +538,6 @@ describe('a turn', () => {
     const chat = assistant();
     chat.lookingAt([{ kind: 'channel', id: 'c-general', name: '' }]);
     chat.hears({
-      area: 'messaging',
       action: 'post_message',
       fields: { channel: 'here', mentions: 'Daniel Okafor', message: 'hello' },
     });
@@ -563,7 +553,6 @@ describe('a turn', () => {
   it('asks which Daniel, with buttons, and continues from the tap', async () => {
     const chat = assistant([daniel, danielPark]);
     chat.hears({
-      area: 'messaging',
       action: 'send_dm',
       fields: { recipient: 'Daniel', message: 'hi' },
     });
@@ -583,7 +572,7 @@ describe('a turn', () => {
 
   it('collects a channel step by step, answering each question from the next sentence', async () => {
     const chat = assistant();
-    chat.hears({ area: 'channels', action: 'create_channel' });
+    chat.hears({ action: 'create_channel' });
     expect((await chat.say('create a channel')).say).toBe('What should I name the channel?');
 
     chat.hears({ continues: 0.95, fields: { name: 'ABC' } });
@@ -606,11 +595,11 @@ describe('a turn', () => {
 
   it('takes a bare reply as the answer to the open question', async () => {
     const chat = assistant();
-    chat.hears({ area: 'channels', action: 'create_channel' });
+    chat.hears({ action: 'create_channel' });
     await chat.say('create a channel');
 
     // Jev sees no action in "Random." and doubts it continues; the reader finds no fields.
-    chat.hears({ area: 'none', continues: 0.1 });
+    chat.hears({ continues: 0.1 });
     const next = await chat.say('Random.');
     expect(next.say).toBe('Should it be public or private?');
     expect(chat.session().conversation.active?.values).toEqual({ name: 'Random' });
@@ -618,13 +607,12 @@ describe('a turn', () => {
 
   it('still starts a clear new request while a question is open', async () => {
     const chat = assistant();
-    chat.hears({ area: 'channels', action: 'create_channel', fields: { name: 'Ops' } });
+    chat.hears({ action: 'create_channel', fields: { name: 'Ops' } });
     expect((await chat.say('create a channel called Ops')).say).toBe(
       'Should it be public or private?'
     );
 
     chat.hears({
-      area: 'messaging',
       action: 'send_dm',
       continues: 0.1,
       fields: { recipient: 'Daniel Okafor', message: 'hi' },
@@ -640,7 +628,7 @@ describe('a turn', () => {
       detail: 'preeti@x.io',
     };
     const chat = assistant([daniel, preeti]);
-    chat.hears({ area: 'messaging', action: 'send_dm', fields: { recipient: 'Priti' } });
+    chat.hears({ action: 'send_dm', fields: { recipient: 'Priti' } });
     const next = await chat.say('Send a direct message to Priti.');
     expect(next.say).toBe('What should I say to Preeti Sharma?');
   });
@@ -652,7 +640,6 @@ describe('a turn', () => {
     };
     const chat = assistant([xyneAgent]);
     chat.hears({
-      area: 'messaging',
       action: 'send_dm',
       fields: { recipient: 'Zahn Doctor', message: 'hello' },
     });
@@ -668,23 +655,23 @@ describe('a turn', () => {
 
   it('answers "what can you do?", greetings, and thanks instead of "I can’t do that"', async () => {
     const chat = assistant();
-    chat.hears({ kind: 'help', area: 'none' });
+    chat.hears({ kind: 'help' });
     const help = await chat.say('What can you do?');
     expect(help.say).toBe(
       'I can send a direct message, or create a channel. Tap one, or just tell me what you need.'
     );
     expect(help.display).toMatchObject({ kind: 'choices' });
 
-    chat.hears({ kind: 'greeting', area: 'none' });
+    chat.hears({ kind: 'greeting' });
     expect((await chat.say('hi')).say).toBe('Hi! What can I do for you?');
 
-    chat.hears({ kind: 'thanks', area: 'none' });
+    chat.hears({ kind: 'thanks' });
     expect(await chat.say('thanks')).toMatchObject({ say: 'You’re welcome.', expectsReply: false });
   });
 
   it('offers to ask Xyne AI a question', async () => {
     const chat = assistant();
-    chat.hears({ kind: 'question', area: 'none' });
+    chat.hears({ kind: 'question' });
     const reply = await chat.say('what did we decide about the launch?');
     expect(reply).toMatchObject({
       say: 'That’s one for Xyne AI. Want me to ask it?',
@@ -694,10 +681,10 @@ describe('a turn', () => {
 
   it('answers help in the middle of a request, then asks its question again', async () => {
     const chat = assistant();
-    chat.hears({ area: 'channels', action: 'create_channel' });
+    chat.hears({ action: 'create_channel' });
     await chat.say('create a channel');
 
-    chat.hears({ kind: 'help', area: 'none', continues: 0.1 });
+    chat.hears({ kind: 'help', continues: 0.1 });
     const reply = await chat.say('what can you do?');
     expect(reply.say).toBe(
       'I can send a direct message, or create a channel. Now, what should I name the channel?'
@@ -707,12 +694,12 @@ describe('a turn', () => {
 
   it('takes a greeting as the message when asked what to say', async () => {
     const chat = assistant();
-    chat.hears({ area: 'messaging', action: 'send_dm', fields: { recipient: 'Daniel Okafor' } });
+    chat.hears({ action: 'send_dm', fields: { recipient: 'Daniel Okafor' } });
     expect((await chat.say('message Daniel Okafor')).say).toBe(
       'What should I say to Daniel Okafor?'
     );
 
-    chat.hears({ kind: 'greeting', area: 'none', continues: 0.2 });
+    chat.hears({ kind: 'greeting', continues: 0.2 });
     const sent = await chat.say('hello');
     expect(sent.run?.plan[2]).toMatchObject({ op: 'send_message', text: 'hello' });
   });
@@ -721,25 +708,15 @@ describe('a turn', () => {
     const chat = assistant();
     const scripted = chat.services.askJev;
     // Two actions equally likely; the later request for the words is answered as scripted.
-    const close: TurnServices['askJev'] = async (state, questions) =>
-      !('area' in questions)
-        ? scripted(state, questions)
-        : Object.fromEntries(
-            Object.entries(questions).map(([id, question]) => {
-              if (question.type === 'noul') return [id, { type: 'noul', noul: 0 }];
-              const labels = Object.keys(question.criteria);
-              const probabilities = Object.fromEntries(
-                labels.map((label) => [label, 1 / labels.length])
-              );
-              if (id === 'area')
-                Object.assign(probabilities, { messaging: 0.45, channels: 0.45, none: 0.1 });
-              if (id === 'action_in_messaging')
-                Object.assign(probabilities, { send_dm: 0.95, none: 0.05 });
-              if (id === 'action_in_channels')
-                Object.assign(probabilities, { create_channel: 0.95, none: 0.05 });
-              return [id, { type: 'choice', choice: labels[0], confidence: 0.5, probabilities }];
-            })
-          );
+    const close: TurnServices['askJev'] = async (state, questions) => {
+      const answers = await scripted(state, questions);
+      if (!answers || !('action' in questions)) return answers;
+      const probabilities = { send_dm: 0.45, create_channel: 0.45, none: 0.1 };
+      return {
+        ...answers,
+        action: { type: 'choice', choice: 'send_dm', confidence: 0.45, probabilities },
+      };
+    };
     chat.services.askJev = close;
     chat.hears({});
     const which = await chat.say('ABC hello');
@@ -756,7 +733,7 @@ describe('a turn', () => {
 
   it('offers what it can do when nothing fits, and a tap starts that action', async () => {
     const chat = assistant();
-    chat.hears({ area: 'none' });
+    chat.hears({});
     const reply = await chat.say('what is the weather');
     expect(reply.say).toMatch(/^I can’t do that yet\. I can /);
     // The closest actions, at most four, as buttons that start them.
@@ -771,7 +748,6 @@ describe('a turn', () => {
   it('reports a name it could not find, and a plan that failed', async () => {
     const chat = assistant();
     chat.hears({
-      area: 'messaging',
       action: 'send_dm',
       fields: { recipient: 'Zorro', message: 'hi' },
     });
@@ -796,7 +772,7 @@ describe('a turn', () => {
 
   it('asks again, gently, when told "no" for a detail it needs', async () => {
     const chat = assistant();
-    chat.hears({ area: 'channels', action: 'create_channel' });
+    chat.hears({ action: 'create_channel' });
     await chat.say('create a channel');
     const again = await chat.say('no');
     expect(again.say).toBe('No problem. What should I name the channel? Or say “cancel” to stop.');
@@ -805,7 +781,7 @@ describe('a turn', () => {
 
   it('cancels at any time without a model', async () => {
     const chat = assistant();
-    chat.hears({ area: 'channels', action: 'create_channel' });
+    chat.hears({ action: 'create_channel' });
     await chat.say('create a channel');
     const before = chat.jevCalls();
     const cancelled = await chat.say('never mind');
