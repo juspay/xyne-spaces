@@ -671,6 +671,12 @@ function pendingActionTargetChannelId(action: Record<string, unknown>): string |
   return typeof raw === "string" && raw.trim() ? raw.trim() : undefined;
 }
 
+function pendingActionTargetRecipientUserId(action: Record<string, unknown>): string | undefined {
+  const params = recordParam(action["params"]);
+  const raw = params["recipientUserId"];
+  return typeof raw === "string" && raw.trim() ? raw.trim() : undefined;
+}
+
 async function pendingActionTargetValidation(
   action: Record<string, unknown>,
   ctx: SessionContext,
@@ -678,9 +684,17 @@ async function pendingActionTargetValidation(
 ): Promise<{ error: string | null; channelName?: string }> {
   const conversationId = pendingActionTargetConversationId(action);
   const channelId = pendingActionTargetChannelId(action);
+  const recipientUserId = pendingActionTargetRecipientUserId(action);
 
-  if (action["tool"] === "user-send-message" && !!conversationId === !!channelId) {
-    return { error: "provide exactly one target: use conversationId for an existing thread or channelId to post into a channel" };
+  if (action["tool"] === "user-send-message") {
+    const targetCount = [conversationId, channelId, recipientUserId].filter(Boolean).length;
+    if (targetCount !== 1) {
+      return { error: "provide exactly one target: use conversationId for an existing thread, channelId to post into a channel, or recipientUserId to create/reuse a DM" };
+    }
+    // Queue-time validation already used the invoking user's credential. Do not
+    // repeat it here with the app token: private DMs intentionally do not include
+    // the agent app, and that mismatch used to suppress the approval card.
+    return { error: null };
   }
 
   if (conversationId) {

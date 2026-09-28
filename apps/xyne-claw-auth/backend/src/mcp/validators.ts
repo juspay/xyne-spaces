@@ -1,6 +1,6 @@
 import { createLogger } from "../logger.js";
 import { errMsg } from "../lib/errors.js";
-import { appFetch, interact, spacesFetch, SpacesApiError, type SpacesAuthContext } from "./servers/xyne-spaces-client.js";
+import { appFetch, extractUserIdFromToken, interact, spacesFetch, SpacesApiError, type SpacesAuthContext } from "./servers/xyne-spaces-client.js";
 import { SDLC_TOOL_NAMES } from "xyne-claw-shared";
 import { spacesConversationExists } from "../lib/spaces-post-target.js";
 const log = createLogger("validators");
@@ -46,6 +46,10 @@ function targetConversationId(params: Record<string, unknown>): string | undefin
 
 function targetChannelId(params: Record<string, unknown>): string | undefined {
   return stringField(params["channelId"]);
+}
+
+function targetRecipientUserId(params: Record<string, unknown>): string | undefined {
+  return stringField(params["recipientUserId"]);
 }
 
 /**
@@ -97,11 +101,16 @@ async function validateTargetConversationId(
   if (serverType !== "xyne-spaces") return null;
   const conversationId = targetConversationId(params);
   const channelId = targetChannelId(params);
+  const recipientUserId = targetRecipientUserId(params);
 
   if (tool === "user-send-message") {
-    if (!!conversationId === !!channelId) {
-      return "provide exactly one target: use conversationId for an existing thread or channelId to post into a channel";
+    const targetCount = [conversationId, channelId, recipientUserId].filter(Boolean).length;
+    if (targetCount !== 1) {
+      return "provide exactly one target: use conversationId for an existing thread, channelId to post into a channel, or recipientUserId to create/reuse a DM";
     }
+    // A recipient target is validated authoritatively by POST /api/users/me/dms
+    // under the invoking user's token when the approved action executes.
+    if (recipientUserId) return null;
   }
 
   const auth: SpacesAuthContext = {};
@@ -185,10 +194,34 @@ async function validateTargetConversationId(
       }
       return `channel ${channelId} not found — use a real Spaces channel id (resolve it with the spaces-channels tool by exact name, or from the triggering thread).${suggestion}`;
     }
-    // The channel exists — now confirm the agent's app can actually reach it, so
-    // a write into a channel the app isn't a member of fails HERE (model can
-    // retry a reachable channel) instead of queuing and then losing its approval
-    // card at delivery time. Same app token, same endpoint as the card path.
+    if (tool === "user-send-message") {
+      // This tool executes with the invoking user's session token, not the agent
+      // app token. Enforce that same user's membership at queue time so a public
+      // channel is not silently auto-joined and a private DM is not rejected just
+      // because the agent app is not one of its participants.
+      if (!token) return null; // no trustworthy identity to pre-check; execution remains authoritative
+      const userId = extractUserIdFromToken(token);
+      if (!userId) {
+        log.warn(`[validator] user-send-message could not read user id from token; failing open channelId=${channelId}`);
+        return null;
+      }
+      const memberships = (await interact(
+        {
+          model: "channelParticipant",
+          operation: "findMany",
+          where: { channelId: { equals: channelId }, userId: { equals: userId } },
+          take: 1,
+        },
+        auth,
+      )) as unknown[];
+      if (Array.isArray(memberships) && memberships.length === 0) {
+        return `channel ${channelId} is not accessible — you must be a member before sending as yourself`;
+      }
+      return null;
+    }
+
+    // Other channel-targeted writes execute as the app, so retain the app
+    // membership check used by the approval-card delivery path.
     return await validateChannelAppAccess(channelId, auth);
   } catch (err) {
     const msg = errMsg(err);

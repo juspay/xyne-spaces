@@ -69,7 +69,7 @@ function sanitizeForLog(value: unknown): string {
 
 // Extract Spaces userId from the JWT token's `sub` claim (user tokens)
 // or `userId` claim (app tokens)
-function extractUserIdFromToken(token: string): string {
+export function extractUserIdFromToken(token: string): string {
   try {
     const parts = token.split(".");
     if (!parts[1]) return "";

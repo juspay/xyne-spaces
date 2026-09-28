@@ -2104,120 +2104,76 @@ export class ChannelController {
       const isOneOnOne = otherParticipantIds.length === 1;
 
       if (isOneOnOne) {
-        // Handle 1-on-1 DM (existing logic)
         const targetUserId = otherParticipantIds[0];
         const targetUser = participantUsers[0];
+        const description = `Direct message between ${await this.getUserInfo(currentUserId).then(u => u.displayName || u.name)} and ${targetUser.displayName || targetUser.name}`;
 
-        // Check if DM already exists
-        const existingDM = await this.channelRepository.getDMChannel(currentUserId, targetUserId);
-        if (existingDM) {
-          const conversations = await this.conversationRepository.getChannelConversations(existingDM.id);
-          const participants = await this.channelParticipantRepository.getChannelParticipants(existingDM.id);
-          const unreadCount = await unreadService.getUnreadCountForChannel(existingDM.id, currentUserId);
-
-          // Send message or forwarded message if provided, even for existing DM
-          let initialConversation = null;
-          if (forwardedMessage) {
-            initialConversation = await this.sendForwardedMessage(existingDM.id, currentUserId, forwardedMessage);
-          } else if (message && message.trim()) {
-            initialConversation = await this.sendInitialMessage(existingDM.id, currentUserId, message);
-          }
-
-          const existingDMStats = await db.channelStats.findUnique({ where: { channelId: existingDM.id } });
-
-          res.status(200).json({
-            message: 'DM channel already exists',
-            id: existingDM.id,
-            name: existingDM.name,
-            scopeType: existingDM.scopeType,
-            description: existingDM.description,
-            visibility: existingDM.visibility,
-            projectId: existingDM.projectId,
-            conversationCount: initialConversation ? conversations.length + 1 : conversations.length,
-            participantCount: participants.length,
-            unreadCount,
-            lastActivityAt: existingDMStats?.lastActivityAt ?? existingDM.createdAt,
-            createdAt: existingDM.createdAt,
-            isExisting: true,
-            targetUser: {
-              id: targetUser.id,
-              name: targetUser.displayName || targetUser.name,
-              email: targetUser.email,
-              picture: targetUser.picture
-            },
-            initialConversation
-          });
-          return;
-        }
-
-        const v = [targetUserId, currentUserId];
-
-        // Create new 1-on-1 DM
-        const channelData: CreateChannelInput = {
-          scopeType: ChannelScopeType.DM,
-          name: v.sort().join(","),
-          description: `Direct message between ${await this.getUserInfo(currentUserId).then(u => u.displayName || u.name)} and ${targetUser.displayName || targetUser.name}`,
-          visibility: ChannelVisibility.PRIVATE,
-          createdBy: currentUserId,
-          projectId: dmProjectId,
+        const { channel, isExisting } = await this.channelRepository.findOrCreateOneOnOneDMChannel({
+          userId: currentUserId,
+          targetUserId,
+          channelParticipants: this.channelParticipantRepository,
           workspaceId,
-        };
+          projectId: dmProjectId,
+          description,
+          creatorIsClosed: shouldHideCreator,
+          targetIsClosed: true,
+        });
 
-        const channel = await this.channelRepository.create(channelData);
+        const conversations = isExisting
+          ? await this.conversationRepository.getChannelConversations(channel.id)
+          : [];
+        const participants = await this.channelParticipantRepository.getChannelParticipants(channel.id);
+        const unreadCount = isExisting
+          ? await unreadService.getUnreadCountForChannel(channel.id, currentUserId)
+          : 0;
 
-        // Add participants - creator sees DM immediately unless this is a silent auto-create
-        // without an initial message, in which case the channel is hidden until the first
-        // message is sent.
-        await this.channelParticipantRepository.addParticipant(
-          channel.id,
-          currentUserId,
-          ChannelRole.ADMIN,
-          shouldHideCreator,
-        );
-        await this.channelParticipantRepository.addParticipant(channel.id, targetUserId, ChannelRole.MEMBER, true);
-
-        // If message or forwarded message is provided, create initial conversation and message using helper method
         let initialConversation = null;
         if (forwardedMessage) {
           initialConversation = await this.sendForwardedMessage(channel.id, currentUserId, forwardedMessage);
         } else if (message && message.trim()) {
           initialConversation = await this.sendInitialMessage(channel.id, currentUserId, message);
+          if (!initialConversation) {
+            throw new Error('DM channel was created or reused, but the initial message could not be sent');
+          }
         }
 
-        const response = {
-          message: 'DM channel created successfully',
+        const channelStats = isExisting
+          ? await db.channelStats.findUnique({ where: { channelId: channel.id } })
+          : null;
+        res.status(isExisting ? 200 : 201).json({
+          message: isExisting ? 'DM channel already exists' : 'DM channel created successfully',
           id: channel.id,
           name: channel.name,
           scopeType: channel.scopeType,
           description: channel.description,
           visibility: channel.visibility,
-          conversationCount: initialConversation ? 1 : 0,
-          participantCount: 2,
-          unreadCount: 0,
-          lastActivityAt: channel.createdAt,
+          projectId: channel.projectId,
+          conversationCount: initialConversation ? conversations.length + 1 : conversations.length,
+          participantCount: participants.length,
+          unreadCount,
+          lastActivityAt: channelStats?.lastActivityAt ?? channel.createdAt,
           createdAt: channel.createdAt,
+          isExisting,
           targetUser: {
             id: targetUser.id,
             name: targetUser.displayName || targetUser.name,
             email: targetUser.email,
             picture: targetUser.picture
           },
-          isExisting: false,
           initialConversation
-        };
-
-        res.status(201).json(response);
-
-        // Queue Vespa job in background for DM - worker will handle all processing
-        vespaQueue.addJob({
-          schema: channelSchema,
-          jobType: "feed",
-          docId: channel.id,
-          userId: currentUserId,
-          workspaceId: workspaceId,
-        }).catch(error => {
-          logger.error('Error queuing Vespa job for DM:', error);
         });
+
+        if (!isExisting) {
+          vespaQueue.addJob({
+            schema: channelSchema,
+            jobType: "feed",
+            docId: channel.id,
+            userId: currentUserId,
+            workspaceId,
+          }).catch(error => {
+            logger.error('Error queuing Vespa job for DM:', error);
+          });
+        }
       } else {
         // Handle Group DM
         const allMemberIds = [currentUserId, ...otherParticipantIds].sort();
