@@ -1,3 +1,10 @@
+## [1.407.2-release-20260928.2](https://github.com/juspay/xyne-spaces/compare/v1.407.2-release-20260928.1...v1.407.2-release-20260928.2) (2026-09-28)
+
+
+### Bug Fixes
+
+* build @xyne/cache in the runner, test and dev backend images ([#2354](https://github.com/juspay/xyne-spaces/issues/2354)) ([f3e571e](https://github.com/juspay/xyne-spaces/commit/f3e571e68decd4abfbec83d00c19ba2bda4467f9))
+
 ## [1.407.2-release-20260928.1](https://github.com/juspay/xyne-spaces/compare/v1.407.1...v1.407.2-release-20260928.1) (2026-09-28)
 
 
