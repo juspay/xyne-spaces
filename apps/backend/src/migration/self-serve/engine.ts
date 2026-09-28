@@ -9,7 +9,7 @@ import { config } from '@/config/env';
 import { decrypt } from '@/services/encryptionService';
 import { getStorageService } from '@/services/storage';
 import { createRedisClient } from '@/services/redisFactory';
-import { runAsServiceActor } from '@/database/tenant/context';
+import { loadSlackConversation } from '@/bypassAcl/migrationServices';
 import { UserRepository } from '@/database/repositories/users';
 import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { ChannelParticipantRepository } from '@/database/repositories/channelParticipantRepository';
@@ -551,125 +551,131 @@ export class SlackMigrationEngine {
 
   async loadConversation(job: MigrationJob, conv: CollectedConversation, ref: SlackOfflineReference, onProgress?: () => void): Promise<{ ingested: number; failed: number }> {
     const cfg = await getMigrationRuntimeConfig();
-    return runAsServiceActor('slack-migration', job.workspaceId, async () => {
-      const userRepo = new UserRepository();
-      const channelRepo = new ChannelRepository();
-      const participantRepo = new ChannelParticipantRepository();
-      const cache: UserInfoCache = new Map();
-      const provCache = new Map<string, { id: string; isDeactivated: boolean }>();
+    return loadSlackConversation(this, job, conv, ref, cfg, onProgress);
+  }
 
-      const resolve = async (slackId: string): Promise<string | undefined> => {
-        const u = ref.users.get(slackId) as { profile?: { email?: string; real_name?: string; display_name?: string }; is_bot?: boolean; deleted?: boolean } | undefined;
-        const email = u?.profile?.email;
-        if (!email || u?.is_bot) return undefined;
-        const name = u?.profile?.display_name || u?.profile?.real_name || email;
-        const id = await findOrCreateUser(email, name, !!u?.deleted, userRepo, provCache, job.workspaceId);
-        if (id) cache.set(slackId, { userId: id, userEmail: email, userName: name, isBot: false });
-        return id ?? undefined;
-      };
+  /**
+   * Ingests one dumped conversation into Xyne. Runs only under the job's tenant scope — reach it
+   * through loadSlackConversation (bypassAcl/migrationServices).
+   */
+  async ingestConversation(job: MigrationJob, conv: CollectedConversation, ref: SlackOfflineReference, cfg: Awaited<ReturnType<typeof getMigrationRuntimeConfig>>, onProgress?: () => void): Promise<{ ingested: number; failed: number }> {
+    const userRepo = new UserRepository();
+    const channelRepo = new ChannelRepository();
+    const participantRepo = new ChannelParticipantRepository();
+    const cache: UserInfoCache = new Map();
+    const provCache = new Map<string, { id: string; isDeactivated: boolean }>();
 
-      // Let the offline resolver create a mentioned user from their dumped email, so the mention
-      // links to a real Xyne user even if they never posted / aren't a member.
-      ref.createUser = async (email, name, isDeactivated) => {
-        try { return await findOrCreateUser(email, name, isDeactivated, userRepo, provCache, job.workspaceId); }
-        catch { return undefined; }
-      };
+    const resolve = async (slackId: string): Promise<string | undefined> => {
+      const u = ref.users.get(slackId) as { profile?: { email?: string; real_name?: string; display_name?: string }; is_bot?: boolean; deleted?: boolean } | undefined;
+      const email = u?.profile?.email;
+      if (!email || u?.is_bot) return undefined;
+      const name = u?.profile?.display_name || u?.profile?.real_name || email;
+      const id = await findOrCreateUser(email, name, !!u?.deleted, userRepo, provCache, job.workspaceId);
+      if (id) cache.set(slackId, { userId: id, userEmail: email, userName: name, isBot: false });
+      return id ?? undefined;
+    };
 
-      const isChannel = job.type === MigrationType.CHANNEL;
-      // Self-DM ("notes to self") has only the owner as member — no "other" side, so otherIds resolution would wrongly drop it.
-      const isSelfDm = !isChannel && conv.members.length > 0 && conv.members.every((m) => m === job.ownerSlackId);
+    // Let the offline resolver create a mentioned user from their dumped email, so the mention
+    // links to a real Xyne user even if they never posted / aren't a member.
+    ref.createUser = async (email, name, isDeactivated) => {
+      try { return await findOrCreateUser(email, name, isDeactivated, userRepo, provCache, job.workspaceId); }
+      catch { return undefined; }
+    };
 
-      // DM: resolve both sides up front (bail if we can't). Channel: ingests into the pre-selected Xyne channel (resolved after empty check).
-      let dmOwnerId: string | undefined;
-      const dmOtherIds: string[] = [];
-      if (isChannel) {
-        if (!job.channelInput?.xyneChannelId) return { ingested: 0, failed: 0 };
-      } else {
-        dmOwnerId = job.ownerSlackId ? await resolve(job.ownerSlackId) : undefined;
-        if (!dmOwnerId) return { ingested: 0, failed: 0 };
-        if (!isSelfDm) {
-          for (const m of conv.members) if (m !== job.ownerSlackId) { const id = await resolve(m); if (id) dmOtherIds.push(id); }
-          if (dmOtherIds.length === 0) return { ingested: 0, failed: 0 };
+    const isChannel = job.type === MigrationType.CHANNEL;
+    // Self-DM ("notes to self") has only the owner as member — no "other" side, so otherIds resolution would wrongly drop it.
+    const isSelfDm = !isChannel && conv.members.length > 0 && conv.members.every((m) => m === job.ownerSlackId);
+
+    // DM: resolve both sides up front (bail if we can't). Channel: ingests into the pre-selected Xyne channel (resolved after empty check).
+    let dmOwnerId: string | undefined;
+    const dmOtherIds: string[] = [];
+    if (isChannel) {
+      if (!job.channelInput?.xyneChannelId) return { ingested: 0, failed: 0 };
+    } else {
+      dmOwnerId = job.ownerSlackId ? await resolve(job.ownerSlackId) : undefined;
+      if (!dmOwnerId) return { ingested: 0, failed: 0 };
+      if (!isSelfDm) {
+        for (const m of conv.members) if (m !== job.ownerSlackId) { const id = await resolve(m); if (id) dmOtherIds.push(id); }
+        if (dmOtherIds.length === 0) return { ingested: 0, failed: 0 };
+      }
+    }
+
+    const pinnedTs = new Set(await this.readJson<string[]>(paths.pins(job.gcsPrefix, conv.id)).catch(() => []));
+
+    // Read base dump + any refresh snapshots as a union (per-message dedup downstream drops overlaps; union means a
+    // partial refresh can't lose data). Offline reference active so mentions/authors resolve from the dumps, never Slack.
+    const dataFiles = await this.listConversationDataFiles(job.gcsPrefix, conv.id);
+    const messages: SlackMessage[] = await runWithSlackOfflineReference(ref, async () => {
+      const out: SlackMessage[] = [];
+      for (const file of dataFiles) {
+        const stream = await this.storage.createReadStream(file);
+        const rl = readline.createInterface({ input: decryptStream(stream), crlfDelay: Infinity });
+        for await (const line of rl) {
+          if (!line.trim()) continue;
+          let raw: unknown;
+          try { raw = JSON.parse(line); } catch { continue; }
+          // Drop Slack system messages and env-ignored bots (matches /sync isHumanMessage); real bot content is kept.
+          if (!isHumanMessage(raw, 'channel', [], true)) continue;
+          out.push(await transformMessage(raw as never, (raw as { _replies?: never[] })._replies, cache, true, true, true, pinnedTs, job.workspaceId, ''));
         }
       }
+      return out;
+    });
+    if (messages.length === 0) return { ingested: 0, failed: 0 };
 
-      const pinnedTs = new Set(await this.readJson<string[]>(paths.pins(job.gcsPrefix, conv.id)).catch(() => []));
+    // Lock the write on the resolved target channel (member-set for DMs, xyneChannelId for channels); the read above is unlocked.
+    const lockScope = isChannel
+      ? `ch:${job.channelInput!.xyneChannelId}`
+      : isSelfDm ? `dm:${dmOwnerId}` : `dm:${[dmOwnerId!, ...dmOtherIds].sort().join(',')}`;
+    return await this.withChannelLock(job.workspaceId, lockScope, async () => {
+    // Channel → the requester's chosen Xyne channel. DM → find/create it (only now we know it has messages, so an empty DM never pins to the top).
+    const channelId = isChannel
+      ? job.channelInput!.xyneChannelId
+      : isSelfDm
+        ? await channelService.ensureSelfDmExists(dmOwnerId!, job.workspaceId) // canonical self-DM (same as login)
+        : await channelRepo.findOrCreateDMChannel(dmOwnerId!, dmOtherIds, participantRepo, job.workspaceId);
 
-      // Read base dump + any refresh snapshots as a union (per-message dedup downstream drops overlaps; union means a
-      // partial refresh can't lose data). Offline reference active so mentions/authors resolve from the dumps, never Slack.
-      const dataFiles = await this.listConversationDataFiles(job.gcsPrefix, conv.id);
-      const messages: SlackMessage[] = await runWithSlackOfflineReference(ref, async () => {
-        const out: SlackMessage[] = [];
-        for (const file of dataFiles) {
-          const stream = await this.storage.createReadStream(file);
-          const rl = readline.createInterface({ input: decryptStream(stream), crlfDelay: Infinity });
-          for await (const line of rl) {
-            if (!line.trim()) continue;
-            let raw: unknown;
-            try { raw = JSON.parse(line); } catch { continue; }
-            // Drop Slack system messages and env-ignored bots (matches /sync isHumanMessage); real bot content is kept.
-            if (!isHumanMessage(raw, 'channel', [], true)) continue;
-            out.push(await transformMessage(raw as never, (raw as { _replies?: never[] })._replies, cache, true, true, true, pinnedTs, job.workspaceId, ''));
-          }
-        }
-        return out;
-      });
-      if (messages.length === 0) return { ingested: 0, failed: 0 };
-
-      // Lock the write on the resolved target channel (member-set for DMs, xyneChannelId for channels); the read above is unlocked.
-      const lockScope = isChannel
-        ? `ch:${job.channelInput!.xyneChannelId}`
-        : isSelfDm ? `dm:${dmOwnerId}` : `dm:${[dmOwnerId!, ...dmOtherIds].sort().join(',')}`;
-      return await this.withChannelLock(job.workspaceId, lockScope, async () => {
-      // Channel → the requester's chosen Xyne channel. DM → find/create it (only now we know it has messages, so an empty DM never pins to the top).
-      const channelId = isChannel
-        ? job.channelInput!.xyneChannelId
-        : isSelfDm
-          ? await channelService.ensureSelfDmExists(dmOwnerId!, job.workspaceId) // canonical self-DM (same as login)
-          : await channelRepo.findOrCreateDMChannel(dmOwnerId!, dmOtherIds, participantRepo, job.workspaceId);
-
-      if (isChannel) {
-        // Slack channel creator → Xyne ADMIN (matches /sync). First, because the member loop's
-        // default-role addParticipant returns existing participants unchanged, so the creator stays ADMIN.
-        if (job.slackChannelCreator) {
-          const creatorId = await resolve(job.slackChannelCreator);
-          if (creatorId) await participantRepo.addParticipant(channelId, creatorId, ChannelRole.ADMIN).catch(() => undefined);
-        }
-        // Sync real Slack members (captured at collection) as participants — humans via the user dump, bots as app users. All offline.
-        const botCache: UserInfoCache = new Map();
-        for (const slackId of conv.members) {
-          const u = ref.users.get(slackId) as { is_bot?: boolean; profile?: { real_name?: string; display_name?: string; bot_id?: string } } | undefined;
-          let participantId: string | undefined;
-          if (u?.is_bot && u.profile?.bot_id) {
-            const botName = u.profile.display_name || u.profile.real_name || 'bot';
-            participantId = await findOrCreateApp(botName, u.profile.bot_id, botCache, slackId, job.workspaceId).catch(() => undefined);
-          } else {
-            participantId = await resolve(slackId);
-          }
-          if (participantId) await participantRepo.addParticipant(channelId, participantId).catch(() => undefined);
-        }
-      } else {
-        // Place the new DM at its real last-message time so it never jumps to the top.
-        const newest = newestMessageDate(messages);
-        if (newest) await channelRepo.setLastActivity(channelId, newest);
+    if (isChannel) {
+      // Slack channel creator → Xyne ADMIN (matches /sync). First, because the member loop's
+      // default-role addParticipant returns existing participants unchanged, so the creator stays ADMIN.
+      if (job.slackChannelCreator) {
+        const creatorId = await resolve(job.slackChannelCreator);
+        if (creatorId) await participantRepo.addParticipant(channelId, creatorId, ChannelRole.ADMIN).catch(() => undefined);
       }
+      // Sync real Slack members (captured at collection) as participants — humans via the user dump, bots as app users. All offline.
+      const botCache: UserInfoCache = new Map();
+      for (const slackId of conv.members) {
+        const u = ref.users.get(slackId) as { is_bot?: boolean; profile?: { real_name?: string; display_name?: string; bot_id?: string } } | undefined;
+        let participantId: string | undefined;
+        if (u?.is_bot && u.profile?.bot_id) {
+          const botName = u.profile.display_name || u.profile.real_name || 'bot';
+          participantId = await findOrCreateApp(botName, u.profile.bot_id, botCache, slackId, job.workspaceId).catch(() => undefined);
+        } else {
+          participantId = await resolve(slackId);
+        }
+        if (participantId) await participantRepo.addParticipant(channelId, participantId).catch(() => undefined);
+      }
+    } else {
+      // Place the new DM at its real last-message time so it never jumps to the top.
+      const newest = newestMessageDate(messages);
+      if (newest) await channelRepo.setLastActivity(channelId, newest);
+    }
 
-      const ingestInput = {
-        slackMessages: messages,
-        externalSourceName: `${isChannel ? 'channelMigration' : 'dmMigration'}-${channelId}`,
-        channelId,
-        workspaceId: job.workspaceId,
-        botToken: 'slack-migration-offline',
-        interMessageDelayMs: cfg.messageDelayMs,
-        onProgress,
-      };
-      // Opt-in bulk path (createMany) — off by default; A/B against the per-message path before trusting it.
-      const ingestResult = cfg.bulk
-        ? await bulkIngestConversationSlack(ingestInput)
-        : await ingestConversationSlack(ingestInput);
-      await channelRepo.recalculateLastActivityFromMessages(channelId);
-      return { ingested: messages.length, failed: ingestResult.errorDetails?.length ?? 0 };
-      });
+    const ingestInput = {
+      slackMessages: messages,
+      externalSourceName: `${isChannel ? 'channelMigration' : 'dmMigration'}-${channelId}`,
+      channelId,
+      workspaceId: job.workspaceId,
+      botToken: 'slack-migration-offline',
+      interMessageDelayMs: cfg.messageDelayMs,
+      onProgress,
+    };
+    // Opt-in bulk path (createMany) — off by default; A/B against the per-message path before trusting it.
+    const ingestResult = cfg.bulk
+      ? await bulkIngestConversationSlack(ingestInput)
+      : await ingestConversationSlack(ingestInput);
+    await channelRepo.recalculateLastActivityFromMessages(channelId);
+    return { ingested: messages.length, failed: ingestResult.errorDetails?.length ?? 0 };
     });
   }
 

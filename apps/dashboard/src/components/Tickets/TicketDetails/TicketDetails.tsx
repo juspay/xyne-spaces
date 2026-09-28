@@ -96,9 +96,9 @@ import { useUsers } from '../../../hooks/useUsers';
 import { useUserGroups } from '../../../hooks/useUserGroup';
 import { useAuth } from '../../../hooks/useAuth';
 import {
-  useProjectTicketSearch,
+  useSubTicketLinkSearch,
   VESPA_MAX_BOARD_FILTER_VALUES,
-} from '../../../hooks/useProjectTicketSearch';
+} from '../../../hooks/useSubTicketLinkSearch';
 import { getSubTicketLinkErrorMessage, subTicketService } from '../../../services/subTicketService';
 import { globalClickTracker } from '../../../services/Analytics/globalClickTracker';
 import {
@@ -456,6 +456,9 @@ const StageFormSubmissions: React.FC<StageFormSubmissionsProps> = ({ stageVisitF
 };
 const TICKET_ATTACHMENT_PREVIEW_LIMIT = 5;
 
+const EXPANDED_HEADER_ICON_BUTTON =
+  'size-[30px] rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground';
+
 // Debounce window for title/description auto-save while the user is typing.
 const FIELD_AUTOSAVE_DEBOUNCE_MS = 600;
 
@@ -471,6 +474,7 @@ interface TicketDetailsProps {
    * twice and the chevron would point nowhere.
    */
   hideBackNav?: boolean;
+  onMinimize?: () => void;
   onFillRCA?: () => void;
   /** Display the current stage without exposing manual lifecycle transitions. */
   stageReadOnly?: boolean;
@@ -580,6 +584,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   onNavigateToTicket,
   expandedView = false,
   hideBackNav = false,
+  onMinimize,
   onFillRCA,
   stageReadOnly = false,
   relationshipsOnly = false,
@@ -1351,7 +1356,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   const [boards] = useCachedQuery(
     queries.boardsListByProject({ projectId: ticket?.projectId || '' }),
     {
-      // Also needed by the sub-ticket picker, which must know each board's type.
+      // Eager on manual boards too: TicketActivity names boards from this list.
       enabled:
         !!ticket?.projectId &&
         (hasBoardDropdownOpened || isManualSubTicketBoard(boardData?.boardType)),
@@ -2299,10 +2304,18 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
 
   const canManageSubTicketLinks = isManualSubTicketBoard(boardData?.boardType);
 
+  // Workspace-wide, like Create Sub-Ticket: a linked sub-ticket may live in any project.
+  const [workspaceBoards] = useCachedQuery(queries.getAllBoardsList(), {
+    enabled: canManageSubTicketLinks,
+  });
+
   // FLOW/RELEASE boards own their mappings, so their tickets are never linkable by hand.
   const manualBoardIds = useMemo(
-    () => (boards ?? []).filter(board => isManualSubTicketBoard(board.boardType)).map(b => b.id),
-    [boards],
+    () =>
+      (workspaceBoards ?? [])
+        .filter(board => isManualSubTicketBoard(board.boardType))
+        .map(b => b.id),
+    [workspaceBoards],
   );
   // Past the API's cap the filter is dropped; subTicketPickerOptions filters instead.
   const manualBoardIdsFilter = useMemo(
@@ -2317,8 +2330,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   const [isAddSubTicketMenuOpen, setIsAddSubTicketMenuOpen] = useState(false);
   const [isLinkingSubTicket, setIsLinkingSubTicket] = useState(false);
   const [unlinkingMappingIds, setUnlinkingMappingIds] = useState<Set<string>>(new Set());
-  const subTicketSearch = useProjectTicketSearch({
-    projectId: ticket?.projectId ?? undefined,
+  const subTicketSearch = useSubTicketLinkSearch({
     boardIds: manualBoardIdsFilter,
     isActive: isAddSubTicketMenuOpen,
   });
@@ -3826,24 +3838,45 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   return (
     <div className='mx-auto px-[20px] pb-[72px] h-full overflow-auto no-scrollbar bg-background'>
       {expandedView && (
-        <div className='flex items-center justify-between pt-[4px]'>
-          <div className='-ml-[6px] flex items-center gap-x-0.5'>
+        <div className='flex h-14 items-center justify-between gap-3'>
+          <div className='-ml-3 flex min-w-0 items-center gap-1'>
             {!hideBackNav && (
               <>
                 <button
+                  type='button'
                   onClick={handleBackFromExpandedView}
+                  aria-label='Back'
+                  className={cn(
+                    'flex shrink-0 items-center justify-center transition-colors',
+                    EXPANDED_HEADER_ICON_BUTTON,
+                  )}
                   data-track-category='Tickets'
                   data-track-name='BackFromExpandedView'
                 >
-                  <ChevronLeft size={18} className='text-foreground' />
+                  <ChevronLeft size={16} />
                 </button>
-                <span className='text-[14px] font-medium text-foreground px-2 py-0.5'>
-                  {ticket.xyneId}
-                </span>
+                <Tooltip content='Copy ticket ID'>
+                  <button
+                    type='button'
+                    onClick={() => {
+                      void navigator.clipboard.writeText(ticket.xyneId);
+                      toast.success('Copied', {
+                        description: 'Ticket ID copied to clipboard',
+                        duration: 2000,
+                      });
+                    }}
+                    aria-label={`Copy ticket ID ${ticket.xyneId}`}
+                    className='truncate font-mono text-[13px] font-medium text-muted-foreground transition-colors hover:text-foreground'
+                    data-track-category='Tickets'
+                    data-track-name='COPY_TICKET_ID'
+                  >
+                    {ticket.xyneId}
+                  </button>
+                </Tooltip>
               </>
             )}
           </div>
-          <div className='flex items-center gap-x-2'>
+          <div className='-mr-2 flex shrink-0 items-center gap-0.5'>
             <BoardTicketNav ticketId={ticketId} />
             {/* A control of its own rather than an item in an overflow menu,
                 because this header has no overflow menu to put it in. Carries
@@ -3858,27 +3891,27 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 ...(ticket.channelId ? { channelId: ticket.channelId } : {}),
                 ...(ticket.conversationId ? { conversationId: ticket.conversationId } : {}),
               }}
-              className='h-8 w-8 rounded-lg border border-border'
+              className='h-[30px] w-[30px] rounded-lg hover:bg-muted'
             />
             <Tooltip content='Copy Ticket Link'>
               <Button
-                className='p-2 border border-border rounded-lg h-8 w-8'
+                className={EXPANDED_HEADER_ICON_BUTTON}
                 variant='ghost'
-                size='sm'
+                size='iconSm'
                 onClick={handleCopyTicketViewLink}
                 data-track-category='Tickets'
                 data-track-name='COPY_TICKET_LINK'
                 data-track-metadata={JSON.stringify(ticketTrackingMetadata(ticket))}
                 aria-label='Copy Ticket'
               >
-                <LinkIcon size={20} />
+                <LinkIcon size={16} />
               </Button>
             </Tooltip>
             <Tooltip content='Summarize thread'>
               <Button
                 variant='ghost'
-                size='sm'
-                className='p-2 border border-border rounded-lg h-8 w-8'
+                size='iconSm'
+                className={EXPANDED_HEADER_ICON_BUTTON}
                 onClick={() => {
                   void navigate(
                     `${baseRoute}/${ticket.channelId}/${ticket.conversationId}#thread-summary`,
@@ -3892,14 +3925,14 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 })}
                 title='Summarize thread'
               >
-                <Sparkles size={20} />
+                <Sparkles size={16} />
               </Button>
             </Tooltip>
             <Tooltip content={'Archive Ticket'}>
               <Button
-                className='p-2 border border-border rounded-lg h-8 w-8'
+                className={EXPANDED_HEADER_ICON_BUTTON}
                 variant='ghost'
-                size='sm'
+                size='iconSm'
                 onClick={() => setShowArchiveConfirmDialog(true)}
                 data-track-category='Tickets'
                 data-track-name='OPEN_ARCHIVE_TICKET_CONFIRM'
@@ -3907,21 +3940,21 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 disabled={ticket?.isArchived}
                 aria-label='Archive Ticket'
               >
-                <Archive size={20} />
+                <Archive size={16} />
               </Button>
             </Tooltip>
             <Tooltip content='Minimize View'>
               <Button
-                className='p-2 border border-border rounded-lg h-8 w-8'
+                className={EXPANDED_HEADER_ICON_BUTTON}
                 variant='ghost'
-                size='sm'
-                onClick={handleMinimizeExpandedView}
+                size='iconSm'
+                onClick={onMinimize ?? handleMinimizeExpandedView}
                 data-track-category='Tickets'
                 data-track-name='MINIMIZE_EXPANDED_VIEW'
                 data-track-metadata={JSON.stringify({ ticketId: ticket?.id })}
-                aria-label='Copy Ticket'
+                aria-label='Minimize View'
               >
-                <Minimize2 size={20} />
+                <Minimize2 size={16} />
               </Button>
             </Tooltip>
           </div>
@@ -5552,30 +5585,28 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                     </div>
                   </>
                 )}
-                {subTickets.length > 0 && (
-                  <div
-                    className={cn(
-                      'flex items-center gap-2 py-0.5',
-                      parentTickets && parentTickets.length > 0 && 'pt-2.5',
-                    )}
+                <div
+                  className={cn(
+                    'flex items-center gap-2 py-0.5',
+                    parentTickets && parentTickets.length > 0 && 'pt-2.5',
+                  )}
+                >
+                  <span className='text-[10px] font-semibold uppercase tracking-[0.4px] text-muted-foreground/80'>
+                    Sub-tickets
+                  </span>
+                  <span
+                    className='font-mono text-[10.5px] tabular-nums text-muted-foreground/60'
+                    data-testid='sub-tickets-count'
                   >
-                    <span className='text-[10px] font-semibold uppercase tracking-[0.4px] text-muted-foreground/80'>
-                      Sub-tickets
+                    {subTickets.length}
+                  </span>
+                  {subTickets.length > 0 && boardData?.boardType !== BoardType.FLOW && (
+                    <span className='inline-flex items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-[10.5px] font-medium text-muted-foreground'>
+                      <GitBranch size={11} />
+                      Tree
                     </span>
-                    <span
-                      className='font-mono text-[10.5px] tabular-nums text-muted-foreground/60'
-                      data-testid='sub-tickets-count'
-                    >
-                      {subTickets.length}
-                    </span>
-                    {boardData?.boardType !== BoardType.FLOW && (
-                      <span className='inline-flex items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-[10.5px] font-medium text-muted-foreground'>
-                        <GitBranch size={11} />
-                        Tree
-                      </span>
-                    )}
-                  </div>
-                )}
+                  )}
+                </div>
 
                 <div className='flex flex-col gap-1.5' data-testid='sub-tickets-list'>
                   {subTickets.length > 0 && subTicketTreeNodes.map(renderSubTicketNode)}
@@ -5583,16 +5614,14 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                   {addSubTicketPicker}
                 </div>
 
-                {referencesOut.length + referencesIn.length > 0 && (
-                  <div className='flex items-center gap-2 pt-2.5 pb-0.5'>
-                    <span className='text-[10px] font-semibold uppercase tracking-[0.4px] text-muted-foreground/80'>
-                      Linked
-                    </span>
-                    <span className='font-mono text-[10.5px] tabular-nums text-muted-foreground/60'>
-                      {referencesOut.length + referencesIn.length}
-                    </span>
-                  </div>
-                )}
+                <div className='flex items-center gap-2 pt-2.5 pb-0.5'>
+                  <span className='text-[10px] font-semibold uppercase tracking-[0.4px] text-muted-foreground/80'>
+                    Linked
+                  </span>
+                  <span className='font-mono text-[10.5px] tabular-nums text-muted-foreground/60'>
+                    {referencesOut.length + referencesIn.length}
+                  </span>
+                </div>
 
                 <div className='flex flex-col gap-1.5'>
                   {referencesOut.map(reference =>

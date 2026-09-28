@@ -41,7 +41,6 @@ import { cn } from '../../utils/classNames';
 import { getApiErrorMessage } from '../../utils/apiError';
 import { surfaceMutationError } from '../../utils/zeroMutationToast';
 import {
-  GridDashboard01,
   LayoutGridTwoVertical as Columns3,
   TicketToken as TicketIcon,
   Hashtag,
@@ -89,7 +88,6 @@ import {
   BarchartDefault as BarChart3,
   UserPlus,
   InformationCircle as InfoIcon,
-  FileText,
 } from '@xyne/icons';
 import ChannelIcon from '../../components/Chat/ChannelIcon/ChannelIcon';
 import { logger, Event } from '../../utils/logger';
@@ -128,6 +126,16 @@ import {
 } from '../../utils/board/dynamicFieldFilters';
 import { dynamicColumnKey } from '../../components/Tickets/TicketTable/TicketTableTypes';
 import { useDeskTableColumns, DESK_TABLE_BUILTIN_COLUMNS } from './useDeskTableColumns';
+import { useDeskListColumns } from './useDeskListColumns';
+import { useDeskListColumnOrder } from './useDeskListColumnOrder';
+import { DeskListColumnsMenu } from './DeskListColumnsMenu';
+import {
+  DESK_LIST_TOGGLEABLE_COLUMNS,
+  dynamicFieldListColumn,
+  orderTicketListColumns,
+  TICKET_LIST_COLUMNS,
+} from '../../components/Tickets/TicketListView/ticketListColumns';
+import DuplicateTicketsBanner from './DuplicateTicketsBanner';
 import type { LabelUnreadFilters } from '../../api/conversationLabelsApi';
 import { tagsConfigApi } from '../../api/tagsConfigApi';
 import { classificationApi } from '../../api/classificationApi';
@@ -154,8 +162,9 @@ import { Button } from '../../components/ui/Button/Button';
 import { Badge } from '../../components/ui/Badge/Badge';
 import { useAuth, useAuthContextValues } from '../../hooks/useAuth';
 import { usePlatform } from '../../hooks/usePlatform';
-import { TicketListView } from '../../components/Tickets/TicketListView';
+import { TicketListView, type PageCursor } from '../../components/Tickets/TicketListView';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
+import { useRacedQuery } from '../../hooks/useRacedQuery';
 import { SupportKanbanBoard } from './SupportKanbanBoard';
 import { SupportTicketTable } from './SupportTicketTable';
 import {
@@ -224,9 +233,13 @@ import { DeskMetricsDashboard } from '../../components/xyne-desk/DeskMetrics';
 import { TopicsExplorer } from '../../components/xyne-desk/TopicsExplorer';
 import { AutoLabelWizard } from '../../components/xyne-desk/AutoLabelWizard/AutoLabelWizard';
 import { DeskReportPanel } from '../../components/xyne-desk/DeskReport';
+import {
+  DeskInsightsPanel,
+  type DeskInsightsSection,
+} from '../../components/xyne-desk/DeskInsights/DeskInsightsPanel';
 import { DeskSavedViewsControls } from '../../components/xyne-desk/DeskSavedViewsControls';
 import { useDeskTicketSavedViews } from '../../hooks/useDeskTicketSavedViews';
-import { valuesToFilters } from '../../utils/savedViewSerialization';
+import { columnKeysFromValues, valuesToFilters } from '../../utils/savedViewSerialization';
 import {
   useChannelIntegrationInfo,
   clearChannelConnectedEmailCache,
@@ -268,7 +281,7 @@ import {
   CloudAgentDock,
   setCloudAgentOpenTicket,
 } from '../../components/xyne-desk/CloudAgentDock/CloudAgentDock';
-import { getOzonetelToolbar } from '../../services/clients/telephonyApi';
+import { getOzonetelToolbar, getPhoneFieldNames } from '../../services/clients/telephonyApi';
 
 // Unified type for tickets from the supportTicketsFiltered query
 type SupportTicket = QueryResultType<typeof queries.supportTicketsFilteredV4>[number];
@@ -781,14 +794,88 @@ const SupportScreen = (): ReactElement => {
     [filters.dynamicFields, dynamicFieldTypesById],
   );
 
-  const { selectedColumnKeys, toggleColumn } = useDeskTableColumns(selectedChannelId);
+  const {
+    selectedColumnKeys,
+    toggleColumn,
+    setColumns: setTableColumns,
+  } = useDeskTableColumns(selectedChannelId);
+  const {
+    selectedColumnKeys: listColumnKeys,
+    toggleColumn: toggleListColumn,
+    setColumns: setListColumns,
+  } = useDeskListColumns(selectedChannelId);
+  const validListColumnKeys = useMemo(
+    () =>
+      new Set([
+        ...DESK_LIST_TOGGLEABLE_COLUMNS.map(c => c.key),
+        ...deskDynamicFields.map(field => dynamicColumnKey(field.id)),
+      ]),
+    [deskDynamicFields],
+  );
   const tableVisibleColumns = useMemo(
     () => new Set([...selectedColumnKeys].filter(key => !key.startsWith('df:'))),
     [selectedColumnKeys],
   );
+
+  // Snapshot of the active mode's columns. Intersection logic on apply handles
+  // cross-mode restoration by filtering to keys valid for the target mode.
+  const currentColumnSnapshot = useMemo((): ReadonlySet<string> => {
+    return viewMode === 'list' ? listColumnKeys : selectedColumnKeys;
+  }, [viewMode, listColumnKeys, selectedColumnKeys]);
+
+  const applyViewColumns = useCallback(
+    (columns: Set<string> | null): void => {
+      if (!columns) return;
+      const validTableKeys = new Set(DESK_TABLE_BUILTIN_COLUMNS.map(c => c.key as string));
+      const tableKeys = new Set(
+        [...columns].filter(k => validTableKeys.has(k) || k.startsWith('df:')),
+      );
+      if (tableKeys.size > 0) setTableColumns(tableKeys);
+      const validListKeys = new Set(DESK_LIST_TOGGLEABLE_COLUMNS.map(c => c.key));
+      const listKeys = new Set(
+        [...columns].filter(k => validListKeys.has(k) || k.startsWith('df:')),
+      );
+      if (listKeys.size > 0) setListColumns(listKeys);
+    },
+    [setTableColumns, setListColumns],
+  );
+
+  // Persists list-view pagination across ticket-detail navigation (TicketListView unmounts
+  // when ticketId is set, so its local state is lost). Keyed to channel+filter+folder so
+  // a filter change while on the detail view doesn't restore a stale page.
+  const listPaginationCacheRef = useRef<{
+    key: string;
+    pageIndex: number;
+    pageCursors: Array<PageCursor | null>;
+    fetchLimit: number;
+  } | null>(null);
+
   const tableDynamicFieldColumns = useMemo(
     () => deskDynamicFields.filter(field => selectedColumnKeys.has(dynamicColumnKey(field.id))),
     [deskDynamicFields, selectedColumnKeys],
+  );
+  const listDynamicFieldColumns = useMemo(
+    () => deskDynamicFields.filter(field => listColumnKeys.has(dynamicColumnKey(field.id))),
+    [deskDynamicFields, listColumnKeys],
+  );
+  const { columnOrder: listColumnOrder, moveColumn: moveListColumn } =
+    useDeskListColumnOrder(selectedChannelId);
+  const deskDynamicFieldByKey = useMemo(
+    () => new Map(deskDynamicFields.map(field => [dynamicColumnKey(field.id), field])),
+    [deskDynamicFields],
+  );
+  const listMenuColumns = useMemo(
+    () =>
+      orderTicketListColumns(
+        [
+          ...TICKET_LIST_COLUMNS,
+          ...Array.from(deskDynamicFieldByKey, ([key, field]) =>
+            dynamicFieldListColumn(key, field.fieldName),
+          ),
+        ],
+        listColumnOrder,
+      ),
+    [deskDynamicFieldByKey, listColumnOrder],
   );
 
   const [tagFilterConversationIds, setTagFilterConversationIds] = useState<string[] | null>(null);
@@ -845,6 +932,38 @@ const SupportScreen = (): ReactElement => {
       conversationLabelId: selectedLabel?.id ?? filters.conversationLabelId,
     }),
     [filters, userID, dynamicFieldEntries, tagFilterConversationIds, selectedLabel?.id],
+  );
+
+  // Stable key that identifies the current list-view data context. When this changes
+  // while the user is on a ticket detail page, the stored page is stale and must not
+  // be restored.
+  const listFilterKey = useMemo(
+    () =>
+      JSON.stringify({
+        c: selectedChannelId,
+        f: ticketFilter,
+        m: selectedFolder?.key ?? null,
+      }),
+    [selectedChannelId, ticketFilter, selectedFolder],
+  );
+
+  const cachedListPagination =
+    listPaginationCacheRef.current?.key === listFilterKey ? listPaginationCacheRef.current : null;
+
+  const handleListPaginationChange = useCallback(
+    (
+      pageIndex: number,
+      pageCursors: ReadonlyArray<PageCursor | null>,
+      fetchLimit: number,
+    ): void => {
+      listPaginationCacheRef.current = {
+        key: listFilterKey,
+        pageIndex,
+        pageCursors: [...pageCursors],
+        fetchLimit,
+      };
+    },
+    [listFilterKey],
   );
 
   // Mode-B label counts drop the label scoping from the shared filter surface.
@@ -999,7 +1118,7 @@ const SupportScreen = (): ReactElement => {
     updateView: updateDeskView,
     deleteView: deleteDeskView,
     applySavedView: applyDeskSavedView,
-  } = useDeskTicketSavedViews(ticketViewsChannelId, setFilters);
+  } = useDeskTicketSavedViews(ticketViewsChannelId, setFilters, applyViewColumns);
 
   // Self-heal: clear a stale activeViewId that no longer exists in the list.
   // Guard on savedViewsLoaded so we don't clear before the query returns data.
@@ -1017,11 +1136,11 @@ const SupportScreen = (): ReactElement => {
     name: string,
     visibility: SavedConfigVisibility,
   ): Promise<string | undefined> => {
-    return saveDeskView(name, filters, visibility);
+    return saveDeskView(name, filters, visibility, currentColumnSnapshot);
   };
 
   const handleUpdateDeskView = async (viewId: string): Promise<void> => {
-    await updateDeskView(viewId, filters);
+    await updateDeskView(viewId, filters, currentColumnSnapshot);
   };
 
   const isDeskViewDirty = useMemo(() => {
@@ -1047,8 +1166,28 @@ const SupportScreen = (): ReactElement => {
       }
       return v;
     };
-    return JSON.stringify(sortDeep(filters)) !== JSON.stringify(sortDeep(viewFilters));
-  }, [activeTicketViewId, deskSavedViews, filters]);
+    if (JSON.stringify(sortDeep(filters)) !== JSON.stringify(sortDeep(viewFilters))) return true;
+    // Also dirty when column selections differ from what was saved
+    // Only check column dirty state when the view actually saved column data; legacy views have no opinion.
+    const savedColumnKeys = columnKeysFromValues(activeView.values);
+    if (!savedColumnKeys) return false;
+    const modeColumnKeys = viewMode === 'list' ? listColumnKeys : selectedColumnKeys;
+    const validKeys =
+      viewMode === 'list'
+        ? validListColumnKeys
+        : new Set(DESK_TABLE_BUILTIN_COLUMNS.map(c => c.key as string));
+    const savedForMode = new Set([...savedColumnKeys].filter(k => validKeys.has(k)));
+    const currentForMode = new Set([...modeColumnKeys].filter(k => validKeys.has(k)));
+    return [...savedForMode].sort().join(',') !== [...currentForMode].sort().join(',');
+  }, [
+    activeTicketViewId,
+    deskSavedViews,
+    filters,
+    viewMode,
+    listColumnKeys,
+    selectedColumnKeys,
+    validListColumnKeys,
+  ]);
 
   const {
     rowRef: filterRowRef,
@@ -1061,7 +1200,7 @@ const SupportScreen = (): ReactElement => {
     collapsedFilterIds,
     hasCollapsedFilters,
     isFilterVisibleOnBar,
-  } = useDeskToolbarOverflow({ showColumnsPicker: viewMode === 'table' });
+  } = useDeskToolbarOverflow({ showColumnsPicker: viewMode === 'table' || viewMode === 'list' });
 
   // Shown on the "Filters" trigger once anything is folded, so an active-but-hidden filter
   // still announces itself instead of silently disappearing.
@@ -1877,12 +2016,40 @@ const SupportScreen = (): ReactElement => {
     // kanbanTickets/ticketFilter are read at fire time only; the latch key is what matters.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [listKey, loadedListKey]);
-  // Topics Explorer rolls up one desk at a time, behind the same preference as metrics.
+  // Topics Explorer rolls up one desk at a time; it doesn't read metrics data, so it
+  // stays available when the metrics preference is off.
   const canExploreTopics =
-    canManageDeskInsights &&
-    isSelectedChannelJoined &&
+    canManageDeskInsights && isSelectedChannelJoined && selectedChannelId !== ALL_CHANNELS_ID;
+  // Metrics, Topics Explorer and Desk Report share one "Insights" entry point; each
+  // section keeps its original visibility gate and its own `?<section>=open` param.
+  const insightsSections: DeskInsightsSection[] = [
+    ...(isSelectedChannelJoined && metricsEnabled && (canManageDeskInsights || isGuest)
+      ? (['metrics'] as const)
+      : []),
+    ...(canExploreTopics ? (['topics'] as const) : []),
+    ...(isSelectedChannelJoined &&
     selectedChannelId !== ALL_CHANNELS_ID &&
-    !!channelPreference?.metricsEnabled;
+    channelPreference?.deskReportEnabled &&
+    canManageDeskInsights
+      ? (['report'] as const)
+      : []),
+  ];
+  // Only an open section the user can actually see counts, so a stale deep link
+  // (e.g. ?metrics=open with metrics off) doesn't leave the button looking active.
+  const openInsights = { metrics: isMetricsOpen, topics: isTopicsOpen, report: isReportOpen };
+  const activeInsightsSection = insightsSections.find(s => openInsights[s]) ?? null;
+  // Swaps only the section param, so the ticket filters kept in the URL survive.
+  const showInsights = (section: DeskInsightsSection | null, replace = true): void => {
+    const params = new URLSearchParams(searchParams);
+    params.delete('metrics');
+    params.delete('topics');
+    params.delete('report');
+    if (section) params.set(section, 'open');
+    const qs = params.toString();
+    const path = `${supportBase}/${selectedChannelId}`;
+    void navigate(qs ? `${path}?${qs}` : path, { replace });
+  };
+  const closeInsights = (): void => showInsights(null);
 
   // Only desks the caller manages belong in the comparison picker: the
   // aggregate route skips anything else as 'forbidden', which read as silently
@@ -3262,85 +3429,25 @@ const SupportScreen = (): ReactElement => {
                           </button>
                         </Tooltip>
                       )}
-                      {isSelectedChannelJoined &&
-                        metricsEnabled &&
-                        (canManageDeskInsights || isGuest) && (
-                          <Tooltip content='Desk metrics' side='bottom'>
-                            <button
-                              onClick={() => {
-                                const base = selectedChannelId
-                                  ? `${supportBase}/${selectedChannelId}`
-                                  : supportBase;
-                                if (isMetricsOpen) {
-                                  void navigate(base, { replace: true });
-                                } else {
-                                  void navigate(`${base}?metrics=open`);
-                                }
-                              }}
-                              className={cn(
-                                'p-1.5 rounded transition-colors',
-                                isMetricsOpen
-                                  ? 'bg-muted text-foreground'
-                                  : 'text-muted-foreground hover:text-foreground hover:bg-accent',
-                              )}
-                              data-track-category='Support'
-                              data-track-name='OpenDeskMetrics'
-                              data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
-                            >
-                              <BarChart3 size={16} />
-                            </button>
-                          </Tooltip>
-                        )}
-                      {isSelectedChannelJoined &&
-                        selectedChannelId !== ALL_CHANNELS_ID &&
-                        channelPreference?.deskReportEnabled &&
-                        canManageDeskInsights && (
-                          <Tooltip content='Desk report' side='bottom'>
-                            <button
-                              onClick={() => {
-                                const base = selectedChannelId
-                                  ? `${supportBase}/${selectedChannelId}`
-                                  : supportBase;
-                                if (isReportOpen) {
-                                  void navigate(base, { replace: true });
-                                } else {
-                                  void navigate(`${base}?report=open`);
-                                }
-                              }}
-                              className={cn(
-                                'p-1.5 rounded transition-colors',
-                                isReportOpen
-                                  ? 'bg-muted text-foreground'
-                                  : 'text-muted-foreground hover:text-foreground hover:bg-accent',
-                              )}
-                              data-track-category='Support'
-                              data-track-name='OpenDeskReport'
-                              data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
-                            >
-                              <FileText size={16} />
-                            </button>
-                          </Tooltip>
-                        )}
-                      {canExploreTopics && (
-                        <Tooltip content='Topics explorer' side='bottom'>
+                      {insightsSections.length > 0 && (
+                        <Tooltip content='Insights' side='bottom'>
                           <button
                             type='button'
                             onClick={() => {
-                              const base = `${supportBase}/${selectedChannelId}`;
-                              if (isTopicsOpen) void navigate(base, { replace: true });
-                              else void navigate(`${base}?topics=open`);
+                              if (activeInsightsSection) closeInsights();
+                              else showInsights(insightsSections[0] ?? null, false);
                             }}
                             className={cn(
                               'p-1.5 rounded transition-colors',
-                              isTopicsOpen
+                              activeInsightsSection
                                 ? 'bg-muted text-foreground'
                                 : 'text-muted-foreground hover:text-foreground hover:bg-accent',
                             )}
                             data-track-category='Support'
-                            data-track-name='OpenTopicsExplorer'
+                            data-track-name='OpenDeskInsights'
                             data-track-metadata={JSON.stringify({ channelId: selectedChannelId })}
                           >
-                            <GridDashboard01 size={16} />
+                            <BarChart3 size={16} />
                           </button>
                         </Tooltip>
                       )}
@@ -3385,7 +3492,7 @@ const SupportScreen = (): ReactElement => {
                           <DeskFilterTrigger id='priority' active={hasPriorityFilter} />
                           <DeskFilterTrigger id='stages' active={hasStagesFilter} />
                         </div>
-                        {viewMode === 'table' && (
+                        {(viewMode === 'table' || viewMode === 'list') && (
                           <>
                             <div ref={columnsWideTwinRef} className='flex items-center'>
                               <Button
@@ -3787,7 +3894,7 @@ const SupportScreen = (): ReactElement => {
                       )}
                     </div>
                     <div className='flex items-center gap-2 shrink-0'>
-                      {viewMode === 'table' && (
+                      {(viewMode === 'table' || viewMode === 'list') && (
                         <Popover.Root open={columnsOpen} onOpenChange={setColumnsOpen}>
                           <Popover.Trigger asChild>
                             <Button
@@ -3799,8 +3906,6 @@ const SupportScreen = (): ReactElement => {
                             >
                               <div className='flex items-center gap-1.5'>
                                 <Columns3 className='w-3.5 h-3.5' />
-                                {/* Label yields before any filter folds — this is secondary
-                                    chrome, and the icon plus tooltip carries it fine. */}
                                 {isColumnsLabelled && <span className='font-medium'>Columns</span>}
                               </div>
                             </Button>
@@ -3811,74 +3916,92 @@ const SupportScreen = (): ReactElement => {
                             sideOffset={6}
                             className='z-[60] w-56 bg-background border border-border rounded-lg shadow-lg py-1 max-h-[400px] overflow-y-auto'
                           >
-                            {DESK_TABLE_BUILTIN_COLUMNS.map(column => {
-                              const Icon =
-                                column.key === 'assignee'
-                                  ? User
-                                  : column.key === 'dueDate' || column.key === 'createdAt'
-                                    ? CalendarDays
-                                    : column.key === 'priority'
-                                      ? BarChart4Icon
-                                      : column.key === 'tags'
-                                        ? Tag
-                                        : Circle;
-                              const isSelected = selectedColumnKeys.has(column.key);
-                              return (
-                                <button
-                                  key={column.key}
-                                  type='button'
-                                  onClick={() => toggleColumn(column.key, !isSelected)}
-                                  className='w-full flex items-center justify-between px-4 py-2 text-sm hover:bg-muted'
-                                  data-track-category='Support'
-                                  data-track-name='ToggleTableColumn'
-                                  data-track-metadata={JSON.stringify({
-                                    column: column.key,
-                                    visible: !isSelected,
-                                  })}
-                                >
-                                  <div className='flex items-center gap-3'>
-                                    <Icon className='w-4 h-4' />
-                                    <span>{column.label}</span>
-                                  </div>
-                                  {isSelected && <Check className='w-4 h-4 text-primary' />}
-                                </button>
-                              );
-                            })}
-                            {SHOW_DESK_CUSTOM_FIELD_COLUMNS && deskDynamicFields.length > 0 && (
+                            {viewMode === 'table' ? (
                               <>
-                                <div className='my-1 border-t border-border' />
-                                <div className='px-4 py-1 text-xs font-medium text-muted-foreground'>
-                                  Custom fields
-                                </div>
-                                {deskDynamicFields.map(field => {
-                                  const key = dynamicColumnKey(field.id);
-                                  const Icon = getIconForFieldType(field.fieldType);
-                                  const isSelected = selectedColumnKeys.has(key);
+                                {DESK_TABLE_BUILTIN_COLUMNS.map(column => {
+                                  const Icon =
+                                    column.key === 'assignee'
+                                      ? User
+                                      : column.key === 'dueDate' || column.key === 'createdAt'
+                                        ? CalendarDays
+                                        : column.key === 'priority'
+                                          ? BarChart4Icon
+                                          : column.key === 'tags'
+                                            ? Tag
+                                            : Circle;
+                                  const isSelected = selectedColumnKeys.has(column.key);
                                   return (
                                     <button
-                                      key={key}
+                                      key={column.key}
                                       type='button'
-                                      onClick={() => toggleColumn(key, !isSelected)}
+                                      onClick={() => toggleColumn(column.key, !isSelected)}
                                       className='w-full flex items-center justify-between px-4 py-2 text-sm hover:bg-muted'
                                       data-track-category='Support'
                                       data-track-name='ToggleTableColumn'
                                       data-track-metadata={JSON.stringify({
-                                        column: key,
-                                        fieldName: field.fieldName,
+                                        column: column.key,
                                         visible: !isSelected,
                                       })}
                                     >
                                       <div className='flex items-center gap-3'>
                                         <Icon className='w-4 h-4' />
-                                        <span className='truncate'>{field.fieldName}</span>
+                                        <span>{column.label}</span>
                                       </div>
-                                      {isSelected && (
-                                        <Check className='w-4 h-4 text-primary shrink-0' />
-                                      )}
+                                      {isSelected && <Check className='w-4 h-4 text-primary' />}
                                     </button>
                                   );
                                 })}
+                                {SHOW_DESK_CUSTOM_FIELD_COLUMNS && deskDynamicFields.length > 0 && (
+                                  <>
+                                    <div className='my-1 border-t border-border' />
+                                    <div className='px-4 py-1 text-xs font-medium text-muted-foreground'>
+                                      Custom fields
+                                    </div>
+                                    {deskDynamicFields.map(field => {
+                                      const key = dynamicColumnKey(field.id);
+                                      const Icon = getIconForFieldType(field.fieldType);
+                                      const isSelected = selectedColumnKeys.has(key);
+                                      return (
+                                        <button
+                                          key={key}
+                                          type='button'
+                                          onClick={() => toggleColumn(key, !isSelected)}
+                                          className='w-full flex items-center justify-between px-4 py-2 text-sm hover:bg-muted'
+                                          data-track-category='Support'
+                                          data-track-name='ToggleTableColumn'
+                                          data-track-metadata={JSON.stringify({
+                                            column: key,
+                                            fieldName: field.fieldName,
+                                            visible: !isSelected,
+                                          })}
+                                        >
+                                          <div className='flex items-center gap-3'>
+                                            <Icon className='w-4 h-4' />
+                                            <span className='truncate'>{field.fieldName}</span>
+                                          </div>
+                                          {isSelected && (
+                                            <Check className='w-4 h-4 text-primary shrink-0' />
+                                          )}
+                                        </button>
+                                      );
+                                    })}
+                                  </>
+                                )}
                               </>
+                            ) : (
+                              <DeskListColumnsMenu
+                                columns={listMenuColumns}
+                                dynamicFieldByKey={deskDynamicFieldByKey}
+                                selectedKeys={listColumnKeys}
+                                onToggle={toggleListColumn}
+                                onMove={(fromKey, toKey) =>
+                                  moveListColumn(
+                                    listMenuColumns.map(column => column.key),
+                                    fromKey,
+                                    toKey,
+                                  )
+                                }
+                              />
                             )}
                           </Popover.Content>
                         </Popover.Root>
@@ -3897,6 +4020,14 @@ const SupportScreen = (): ReactElement => {
                             onUpdate={handleUpdateDeskView}
                             onDelete={deleteDeskView}
                             currentFilters={filters}
+                            currentColumnKeys={
+                              viewMode === 'list' ? listColumnKeys : selectedColumnKeys
+                            }
+                            validColumnKeysForMode={
+                              viewMode === 'list'
+                                ? validListColumnKeys
+                                : new Set(DESK_TABLE_BUILTIN_COLUMNS.map(c => c.key as string))
+                            }
                             dynamicFieldDefs={deskDynamicFields}
                             trackCategory='Support'
                           />
@@ -4103,58 +4234,52 @@ const SupportScreen = (): ReactElement => {
                   userID={userID}
                 />
               )}
-              {isMetricsOpen &&
-                selectedChannelId &&
-                selectedChannelId !== ALL_CHANNELS_ID &&
-                (canManageDeskInsights || isGuest) && (
-                  <DeskMetricsDashboard
-                    open
-                    onClose={() => {
-                      const base = selectedChannelId
-                        ? `${supportBase}/${selectedChannelId}`
-                        : supportBase;
-                      void navigate(base, { replace: true });
-                    }}
-                    channelId={selectedChannelId}
-                    channelName={selectedChannelName ?? undefined}
-                    availableDesks={metricsSelectableDesks}
-                    customFieldDefinitions={deskDynamicFields}
-                    availableStages={availableStages}
-                    onTicketClick={ticket => {
-                      void navigate(`${supportBase}/${ticket.channelId}/${ticket.xyneId}`, {
-                        state: { ticketId: ticket.ticketId, shouldNavigateBack: true },
-                      });
-                    }}
-                  />
-                )}
-              {isReportOpen &&
-                selectedChannelId &&
-                selectedChannelId !== ALL_CHANNELS_ID &&
-                canManageDeskInsights && (
-                  <DeskReportPanel
-                    open
-                    onClose={() => {
-                      const base = selectedChannelId
-                        ? `${supportBase}/${selectedChannelId}`
-                        : supportBase;
-                      void navigate(base, { replace: true });
-                    }}
-                    channelId={selectedChannelId}
-                    channelName={selectedChannelName ?? undefined}
-                  />
-                )}
-              {isTopicsOpen && selectedChannelId && canExploreTopics && (
-                <TopicsExplorer
-                  open
-                  onClose={() =>
-                    void navigate(`${supportBase}/${selectedChannelId}`, { replace: true })
-                  }
-                  channelId={selectedChannelId}
-                  channelName={selectedChannelName ?? undefined}
-                  supportBase={supportBase}
-                  availableAiCategories={availableAiCategories}
-                  availableStages={availableStages}
-                />
+              {selectedChannelId && activeInsightsSection && (
+                <DeskInsightsPanel
+                  onClose={closeInsights}
+                  activeSection={activeInsightsSection}
+                  availableSections={insightsSections}
+                  onSectionChange={section => showInsights(section)}
+                >
+                  {activeInsightsSection === 'metrics' && (
+                    <DeskMetricsDashboard
+                      open
+                      embedded
+                      onClose={closeInsights}
+                      channelId={selectedChannelId}
+                      channelName={selectedChannelName ?? undefined}
+                      availableDesks={metricsSelectableDesks}
+                      customFieldDefinitions={deskDynamicFields}
+                      availableStages={availableStages}
+                      onTicketClick={ticket => {
+                        void navigate(`${supportBase}/${ticket.channelId}/${ticket.xyneId}`, {
+                          state: { ticketId: ticket.ticketId, shouldNavigateBack: true },
+                        });
+                      }}
+                    />
+                  )}
+                  {activeInsightsSection === 'topics' && (
+                    <TopicsExplorer
+                      open
+                      embedded
+                      onClose={closeInsights}
+                      channelId={selectedChannelId}
+                      channelName={selectedChannelName ?? undefined}
+                      supportBase={supportBase}
+                      availableAiCategories={availableAiCategories}
+                      availableStages={availableStages}
+                    />
+                  )}
+                  {activeInsightsSection === 'report' && (
+                    <DeskReportPanel
+                      open
+                      embedded
+                      onClose={closeInsights}
+                      channelId={selectedChannelId}
+                      channelName={selectedChannelName ?? undefined}
+                    />
+                  )}
+                </DeskInsightsPanel>
               )}
               <div className='h-full flex-1 min-h-0 overflow-y-auto no-scrollbar'>
                 {!selectedChannelId ? (
@@ -4301,6 +4426,13 @@ const SupportScreen = (): ReactElement => {
                         onPageChange={clearTicketSelection}
                         onToggleSelectAll={handleToggleSelectAll}
                         onTicketsLoaded={handleTicketsLoaded}
+                        visibleColumnKeys={listColumnKeys}
+                        dynamicFieldColumns={listDynamicFieldColumns}
+                        columnOrder={listColumnOrder}
+                        initialPageIndex={cachedListPagination?.pageIndex}
+                        initialPageCursors={cachedListPagination?.pageCursors}
+                        initialFetchLimit={cachedListPagination?.fetchLimit}
+                        onPaginationChange={handleListPaginationChange}
                         onTicketClick={ticket => {
                           void navigate(`${supportBase}/${ticket.channelId}/${ticket.xyneId}`, {
                             state: {
@@ -4738,7 +4870,7 @@ export const SupportTicketDetail = ({
   // Fetch the ticket metadata needed to resolve the detail view. Emails and drafts use
   // their dedicated conversation-scoped queries below. supportTicketDetailV2 looks up by
   // `id` when list navigation supplied it, else by `xyneId` from the URL path param.
-  const [ticket] = useCachedQuery(
+  const [ticket] = useRacedQuery(
     queries.supportTicketDetailV2({
       id: ticketId || undefined,
       xyneId: ticketIdParam || undefined,
@@ -4752,21 +4884,22 @@ export const SupportTicketDetail = ({
     queryKey: ['workspace-ozonetel-toolbar'],
     queryFn: getOzonetelToolbar,
   });
-  const customerPhoneFieldName = ozonetelToolbar?.customerPhoneFieldName?.trim() ?? '';
+  const phoneFieldNames = useMemo(() => getPhoneFieldNames(ozonetelToolbar), [ozonetelToolbar]);
+  const hasPhoneFields = phoneFieldNames.length > 0;
   const [ticketFormValues] = useCachedQuery(
     queries.getFormEntityValuesByEntityId({ entityId: ticket?.id ?? '' }),
-    { enabled: !!ticket?.id && !!customerPhoneFieldName },
+    { enabled: !!ticket?.id && hasPhoneFields },
   );
-  // Calls link only when they dialled this number, so other numbers and inbound calls never land here.
-  const customerPhoneNumber = useMemo(() => {
-    if (!customerPhoneFieldName) return '';
-    const row = (ticketFormValues ?? []).find(
-      entry =>
-        (entry.globalField?.fieldName ?? entry.formField?.fieldName) === customerPhoneFieldName,
-    );
-    const value = row?.actualFieldValue ?? row?.fieldValue;
-    return typeof value === 'string' ? value.trim() : '';
-  }, [ticketFormValues, customerPhoneFieldName]);
+  // Calls link only when they dialled one of these numbers, so other numbers and inbound calls never land here.
+  const ticketPhoneNumbers = useMemo(() => {
+    if (phoneFieldNames.length === 0) return [];
+    const names = new Set(phoneFieldNames);
+    return (ticketFormValues ?? [])
+      .filter(entry => names.has(entry.globalField?.fieldName ?? entry.formField?.fieldName ?? ''))
+      .map(entry => entry.actualFieldValue ?? entry.fieldValue)
+      .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+      .map(value => value.trim());
+  }, [ticketFormValues, phoneFieldNames]);
 
   const detailConversationId = ticket?.conversationId ?? stateConversationId;
   const isAppSourcedTicket = getTicketReplyKind(ticket?.metadata) === 'app';
@@ -4846,7 +4979,7 @@ export const SupportTicketDetail = ({
     ],
   );
 
-  const [allEmails] = useCachedQuery(
+  const [allEmails] = useRacedQuery(
     queries.getEmailsForConversationsV2({
       conversationIds: allConversationIds,
       channelId: routeChannelId,
@@ -5356,10 +5489,12 @@ export const SupportTicketDetail = ({
   const openTicketId = ticket?.id;
   const channelType = channel?.type;
   useEffect(() => {
-    if (!openTicketId || !customerPhoneNumber || channelType !== ChannelType.APP) return undefined;
-    setCloudAgentOpenTicket({ ticketId: openTicketId, number: customerPhoneNumber });
+    if (!openTicketId || ticketPhoneNumbers.length === 0 || channelType !== ChannelType.APP) {
+      return undefined;
+    }
+    setCloudAgentOpenTicket({ ticketId: openTicketId, numbers: ticketPhoneNumbers });
     return (): void => setCloudAgentOpenTicket(null);
-  }, [openTicketId, customerPhoneNumber, channelType]);
+  }, [openTicketId, ticketPhoneNumbers, channelType]);
   const [mailboxRows] = useCachedQuery(
     queries.myTicketMailboxV2({
       ticketId: mailboxTicketId ?? '',
@@ -5450,13 +5585,7 @@ export const SupportTicketDetail = ({
                 {showAdjacentNav && (
                   <button
                     type='button'
-                    onClick={() => {
-                      if (onBack) {
-                        onBack();
-                        return;
-                      }
-                      goBackToTicketList();
-                    }}
+                    onClick={() => void navigate(-1)}
                     className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0'
                     aria-label='Back to ticket list'
                     data-track-category='Support'
@@ -6137,6 +6266,7 @@ export const SupportTicketDetail = ({
               className='absolute inset-x-0 bottom-0 z-20 bg-background'
               ref={composerOverlayRef}
             >
+              <DuplicateTicketsBanner ticketId={mailboxTicketId} />
               {isAppSourcedTicket ? (
                 conversationId ? (
                   <SlackComposer

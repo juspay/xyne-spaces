@@ -1,5 +1,6 @@
 import type {
   DeskMetricsAggregateResponse,
+  DeskMetricsDateBasis,
   DeskMetricsResponse,
   TicketPriority,
 } from '@xyne/shared';
@@ -52,11 +53,13 @@ export async function getAggregateDeskMetrics(
   userGroupIds?: string[],
   tagValues?: string[],
   aiCategories?: string[],
+  dateBasis?: DeskMetricsDateBasis,
 ): Promise<DeskMetricsAggregateResponse> {
   const params: Record<string, string> = {
     timeRange,
     channelIds: channelIds.join(','),
   };
+  if (dateBasis === 'active') params['dateBasis'] = dateBasis;
   if (assigneeIds && assigneeIds.length > 0) params['assigneeIds'] = JSON.stringify(assigneeIds);
   if (stageNames && stageNames.length > 0) params['stageNames'] = JSON.stringify(stageNames);
   if (priorities && priorities.length > 0) params['priorities'] = JSON.stringify(priorities);

@@ -36,10 +36,6 @@ interface ParticipantTileProps {
   onToggleHandRaise?: (() => void) | undefined;
   /** Shows a hover "Pin" button (top-centre of the tile) that spotlights this participant. */
   onExpand?: (() => void) | undefined;
-  /** Hide the participant name overlay (used by presentation mode's full-bleed tile) */
-  hideNameLabel?: boolean | undefined;
-  /** Drop the speaking/raised-hand glow ring (a full-screen coloured frame looks wrong) */
-  hideSpeakingIndicator?: boolean | undefined;
 }
 
 export function ParticipantTile({
@@ -57,8 +53,6 @@ export function ParticipantTile({
   isHandRaised = false,
   onToggleHandRaise,
   onExpand,
-  hideNameLabel = false,
-  hideSpeakingIndicator = false,
 }: ParticipantTileProps): React.ReactElement {
   // Get track publications - these are observables that update automatically
   const cameraPublication = participant.participant?.getTrackPublication(Track.Source.Camera);
@@ -177,11 +171,6 @@ export function ParticipantTile({
     if (isFocused) {
       return 'border-[1.5px] border-blue-400';
     }
-    // Presentation mode fills the screen, so any state frame becomes a coloured
-    // border around the whole viewport — drop it entirely there.
-    if (hideSpeakingIndicator) {
-      return 'border-0';
-    }
     // Hand raised — amber to draw attention (a raised hand usually means the
     // person is waiting to speak, so it takes precedence over the speaking ring).
     if (isHandRaised) {
@@ -200,9 +189,6 @@ export function ParticipantTile({
   // the element, so nothing can cover it). Kept faint — the overlay border is the
   // real state signal; a strong glow bleeds onto neighbouring tiles.
   const getGlowClass = (): string => {
-    if (hideSpeakingIndicator) {
-      return '';
-    }
     if (isHandRaised) {
       return 'shadow-[0_0_8px_rgba(251,191,36,0.2)]';
     }
@@ -453,18 +439,16 @@ export function ParticipantTile({
       >
         <AudioIndicator
           isMuted={!participant.isMicrophoneEnabled}
-          isSpeaking={!hideSpeakingIndicator && isSpeaking && participant.isMicrophoneEnabled}
+          isSpeaking={isSpeaking && participant.isMicrophoneEnabled}
         />
-        {!hideNameLabel && (
-          <span
-            className={cn(
-              'truncate font-medium text-white [text-shadow:0_1px_3px_rgba(0,0,0,0.75)]',
-              compact ? 'text-[10px]' : 'text-xs sm:text-sm',
-            )}
-          >
-            {participant.isLocal ? 'You' : isAIAgent ? 'Xyne Automatic' : participant.name}
-          </span>
-        )}
+        <span
+          className={cn(
+            'truncate font-medium text-white [text-shadow:0_1px_3px_rgba(0,0,0,0.75)]',
+            compact ? 'text-[10px]' : 'text-xs sm:text-sm',
+          )}
+        >
+          {participant.isLocal ? 'You' : isAIAgent ? 'Xyne Automatic' : participant.name}
+        </span>
       </div>
 
       {/* Background Blur Toggle - local tile only, when camera is on */}

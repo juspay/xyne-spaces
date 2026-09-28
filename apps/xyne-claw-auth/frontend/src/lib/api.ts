@@ -1,4 +1,4 @@
-import type { User, McpServer, UserConnection, HealthResult, CredentialField, Gateway, GatewayIdentity, Agent, AgentLight, ScheduledJob, ScheduledJobRun } from "./types";
+import type { User, McpServer, UserConnection, HealthResult, CredentialField, Gateway, GatewayIdentity, GatewayServiceRow, GatewayServiceRequest, Agent, AgentLight, ScheduledJob, ScheduledJobRun } from "./types";
 
 import { frontendConfig } from "./config";
 
@@ -1620,7 +1620,6 @@ export async function connectLinkedInRapidApi(
   );
 }
 
-
 export async function createAgentApp(slug: string): Promise<void> {
   const userToken = getGoogleToken();
   await request<{ success: boolean }>(
@@ -2997,6 +2996,61 @@ export interface PlanTodo {
   status: PlanTodoStatus;
 }
 
+/** A payload interned into the v2 blob log and referenced by hash. Large fields
+ *  (system prompt, tool result, transcript) arrive as one of these instead of a
+ *  string whenever the blob content could not be inlined — capture level
+ *  `metadata`, or a blob log that lost its tail. `preview` is the first ~200
+ *  chars so a reader always has something to show. */
+export interface DebugBlobRef {
+  hash: string;
+  bytes: number;
+  originalBytes?: number;
+  truncated?: true;
+  preview?: string;
+}
+
+export interface DebugSkillRef {
+  name: string;
+  description?: string;
+  location?: string;
+}
+
+export interface DebugToolDefinition {
+  name: string;
+  description?: string;
+  /** JSON Schema the model was given for this tool's arguments. */
+  parameters?: unknown;
+}
+
+/**
+ * Event payload. Every field is optional and must be guarded at the read site:
+ * older runs predate them, capture level can drop them, and the big ones may
+ * come through as a `DebugBlobRef`. The index signature stays because readers
+ * (the debug drawer, the trace exporter) treat data as an open bag.
+ */
+export interface DebugEventData {
+  [key: string]: unknown;
+  /** On `session_prompt`, the TRUE prompt pi sent — persona plus the
+   *  `<available_skills>` block — not just the persona prompt. */
+  systemPrompt?: string | DebugBlobRef;
+  availableSkills?: DebugSkillRef[];
+  tools?: DebugToolDefinition[];
+  toolNames?: string[];
+  /** Mid-run tool-palette diff (load-tools / fast-mode). */
+  paletteAdded?: string[];
+  paletteRemoved?: string[];
+  temperature?: number;
+  maxTokens?: number;
+  thinkingLevel?: string;
+  fastMode?: boolean;
+  model?: string;
+  provider?: string;
+  /** `cacheRead`/`cacheWrite` are the prompt-cache hit/miss signal. */
+  responseUsage?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number };
+  responseStopReason?: string;
+  ttftMs?: number;
+}
+
 export interface DebugEventRecord {
   seq: number;
   at: string;
@@ -3006,7 +3060,9 @@ export interface DebugEventRecord {
   toolCallId?: string;
   parentToolCallId?: string;
   subagentName?: string;
-  data: Record<string, unknown>;
+  /** Run id of the child trace a `subagent_start` / `delegation` event spawned. */
+  childRunId?: string;
+  data: DebugEventData;
 }
 
 export interface StreamCallbacks {
@@ -3054,10 +3110,24 @@ export interface ChatReply {
 // switcher. Any chat participant may call this — the backend reads the agent's
 // admin-set key and never returns it. Empty models ⇒ hide the picker.
 // `defaultModel` is the agent's configured model, used to preselect the dropdown.
+export interface EvalAgentModel {
+  provider: string;
+  model: string | null;
+  isDefault: boolean;
+}
+
+/** Providers (with the model each would use) this agent can really run on for the caller. */
+export async function listEvalAgentModels(slug: string): Promise<EvalAgentModel[]> {
+  const data = await request<{ success: boolean; models?: EvalAgentModel[] }>(
+    `${AUTH_API_URL}/api/v1/evals/agent-models/${encodeURIComponent(slug)}`,
+  );
+  return data.models ?? [];
+}
+
 export async function listChatLitellmModels(
   slug: string,
   userId: string,
-): Promise<{ models: Array<{ id: string; name: string }>; defaultModel: string | null }> {
+): Promise<{ models: Array<{ id: string; name: string }>; defaultModel: string | null; pinProvider: string | null }> {
   const res = await fetch(
     `${AUTH_API_URL}/api/v1/agent-chat/${encodeURIComponent(slug)}/litellm-models`,
     { credentials: "include", headers: { "x-user-id": userId } },
@@ -3067,8 +3137,9 @@ export async function listChatLitellmModels(
     success: boolean;
     data?: Array<{ id: string; name: string }>;
     defaultModel?: string | null;
+    pinProvider?: string | null;
   };
-  return { models: data.data ?? [], defaultModel: data.defaultModel ?? null };
+  return { models: data.data ?? [], defaultModel: data.defaultModel ?? null, pinProvider: data.pinProvider ?? null };
 }
 
 export async function sendChatMessage(
@@ -3531,13 +3602,31 @@ export interface DebugArtifactBundle {
   debugEvents: Record<string, unknown>[] | null;
   runs: Array<{ fileName: string; data: Record<string, unknown> }>;
   subagents: Array<{ fileName: string; data: Record<string, unknown> }>;
+  /** Non-fatal problems hit while reading these artifacts (dropped torn line,
+   *  unreadable blob log, GCS miss). Surfaced in the drawer so a partial trace
+   *  never reads as "no data". Individual runs carry their own `data.warnings`. */
+  warnings?: string[];
+  /** Runs this viewer may see in the whole conversation. `runs` is one capped
+   *  page of them; without these a long thread silently loses its older runs. */
+  totalRuns?: number;
+  /** True when runs older than this page exist — ask again with a bigger
+   *  `limit`, or with `before` set to the oldest runId on this page. */
+  truncated?: boolean;
 }
 
-export async function fetchConversationDebugArtifacts(slug: string, conversationId: string): Promise<DebugArtifactBundle> {
+export async function fetchConversationDebugArtifacts(
+  slug: string,
+  conversationId: string,
+  opts?: { limit?: number; before?: string },
+): Promise<DebugArtifactBundle> {
+  const params = new URLSearchParams();
+  if (opts?.limit !== undefined) params.set("limit", String(opts.limit));
+  if (opts?.before !== undefined) params.set("before", opts.before);
+  const query = params.toString();
   const data = await request<{
     success: boolean;
     data: DebugArtifactBundle;
-  }>(`${AUTH_API_URL}/api/v1/agent-chat/${slug}/chat/${conversationId}/debug`);
+  }>(`${AUTH_API_URL}/api/v1/agent-chat/${slug}/chat/${conversationId}/debug${query ? `?${query}` : ""}`);
   return data.data;
 }
 
@@ -3908,7 +3997,7 @@ export interface AgentRun {
   sessionId: string;
   userId: string;
   agentSlug: string;
-  triggerSource: "spaces" | "scheduled" | "chat" | "api" | "automation";
+  triggerSource: "spaces" | "scheduled" | "chat" | "api" | "automation" | "delegation";
   status: "running" | "completed" | "failed" | "cancelled";
   currentToolLabel: string | null;
   task: string;
@@ -3943,6 +4032,10 @@ export interface AgentRun {
    *  branching: once a user message has multiple assistant siblings,
    *  chronology no longer pairs runs ↔ assistants — chatMessageId does. */
   chatMessageId?: string | null;
+  /** Set when another run spawned this one through `call-agent`: the caller's
+   *  session and slug, for telling a child run apart from a top-level one. */
+  parentSessionId?: string | null;
+  parentAgentSlug?: string | null;
   /** Populated only by the elevated "All Runs" (scope=all) listing — null elsewhere. */
   userName?: string | null;
   userEmail?: string | null;
@@ -4105,6 +4198,10 @@ export interface AgentRunListItem {
   tokensIn: number | null;
   tokensOut: number | null;
   rating: "up" | "down" | null;
+  /** Set when another run spawned this one through `call-agent`: the caller's
+   *  session and slug, for telling a child run apart from a top-level one. */
+  parentSessionId?: string | null;
+  parentAgentSlug?: string | null;
   /** Hydrated only by scope=all — null/absent otherwise. */
   userName?: string | null;
   userEmail?: string | null;
@@ -4422,7 +4519,6 @@ export interface DashboardAgentMeta {
   _count: { tools: number; skills: number; shares: number };
 }
 
-
 export interface SkillUsageRow {
   skillId: string;
   skillSlug: string;
@@ -4611,7 +4707,6 @@ export async function getProjectInsights(
   );
   return data.data;
 }
-
 
 // ── Doctor Bitbucket Stats (admin) ───────────────────────────────────
 // Live count of PRs / commits authored by the bot identity that powers
@@ -5508,7 +5603,6 @@ export async function deleteDigitalTwinMemory(userId: string, hindsightMemoryId:
   }
 }
 
-
 export async function getDigitalTwinStats(
   userId: string,
   range: "7d" | "30d" | "90d" = "7d",
@@ -6288,6 +6382,8 @@ export interface StartGenerationAgent {
   agentSlug: string;
   genProvider?: string;
   genModel?: string;
+  optimizations?: string;
+  judgeBackend?: string;
 }
 
 /** Start a comparison of 1-3 agents over the same conversations. Each agent gets
@@ -6583,11 +6679,26 @@ export async function cancelEvalImportJob(jobId: string, userId: string): Promis
 }
 
 /** Judge/extraction model options + what an empty ("default") model resolves to. */
-export async function listEvalModels(): Promise<{ models: string[]; defaultModel: string }> {
-  const data = await request<{ success: boolean; models: string[]; defaultModel?: string }>(
-    `${AUTH_API_URL}/api/v1/evals/models`,
-  );
-  return { models: data.models ?? [], defaultModel: data.defaultModel ?? "" };
+export async function listEvalModels(): Promise<{
+  models: string[];
+  defaultModel: string;
+  judgeBackends: Array<{ id: string; label: string }>;
+  optimizations: Array<{ key: string; summary: string; defaultOn: boolean }>;
+}> {
+  const data = await request<{
+    success: boolean;
+    models: string[];
+    defaultModel?: string;
+    judgeBackends?: string[];
+    judgeBackendLabels?: Record<string, string>;
+    optimizations?: Array<{ key: string; summary: string; defaultOn: boolean }>;
+  }>(`${AUTH_API_URL}/api/v1/evals/models`);
+  return {
+    models: data.models ?? [],
+    defaultModel: data.defaultModel ?? "",
+    judgeBackends: (data.judgeBackends ?? []).map((id) => ({ id, label: data.judgeBackendLabels?.[id] ?? id })),
+    optimizations: data.optimizations ?? [],
+  };
 }
 
 /**
@@ -7122,6 +7233,192 @@ export async function resyncChannelEntityTypes(
   );
 }
 
+// ── Messaging channels (WhatsApp, Telegram, …) — surfaces/messaging admin API ──
+
+export type MessagingChannelKey = "whatsapp" | "whatsapp-cloud";
+export type ChannelConnState = "pending_login" | "connected" | "disconnected" | "logged_out";
+export type ChannelDmPolicy = "linked" | "disabled";
+export type ChannelGroupPolicy = "allowlist" | "open" | "disabled";
+
+export interface ChannelAccountView {
+  id: string;
+  accountKey: string;
+  channel: MessagingChannelKey;
+  orgId: string;
+  label: string;
+  desiredState: "running" | "stopped";
+  connState: ChannelConnState;
+  selfId?: string;
+  displayId?: string;
+  lastConnectedAt?: string;
+  lastDisconnect?: { code?: number; reason?: string; at: string };
+  dmPolicy: ChannelDmPolicy;
+  groupPolicy: ChannelGroupPolicy;
+  groupAllowlist: string[];
+  requireMention: boolean;
+  groupHistoryLimit: number;
+  ackReaction?: string;
+  rateLimitPerMinute: number;
+  channelConfig: Record<string, unknown> | null;
+  agent: { slug: string; name: string } | null;
+  login: { kind: "qr" | "token" };
+  /** "org": one shared business number. "user": this is one person's own
+   *  number and only they (or an admin) can see or manage it. */
+  scope: "org" | "user";
+  ownerUserId: string | null;
+  loginFields: Array<{ key: string; label: string; type: "text" | "password"; placeholder?: string; hint?: string }>;
+  transport: "connection" | "webhook";
+  /** Webhook channels only: where the provider must POST. */
+  webhookUrl?: string;
+  webhookPath?: string;
+  capabilities: { groups: boolean; media: boolean; typing: boolean; reactions: boolean; maxTextChars: number };
+  leaseHolder: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ChannelAccountPolicyPatch {
+  label?: string;
+  agentSlug?: string;
+  dmPolicy?: ChannelDmPolicy;
+  groupPolicy?: ChannelGroupPolicy;
+  groupAllowlist?: string[];
+  requireMention?: boolean;
+  groupHistoryLimit?: number;
+  ackReaction?: string;
+  rateLimitPerMinute?: number;
+  channel?: Record<string, unknown>;
+}
+
+export interface ChannelLoginArtifact {
+  connState: ChannelConnState;
+  desiredState: "running" | "stopped";
+  login: { kind: "qr" | "token" };
+  artifact: string | null;
+  /** Data URL of the rendered QR (login.kind === "qr"). */
+  qr: string | null;
+}
+
+function channelBase(channel: MessagingChannelKey): string {
+  return `${AUTH_API_URL}/api/v1/surfaces/${channel}`;
+}
+
+/** Omit `orgId` for a user-scoped channel: the server uses the session's org
+ *  and returns only the caller's own accounts. */
+export async function listChannelAccounts(channel: MessagingChannelKey, orgId?: string): Promise<ChannelAccountView[]> {
+  const query = orgId ? `?orgId=${encodeURIComponent(orgId)}` : "";
+  const data = await request<{ success: boolean; accounts: ChannelAccountView[] }>(
+    `${channelBase(channel)}/accounts${query}`,
+  );
+  return data.accounts;
+}
+
+export async function createChannelAccount(
+  channel: MessagingChannelKey,
+  input: { orgId?: string; label?: string; agentSlug: string; channel?: Record<string, unknown> },
+): Promise<ChannelAccountView> {
+  const data = await request<{ success: boolean; account: ChannelAccountView }>(`${channelBase(channel)}/accounts`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+  return data.account;
+}
+
+export async function updateChannelAccount(
+  channel: MessagingChannelKey,
+  accountId: string,
+  patch: ChannelAccountPolicyPatch,
+): Promise<ChannelAccountView> {
+  const data = await request<{ success: boolean; account: ChannelAccountView }>(
+    `${channelBase(channel)}/accounts/${encodeURIComponent(accountId)}`,
+    { method: "PATCH", body: JSON.stringify(patch) },
+  );
+  return data.account;
+}
+
+export async function deleteChannelAccount(channel: MessagingChannelKey, accountId: string): Promise<void> {
+  await request<{ success: boolean }>(`${channelBase(channel)}/accounts/${encodeURIComponent(accountId)}`, {
+    method: "DELETE",
+  });
+}
+
+export async function loginChannelAccount(
+  channel: MessagingChannelKey,
+  accountId: string,
+  input: { token?: string; secrets?: Record<string, string> } = {},
+): Promise<void> {
+  await request<{ success: boolean }>(`${channelBase(channel)}/accounts/${encodeURIComponent(accountId)}/login`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function logoutChannelAccount(channel: MessagingChannelKey, accountId: string): Promise<void> {
+  await request<{ success: boolean }>(`${channelBase(channel)}/accounts/${encodeURIComponent(accountId)}/logout`, {
+    method: "POST",
+    body: "{}",
+  });
+}
+
+export async function getChannelLoginArtifact(
+  channel: MessagingChannelKey,
+  accountId: string,
+): Promise<ChannelLoginArtifact> {
+  return request<ChannelLoginArtifact & { success: boolean }>(
+    `${channelBase(channel)}/accounts/${encodeURIComponent(accountId)}/login-artifact`,
+  );
+}
+
+// ── my numbers (self-service linking) ──
+
+export interface LinkedChannelNumber {
+  senderId: string;
+  linkedAt: string;
+  lastSeenAt: string | null;
+}
+
+export interface ChannelNumberLink {
+  senderId: string;
+  /** The number to message, when the org has exactly one to offer. */
+  sendTo: string | null;
+  linkedAt: string;
+}
+
+export async function listMyChannelNumbers(channel: MessagingChannelKey): Promise<LinkedChannelNumber[]> {
+  const data = await request<{ success: boolean; numbers: LinkedChannelNumber[] }>(`${channelBase(channel)}/my-numbers`);
+  return data.numbers;
+}
+
+export async function linkChannelNumber(channel: MessagingChannelKey, phone: string): Promise<ChannelNumberLink> {
+  const data = await request<{ success: boolean; linked: ChannelNumberLink }>(`${channelBase(channel)}/my-numbers`, {
+    method: "POST",
+    body: JSON.stringify({ phone }),
+  });
+  return data.linked;
+}
+
+export async function unlinkMyChannelNumber(channel: MessagingChannelKey, senderId: string): Promise<void> {
+  await request<{ success: boolean }>(`${channelBase(channel)}/my-numbers/${encodeURIComponent(senderId)}`, {
+    method: "DELETE",
+  });
+}
+
+export interface ChannelGroup {
+  id: string;
+  name: string;
+  participants: number;
+}
+
+/** Groups the account is a member of, for the allowlist picker. Only the server
+ *  holding the account's connection can answer, so this can legitimately fail
+ *  with 503 while the account moves between servers. */
+export async function listChannelGroups(channel: MessagingChannelKey, accountId: string): Promise<ChannelGroup[]> {
+  const data = await request<{ success: boolean; groups: ChannelGroup[] }>(
+    `${channelBase(channel)}/accounts/${encodeURIComponent(accountId)}/groups`,
+  );
+  return data.groups;
+}
+
 // ── Agent index ────────────────────────────────────────────────────────────
 // The per-org Hindsight bank holding one searchable document per agent.
 
@@ -7278,4 +7575,105 @@ export async function writeUsagePatternFile(slug: string, content: string): Prom
     { method: "PUT", body: JSON.stringify({ content }) },
   );
   return data.data;
+}
+
+// ── MCP Gateway service registry (session-authed UI surface) ──────────────
+// The secret x-s2s-key / tenant are injected server-side by the
+// /gateway-registry route; the browser only sends its session cookie.
+
+export interface GatewayToolInput {
+  name: string;
+  description?: string;
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+  path?: string;
+  requiresApproval?: boolean;
+  isWriteTool?: boolean;
+  inputSchema?: Record<string, unknown>;
+  outputSchema?: Record<string, unknown>;
+}
+
+export interface RegisterGatewayServiceInput {
+  serviceName: string;
+  backendId: string;
+  backendUrl: string;
+  tokenEndpointUrl: string;
+  xAuthHeaderName?: string;
+  tools: GatewayToolInput[];
+}
+
+/** Submit an MCP-gateway service registration for admin approval (does not go live). */
+export async function registerGatewayService(
+  input: RegisterGatewayServiceInput,
+): Promise<{ success: boolean; message: string; status?: string; requestId?: string }> {
+  const data = await request<{ success: boolean; data: { success: boolean; message: string; status?: string; requestId?: string } }>(
+    `${AUTH_API_URL}/api/v1/gateway-registry`,
+    { method: "POST", body: JSON.stringify(input) },
+  );
+  return data.data;
+}
+
+/** The caller's own registration requests (pending/approved/rejected). */
+export async function listMyGatewayRequests(): Promise<GatewayServiceRequest[]> {
+  const data = await request<{ success: boolean; data: GatewayServiceRequest[] }>(
+    `${AUTH_API_URL}/api/v1/gateway-registry/my-requests`,
+  );
+  return data.data;
+}
+
+/** Pending registration requests awaiting review (admin only). */
+export async function listGatewayRequests(): Promise<GatewayServiceRequest[]> {
+  const data = await request<{ success: boolean; data: GatewayServiceRequest[] }>(
+    `${AUTH_API_URL}/api/v1/gateway-registry/requests`,
+  );
+  return data.data;
+}
+
+/** Approve a pending request → registers it live (admin only). */
+export async function approveGatewayRequest(id: string): Promise<void> {
+  await request<{ success: boolean }>(
+    `${AUTH_API_URL}/api/v1/gateway-registry/requests/${encodeURIComponent(id)}/approve`,
+    { method: "POST", body: JSON.stringify({}) },
+  );
+}
+
+/** Reject a pending request (admin only). */
+export async function rejectGatewayRequest(id: string): Promise<void> {
+  await request<{ success: boolean }>(
+    `${AUTH_API_URL}/api/v1/gateway-registry/requests/${encodeURIComponent(id)}/reject`,
+    { method: "POST", body: JSON.stringify({}) },
+  );
+}
+
+export interface GatewayServiceDetail {
+  serviceName: string;
+  backendId: string;
+  backendUrl: string;
+  xAuthHeaderName: string | null;
+  tokenEndpointUrl: string | null;
+  tools: GatewayToolInput[];
+}
+
+/** Fetch one registered service with its full tool definitions (for editing). */
+export async function getGatewayService(serviceName: string, backendId?: string): Promise<GatewayServiceDetail> {
+  const q = backendId ? `?backendId=${encodeURIComponent(backendId)}` : "";
+  const data = await request<{ success: boolean; data: GatewayServiceDetail }>(
+    `${AUTH_API_URL}/api/v1/gateway-registry/${encodeURIComponent(serviceName)}${q}`,
+  );
+  return data.data;
+}
+
+/** List MCP-gateway services registered for the workspace tenant. */
+export async function listGatewayServices(): Promise<GatewayServiceRow[]> {
+  const data = await request<{ success: boolean; data: GatewayServiceRow[] }>(
+    `${AUTH_API_URL}/api/v1/gateway-registry`,
+  );
+  return data.data;
+}
+
+/** Deregister all backends for a service under the workspace tenant. */
+export async function deregisterGatewayService(serviceName: string): Promise<void> {
+  await request<{ success: boolean }>(
+    `${AUTH_API_URL}/api/v1/gateway-registry/${encodeURIComponent(serviceName)}`,
+    { method: "DELETE" },
+  );
 }

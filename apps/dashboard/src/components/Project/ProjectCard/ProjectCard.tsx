@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Button } from '../../ui/Button';
 import { CopyDefault as Copy, CheckTickSingle as Check } from '@xyne/icons';
 import { copyTextToClipboard } from '../../../utils/clipboardUtils';
+import { formatDateNumeric } from '../../../utils/dateUtils';
 import { toast } from 'sonner';
 import type { Project } from '@xyne/shared';
 
@@ -33,7 +34,8 @@ export const ProjectCard = ({
         : initialDetailTab
           ? { tab: initialDetailTab }
           : undefined;
-    void navigate(`/listProjects/${project.id}`, state ? { state } : undefined);
+    const suffix = state?.from === 'releaseManager' ? '?from=releaseManager' : '';
+    void navigate(`/listProjects/${project.id}${suffix}`, state ? { state } : undefined);
   };
 
   const handleEditClick = (e?: React.MouseEvent<HTMLButtonElement>): void => {
@@ -88,7 +90,7 @@ export const ProjectCard = ({
 
       <div className='border-t border-border pt-4 mt-4'>
         <div className='text-xs text-muted-foreground mb-3'>
-          <p>Created: {new Date(project.createdAt).toLocaleDateString()}</p>
+          <p>Created: {formatDateNumeric(project.createdAt)}</p>
           <div className='flex items-center gap-1 mt-1'>
             <span className='text-xs text-muted-foreground'>ID:</span>
             <code className='text-xs bg-muted px-1.5 py-0.5 rounded font-mono truncate max-w-[160px]'>

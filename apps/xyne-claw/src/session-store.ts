@@ -20,7 +20,8 @@ import { existsSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { PATHS, SERVER } from "./config.js";
-import { gcsRestoreSessionToDisk, gcsUploadSessionFromDisk, gcsDeleteSession, gcsSessionUpdatedAt, type SessionDiskFile } from "./storage.js";
+import { gcsRestoreSessionToDisk, gcsUploadSessionFromDisk, gcsDeleteSession, gcsDeleteDebugRuns, gcsDeleteDebugIndex, gcsSessionUpdatedAt, gcsUploadDebugObject, gcsUploadDebugRunWithRetries, gcsPutDebugIndex, type SessionDiskFile } from "./storage.js";
+import { indexObjectName, listRunDirs, packRun, packedRunObjectName, readRun, runFileNameFor, toV1Snapshot, type RunHeader } from "./debug/index.js";
 import { metric } from "./metrics.js";
 
 import { createLogger } from "./logger.js";
@@ -94,6 +95,97 @@ export async function ensureSessionDebugDir(conversationId: string): Promise<str
   return dir;
 }
 
+/** Mirrors the marker `RunStore.markUploaded` writes (debug/store.ts). */
+const DEBUG_UPLOADED_MARKER = ".uploaded";
+
+/** `<storeKey>.stale-<ts>` and friends are parked copies of a real session dir. */
+function storeKeyForSessionDirName(name: string): string {
+  const m = /\.(?:stale|restore|pvc|tmp)-\d+$/.exec(name);
+  return m ? name.slice(0, m.index) : name;
+}
+
+/**
+ * Conversation ids a run is discoverable by: the RAW Spaces conversation id
+ * (what the debugger asks with) and the session key (`conversationId` on the
+ * header). Deduped and order-stable — raw first, because that is the lookup
+ * that matters if only one marker write survives.
+ */
+function indexConvIdsForHeader(header: RunHeader): string[] {
+  const ids = [header.rawConversationId, header.conversationId].filter((v): v is string => !!v);
+  return [...new Set(ids)];
+}
+
+/**
+ * Lift this pod's un-uploaded debug runs off a session dir that is about to be
+ * destroyed. Returns how many made it to GCS.
+ *
+ * Eviction, the stale-local rollback and snapshot overwrites all delete a
+ * session dir outright — taking `debug/runs/**` with it. A run whose own finish
+ * path could not reach GCS (no `.uploaded` marker) existed ONLY there, so those
+ * deletes were silently the end of the trace. This re-attempts the same two
+ * uploads the finish path does plus the discovery marker, which also indexes a
+ * run that was never indexed because GCS was down at run start.
+ *
+ * Best-effort by construction: a destructive caller must not be blocked by a
+ * storage outage, so nothing here throws.
+ */
+export async function salvageDebugRuns(sessionDirPath: string): Promise<number> {
+  let runDirs: string[];
+  try {
+    runDirs = await listRunDirs(path.join(sessionDirPath, "debug"));
+  } catch {
+    return 0;
+  }
+
+  let salvaged = 0;
+  for (const runDir of runDirs) {
+    try {
+      if (existsSync(path.join(runDir, DEBUG_UPLOADED_MARKER))) continue;
+      const run = await readRun(runDir);
+      if (!run) {
+        metric.count("debug_salvage", { result: "unreadable" });
+        continue;
+      }
+      // The header owns the storeKey it was written under; the dir name is only
+      // a fallback for a header torn before that field landed.
+      const runId = run.header.runId || path.basename(runDir);
+      const storeKey = run.header.storeKey || storeKeyForSessionDirName(path.basename(sessionDirPath));
+      const v1 = Buffer.from(JSON.stringify(toV1Snapshot(run)), "utf8");
+      const uploadedV1 = await gcsUploadDebugRunWithRetries(storeKey, runFileNameFor(runId), v1);
+      const packed = await packRun(runDir);
+      const uploadedPacked = packed
+        ? await gcsUploadDebugObject(`${storeKey}/${packedRunObjectName(runId)}`, packed)
+        : false;
+      if (!uploadedV1 && !uploadedPacked) {
+        metric.count("debug_salvage", { result: "upload_failed" });
+        log.warn(`[session-store] debug salvage could not upload run ${runId} (${storeKey})`);
+        continue;
+      }
+      // Index only once something is there to point at: a marker for an object
+      // that never landed turns "no trace" into a broken row in the drawer.
+      // Both ids, exactly as the start-of-run marker does (agent.ts): the
+      // debugger asks by the RAW conversation id, while `conversationId` is the
+      // session key, and indexing only one leaves the run unfindable by the
+      // other.
+      for (const convId of indexConvIdsForHeader(run.header)) {
+        await gcsPutDebugIndex(indexObjectName(convId, runId, storeKey));
+      }
+      // The dir usually dies right after this, but the stale-local rollback can
+      // put it back — the marker stops the next salvage re-uploading it.
+      await writeFile(path.join(runDir, DEBUG_UPLOADED_MARKER), "").catch(() => {});
+      salvaged++;
+      metric.count("debug_salvage", { result: "uploaded" });
+    } catch (err) {
+      metric.count("debug_salvage", { result: "error" });
+      log.warn(`[session-store] debug salvage failed for ${runDir}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  if (salvaged > 0) {
+    log.info(`[session-store] Salvaged ${salvaged} debug run(s) from ${path.basename(sessionDirPath)}`);
+  }
+  return salvaged;
+}
+
 /** Delete a specific session — BOTH the local dir AND the GCS archive.
  *  Deleting only local disk left the GCS snapshot behind, so the next message
  *  resumed the archived session from storage — making `/clear` unable to rescue
@@ -115,7 +207,71 @@ export async function deleteSession(conversationId: string): Promise<void> {
   } catch (err) {
     log.warn(`[session-store] GCS archive delete failed for ${conversationId}:`, err instanceof Error ? err.message : String(err));
   }
+  // Debug runs live under their OWN GCS prefix, not inside the session archive,
+  // so clearing a session used to leave its traces behind indefinitely.
+  try {
+    const removed = await gcsDeleteDebugRuns(conversationId);
+    if (removed > 0) log.info(`[session-store] Deleted ${removed} GCS debug object(s) for ${conversationId}`);
+  } catch (err) {
+    log.warn(`[session-store] GCS debug delete failed for ${conversationId}:`, err instanceof Error ? err.message : String(err));
+  }
+  // ...and the discovery markers that point AT those objects. Deleting only the
+  // objects left the `_index/<convId>/` markers behind, so discovery kept
+  // listing runs whose payload was gone — phantom rows that 404 on open.
+  try {
+    let removed = 0;
+    for (const convId of candidateIndexConvIds(conversationId)) {
+      removed += await gcsDeleteDebugIndex(convId, conversationId);
+    }
+    if (removed > 0) log.info(`[session-store] Deleted ${removed} GCS debug marker(s) for ${conversationId}`);
+  } catch (err) {
+    log.warn(`[session-store] GCS debug index delete failed for ${conversationId}:`, err instanceof Error ? err.message : String(err));
+  }
 }
+
+/**
+ * Conversation ids whose `_index/` folder can hold markers for this storeKey.
+ *
+ * A marker is written under both the raw conversation id and the session key,
+ * and only the session key (= this storeKey) reaches `deleteSession` — the raw
+ * id has to be recovered from it. So we derive every id shape the key can have
+ * been built from and list each. Over-guessing is free: deletion matches on the
+ * `~<storeKey>.json` suffix, so a candidate that was never a real conversation
+ * id simply lists nothing, and one that belongs to a DIFFERENT store key of the
+ * same conversation keeps its markers.
+ */
+function candidateIndexConvIds(storeKey: string): string[] {
+  const ids = new Set<string>([storeKey]);
+  // `<convId>_<slug>` — the slug is always the LAST segment (buildSandboxStoreKey).
+  const bare = bareConversationIdForStoreKey(storeKey);
+  for (const id of bare ? [storeKey, bare] : [storeKey]) {
+    ids.add(id);
+    // Digital-Twin per-user fold: `<convId>-<safeUserId>`.
+    const twin = /^(.+)-[A-Za-z0-9]{1,40}$/.exec(id);
+    if (twin?.[1]) ids.add(twin[1]);
+    // Branch sessions: `<convId>__branch__<assistantId>`.
+    const branch = id.indexOf("__branch__");
+    if (branch > 0) ids.add(id.slice(0, branch));
+  }
+  return [...ids];
+}
+
+/**
+ * Per-run trace dirs, relative to the session dir. Excluded from the session
+ * archive: `debug/runs/**` is append-only and grows for the life of the thread,
+ * so archiving it makes every ~30s checkpoint re-upload every PRIOR run's
+ * events.jsonl and blobs.jsonl — unbounded duplicated work, and the same cost
+ * profile that filled a pod's disk (prod ENOSPC 2026-06-12).
+ *
+ * Nothing is lost: each run has its OWN durable home under
+ * `claw-debug-runs/<storeKey>/` (written at finish, and by `salvageDebugRuns`
+ * before any path that destroys a session dir), and the read path resolves runs
+ * from there when the PVC copy is gone. The small v1 artifacts that sit
+ * alongside it — `debug/debug-session.json`, `debug/debug-events.json`,
+ * `debug/subagents-*.json` — are rewritten in place, not accumulated, and stay
+ * in the archive.
+ */
+const ARCHIVE_EXCLUDED_DIR = "debug/runs";
 
 /**
  * Walk a session dir and list every regular file (path + size, NO contents).
@@ -130,6 +286,7 @@ async function listSessionFiles(dir: string): Promise<SessionDiskFile[]> {
       const abs = path.join(current, e.name);
       const rel = prefix ? `${prefix}/${e.name}` : e.name;
       if (e.isDirectory()) {
+        if (rel === ARCHIVE_EXCLUDED_DIR) continue;
         await walk(abs, rel);
       } else if (e.isFile()) {
         const s = await stat(abs);
@@ -370,6 +527,7 @@ async function restoreFromPvcFallback(conversationId: string): Promise<boolean> 
   try {
     await rm(tmp, { recursive: true, force: true }).catch(() => {});
     await cp(source, tmp, { recursive: true, force: false, errorOnExist: false });
+    await salvageDebugRuns(local);
     await rm(local, { recursive: true, force: true }).catch(() => {});
     await rename(tmp, local);
     metric.count("session_pvc_fallback_hit", { conversationId });
@@ -528,8 +686,15 @@ async function writeRestoredFiles(conversationId: string, files: { path: string;
 /** Clock-skew + write-latency margin for the local-vs-GCS comparison. */
 const FRESHNESS_SKEW_MS = Number(process.env["SESSION_FRESHNESS_SKEW_MS"] ?? 2_000);
 
-/** Newest mtime across every regular file in the session dir (0 if none). */
-async function localSessionUpdatedAt(conversationId: string): Promise<number> {
+/**
+ * Newest mtime across every regular file in the session dir: 0 when the dir is
+ * genuinely empty, `null` when the walk FAILED.
+ *
+ * The two used to be one value, so "unknown" read as "empty" — and an EACCES/EIO
+ * on a perfectly good session sent it down the delete-then-restore path on the
+ * strength of a number we never measured. Callers must refuse to delete on null.
+ */
+async function localSessionUpdatedAt(conversationId: string): Promise<number | null> {
   let newest = 0;
   async function walk(current: string): Promise<void> {
     const entries = await readdir(current, { withFileTypes: true });
@@ -545,7 +710,7 @@ async function localSessionUpdatedAt(conversationId: string): Promise<number> {
   try {
     await walk(sessionDir(conversationId));
   } catch {
-    return 0;
+    return null;
   }
   return newest;
 }
@@ -589,7 +754,13 @@ export async function ensureFreshSession(conversationId: string): Promise<Sessio
 
   let decision: SessionFreshness;
   let gcsAt: number | null = null;
-  if (localAt === 0) {
+  if (localAt === null) {
+    // The dir is there but unreadable. Every branch below either deletes or
+    // moves it aside on the strength of that mtime, so with no mtime the only
+    // safe move is to leave it alone and run against what is on disk.
+    decision = "local-unverified";
+    log.error(`session_restore_unverified conversationId=${conversationId} reason=local_walk_failed`);
+  } else if (localAt === 0) {
     // An EMPTY local dir would short-circuit restoreSessionFromArchive
     // ("already local") — remove it so the restore actually runs.
     if (hasSession(conversationId)) {
@@ -628,8 +799,11 @@ export async function ensureFreshSession(conversationId: string): Promise<Sessio
       const restore = await restoreSessionFromArchiveDetailed(conversationId).catch((): SessionRestoreOutcome => "failed");
       if (restore === "restored") {
         const restoredAt = await localSessionUpdatedAt(conversationId);
-        if (restoredAt + FRESHNESS_SKEW_MS < gcsAt) {
+        // An unreadable restore is "unknown", not "too old" — rolling back on it
+        // would delete the copy we just fetched without ever having read it.
+        if (restoredAt !== null && restoredAt + FRESHNESS_SKEW_MS < gcsAt) {
           decision = "restore-failed";
+          await salvageDebugRuns(sessionDir(conversationId));
           await rm(sessionDir(conversationId), { recursive: true, force: true }).catch(() => {});
           await rename(backup, dir).catch(() => {});
           metric.count("session_freshness", { decision });
@@ -639,6 +813,9 @@ export async function ensureFreshSession(conversationId: string): Promise<Sessio
           throw new SessionRestoreStaleError(conversationId, localAt, gcsAt);
         }
         decision = "restored-stale";
+        // The backup is this pod's own local copy; its debug runs are nowhere
+        // else if their finish-time upload failed.
+        await salvageDebugRuns(backup);
         await rm(backup, { recursive: true, force: true }).catch(() => {});
       } else {
         decision = "restore-failed";
@@ -653,7 +830,7 @@ export async function ensureFreshSession(conversationId: string): Promise<Sessio
   }
 
   log.info(
-    `[session-store] freshness ${conversationId}: local=${localAt ? new Date(localAt).toISOString() : "none"} gcs=${gcsAt !== null ? (gcsAt ? new Date(gcsAt).toISOString() : "none") : "unknown"} → ${decision}`,
+    `[session-store] freshness ${conversationId}: local=${localAt === null ? "unknown" : localAt ? new Date(localAt).toISOString() : "none"} gcs=${gcsAt !== null ? (gcsAt ? new Date(gcsAt).toISOString() : "none") : "unknown"} → ${decision}`,
   );
   metric.count("session_freshness", { decision });
   return decision;
@@ -877,6 +1054,7 @@ export async function snapshotLiveSessionHandle(
       return { ok: false, reason: "target_exists" };
     }
     try {
+      await salvageDebugRuns(targetDir);
       await rm(targetDir, { recursive: true, force: true });
     } catch (err) {
       log.warn(
@@ -1087,10 +1265,17 @@ async function disposeSessionDir(name: string): Promise<DisposeOutcome> {
   if (isActiveSessionOrBareSpillDir(name)) return "skipped-active";
   const dir = path.join(sessionsRoot(), name);
   if (name.includes(".stale-")) {
+    // Rollback debris is deleted, never archived, so its debug runs get no
+    // second chance from the archive path — lift them out first.
+    await salvageDebugRuns(dir);
     await rm(dir, { recursive: true, force: true }).catch(() => {});
     return "removed-stale";
   }
   if (await archiveSessionToGcsWithRetries(name)) {
+    // The archive deliberately does NOT carry `debug/runs/**` (see
+    // ARCHIVE_EXCLUDED_DIR), so a successful archive is not a second chance for
+    // a run whose finish-time upload failed — lift those out before the delete.
+    await salvageDebugRuns(dir);
     await rm(dir, { recursive: true, force: true }).catch(() => {});
     return "archived";
   }

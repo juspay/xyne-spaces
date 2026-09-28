@@ -76,6 +76,32 @@ export interface SummaryTemplateAiInput {
   sections?: Array<Pick<SummaryTemplateSection, 'title' | 'description'>>;
 }
 
+export interface SummaryTemplateSelectionDraft {
+  id: string | null;
+  name: string;
+  autoTriggerPrompt: string | null;
+  sections: SummaryTemplateSection[];
+  systemPrompt: string;
+}
+
+export interface SummaryTemplateSelectionTestInput {
+  transcript: string;
+  draft: SummaryTemplateSelectionDraft;
+}
+
+export interface SummaryTemplateSelectionTestResult {
+  selectedDraft: boolean;
+  selectedTemplateId: string | null;
+  selectedTemplateName: string | null;
+  fellBack: boolean;
+  reason: string | null;
+}
+
+export interface SummaryTemplateOutputTestResult {
+  summary: string;
+  citationSegments: CitationSegment[];
+}
+
 export interface RecordingUpdate {
   title?: string;
   labels?: string[];
@@ -577,6 +603,22 @@ class RecordingService {
     const response: AxiosResponse<{ success: boolean; systemPrompt: string }> =
       await apiInstance.post('/calls/summary-templates/ai/generate-system-prompt', input);
     return response.data.systemPrompt;
+  }
+
+  async testSummaryTemplateSelection(
+    input: SummaryTemplateSelectionTestInput,
+  ): Promise<SummaryTemplateSelectionTestResult> {
+    const response: AxiosResponse<{ success: boolean } & SummaryTemplateSelectionTestResult> =
+      await apiInstance.post('/calls/summary-templates/ai/test-selection', input);
+    return response.data;
+  }
+
+  async testSummaryTemplateOutput(
+    input: SummaryTemplateSelectionTestInput,
+  ): Promise<SummaryTemplateOutputTestResult> {
+    const response: AxiosResponse<{ success: boolean } & SummaryTemplateOutputTestResult> =
+      await apiInstance.post('/calls/summary-templates/ai/test-output', input);
+    return { summary: response.data.summary, citationSegments: response.data.citationSegments };
   }
 
   /**

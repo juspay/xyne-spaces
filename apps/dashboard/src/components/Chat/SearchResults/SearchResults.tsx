@@ -62,6 +62,8 @@ import { useSearchMetrics } from '../../../hooks/useSearchMetrics';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
 import { useUser, useUsers } from '../../../hooks/useUsers';
+import { useUserGroups } from '../../../hooks/useUserGroup';
+import { makeMentionHighlightsBuilder } from '../../../search/mentionHighlights';
 import {
   getDMNames,
   isDMChannel,
@@ -293,6 +295,18 @@ const SearchResults = (): ReactElement => {
     return result;
   }, [starredChannels, regularChannels, dmChannels, allChannelsForNav, currentUserId, usersById]);
 
+  // Reuse this component's existing usersById + allUserGroups (no re-subscription) to resolve
+  // each mention chip's display forms for result highlighting.
+  const allUserGroups = useUserGroups();
+  const userGroupsById = useMemo(
+    () => new Map(allUserGroups.map(group => [group.id, group])),
+    [allUserGroups],
+  );
+  const buildMentionHighlights = useMemo(
+    () => makeMentionHighlightsBuilder(usersById, userGroupsById),
+    [usersById, userGroupsById],
+  );
+
   // Use the exact same hook as the popup modal — no separate search infrastructure
   const {
     searchResults: backendResults,
@@ -306,6 +320,7 @@ const SearchResults = (): ReactElement => {
     setSelectedMentions,
     setIncludeBotMessages,
     setOnlyMyChannels,
+    setExcludeArchived,
     setExactMatch,
     setRankProfile,
     setStructuredFilters,
@@ -318,7 +333,12 @@ const SearchResults = (): ReactElement => {
     allChannels: allChannelsWithCategory,
     mentionSearchType: null,
     defaultOnlyMyChannels: filters.onlyMyChannels,
+    // The Desk and Tickets tabs hide archived tickets by default; the "Show archived" toggle
+    // turns exclusion off. Every other tab leaves archived untouched (flag stays false).
+    defaultExcludeArchived:
+      filters.docType === 'desk' || filters.docType === 'tickets' ? !filters.showArchived : false,
     groupByDocType: true,
+    buildMentionHighlights,
     // The URL follows the results: the hook hands back the query these were fetched for,
     // so the address bar is shareable without anyone pressing Enter.
     onSearchComplete: (_results, searchedQuery) => {
@@ -381,6 +401,15 @@ const SearchResults = (): ReactElement => {
     setOnlyMyChannels(filters.onlyMyChannels);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters.onlyMyChannels]);
+
+  // Sync archived scope → hook. The Desk and Tickets tabs hide archived (and their "Show
+  // archived" toggle opts back in); other tabs never exclude, matching pre-existing behavior.
+  useEffect(() => {
+    setExcludeArchived(
+      filters.docType === 'desk' || filters.docType === 'tickets' ? !filters.showArchived : false,
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filters.docType, filters.showArchived]);
 
   // Sync exact-match → hook; the hook quotes the query when the request is built.
   useEffect(() => {
@@ -451,13 +480,23 @@ const SearchResults = (): ReactElement => {
       )?.name,
     [allBoardsList],
   );
+  // Prefer the `@`-handle (alias), matching the cmd+K picker — else the same group chip reads
+  // `@rockers` here but `@rock-team` in the popup.
+  const mentionUserGroupName = useCallback(
+    (id: string): string | undefined => {
+      const group = userGroupsById.get(id);
+      return group ? (group.alias ?? group.name) : undefined;
+    },
+    [userGroupsById],
+  );
   const filterResolvers = useMemo(
     (): FilterResolvers => ({
       userName: mentionUserName,
       channelName: mentionChannelName,
+      userGroupName: mentionUserGroupName,
       boardName,
     }),
-    [mentionUserName, mentionChannelName, boardName],
+    [mentionUserName, mentionChannelName, mentionUserGroupName, boardName],
   );
 
   // The active filter chips (from/to/with/in/assignee/priority + bare @/#), rebuilt only when a
@@ -474,9 +513,11 @@ const SearchResults = (): ReactElement => {
       filters.withUserIds,
       filters.mentionUserIds,
       filters.mentionChannelIds,
+      filters.mentionUserGroupIds,
       filters.priority,
       mentionUserName,
       mentionChannelName,
+      mentionUserGroupName,
     ],
   );
 
@@ -1378,6 +1419,13 @@ function ResultsBody({
               {senderName}
               {recipientCount > 0 && ` +${recipientCount} more`}
             </span>
+            {/* Assignee of the linked desk ticket, when set — same muted style as the
+                sender line above (mirrors the cmdK desk row). */}
+            {result.searchContext?.assigneeName && (
+              <span className='block min-w-0 truncate text-xs text-muted-foreground'>
+                {`Assigned to ${result.searchContext.assigneeName}`}
+              </span>
+            )}
             {result.context && (
               <div className='mt-0.5 text-xs text-muted-foreground'>
                 <SearchSnippetRenderer message={result.context} wordLimit={40} />

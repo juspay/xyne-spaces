@@ -161,6 +161,7 @@ export const parseInternalXyneLink = (href: string): ParsedInternalXyneLink | nu
     return {
       kind,
       href,
+      ...(linkWorkspaceId ? { workspaceId: linkWorkspaceId } : {}),
       channelId,
       ...(conversationId ? { conversationId } : {}),
       ...(ticketId ? { ticketId } : {}),

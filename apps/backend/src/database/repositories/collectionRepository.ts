@@ -2,6 +2,7 @@ import { PrismaClient, Collection, CollectionItem, MessageAttachment } from '@pr
 import { IngestionStatus, CollectionRole, AttachmentEntityType } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
 import { v4 as uuidv4 } from 'uuid';
+import { queryCollectionFolderTree } from '@/bypassAcl/collectionServices';
 
 type WithAttachment = { attachment: MessageAttachment | null };
 
@@ -431,19 +432,7 @@ export class CollectionRepository {
         mimeType: string | null;
     }>> {
         // Raw query: the workspace predicates below are written explicitly.
-        const allFolders = await this.db.$queryRaw<Array<{ id: string; name: string; parentId: string | null }>>`
-            WITH RECURSIVE folder_tree AS (
-                SELECT id, name, "parentId"
-                FROM collections
-                WHERE id = ${folderId} AND "workspaceId" = ${workspaceId} AND "deletedAt" IS NULL
-                UNION ALL
-                SELECT c.id, c.name, c."parentId"
-                FROM collections c
-                INNER JOIN folder_tree ft ON c."parentId" = ft.id
-                WHERE c."deletedAt" IS NULL AND c."workspaceId" = ${workspaceId}
-            )
-            SELECT id, name, "parentId" FROM folder_tree
-        `;
+        const allFolders = await queryCollectionFolderTree(this.db, folderId, workspaceId);
 
         const folderIds = allFolders.map(f => f.id);
 

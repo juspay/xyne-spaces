@@ -75,11 +75,13 @@ function setFloatingDockState(next: FloatingDockState): void {
 }
 
 // The toolbar's own dial sends no ticket id, so a reported call is linked to the ticket open on screen.
-let openTicket: { ticketId: string; number: string } | null = null;
+let openTicket: { ticketId: string; numbers: string[] } | null = null;
 // busyAgent can fire more than once per call, and newCall too; act on each call once.
 const handledCallIds = new Set<string>();
 
-export function setCloudAgentOpenTicket(ticket: { ticketId: string; number: string } | null): void {
+export function setCloudAgentOpenTicket(
+  ticket: { ticketId: string; numbers: string[] } | null,
+): void {
   openTicket = ticket;
 }
 
@@ -98,9 +100,9 @@ function linkCallToOpenTicket(token: unknown): void {
   handledCallIds.add(monitorUcid);
 
   const dialled = lastDigits(call.callerId);
-  if (!dialled || dialled !== lastDigits(openTicket.number)) {
+  if (!dialled || !openTicket.numbers.some(number => lastDigits(number) === dialled)) {
     toast.warning('This call is not logged to the open ticket', {
-      description: "It went to a different number than the ticket's.",
+      description: "It went to a number that isn't on the ticket.",
     });
     return;
   }

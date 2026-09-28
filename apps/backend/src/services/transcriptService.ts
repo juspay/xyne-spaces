@@ -28,6 +28,7 @@ import { logDetailedSummaryFailed } from '@/services/detailedSummaryFailureLog';
 import { RECORDING_TITLE_PROMPT } from '@/services/recordingSummaryTemplates';
 import { acquireLock, releaseLock } from '@/utils/distributedLock';
 import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
+import { lockMessageContentAndMetadata } from '@/bypassAcl/rowLockServices';
 
 const SPEAKER_IDENTIFICATION_CAC_KEY = 'speaker_identification_config';
 
@@ -1781,9 +1782,7 @@ export class TranscriptService {
           // Serialize with first-chunk Canvas URL attachment: both merge the
           // call-message metadata, so neither can discard the other's fields.
           await db.$transaction(async (tx) => {
-            const [message] = await tx.$queryRaw<Array<{ content: string; metadata: unknown }>>`
-              SELECT "content", "metadata" FROM "messages" WHERE "messageId" = ${messageId} FOR UPDATE
-            `;
+            const message = await lockMessageContentAndMetadata(tx, messageId);
             if (!message) {
               logger.warn(`Call message ${messageId} not found for title update`);
               return;

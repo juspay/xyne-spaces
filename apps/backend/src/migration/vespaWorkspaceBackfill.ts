@@ -4,7 +4,7 @@ import { authMiddleware } from '@/middleware/auth';
 import { authorize } from '@/middleware/authorize';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
-import { runAsSystem } from '@/database/tenant/context';
+import { runVespaWorkspaceBackfillJob } from '@/bypassAcl/migrationServices';
 import vespaClient from '@/vespa/client';
 import { NAMESPACE, CLUSTER } from '@/vespa/vespaConfig';
 import {
@@ -30,7 +30,7 @@ const VESPA_CLUSTER = CLUSTER;
 
 // ─── In-memory job registry (lost on pod restart — acceptable for one-time) ───
 
-interface JobStats {
+export interface JobStats {
   schema: string;
   processed: number;
   updated: number;
@@ -241,7 +241,7 @@ async function resolveUser(docId: string): Promise<{ workspaceId: string; orgId:
 
 // ─── Schema config ───────────────────────────────────────────────────────────
 
-interface SchemaConfig {
+export interface SchemaConfig {
   schema: VespaSchema;
   resolve: (docId: string, fields: Record<string, any>) => Promise<{ workspaceId: string; orgId: string } | null>;
 }
@@ -258,7 +258,7 @@ const SCHEMAS_TO_BACKFILL: SchemaConfig[] = [
 
 // ─── Backfill engine ─────────────────────────────────────────────────────────
 
-async function backfillSchema(
+export async function backfillSchema(
   schemaConfig: SchemaConfig,
   delayMs: number,
   stats: JobStats,
@@ -360,23 +360,7 @@ router.post('/trigger', authMiddleware.authenticate, authorize('VESPA', AccessTy
     jobs.set(jobId, stats);
 
     // Fire-and-forget backfill
-    (async () => {
-      // Cross-workspace sweep: runs above tenant scope by design.
-      await runAsSystem(async () => {
-        try {
-          for (const sc of schemas) {
-            logger.info(`[VespaBackfill] Starting backfill for schema: ${sc.schema}`);
-            await backfillSchema(sc, delayMs, stats);
-            logger.info(`[VespaBackfill] Completed schema: ${sc.schema}`);
-          }
-        } catch (err) {
-          stats.error = (err as Error).message;
-          logger.error(`[VespaBackfill] Job ${jobId} failed:`, err);
-        } finally {
-          stats.running = false;
-        }
-      });
-    })();
+    void runVespaWorkspaceBackfillJob(schemas, delayMs, stats, jobId);
 
     return res.status(202).json({
       jobId,

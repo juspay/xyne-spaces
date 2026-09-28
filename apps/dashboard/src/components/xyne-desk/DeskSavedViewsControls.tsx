@@ -15,7 +15,7 @@ import {
 import { cn } from '../../utils/classNames';
 import { Switch } from '../ui/Switch';
 import Dialog from '../ui/Dialog';
-import { valuesToFilters } from '../../utils/savedViewSerialization';
+import { columnKeysFromValues, valuesToFilters } from '../../utils/savedViewSerialization';
 import type { DeskTicketSavedView } from '../../hooks/useDeskTicketSavedViews';
 import type { TicketFilters } from '../Tickets/TicketFilters/types';
 import type { ResolvedDisplayFormField } from '../../utils/board/resolveDisplayFormFields';
@@ -31,6 +31,8 @@ interface DeskSavedViewsControlsProps {
   onUpdate: (viewId: string) => Promise<void>;
   onDelete: (viewId: string) => Promise<void>;
   currentFilters: TicketFilters;
+  currentColumnKeys: ReadonlySet<string>;
+  validColumnKeysForMode: ReadonlySet<string>;
   dynamicFieldDefs?: ResolvedDisplayFormField[];
   trackCategory?: string;
 }
@@ -177,6 +179,8 @@ export function DeskSavedViewsControls({
   onUpdate,
   onDelete,
   currentFilters,
+  currentColumnKeys,
+  validColumnKeysForMode,
   dynamicFieldDefs,
   trackCategory = 'Support',
 }: DeskSavedViewsControlsProps): ReactElement {
@@ -197,11 +201,19 @@ export function DeskSavedViewsControls({
   const activeView = savedViews.find(v => v.id === activeViewId) ?? null;
   const isOwnActiveView = activeView?.userId === currentUserId;
 
-  // Dirty: current filters differ from what the active view has stored
+  // Dirty: current filters OR columns differ from what the active view has stored
   const isDirty = (() => {
     if (!activeView?.values) return false;
     const viewFilters = valuesToFilters(activeView.values);
-    return filtersSignature(currentFilters) !== filtersSignature(viewFilters);
+    if (filtersSignature(currentFilters) !== filtersSignature(viewFilters)) return true;
+    // Only compare columns when the view actually saved column data; legacy views have no opinion.
+    const savedColumnKeys = columnKeysFromValues(activeView.values);
+    if (!savedColumnKeys) return false;
+    const savedForMode = new Set([...savedColumnKeys].filter(k => validColumnKeysForMode.has(k)));
+    const currentForMode = new Set(
+      [...currentColumnKeys].filter(k => validColumnKeysForMode.has(k)),
+    );
+    return [...savedForMode].sort().join(',') !== [...currentForMode].sort().join(',');
   })();
 
   // Reset inner state when popover closes
@@ -241,6 +253,18 @@ export function DeskSavedViewsControls({
   const handleSave = async (): Promise<void> => {
     const name = saveViewName.trim();
     if (!name) return;
+    if (isPublic) {
+      const nameLower = name.toLowerCase();
+      const conflict = savedViews.find(
+        v =>
+          v.visibility === (SavedConfigVisibility.PUBLIC as string) &&
+          v.name.trim().toLowerCase() === nameLower,
+      );
+      if (conflict) {
+        setSaveError(`A public view named "${conflict.name}" already exists.`);
+        return;
+      }
+    }
     setSaveLoading(true);
     setSaveError('');
     try {

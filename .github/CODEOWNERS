@@ -23,3 +23,48 @@
 /packages/shared/src/zero/mutators.ts @juspay/xyne-acl-guardians
 /apps/backend/src/zero/formsMutatorHelpers.ts @juspay/xyne-acl-guardians
 /packages/shared/src/zero/formsMutatorHelpers.ts @juspay/xyne-acl-guardians
+
+# ---------------------------------------------------------------------------
+# Call infrastructure.
+#
+# Same mechanism as the ACL rules above: a PR touching any path here needs an
+# approval from @juspay/xyne-call-guardians on top of the normal reviews.
+#
+# NOTE: the @juspay/xyne-call-guardians team needs at least read access to this
+# repository for these rules to take effect.
+#
+# Scoped deliberately to token issuance, join authorization, the API surface and
+# the client session core. Call UI under components/Call/** is NOT owned here —
+# gating routine UI work would make the team a bottleneck.
+
+# LiveKit token minting, host controls and webhook authorization
+/apps/backend/src/services/liveKitService.ts @juspay/xyne-call-guardians
+/apps/backend/src/services/externalCallTokenService.ts @juspay/xyne-call-guardians
+/apps/backend/src/services/callHostControlService.ts @juspay/xyne-call-guardians
+/apps/backend/src/services/callHostControlUtils.ts @juspay/xyne-call-guardians
+/apps/backend/src/services/callShareService.ts @juspay/xyne-call-guardians
+/apps/backend/src/routes/livekitWebhook.ts @juspay/xyne-call-guardians
+/apps/backend/src/controllers/livekitWebhookController.ts @juspay/xyne-call-guardians
+/apps/backend/src/controllers/livekitWebhookACL.ts @juspay/xyne-call-guardians
+
+# Call API surface and lifecycle
+/apps/backend/src/routes/calls.ts @juspay/xyne-call-guardians
+/apps/backend/src/routes/callLobby.ts @juspay/xyne-call-guardians
+/apps/backend/src/controllers/callController.ts @juspay/xyne-call-guardians
+/apps/backend/src/controllers/callLobbyController.ts @juspay/xyne-call-guardians
+/apps/backend/src/controllers/callHostControlController.ts @juspay/xyne-call-guardians
+/apps/backend/src/validators/callValidator.ts @juspay/xyne-call-guardians
+
+# Transcription agent — LiveKit worker that transcribes calls and serves the
+# voice-input HTTP endpoints (deployed as the xyne-transcription-agent chart)
+/apps/backend/python-agent/ @juspay/xyne-call-guardians
+
+# Client join path and LiveKit room session
+/apps/dashboard/src/services/Call/ @juspay/xyne-call-guardians
+/apps/dashboard/src/components/Call/CallViews/CustomLiveKitRoom.tsx @juspay/xyne-call-guardians
+/apps/dashboard/src/components/Call/CallStateTransition/ @juspay/xyne-call-guardians
+/apps/dashboard/src/hooks/useCallJoinOrInitiate.ts @juspay/xyne-call-guardians
+/apps/dashboard/src/hooks/useCallJoinState.ts @juspay/xyne-call-guardians
+
+# bypassAcl framework — the sole sanctioned location for the ACL-bypass primitives
+/apps/backend/src/bypassAcl/ @juspay/xyne-acl-guardians

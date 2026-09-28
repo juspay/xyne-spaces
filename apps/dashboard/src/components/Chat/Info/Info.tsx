@@ -9,7 +9,6 @@ import {
   Channel,
 } from '@xyne/shared';
 import { useZero } from '../../../hooks/useZero';
-import { useQuery } from '../../../hooks/useQuery';
 import { QueryResultType } from '@rocicorp/zero';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 
@@ -19,7 +18,7 @@ import { isOneToOneDMChannel, isGroupDMChannel } from '../ChatDirectory/ChatDire
 import Button from '../../ui/Button';
 import * as Tabs from '@radix-ui/react-tabs';
 import { cn } from '../../../utils/classNames';
-import { logger, Event as LogEvent } from '../../../utils/logger';
+import { useChannelBoards } from '../../../hooks/useChannelBoards';
 import Input from '../../ui/Input';
 import { Dialog } from '../../ui/Dialog/Dialog';
 import { AddPeopleDialog } from '../AddPeopleForm/AddPeopleDialog';
@@ -59,7 +58,7 @@ import { useCallConfirmation } from '../../../hooks/useCallConfirmation';
 import { CallConfirmationModal } from '../../Call/CallConfirmationModal';
 import { useGetChannelUserStatus } from '../../../hooks/useChannels';
 import { mutators } from '../../../zero/mutators';
-import { useUser, useUsers, useUsersById } from '../../../hooks/useUsers';
+import { useUser, useUsers } from '../../../hooks/useUsers';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { v4 as uuidv4 } from 'uuid';
 import { VisibleChannel } from '../../../machines/stateMachine';
@@ -74,12 +73,6 @@ export type ChannelTab =
   | 'settings'
   | 'ai-features';
 
-const APP_USER_EMAIL_SUFFIXES = ['@app.xyne.ai', '@bot.xyne.ai'];
-const isAppUserEmail = (email: string | null | undefined): boolean => {
-  if (!email) return false;
-  const lower = email.toLowerCase();
-  return APP_USER_EMAIL_SUFFIXES.some(suffix => lower.endsWith(suffix));
-};
 interface InfoProps {
   channel: VisibleChannel;
   previousChannelId?: string | null;
@@ -108,18 +101,16 @@ const Info = ({
   const [showPromoteDialog, setShowPromoteDialog] = useState(false);
 
   const [participants] = useCachedQuery(queries.channelParticipants({ channelId: channel.id }));
-  const usersById = useUsersById();
 
-  const { humanMemberCount, agentAppCount } = useMemo(() => {
-    let human = 0;
-    let agentApp = 0;
-    for (const p of participants) {
-      const user = usersById.get(p.userId);
-      if (isAppUserEmail(user?.email)) agentApp++;
-      else human++;
-    }
-    return { humanMemberCount: human, agentAppCount: agentApp };
-  }, [participants, usersById]);
+  // Authoritative app/bot list for this channel — server-filtered by
+  // users.userType so we don't depend on the workspace users map hydrating
+  // with userType before the tab-label counts render.
+  const [appParticipantsForCount] = useCachedQuery(
+    queries.channelAppParticipants({ channelId: channel.id }),
+  );
+
+  const agentAppCount = appParticipantsForCount.length;
+  const humanMemberCount = Math.max(0, participants.length - agentAppCount);
 
   const currentUserParticipant = useMemo(
     () => participants.find(p => p.userId === context.userID),
@@ -145,43 +136,11 @@ const Info = ({
   const navigate = useNavigate();
   const location = useLocation();
   const channelUserStatus = useGetChannelUserStatus(channel.id);
-  // channel.projectId is nullable (decoupling). Empty string → no project/board match,
-  // and the panel falls back to the channel's board mappings below.
+  // Only drives the project-name label. Boards no longer come from here — see below.
   const [project] = useCachedQuery(queries.projectById({ projectId: channel.projectId ?? '' }));
-  const [channelBoardMappings, mappingDetails] = useCachedQuery(
-    queries.boardsByChannel({ channelId: channel.id }),
-  );
-  const [projectBoards] = useCachedQuery(
-    queries.boardsListByProject({ projectId: channel.projectId ?? '' }),
-  );
-
-  const boards = useMemo(() => {
-    const mappingSynced = mappingDetails.type === 'complete';
-    const mappedBoards = channelBoardMappings?.map(m => m.board) ?? [];
-    const filtered = mappedBoards.filter((b): b is NonNullable<typeof b> => Boolean(b));
-    const projectBoardsList = projectBoards ?? [];
-    if (filtered.length > 0) {
-      logger.debug(LogEvent.KANBAN_ENTITY_LOADED, {
-        source: 'Info',
-        resolution: 'channel-board-mapping',
-        channelId: channel.id,
-        mappedCount: filtered.length,
-        projectBoardsCount: projectBoardsList.length,
-      });
-      return filtered;
-    }
-    if (!mappingSynced) {
-      return projectBoardsList;
-    }
-    logger.debug(LogEvent.KANBAN_ENTITY_LOADED, {
-      source: 'Info',
-      resolution: 'project-boards-fallback',
-      channelId: channel.id,
-      mappedCount: 0,
-      projectBoardsCount: projectBoardsList.length,
-    });
-    return projectBoardsList;
-  }, [channelBoardMappings, mappingDetails.type, projectBoards, channel.id]);
+  // channel_board_mappings is the only source of channel→board truth; there is no
+  // project fallback, so an empty set means the channel genuinely has no boards.
+  const { boards } = useChannelBoards(channel.id);
 
   // Get target user ID for 1:1 DM calls
   const targetUserId = useMemo(() => {
@@ -312,7 +271,7 @@ const Info = ({
   // Pill-style tab trigger, matching the ConversationHeader channel tabs.
   const tabTriggerClass = (value: ChannelTab): string =>
     cn(
-      'flex items-center justify-center gap-2 px-2.5 py-1.5 rounded-lg text-sm font-medium tracking-[-0.28px] transition-colors duration-100 cursor-pointer',
+      'flex items-center justify-center gap-2 px-2.5 py-1.5 rounded-lg text-sm font-medium tracking-[-0.28px] transition-colors duration-100 cursor-pointer whitespace-nowrap',
       activeTab === value
         ? 'bg-muted text-foreground'
         : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
@@ -515,10 +474,11 @@ const Info = ({
           >
             <ChannelMembers
               channel={channel}
-              participants={participants}
               channelDisplayName={channelDisplayName}
               popoverContainer={popoverContainerRef.current}
               filterMode='members'
+              allParticipants={participants}
+              appParticipants={appParticipantsForCount}
             />
           </Tabs.Content>
         )}
@@ -529,10 +489,11 @@ const Info = ({
           >
             <ChannelMembers
               channel={channel}
-              participants={participants}
               channelDisplayName={channelDisplayName}
               popoverContainer={popoverContainerRef.current}
               filterMode='agents-apps'
+              allParticipants={participants}
+              appParticipants={appParticipantsForCount}
             />
           </Tabs.Content>
         )}
@@ -761,12 +722,15 @@ const ChannelMembers = ({
   channelDisplayName,
   popoverContainer,
   filterMode = 'members',
+  allParticipants,
+  appParticipants,
 }: {
   channel: Channel;
-  participants: NonNullable<QueryResultType<typeof queries.channelParticipants>>;
   channelDisplayName: string;
   popoverContainer?: HTMLElement | null;
   filterMode?: 'members' | 'agents-apps';
+  allParticipants: NonNullable<QueryResultType<typeof queries.channelParticipants>>;
+  appParticipants: NonNullable<QueryResultType<typeof queries.channelAppParticipants>>;
 }): ReactElement => {
   const context = useAuthContextValues();
   const zero = useZero();
@@ -789,36 +753,59 @@ const ChannelMembers = ({
     return () => cancelAnimationFrame(rafId);
   }, [isMobile]);
 
-  // Simplified pagination state
-  const [accumulatedParticipants, setAccumulatedParticipants] = useState<
-    QueryResultType<typeof queries.channelParticipantsPaginated>
+  // Paginated humans-only list for the Members tab. Skipped for the Agents &
+  // Apps tab (which reads directly from appParticipants) and while searching
+  // (which filters the parent's already-loaded allParticipants).
+  const [humanPage, setHumanPage] = useState<
+    QueryResultType<typeof queries.channelHumanParticipantsPaginated>
   >([]);
-  const [currentCursor, setCurrentCursor] = useState<{ role: ChannelRole; userId: string } | null>(
+  const [humanCursor, setHumanCursor] = useState<{ role: ChannelRole; userId: string } | null>(
     null,
   );
-  const [hasMore, setHasMore] = useState(true);
+  const [humanHasMore, setHumanHasMore] = useState(true);
 
-  // Query for paginated participants using useQuery hook
-  const [participants] = useQuery(
-    queries.channelParticipantsPaginated({
+  const paginationEnabled = filterMode === 'members' && !searchQuery.trim();
+
+  const [paginatedHumans] = useCachedQuery(
+    queries.channelHumanParticipantsPaginated({
       channelId: channel.id,
       limit: PAGE_SIZE,
-      start: currentCursor,
+      start: humanCursor,
     }),
+    { enabled: paginationEnabled },
   );
 
-  const [searchResults] = useCachedQuery(
-    queries.searchChannelParticipants({ channelId: channel.id, searchQuery }),
-    {
-      enabled: !!searchQuery.trim(),
-    },
-  );
+  useEffect(() => {
+    if (!paginationEnabled) return;
+    if (!paginatedHumans || paginatedHumans.length === 0) {
+      if (humanCursor !== null) setHumanHasMore(false);
+      return;
+    }
+    setHumanPage(prev => {
+      if (humanCursor === null) return paginatedHumans;
+      const combined = [...prev, ...paginatedHumans];
+      return Array.from(
+        combined
+          .reduce(
+            (map, item) => map.set(item.userId, item),
+            new Map<string, (typeof combined)[number]>(),
+          )
+          .values(),
+      );
+    });
+    setHumanHasMore(paginatedHumans.length >= PAGE_SIZE);
+  }, [paginatedHumans, humanCursor, paginationEnabled]);
+
+  const loadMoreHumans = useCallback(() => {
+    if (!humanHasMore || humanPage.length === 0) return;
+    const last = humanPage[humanPage.length - 1];
+    if (!last) return;
+    setHumanCursor({ role: last.role, userId: last.userId });
+  }, [humanHasMore, humanPage]);
 
   const currentUserParticipant = useMemo(
-    () =>
-      accumulatedParticipants.find(c => c.userId === context.userID) ??
-      participants.find(c => c.userId === context.userID),
-    [accumulatedParticipants, participants, context.userID],
+    () => allParticipants.find(c => c.userId === context.userID),
+    [allParticipants, context.userID],
   );
 
   const allUsers = useUsers();
@@ -890,62 +877,17 @@ const ChannelMembers = ({
     setRemoveDialogOpen(true);
   };
 
-  // Simplified useEffect - accumulate participants data
-  useEffect(() => {
-    if (!participants || participants.length === 0) {
-      if (currentCursor !== null) {
-        // We tried to load more but got no results
-        setHasMore(false);
-      }
-      return;
-    }
-
-    setAccumulatedParticipants(prev => {
-      // Initial load (no cursor set yet)
-      if (currentCursor === null) {
-        return participants;
-      }
-
-      // Loading more - append and deduplicate
-      const combined = [...prev, ...participants];
-      const unique = Array.from(
-        combined
-          .reduce(
-            (map, item) => map.set(item.userId, item),
-            new Map<string, QueryResultType<typeof queries.channelParticipantsPaginated>[number]>(),
-          )
-          .values(),
-      );
-      return unique;
-    });
-
-    // Update hasMore based on result size
-    setHasMore(participants.length >= PAGE_SIZE);
-  }, [participants, currentCursor]);
-
-  // Simplified load more function
-  const loadMore = useCallback(() => {
-    if (!hasMore || accumulatedParticipants.length === 0) return;
-
-    const lastParticipant = accumulatedParticipants[accumulatedParticipants.length - 1];
-    if (!lastParticipant) return;
-
-    setCurrentCursor({ role: lastParticipant.role, userId: lastParticipant.userId });
-  }, [hasMore, accumulatedParticipants]);
-
   const isChannelCreator = channel.createdBy === context.userID;
   const currentUserIsAdmin = currentUserParticipant?.role === ChannelRole.ADMIN;
 
   const isAuthorizedToRemoveParticipant =
     channel.scopeType === ChannelScopeType.DEFAULT && currentUserIsAdmin;
 
-  const matchesFilterMode = useCallback(
-    (userId: string): boolean => {
-      const user = usersById.get(userId);
-      const isApp = isAppUserEmail(user?.email);
-      return filterMode === 'agents-apps' ? isApp : !isApp;
-    },
-    [usersById, filterMode],
+  // Server-authoritative set of app/bot user IDs in this channel. Used to
+  // bucket search results without depending on usersById.userType hydration.
+  const appUserIdSet = useMemo(
+    () => new Set(appParticipants.map(p => p.userId)),
+    [appParticipants],
   );
 
   const filteredParticipants = useMemo(() => {
@@ -962,29 +904,42 @@ const ChannelMembers = ({
       return words.some(word => word.startsWith(queryLower));
     };
 
-    if (searchQuery.trim()) {
-      // When searching, sort results so that users whose names start with the query appear first
-      return [...searchResults]
-        .filter(p => matchesFilterMode(p.userId))
-        .sort((a, b) => {
-          const userA = usersById.get(a.userId);
-          const userB = usersById.get(b.userId);
-          const displayA = getUserDisplayName(userA);
-          const displayB = getUserDisplayName(userB);
-          const aStartsWith = userA ? nameStartsWith(displayA, searchQuery) : false;
-          const bStartsWith = userB ? nameStartsWith(displayB, searchQuery) : false;
+    const trimmedQuery = searchQuery.trim();
+    const queryLower = trimmedQuery.toLowerCase();
 
-          if (aStartsWith && !bStartsWith) return -1;
-          if (!aStartsWith && bStartsWith) return 1;
-
-          const nameA = displayA;
-          const nameB = displayB;
-          return nameA.localeCompare(nameB);
-        });
+    // Members tab, idle: render the paginated page (server-filtered by
+    // userType = USER).
+    if (filterMode === 'members' && !trimmedQuery) {
+      return humanPage;
     }
 
-    return accumulatedParticipants.filter(p => matchesFilterMode(p.userId));
-  }, [accumulatedParticipants, searchQuery, searchResults, usersById, matchesFilterMode]);
+    // Everything else — Agents & Apps (any state) or Members search — filters
+    // the parent's fully-loaded participant list client-side. The
+    // server-filtered appUserIdSet buckets app-vs-human without depending on
+    // usersById.userType being hydrated.
+    return allParticipants
+      .filter(p => {
+        const isApp = appUserIdSet.has(p.userId);
+        if (filterMode === 'agents-apps' ? !isApp : isApp) return false;
+        if (!trimmedQuery) return true;
+        const user = usersById.get(p.userId);
+        if (!user) return false;
+        const display = getUserDisplayName(user).toLowerCase();
+        const rawName = (user.name ?? '').toLowerCase();
+        return display.includes(queryLower) || rawName.includes(queryLower);
+      })
+      .sort((a, b) => {
+        const displayA = getUserDisplayName(usersById.get(a.userId));
+        const displayB = getUserDisplayName(usersById.get(b.userId));
+        if (trimmedQuery) {
+          const aStartsWith = nameStartsWith(displayA, searchQuery);
+          const bStartsWith = nameStartsWith(displayB, searchQuery);
+          if (aStartsWith && !bStartsWith) return -1;
+          if (!aStartsWith && bStartsWith) return 1;
+        }
+        return displayA.localeCompare(displayB);
+      });
+  }, [allParticipants, appUserIdSet, filterMode, humanPage, searchQuery, usersById]);
 
   return (
     <div className='relative h-full min-h-0 flex flex-col'>
@@ -1006,9 +961,9 @@ const ChannelMembers = ({
         className='flex-1 min-h-0 thin-scrollbar'
         style={{ height: '100%' }}
         data={filteredParticipants}
-        {...(!searchQuery &&
-          hasMore && {
-            endReached: loadMore,
+        {...(paginationEnabled &&
+          humanHasMore && {
+            endReached: loadMoreHumans,
           })}
         overscan={10}
         itemContent={(_, participant) => (

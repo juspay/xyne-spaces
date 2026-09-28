@@ -1,5 +1,5 @@
 import log from 'electron-log/main';
-import { BrowserWindow } from 'electron';
+import { BrowserWindow, net } from 'electron';
 import { getMainWindow } from '../../window/manager';
 import { isAppControlTool } from './appControl';
 import { workspaceBrowserBridge } from './workspaceBrowser';
@@ -64,7 +64,7 @@ export class SurfaceCallWatcher {
   }
 
   private async next(token: string): Promise<PendingSurfaceCall | null> {
-    const res = await fetch(`${this.baseUrl()}/local-harness-bridge/surface-calls/next`, {
+    const res = await net.fetch(`${this.baseUrl()}/local-harness-bridge/surface-calls/next`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!res.ok) return null;
@@ -79,7 +79,7 @@ export class SurfaceCallWatcher {
       ? await workspaceBrowserBridge.call(call.toolName, call.args)
       : { ok: false, content: `Unknown app tool: ${call.toolName}` };
 
-    await fetch(
+    await net.fetch(
       `${this.baseUrl()}/local-harness-bridge/surface-calls/${encodeURIComponent(call.id)}/result`,
       {
         method: 'POST',
@@ -97,7 +97,7 @@ export class SurfaceCallWatcher {
     if (focused && now - this.lastFocusReport < 5000) return;
     this.lastFocusReport = now;
 
-    await fetch(`${this.baseUrl()}/local-harness-bridge/devices/focus`, {
+    await net.fetch(`${this.baseUrl()}/local-harness-bridge/devices/focus`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify({ focused, windows: BrowserWindow.getAllWindows().length }),

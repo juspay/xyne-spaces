@@ -69,6 +69,7 @@ export const searchQuerySchema = z.object({
   in: csv.optional(),
   mentions: csv.optional(),
   channelMentions: csv.optional(),
+  groupMentions: csv.optional(),
 
   // Work-item filters.
   projectId: csv.optional(),
@@ -100,6 +101,8 @@ export const searchQuerySchema = z.object({
   groupBy: z.string().optional(),
   includeBotMessages: boolish.optional(),
   onlyMyChannels: boolish.optional(),
+  /** When true, drop results resolving to an archived ticket (cmd+k + full-page Desk). */
+  excludeArchived: boolish.optional(),
   view: z.enum(['installed', 'org', 'marketplace']).optional(),
 }).strict();
 

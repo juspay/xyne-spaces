@@ -8,6 +8,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '../../ui/Select/Select';
+import { MultiSelect } from '../../ui/MultiSelect';
 import { cn } from '../../../utils/classNames';
 import type { FlowComponent, SelectOption, FlowAction } from '@xyne/shared';
 
@@ -25,6 +26,8 @@ export const SelectNode: React.FC<SelectNodeProps> = ({ node }) => {
         /** Static array OR "$<key>" dynamic reference */
         options: SelectOption[] | string;
         required?: boolean;
+        /** true → multi-select; the field value is a string[] instead of a string */
+        multiple?: boolean;
         /** Optional action fired when value changes (e.g. inputChange for cascading dropdowns) */
         action?: FlowAction;
       }
@@ -48,15 +51,26 @@ export const SelectNode: React.FC<SelectNodeProps> = ({ node }) => {
     return [];
   })();
 
-  const value = (state.values[props.name] as string) || '';
+  const isMulti = props.multiple === true;
+  const rawValue = state.values[props.name];
+  const value = typeof rawValue === 'string' ? rawValue : '';
+  // Multi-select keeps a string[] in flow state; a single-select value already
+  // stored under the same name is carried over rather than dropped.
+  const selectedValues: string[] = Array.isArray(rawValue)
+    ? (rawValue as string[])
+    : typeof rawValue === 'string' && rawValue
+      ? [rawValue]
+      : [];
   const error = state.errors[props.name];
   const isTouched = state.touched[props.name];
   const isLoading = state.loadingComponentIds.includes(node.id);
 
-  const handleChange = (val: string) => {
+  const handleChange = (val: string | string[]) => {
     logger.info(LogEvent.INFO, {
       type: 'migrated_console_log',
-      message: String(`[SelectNode] value changed  name=${props.name}  value=${val}`),
+      message: String(
+        `[SelectNode] value changed  name=${props.name}  value=${Array.isArray(val) ? val.join(',') : val}`,
+      ),
     });
     // updateFieldValue syncs stateRef immediately so the debounced executeAction
     // reads the correct (freshly selected) values when it fires
@@ -91,23 +105,39 @@ export const SelectNode: React.FC<SelectNodeProps> = ({ node }) => {
           {props.required && <span className='text-destructive ml-0.5'>*</span>}
         </label>
       )}
-      <Select value={value} onValueChange={handleChange} disabled={state.submitting || isLoading}>
-        <SelectTrigger
-          className={cn(
-            'w-full',
-            error && isTouched && 'border-destructive focus:ring-destructive/20',
-          )}
-        >
-          <SelectValue placeholder={isLoading ? 'Loading…' : props.placeholder || 'Select...'} />
-        </SelectTrigger>
-        <SelectContent>
-          {resolvedOptions.map(opt => (
-            <SelectItem key={opt.value} value={opt.value} disabled={opt.disabled === true}>
-              {opt.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      {isMulti ? (
+        <MultiSelect
+          options={resolvedOptions.map(opt => ({
+            value: opt.value,
+            label: opt.label,
+            ...(opt.description !== undefined ? { subtitle: opt.description } : {}),
+            ...(opt.disabled !== undefined ? { disabled: opt.disabled } : {}),
+          }))}
+          selectedValues={selectedValues}
+          onChange={handleChange}
+          placeholder={isLoading ? 'Loading…' : props.placeholder || 'Select...'}
+          disabled={state.submitting || isLoading}
+          className={cn(error && isTouched && '[&>button]:border-destructive')}
+        />
+      ) : (
+        <Select value={value} onValueChange={handleChange} disabled={state.submitting || isLoading}>
+          <SelectTrigger
+            className={cn(
+              'w-full',
+              error && isTouched && 'border-destructive focus:ring-destructive/20',
+            )}
+          >
+            <SelectValue placeholder={isLoading ? 'Loading…' : props.placeholder || 'Select...'} />
+          </SelectTrigger>
+          <SelectContent>
+            {resolvedOptions.map(opt => (
+              <SelectItem key={opt.value} value={opt.value} disabled={opt.disabled === true}>
+                {opt.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
       {error && isTouched && <p className='text-xs text-destructive'>{error}</p>}
     </div>
   );

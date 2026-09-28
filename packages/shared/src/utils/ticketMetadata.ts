@@ -176,6 +176,8 @@ export async function writeConversationAnchorFromZero(
   conversationId: string,
   summary: ParentMessageSummary,
 ): Promise<void> {
+  if (summary.conversationId && summary.conversationId === conversationId) return;
+
   const conversation = (await tx.run(
     zql.conversations.where('conversationId', conversationId).one(),
   )) as { parent_message_md?: string | null } | null;
@@ -215,6 +217,8 @@ export async function linkSubTicketConversationToParentFromZero(
     zql.tickets.where('id', parentTicketId).one(),
   )) as ZeroTicketLike | null;
   if (!parent?.conversationId) return;
+
+  if (child.conversationId === parent.conversationId) return;
 
   const parentConversation = (await tx.run(
     zql.conversations.where('conversationId', parent.conversationId).one(),

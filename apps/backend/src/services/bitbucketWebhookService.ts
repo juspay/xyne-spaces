@@ -13,7 +13,7 @@ import { xyneCommentService } from '@/services/xyneCommentService';
 import { prCheckApprovalService } from '@/services/prCheckApprovalService';
 import { syncReleaseOnPRMerge } from '@/services/release/releaseWebhookSync';
 import { VCSProviderType } from '@xyne/shared';
-import { runAsServiceActor } from '@/database/tenant/context';
+import { runBitbucketWebhook } from '@/bypassAcl/webhookIngestServices';
 /**
  * Bitbucket Server webhook event types for pull requests
  * Based on Bitbucket Server 8.6 documentation
@@ -59,79 +59,88 @@ export class BitbucketWebhookService {
     payload: BitbucketWebhookEnvelope,
     workspaceId: string,
   ): Promise<{ success: boolean; message: string }> {
-    // Unauthenticated webhook (no req.user): open an explicit tenant scope from the
-    // internal workspaceId in the request URL so the workspaceId stamper fills the
-    // ticket_assignments / user_workload_mappings writes this event triggers downstream.
-    return runAsServiceActor('bitbucket-webhook', workspaceId, async () => {
-      try {
-        logger.info(`[Bitbucket-Webhook] Received event: ${eventKey} for workspace: ${workspaceId}`);
+    // Unauthenticated webhook (no req.user): the scope is opened from the internal workspaceId in
+    // the request URL, so the workspaceId stamper fills the writes this event triggers downstream.
+    return runBitbucketWebhook(this, workspaceId, eventKey, payload);
+  }
 
-        // Check if this is a PR event
-        if (!this.isPullRequestEvent(eventKey)) {
-          return { success: true, message: `Event ${eventKey} acknowledged but not processed` };
-        }
+  /**
+   * Runs one webhook event. Called only through runBitbucketWebhook (bypassAcl/webhookIngestServices),
+   * which opens the tenant scope this needs.
+   */
+  async processWebhookEvent(
+    eventKey: string,
+    payload: BitbucketWebhookEnvelope,
+    workspaceId: string,
+  ): Promise<{ success: boolean; message: string }> {
+    try {
+      logger.info(`[Bitbucket-Webhook] Received event: ${eventKey} for workspace: ${workspaceId}`);
 
-        // Handle comment events separately
-        if (this.isCommentEvent(eventKey)) {
-          return await this.handleCommentEvent(eventKey as BitbucketPREventType, payload, workspaceId);
-        }
-
-        // Validate PR data exists (Bitbucket Server uses 'pullRequest' with capital R)
-        if (!payload.pullRequest) {
-          logger.warn(
-            `[Bitbucket-Webhook] PR event ${eventKey} received but pullRequest data missing`
-          );
-          return { success: true, message: 'No pullRequest data in payload' };
-        }
-
-        // Extract PR context
-        const context = this.extractPRContext(payload, workspaceId);
-
-        // Release sync is BRANCH-scoped, not gated on PR-title validation: fire on
-        // merge BEFORE the validation gate so a hotfix whose dev ticket doesn't
-        // exist yet still syncs. Fire-and-forget — analysis can outlast the webhook
-        // timeout and syncReleaseOnPRMerge handles its own errors.
-        if (eventKey === BitbucketPREventType.PR_MERGED) {
-          // No latestCommit fallback: if mergeCommit.id is absent, leave it
-          // undefined so syncReleaseOnPRMerge does a plain re-run rather than
-          // inventing a hotfix delta from the destination-branch tip.
-          if (!context.pr.properties?.mergeCommit?.id) {
-            logger.warn(`[Bitbucket-Webhook] PR #${context.prId} merged with no mergeCommit.id — hotfix delta will fall back to a plain re-run`);
-          }
-          syncReleaseOnPRMerge({
-            workspaceId: context.workspace,
-            provider: VCSProviderType.BITBUCKET_SERVER,
-            projectKey: context.projectName,
-            repoSlug: context.pr.toRef.repository.slug,
-            baseBranch: context.destinationBranch,
-            mergeCommitSha: context.pr.properties?.mergeCommit?.id,
-            source: 'Bitbucket-Webhook',
-          }).catch(err => logger.error('[Bitbucket-Webhook] release sync failed:', err));
-        }
-
-        let validationResult: { isValid: boolean; ticketId?: string };
-
-          // PR doesn't exist or wasn't created by workflow - run full validation
-          validationResult = await this.validatePRTitle(context);
-
-          if (!validationResult.isValid) {
-            // Validation failed, already posted failed build status, skip further processing
-            logger.warn(
-              `[Bitbucket-Webhook] PR validation failed for PR ${context.prId}, skipping event processing`
-            );
-            return { success: true, message: 'PR validation failed, event skipped' };
-          }
-
-        // Route to appropriate handler based on event type, passing validation result
-        await this.routePREvent(eventKey as BitbucketPREventType, context, validationResult);
-
-        return { success: true, message: `Event ${eventKey} processed successfully` };
-      } catch (error) {
-        logger.error(`[Bitbucket-Webhook] Error processing event ${eventKey}:`, error);
-        // Return success to prevent Bitbucket retries
-        return { success: true, message: 'Error acknowledged' };
+      // Check if this is a PR event
+      if (!this.isPullRequestEvent(eventKey)) {
+        return { success: true, message: `Event ${eventKey} acknowledged but not processed` };
       }
-    });
+
+      // Handle comment events separately
+      if (this.isCommentEvent(eventKey)) {
+        return await this.handleCommentEvent(eventKey as BitbucketPREventType, payload, workspaceId);
+      }
+
+      // Validate PR data exists (Bitbucket Server uses 'pullRequest' with capital R)
+      if (!payload.pullRequest) {
+        logger.warn(
+          `[Bitbucket-Webhook] PR event ${eventKey} received but pullRequest data missing`
+        );
+        return { success: true, message: 'No pullRequest data in payload' };
+      }
+
+      // Extract PR context
+      const context = this.extractPRContext(payload, workspaceId);
+
+      // Release sync is BRANCH-scoped, not gated on PR-title validation: fire on
+      // merge BEFORE the validation gate so a hotfix whose dev ticket doesn't
+      // exist yet still syncs. Fire-and-forget — analysis can outlast the webhook
+      // timeout and syncReleaseOnPRMerge handles its own errors.
+      if (eventKey === BitbucketPREventType.PR_MERGED) {
+        // No latestCommit fallback: if mergeCommit.id is absent, leave it
+        // undefined so syncReleaseOnPRMerge does a plain re-run rather than
+        // inventing a hotfix delta from the destination-branch tip.
+        if (!context.pr.properties?.mergeCommit?.id) {
+          logger.warn(`[Bitbucket-Webhook] PR #${context.prId} merged with no mergeCommit.id — hotfix delta will fall back to a plain re-run`);
+        }
+        syncReleaseOnPRMerge({
+          workspaceId: context.workspace,
+          provider: VCSProviderType.BITBUCKET_SERVER,
+          projectKey: context.projectName,
+          repoSlug: context.pr.toRef.repository.slug,
+          baseBranch: context.destinationBranch,
+          mergeCommitSha: context.pr.properties?.mergeCommit?.id,
+          source: 'Bitbucket-Webhook',
+        }).catch(err => logger.error('[Bitbucket-Webhook] release sync failed:', err));
+      }
+
+      let validationResult: { isValid: boolean; ticketId?: string };
+
+        // PR doesn't exist or wasn't created by workflow - run full validation
+        validationResult = await this.validatePRTitle(context);
+
+        if (!validationResult.isValid) {
+          // Validation failed, already posted failed build status, skip further processing
+          logger.warn(
+            `[Bitbucket-Webhook] PR validation failed for PR ${context.prId}, skipping event processing`
+          );
+          return { success: true, message: 'PR validation failed, event skipped' };
+        }
+
+      // Route to appropriate handler based on event type, passing validation result
+      await this.routePREvent(eventKey as BitbucketPREventType, context, validationResult);
+
+      return { success: true, message: `Event ${eventKey} processed successfully` };
+    } catch (error) {
+      logger.error(`[Bitbucket-Webhook] Error processing event ${eventKey}:`, error);
+      // Return success to prevent Bitbucket retries
+      return { success: true, message: 'Error acknowledged' };
+    }
   }
 
   /**

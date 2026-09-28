@@ -1,13 +1,21 @@
 import React, { useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { Globe, Link2, Lock } from 'lucide-react';
-import { CallVisibility } from '@xyne/shared';
+import {
+  CallVisibility,
+  ChannelVisibility,
+  EntityUserAccess,
+  type GrantableEntityUserAccess,
+} from '@xyne/shared';
+import { useUser } from '@xyne/shared/hooks';
 import { Switch } from '../../../components/ui/Switch';
 import {
   EntityShareModal,
   type EntityShareEntry,
 } from '../../../components/Share/EntityShareModal';
 import { useAuth } from '../../../hooks/useAuth';
+import { useLeaveRecording } from '../../../hooks/useLeaveRecording';
+import { useRecordingAccessLevel } from '../../../hooks/useRecordingAccessLevel';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useShareableOrigin } from '../../../hooks/useShareableOrigin';
 import { queries } from '../../../zero/queries';
@@ -24,6 +32,17 @@ import {
   isRecordingTicketLinkShare,
   logRecordingError,
 } from '../../../utils/recordingUtils';
+
+/**
+ * Whether the viewer could have opened this channel anyway — public, or one they
+ * are in. Zero does not ACL-filter `related()` subqueries, so without this check
+ * the modal would name a private channel, and link into it, for anyone the
+ * recording was shared with. Unreachable ones stay an unnamed "Private channel"
+ */
+const isChannelReachable = (
+  channelVisibility: string | null | undefined,
+  viewerMemberships: number,
+): boolean => viewerMemberships > 0 || channelVisibility === ChannelVisibility.PUBLIC;
 
 export interface RecordingShareModalProps {
   recording: Pick<RecordingDetail, 'externalId' | 'createdByUserId'>;
@@ -43,7 +62,8 @@ export const RecordingShareModal: React.FC<RecordingShareModalProps> = ({
 }) => {
   const { user: currentUser } = useAuth();
   const shareableOrigin = useShareableOrigin();
-  const isCreator = currentUser?.id === recording.createdByUserId;
+  const { requestLeave, ConfirmDialog } = useLeaveRecording();
+  const owner = useUser(recording.createdByUserId ?? '');
 
   const [locallyRevokedShareIds, setLocallyRevokedShareIds] = useState<Set<string>>(new Set());
   const [visibilityOverride, setVisibilityOverride] = useState<CallVisibility | null>(null);
@@ -53,6 +73,9 @@ export const RecordingShareModal: React.FC<RecordingShareModalProps> = ({
   );
   const visibility = visibilityOverride ?? recordingRow?.visibility ?? CallVisibility.PRIVATE;
   const isPublic = visibility === CallVisibility.PUBLIC;
+  // Owner and editors manage sharing and link access; viewers get a read-only
+  // list with Leave on their own row (PRD §5.1).
+  const { canEdit } = useRecordingAccessLevel(recordingRow);
 
   const shares = useMemo<EntityShareEntry[]>(
     () =>
@@ -67,34 +90,54 @@ export const RecordingShareModal: React.FC<RecordingShareModalProps> = ({
             : share.channelId
               ? { type: 'channel', id: share.channelId }
               : { type: 'user', id: share.userId! };
+          // A channel share the viewer cannot reach is named and linked only if
+          // they could have opened that channel anyway (PRD §11.5).
+          const channelReachable =
+            !share.channelId ||
+            isChannelReachable(share.channel?.visibility, share.channelMembers?.length ?? 0);
           const label = share.userGroupId
             ? (share.userGroup?.name ?? share.userGroupId)
             : share.channelId
-              ? (share.channel?.name ?? share.channelId)
+              ? channelReachable
+                ? (share.channel?.name ?? 'Private channel')
+                : 'Private channel'
               : share.user
                 ? getUserDisplayName(share.user)
                 : (share.userId ?? '');
-          const post = getRecordingSharePost(share.metadata);
+          const post = channelReachable ? getRecordingSharePost(share.metadata) : null;
           return {
             id: share.id,
             label,
             userId: share.userId ?? null,
             target,
             post: post ? { channelId: post.channelId, conversationId: post.conversationId } : null,
+            access:
+              share.entityUserAccess === EntityUserAccess.EDIT
+                ? EntityUserAccess.EDIT
+                : EntityUserAccess.VIEW,
           };
         }),
     [locallyRevokedShareIds, recordingRow],
   );
 
+  // Leave needs a row of the viewer's own to revoke. Access reaching them only
+  // through a group or channel has no such row, so those rows offer no Leave.
+  const ownShareId = useMemo(
+    () =>
+      shares.find(share => share.target.type === 'user' && share.userId === currentUser?.id)?.id,
+    [shares, currentUser?.id],
+  );
+
   const handleGrant = async (
     targets: RecordingShareTarget[],
     messageContent: string,
+    access?: GrantableEntityUserAccess,
   ): Promise<void> => {
     try {
       const result = await recordingService.grantRecordingAccess(
         recording.externalId,
         targets,
-        undefined,
+        access,
         messageContent,
       );
       if (result.shares?.length) {
@@ -129,6 +172,28 @@ export const RecordingShareModal: React.FC<RecordingShareModalProps> = ({
         description: getApiErrorMessage(error, 'Unable to remove recording access'),
       });
     }
+  };
+
+  // Re-granting an existing target with a different level updates it in place
+  // (the backend upserts), so a promotion and a demotion are the same call.
+  const handleChangeAccess = async (
+    target: RecordingShareTarget,
+    access: GrantableEntityUserAccess,
+  ): Promise<void> => {
+    try {
+      await recordingService.grantRecordingAccess(recording.externalId, [target], access);
+      toast.success(access === EntityUserAccess.EDIT ? 'Now an editor' : 'Now a viewer');
+    } catch (error) {
+      logRecordingError('RecordingShareModal.changeAccess', error);
+      throw error;
+    }
+  };
+
+  const handleLeave = async (): Promise<void> => {
+    await requestLeave(async target => {
+      await handleRevoke(target);
+      onClose?.();
+    });
   };
 
   const handleVisibilityChange = async (next: CallVisibility): Promise<void> => {
@@ -177,7 +242,7 @@ export const RecordingShareModal: React.FC<RecordingShareModalProps> = ({
               : 'Only people with access can open'}
           </div>
         </div>
-        {isCreator && (
+        {canEdit && (
           <Switch
             checked={isPublic}
             onCheckedChange={checked =>
@@ -209,16 +274,26 @@ export const RecordingShareModal: React.FC<RecordingShareModalProps> = ({
   );
 
   return (
-    <EntityShareModal
-      ownerId={recording.createdByUserId}
-      shares={shares}
-      onGrant={handleGrant}
-      onRevoke={handleRevoke}
-      subject='recording'
-      trackCategory='RecordingDetailV2'
-      generalAccess={generalAccess}
-      {...(onClose && { onClose })}
-    />
+    <>
+      <EntityShareModal
+        ownerId={recording.createdByUserId}
+        shares={shares}
+        onGrant={handleGrant}
+        onRevoke={handleRevoke}
+        subject='recording'
+        trackCategory='RecordingDetailV2'
+        generalAccess={generalAccess}
+        roles={{
+          canManage: canEdit,
+          onChangeAccess: handleChangeAccess,
+          onLeave: handleLeave,
+          ...(owner && { ownerLabel: getUserDisplayName(owner) }),
+          ...(ownShareId && { ownShareId }),
+        }}
+        {...(onClose && { onClose })}
+      />
+      <ConfirmDialog />
+    </>
   );
 };
 

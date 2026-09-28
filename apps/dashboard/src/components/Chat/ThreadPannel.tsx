@@ -59,6 +59,7 @@ import { BotBubble } from './BotBubble';
 import { ThreadTags, parseThreadTypes, useSetThreadTypes } from '../tags/ThreadTags';
 import { ThreadTagMenuItems } from '../tags/ThreadTagMenuItems';
 import { useShowThreadTags } from '../../hooks/useShowThreadTags';
+import { useAskAIAvailable } from '../../contexts/AskAIAvailabilityContext';
 import { toast } from 'sonner';
 import { TicketDetails } from '../Tickets/TicketDetails/TicketDetails';
 import { FileBubble } from '../ui/FileBubble/FileBubble';
@@ -69,6 +70,7 @@ import {
   BaseTicketType,
   parseTicketMd,
 } from '@xyne/shared';
+import { usePendingForThread, buildPendingThreadMessage } from '@xyne/shared/messages';
 import { RCAPanelView } from '../Tickets/RCAPanelView';
 import { ReleasePanelView } from '../Tickets/ReleasePanelView';
 import Tooltip from '../ui/Tooltip';
@@ -316,14 +318,31 @@ export const ThreadMessages = ({
   // is stored, so they disappear on reload.
   const ephemeralThreadMessages = useEphemeralThreadMessages(derivedConversationId);
 
+  // Replies the server has not confirmed yet. A failed send has had its
+  // optimistic Zero row rolled back, so the pending entry is the only thing
+  // keeping the message on screen — mirrors useThreadMessagesImpl in
+  // @xyne/shared and ChatListV4's channel-side overlay.
+  const pendingReplies = usePendingForThread(derivedConversationId ?? '');
+
   // Use pre-fetched messages if provided, otherwise use queried
   const messages = useMemo(() => {
     const base = propThreadMessages ?? queriedMessages ?? [];
-    if (ephemeralThreadMessages.length === 0) return base;
     // Appended, not merged by timestamp: they arrive live, so they are always the
     // newest thing in the thread at the moment they show up.
-    return [...base, ...(ephemeralThreadMessages as typeof base)];
-  }, [propThreadMessages, queriedMessages, ephemeralThreadMessages]);
+    const withEphemeral =
+      ephemeralThreadMessages.length === 0
+        ? base
+        : [...base, ...(ephemeralThreadMessages as typeof base)];
+    if (pendingReplies.length === 0) return withEphemeral;
+    // A pending row SHADOWS its Zero counterpart by messageId rather than
+    // appending, so an in-flight reply is not rendered twice.
+    const pendingIds = new Set(pendingReplies.map(entry => entry.messageId));
+    const confirmed = withEphemeral.filter(m => !pendingIds.has(m.messageId));
+    const pendingRows = [...pendingReplies]
+      .sort((a, b) => a.timestamp - b.timestamp)
+      .map(buildPendingThreadMessage);
+    return [...confirmed, ...(pendingRows as unknown as typeof withEphemeral)];
+  }, [propThreadMessages, queriedMessages, ephemeralThreadMessages, pendingReplies]);
   const messagesDetails = propThreadMessages ? { type: 'complete' as const } : queryDetails;
   const isMessagesLoaded = messagesDetails.type === 'complete' || messagesDetails.type === 'error';
 
@@ -636,6 +655,9 @@ export const ThreadMessages = ({
       setActiveTab: (): void => undefined,
       setSkipMarkAsRead: setSkipMarkAsReadThread,
       skipMarkAsReadRef: skipMarkAsReadThreadRef,
+      // Thread bubbles render with context 'thread', where the create-ticket
+      // action is never offered, so this value is not read on this path.
+      channelHasBoards: false,
     }),
     [setSkipMarkAsReadThread],
   );
@@ -687,6 +709,10 @@ export const ThreadMessages = ({
         showInChannel: false,
         timestamp: ts,
         messageId: uuidv4(),
+        // Explicitly none. Omitting this drops the mutator into its legacy
+        // draft-scan, which would claim whatever the user has attached in this
+        // thread's composer onto this context summary.
+        attachmentIds: [],
       }),
     );
     // Sender has implicitly read up to their own message
@@ -704,6 +730,7 @@ export const ThreadMessages = ({
   const initialMessageSender = useUser(initialMessage?.senderId || '');
   const setThreadTypes = useSetThreadTypes(derivedConversationId);
   const { showThreadTags } = useShowThreadTags();
+  const askAIAvailable = useAskAIAvailable();
   // Which tag's evidence is on screen. Owned here because this component renders both the
   // chips and the message list; cleared on thread change so it never leaks across threads.
   const [inspectedTag, setInspectedTag] = useState<string | null>(null);
@@ -1099,7 +1126,7 @@ export const ThreadMessages = ({
                     {/* Subscription Button */}
                     {derivedConversationId && (
                       <Tooltip content='Toggle notification subscription'>
-                        <div className='p-2 border border-border rounded-lg h-8 w-8'>
+                        <div className='flex h-8 w-8 items-center justify-center rounded-lg transition-colors hover:bg-muted'>
                           <ConversationSubscription
                             conversationId={derivedConversationId}
                             {...(conversation && { conversation })}
@@ -1223,7 +1250,7 @@ export const ThreadMessages = ({
   const simpleViewHeaderActions = (
     <div className='flex items-center gap-1 shrink-0' style={APP_NO_DRAG_STYLE}>
       {/* Ask AI */}
-      {!isStandaloneWindow() && (
+      {!isStandaloneWindow() && askAIAvailable && (
         <Tooltip content='Ask AI Conversation'>
           <Button
             size='sm'
@@ -1493,7 +1520,7 @@ export const ThreadMessages = ({
             </div>
             <div className='flex gap-x-2 shrink-0'>
               {/* Ask AI */}
-              {!isStandaloneWindow() && (
+              {!isStandaloneWindow() && askAIAvailable && (
                 <Tooltip content='Ask AI Conversation'>
                   <Button
                     size='sm'

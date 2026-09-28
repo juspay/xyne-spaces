@@ -51,6 +51,14 @@ export type TicketFiltersEvent =
       viewId?: string | undefined;
       enabled?: boolean | undefined;
       selectedBoardIdFromDb?: string | null | undefined;
+      /**
+       * Board to fall back to when nothing else picks one. Channels pass their
+       * first linked board here so the tickets tab always has exactly one board
+       * selected — a channel has no "All Boards" state, and an empty
+       * `filters.boards` would leave the query with no scope at all now that
+       * channel.projectId is no longer read.
+       */
+      defaultBoardId?: string | null | undefined;
       searchParams: URLSearchParams;
       setSearchParams: (
         params: URLSearchParams | ((prev: URLSearchParams) => URLSearchParams),
@@ -492,7 +500,10 @@ export const ticketFiltersMachine = setup({
         // the boardId is in the route params (not query params), so we use it as a fallback.
         const boardFromPath =
           event.viewMode === 'board' && event.boardId ? [event.boardId] : undefined;
-        const boardFilter = boardFromUrl ?? boardFromDb ?? boardFromPath;
+        // Last resort only: the URL, the user's persisted board, and the route
+        // path all outrank it, so seeding never overrides an explicit choice.
+        const boardFromDefault = event.defaultBoardId ? [event.defaultBoardId] : undefined;
+        const boardFilter = boardFromUrl ?? boardFromDb ?? boardFromPath ?? boardFromDefault;
 
         if (Object.keys(urlFilters).length > 0) {
           filters = { ...urlFilters };

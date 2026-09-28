@@ -5,7 +5,12 @@ import { queries } from '../zero/queries';
 import { mutators } from '../zero/mutators';
 import { useZero } from './useZero';
 import { useCachedQuery } from './useCachedQuery';
-import { deskFiltersToValues, valuesToFilters } from '../utils/savedViewSerialization';
+import {
+  columnKeysFromValues,
+  columnKeysToValues,
+  deskFiltersToValues,
+  valuesToFilters,
+} from '../utils/savedViewSerialization';
 import type { SavedConfigValueRow } from '../utils/savedViewSerialization';
 import type { TicketFilters } from '../components/Tickets/TicketFilters/types';
 
@@ -21,6 +26,7 @@ export type DeskTicketSavedView = {
 export function useDeskTicketSavedViews(
   channelId: string,
   applyView?: (filters: TicketFilters) => void,
+  applyColumns?: (columns: Set<string> | null) => void,
 ) {
   const zero = useZero();
 
@@ -34,10 +40,14 @@ export function useDeskTicketSavedViews(
       name: string,
       filters: TicketFilters,
       visibility: SavedConfigVisibility,
+      columnKeys?: ReadonlySet<string>,
     ): Promise<string | undefined> => {
       if (!channelId) return undefined;
       const id = uuidv4();
-      const values = deskFiltersToValues(filters);
+      const values = [
+        ...deskFiltersToValues(filters),
+        ...(columnKeys ? columnKeysToValues(columnKeys) : []),
+      ];
       const res = await zero.mutate(
         mutators.savedUserConfiguration.create({
           id,
@@ -57,8 +67,15 @@ export function useDeskTicketSavedViews(
   );
 
   const updateView = useCallback(
-    async (configId: string, filters: TicketFilters): Promise<void> => {
-      const values = deskFiltersToValues(filters);
+    async (
+      configId: string,
+      filters: TicketFilters,
+      columnKeys?: ReadonlySet<string>,
+    ): Promise<void> => {
+      const values = [
+        ...deskFiltersToValues(filters),
+        ...(columnKeys ? columnKeysToValues(columnKeys) : []),
+      ];
       const res = await zero.mutate(
         mutators.savedUserConfiguration.update({
           configId,
@@ -81,11 +98,16 @@ export function useDeskTicketSavedViews(
 
   const applySavedView = useCallback(
     (view: DeskTicketSavedView): void => {
-      if (!applyView || !view.values) return;
-      const filters = valuesToFilters(view.values);
-      applyView(filters);
+      if (!view.values) return;
+      if (applyView) {
+        const filters = valuesToFilters(view.values);
+        applyView(filters);
+      }
+      if (applyColumns) {
+        applyColumns(columnKeysFromValues(view.values));
+      }
     },
-    [applyView],
+    [applyView, applyColumns],
   );
 
   return {

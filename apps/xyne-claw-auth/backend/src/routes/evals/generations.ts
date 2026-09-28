@@ -21,34 +21,74 @@ interface AgentSpec {
   agentSlug: string;
   genProvider: string | null;
   genModel: string | null;
+  optimizations: string | null;
+  judgeBackend: string | null;
+}
+
+const OPTIMIZATIONS_SPEC = /^[a-z0-9_,+\-]{1,400}$/i;
+const JUDGE_BACKEND_SPEC = /^[a-z0-9_]{1,40}$/i;
+
+export function armDisplayModel(spec: Pick<AgentSpec, "genModel" | "optimizations" | "judgeBackend">): string | null {
+  const tags = [
+    spec.optimizations ? `opts:${spec.optimizations}` : "",
+    spec.judgeBackend ? `judge:${spec.judgeBackend}` : "",
+  ].filter(Boolean);
+  if (tags.length === 0) return spec.genModel;
+  return `${spec.genModel ?? "default"} · ${tags.join(" · ")}`;
 }
 
 /** Normalize the request body into 1-3 agent specs. Supports the multi-agent
  *  shape { agents: [{ agentSlug, genProvider?, genModel? }] } and the legacy
- *  single-agent shape { agentSlug, genProvider?, genModel? }. Dedupes by slug. */
-function parseAgentSpecs(body: unknown): { specs: AgentSpec[]; legacy: boolean } | { error: string } {
+ *  single-agent shape { agentSlug, genProvider?, genModel? }. Dedupes by slug + optimization/judge arm, so one agent can be compared against itself. */
+export function parseAgentSpecs(body: unknown): { specs: AgentSpec[]; legacy: boolean } | { error: string } {
   const b = (body ?? {}) as {
-    agents?: Array<{ agentSlug?: unknown; genProvider?: unknown; genModel?: unknown }>;
+    agents?: Array<{ agentSlug?: unknown; genProvider?: unknown; genModel?: unknown; optimizations?: unknown; judgeBackend?: unknown }>;
     agentSlug?: unknown;
     genProvider?: unknown;
     genModel?: unknown;
+    optimizations?: unknown;
+    judgeBackend?: unknown;
   };
   const str = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v.trim() : null);
+  const matching = (v: unknown, shape: RegExp): string | null => {
+    const value = str(v);
+    return value && shape.test(value) ? value.toLowerCase() : null;
+  };
   if (Array.isArray(b.agents) && b.agents.length > 0) {
     const seen = new Set<string>();
     const specs: AgentSpec[] = [];
     for (const a of b.agents) {
       const slug = str(a?.agentSlug);
-      if (!slug || seen.has(slug)) continue;
-      seen.add(slug);
-      specs.push({ agentSlug: slug, genProvider: str(a?.genProvider), genModel: str(a?.genModel) });
+      if (!slug) continue;
+      const spec: AgentSpec = {
+        agentSlug: slug,
+        genProvider: str(a?.genProvider),
+        genModel: str(a?.genModel),
+        optimizations: matching(a?.optimizations, OPTIMIZATIONS_SPEC),
+        judgeBackend: matching(a?.judgeBackend, JUDGE_BACKEND_SPEC),
+      };
+      const armKey = [spec.agentSlug, spec.optimizations ?? "", spec.judgeBackend ?? ""].join("|");
+      if (seen.has(armKey)) continue;
+      seen.add(armKey);
+      specs.push(spec);
     }
     if (specs.length === 0) return { error: "At least one agent is required" };
     if (specs.length > MAX_COMPARE_AGENTS) return { error: `At most ${MAX_COMPARE_AGENTS} agents can be compared` };
     return { specs, legacy: false };
   }
   const slug = str(b.agentSlug);
-  if (slug) return { specs: [{ agentSlug: slug, genProvider: str(b.genProvider), genModel: str(b.genModel) }], legacy: true };
+  if (slug) {
+    return {
+      specs: [{
+        agentSlug: slug,
+        genProvider: str(b.genProvider),
+        genModel: str(b.genModel),
+        optimizations: matching(b.optimizations, OPTIMIZATIONS_SPEC),
+        judgeBackend: matching(b.judgeBackend, JUDGE_BACKEND_SPEC),
+      }],
+      legacy: true,
+    };
+  }
   return { error: "agentSlug is required" };
 }
 
@@ -139,6 +179,8 @@ router.post("/generations/background", async (req: Request, res: Response) => {
         conversationIds: ids,
         ...(spec.genProvider ? { genProvider: spec.genProvider } : {}),
         ...(spec.genModel ? { genModel: spec.genModel } : {}),
+        ...(spec.optimizations ? { optimizations: spec.optimizations } : {}),
+        ...(spec.judgeBackend ? { judgeBackend: spec.judgeBackend } : {}),
       });
 
     // Legacy single-agent callers keep the flat { runId, jobId } shape (no group).
@@ -150,7 +192,7 @@ router.post("/generations/background", async (req: Request, res: Response) => {
         folderId: folderId ?? null,
         createdBy: userId,
         genProvider: spec.genProvider,
-        genModel: spec.genModel,
+        genModel: armDisplayModel(spec),
         orgId,
       });
       const jobId = await enqueueFor(spec, run.id);
@@ -170,7 +212,7 @@ router.post("/generations/background", async (req: Request, res: Response) => {
         folderId: folderId ?? null,
         createdBy: userId,
         genProvider: spec.genProvider,
-        genModel: spec.genModel,
+        genModel: armDisplayModel(spec),
         orgId,
         comparisonId,
         comparisonSeq: i,

@@ -25,7 +25,7 @@ class AccountDeactivationService {
       // Revoke any mTLS certificates issued to the user (s2s call).
       { name: 'revokeCertificates', run: () => mtlsCertificateService.revokeUserCertificates(email) },
       // Revoke every session so the user cannot refresh into a new token.
-      { name: 'revokeSessions', run: () => this.userSessionService.revokeAllUserSessions(userId) },
+      { name: 'revokeSessions', run: () => this.userSessionService.revokeAllUserSessions(userId, 'PROVIDER_REVOKED') },
       // Stop notifications: clear mobile push tokens and browser subscriptions.
       { name: 'unregisterPushTokens', run: () => fcmPushService.unregisterUserTokens(userId) },
     ];

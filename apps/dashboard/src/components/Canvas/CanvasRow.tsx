@@ -81,6 +81,7 @@ export interface CanvasRowProps {
   onArchiveToggle?: ((canvas: Canvas) => void) | undefined;
   trackNames: CanvasRowTrackNames;
   highlightQuery?: string | undefined;
+  dragHandle?: React.ReactNode;
 }
 
 export const CanvasRow: React.FC<CanvasRowProps> = ({
@@ -95,6 +96,7 @@ export const CanvasRow: React.FC<CanvasRowProps> = ({
   onArchiveToggle,
   trackNames,
   highlightQuery,
+  dragHandle,
 }) => {
   const [shareOpen, setShareOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -151,6 +153,7 @@ export const CanvasRow: React.FC<CanvasRowProps> = ({
               : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
           )}
         >
+          {dragHandle}
           <button
             className='flex min-w-0 flex-1 items-center gap-3 text-left'
             onClick={event => onSelect(event, canvas)}
