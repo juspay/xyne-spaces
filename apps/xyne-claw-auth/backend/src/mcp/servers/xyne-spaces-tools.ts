@@ -3251,8 +3251,20 @@ function userDetailLines(u: UserRow): string[] {
   if (u.lastActiveAt) times.push(`Last seen: ${toIST(u.lastActiveAt)} IST`);
   if (times.length > 0) out.push(`  ${times.join(" · ")}`);
   if (u.statusContent) out.push(`  Status: ${u.statusEmoji ? `${u.statusEmoji} ` : ""}${u.statusContent}`);
-  if (u.picture) out.push(`  Avatar: ${u.picture}`);
+  if (u.picture) out.push(`  Avatar: ${buildAvatarUrl(u.id, u.picture)}`);
   return out;
+}
+
+/** Build a READY-MADE, absolute avatar URL the agent can drop into HTML
+ *  verbatim. We emit the full URL (never the bare id + storage path) so the
+ *  desk/report agent never re-types — and truncates — the 25-char user id.
+ *  If `picture` is already an absolute http(s) URL it's passed through
+ *  unchanged; otherwise it's treated as a storage path and encoded into the
+ *  authenticated `/api/users/<id>/picture?v=<path>` endpoint. */
+function buildAvatarUrl(userId: string, picture: string): string {
+  if (/^https?:\/\//i.test(picture)) return picture;
+  const base = CONFIG.spacesAppUrl.replace(/\/+$/, "");
+  return `${base}/api/users/${userId}/picture?v=${encodeURIComponent(picture)}`;
 }
 
 // ── spaces-activity ──────────────────────────────────────────────────
