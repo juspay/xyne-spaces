@@ -12,6 +12,8 @@ export interface KeepAlivePane {
   element: ReactNode;
   /** Location as of that same moment — replayed to the pane while it is hidden. */
   locationContext: LocationContextValue;
+  /** Outlet context the element was captured with. */
+  context?: unknown;
 }
 
 export interface KeepAliveOutletProps {
