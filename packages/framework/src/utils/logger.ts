@@ -1,6 +1,7 @@
 /**
  * Logging abstraction to replace console.log usage
  */
+import { shred, shredText } from '@xyne/logger';
 
 export enum LogLevel {
   DEBUG = 'debug',
@@ -63,10 +64,14 @@ class SimpleLogger implements Logger {
     // In production, this would integrate with proper logging service
     // For now, we'll use a simple implementation that doesn't violate ESLint
     if (typeof process !== 'undefined' && process.env['NODE_ENV'] !== 'test') {
-      const logMessage = `[${entry.timestamp.toISOString()}] ${level.toUpperCase()}: ${message}`;
-      const logData = context ? ` | Context: ${JSON.stringify(context)}` : '';
-      const errorData = error ? ` | Error: ${error.message}` : '';
-      
+      // Shred secret values out of the message/context/error before writing.
+      const safeMessage = shredText(message);
+      const safeContext = context ? shred(context) : undefined;
+      const safeError = error ? shredText(error.message) : undefined;
+      const logMessage = `[${entry.timestamp.toISOString()}] ${level.toUpperCase()}: ${safeMessage}`;
+      const logData = safeContext ? ` | Context: ${JSON.stringify(safeContext)}` : '';
+      const errorData = safeError ? ` | Error: ${safeError}` : '';
+
       process.stdout.write(`${logMessage}${logData}${errorData}\n`);
     }
   }
