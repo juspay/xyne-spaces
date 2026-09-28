@@ -16,4 +16,7 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD wget -q -O- http://127.0.0.1:8080/health || exit 1
 
+# Run as an unprivileged, high-UID user.
+USER 10001:10001
+
 CMD ["node", "/app/tei-batch-proxy.js"]

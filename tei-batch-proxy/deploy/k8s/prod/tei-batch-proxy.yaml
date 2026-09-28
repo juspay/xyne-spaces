@@ -26,6 +26,11 @@ spec:
         traffic.sidecar.istio.io/includeInboundPorts: "8088"
         traffic.sidecar.istio.io/includeOutboundPorts: "8088"
     spec:
+      serviceAccountName: tei-batch-proxy
+      automountServiceAccountToken: false
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       # Co-locate with vespa-feed (the proxy's only caller). The feed pool is
       # tainted v-role=feed:NoSchedule, so we must both select it and tolerate it.
       nodeSelector: { v-role: feed }
@@ -37,6 +42,14 @@ spec:
       containers:
       - name: tei-batch-proxy
         image: <REGISTRY>/tei-batch-proxy:<tag>
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 10001
+          runAsGroup: 10001
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
         ports:
         - containerPort: 8088
         env:
@@ -92,3 +105,10 @@ spec:
   #   http://tei-batch-proxy.xyne-vespa.svc.cluster.local:8088/v1/embeddings
   - port: 8088
     targetPort: 8088
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tei-batch-proxy
+  namespace: xyne-vespa
+automountServiceAccountToken: false
