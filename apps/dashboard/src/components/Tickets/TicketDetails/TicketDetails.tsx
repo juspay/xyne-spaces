@@ -83,6 +83,7 @@ import { EditableFormField } from './EditableFormField';
 import { queries } from '../../../zero/queries';
 import { useChannel, useAllChannels } from '../../../hooks/useChannels';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
 import UserAvatar, { AvatarShape, AvatarSize } from '../../UserAvatar/UserAvatar';
 import { Selector } from './Selector';
 import { DetailChip, DetailChipButton, DetailChipLabel, DetailChipMarker } from './DetailChip';
@@ -1223,9 +1224,13 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   const [projectTicketNextOffset, setProjectTicketNextOffset] = useState(0);
   const projectTicketsRequestIdRef = useRef(0);
 
+  const debouncedTagSearch = useDebouncedValue(tagSearchQuery.trim(), 200);
   // Project-level tags — lazy-loaded when tag dropdown is opened
   const [projectTags] = useCachedQuery(
-    queries.projectTagsByProjectId({ projectId: ticket?.projectId ?? '' }),
+    queries.projectTagsByProjectId({
+      projectId: ticket?.projectId ?? '',
+      search: debouncedTagSearch,
+    }),
     { enabled: !!ticket?.projectId && showTagDropdown },
   );
 

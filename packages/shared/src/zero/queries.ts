@@ -4181,13 +4181,17 @@ export const queries = defineQueries({
       limit: z.number().optional(),
       start: z.object({ name: z.string(), id: z.string() }).nullish(),
       direction: z.enum(['forward', 'backward']).optional(),
+      search: z.string().optional(),
     }),
-    ({ args: { projectId, limit = 100, start, direction = 'forward' } }) => {
+    ({ args: { projectId, limit = 100, start, direction = 'forward', search } }) => {
       const isBackward = direction === 'backward';
       let q = zql.project_tags
         .where('projectId', projectId)
         .orderBy('name', isBackward ? 'desc' : 'asc')
         .orderBy('id', isBackward ? 'desc' : 'asc');
+      if (search) {
+        q = q.where('name', 'ILIKE', `%${search}%`);
+      }
       if (start) {
         q = q.start({ name: start.name, id: start.id }, { inclusive: false });
       }
