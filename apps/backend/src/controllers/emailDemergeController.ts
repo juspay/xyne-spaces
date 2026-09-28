@@ -9,7 +9,6 @@
 import { Request, Response } from 'express';
 import { EmailType } from '@xyne/shared';
 import { EmailRepository } from '@/database/repositories/emailRepository';
-import { syncTicketEmailCount } from '@/database/syncTicketEmailCount';
 import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { ChannelParticipantRepository } from '@/database/repositories/channelParticipantRepository';
 import { emailService } from '@/services/emailService';
@@ -20,6 +19,7 @@ import { mailSchema } from '@/vespa/src/types';
 import { config as appConfig } from '@/config/env';
 import { tagGenerationPipeline, DESK_EMAIL_SOURCE_TYPE, deskEmailConfigKey } from '@/tags';
 import { syncTicketTagsForConversation } from '@/tags/deskTicket';
+import { demergeEmailTx } from '@/bypassAcl/transactions/emailDemergeController';
 
 interface DemergeEmailRequest {
   emailId: string;
@@ -29,7 +29,7 @@ export class EmailDemergeController {
   private emailRepo: EmailRepository;
   private channelRepo: ChannelRepository;
   private channelParticipantRepo: ChannelParticipantRepository;
-  private prisma;
+  prisma;
 
   constructor() {
     this.emailRepo = new EmailRepository();
@@ -150,16 +150,7 @@ export class EmailDemergeController {
 
       // Step 9: Move emails in a transaction. external_message.entityId still
       // points to these email ids, so no external_message rewrite is needed.
-      await this.prisma.$transaction(async (tx) => {
-        await tx.email.updateMany({
-          where: { id: { in: emailIdsToMove } },
-          data: {
-            conversationId: newConversation.conversationId,
-          },
-        });
-        await syncTicketEmailCount(tx, originalTicket.conversationId);
-        await syncTicketEmailCount(tx, newConversation.conversationId);
-      });
+      await demergeEmailTx(this, emailIdsToMove, newConversation, originalTicket);
 
       // Re-sync old ticket's tags — emails moved out so its latest email changed,
       // but no tag write fired on the old conversation's side.
@@ -228,3 +219,4 @@ export class EmailDemergeController {
 }
 
 export const emailDemergeController = new EmailDemergeController();
+

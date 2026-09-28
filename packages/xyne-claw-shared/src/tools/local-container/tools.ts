@@ -2,14 +2,31 @@ import type { ToolDefinition } from "../types.js";
 
 const SOURCE = "custom:local-container";
 
+/**
+ * Every container-* description carries this. The container tools and the
+ * sandbox-* tools have near-identical names and overlapping jobs, and the model
+ * picks wrongly when nothing says which environment it is standing in.
+ *
+ * container-* = the user's OWN machine, via the desktop app's local harness.
+ * sandbox-*   = a server-side Kata/QEMU microVM.
+ *
+ * They are not interchangeable: only container-* can see the user's local files
+ * and only sandbox-* exists on a server run.
+ */
+/** Returned at runtime when a container-* tool is called on a server run. */
 const SERVER_HINT = "Use the sandbox-* tools on server runs.";
+
+const LOCAL_ONLY =
+  " Runs on the USER'S OWN MACHINE (desktop app local harness) — it can see their local " +
+  "files, and it does not exist on server runs. On a server run use the sandbox-* tools instead.";
 
 export const containerRun: ToolDefinition = {
   slug: "container-run",
   name: "Container Run",
   description:
-    "Run a shell command inside the isolated container; /workspace is your working folder. " +
-    "Use for installs, builds, tests and scripts.",
+    "Run a SHORT shell command inside the isolated container; /workspace is your working folder. " +
+    "Use for greps, file inspection, small scripts, git status/log. For installs, builds and test " +
+    "suites use container-run-detached instead — this call blocks and will time out." + LOCAL_ONLY,
   source: SOURCE,
   harness: "local",
   inputSchema: {
@@ -28,7 +45,9 @@ export const containerRun: ToolDefinition = {
 export const containerRunDetached: ToolDefinition = {
   slug: "container-run-detached",
   name: "Container Run Detached",
-  description: "Start a long command in the background inside the container and get a job id back.",
+  description:
+    "Start a LONG command in the background inside the container and get a job id back; poll it with " +
+    "container-poll-job. Correct tool for dependency installs, builds and test suites." + LOCAL_ONLY,
   source: SOURCE,
   harness: "local",
   inputSchema: {
@@ -65,7 +84,9 @@ export const containerPollJob: ToolDefinition = {
 export const containerWriteFile: ToolDefinition = {
   slug: "container-write-file",
   name: "Container Write File",
-  description: "Create or overwrite a file in the workspace (workspace-relative path).",
+  description:
+    "Create or overwrite a file in the container workspace (workspace-relative path). To SEND a finished " +
+    "file to the user afterwards, call deliver-files — writing a file does not deliver it." + LOCAL_ONLY,
   source: SOURCE,
   harness: "local",
   inputSchema: {
@@ -84,7 +105,7 @@ export const containerWriteFile: ToolDefinition = {
 export const containerReadFile: ToolDefinition = {
   slug: "container-read-file",
   name: "Container Read File",
-  description: "Read a workspace file.",
+  description: "Read a file from the container workspace back into your context." + LOCAL_ONLY,
   source: SOURCE,
   harness: "local",
   inputSchema: {
@@ -102,7 +123,9 @@ export const containerReadFile: ToolDefinition = {
 export const containerEditFile: ToolDefinition = {
   slug: "container-edit-file",
   name: "Container Edit File",
-  description: "Replace exactly one occurrence of oldText with newText in a workspace file.",
+  description:
+    "Replace exactly one occurrence of oldText with newText in a container workspace file — cheaper than " +
+    "rewriting the whole file with container-write-file." + LOCAL_ONLY,
   source: SOURCE,
   harness: "local",
   inputSchema: {

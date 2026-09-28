@@ -8,6 +8,7 @@ export {
   sandboxCopyIn,
   sandboxReadFile,
   sandboxDeliverFiles,
+  sandboxContentType,
   sandboxDestroy,
   sandboxRepoSetup,
   gitRead,

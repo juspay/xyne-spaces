@@ -38,6 +38,18 @@ const RAW_ATTACHMENT_INLINE_LIMIT_BYTES = Number(
   process.env["SPACES_FETCH_ATTACHMENT_INLINE_LIMIT_BYTES"] ?? 5 * 1024 * 1024,
 );
 const isOnyxBenchLane = (): boolean => (process.env["ONYX_BENCH_VESPA"] ?? "").trim() === "true";
+
+// `spaces-search` used to cover the DIRECT_VESPA_SEARCH=off case. It is gone
+// (2026-09-26), so that flag now decides whether this deployment ships a
+// general search tool AT ALL. Silence there would look like "the agent chose
+// not to search" rather than "the agent had nothing to search with".
+if (!CONFIG.directVespaSearch) {
+  log.error(
+    "[xyne-spaces-tools] DIRECT_VESPA_SEARCH is off — NO general search tool is registered " +
+    "(spaces-vespa-search/-corpus-scan/-evidence-pack are all gated on it, and spaces-search was removed). " +
+    "Set DIRECT_VESPA_SEARCH=true plus VESPA_QUERY_ENDPOINT / VESPA_NAMESPACE / VESPA_CLUSTER.",
+  );
+}
 const ATTACHMENT_INGEST_TIMEOUT_MS = Number(
   process.env["SPACES_FETCH_ATTACHMENT_INGEST_TIMEOUT_MS"] ?? 120_000,
 );
@@ -10258,10 +10270,19 @@ const spacesAutomationAgents: ToolDef = {
 
 export const tools: ToolDef[] = [
   spacesWhoami,
+  // `spaces-vespa-search` is the general search tool (2026-09-26). The older
+  // `spaces-search` and its `spaces-search-v2` fork are no longer listed: three
+  // overlapping search tools made the model pick badly, and v2 was a partial
+  // fork of v1 that no prompt or skill pointed at.
+  //
+  // NOTE: DIRECT_VESPA_SEARCH is now LOAD-BEARING. With it off there is no
+  // general search tool at all, where previously `spaces-search` covered that
+  // case — see the startup guard in this module.
   ...(CONFIG.directVespaSearch ? [spacesVespaSearch, spacesCorpusScan, spacesEvidencePack] : []),
-  onyxBenchSearch,
-  spacesSearch,
-  spacesSearchV2,
+  // Benchmark-only (EnterpriseRAG-Bench). Catalogued ONLY on the bench lane —
+  // its handler already refused elsewhere, but listing it put a fictional-corpus
+  // search tool in every real agent's palette.
+  ...(isOnyxBenchLane() ? [onyxBenchSearch] : []),
   spacesMyItems,
   spacesSavedViews,
   spacesWorkflowStats,

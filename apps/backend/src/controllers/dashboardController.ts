@@ -7,7 +7,7 @@ import {
   DashboardAiCreateRequestSchema,
   QueryVisualizationType as SharedVisualizationType,
   DashboardRole,
-  DashboardVisibility, QueryType } from '@xyne/shared';
+  DashboardVisibility } from '@xyne/shared';
 import { config } from '@/config/env';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
@@ -27,18 +27,22 @@ import {
   QueryExecError,
 } from '@/services/dynamicDashboard/queryEngine';
 import {
-  assertDashboardEditAccess,
-  assertNoDashboardNameClash,
   createDashboardComponent,
   deleteDashboardComponent,
-  resolveDashboardAccess,
   setDashboardMeta,
   updateDashboardComponent,
   userCanReadDashboard,
 } from '@/services/dynamicDashboard/componentWrites';
+import { createDashboardTxTx } from '@/bypassAcl/transactions/dashboardController';
+import { removeTx } from '@/bypassAcl/transactions/dashboardController';
+import { addParticipantsTx } from '@/bypassAcl/transactions/dashboardController';
+import { removeParticipantTx } from '@/bypassAcl/transactions/dashboardController';
+import { updateParticipantRoleTx } from '@/bypassAcl/transactions/dashboardController';
+import { updatePositionsTx } from '@/bypassAcl/transactions/dashboardController';
+import { aiCreateTx } from '@/bypassAcl/transactions/dashboardController';
 
-const notFound = (message: string): AppError => new AppError(message, 404);
-const forbidden = (message: string): AppError => new AppError(message, 403);
+export const notFound = (message: string): AppError => new AppError(message, 404);
+export const forbidden = (message: string): AppError => new AppError(message, 403);
 
 const STATUS_LABEL: Record<number, string> = {
   400: 'BadRequest',
@@ -254,46 +258,7 @@ export class DashboardController {
     components: z.infer<typeof componentInput>[],
   ): Promise<DashboardRow> {
     const trimmedName = data.name.trim();
-    return db.$transaction(async (tx) => {
-      await assertNoDashboardNameClash(tx, ctx.workspaceId, trimmedName);
-      const created = await tx.dynamicDashboard.create({
-        data: {
-          workspaceId: ctx.workspaceId,
-          name: trimmedName,
-          description: data.description?.trim(),
-          createdBy: ctx.userId,
-          visibility: data.visibility ?? DashboardVisibility.PRIVATE,
-          config: '{}',
-        },
-      });
-      await tx.dashboardParticipant.create({
-        data: {
-          workspaceId: ctx.workspaceId,
-          dashboardId: created.id,
-          userId: ctx.userId,
-          role: DashboardRole.OWNER,
-        },
-      });
-      for (let i = 0; i < components.length; i++) {
-        const c = components[i]!;
-        const query = await tx.dynamicDashboardQuery.create({
-          data: {
-            workspaceId: ctx.workspaceId,
-            title: c.title ?? null,
-            queryType: QueryType.external,
-            queryJson: c.queryJson,
-            visualType: c.visualType as SharedVisualizationType,
-            position: c.position,
-            config: c.config ?? '{}',
-            createdBy: ctx.userId,
-          },
-        });
-        await tx.dynamicDashboardQueryMapping.create({
-          data: { workspaceId: ctx.workspaceId, dashboardId: created.id, queryId: query.id, sequence: i },
-        });
-      }
-      return created;
-    });
+    return createDashboardTxTx(ctx, trimmedName, data, components);
   }
 
   // =====================================================================
@@ -463,26 +428,7 @@ export class DashboardController {
     if (!ctx) return;
     const id = req.params.id!;
     try {
-      await db.$transaction(async (tx) => {
-        const dashboard = await tx.dynamicDashboard.findUnique({ where: { id } });
-        if (!dashboard || dashboard.workspaceId !== ctx.workspaceId) {
-          throw notFound('Dashboard not found');
-        }
-        const { isOwner } = await resolveDashboardAccess(tx, dashboard, ctx.userId);
-        if (!isOwner) {
-          throw forbidden('Only dashboard owners can delete the dashboard');
-        }
-        // App-side cascade (relationMode = "prisma" — no DB FKs).
-        const mappings = await tx.dynamicDashboardQueryMapping.findMany({
-          where: { dashboardId: id },
-        });
-        await tx.dynamicDashboardQueryMapping.deleteMany({ where: { dashboardId: id } });
-        await tx.dynamicDashboardQuery.deleteMany({
-          where: { id: { in: mappings.map((m) => m.queryId) } },
-        });
-        await tx.dashboardParticipant.deleteMany({ where: { dashboardId: id } });
-        await tx.dynamicDashboard.delete({ where: { id } });
-      });
+      await removeTx(id, ctx);
       res.json({ success: true });
     } catch (e) {
       this.respondWithError(res, e, 'remove');
@@ -501,30 +447,7 @@ export class DashboardController {
     const parsed = addParticipantsBody.safeParse(req.body);
     if (!parsed.success) return this.badRequest(res, parsed);
     try {
-      await db.$transaction(async (tx) => {
-        const dashboard = await tx.dynamicDashboard.findUnique({ where: { id: dashboardId } });
-        if (!dashboard || dashboard.workspaceId !== ctx.workspaceId) {
-          throw notFound("Dashboard doesn't exist");
-        }
-        const { isOwner, isEditor } = await resolveDashboardAccess(tx, dashboard, ctx.userId);
-        if (!isOwner && !isEditor) {
-          throw forbidden('Only dashboard owners or editors can add participants');
-        }
-        if (isEditor && parsed.data.participants.some((p) => p.role === DashboardRole.OWNER)) {
-          throw forbidden('Editors cannot grant owner role');
-        }
-        for (const p of parsed.data.participants) {
-          const user = await tx.user.findUnique({ where: { id: p.userId } });
-          if (!user) continue;
-          const existing = await tx.dashboardParticipant.findUnique({
-            where: { dashboardId_userId: { dashboardId, userId: p.userId } },
-          });
-          if (existing) continue;
-          await tx.dashboardParticipant.create({
-            data: { workspaceId: ctx.workspaceId, dashboardId, userId: p.userId, role: p.role },
-          });
-        }
-      });
+      await addParticipantsTx(dashboardId, ctx, parsed);
       const participants = await db.dashboardParticipant.findMany({
         where: { dashboardId },
         orderBy: { joinedAt: 'asc' },
@@ -542,27 +465,7 @@ export class DashboardController {
     const dashboardId = req.params.id!;
     const targetUserId = req.params.userId!;
     try {
-      await db.$transaction(async (tx) => {
-        const dashboard = await tx.dynamicDashboard.findUnique({ where: { id: dashboardId } });
-        if (!dashboard || dashboard.workspaceId !== ctx.workspaceId) {
-          throw notFound("Dashboard doesn't exist");
-        }
-        const { isOwner, isEditor } = await resolveDashboardAccess(tx, dashboard, ctx.userId);
-        if (!isOwner && !isEditor) {
-          throw forbidden('Only dashboard owners or editors can remove participants');
-        }
-        const target = await tx.dashboardParticipant.findUnique({
-          where: { dashboardId_userId: { dashboardId, userId: targetUserId } },
-        });
-        if (!target) throw notFound('User is not a participant');
-        if (targetUserId === ctx.userId && dashboard.createdBy === ctx.userId) {
-          throw forbidden('Dashboard creator cannot be removed');
-        }
-        if (isEditor && target.role === DashboardRole.OWNER) {
-          throw forbidden('Editors cannot remove owners');
-        }
-        await tx.dashboardParticipant.delete({ where: { id: target.id } });
-      });
+      await removeParticipantTx(dashboardId, ctx, targetUserId);
       res.json({ success: true });
     } catch (e) {
       this.respondWithError(res, e, 'removeParticipant');
@@ -579,33 +482,7 @@ export class DashboardController {
     if (!parsed.success) return this.badRequest(res, parsed);
     const { role } = parsed.data;
     try {
-      const updated = await db.$transaction(async (tx) => {
-        const dashboard = await tx.dynamicDashboard.findUnique({ where: { id: dashboardId } });
-        if (!dashboard || dashboard.workspaceId !== ctx.workspaceId) {
-          throw notFound("Dashboard doesn't exist");
-        }
-        const { isOwner, isEditor } = await resolveDashboardAccess(tx, dashboard, ctx.userId);
-        if (!isOwner && !isEditor) {
-          throw forbidden('Only dashboard owners or editors can update participant roles');
-        }
-        const target = await tx.dashboardParticipant.findUnique({
-          where: { dashboardId_userId: { dashboardId, userId: targetUserId } },
-        });
-        if (!target) throw notFound('User is not a participant');
-        if (isEditor && role === DashboardRole.OWNER) {
-          throw forbidden('Editors cannot grant owner role');
-        }
-        if (isEditor && target.role === DashboardRole.OWNER) {
-          throw forbidden('Editors cannot modify owner roles');
-        }
-        if (targetUserId === dashboard.createdBy) {
-          throw forbidden("Cannot change dashboard creator's role");
-        }
-        return tx.dashboardParticipant.update({
-          where: { id: target.id },
-          data: { role },
-        });
-      });
+      const updated = await updateParticipantRoleTx(dashboardId, ctx, targetUserId, role);
       res.json({ participant: toParticipant(updated) });
     } catch (e) {
       this.respondWithError(res, e, 'updateParticipantRole');
@@ -659,24 +536,7 @@ export class DashboardController {
     const parsed = positionsBody.safeParse(req.body);
     if (!parsed.success) return this.badRequest(res, parsed);
     try {
-      await db.$transaction(async (tx) => {
-        await assertDashboardEditAccess(tx, dashboardId, ctx.userId, ctx.workspaceId);
-        // All updated tiles must belong to this dashboard.
-        const ids = parsed.data.updates.map((u) => u.id);
-        const mappings = await tx.dynamicDashboardQueryMapping.findMany({
-          where: { dashboardId, queryId: { in: ids } },
-        });
-        const allowed = new Set(mappings.map((m) => m.queryId));
-        for (const u of parsed.data.updates) {
-          if (!allowed.has(u.id)) {
-            throw forbidden('Tile does not belong to this dashboard');
-          }
-          await tx.dynamicDashboardQuery.update({
-            where: { id: u.id },
-            data: { position: u.position },
-          });
-        }
-      });
+      await updatePositionsTx(dashboardId, ctx, parsed);
       res.json({ success: true });
     } catch (e) {
       this.respondWithError(res, e, 'updatePositions');
@@ -728,9 +588,7 @@ export class DashboardController {
     }
 
     try {
-      await db.$transaction((tx) =>
-        assertDashboardEditAccess(tx, dashboardId, userId, workspaceId),
-      );
+      await aiCreateTx(dashboardId, userId, workspaceId);
     } catch (e) {
       if (e instanceof AppError) {
         res.status(e.statusCode).json({ error: 'Forbidden', message: e.message });
@@ -1258,3 +1116,10 @@ export class DashboardController {
     res.status(500).json({ error: 'InternalServerError' });
   }
 }
+
+
+
+
+
+
+
