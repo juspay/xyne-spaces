@@ -1423,6 +1423,27 @@ export const RenderMessageWithHTML: React.FC<RenderMessageWithHTMLProps> = ({
   const navigate = useNavigate();
   const keyPrefix = useMemo<string>(() => Math.random().toString(36).slice(2), []);
 
+  // Callers build this object inline, so its identity changes on every render.
+  // Keyed on its fields instead, or the memo below re-parses the message HTML on
+  // every re-render of the bubble.
+  const hasArtifactContext = slashCommandArtifactContext !== undefined;
+  const artifactChannelId = slashCommandArtifactContext?.channelId;
+  const artifactSenderId = slashCommandArtifactContext?.senderId;
+  const artifactCreatedAt = slashCommandArtifactContext?.createdAt;
+  const artifactSurface = slashCommandArtifactContext?.surface;
+  const artifactContext = useMemo<RenderMessageWithHTMLProps['slashCommandArtifactContext']>(
+    () =>
+      hasArtifactContext
+        ? {
+            ...(artifactChannelId !== undefined && { channelId: artifactChannelId }),
+            ...(artifactSenderId !== undefined && { senderId: artifactSenderId }),
+            ...(artifactCreatedAt !== undefined && { createdAt: artifactCreatedAt }),
+            ...(artifactSurface !== undefined && { surface: artifactSurface }),
+          }
+        : undefined,
+    [hasArtifactContext, artifactChannelId, artifactSenderId, artifactCreatedAt, artifactSurface],
+  );
+
   const parsedContent = useMemo<React.ReactNode[]>(() => {
     try {
       if (!message || typeof message !== 'string') return [];
@@ -1463,7 +1484,7 @@ export const RenderMessageWithHTML: React.FC<RenderMessageWithHTMLProps> = ({
           messageId,
           conversationId,
           preserveThreadRoute,
-          slashCommandArtifactContext,
+          artifactContext,
           disableLinks,
         );
         if (parsed !== null) nodes.push(parsed);
@@ -1482,7 +1503,7 @@ export const RenderMessageWithHTML: React.FC<RenderMessageWithHTMLProps> = ({
     messageId,
     conversationId,
     preserveThreadRoute,
-    slashCommandArtifactContext,
+    artifactContext,
   ]);
 
   // Inject (edited) into the last element if it's safe to do so
