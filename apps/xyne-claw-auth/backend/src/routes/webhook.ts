@@ -82,7 +82,7 @@ import { publishLiveEvent } from "../lib/live-conversation-bus.js";
 import { deliverXyneAiFlow, postFlowCard, resolveXyneAiCardTarget } from "../lib/flow-card-delivery.js";
 import { renderAgentProfileCard, renderAgentProfileListCard, renderAgentSummaryCard } from "../lib/agent-card-render.js";
 import { renderConnectorSuggestCard, renderProviderSuggestCard, resolveConnectorSuggestions } from "../lib/connector-card-render.js";
-import { buildTicketProposalCardFlow, mintWriteCardAction, readPendingWriteAction } from "../lib/ticket-card-render.js";
+import { buildWriteApprovalCardFlow, formatActionDescription, mintWriteCardAction, readPendingWriteAction } from "../lib/write-card-render.js";
 import { UNREGISTERED_USER_TEMPLATE } from "../constants.js";
 import {
   registerRunRecovery,
@@ -1069,146 +1069,6 @@ export async function fetchConversationHistory(
 
 // buildAppActionFrontmatter removed — replaced by buildTwinApprovalFlow from xyne-claw-shared
 
-// ── Action formatting ───────────────────────────────────────────────
-
-/** Tickets rendered in full inside the bulk approval card. The rest are
- *  summarised by count — every ticket in `params` is still created on approve,
- *  since the executed payload comes from the HMAC-signed action, not the card. */
-const BULK_TICKETS_CARD_LIMIT = 25;
-
-function formatActionDescription(tool: string, params: Record<string, unknown>, options?: { channelName?: string }): string {
-  if (tool === "user-send-message") {
-    const content = (params["content"] as string ?? "").slice(0, 300);
-    const conversationId = params["conversationId"] as string | undefined;
-    const channelId = params["channelId"] as string | undefined;
-    const lines = [`**Send Message as You**`, ``];
-    if (channelId) {
-      lines.push(`**Destination:** post NEW message to #${options?.channelName ?? channelId}`);
-    } else if (conversationId) {
-      lines.push(`**Destination:** reply in existing thread ${conversationId}`);
-    }
-    if (content) lines.push(``, `**Message:** ${content}${(params["content"] as string ?? "").length > 300 ? "..." : ""}`);
-    return lines.join("\n");
-  }
-
-  if (tool === "spaces-create-ticket") {
-    const title = params["title"] as string ?? "";
-    const desc = (params["description"] as string ?? "").slice(0, 300);
-    const lines = [`**Create Ticket**`, ``, `**Title:** ${title}`];
-    if (desc) lines.push(`**Description:** ${desc}${(params["description"] as string ?? "").length > 300 ? "..." : ""}`);
-    return lines.join("\n");
-  }
-
-  if (tool === "spaces-create-bulk-tickets") {
-    const tickets = Array.isArray(params["tickets"]) ? params["tickets"] as Array<Record<string, unknown>> : [];
-    const lines = [
-      `**Create ${tickets.length} Tickets**`,
-      ``,
-      `**Project/Board/Channel:** ${String(params["projectId"] ?? "")} / ${String(params["boardId"] ?? "")} / ${options?.channelName ? `#${options.channelName}` : String(params["channelId"] ?? "")}`,
-      ``,
-    ];
-    // Everything the approver needs lives in THIS card — no companion file
-    // upload. Same shape as spaces-create-ticket above (title + trimmed
-    // description), repeated per ticket. The card body scrolls past 280px
-    // (buildWriteApprovalFlow), so a long batch stays readable in-thread.
-    tickets.slice(0, BULK_TICKETS_CARD_LIMIT).forEach((ticket, index) => {
-      const title = String(ticket["title"] ?? "(untitled)");
-      const priority = String(ticket["priority"] ?? params["defaultPriority"] ?? "");
-      const assignee = String(ticket["assignedTo"] ?? params["defaultAssignedTo"] ?? "");
-      const tags = Array.isArray(ticket["tags"]) ? (ticket["tags"] as unknown[]).join(", ") : "";
-      const rawDesc = String(ticket["description"] ?? "");
-      const desc = rawDesc.slice(0, 200);
-      const meta = [priority, assignee && `→ ${assignee}`, tags && `[${tags}]`].filter(Boolean).join(" · ");
-      lines.push(`**${index + 1}. ${title}**${meta ? ` — ${meta}` : ""}`);
-      if (desc) lines.push(`${desc}${rawDesc.length > 200 ? "…" : ""}`);
-      lines.push(``);
-    });
-    if (tickets.length > BULK_TICKETS_CARD_LIMIT) {
-      lines.push(`_…and ${tickets.length - BULK_TICKETS_CARD_LIMIT} more — all ${tickets.length} are created on approve._`);
-    }
-    return lines.join("\n");
-  }
-
-  if (tool === "spaces-update-bulk-tickets") {
-    const tickets = Array.isArray(params["tickets"]) ? params["tickets"] as Array<Record<string, unknown>> : [];
-    const lines = [`**Update ${tickets.length} Tickets**`, ``];
-
-    const defaults: string[] = [];
-    if (params["defaultStatus"]) defaults.push(`status \u2192 ${String(params["defaultStatus"])}`);
-    if (params["defaultStage"]) defaults.push(`stage \u2192 ${String(params["defaultStage"])}`);
-    if (params["defaultPriority"]) defaults.push(`priority \u2192 ${String(params["defaultPriority"])}`);
-    if (params["defaultAssigneeId"]) defaults.push(`assignee \u2192 ${String(params["defaultAssigneeId"])}`);
-    if (Array.isArray(params["defaultTags"]) && (params["defaultTags"] as unknown[]).length) {
-      defaults.push(`tags [${(params["defaultTags"] as unknown[]).join(", ")}]`);
-    }
-    if (defaults.length) lines.push(`**Defaults:** ${defaults.join(" \u00b7 ")}`, ``);
-
-    tickets.slice(0, BULK_TICKETS_CARD_LIMIT).forEach((ticket, index) => {
-      const ticketId = String(ticket["ticketId"] ?? "(no id)");
-      const changes: string[] = [];
-      const status = ticket["status"] ?? params["defaultStatus"];
-      const stage = ticket["stage"] ?? params["defaultStage"];
-      const priority = ticket["priority"] ?? params["defaultPriority"];
-      const assignee = ticket["assigneeId"] ?? params["defaultAssigneeId"];
-      if (status) changes.push(`status \u2192 ${String(status)}`);
-      if (stage) changes.push(`stage \u2192 ${String(stage)}`);
-      if (priority) changes.push(`priority \u2192 ${String(priority)}`);
-      if (assignee) changes.push(`assignee \u2192 ${String(assignee)}`);
-      if (ticket["title"]) changes.push(`title`);
-      if (ticket["description"]) changes.push(`description`);
-      if (ticket["eta"]) changes.push(`eta \u2192 ${String(ticket["eta"])}`);
-      if (Array.isArray(ticket["tags"]) || Array.isArray(params["defaultTags"])) changes.push(`tags`);
-      lines.push(`**${index + 1}. ${ticketId}**${changes.length ? ` \u2014 ${changes.join(" \u00b7 ")}` : ""}`);
-    });
-    if (tickets.length > BULK_TICKETS_CARD_LIMIT) {
-      lines.push(``, `_\u2026and ${tickets.length - BULK_TICKETS_CARD_LIMIT} more \u2014 all ${tickets.length} are updated on approve._`);
-    }
-    return lines.join("\n");
-  }
-
-  if (tool === "spaces-schedule-call") {
-    const title = params["title"] as string ?? "Call";
-    const startsAt = params["startsAt"] as string ?? "";
-    const endsAt = params["endsAt"] as string ?? "";
-    const lines = [`**Schedule Call**`, ``, `**Title:** ${title}`];
-    if (startsAt) lines.push(`**Starts:** ${new Date(startsAt).toLocaleString()}`);
-    if (endsAt) lines.push(`**Ends:** ${new Date(endsAt).toLocaleString()}`);
-    return lines.join("\n");
-  }
-
-  if (tool === "spaces-memory-create") {
-    const docType = (params["docType"] as string ?? "fact").toUpperCase();
-    const query = params["query"] as string ?? "";
-    const tags = params["tags"] as string[] ?? [];
-    const lines = [`**Save to Knowledge Base (${docType})**`];
-    if (query) lines.push(``, `**Summary:** ${query}`);
-    if (tags.length > 0) lines.push(`**Tags:** ${tags.join(", ")}`);
-    lines.push(``, `_See attached file for full content._`);
-    return lines.join("\n");
-  }
-
-  if (tool === "create-skill") {
-    const name = (params["name"] as string) ?? "";
-    const slug = (params["slug"] as string) ?? "";
-    const description = (params["description"] as string) ?? "";
-    const content = (params["content"] as string) ?? "";
-    const lines = [`**Create Skill**`, ``, `**Name:** ${name}`];
-    if (slug) lines.push(`**Slug:** \`${slug}\``);
-    if (description) lines.push(`**Description:** ${description}`);
-    lines.push(``, `**Content (${content.length} chars):**`, "```md", content.slice(0, 1500) + (content.length > 1500 ? "\n…(truncated)" : ""), "```");
-    return lines.join("\n");
-  }
-
-  // Fallback for unknown tools
-  const entries = Object.entries(params).filter(([, v]) => v != null).slice(0, 8);
-  const lines = [`**${tool}**`, ``];
-  for (const [key, value] of entries) {
-    const val = typeof value === "string" ? value.slice(0, 200) : JSON.stringify(value).slice(0, 200);
-    lines.push(`**${key}:** ${val}`);
-  }
-  return lines.join("\n");
-}
-
 async function postWriteApprovalAction(args: {
   action: Record<string, unknown>;
   ctx: SessionContext;
@@ -1238,12 +1098,11 @@ async function postWriteApprovalAction(args: {
   // The rich `ticket` FlowUI component is only rendered by newer Spaces
   // backends; older deployments reject it. Track when we used it so a flow-
   // schema rejection can fall back to the generic approval card below.
-  const ticketFlow = buildTicketProposalCardFlow(cardAction);
-  const usedRichTicketCard = ticketFlow !== null;
-  const writeFlow = withSpacesAppId(
-    ticketFlow ?? buildWriteApprovalFlow(actionDesc, cardAction),
-    spacesAppId,
+  const { flow: cardFlow, usedTicketCard: usedRichTicketCard } = buildWriteApprovalCardFlow(
+    cardAction,
+    actionDesc,
   );
+  const writeFlow = withSpacesAppId(cardFlow, spacesAppId);
 
   // Any attachment is a SEPARATE post from the card. `/files/filesUpload`
   // (filesController.uploadFiles) has no flow handling at all — a `flow` field

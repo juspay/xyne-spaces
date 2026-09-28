@@ -2225,20 +2225,21 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
       log.warn(`[connector-card] xyne-ai suggestion cards failed:`, errMsg(suggestErr));
     }
 
-    // Request side only — the action and its result card are surface-aware in
-    // flow-action.ts. Every other write tool keeps its PendingActionBlock.
+    // Request side only — action and result are surface-aware in flow-action.ts.
+    // A pending action with no card keeps its raw row, so a delivery failure
+    // cannot make it unapprovable.
     if (pendingActions?.length) {
       try {
         const { resolveXyneAiCardTarget } = await import("../lib/flow-card-delivery.js");
         const ticketTarget = await resolveXyneAiCardTarget({ assistantMessageId });
         if (ticketTarget) {
-          const { readPendingWriteAction, renderXyneAiTicketProposalCard } = await import(
-            "../lib/ticket-card-render.js"
+          const { readPendingWriteAction, renderXyneAiWriteApprovalCard } = await import(
+            "../lib/write-card-render.js"
           );
           for (const raw of pendingActions) {
             const writeAction = readPendingWriteAction(raw);
             if (!writeAction) continue;
-            const flow = await renderXyneAiTicketProposalCard({
+            const flow = await renderXyneAiWriteApprovalCard({
               action: writeAction,
               target: ticketTarget,
             });

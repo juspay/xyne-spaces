@@ -626,6 +626,33 @@ async function deliverWriteCardUpdate(opts: {
   );
 }
 
+/** For a branch whose Spaces ending is message text. Same ordering rule as the
+ *  write result cards: the row lands before the request is answered. */
+async function finishTextWriteOnRow(opts: {
+  card: XyneAiWriteCard;
+  tool: string;
+  ok: boolean;
+  heading: string;
+  details?: Array<{ label: string; value: string }> | undefined;
+  errorText?: string | undefined;
+}): Promise<void> {
+  // A failed write should not read back as declined.
+  if (opts.ok) resolveXyneAiPendingAction(opts.card, "approved");
+  const flow = buildWriteResultFlow({
+    tool: opts.tool,
+    ok: opts.ok,
+    heading: opts.heading,
+    details: opts.details ?? [],
+    ...(opts.errorText ? { errorText: opts.errorText } : {}),
+  });
+  await deliverWriteCardUpdate({
+    messageId: opts.card.chatMessageId,
+    agentSlug: undefined,
+    flow: withXyneAiCardFields(flow, opts.card),
+    xyneAi: opts.card,
+  });
+}
+
 /** So a reload agrees with what the card now shows. */
 function resolveXyneAiPendingAction(
   card: XyneAiWriteCard | undefined,
@@ -1085,12 +1112,28 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         const outcome = await applyAgentToolAction(tool, params, writeUserId);
         if (!outcome.ok) {
           resp = { type: "close_screen", finalMessage: `⚠️ ${outcome.error}` };
+          if (xyneAiCard) {
+            await finishTextWriteOnRow({ card: xyneAiCard, tool, ok: false, heading: `${tool} failed`, errorText: outcome.error });
+            res.json(resp);
+            return;
+          }
           res.json(resp);
           void replaceFlowCardWithText(messageId, agentSlug, `⚠️ ${outcome.error}`, conversationId, undefined, spacesAppId);
           return;
         }
         const suffix = outcome.note ? `\n\n_${outcome.note}_` : "";
         resp = { type: "close_screen", finalMessage: `✅ ${outcome.message}` };
+        if (xyneAiCard) {
+          await finishTextWriteOnRow({
+            card: xyneAiCard,
+            tool,
+            ok: true,
+            heading: outcome.message,
+            ...(outcome.note ? { details: [{ label: "Note", value: outcome.note }] } : {}),
+          });
+          res.json(resp);
+          return;
+        }
         res.json(resp);
         void replaceFlowCardWithText(messageId, agentSlug, `✅ **${outcome.message}**${suffix}`, conversationId, undefined, spacesAppId);
         return;
@@ -1111,11 +1154,27 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         }
         if (outcome.status === "duplicate") {
           resp = { type: "close_screen", finalMessage: `⚠️ ${outcome.error}` };
+          if (xyneAiCard) {
+            await finishTextWriteOnRow({ card: xyneAiCard, tool, ok: false, heading: `${tool} failed`, errorText: outcome.error });
+            res.json(resp);
+            return;
+          }
           res.json(resp);
           void replaceFlowCardWithText(messageId, agentSlug, `⚠️ ${outcome.error}`, conversationId, undefined, spacesAppId);
           return;
         }
         resp = { type: "close_screen", finalMessage: `✅ ${outcome.message}` };
+        if (xyneAiCard) {
+          await finishTextWriteOnRow({
+            card: xyneAiCard,
+            tool,
+            ok: true,
+            heading: outcome.message,
+            details: [{ label: "Slug", value: outcome.slug }],
+          });
+          res.json(resp);
+          return;
+        }
         res.json(resp);
         void replaceFlowCardWithText(messageId, agentSlug, `✅ **Skill created:** ${outcome.name} (\`${outcome.slug}\`)`, conversationId, undefined, spacesAppId);
         return;
