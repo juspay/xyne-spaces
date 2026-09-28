@@ -8,6 +8,7 @@ import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { extractGroupMentions, extractUserMentions } from '@/utils/mentionParser';
 import { toReadableMessageContent } from '@/utils/flowJson';
+import { stripHtml } from '@/agents/xyne-ai/tools/helpers';
 import type { MessageReceivedEventPayload } from '../types/automation-events';
 
 export const MESSAGE_RECEIVED_EVENT = 'MESSAGE_RECEIVED';
@@ -29,6 +30,12 @@ const MessageReceivedConfigSchema = z.object({
     .describe(
       'Fire when the message body contains ANY of these substrings. Press Enter after each one. Case-insensitive. Empty matches any message.',
     ),
+  contentStartsWith: z
+    .array(z.string())
+    .optional()
+    .describe(
+      'Fire when the message body starts with ANY of these prefixes. Press Enter after each one. Case-insensitive. Empty matches any message.',
+    ),
   messageTypes: z
     .array(z.nativeEnum(MessageType))
     .default([MessageType.USER])
@@ -47,7 +54,7 @@ const MessageReceivedConfigSchema = z.object({
     .boolean()
     .default(false)
     .describe(
-      'Also fire when an edit turns a non-matching message into a match. Only that transition fires. Needs a Content Contains value.',
+      'Also fire when an edit turns a non-matching message into a match. Only that transition fires. Needs a Content Contains or Content Starts With value.',
     ),
 });
 
@@ -138,13 +145,12 @@ export class MessageReceivedTrigger extends BaseTrigger<typeof MessageReceivedCo
 
     const previousContent = _transient?.previousContent;
     if (previousContent === undefined) return rest;
-    const needles = contentNeedles(cfg.contentContains);
-    // Mirror matchFilters: test decoded + raw so an encoded-card needle can't read as a non-match.
-    const prevTexts = [previousContent, toReadableMessageContent(previousContent)];
     return {
       ...rest,
-      previousContentMatched: needles.some(needle =>
-        prevTexts.some(text => !!text && text.toLowerCase().includes(needle.toLowerCase())),
+      previousContentMatched: contentFilterMatches(
+        cfg,
+        toReadableMessageContent(previousContent),
+        previousContent,
       ),
     };
   }
@@ -179,7 +185,7 @@ export class MessageReceivedTrigger extends BaseTrigger<typeof MessageReceivedCo
     if (fromUserIds.length > 0) {
       if (!fromUserIds.includes(p.authorId)) return { matched: false, failed: 'fromUserIds' };
     }
-    // Match filters: contentContains, user mentions, group mentions.
+    // Match filters: contentContains/contentStartsWith, user mentions, group mentions.
     // These combine with OR logic when multiple are configured:
     // if ANY of the configured match conditions is satisfied, the trigger fires.
     //
@@ -187,8 +193,7 @@ export class MessageReceivedTrigger extends BaseTrigger<typeof MessageReceivedCo
     //   - undefined  -> the filter was not configured, so it imposes no condition
     //   - []         -> explicitly "any mention"; the message must contain at least one mention
     //   - [ids...]   -> the message must mention at least one of the listed users/groups
-    const needles = contentNeedles(cfg.contentContains);
-    const contentFilterConfigured = needles.length > 0;
+    const contentFilterConfigured = hasContentFilter(cfg);
     const userMentionFilterConfigured = cfg.mentionedUserIds !== undefined;
     const groupMentionFilterConfigured = cfg.mentionedGroupIds !== undefined;
 
@@ -198,16 +203,11 @@ export class MessageReceivedTrigger extends BaseTrigger<typeof MessageReceivedCo
       const matchResults: Array<{ name: string; passed: boolean }> = [];
 
       if (contentFilterConfigured) {
-        // Decoded text and the stored blob: a filter written against a FlowJSON
-        // card title or button label must keep firing after the decode.
-        const texts = [p.message.content, p.message.rawContent];
-        const nowMatches = needles.some(needle =>
-          texts.some(text => !!text && text.toLowerCase().includes(needle.toLowerCase())),
-        );
+        const nowMatches = contentFilterMatches(cfg, p.message.content, p.message.rawContent);
         // On an edit only the transition counts — an edit that leaves an
         // already-matching message still matching must not re-run the automation.
         const contentPasses = p.isEdit ? nowMatches && !p.previousContentMatched : nowMatches;
-        matchResults.push({ name: 'contentContains', passed: contentPasses });
+        matchResults.push({ name: 'contentContains|contentStartsWith', passed: contentPasses });
       }
 
       if (userMentionFilterConfigured) {
@@ -259,6 +259,37 @@ function contentNeedles(value: unknown): string[] {
   }
   if (typeof value === 'string' && value.trim().length > 0) return [value];
   return [];
+}
+
+function hasContentFilter(cfg: MessageReceivedConfig): boolean {
+  return contentNeedles(cfg.contentContains).length > 0 || contentNeedles(cfg.contentStartsWith).length > 0;
+}
+
+/**
+ * Content Contains and Content Starts With form one content filter: a message
+ * passes if it satisfies either. `content` is the decoded text, `rawContent`
+ * the stored blob.
+ */
+function contentFilterMatches(
+  cfg: MessageReceivedConfig,
+  content: string | null | undefined,
+  rawContent: string | null | undefined,
+): boolean {
+  // Decoded text and the stored blob: a filter written against a FlowJSON
+  // card title or button label must keep firing after the decode.
+  const texts = [content, rawContent];
+  const containsMatch = contentNeedles(cfg.contentContains).some(needle =>
+    texts.some(text => !!text && text.toLowerCase().includes(needle.toLowerCase())),
+  );
+  if (containsMatch) return true;
+
+  const prefixes = contentNeedles(cfg.contentStartsWith);
+  if (prefixes.length === 0) return false;
+  // Prefix match against the visible text only — a user message is stored as
+  // `<p>…</p>` and a FlowJSON card as `<div data-flow-json=…>`, so the raw blob
+  // never starts with what the user typed.
+  const visible = stripHtml(content ?? rawContent ?? '').toLowerCase();
+  return prefixes.some(prefix => visible.startsWith(prefix.trim().toLowerCase()));
 }
 
 export const messageReceivedTrigger = new MessageReceivedTrigger();
