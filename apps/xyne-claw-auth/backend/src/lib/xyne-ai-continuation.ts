@@ -24,7 +24,6 @@ export async function dispatchXyneAiContinuationRun(input: {
   userId: string;
   orgId: string;
   prompt: string;
-  /** Untrusted DATA the prompt refers to, when there is any. */
   context?: string | undefined;
   idempotencyKey: string;
   failureMessage: string;

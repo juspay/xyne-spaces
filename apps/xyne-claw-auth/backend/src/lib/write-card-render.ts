@@ -8,7 +8,6 @@ const log = createLogger("write-card");
 type TicketCardPriority = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
 const TICKET_CARD_PRIORITIES: TicketCardPriority[] = ["LOW", "MEDIUM", "HIGH", "CRITICAL"];
 
-/** The signed write action claw returns on a run result. */
 export interface PendingWriteAction {
   serverType: string;
   tool: string;
@@ -224,8 +223,6 @@ export async function mintWriteCardAction(
   };
 }
 
-/** Null for any other write tool, and for a ticket with no title — both keep
- *  the generic approval card. */
 export function buildTicketProposalCardFlow(action: WriteCardAction): FlowDefinition | null {
   if (action.tool !== "spaces-create-ticket") return null;
   const rawTitle = action.params["title"];
