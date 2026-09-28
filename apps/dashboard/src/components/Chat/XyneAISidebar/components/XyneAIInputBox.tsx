@@ -1861,7 +1861,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
               — same visual, one less render per focus change. */}
           <div
             className={`
-            overflow-hidden transition-all flex flex-col relative bg-clip-padding
+            overflow-hidden transition flex flex-col relative bg-clip-padding
             ${isMobile ? 'bg-background rounded-[26px] text-foreground shadow-sm' : 'bg-background rounded-2xl border border-chat-composer-border focus-within:border-chat-composer-border-active text-foreground shadow-none'}
           `}
           >
