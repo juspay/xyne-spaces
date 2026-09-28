@@ -527,6 +527,7 @@ const DeskPaginatedStageList: React.FC<{
   pageArgs: SupportKanbanPageBaseArgs;
   otherStageNames?: string[] | undefined;
   dynamicFieldEntries?: DynamicFieldFilterEntry[] | undefined;
+  onPageComplete?: ((pageArgs: SupportKanbanPageBaseArgs) => void) | undefined;
   onTicketsChange?: ((columnKey: string, tickets: Ticket[]) => void) | undefined;
   availableTags: string[];
   visibleColumns?: Set<string> | undefined;
@@ -534,13 +535,25 @@ const DeskPaginatedStageList: React.FC<{
   showEmailReads?: boolean;
   onTicketClick: (e: React.MouseEvent | KeyboardEvent, ticket: Ticket) => void;
   slaPolicies?: BoardSlaPolicy[];
-}> = ({ stage, columnKey, pageArgs, otherStageNames, dynamicFieldEntries, ...listProps }) => {
-  const { tickets, hasMore, isLoadingMore, loadMore } = useSupportKanbanTicketsPage({
+}> = ({
+  stage,
+  columnKey,
+  pageArgs,
+  otherStageNames,
+  dynamicFieldEntries,
+  onPageComplete,
+  ...listProps
+}) => {
+  const { tickets, isComplete, hasMore, isLoadingMore, loadMore } = useSupportKanbanTicketsPage({
     ...pageArgs,
     stage: stage.name,
     ...(otherStageNames ? { otherStageNames } : {}),
     ...(dynamicFieldEntries ? { dynamicFieldEntries } : {}),
   });
+
+  React.useEffect(() => {
+    if (isComplete) onPageComplete?.(pageArgs);
+  }, [isComplete, onPageComplete, pageArgs]);
 
   return (
     <SortableContext
@@ -602,6 +615,7 @@ interface KanbanColumnsProps {
   deskPaginationConfig?: {
     pageArgs: SupportKanbanPageBaseArgs;
     dynamicFieldEntries?: DynamicFieldFilterEntry[] | undefined;
+    onPageComplete?: (pageArgs: SupportKanbanPageBaseArgs) => void;
   };
   /**
    * A search is active. Server counts are not refetched for the search term, so
@@ -852,6 +866,7 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
                       stage.id === stages[0]?.id ? stages.slice(1).map(s => s.name) : undefined
                     }
                     dynamicFieldEntries={deskPaginationConfig.dynamicFieldEntries}
+                    onPageComplete={deskPaginationConfig.onPageComplete}
                     {...(onTicketsChange !== undefined ? { onTicketsChange } : {})}
                     availableTags={availableTags}
                     visibleColumns={visibleColumns}

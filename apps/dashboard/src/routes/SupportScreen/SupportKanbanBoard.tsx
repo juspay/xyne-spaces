@@ -127,7 +127,7 @@ export const SupportKanbanBoard = ({
     };
   }, [channelId, isMember, ticketFilter]);
 
-  // Record kanban ticket load duration once the query completes. Mirrors the
+  // Record kanban ticket load duration once a column's page query completes. Mirrors the
   // list view's SUPPORT_TICKETS_LOADED instrumentation so both views are
   // comparable. The timer resets per channel + filter combination.
   const filterKey = useMemo(
@@ -176,12 +176,17 @@ export const SupportKanbanBoard = ({
     setTicketsByColumn(prev => ({ ...prev, [columnKey]: tickets }));
   }, []);
 
+  // Columns report the page args they completed for, so a completion left over from the
+  // previous filter is never timed against the new one.
+  const [completedPageArgs, setCompletedPageArgs] = useState<SupportKanbanPageBaseArgs | null>(
+    null,
+  );
   const loadStartTimeRef = useRef<number | null>(Date.now());
   useEffect(() => {
     loadStartTimeRef.current = Date.now();
   }, [filterKey]);
   useEffect(() => {
-    if (Object.keys(ticketsByColumn).length === 0) return;
+    if (completedPageArgs !== pageArgs) return;
     if (loadStartTimeRef.current === null) return;
     const duration = Date.now() - loadStartTimeRef.current;
     logger.info(Event.SUPPORT_TICKETS_LOADED, {
@@ -199,7 +204,7 @@ export const SupportKanbanBoard = ({
       });
     });
     loadStartTimeRef.current = null;
-  }, [ticketsByColumn, channelId]);
+  }, [completedPageArgs, pageArgs, filterKey, channelId]);
 
   // Fallback for a desk with no board on its channel preference: take the board from
   // any one of its tickets so the stage columns can load.
@@ -520,7 +525,11 @@ export const SupportKanbanBoard = ({
           ticketsByStage={ticketsByStage}
           {...(stageCounts ? { stageCounts } : {})}
           onTicketsChange={handleColumnTicketsChange}
-          deskPaginationConfig={{ pageArgs, dynamicFieldEntries }}
+          deskPaginationConfig={{
+            pageArgs,
+            dynamicFieldEntries,
+            onPageComplete: setCompletedPageArgs,
+          }}
           onTicketClick={onTicketClick}
           containerClassName='h-full'
           showEmailReads={true}
