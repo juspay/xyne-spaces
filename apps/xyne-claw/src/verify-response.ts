@@ -29,6 +29,10 @@
 import { LITELLM } from "./config.js";
 
 import { createLogger } from "./logger.js";
+import { metric } from "./metrics.js";
+import { optEnabled } from "./optimizations.js";
+import { recordJudgeOutcome } from "./judge-backend.js";
+import { holdErrors, holdThreshold, passThreshold, precheckEnabled, runPrecheck, type PrecheckAsk } from "./verify-prefilter.js";
 const log = createLogger("verify-response");
 
 // Same rationale as the goal judge: LiteLLM can be slow under load and a
@@ -209,13 +213,43 @@ const VERDICT_TOOL = {
   },
 };
 
-export async function verifyResponse(input: VerifyResponseInput): Promise<ResponseVerdict> {
+export interface VerifyResponseDeps {
+  ask?: PrecheckAsk;
+  llm?: (input: VerifyResponseInput) => Promise<ResponseVerdict | null>;
+}
+
+export async function verifyResponse(input: VerifyResponseInput, deps: VerifyResponseDeps = {}): Promise<ResponseVerdict> {
   // Fail open when the verifier can't run. The no-evidence fast-pass applies
   // ONLY to the default check (nothing to contradict). When per-agent criteria
   // are set, empty evidence means the requirements weren't shown to be met —
   // so we must still run the verifier rather than wave it through.
-  if (!LITELLM.apiKey) return { ok: true, errors: [] };
   if (!input.evidenceDigest.trim() && !input.criteria?.trim()) return { ok: true, errors: [] };
+
+  const pre = optEnabled("jev_verify_prefilter") && (deps.ask || precheckEnabled())
+    ? await runPrecheck(input, deps.ask)
+    : null;
+  if (pre && pre.risk <= passThreshold()) {
+    metric.count("verify_prefilter", { result: "pass" });
+    recordJudgeOutcome("verify-prefilter", `passed without LLM · risk ${pre.risk.toFixed(2)} ≤ ${passThreshold()}`, { ...pre });
+    return { ok: true, errors: [] };
+  }
+
+  const verdict = await (deps.llm ?? llmVerify)(input);
+  if (verdict) {
+    if (pre) metric.count("verify_prefilter", { result: verdict.ok ? "llm_pass" : "llm_reject" });
+    return verdict;
+  }
+  if (pre && pre.risk >= holdThreshold()) {
+    metric.count("verify_prefilter", { result: "held" });
+    recordJudgeOutcome("verify-prefilter", `LLM verifier unavailable · held at risk ${pre.risk.toFixed(2)} ≥ ${holdThreshold()}`, { ...pre });
+    return { ok: false, errors: holdErrors(pre) };
+  }
+  if (pre) metric.count("verify_prefilter", { result: "unavailable_pass" });
+  return { ok: true, errors: [] };
+}
+
+async function llmVerify(input: VerifyResponseInput): Promise<ResponseVerdict | null> {
+  if (!LITELLM.apiKey) return null;
 
   const systemPrompt = input.criteria?.trim()
     ? SYSTEM_PROMPT + criteriaAppendix(input.criteria)
@@ -253,8 +287,8 @@ export async function verifyResponse(input: VerifyResponseInput): Promise<Respon
 
     if (!res.ok) {
       const body = await res.text().catch(() => "");
-      log.warn(`[verify-response] LiteLLM ${res.status}: ${body.slice(0, 200)} — failing open`);
-      return { ok: true, errors: [] };
+      log.warn(`[verify-response] LiteLLM ${res.status}: ${body.slice(0, 200)} — verifier unavailable`);
+      return null;
     }
 
     const data = (await res.json()) as {
@@ -262,14 +296,14 @@ export async function verifyResponse(input: VerifyResponseInput): Promise<Respon
     };
     const raw = data.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments;
     if (!raw) {
-      log.warn("[verify-response] no tool_call in response — failing open");
-      return { ok: true, errors: [] };
+      log.warn("[verify-response] no tool_call in response — verifier unavailable");
+      return null;
     }
 
     return parseVerdict(raw);
   } catch (err) {
-    log.warn(`[verify-response] call failed: ${err instanceof Error ? err.message : String(err)} — failing open`);
-    return { ok: true, errors: [] };
+    log.warn(`[verify-response] call failed: ${err instanceof Error ? err.message : String(err)} — verifier unavailable`);
+    return null;
   }
 }
 
