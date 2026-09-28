@@ -243,6 +243,7 @@
   "devDependencies": {
     "@commitlint/cli": "^20.1.0",
     "@commitlint/config-conventional": "^20.0.0",
+    "@csstools/postcss-is-pseudo-class": "^6.0.1",
     "@eslint/js": "8.57.1",
     "@prisma/client": "^5.22.0",
     "@types/dompurify": "^3.0.5",
