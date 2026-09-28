@@ -25,6 +25,7 @@ import { repositories } from '@/database/repositories';
 import { ExternalSourceRepository, MAILBOX_SOURCE_TYPES } from '@/database/repositories/externalSourceRepository';
 import { ExternalMessageRepository } from '@/database/repositories/externalMessageRepository';
 import { emailService } from '@/services/emailService';
+import { websocketService } from '@/services/websocketService';
 import {
   AttachmentConversionService,
   ExternalAttachmentService,
@@ -466,6 +467,10 @@ export class AppDeskRefetch extends BaseRefetch {
       await this.clearResumeCursor(source.id, options.startDate, options.endDate);
     }
 
+    // End-of-run channel-level writes, replacing the per-message ones the
+    // persist calls skipped via deferChannelSideEffects.
+    await this.flushChannelSideEffects(channelId, newTickets, processed);
+
     logger.info(
       `${TAG} ${source.name}: processed=${processed} newTickets=${newTickets} skipped=${skipped} errors=${totalErrors} pages=${pageCount}${capped ? ' partial=true' : ''}`,
       { channelId, startDate: options.startDate, endDate: options.endDate },
@@ -478,6 +483,44 @@ export class AppDeskRefetch extends BaseRefetch {
       ...(capped && { partial: true }),
       ...(totalErrors > errors.length && { totalErrors }),
     };
+  }
+
+  /**
+   * Replay, once, the channel-scoped work the per-message persist calls were
+   * told to skip.
+   *
+   * Only new tickets count toward the unread bump: an appended message bumps
+   * just the users who were already caught up, and that narrow write still
+   * happens inline (emailService keeps it, exactly as ingestEmailThread keeps
+   * its own wasVespaMerge case).
+   *
+   * Best-effort — a badge that is briefly stale must not fail a run whose rows
+   * are already committed, so each write is caught and logged.
+   */
+  private async flushChannelSideEffects(
+    channelId: string,
+    newTickets: number,
+    processed: number,
+  ): Promise<void> {
+    if (newTickets > 0) {
+      try {
+        await repositories.channels.incrementUnreadForAllMembers(channelId, newTickets);
+      } catch (error) {
+        logger.warn(`${TAG} end-of-run unread bump failed`, { channelId, newTickets, error });
+      }
+    }
+    if (processed > 0) {
+      try {
+        await repositories.channels.updateLastActivity(channelId);
+      } catch (error) {
+        logger.warn(`${TAG} end-of-run updateLastActivity failed`, { channelId, error });
+      }
+      try {
+        websocketService.broadcastLabelUnreadCountsUpdate(channelId);
+      } catch (error) {
+        logger.warn(`${TAG} end-of-run label unread broadcast failed`, { channelId, error });
+      }
+    }
   }
 
   /**
@@ -738,6 +781,7 @@ export class AppDeskRefetch extends BaseRefetch {
         externalMessageId,
         emailType: EmailType.DEFAULT,
         receivedAt,
+        deferChannelSideEffects: true,
         ...(uploadedFiles.length > 0 && { uploadedFiles }),
       });
       await this.applyFormFieldsToThread(ctx, message, threadEmail.conversationId);
@@ -774,6 +818,7 @@ export class AppDeskRefetch extends BaseRefetch {
       },
       receivedAt,
       boardId: ctx.boardId,
+      deferChannelSideEffects: true,
       ...(uploadedFiles.length > 0 && { uploadedFiles }),
       ...(scopeFieldValues && { scopeFieldValues }),
     });

@@ -147,6 +147,7 @@ export interface CreateConversationWithEmailParams {
   // expanded inside ticketDuplicateService. Undefined → falls back to project-wide
   // detection when the channel's duplicateScopeConfig has no matching values.
   scopeFieldValues?: DuplicateScopeFieldValue[];
+  deferChannelSideEffects?: boolean;
 }
 
 export interface AddEmailToConversationParams {
@@ -169,6 +170,8 @@ export interface AddEmailToConversationParams {
   clientVersionCode?: string;
   uploadedFiles?: UploadedFileResult[];
   receivedAt?: Date;
+  /** See CreateConversationWithEmailParams.deferChannelSideEffects. */
+  deferChannelSideEffects?: boolean;
 }
 
 export interface UpdateExternalInteractionParams {
@@ -1062,6 +1065,7 @@ export class EmailService {
       clientVersionName,
       clientVersionCode,
       scopeFieldValues,
+      deferChannelSideEffects = false,
     } = params;
     const normalizedRfcMessageId = normalizeRfcMessageId(rfcMessageId);
 
@@ -1147,7 +1151,7 @@ export class EmailService {
     // concurrently, the transaction rolls back everything (no orphaned tickets).
     let txResult: { conversation: any; ticket: any; email: any };
     try {
-      txResult = await createConversationWithEmailTx(this, channelId, userId, channel, receivedAt, emailType, emailSubject, emailBody, emailTo, emailFrom, emailCc, emailBcc, emailReplyTo, externalThreadId, externalMessageId, sentByUserId, normalizedRfcMessageId, rating, clientVersionName, clientVersionCode, externalSourceId, projectId, boardId, firstStage, slaResolutionDue, userGroup, groupId, ticketMetadata);
+      txResult = await createConversationWithEmailTx(this, channelId, userId, channel, receivedAt, emailType, emailSubject, emailBody, emailTo, emailFrom, emailCc, emailBcc, emailReplyTo, externalThreadId, externalMessageId, sentByUserId, normalizedRfcMessageId, rating, clientVersionName, clientVersionCode, externalSourceId, projectId, boardId, firstStage, slaResolutionDue, userGroup, groupId, ticketMetadata, deferChannelSideEffects);
     } catch (err) {
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
         await this.emailRepository.backfillRfcMessageIdByExternalMessageId(
@@ -1164,7 +1168,7 @@ export class EmailService {
 
     // Direct DB ticket create bypasses Zero side-effects — invalidate the
     // channel's label unread counts so sidebar badges refresh.
-    websocketService.broadcastLabelUnreadCountsUpdate(channelId);
+    if (!deferChannelSideEffects) websocketService.broadcastLabelUnreadCountsUpdate(channelId);
 
     // --- Side effects (outside transaction) ---
 
@@ -1305,7 +1309,7 @@ export class EmailService {
     }
 
     // Update channel last activity
-      await this.channelRepository.updateLastActivity(channelId);
+      if (!deferChannelSideEffects) await this.channelRepository.updateLastActivity(channelId);
 
       // Get sender info
       const senderInfo = await this.getUserInfo(userId);
@@ -1325,11 +1329,14 @@ export class EmailService {
         createdAt: message.createdAt,
       };
 
-      // Real-time broadcast via WebSocket
-      await websocketService.broadcastToSession(channelId, 'new_conversation', conversationMessage);
+      // Real-time broadcast via WebSocket. A historical import has no live
+      // conversation to announce, and `ingestEmailThread` sends neither of these.
+      if (!deferChannelSideEffects) {
+        await websocketService.broadcastToSession(channelId, 'new_conversation', conversationMessage);
 
-    // Also broadcast via Redis for horizontal scaling
-    await redisService.broadcastMessageToSession(channelId, conversationMessage);
+        // Also broadcast via Redis for horizontal scaling
+        await redisService.broadcastMessageToSession(channelId, conversationMessage);
+      }
 
     return {
       conversation,
@@ -1367,6 +1374,7 @@ export class EmailService {
         clientVersionCode,
         uploadedFiles = [],
         receivedAt,
+        deferChannelSideEffects = false,
       } = params;
 
       // Validate conversation exists
@@ -1408,7 +1416,7 @@ export class EmailService {
       // When an app-desk source link is requested, the Email upsert and the
       // link write share one transaction so neither can be lost on its own.
       const email = externalSourceId ? await addEmailToConversationTx(this, emailData, externalMessageId, externalThreadId, externalSourceId) : await this.emailRepository.create(emailData);
-      void this.channelRepository.updateLastActivity(conversation.channelId);
+      if (!deferChannelSideEffects) void this.channelRepository.updateLastActivity(conversation.channelId);
 
       // Direct DB insert bypasses Zero side-effects, so dispatch the EMAIL app event ourselves.
       void dispatchEmailEventForEmailId(email.id);
@@ -1424,7 +1432,7 @@ export class EmailService {
         }
 
         await syncTicketEmailCount(this.prisma, conversationId);
-        websocketService.broadcastLabelUnreadCountsUpdate(conversation.channelId);
+        if (!deferChannelSideEffects) websocketService.broadcastLabelUnreadCountsUpdate(conversation.channelId);
 
         const previousLatest = await this.prisma.email.findFirst({
           where: { conversationId, id: { not: email.id } },
@@ -1451,15 +1459,17 @@ export class EmailService {
             }));
           }
 
-          void this.notifyAssigneeOfReply({
-            ticketId: ticketRow.id,
-            conversationId,
-            channelId: conversation.channelId,
-            workspaceId: channel?.workspaceId,
-            emailSubject,
-            emailFrom,
-            emailId: email.id,
-          });
+          if (!deferChannelSideEffects) {
+            void this.notifyAssigneeOfReply({
+              ticketId: ticketRow.id,
+              conversationId,
+              channelId: conversation.channelId,
+              workspaceId: channel?.workspaceId,
+              emailSubject,
+              emailFrom,
+              emailId: email.id,
+            });
+          }
         }
 
         this.pushVespaJobForTicket(

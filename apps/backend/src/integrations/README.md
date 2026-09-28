@@ -406,6 +406,14 @@ Points worth copying:
 - Pages are requested **back-to-back with no client-side delay** — page N+1 is issued as soon as page N is persisted, so a fast app will see a sustained serial request stream. To slow Xyne down, answer `429` (or `503`) with a `Retry-After` header (delta-seconds or HTTP-date); Xyne honors it, backs off in place, and continues the same export — up to 5 backoff-and-retry rounds per page (6 requests in total; a 6th throttled response ends the run), falling back to exponential backoff from 1s when the header is absent. Each retry is **re-signed**, so the `X-Xyne-Timestamp` skew window applies to the retry, not the original attempt. A `Retry-After` longer than the run's remaining budget is not slept through: the export stops cleanly, keeps what it ingested, and resumes from the same page on the next Fetch. Do not answer `429` without `Retry-After` if you need a specific pace — the exponential fallback may be shorter than you want.
 Fetch requires `ENABLE_EMAIL_FETCH_WORKER=true` in the backend; otherwise the route returns `409` without calling the app.
 
+#### Before a first backfill: check the desk's automations
+
+A pulled ticket is a real ticket. It emits `TICKET_CREATED` exactly as a pushed one does, so **every automation on that board runs once per ticket the fetch creates** — including the steps that reach people outside Xyne: `send-email-reply`, `send-email-to-user`, `send-csat-request`, `make-call` and `trigger-webhook`. A desk with an acknowledgement or CSAT rule will, on a first import of months of history, contact every historical reporter about a ticket they filed long ago. None of it can be recalled once sent.
+
+This is not specific to app history — the mailbox range fetch behaves the same way — but an app export is usually the largest single import a desk ever takes, so it is where it first bites. **Disable or scope the board's automations before the first fetch of a wide window, and re-enable them afterwards.** Fetching a narrow recent window to fill a gap is normally fine; it is the deep first import that needs the check.
+
+Two related effects, for what to expect rather than what to prevent: SLA due dates are derived from each message's own `sentAt`, so backfilled tickets land already past their resolution target; and the assignee reply notification is deliberately not sent for fetched messages, matching the mailbox fetch — an agent sees a pulled reply when they open the ticket, not as a notification.
+
 ---
 
 ## Adding a New Adapter
