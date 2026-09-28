@@ -46,7 +46,6 @@ spec:
             host: {{ $s.zero.host }}
             port:
               number: {{ $s.zero.port }}
-      timeout: 0s
     - name: ysweet
       match:
         - uri:
@@ -56,7 +55,6 @@ spec:
             host: {{ $s.ysweet.host }}
             port:
               number: {{ $s.ysweet.port }}
-      timeout: 0s
     {{- if .Values.routes.externalDashboard }}
     - name: external
       match:
@@ -68,16 +66,42 @@ spec:
             port:
               number: {{ $s.externalDashboard.port }}
     {{- end }}
+    {{- if .Values.routes.clawAuth }}
+    - name: claw-api
+      match:
+        - uri:
+            prefix: /claw/api/
+        - uri:
+            exact: /claw/health
+      route:
+        - destination:
+            host: {{ $s.clawAuth.host }}
+            port:
+              number: {{ $s.clawAuth.port }}
+    {{- end }}
     {{- if .Values.routes.clawAuthFrontend }}
     - name: claw
       match:
         - uri:
             prefix: /claw/
+        - uri:
+            exact: /claw
       route:
         - destination:
             host: {{ $s.clawAuthFrontend.host }}
             port:
               number: {{ $s.clawAuthFrontend.port }}
+    {{- end }}
+    {{- if .Values.routes.clawPreview }}
+    - name: claw-preview
+      match:
+        - uri:
+            prefix: /claw-preview/
+      route:
+        - destination:
+            host: {{ $s.sandboxRouter.host }}
+            port:
+              number: {{ $s.sandboxRouter.port }}
     {{- end }}
     - name: dashboard
       match:

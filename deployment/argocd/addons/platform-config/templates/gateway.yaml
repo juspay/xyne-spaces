@@ -27,7 +27,11 @@ spec:
         name: https
         protocol: HTTPS
       hosts:
+        {{- if .Values.gateway.edgeTerminated }}
+        - "*"
+        {{- else }}
         {{- include "platform-config.hosts" . | nindent 8 }}
+        {{- end }}
       tls:
         mode: SIMPLE
         credentialName: {{ .Values.gateway.tlsSecret }}
