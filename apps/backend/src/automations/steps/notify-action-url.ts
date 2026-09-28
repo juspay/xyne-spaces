@@ -1,6 +1,6 @@
 import { repositories } from '@/database/repositories';
 import { db } from '@/database/client';
-import { isDeskChannelType } from '@xyne/shared';
+import { ChannelScopeType, isDeskChannelType } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 
 /** What a notification can deep-link to. The user picks the kind; we build the URL. */
@@ -13,6 +13,14 @@ export const NOTIFY_LINK_TYPES = [
   'EMAIL',
 ] as const;
 export type NotifyLinkType = (typeof NOTIFY_LINK_TYPES)[number];
+
+async function chatRouteBase(workspaceId: string, channelId: string): Promise<string> {
+  const channel = await db.channel
+    .findUnique({ where: { id: channelId }, select: { scopeType: true } })
+    .catch((err: unknown) => { logger.error(`[notify-action-url] CHANNEL lookup failed id=${channelId}`, err); return null; });
+  const isDM = channel?.scopeType === ChannelScopeType.DM || channel?.scopeType === ChannelScopeType.GROUP_DM;
+  return `/${workspaceId}/chat/${isDM ? 'dm' : 'dir'}/${channelId}`;
+}
 
 /**
  * Builds the notification deep-link from the kind the user selected + the single
@@ -53,10 +61,10 @@ export async function buildNotifyActionUrl(
         : `/${workspaceId}/tickets?tickets=${id}`;
     }
     case 'CHANNEL':
-      return `/${workspaceId}/chat/dir/${id}`;
+      return chatRouteBase(workspaceId, id);
     case 'CONVERSATION': {
       const conv = await repositories.conversations.findById(id).catch((err: unknown) => { logger.error(`[notify-action-url] CONVERSATION lookup failed id=${id}`, err); return null; });
-      return conv?.channelId ? `/${workspaceId}/chat/dir/${conv.channelId}#origin=${id}` : undefined;
+      return conv?.channelId ? `${await chatRouteBase(workspaceId, conv.channelId)}#origin=${id}` : undefined;
     }
     case 'MESSAGE': {
       const msg = await db.message
@@ -65,7 +73,7 @@ export async function buildNotifyActionUrl(
       if (!msg?.conversationId) return undefined;
       const conv = await repositories.conversations.findById(msg.conversationId).catch((err: unknown) => { logger.error(`[notify-action-url] CONVERSATION lookup failed id=${msg.conversationId}`, err); return null; });
       return conv?.channelId
-        ? `/${workspaceId}/chat/dir/${conv.channelId}#origin=${msg.conversationId}&messageId=${id}`
+        ? `${await chatRouteBase(workspaceId, conv.channelId)}#origin=${msg.conversationId}&messageId=${id}`
         : undefined;
     }
     case 'EMAIL': {
