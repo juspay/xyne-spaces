@@ -14,6 +14,7 @@ import { ExternalLinkSquare } from '@xyne/icons';
 import { createPreviewUrl } from '../../../services/clients/fileFetchService';
 import { useIntersectionObserver } from '../../../hooks/useIntersectionObserver';
 import { cn } from '../../../utils/classNames';
+import { inlineAuthenticatedImages } from '../../../utils/inlineAuthenticatedImages';
 
 const PREVIEW_BACKDROP = '/images/html-preview-bg.jpg';
 
@@ -120,7 +121,12 @@ export const HtmlPreviewCard: React.FC<HtmlPreviewCardProps> = ({
     void (async (): Promise<void> => {
       try {
         const blob = await createPreviewUrl(attachmentId);
-        setHtml(withPreviewCsp(await blob.text()));
+        // Inline authenticated-origin images before the sandbox='' iframe gets
+        // the document — its opaque origin sends no cookies, so those <img>
+        // loads would 401 (broken glimpse + Electron treats the 401 as an
+        // expired session and logs the user out).
+        const { html: inlined } = await inlineAuthenticatedImages(await blob.text());
+        setHtml(withPreviewCsp(inlined));
       } catch {
         setFailed(true);
       }

@@ -214,8 +214,11 @@ const electronAPI = {
     ipcRenderer.on('auth:mtls-success', listener);
   },
 
-  onTokenExpired: (callback: () => void) => {
-    ipcRenderer.on('auth:token-expired', callback);
+  onTokenExpired: (callback: (payload?: { url?: string; resourceType?: string }) => void) => {
+    ipcRenderer.on(
+      'auth:token-expired',
+      (_event: unknown, payload?: { url?: string; resourceType?: string }) => callback(payload),
+    );
   },
   showBrowserView: (config: {
     url: string;
