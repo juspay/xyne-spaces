@@ -5,7 +5,14 @@
       "token": "replace-with-a-short-lived-token",
       "workspaceId": "performance-workspace-id",
       "conversationId": "performance-conversation-id",
-      "channelId": "optional-performance-channel-id"
+      "channelId": "optional-performance-channel-id",
+      "searchTerms": [
+        "release",
+        "deployment"
+      ],
+      "attachmentIds": [
+        "small-test-file-attachment-id"
+      ]
     },
     {
       "userId": "performance-user-02",

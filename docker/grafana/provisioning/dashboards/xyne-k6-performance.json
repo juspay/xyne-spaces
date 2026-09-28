@@ -432,6 +432,56 @@
       ],
       "title": "Search latency",
       "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "GET /api/attachments/:id/{download,thumbnail}: auth, access check and object-storage retrieval including byte transfer.",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 37
+      },
+      "id": 11,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "max(k6_attachment_duration_p50{test_run_id=~\"$test_run_id\"})",
+          "legendFormat": "attachment p50",
+          "refId": "A"
+        },
+        {
+          "expr": "max(k6_attachment_duration_p95{test_run_id=~\"$test_run_id\"})",
+          "legendFormat": "attachment p95",
+          "refId": "B"
+        },
+        {
+          "expr": "max(k6_attachment_duration_p99{test_run_id=~\"$test_run_id\"})",
+          "legendFormat": "attachment p99",
+          "refId": "C"
+        }
+      ],
+      "title": "Attachment retrieval latency",
+      "type": "timeseries"
     }
   ],
   "refresh": "10s",

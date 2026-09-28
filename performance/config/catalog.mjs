@@ -11,8 +11,16 @@ export const PROFILES = new Set(['smoke', 'release', 'load', 'stress', 'soak']);
 // is not a Zero-sync test. `rest-messaging` exercises POST /api/conversations/:id/messages,
 // which bots, the Claw MCP route and attachment uploads use rather than the chat UI.
 // `search` exercises GET /api/vespaSearch/ — ACL-filtered Vespa retrieval, read-only.
+// `attachments` exercises GET /api/attachments/:id/{download,thumbnail} — object-storage
+// retrieval, read-only, but it moves real bytes so it has a bandwidth cost.
 // The names are deliberately narrow so a report is never read as broader than it is.
-export const SCENARIOS = new Set(['smoke', 'zero-query-transform', 'search', 'rest-messaging']);
+export const SCENARIOS = new Set([
+  'smoke',
+  'zero-query-transform',
+  'search',
+  'attachments',
+  'rest-messaging',
+]);
 const SANDBOX_PROFILES = new Set(['smoke', 'release']);
 
 // Scenarios that insert rows. Each `rest-messaging` iteration writes a message, which also
