@@ -373,11 +373,8 @@ router.post("/workspace", asyncHandler(async (req: Request, res: Response) => {
       spacesWorkspaceId,
       createdBySpacesUserId: optionalString(body, "createdBySpacesUserId"),
     }))
-    // Install only into workspaces this sync actually created — installs are
-    // per-workspace; re-running them on every sync would churn the stored JWT.
-    .then(() => result.created
-      ? installDefaultAgentsToWorkspace({ orgId: result.orgId, spacesWorkspaceId })
-      : undefined)
+    // Presence-checked (missing only) — safe to run on every sync.
+    .then(() => installDefaultAgentsToWorkspace({ orgId: result.orgId, spacesWorkspaceId }))
     .catch((err) => {
       log.error("[spaces-sync] default-agent provisioning failed", { orgId: result.orgId, err });
     });
@@ -486,24 +483,19 @@ router.post("/user", asyncHandler(async (req: Request, res: Response) => {
       workspaceCreated: workspace.created,
     };
   });
-  // Plain user syncs do nothing agent-related — agent provisioning belongs to
-  // org and workspace creation. The one exception: a user sync can be the first
-  // contact that materializes a workspace (e.g. flows that only enqueue a user
-  // sync), in which case IT is the workspace-creation moment and runs the full
-  // org-agents → apps → install pipeline.
-  if (result.workspaceCreated) {
-    provisionDefaultAgents(result.orgId)
-      .then(() => ensureDefaultAgentSpacesApps({
-        orgId: result.orgId,
-        spacesOrgId,
-        spacesWorkspaceId,
-        createdBySpacesUserId: optionalString(body, "createdBySpacesUserId") ?? spacesUserId,
-      }))
-      .then(() => installDefaultAgentsToWorkspace({ orgId: result.orgId, spacesWorkspaceId }))
-      .catch((err) => {
-        log.error("[spaces-sync] default-agent provisioning failed", { orgId: result.orgId, err });
-      });
-  }
+  // Full agents → apps → install pipeline on every sync; presence-checked,
+  // so steady state is a self-healing no-op.
+  provisionDefaultAgents(result.orgId)
+    .then(() => ensureDefaultAgentSpacesApps({
+      orgId: result.orgId,
+      spacesOrgId,
+      spacesWorkspaceId,
+      createdBySpacesUserId: optionalString(body, "createdBySpacesUserId") ?? spacesUserId,
+    }))
+    .then(() => installDefaultAgentsToWorkspace({ orgId: result.orgId, spacesWorkspaceId }))
+    .catch((err) => {
+      log.error("[spaces-sync] default-agent provisioning failed", { orgId: result.orgId, err });
+    });
   ok(res, result);
 }));
 
