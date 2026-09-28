@@ -1,3 +1,10 @@
+## [1.408.0-release-20260928.1](https://github.com/juspay/xyne-spaces/compare/v1.407.2-release-20260928.2...v1.408.0-release-20260928.1) (2026-09-28)
+
+
+### Features
+
+* show related threads, tickets, canvases and calls while composing ([#2332](https://github.com/juspay/xyne-spaces/issues/2332)) ([#2363](https://github.com/juspay/xyne-spaces/issues/2363)) ([9135520](https://github.com/juspay/xyne-spaces/commit/913552054b44ff2fdbf3ef1c090c9c31a28e8542))
+
 ## [1.407.2-release-20260928.2](https://github.com/juspay/xyne-spaces/compare/v1.407.2-release-20260928.1...v1.407.2-release-20260928.2) (2026-09-28)
 
 
