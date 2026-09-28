@@ -27,7 +27,7 @@ vi.mock("./commands.js", () => ({
   describeElapsed: (since: number) => `${Math.round((Date.now() - since) / 60_000)} minutes`,
 }));
 
-const { maybeSendCheckpoint, stopCheckpoints, checkpointText, CHECKPOINT_MAX } = await import("./checkpoints.js");
+const { maybeSendCheckpoint, sendInterimMessage, stopCheckpoints, checkpointText, CHECKPOINT_MAX } = await import("./checkpoints.js");
 
 const target = { channel: "whatsapp-cloud", connectedSurfaceId: "acc", accountKey: "k", chatId: "919", senderId: "919", isGroup: false } as never;
 
@@ -67,6 +67,22 @@ describe("maybeSendCheckpoint", () => {
   it("ignores progress from a run that is no longer the chat's current one", async () => {
     activeRun.mockResolvedValueOnce({ sessionId: "sess-2", agentSlug: "xyne", startedAt: 0 });
     await expect(maybeSendCheckpoint("sess-1", target, "a")).resolves.toBe(false);
+  });
+});
+
+describe("sendInterimMessage", () => {
+  it("sends the model's line and holds the next checkpoint back a minute", async () => {
+    await expect(sendInterimMessage("sess-1", target, "  2 of your 3 PRs have failing CI ")).resolves.toBe(true);
+    expect(enqueueOutbound).toHaveBeenCalledWith("acc", { kind: "text", chatId: "919", text: "2 of your 3 PRs have failing CI", markdown: true });
+    await expect(maybeSendCheckpoint("sess-1", target, "step")).resolves.toBe(false);
+    expect(enqueueOutbound).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops empty text and lines from a run that is no longer current", async () => {
+    await expect(sendInterimMessage("sess-1", target, "   ")).resolves.toBe(false);
+    activeRun.mockResolvedValueOnce(null);
+    await expect(sendInterimMessage("sess-1", target, "late line")).resolves.toBe(false);
+    expect(enqueueOutbound).not.toHaveBeenCalled();
   });
 });
 

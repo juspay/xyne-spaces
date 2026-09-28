@@ -4171,7 +4171,7 @@ export async function processTask(
         // Thread invocations (Spaces/Slack replies — channelId present) keep a
         // clean posted reply = the last 2 assistant turns; ask-ai and every other
         // surface keep ALL turns so the stored answer matches the streamed one.
-        finalAnswerMaxTurns: channelId ? 2 : undefined,
+        finalAnswerMaxTurns: channelId ? (optEnabled("interim_messages") ? 1 : 2) : undefined,
         ...(isRegenerate ? { isRegenerate: true } : {}),
         backgroundRegistry: childTaskRegistry,
         parentDebug: parentDebugHandle,

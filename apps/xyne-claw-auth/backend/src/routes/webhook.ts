@@ -116,7 +116,7 @@ import { sendStoredExternalResultCallback, isInternalCallbackOrigin, isAllowedEx
 import { encryptSurfaceSecret } from "../lib/surface-resolver.js";
 import { deliverSlackResult, type SlackDeliveryTarget } from "../surfaces/slack/delivery.js";
 import { deliverChannelResult } from "../surfaces/messaging/delivery.js";
-import { maybeSendCheckpoint, stopCheckpoints } from "../surfaces/messaging/checkpoints.js";
+import { maybeSendCheckpoint, sendInterimMessage, stopCheckpoints } from "../surfaces/messaging/checkpoints.js";
 import { designShareUrl, upsertDesignShare } from "./design-shares.js";
 import {
   getActivePlanCard,
@@ -7160,6 +7160,17 @@ router.post("/progress", requireStrictS2S, async (req: Request, res: Response) =
       clog.warn(
         `[webhook/progress] kind:pr REJECTED by coercePrInput sessionId=${sessionId} raw=${JSON.stringify(rawPr)?.slice(0, 300)}`,
       );
+    }
+    return;
+  }
+
+  if (body["kind"] === "interim" && typeof body["text"] === "string") {
+    const interimText = body["text"];
+    const ctx = await resolveSessionContext(sessionId, conversationId, agentSlug).catch(() => null);
+    if (ctx?.channelDelivery) {
+      await sendInterimMessage(sessionId, ctx.channelDelivery, interimText).catch((err) => {
+        clog.warn(`[webhook/progress] interim message failed for ${sessionId}: ${errMsg(err)}`);
+      });
     }
     return;
   }

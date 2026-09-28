@@ -35,6 +35,16 @@ export async function maybeSendCheckpoint(sessionId: string, target: ChannelDeli
   return true;
 }
 
+export async function sendInterimMessage(sessionId: string, target: ChannelDeliveryTarget, text: string): Promise<boolean> {
+  const body = text.trim();
+  if (!body) return false;
+  const run = await activeRun(target.connectedSurfaceId, target.chatId);
+  if (!run || run.sessionId !== sessionId) return false;
+  await redisService.getConnection().set(gateKey(sessionId), "1", "PX", CHECKPOINT_EVERY_MS);
+  await enqueueOutbound(target.connectedSurfaceId, { kind: "text", chatId: target.chatId, text: body, markdown: true });
+  return true;
+}
+
 export async function stopCheckpoints(sessionId: string): Promise<void> {
   await redisService
     .getConnection()

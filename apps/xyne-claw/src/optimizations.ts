@@ -42,6 +42,10 @@ export const OPTIMIZATIONS = {
     summary: "built-in server subagents (spaces, bitbucket, …) are not offered at all: their tools, writes included, are catalogued and the agent loads and calls them itself, so no run waits on a nested subagent; custom subagents are kept",
     defaultOn: false,
   },
+  interim_messages: {
+    summary: "text the model writes alongside a tool call is sent to the person as soon as that turn ends, and only the last turn is kept as the final answer — for messaging channels, where nothing else shows progress",
+    defaultOn: false,
+  },
   lean_palette: {
     summary: "with the open palette on, tools it admitted (not ones the agent was granted) stay hidden in the catalog — including write tools — and under a reads+writes palette the forced `spaces` wrapper is dropped since its tools are loadable directly",
     defaultOn: false,
