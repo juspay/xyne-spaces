@@ -18,6 +18,8 @@ export interface SearchHints {
 }
 
 export interface RecordFinder {
+  /** The caller's own id, used only when a message search explicitly names them. */
+  selfId?: string;
   /** Records that could match `mention`: names for `matchName` to rank, or search results. */
   find(kind: EntityKind, mention: string, hints?: SearchHints): Promise<FoundRecord[]>;
   /** One record by id, if the user can see it. */

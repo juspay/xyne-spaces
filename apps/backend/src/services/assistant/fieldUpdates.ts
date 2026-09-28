@@ -21,7 +21,8 @@ export async function toFieldUpdates(
   words: FieldWords,
   finder: RecordFinder,
   clear: boolean,
-  known: Readonly<Record<string, FieldValue>> = {}
+  known: Readonly<Record<string, FieldValue>> = {},
+  inputText = ''
 ): Promise<FieldUpdate[]> {
   const entries = Object.entries(words);
   const searches = entries.filter(([field]) => action.fields[field]?.kind === 'thread');
@@ -30,11 +31,53 @@ export async function toFieldUpdates(
   const named = await Promise.all(
     others.map(([field, value]) => fieldUpdates(action, field, value, finder, clear))
   );
-  const hints = searchHints(named.flat(), known);
+  const namedUpdates = named.flat();
+  const selfUpdate = explicitSelfParticipant(action, finder.selfId, inputText);
+  if (selfUpdate) namedUpdates.unshift(selfUpdate);
+
+  const hasUnresolvedSearchFilter = namedUpdates.some(
+    (update) =>
+      isSearchFilter(action, update.field) &&
+      (update.op === 'ambiguous' || update.op === 'unknown')
+  );
+  if (searches.length > 0 && hasUnresolvedSearchFilter) {
+    const deferred = searches.flatMap(([field, value]) =>
+      (Array.isArray(value) ? value : [value])
+        .map((mention) => mention.trim())
+        .filter(Boolean)
+        .map((mention) => ({ field, op: 'defer' as const, mention }))
+    );
+    return [...namedUpdates, ...deferred];
+  }
+
+  const hints = searchHints(action, namedUpdates, known);
   const searched = await Promise.all(
     searches.map(([field, value]) => fieldUpdates(action, field, value, finder, clear, hints))
   );
-  return [...named.flat(), ...searched.flat()];
+  return [...namedUpdates, ...searched.flat()];
+}
+
+function explicitSelfParticipant(
+  action: ActionDefinition,
+  selfId: string | undefined,
+  inputText: string
+): FieldUpdate | undefined {
+  const participantField = action.fields.with;
+  if (
+    action.id !== 'find_conversation' ||
+    participantField?.kind !== 'person' ||
+    !participantField.many ||
+    !selfId ||
+    !explicitlyNamesSelfAsParticipant(inputText)
+  ) {
+    return undefined;
+  }
+  return {
+    field: 'with',
+    op: 'add',
+    value: { kind: 'person', id: selfId, name: 'you' },
+    certain: true,
+  };
 }
 
 async function fieldUpdates(
@@ -82,21 +125,65 @@ async function fieldUpdates(
 
 /** The people and channels found now or earlier in the request. */
 function searchHints(
+  action: ActionDefinition,
   updates: readonly FieldUpdate[],
   known: Readonly<Record<string, FieldValue>>
 ): SearchHints {
-  const refs: EntityRef[] = [
-    ...updates.flatMap((update) =>
-      (update.op === 'set' || update.op === 'add') && isEntityRef(update.value)
-        ? [update.value]
-        : []
-    ),
-    ...Object.values(known).flatMap((value) =>
-      Array.isArray(value) ? value : isEntityRef(value) ? [value] : []
-    ),
-  ];
+  // Build the effective filter state by field. A new value for a single channel replaces the
+  // old one; people fields marked `many` keep earlier people when another is added.
+  const values = new Map<string, EntityRef[]>();
+  for (const [field, value] of Object.entries(known)) {
+    if (isSearchFilter(action, field)) values.set(field, entityRefs(value));
+  }
+
+  for (const update of updates) {
+    if (!isSearchFilter(action, update.field)) continue;
+    const current = values.get(update.field) ?? [];
+    switch (update.op) {
+      case 'set':
+        values.set(update.field, isEntityRef(update.value) ? [update.value] : []);
+        break;
+      case 'add':
+        values.set(
+          update.field,
+          current.some((ref) => ref.id === update.value.id) ? current : [...current, update.value]
+        );
+        break;
+      case 'remove':
+        values.set(
+          update.field,
+          current.filter((ref) => ref.id !== update.id)
+        );
+        break;
+      case 'ambiguous':
+      case 'unknown':
+        // Do not let an old value silently stand in for a correction the user is making.
+        values.delete(update.field);
+        break;
+      case 'defer':
+        break;
+    }
+  }
+
+  const refs = [...values.values()].flat();
   return {
     people: refs.filter((ref) => ref.kind === 'person').map((ref) => ref.id),
     channels: refs.filter((ref) => ref.kind === 'channel').map((ref) => ref.id),
   };
+}
+
+function isSearchFilter(action: ActionDefinition, field: string): boolean {
+  const kind = action.fields[field]?.kind;
+  return kind === 'person' || kind === 'channel';
+}
+
+function entityRefs(value: FieldValue): EntityRef[] {
+  return Array.isArray(value) ? value.filter(isEntityRef) : isEntityRef(value) ? [value] : [];
+}
+
+/** Avoid treating polite "find me a thread" as a participant filter. */
+function explicitlyNamesSelfAsParticipant(text: string): boolean {
+  return /\b(?:me\s+(?:and|with)|(?:and|with)\s+(?:me|i)|i\s+and|(?:i|we)\s+(?:discuss|talk|chat|said|wrote|were|was)\w*)\b/i.test(
+    text
+  );
 }

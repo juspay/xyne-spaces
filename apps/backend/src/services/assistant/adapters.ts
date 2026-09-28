@@ -48,6 +48,7 @@ export function databaseFinder(context: ACLContext): RecordFinder {
   const channelsAcl = new ChannelsACL(context, db);
 
   return {
+    selfId: context.userId,
     async find(kind, mention, hints) {
       if (kind === 'thread') return findConversations(mention, context.userId, hints);
       const words = normalizeName(mention)
@@ -171,7 +172,9 @@ async function findConversations(
       limit: MAX_CONVERSATIONS * 3,
       slack: {
         docType: [VespaDocType.MESSAGE],
-        ...(hints.people.length ? { participants: hints.people } : {}),
+        ...(hints.people.length
+          ? { participants: hints.people, participantsMode: 'all' as const }
+          : {}),
         ...(hints.channels.length ? { channelId: hints.channels } : {}),
       },
     });

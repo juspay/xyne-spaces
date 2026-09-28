@@ -171,9 +171,56 @@ describe('choosing the action', () => {
       asking: 'name',
       choosing: null,
       notFound: null,
+      resolutionQueue: [],
+      pendingLookup: null,
       previewFingerprint: null,
     });
     expect(questions.continues?.type).toBe('noul');
+  });
+
+  it('gives Jev the topic and visible choices for a pending message search', () => {
+    const { state } = buildIntentQuestions('open the Android one', ACTIONS, {
+      id: 'd1',
+      action: 'find_conversation',
+      values: {},
+      certain: {},
+      offered: [],
+      skipped: [],
+      asking: 'conversation',
+      choosing: {
+        field: 'conversation',
+        mention: 'mobile performance',
+        candidates: [
+          {
+            id: 'thread-1',
+            label: 'Android startup delay',
+            detail: '#android · Vinit',
+            value: {
+              kind: 'thread',
+              id: 'thread-1',
+              name: 'Android startup delay',
+              channelId: 'channel-android',
+              channelName: 'android',
+            },
+          },
+        ],
+      },
+      notFound: null,
+      resolutionQueue: [],
+      pendingLookup: null,
+      previewFingerprint: null,
+    });
+
+    expect(state).toMatchObject({
+      inProgress: {
+        request: 'find_conversation',
+        awaiting: {
+          question:
+            'Here are the closest matches for “mobile performance”. Tap one, or tell me who was in it or which channel.',
+          options: [{ label: 'Android startup delay', detail: '#android · Vinit' }],
+        },
+      },
+    });
   });
 
   it('scores area × action and acts on a clear winner', () => {
@@ -196,6 +243,10 @@ describe('choosing the action', () => {
     ];
     expect(decideIntent(close)).toEqual({ kind: 'ask', actions: ['send_dm', 'create_channel'] });
     expect(decideIntent([{ action: 'send_dm', probability: 0.1 }])).toEqual({ kind: 'none' });
+  });
+
+  it('does not act on a lone candidate below the clear-winner threshold', () => {
+    expect(decideIntent([{ action: 'send_dm', probability: 0.35 }])).toEqual({ kind: 'none' });
   });
 });
 
@@ -256,6 +307,127 @@ describe('the stored session', () => {
     expect(parseSession(null)).toBe(EMPTY_SESSION);
     expect(parseSession('not json')).toBe(EMPTY_SESSION);
     expect(parseSession(JSON.stringify({ ...EMPTY_SESSION, version: 2 }))).toBe(EMPTY_SESSION);
+  });
+
+  it('round-trips a populated draft, question, candidate, and pending run', () => {
+    const person = { kind: 'person' as const, id: 'u-1', name: 'Priya Shah' };
+    const session = {
+      ...EMPTY_SESSION,
+      conversation: {
+        ...EMPTY_SESSION.conversation,
+        seq: 1,
+        active: {
+          id: 'd1',
+          action: 'create_channel',
+          values: { members: [person] },
+          certain: { members: false },
+          offered: ['members'],
+          skipped: [],
+          asking: 'visibility',
+          choosing: {
+            field: 'members',
+            mention: 'Priya',
+            candidates: [{ id: person.id, label: person.name, value: person }],
+          },
+          notFound: null,
+          resolutionQueue: [],
+          pendingLookup: null,
+          previewFingerprint: null,
+        },
+      },
+      question: {
+        kind: 'detail' as const,
+        field: 'visibility',
+        options: [
+          { id: 'public', label: 'Public' },
+          { id: 'private', label: 'Private' },
+        ],
+      },
+      run: {
+        runId: 'run-1',
+        action: 'create_channel',
+        expectedResults: 2,
+        done: 'Created the channel.',
+      },
+    };
+
+    expect(parseSession(serializeSession(session))).toEqual(session);
+  });
+
+  it('starts fresh when nested conversation, reference, question, or run data is malformed', () => {
+    const invalidActive: unknown = {
+      ...EMPTY_SESSION,
+      conversation: { ...EMPTY_SESSION.conversation, active: {} },
+    };
+    const invalidParkedDraft: unknown = {
+      ...EMPTY_SESSION,
+      conversation: { ...EMPTY_SESSION.conversation, parked: [{}] },
+    };
+    const invalidCandidateRef: unknown = {
+      ...EMPTY_SESSION,
+      conversation: {
+        ...EMPTY_SESSION.conversation,
+        active: {
+          id: 'd1',
+          action: 'create_channel',
+          values: {},
+          certain: {},
+          offered: [],
+          skipped: [],
+          asking: null,
+          choosing: {
+            field: 'members',
+            mention: 'Priya',
+            candidates: [
+              {
+                id: 'w-1',
+                label: 'Workspace',
+                value: { kind: 'workspace', id: 'w-1', name: 'Workspace' },
+              },
+            ],
+          },
+          notFound: null,
+          previewFingerprint: null,
+        },
+      },
+    };
+    const invalidQuestion: unknown = {
+      ...EMPTY_SESSION,
+      question: { kind: 'detail', field: 'visibility', options: [{ id: 'public' }] },
+    };
+    const invalidRun: unknown = {
+      ...EMPTY_SESSION,
+      run: { runId: 'run-1', action: 'send_dm', done: 'Sent.', expectedResults: 'three' },
+    };
+
+    for (const value of [
+      invalidActive,
+      invalidParkedDraft,
+      invalidCandidateRef,
+      invalidQuestion,
+      invalidRun,
+    ]) {
+      expect(parseSession(JSON.stringify(value))).toEqual(EMPTY_SESSION);
+    }
+  });
+
+  it('accepts a pending run written before expected result counts were stored', () => {
+    const legacyRun = {
+      ...EMPTY_SESSION,
+      run: { runId: 'run-old', action: 'open_channel', done: 'Opened it.' },
+    };
+
+    expect(parseSession(JSON.stringify(legacyRun))).toEqual(legacyRun);
+  });
+
+  it('rejects a stored session that exceeds the byte limit', () => {
+    const oversized = {
+      ...EMPTY_SESSION,
+      run: { runId: 'run-1', action: 'send_dm', done: '🙂'.repeat(17_000) },
+    };
+
+    expect(Buffer.byteLength(JSON.stringify(oversized), 'utf8')).toBeGreaterThan(64 * 1024);
+    expect(parseSession(JSON.stringify(oversized))).toEqual(EMPTY_SESSION);
   });
 });
 

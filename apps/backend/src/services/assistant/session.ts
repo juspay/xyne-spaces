@@ -1,5 +1,8 @@
+import { z } from 'zod';
 import {
   EMPTY_CONVERSATION,
+  entityRefSchema,
+  MAX_PARKED,
   type ChoiceOption,
   type ConversationState,
 } from '@xyne/shared/assistant';
@@ -20,6 +23,8 @@ export interface AssistantSession {
 export interface PendingRun {
   runId: string;
   action: string;
+  /** The dashboard must return one result for each completed operation. */
+  expectedResults?: number;
   /** Said when every operation succeeded. */
   done: string;
   /** Said after `done`, e.g. a reminder that another request is on hold. */
@@ -45,6 +50,101 @@ export const SESSION_IDLE_SECONDS = 2 * 60 * 60;
 /** Far above any real conversation; stops a runaway session from growing without bound. */
 const MAX_BYTES = 64 * 1024;
 
+const choiceOptionSchema = z
+  .object({
+    id: z.string().min(1),
+    label: z.string().min(1),
+    detail: z.string().optional(),
+  })
+  .strict();
+const fieldValueSchema = z.union([z.string(), entityRefSchema, z.array(entityRefSchema)]);
+const candidateSchema = choiceOptionSchema.extend({ value: fieldValueSchema }).strict();
+const pendingResolutionSchema = z.discriminatedUnion('kind', [
+  z
+    .object({
+      kind: z.literal('choice'),
+      field: z.string().min(1),
+      mention: z.string(),
+      candidates: z.array(candidateSchema),
+    })
+    .strict(),
+  z
+    .object({ kind: z.literal('notFound'), field: z.string().min(1), mention: z.string() })
+    .strict(),
+]);
+const draftSchema = z
+  .object({
+    id: z.string().min(1),
+    action: z.string().min(1),
+    values: z.record(fieldValueSchema),
+    certain: z.record(z.boolean()),
+    offered: z.array(z.string()),
+    skipped: z.array(z.string()),
+    asking: z.string().nullable(),
+    choosing: z
+      .object({
+        field: z.string().min(1),
+        mention: z.string(),
+        candidates: z.array(candidateSchema),
+      })
+      .strict()
+      .nullable(),
+    notFound: z
+      .object({ field: z.string().min(1), mention: z.string() })
+      .strict()
+      .nullable(),
+    resolutionQueue: z.array(pendingResolutionSchema).default([]),
+    pendingLookup: z
+      .object({ field: z.string().min(1), mention: z.string() })
+      .strict()
+      .nullable()
+      .default(null),
+    previewFingerprint: z.string().nullable(),
+  })
+  .strict();
+const conversationSchema = z
+  .object({
+    version: z.literal(1),
+    seq: z.number().int().nonnegative(),
+    active: draftSchema.nullable(),
+    parked: z.array(draftSchema).max(MAX_PARKED),
+  })
+  .strict();
+const openQuestionSchema = z.discriminatedUnion('kind', [
+  z
+    .object({
+      kind: z.literal('detail'),
+      field: z.string().min(1),
+      options: z.array(choiceOptionSchema),
+    })
+    .strict(),
+  z.object({ kind: z.literal('preview') }).strict(),
+  z
+    .object({
+      kind: z.literal('action'),
+      options: z.array(choiceOptionSchema).min(1),
+      text: z.string(),
+    })
+    .strict(),
+]);
+const pendingRunSchema = z
+  .object({
+    runId: z.string().min(1),
+    action: z.string().min(1),
+    expectedResults: z.number().int().nonnegative().optional(),
+    done: z.string(),
+    after: z.string().optional(),
+  })
+  .strict();
+const assistantSessionSchema: z.ZodType<AssistantSession, z.ZodTypeDef, unknown> = z
+  .object({
+    version: z.literal(1),
+    conversation: conversationSchema,
+    question: openQuestionSchema.nullable(),
+    run: pendingRunSchema.nullable(),
+  })
+  .strict();
+
 export interface SessionIdentity {
   workspaceId: string;
   userId: string;
@@ -65,16 +165,10 @@ export function sessionKey({ workspaceId, userId, sessionId }: SessionIdentity):
  * rather than being half-used.
  */
 export function parseSession(raw: string | null): AssistantSession {
-  if (!raw) return EMPTY_SESSION;
+  if (!raw || Buffer.byteLength(raw, 'utf8') > MAX_BYTES) return EMPTY_SESSION;
   try {
-    const value = JSON.parse(raw) as Partial<AssistantSession>;
-    const valid =
-      value.version === 1 &&
-      value.conversation?.version === 1 &&
-      Array.isArray(value.conversation.parked) &&
-      value.question !== undefined &&
-      value.run !== undefined;
-    return valid ? (value as AssistantSession) : EMPTY_SESSION;
+    const parsed = assistantSessionSchema.safeParse(JSON.parse(raw));
+    return parsed.success ? parsed.data : EMPTY_SESSION;
   } catch {
     return EMPTY_SESSION;
   }

@@ -160,7 +160,7 @@ async function understand(
   if (draft) {
     // Help or a question mid-request is answered, and the request's question asked again.
     if (draft.asking && !continues && (kind === 'help' || kind === 'question')) {
-      const openQuestion = applyEvent({ type: 'details', updates: [] }, session, services);
+      const openQuestion = await applyEvent({ type: 'details', updates: [] }, session, services);
       return withDebug({
         ...openQuestion,
         reply: replyForAside(kind, text, catalog, openQuestion.reply),
@@ -183,14 +183,15 @@ async function understand(
         { ...words, ...answer },
         services.records,
         true,
-        draft.values
+        draft.values,
+        text
       );
       return withDebug(
-        applyEvent(
+        await applyEvent(
           { type: 'details', updates: requireLongTextPreview(action, text, updates) },
           session,
           services
-        )
+        ),
       );
     }
   }
@@ -237,7 +238,7 @@ async function startAction(
   const action = services.catalog.get(actionId);
   if (!action) return withReply(session, replyForError('I can’t do that yet.'));
   const words = text ? await wordsFor(action, text, services) : {};
-  const updates = await toFieldUpdates(action, words, services.records, true);
+  const updates = await toFieldUpdates(action, words, services.records, true, {}, text);
   return applyEvent(
     {
       type: 'request',
@@ -290,8 +291,37 @@ function bareAnswer(text: string): string {
 }
 
 /** Runs one engine event and turns the step into a reply, or into a plan to run. */
-function applyEvent(event: TurnEvent, session: AssistantSession, services: TurnServices): Outcome {
-  const { state, step, notes } = advance(session.conversation, event, services.catalog);
+async function applyEvent(
+  event: TurnEvent,
+  session: AssistantSession,
+  services: TurnServices,
+): Promise<Outcome> {
+  let { state, step, notes } = advance(session.conversation, event, services.catalog);
+
+  // Message search waits for named filters that were ambiguous or not found. Once the user
+  // resolves or skips those filters, run the saved topic against the final, typed IDs.
+  const draft = state.active;
+  const action = draft && services.catalog.get(draft.action);
+  if (draft?.pendingLookup && action && !awaitingSearchFilter(draft, action)) {
+    const lookup = draft.pendingLookup;
+    const updates = await toFieldUpdates(
+      action,
+      { [lookup.field]: lookup.mention },
+      services.records,
+      true,
+      draft.values,
+    );
+    const readyToSearch: typeof state = {
+      ...state,
+      active: { ...draft, pendingLookup: null },
+    };
+    ({ state, step, notes } = advance(
+      readyToSearch,
+      { type: 'details', updates },
+      services.catalog,
+    ));
+  }
+
   const next: AssistantSession = { ...session, conversation: state };
   if (step.kind !== 'run') return withReply(next, replyForStep(step, notes));
 
@@ -301,11 +331,33 @@ function applyEvent(event: TurnEvent, session: AssistantSession, services: TurnS
     session: {
       ...next,
       question: null,
-      run: { runId, action: step.action, done: step.done, ...(after ? { after } : {}) },
+      run: {
+        runId,
+        action: step.action,
+        expectedResults: step.plan.length,
+        done: step.done,
+        ...(after ? { after } : {}),
+      },
     },
     reply: { say: '', question: null, expectsReply: false },
     run: { runId, plan: step.plan },
   };
+}
+
+function awaitingSearchFilter(
+  draft: NonNullable<AssistantSession['conversation']['active']>,
+  action: ActionDefinition,
+): boolean {
+  const isFilter = (field: string): boolean => {
+    const kind = action.fields[field]?.kind;
+    return kind === 'person' || kind === 'channel';
+  };
+  return (
+    Boolean(draft.choosing && isFilter(draft.choosing.field)) ||
+    Boolean(draft.notFound && isFilter(draft.notFound.field)) ||
+    draft.resolutionQueue.some(({ field }) => isFilter(field)) ||
+    Boolean(draft.asking && isFilter(draft.asking) && !draft.skipped.includes(draft.asking))
+  );
 }
 
 /** The dashboard ran the plan: say the action's final words, or what went wrong. */
@@ -323,6 +375,20 @@ function finishRun(
   if (failed || results.length === 0) {
     const reason = failed?.error ? `: ${failed.error}` : '.';
     return { session: cleared, reply: replyForError(`That didn’t finish${reason}`) };
+  }
+  if (run.expectedResults !== undefined && results.length > run.expectedResults) {
+    return {
+      session: cleared,
+      reply: replyForError('That result doesn’t match the actions I ran.'),
+    };
+  }
+  if (run.expectedResults !== undefined && results.length !== run.expectedResults) {
+    return {
+      session: cleared,
+      reply: replyForError(
+        'I can’t confirm this finished because some action results are missing.'
+      ),
+    };
   }
   const say = [run.done, run.after].filter(Boolean).join(' ');
   return { session: cleared, reply: { say, question: null, expectsReply: false } };

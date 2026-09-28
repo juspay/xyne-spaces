@@ -42,12 +42,20 @@ export interface Draft {
   choosing: { field: string; mention: string; candidates: Candidate[] } | null;
   /** A name that matched nothing, mentioned in the next question. */
   notFound: { field: string; mention: string } | null;
+  /** Additional unresolved names from the same request, asked one at a time. */
+  resolutionQueue: PendingResolution[];
+  /** A search term held until its requested person or channel filters are resolved. */
+  pendingLookup: { field: string; mention: string } | null;
   /**
    * Set while a preview waits for "yes": a fingerprint of exactly what the preview showed.
    * Any change to the draft clears it, so "yes" only ever runs what the user saw.
    */
   previewFingerprint: string | null;
 }
+
+export type PendingResolution =
+  | { kind: 'choice'; field: string; mention: string; candidates: Candidate[] }
+  | { kind: 'notFound'; field: string; mention: string };
 
 export interface ConversationState {
   version: 1;
@@ -77,7 +85,9 @@ export type FieldUpdate =
   /** Several records match the spoken name. */
   | { field: string; op: 'ambiguous'; mention: string; candidates: Candidate[] }
   /** Nothing matches the spoken name. */
-  | { field: string; op: 'unknown'; mention: string };
+  | { field: string; op: 'unknown'; mention: string }
+  /** Keep a search term until its requested person or channel filters are resolved. */
+  | { field: string; op: 'defer'; mention: string };
 
 export type TurnEvent =
   /** A new request for an action, with whatever details it included. */
@@ -246,10 +256,30 @@ export function advance(
       if (!active) return idle();
       if (active.previewFingerprint)
         return finish(null, { kind: 'cancelled', action: active.action });
-      if (active.choosing) return proceed({ ...active, choosing: null });
-      const field = active.asking ? definitionOf(active).fields[active.asking] : undefined;
-      if (active.asking && field && !field.required) {
-        return proceed({ ...active, skipped: [...active.skipped, active.asking], asking: null });
+      if (active.choosing) {
+        const field = active.choosing.field;
+        if (!definitionOf(active).fields[field]?.required) {
+          return proceed({
+            ...active,
+            asking: null,
+            choosing: null,
+            skipped: [...active.skipped, field],
+            resolutionQueue: active.resolutionQueue.filter(item => item.field !== field),
+          });
+        }
+        return proceed({ ...active, choosing: null });
+      }
+      const skippedField = active.asking;
+      const field = skippedField ? definitionOf(active).fields[skippedField] : undefined;
+      if (skippedField && field && !field.required) {
+        return proceed({
+          ...active,
+          skipped: [...active.skipped, skippedField],
+          asking: null,
+          choosing: null,
+          notFound: active.notFound?.field === skippedField ? null : active.notFound,
+          resolutionQueue: active.resolutionQueue.filter(item => item.field !== skippedField),
+        });
       }
       const next = proceed(active);
       return next.step.kind === 'ask' ? { ...next, step: { ...next.step, declined: true } } : next;
@@ -289,6 +319,16 @@ function nextStep(draft: Draft, definition: ActionDefinition): Next {
     ...(options ? { options } : {}),
   });
 
+  if (!draft.choosing && !draft.notFound && draft.resolutionQueue.length > 0) {
+    const [pending, ...resolutionQueue] = draft.resolutionQueue;
+    if (pending?.kind === 'choice') {
+      return nextStep({ ...draft, resolutionQueue, choosing: pending }, definition);
+    }
+    if (pending?.kind === 'notFound') {
+      return nextStep({ ...draft, resolutionQueue, notFound: pending }, definition);
+    }
+  }
+
   if (draft.choosing) {
     const { field, mention, candidates } = draft.choosing;
     const question = definition.fields[field]?.choose ?? 'Which one do you mean by “{mention}”?';
@@ -310,7 +350,9 @@ function nextStep(draft: Draft, definition: ActionDefinition): Next {
     const { field, mention } = draft.notFound;
     return {
       kind: 'step',
-      draft: { ...draft, asking: field, notFound: null },
+      // Keep the missing value pending until it is resolved or explicitly skipped. An aside
+      // (for example, "what can you do?") advances the draft without answering this question.
+      draft: { ...draft, asking: field },
       step: ask(
         field,
         `I couldn't find “${mention}”. ${renderTemplate(notFound.ask, draft.values)}`,
@@ -390,18 +432,24 @@ function applyUpdates(
           skipped: next.skipped.filter(skipped => skipped !== id),
           choosing: next.choosing?.field === id ? null : next.choosing,
           notFound: next.notFound?.field === id ? null : next.notFound,
+          resolutionQueue: definition.fields[id]?.many
+            ? next.resolutionQueue
+            : next.resolutionQueue.filter(item => item.field !== id),
         };
         break;
       case 'add': {
         const current = next.values[id];
         const records = Array.isArray(current) ? current : [];
-        if (records.some(record => record.id === update.value.id)) break;
+        const alreadyPresent = records.some(record => record.id === update.value.id);
         next = {
           ...next,
-          values: { ...next.values, [id]: [...records, update.value] },
-          certain: { ...next.certain, [id]: (next.certain[id] ?? true) && update.certain },
+          values: alreadyPresent ? next.values : { ...next.values, [id]: [...records, update.value] },
+          certain: alreadyPresent
+            ? next.certain
+            : { ...next.certain, [id]: (next.certain[id] ?? true) && update.certain },
           skipped: next.skipped.filter(skipped => skipped !== id),
-          choosing: next.choosing?.field === id ? null : next.choosing,
+          choosing: next.asking === id && next.choosing?.field === id ? null : next.choosing,
+          notFound: next.asking === id && next.notFound?.field === id ? null : next.notFound,
         };
         break;
       }
@@ -416,14 +464,49 @@ function applyUpdates(
         break;
       }
       case 'ambiguous':
-        next = {
-          ...next,
-          choosing: { field: id, mention: update.mention, candidates: update.candidates },
-        };
+        if (!definition.fields[id]?.many) {
+          const values = { ...next.values };
+          const certain = { ...next.certain };
+          delete values[id];
+          delete certain[id];
+          next = { ...next, values, certain };
+        }
+        next = addPendingResolution(next, {
+          kind: 'choice',
+          field: id,
+          mention: update.mention,
+          candidates: update.candidates,
+        }, Boolean(definition.fields[id]?.many));
         break;
       case 'unknown':
-        next = { ...next, notFound: { field: id, mention: update.mention } };
+        if (!definition.fields[id]?.many) {
+          const values = { ...next.values };
+          const certain = { ...next.certain };
+          delete values[id];
+          delete certain[id];
+          next = { ...next, values, certain };
+        }
+        next = addPendingResolution(
+          next,
+          { kind: 'notFound', field: id, mention: update.mention },
+          Boolean(definition.fields[id]?.many),
+        );
         break;
+      case 'defer': {
+        const values = { ...next.values };
+        delete values[id];
+        const certain = { ...next.certain };
+        delete certain[id];
+        next = {
+          ...next,
+          values,
+          certain,
+          choosing: next.choosing?.field === id ? null : next.choosing,
+          notFound: next.notFound?.field === id ? null : next.notFound,
+          pendingLookup: { field: id, mention: update.mention },
+        };
+        break;
+      }
     }
   }
   return next;
@@ -440,8 +523,48 @@ function newDraft(id: string, action: string): Draft {
     asking: null,
     choosing: null,
     notFound: null,
+    resolutionQueue: [],
+    pendingLookup: null,
     previewFingerprint: null,
   };
+}
+
+function addPendingResolution(draft: Draft, pending: PendingResolution, many: boolean): Draft {
+  const resolvesActiveField =
+    draft.choosing?.field === pending.field || draft.notFound?.field === pending.field;
+  const answeringActiveField = draft.asking === pending.field;
+
+  // A correction to the question on screen replaces that unresolved mention. For a `many`
+  // field, only replace once per answer so other names from the same sentence remain queued.
+  if (resolvesActiveField && (!many || answeringActiveField)) {
+    return {
+      ...draft,
+      asking: null,
+      choosing: pending.kind === 'choice' ? pending : null,
+      notFound: pending.kind === 'notFound' ? pending : null,
+      resolutionQueue: many
+        ? draft.resolutionQueue
+        : draft.resolutionQueue.filter(item => item.field !== pending.field),
+    };
+  }
+
+  if (!many) {
+    const queuedIndex = draft.resolutionQueue.findIndex(item => item.field === pending.field);
+    if (queuedIndex >= 0) {
+      return {
+        ...draft,
+        resolutionQueue: draft.resolutionQueue.map((item, index) =>
+          index === queuedIndex ? pending : item,
+        ),
+      };
+    }
+  }
+  if (!draft.choosing && !draft.notFound) {
+    return pending.kind === 'choice'
+      ? { ...draft, choosing: pending }
+      : { ...draft, notFound: pending };
+  }
+  return { ...draft, resolutionQueue: [...draft.resolutionQueue, pending] };
 }
 
 function invalidate(draft: Draft): Draft {
@@ -449,7 +572,14 @@ function invalidate(draft: Draft): Draft {
 }
 
 function hasContent(draft: Draft): boolean {
-  return Object.keys(draft.values).length > 0;
+  return (
+    Object.keys(draft.values).length > 0 ||
+    draft.asking !== null ||
+    draft.choosing !== null ||
+    draft.notFound !== null ||
+    draft.resolutionQueue.length > 0 ||
+    draft.pendingLookup !== null
+  );
 }
 
 /** The preview line when complete; otherwise what is known so far ("create_channel (name: ABC)"). */

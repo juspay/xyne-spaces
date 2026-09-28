@@ -1,5 +1,6 @@
 import {
   intentCriteria,
+  renderTemplate,
   summarizeDraft,
   type ActionCatalog,
   type Draft,
@@ -92,15 +93,48 @@ export function buildIntentQuestions(
   const state: Record<string, unknown> = { request: text };
   const definition = inProgress && catalog.get(inProgress.action);
   if (inProgress && definition) {
+    const choiceField = inProgress.choosing && definition.fields[inProgress.choosing.field];
+    const missingField = inProgress.notFound && definition.fields[inProgress.notFound.field];
+    const askingField = inProgress.asking && definition.fields[inProgress.asking];
+    const awaiting =
+      inProgress.choosing && choiceField
+        ? {
+            question: (choiceField.choose ?? choiceField.ask).replace(
+              '{mention}',
+              inProgress.choosing.mention
+            ),
+            options: inProgress.choosing.candidates.map(({ label, detail }) => ({
+              label,
+              ...(detail ? { detail } : {}),
+            })),
+          }
+        : inProgress.notFound && missingField
+          ? {
+              question: `I couldn't find “${inProgress.notFound.mention}”. ${renderTemplate(missingField.ask, inProgress.values)}`,
+            }
+          : askingField
+            ? { question: renderTemplate(askingField.ask, inProgress.values) }
+            : undefined;
     state.inProgress = {
-      request: summarizeDraft(inProgress, definition),
-      ...(inProgress.asking ? { lastQuestion: definition.fields[inProgress.asking]?.ask } : {}),
+      request: inProgress.pendingLookup
+        ? `${summarizeDraft(inProgress, definition)} (message topic: “${inProgress.pendingLookup.mention}”)`
+        : summarizeDraft(inProgress, definition),
+      ...(awaiting ? { awaiting } : {}),
+      ...(inProgress.resolutionQueue.length
+        ? {
+            queued: inProgress.resolutionQueue.map(({ field, mention, kind }) => ({
+              field,
+              mention,
+              kind,
+            })),
+          }
+        : {}),
     };
     questions.continues = {
       type: 'noul',
       instructions:
-        '`inProgress` is a request the assistant is still working on. Is `request` about that same ' +
-        'request — answering its last question, or correcting or adding one of its details?',
+        '`inProgress` is a request the assistant is still working on. Use its current question and ' +
+        'choices when deciding whether `request` answers that request, corrects it, or starts a new one.',
       criteria: {
         true: 'It answers or adjusts the request in progress: "call it ABC", "private", "also add Priya", "actually make it Daniel Park".',
         false:
@@ -146,7 +180,7 @@ export function decideIntent(ranked: readonly RankedAction[]): IntentDecision {
     .slice(0, 3)
     .filter(({ probability }) => probability >= MIN_PROBABILITY)
     .map(({ action }) => action);
-  return close.length > 1 ? { kind: 'ask', actions: close } : { kind: 'act', action: best.action };
+  return close.length > 1 ? { kind: 'ask', actions: close } : { kind: 'none' };
 }
 
 /** The kind of sentence; a request for an action when Jev could not tell. */

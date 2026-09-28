@@ -1,6 +1,6 @@
 import { ACTIONS, type EntityRef, type TurnInput, type TurnResponse } from '@xyne/shared/assistant';
 import type { JevAnswer } from '@/services/queryIntent/jevClient';
-import type { FoundRecord } from './records';
+import type { FoundRecord, SearchHints } from './records';
 import { EMPTY_SESSION, type AssistantSession } from './session';
 import { handleTurn, type TurnServices } from './turn';
 
@@ -173,6 +173,25 @@ describe('a turn', () => {
     expect(chat.session().run).toBeNull();
   });
 
+  it('does not report success when an all-success result list is incomplete', async () => {
+    const chat = assistant();
+    chat.hears({
+      area: 'messaging',
+      action: 'send_dm',
+      fields: { recipient: 'Daniel Okafor', message: 'hello' },
+    });
+    const planned = await chat.say('create a DM with Daniel Okafor and message hello');
+    expect(planned.run?.plan).toHaveLength(3);
+
+    const incomplete = await chat.ran(planned.run!.runId, [{ ok: true }]);
+
+    expect(incomplete).toMatchObject({
+      tone: 'error',
+      say: 'I can’t confirm this finished because some action results are missing.',
+    });
+    expect(chat.session().run).toBeNull();
+  });
+
   it('previews when a name only partly matched, and runs on "yes" without a model', async () => {
     const chat = assistant();
     chat.hears({
@@ -245,6 +264,32 @@ describe('a turn', () => {
     expect(opened.run?.plan).toEqual([{ op: 'navigate', target: perfThreads[1]!.record }]);
   });
 
+  it('keeps a topic-only search when the user switches tasks and says continue', async () => {
+    const chat = assistant();
+    chat.hears({
+      area: 'messaging',
+      action: 'find_conversation',
+      fields: { conversation: 'release notes' },
+    });
+    const matches = await chat.say('find the messages about release notes');
+    expect(matches.display?.kind).toBe('choices');
+
+    chat.hears({ area: 'channels', action: 'create_channel' });
+    expect((await chat.say('create a channel')).say).toBe(
+      'I’ve put your earlier request on hold. What should I name the channel?'
+    );
+    expect(chat.session().conversation.parked).toHaveLength(1);
+
+    const resumed = await chat.say('continue');
+    expect(resumed.display).toMatchObject({
+      kind: 'choices',
+      options: [
+        { id: 't-1', label: 'Reduce startup work' },
+        { id: 't-2', label: 'Cold start regression' },
+      ],
+    });
+  });
+
   it('narrows a search to the people named with it', async () => {
     const chat = assistant([daniel, meera]);
     chat.hears({
@@ -271,6 +316,256 @@ describe('a turn', () => {
     chat.hears({ continues: 0.9, fields: { with: 'Meera' } });
     const opened = await chat.say('the one with Meera');
     expect(opened.run?.plan).toEqual([{ op: 'navigate', target: perfThreads[1]!.record }]);
+  });
+
+  it.each([
+    {
+      name: 'unknown participant',
+      field: 'with' as const,
+      mention: 'Unknown Person',
+      matches: [] as FoundRecord[],
+      resolved: daniel,
+      expectedHints: { people: ['u-daniel'], channels: [] },
+      answer: 'Daniel Okafor',
+    },
+    {
+      name: 'ambiguous participant',
+      field: 'with' as const,
+      mention: 'Daniel',
+      matches: [daniel, danielPark],
+      resolved: daniel,
+      expectedHints: { people: ['u-daniel'], channels: [] },
+      answer: 'u-daniel',
+    },
+    {
+      name: 'unknown channel',
+      field: 'in' as const,
+      mention: 'Unknown Room',
+      matches: [] as FoundRecord[],
+      resolved: android,
+      expectedHints: { people: [], channels: ['c-android'] },
+      answer: 'android',
+    },
+    {
+      name: 'ambiguous channel',
+      field: 'in' as const,
+      mention: 'Ops',
+      matches: [
+        { record: { kind: 'channel' as const, id: 'c-ops-north', name: 'Ops North' } },
+        { record: { kind: 'channel' as const, id: 'c-ops-south', name: 'Ops South' } },
+      ],
+      resolved: { record: { kind: 'channel' as const, id: 'c-ops-north', name: 'Ops North' } },
+      expectedHints: { people: [], channels: ['c-ops-north'] },
+      answer: 'c-ops-north',
+    },
+  ])('waits for the $name before searching messages', async scenario => {
+    const chat = assistant();
+    const threadSearches: Array<{ topic: string; hints: SearchHints | undefined }> = [];
+    chat.services.records.find = async (kind, mention, hints) => {
+      if (kind === 'thread') {
+        threadSearches.push({ topic: mention, hints });
+        return [perfThreads[0]!];
+      }
+      if (kind === (scenario.field === 'with' ? 'person' : 'channel')) {
+        return mention === scenario.mention ? scenario.matches : [scenario.resolved];
+      }
+      return [];
+    };
+    chat.hears({
+      area: 'messaging',
+      action: 'find_conversation',
+      fields: { conversation: 'release notes', [scenario.field]: scenario.mention },
+    });
+
+    const clarification = await chat.say(`find release notes ${scenario.field} ${scenario.mention}`);
+    expect(threadSearches).toEqual([]);
+
+    let opened: TurnResponse;
+    if (scenario.matches.length === 0) {
+      expect(clarification.say).toContain("I couldn't find");
+      chat.hears({ continues: 0.9, fields: { [scenario.field]: scenario.resolved.record.name } });
+      opened = await chat.say(scenario.answer);
+    } else {
+      expect(clarification.display?.kind).toBe('choices');
+      opened = await chat.tap(scenario.answer);
+    }
+
+    expect(threadSearches).toEqual([
+      { topic: 'release notes', hints: scenario.expectedHints },
+    ]);
+    expect(opened.run?.plan).toEqual([{ op: 'navigate', target: perfThreads[0]!.record }]);
+  });
+
+  it('resolves multiple message filters in order before searching', async () => {
+    const chat = assistant();
+    const threadSearches: SearchHints[] = [];
+    chat.services.records.find = async (kind, mention, hints) => {
+      if (kind === 'thread') {
+        threadSearches.push(hints ?? { people: [], channels: [] });
+        return [perfThreads[0]!];
+      }
+      if (kind === 'person') return mention === 'Missing Person' ? [] : [daniel];
+      if (kind === 'channel') return mention === 'Missing Room' ? [] : [android];
+      return [];
+    };
+    chat.hears({
+      area: 'messaging',
+      action: 'find_conversation',
+      fields: {
+        conversation: 'release notes',
+        with: 'Missing Person',
+        in: 'Missing Room',
+      },
+    });
+
+    const first = await chat.say('find release notes with Missing Person in Missing Room');
+    expect(first.say).toContain('Missing Person');
+    expect(threadSearches).toEqual([]);
+
+    chat.hears({ continues: 0.9, fields: { with: 'Daniel Okafor' } });
+    const second = await chat.say('Daniel Okafor');
+    expect(second.say).toContain('Missing Room');
+    expect(threadSearches).toEqual([]);
+
+    chat.hears({ continues: 0.9, fields: { in: 'android' } });
+    const opened = await chat.say('android');
+
+    expect(threadSearches).toEqual([{ people: ['u-daniel'], channels: ['c-android'] }]);
+    expect(opened.run?.plan).toEqual([{ op: 'navigate', target: perfThreads[0]!.record }]);
+  });
+
+  it('keeps an unknown participant filter pending through a help aside', async () => {
+    const chat = assistant();
+    const threadSearches: Array<{ topic: string; hints: SearchHints | undefined }> = [];
+    chat.services.records.find = async (kind, mention, hints) => {
+      if (kind === 'thread') {
+        threadSearches.push({ topic: mention, hints });
+        return [perfThreads[0]!];
+      }
+      if (kind === 'person') return mention === 'Missing Person' ? [] : [daniel];
+      return [];
+    };
+    chat.hears({
+      area: 'messaging',
+      action: 'find_conversation',
+      fields: { conversation: 'release notes', with: 'Missing Person' },
+    });
+
+    const clarification = await chat.say('find release notes with Missing Person');
+    expect(clarification.say).toContain('Missing Person');
+    expect(threadSearches).toEqual([]);
+
+    chat.hears({ kind: 'help', area: 'none', continues: 0.1 });
+    const help = await chat.say('what can you do?');
+    expect(help.say).toContain('Who was in it?');
+    expect(chat.session().conversation.active?.notFound).toMatchObject({
+      field: 'with',
+      mention: 'Missing Person',
+    });
+    expect(threadSearches).toEqual([]);
+
+    chat.hears({ continues: 0.9, fields: { with: 'Daniel Okafor' } });
+    const opened = await chat.say('Daniel Okafor');
+
+    expect(threadSearches).toEqual([
+      { topic: 'release notes', hints: { people: ['u-daniel'], channels: [] } },
+    ]);
+    expect(opened.run?.plan).toEqual([{ op: 'navigate', target: perfThreads[0]!.record }]);
+  });
+
+  it('keeps other unresolved participants when one correction is ambiguous', async () => {
+    const chat = assistant([daniel, danielPark, meera]);
+    const threadSearches: SearchHints[] = [];
+    chat.services.records.find = async (kind, mention, hints) => {
+      if (kind === 'thread') {
+        threadSearches.push(hints ?? { people: [], channels: [] });
+        return [perfThreads[0]!];
+      }
+      if (kind === 'person') {
+        if (mention === 'Daneel' || mention === 'Missing Meera') return [];
+        if (mention === 'Daniel') return [daniel, danielPark];
+        return [meera];
+      }
+      return [];
+    };
+    chat.hears({
+      area: 'messaging',
+      action: 'find_conversation',
+      fields: { conversation: 'release notes', with: 'Daneel and Missing Meera' },
+    });
+
+    const notFound = await chat.say('find release notes with Daneel and Missing Meera');
+    expect(notFound.say).toContain('Daneel');
+    expect(threadSearches).toEqual([]);
+
+    chat.hears({ continues: 0.9, fields: { with: 'Daniel' } });
+    const corrected = await chat.say('I meant Daniel');
+    expect(corrected.display).toMatchObject({
+      kind: 'choices',
+      options: [
+        { id: 'u-daniel', label: 'Daniel Okafor' },
+        { id: 'u-park', label: 'Daniel Park' },
+      ],
+    });
+
+    const nextFilter = await chat.tap('u-park');
+    expect(nextFilter.say).toContain('Missing Meera');
+    expect(threadSearches).toEqual([]);
+
+    chat.hears({ continues: 0.9, fields: { with: 'Meera Mehta' } });
+    const opened = await chat.say('Meera Mehta');
+    expect(threadSearches).toEqual([{ people: ['u-park', 'u-meera'], channels: [] }]);
+    expect(opened.run?.plan).toEqual([{ op: 'navigate', target: perfThreads[0]!.record }]);
+  });
+
+  it('replaces an ambiguous channel filter when the user corrects it', async () => {
+    const chat = assistant();
+    const ops: FoundRecord[] = [
+      { record: { kind: 'channel', id: 'c-ops-north', name: 'Ops North' } },
+      { record: { kind: 'channel', id: 'c-ops-south', name: 'Ops South' } },
+    ];
+    const engineering: FoundRecord[] = [
+      { record: { kind: 'channel', id: 'c-eng-platform', name: 'Engineering Platform' } },
+      { record: { kind: 'channel', id: 'c-eng-mobile', name: 'Engineering Mobile' } },
+    ];
+    const threadSearches: SearchHints[] = [];
+    chat.services.records.find = async (kind, mention, hints) => {
+      if (kind === 'thread') {
+        threadSearches.push(hints ?? { people: [], channels: [] });
+        return [perfThreads[0]!];
+      }
+      if (kind === 'channel') return mention === 'Ops' ? ops : engineering;
+      return [];
+    };
+    chat.hears({
+      area: 'messaging',
+      action: 'find_conversation',
+      fields: { conversation: 'release notes', in: 'Ops' },
+    });
+
+    const firstChoice = await chat.say('find release notes in Ops');
+    expect(firstChoice.display).toMatchObject({
+      kind: 'choices',
+      options: [
+        { id: 'c-ops-north', label: 'Ops North' },
+        { id: 'c-ops-south', label: 'Ops South' },
+      ],
+    });
+    expect(threadSearches).toEqual([]);
+
+    chat.hears({ continues: 0.9, fields: { in: 'Engineering' } });
+    const corrected = await chat.say('I meant Engineering');
+    expect(corrected.display).toMatchObject({
+      kind: 'choices',
+      options: [
+        { id: 'c-eng-platform', label: 'Engineering Platform' },
+        { id: 'c-eng-mobile', label: 'Engineering Mobile' },
+      ],
+    });
+
+    const opened = await chat.tap('c-eng-mobile');
+    expect(threadSearches).toEqual([{ people: [], channels: ['c-eng-mobile'] }]);
+    expect(opened.run?.plan).toEqual([{ op: 'navigate', target: perfThreads[0]!.record }]);
   });
 
   it('posts "here" in the channel open on screen, mentioning people', async () => {
