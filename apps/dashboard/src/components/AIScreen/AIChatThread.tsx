@@ -53,6 +53,7 @@ import { buildXyneAIStreamThreadId } from '../../utils/xyneAIStreamThreadId';
 import { cn } from '../../utils/classNames';
 import { AskAiRatingButtons } from './AskAiRatingButtons';
 import { AIComposer, type AIComposerAttachment, type AIComposerHandle } from './AIComposer';
+import type { VoiceModeToggle } from '../Assistant/ui/VoiceToggleButton';
 import { ReadonlyContextPills } from './ReadonlyContextPills';
 import { type ComposerContext, toStreamOverrides } from './composerContext';
 import {
@@ -167,6 +168,8 @@ interface AIChatThreadProps {
    *  it and opens yet another conversation. Clearing it at the source is the
    *  guard that survives a remount. */
   onInitialQueryConsumed?: (() => void) | undefined;
+  /** The assistant's voice mode button in the composer. */
+  assistantVoice?: VoiceModeToggle | undefined;
 }
 
 export interface AIChatThreadHandle {
@@ -1538,6 +1541,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     onAgentChange,
     onContextChange,
     onInitialQueryConsumed,
+    assistantVoice,
   },
   ref,
 ): ReactElement {
@@ -2689,6 +2693,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
               pending={isAnyMessageStreaming}
               onStop={handleStop}
               placeholder='Write a message...'
+              assistantVoice={assistantVoice}
             />
           </div>
         </div>

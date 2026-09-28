@@ -70,6 +70,7 @@ import type { VisibleChannel } from '../../../../machines/stateMachine';
 import { useNavigate } from 'react-router-dom';
 import { xyneAIActor } from '../../../../machines/xyneAIMachine';
 import { DANGEROUS_EXTENSIONS } from '@xyne/shared';
+import { VoiceToggleButton, type VoiceModeToggle } from '../../../Assistant/ui/VoiceToggleButton';
 
 import type { UserActivity } from '../../../../hooks/useUserActivity';
 import type { UserTag } from '../utils/XyneAITypes';
@@ -128,6 +129,8 @@ export interface XyneAIInputBoxProps {
   onInputChange: (value: string) => void;
   /** `trigger` says which affordance sent it; the button has its own click row. */
   onSubmit: (trigger?: 'button' | 'enter') => void;
+  /** The assistant's voice mode button, shown next to the dictation microphone. */
+  assistantVoice?: VoiceModeToggle;
   onSelectedCollectionsChange?: (collectionIds: string[]) => void;
   onThreadInfoChange?: (threadInfo: ThreadInfo | null) => void;
   onSelectionInfosChange?: (selectionInfos: SelectionInfo[]) => void;
@@ -247,6 +250,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       inputValue,
       onInputChange,
       onSubmit,
+      assistantVoice,
       onSelectedCollectionsChange,
       onThreadInfoChange,
       onSelectionInfosChange,
@@ -2007,6 +2011,13 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                     disabled={isStreaming}
                     onStateChange={({ isRecording }) => setIsVoiceRecording(isRecording)}
                   />
+                  {assistantVoice && (
+                    <VoiceToggleButton
+                      voice={assistantVoice}
+                      disabled={isStreaming}
+                      className='h-9 w-9'
+                    />
+                  )}
                   <button
                     onClick={isStreaming ? onAbort : () => onSubmit('button')}
                     data-ph-capture-attribute-track-id={

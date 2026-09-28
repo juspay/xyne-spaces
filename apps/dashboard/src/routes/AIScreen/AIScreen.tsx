@@ -35,6 +35,8 @@ import { readTrackSource } from '../../services/Analytics/trackSource';
 import { useV2SessionInvalidator } from '../../hooks/useAskAISessionsV2';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
 import { AI_ACTIVE_SESSION_KEY, AI_SHOW_CHAT_VIEW_KEY } from './aiSessionStorage';
+import { useAssistant } from '../../components/Assistant/useAssistant';
+import { AssistantScreen } from '../../components/Assistant/ui/AssistantScreen';
 
 function CitationWorkspaceOpener({ onOpenSources }: { onOpenSources: () => void }): null {
   const citations = useCitationDocs();
@@ -519,6 +521,14 @@ const AIScreen = (): ReactElement => {
     (text: string): boolean => chatThreadRef.current?.submitPrompt(text) ?? false,
     [],
   );
+  // Voice mode covers the page; a question for Xyne AI goes to the open chat, or starts one.
+  const askXyneAI = useCallback(
+    (question: string): void => {
+      if (!submitPrompt(question)) handleComposerSubmit(question);
+    },
+    [handleComposerSubmit, submitPrompt],
+  );
+  const assistant = useAssistant({ onAskAI: askXyneAI });
   // A fresh object here re-renders every context consumer — that is every
   // artifact card in the transcript — on each AIScreen render.
   const appModeSignal = useMemo(
@@ -656,6 +666,7 @@ const AIScreen = (): ReactElement => {
                   onAgentChange={handleAgentChange}
                   onContextChange={handleContextChange}
                   onInitialQueryConsumed={handleInitialQueryConsumed}
+                  assistantVoice={assistant}
                 />
               ) : (
                 /* Landing page – centred greeting + composer */
@@ -671,10 +682,25 @@ const AIScreen = (): ReactElement => {
                         showAgentSelector={isV2}
                         onContextChange={handleContextChange}
                         hideDisclaimer
+                        assistantVoice={assistant}
                       />
                     </div>
                   </div>
                 </main>
+              )}
+              {/* Voice mode covers the page; the chat stays mounted underneath so nothing is lost. */}
+              {assistant.open && (
+                <div className='absolute inset-0 z-20 flex bg-background'>
+                  <AssistantScreen assistant={assistant}>
+                    <AIComposer
+                      onSubmit={text => assistant.send(text)}
+                      showAgentSelector={false}
+                      hideDisclaimer
+                      placeholder='Message the assistant…'
+                      assistantVoice={assistant}
+                    />
+                  </AssistantScreen>
+                </div>
               )}
             </AIShell>
           </AppCreationModeProvider>
