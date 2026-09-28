@@ -92,7 +92,6 @@
     "src/components/Tickets/TicketFilters/Submenus/UserGroupSubmenu/UserGroupSubmenu.tsx",
     "src/components/Tickets/TicketFilters/Submenus/UserSubmenu/UserSubmenu.tsx",
     "src/components/UserGroup/OnCallRotationModal/OnCallRotationModal.tsx",
-    "src/components/ZeroConnectionStatus/ZeroConnectionFailureModal.tsx",
     "src/components/flowUI/nodes/PrPreview.tsx",
     "src/components/flowUI/nodes/WidgetPreview.tsx",
     "src/components/flowUI/nodes/agent/AgentPreview.tsx",
