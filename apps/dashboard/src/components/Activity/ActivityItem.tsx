@@ -135,6 +135,7 @@ export const ActivityItem = memo(function ActivityItem({
       return <CanvasSharedActivity activity={activity} isExpanded={isExpanded} />;
 
     case 'recording_shared':
+    case 'recording_access_changed':
     case 'recording_access_revoked':
       return <RecordingSharedActivity activity={activity} isExpanded={isExpanded} />;
 

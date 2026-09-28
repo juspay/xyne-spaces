@@ -1579,6 +1579,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     taskCommandText,
     immediateTaskCommand,
     autoGoalEnabled,
+    isTwin: runAsTwin,
     reply: async (markdownText, failureLabel) => {
       await postAgentMessage(
         { spacesAppUserId: commandAgent.spacesAppUserId, appToken: commandAgent.appToken },

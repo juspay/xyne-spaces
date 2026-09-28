@@ -145,6 +145,12 @@ const envSchema = Joi.object({
   RADAR_BOOTSTRAP_LOOKBACK_MINUTES: Joi.number().integer().min(1).max(10_080).default(120),
   RADAR_EXECUTION_WORKER_CONCURRENCY: Joi.number().integer().min(1).max(50).default(1),
   RADAR_RUN_LOG_RETENTION_DAYS: Joi.number().integer().min(1).max(365).default(3),
+  // Duplicate check on the parser's creates, scored by Jev (JEV_* below). Off
+  // by default: it adds one Jev call per create on every window that has open
+  // items.
+  ENABLE_RADAR_DEDUP: Joi.boolean().default(false),
+  RADAR_DEDUP_THRESHOLD: Joi.number().min(0.5).max(1).default(0.75),
+  RADAR_DEDUP_TIMEOUT_MS: Joi.number().integer().min(500).max(60_000).default(5_000),
   ENABLE_TEAM_INTELLIGENCE_WORKER: Joi.boolean().default(false),
   TEAM_INTELLIGENCE_USER_JOB_CONCURRENCY: Joi.number().integer().min(1).default(2),
   TEAM_INTELLIGENCE_TEAM_JOB_CONCURRENCY: Joi.number().integer().min(1).default(2),
@@ -821,6 +827,13 @@ export const config = {
     // execution_run_logs is the fastest-growing table here — one row per
     // drain pass, carrying full LLM payloads. Swept on a timer by the worker.
     runLogRetentionDays: envVars.RADAR_RUN_LOG_RETENTION_DAYS as number,
+    // A create Jev rates at or above the threshold as the same ask as an open
+    // item is sent back to the parser once. Tuned on jev-trained, where a
+    // labelled set scored duplicates >= 0.84 and distinct asks <= 0.66 —
+    // re-tune when JEV_MODEL changes.
+    dedupEnabled: envVars.ENABLE_RADAR_DEDUP as boolean,
+    dedupThreshold: envVars.RADAR_DEDUP_THRESHOLD as number,
+    dedupTimeoutMs: envVars.RADAR_DEDUP_TIMEOUT_MS as number,
   },
   enableTeamIntelligenceWorker: envVars.ENABLE_TEAM_INTELLIGENCE_WORKER,
   teamIntelligence: {

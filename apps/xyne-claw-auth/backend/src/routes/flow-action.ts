@@ -1849,6 +1849,14 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       );
 
       if (!result.ok) {
+        // Retryable ⇒ the draft row is still pending, so the card is still worth
+        // clicking. Leave the message alone and let the browser toast carry the
+        // reason — flattening it to text would strand an approvable draft with
+        // no button to approve it (a taken identifier used to do exactly that).
+        if (result.retryable) {
+          res.json({ type: "error", message: result.error } satisfies AppActionResponse);
+          return;
+        }
         resp = { type: "close_screen", finalMessage: result.error };
         res.json(resp);
         void replaceFlowCardWithText(messageId, cardAgentSlug, `⚠️ ${result.error}`, cardConversationId, cardChannelId, cardSpacesAppId);

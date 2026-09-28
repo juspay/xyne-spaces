@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { clampPercent } from "./subagent-model-split.js";
 
 export const SERVER = {
   port: Number(process.env["XYNE_CLAW_PORT"] ?? 3002),
@@ -70,6 +71,8 @@ export const LITELLM = {
   // Boss decisions are short structured calls; running them on the same big
   // model as the worker would double the per-turn cost for marginal quality.
   fastModel: litellmFastModel,
+  subagentFastModel: process.env["LITELLM_SUBAGENT_FAST_MODEL"]?.trim() || litellmFastModel,
+  subagentFastModelPercent: clampPercent(process.env["LITELLM_SUBAGENT_FAST_MODEL_PERCENT"], 100),
 } as const;
 
 export const AGENT = {

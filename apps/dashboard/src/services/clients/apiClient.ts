@@ -11,6 +11,7 @@ import {
   clearAuthTokenTotal,
 } from '../otel';
 import { getDynamicHeaders } from './dynamicHeaders';
+import { stateMachineActor } from '../../machines/stateMachine';
 import {
   encryptionRequestInterceptor,
   encryptionResponseInterceptor,
@@ -158,6 +159,12 @@ apiConfig.interceptors.response.use(
     return response;
   },
   async (error: unknown) => {
+    // Cancelled by the caller — it moved on, e.g. the user typed on. Not a failure, so
+    // it is neither logged nor counted as one.
+    if (axios.isCancel(error)) {
+      return Promise.reject(error);
+    }
+
     // Type guard to ensure error has the expected structure
     if (!error || typeof error !== 'object' || !('config' in error)) {
       logger.error(Logger.Event.API_CALL_FAILED, {
@@ -322,6 +329,9 @@ export function clearAuthTokens(): void {
     document.cookie = 'user_data=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
   }
   logger.info(Logger.Event.CLEAR_AUTH_TOKEN_CALLED);
+  // The composer's saved related-context chips quote other people's messages; a
+  // session that ends this way (a 401, say) must not leave them behind.
+  stateMachineActor.send({ type: 'CLEAR_RELATED_CONTEXT' });
 
   safeRecordMetric(() => {
     clearAuthTokenTotal.add(1, {
