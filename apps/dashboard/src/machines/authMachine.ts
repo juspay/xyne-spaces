@@ -314,6 +314,11 @@ export const authMachine = createMachine(
           src: 'processOAuthCallback',
           onDone: [
             {
+              // SDK SSO flow - redirect to authorize page to complete device flow
+              target: 'redirectingToSdkSso',
+              guard: 'hasPendingSdkSso',
+            },
+            {
               // If pending invitation exists in localStorage, prioritize invitation flow
               // This overrides auto-login so user can see and accept the invitation
               target: 'redirectingToInvitation',
@@ -457,6 +462,16 @@ export const authMachine = createMachine(
           const pendingInvitationId = localStorage.getItem('pending_invitation_id');
           if (pendingInvitationId) {
             window.location.href = `/invite?invitationId=${encodeURIComponent(pendingInvitationId)}&loginComplete=true`;
+          }
+        },
+      },
+      redirectingToSdkSso: {
+        // Entry action that redirects to SDK SSO authorize page
+        entry: () => {
+          const pendingUserCode = localStorage.getItem('pending_sdk_sso_user_code');
+          if (pendingUserCode) {
+            localStorage.removeItem('pending_sdk_sso_user_code');
+            window.location.href = `/sdk-sso/authorize?user_code=${encodeURIComponent(pendingUserCode)}`;
           }
         },
       },
@@ -723,6 +738,11 @@ export const authMachine = createMachine(
         invoke: {
           src: 'validateSession',
           onDone: [
+            {
+              // SDK SSO flow - redirect to authorize page to complete device flow
+              target: 'redirectingToSdkSso',
+              guard: 'hasPendingSdkSso',
+            },
             {
               target: 'joiningWorkspace',
               guard: 'hasPendingWorkspaceAfterSessionValidation',
@@ -1237,6 +1257,9 @@ export const authMachine = createMachine(
       canKeepOptimisticSession: ({ context, event }) => {
         const status = (event as { error?: { status?: number } }).error?.status;
         return status !== 401 && !!context.user?.id;
+      },
+      hasPendingSdkSso: () => {
+        return !!localStorage.getItem('pending_sdk_sso_user_code');
       },
     },
     actions: {

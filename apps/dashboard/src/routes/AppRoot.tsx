@@ -16,6 +16,7 @@ import CommunityWorkspaceSelectionRoute from './AuthScreen/CommunityWorkspaceSel
 import TermsOfServiceScreen from './TermsOfServiceScreen/TermsOfServiceScreen';
 import PrivacyPolicyScreen from './PrivacyPolicyScreen/PrivacyPolicyScreen';
 import WorkspaceSelectionScreen from './WorkspaceSelectionScreen';
+import SdkSsoAuthorizeScreen from './SdkSsoAuthorizeScreen';
 import QuestionnaireScreen from './QuestionnaireScreen/QuestionnaireScreen';
 import IntentPlaygroundScreen from './IntentPlaygroundScreen';
 import ChatScreen from './ChatScreen/ChatScreen';
@@ -2075,6 +2076,10 @@ export const router = createBrowserRouter(
         {
           path: '/privacy',
           element: <PrivacyPolicyScreen />,
+        },
+        {
+          path: '/sdk-sso/authorize',
+          element: <SdkSsoAuthorizeScreen />,
         },
         {
           path: '/workspaces',
