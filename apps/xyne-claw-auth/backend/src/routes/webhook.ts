@@ -106,7 +106,7 @@ import {
 } from "../lib/chain-workflow.js";
 import { persistBase64ChatAttachments } from "../services/chatAttachmentService.js";
 import { gcsService } from "../services/storageService.js";
-import { getSpacesAuthForUser, spacesDbAvailable, getSpacesUserWorkspaceId, getWorkspaceIdForUser } from "../lib/spaces-db.js";
+import { getSpacesAuthForUser, spacesDbAvailable, getSpacesUserWorkspaceId, getWorkspaceIdForUser, spacesConversationExists } from "../lib/spaces-db.js";
 import { ensureUserExists, orgIdForSpacesUser } from "../lib/users-jit.js";
 import { finalizeOrphanedRun } from "../services/orphan-run-finalizer.js";
 import { requireStrictS2S, s2sKeyMatches, requireResultToken } from "../middleware/require-auth.js";
@@ -703,6 +703,7 @@ async function pendingActionTargetValidation(
   }
 
   if (conversationId) {
+    if ((await spacesConversationExists(conversationId)) === true) return { error: null };
     try {
       await spacesAppFetchGet(
         `/chat/conversationReplies?conversationId=${encodeURIComponent(conversationId)}&limit=1`,

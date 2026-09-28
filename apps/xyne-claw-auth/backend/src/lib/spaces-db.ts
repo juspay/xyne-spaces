@@ -610,6 +610,23 @@ export async function getSpacesUserWorkspaceId(userId: string): Promise<string |
   }
 }
 
+export async function spacesConversationExists(conversationId: string): Promise<boolean | null> {
+  const client = getClient();
+  if (!client) return null;
+  const trimmed = conversationId.trim();
+  if (!trimmed) return false;
+  try {
+    const rows = await client.$queryRawUnsafe<Array<{ one: number }>>(
+      `SELECT 1 AS one FROM public.conversations WHERE "conversationId" = $1 LIMIT 1`,
+      trimmed,
+    );
+    return rows.length > 0;
+  } catch (err) {
+    log.warn(`[spaces-db] conversation-exists conversationId=${trimmed} err=${errMsg(err)}`);
+    return null;
+  }
+}
+
 /** Resolve `@email@domain` → the active user with that email (email is @unique). */
 export async function getSpacesUserByEmail(email: string, workspaceId?: string): Promise<UserHit[]> {
   const client = getClient();
