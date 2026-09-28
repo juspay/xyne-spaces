@@ -32,6 +32,7 @@ import { formatAgentList, namesAnAgent, parseAgentRoute } from "./routing.js";
 import { policyOf } from "./schema.js";
 import { handleControlCommand, parseControlCommand, rememberActiveRun } from "./commands.js";
 import { runSerialized } from "./serialize.js";
+import { accountForSender } from "./shared-number.js";
 import { isAudio, transcribeAudio, transcriptionEnabled } from "./transcribe.js";
 import { findDefaultAgent, findOrgAgentBySlug, listOrgAgents, type BoundAgent } from "./store.js";
 
@@ -149,21 +150,29 @@ export async function handleInbound(ctx: InboundContext, msg: InboundMessage): P
 }
 
 async function handleOne(ctx: InboundContext, msg: InboundMessage): Promise<void> {
-  const { account, plugin } = ctx;
+  const { plugin } = ctx;
   let text = msg.text.trim();
-
-  const policy = policyOf(account.config);
 
   // Who sent this, properly. Inside the queue so two quick messages cannot
   // swap places while one of them looks the sender up, and behind the
   // chat-level gate so a group the account ignores never pays for it.
-  if (msg.resolveSenderId && chatIsAnswerable(policy, { isGroup: msg.isGroup, chatId: msg.chatId, selfChat: msg.selfChat === true })) {
+  if (
+    msg.resolveSenderId &&
+    chatIsAnswerable(policyOf(ctx.account.config), { isGroup: msg.isGroup, chatId: msg.chatId, selfChat: msg.selfChat === true })
+  ) {
     const resolved = await msg.resolveSenderId().catch((err) => {
-      log.warn(`[inbound] sender lookup failed account=${account.id}: ${errMsg(err)}`);
+      log.warn(`[inbound] sender lookup failed account=${ctx.account.id}: ${errMsg(err)}`);
       return null;
     });
     if (resolved) msg.senderId = resolved;
   }
+
+  // Before cards: an approval is parked under the account that sent it.
+  const account = await accountForSender(ctx, msg.senderId);
+  if (account.id !== ctx.account.id) {
+    log.info(`[inbound] shared number routed account=${ctx.account.id} → ${account.id} sender=${msg.senderId}`);
+  }
+  const policy = policyOf(account.config);
 
   // Tapping a card we sent is an ANSWER, not a new request, so it resolves
   // before policy and routing: the token is single-use and bound to this chat

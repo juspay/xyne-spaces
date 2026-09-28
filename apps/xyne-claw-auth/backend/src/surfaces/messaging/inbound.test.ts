@@ -53,6 +53,7 @@ vi.mock("./store.js", () => ({
   listOrgAgents: async () => [],
 }));
 vi.mock("xyne-claw-shared", () => ({ isAgentInvocableBy: () => true }));
+vi.mock("./shared-number.js", () => ({ accountForSender: async (ctx: { account: unknown }) => ctx.account }));
 
 const { handleInbound } = await import("./inbound.js");
 
