@@ -99,7 +99,7 @@ import { FlowScreenManager } from '../flowUI/FlowScreenManager';
 import { useFlowActionComplete } from '../../hooks/useFlowActionComplete';
 import {
   flowMessageId,
-  pendingActionIndex,
+  requirePendingActionIndex,
   unpresentedPendingActions,
 } from '../Chat/XyneAISidebar/utils/XyneAITypes';
 import { OpenUrlActions } from './OpenUrlActions';
@@ -1382,7 +1382,7 @@ function ChatMessageBubble({
                 await respondToPendingAction(
                   message,
                   action,
-                  pendingActionIndex(message.pendingActions, action),
+                  requirePendingActionIndex(message.pendingActions, action),
                   true,
                   agentSlug || 'ask-ai',
                 );
@@ -1392,7 +1392,7 @@ function ChatMessageBubble({
                 await respondToPendingAction(
                   message,
                   action,
-                  pendingActionIndex(message.pendingActions, action),
+                  requirePendingActionIndex(message.pendingActions, action),
                   false,
                   agentSlug || 'ask-ai',
                 );

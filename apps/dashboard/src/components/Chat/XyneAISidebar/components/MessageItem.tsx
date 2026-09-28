@@ -88,7 +88,11 @@ import type {
 } from '../utils/XyneAITypes';
 import { ActivityBlock } from './ActivityBlock';
 import { FlowScreenManager } from '../../../flowUI/FlowScreenManager';
-import { flowMessageId, pendingActionIndex, unpresentedPendingActions } from '../utils/XyneAITypes';
+import {
+  flowMessageId,
+  requirePendingActionIndex,
+  unpresentedPendingActions,
+} from '../utils/XyneAITypes';
 import { PendingActionBlock } from './PendingActionBlock';
 import { respondToPendingAction } from '../../../../services/XyneAI/XyneAIPendingActionService';
 import { Link2 } from 'lucide-react';
@@ -2009,7 +2013,7 @@ const MessageContent = ({
             await respondToPendingAction(
               message,
               action,
-              pendingActionIndex(message.pendingActions, action),
+              requirePendingActionIndex(message.pendingActions, action),
               true,
             );
           }}
@@ -2017,7 +2021,7 @@ const MessageContent = ({
             await respondToPendingAction(
               message,
               action,
-              pendingActionIndex(message.pendingActions, action),
+              requirePendingActionIndex(message.pendingActions, action),
               false,
             );
           }}

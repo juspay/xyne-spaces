@@ -61,6 +61,19 @@ describe("applyCreateSkill", () => {
     });
   });
 
+  it("slugifies a pathological name without backtracking", async () => {
+    // The old /^-+|-+$/ trim went quadratic on this; the outcome must still be
+    // a clean slug, derived in linear time.
+    const started = Date.now();
+    const outcome = await applyCreateSkill(
+      { ...PARAMS, name: `${"-".repeat(50_000)}Runbook${"-".repeat(50_000)}` },
+      "user-1",
+    );
+
+    expect(outcome).toMatchObject({ status: "created", slug: "runbook" });
+    expect(Date.now() - started).toBeLessThan(1_000);
+  });
+
   it("keeps an explicit slug", async () => {
     const outcome = await applyCreateSkill({ ...PARAMS, slug: "runbook" }, "user-1");
     expect(outcome).toMatchObject({ status: "created", slug: "runbook" });

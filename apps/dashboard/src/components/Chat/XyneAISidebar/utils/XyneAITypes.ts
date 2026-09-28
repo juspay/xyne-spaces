@@ -523,13 +523,18 @@ export function unpresentedPendingActions(
   return actions.filter(action => !presented.has(action.signature));
 }
 
-/** Position in the FULL list — the stored resolution id is keyed on it. */
-export function pendingActionIndex(
+/** Position in the FULL list — the stored resolution id is keyed on it. Throws
+ *  rather than guessing: an index we cannot prove would resolve some OTHER
+ *  action on the message. */
+export function requirePendingActionIndex(
   actions: PendingAction[] | undefined,
   action: PendingAction,
 ): number {
   const at = actions?.indexOf(action) ?? -1;
-  return at >= 0 ? at : 0;
+  if (at < 0) {
+    throw new Error('This request is no longer on the message — reload and try again.');
+  }
+  return at;
 }
 
 export interface PlanTodo {

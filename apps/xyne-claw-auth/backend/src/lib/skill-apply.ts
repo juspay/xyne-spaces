@@ -18,6 +18,25 @@ export type SkillApplyOutcome =
 
 /** `userId` is the approver; the caller has already verified it signed the
  *  action, so params are trusted here. */
+/**
+ * Character scan rather than /[^a-z0-9]+/ + /^-+|-+$/. The name is
+ * agent-supplied and that trim backtracks on a long run of separators; this is
+ * linear in the input and produces the same slug.
+ */
+function slugifyName(name: string): string {
+  const parts: string[] = [];
+  let word = "";
+  for (const ch of name.toLowerCase()) {
+    if ((ch >= "a" && ch <= "z") || (ch >= "0" && ch <= "9")) word += ch;
+    else if (word) {
+      parts.push(word);
+      word = "";
+    }
+  }
+  if (word) parts.push(word);
+  return parts.join("-").slice(0, 80);
+}
+
 export async function applyCreateSkill(
   params: Record<string, unknown>,
   userId: string,
@@ -27,7 +46,7 @@ export async function applyCreateSkill(
   const description = String(params["description"] ?? "").trim();
   const content = String(params["content"] ?? "");
   let slug = String(params["slug"] ?? "").trim().toLowerCase();
-  if (!slug) slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80);
+  if (!slug) slug = slugifyName(name);
 
   if (!name || !content.trim() || !slug) {
     return { status: "invalid", error: "Skill name, slug and content are required." };
