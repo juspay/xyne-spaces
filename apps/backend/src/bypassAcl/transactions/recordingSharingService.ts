@@ -63,7 +63,7 @@ export function validateGrantTargetsTx(self: RecordingSharingService, callId: st
   });
 }
 
-export function grantTx2(self: RecordingSharingService, callId: string, actor: RecordingSharingActor, targets: RecordingShareTarget[], access: GrantableEntityUserAccess, dmChannelIds: Map<string, string>, messageContent: string | undefined) {
+export function grantTx2(self: RecordingSharingService, callId: string, actor: RecordingSharingActor, targets: RecordingShareTarget[], access: GrantableEntityUserAccess, dmChannelIds: Map<string, string>, messageContent: string | undefined, post = true) {
   const dmChannelFor = async (userId: string): Promise<string> => {
     const cached = dmChannelIds.get(userId);
     if (cached) return cached;
@@ -95,17 +95,18 @@ export function grantTx2(self: RecordingSharingService, callId: string, actor: R
 
       // Post once for channel and user shares.
       if (
+        post &&
         (target.type === 'channel' || target.type === 'user') &&
         !asSharePost(change.share.metadata)
       ) {
         const channelId = target.type === 'channel' ? target.id : await dmChannelFor(target.id);
-        const post = await createRecordingPostMessage(tx, recording, actor, channelId, messageContent);
+        const sharePost = await createRecordingPostMessage(tx, recording, actor, channelId, messageContent);
         await tx.entityAccess.update({
           where: { id: change.share.id },
           data: {
             metadata: {
               intent: RECORDING_SHARE_INTENT.DIRECT_SHARE,
-              ...post,
+              ...sharePost,
             } as Prisma.InputJsonValue,
           },
         });

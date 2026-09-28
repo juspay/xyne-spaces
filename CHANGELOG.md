@@ -1,3 +1,19 @@
+## [1.410.4](https://github.com/juspay/xyne-spaces/compare/v1.410.3...v1.410.4) (2026-09-28)
+
+## [1.410.3](https://github.com/juspay/xyne-spaces/compare/v1.410.2...v1.410.3) (2026-09-28)
+
+
+### Bug Fixes
+
+* round the label chip in the create-ticket modal ([#2356](https://github.com/juspay/xyne-spaces/issues/2356)) ([5de4713](https://github.com/juspay/xyne-spaces/commit/5de47138556337d45525af226de65fe8cbde18d7))
+
+## [1.410.2](https://github.com/juspay/xyne-spaces/compare/v1.410.1...v1.410.2) (2026-09-28)
+
+
+### Bug Fixes
+
+* build @xyne/cache in the runner, test and dev backend images ([#2348](https://github.com/juspay/xyne-spaces/issues/2348)) ([588d277](https://github.com/juspay/xyne-spaces/commit/588d277d2be5ce7733ecaea13ea2bcdbfa71109b))
+
 ## [1.410.1](https://github.com/juspay/xyne-spaces/compare/v1.410.0...v1.410.1) (2026-09-28)
 
 
