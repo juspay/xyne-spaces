@@ -235,10 +235,11 @@ const AuthScreen = (): ReactElement | null => {
     reactNativeBridge.notifyRouteReady(path);
   }, [location]);
 
-  const entryLocationState = useRef(location.state).current;
+  const entryLocationState = useRef(
+    location.state as { enterpriseLoginEntry?: boolean } | null,
+  ).current;
   useEffect(() => {
-    const state = entryLocationState as { enterpriseLoginEntry?: boolean } | null;
-    if (!state?.enterpriseLoginEntry) {
+    if (!entryLocationState?.enterpriseLoginEntry) {
       clearEnterpriseLoginIntent();
     }
   }, [entryLocationState]);

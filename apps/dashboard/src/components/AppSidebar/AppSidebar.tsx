@@ -28,6 +28,7 @@ import {
   TicketToken,
   UserPlus,
 } from '@xyne/icons';
+import { WorkspaceRole } from '@xyne/shared';
 
 import Avatar from '../ui/Avatar/Avatar';
 import { Popover } from '../ui/Popover/Popover';
@@ -46,6 +47,7 @@ import { useAllVisibleChannels } from '../../hooks/useChannels';
 import { useAllUnreadCount } from '../../hooks/useUnreadCount';
 import { reactNativeBridge } from '../../utils/reactNativeBridge';
 import { useVisibleNavigationItems } from '../../hooks/useVisibleNavigationItems';
+import { useIsCommunityWorkspace } from '../../hooks/useIsCommunityWorkspace';
 import { AppIcon } from '../AppIcon/AppIcon';
 import { toolbarItemsStore, useAppSnapshots, appIdOf } from '../../hooks/barItems';
 import type { NavigationItem } from './navigationConfig';
@@ -176,6 +178,11 @@ const AppSidebar = (): ReactElement => {
   const prefixWs = (path: string): string => (workspaceId ? `/${workspaceId}${path}` : path);
   const { user } = useAuth();
   const currentUser = useSelf();
+  const isCommunityWorkspace = useIsCommunityWorkspace();
+  const canInvitePeople =
+    isCommunityWorkspace ||
+    currentUser?.role === WorkspaceRole.ADMIN ||
+    currentUser?.role === WorkspaceRole.OWNER;
   const visibleNavigationItems = useVisibleNavigationItems();
   const toolbarIds = toolbarItemsStore.useItems();
   const appSnapshots = useAppSnapshots();
@@ -621,25 +628,27 @@ const AppSidebar = (): ReactElement => {
         >
           <ZeroConnectionStatus className='mb-2' />
 
-          <Tooltip content='Invite people' side='right' delayDuration={0}>
-            <button
-              type='button'
-              aria-label='Invite people to workspace'
-              title='Invite people'
-              onClick={() => setIsInviteDialogOpen(true)}
-              data-testid='nav-invite-people'
-              data-track-category='App_Sidebar'
-              data-track-name='Sidebar_InvitePeople_Open'
-              className={cn(
-                'size-8 mb-2 translate-y-[10px] flex items-center justify-center rounded-lg cursor-pointer border border-transparent transition-colors',
-                isInviteDialogOpen
-                  ? 'bg-sidebar-accent border-sidebar-border text-sidebar-accent-foreground'
-                  : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
-              )}
-            >
-              <UserPlus size={18} variant='Solid' className='text-black' />
-            </button>
-          </Tooltip>
+          {canInvitePeople && (
+            <Tooltip content='Invite people' side='right' delayDuration={0}>
+              <button
+                type='button'
+                aria-label='Invite people to workspace'
+                title='Invite people'
+                onClick={() => setIsInviteDialogOpen(true)}
+                data-testid='nav-invite-people'
+                data-track-category='App_Sidebar'
+                data-track-name='Sidebar_InvitePeople_Open'
+                className={cn(
+                  'size-8 mb-2 translate-y-[10px] flex items-center justify-center rounded-lg cursor-pointer border border-transparent transition-colors',
+                  isInviteDialogOpen
+                    ? 'bg-sidebar-accent border-sidebar-border text-sidebar-accent-foreground'
+                    : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+                )}
+              >
+                <UserPlus size={18} variant='Solid' className='text-black' />
+              </button>
+            </Tooltip>
+          )}
 
           <Popover
             open={isSupportOpen}
@@ -770,6 +779,7 @@ const AppSidebar = (): ReactElement => {
           open={isInviteDialogOpen}
           onOpenChange={setIsInviteDialogOpen}
           workspaceId={workspaceId}
+          isCommunityWorkspace={isCommunityWorkspace}
         />
 
         {/* Status Update Modal */}

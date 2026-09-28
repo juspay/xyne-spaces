@@ -81,7 +81,11 @@ export class InvitationController {
 
       // Only workspace admins/owners can send invitations
       const inviterRole = req.user?.role;
-      if (inviterRole !== 'ADMIN' && inviterRole !== 'OWNER') {
+      if (
+        inviterRole !== 'ADMIN' &&
+        inviterRole !== 'OWNER' &&
+        role !== WorkspaceRole.COMMUNITY_MEMBER
+      ) {
         res.status(403).json({ error: 'Only workspace admins can send invitations' });
         return;
       }
