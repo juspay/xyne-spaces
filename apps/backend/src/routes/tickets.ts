@@ -10,6 +10,7 @@ import { validate } from '../middleware/validation';
 import { ticketDuplicateCheckSchema } from '../validators/ticketDuplicateValidator';
 import { ticketBoardSuggestionSchema } from '../validators/ticketBoardValidator';
 import { ReleaseReportController } from '@/controllers/releaseReportController';
+import { DeskThreadCanvasController } from '@/controllers/deskThreadCanvasController';
 import { authorize, authorizePrivilegedOrResource } from '@/middleware/authorize';
 import { analyticsAuthMiddleware } from '@/middleware/analyticsAuth';
 import { FlowRunExportController } from '@/controllers/flowRunExportController';
@@ -22,6 +23,7 @@ const kanbanTicketController = new KanbanTicketController();
 const releaseReportController = new ReleaseReportController();
 const releaseInsightsController = new ReleaseInsightsController();
 const flowRunExportController = new FlowRunExportController();
+const deskThreadCanvasController = new DeskThreadCanvasController();
 
 // Note: Authentication and ACL middleware are applied at the app level
 
@@ -74,5 +76,8 @@ router.post(
 
 router.post('/:ticketId/merge', ticketController.mergeTicket);
 router.post('/:ticketId/unmerge', ticketController.unmergeTicket);
+
+// Desk: synthesize the ticket's chat/email thread into a canvas
+router.post('/:ticketId/canvas', deskThreadCanvasController.createCanvasFromThread);
 
 export default router;
