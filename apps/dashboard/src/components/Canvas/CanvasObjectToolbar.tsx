@@ -5,6 +5,7 @@ import { posToDOMRect } from '@tiptap/core';
 import { type FC, type ReactElement, useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { CanvasToolbarAttachedActions } from './CanvasFormattingToolbar/CanvasFormattingToolbar';
+import { useAskAIAvailable } from '../../contexts/AskAIAvailabilityContext';
 
 /**
  * Whether BlockNote's own formatting toolbar will show for this selection.
@@ -73,6 +74,7 @@ export const CanvasObjectToolbar: FC<{
   canComment?: boolean;
 }> = (props): ReactElement | null => {
   const editor = useBlockNoteEditor();
+  const askAIAvailable = useAskAIAvailable();
   const [selected, setSelected] = useState<{ from: number; to: number; text: string } | null>(null);
   // The rect is measured during render, so scrolling has to ask for one. A
   // counter rather than a clock: two scroll events in the same millisecond
@@ -172,7 +174,8 @@ export const CanvasObjectToolbar: FC<{
   }, [editor, refresh, reposition]);
 
   const view = editor?._tiptapEditor?.view;
-  if (!selected || !view) return null;
+  // Nothing to offer: no commenting, and Ask AI left out by the host screen.
+  if (!selected || !view || (props.canComment === false && !askAIAvailable)) return null;
 
   const rect = posToDOMRect(view, selected.from, selected.to);
   return createPortal(

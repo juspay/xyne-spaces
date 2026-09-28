@@ -184,6 +184,29 @@ export interface QueryIntent {
   pAI: number;
 }
 
+/** How an existing item relates to a draft in the composer. */
+export type RelatedLabel = 'answers_it' | 'same_question' | 'related_discussion';
+
+export type RelatedKind = 'thread' | 'ticket' | 'canvas' | 'call';
+
+export interface RelatedItem {
+  id: string;
+  kind: RelatedKind;
+  label: RelatedLabel;
+  /** The classifier's confidence in the label. */
+  confidence: number;
+  /** Opens the same way a cmd+K result does. */
+  result: DisplaySearchResult;
+}
+
+export interface RelatedContext {
+  items: RelatedItem[];
+  /** False when the draft was not searched — not ready (half-typed, or nothing to look up). */
+  ready?: boolean;
+  /** The lookup failed; nothing to show, but worth asking again at the next pause. */
+  failed?: boolean;
+}
+
 export interface VespaSearchResponse {
   success: boolean;
   data: {
