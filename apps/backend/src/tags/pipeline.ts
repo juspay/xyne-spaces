@@ -5,6 +5,7 @@ import { logger } from '@/utils/logger';
 import { redisService } from '@/services/redisService';
 import { tagRepository } from '@/database/repositories/tagRepository';
 import { generateLlmTags } from './generators/llm';
+import { runShadowTagGeneration } from './generators/jevShadow';
 import { TagsConfigShapeSchema } from './schema';
 import { tagService } from './service';
 import { DESK_EMAIL_SOURCE_TYPE, DEFAULT_DESK_EMAIL_CONFIG } from './deskEmail';
@@ -406,6 +407,11 @@ export class TagGenerationPipeline extends EventEmitter {
 
       generated.push(...(await generator(context, group, workspaceId)));
     }
+
+    // Log-only comparison against a candidate Jev model. Not awaited: its result is
+    // never persisted and a slow candidate must not hold the job's Bull lock. Off
+    // unless CAC `shadow_tag_generation_enabled` is true. Never throws.
+    void runShadowTagGeneration(context, categories, generated, { jobId, sourceId, sourceType });
 
     // If an LLM generator returned a tag outside `tags` for a category with
     // is_new_tag_allowed=true, fold that new tag back into the config's vocabulary
