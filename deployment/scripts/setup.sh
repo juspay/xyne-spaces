@@ -205,17 +205,39 @@ if [ "$DO_OVERLAY" = "1" ]; then
   fi
 fi
 
+argo_settle() {
+  local ns="$1" filter="$2" i
+  for i in $(seq 1 60); do
+    [ -z "$(kubectl -n "$ns" get applications -o json | jq -r "$filter")" ] && return 0
+    sleep 2
+  done
+  log "Argo CD did not settle within 120s; continuing"
+}
+
 restart_argo_syncs() {
-  local ns="$1" app revision running
-  log "refreshing Argo CD Applications and restarting any sync from an older revision"
+  local ns="$1" app revision stale phase
+  log "refreshing Argo CD Applications and restarting any sync pinned to an older revision"
   run kubectl -n "$ns" annotate application --all argocd.argoproj.io/refresh=hard --overwrite
   if [ "$DRY_RUN" = "1" ]; then
     return 0
   fi
-  running="$(kubectl -n "$ns" get applications -o json | jq -r '.items[] | select(.status.operationState.phase == "Running") | .metadata.name')"
-  for app in $running; do
+  argo_settle "$ns" '.items[] | select(.metadata.annotations["argocd.argoproj.io/refresh"]) | .metadata.name'
+  stale="$(kubectl -n "$ns" get applications -o json | jq -r '.items[]
+    | select(.status.operationState.phase == "Running")
+    | (.status.operationState.operation.sync.revision // "") as $r
+    | select(($r | test("^[0-9a-f]{40}$")) and $r != (.status.sync.revision // ""))
+    | .metadata.name')"
+  for app in $stale; do
     run kubectl -n "$ns" patch application "$app" --type merge -p '{"status":{"operationState":{"phase":"Terminating"}}}'
   done
+  if [ -n "$stale" ]; then
+    argo_settle "$ns" '.items[] | select(.status.operationState.phase == "Terminating") | .metadata.name'
+  fi
+  phase="$(kubectl -n "$ns" get application xyne-root -o jsonpath='{.status.operationState.phase}')"
+  if [ "$phase" = "Running" ]; then
+    log "xyne-root is already syncing the current revision"
+    return 0
+  fi
   revision="$(kubectl -n "$ns" get application xyne-root -o jsonpath='{.spec.source.targetRevision}')"
   run kubectl -n "$ns" patch application xyne-root --type merge -p "$(jq -nc --arg r "$revision" '{operation: {initiatedBy: {username: "setup.sh"}, sync: {revision: $r, prune: true}}}')"
 }

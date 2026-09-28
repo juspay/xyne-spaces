@@ -27,7 +27,7 @@ command:
   - |
     major="$(python3 -c 'import torch; print(torch.cuda.get_device_capability()[0])' 2>/dev/null || echo 0)"
     dtype=auto
-    if [ "$major" -lt 8 ]; then dtype=half; fi
+    if [ "$major" -lt 8 ]; then dtype=float32; fi
     echo "GPU compute capability ${major}.x: serving with --dtype $dtype"
     exec vllm serve "$@" --dtype "$dtype"
   - vllm

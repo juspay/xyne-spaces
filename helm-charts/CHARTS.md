@@ -668,9 +668,12 @@ included (vllm-project/vllm#58755, fixed after v0.30.0).
 
 **Command.** `vllm serve lightonai/LightOnOCR-2-1B-bbox --host 0.0.0.0 --port 8000
 --limit-mm-per-prompt '{"image": 1}' --mm-processor-cache-gb 0 --no-enable-prefix-caching
---gpu-memory-utilization 0.9 --dtype <auto|half>`, the serving flags from the model card. A
+--gpu-memory-utilization 0.9 --dtype <auto|float32>`, the serving flags from the model card. A
 short entrypoint reads the GPU's compute capability first: `auto` (the model's bf16) on 8.0 and
-newer (L4, A10G, L40S), `half` below it (T4), and `half` if the check fails.
+newer (L4, A10G, L40S), `float32` below it (T4), and `float32` if the check fails. Do not use
+`half`: in fp16 the model's activations overflow and it emits one token repeated until
+`max_tokens` (seen on a T4 as `locklocklock…`), so every page runs into the OCR client's timeout.
+float32 fits a 1B model in 16 GB but generates more slowly than bf16.
 
 **Ports.** Container and Service `http` 8000. `xyne-lighton-ocr` reaches it at
 `http://xyne-lighton-model:8000/v1/chat/completions`, which the root chart sets as its
@@ -710,7 +713,9 @@ storage), and the **feed** and **search** container clusters. The defaults are t
 because every other role points at it and it must come up first.
 
 **Image.** `vespaengine/vespa` (no registry set), third party. **`image.tag` must be set**: the
-image is not built from this repository, so `appVersion` is the `0.0.0` placeholder.
+image is not built from this repository, so `appVersion` is the `0.0.0` placeholder. The root
+chart sets `8.754.14`, the version the application package in `vespa-core/vespa` is validated
+against.
 
 **Workload.** `workloadKind: StatefulSet`, `podManagementPolicy: OrderedReady`,
 `updateStrategy: RollingUpdate` (partition 0), `persistentVolumeClaimRetentionPolicy`
@@ -788,7 +793,7 @@ securityContext:
 podAnnotations:
   sidecar.istio.io/inject: null
   traffic.sidecar.istio.io/includeInboundPorts: "8080"
-  traffic.sidecar.istio.io/includeOutboundPorts: "8080,8088"
+  traffic.sidecar.istio.io/includeOutboundPorts: "8080"
 podAntiAffinityPreset: ""
 persistence:
   enabled: false
@@ -838,9 +843,21 @@ application package.
 - **`versionedName` must stay `false`.** It renames the StatefulSet, which orphans the volumes.
 - `persistentVolumeClaimRetentionPolicy` is `Retain`/`Retain`: deleting the release leaves the
   data. The claims are named `data-<workload>-<ordinal>`; nothing adopts volumes with other names.
-- **Schemas are not deployed by this chart.** The application package reaches the configserver
-  through `vespa deploy` (see `vespa-core/scripts/deploy-dev.sh`); the configserver comes up
-  healthy but empty until it runs.
+- **Schemas are not deployed by this chart.** The application package is its own chart,
+  `vespa-core/vespa` (`xyne-vespa-app`): it renders `services.xml` and `hosts.xml` for this
+  topology and a PostSync Job uploads it to the configserver; the root chart installs it with
+  Vespa. Standalone, install that chart after the four roles, or run
+  `vespa-core/scripts/deploy-dev.sh` for the laptop layout. The configserver comes up healthy
+  but empty until the package is deployed, and feed/search stay unready until then.
+- **Host names.** `hosts.xml` names every node by its pod DNS name, which the configserver must
+  resolve before it accepts the package. Configserver and content are named through their own
+  headless Services; feed and search, whose Services are ordinary ClusterIP for the backend,
+  are named through extra headless `<name>-hosts` Services (`statefulset.serviceName` plus an
+  `extraObjects` Service with `publishNotReadyAddresses: true`), which the root chart adds.
+  With Istio it also adds a PeerAuthentication per feed/search workload that keeps `STRICT` but
+  sets port 8080 `PERMISSIVE`: the configserver and content nodes are outside the mesh and
+  read `/state/v1` on 8080 in plain HTTP (without it the deploy never converges, container
+  generation `-1`), while the backend and workers still arrive over mTLS.
 - **Readiness probes**: `/state/v1/health` on 19071 (configserver) and 8080 (feed, search).
   `vespa-content` ships **no** probe: 19107 is the storage node's state port and this has not been
   verified against the image; add one once you have. Running all four with no probes makes
@@ -857,8 +874,11 @@ application package.
 
 A GPU text-embeddings-inference server backing the Vespa embed pipeline.
 
-**Image.** `huggingface/text-embeddings-inference` (no registry set), third party, `appVersion`
-`1.6`.
+**Image.** `ghcr.io/huggingface/text-embeddings-inference`, third party, `appVersion`
+`cuda-1.9.4`: TEI's CUDA build for every supported GPU generation (Turing T4 through Hopper).
+The plain version tags are compiled for one generation each (`1.x` is Ampere 8.0 only,
+`turing-`, `86-`, `89-` the others), so a pool that mixes instance types needs the `cuda-`
+image. The root chart schedules it on the `gpu` pool.
 
 **Command.** `args`: `--model-id BAAI/bge-base-en-v1.5 --port 3000 --dtype float32
 --max-client-batch-size 1000 --max-batch-requests 1000 --auto-truncate`. Model and batching are
@@ -893,18 +913,20 @@ start).
 
 A batching proxy that coalesces embedding requests before they reach the GPU.
 
-**Image.** `xyne-spaces-tei-batch-proxy` with no registry and `appVersion` `0.0.0`: the source is
-not in this repository, so **`image.registry`, `image.repository` and `image.tag` must be set** to
-wherever you build it.
+**Image.** `ghcr.io/juspay/xyne-spaces-tei-batch-proxy`, release-stamped, built from
+`tei-batch-proxy/Dockerfile` (Node stdlib only). Besides `POST /v1/embeddings` it serves
+`POST /v1/embeddings/file`, sent to `UPSTREAM_FILE_EMBEDDINGS_URL` (defaults to
+`UPSTREAM_EMBEDDINGS_URL`).
 
-**Ports.** Container `http` 8088; Service `http` 8088 -> 8088. `fullnameOverride: tei-batch-proxy`
+**Ports.** Container `http` 8080; Service `http` 8080 -> 8080, the address Vespa's
+`openai-embedder` component uses (`http://tei-batch-proxy:8080/v1/embeddings`). `fullnameOverride: tei-batch-proxy`
 is the chart default.
 
 **Health.** Liveness (initial 5 s, every 20 s) and readiness (initial 3 s) `GET /health`.
 
 **Secrets.** None.
 
-**Environment.** `PORT` (`"8088"`), `UPSTREAM_EMBEDDINGS_URL`
+**Environment.** `PORT` (`"8080"`), `UPSTREAM_EMBEDDINGS_URL`
 (`http://vespa-embedder:80/v1/embeddings`), `EMBEDDINGS_BATCH_SIZE` (`"512"`),
 `UPSTREAM_CONCURRENCY` (`"4"`), `REQUEST_TIMEOUT_MS` (`"120000"`), `MAX_RETRIES` (`"0"`),
 `RETRY_BASE_MS` (`"1000"`), `PROXY_PAYLOAD_LIMIT_BYTES` (`"200000000"`).
@@ -914,8 +936,8 @@ is the chart default.
 stateless and scales horizontally, but every replica adds `UPSTREAM_CONCURRENCY` (4) concurrent
 streams against one GPU.
 
-**Security.** No security context. Pod annotations restrict the Istio sidecar to port 8088
-inbound and outbound.
+**Security.** No security context. Pod annotations restrict the Istio sidecar to port 8080
+inbound and outbound; the embedder has no sidecar, so calls to it on port 80 bypass the mesh.
 
 **Gotchas.**
 
@@ -1101,7 +1123,7 @@ replication-manager overrides and the three Vespa role overrides. `global.imageR
 | `xyne-vespa-feed` | xyne-vespa (alias) | off | `fullnameOverride: vespa-feed`; needs `image.tag` |
 | `xyne-vespa-search` | xyne-vespa (alias) | off | `fullnameOverride: vespa-search`; needs `image.tag` |
 | `xyne-vespa-embedder` | xyne-vespa-embedder | off | GPU node required |
-| `xyne-tei-batch-proxy` | xyne-tei-batch-proxy | off | needs `image.registry` / `image.repository` / `image.tag` |
+| `xyne-tei-batch-proxy` | xyne-tei-batch-proxy | off | |
 | `xyne-redis` | xyne-redis | off | |
 | `xyne-sandbox-router` | xyne-sandbox-router | off | only with the Kata sandbox stack |
 | `xyne-egress-proxy` | xyne-egress-proxy | off | only with the Kata sandbox stack |
@@ -1111,8 +1133,8 @@ An aliased sub-chart takes the alias as its chart name, so `xyne-zero-replicatio
 because the backend addresses `vespa-feed` and `vespa-search`.
 
 The Vespa tier is six entries: the configserver, the three aliases, the embedder and the batch
-proxy. Bring them up before the backend needs search: `vespa-configserver` first, then the rest,
-then `vespa deploy`. The sandbox router and the egress proxy only make sense with the Kata sandbox
+proxy. Bring them up before the backend needs search, then install the application package
+chart `vespa-core/vespa`, which deploys the schemas through its PostSync Job. The sandbox router and the egress proxy only make sense with the Kata sandbox
 stack from `deployment/argocd/addons/sandbox`, which is not part of the umbrella.
 
 The umbrella has no templates of its own apart from `NOTES.txt`, so a top-level `extraObjects`

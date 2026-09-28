@@ -6,8 +6,8 @@ nameOverride: ""
 fullnameOverride: tei-batch-proxy
 
 image:
-  registry: ""
-  repository: xyne-spaces-tei-batch-proxy
+  registry: ghcr.io
+  repository: juspay/xyne-spaces-tei-batch-proxy
   tag: ""
   digest: ""
   pullPolicy: IfNotPresent
@@ -30,7 +30,7 @@ args: []
 
 containerPorts:
   - name: http
-    containerPort: 8088
+    containerPort: 8080
     protocol: TCP
 
 service:
@@ -39,11 +39,11 @@ service:
   annotations: {}
   ports:
     - name: http
-      port: 8088
+      port: 8080
       targetPort: http
 
 env:
-  PORT: "8088"
+  PORT: "8080"
   UPSTREAM_EMBEDDINGS_URL: http://vespa-embedder:80/v1/embeddings
   EMBEDDINGS_BATCH_SIZE: "512"
   UPSTREAM_CONCURRENCY: "4"
@@ -96,8 +96,8 @@ serviceAccount:
 commonLabels: {}
 podLabels: {}
 podAnnotations:
-  traffic.sidecar.istio.io/includeInboundPorts: "8088"
-  traffic.sidecar.istio.io/includeOutboundPorts: "8088"
+  traffic.sidecar.istio.io/includeInboundPorts: "8080"
+  traffic.sidecar.istio.io/includeOutboundPorts: "8080"
 deploymentAnnotations: {}
 
 nodeSelector: {}

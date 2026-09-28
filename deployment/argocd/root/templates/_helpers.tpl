@@ -585,6 +585,7 @@ pdb:
 {{- $env := include "xyne-root.redisEnv" (dict "root" $root) | fromYaml }}
 {{- if (index $root.Values.apps "xyne-lighton-model").enabled }}
 {{- $_ := set $env "LIGHTON_URL" "http://xyne-lighton-model:8000/v1/chat/completions" }}
+{{- $_ := set $env "LIGHTON_TIMEOUT_SECONDS" "300" }}
 {{- end }}
 {{- $_ := set $v "env" $env }}
 {{- $_ := set $v "secretEnv" (dict "REDIS_PASSWORD" (dict "name" "xyne-backend-secrets" "key" "REDIS_PASSWORD" "optional" true)) }}
@@ -595,11 +596,40 @@ pdb:
 {{- include "xyne-root.appBase" (dict "root" .root "xyneImage" false "pool" "gpu") }}
 {{- end }}
 
+{{- define "xyne-root.secretChecksum" -}}
+{{- $sums := .root.Values.global.secretChecksums | default dict }}
+{{- $names := list (printf "%s-secrets" .chart) }}
+{{- range $_, $ref := (.values.secretEnv | default dict) }}
+{{- if kindIs "map" $ref }}
+{{- $names = append $names $ref.name }}
+{{- end }}
+{{- end }}
+{{- range (.values.envFromSecrets | default list) }}
+{{- if kindIs "string" . }}
+{{- $names = append $names . }}
+{{- else if .name }}
+{{- $names = append $names .name }}
+{{- end }}
+{{- end }}
+{{- $parts := list }}
+{{- range ($names | uniq | sortAlpha) }}
+{{- with index $sums . }}
+{{- $parts = append $parts . }}
+{{- end }}
+{{- end }}
+{{- if $parts }}
+{{- join "," $parts | sha256sum | trunc 16 }}
+{{- end }}
+{{- end }}
+
 {{- define "xyne-root.app" -}}
 {{- $root := .root }}
 {{- $app := index $root.Values.apps .name | default dict }}
 {{- $built := include (printf "xyne-root.appValues.%s" (.builder | default .chart)) (dict "root" $root "worker" .worker) | fromYaml }}
 {{- $values := include "xyne-root.merge" (dict "base" $built "layers" (list $app.values .workerValues)) | fromYaml }}
+{{- with include "xyne-root.secretChecksum" (dict "root" $root "values" $values "chart" .chart) }}
+{{- $_ := set $values "podAnnotations" (merge (dict "checksum/secrets" .) ($values.podAnnotations | default dict)) }}
+{{- end }}
 {{- $source := include "xyne-root.helmSource" (dict "root" $root "path" (printf "helm-charts/charts/%s" .chart) "releaseName" .name "values" $values) | fromYaml }}
 {{- include "xyne-root.application" (dict "root" $root "name" .name "namespace" $root.Values.global.namespace "wave" (.wave | default 0) "source" $source "ignoreDifferences" (include "xyne-root.deploymentIgnore" . | fromYamlArray)) }}
 {{- end }}

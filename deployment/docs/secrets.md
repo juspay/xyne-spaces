@@ -160,8 +160,10 @@ the backend and claw-auth ([Rotation](#rotation)).
 
 `livekit_api_key` / `livekit_api_secret` are rendered into the server configuration (`keys:`)
 and the egress configuration, stored in the cloud's secret store by `01-infra`, and copied into
-`xyne-transcription-agent-secrets` by `02-platform`. The backend and the agent sign room tokens
-with them.
+`xyne-backend-secrets` and `xyne-transcription-agent-secrets` by `02-platform`. The backend and
+the agent sign room tokens with them, and the backend verifies the server's webhooks
+(`https://<domain>/api/livekit/webhook`) with them. On AWS the instances carry a hash of the
+rendered configuration, so a key change replaces them automatically.
 
 TURN over TLS is optional. The bundle is a single PEM file: the full certificate chain for
 `turn.<domain>` followed by its private key. The VM's cloud-init splits it into
@@ -201,9 +203,13 @@ credentials such as `xyne-pg-backup`) are created by you with `kubectl` or by an
 
 ## Rotation
 
-Every rotation is: change the value in the `.tfvars`, re-apply the stack that owns it, restart
-the pods that read it. Terraform replaces the Secret data in place; pods pick up a Secret change
-only on restart.
+Every rotation is: change the value in the `.tfvars` and re-apply the stack that owns it. The
+restart is automatic for the app Secrets `02-platform` writes: it passes a checksum of each one
+to the root chart (`global.secretChecksums`), which stamps a `checksum/secrets` pod annotation on
+every app from the Secrets it reads (its own `<chart>-secrets` plus any `secretEnv` /
+`envFromSecrets` reference). A changed Secret changes that annotation, so Argo CD rolls exactly
+the apps that read it. The "Then" column below is what is left to do by hand; entries for app
+Deployments are the restarts that now happen on their own.
 
 | Value | Re-apply | Then |
 |---|---|---|

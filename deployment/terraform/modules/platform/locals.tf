@@ -201,6 +201,13 @@ locals {
     },
   )
 
+  secret_checksums = {
+    for name in local.secret_names : name => nonsensitive(substr(sha256(jsonencode(merge(
+      local.secret_data[name],
+      lookup(var.extra_secret_data, name, {}),
+    ))), 0, 16))
+  }
+
   root_values = {
     platformRevision = var.root_revision
     argocd = {
@@ -215,8 +222,9 @@ locals {
       namespace     = var.namespace
       repoURL       = var.repo_url
       chartRevision = var.chart_revision
-      imageRegistry = var.image_registry
-      imageTag      = var.image_tag
+      imageRegistry   = var.image_registry
+      imageTag        = var.image_tag
+      secretChecksums = local.secret_checksums
     }
     infra = {
       cluster = {

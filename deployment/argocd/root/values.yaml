@@ -250,16 +250,18 @@ addons:
     image:
       registry: ""
       repository: vespaengine/vespa
-      tag: ""
+      tag: "8.754.14"
     proxyImage:
       registry: ""
-      repository: xyne-spaces-tei-batch-proxy
+      repository: ""
       tag: ""
     storageClass: ""
     configserverStorage: 50Gi
     contentStorage: 200Gi
     embedder:
       enabled: true
+      model: BAAI/bge-base-en-v1.5
+      dimensions: 768
     values:
       configserver: {}
       content: {}
@@ -267,6 +269,7 @@ addons:
       search: {}
       embedder: {}
       proxy: {}
+      app: {}
   monitoring:
     enabled: false
     namespace: monitoring

@@ -375,10 +375,22 @@ check_sandbox_capacity() {
 check_vespa() {
   [ -f "$PLATFORM_TFVARS" ] || return 0
   [ "$(tfvar_value "$PLATFORM_TFVARS" enable_vespa)" = "true" ] || return 0
-  if grep -q 'proxyImage' "$PLATFORM_TFVARS"; then
-    record PASS "vespa proxy image" "set in addon_values"
+  if [ "$(tfvar_value "$INFRA_TFVARS" vespa_enabled)" = "true" ]; then
+    record PASS "vespa pool" "vespa_enabled"
   else
-    record FAIL "vespa proxy image" "enable_vespa needs the tei-batch-proxy image, which is not published publicly; set addons.vespa.proxyImage through addon_values (docs/configuration.md)"
+    record WARN "vespa pool" "vespa_enabled is off: the Vespa roles (about 22 GiB of requests) land on the general pool"
+  fi
+  if grep -Eq 'embedder:[[:space:]]*\{[[:space:]]*enabled:[[:space:]]*false' "$PLATFORM_TFVARS"; then
+    record PASS "vespa embedder" "disabled; point values.app.embedder at your own OpenAI-compatible endpoint"
+  elif [ "$(tfvar_value "$INFRA_TFVARS" gpu_enabled)" = "true" ]; then
+    record PASS "vespa embedder" "runs on the gpu pool"
+  else
+    record FAIL "vespa embedder" "the embedder needs a GPU node: set gpu_enabled = true in 01-infra.tfvars"
+  fi
+  if grep -q 'ENABLE_VESPA_WORKER' "$PLATFORM_TFVARS"; then
+    record PASS "vespa ingestion worker" "a worker sets ENABLE_VESPA_WORKER"
+  else
+    record WARN "vespa ingestion worker" "no worker sets ENABLE_VESPA_WORKER, so nothing is indexed into Vespa (docs/configuration.md#add-a-worker-role)"
   fi
 }
 

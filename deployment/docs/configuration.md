@@ -654,7 +654,7 @@ reachable:
 | `redis` | `enabled`, `persistence.size` 10Gi, `persistence.storageClass`, `values` |
 | `minio` | `enabled`, `version` 5.4.0, `persistence.size` 200Gi, `persistence.storageClass`, `resources.requests.memory` 2Gi, `values` |
 | `hindsight` | `enabled`, `repoURL` github.com/vectorize-io/hindsight, `targetRevision` v0.10.1, `path` helm/hindsight, `namespace` hindsight, `service` hindsight-api, `port` 8888, `values` (any upstream chart value: `postgresql.*`, `worker.*`, `tei.*`, `api.env`, `existingSecret`) |
-| `vespa` | `enabled`, `image.{registry, repository vespaengine/vespa, tag}`, `proxyImage.{registry, repository, tag}`, `storageClass`, `configserverStorage` 50Gi, `contentStorage` 200Gi, `embedder.enabled` true, `values.{configserver, content, feed, search, embedder, proxy}` |
+| `vespa` | `enabled`, `image.{registry, repository vespaengine/vespa, tag 8.754.14}`, `proxyImage.{registry, repository, tag}` (default: the published image at `image_tag`), `storageClass`, `configserverStorage` 50Gi, `contentStorage` 200Gi, `embedder.{enabled true, model BAAI/bge-base-en-v1.5, dimensions 768}`, `values.{configserver, content, feed, search, embedder, proxy, app}` |
 | `monitoring` | `enabled`, `namespace` monitoring, `metricsEndpoint`, `victoriaMetrics.version` 0.93.0, `otelCollector.version` 0.173.1, `values.{victoriaMetrics, otelCollector}` |
 | `sandbox` | `enabled`, `kata.{version 4.1.0, imageTag 4.1.0, namespace kube-system, shim qemu, shims [qemu, qemu-runtime-rs], hypervisorAnnotations}`, `controller.{repoURL, targetRevision v0.4.5, path helm, namespace, image, tag, values}`, `template.{name, image, vcpus, memory, resources}`, `warmPool.replicas`, `policy.{allowedEgress, dns.cidrs}`, `values.{kata, policy, router, egressProxy}` |
 
@@ -693,7 +693,7 @@ disabled.
 | `zero` | `storage-type=local-ssd:NoSchedule` | `e2-highmem-4`, 1–3, `local_ssd_count` 0 (needs N2/N2D/C2 when > 0) | `r6i.xlarge`, 1–3, `local_storage_raid0` false | `Standard_E4s_v5`, 1–3, `local_storage_temp_disk` false (needs a `d` size) |
 | `vespa` | `pool=vespa:NoSchedule` | `n2-standard-8`, 1–3, 200 GB `pd-ssd` | `m6i.2xlarge`, 1–3, 200 GB | `Standard_D8s_v5`, 1–3, 256 GB |
 | `sandbox` | `workload=sandbox:NoSchedule` | `n1-standard-4`, 1–5, `UBUNTU_CONTAINERD`, nested virtualization | `m5.metal`, 1–3, Ubuntu EKS AMI (must end in `.metal`, x86_64, and be offered in the region) | `Standard_D4s_v3`, 1–3 (must be a v3/v4 D or E size) |
-| `gpu` | `nvidia.com/gpu=present:NoSchedule` | not yet | `instance_types` `g6.xlarge`, `g5.xlarge`, `g6e.xlarge`, `g4dn.xlarge` (L4, A10G, L40S, T4), tried in that order when one is out of capacity; 1–2, `AL2023_x86_64_NVIDIA`, 100 GB. vLLM serves in bf16, and switches to fp16 (`--dtype half`) on its own on a GPU without bf16 such as the T4 | not yet |
+| `gpu` | `nvidia.com/gpu=present:NoSchedule` | not yet | `instance_types` `g6.xlarge`, `g5.xlarge`, `g6e.xlarge`, `g4dn.xlarge` (L4, A10G, L40S, T4), tried in that order when one is out of capacity; 1–2, `AL2023_x86_64_NVIDIA`, 100 GB. vLLM serves in bf16, and switches to float32 on its own on a GPU without bf16 such as the T4 (fp16 makes the OCR model emit garbage) | not yet |
 
 Common attributes: `min_count`, `max_count`, `disk_size_gb`, `disk_type`, `spot`, `labels`;
 plus `machine_type` (GCP), `instance_type`, `desired_count`, `ami_type` (AWS), `vm_size`,
@@ -780,8 +780,8 @@ image_tag      = "1.356.0"
 `image_registry` replaces the registry of every chart image (through `image.registry` and
 `global.imageRegistry`); `image_tag` applies to images built from this repository (backend,
 worker, dashboards, claw, claw-auth, transcription-agent, ocr) and must match a tag that
-`chart_revision`'s charts can run. Vespa and the batch proxy take their tags from
-`addon_values["vespa"]`. If the mirror needs a pull secret, create it in `namespace` yourself
+`chart_revision`'s charts can run; the batch proxy follows it too. Vespa takes its tag from
+`addon_values["vespa"]` (`image.tag`, default `8.754.14`). If the mirror needs a pull secret, create it in `namespace` yourself
 (`kubectl create secret docker-registry …` or an overlay; `extra_secret_data` only writes the
 nine known Secrets) and reference it with `imagePullSecrets` in `apps.<chart>.values`.
 
@@ -790,6 +790,7 @@ nine known Secrets) and reference it with `imagePullSecrets` in `apps.<chart>.va
 ```hcl
 # 01-infra.tfvars
 vespa_enabled   = true      # the vespa node pool (Vespa nodes are pinned to it)
+gpu_enabled     = true      # the embedder needs a GPU node
 sandbox_enabled = true      # the sandbox node pool
 
 # 02-platform.tfvars
@@ -799,10 +800,7 @@ enable_sandbox    = true
 
 addon_values = {
   vespa = <<-YAML
-    image: {tag: "8.520.9"}
-    proxyImage: {registry: ghcr.io/juspay, tag: "1.356.0"}
     storageClass: premium-rwo
-    embedder: {enabled: false}
   YAML
   monitoring = <<-YAML
     values:
@@ -816,10 +814,23 @@ addon_values = {
 }
 ```
 
-- **Vespa** installs four `xyne-vespa` roles, and with `embedder.enabled` a GPU embedder plus
-  the batching proxy. `image.tag` is required (the chart's `appVersion` is a placeholder). The
-  backend receives `VESPA_FEED_URL`, `VESPA_QUERY_URL`, `VESPA_CONFIG_SERVER_URL`. Schemas are
-  deployed separately (`vespa-core/`).
+- **Vespa** installs four `xyne-vespa` roles (configserver, content, feed, search) on the
+  `vespa` pool, the embedder (TEI `cuda-1.9.4`, one image for T4 through Hopper) on the `gpu`
+  pool, the `tei-batch-proxy`, and `xyne-vespa-app`, the application package from
+  `vespa-core/vespa`. That chart renders `services.xml` and `hosts.xml` from the replica counts
+  (`values.content/feed/search.replicaCount`), fills the schemas' `v[DIMS]` with
+  `embedder.dimensions`, and a PostSync Job uploads the package to the config server and waits
+  for the services to converge; it re-runs whenever the package changes. Both container
+  clusters embed through the proxy (`hf-embedder` on `/v1/embeddings`, `embed-file` on
+  `/v1/embeddings/file`). `image.tag` defaults to `8.754.14`. `embedder.model` and
+  `embedder.dimensions` must match the embedder's `--model-id` (`values.embedder.args`); a new
+  model changes the vector size, which Vespa only accepts on an empty index. The backend
+  receives `VESPA_FEED_URL`, `VESPA_QUERY_URL`, `VESPA_CONFIG_SERVER_URL`. Documents reach
+  Vespa only through a worker with `ENABLE_VESPA_WORKER` ([Add a worker role](#add-a-worker-role)).
+  Feed and search pods are named through headless `vespa-feed-hosts` / `vespa-search-hosts`
+  Services. A StatefulSet's `serviceName` is immutable, so on an install that ran Vespa before
+  this layout, delete the `vespa-feed` and `vespa-search` StatefulSets once and let Argo CD
+  recreate them.
 - **Monitoring** installs `victoria-metrics-k8s-stack` (release `vm`) and an OpenTelemetry
   collector in `monitoring`; every app gets `ENABLE_OTEL_METRICS=true` and
   `OTEL_BASE_URL=http://otel-collector.monitoring.svc:4318`.
