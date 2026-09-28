@@ -26,7 +26,7 @@ test('defaults non-smoke profiles to the Zero query-transform read path', () => 
 test('offers the Zero and REST scenarios under explicit names', () => {
   assert.deepEqual(
     [...SCENARIOS].sort(),
-    ['attachments', 'rest-messaging', 'search', 'smoke', 'zero-query-transform'],
+    ['attachments', 'rest-messaging', 'search', 'smoke', 'zero-push', 'zero-query-transform'],
   );
 });
 
@@ -106,7 +106,19 @@ test('rejects invalid or excessive duration overrides', () => {
 });
 
 test('names the scenarios that write rows', () => {
-  assert.deepEqual([...WRITE_SCENARIOS], ['rest-messaging']);
+  assert.deepEqual([...WRITE_SCENARIOS].sort(), ['rest-messaging', 'zero-push']);
+});
+
+test('zero-push is gated, because it inserts a message per iteration', () => {
+  assert.throws(
+    () => resolveRunConfig({ profile: 'release', scenario: 'zero-push' }),
+    /writes rows and no reset is implemented/i,
+  );
+  assert.equal(
+    resolveRunConfig({ profile: 'release', scenario: 'zero-push', allowWriteScenarios: true })
+      .scenario,
+    'zero-push',
+  );
 });
 
 test('refuses a write scenario while no fixture reset exists', () => {
