@@ -3,6 +3,9 @@ import type { TicketStatusV2, TicketPriority } from '@xyne/shared';
 
 export type ActiveMenu = 'assignee' | 'status' | 'priority' | 'stage' | 'dueDate' | 'tags' | null;
 
+/** Column-picker key for a board dynamic field (`df:<fieldId>`). */
+export const dynamicColumnKey = (fieldId: string): string => `df:${fieldId}`;
+
 export interface EntityOption {
   value: string;
   label: string;

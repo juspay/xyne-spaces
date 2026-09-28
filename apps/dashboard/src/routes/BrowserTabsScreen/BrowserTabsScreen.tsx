@@ -151,6 +151,7 @@ function WebviewTab({
       // Open XyneAI sidebar with browser context
       xyneAIActor.send({
         type: 'OPEN',
+        trackSource: 'browser_panel',
         contextType: 'general',
       });
 

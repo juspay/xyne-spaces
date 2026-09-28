@@ -99,11 +99,12 @@ const useOpenTicketCard = (
       standaloneNavigate(
         navigate,
         `${baseRoute}/${resolvedChannelId}/${resolvedConversationId}/${ticket.id}?selectedTab=details`,
-        { event },
+        { event, state: { trackSource: 'chat_message' } },
       );
     } else {
       standaloneNavigate(navigate, `${baseRoute}/${resolvedChannelId}/${resolvedConversationId}`, {
         event,
+        state: { trackSource: 'chat_message' },
       });
     }
   };
@@ -219,6 +220,7 @@ const TicketCreateModeWithChannel: React.FC<{
   isModalOpen: boolean;
   onModalOpenChange: (isOpen: boolean) => void;
   onTicketCreated?: (ticket: { id: string; conversationId?: string }) => void;
+  trackSource: string;
 }> = ({
   messageId,
   messageContent,
@@ -227,6 +229,7 @@ const TicketCreateModeWithChannel: React.FC<{
   isModalOpen,
   onModalOpenChange,
   onTicketCreated,
+  trackSource,
 }) => {
   const channel = useChannel(channelId);
   const projectId = channel?.projectId || '';
@@ -255,6 +258,7 @@ const TicketCreateModeWithChannel: React.FC<{
       onClose={() => onModalOpenChange(false)}
       channelId={channelId}
       projectId={projectId}
+      trackSource={trackSource}
       initialTitle=''
       initialDescription={stripHtml(messageContent)}
       sourceMessageId={messageId}
@@ -314,6 +318,7 @@ export const BotBubble: React.FC<BotBubbleProps> = ({
         conversation={conversation}
         isModalOpen={isModalOpen}
         onModalOpenChange={onModalOpenChange}
+        trackSource={context === 'thread' ? 'thread_panel' : 'chat_message'}
         {...(onTicketCreated && { onTicketCreated })}
       />
     );

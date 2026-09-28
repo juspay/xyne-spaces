@@ -2,14 +2,16 @@
 process.env.SERVICE_NAME ||= "xyne-claw";
 
 import express from "express";
-import { SERVER } from "./config.js";
+import { DATA_DIR_IS_EXPLICIT, PATHS, SERVER } from "./config.js";
 import { initStore } from "./store.js";
 import { runRouter, getActiveRunCount, getActiveSessionIds, cancelActiveRunsForDrain, describeActiveRuns, requestActiveRunHandoffs } from "./routes/run.js";
 import { curatorRouter } from "./routes/curator.js";
 import { userMemoryRouter } from "./routes/user-memory.js";
 import { failureCuratorRouter } from "./routes/failure-curator.js";
+import { usagePatternCuratorRouter } from "./routes/usage-pattern-curator.js";
 import { goalJudgeRouter } from "./routes/goal-judge.js";
 import { debugRouter } from "./routes/debug.js";
+import { taskCommandsInternalRouter } from "./routes/task-commands-internal.js";
 import { evalJudgeRouter } from "./routes/eval-judge.js";
 import { evalExtractRouter } from "./routes/eval-extract.js";
 import { entityLlmRouter } from "./routes/entity-llm.js";
@@ -33,6 +35,18 @@ const HANDOFF_TURN_CAP_MS = Number(process.env["XYNE_HANDOFF_TURN_CAP_MS"] ?? 12
 if (!SERVER.s2sKey) {
   log.error("[startup] FATAL: XYNE_CLAW_S2S_KEY is not set. Refusing to boot an unauthenticated service. Set the key.");
   process.exit(1);
+}
+
+// Sessions are the pod's heaviest writer. Defaulting the location means they
+// land wherever cwd happens to be, which is the container's own writable layer
+// unless a volume is mounted there — that filled the node's disk in prod
+// (ENOSPC, 2026-09). Say so at boot rather than discovering it from a full disk.
+if (!DATA_DIR_IS_EXPLICIT && process.env["NODE_ENV"] === "production") {
+  log.warn(
+    `[startup] XYNE_CLAW_DATA_DIR is not set — session data will be written to ${PATHS.dataDir}. ` +
+    "If no volume is mounted there, sessions consume the node's ephemeral storage. " +
+    "Point XYNE_CLAW_DATA_DIR at the mounted sessions volume.",
+  );
 }
 
 
@@ -60,8 +74,10 @@ app.use(runRouter);
 app.use(curatorRouter);
 app.use(userMemoryRouter);
 app.use(failureCuratorRouter);
+app.use(usagePatternCuratorRouter);
 app.use(goalJudgeRouter);
 app.use(debugRouter);
+app.use(taskCommandsInternalRouter);
 app.use(evalJudgeRouter);
 app.use(evalExtractRouter);
 app.use(entityLlmRouter);

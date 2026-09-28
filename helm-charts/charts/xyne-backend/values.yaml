@@ -1,0 +1,248 @@
+global:
+  imageRegistry: ""
+  imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+image:
+  registry: ghcr.io
+  repository: juspay/xyne-spaces-backend
+  tag: ""
+  digest: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+version: ""
+versionedName: false
+
+replicaCount: 2
+revisionHistoryLimit: 3
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 25%
+    maxUnavailable: 0
+
+command: []
+args: []
+
+containerPorts:
+  - name: http
+    containerPort: 3001
+    protocol: TCP
+
+service:
+  enabled: true
+  type: ClusterIP
+  annotations: {}
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+    - name: http-app
+      port: 3001
+      targetPort: http
+
+env:
+  NODE_ENV: production
+  HOST: 0.0.0.0
+  PORT: "3001"
+  LOG_LEVEL: info
+  FRONTEND_URL: http://localhost:8080
+  BACKEND_URL: http://localhost:3001
+  CORS_ORIGIN: http://localhost:8080
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  Y_SWEET_URL: http://xyne-ysweet:8080
+  ZERO_MUTATE_URL: http://xyne-backend/api/zero/push
+  ZERO_QUERY_URL: http://xyne-backend/api/zero/query
+  VESPA_FEED_URL: http://vespa-feed:8080
+  VESPA_QUERY_URL: http://vespa-search:8080
+  STORAGE_PROVIDER: s3
+  ENABLE_OTEL_METRICS: "false"
+
+secretEnv:
+  DATABASE_URL:
+    name: xyne-backend-secrets
+    key: DATABASE_URL
+  COMMON_DATABASE_URL:
+    name: xyne-backend-secrets
+    key: COMMON_DATABASE_URL
+  ZERO_UPSTREAM_DB:
+    name: xyne-backend-secrets
+    key: ZERO_UPSTREAM_DB
+  REDIS_URL:
+    name: xyne-backend-secrets
+    key: REDIS_URL
+  JWT_SECRET:
+    name: xyne-backend-secrets
+    key: JWT_SECRET
+  ZERO_AUTH_SECRET:
+    name: xyne-backend-secrets
+    key: ZERO_AUTH_SECRET
+  ENCRYPTION_KEY:
+    name: xyne-backend-secrets
+    key: ENCRYPTION_KEY
+  INTERNAL_S2S_KEY:
+    name: xyne-backend-secrets
+    key: INTERNAL_S2S_KEY
+
+envFromSecrets: []
+envFromConfigMaps: []
+extraEnv: []
+
+startupProbe: {}
+livenessProbe:
+  httpGet:
+    path: /api/health
+    port: http
+  initialDelaySeconds: 60
+  periodSeconds: 10
+  timeoutSeconds: 3
+  failureThreshold: 3
+readinessProbe:
+  httpGet:
+    path: /api/health
+    port: http
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 3
+  failureThreshold: 3
+lifecycle: {}
+
+resources:
+  requests:
+    cpu: "1"
+    memory: 3Gi
+  limits:
+    memory: 8Gi
+
+podSecurityContext:
+  fsGroup: 1001
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1001
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  seccompProfile:
+    type: RuntimeDefault
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+  automount: false
+
+commonLabels: {}
+podLabels: {}
+podAnnotations: {}
+deploymentAnnotations: {}
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+podAntiAffinityPreset: soft
+topologySpreadConstraints: []
+priorityClassName: ""
+runtimeClassName: ""
+terminationGracePeriodSeconds: 60
+hostAliases: []
+dnsPolicy: ""
+dnsConfig: {}
+
+initContainers: []
+sidecars: []
+
+volumes:
+  - name: logs
+    emptyDir: {}
+volumeMounts:
+  - name: logs
+    mountPath: /repo/apps/backend/logs
+
+persistence:
+  enabled: false
+  existingClaim: ""
+  storageClass: ""
+  accessModes:
+    - ReadWriteOnce
+  size: 10Gi
+  mountPath: /data
+  subPath: ""
+  annotations: {}
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+  metrics: []
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      selectPolicy: Max
+      policies:
+        - type: Pods
+          value: 4
+          periodSeconds: 15
+        - type: Percent
+          value: 100
+          periodSeconds: 15
+    scaleDown:
+      selectPolicy: Max
+      policies:
+        - type: Percent
+          value: 5
+          periodSeconds: 120
+
+pdb:
+  enabled: true
+  minAvailable: 1
+  unhealthyPodEvictionPolicy: ""
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: spaces.example.com
+      paths:
+        - path: /api/
+          pathType: Prefix
+  tls: []
+
+istio:
+  virtualService:
+    enabled: false
+    hosts: []
+    gateways: []
+    timeout: 50s
+    retries: {}
+    http: []
+  destinationRule:
+    enabled: false
+    exportTo: []
+    trafficPolicy: {}
+    subsets: []
+
+networkPolicy:
+  enabled: false
+  policyTypes:
+    - Ingress
+  ingress: []
+  egress: []
+
+serviceMonitor:
+  enabled: false
+  namespace: ""
+  labels: {}
+  port: http
+  path: /metrics
+  interval: 30s
+  scrapeTimeout: ""
+
+extraObjects: []

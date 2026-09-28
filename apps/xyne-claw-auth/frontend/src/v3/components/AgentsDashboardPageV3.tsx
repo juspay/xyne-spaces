@@ -4,8 +4,9 @@
  * Sections:
  *   1. Overview stat cards (global agents, runs, users, tokens)
  *   2. Global Agents table (searchable + sortable)
- *   3. Agent Inventory breakdown
- *   4. Top Users (expandable per-agent drill-down)
+ *   3. Agent Index coverage / bank health
+ *   4. Agent Inventory breakdown
+ *   5. Top Users (expandable per-agent drill-down)
  */
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
@@ -43,6 +44,7 @@ import {
   type DoctorBitbucketStats,
 } from "../../lib/api";
 import { ProjectInsightsSection } from "./ProjectInsightsSection";
+import { AgentIndexDashboard } from "./agents/AgentIndexDashboard";
 
 // ── Types ──────────────────────────────────────────────────────────────
 type Days = 7 | 30 | 90 | "all";
@@ -75,7 +77,7 @@ export function fmtPct(rate: number): string {
   return `${(rate * 100).toFixed(1)}%`;
 }
 
-function fmtRelativeTime(iso: string | null): string {
+export function fmtRelativeTime(iso: string | null): string {
   if (!iso) return "—";
   const then = new Date(iso).getTime();
   if (Number.isNaN(then)) return "—";
@@ -90,7 +92,7 @@ function fmtRelativeTime(iso: string | null): string {
 }
 
 // ── StatCard ───────────────────────────────────────────────────────────
-function StatCard({
+export function StatCard({
   label,
   value,
   sub,
@@ -871,7 +873,7 @@ export function AgentsDashboardPageV3({ userId }: Props) {
               {platformExpanded ? "Hide platform overview" : "Show platform overview"}
             </span>
             <span className="truncate text-[12px] text-xyne-fg-tertiary">
-              Overview KPIs · Xyne Doctor activity · Global agents · Skill &amp; subagent adoption · Top users
+              Overview KPIs · Xyne Doctor activity · Global agents · Agent index coverage · Skill &amp; subagent adoption · Top users
             </span>
           </div>
           <CaretDownIcon
@@ -942,6 +944,10 @@ export function AgentsDashboardPageV3({ userId }: Props) {
             <Section title="Global Agents" count={globalAgentRows.length}>
               <AgentTable rows={globalAgentRows} />
             </Section>
+
+            {/* Agent Index — renders its own heading row so the refresh /
+                rebuild actions can sit inline with the title. */}
+            <AgentIndexDashboard />
 
             {/* Skill Usage */}
             <Section title="Skill Adoption" count={d.skillUsage.length}>

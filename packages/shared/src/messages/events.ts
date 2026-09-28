@@ -4,8 +4,12 @@ export type MessageSentEvent = {
   ref: ConversationRef;
   messageId: string;
   conversationId: string;
-  /** true when the client-apply resolved; false when the server rejected. */
-  isServerConfirmed: boolean;
+  /**
+   * The optimistic client apply landed. This is NOT a delivery confirmation —
+   * the server can still reject or retry the mutation. Whether a message has
+   * actually been persisted is answered by its `isSent` row, not by this.
+   */
+  isClientApplied: boolean;
   showInChannel?: boolean;
   childConversationId?: string;
 };

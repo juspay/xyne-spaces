@@ -1,49 +1,24 @@
-import { execFile } from 'child_process';
-import { mkdtemp, rm } from 'fs/promises';
-import { tmpdir } from 'os';
-import { join } from 'path';
-import { promisify } from 'util';
 import type {
-  DraftPullRequestInput,
-  DraftPullRequestResult,
   FirstParentHistory,
   GitAuthentication,
   ParsedRepository,
+  PullRequestInput,
   PullRequestInspection,
+  PullRequestResult,
   RepositoryInspection,
   RepositoryReach,
   RepositoryVisibility,
-  SourceLineRange,
   ValidatedCredential,
   VcsProviderAdapter,
 } from './types';
+import { createHash } from 'crypto';
 import { VcsProviderError } from './types';
+import { defaultGitRunner, listFirstParentHistoryWithGit, type GitRunner } from './gitHistory';
 
-const execFileAsync = promisify(execFile);
 const API_URL = 'https://api.github.com';
+const REPOSITORY_LIST_TTL_MS = 60_000;
+const REPOSITORY_LIST_MAX_PAGES = 5;
 const API_VERSION = '2026-03-10';
-const GIT_HISTORY_TIMEOUT_MS = 5 * 60_000;
-const GIT_HISTORY_MAX_BUFFER = 64 * 1024 * 1024;
-
-interface GitHubVcsAdapterDependencies {
-  runGit(
-    args: string[],
-    options: { env: NodeJS.ProcessEnv; timeout: number; maxBuffer: number }
-  ): Promise<{ stdout: string }>;
-  makeTempDirectory(prefix: string): Promise<string>;
-  removeTempDirectory(path: string): Promise<void>;
-}
-
-const defaultDependencies: GitHubVcsAdapterDependencies = {
-  async runGit(args, options) {
-    const result = await execFileAsync('git', args, options);
-    return { stdout: String(result.stdout) };
-  },
-  makeTempDirectory: mkdtemp,
-  async removeTempDirectory(path) {
-    await rm(path, { recursive: true, force: true });
-  },
-};
 
 interface GitHubRepositoryResponse {
   name?: string;
@@ -63,9 +38,10 @@ interface GitHubRepositoryResponse {
 export class GitHubVcsAdapter implements VcsProviderAdapter {
   readonly provider = 'GITHUB' as const;
 
-  constructor(
-    private readonly dependencies: GitHubVcsAdapterDependencies = defaultDependencies
-  ) {}
+  // GitHub has no name search scoped to a token, so search filters a cached listing.
+  private readonly repositoryLists = new Map<string, { at: number; repositories: ParsedRepository[] }>();
+
+  constructor(private readonly git: GitRunner = defaultGitRunner) {}
 
   parseRepositoryUrl(raw: string): ParsedRepository {
     let value = raw.trim();
@@ -114,6 +90,7 @@ export class GitHubVcsAdapter implements VcsProviderAdapter {
     const [owner, name] = segments as [string, string];
     return {
       provider: 'GITHUB',
+      host: 'github.com',
       owner,
       name,
       canonicalUrl: `https://github.com/${owner.toLowerCase()}/${name.toLowerCase()}`,
@@ -122,15 +99,25 @@ export class GitHubVcsAdapter implements VcsProviderAdapter {
   }
 
   async validateCredential(token: string): Promise<ValidatedCredential> {
-    const identity = await this.request<{ login?: string }>('/user', token);
-    if (!identity.login) {
+    const identity = await this.request<{ login?: string; id?: number; name?: string | null }>(
+      '/user',
+      token
+    );
+    const login = identity.login ?? '';
+    if (!/^[A-Za-z0-9-]+$/.test(login) || !Number.isSafeInteger(identity.id) || identity.id! <= 0) {
       throw new VcsProviderError(
         'GITHUB_IDENTITY_INVALID',
         'GitHub did not return an authenticated identity',
         502
       );
     }
-    return { identityLogin: identity.login };
+    const accountName = (identity.name?.trim() || login).replace(/[\r\n<>]/g, '').slice(0, 200);
+    return {
+      identityLogin: login,
+      accountName: accountName || login,
+      // The noreply form links commits to the account without exposing a private email.
+      accountEmail: `${identity.id}+${login}@users.noreply.github.com`,
+    };
   }
 
   // Display only, never a gate. With per_page=1 the Link header's last page is the total.
@@ -149,6 +136,33 @@ export class GitHubVcsAdapter implements VcsProviderAdapter {
       // Display data must not block saving a valid key.
       return { repositoryOwner: null, repositoryCount: null };
     }
+  }
+
+  async searchRepositories(token: string, query: string, limit: number): Promise<ParsedRepository[]> {
+    const key = createHash('sha256').update(token).digest('hex');
+    let cached = this.repositoryLists.get(key);
+    if (!cached || Date.now() - cached.at > REPOSITORY_LIST_TTL_MS) {
+      const repositories: ParsedRepository[] = [];
+      // Capped at the first 500 repositories by recent push.
+      for (let page = 1; page <= REPOSITORY_LIST_MAX_PAGES; page += 1) {
+        const data = await this.request<GitHubRepositoryResponse[]>(
+          `/user/repos?per_page=100&page=${page}&sort=pushed`,
+          token
+        );
+        for (const repo of data) {
+          if (repo.name && repo.owner?.login) {
+            repositories.push(this.parseRepositoryUrl(`https://github.com/${repo.owner.login}/${repo.name}`));
+          }
+        }
+        if (data.length < 100) break;
+      }
+      cached = { at: Date.now(), repositories };
+      this.repositoryLists.set(key, cached);
+    }
+    const needle = query.trim().toLowerCase();
+    return cached.repositories
+      .filter((repository) => `${repository.owner}/${repository.name}`.toLowerCase().includes(needle))
+      .slice(0, limit);
   }
 
   async inspectRepository(input: {
@@ -221,14 +235,11 @@ export class GitHubVcsAdapter implements VcsProviderAdapter {
     };
   }
 
-  buildGitAuthentication(token: string): GitAuthentication {
-    return { username: 'x-access-token', password: token };
+  buildGitAuthentication(credential: { token: string }): GitAuthentication {
+    return { username: 'x-access-token', password: credential.token };
   }
 
-  async createDraftPullRequest(
-    token: string,
-    input: DraftPullRequestInput
-  ): Promise<DraftPullRequestResult> {
+  async createPullRequest(token: string, input: PullRequestInput): Promise<PullRequestResult> {
     const result = await this.request<{
       html_url?: string;
       number?: number;
@@ -245,7 +256,7 @@ export class GitHubVcsAdapter implements VcsProviderAdapter {
           body: input.body,
           head: input.head,
           base: input.base,
-          draft: true,
+          draft: input.draft,
         }),
       }
     );
@@ -302,22 +313,6 @@ export class GitHubVcsAdapter implements VcsProviderAdapter {
     };
   }
 
-  async verifyRemoteCommit(
-    token: string | undefined,
-    repository: ParsedRepository,
-    branch: string,
-    commitHash: string
-  ): Promise<void> {
-    const head = await this.resolveBranchHead(token, repository, branch);
-    if (head.toLowerCase() !== commitHash.toLowerCase()) {
-      throw new VcsProviderError(
-        'GITHUB_REMOTE_COMMIT_MISMATCH',
-        'Remote branch does not point to the submitted commit',
-        409
-      );
-    }
-  }
-
   async resolveBranchHead(
     token: string | undefined,
     repository: ParsedRepository,
@@ -342,145 +337,19 @@ export class GitHubVcsAdapter implements VcsProviderAdapter {
     repository: ParsedRepository,
     branch: string
   ): Promise<FirstParentHistory> {
-    const directory = await this.dependencies.makeTempDirectory(
-      join(tmpdir(), 'xyne-sdlc-wiki-history-')
-    );
-    const env = this.gitEnvironment(token);
-    const options = {
-      env,
-      timeout: GIT_HISTORY_TIMEOUT_MS,
-      maxBuffer: GIT_HISTORY_MAX_BUFFER,
-    };
-    try {
-      await this.dependencies.runGit(['init', '--bare', directory], options);
-      await this.dependencies.runGit(
-        [
-          '--git-dir',
-          directory,
-          'fetch',
-          '--force',
-          '--no-tags',
-          // Planning needs commit ancestry only. Omitting historical trees and
-          // blobs keeps 7k+ commit monorepos bounded; the agent sandbox fetches
-          // code separately for the selected commits.
-          '--filter=tree:0',
-          repository.cloneUrl,
-          `+refs/heads/${branch}:refs/remotes/origin/wiki-base`,
-        ],
-        options
-      );
-      const { stdout } = await this.dependencies.runGit(
-        [
-          '--git-dir',
-          directory,
-          'rev-list',
-          '--first-parent',
-          '--reverse',
-          'refs/remotes/origin/wiki-base',
-        ],
-        options
-      );
-      const shas = stdout
-        .split(/\r?\n/)
-        .map((value) => value.trim().toLowerCase())
-        .filter(Boolean);
-      if (shas.length === 0 || shas.some((sha) => !/^[0-9a-f]{40}$/.test(sha))) {
-        throw new VcsProviderError(
-          'GITHUB_HISTORY_INVALID',
-          'Git returned an invalid base-branch history',
-          502
-        );
-      }
-      return {
-        targetHeadSha: shas[shas.length - 1]!,
-        commits: shas.map((sha, index) => ({
-          sha,
-          parentSha: index === 0 ? null : shas[index - 1]!,
-        })),
-      };
-    } catch (error) {
-      if (error instanceof VcsProviderError) throw error;
-      throw new VcsProviderError(
-        'GITHUB_GIT_HISTORY_FAILED',
-        `Git could not read first-parent history for branch ${branch}`,
-        503,
-        true
-      );
-    } finally {
-      await this.dependencies.removeTempDirectory(directory).catch(() => undefined);
-    }
-  }
-
-  async verifyPathsAtCommit(
-    token: string | undefined,
-    repository: ParsedRepository,
-    commitHash: string,
-    paths: string[]
-  ): Promise<void> {
-    if (!/^[0-9a-f]{40}$/i.test(commitHash)) {
-      throw new VcsProviderError('GITHUB_COMMIT_INVALID', 'Invalid Git commit identity', 400);
-    }
-    for (const path of [...new Set(paths)]) {
-      if (!path || path.startsWith('/') || path.includes('\\') || path.split('/').includes('..')) {
-        throw new VcsProviderError('GITHUB_PATH_INVALID', `Invalid repository path: ${path}`, 400);
-      }
-      try {
-        await this.request(
-          `/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.name)}/contents/${path
-            .split('/')
-            .map(encodeURIComponent)
-            .join('/')}?ref=${encodeURIComponent(commitHash)}`,
-          token
-        );
-      } catch (error) {
-        if (error instanceof VcsProviderError && error.httpStatus === 404) {
-          throw new VcsProviderError(
-            'INVALID_SOURCE_PATH',
-            `[INVALID_SOURCE_PATH] Source path does not exist at the assigned ref: ${path}`,
-            400
-          );
-        }
-        throw error;
-      }
-    }
-  }
-
-  async verifySourceRangesAtCommit(
-    token: string | undefined,
-    repository: ParsedRepository,
-    commitHash: string,
-    references: SourceLineRange[]
-  ): Promise<void> {
-    if (!/^[0-9a-f]{40}$/i.test(commitHash)) {
-      throw new VcsProviderError('GITHUB_COMMIT_INVALID', 'Invalid Git commit identity', 400);
-    }
-    for (const reference of references) {
-      if (!reference.startLine) continue;
-      const response = await this.request<{ type?: string; content?: string; encoding?: string }>(
-        `/repos/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.name)}/contents/${reference.path
-          .split('/')
-          .map(encodeURIComponent)
-          .join('/')}?ref=${encodeURIComponent(commitHash)}`,
-        token
-      );
-      if (response.type !== 'file' || response.encoding !== 'base64' || typeof response.content !== 'string') {
-        throw new VcsProviderError(
-          'INVALID_SOURCE_RANGE',
-          `[INVALID_SOURCE_RANGE] Source cannot be line-addressed: ${reference.path}`,
-          400
-        );
-      }
-      const content = Buffer.from(response.content.replace(/\s/g, ''), 'base64').toString('utf8');
-      const lineCount = content.length === 0 ? 0 : content.split(/\r?\n/).length;
-      const endLine = reference.endLine ?? reference.startLine;
-      if (reference.startLine > lineCount || endLine > lineCount) {
-        throw new VcsProviderError(
-          'INVALID_SOURCE_RANGE',
-          `[INVALID_SOURCE_RANGE] ${reference.path} has ${lineCount} lines at the assigned ref`,
-          400
-        );
-      }
-    }
+    return listFirstParentHistoryWithGit(this.git, {
+      cloneUrl: repository.cloneUrl,
+      branch,
+      ...(token
+        ? {
+            authorization: {
+              url: 'https://github.com/',
+              header: `AUTHORIZATION: basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}`,
+            },
+          }
+        : {}),
+      errorPrefix: 'GITHUB',
+    });
   }
 
   validatePullRequestUrl(repository: ParsedRepository, raw: string): boolean {
@@ -581,15 +450,5 @@ export class GitHubVcsAdapter implements VcsProviderAdapter {
       response.status >= 500 ? 503 : 502,
       response.status >= 500
     );
-  }
-
-  private gitEnvironment(token?: string): NodeJS.ProcessEnv {
-    const env: NodeJS.ProcessEnv = { ...process.env, GIT_TERMINAL_PROMPT: '0' };
-    if (token) {
-      env.GIT_CONFIG_COUNT = '1';
-      env.GIT_CONFIG_KEY_0 = 'http.https://github.com/.extraheader';
-      env.GIT_CONFIG_VALUE_0 = `AUTHORIZATION: basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}`;
-    }
-    return env;
   }
 }

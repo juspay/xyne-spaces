@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { apiInstance } from '../services/clients/apiClient';
+import { isExternalApp } from '../config';
 
 /**
  * Hook to fetch authenticated profile picture and return as blob URL
@@ -32,7 +33,8 @@ export const useProfilePictureUrl = (
       const blob = response.data as Blob;
       return URL.createObjectURL(blob);
     },
-    enabled: !!userId && !!picturePath && !picturePath.startsWith('http'),
+    // The picture endpoint needs a session, which external guests don't have.
+    enabled: !isExternalApp && !!userId && !!picturePath && !picturePath.startsWith('http'),
     staleTime: 10 * 60 * 1000,
   });
 

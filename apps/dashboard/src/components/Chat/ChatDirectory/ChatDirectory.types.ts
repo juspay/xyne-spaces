@@ -20,6 +20,13 @@ export const ChannelCategory = {
 
 export type ChannelCategory = (typeof ChannelCategory)[keyof typeof ChannelCategory];
 
+// Non-starred browse categories, in display order.
+export const NON_STARRED_CATEGORIES: ChannelCategory[] = [
+  ChannelCategory.CHANNELS,
+  ChannelCategory.DIRECT_MESSAGES,
+  ChannelCategory.GROUP_DMS,
+];
+
 export interface SectionBucket {
   section: ChannelSection;
   channels: VisibleChannel[];

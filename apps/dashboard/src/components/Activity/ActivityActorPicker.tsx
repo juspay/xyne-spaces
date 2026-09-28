@@ -4,6 +4,9 @@ import { CheckTickSingle, SearchDefault, UserUser02 } from '@xyne/icons';
 import { Popover } from '../ui/Popover/Popover';
 import Avatar from '../ui/Avatar/Avatar';
 import { useActiveUsers } from '../../hooks/useUsers';
+import { useDmContactRecency } from '../../hooks/useRankedPeopleSearch';
+import { useAffinityCallback } from '../../hooks/useAffinityCallback';
+import { rankUsers } from '../../utils/rankingUtils';
 import { getUserDisplayName, matchesUserQuery } from '../../utils/userDisplayName';
 import { cn } from '../../utils/classNames';
 
@@ -17,6 +20,8 @@ interface ActivityActorPickerProps {
   searchPlaceholder: string;
   trigger: ReactNode;
 }
+
+const PEOPLE_LIMIT = 20;
 
 const ROW_CLASS =
   'flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-sm text-foreground transition-colors hover:bg-foreground/[6%] focus-visible:outline-none focus-visible:bg-foreground/[6%]';
@@ -33,15 +38,28 @@ export const ActivityActorPicker = ({
 }: ActivityActorPickerProps): ReactElement => {
   const [query, setQuery] = useState('');
   const users = useActiveUsers();
+  const dmContactRecency = useDmContactRecency();
+  const affinityVersion = useAffinityCallback();
 
-  const candidates = useMemo(
+  const pool = useMemo(
     () =>
       users
         .filter(user => userTypes.includes(user.userType))
-        .filter(user => matchesUserQuery(user, query))
         .sort((a, b) => getUserDisplayName(a).localeCompare(getUserDisplayName(b))),
-    [users, userTypes, query],
+    [users, userTypes],
   );
+
+  const candidates = useMemo(() => {
+    void affinityVersion;
+    const trimmed = query.trim();
+    const matched = trimmed ? pool.filter(user => matchesUserQuery(user, trimmed)) : pool;
+    const ranked = rankUsers(matched, trimmed, dmContactRecency).slice(0, PEOPLE_LIMIT);
+    if (!trimmed && selectedUserId && !ranked.some(user => user.id === selectedUserId)) {
+      const selected = pool.find(user => user.id === selectedUserId);
+      if (selected) ranked.unshift(selected);
+    }
+    return ranked;
+  }, [pool, query, dmContactRecency, affinityVersion, selectedUserId]);
 
   const handleOpenChange = useCallback(
     (next: boolean): void => {

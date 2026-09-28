@@ -25,6 +25,8 @@ import {
   ActivityType,
 } from '@xyne/shared';
 import { db } from '@/database/client';
+import { websocketService } from '@/services/websocketService';
+import { advanceLastEmailAt } from '@/database/ticketLastEmailAt';
 import {
   listS2SClawAgents,
   getConversationTranscript,
@@ -389,10 +391,8 @@ export class EmailController {
         sentByUserId: userId,
       });
       
-      await db.ticket.updateMany({
-        where: { conversationId },
-        data: { lastEmailAt: newEmail.createdAt },
-      });
+      await advanceLastEmailAt(db, { conversationId }, newEmail.createdAt);
+      websocketService.broadcastLabelUnreadCountsUpdate(conversation.channelId);
 
       // 6a. Record the reply as a ticket event, mirroring how stage changes surface: a
       // ticket_activities row for the Details → Activity timeline, plus a SYSTEM message for the

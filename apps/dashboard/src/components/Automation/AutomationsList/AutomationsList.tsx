@@ -711,7 +711,7 @@ function AutomationRow({
               e.stopPropagation();
               onOpen();
             }}
-            aria-label={`${automation.name}, ${automation.status.toLowerCase()}. ${summary}. Press Enter to edit.`}
+            aria-label={`${automation.name}, ${automation.status.toLowerCase()}.${automation.priority ? ' Priority.' : ''} ${summary}. Press Enter to edit.`}
             data-track-category='automations-list'
             data-track-name='row-title-open'
             className={cn(
@@ -734,6 +734,13 @@ function AutomationRow({
               >
                 {automation.status}
               </span>
+              {/* Violet on purpose — no status badge uses it, so priority stands out
+                  as its own thing rather than looking like another status. */}
+              {automation.priority && (
+                <span className='rounded-md border border-violet-500/30 bg-violet-500/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-violet-700 dark:border-violet-500/40 dark:text-violet-400'>
+                  Priority
+                </span>
+              )}
             </div>
             <p className='line-clamp-2 text-xs text-muted-foreground' title={summary}>
               {summary}

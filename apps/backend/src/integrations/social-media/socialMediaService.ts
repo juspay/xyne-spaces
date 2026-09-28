@@ -8,7 +8,8 @@ import { db } from '@/database/client';
 import { adapterRegistry } from '@/integrations/core/adapterRegistry';
 import { externalSourceCore } from '@/integrations/core/core';
 import { InteractionReplyValidationError } from '@/integrations/core/baseInteractionReplySender';
-import { ExternalSourcePlatform, type IngestionOptions } from '@/integrations/core/types';
+import { type IngestionOptions } from '@/integrations/core/types';
+import { isSocialMediaPlatform } from './constants';
 import { logger } from '@/utils/logger';
 import { acquireLock, releaseLock } from '@/utils/distributedLock';
 
@@ -68,11 +69,19 @@ class SocialMediaService {
         options,
       );
       const synced = results.filter((result) => result.action === 'created').length;
-      if (source.sourceType === ExternalSourcePlatform.GOOGLE_PLAY) {
-        await db.externalSource.update({
-          where: { id: source.id },
-          data: { lastSyncCursor: syncStartedAt.toISOString() },
-        });
+      // syncStartedAt is only a correct cursor for a provider whose fetch window is keyed on
+      // modification time, as Play's is. A provider paging an immutable sort key cannot always
+      // prove it covered its window, so it gets the final say — null means leave the cursor alone.
+      if (isSocialMediaPlatform(source.sourceType)) {
+        const nextCursor = adapter.resolveNextCursor
+          ? adapter.resolveNextCursor(source, syncStartedAt)
+          : syncStartedAt.toISOString();
+        if (nextCursor) {
+          await db.externalSource.update({
+            where: { id: source.id },
+            data: { lastSyncCursor: nextCursor },
+          });
+        }
       }
       logger.info(`${TAG} Source synchronized`, {
         sourceId,

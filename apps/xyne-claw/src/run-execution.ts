@@ -1,3 +1,5 @@
+import { pinRunJudgeBackend } from "./judge-backend.js";
+import { pinRunOptimizations } from "./optimizations.js";
 import {
   ensureActiveRun,
   finishActiveRun,
@@ -117,6 +119,8 @@ export interface InternalRunPayload {
   detached?: boolean;
   fastMode?: boolean;
   resumedFromHandoff?: boolean;
+  judgeBackend?: string;
+  optimizations?: unknown;
   memoryBankId?: string;
   /** Digital Twin mention flow: real reply destinations the user can post in
    *  (their accessible channels/threads), built by claw-auth from Spaces
@@ -215,6 +219,8 @@ export async function executeRunFromPayload(
     isRegenerate,
     fastMode,
     resumedFromHandoff,
+    judgeBackend,
+    optimizations,
     memoryBankId,
     twinDestinations,
     senderName,
@@ -236,6 +242,9 @@ export async function executeRunFromPayload(
   const experiment = normalizeExperimentContext(rawExperiment);
   const activeRun = ensureActiveRun(sessionId, payload);
   const state: RunExecutionState = hooks ? { hooks } : {};
+
+  pinRunJudgeBackend(judgeBackend);
+  pinRunOptimizations(optimizations, agentConfig?.["optimizations"]);
 
   try {
     // Process in background

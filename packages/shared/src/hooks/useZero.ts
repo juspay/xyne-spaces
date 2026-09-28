@@ -14,7 +14,7 @@ import { noopLogger, noopMetrics } from '../logger/index.js';
 import { Event } from '../logger/events.js';
 import { useEncryptionConfig } from './useEncryptionConfig.js';
 import { encryptField, decryptField, isEncryptedField } from '../crypto/field-decrypt.js';
-import { validateQueryWhereClause } from '../zero/client-transaction-wrapper.js';
+import { validateQueryWhereClause } from '../zero/query-validation.js';
 import { wasInterrupted } from './metricValidity.js';
 import { trackMutationStart, trackMutationSettled } from './pendingMutations.js';
 
@@ -326,7 +326,7 @@ export function useZero(): Zero {
           metrics.incrementCounter('zero.run.operations', { query: queryName, stage: 'start' });
 
           try {
-            validateQueryWhereClause(query);
+            validateQueryWhereClause(query, config?.encryptedFields ?? {});
             const rawResult = (await target.run(
               query as Parameters<Zero['run']>[0],
               runOptions as Parameters<Zero['run']>[1],

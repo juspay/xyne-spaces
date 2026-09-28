@@ -52,6 +52,12 @@ import { AttachmentPreview } from '../files';
 import { useOverlayZIndex } from '../../../contexts/OverlayZIndexContext';
 import type { UploadedFile } from '../files/Files.types';
 import { FilePreviewModal } from '../../FileViewer/FileViewerModal';
+import {
+  convertHeicFileToPreviewBlob,
+  isHeicAttachment,
+  sniffHeicFile,
+  toWebpFilename,
+} from '../../../services/heicAttachmentService';
 import type { MentionResult } from '@xyne/shared';
 import { MentionExtension, mentionPluginKey } from '../TipTapExtensions';
 import { CommandsExtension, commandPluginKey } from '../TipTapExtensions';
@@ -286,6 +292,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       bottomLeftSlot,
       disableDraftUpload = false,
       dockSlot,
+      headerSlot,
+      borderActivity,
       slashCommandArtifactCommand,
       slashCommandArtifactChannelLabel,
       onCancelSlashCommandArtifact,
@@ -305,6 +313,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
     const [isPreferencesOpen, setIsPreferencesOpen] = useState(false);
     const [selectedFile, setSelectedFile] = useState<File | UploadedFile | null>(null);
     const [isViewerOpen, setIsViewerOpen] = useState(false);
+    const [heicPreviewId, setHeicPreviewId] = useState<string | null>(null);
+    const [heicPreviewName, setHeicPreviewName] = useState('image.heic');
 
     const alsoSendToChannelLabel = isDMThread ? 'Send as direct message' : 'Send to channel';
 
@@ -1531,7 +1541,48 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       [providerRemoveDroppedFile, disableDraftUpload],
     );
 
-    const handlePreview = (file: File | UploadedFile): void => {
+    const handlePreview = async (
+      file: File | UploadedFile,
+      attachmentId?: string,
+    ): Promise<void> => {
+      // Local Files: the ftyp brand beats the browser's type/extension guess
+      // (a renamed .jpg can carry HEIC bytes). UploadedFiles have no local
+      // bytes, so they stay on metadata — which upload-time sniffing has
+      // already corrected server-side.
+      const sniffedHeic = file instanceof File ? await sniffHeicFile(file) : null;
+      const isHeic =
+        sniffedHeic ??
+        isHeicAttachment(
+          file instanceof File ? file.type : file.mimeType,
+          file instanceof File ? file.name : file.originalName,
+        );
+      if (isHeic) {
+        // Local HEIC File: convert client-side (cached from the chip's preview)
+        // and open the local-file viewer — works before the upload finishes.
+        if (file instanceof File) {
+          void convertHeicFileToPreviewBlob(file)
+            .then(blob => {
+              setSelectedFile(new File([blob], toWebpFilename(file.name), { type: 'image/webp' }));
+              setIsViewerOpen(true);
+            })
+            .catch(() => {
+              if (attachmentId) {
+                setHeicPreviewId(attachmentId);
+                setHeicPreviewName(file.name);
+                setIsViewerOpen(true);
+              }
+            });
+          return;
+        }
+        // UploadedFile HEIC (restored draft): server-backed viewer with its
+        // WebP rendition
+        if (attachmentId) {
+          setHeicPreviewId(attachmentId);
+          setHeicPreviewName(file.originalName);
+          setIsViewerOpen(true);
+          return;
+        }
+      }
       setSelectedFile(file);
       setIsViewerOpen(true);
     };
@@ -1539,6 +1590,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
     const handleCloseViewer = (): void => {
       setIsViewerOpen(false);
       setSelectedFile(null);
+      setHeicPreviewId(null);
     };
 
     // Convert channelItems to MentionResult format for the MentionSelector
@@ -1672,7 +1724,14 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         {dockSlot}
 
         <div
-          className={isVoiceRecording ? 'xyne-voice-border-wrap' : undefined}
+          className={
+            isVoiceRecording
+              ? 'xyne-voice-border-wrap'
+              : borderActivity !== undefined && !isMobile
+                ? 'xyne-related-scan'
+                : undefined
+          }
+          data-active={borderActivity && !isVoiceRecording ? 'true' : undefined}
           style={isVoiceRecording && isMobile ? { borderRadius: '28px' } : undefined}
         >
           <div
@@ -1717,6 +1776,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                 </button>
               </div>
             )}
+            {!isMobile && headerSlot}
             {/* VoiceInput — always mounted so ref works on mobile too; headless on mobile since MobileEditor has its own mic button */}
             {isMobile && !hideVoiceInput && (
               <VoiceInput
@@ -1779,7 +1839,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                           key={`file-${attachmentId}-${index}`}
                           file={file}
                           onRemove={() => void handleRemoveAttachment({ attachmentId, file })}
-                          onPreview={() => handlePreview(file)}
+                          onPreview={() => void handlePreview(file, attachmentId)}
                           isUploading={false}
                         />
                       ))}
@@ -1855,7 +1915,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                     key={attachmentId}
                     file={file}
                     onRemove={() => void handleRemoveAttachment({ attachmentId, file })}
-                    onPreview={() => handlePreview(file)}
+                    onPreview={() => void handlePreview(file, attachmentId)}
                     isUploading={false}
                   />
                 ))}
@@ -1870,7 +1930,18 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             )}
 
             {/* Full-screen Viewer - Use MediaViewer for File objects, FilePreviewModal for UploadedFile */}
-            {selectedFile && (
+            {isViewerOpen && heicPreviewId && (
+              <FilePreviewModal
+                isOpen={isViewerOpen}
+                onClose={handleCloseViewer}
+                fileName={heicPreviewName}
+                fileUrl={`/attachments/${heicPreviewId}/download`}
+                mimeType='image/heic'
+                fileSize={0}
+                attachmentId={heicPreviewId}
+              />
+            )}
+            {selectedFile && !heicPreviewId && (
               <>
                 {selectedFile instanceof File ? (
                   <MediaViewer

@@ -21,11 +21,30 @@ const GetDeskConfigBodySchema = z.object({
   { message: 'Either channelId or channelName is required' }
 );
 
+const DEFAULT_CHANNEL_LIST_LIMIT = 100;
+const MAX_CHANNEL_LIST_LIMIT = 200;
+const MAX_CHANNEL_NAME_LENGTH = 255;
+
 const ListChannelsQuerySchema = z.object({
-  limit: z.string().optional().transform(val => val ? parseInt(val, 10) : 100),
+  limit: z
+    .string()
+    .optional()
+    .transform(val => {
+      const parsed = val ? parseInt(val, 10) : NaN;
+      if (Number.isNaN(parsed) || parsed <= 0) return DEFAULT_CHANNEL_LIST_LIMIT;
+      return Math.min(parsed, MAX_CHANNEL_LIST_LIMIT);
+    }),
   cursor: z.string().optional(),
   projectId: z.string().optional(),
   scopeType: z.string().optional(),
+  // Exact channel-name match. Served directly by the existing
+  // (workspaceId, name, id) btree index — no new index needed.
+  name: z
+    .string()
+    .trim()
+    .min(1, 'name must not be empty')
+    .max(MAX_CHANNEL_NAME_LENGTH, `name must be at most ${MAX_CHANNEL_NAME_LENGTH} characters`)
+    .optional(),
 });
 
 export class ChannelController {
@@ -131,8 +150,9 @@ export class ChannelController {
   };
 
   /**
-   * List channels with cursor-based pagination
-   * GET /api/apps/channel/list?limit=100&cursor=xxx&projectId=xxx&scopeType=xxx
+   * List channels with cursor-based pagination and an optional
+   * exact-match filter on the channel name.
+   * GET /api/apps/channel/list?limit=100&cursor=xxx&projectId=xxx&scopeType=xxx&name=support
    */
   listChannels = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -147,11 +167,19 @@ export class ChannelController {
         return;
       }
 
-      const { limit, cursor, projectId, scopeType } = queryResult.data;
+      const { limit, cursor, projectId, scopeType, name } = queryResult.data;
 
-      const where: Record<string, unknown> = {};
+      // Tenant comes from the verified app token, never from the query string.
+      const workspaceId = req.user?.workspaceId;
+      if (!workspaceId) {
+        res.status(401).json({ error: 'Unauthorized', code: 'UNAUTHORIZED' });
+        return;
+      }
+
+      const where: Record<string, unknown> = { workspaceId };
       if (projectId) where.projectId = projectId;
       if (scopeType) where.scopeType = scopeType;
+      if (name) where.name = name;
 
       // Fetch one extra to determine hasMore
       const channels = await repositories.channels.findManyPaginated({

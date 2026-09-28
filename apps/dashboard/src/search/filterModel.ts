@@ -47,6 +47,8 @@ export interface SearchResultsFilters {
   // Bare @user / #channel mention filters (no prefix) — searched as message mentions.
   mentionUserIds: string[];
   mentionChannelIds: string[];
+  // Picked @user-group mention filter — searched as message group-mentions (Vespa `groupMentions`).
+  mentionUserGroupIds: string[];
   // Ticket power-filters. Typed syntax (`status:`, `board:`, …) still works and feeds the
   // same backend fields; these carry the values picked in the Filters popover.
   priority: string;
@@ -65,6 +67,8 @@ export interface SearchResultsFilters {
   /** Phrase search. The query is quoted when the request is built, never in the box. */
   exactMatch: boolean;
   onlyMyChannels: boolean;
+  /** Desk-only toggle. When on, archived tickets are included in Desk results. */
+  showArchived: boolean;
   rankProfile: string;
 }
 
@@ -78,6 +82,7 @@ export const DEFAULT_SEARCH_FILTERS: SearchResultsFilters = {
   withUserIds: [],
   mentionUserIds: [],
   mentionChannelIds: [],
+  mentionUserGroupIds: [],
   priority: '',
   statuses: [],
   boardIds: [],
@@ -90,6 +95,7 @@ export const DEFAULT_SEARCH_FILTERS: SearchResultsFilters = {
   includeBotMessages: false,
   exactMatch: false,
   onlyMyChannels: true,
+  showArchived: false,
   rankProfile: '',
 };
 

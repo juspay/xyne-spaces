@@ -56,6 +56,10 @@ export const FormFieldConditionSchema = z
 export type FormFieldCondition = z.infer<typeof FormFieldConditionSchema>;
 
 const TicketUpdatedConfigSchema = z.object({
+  projectIds: z
+    .array(z.string())
+    .optional()
+    .describe('Limit to tickets on these projects. Empty matches every project.'),
   boardIds: z
     .array(z.string())
     .optional()
@@ -64,10 +68,6 @@ const TicketUpdatedConfigSchema = z.object({
     .array(z.string())
     .optional()
     .describe('Limit to tickets posted to these channels. Empty matches every channel.'),
-  projectIds: z
-    .array(z.string())
-    .optional()
-    .describe('Limit to tickets on these projects. Empty matches every project.'),
   transitions: z
     .array(FieldTransitionSchema)
     .optional()
@@ -106,6 +106,27 @@ type TicketUpdatedPayload = z.infer<typeof TicketUpdatedOutputSchema>;
 type TicketChange = z.infer<typeof TicketChangeSchema>;
 
 export type TicketChanges = Partial<Record<TicketUpdatedField, TicketChange>>;
+
+/**
+ * Statuses a ticket can come back to from COMPLETED. Mirrors the reopen definition
+ * used for desk metrics (deskMetricsRepository's reopenedPredicate) so "reopened"
+ * means one thing across the product.
+ */
+export const REOPENED_STATUSES: string[] = [
+  TicketStatusV2.TODO,
+  TicketStatusV2.STARTED,
+  TicketStatusV2.PAUSED,
+];
+
+/** True when this diff represents a completed ticket being brought back to life. */
+export function isTicketReopenTransition(changes: TicketChanges): boolean {
+  const statusChange = changes.statusV2;
+  if (!statusChange) return false;
+  return (
+    statusChange.previousValue === TicketStatusV2.COMPLETED &&
+    REOPENED_STATUSES.includes(String(statusChange.newValue))
+  );
+}
 export type FormFieldChanges = Record<string, TicketChange>;
 
 /** Normalize legacy formFieldIds into formFieldConditions (match: changed). */
@@ -274,6 +295,26 @@ export async function emitTicketUpdated(params: {
 }): Promise<void> {
   const { ticket, changes, formFieldChanges, performedById } = params;
   if (Object.keys(changes).length === 0 && Object.keys(formFieldChanges ?? {}).length === 0) return;
+
+  // Every path that changes statusV2 funnels through here, so this is the one place
+  // a reopen can be observed regardless of which writer produced it (Zero mutators,
+  // the ticket repository, the apps API, email ingestion, the classification worker).
+  //
+  // The cheap transition test runs inline so the common update — which is not a
+  // reopen — costs one comparison and nothing else. Only a genuine reopen pays for
+  // the module load, which is lazy because the reassignment helper reaches the ticket
+  // repository, which imports this module for emitTicketUpdated; a static import
+  // would close that loop.
+  if (isTicketReopenTransition(changes)) {
+    void import('@/utils/ticketReassignment')
+      .then(({ reassignReopenedTicketIfAssigneeInactive }) =>
+        reassignReopenedTicketIfAssigneeInactive(ticket, changes),
+      )
+      .catch(err =>
+        logger.error(`[automations] reopen reassignment hook failed for ${ticket.id}:`, err),
+      );
+  }
+
   try {
     // Lightweight payload: ticketId + the diff + performer id. The trigger's
     // hydratePayload fetches ticket + board + project + channel + ...

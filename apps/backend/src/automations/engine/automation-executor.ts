@@ -286,7 +286,10 @@ export class AutomationExecutor {
     );
 
     const filterConfig = (config.trigger.config ?? {}) as Record<string, unknown>;
-    if (triggerImpl && !triggerImpl.matchFilters(filterConfig, hydratedTriggerData)) {
+    const filterMatch = triggerImpl
+      ? triggerImpl.matchFiltersDetailed(filterConfig, hydratedTriggerData)
+      : { matched: true, failed: undefined };
+    if (!filterMatch.matched) {
       const skeleton = this.buildContext(
         workflow.id,
         workflow.workspaceId,
@@ -301,7 +304,7 @@ export class AutomationExecutor {
       skeleton.__meta = { error: null, chain };
       await persistAutomationState(executionId, { context: JSON.stringify(skeleton) });
       logger.info(
-        `[automations] prepareRun: filter mismatched at run-time — automation=${workflow.id} run=${executionId} skipping`,
+        `[automations] prepareRun: filter mismatched at run-time — automation=${workflow.id} run=${executionId} reason=${filterMatch.failed ?? 'unspecified'} skipping`,
       );
       return null;
     }

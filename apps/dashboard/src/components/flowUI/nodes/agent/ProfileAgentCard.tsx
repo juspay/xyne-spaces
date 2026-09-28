@@ -1,11 +1,10 @@
-import React, { useContext, useState } from 'react';
-import { MaximizeTwoArrow } from '@xyne/icons';
+import React, { useContext } from 'react';
+import { Link } from 'react-router-dom';
 import type { AgentProfileProps, FlowComponent } from '@xyne/shared';
-import { useFlow } from '../../FlowContext';
 import { AuditLine, CardShell, Mention, StatusChip } from '../cardPrimitives';
 import Avatar from '../../../ui/Avatar/Avatar';
 import { ChatWithAgentButton } from './ChatWithAgentButton';
-import { AgentPreview, InsideAgentPreviewContext } from './AgentPreview';
+import { InsideAgentPreviewContext } from './AgentPreview';
 
 /**
  * The `agent` artifact's PROFILE variant — a live agent described back to the
@@ -13,18 +12,19 @@ import { AgentPreview, InsideAgentPreviewContext } from './AgentPreview';
  * capability selection and no decision controls.
  *
  * Presentation is a deliberate mirror of DraftAgentCard's created phase — same
- * inset panel, same chin, same expanded preview — so a listed agent and one the
+ * inset panel and chin — so a listed agent and one the
  * user just created are visibly the same object. The two stay separate
  * components because the draft card is stateful and actionable (flow-state,
  * approve/decline) while this one is not; only the chrome is shared.
+ *
+ * View opens the agent's detail page rather than a preview dialog: the page
+ * shows persona, tools and keys in full, which the dialog only summarised.
  */
 export const ProfileAgentCard: React.FC<{ node: FlowComponent; props: AgentProfileProps }> = ({
   node,
   props,
 }) => {
-  const { conversationId, messageId } = useFlow();
   const insidePreview = useContext(InsideAgentPreviewContext);
-  const [expanded, setExpanded] = useState(false);
 
   const statePill = <StatusChip label='Created' />;
 
@@ -66,16 +66,16 @@ export const ProfileAgentCard: React.FC<{ node: FlowComponent; props: AgentProfi
             {statePill}
           </div>
           {!insidePreview && (
-            <button
-              type='button'
-              onClick={(): void => setExpanded(true)}
-              aria-label='Expand agent'
-              className='shrink-0 rounded-[10px] p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
+            // The agent exists, so its detail page carries everything the
+            // preview dialog only summarises.
+            <Link
+              to={`/ai/library/agent/${encodeURIComponent(props.agent.slug)}?tab=persona`}
+              className='shrink-0 rounded-[10px] px-2 py-1 text-sm font-medium leading-5 !text-muted-foreground !no-underline transition-colors hover:bg-accent hover:!text-foreground'
               data-track-category='AGENT_ARTIFACT'
-              data-track-name='EXPAND_ARTIFACT'
+              data-track-name='VIEW_AGENT_FROM_CARD'
             >
-              <MaximizeTwoArrow size={16} className='shrink-0' />
-            </button>
+              View
+            </Link>
           )}
         </div>
 
@@ -105,17 +105,6 @@ export const ProfileAgentCard: React.FC<{ node: FlowComponent; props: AgentProfi
       <div className='flex min-h-[44px] items-center justify-between gap-3 px-3 py-2'>
         {footerNode}
       </div>
-
-      <AgentPreview
-        open={expanded}
-        onOpenChange={setExpanded}
-        messageId={messageId ?? ''}
-        agent={props.agent}
-        note={props.note}
-        statePill={statePill}
-        footer={footerNode}
-        conversationId={conversationId ?? undefined}
-      />
     </CardShell>
   );
 };

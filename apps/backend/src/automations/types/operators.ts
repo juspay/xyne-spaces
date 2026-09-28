@@ -4,6 +4,7 @@ export enum ConditionOperator {
   EQ = 'eq',
   NEQ = 'neq',
   CONTAINS = 'contains',
+  STARTS_WITH = 'starts_with',
   GT = 'gt',
   GTE = 'gte',
   LT = 'lt',

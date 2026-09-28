@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactElement } from 'react';
-import { ChevronRight, MultipleCrossCancelDefault, UserCheck } from '@xyne/icons';
+import { MultipleCrossCancelDefault, UserCheck } from '@xyne/icons';
 import { cn } from '@/utils/classNames';
 import { useClawKnowledgeBaseTree } from '@/hooks/useClawKnowledgeBaseTree';
 import type { KbCollectionNode, KbSelection } from '@/services/claw/clawKnowledgeBaseTypes';
@@ -116,28 +116,39 @@ export function BrowseKnowledgeDialog({
               <div className='flex flex-col gap-4 px-2'>
                 <div className='flex flex-wrap gap-2'>
                   {selected.map(entry => (
-                    <button
+                    <span
                       key={entry.root.id}
-                      type='button'
-                      onClick={() => removeRoot(entry.keys)}
-                      title={`Remove ${entry.root.name}`}
-                      aria-label={`Remove ${entry.root.name}`}
-                      data-track-category='Claw Agents'
-                      data-track-name='Create agent v2: remove KB collection'
                       className='flex shrink-0 items-center gap-1.5 overflow-hidden rounded-[10px] border-[0.8px] border-solid border-border bg-muted py-1 pl-1 pr-2 transition-colors hover:bg-muted/70'
                     >
-                      <KbFolderTile size='sm' />
-                      <span className='max-w-[200px] truncate text-sm font-medium leading-5 text-foreground'>
-                        {entry.root.name}
-                      </span>
-                      <span className='shrink-0 text-sm leading-5 text-muted-foreground'>
-                        {entry.fileCount} file{entry.fileCount === 1 ? '' : 's'}
-                      </span>
-                      <MultipleCrossCancelDefault
-                        className='size-3 shrink-0 text-muted-foreground'
-                        aria-hidden
-                      />
-                    </button>
+                      <button
+                        type='button'
+                        onClick={() => setOpenId(entry.root.id)}
+                        title={`Open ${entry.root.name}`}
+                        aria-label={`Open ${entry.root.name}`}
+                        data-track-category='Claw Agents'
+                        data-track-name='Create agent v2: open KB collection chip'
+                        className='flex min-w-0 items-center gap-1.5 rounded-md'
+                      >
+                        <KbFolderTile size='sm' />
+                        <span className='max-w-[200px] truncate text-sm font-medium leading-5 text-foreground'>
+                          {entry.root.name}
+                        </span>
+                        <span className='shrink-0 text-sm leading-5 text-muted-foreground'>
+                          {entry.fileCount} file{entry.fileCount === 1 ? '' : 's'}
+                        </span>
+                      </button>
+                      <button
+                        type='button'
+                        onClick={() => removeRoot(entry.keys)}
+                        title={`Remove ${entry.root.name}`}
+                        aria-label={`Remove ${entry.root.name}`}
+                        data-track-category='Claw Agents'
+                        data-track-name='Create agent v2: remove KB collection'
+                        className='flex shrink-0 items-center rounded-md text-muted-foreground transition-colors hover:text-foreground'
+                      >
+                        <MultipleCrossCancelDefault className='size-3 shrink-0' aria-hidden />
+                      </button>
+                    </span>
                   ))}
                 </div>
                 <button
@@ -203,11 +214,8 @@ function CollectionCard({
     >
       <KbFolderTile size='lg' />
       <span className='flex min-w-0 flex-1 flex-col gap-1.5 overflow-hidden'>
-        <span className='flex min-w-0 items-center gap-2'>
-          <span className='min-w-0 flex-1 truncate text-sm font-medium leading-5 text-foreground'>
-            {node.name}
-          </span>
-          <ChevronRight className='size-4 shrink-0 text-muted-foreground' aria-hidden />
+        <span className='min-w-0 truncate text-sm font-medium leading-5 text-foreground'>
+          {node.name}
         </span>
         <KbCollectionMeta node={node} />
       </span>

@@ -1,8 +1,15 @@
 // Barrel export - allows clean imports from @xyne/shared
 export * from './zero/schema';
+export * from './zero/audit';
 export { defineQuery } from './zero/acl';
-export { encryptedFieldsConfig, type EncryptedTableConfig } from './zero/encrypted-fields';
-export { EncryptedFieldQueryError, validateQueryWhereClause, type Condition, type QueryAST } from './zero/client-transaction-wrapper';
+export {
+  EncryptedFieldQueryError,
+  validateQueryWhereClause,
+  isEncryptionScopeEmpty,
+  isWorkspaceInEncryptionScope,
+  type EncryptedWorkspaceScope,
+  type EncryptedTableConfig,
+} from './zero/query-validation';
 export * from './ai';
 export * from './dashboard';
 export * from './types/activity';
@@ -21,16 +28,21 @@ export * from './utils/etaCalculation';
 export * from './utils/formFieldBranching';
 export * from './utils/formFieldOptions';
 export * from './utils/slaCalculator';
+export * from './utils/relatedContextDraft';
 export * from './utils/project';
 export * from './utils/activityMetadataParser';
+export * from './utils/radarRules';
 export * from './utils/canvasHierarchy';
 export * from './utils/canvasDestinationAccess';
 export * from './utils/canvasFolderNameConflict';
+export * from './utils/recordingAccess';
 export * from './utils/origins';
 export * from './utils/linkPreviewParser';
 export * from './utils/messageContent';
 export * from './utils/ticketMetadata';
+export * from './utils/ticketDescription';
 export * from './utils/fileTypes';
+export * from './utils/heic';
 export * from './utils/channel';
 export * from './utils/socialMedia';
 export * from './utils/csv';

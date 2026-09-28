@@ -396,7 +396,9 @@ class CanvasAuthService {
         loadChannel: (channelId) =>
           db.channel.findUnique({
             where: { id: channelId },
-            select: { projectId: true, isArchived: true },
+            // resolveCanvasHierarchy only needs to confirm the channel exists now
+            // (the project-mismatch check was removed); no channel.projectId read.
+            select: { id: true },
           }),
       });
 
@@ -426,21 +428,7 @@ class CanvasAuthService {
         if (!channelMembership) {
           throw new Error('User does not have permission to create canvas in this channel');
         }
-      } else if (resolvedProjectId) {
-        const projectChannelMembership = await db.channelParticipant.findFirst({
-          where: {
-            userId,
-            channel: {
-              projectId: resolvedProjectId,
-            },
-          },
-        });
-
-        if (!projectChannelMembership) {
-          throw new Error('User does not have permission to create canvas in this project');
-        }
       }
-
       const creator = await db.user.findUnique({
         where: { id: userId },
         select: { workspaceId: true },

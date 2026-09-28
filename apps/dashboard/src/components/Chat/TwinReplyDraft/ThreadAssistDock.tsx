@@ -32,6 +32,7 @@ import type { ToolInvocation } from '../XyneAISidebar/utils/XyneAITypes';
 import { TwinReasoningPopover } from './TwinReasoningPopover';
 import type { TwinReplyDraftView, PostedTarget } from './twinReplyDraftApi';
 import type { AssistTab } from './useThreadAssist';
+import { twinDraftShownAt } from '../../../hooks/useTwinReplyDraft';
 
 const expand = {
   initial: { opacity: 0, y: 6 },
@@ -760,6 +761,18 @@ function ReplyCard({
     onPosted(posted);
   };
 
+  // Joins the send / edit / decline clicks back to TWIN_DRAFT_SHOWN. `shownAt`
+  // is a timestamp, not a delta: the attribute is baked at render, and the
+  // click may come much later — the delta is `timestamp - shownAt` in the query.
+  const draftTrackMetadata = JSON.stringify({
+    draftId: draft.id,
+    action: draft.action,
+    destinationKind: draft.destinationKind,
+    editedBeforeSend: editing,
+    hasReasoning: !!draft.reasoning,
+    shownAt: twinDraftShownAt(draft.id),
+  });
+
   return (
     <div className='flex flex-col gap-4'>
       <div className='flex flex-col gap-3.5'>
@@ -834,6 +847,7 @@ function ReplyCard({
                 aria-label='Discard draft'
                 data-track-category='twin-dock'
                 data-track-name='decline'
+                data-track-metadata={draftTrackMetadata}
                 className='flex items-center justify-center px-[9px] py-1.5 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50'
               >
                 <ChatCancel size={14} />
@@ -847,6 +861,7 @@ function ReplyCard({
                   aria-label={editing ? 'Cancel edit' : 'Edit draft'}
                   data-track-category='twin-dock'
                   data-track-name='edit'
+                  data-track-metadata={draftTrackMetadata}
                   className='flex items-center justify-center px-[9px] py-1.5 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50'
                 >
                   <PencilEraserEditLine size={14} />
@@ -858,6 +873,7 @@ function ReplyCard({
             size='sm'
             data-track-category='twin-dock'
             data-track-name='send-draft'
+            data-track-metadata={draftTrackMetadata}
             trackId='twin_send_reply'
             trackAction={send}
             disabled={loading}

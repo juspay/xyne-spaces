@@ -156,7 +156,11 @@ export const McpSuggestNode: React.FC<{ node: FlowComponent; children?: React.Re
                 </Link>
 
                 {isConnected ? (
-                  <span className='shrink-0 rounded-lg px-2 py-1 text-xs font-medium leading-5 text-muted-foreground'>
+                  <span className='flex shrink-0 items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-medium leading-5 text-status-success'>
+                    <span
+                      className='size-[6px] shrink-0 rounded-full bg-status-success'
+                      aria-hidden
+                    />
                     Connected
                   </span>
                 ) : (

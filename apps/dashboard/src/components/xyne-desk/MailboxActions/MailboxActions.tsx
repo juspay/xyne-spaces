@@ -7,6 +7,7 @@ import { mutators } from '../../../zero/mutators';
 import { useZero } from '../../../hooks/useZero';
 import Tooltip from '../../ui/Tooltip';
 import { cn } from '../../../utils/classNames';
+import { trackDeskOutcome } from '../../../services/Analytics/deskTracking';
 
 export type MailboxSlot = 'star' | 'actions' | 'chip';
 
@@ -58,6 +59,17 @@ export const MailboxActions = ({
         }),
       ).server;
       if (result.type === 'error') throw new Error(result.error.message || 'Failed to move mail');
+      // Outcome, not intent: the chip / button click is already its own row.
+      trackDeskOutcome(
+        'MAILBOX_STATE_CHANGED',
+        { id: ticketId, channelId },
+        { mailbox: mailboxOverlay },
+        {
+          to: next,
+          previous: state,
+          surface: slot === 'chip' ? 'row_chip' : 'detail',
+        },
+      );
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to move mail');
     }
@@ -75,6 +87,15 @@ export const MailboxActions = ({
         }),
       ).server;
       if (result.type === 'error') throw new Error(result.error.message || 'Failed to star mail');
+      trackDeskOutcome(
+        'TICKET_STARRED',
+        { id: ticketId, channelId },
+        { mailbox: mailboxOverlay },
+        {
+          to: !starred,
+          surface: 'detail',
+        },
+      );
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to star mail');
     }

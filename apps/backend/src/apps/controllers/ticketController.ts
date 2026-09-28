@@ -8,7 +8,7 @@ import { repositories } from '@/database/repositories';
 import { evaluateAssignmentRule } from '@/utils/assignmentEngine';
 import { ticketService } from '@/services/ticketService';
 import { ticketAssignmentService, primaryUserIdOf } from '@/services/ticketAssignmentService';
-import { ticketDuplicateService } from '@/services/ticketDuplicateService';
+import { ticketDuplicateService, type DuplicateScopeFieldValue } from '@/services/ticketDuplicateService';
 import { DatabaseClient } from '@/database/client';
 import type { BoardMetadata } from '@xyne/shared';
 import {
@@ -20,8 +20,6 @@ import {
   EmailType,
   DeskType,
   isDeskChannelType,
-  parseTicketEtaManagement,
-  mergeTicketEtaManagement,
 } from '@xyne/shared';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { emitEventToWorkspaceApps } from '../core/eventSubscriptionUtils';
@@ -42,8 +40,6 @@ import { resolveChannelId } from '../utils/channelUtils';
 import { decodeCursor, paginateResults } from '../core/paginationUtils';
 import type { MerchantTicketListItem } from '../types';
 import { validateChannelIdsAccess } from '../middelware/channelValidation';
-import { calculateETADeadline } from '@/utils/etaCalculation';
-import { generateKeyBetween } from 'fractional-indexing';
 import { resolveFormFieldDefinitionsForForm } from '@/utils/fieldDefinition';
 import type { TicketCustomFormData } from '@/database/repositories/formsRepository';
 import {
@@ -61,25 +57,19 @@ import {
   type CustomFieldWritePayload,
 } from '@/services/ticketCustomFieldService';
 import { emitTicketUpdated } from '@/automations/triggers/ticket-updated.trigger';
-import { syncStageOverdueFlag } from '@/services/tickets/syncStageOverdueFlag';
 import { getTicketBotActorId } from '@/utils/etaNotificationUtils';
 import {
-  resolveStepEstimate,
-  loadBoardEtaContext,
-  evaluateEta,
-  buildEtaActivityIntents,
-  isTerminalStatus,
   dispatchEtaNotifications,
   etaSignalsFromResult,
-  writeEtaActivitiesPrisma,
 } from '@/services/etaManagement';
+import { transferTicketToBoardTx } from '@/bypassAcl/transactions/controllersTicketController';
 
 const externalSourceRepo = new ExternalSourceRepository();
 const externalMessageRepo = new ExternalMessageRepository();
 const emailChannelPreferenceRepo = new EmailChannelPreferenceRepository();
 const appsFilesBaseUrl = `${config.backendUrl.replace(/\/$/, '')}/api/apps/files`;
 
-const prismaClient = DatabaseClient.getInstance();
+export const prismaClient = DatabaseClient.getInstance();
 
 const CreateTicketBodySchema = z.object({
   title: z.string().min(1, 'Title is required').trim(),
@@ -95,6 +85,7 @@ const CreateTicketBodySchema = z.object({
   stageName: z.string().trim().optional(),
   eta: z.string().datetime({ message: 'ETA must be a valid ISO 8601 date string' }).optional(),
   ticketType: z.string().trim().optional(),
+  merchantId: z.string().trim().min(1, 'Merchant ID cannot be empty').optional(),
   dynamicFields: z.record(z.unknown()).optional(),
 }).refine(
   data => !!data.channelId || !!data.channelName,
@@ -123,6 +114,8 @@ const UpdateTicketBodySchema = z.object({
   boardId: z.string().min(1, 'Board ID cannot be empty').trim().optional(),
   isArchived: z.boolean().optional(),
   tags: z.array(z.string().trim().min(1, 'Tags cannot be empty')).optional(),
+  // null clears the merchant link
+  merchantId: z.string().trim().min(1, 'Merchant ID cannot be empty').nullable().optional(),
   dynamicFields: z.record(z.unknown()).optional(),
 }).refine(
   data => !!data.channelId || !!data.channelName || !!data.conversationId,
@@ -132,7 +125,8 @@ const UpdateTicketBodySchema = z.object({
     data.assigneeId || data.assignedToEmail || data.stageName || data.groupId ||
     data.title || data.description || data.priority || data.eta ||
     data.ticketType || data.statusV2 || data.boardId || data.assignedUserGroupAlias ||
-    data.isArchived !== undefined || data.tags || data.dynamicFields
+    data.isArchived !== undefined || data.tags || data.dynamicFields ||
+    data.merchantId !== undefined
   ),
   { message: 'At least one field to update is required', path: ['assigneeId'] }
 ).refine(
@@ -208,6 +202,8 @@ const TicketFiltersSchema = z
     createdBy: toArrayFilter(z.string().trim().min(1)).optional(),
     userGroupId: toArrayFilter(z.string().trim().min(1)).optional(),
     tags: toArrayFilter(z.string().trim().min(1)).optional(),
+    merchantId: toArrayFilter(z.string().trim().min(1)).optional(),
+    hasMerchantId: z.boolean().optional(),
     isArchived: z.boolean().optional(),
     createdAfter: z.string().datetime({ message: 'createdAfter must be an ISO 8601 date string' }).optional(),
     createdBefore: z.string().datetime({ message: 'createdBefore must be an ISO 8601 date string' }).optional(),
@@ -230,11 +226,16 @@ const SearchTicketsBodySchema = z.object({
   const hasChannel = typeof data.channelId === 'string' && data.channelId.length > 0;
   const hasBoards = Array.isArray(data.boardIds) && data.boardIds.length > 0;
   const hasProject = typeof data.projectId === 'string' && data.projectId.length > 0;
-  if (!hasChannel && !hasBoards && !hasProject) {
+  // A merchant filter is a narrow, indexed predicate, so it may stand in for a scope and
+  // search the whole workspace (still bounded by the workspaceId backstop in the handler).
+  const hasMerchantScope =
+    (Array.isArray(data.filters?.merchantId) && data.filters.merchantId.length > 0) ||
+    data.filters?.hasMerchantId === true;
+  if (!hasChannel && !hasBoards && !hasProject && !hasMerchantScope) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       path: ['channelId'],
-      message: 'At least one of channelId, boardIds, or projectId is required',
+      message: 'At least one of channelId, boardIds, projectId, filters.merchantId, or filters.hasMerchantId: true is required',
     });
   }
   // customFields is an expensive post-filter — require a board/project scope to bound it.
@@ -384,154 +385,7 @@ const transferTicketToBoard = async (params: {
   // transactional state, and best kept off the held connection.
   const systemActorId = await getTicketBotActorId(currentTicket.workspaceId);
 
-  const txResult = await prismaClient.$transaction(async tx => {
-    const newBoardStages = await tx.stage.findMany({
-      where: { boardId: targetBoardId },
-      orderBy: { sequenceNumber: 'asc' },
-    });
-
-    if (newBoardStages.length === 0) {
-      throw new Error(`No stages found for board ${targetBoardId}`);
-    }
-
-    const firstStage = newBoardStages[0];
-
-    const firstTicketInStage = await tx.ticket.findFirst({
-      where: {
-        boardId: targetBoardId,
-        stageName: firstStage.name,
-        kanbanPosition: { not: null },
-      },
-      orderBy: { kanbanPosition: 'asc' },
-      select: { kanbanPosition: true },
-    });
-
-    let kanbanPosition: string;
-    try {
-      kanbanPosition = generateKeyBetween(null, firstTicketInStage?.kanbanPosition ?? null);
-    } catch {
-      kanbanPosition = generateKeyBetween(null, null);
-    }
-
-    // `eta` is deliberately left out of this base update - an automatic due date is only
-    // ever set by the domain-service evaluation below, and only when the target board has
-    // opted into automatic ETA management (never a blind stage-eta sum, and never a write
-    // that can shorten the ticket's existing due date).
-    await tx.ticket.update({
-      where: { id: ticketId },
-      data: {
-        boardId: targetBoardId,
-        stageName: firstStage.name,
-        statusV2: firstStage.defaultTicketStatusV2 ?? undefined,
-        kanbanPosition,
-        updatedAt: now,
-        updatedBy,
-      },
-    });
-
-    await tx.ticketStageEta.deleteMany({ where: { ticketId } });
-
-    let newStageEtaEntryId: string | null = null;
-    let stageEtaDeadline: Date | null = null;
-    if (firstStage.eta !== null && firstStage.eta > 0) {
-      stageEtaDeadline = calculateETADeadline(now, firstStage.eta);
-      const newStageEtaEntry = await tx.ticketStageEta.create({
-        data: {
-          ticketId,
-          stageId: firstStage.id,
-          stageEnteredAt: now,
-          stageLeftAt: null,
-          stageEta: stageEtaDeadline,
-          updatedBy,
-          workspaceId: currentTicket.workspaceId,
-        },
-        select: { id: true },
-      });
-      newStageEtaEntryId = newStageEtaEntry.id;
-    }
-
-    await syncStageOverdueFlag(tx, ticketId, now);
-    // ETA domain-service evaluation: forecast (extend-only) + planning-risk state, mirroring
-    // the pattern already used by TicketRepository.updateTicketStage and the Zero
-    // ticket.update board-transfer branch.
-    const effectiveStatusV2 = (firstStage.defaultTicketStatusV2 ?? currentTicket.statusV2) as TicketStatusV2;
-    // metadata AND eta were both read before this transaction opened, so a concurrent write
-    // (e.g. acknowledgeEtaRisk, or a manual due-date edit) landing before ours would be lost.
-    // FOR UPDATE locks the row so that can't happen. Both locked values feed evaluateEta:
-    // eta is the extend-only baseline and a fingerprint input, so a stale one could decide
-    // against - and then overwrite - a due date someone else just moved.
-    const [lockedTicket] = await tx.$queryRaw<{ metadata: unknown; eta: Date | null }[]>`
-      SELECT "metadata", "eta"
-      FROM "tickets"
-      WHERE "id" = ${ticketId}
-      FOR UPDATE
-    `;
-    const lockedEta = lockedTicket?.eta ?? null;
-    const boardEtaCtx = await loadBoardEtaContext(tx, targetBoardId);
-    const currentTicketEtaManagement = parseTicketEtaManagement(lockedTicket?.metadata);
-    const stepEstimate = resolveStepEstimate(
-      { id: firstStage.id, eta: firstStage.eta },
-      null,
-      { requireExplicitTransition: false },
-    );
-
-    const etaResult = evaluateEta({
-      ticketId,
-      ticketStatus: effectiveStatusV2,
-      isTerminal: isTerminalStatus(effectiveStatusV2),
-      currentTicketEta: lockedEta,
-      currentTicketEtaManagement,
-      boardType: boardEtaCtx.boardType,
-      boardEtaManagement: boardEtaCtx.boardEtaManagement,
-      currentStageId: firstStage.id,
-      stages: boardEtaCtx.stages,
-      transitions: boardEtaCtx.transitions,
-      activeVisit: {
-        stageVisitId: newStageEtaEntryId,
-        transitionId: null,
-        deadline: stageEtaDeadline,
-        deadlineTracked: newStageEtaEntryId !== null,
-        estimateSource: stepEstimate.source,
-        estimateHours: stepEstimate.incomplete ? null : stepEstimate.hours,
-      },
-      trigger: 'STAGE_TRANSITION',
-      now,
-    });
-
-    const mergedMetadata = mergeTicketEtaManagement(
-      lockedTicket?.metadata,
-      etaResult.ticketEtaManagementPatch,
-    );
-
-    const updatedTicket = await tx.ticket.update({
-      where: { id: ticketId },
-      data: {
-        ...(etaResult.etaDecision.changed && etaResult.etaDecision.newEta
-          ? { eta: etaResult.etaDecision.newEta }
-          : {}),
-        metadata: mergedMetadata as Prisma.InputJsonValue,
-      },
-    });
-
-    const activityIntents = buildEtaActivityIntents(etaResult, {
-      currentStageId: firstStage.id,
-      oldEta: lockedEta ? lockedEta.getTime() : null,
-      trigger: 'STAGE_TRANSITION',
-      systemReason: `Automatic recalculation after moving ticket to board "${targetBoardId}"`,
-      previousRiskFingerprint: currentTicketEtaManagement.planningRisk.fingerprint,
-    });
-    await writeEtaActivitiesPrisma(tx, activityIntents, {
-      ticketId,
-      workspaceId: currentTicket.workspaceId,
-      channelId: currentTicket.channelId,
-      timestamp: now.getTime(),
-      systemActorId,
-    });
-
-    await syncConversationTicketMdFromPrismaTicket(tx, updatedTicket);
-
-    return { updatedTicket, etaResult };
-  });
+  const txResult = await transferTicketToBoardTx(targetBoardId, ticketId, now, updatedBy, currentTicket, systemActorId);
 
   // Post-commit notification dispatch - best-effort, must never affect the already-
   // committed response. Suppressed while the ticket is paused.
@@ -689,6 +543,7 @@ export class TicketController {
         stageName: requestedStageName,
         eta: etaString,
         ticketType,
+        merchantId,
         dynamicFields,
       } = bodyResult.data;
 
@@ -744,6 +599,11 @@ export class TicketController {
         });
         return;
       }
+
+      const duplicateScopeValues: DuplicateScopeFieldValue[] | undefined =
+        customFieldValues && customFieldValues.fieldValues.length > 0
+          ? customFieldValues.fieldValues.map(fv => ({ fieldId: fv.fieldId, value: fv.actualFieldValue }))
+          : undefined;
 
       // Resolve channelId from channelName if not provided
       const resolvedChannelId = await resolveChannelId(channelId, undefined, channelName);
@@ -822,6 +682,7 @@ export class TicketController {
         stageName: resolvedStageName,
         eta: etaDate,
         ticketType,
+        merchantId,
         customFieldValues,
       });
 
@@ -834,6 +695,8 @@ export class TicketController {
           description,
           projectId,
           userId,
+          channelId: resolvedChannelId,
+          scopeFieldValues: duplicateScopeValues,
         }).catch(error => {
           logger.error('[Apps Ticket Creation] Failed to persist duplicate references for ticket', {
             ticketId: result.ticketId,
@@ -935,6 +798,7 @@ export class TicketController {
         boardId,
         isArchived,
         tags,
+        merchantId,
         dynamicFields,
       } = bodyResult.data;
 
@@ -1120,6 +984,7 @@ export class TicketController {
       if (ticketType !== undefined) directUpdates.ticketType = ticketType;
       if (statusV2 !== undefined) directUpdates.statusV2 = statusV2;
       if (isArchived !== undefined) directUpdates.isArchived = isArchived;
+      if (merchantId !== undefined) directUpdates.merchantId = merchantId;
 
       if (Object.keys(directUpdates).length > 0) {
         await repositories.tickets.updateTicketFields(ticketId, directUpdates, userId);
@@ -1410,6 +1275,8 @@ export class TicketController {
           createdBy: filters.createdBy,
           userGroupId: filters.userGroupId,
           tags: filters.tags,
+          merchantId: filters.merchantId,
+          hasMerchantId: filters.hasMerchantId,
           isArchived: filters.isArchived,
           createdAfter: filters.createdAfter ? new Date(filters.createdAfter) : undefined,
           createdBefore: filters.createdBefore ? new Date(filters.createdBefore) : undefined,
@@ -1442,6 +1309,7 @@ export class TicketController {
         channelId: true,
         boardId: true,
         projectId: true,
+        merchantId: true,
       } as const;
 
       const hasCustomFieldFilters = !!(customFields && Object.keys(customFields).length > 0);
@@ -1536,6 +1404,7 @@ export class TicketController {
           channelId: ticket.channelId,
           boardId: ticket.boardId,
           projectId: ticket.projectId,
+          merchantId: ticket.merchantId,
           ...(includeCustomFields ? { customFormData: customFormDataByTicketId.get(ticket.id) ?? null } : {}),
         };
       });
@@ -2541,6 +2410,11 @@ export class TicketController {
         try {
           req.body.additionalFormFields = JSON.parse(req.body.additionalFormFields);
         } catch {
+          logger.warn('[AppDeskInbound] additionalFormFields is not valid JSON - ignoring all additional form fields', {
+            channelId: req.body.channelId,
+            threadId: req.body.threadId,
+            rawAdditionalFormFields: String(req.body.additionalFormFields).slice(0, 500),
+          });
           additionalFormFieldValidationErrors.push({
             error: 'additionalFormFields must be valid JSON',
             code: 'VALIDATION_ERROR',
@@ -2550,10 +2424,29 @@ export class TicketController {
       }
 
       const bodyResult = AppDeskInboundBodySchema.safeParse(req.body);
+      const receivedPayload = {
+        channelId: req.body?.channelId,
+        threadId: req.body?.threadId,
+        externalId: req.body?.externalId,
+        subject: req.body?.subject,
+        senderName: req.body?.senderName,
+        senderEmail: req.body?.senderEmail,
+        bodyLength: typeof req.body?.body === 'string' ? req.body.body.length : 0,
+        additionalFormFields: req.body?.additionalFormFields,
+        receivedKeys: Object.keys(req.body ?? {}),
+        fileFields: req.files && !Array.isArray(req.files)
+          ? Object.fromEntries(Object.entries(req.files).map(([name, list]) => [name, list.length]))
+          : undefined,
+      };
       if (!bodyResult.success) {
+        logger.warn('[AppDeskInbound] returning 400: payload validation failed', {
+          ...receivedPayload,
+          schemaIssues: bodyResult.error.errors,
+        });
         res.status(400).json({ error: 'Validation error', code: 'VALIDATION_ERROR', details: bodyResult.error.errors });
         return;
       }
+      logger.info('[AppDeskInbound] payload received', receivedPayload);
 
       const {
         channelId, threadId, externalId: bodyExternalId, subject, body,
@@ -2568,14 +2461,29 @@ export class TicketController {
         ? (req.files as Record<string, Express.Multer.File[]>)
         : {};
       const files = reqFiles['files'] ?? [];
+      if (reqFiles['thumbnails']?.length) {
+        logger.warn('[AppDeskInbound] thumbnails received but not used - ignoring them', {
+          channelId,
+          threadId,
+          thumbnailCount: reqFiles['thumbnails'].length,
+        });
+      }
       const emailBody = body ?? '';
       if (!emailBody && files.length === 0) {
+        logger.warn('[AppDeskInbound] returning 400: no body and no files', {
+          channelId,
+          threadId,
+          bodyProvided: body !== undefined,
+          filesFieldCount: files.length,
+          fileFields: Object.keys(reqFiles),
+        });
         res.status(400).json({ error: 'body or at least one file is required', code: 'VALIDATION_ERROR' });
         return;
       }
 
       const channel = await repositories.channels.findById(channelId);
       if (!channel) {
+        logger.warn('[AppDeskInbound] returning 404: channel not found', { channelId, threadId });
         res.status(404).json({ error: `Channel with ID ${channelId} not found`, code: 'CHANNEL_NOT_FOUND' });
         return;
       }
@@ -2585,21 +2493,40 @@ export class TicketController {
         select: { sendAsEmail: true, ownerUserId: true, boardId: true },
       });
       if (!channelPref || !isDeskChannelType(channel.type)) {
+        logger.warn('[AppDeskInbound] returning 400: channel is not a desk channel', {
+          channelId,
+          threadId,
+          channelType: channel.type,
+          hasEmailChannelPreference: !!channelPref,
+          isDeskChannelType: isDeskChannelType(channel.type),
+        });
         res.status(400).json({ error: 'Channel is not a desk channel', code: 'NOT_DESK_CHANNEL' });
         return;
       }
 
       const installedAppId = (req as any).auth?.installedAppId as string | undefined;
       if (!installedAppId) {
+        logger.warn('[AppDeskInbound] returning 403: app identity not established', { channelId, threadId });
         res.status(403).json({ error: 'App identity not established', code: 'APP_NOT_CONNECTED' });
         return;
       }
       const externalSource = await externalSourceRepo.findChannelAppSource(channelId, installedAppId);
       if (!externalSource) {
+        logger.warn('[AppDeskInbound] returning 403: app is not connected to this channel', {
+          channelId,
+          threadId,
+          installedAppId,
+        });
         res.status(403).json({ error: 'App is not connected to this channel', code: 'APP_NOT_CONNECTED' });
         return;
       }
       if (!externalSource.isActive) {
+        logger.warn('[AppDeskInbound] returning 409: app desk is disconnected', {
+          channelId,
+          threadId,
+          installedAppId,
+          externalSourceId: externalSource.id,
+        });
         res.status(409).json({ error: 'App desk is disconnected', code: 'DESK_DISCONNECTED' });
         return;
       }
@@ -2626,6 +2553,20 @@ export class TicketController {
         emailFrom = botUser?.email
           ? `${botUser.name} <${botUser.email}>`
           : botUser?.name ?? 'External user';
+        logger.warn('[AppDeskInbound] senderName/senderEmail not sent - using app bot user as sender', {
+          channelId,
+          threadId,
+          senderNameReceived: senderName,
+          senderEmailReceived: senderEmail,
+          fallbackEmailFrom: emailFrom,
+        });
+      }
+      if (!senderEmail) {
+        logger.warn('[AppDeskInbound] senderEmail not sent - reporterEmail/fromEmailAddress will not be set on the ticket', {
+          channelId,
+          threadId,
+          senderNameReceived: senderName,
+        });
       }
       const uploadedFiles = files.length > 0 ? await uploadFiles(files) : [];
 
@@ -2642,6 +2583,16 @@ export class TicketController {
         extractEmailAddress(mailboxSource?.displayName ?? '') ||
         ownerUser?.email ||
         `desk-${channelId}@apps.xyne.ai`;
+
+      if (!channelPref.sendAsEmail) {
+        logger.warn('[AppDeskInbound] channel has no sendAsEmail - recipient email resolved via fallback', {
+          channelId,
+          threadId,
+          mailboxSourceDisplayName: mailboxSource?.displayName,
+          ownerUserEmail: ownerUser?.email,
+          recipientEmail,
+        });
+      }
 
       logger.info('[AppDeskInbound] received', {
         channelId,
@@ -2712,6 +2663,12 @@ export class TicketController {
 
         if (additionalFormFields && existingTicket?.id) {
           if (!existingTicket.boardId) {
+            logger.warn('[AppDeskInbound] additionalFormFields not saved: existing ticket has no board', {
+              channelId,
+              threadId: externalThreadId,
+              ticketId: existingTicket.id,
+              receivedFieldNames: Object.keys(additionalFormFields),
+            });
             additionalFormFieldValidationErrors.push({
               error: 'Ticket board is not configured for additional form fields',
               code: 'VALIDATION_ERROR',
@@ -2726,13 +2683,30 @@ export class TicketController {
             customFieldValues = partialResult.customFieldValues;
             additionalFormFieldValidationErrors.push(...partialResult.validationErrors);
 
+            logger[partialResult.validationErrors.length > 0 ? 'warn' : 'info']('[AppDeskInbound] additionalFormFields result for existing ticket', {
+              channelId,
+              threadId: externalThreadId,
+              ticketId: existingTicket.id,
+              boardId: existingTicket.boardId,
+              receivedFieldNames: Object.keys(additionalFormFields),
+              savedFieldNames: customFieldValues?.fieldValues.map(fv => fv.fieldName) ?? [],
+              validationErrors: partialResult.validationErrors,
+            });
+
             if (customFieldValues && customFieldValues.fieldValues.length > 0) {
               await syncCustomFieldValues(existingTicket.id, customFieldValues, userId);
             }
           }
+        } else if (additionalFormFields) {
+          logger.warn('[AppDeskInbound] additionalFormFields not saved: no ticket found for existing thread', {
+            channelId,
+            threadId: externalThreadId,
+            conversationId: threadEmail.conversationId,
+            receivedFieldNames: Object.keys(additionalFormFields),
+          });
         }
 
-        logger.info('[AppDeskInbound] appended message to existing thread', {
+        logger[additionalFormFieldValidationErrors.length > 0 ? 'warn' : 'info']('[AppDeskInbound] appended message to existing thread', {
           threadId: externalThreadId,
           conversationId: threadEmail.conversationId,
           emailId: email.id,
@@ -2740,6 +2714,8 @@ export class TicketController {
           xyneId: existingTicket?.xyneId,
           fileCount: uploadedFiles.length,
           additionalFormFieldsCount: additionalFormFields ? Object.keys(additionalFormFields).length : 0,
+          savedFieldNames: customFieldValues?.fieldValues.map(fv => fv.fieldName) ?? [],
+          validationErrors: additionalFormFieldValidationErrors,
         });
         res.status(200).json({
           ticketId: existingTicket?.id,
@@ -2755,6 +2731,11 @@ export class TicketController {
 
       const effectiveBoardId = channelPref.boardId || undefined;
       if (!effectiveBoardId) {
+        logger.warn('[AppDeskInbound] returning 503: desk channel has no board configured', {
+          channelId,
+          threadId: externalThreadId,
+          receivedFieldNames: additionalFormFields ? Object.keys(additionalFormFields) : [],
+        });
         res.status(503).json({ error: 'App desk board is not configured', code: 'MISCONFIGURED' });
         return;
       }
@@ -2767,7 +2748,23 @@ export class TicketController {
         );
         customFieldValues = partialResult.customFieldValues;
         additionalFormFieldValidationErrors.push(...partialResult.validationErrors);
+
+        logger[partialResult.validationErrors.length > 0 ? 'warn' : 'info']('[AppDeskInbound] additionalFormFields result for new ticket', {
+          channelId,
+          threadId: externalThreadId,
+          boardId: effectiveBoardId,
+          receivedFieldNames: Object.keys(additionalFormFields),
+          savedFieldNames: customFieldValues?.fieldValues.map(fv => fv.fieldName) ?? [],
+          validationErrors: partialResult.validationErrors,
+        });
       }
+
+      // Duplicate detection fires inside createConversationWithEmail BEFORE the
+      // field sync below (timing constraint) — hand it the precomputed payload.
+      const scopeFieldValues: DuplicateScopeFieldValue[] | undefined =
+        customFieldValues && customFieldValues.fieldValues.length > 0
+          ? customFieldValues.fieldValues.map(fv => ({ fieldId: fv.fieldId, value: fv.actualFieldValue }))
+          : undefined;
 
       const result = await emailService.createConversationWithEmail({
         channelId,
@@ -2793,13 +2790,25 @@ export class TicketController {
         },
         receivedAt: new Date(),
         boardId: effectiveBoardId,
+        scopeFieldValues,
       });
 
       if (result && 'blocked' in result && result.blocked) {
+        logger.warn('[AppDeskInbound] returning 403: ticket creation blocked by configuration', {
+          channelId,
+          threadId: externalThreadId,
+          boardId: effectiveBoardId,
+        });
         res.status(403).json({ error: 'Ticket creation blocked by configuration', code: 'BLOCKED' });
         return;
       }
       if (result && 'isDuplicate' in result && result.isDuplicate) {
+        logger.warn('[AppDeskInbound] returning 409: duplicate ticket', {
+          channelId,
+          threadId: externalThreadId,
+          boardId: effectiveBoardId,
+          scopeFieldIds: scopeFieldValues?.map(sfv => sfv.fieldId) ?? [],
+        });
         res.status(409).json({ error: 'Duplicate ticket', code: 'DUPLICATE' });
         return;
       }
@@ -2808,9 +2817,16 @@ export class TicketController {
 
       if (customFieldValues && customFieldValues.fieldValues.length > 0 && ticket?.id) {
         await syncCustomFieldValues(ticket.id, customFieldValues, userId);
+      } else if (customFieldValues && customFieldValues.fieldValues.length > 0) {
+        logger.warn('[AppDeskInbound] custom fields not saved: created ticket has no id', {
+          channelId,
+          threadId: externalThreadId,
+          conversationId: conversation?.conversationId,
+          acceptedFieldNames: customFieldValues.fieldValues.map(fv => fv.fieldName),
+        });
       }
 
-      logger.info('[AppDeskInbound] created new ticket', {
+      logger[additionalFormFieldValidationErrors.length > 0 ? 'warn' : 'info']('[AppDeskInbound] created new ticket', {
         threadId: externalThreadId,
         ticketId: ticket?.id,
         xyneId: ticket?.xyneId,
@@ -2819,6 +2835,8 @@ export class TicketController {
         boardId: effectiveBoardId,
         fileCount: uploadedFiles.length,
         additionalFormFieldsCount: additionalFormFields ? Object.keys(additionalFormFields).length : 0,
+        savedFieldNames: customFieldValues?.fieldValues.map(fv => fv.fieldName) ?? [],
+        validationErrors: additionalFormFieldValidationErrors,
       });
 
       res.status(201).json({
@@ -2831,9 +2849,15 @@ export class TicketController {
         }),
       });
     } catch (error) {
+      logger.error('[AppDeskInbound] returning 500: unhandled error', {
+        channelId: req.body?.channelId,
+        threadId: req.body?.threadId,
+        externalId: req.body?.externalId,
+      });
       logger.error('[TicketController] appDeskInbound error:', error);
       res.status(500).json({ error: 'Internal server error', code: 'INTERNAL_ERROR' });
     }
   };
 
 }
+

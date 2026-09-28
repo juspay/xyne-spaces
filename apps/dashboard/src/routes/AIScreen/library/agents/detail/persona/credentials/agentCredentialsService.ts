@@ -1,4 +1,5 @@
 import { clawApiRequest } from '@/services/claw/clawRequest';
+import type { CredentialHealth } from '@/services/claw/clawSettingsService';
 
 export interface AgentProviderCredentialStatus {
   readonly provider: string;
@@ -38,6 +39,15 @@ export function setAgentProviderCredential(
   return clawApiRequest<unknown>(base(slug), {
     method: 'POST',
     body: JSON.stringify(payload),
+  });
+}
+
+export function verifyAgentProviderCredential(
+  slug: string,
+  provider: string,
+): Promise<CredentialHealth> {
+  return clawApiRequest<CredentialHealth>(`${base(slug)}/${encodeURIComponent(provider)}/verify`, {
+    method: 'POST',
   });
 }
 

@@ -184,8 +184,6 @@ class AgentAuthService {
         await this.handleAuthRequest(req, res);
       } else if (req.method === 'POST' && url.pathname === '/auth/release') {
         await this.handleAuthRelease(req, res);
-      } else if (req.method === 'POST' && url.pathname === '/interact') {
-        await this.handleInteract(req, res);
       } else if (req.method === 'GET' && url.pathname === '/search') {
         await this.handleSearch(req, res, url);
       } else if (req.method === 'POST' && url.pathname === '/api/search') {
@@ -354,74 +352,6 @@ class AgentAuthService {
       this.sendJson(res, 200, { status: 'released' });
     } else {
       this.sendJson(res, 404, { error: 'Session not found' });
-    }
-  }
-
-  /**
-   * Handle /interact endpoint - proxy requests to backend with user's access token
-   */
-  private async handleInteract(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    // Validate agent authorization token
-    const agentToken = this.extractToken(req);
-    if (!agentToken || !(await this.validateTokenAndPeer(agentToken, req))) {
-      this.sendJson(res, 401, { 
-        error: 'Unauthorized',
-        message: 'Invalid or missing agent authorization token' 
-      });
-      return;
-    }
-
-    // Use hardcoded endpoint and method from config
-    const endpoint = config.agentInteract.endpoint;
-    const method = config.agentInteract.method.toUpperCase();
-
-    // Parse request body (contains only the data to send to backend)
-    let data: any = null;
-    try {
-      data = await this.parseBody(req);
-    } catch (error) {
-      this.sendJson(res, 400, { 
-        error: 'Bad Request',
-        message: 'Invalid JSON in request body' 
-      });
-      return;
-    }
-
-    try {
-      const accessToken = await this.getUserAccessTokenFromSession();
-      if (!accessToken) {
-        this.sendJson(res, 401, { 
-          error: 'Unauthorized',
-          message: 'No user access token found in session' 
-        });
-        return;
-      }
-
-      // Construct full backend URL
-      const backendUrl = `${config.BACKEND_URL}${endpoint}`;
-      log.info(`[AgentAuth] Proxying ${method} request to ${backendUrl}`);
-
-      // Make request to backend with user's access token
-      const backendResponse = await this.makeBackendRequest({
-        url: backendUrl,
-        method,
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json'
-        },
-        data
-      });
-
-      // Forward backend response to agent
-      res.writeHead(backendResponse.statusCode, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify(backendResponse.data));
-
-    } catch (error: any) {
-      log.error('[AgentAuth] Backend request failed:', error);
-      this.sendJson(res, 500, { 
-        error: 'Backend Request Failed',
-        message: error.message 
-      });
     }
   }
 

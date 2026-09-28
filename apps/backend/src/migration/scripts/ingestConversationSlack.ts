@@ -250,17 +250,13 @@ export const findOrCreateApp = async (
   // ── 2. Not found in target workspace — create fresh app + user ───────────
   // Each workspace gets its own apps row so workspace-scoped features
   // (permissions, webhooks, commands) are cleanly isolated.
-  const xyneUser = await db.user.findFirst({ where: { email: 'john.doe@gmail.com' } });
-  let creatorUser = xyneUser;
+  // App createdBy = the MIGRATION_APP_CREATOR_EMAIL user IN the target workspace (the same email can exist in several).
+  const creatorEmail = config.slackMigration.appCreatorEmail;
+  const creatorUser = creatorEmail
+    ? await db.user.findFirst({ where: { email: creatorEmail, workspaceId } })
+    : null;
   if (!creatorUser) {
-    if (config.env === 'development' && workspaceId) {
-      creatorUser = await db.user.findFirst({ where: { workspaceId } });
-    } else {
-      throw new Error('[findOrCreateApp] Creator user john.doe@gmail.com not found');
-    }
-  }
-  if (!creatorUser) {
-    throw new Error('[findOrCreateApp] No fallback workspace user found for local migration');
+    throw new Error(`[findOrCreateApp] App creator not found for '${creatorEmail}' in workspace ${workspaceId} — set MIGRATION_APP_CREATOR_EMAIL to a user in this workspace.`);
   }
 
   // Build a unique app name so bots with identical display names (e.g. two
@@ -656,15 +652,13 @@ export async function ingestConversationSlack(
       const channel = await channelRepo.findById(channelId);
       if (channel && !(channel as any).isMigrated) {
         await channelRepo.update(channelId, { isMigrated: true });
-        const project = channel.projectId
-          ? await db.project.findUnique({ where: { id: channel.projectId }, select: { name: true } })
-          : null;
         logger.info('analytics_event', {
           event: 'channel_migrated',
           timestamp: new Date().toISOString(),
           channelId,
           channelName: channel.name,
-          channelProjectName: project?.name ?? null,
+          // channel.projectId is decoupled; no project-name enrichment.
+          channelProjectName: null,
           sourceType: 'slack',
         });
       }

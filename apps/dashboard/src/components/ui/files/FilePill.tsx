@@ -5,20 +5,18 @@
 // ============================================================================
 
 import React from 'react';
+import { X, Download, Trash2 } from 'lucide-react';
 import {
-  X,
-  Download,
-  FileText,
-  Image,
-  Video,
-  Music,
-  Archive,
+  Cube,
+  FileBarGraph,
   FileCode,
-  Trash2,
-} from 'lucide-react';
-// Lucide has no PDF-specific glyph, so PDFs used to fall back to the same
-// generic document sheet as Word/Excel/text. The design system ships one.
-import { FilePdfFormat } from '@xyne/icons';
+  FilePdfFormat,
+  FileText,
+  MusicQuaverNote,
+  PhotoImageDefault,
+  PresentationBargraph,
+  VideoRecording,
+} from '@xyne/icons';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { cn } from '../../../utils/classNames';
 import { useAuth } from '../../../hooks/useAuth';
@@ -77,7 +75,7 @@ const getFileTypeConfig = (mimeType: string, fileName: string): FileTypeConfig =
   // Images
   if (mimeType.startsWith('image/')) {
     return {
-      icon: Image,
+      icon: PhotoImageDefault,
       color: 'bg-blue-500',
       textColor: 'text-blue-500',
       label: 'Image',
@@ -87,7 +85,7 @@ const getFileTypeConfig = (mimeType: string, fileName: string): FileTypeConfig =
   // Videos
   if (mimeType.startsWith('video/')) {
     return {
-      icon: Video,
+      icon: VideoRecording,
       color: 'bg-purple-500',
       textColor: 'text-purple-500',
       label: 'Video',
@@ -97,7 +95,7 @@ const getFileTypeConfig = (mimeType: string, fileName: string): FileTypeConfig =
   // Audio
   if (mimeType.startsWith('audio/')) {
     return {
-      icon: Music,
+      icon: MusicQuaverNote,
       color: 'bg-green-500',
       textColor: 'text-green-500',
       label: 'Audio',
@@ -123,7 +121,7 @@ const getFileTypeConfig = (mimeType: string, fileName: string): FileTypeConfig =
       icon: FileText,
       color: 'bg-blue-600',
       textColor: 'text-blue-600',
-      label: 'Word',
+      label: 'Word Document',
     };
   }
 
@@ -134,10 +132,10 @@ const getFileTypeConfig = (mimeType: string, fileName: string): FileTypeConfig =
     mimeType === 'text/csv'
   ) {
     return {
-      icon: FileText,
+      icon: FileBarGraph,
       color: 'bg-green-600',
       textColor: 'text-green-600',
-      label: 'Excel',
+      label: 'Excel Spreadsheet',
     };
   }
 
@@ -147,10 +145,10 @@ const getFileTypeConfig = (mimeType: string, fileName: string): FileTypeConfig =
     mimeType === 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
   ) {
     return {
-      icon: FileText,
+      icon: PresentationBargraph,
       color: 'bg-orange-500',
       textColor: 'text-orange-500',
-      label: 'PowerPoint',
+      label: 'PowerPoint Presentation',
     };
   }
 
@@ -165,7 +163,7 @@ const getFileTypeConfig = (mimeType: string, fileName: string): FileTypeConfig =
     mimeType.includes('compressed')
   ) {
     return {
-      icon: Archive,
+      icon: Cube,
       color: 'bg-yellow-500',
       textColor: 'text-yellow-500',
       label: 'Archive',
@@ -251,9 +249,6 @@ export const FilePill: React.FC<FilePillProps> = ({
   // Check if current user can delete (owner or admin)
   const canDelete = uploadedByUserId && user?.id === uploadedByUserId;
 
-  // Truncate filename if too long
-  const displayName = fileName.length > 40 ? `${fileName.substring(0, 37)}...` : fileName;
-
   // Format size for display
   const sizeDisplay = formatFileSize(fileSize);
 
@@ -296,7 +291,7 @@ export const FilePill: React.FC<FilePillProps> = ({
       {/* File Info */}
       <div className='flex-1 min-w-0 flex flex-col gap-0.5'>
         <div className='text-sm font-medium text-foreground truncate' title={fileName}>
-          {displayName}
+          {fileName}
         </div>
         <div className='text-xs text-muted-foreground flex items-center gap-1'>
           <span>{typeLabel || config.label}</span>

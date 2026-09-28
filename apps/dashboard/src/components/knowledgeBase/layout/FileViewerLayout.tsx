@@ -122,6 +122,7 @@ export const FileViewerLayout: React.FC = () => {
 
     xyneAIActor.send({
       type: 'OPEN',
+      trackSource: 'file_viewer',
       startFreshChat: true,
       kbCollectionId: collectionId ?? null,
       kbChannelId: channelId ?? null,

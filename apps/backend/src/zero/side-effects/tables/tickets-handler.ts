@@ -135,6 +135,7 @@ export class TicketsSideEffectHandler extends BaseSideEffectHandler {
           createdBy: fullTicket.createdBy,
           userGroupId: fullTicket.userGroupId,
           ticketType: fullTicket.ticketType,
+          merchantId: fullTicket.merchantId,
           isStageOverdue: Boolean((fullTicket as typeof fullTicket & { isStageOverdue?: boolean | null }).isStageOverdue),
           eta: fullTicket.eta?.getTime() ?? null,
           createdAt: fullTicket.createdAt.getTime(),
@@ -155,6 +156,11 @@ export class TicketsSideEffectHandler extends BaseSideEffectHandler {
             assignedTo: prev.assignedTo,
           },
         });
+        // Ticket field changes (stage/priority/assignee/...) change which
+        // conversations match desk filter payloads, so label badges invalidate too.
+        if (snapshot.channelId) {
+          websocketService.broadcastLabelUnreadCountsUpdate(snapshot.channelId);
+        }
       }
     }
 

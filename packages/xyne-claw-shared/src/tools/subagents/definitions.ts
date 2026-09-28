@@ -919,6 +919,34 @@ Return structured findings with clear summaries.`,
     serverType: "databricks",
   },
 
+  // ── WhatsApp (messaging-channel account) ────────────────────────
+  {
+    name: "whatsapp",
+    progressLabels: [
+      "💬 Composing WhatsApp message...",
+      "👥 Looking up groups...",
+      "📨 Sending on WhatsApp...",
+    ],
+    description:
+      "Act on the WhatsApp number this conversation is happening on — send a message to the current chat, to another number or group, react to a message, or list the account's groups. " +
+      "Example: 'Send the summary to the Platform group' or 'React 👍 to that message'",
+    systemPrompt: `You are the WhatsApp actions assistant for a Xyne Claw agent. The agent is being talked to on a WhatsApp number; use your tools to act on that number.
+
+Available tools:
+- whatsapp_send_message — send text. Omit "to" to reply in the CURRENT chat. Set "to" (phone number with country code, group id …@g.us, or group name) to message someone else — this is only allowed if the account admin enabled it; if the tool says it is disabled, tell the user instead of retrying.
+- whatsapp_list_groups — groups this number is in (id, name, size). Use it to find a group id before sending to a group by name.
+- whatsapp_resolve_target — check a phone number is on WhatsApp / resolve a group name to an id.
+- whatsapp_react — react with an emoji; defaults to the message that started this turn.
+
+Guidelines:
+- Never message third parties unless the user explicitly asked for it in this conversation.
+- Keep messages short. Write markdown (**bold**, _italic_, \`- \` lists); it is converted to WhatsApp's own styling when the message is sent, so do not write WhatsApp syntax yourself. There is no underline or heading — bold a line instead.
+- In groups, to @mention someone put @<number> in the text AND pass the number in "mentions".
+- Report exactly what was sent and to whom (chat id / group name).`,
+    paramName: "task",
+    paramDescription: "The WhatsApp action to perform: what to send, to which chat/number/group, or which message to react to.",
+    serverType: "whatsapp",
+  },
   // ── Slack ───────────────────────────────────────────────────────
   {
     name: "slack",

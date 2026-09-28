@@ -85,7 +85,8 @@ const PRESETS = [
   },
 ];
 
-const matchPreset = (dr: DateRangeValue): string | null => {
+/** The preset label a range corresponds to, or null for a custom range. Also a DESK_METRICS_VIEWED dimension. */
+export const matchPreset = (dr: DateRangeValue): string | null => {
   for (const p of PRESETS) {
     const v = p.getValue();
     if (isSameDay(dr.startDate, v.startDate) && isSameDay(dr.endDate, v.endDate)) return p.label;

@@ -9,6 +9,7 @@ import {
   PaginatedResult,
 } from '@/types/database';
 import { aclAuditService } from '@/services/aclAuditService';
+import { createWithUsersTx } from '@/bypassAcl/transactions/userGroups';
 
 export interface CreateUserGroupWithUsersInput extends CreateUserGroupInput {
   userIds?: string[];
@@ -59,46 +60,7 @@ export class UserGroupRepository extends BaseRepository<UserGroup, CreateUserGro
     }
 
     // Use transaction to create user group and user mappings together
-    return await this.db.$transaction(async (tx) => {
-      const userGroup = await tx.userGroup.create({
-        data: {
-          name: data.name,
-          alias: data.alias || null,
-          description: data.description || null,
-          metadata: data.metadata,
-          workspace: data.workspace,
-          // Record the creator so non-admin User Groups views can be scoped to groups they created.
-          createdBy: actorUserId ?? null,
-        },
-      });
-
-      // Create user mappings if userIds are provided
-      if (data.userIds && data.userIds.length > 0) {
-        await tx.userGroupMapping.createMany({
-          data: data.userIds.map(userId => ({
-            userGroupId: userGroup.id,
-            workspaceId: userGroup.workspaceId,
-            userId,
-            ...(data.userRoleUpdates?.[userId] ? { roleId: data.userRoleUpdates[userId] } : {}),
-          })),
-        });
-      } else if (actorUserId) {
-        // If no userIds provided, add creator as a member
-        await tx.userGroupMapping.create({
-          data: {
-            userGroupId: userGroup.id,
-            workspaceId: userGroup.workspaceId,
-            userId: actorUserId,
-            ...(data.userRoleUpdates?.[actorUserId] ? { roleId: data.userRoleUpdates[actorUserId] } : {}),
-          },
-        });
-      }
-
-      // Log audit event
-      await aclAuditService.logUserGroupCreated(userGroup.id, userGroup.name, actorUserId);
-
-      return userGroup;
-    });
+    return await createWithUsersTx(this, data, actorUserId);
   }
 
   async findById(id: string): Promise<UserGroup | null> {
@@ -418,3 +380,4 @@ export class UserGroupRepository extends BaseRepository<UserGroup, CreateUserGro
   }
 
 }
+

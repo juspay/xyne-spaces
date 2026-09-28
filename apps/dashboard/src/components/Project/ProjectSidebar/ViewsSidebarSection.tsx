@@ -1,4 +1,4 @@
-import { ReactElement, ReactNode, useEffect, useMemo, useState } from 'react';
+import { ReactElement, ReactNode, RefObject, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useLocation, useParams } from 'react-router-dom';
 import {
   ChevronDown,
@@ -59,12 +59,29 @@ interface ViewRowProps {
   isActive: boolean;
   ownerId?: string | null;
   onOpen: () => void;
+  onRename?: () => void;
+  editing?: {
+    value: string;
+    inputRef: RefObject<HTMLInputElement | null>;
+    onChange: (value: string) => void;
+    onCommit: () => void;
+    onCancel: () => void;
+  };
   menu?: ReactNode;
 }
 
 // A view row is a div[role=button] (NOT a <button>) so the ⋯ menu — itself a button —
 // can live inside without nesting buttons. The menu is revealed on hover OR keyboard focus.
-function ViewRow({ label, isShared, isActive, ownerId, onOpen, menu }: ViewRowProps): ReactElement {
+function ViewRow({
+  label,
+  isShared,
+  isActive,
+  ownerId,
+  onOpen,
+  onRename,
+  editing,
+  menu,
+}: ViewRowProps): ReactElement {
   const Icon = isShared ? PanelsTopLeft : Lock02Close;
 
   return (
@@ -72,11 +89,18 @@ function ViewRow({ label, isShared, isActive, ownerId, onOpen, menu }: ViewRowPr
       role='button'
       tabIndex={0}
       onClick={e => {
+        if (editing) return;
         // Ignore activations originating from the actions menu (its trigger/items).
         if ((e.target as HTMLElement).closest('[data-view-actions]')) return;
         onOpen();
       }}
+      onDoubleClick={e => {
+        if (editing || !onRename) return;
+        if ((e.target as HTMLElement).closest('[data-view-actions]')) return;
+        onRename();
+      }}
       onKeyDown={e => {
+        if (editing) return;
         if ((e.target as HTMLElement).closest('[data-view-actions]')) return;
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
@@ -96,7 +120,37 @@ function ViewRow({ label, isShared, isActive, ownerId, onOpen, menu }: ViewRowPr
     >
       <Icon className='size-4 shrink-0 text-muted-foreground' aria-hidden='true' />
 
-      <span className='flex-1 min-w-0 text-left truncate block'>{label}</span>
+      {editing ? (
+        <input
+          ref={editing.inputRef}
+          autoFocus
+          value={editing.value}
+          onChange={e => editing.onChange(e.target.value)}
+          onFocus={e => e.currentTarget.select()}
+          onBlur={editing.onCommit}
+          onKeyDown={e => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              editing.onCommit();
+            } else if (e.key === 'Escape') {
+              e.preventDefault();
+              e.stopPropagation();
+              editing.onCancel();
+            }
+          }}
+          placeholder='View name'
+          aria-label='View name'
+          data-track-category='Projects'
+          data-track-name='RenameViewInput'
+          className={cn(
+            'flex-1 min-w-0 -mx-1.5 -my-[3px] px-1.5 py-0.5 rounded-md text-left font-medium',
+            'bg-background text-foreground placeholder:text-muted-foreground outline-none',
+            'border border-ring ring-[3px] ring-ring/30 cursor-text',
+          )}
+        />
+      ) : (
+        <span className='flex-1 min-w-0 text-left truncate block'>{label}</span>
+      )}
 
       {ownerId && (
         <Avatar userId={ownerId} size='sm' showActiveStatus={false} className='shrink-0' />
@@ -134,6 +188,10 @@ const ViewsSidebarSection = ({ searchQuery = '' }: ViewsSidebarSectionProps): Re
 
   const [renameTarget, setRenameTarget] = useState<{ id: string; name: string } | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
+  const renameTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const renameOpenedFromMenuRef = useRef(false);
+  const renameOriginalRef = useRef('');
+  const renameInputRef = useRef<HTMLInputElement | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
   const [shareTarget, setShareTarget] = useState<{ id: string; name: string } | null>(null);
 
@@ -187,25 +245,54 @@ const ViewsSidebarSection = ({ searchQuery = '' }: ViewsSidebarSectionProps): Re
   };
 
   const openRename = (view: SavedView): void => {
+    renameOriginalRef.current = view.name;
     setRenameTarget({ id: view.id, name: view.name });
     setRenameDraft(view.name);
   };
 
-  const submitRename = async (): Promise<void> => {
-    const name = renameDraft.trim();
-    if (!name || !renameTarget) return;
-    const target = renameTarget;
-    setRenameTarget(null);
+  const clearRenameTimer = (): void => {
+    if (renameTimerRef.current) clearTimeout(renameTimerRef.current);
+    renameTimerRef.current = null;
+  };
+
+  const persistRename = async (id: string, name: string): Promise<void> => {
     const res = await zero.mutate(
-      mutators.savedUserConfiguration.update({
-        configId: target.id,
-        name,
-        timestamp: Date.now(),
-      }),
+      mutators.savedUserConfiguration.update({ configId: id, name, timestamp: Date.now() }),
     ).server;
     if (res.type === 'error') toast.error(res.error?.message ?? 'Failed to rename view');
-    else toast.success('View renamed');
+    else setRenameTarget(prev => (prev && prev.id === id ? { id, name } : prev));
   };
+
+  const handleRenameChange = (value: string): void => {
+    setRenameDraft(value);
+    clearRenameTimer();
+    const name = value.trim();
+    if (!renameTarget || !name || name === renameTarget.name) return;
+    const target = renameTarget;
+    renameTimerRef.current = setTimeout(() => {
+      renameTimerRef.current = null;
+      void persistRename(target.id, name);
+    }, 600);
+  };
+
+  const commitRename = (): void => {
+    clearRenameTimer();
+    const name = renameDraft.trim();
+    if (renameTarget && name && name !== renameTarget.name) {
+      void persistRename(renameTarget.id, name);
+    }
+    setRenameTarget(null);
+  };
+
+  const cancelRename = (): void => {
+    clearRenameTimer();
+    if (renameTarget && renameTarget.name !== renameOriginalRef.current) {
+      void persistRename(renameTarget.id, renameOriginalRef.current);
+    }
+    setRenameTarget(null);
+  };
+
+  useEffect(() => clearRenameTimer, []);
 
   const confirmDelete = async (): Promise<void> => {
     if (!deleteTarget) return;
@@ -232,6 +319,12 @@ const ViewsSidebarSection = ({ searchQuery = '' }: ViewsSidebarSectionProps): Re
     >
       <CompactActionsMenu
         contentAlign='end'
+        onCloseAutoFocus={e => {
+          if (!renameOpenedFromMenuRef.current) return;
+          renameOpenedFromMenuRef.current = false;
+          e.preventDefault();
+          renameInputRef.current?.select();
+        }}
         triggerClassName={cn(
           'size-7 p-1 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground',
           'active:scale-[0.96] transition-[transform,background-color,color]',
@@ -240,7 +333,10 @@ const ViewsSidebarSection = ({ searchQuery = '' }: ViewsSidebarSectionProps): Re
           {
             icon: <Pencil className='size-4' />,
             label: 'Rename',
-            onSelect: () => openRename(view),
+            onSelect: () => {
+              renameOpenedFromMenuRef.current = true;
+              openRename(view);
+            },
             testId: 'view-rename',
           },
           {
@@ -277,6 +373,18 @@ const ViewsSidebarSection = ({ searchQuery = '' }: ViewsSidebarSectionProps): Re
       isShared={isViewShared(view)}
       isActive={isOnView(view.id)}
       onOpen={() => void navigate(`/projects/views/${view.id}`)}
+      onRename={() => openRename(view)}
+      {...(renameTarget?.id === view.id
+        ? {
+            editing: {
+              value: renameDraft,
+              inputRef: renameInputRef,
+              onChange: handleRenameChange,
+              onCommit: commitRename,
+              onCancel: cancelRename,
+            },
+          }
+        : {})}
       menu={ownerMenu(view)}
     />
   );
@@ -392,59 +500,6 @@ const ViewsSidebarSection = ({ searchQuery = '' }: ViewsSidebarSectionProps): Re
           viewName={shareTarget.name}
         />
       )}
-
-      {/* Rename dialog */}
-      <Dialog
-        open={!!renameTarget}
-        onOpenChange={open => !open && setRenameTarget(null)}
-        title='Rename view'
-        description='Choose a clear name for this view.'
-        className='max-w-sm rounded-2xl'
-      >
-        <div className='flex flex-col gap-4 p-5'>
-          <div className='flex flex-col gap-1' aria-hidden='true'>
-            <h2 className='text-[15px] font-semibold text-foreground text-balance'>Rename view</h2>
-            <p className='text-[13px] text-muted-foreground'>Choose a clear name for this view.</p>
-          </div>
-          <input
-            autoFocus
-            value={renameDraft}
-            onChange={e => setRenameDraft(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === 'Enter') void submitRename();
-            }}
-            placeholder='View name'
-            aria-label='View name'
-            data-track-category='Projects'
-            data-track-name='RenameViewInput'
-            className={cn(
-              'h-10 px-3 rounded-lg border border-input bg-background text-sm text-foreground',
-              'outline-none transition-[box-shadow,border-color] placeholder:text-muted-foreground',
-              'focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/40',
-            )}
-          />
-          <div className='flex justify-end gap-2'>
-            <Button
-              variant='ghost'
-              size='sm'
-              onClick={() => setRenameTarget(null)}
-              data-track-category='Projects'
-              data-track-name='CANCEL_RENAME_VIEW'
-            >
-              Cancel
-            </Button>
-            <Button
-              size='sm'
-              onClick={() => void submitRename()}
-              data-track-category='Projects'
-              data-track-name='CONFIRM_RENAME_VIEW'
-              disabled={!renameDraft.trim()}
-            >
-              Save
-            </Button>
-          </div>
-        </div>
-      </Dialog>
 
       {/* Delete confirm dialog */}
       <Dialog

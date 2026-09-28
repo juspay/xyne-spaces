@@ -37,6 +37,39 @@ export interface LocalHarnessRunEnvelope {
   task: string;
   context: string | null;
   timeoutMs: number;
+  resumeSessionId?: string | null;
+  attachments?: Array<{
+    id: string;
+    fileName: string;
+    mimeType: string;
+  }>;
+  localSandbox?: LocalHarnessSandboxSpec | null;
+  workspace?: LocalHarnessWorkspaceSpec | null;
+}
+
+export interface LocalHarnessWorkspaceSpec {
+  path: string;
+  name: string;
+  branch?: string;
+}
+
+export interface LocalHarnessWorkspaceDiff {
+  branch: string;
+  changedFiles: number;
+  stat: string;
+  patch: string;
+}
+
+export interface LocalHarnessSandboxSkill {
+  name: string;
+  content: string;
+}
+
+export interface LocalHarnessSandboxSpec {
+  command: string;
+  instruction: string;
+  skills: LocalHarnessSandboxSkill[];
+  container?: boolean;
 }
 
 export type LocalHarnessPollResult =
@@ -50,6 +83,7 @@ export interface LocalHarnessToolSpec {
   description: string;
   inputSchema: Record<string, unknown>;
   write: boolean;
+  local?: boolean;
 }
 
 export interface LocalHarnessToolCallResponse {
@@ -59,8 +93,17 @@ export interface LocalHarnessToolCallResponse {
 
 export type LocalHarnessProgressEvent =
   | { kind: 'text'; delta: string }
-  | { kind: 'tool'; toolName: string }
-  | { kind: 'status'; label: string };
+  | {
+      kind: 'tool';
+      toolName: string;
+      toolCallId?: string;
+      args?: Record<string, unknown>;
+      result?: string;
+      status?: 'running' | 'completed' | 'error';
+      durationMs?: number;
+    }
+  | { kind: 'status'; label: string }
+  | { kind: 'reasoning'; delta: string };
 
 export type LocalHarnessRunStatus = 'done' | 'failed' | 'cancelled';
 
@@ -71,6 +114,9 @@ export interface LocalHarnessRunResult {
   tokenUsage?: { input?: number; output?: number };
   effectiveModel?: string;
   error?: string;
+  harnessSessionId?: string;
+  interrupted?: boolean;
+  workspaceDiff?: LocalHarnessWorkspaceDiff;
 }
 
 export interface LocalHarnessStatus {
@@ -81,4 +127,6 @@ export interface LocalHarnessStatus {
   platform: string;
   installations: LocalHarnessInstallation[];
   lastError: string | null;
+  activeRuns?: number;
+  containerRuntime?: { available: boolean; reason?: string };
 }

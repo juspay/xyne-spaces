@@ -18,6 +18,7 @@ import { unifiedBotUserService } from '@/bots/unified';
 import { userActivityTrackingService } from '@/services/userActivityTrackingService';
 import { logger } from '@/utils/logger';
 import { ReleaseReportCanvasService } from './releaseReportCanvas';
+import { publishTx } from '@/bypassAcl/transactions/releaseReportService';
 
 interface ReleaseReportTicketMetadata {
   releaseReportCanvasId?: string;
@@ -281,16 +282,10 @@ export class ReleaseReportService {
   }: PublishReleaseReportInput): Promise<PublishReleaseReportResponse> {
     const report = await this.gatherReleaseReport(ticketId);
 
-    return db.$transaction(
-      async (tx) => {
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'release-report:' + ticketId}))`;
-        return this.publishLocked(ticketId, publisher, report);
-      },
-      { maxWait: 10_000, timeout: 60_000 }
-    );
+    return publishTx(ticketId, this, publisher, report);
   }
 
-  private async publishLocked(
+  async publishLocked(
     ticketId: string,
     publisher: User,
     report: ReleaseReport
@@ -451,3 +446,4 @@ A full release report for **${report.release.xyneId} - ${report.release.title}**
     };
   }
 }
+

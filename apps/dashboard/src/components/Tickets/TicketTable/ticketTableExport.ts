@@ -108,6 +108,7 @@ const EXPORT_COLUMNS: ExportColumn[] = [
       ticket.channelId ? (opts.channelNamesById?.get(ticket.channelId) ?? ticket.channelId) : '',
   },
   { key: 'type', header: 'Type', value: ticket => ticket.ticketType ?? '' },
+  { key: 'merchantId', header: 'Merchant ID', value: ticket => ticket.merchantId ?? '' },
   { key: 'age', header: 'Age (days)', value: ticket => ageInDays(ticket.createdAt) },
   {
     key: 'tags',

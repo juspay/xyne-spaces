@@ -2,13 +2,11 @@ import { randomUUID } from 'crypto';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
-import { runClawAgent } from '@/services/clawAgentService';
+import { runScopedClawAgent } from '@/services/clawAgentService';
 import { MessageAttachmentRepository } from '@/database/repositories/messageAttachmentRepository';
 import { storageService } from '@/services/storage';
-import { runAsServiceActor } from '@/database/tenant/context';
+import { generateScheduledDeskReport } from '@/bypassAcl/deskReportServices';
 import { AttachmentEntityType, AttachmentUploadStatus } from '@xyne/shared';
-
-const DESK_REPORT_SCHEDULER_ACTOR_ID = 'desk-report-scheduler';
 
 const DESK_REPORT_ENTITY_TYPE = AttachmentEntityType.DESK_REPORT;
 // A run with no callback (crash, dropped webhook) is reaped as failed past this age.
@@ -49,9 +47,7 @@ export class DeskReportGenerationService {
     const results: DeskReportGenerationResult[] = [];
     for (const pref of preferences) {
       try {
-        const result = await runAsServiceActor(DESK_REPORT_SCHEDULER_ACTOR_ID, pref.workspaceId, () =>
-          this.generateReportForChannel(pref),
-        );
+        const result = await generateScheduledDeskReport(this, pref);
         results.push(result);
       } catch (error) {
         logger.error(`[DeskReport] Unexpected error for channel ${pref.channelId}:`, error);
@@ -105,7 +101,7 @@ export class DeskReportGenerationService {
 
     const owner = await db.user.findUnique({
       where: { id: pref.ownerUserId },
-      select: { id: true, name: true },
+      select: { id: true, name: true, email: true, workspace: { select: { orgId: true } } },
     });
     if (!owner) {
       logger.warn(`[DeskReport] channel ${channelId} owner ${pref.ownerUserId} not found — skipping`);
@@ -147,16 +143,18 @@ export class DeskReportGenerationService {
     const task = `Generate a desk html report for ${channelName} for ${rangeLabel}.`;
     const callbackUrl = `${config.xyneClaw.callbackUrl.replace(/\/$/, '')}/api/internal/desk-report/callback/${encodeURIComponent(channelId)}/${encodeURIComponent(pending.id)}`;
 
-    const { dispatched } = await runClawAgent({
+    const dispatched = await runScopedClawAgent({
+      identity: { userId: owner.id, orgId: owner.workspace.orgId, workspaceId },
       agentSlug: resolvedAgentSlug,
       task,
       userId: owner.id,
       userName: owner.name || 'Desk Owner',
+      userEmail: owner.email,
       conversationId: `desk-report-${channelId}-${sessionId}`,
       channelId,
       workspaceId,
-      resultForwardUrl: callbackUrl,
-    });
+      callbackUrl,
+    }).then(() => true, () => false);
 
     if (!dispatched) {
       const errorMessage = pref.deskReportAgentSlug?.trim()

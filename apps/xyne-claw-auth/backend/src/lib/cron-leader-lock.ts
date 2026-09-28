@@ -23,10 +23,21 @@ const log = createLogger("cron-leader-lock");
 
 const DEFAULT_TTL_MS = 6 * 60 * 60 * 1000; // covers the longest plausible run; key is date-scoped anyway
 
-export async function acquireCronLeaderLock(jobName: string, ttlMs = DEFAULT_TTL_MS): Promise<boolean> {
-  const dateStr = new Date().toISOString().slice(0, 10); // UTC fire date — identical across pods
+const holderId = (): string => `${hostname()}:${process.pid}`;
+
+/**
+ * `scope` is the period the lock covers, defaulting to today's UTC date. A
+ * weekly job passes its ISO week instead, so one pod claims the whole week
+ * rather than one pod per day claiming a job that should only run once.
+ */
+export async function acquireCronLeaderLock(
+  jobName: string,
+  ttlMs = DEFAULT_TTL_MS,
+  scope?: string,
+): Promise<boolean> {
+  const dateStr = scope ?? new Date().toISOString().slice(0, 10); // UTC fire date, identical across pods
   const key = `claw:cron-leader:${jobName}:${dateStr}`;
-  const holder = `${hostname()}:${process.pid}`;
+  const holder = holderId();
   try {
     const redis = redisService.getConnection();
     const ok = await redis.set(key, holder, "PX", ttlMs, "NX");
@@ -40,5 +51,29 @@ export async function acquireCronLeaderLock(jobName: string, ttlMs = DEFAULT_TTL
   } catch (err) {
     log.warn(`[cron-leader] ${jobName}: Redis unavailable, failing open (may duplicate across pods):`, err instanceof Error ? err.message : err);
     return true;
+  }
+}
+
+/**
+ * Hand the lock back so the next check can retry.
+ *
+ * Only for a run that FAILED: a daily job's key expires with the day, but a
+ * weekly one holds its key for the whole week, so an enqueue that throws
+ * halfway would otherwise cost the entire week with no automatic recovery.
+ *
+ * Deletes only if we are still the holder, so a lock that already expired and
+ * was re-taken by another pod is not pulled out from under it.
+ */
+export async function releaseCronLeaderLock(jobName: string, scope?: string): Promise<void> {
+  const dateStr = scope ?? new Date().toISOString().slice(0, 10);
+  const key = `claw:cron-leader:${jobName}:${dateStr}`;
+  try {
+    const redis = redisService.getConnection();
+    if ((await redis.get(key)) === holderId()) {
+      await redis.del(key);
+      log.info(`[cron-leader] ${jobName}: released ${dateStr} after a failed run`);
+    }
+  } catch (err) {
+    log.warn(`[cron-leader] ${jobName}: release failed, the lock will expire on its own:`, err instanceof Error ? err.message : err);
   }
 }

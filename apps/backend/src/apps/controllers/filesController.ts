@@ -7,6 +7,7 @@ import { MessageAttachmentRepository } from '@/database/repositories/messageAtta
 import { storageService, getStorageService } from '@/services/storage/index';
 import { normalizeStoragePath } from '@xyne/storage';
 import { setSafeDownloadHeaders } from '@/utils/safeAttachmentDownload';
+import { assertAttachmentAccess } from '@/services/attachmentAccessService';
 import { config } from '@/config/env';
 
 const UploadFilesBodySchema = z.object({
@@ -35,7 +36,13 @@ export class FilesController {
   getFileInfo = async (req: Request, res: Response): Promise<void> => {
     try {
       const { attachmentId } = req.params;
+      const userId = req.user?.id;
       const workspaceId = req.user?.workspaceId;
+
+      if (!userId) {
+        res.status(401).json({ error: 'Unauthorized', code: 'UNAUTHORIZED' });
+        return;
+      }
 
       const attachment = await this.messageAttachmentRepository.findById(attachmentId);
       if (!attachment) {
@@ -43,8 +50,9 @@ export class FilesController {
         return;
       }
 
-      if (workspaceId && attachment.workspaceId !== workspaceId) {
-        res.status(403).json({ error: 'Access denied', code: 'FORBIDDEN' });
+      const access = await assertAttachmentAccess(attachment, userId, workspaceId);
+      if (!access.ok) {
+        res.status(access.status).json(access.body);
         return;
       }
 
@@ -72,7 +80,13 @@ export class FilesController {
   downloadFile = async (req: Request, res: Response): Promise<void> => {
     try {
       const { attachmentId } = req.params;
+      const userId = req.user?.id;
       const workspaceId = req.user?.workspaceId;
+
+      if (!userId) {
+        res.status(401).json({ error: 'Unauthorized', code: 'UNAUTHORIZED' });
+        return;
+      }
 
       const attachment = await this.messageAttachmentRepository.findById(attachmentId);
       if (!attachment) {
@@ -80,8 +94,9 @@ export class FilesController {
         return;
       }
 
-      if (workspaceId && attachment.workspaceId !== workspaceId) {
-        res.status(403).json({ error: 'Access denied', code: 'FORBIDDEN' });
+      const access = await assertAttachmentAccess(attachment, userId, workspaceId);
+      if (!access.ok) {
+        res.status(access.status).json(access.body);
         return;
       }
 

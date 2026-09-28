@@ -70,6 +70,8 @@ import {
   startBackgroundGeneration,
   listEvalGenModels,
   listChatLitellmModels,
+  listEvalAgentModels,
+  type EvalAgentModel,
   type EvalGenModels,
   getGenerationJob,
   cancelGenerationJob,
@@ -158,6 +160,22 @@ interface FolderComparison {
 interface RunAgentSpec {
   slug: string;
   genChoice: string;
+  opts: string;
+  judge: string;
+}
+
+function armTag(opts: string, judge: string): string {
+  return [opts ? `opts:${opts}` : "", judge ? `judge:${judge}` : ""].filter(Boolean).join(" · ");
+}
+
+function armTagOfModel(genModel?: string | null): string {
+  const m = genModel ? / · ((?:opts|judge):.+)$/.exec(genModel) : null;
+  return m?.[1] ?? "";
+}
+
+function armKeyOf(run: { agentSlug: string; genModel?: string | null }): string {
+  const tag = armTagOfModel(run.genModel);
+  return tag ? `${run.agentSlug}#${tag}` : run.agentSlug;
 }
 
 /** One agent's answer for a single turn, ready to render as a panel. */
@@ -387,12 +405,13 @@ export function EvalsPageV3({ userId }: { userId: string }) {
   // generation-model choice. genChoice encodings: "" = default, "prov:<provider>"
   // = a provider the user configured in claw, "spaces:<model>" = platform LiteLLM,
   // "litellm:<model>" = a model off THAT agent's shared LiteLLM key.
-  const [runAgents, setRunAgents] = useState<RunAgentSpec[]>([{ slug: "", genChoice: "" }]);
+  const [runAgents, setRunAgents] = useState<RunAgentSpec[]>([{ slug: "", genChoice: "", opts: "", judge: "" }]);
   const [genModels, setGenModels] = useState<EvalGenModels | null>(null);
   // Per-agent shared LiteLLM models (each agent's own key), fetched reactively
   // while the Run dialog is open. Keyed by agent slug. Distinct from
   // genModels.litellm, which is the platform catalog run on the platform key.
   const [litellmByAgent, setLitellmByAgent] = useState<Record<string, { id: string; name: string }[]>>({});
+  const [agentModelsBySlug, setAgentModelsBySlug] = useState<Record<string, EvalAgentModel[]>>({});
   // Right-docked, resizable side panels for an eval turn: the "Debug this
   // response" drawer and the citation source panel. Mutually exclusive (one dock
   // slot) — opening one closes the other, mirroring chat. Widths persist under
@@ -469,10 +488,14 @@ export function EvalsPageV3({ userId }: { userId: string }) {
   // What an empty/"default" model resolves to (e.g. "kimi-latest") — shown in
   // brackets next to "Default" so it's never a mystery or a duplicate entry.
   const [defaultModelName, setDefaultModelName] = useState("");
+  const [judgeBackends, setJudgeBackends] = useState<Array<{ id: string; label: string }>>([]);
+  const [optSwitches, setOptSwitches] = useState<Array<{ key: string; summary: string; defaultOn: boolean }>>([]);
   const loadModels = useCallback(async () => {
     const r = await listEvalModels();
     setModels(r.models);
     setDefaultModelName(r.defaultModel);
+    setJudgeBackends(r.judgeBackends);
+    setOptSwitches(r.optimizations);
   }, []);
   // The user's connected Copilot provider (if any) — surfaces their configured
   // model as "gpt-4o (copilot)" in the extraction/judge model dropdowns.
@@ -538,7 +561,8 @@ export function EvalsPageV3({ userId }: { userId: string }) {
   /** Merge a run into its own agent slot in the per-agent map (comparison views).
    *  Every agent (including the primary) is merged here. */
   const mergeAgentResults = useCallback((run: EvalGeneration) => {
-    setResultsByAgent((prev) => ({ ...prev, [run.agentSlug]: mergeTurnsInto(prev[run.agentSlug] ?? {}, run) }));
+    const key = armKeyOf(run);
+    setResultsByAgent((prev) => ({ ...prev, [key]: mergeTurnsInto(prev[key] ?? {}, run) }));
   }, []);
 
   /** Merge every sibling run of a comparison: agent[0] → flat map (primary) too. */
@@ -566,9 +590,9 @@ export function EvalsPageV3({ userId }: { userId: string }) {
   }, []);
 
   const toAgentRun = useCallback(
-    (run: EvalGeneration): AgentRun => ({
-      slug: run.agentSlug,
-      name: agentNameBySlug.get(run.agentSlug) ?? run.agentSlug,
+    (run: { id: string; agentSlug: string; genProvider?: string | null; genModel?: string | null }): AgentRun => ({
+      slug: armKeyOf(run),
+      name: `${agentNameBySlug.get(run.agentSlug) ?? run.agentSlug}${armTagOfModel(run.genModel) ? ` · ${armTagOfModel(run.genModel)}` : ""}`,
       runId: run.id,
       genLabel: genLabelFor(run),
     }),
@@ -1010,6 +1034,11 @@ export function EvalsPageV3({ userId }: { userId: string }) {
         const m = genModels?.providers.find((x) => x.provider === p)?.model;
         return { genProvider: p, ...(m ? { genModel: m } : {}) };
       }
+      if (genChoice.startsWith("agent:")) {
+        const [, provider, ...rest] = genChoice.split(":");
+        const model = rest.join(":");
+        return provider ? { genProvider: provider, ...(model ? { genModel: model } : {}) } : {};
+      }
       if (genChoice.startsWith("spaces:")) return { genProvider: "spaces", genModel: genChoice.slice(7) };
       if (genChoice.startsWith("litellm:")) return { genProvider: "litellm", genModel: genChoice.slice(8) };
       return {};
@@ -1051,17 +1080,23 @@ export function EvalsPageV3({ userId }: { userId: string }) {
         });
       }
       try {
-        const agentsPayload = specs.map((s) => ({ agentSlug: s.slug, ...decodeGenChoice(s.genChoice) }));
+        const agentsPayload = specs.map((s) => ({
+          agentSlug: s.slug,
+          ...decodeGenChoice(s.genChoice),
+          ...(s.opts ? { optimizations: s.opts } : {}),
+          ...(s.judge ? { judgeBackend: s.judge } : {}),
+        }));
         const { comparisonId, runs } = await startBackgroundGeneration({ agents: agentsPayload, ...scope }, userId);
         if (runs.length === 0) throw new Error("No runs started");
         const fid = scope.folderId ?? openConv?.folderId;
         if (fid) {
-          const agentRuns: AgentRun[] = runs.map((r) => {
-            const spec = specs.find((s) => s.slug === r.agentSlug);
+          const agentRuns: AgentRun[] = runs.map((r, i) => {
+            const spec = specs[i]?.slug === r.agentSlug ? specs[i] : specs.find((s) => s.slug === r.agentSlug);
             const g = spec ? decodeGenChoice(spec.genChoice) : {};
+            const tag = spec ? armTag(spec.opts, spec.judge) : "";
             return {
-              slug: r.agentSlug,
-              name: agentNameBySlug.get(r.agentSlug) ?? r.agentSlug,
+              slug: tag ? `${r.agentSlug}#${tag}` : r.agentSlug,
+              name: `${agentNameBySlug.get(r.agentSlug) ?? r.agentSlug}${tag ? ` · ${tag}` : ""}`,
               runId: r.runId,
               genLabel: g.genProvider && g.genModel ? `${g.genProvider} · ${g.genModel}` : g.genModel ?? g.genProvider ?? "",
             };
@@ -1085,12 +1120,13 @@ export function EvalsPageV3({ userId }: { userId: string }) {
       if (submittingRun) return;
       // Start with one agent row prefilled to the default agent; the user can add
       // up to MAX_COMPARE_AGENTS to compare.
-      setRunAgents([{ slug: agentSlug || agents[0]?.slug || "", genChoice: "" }]);
+      setRunAgents([{ slug: agentSlug || agents[0]?.slug || "", genChoice: "", opts: "", judge: "" }]);
       setPendingRun({ scope, label });
       // Lazily load the user's configured providers + platform models for the picker.
       if (!genModels) void listEvalGenModels(userId).then(setGenModels).catch(() => setGenModels({ providers: [], litellm: [] }));
+      if (optSwitches.length === 0) void loadModels().catch(() => {});
     },
-    [submittingRun, genModels, userId, agentSlug, agents],
+    [submittingRun, genModels, userId, agentSlug, agents, optSwitches.length, loadModels],
   );
 
   // Load each picked agent's shared LiteLLM models while the Run dialog is open
@@ -1103,11 +1139,20 @@ export function EvalsPageV3({ userId }: { userId: string }) {
     for (const slug of slugs) {
       if (litellmByAgent[slug]) continue;
       listChatLitellmModels(slug, userId)
-        .then((r) => { if (!cancelled) setLitellmByAgent((prev) => ({ ...prev, [slug]: r.models })); })
+        .then((r) => {
+          if (cancelled) return;
+          setLitellmByAgent((prev) => ({ ...prev, [slug]: r.pinProvider === "litellm" ? r.models : [] }));
+        })
         .catch(() => { if (!cancelled) setLitellmByAgent((prev) => ({ ...prev, [slug]: [] })); });
     }
+    for (const slug of slugs) {
+      if (agentModelsBySlug[slug]) continue;
+      listEvalAgentModels(slug)
+        .then((models) => { if (!cancelled) setAgentModelsBySlug((prev) => ({ ...prev, [slug]: models })); })
+        .catch(() => { if (!cancelled) setAgentModelsBySlug((prev) => ({ ...prev, [slug]: [] })); });
+    }
     return () => { cancelled = true; };
-  }, [pendingRun, runAgents, userId, litellmByAgent]);
+  }, [pendingRun, runAgents, userId, litellmByAgent, agentModelsBySlug]);
 
   // ── Semantic judge ──
   /** Open the judge dialog for a folder (whole run) or one conversation. Lazily
@@ -1161,8 +1206,7 @@ export function EvalsPageV3({ userId }: { userId: string }) {
   // otherwise score it on its own. Reuses the same judge dialog/flow as the latest.
   const scoreHistoricalRun = useCallback(
     async (folderId: string, run: GenerationMeta) => {
-      const genLabel = run.genModel ? `${run.genProvider ? `${run.genProvider} · ` : ""}${run.genModel}` : "";
-      const solo: AgentRun = { slug: run.agentSlug, name: agentNameBySlug.get(run.agentSlug) ?? run.agentSlug, runId: run.id, genLabel };
+      const solo: AgentRun = toAgentRun(run);
       let target: { comparisonId: string | null; agents: AgentRun[] } = { comparisonId: null, agents: [solo] };
       if (run.comparisonId) {
         const comp = await getComparison(run.comparisonId).catch(() => null);
@@ -2154,7 +2198,8 @@ export function EvalsPageV3({ userId }: { userId: string }) {
               </div>
               <div className="flex flex-col gap-2.5">
                 {runAgents.map((row, idx) => {
-                  const taken = new Set(runAgents.filter((_, i) => i !== idx).map((r) => r.slug).filter(Boolean));
+                  const armOf = (r: RunAgentSpec): string => `${r.slug}|${r.opts}|${r.judge}`;
+                  const taken = new Set(runAgents.filter((_, i) => i !== idx).filter((r) => r.slug).map(armOf));
                   return (
                     <div key={idx} className="rounded-lg border border-xyne-border-subtle bg-xyne-surface-subtle p-2.5">
                       <div className="mb-2 flex items-center justify-between">
@@ -2176,14 +2221,28 @@ export function EvalsPageV3({ userId }: { userId: string }) {
                           placeholder={agents.length === 0 ? "Loading agents…" : "Search agents…"}
                           value={row.slug}
                           onValueChange={(v) => setRow(idx, { slug: v ?? "", genChoice: "" })}
-                          options={agents.filter((a) => !taken.has(a.slug)).map((a) => ({ value: a.slug, label: a.name }))}
+                          options={agents
+                            .filter((a) => !taken.has(armOf({ ...row, slug: a.slug })))
+                            .map((a) => ({ value: a.slug, label: a.name }))}
                         />
                         <SelectField
                           placeholder="Generation model…"
                           value={toSel(row.genChoice)}
                           onValueChange={(v) => setRow(idx, { genChoice: fromSel(v) })}
                           options={[
-                            { value: DEFAULT_OPT, label: "Default — agent settings" },
+                            {
+                              value: DEFAULT_OPT,
+                              label: (() => {
+                                const d = (agentModelsBySlug[row.slug] ?? []).find((mdl) => mdl.isDefault);
+                                return d
+                                  ? `Default — ${d.provider}${d.model ? ` · ${d.model}` : ""} (not pinned, may fall back)`
+                                  : "Default — agent settings";
+                              })(),
+                            },
+                            ...(agentModelsBySlug[row.slug] ?? []).map((mdl) => ({
+                              value: `agent:${mdl.provider}:${mdl.model ?? ""}`,
+                              label: `${mdl.provider}${mdl.model ? ` · ${mdl.model}` : ""} (this agent${mdl.isDefault ? ", its default" : ""} — pinned)`,
+                            })),
                             ...(genModels?.providers ?? []).map((p) => ({
                               value: `prov:${p.provider}`,
                               label: `${p.provider}${p.model ? ` · ${p.model}` : ""} (your provider)`,
@@ -2192,22 +2251,53 @@ export function EvalsPageV3({ userId }: { userId: string }) {
                             ...(litellmByAgent[row.slug] ?? []).map((m) => ({ value: `litellm:${m.id}`, label: `${m.name} (agent LiteLLM)` })),
                           ]}
                         />
+                        <SelectField
+                          placeholder="Optimizations…"
+                          value={toSel(row.opts)}
+                          onValueChange={(v) => setRow(idx, { opts: fromSel(v) })}
+                          options={[
+                            { value: DEFAULT_OPT, label: "Optimizations — as deployed" },
+                            { value: "none", label: "All OFF — baseline" },
+                            { value: "all", label: "All ON" },
+                            ...optSwitches.map((o) => ({ value: `none,+${o.key}`, label: `Only ${o.key}` })),
+                            ...optSwitches.map((o) => ({ value: `all,-${o.key}`, label: `All except ${o.key}` })),
+                          ].filter((o) => o.value === DEFAULT_OPT || !taken.has(armOf({ ...row, opts: o.value })))}
+                        />
+                        <SelectField
+                          placeholder="Harness judge…"
+                          value={toSel(row.judge)}
+                          onValueChange={(v) => setRow(idx, { judge: fromSel(v) })}
+                          options={[
+                            { value: DEFAULT_OPT, label: "Harness judge — as deployed" },
+                            ...judgeBackends.map((b) => ({ value: b.id, label: b.label })),
+                            { value: "llm", label: "LLM judge" },
+                          ]}
+                        />
                       </div>
                     </div>
                   );
                 })}
               </div>
-              {runAgents.length < MAX_COMPARE_AGENTS && agents.length > chosen && !runAgents.some((a) => !a.slug) && (
+              {runAgents.length < MAX_COMPARE_AGENTS && chosen > 0 && !runAgents.some((a) => !a.slug) && (
                 <button
-                  onClick={() => setRunAgents((l) => (l.length < MAX_COMPARE_AGENTS ? [...l, { slug: "", genChoice: "" }] : l))}
+                  onClick={() =>
+                    setRunAgents((l) => {
+                      if (l.length >= MAX_COMPARE_AGENTS) return l;
+                      const last = l[l.length - 1];
+                      const usedOpts = new Set(l.map((r) => r.opts));
+                      const nextOpts = ["none", "all"].find((o) => !usedOpts.has(o)) ?? "";
+                      return [...l, { slug: last?.slug ?? "", genChoice: last?.genChoice ?? "", opts: nextOpts, judge: last?.judge ?? "" }];
+                    })
+                  }
                   className="flex items-center gap-1.5 self-start text-[12px] text-xyne-brand hover:underline"
                 >
-                  <PlusIcon size={13} /> Add agent to compare
+                  <PlusIcon size={13} /> Add arm to compare
                 </button>
               )}
               <span className="text-[11px] text-xyne-fg-tertiary">
-                Compare up to {MAX_COMPARE_AGENTS} agents over the same conversations — each replays on its own model and is
-                judged against the same gold answers. Each model pin is recorded on the report.
+                Compare up to {MAX_COMPARE_AGENTS} arms over the same conversations — different agents, or the same agent with
+                different optimization switches (e.g. All OFF vs All ON). Each arm replays on its own model and is judged against
+                the same gold answers; its model pin and switches are recorded on the report.
               </span>
               <div className="flex justify-end gap-2">
                 <Button variant="ghost" onClick={() => setPendingRun(null)}>
@@ -2276,6 +2366,7 @@ export function EvalsPageV3({ userId }: { userId: string }) {
                   options={[
                     { value: DEFAULT_OPT, label: `Default model${defaultModelName ? ` (${defaultModelName})` : ""}` },
                     ...(copilotOptionLabel ? [{ value: "prov:copilot", label: copilotOptionLabel }] : []),
+                    ...judgeBackends.map((b) => ({ value: b.id, label: b.label })),
                     ...models.map((m) => ({ value: m, label: m })),
                   ]}
                 />

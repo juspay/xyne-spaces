@@ -1,6 +1,10 @@
 import { ReactElement, ReactNode, useMemo, useState } from 'react';
 import { Archive } from 'lucide-react';
-import { SwapArrowVertical as ArrowUpDown, KanbanBoard as SquareKanban } from '@xyne/icons';
+import {
+  SwapArrowVertical as ArrowUpDown,
+  KanbanBoard as SquareKanban,
+  ChevronRight,
+} from '@xyne/icons';
 import {
   Activity,
   CalendarDefault as Calendar,
@@ -30,7 +34,8 @@ import {
 import { formatReferenceLabel } from '../../../hooks/useTicketReferences';
 import { formatDistanceToNow, format } from 'date-fns';
 import { Tooltip } from '../../ui/Tooltip/Tooltip';
-import { Switch } from '../../ui/Switch';
+import { DetailToggle } from '../TicketDetails/DetailSection';
+import { cn } from '../../../utils/classNames';
 import { TicketPriorityIcon } from '../../../assets/icons';
 import { TicketStatusIcon } from '../../../assets/icons';
 import SmallUserAvatar from '../../UserAvatar/SmallUserAvatar';
@@ -792,6 +797,7 @@ export const TicketActivity = ({
 }: TicketActivityProps): ReactElement => {
   const [sortOrder, setSortOrder] = useState<SortOrder>('newest');
   const [showExactTime, setShowExactTime] = useState(false);
+  const [isOpen, setIsOpen] = useState(false);
 
   const sortedActivities = useMemo(() => {
     if (!activities) return [];
@@ -834,37 +840,60 @@ export const TicketActivity = ({
     setSortOrder(prev => (prev === 'newest' ? 'oldest' : 'newest'));
   };
   return (
-    <div className='mt-8' data-testid='ticket-activity-section'>
-      <div className='flex items-center justify-between'>
-        <h3 className='text-base font-semibold text-foreground mb-4 flex items-center gap-2'>
-          Activity
-        </h3>
+    <div className='pt-[30px]' data-testid='ticket-activity-section'>
+      <div className='mb-1.5 flex items-center gap-2.5'>
+        <button
+          type='button'
+          onClick={() => setIsOpen(prev => !prev)}
+          aria-expanded={isOpen}
+          className='flex items-center gap-[9px] rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+          data-track-category='Tickets'
+          data-track-name='ToggleActivitySection'
+        >
+          <ChevronRight
+            size={12}
+            className={cn(
+              'w-3 shrink-0 text-muted-foreground/70 transition-transform duration-150 ease-[cubic-bezier(0.23,1,0.32,1)]',
+              isOpen && 'rotate-90',
+            )}
+          />
+          <span className='text-[11px] font-semibold uppercase tracking-[0.45px] text-muted-foreground'>
+            Activity
+          </span>
+          <span className='font-mono text-[11px] tabular-nums text-muted-foreground/70'>
+            {sortedActivities.length}
+          </span>
+        </button>
 
-        <div className='flex items-center gap-3'>
-          <div className='flex items-center gap-2'>
-            <span className='text-[13px] text-muted-foreground'>Exact time</span>
-            <Switch
+        <div className='flex-1' />
+
+        {isOpen && (
+          <>
+            <DetailToggle
               checked={showExactTime}
-              onCheckedChange={setShowExactTime}
-              aria-label='Show exact activity time'
+              onChange={setShowExactTime}
+              label='Exact time'
+              title='Show exact timestamps'
             />
-          </div>
-
-          <button
-            onClick={toggleSort}
-            className='flex items-center text-[13px] text-muted-foreground gap-2'
-            title={sortOrder === 'newest' ? 'Newest to oldest' : 'Oldest to newest'}
-            data-track-category='Tickets'
-            data-track-name='ToggleActivitySort'
-            data-track-metadata={JSON.stringify({ sortOrder })}
-          >
-            <ArrowUpDown size={13} />
-            {sortOrder === 'newest' ? <p>Oldest</p> : <p>Newest</p>}
-          </button>
-        </div>
+            <button
+              type='button'
+              onClick={toggleSort}
+              className='flex h-[26px] items-center gap-1.5 rounded-lg px-1.5 text-[12.5px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+              title={sortOrder === 'newest' ? 'Newest to oldest' : 'Oldest to newest'}
+              data-track-category='Tickets'
+              data-track-name='ToggleActivitySort'
+              data-track-metadata={JSON.stringify({ sortOrder })}
+            >
+              <ArrowUpDown size={14} />
+              <span className='whitespace-nowrap'>
+                {sortOrder === 'newest' ? 'Newest first' : 'Oldest first'}
+              </span>
+            </button>
+          </>
+        )}
       </div>
 
-      {sortedActivities.length > 0 ? (
+      {!isOpen ? null : sortedActivities.length > 0 ? (
         <div className='relative' data-testid='ticket-activity-list'>
           {sortedActivities.map((activity, index) => (
             <ActivityComponent
@@ -951,19 +980,21 @@ export const ActivityComponent = ({
   return (
     <div
       key={activity.id}
-      className='relative flex items-start gap-3'
+      className='relative flex min-h-[44px] items-stretch gap-3'
       data-testid={`ticket-activity-item-${activity.activityType}`}
     >
       {/* Icon */}
-      <div className='flex flex-col items-center self-stretch mt-2'>
-        {getActivityIcon(activity)}
-        {!isLast && <span className='w-0 flex-1 my-1 border-[0.8px] border-border' />}
+      <div className='flex w-[18px] shrink-0 flex-col items-center'>
+        <span className='mt-[5px] flex items-center justify-center'>
+          {getActivityIcon(activity)}
+        </span>
+        {!isLast && <span className='mt-1.5 w-px flex-1 bg-border' />}
       </div>
 
       {/* Content */}
-      <div className='flex-1 min-w-0 mt-1 pb-6'>
-        <div className='flex items-center justify-between gap-3'>
-          <p className='text-sm text-muted-foreground'>
+      <div className='flex min-w-0 flex-1 flex-col pt-0.5 pb-3.5'>
+        <div className='flex min-w-0 items-start justify-between gap-3.5'>
+          <p className='min-w-0 flex-1 text-[13.5px] leading-[1.6] text-muted-foreground [text-wrap:pretty]'>
             {activity.activityType !== ActivityType.PR &&
               !hideActorName &&
               (isAiActivity
@@ -975,7 +1006,7 @@ export const ActivityComponent = ({
             {details && <span className='text-muted-foreground'> {details}</span>}
           </p>
           <Tooltip content={formatExactTimestamp(activity.timestamp)}>
-            <span className='text-xs text-muted-foreground whitespace-nowrap flex-shrink-0 cursor-default'>
+            <span className='shrink-0 cursor-default whitespace-nowrap pt-0.5 text-[12.5px] tabular-nums text-muted-foreground/70'>
               {showExactTime
                 ? formatExactTimestamp(activity.timestamp)
                 : formatTimestamp(activity.timestamp)}

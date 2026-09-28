@@ -20,6 +20,9 @@ import { WebClient } from '@slack/web-api';
 import { config } from '../../config/env';
 import { getBotConfigByWorkspaceId } from './slackMigrationBotConfig';
 import { buildSlackMigrationSourceName } from './slackMigrationSource';
+import { listChannelFiles } from './channelFiles';
+import { fetchChannelLinks, ingestChannelLinks } from './channelLinks';
+import { fetchChannelCanvases, ingestChannelCanvases } from './channelCanvases';
 import { vespaBackfillQueue } from '@/queues/vespaQueue';
 import { channelSchema } from '@/vespa/src/types';
 import { db } from '@/database/client';
@@ -825,15 +828,13 @@ export async function runMigration(input: MigrationInput): Promise<MigrationResu
         wsConfig = getBotConfigByWorkspaceId(workspaceId);
         xyneSpaceChannelLink = `<https://spaces.xyne.juspay.net/${workspaceId}/chat/dir/${input.xyneSpaceChannelId}|${channelName}>`;
         if (xyneChannel.isMigrated) {
-          const project = xyneChannel.projectId
-            ? await db.project.findUnique({ where: { id: xyneChannel.projectId }, select: { name: true } })
-            : null;
           logger.info('analytics_event', {
             event: 'channel_remigrated',
             timestamp: new Date().toISOString(),
             channelId: input.xyneSpaceChannelId,
             channelName,
-            channelProjectName: project?.name ?? null,
+            // channel.projectId is decoupled; no project-name enrichment.
+            channelProjectName: null,
             sourceType: 'slack',
           });
         }
@@ -1073,6 +1074,34 @@ export async function runMigration(input: MigrationInput): Promise<MigrationResu
         resolvedUsers.usersToBeAdded,
         resolvedUsers.channelCreatorSlackId,
       );
+
+      // Bookmarks / shared links / canvases — not covered by the message pipeline. Idempotent, non-fatal.
+      try {
+        const resourceChannel = await new ChannelRepository().findById(input.xyneSpaceChannelId);
+        const slackToXyne = new Map(resolvedUsers.usersToBeAdded.map((u) => [u.slackUserId, u.xyneUserId]));
+        const fallbackUserId = (resolvedUsers.channelCreatorSlackId && slackToXyne.get(resolvedUsers.channelCreatorSlackId))
+          || resolvedUsers.usersToBeAdded[0]?.xyneUserId;
+        if (resourceChannel?.workspaceId && fallbackUserId && input.channelId) {
+          const client = new WebClient(wsConfig.slackBotToken);
+          const files = await listChannelFiles(client, input.channelId);
+          const [links, canvases] = await Promise.all([
+            fetchChannelLinks(client, input.channelId, files),
+            fetchChannelCanvases(wsConfig.slackBotToken, files),
+          ]);
+          const target = {
+            xyneChannelId: input.xyneSpaceChannelId,
+            workspaceId: resourceChannel.workspaceId,
+            resolveUser: (sid?: string) => Promise.resolve(sid ? slackToXyne.get(sid) : undefined),
+            fallbackUserId,
+          };
+          const [l, c] = await Promise.all([ingestChannelLinks(links, target), ingestChannelCanvases(canvases, target, wsConfig.slackBotToken)]);
+          logger.info('[Migration] channel resources synced', { channelId: input.xyneSpaceChannelId, links: l, canvases: c });
+        }
+      } catch (error) {
+        logger.warn('[Migration] channel resources sync failed (non-fatal)', {
+          channelId: input.xyneSpaceChannelId, error: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
 
     // Post final summary to log channel (threaded)
@@ -1353,15 +1382,13 @@ export async function runMigrationDm(input: DmMigrationInput): Promise<Migration
           await channelRepo.update(xyneSpaceChannelId, { isMigrated: true });
         }
         if (xyneChannel) {
-          const project = xyneChannel.projectId
-            ? await db.project.findUnique({ where: { id: xyneChannel.projectId }, select: { name: true } })
-            : null;
           logger.info('analytics_event', {
             event: wasAlreadyMigrated ? 'dm_remigrated' : 'dm_migrated',
             timestamp: new Date().toISOString(),
             channelId: xyneSpaceChannelId,
             channelName: xyneChannel.name,
-            channelProjectName: project?.name ?? null,
+            // channel.projectId is decoupled; no project-name enrichment.
+            channelProjectName: null,
             sourceType: 'slack',
           });
         }

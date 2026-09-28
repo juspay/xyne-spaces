@@ -38,6 +38,7 @@ import {
   CallStatus,
   CallType,
   InvitationResponse,
+  RingStatus,
   MeetingStatus,
   NotificationType,
   RecordingType,
@@ -46,12 +47,14 @@ import {
 import { storageService } from '@/services/storage';
 import { CallVespaFeedSource, queueCallVespaFeed } from '@/services/callVespaQueue';
 import { callShareService } from '@/services/callShareService';
+import { callNotesCanvasService } from '@/services/callNotesCanvasService';
 import { noteTakerTranscriptService } from '@/services/noteTakerTranscriptService';
 import { summaryTemplateService } from '@/services/summaryTemplateService';
 import { canvasAuthService } from '@/services/canvasAuthService';
 import { isTrackInChannel } from '@/sdlc/sdlcChannelMembership';
 import { buildCallInviteUrl } from '@/utils/urlUtils';
 import { readRecordingGoogleDocLinks } from '@/utils/recordingGoogleDocs';
+import { hideCallTx } from '@/bypassAcl/transactions/callController';
 
 const RecordingParticipantsCommandSchema = z.object({
   action: z.enum(['add', 'remove']),
@@ -338,26 +341,7 @@ export class CallController {
         return;
       }
 
-      const updatedCount = await db.$transaction(async tx => {
-        await repositories.calls.updateParticipantMeetingStatus(
-          participant.id,
-          MeetingStatus.HIDDEN,
-          now,
-          tx,
-        );
-
-        if (isSeries && call.recurringSeriesId) {
-          return repositories.calls.updateRecurringSeriesMeetingStatus({
-            recurringSeriesId: call.recurringSeriesId,
-            userId,
-            meetingStatus: MeetingStatus.HIDDEN,
-            respondedAt: now,
-            tx,
-          });
-        }
-
-        return 1;
-      });
+      const updatedCount = await hideCallTx(participant, now, isSeries, call, userId);
 
       res.json({
         success: true,
@@ -1080,21 +1064,15 @@ export class CallController {
           queueCallVespaFeed(call.id, { source: CallVespaFeedSource.CallControllerJoinCallClearRemovedByHost });
         }
 
-        // Who belongs to a call: the host, anyone invited, and the members of the
-        // channel it is happening in — a channel call is offered to the channel, so
-        // membership is the invitation. Matches assertCanViewCallRecordings. Anyone
-        // else holds a link they were never given access by, and is turned away.
+        // The call link is the invitation: anyone in the call's workspace who holds
+        // it may join, invited or not. The workspace check above is the boundary;
+        // people outside the workspace go through the lobby and are admitted by the
+        // host. The webhook creates the participant row on join, which is what makes
+        // a link joiner part of the call's audience (see isCallAudience) afterwards.
         if (!participant && call.createdByUserId !== user.id) {
-          const isChannelMember = call.channelId
-            ? await repositories.channelParticipants.isParticipant(call.channelId, user.id)
-            : false;
-          if (!isChannelMember) {
-            logger.warn(
-              `[CallController] join denied, no invitation or channel membership | callId=${callId}, userId=${user.id}`,
-            );
-            res.status(403).json({ success: false, error: 'You do not have access to this call' });
-            return;
-          }
+          logger.info(
+            `[CallController] link join without invitation | callId=${callId}, userId=${user.id}`,
+          );
         }
       }
 
@@ -1381,7 +1359,12 @@ export class CallController {
         return;
       }
 
-      const canView = await callShareService.canView(call, userId, req.user!.workspaceId);
+      const canView = await callShareService.hasAtLeast(
+        call,
+        userId,
+        req.user!.workspaceId,
+        'view',
+      );
       if (!canView) {
         res.status(403).json({ success: false, error: 'Access denied' });
         return;
@@ -1588,7 +1571,7 @@ export class CallController {
         return;
       }
 
-      if (call.createdByUserId !== userId) {
+      if (!(await callShareService.hasAtLeast(call, userId, req.user!.workspaceId, 'edit'))) {
         res.status(403).json({ success: false, error: 'Access denied' });
         return;
       }
@@ -1640,8 +1623,8 @@ export class CallController {
         return;
       }
 
-      // Verify ownership
-      if (call.createdByUserId !== userId) {
+      // Editing a recording's title, labels or template is an editor action.
+      if (!(await callShareService.hasAtLeast(call, userId, req.user!.workspaceId, 'edit'))) {
         res.status(403).json({ success: false, error: 'Access denied' });
         return;
       }
@@ -1790,7 +1773,7 @@ export class CallController {
       }
 
       const canRegenerate = isRecording(call)
-        ? call.createdByUserId === userId
+        ? await callShareService.hasAtLeast(call, userId, req.user!.workspaceId, 'edit')
         : await callShareService.isCallAudience(call, userId);
       if (!canRegenerate) {
         res.status(403).json({ success: false, error: 'Access denied' });
@@ -1844,7 +1827,7 @@ export class CallController {
         return;
       }
 
-      if (call.createdByUserId !== userId) {
+      if (!(await callShareService.hasAtLeast(call, userId, req.user!.workspaceId, 'edit'))) {
         res.status(403).json({ success: false, error: 'Access denied' });
         return;
       }
@@ -2002,6 +1985,38 @@ export class CallController {
    * POST /api/calls/:callId/generate-prd
    * Generate PRD from call transcript and post to conversation as Canvas
    */
+  // POST /api/calls/:callId/notes-canvas - Get or lazily create the call's collaborative notes canvas.
+  // Recurring series share one canvas across all occurrences.
+  getOrCreateNotesCanvas = async (req: Request, res: Response): Promise<void> => {
+    const userId = req.user?.id;
+    const { callId } = req.params;
+
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    try {
+      const call = await repositories.calls.findByExternalId(callId);
+      if (!call || isRecording(call)) {
+        res.status(404).json({ success: false, error: 'Call not found' });
+        return;
+      }
+      if (call.workspaceId !== req.user!.workspaceId || !(await callShareService.isCallAudience(call, userId))) {
+        res.status(403).json({ success: false, error: 'You do not have access to this call' });
+        return;
+      }
+
+      const canvasId = await callNotesCanvasService.getOrCreate(call, userId);
+      res.json({ success: true, canvasId, isSeriesCanvas: Boolean(call.recurringSeriesId) });
+    } catch (error) {
+      logger.error(`[${callId}] call_notes_canvas_get_or_create_failed`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      res.status(500).json({ success: false, error: 'Failed to open call notes' });
+    }
+  };
+
   generatePRD = async (req: Request, res: Response): Promise<void> => {
     const userId = req.user?.id;
     const { callId } = req.params;
@@ -2033,7 +2048,7 @@ export class CallController {
       }
       if (
         call.callType === CallType.HEADLESS &&
-        !(await callShareService.canView(call, userId, req.user!.workspaceId))
+        !(await callShareService.hasAtLeast(call, userId, req.user!.workspaceId, 'view'))
       ) {
         res.status(403).json({ success: false, error: 'Access denied' });
         return;
@@ -2137,7 +2152,7 @@ export class CallController {
       }
       if (
         call.callType === CallType.HEADLESS &&
-        !(await callShareService.canView(call, userId, req.user!.workspaceId))
+        !(await callShareService.hasAtLeast(call, userId, req.user!.workspaceId, 'view'))
       ) {
         res.status(403).json({ success: false, error: 'Access denied' });
         return;
@@ -2328,6 +2343,7 @@ export class CallController {
               where: { id: existingParticipant.id },
               data: {
                 response: InvitationResponse.INVITED,
+                ringStatus: RingStatus.CALLING,
                 invitedBy: userId,
                 invitedAt: now,
                 respondedAt: null,
@@ -2348,6 +2364,7 @@ export class CallController {
             invitedBy: userId,
             invitedAt: now,
             response: InvitationResponse.INVITED,
+            ringStatus: RingStatus.CALLING,
           });
           invitedUserIds.push(targetUserId);
         }
@@ -2713,6 +2730,53 @@ export class CallController {
     const call = await repositories.calls.findByExternalId(callId);
     return !!call && callShareService.canViewRecordings(call, userId);
   }
+
+  /**
+   * GET /api/calls/:callId/recordings
+   * The call's recording sessions, newest first, minus soft-deleted ones. Same
+   * audience as the recording itself. `startedAt`/`endedAt` are wall-clock, which is
+   * what lets the call timeline draw when recording was running.
+   */
+  listCallRecordings = async (req: Request, res: Response): Promise<void> => {
+    const userId = req.user?.id;
+    const { callId } = req.params;
+
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    try {
+      const call = await repositories.calls.findByExternalId(callId);
+      if (!call) {
+        res.status(404).json({ success: false, error: 'Call not found' });
+        return;
+      }
+      if (!(await this.assertCanViewCallRecordings(callId, userId))) {
+        res.status(403).json({ success: false, error: 'Access denied' });
+        return;
+      }
+
+      const recordings = await repositories.callRecordings.listByCallId(call.id);
+      res.json({
+        success: true,
+        recordings: recordings.map((recording) => ({
+          id: recording.id,
+          name: recording.name,
+          recordingType: recording.recordingType,
+          status: recording.status,
+          startedAt: recording.startedAt,
+          endedAt: recording.endedAt,
+          durationMs: recording.endedAt
+            ? new Date(recording.endedAt).getTime() - new Date(recording.startedAt).getTime()
+            : null,
+        })),
+      });
+    } catch (error) {
+      logger.error(`[CallController] listCallRecordings failed | callId=${callId}, error=`, error);
+      res.status(500).json({ success: false, error: 'Failed to list recordings' });
+    }
+  };
 
   /**
    * POST /api/calls/:callId/recording/start
@@ -3496,3 +3560,4 @@ export class CallController {
 }
 
 export const callController = new CallController();
+

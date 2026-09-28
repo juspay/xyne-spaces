@@ -158,6 +158,10 @@ export const dropdownComponentSchema = baseComponentSchema.extend({
     placeholder: z.string().optional(),
     options: selectOptionsField,
     required: z.boolean().optional(),
+    // Opt-in multi-select. Omitted or false keeps the single-select dropdown,
+    // whose field value is a string; true makes the field value a string[] and
+    // renders a searchable dropdown with removable pills.
+    multiple: z.boolean().optional(),
     action: flowActionSchema.optional(),
   }).strict(),
 });
@@ -725,6 +729,8 @@ export const agentCapabilitySchema = z
     id: z.string().min(1),
     label: z.string().min(1),
     kind: z.enum(['subagent', 'tool']),
+    group: z.enum(['subagent', 'agent', 'mcp', 'builtin']).optional(),
+    description: z.string().optional(),
     /**
      * MCP serverType whose brand icon represents this capability, e.g. "github".
      * Set server-side (the subagent name and the icon key differ — "spaces" is
@@ -733,6 +739,46 @@ export const agentCapabilitySchema = z
     iconKey: z.string().optional(),
     /** serverType whose account/credentials this capability needs, when unconnected. */
     requiresConnection: z.string().optional(),
+    parentId: z.string().optional(),
+    parentLabel: z.string().optional(),
+  })
+  .strict();
+
+export const agentSkillSchema = z
+  .object({
+    id: z.string().min(1),
+    name: z.string().min(1),
+    description: z.string().optional(),
+  })
+  .strict();
+
+export const agentKnowledgeSourceSchema = z
+  .object({
+    id: z.string().min(1),
+    name: z.string().min(1),
+    kind: z.enum(['collection', 'file']).optional(),
+  })
+  .strict();
+
+export const agentKnowledgeSchema = z
+  .object({
+    scope: z.enum(['COLLECTIONS', 'USER']).optional(),
+    sources: z.array(agentKnowledgeSourceSchema).optional(),
+  })
+  .strict();
+
+export const agentMemorySchema = z
+  .object({
+    enabled: z.boolean(),
+    requiresApproval: z.boolean().optional(),
+  })
+  .strict();
+
+export const agentProviderStatusSchema = z
+  .object({
+    provider: z.string().min(1),
+    label: z.string().min(1),
+    connected: z.boolean(),
   })
   .strict();
 
@@ -741,6 +787,16 @@ export const agentDetailRowSchema = z
   .object({
     label: z.string().min(1),
     value: z.string(),
+  })
+  .strict();
+
+export const agentToolSelectionSchema = z
+  .object({
+    subagents: z.array(z.string()).optional(),
+    direct: z.array(z.string()).optional(),
+    gateway: z.array(z.string()).optional(),
+    custom: z.array(z.string()).optional(),
+    callableAgents: z.array(z.string()).optional(),
   })
   .strict();
 
@@ -767,6 +823,11 @@ export const agentIdentitySchema = z
      */
     color: z.string().optional(),
     capabilities: z.array(agentCapabilitySchema).optional(),
+    providerOrder: z.array(z.string().min(1)).optional(),
+    providers: z.array(agentProviderStatusSchema).optional(),
+    skills: z.array(agentSkillSchema).optional(),
+    knowledge: agentKnowledgeSchema.optional(),
+    memory: agentMemorySchema.optional(),
     details: z.array(agentDetailRowSchema).optional(),
     connectLinks: z
       .array(
@@ -790,6 +851,7 @@ export const agentPropsSchema = z.discriminatedUnion('variant', [
       variant: z.literal('draft'),
       phase: agentDraftPhaseSchema,
       agent: agentIdentitySchema,
+      toolSelection: agentToolSelectionSchema.optional(),
       // Seeds state.values[node.id] — the capability ids kept by the user. The
       // live selection then lives in flow state (the plan card's pattern), so
       // `capabilities` stays byte-identical across variants.
@@ -820,6 +882,12 @@ export const agentComponentSchema = baseComponentSchema.extend({
 // TS mirrors inferred from the schema so the two can't drift.
 export type AgentCapability = z.infer<typeof agentCapabilitySchema>;
 export type AgentDetailRow = z.infer<typeof agentDetailRowSchema>;
+export type AgentSkill = z.infer<typeof agentSkillSchema>;
+export type AgentKnowledgeSource = z.infer<typeof agentKnowledgeSourceSchema>;
+export type AgentKnowledge = z.infer<typeof agentKnowledgeSchema>;
+export type AgentMemory = z.infer<typeof agentMemorySchema>;
+export type AgentProviderStatus = z.infer<typeof agentProviderStatusSchema>;
+export type AgentToolSelection = z.infer<typeof agentToolSelectionSchema>;
 export type AgentIdentity = z.infer<typeof agentIdentitySchema>;
 export type AgentProps = z.infer<typeof agentPropsSchema>;
 export type AgentVariant = AgentProps['variant'];
@@ -952,6 +1020,39 @@ export const mcpSuggestComponentSchema = baseComponentSchema.extend({
 export type McpSuggestItem = z.infer<typeof mcpSuggestItemSchema>;
 export type McpSuggestProps = z.infer<typeof mcpSuggestPropsSchema>;
 
+export const providerSuggestItemSchema = z
+  .object({
+    provider: z.string().min(1),
+    name: z.string().min(1),
+    description: z.string().optional(),
+    /** The user's own credential — never the agent's or an org-shared one. */
+    connected: z.boolean().optional(),
+    /** Available through a credential an admin shared, so it works unconfigured. */
+    sharedName: z.string().optional(),
+    /** How the card connects it: nothing else is a valid action. */
+    connectMethod: z.enum(['oauth', 'device', 'api_key', 'none']).optional(),
+  })
+  .strict();
+
+export const providerSuggestPropsSchema = z
+  .object({
+    title: z.string().optional(),
+    reason: z.string().optional(),
+    providers: z.array(providerSuggestItemSchema).min(1),
+    /** Roster mode: the user asked what exists, so offer a link to settings. */
+    browseAll: z.boolean().optional(),
+    totalCount: z.number().int().nonnegative().optional(),
+  })
+  .strict();
+
+export const providerSuggestComponentSchema = baseComponentSchema.extend({
+  type: z.literal('provider_suggest'),
+  props: providerSuggestPropsSchema,
+});
+
+export type ProviderSuggestItem = z.infer<typeof providerSuggestItemSchema>;
+export type ProviderSuggestProps = z.infer<typeof providerSuggestPropsSchema>;
+
 export const mcpConfigureComponentSchema = baseComponentSchema.extend({
   type: z.literal('mcpConfigure'),
   props: mcpConfigurePropsSchema,
@@ -989,6 +1090,7 @@ export const flowComponentSchema: z.ZodType<any> = z.lazy(() =>
     agentComponentSchema,
     mcpConfigureComponentSchema,
     mcpSuggestComponentSchema,
+    providerSuggestComponentSchema,
     slashCommandArtifactComponentSchema,
     // Container types — inline here so they can reference flowComponentSchema
     baseComponentSchema.extend({
@@ -1026,7 +1128,7 @@ export const flowComponentSchema: z.ZodType<any> = z.lazy(() =>
 const KNOWN_COMPONENT_TYPES = new Set([
   'text', 'heading', 'input', 'textarea', 'dropdown', 'select', 'multiselect',
   'date', 'button', 'divider', 'image', 'link', 'table', 'plan', 'pr',
-  'pr_approval', 'call_schedule', 'agent', 'agent_summary', 'mcpConfigure', 'mcp_suggest', 'row', 'column', 'card',
+  'pr_approval', 'call_schedule', 'agent', 'agent_summary', 'mcpConfigure', 'mcp_suggest', 'provider_suggest', 'row', 'column', 'card',
 ]);
 
 const unknownComponentSchema = baseComponentSchema

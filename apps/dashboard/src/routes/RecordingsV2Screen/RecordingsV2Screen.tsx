@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactElement } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { Virtuoso } from 'react-virtuoso';
-import { LayersTo, Spinner } from '@xyne/icons';
+import { Spinner } from '@xyne/icons';
 import { CallStatus, TagMethod } from '@xyne/shared';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { toast } from 'sonner';
@@ -16,7 +16,9 @@ import {
 } from '../../hooks/usePaginatedOatsRecordings';
 import { recordingService } from '../../services/Recording/recordingService';
 import { logRecordingError } from '../../utils/recordingUtils';
+import { getApiErrorMessage } from '../../utils/apiError';
 import { RecordingShareModal } from '../RecordingDetailV2Screen/components/RecordingShareModal';
+import { useLeaveRecording } from '../../hooks/useLeaveRecording';
 import { usePlatform } from '../../hooks/usePlatform';
 import { getRecordingDefaultLayout } from '../../hooks/useRecordingDefaultLayout';
 import { sendRecordingEvent, useRecordingStore } from '../../hooks/useRecordingStore';
@@ -51,9 +53,6 @@ import {
 } from './utils/RecordingsV2.utils';
 import { getRecordingParticipantIds, normalizeRecordingTags } from '../../utils/recordingUtils';
 import { DEFAULT_RECORDING_TITLE, readRecordingCanvasIds } from '@/utils/recordingUtils';
-import { getUserDisplayName } from '../../utils/userDisplayName';
-import { SummaryTemplatesModal } from '../RecordingDetailV2Screen/components/SummaryTemplatesModal';
-import { useSummaryTemplates } from '../../hooks/useSummaryTemplates';
 
 const RecordingsV2Screen = (): ReactElement => {
   const { isMobile } = usePlatform();
@@ -61,9 +60,6 @@ const RecordingsV2Screen = (): ReactElement => {
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const shouldReduceMotion = useReducedMotion();
-  const requestedSummaryTemplateId = searchParams.get('summaryTemplateId');
-  const shouldOpenTemplatesFromUrl =
-    searchParams.get('templates') === '1' || requestedSummaryTemplateId !== null;
   const [scrollContainer, setScrollContainer] = useState<HTMLDivElement | null>(null);
   const listTabParam = searchParams.get('tab');
   const activeListTab: RecordingOwnershipTab =
@@ -75,9 +71,6 @@ const RecordingsV2Screen = (): ReactElement => {
   const [showAskAIContextModal, setShowAskAIContextModal] = useState(false);
   const [shareRecording, setShareRecording] = useState<RecordingsV2PillRecording | null>(null);
   const [deleteRecording, setDeleteRecording] = useState<RecordingsV2PillRecording | null>(null);
-  const showTemplatesModal = shouldOpenTemplatesFromUrl;
-  const { templates: summaryTemplates, isLoading: summaryTemplatesLoading } =
-    useSummaryTemplates(showTemplatesModal);
   const {
     recordings,
     hasMoreRecordings,
@@ -88,6 +81,7 @@ const RecordingsV2Screen = (): ReactElement => {
     refreshRecordings,
   } = usePaginatedOatsRecordings(activeListTab, selectedCreatorId);
   const currentUser = useSelf();
+  const { requestLeave, ConfirmDialog } = useLeaveRecording();
   const users = useUsers();
   const usersById = useMemo(() => new Map(users.map(user => [user.id, user])), [users]);
   const recordingStatus = useRecordingStore(context => context.status);
@@ -97,26 +91,6 @@ const RecordingsV2Screen = (): ReactElement => {
   const recordingPauseStartedAt = useRecordingStore(context => context.pauseStartedAt);
   const recordingAccumulatedPausedMs = useRecordingStore(context => context.accumulatedPausedMs);
   const pendingAutoStart = useRecordingStore(context => context.pendingAutoStart);
-  const handleOpenTemplates = useCallback((): void => {
-    setSearchParams(current => {
-      const next = new URLSearchParams(current);
-      next.set('templates', '1');
-      return next;
-    });
-  }, [setSearchParams]);
-
-  const handleCloseTemplates = useCallback((): void => {
-    setSearchParams(
-      current => {
-        const next = new URLSearchParams(current);
-        next.delete('templates');
-        next.delete('summaryTemplateId');
-        return next;
-      },
-      { replace: true },
-    );
-  }, [setSearchParams]);
-
   const handleStartRecording = useCallback((): void => {
     if (recordingStatus !== 'idle' && recordingStatus !== 'error') return;
 
@@ -287,6 +261,26 @@ const RecordingsV2Screen = (): ReactElement => {
     setDeleteRecording(recording);
   }, []);
 
+  // Leaving revokes your own grant. Access that arrives through a group or
+  // channel has no grant of your own to drop, so the menu offers no Leave there.
+  const handleLeaveRecording = useCallback(
+    async (recording: RecordingsV2PillRecording): Promise<void> => {
+      await requestLeave(async target => {
+        try {
+          await recordingService.revokeRecordingAccess(recording.externalId, [target]);
+          refreshOatsRecordings();
+          toast.success('You left the recording');
+        } catch (err) {
+          logRecordingError('RecordingsV2Screen.leaveRecording', err);
+          toast.error('Failed to leave recording', {
+            description: getApiErrorMessage(err, 'Unable to remove your access'),
+          });
+        }
+      });
+    },
+    [requestLeave],
+  );
+
   const handleConfirmDeleteRecording = useCallback(async (): Promise<void> => {
     if (!deleteRecording) return;
 
@@ -341,6 +335,7 @@ const RecordingsV2Screen = (): ReactElement => {
 
     xyneAIActor.send({
       type: 'OPEN',
+      trackSource: 'recordings',
       contextType: 'general',
       threadInfo: null,
       startFreshChat: true,
@@ -463,17 +458,6 @@ const RecordingsV2Screen = (): ReactElement => {
               </div>
 
               <div className='col-start-2 row-start-1 flex items-center gap-2 sm:row-start-2'>
-                <Button
-                  type='button'
-                  variant='outline'
-                  onClick={handleOpenTemplates}
-                  className='h-9 gap-1.5 whitespace-nowrap rounded-xl border-border px-4 font-semibold hover:bg-muted/70'
-                  data-track-category='RecordingsV2'
-                  data-track-name='open_summary_templates'
-                >
-                  <LayersTo className='size-4' strokeWidth={2} />
-                  Templates
-                </Button>
                 <Button
                   type='button'
                   variant='outline'
@@ -636,9 +620,9 @@ const RecordingsV2Screen = (): ReactElement => {
                           row.recording.labels.filter(label => !isResolved(label)).length
                         }
                         resolveLabel={resolveLabel}
-                        currentUserId={currentUser?.id}
                         onOpen={handleOpenRecording}
                         onShare={handleShareRecording}
+                        onLeave={recording => void handleLeaveRecording(recording)}
                         onDelete={handleRequestDeleteRecording}
                       />
                     </div>
@@ -659,26 +643,6 @@ const RecordingsV2Screen = (): ReactElement => {
           />
         )}
       </AnimatePresence>
-
-      {currentUser && showTemplatesModal && (
-        <Dialog
-          open
-          onOpenChange={open => !open && handleCloseTemplates()}
-          title='Templates'
-          description='Create, edit, and share recording summary templates.'
-          className='h-full max-h-[824px] w-full max-w-screen-lg overflow-hidden rounded-2xl p-0'
-          testId='recordings-summary-templates-dialog'
-        >
-          <SummaryTemplatesModal
-            templates={summaryTemplates}
-            loading={summaryTemplatesLoading}
-            selectedTemplateId={requestedSummaryTemplateId}
-            currentUserId={currentUser.id}
-            currentUserName={getUserDisplayName(currentUser)}
-            onClose={handleCloseTemplates}
-          />
-        </Dialog>
-      )}
 
       {showAskAIContextModal && (
         <RecordingAskAIModal
@@ -708,6 +672,7 @@ const RecordingsV2Screen = (): ReactElement => {
         onOpenChange={open => !open && setDeleteRecording(null)}
         onConfirm={() => void handleConfirmDeleteRecording()}
       />
+      <ConfirmDialog />
     </div>
   );
 };

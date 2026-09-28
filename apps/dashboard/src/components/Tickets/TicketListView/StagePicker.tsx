@@ -11,6 +11,7 @@ import { getStageColor } from '../../../routes/KanbanBoardScreen/KanbanBoardScre
 import { StageIndicator } from '../../../utils/board/stageStatusIcon';
 import { cn } from '../../../utils/classNames';
 import { surfaceMutationError } from '../../../utils/zeroMutationToast';
+import { trackTicketOutcome } from '../../../services/Analytics/ticketTracking';
 import { useAuth } from '../../../hooks/useAuth';
 import { useCurrentUserRoleIds } from '../../../hooks/useRoles';
 import { TicketStageRequestStatus, BoardType, ApproverType, FormContextType } from '@xyne/shared';
@@ -348,10 +349,25 @@ export function StagePicker({
       if (onStageChange) {
         onStageChange(ticketId, next, stageName);
       } else {
-        void zero.mutate(
-          mutators.ticket.update({ id: ticketId, stageName: next, updatedAt: Date.now() }),
-        );
-        onAfterStageChange?.(next);
+        // Outcome only once the server confirmed, like the two branches below.
+        void surfaceMutationError(
+          zero.mutate(
+            mutators.ticket.update({ id: ticketId, stageName: next, updatedAt: Date.now() }),
+          ),
+          'Failed to update stage',
+        ).then(ok => {
+          if (!ok) return;
+          trackTicketOutcome(
+            'TICKET_STAGE_CHANGED',
+            { id: ticketId, boardId },
+            {
+              surface: 'list_inline',
+              to: next,
+              previous: stageName ?? null,
+            },
+          );
+          onAfterStageChange?.(next);
+        });
       }
       setOpen(false);
       return;
@@ -606,6 +622,16 @@ export function StagePicker({
         }
 
         if (serverResult?.type !== 'error') {
+          trackTicketOutcome(
+            'TICKET_STAGE_CHANGED',
+            { id: ticketId, boardId },
+            {
+              surface: 'list_inline',
+              to: next,
+              previous: stageName ?? null,
+              nonLinear: true,
+            },
+          );
           onAfterStageChange?.(next);
         }
       });
@@ -622,7 +648,23 @@ export function StagePicker({
           }),
         ),
         'Failed to update stage',
-      );
+      ).then(ok => {
+        if (ok) {
+          trackTicketOutcome(
+            'TICKET_STAGE_CHANGED',
+            { id: ticketId, boardId },
+            {
+              surface: 'list_inline',
+              to: next,
+              previous: stageName ?? null,
+              ...(typeof targetStageObj?.sequenceNumber === 'number' &&
+                typeof currentStageObj?.sequenceNumber === 'number' && {
+                  isBackward: targetStageObj.sequenceNumber < currentStageObj.sequenceNumber,
+                }),
+            },
+          );
+        }
+      });
       onAfterStageChange?.(next);
     }
     setOpen(false);

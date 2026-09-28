@@ -1,6 +1,5 @@
-import { useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactElement } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Panel, ResizableGroup, Separator, usePanelRef } from '../ui/Resizable/Resizable';
 import {
   ChevronDown,
   FileText,
@@ -355,7 +354,7 @@ function CitationDocView({ doc }: { doc: CitationDoc }): ReactElement {
  * hidden) so their scroll position / highlight survive a tab switch — mirrors
  * xyne-search's CitationPanel. Renders nothing when no doc is open.
  */
-export function CitationDocsPanel(): ReactElement | null {
+export function CitationDocsPanel({ embedded }: { embedded?: boolean } = {}): ReactElement | null {
   const ctx = useCitationDocs();
   const navigate = useNavigate();
   // Ref on the active tab so it auto-scrolls into view in the horizontally
@@ -385,7 +384,7 @@ export function CitationDocsPanel(): ReactElement | null {
 
   // Collapsed: a thin re-open rail instead of the tab strip + viewer — the
   // open docs stay in state, just not rendered, so re-expanding restores them.
-  if (collapsed) {
+  if (collapsed && !embedded) {
     return (
       <div className='flex h-full w-full flex-col items-center border-l border-border bg-background pt-2'>
         <button
@@ -498,17 +497,19 @@ export function CitationDocsPanel(): ReactElement | null {
               <SquareArrowOutUpRight className='h-4 w-4' />
             </button>
           )}
-          <button
-            type='button'
-            onClick={() => setCollapsed(true)}
-            aria-label='Collapse panel'
-            title='Collapse'
-            className='grid h-7 w-7 flex-shrink-0 place-items-center rounded text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
-            data-track-category='AskAI'
-            data-track-name='citation-docs-collapse'
-          >
-            <PanelRightClose className='h-4 w-4' />
-          </button>
+          {!embedded && (
+            <button
+              type='button'
+              onClick={() => setCollapsed(true)}
+              aria-label='Collapse panel'
+              title='Collapse'
+              className='grid h-7 w-7 flex-shrink-0 place-items-center rounded text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
+              data-track-category='AskAI'
+              data-track-name='citation-docs-collapse'
+            >
+              <PanelRightClose className='h-4 w-4' />
+            </button>
+          )}
           <button
             type='button'
             onClick={closeAll}
@@ -554,83 +555,6 @@ export function CitationDocsPanel(): ReactElement | null {
         })}
       </div>
     </div>
-  );
-}
-
-/**
- * Wraps the chat thread. When one or more citation docs are open, it splits the
- * area into a resizable chat column (left) + the citation docs panel (right).
- * With no docs open the chat panel is alone and fills the width. Must be
- * rendered inside a `CitationDocsProvider`.
- *
- * The group and the chat Panel render UNCONDITIONALLY; only the separator and
- * docs Panel are appended. That is load-bearing: this used to return a bare
- * `<>{children}</>` until a doc opened, which moved `children` to a different
- * position in the element tree — React then remounts the whole subtree, and
- * AIChatThread keeps the conversation in local state, so opening a citation
- * wiped every message.
- */
-export function ChatWithCitationDocs({ children }: { children: ReactNode }): ReactElement {
-  const ctx = useCitationDocs();
-  const hasDocs = !!ctx && ctx.docs.length > 0;
-  const collapsed = !!ctx?.collapsed;
-  const docsPanelRef = usePanelRef();
-
-  // Drive the Panel's own collapse/expand via its imperative handle, keyed off
-  // the collapse button's state in context — the Panel stays mounted (rail UI
-  // renders inside it at collapsedSize) so the group's saved layout survives.
-  //
-  // The ref callback fires as soon as the Panel mounts, but the group doesn't
-  // register its layout constraints (measured via ResizeObserver) until a
-  // moment later — calling isCollapsed()/collapse()/expand() in that window
-  // throws "Panel constraints not found". That window only exists right on
-  // mount; by the time a user can actually click the collapse button the
-  // panel is long since registered, so best-effort + swallow is safe here.
-  useEffect(() => {
-    const handle = docsPanelRef.current;
-    if (!handle || !hasDocs) return;
-    try {
-      if (collapsed && !handle.isCollapsed()) handle.collapse();
-      else if (!collapsed && handle.isCollapsed()) handle.expand();
-    } catch {
-      /* constraints not registered yet — nothing to sync on this pass */
-    }
-  }, [collapsed, hasDocs, docsPanelRef]);
-
-  return (
-    <ResizableGroup
-      orientation='horizontal'
-      autoSaveId='ai-citation-docs'
-      // Which Panels are actually mounted, so the persisted layout restores
-      // against the right set instead of the last one written.
-      panelIds={hasDocs ? ['ai-chat', 'ai-citation-docs'] : ['ai-chat']}
-      className='h-full w-full'
-    >
-      <Panel
-        id='ai-chat'
-        defaultSize={hasDocs ? '55%' : '100%'}
-        minSize={hasDocs ? '30%' : '100%'}
-        className='min-w-0'
-      >
-        {children}
-      </Panel>
-      {hasDocs && (
-        <>
-          <Separator className='w-px bg-border transition-colors hover:bg-primary/40 active:bg-primary/60' />
-          <Panel
-            id='ai-citation-docs'
-            defaultSize='45%'
-            minSize='25%'
-            collapsible
-            collapsedSize={40}
-            panelRef={docsPanelRef}
-            className='min-w-0'
-          >
-            <CitationDocsPanel />
-          </Panel>
-        </>
-      )}
-    </ResizableGroup>
   );
 }
 

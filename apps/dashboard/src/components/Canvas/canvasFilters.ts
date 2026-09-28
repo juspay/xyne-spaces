@@ -56,16 +56,7 @@ export function getRecordingCanvasCallId(canvas: Canvas): string | null {
     return null;
   }
 
-  const meta = metadata as Record<string, unknown>;
-  const isRegularCallSummary =
-    meta['source'] === 'call_detailed_summary' &&
-    typeof meta['conversationId'] === 'string' &&
-    meta['conversationId'].length > 0;
-  if (isRegularCallSummary) {
-    return null;
-  }
-
-  const callId = meta['callId'];
+  const callId = (metadata as Record<string, unknown>)['callId'];
   return typeof callId === 'string' && callId ? callId : null;
 }
 

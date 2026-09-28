@@ -1,0 +1,40 @@
+name: Helm Charts CI
+
+on:
+  pull_request:
+    paths:
+      - helm-charts/**
+      - ci/helm/**
+      - ci/scripts/bump-chart.sh
+      - .github/workflows/helm-charts-ci.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint + template
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
+        with:
+          version: v3.16.2
+
+      - name: Install yq
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+
+      - name: Lint and render charts
+        run: bash ci/scripts/lint-charts.sh
+
+      - name: Version stamp dry run
+        run: |
+          bash ci/scripts/bump-chart.sh 0.0.0-ci.1
+          bash ci/scripts/lint-charts.sh

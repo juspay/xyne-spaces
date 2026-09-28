@@ -1,5 +1,6 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import type { LocalHarnessDevice, LocalHarnessRun, Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
+import type { LocalHarnessDevice, LocalHarnessRun } from "@prisma/client";
 import { prisma } from "../db.js";
 
 export const LOCAL_HARNESS_ONLINE_WINDOW_MS = 90_000;
@@ -36,6 +37,12 @@ export function authenticatedProviders(device: Pick<LocalHarnessDevice, "install
     if (record["authenticated"] !== true || record["enabled"] === false) return [];
     return typeof record["provider"] === "string" ? [record["provider"]] : [];
   });
+}
+
+function runConversationId(run: Pick<LocalHarnessRun, "envelope">): string | null {
+  const envelope = run.envelope as unknown as { conversationId?: unknown } | null;
+  const id = envelope && typeof envelope === "object" ? (envelope as { conversationId?: unknown }).conversationId : null;
+  return typeof id === "string" && id ? id : null;
 }
 
 export const localHarnessRepository = {
@@ -161,6 +168,16 @@ export const localHarnessRepository = {
   touchDevice: (deviceId: string): Promise<unknown> =>
     prisma.localHarnessDevice.update({ where: { id: deviceId }, data: { lastSeenAt: new Date() } }),
 
+  setDeviceFocus: (deviceId: string, focused: boolean, route: string | null): Promise<unknown> =>
+    prisma.localHarnessDevice.update({
+      where: { id: deviceId },
+      data: {
+        lastSeenAt: new Date(),
+        ...(focused ? { focusedAt: new Date() } : {}),
+        ...(route === null ? {} : { appRoute: route }),
+      },
+    }),
+
   // Per-harness connect/disconnect. Authed by the device token the app already
   // holds, so toggling one harness does NOT rotate the pairing token the way a
   // re-registration would (that would 401 the in-flight long-poll).
@@ -197,8 +214,30 @@ export const localHarnessRepository = {
       },
     }),
 
+  findById: (runId: string): Promise<LocalHarnessRun | null> =>
+    prisma.localHarnessRun.findUnique({ where: { id: runId } }),
+
+  findActiveByConversation: async (conversationId: string): Promise<LocalHarnessRun | null> => {
+    const runs = await prisma.localHarnessRun.findMany({
+      where: {
+        status: { in: ["claimed", "running"] },
+        envelope: { path: ["conversationId"], equals: conversationId },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 5,
+    });
+    return runs.find((run) => runConversationId(run) === conversationId) ?? null;
+  },
+
   claimNextRun: async (device: LocalHarnessDevice, providers: string[]): Promise<LocalHarnessRun | null> => {
     if (providers.length === 0) return null;
+    const activeOnDevice = await prisma.localHarnessRun.findMany({
+      where: { deviceId: device.id, status: { in: ["claimed", "running"] } },
+      take: 100,
+    });
+    const busyConversations = new Set(
+      activeOnDevice.map(runConversationId).filter((id): id is string => !!id),
+    );
     const candidates = await prisma.localHarnessRun.findMany({
       where: {
         userId: device.userId,
@@ -215,6 +254,8 @@ export const localHarnessRepository = {
     });
 
     for (const candidate of candidates) {
+      const conversationId = runConversationId(candidate);
+      if (conversationId && busyConversations.has(conversationId)) continue;
       const claimed = await prisma.localHarnessRun.updateMany({
         where: { id: candidate.id, status: "queued" },
         data: { status: "claimed", deviceId: device.id, claimedAt: new Date() },
@@ -239,6 +280,14 @@ export const localHarnessRepository = {
     return run;
   },
 
+  cancelRun: async (runId: string): Promise<boolean> => {
+    const result = await prisma.localHarnessRun.updateMany({
+      where: { id: runId, status: { in: ["queued", "claimed", "running", "awaiting_approval"] } },
+      data: { status: "cancelled", finishedAt: new Date() },
+    });
+    return result.count > 0;
+  },
+
   markRunning: (runId: string): Promise<unknown> =>
     prisma.localHarnessRun.updateMany({ where: { id: runId, status: "claimed" }, data: { status: "running" } }),
 
@@ -248,6 +297,46 @@ export const localHarnessRepository = {
       data: { status, finishedAt: new Date(), ...(error ? { error } : {}) },
     });
     return result.count > 0;
+  },
+
+  setPendingAction: async (runId: string, pendingActionId: string, action: Prisma.InputJsonValue): Promise<boolean> => {
+    const result = await prisma.localHarnessRun.updateMany({
+      where: { id: runId, pendingActionId: null, status: { in: ["claimed", "running"] } },
+      data: { pendingActionId, pendingAction: action },
+    });
+    return result.count > 0;
+  },
+
+  clearPendingAction: async (runId: string): Promise<void> => {
+    await prisma.localHarnessRun.updateMany({
+      where: { id: runId },
+      data: { pendingAction: Prisma.DbNull, pendingActionId: null },
+    });
+  },
+
+  markAwaitingApproval: async (runId: string): Promise<boolean> => {
+    const result = await prisma.localHarnessRun.updateMany({
+      where: { id: runId, status: { in: LIVE_RUN_STATUSES } },
+      data: { status: "awaiting_approval" },
+    });
+    return result.count > 0;
+  },
+
+  setCliSessionId: async (runId: string, cliSessionId: string): Promise<void> => {
+    await prisma.localHarnessRun.updateMany({ where: { id: runId }, data: { cliSessionId } });
+  },
+
+  findRunByPendingActionId: (pendingActionId: string, userId: string): Promise<LocalHarnessRun | null> =>
+    prisma.localHarnessRun.findFirst({
+      where: { pendingActionId, userId, status: "awaiting_approval" },
+      orderBy: { createdAt: "desc" },
+    }),
+
+  finishAwaitingApproval: async (runId: string): Promise<void> => {
+    await prisma.localHarnessRun.updateMany({
+      where: { id: runId, status: "awaiting_approval" },
+      data: { status: "done", finishedAt: new Date(), pendingAction: Prisma.DbNull, pendingActionId: null },
+    });
   },
 
   findBySessionId: (sessionId: string): Promise<LocalHarnessRun | null> =>

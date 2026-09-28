@@ -2,25 +2,27 @@ import { Prisma } from '@prisma/client';
 import {
   defaultSizeFor,
   nextOpenPosition,
-  parseDashboardConfig,
   DashboardRole,
-  DashboardVisibility,
-  QueryVisualizationType, QueryType } from '@xyne/shared';
+  DashboardVisibility } from '@xyne/shared';
 import { db } from '@/database/client';
 import { AppError } from '@/middleware/errorHandler';
+import { createDashboardComponentTx } from '@/bypassAcl/transactions/componentWrites';
+import { updateDashboardComponentTx } from '@/bypassAcl/transactions/componentWrites';
+import { deleteDashboardComponentTx } from '@/bypassAcl/transactions/componentWrites';
+import { setDashboardMetaTx } from '@/bypassAcl/transactions/componentWrites';
 
 // Transactional dashboard/component writes shared by the browser-facing CRUD
 // routes (DashboardController) and the AI tool endpoints
 // (DashboardClawController). All functions throw AppError with the proper
 // HTTP status (403/404/409) — callers translate as needed.
 
-const notFound = (message: string): AppError => new AppError(message, 404);
-const forbidden = (message: string): AppError => new AppError(message, 403);
+export const notFound = (message: string): AppError => new AppError(message, 404);
+export const forbidden = (message: string): AppError => new AppError(message, 403);
 const conflict = (message: string): AppError => new AppError(message, 409);
 
 type Tx = Prisma.TransactionClient;
-type QueryRow = Prisma.DynamicDashboardQueryGetPayload<{}>;
-type MappingRow = Prisma.DynamicDashboardQueryMappingGetPayload<{}>;
+export type QueryRow = Prisma.DynamicDashboardQueryGetPayload<{}>;
+export type MappingRow = Prisma.DynamicDashboardQueryMappingGetPayload<{}>;
 type DashboardRow = Prisma.DynamicDashboardGetPayload<{}>;
 
 export interface WriteContext {
@@ -94,7 +96,7 @@ export interface CreateComponentInput {
   sequence?: number | undefined;
 }
 
-async function autoPlacePosition(
+export async function autoPlacePosition(
   tx: Tx,
   dashboardId: string,
   visualType: string,
@@ -115,27 +117,7 @@ export async function createDashboardComponent(
   input: CreateComponentInput,
   ctx: WriteContext,
 ): Promise<{ query: QueryRow; mapping: MappingRow }> {
-  return db.$transaction(async (tx) => {
-    await assertDashboardEditAccess(tx, dashboardId, ctx.userId, ctx.workspaceId);
-    const position =
-      input.position ?? (await autoPlacePosition(tx, dashboardId, input.visualType));
-    const query = await tx.dynamicDashboardQuery.create({
-      data: {
-        title: input.title ?? null,
-        queryType: QueryType.external,
-        queryJson: input.queryJson as Prisma.InputJsonValue,
-        visualType: input.visualType as QueryVisualizationType,
-        position,
-        config: input.config ?? '{}',
-        createdBy: ctx.userId,
-        workspaceId: ctx.workspaceId,
-      },
-    });
-    const mapping = await tx.dynamicDashboardQueryMapping.create({
-      data: { dashboardId, queryId: query.id, sequence: input.sequence ?? 0, workspaceId: ctx.workspaceId },
-    });
-    return { query, mapping };
-  });
+  return createDashboardComponentTx(dashboardId, ctx, input);
 }
 
 export interface UpdateComponentInput {
@@ -151,36 +133,14 @@ export async function updateDashboardComponent(
   input: UpdateComponentInput,
   ctx: WriteContext,
 ): Promise<QueryRow> {
-  return db.$transaction(async (tx) => {
-    const dashboardId = await resolveDashboardIdForQuery(tx, queryId);
-    await assertDashboardEditAccess(tx, dashboardId, ctx.userId, ctx.workspaceId);
-    return tx.dynamicDashboardQuery.update({
-      where: { id: queryId },
-      data: {
-        ...(input.visualType !== undefined && {
-          visualType: input.visualType as QueryVisualizationType,
-        }),
-        ...(input.title !== undefined && { title: input.title }),
-        ...(input.queryJson !== undefined && {
-          queryJson: input.queryJson as Prisma.InputJsonValue,
-        }),
-        ...(input.position !== undefined && { position: input.position }),
-        ...(input.config !== undefined && { config: input.config }),
-      },
-    });
-  });
+  return updateDashboardComponentTx(queryId, ctx, input);
 }
 
 export async function deleteDashboardComponent(
   queryId: string,
   ctx: WriteContext,
 ): Promise<void> {
-  await db.$transaction(async (tx) => {
-    const dashboardId = await resolveDashboardIdForQuery(tx, queryId);
-    await assertDashboardEditAccess(tx, dashboardId, ctx.userId, ctx.workspaceId);
-    await tx.dynamicDashboardQueryMapping.deleteMany({ where: { queryId } });
-    await tx.dynamicDashboardQuery.delete({ where: { id: queryId } });
-  });
+  await deleteDashboardComponentTx(queryId, ctx);
 }
 
 export async function assertNoDashboardNameClash(
@@ -210,33 +170,6 @@ export async function setDashboardMeta(
   ctx: WriteContext,
 ): Promise<DashboardRow> {
   const { name, description, visibility, config } = meta;
-  return db.$transaction(async (tx) => {
-    const dashboard = await tx.dynamicDashboard.findUnique({ where: { id: dashboardId } });
-    if (!dashboard || dashboard.workspaceId !== ctx.workspaceId) {
-      throw notFound('Dashboard not found');
-    }
-    const { isOwner, isEditor } = await resolveDashboardAccess(tx, dashboard, ctx.userId);
-    if (!isOwner && !isEditor) {
-      throw forbidden('You do not have permission to edit this dashboard');
-    }
-    if (!isOwner && (name !== undefined || visibility !== undefined)) {
-      throw forbidden('Only dashboard owners can rename or change visibility');
-    }
-    if (name !== undefined) {
-      const trimmedName = name.trim();
-      if (trimmedName !== dashboard.name) {
-        await assertNoDashboardNameClash(tx, dashboard.workspaceId, trimmedName, dashboardId);
-      }
-    }
-    if (config !== undefined) parseDashboardConfig(config);
-    return tx.dynamicDashboard.update({
-      where: { id: dashboardId },
-      data: {
-        ...(name !== undefined && { name: name.trim() }),
-        ...(description !== undefined && { description: description.trim() }),
-        ...(visibility !== undefined && { visibility }),
-        ...(config !== undefined && { config }),
-      },
-    });
-  });
+  return setDashboardMetaTx(dashboardId, ctx, name, visibility, config, description);
 }
+

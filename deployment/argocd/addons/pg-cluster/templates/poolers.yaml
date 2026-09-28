@@ -1,0 +1,4 @@
+{{- range $type := list "rw" "ro" }}
+---
+{{ include "pg-cluster.pooler" (dict "root" $ "type" $type) }}
+{{- end }}

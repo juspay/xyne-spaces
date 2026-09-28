@@ -151,7 +151,19 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
     });
   }
 
+  /**
+   * Hard-deletes a conversation. Relations are app-level (relationMode="prisma"): label mappings
+   * and email drafts cascade, but a conversation that still has a ticket cannot be deleted
+   * (Ticket.conversation is required, Prisma Client throws P2014). Messages and participants
+   * must be removed by the caller first.
+   */
   async delete(id: string): Promise<Conversation> {
+    const ticketCount = await this.db.ticket.count({ where: { conversationId: id } });
+    if (ticketCount > 0) {
+      throw new Error(
+        `Cannot delete conversation ${id}: it has ${ticketCount} ticket(s). Delete or archive the ticket first.`,
+      );
+    }
     return await this.db.conversation.delete({
       where: { conversationId: id }
     });
@@ -536,6 +548,8 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
       })
     ]);
 
+    // Note: the label-unread broadcast lives in the service layer (groupDmParticipantService), not here — a
+    // repository must not depend on websocketService (that inverted dependency created a module-load cycle).
     return movedConversations.count;
   }
 

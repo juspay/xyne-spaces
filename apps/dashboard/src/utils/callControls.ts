@@ -30,6 +30,38 @@ interface AiButtonActionParams {
   onToggleAIAssistant: () => void;
 }
 
+export interface AiControlState {
+  /** The local user currently controls the agent. */
+  isController: boolean;
+  /** Someone else controls the agent. */
+  isControlledByOther: boolean;
+  /** Another participant is waiting for control. */
+  hasPendingRequestFromOther: boolean;
+  /** The local user is the one waiting for control. */
+  isRequestingUser: boolean;
+}
+
+/** Who owns Xyne Automatic, from the local user's point of view. */
+export function getAiControlState({
+  localParticipantId,
+  aiController,
+  pendingControlRequest,
+}: {
+  localParticipantId: string | null;
+  aiController: AiControllerLike | null;
+  pendingControlRequest: PendingControlRequestLike | null;
+}): AiControlState {
+  const isController = !!localParticipantId && localParticipantId === aiController?.id;
+  return {
+    isController,
+    isControlledByOther: !!aiController && !isController,
+    hasPendingRequestFromOther:
+      !!pendingControlRequest && pendingControlRequest.requesterId !== localParticipantId,
+    isRequestingUser:
+      !!pendingControlRequest && pendingControlRequest.requesterId === localParticipantId,
+  };
+}
+
 export function getAiButtonDisabled({
   hasPendingRequestFromOther,
   isRequestingUser,

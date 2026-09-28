@@ -123,6 +123,7 @@ export const AILandingHero = ({ renderInput, className }: AILandingHeroProps): R
       setSelectedCard(null);
       xyneAIActor.send({
         type: 'OPEN',
+        trackSource: 'ai_landing_recap',
         channelId: card.channelId,
         threadInfo,
         startFreshChat: true,

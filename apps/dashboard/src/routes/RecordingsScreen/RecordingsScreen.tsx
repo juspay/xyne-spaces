@@ -435,6 +435,7 @@ export default function RecordingsScreen(): ReactElement {
       const primary = details[0];
       xyneAIActor.send({
         type: 'OPEN',
+        trackSource: 'recordings',
         startFreshChat: true,
         ...(primary?.channelId ? { channelId: primary.channelId } : {}),
         threadInfo: {

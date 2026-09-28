@@ -408,7 +408,6 @@ export const V1_MAPPER: Readonly<Record<string, V1Target>> = {
   'projects.listCanvasFolders': { kind: 'query', name: 'projectCanvasFolders' },
   'projects.listApplications': { kind: 'query', name: 'applicationsByProjectId' },
   'projects.listReleaseTickets': { kind: 'query', name: 'releaseTicketsByProjectId' },
-  'projects.listRecaps': { kind: 'query', name: 'projectRecaps' },
   'projects.update': { kind: 'mutator', name: 'project.update' },
   'projects.delete': { kind: 'mutator', name: 'project.delete' },
   'projects.saveReleaseBoardConfig': { kind: 'mutator', name: 'project.saveReleaseBoardConfig' },
@@ -416,7 +415,6 @@ export const V1_MAPPER: Readonly<Record<string, V1Target>> = {
   // ----- recaps -----
   'recaps.listForChannels': { kind: 'query', name: 'channelRecaps' },
   'recaps.listDaily': { kind: 'query', name: 'channelDailyRecaps' },
-  'recaps.listForProjects': { kind: 'query', name: 'projectRecaps' },
   'recaps.listEntityNudges': { kind: 'query', name: 'entityNudges' },
   'recaps.listNudgesByCountRows': { kind: 'query', name: 'surfaceNudgesByCountRowIds' },
   'recaps.saveSubscriptions': { kind: 'mutator', name: 'recap.saveSubscriptions' },

@@ -145,6 +145,9 @@ export const ActivityItemCard = ({
           : appendSelectedActivity(path);
       const state = {
         activityNavigationNonce: Date.now(),
+        // Arrival attribution for *_VIEWED events (SupportScreen's deep-link
+        // resolver carries this state through to the ticket route).
+        trackSource: 'activity_feed',
         ...(linkedItemCreatedAt !== undefined ? { linkedItemCreatedAt } : {}),
         ...(useActivityCutoff && activity.conversationSeenCutoffAt
           ? { linkedCutoffCreatedAt: activity.conversationSeenCutoffAt }

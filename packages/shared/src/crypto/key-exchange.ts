@@ -1,7 +1,8 @@
 import { API_BASE_URL } from '../config.js';
+import type { EncryptedTableConfig } from '../zero/query-validation.js';
 
 export interface EncryptionConfig {
-  encryptedFields: Record<string, { fields: string[]; enforceClientEncryption: boolean }>;
+  encryptedFields: Record<string, EncryptedTableConfig>;
   clientEncryptionEnabled: boolean;
   apiClientEncryptionEnabled: boolean;
 }
@@ -20,7 +21,7 @@ export async function fetchEncryptionConfig(): Promise<
   const data = (await response.json()) as {
     publicKey?: string;
     sessionFingerprint?: string;
-    encryptedFields?: Record<string, { fields: string[]; enforceClientEncryption: boolean }>;
+    encryptedFields?: Record<string, EncryptedTableConfig>;
     clientEncryptionEnabled?: boolean;
     apiClientEncryptionEnabled?: boolean;
   };

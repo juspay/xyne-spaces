@@ -1,9 +1,9 @@
 import { Request, Response } from 'express';
 import { db } from '@/database/client';
-import { runAsSystem } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 import { ApiResponse } from '@/types/express';
 import { ApproverType } from '@xyne/shared';
+import { runRoleFrameworkBackfill, getRoleFrameworkBackfillStats } from '@/bypassAcl/roleFrameworkServices';
 
 /**
  * Role framework backfill controller.
@@ -99,7 +99,7 @@ export class RoleFrameworkBackfillController {
    * (up to 50 role inserts per batch — one createMany call per workspace).
    * Waits 2 seconds between batches to avoid hammering the DB.
    */
-  private static async seedDefaultRoles(
+  static async seedDefaultRoles(
     options: BackfillOptions,
     runId: string,
   ): Promise<BackfillSummary> {
@@ -245,7 +245,7 @@ export class RoleFrameworkBackfillController {
    * chunked internally — 50 mappings per DB round-trip, 1s wait after each.
    * Goal: ~50 DB writes per second.
    */
-  private static async backfillUserGroupMappingsRoleId(
+  static async backfillUserGroupMappingsRoleId(
     options: BackfillOptions,
     runId: string,
   ): Promise<BackfillSummary> {
@@ -458,7 +458,7 @@ export class RoleFrameworkBackfillController {
    * Processes boards in batches of 50 (one `board.update` per board, so up to
    * 50 writes per batch) with a 1-second delay between batches.
    */
-  private static async backfillBoardMetadata(
+  static async backfillBoardMetadata(
     options: BackfillOptions,
     runId: string,
   ): Promise<BackfillSummary> {
@@ -680,7 +680,7 @@ export class RoleFrameworkBackfillController {
    * issues one `updateMany` per batch (50 rows per DB round-trip). Waits 1
    * second between batches.
    */
-  private static async backfillStageApproversApproverType(
+  static async backfillStageApproversApproverType(
     options: BackfillOptions,
     runId: string,
   ): Promise<BackfillSummary> {
@@ -811,16 +811,10 @@ export class RoleFrameworkBackfillController {
       // sweep runs above any single workspace's scope.
       switch (mode) {
         case 'seedDefaultRoles':
-          summary = await runAsSystem(() => RoleFrameworkBackfillController.seedDefaultRoles(options, runId));
-          break;
         case 'userGroupMappingsRoleId':
-          summary = await runAsSystem(() => RoleFrameworkBackfillController.backfillUserGroupMappingsRoleId(options, runId));
-          break;
         case 'boardMetadata':
-          summary = await runAsSystem(() => RoleFrameworkBackfillController.backfillBoardMetadata(options, runId));
-          break;
         case 'stageApproversApproverType':
-          summary = await runAsSystem(() => RoleFrameworkBackfillController.backfillStageApproversApproverType(options, runId));
+          summary = await runRoleFrameworkBackfill(mode, options, runId);
           break;
         default:
           // Future modes — not yet implemented.
@@ -870,86 +864,11 @@ export class RoleFrameworkBackfillController {
 
   static async getBackfillStats(_req: Request, res: Response<ApiResponse>) {
     try {
-      // These counts report the remaining work for a sweep that spans every workspace, so
-      // each read runs above any single workspace's scope.
-      // seedDefaultRoles stats
-      const totalWorkspaces = await runAsSystem(() => db.workspace.count());
-      const totalRoles = await runAsSystem(() => db.role.count());
-      const rolesWithDefaultNames = await runAsSystem(() => db.role.count({
-        where: { name: { in: [...DEFAULT_ROLE_NAMES] } },
-      }));
-
-      const workspacesWithAllDefaults = await runAsSystem(() => db.workspace.findMany({
-        select: {
-          id: true,
-          _count: {
-            select: {
-              roles: { where: { name: { in: [...DEFAULT_ROLE_NAMES] } } },
-            },
-          },
-        },
-      }));
-      const workspacesNeedingSeed = workspacesWithAllDefaults.filter(
-        w => w._count.roles < DEFAULT_ROLE_NAMES.length,
-      ).length;
-
-      // userGroupMappingsRoleId stats
-      const totalUserGroupMappings = await runAsSystem(() => db.userGroupMapping.count());
-      const userGroupMappingsNeedingRoleId = await runAsSystem(() => db.userGroupMapping.count({
-        where: { roleId: null, responsibility: { not: null } },
-      }));
-
-      // boardMetadata stats — count boards where each key is missing/empty
-      const totalBoards = await runAsSystem(() => db.board.count());
-      const boards = await runAsSystem(() => db.board.findMany({
-        select: { metadata: true },
-      }));
-      let boardsNeedingAssignmentRoles = 0;
-      let boardsNeedingTicketControlRoleIds = 0;
-      let boardsNeedingBitbucketEventRoles = 0;
-      for (const b of boards) {
-        const md = (b.metadata as Record<string, unknown> | null) ?? {};
-        const ar = Array.isArray(md.assignmentRoles) ? (md.assignmentRoles as unknown[]) : null;
-        if (!ar || ar.length === 0) boardsNeedingAssignmentRoles += 1;
-        const tc = Array.isArray(md.ticketControlRoleIds) ? (md.ticketControlRoleIds as unknown[]) : null;
-        if (!tc || tc.length === 0) boardsNeedingTicketControlRoleIds += 1;
-        if (!md.bitbucketEventRoles || typeof md.bitbucketEventRoles !== 'object') {
-          boardsNeedingBitbucketEventRoles += 1;
-        }
-      }
-
-      // stageApproversApproverType stats
-      const totalStageApprovers = await runAsSystem(() => db.stageApprovers.count());
-      const stageApproversNeedingApproverType = await runAsSystem(() => db.stageApprovers.count({
-        where: { approverType: null },
-      }));
+      const stats = await getRoleFrameworkBackfillStats();
 
       const response: ApiResponse = {
         success: true,
-        data: {
-          stats: {
-            seedDefaultRoles: {
-              totalWorkspaces,
-              totalRoles,
-              rolesWithDefaultNames,
-              workspacesNeedingSeed: workspacesNeedingSeed,
-            },
-            userGroupMappingsRoleId: {
-              totalUserGroupMappings,
-              userGroupMappingsNeedingRoleId,
-            },
-            boardMetadata: {
-              totalBoards,
-              boardsNeedingAssignmentRoles,
-              boardsNeedingTicketControlRoleIds,
-              boardsNeedingBitbucketEventRoles,
-            },
-            stageApproversApproverType: {
-              totalStageApprovers,
-              stageApproversNeedingApproverType,
-            },
-          },
-        },
+        data: { stats },
         timestamp: new Date().toISOString(),
       };
 

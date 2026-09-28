@@ -7,15 +7,14 @@ import jwt from 'jsonwebtoken';
 import { Request, Response } from 'express';
 import { invitationService } from '@/services/invitationService';
 import { DatabaseClient } from '@/database/client';
-import { withWorkspaceScope, runAsSystem } from '@/database/tenant/context';
+import { withWorkspaceScope } from '@/database/tenant/context';
+import { createOwnerInvitation, syncAllBotUsersForNewWorkspace } from '@/bypassAcl/orgServices';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
-import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
-import { WorkspaceJoinPolicy, WorkspaceType, ProjectType, Status, WorkspaceRole, OrgRole } from '@xyne/shared';
+import { ProjectType } from '@xyne/shared';
 import { aiProvisioningService } from '@/services/aiProvisioningService';
 import { isOrganizationPolicyError, organizationDomainService } from '@/services/organizationDomainService';
 import { CacConfigService } from '@/services/cacConfigService';
-import { createCommunityWorkspaceDefaults } from '@/utils/communityWorkspaceDefaults';
 import { getEncryptionProvider } from '@/services/encryption';
 
 /**
@@ -61,6 +60,7 @@ export async function buildInvitationLink(params: {
   return `${baseUrl}/launch?path=${encodeURIComponent(path)}`;
 }
 import { createId } from '@paralleldrive/cuid2';
+import { provisionOrgTx } from '@/bypassAcl/transactions/invitationController';
 
 export class InvitationController {
   /**
@@ -475,74 +475,7 @@ export class InvitationController {
       }
 
       // All creation steps in one transaction — rollback automatically on any failure
-      const { org, workspace } = await prisma.$transaction(async tx => {
-        const org = await tx.organization.create({
-          data: {
-            orgId,
-            name: orgName.trim(),
-            createdBy: invitedBy,
-            status: Status.ACTIVE,
-          },
-        });
-
-        const workspace = await tx.workspace.create({
-          data: {
-            orgId: org.orgId,
-            name: workspaceName.trim(),
-            createdBy: invitedBy,
-            status: Status.ACTIVE,
-            workspaceType: WorkspaceType.ENTERPRISE,
-            joinPolicy: WorkspaceJoinPolicy.INVITE_ONLY,
-          },
-        });
-
-        await getEncryptionProvider().provisionEntity({
-          entityId: workspace.id,
-          orgId: workspace.orgId,
-          entityType: 'WORKSPACE',
-        });
-
-        // DM project required for every workspace
-        await tx.project.create({
-          data: {
-            name: 'Direct Messages',
-            code: 'DM',
-            description: 'DM project for direct message channels',
-            type: ProjectType.DM,
-            workspaceId: workspace.id,
-            createdBy: invitedBy,
-          },
-        });
-
-        // Link workspace ↔ org
-        await tx.workspaceOrganization.create({
-          data: {
-            orgId: org.orgId,
-            workspaceId: workspace.id,
-            role: WorkspaceRole.ADMIN,
-          },
-        });
-
-        // Seed general channel + default project + board/stages
-        await createCommunityWorkspaceDefaults({
-          db: tx,
-          workspaceId: workspace.id,
-          workspaceName: workspaceName.trim(),
-          createdBy: invitedBy,
-        });
-
-        // Add owner as org_member (email-only — no User record yet)
-        await tx.orgMember.create({
-          data: {
-            orgId: org.orgId,
-            email: normalizedOwnerEmail,
-            role: OrgRole.OWNER,
-            invitedBy: req.user?.email ?? undefined,
-          },
-        });
-
-        return { org, workspace };
-      });
+      const { org, workspace } = await provisionOrgTx(prisma, orgId, orgName, invitedBy, workspaceName, normalizedOwnerEmail, req);
 
       await organizationDomainService.createDomainMappingForOrg({
         orgId: org.orgId,
@@ -551,20 +484,12 @@ export class InvitationController {
       });
 
       // Sync all hardcoded bots into the newly provisioned workspace
-      await runAsSystem(() => unifiedBotUserService.syncAllBotUsers(workspace.id));
+      await syncAllBotUsersForNewWorkspace(workspace.id);
 
       // Create invitation outside the transaction (sends email — non-DB side-effect)
-      // Run as system because the new org/workspace is not the caller's own —
+      // Runs as system because the new org/workspace is not the caller's own —
       // the OrganizationsACL would filter out the org lookup inside createInvitation.
-      const invitation = await runAsSystem(() =>
-        invitationService.createInvitation({
-          email: normalizedOwnerEmail,
-          role: WorkspaceRole.OWNER,
-          workspaceId: workspace.id,
-          orgId: org.orgId,
-          invitedBy,
-        }),
-      );
+      const invitation = await createOwnerInvitation(normalizedOwnerEmail, workspace.id, invitedBy, org.orgId);
       invitationId = invitation.invitationId ?? invitation.id;
 
       const provisionInvitationLink = await buildInvitationLink({ req, workspaceId: workspace.id, invitationId });
@@ -668,3 +593,4 @@ export class InvitationController {
 }
 
 export const invitationController = new InvitationController();
+

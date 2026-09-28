@@ -31,12 +31,14 @@ export class DelayedMessagesACL extends BaseQueryACL<'delayed_messages'> {
         .whereExists('channel', scalarChannelBody(this.ctx, channelId, isMember), SCALAR);
     }
 
+    // Pin the join direction — see tickets-acl.ts for the full rationale.
     return query
       .where('senderId', this.ctx.userID)
       .whereExists('channel', (ch) =>
         ch
           .where('workspaceId', '=', this.ctx.workspaceId)
           .where(channelAccessWhere(this.ctx)),
+        { flip: false },
       );
   }
 }

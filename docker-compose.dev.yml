@@ -131,21 +131,28 @@ services:
       retries: 5
       start_period: 60s
 
-  # MinIO (local S3-compatible storage for testing)
+  # RustFS (local S3-compatible storage for testing).
+  # Replaces MinIO, whose binaries and images are no longer published
+  # (dl.min.io returns 410, minio/minio is gone from Docker Hub). The service
+  # keeps the `minio` name, ports and minioadmin credentials so S3_ENDPOINT /
+  # AWS_* settings and the `minio` container hostname keep working unchanged.
   minio:
-    image: mirror.gcr.io/minio/minio:latest
+    image: rustfs/rustfs:latest
     container_name: ${COMPOSE_PROJECT_NAME:-xyne}-minio
     ports:
       - "${MINIO_API_BIND_PORT:-9000}:9000"
       - "${MINIO_CONSOLE_BIND_PORT:-9001}:9001"
     environment:
-      - MINIO_ROOT_USER=minioadmin
-      - MINIO_ROOT_PASSWORD=minioadmin
-    command: server /data --console-address ":9001"
+      - RUSTFS_VOLUMES=/data
+      - RUSTFS_ADDRESS=0.0.0.0:9000
+      - RUSTFS_CONSOLE_ADDRESS=0.0.0.0:9001
+      - RUSTFS_CONSOLE_ENABLE=true
+      - RUSTFS_ACCESS_KEY=minioadmin
+      - RUSTFS_SECRET_KEY=minioadmin
     volumes:
       - minio_data:/data
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9000/health"]
       interval: 5s
       timeout: 3s
       retries: 5

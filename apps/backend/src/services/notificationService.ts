@@ -1,5 +1,5 @@
 import { logger } from '@/utils/logger';
-import { runAsSystem } from '@/database/tenant/context';
+import { getWorkspaceNotificationCountsQuery } from '@/bypassAcl/notificationServices';
 import { repositories } from '@/database/repositories';
 import { websocketService } from './websocketService';
 import {
@@ -23,7 +23,7 @@ import { buildInitialMessageMd,
   type InitialMessageSummary,
   ChannelScopeType,
   NotificationDeliveryMethod,
-  NotificationType, MessageType, NotificationStatus, UserStatus, ActivityClassification, TicketStatusV2 } from '@xyne/shared';
+  NotificationType, MessageType, ActivityClassification, TicketStatusV2 } from '@xyne/shared';
 import { activityService } from '@/services/activity/activityService';
 
 const prisma = DatabaseClient.getInstance();
@@ -1486,8 +1486,9 @@ class NotificationService {
     recordingTitle: string,
     actorId: string,
     actorName: string,
-    actorAction: 'recording_shared' | 'recording_access_revoked',
+    actorAction: 'recording_shared' | 'recording_access_changed' | 'recording_access_revoked',
     subject: string = 'recording',
+    accessLabel?: string,
   ): Promise<{ deliveredUserIds: string[] }> {
     const recipientIds = recipientUserIds.filter(id => id !== actorId);
 
@@ -1501,12 +1502,21 @@ class NotificationService {
     });
 
     const isRevoked = actorAction === 'recording_access_revoked';
+    const isChanged = actorAction === 'recording_access_changed';
     const title = isRevoked
       ? `${actorName} removed your access to a ${subject}`
-      : `${actorName} shared a ${subject} with you`;
+      : isChanged
+        ? `${actorName} changed your access to a ${subject}`
+        : `${actorName} shared a ${subject} with you`;
     const message = isRevoked
       ? `${actorName} removed your access to "${recordingTitle}"`
-      : `${actorName} shared "${recordingTitle}" with you`;
+      : isChanged
+        ? accessLabel
+          ? `${actorName} made you ${accessLabel} on "${recordingTitle}"`
+          : `${actorName} changed your access to "${recordingTitle}"`
+        : accessLabel
+          ? `${actorName} shared "${recordingTitle}" with you as ${accessLabel}`
+          : `${actorName} shared "${recordingTitle}" with you`;
 
     const results = await Promise.allSettled(
       recipientIds.map(async userId => {
@@ -1521,6 +1531,7 @@ class NotificationService {
             actorId,
             actorName,
             actorAction,
+            ...(accessLabel ? { accessLabel } : {}),
           },
         });
         return userId;
@@ -1939,54 +1950,7 @@ class NotificationService {
       count: number;
     }>
   > {
-    // Spans the caller's own identities across workspaces.
-    return runAsSystem(async () => {
-      // Step 1: Get all active users for this member across workspaces
-      const users = await prisma.user.findMany({
-        where: {
-          orgMemberId: memberId,
-          leftAt: null,
-          status: UserStatus.ACTIVE,
-        },
-        select: {
-          id: true,
-          workspaceId: true,
-        },
-      });
-
-      if (users.length === 0) {
-        return [];
-      }
-
-      const userIds = users.map(u => u.id);
-
-      // Step 2: Count unread+delivered notifications per user
-      const notificationCounts = await prisma.notification.groupBy({
-        by: ['userId'],
-        where: {
-          userId: { in: userIds },
-          status: { in: [NotificationStatus.UNREAD, NotificationStatus.DELIVERED] },
-          readAt: null,
-          dismissedAt: null,
-        },
-        _count: {
-          id: true,
-        },
-      });
-
-      // Build a map: userId -> count
-      const countMap = new Map<string, number>();
-      for (const nc of notificationCounts) {
-        countMap.set(nc.userId, nc._count.id);
-      }
-
-      // Step 3: Merge users with their counts
-      return users.map(u => ({
-        workspaceId: u.workspaceId,
-        userId: u.id,
-        count: countMap.get(u.id) ?? 0,
-      }));
-    });
+    return getWorkspaceNotificationCountsQuery(memberId);
   }
 
   async getUserPreferences(userId: string): Promise<UserPreferences> {

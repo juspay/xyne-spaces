@@ -51,7 +51,8 @@ export function buildVariableSources(
 
       const formFieldProperties: Record<string, JsonSchema> = {};
       for (const [fieldId, fieldName] of formFieldNameMap.entries()) {
-        if (selectedIds && !selectedIds.has(fieldId)) continue;
+        if (triggerSchema.type !== 'TICKET_CREATED' && selectedIds && !selectedIds.has(fieldId))
+          continue;
         formFieldProperties[fieldName] = {
           type: 'object',
           properties: {

@@ -1,19 +1,13 @@
 import { ReactElement, ReactNode, useEffect, useRef, useState } from 'react';
 import * as PopoverPrimitive from '@radix-ui/react-popover';
+import { format } from 'date-fns';
 import { Tooltip } from '../../components/ui/Tooltip/Tooltip';
-import {
-  DndContext,
-  DragOverlay,
-  useDraggable,
-  useDroppable,
-  type DragStartEvent,
-} from '@dnd-kit/core';
-import { CallStatus, MeetingStatus } from '@xyne/shared';
+import { DndContext, useDraggable, useDroppable, type DragStartEvent } from '@dnd-kit/core';
+import { MeetingStatus } from '@xyne/shared';
 import { Call, isGoogleCalendarCall, isMicrosoftCalendarCall } from './callHistoryItem.utils';
 import { GoogleCalendarIcon, MicrosoftIcon } from './CalendarIcons';
 import { cn } from '../../utils/classNames';
 import CalendarCallPopup from './CalendarCallPopup';
-import DragOverlayCard from './DragOverlayCard';
 import RecurringRescheduleDialog from './RecurringRescheduleDialog';
 import { useDragReschedule, type DragPreview } from './useDragReschedule';
 import { useResizeEndTime, type ResizePreview } from './useResizeEndTime';
@@ -33,15 +27,26 @@ import {
   formatTime,
   formatCurrentTime,
   getCurrentUserMeetingStatus,
+  getCallPillVariant,
+  getCallPillVariantClasses,
+  isCallJoinableNow,
   dayKey,
   computeEventPositions,
   isCallDraggable,
   buildDayEventPool,
+  ALWAYS_VISIBLE_JOIN_MIN_WIDTH_PERCENTAGE,
+  COMPACT_METADATA_MIN_WIDTH_PERCENTAGE,
+  HATCH_BACKGROUND,
 } from './CalenderViewUtils';
 import { CalendarTimeSlotCell } from './CalendarTimeSlotCell';
 import { usePlatform } from '../../hooks/usePlatform';
 import type { OtherUserCalls } from '../../hooks/useOtherUserCalls';
 import { OtherUserEventBlock } from './OtherUserEventBlock';
+import {
+  ChannelScopeIcon,
+  type XyneCalendarCallPillVariant,
+} from '../../components/Chat/XyneCalendarSidebar/XyneCalendarCallPill';
+import type { XyneCalendarChannelPresentation } from '../../components/Chat/XyneCalendarSidebar/xyneCalendarSidebar.utils';
 
 interface CalendarWeekViewProps {
   calls: Call[];
@@ -56,10 +61,11 @@ interface CalendarWeekViewProps {
   onCreateCallAtSlot?: (startsAt: Date, endsAt: Date) => void;
   otherUsersCalls?: OtherUserCalls[];
   initialOpenCallId?: string | null;
+  /** Channel label/type per channelId, e.g. from XyneCalendarSidebar — omit to hide channel chips. */
+  channelPresentationsById?: Map<string, XyneCalendarChannelPresentation>;
 }
 
 const TIME_GUTTER_WIDTH = 80;
-
 // ── Per-call card: drag handle IS the popover trigger button ─────────────────
 // Radix's Slot (asChild) composes refs, so setNodeRef + Radix's internal ref both work.
 
@@ -72,6 +78,9 @@ interface WeekViewCallCardProps {
   widthPct: number;
   isBeingResized: boolean;
   currentUserId: string | undefined;
+  variant: XyneCalendarCallPillVariant;
+  joinable: boolean;
+  channel?: XyneCalendarChannelPresentation;
   openCallId: string | null;
   setOpenCallId: (id: string | null) => void;
   onCallClick: (call: Call) => void;
@@ -92,6 +101,9 @@ function WeekViewCallCard({
   widthPct,
   isBeingResized,
   currentUserId,
+  variant,
+  joinable,
+  channel,
   openCallId,
   setOpenCallId,
   onCallClick,
@@ -102,16 +114,21 @@ function WeekViewCallCard({
   onHideClick,
   onResizePointerDown,
 }: WeekViewCallCardProps): ReactElement {
-  const { isMobile } = usePlatform();
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: call.id,
     disabled: !draggable,
   });
 
-  const isEnded = call.status === CallStatus.ENDED;
   const meetingStatus = getCurrentUserMeetingStatus(call, currentUserId);
-  const isDeclined = meetingStatus === MeetingStatus.DECLINED;
+  const isDeclined = variant === 'declined';
   const isMaybe = meetingStatus === MeetingStatus.MAYBE;
+  const compact = height < 40;
+  const showCompactMetadata = widthPct >= COMPACT_METADATA_MIN_WIDTH_PERCENTAGE;
+  const showJoinByDefault = widthPct >= ALWAYS_VISIBLE_JOIN_MIN_WIDTH_PERCENTAGE;
+  const showSecondaryInformation = !compact || showCompactMetadata;
+  const timeRange = `${formatTime(call.startsAt)}${call.endsAt ? ` – ${formatTime(call.endsAt)}` : ''}`;
+  const secondaryTextClass =
+    variant === 'highlighted' ? 'text-primary-foreground/90' : 'text-muted-foreground';
 
   return (
     <PopoverPrimitive.Root
@@ -132,66 +149,91 @@ function WeekViewCallCard({
           title={call.title ?? 'Call'}
           data-track-category='CALLS'
           data-track-name='calendar-week-call-card'
-          className='group absolute right-1 rounded overflow-hidden text-left z-[5] focus:outline-none'
+          className={cn(
+            'group absolute right-1 overflow-hidden rounded-lg border text-left z-[5] transition-colors focus:outline-none',
+            getCallPillVariantClasses(variant),
+          )}
           style={{
             top,
             height,
             left: `calc(${leftPct}% + 1px)`,
             width: `calc(${widthPct}% - 2px)`,
-            backgroundColor: meetingStatus === MeetingStatus.ACCEPTED ? '#0077FF1A' : 'transparent',
             opacity: isDragging || isBeingResized ? 0.3 : 1,
             cursor: draggable ? 'grab' : 'pointer',
             userSelect: 'none',
             touchAction: 'none',
           }}
         >
-          {isMaybe && !isEnded && (
+          {isMaybe && variant !== 'past' && (
             <div className='pointer-events-none absolute inset-0 overflow-hidden'>
-              <div
-                className='absolute inset-0'
-                style={{
-                  backgroundImage:
-                    'repeating-linear-gradient(-18deg, rgba(0, 119, 255, 0.1) 0 2px, transparent 2px 4px)',
-                }}
-              />
+              <div className='absolute inset-0' style={{ backgroundImage: HATCH_BACKGROUND }} />
             </div>
           )}
-          <div className='px-1 py-1 h-full flex flex-row gap-1 justify-start overflow-hidden'>
-            <div className='w-0.5 rounded-full shrink-0 bg-primary self-stretch max-sm:hidden' />
+          <div
+            className={cn(
+              'px-1.5 py-1 h-full flex flex-row gap-1.5 justify-start overflow-hidden',
+              isBeingResized && 'invisible',
+            )}
+          >
             <div className='flex flex-col flex-1 overflow-hidden'>
-              <span
-                className='truncate text-foreground max-sm:whitespace-normal max-sm:overflow-visible max-sm:break-words'
-                style={{
-                  fontSize: isMobile ? '10px' : '12px',
-                  lineHeight: isMobile ? '13px' : '18px',
-                  fontWeight: 500,
-                  textDecorationLine: isDeclined ? 'line-through' : 'none',
-                }}
-              >
-                {isGoogleCalendarCall(call) && (
-                  <span className='inline-block mr-0.5 mb-px'>
-                    <GoogleCalendarIcon size={14} />
+              <span className='flex min-w-0 items-center gap-1'>
+                {joinable && (
+                  <span className='flex shrink-0 items-center gap-1' aria-hidden='true'>
+                    <span
+                      className={cn(
+                        'block size-1.5 flex-none rounded-full motion-safe:animate-pulse',
+                        variant === 'highlighted' ? 'bg-primary-foreground' : 'bg-status-success',
+                      )}
+                    />
+                    {showJoinByDefault && !compact && (
+                      <span
+                        className={cn(
+                          'text-[10px] font-semibold leading-none',
+                          variant === 'highlighted' ? 'text-primary-foreground/90' : 'text-primary',
+                        )}
+                      >
+                        Live
+                      </span>
+                    )}
                   </span>
                 )}
-                {isMicrosoftCalendarCall(call) && (
-                  <span className='inline-block mr-0.5 mb-px'>
-                    <MicrosoftIcon size={14} />
-                  </span>
-                )}
-                {call.title ?? 'Call'}
-              </span>
-              {height >= 40 && !isMobile && (
                 <span
-                  className='mt-0.5 whitespace-nowrap text-muted-foreground'
-                  style={{
-                    fontSize: '10px',
-                    lineHeight: '14px',
-                    opacity: 0.7,
-                    textDecorationLine: isDeclined ? 'line-through' : 'none',
-                  }}
+                  className={cn(
+                    'min-w-0 flex-1 truncate text-xs font-semibold leading-tight max-sm:whitespace-normal max-sm:overflow-visible max-sm:break-words',
+                    isDeclined && 'line-through',
+                  )}
                 >
-                  {formatTime(call.startsAt)}
-                  {call.endsAt && ` - ${formatTime(call.endsAt)}`}
+                  {isGoogleCalendarCall(call) && (
+                    <span className='inline-block mr-0.5 mb-px'>
+                      <GoogleCalendarIcon size={14} />
+                    </span>
+                  )}
+                  {isMicrosoftCalendarCall(call) && (
+                    <span className='inline-block mr-0.5 mb-px'>
+                      <MicrosoftIcon size={14} />
+                    </span>
+                  )}
+                  {call.title ?? 'Call'}
+                </span>
+              </span>
+              {showSecondaryInformation && (
+                <span className='mt-0.5 flex min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap'>
+                  <span
+                    className={cn('shrink-0 text-xs font-normal leading-tight', secondaryTextClass)}
+                  >
+                    {timeRange}
+                  </span>
+                  {channel && (
+                    <span
+                      className={cn(
+                        'flex min-w-0 shrink items-center gap-1 text-xs font-normal leading-tight',
+                        secondaryTextClass,
+                      )}
+                    >
+                      <ChannelScopeIcon channel={channel} />
+                      <span className='truncate'>{channel.label}</span>
+                    </span>
+                  )}
                 </span>
               )}
             </div>
@@ -199,7 +241,7 @@ function WeekViewCallCard({
           {draggable && (
             <div
               role='none'
-              className='absolute bottom-0 left-0 right-0 h-2 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity'
+              className='absolute bottom-0.5 left-0 right-0 h-3 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity'
               style={{ cursor: 'ns-resize', touchAction: 'none' }}
               onPointerDown={e => onResizePointerDown(e, call)}
               onClick={e => e.stopPropagation()}
@@ -207,7 +249,7 @@ function WeekViewCallCard({
               data-track-category='CALLS'
               data-track-name='calendar-resize-handle'
             >
-              <div className='w-6 h-0.5 rounded-full bg-blue-500' />
+              <div className='w-12 h-1 rounded-full bg-primary-foreground' />
             </div>
           )}
         </button>
@@ -272,6 +314,7 @@ function WeekViewCallCard({
 interface DroppableDayColumnProps {
   date: Date;
   isToday: boolean;
+  isWeekend: boolean;
   children: ReactNode;
   isPopoverOpen: boolean;
   onCreateCallAtSlot: ((startsAt: Date, endsAt: Date) => void) | undefined;
@@ -284,6 +327,7 @@ interface DroppableDayColumnProps {
 function DroppableDayColumn({
   date,
   isToday,
+  isWeekend,
   children,
   isPopoverOpen,
   onCreateCallAtSlot,
@@ -303,6 +347,7 @@ function DroppableDayColumn({
       trackName='calendar-week-slot-create'
       className={cn(
         'border-r last:border-r-0 border-border',
+        isWeekend && !isToday && 'bg-muted/50',
         isToday && 'bg-primary/[0.02]',
         isOver && 'bg-primary/[0.04]',
       )}
@@ -317,18 +362,19 @@ function DroppableDayColumn({
 function DropGhost({
   dragPreview,
   columnDateKey,
-  durationMins,
 }: {
   dragPreview: DragPreview;
   columnDateKey: string;
-  durationMins: number;
 }): ReactElement | null {
   if (dragPreview.targetDateKey !== columnDateKey) return null;
   return (
     <CalendarEventGhost
       compact
       top={topPxForMinutes(dragPreview.newStartMins)}
-      height={Math.max(MIN_EVENT_HEIGHT, topPxForMinutes(durationMins))}
+      height={Math.max(
+        MIN_EVENT_HEIGHT,
+        topPxForMinutes((dragPreview.newEndsAt - dragPreview.newStartsAt) / 60_000),
+      )}
       formattedTime={dragPreview.formattedTime}
     />
   );
@@ -372,6 +418,7 @@ const CalendarWeekView = ({
   onCreateCallAtSlot,
   otherUsersCalls = [],
   initialOpenCallId,
+  channelPresentationsById,
 }: CalendarWeekViewProps): ReactElement => {
   const { isMobile } = usePlatform();
   const timeGutterWidth = isMobile ? 48 : TIME_GUTTER_WIDTH;
@@ -382,29 +429,24 @@ const CalendarWeekView = ({
   const {
     sensors,
     dragPreview,
-    activeCall,
     onDragStart,
     onDragMove,
     onDragEnd,
     onDragCancel,
-    recurringDialogOpen,
-    confirmReschedule,
-    cancelReschedule,
-    singleDialogOpen,
-    confirmSingleReschedule,
-    cancelSingleReschedule,
+    dialogOpen: rescheduleDialogOpen,
+    confirm: confirmReschedule,
+    cancel: cancelReschedule,
+    pendingChange: pendingRescheduleChange,
   } = useDragReschedule(calls);
 
   const {
     resizePreview,
     activeResizeCallId,
     onResizePointerDown,
-    recurringResizeDialogOpen,
-    confirmResize,
-    cancelResize,
-    singleResizeDialogOpen,
-    confirmSingleResize,
-    cancelSingleResize,
+    dialogOpen: resizeDialogOpen,
+    confirm: confirmResize,
+    cancel: cancelResize,
+    pendingChange: pendingResizeChange,
   } = useResizeEndTime(scrollRef);
 
   const { dragCreatePreview, onDragCreatePointerDown, consumeDragEnd } = useDragCreate(
@@ -448,15 +490,6 @@ const CalendarWeekView = ({
   const currentTimePx = topPxForMinutes(minutesSinceMidnight(now));
   const todayColIndex = weekDays.findIndex(d => isSameDay(d, today));
 
-  const activeDurationMins =
-    activeCall?.startsAt && activeCall?.endsAt
-      ? Math.max(
-          15,
-          minutesSinceMidnight(new Date(activeCall.endsAt)) -
-            minutesSinceMidnight(new Date(activeCall.startsAt)),
-        )
-      : 60;
-
   return (
     <DndContext
       sensors={sensors}
@@ -465,47 +498,50 @@ const CalendarWeekView = ({
       onDragEnd={onDragEnd}
       onDragCancel={onDragCancel}
     >
-      <div className='w-full h-full flex flex-col border border-border rounded-xl overflow-hidden'>
+      <div className='w-full h-full flex flex-col border-x border-y border-border overflow-hidden'>
         {/* Day header row */}
-        <div className='flex shrink-0 border-b border-border bg-background'>
-          <div style={{ width: timeGutterWidth }} className='shrink-0 border-r border-border' />
+        <div className='flex shrink-0 items-center border-b border-border'>
+          <div style={{ width: timeGutterWidth }} className='shrink-0' />
           {weekDays.map((day, i) => {
             const isToday = isSameDay(day, today);
+            const dayCallCount = callsByDay.get(dayKey(day))?.length ?? 0;
+            const title = `${format(day, 'EEEE')} ${day.getDate()} · ${
+              dayCallCount === 0
+                ? 'no calls'
+                : `${dayCallCount} call${dayCallCount === 1 ? '' : 's'}`
+            }`;
             return (
-              <div
+              <button
                 key={i}
-                className={cn(
-                  'flex-1 py-2.5 text-center border-r last:border-r-0 border-border flex flex-col items-center justify-center',
-                  isToday && 'bg-primary/5',
-                )}
+                type='button'
+                title={title}
+                aria-label={title}
+                className='flex flex-1 flex-col items-center gap-0.5 pb-2 pt-[7px]'
               >
-                <span
-                  className={cn(
-                    'text-sm max-sm:text-xs font-medium leading-tight',
-                    isToday ? 'text-primary' : 'text-muted-foreground',
-                  )}
-                >
+                <span className='text-[10px] font-semibold uppercase tracking-[0.5px] text-muted-foreground'>
                   {DAY_NAMES[day.getDay()]}
                 </span>
                 <span
                   className={cn(
-                    'text-sm max-sm:text-xs font-medium leading-tight',
-                    isToday ? 'text-primary' : 'text-muted-foreground',
+                    'flex size-[21px] items-center justify-center rounded-full text-[12.5px] font-semibold',
+                    isToday ? 'bg-primary text-primary-foreground' : 'text-foreground',
                   )}
                 >
                   {day.getDate()}
                 </span>
-              </div>
+                <span
+                  className={cn(
+                    'size-1 rounded-full',
+                    dayCallCount > 0 ? 'bg-muted-foreground' : 'bg-transparent',
+                  )}
+                />
+              </button>
             );
           })}
         </div>
 
         {/* Scrollable time grid */}
-        <div
-          ref={scrollRef}
-          className='overflow-y-auto'
-          style={{ maxHeight: isMobile ? 'calc(100dvh - 320px)' : 'calc(100dvh - 290px)' }}
-        >
+        <div ref={scrollRef} className='flex-1 min-h-0 overflow-y-auto'>
           <div className='flex' style={{ height: HOUR_HEIGHT * 24 }}>
             {/* Time gutter */}
             <div
@@ -572,6 +608,7 @@ const CalendarWeekView = ({
                   const dayCalls = callsByDay.get(dayKey(day)) ?? [];
                   const colDateKey = dayKey(day);
                   const isToday = isSameDay(day, today);
+                  const isWeekend = day.getDay() === 0 || day.getDay() === 6;
 
                   // Merge own calls + other users' slots into one pool so the
                   // cluster algorithm places them side-by-side when they overlap.
@@ -584,13 +621,14 @@ const CalendarWeekView = ({
                     slot => !!slot.startsAt && dayKey(new Date(slot.startsAt)) === colDateKey,
                   );
 
-                  const positions = computeEventPositions(allEvents);
+                  const positions = computeEventPositions(allEvents, day);
 
                   return (
                     <DroppableDayColumn
                       key={i}
                       date={day}
                       isToday={isToday}
+                      isWeekend={isWeekend}
                       isPopoverOpen={openCallId !== null}
                       onCreateCallAtSlot={onCreateCallAtSlot}
                       onDragCreatePointerDown={onDragCreatePointerDown}
@@ -598,11 +636,7 @@ const CalendarWeekView = ({
                     >
                       {/* Move-drag ghost */}
                       {dragPreview && (
-                        <DropGhost
-                          dragPreview={dragPreview}
-                          columnDateKey={colDateKey}
-                          durationMins={activeDurationMins}
-                        />
+                        <DropGhost dragPreview={dragPreview} columnDateKey={colDateKey} />
                       )}
 
                       {/* Resize ghost */}
@@ -678,6 +712,11 @@ const CalendarWeekView = ({
                         const call = dayCalls.find(c => c.id === event.id);
                         if (!call) return null;
                         const draggable = isCallDraggable(call, currentUserId);
+                        const variant = getCallPillVariant(call, currentUserId, now);
+                        const joinable = isCallJoinableNow(call, variant, now);
+                        const channel = call.channelId
+                          ? channelPresentationsById?.get(call.channelId)
+                          : undefined;
 
                         return (
                           <WeekViewCallCard
@@ -690,6 +729,9 @@ const CalendarWeekView = ({
                             widthPct={widthPct}
                             isBeingResized={activeResizeCallId === call.id}
                             currentUserId={currentUserId}
+                            variant={variant}
+                            joinable={joinable}
+                            {...(channel ? { channel } : {})}
                             openCallId={openCallId}
                             setOpenCallId={setOpenCallId}
                             onCallClick={onCallClick}
@@ -711,41 +753,21 @@ const CalendarWeekView = ({
         </div>
       </div>
 
-      {/* Floating clone that follows the cursor */}
-      <DragOverlay dropAnimation={null}>
-        {activeCall && dragPreview && (
-          <DragOverlayCard
-            call={activeCall}
-            formattedTime={dragPreview.formattedTime}
-            width={dragPreview.overlayWidth}
-            height={dragPreview.overlayHeight}
-          />
-        )}
-      </DragOverlay>
-
       <RecurringRescheduleDialog
-        isOpen={recurringDialogOpen}
+        isOpen={rescheduleDialogOpen}
         onConfirm={confirmReschedule}
         onCancel={cancelReschedule}
+        pendingChange={pendingRescheduleChange}
+        isRecurring={Boolean(pendingRescheduleChange?.call.recurringSeriesId)}
+        confirmLabel='Confirm move'
       />
       <RecurringRescheduleDialog
-        isOpen={recurringResizeDialogOpen}
+        isOpen={resizeDialogOpen}
         onConfirm={confirmResize}
         onCancel={cancelResize}
-      />
-      <RecurringRescheduleDialog
-        isOpen={singleDialogOpen}
-        onConfirm={confirmSingleReschedule}
-        onCancel={cancelSingleReschedule}
-        title='Reschedule this call?'
-        description='This will update the call time for all participants.'
-      />
-      <RecurringRescheduleDialog
-        isOpen={singleResizeDialogOpen}
-        onConfirm={confirmSingleResize}
-        onCancel={cancelSingleResize}
-        title='Reschedule this call?'
-        description='This will update the call time for all participants.'
+        pendingChange={pendingResizeChange}
+        isRecurring={Boolean(pendingResizeChange?.call.recurringSeriesId)}
+        confirmLabel='Confirm resize'
       />
     </DndContext>
   );

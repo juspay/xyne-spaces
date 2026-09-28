@@ -166,7 +166,7 @@ export async function synthesizeSoulFilesForUser(
     // apply if the file didn't exist yet.
     await upsertFile({
       agentSlug: TWIN_AGENT_SLUG,
-      userId,
+      owner: userId,
       name: spec.name,
       content,
       updatedBy: "synthesizer",

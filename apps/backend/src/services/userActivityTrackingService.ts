@@ -58,6 +58,42 @@ class UserActivityTrackingService {
       await activityTrackingService.saveActivityEvent(event);
   }
 
+  // ==================== Specific Auth Operations ====================
+
+  // LOGIN and LOGOUT carry the same UserSession.id in contextMetadata.userSessionId
+  // so the two rows pair up — the top-level session_id stays a per-tab id like
+  // every other event (see the comment in trackActivity). eventLabel carries the
+  // login method / logout reason so daily reports can group on a plain column.
+  async trackLogin(
+    userId: string,
+    params: { sessionId: string; method: string; platform: Platform; metadata?: Record<string, unknown> },
+  ): Promise<void> {
+    await this.trackActivity({
+      userId,
+      eventCategory: 'AUTH',
+      eventName: 'LOGIN',
+      eventLabel: params.method,
+      triggerType: TriggerType.DB_MUTATION,
+      platform: params.platform,
+      contextMetadata: { method: params.method, userSessionId: params.sessionId, ...params.metadata },
+    });
+  }
+
+  async trackLogout(
+    userId: string,
+    params: { sessionId: string; reason: string; platform: Platform; metadata?: Record<string, unknown> },
+  ): Promise<void> {
+    await this.trackActivity({
+      userId,
+      eventCategory: 'AUTH',
+      eventName: 'LOGOUT',
+      eventLabel: params.reason,
+      triggerType: TriggerType.DB_MUTATION,
+      platform: params.platform,
+      contextMetadata: { reason: params.reason, userSessionId: params.sessionId, ...params.metadata },
+    });
+  }
+
   // ==================== Specific Call Operations ====================
 
   async trackCallInitiated(userId: string, metadata?: { callId?: string; channelId?: string; callType?: string }): Promise<void> {

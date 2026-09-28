@@ -19,7 +19,7 @@
  * read and stamps it on insert (see `database/tenant/`), and this adapter ALSO pushes
  * `XyneFilter` into its queries because that is the SDK's contract and the surface the
  * authorizer will extend with sharing. Methods that are genuinely cross-tenant say so
- * and wrap themselves in `runAsSystem()` — without it the ambient scope silently
+ * and go through bypassAcl's asSystem — without it the ambient scope silently
  * reduces them to the caller's workspace and they return nothing.
  *
  * @see docs/guidelines/workflows/PERSISTENCE.md
@@ -31,6 +31,7 @@ import type {
   CredentialListItem,
   CredentialStatus,
   CredentialSummary,
+  ExecutionOrigin,
   ExecutionPauseType,
   ExecutionRecord,
   ExecutionStateRecord,
@@ -47,8 +48,14 @@ import { validateCredentialAuth, validateCredentialValues } from '@xyne/workflow
 import type { ResumePayload } from '@xyne/workflow-sdk/common';
 import type { Prisma } from '@prisma/client';
 import { db } from '@/database/client';
-import { runAsSystem } from '@/database/tenant/context';
 import { decrypt, encrypt } from '@/services/encryptionService';
+import {
+  findActiveWorkflowsQuery,
+  listAllActiveWorkflowsQuery,
+  listAllFoldersQuery,
+  countWorkflowsInFolderQuery,
+  getExecutionQuery,
+} from '@/bypassAcl/workflowServices';
 import { triggerTypeToEventType } from '@/automations/types/workflow-adapter';
 import {
   CREDENTIAL_ACTIVE,
@@ -72,6 +79,7 @@ import {
   toStepRecord,
   toWorkflowRecord,
 } from '../utils';
+import { createExecutionTx } from '@/bypassAcl/transactions/adaptersPersistence';
 
 // ─── Adapter ─────────────────────────────────────────────────────────────────
 
@@ -138,20 +146,7 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
     eventType: string,
     eventScope: Record<string, unknown>,
   ): Promise<WorkflowRecord[]> {
-    const workspaceId =
-      typeof eventScope['workspaceId'] === 'string' ? eventScope['workspaceId'] : undefined;
-
-    return runAsSystem(async () => {
-      const rows = await db.workflow.findMany({
-        where: {
-          ...WORKFLOWS_SCOPE,
-          eventType,
-          status: 'ACTIVE',
-          ...(workspaceId ? { workspaceId } : {}),
-        },
-      });
-      return rows.map(toWorkflowRecord);
-    });
+    return findActiveWorkflowsQuery(eventType, eventScope);
   }
 
   /**
@@ -160,10 +155,7 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
    * restart, which is inherently cross-tenant.
    */
   async listAllActiveWorkflows(): Promise<WorkflowRecord[]> {
-    return runAsSystem(async () => {
-      const rows = await db.workflow.findMany({ where: { ...WORKFLOWS_SCOPE, status: 'ACTIVE' } });
-      return rows.map(toWorkflowRecord);
-    });
+    return listAllActiveWorkflowsQuery();
   }
 
   async createWorkflow(data: {
@@ -244,10 +236,7 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
    * returned to a caller.
    */
   async listAllFolders(): Promise<FolderRecord[]> {
-    return runAsSystem(async () => {
-      const rows = await db.workflowFolder.findMany();
-      return rows.map(toFolderRecord);
-    });
+    return listAllFoldersQuery();
   }
 
   /**
@@ -256,7 +245,7 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
    * caller delete a folder out from under someone else's workflows.
    */
   async countWorkflowsInFolder(folderId: string): Promise<number> {
-    return runAsSystem(() => db.workflow.count({ where: { folderId, ...WORKFLOWS_SCOPE } }));
+    return countWorkflowsInFolderQuery(folderId);
   }
 
   async createFolder(data: {
@@ -310,42 +299,25 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
     status: string;
     context: string;
     sourceExecutionId?: string;
+    fireAt?: Date;
+    origin?: ExecutionOrigin;
     attributes: ResourceAttributes<'workflow'>;
   }): Promise<string> {
     const workspaceId = requireWorkspaceId(data.attributes, 'createExecution');
-    const row = await db.$transaction(async (tx) => {
-      const created = await tx.workflowExecution.create({
-        data: {
-          workspaceId,
-          workflowId: data.workflowId,
-          workflowType: WORKFLOWS_TYPE,
-          status: data.status,
-          ...(data.sourceExecutionId
-            ? { parentWorkflowExecutionId: data.sourceExecutionId, tag: 'rerun' }
-            : { tag: 'root' }),
-        },
-        select: { id: true },
-      });
-
-      await tx.workflowExecutionState.create({
-        data: {
-          workflowExecutionId: created.id,
-          workspaceId,
-          context: data.context,
-          currentStepIndex: 0,
-        },
-      });
-
-      return created;
-    });
+    const row = await createExecutionTx(workspaceId, data);
 
     return row.id;
   }
 
-  async updateExecutionStatus(executionId: string, status: string): Promise<void> {
-    await db.workflowExecution.updateMany({
+  async updateExecutionStatus(executionId: string, status: string, reason?: string): Promise<void> {
+    const updated = await db.workflowExecution.updateMany({
       where: { id: executionId, ...WORKFLOWS_SCOPE },
       data: { status },
+    });
+    if (reason === undefined || updated.count === 0) return;
+    await db.workflowExecutionState.updateMany({
+      where: { workflowExecutionId: executionId },
+      data: { endReason: reason },
     });
   }
 
@@ -356,13 +328,7 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
    * workspace, and in the worker (no context yet) it would return nothing at all.
    */
   async getExecution(executionId: string): Promise<ExecutionRecord | null> {
-    return runAsSystem(async () => {
-      const row = await db.workflowExecution.findFirst({
-        where: { id: executionId, ...WORKFLOWS_SCOPE },
-        include: { workflow: { select: { metadata: true } } },
-      });
-      return row ? toExecutionRecord(row, row.workflow?.metadata ?? null) : null;
-    });
+    return getExecutionQuery(executionId);
   }
 
   /**
@@ -393,7 +359,10 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
         ...(params.status !== undefined ? { status: params.status } : {}),
         ...(params.cursor !== undefined ? { createdAt: { lt: decodeCursor(params.cursor) } } : {}),
       },
-      include: { workflow: { select: { metadata: true } } },
+      include: {
+        workflow: { select: { metadata: true } },
+        workflowExecutionState: { select: { fireAt: true, origin: true, endReason: true } },
+      },
       orderBy: { createdAt: 'desc' },
       // One extra row is the cheapest way to answer "is there another page?".
       ...(limit !== undefined ? { take: limit + 1 } : {}),
@@ -401,7 +370,9 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
 
     const hasMore = limit !== undefined && rows.length > limit;
     const page = hasMore ? rows.slice(0, limit) : rows;
-    const items = page.map((r) => toExecutionRecord(r, r.workflow?.metadata ?? null));
+    const items = page.map((r) =>
+      toExecutionRecord(r, r.workflow?.metadata ?? null, r.workflowExecutionState),
+    );
     const last = page[page.length - 1];
 
     return hasMore && last
@@ -784,3 +755,4 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
     return Promise.resolve();
   }
 }
+

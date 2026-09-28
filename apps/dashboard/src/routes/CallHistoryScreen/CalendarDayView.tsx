@@ -2,17 +2,10 @@ import { ReactElement, ReactNode, useEffect, useRef, useState } from 'react';
 import * as PopoverPrimitive from '@radix-ui/react-popover';
 import { Call, isGoogleCalendarCall, isMicrosoftCalendarCall } from './callHistoryItem.utils';
 import { GoogleCalendarIcon, MicrosoftIcon } from './CalendarIcons';
-import {
-  DndContext,
-  DragOverlay,
-  useDraggable,
-  useDroppable,
-  type DragStartEvent,
-} from '@dnd-kit/core';
+import { DndContext, useDraggable, useDroppable, type DragStartEvent } from '@dnd-kit/core';
 import { CallStatus, MeetingStatus } from '@xyne/shared';
 import { cn } from '../../utils/classNames';
 import CalendarCallPopup from './CalendarCallPopup';
-import DragOverlayCard from './DragOverlayCard';
 import RecurringRescheduleDialog from './RecurringRescheduleDialog';
 import { useDragReschedule, type DragPreview } from './useDragReschedule';
 import { useResizeEndTime, type ResizePreview } from './useResizeEndTime';
@@ -153,7 +146,12 @@ function DayViewCallCard({
               />
             </div>
           )}
-          <div className='px-1 py-1.5 h-full flex flex-row gap-1 justify-start overflow-hidden'>
+          <div
+            className={cn(
+              'px-1 py-1.5 h-full flex flex-row gap-1 justify-start overflow-hidden',
+              isBeingResized && 'invisible',
+            )}
+          >
             <div className='w-0.5 rounded-full shrink-0 bg-primary self-stretch max-sm:hidden' />
             <div className='flex flex-col flex-1 overflow-hidden'>
               <span
@@ -305,17 +303,14 @@ function DroppableDayColumn({
 
 // ── Drop-zone ghost (move drag) ───────────────────────────────────────────────
 
-function DropGhost({
-  dragPreview,
-  durationMins,
-}: {
-  dragPreview: DragPreview;
-  durationMins: number;
-}): ReactElement {
+function DropGhost({ dragPreview }: { dragPreview: DragPreview }): ReactElement {
   return (
     <CalendarEventGhost
       top={topPxForMinutes(dragPreview.newStartMins)}
-      height={Math.max(MIN_EVENT_HEIGHT, topPxForMinutes(durationMins))}
+      height={Math.max(
+        MIN_EVENT_HEIGHT,
+        topPxForMinutes((dragPreview.newEndsAt - dragPreview.newStartsAt) / 60_000),
+      )}
       formattedTime={dragPreview.formattedTime}
     />
   );
@@ -360,29 +355,24 @@ const CalendarDayView = ({
   const {
     sensors,
     dragPreview,
-    activeCall,
     onDragStart,
     onDragMove,
     onDragEnd,
     onDragCancel,
-    recurringDialogOpen,
-    confirmReschedule,
-    cancelReschedule,
-    singleDialogOpen,
-    confirmSingleReschedule,
-    cancelSingleReschedule,
+    dialogOpen: rescheduleDialogOpen,
+    confirm: confirmReschedule,
+    cancel: cancelReschedule,
+    pendingChange: pendingRescheduleChange,
   } = useDragReschedule(calls);
 
   const {
     resizePreview,
     activeResizeCallId,
     onResizePointerDown,
-    recurringResizeDialogOpen,
-    confirmResize,
-    cancelResize,
-    singleResizeDialogOpen,
-    confirmSingleResize,
-    cancelSingleResize,
+    dialogOpen: resizeDialogOpen,
+    confirm: confirmResize,
+    cancel: cancelResize,
+    pendingChange: pendingResizeChange,
   } = useResizeEndTime(scrollRef);
 
   const { dragCreatePreview, onDragCreatePointerDown, consumeDragEnd } = useDragCreate(
@@ -415,15 +405,6 @@ const CalendarDayView = ({
   const dayCalls = calls
     .filter(call => call.startsAt && isSameDay(new Date(call.startsAt), currentDay))
     .sort((a, b) => new Date(a.startsAt ?? 0).getTime() - new Date(b.startsAt ?? 0).getTime());
-
-  const activeDurationMins =
-    activeCall?.startsAt && activeCall?.endsAt
-      ? Math.max(
-          15,
-          minutesSinceMidnight(new Date(activeCall.endsAt)) -
-            minutesSinceMidnight(new Date(activeCall.startsAt)),
-        )
-      : 60;
 
   const currentUserDisplayName = getUserDisplayName(currentUser);
   const currentUserFirstName =
@@ -562,9 +543,7 @@ const CalendarDayView = ({
                 )}
 
                 {/* Move-drag ghost */}
-                {dragPreview && (
-                  <DropGhost dragPreview={dragPreview} durationMins={activeDurationMins} />
-                )}
+                {dragPreview && <DropGhost dragPreview={dragPreview} />}
 
                 {/* Resize ghost */}
                 {resizePreview && <ResizeGhost resizePreview={resizePreview} />}
@@ -588,7 +567,7 @@ const CalendarDayView = ({
                     otherUsersCalls,
                     slot => !!slot.startsAt && isSameDay(new Date(slot.startsAt), currentDay),
                   );
-                  const positions = computeEventPositions(allEvents);
+                  const positions = computeEventPositions(allEvents, currentDay);
 
                   return allEvents.map(event => {
                     const pos = positions.get(event.id);
@@ -672,12 +651,10 @@ const CalendarDayView = ({
                   onDragCreatePointerDown={onDragCreatePointerDown}
                   consumeDragEnd={consumeDragEnd}
                 >
-                  {dragPreview && (
-                    <DropGhost dragPreview={dragPreview} durationMins={activeDurationMins} />
-                  )}
+                  {dragPreview && <DropGhost dragPreview={dragPreview} />}
                   {resizePreview && <ResizeGhost resizePreview={resizePreview} />}
                   {(() => {
-                    const positions = computeEventPositions(dayCalls);
+                    const positions = computeEventPositions(dayCalls, currentDay);
                     return dayCalls.map(call => {
                       if (!call.startsAt) return null;
                       const pos = positions.get(call.id);
@@ -724,7 +701,7 @@ const CalendarDayView = ({
                     endsAt: slot.endsAt,
                     slot,
                   }));
-                  const positions = computeEventPositions(slotEvents);
+                  const positions = computeEventPositions(slotEvents, currentDay);
                   return (
                     <div
                       key={user.id}
@@ -761,41 +738,21 @@ const CalendarDayView = ({
         </div>
       </div>
 
-      {/* Floating clone that follows the cursor */}
-      <DragOverlay dropAnimation={null}>
-        {activeCall && dragPreview && (
-          <DragOverlayCard
-            call={activeCall}
-            formattedTime={dragPreview.formattedTime}
-            width={dragPreview.overlayWidth}
-            height={dragPreview.overlayHeight}
-          />
-        )}
-      </DragOverlay>
-
       <RecurringRescheduleDialog
-        isOpen={recurringDialogOpen}
+        isOpen={rescheduleDialogOpen}
         onConfirm={confirmReschedule}
         onCancel={cancelReschedule}
+        pendingChange={pendingRescheduleChange}
+        isRecurring={Boolean(pendingRescheduleChange?.call.recurringSeriesId)}
+        confirmLabel='Confirm move'
       />
       <RecurringRescheduleDialog
-        isOpen={recurringResizeDialogOpen}
+        isOpen={resizeDialogOpen}
         onConfirm={confirmResize}
         onCancel={cancelResize}
-      />
-      <RecurringRescheduleDialog
-        isOpen={singleDialogOpen}
-        onConfirm={confirmSingleReschedule}
-        onCancel={cancelSingleReschedule}
-        title='Reschedule this call?'
-        description='This will update the call time for all participants.'
-      />
-      <RecurringRescheduleDialog
-        isOpen={singleResizeDialogOpen}
-        onConfirm={confirmSingleResize}
-        onCancel={cancelSingleResize}
-        title='Reschedule this call?'
-        description='This will update the call time for all participants.'
+        pendingChange={pendingResizeChange}
+        isRecurring={Boolean(pendingResizeChange?.call.recurringSeriesId)}
+        confirmLabel='Confirm resize'
       />
     </DndContext>
   );

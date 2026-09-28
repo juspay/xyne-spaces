@@ -44,12 +44,14 @@ export class OzonetelFlow extends BaseFlow {
         status: event.status,
         channelId: prepared.channelId,
         creatorUserId: prepared.creatorUserId,
+        targetConversationId: prepared.targetConversationId,
       });
 
       return {
         event,
         channelId: prepared.channelId,
         creatorUserId: prepared.creatorUserId,
+        targetConversationId: prepared.targetConversationId,
       } satisfies OzonetelPreprocessedPayload;
     } catch (error) {
       logger.error('[telephony] ingest_apply_failed', {

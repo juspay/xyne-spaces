@@ -345,14 +345,53 @@ const convertToPngBlob = (blob: Blob): Promise<Blob> => {
 };
 
 /**
- * Copies an image blob to the clipboard.
+ * Either an already-loaded blob, or a thunk that produces one (download, decode, ...).
+ * Prefer the thunk form: it lets the clipboard write start inside the user gesture.
+ */
+export type ImageClipboardSource = Blob | (() => Promise<Blob>);
+
+const toPngBlob = async (blob: Blob): Promise<Blob> =>
+  blob.type === 'image/png' ? blob : convertToPngBlob(blob);
+
+/**
+ * Turns a raw clipboard rejection into something a user can act on.
+ */
+const describeClipboardFailure = (error: unknown): string => {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/not focused/i.test(message)) {
+    return 'The browser window lost focus. Click on the page, then copy again.';
+  }
+  if (error instanceof DOMException && error.name === 'NotAllowedError') {
+    return 'The browser blocked the clipboard write. Allow clipboard access for this site and try again.';
+  }
+  return message || 'Clipboard write failed';
+};
+
+/**
+ * Copies an image to the clipboard.
  * Converts non-PNG images to PNG first, as browsers only support image/png for clipboard writes.
  */
-export const copyImageToClipboard = async (blob: Blob): Promise<void> => {
-  if (typeof ClipboardItem === 'undefined') {
-    throw new Error('ClipboardItem is not supported in this browser');
+export const copyImageToClipboard = async (source: ImageClipboardSource): Promise<void> => {
+  if (typeof ClipboardItem === 'undefined' || typeof navigator.clipboard?.write !== 'function') {
+    throw new Error('Copying images is not supported in this browser');
   }
-  const pngBlob = blob.type === 'image/png' ? blob : await convertToPngBlob(blob);
-  const clipboardItem = new ClipboardItem({ 'image/png': pngBlob });
-  await navigator.clipboard.write([clipboardItem]);
+
+  // The ClipboardItem has to be constructed synchronously — in the same task as the
+  // click — and handed a PROMISE of the PNG blob. If we await the download or the
+  // canvas PNG conversion first, transient user activation is gone by the time
+  // navigator.clipboard.write() runs and Safari/Firefox reject it with NotAllowedError,
+  // which is what surfaced as the bare "Failed to copy image" toast.
+  const pngBlob = Promise.resolve()
+    .then(() => (typeof source === 'function' ? source() : source))
+    .then(toPngBlob);
+
+  // Keep a handler attached so a failed download never escapes as an unhandled
+  // rejection; the awaited write below reports the real error.
+  void pngBlob.catch(() => undefined);
+
+  try {
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': pngBlob })]);
+  } catch (error) {
+    throw new Error(describeClipboardFailure(error));
+  }
 };

@@ -49,6 +49,7 @@ const fieldTypeOptions = [
   { value: 'boolean', label: 'Boolean' },
   { value: 'date', label: 'Date' },
   { value: 'user', label: 'User' },
+  { value: 'ticket', label: 'Ticket' },
 ];
 
 export const CustomField = ({
