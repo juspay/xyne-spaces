@@ -10,6 +10,10 @@ import {
   assertValidMessageAlias,
   assertValidUserAlias,
 } from '@/tests/shared/support/literal-validation';
+import { clickHoverActionOnMessage } from '@/tests/shared/support/message-hover';
+
+const MENU_ACTION_OPEN_ATTEMPTS = 3;
+const MENU_ACTION_RECHECK_MS = 3000;
 
 function ensureDmContext(userAlias: string, dmAlias: string): void {
   const user = getStoredUser(userAlias);
@@ -42,31 +46,6 @@ function getStoredChannelMessageText(
     `No stored channel message "${messageAlias}" found for user "${userAlias}" in channel "${channelAlias}".`
   );
   return message.text;
-}
-
-async function clickHoverActionOnMessage(
-  hoverActionSelector: string,
-  messageText: string
-): Promise<void> {
-  const page = testContext.activePage;
-  const message = page.locator(`[data-testid^="chat-message-"]:has-text("${messageText}")`).last();
-  await message.waitFor({ state: 'visible' });
-
-  const actionButton = page.locator(hoverActionSelector).first();
-  // Hover actions vanish if the message re-renders under load — re-hover per attempt.
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    await message.scrollIntoViewIfNeeded();
-    await message.hover({ force: true });
-    try {
-      await actionButton.waitFor({ state: 'visible', timeout: 5000 });
-      await actionButton.click({ force: true, timeout: 5000 });
-      return;
-    } catch (error) {
-      if (attempt === 3) {
-        throw error;
-      }
-    }
-  }
 }
 
 export default class MessagingSteps {
@@ -185,8 +164,36 @@ export default class MessagingSteps {
     assertValidUserAlias(userAlias);
     assertValidChannelAlias(channelAlias);
     assertValidMessageAlias(messageAlias);
-    await this.openMoreActionsForStoredChannelMessage(userAlias, channelAlias, messageAlias);
-    await testContext.activePage.locator(selector).first().waitFor({ state: 'visible' });
+    const page = testContext.activePage;
+    const menu = page.locator('[role="menu"]');
+    // Scoped to the open menu: the same testid also exists on toolbar buttons, and a second
+    // list's toolbar would answer a page-wide lookup.
+    const action = menu.locator(selector).first();
+
+    // The label flips only after Zero -> cached query -> effect -> XState, several hops past the
+    // socket quiet the spec waited on. Re-open from a known-closed state and re-check.
+    for (let attempt = 1; ; attempt++) {
+      await menu
+        .first()
+        .press('Escape', { timeout: 1000 })
+        .catch(() => {});
+      await this.openMoreActionsForStoredChannelMessage(userAlias, channelAlias, messageAlias);
+      const appeared = await action
+        .waitFor({ state: 'visible', timeout: MENU_ACTION_RECHECK_MS })
+        .then(() => true)
+        .catch(() => false);
+      if (appeared) return;
+      if (attempt >= MENU_ACTION_OPEN_ATTEMPTS) {
+        const visible = await menu
+          .locator('[data-testid^="hover-action-"]')
+          .evaluateAll((nodes) => nodes.map((n) => n.getAttribute('data-testid')))
+          .catch(() => []);
+        assert.fail(
+          `Menu action "${selector}" never appeared for message "${messageAlias}" after ${MENU_ACTION_OPEN_ATTEMPTS} attempts. ` +
+            `Menu items at failure: ${visible.length > 0 ? visible.join(', ') : '(none — the menu was not open)'}`
+        );
+      }
+    }
   }
 
   @Step(
@@ -204,7 +211,11 @@ export default class MessagingSteps {
     assertValidUserAlias(targetUserAlias);
 
     await this.openMoreActionsForStoredChannelMessage(userAlias, channelAlias, messageAlias);
-    await testContext.activePage.locator("[data-testid='hover-action-forward-message']").click();
+    await testContext.activePage
+      .locator('[role="menu"]')
+      .locator("[data-testid='hover-action-forward-message']")
+      .first()
+      .click();
     await this.pickForwardTargetUser(targetUserAlias);
   }
 

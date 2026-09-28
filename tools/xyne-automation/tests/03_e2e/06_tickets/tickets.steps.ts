@@ -1,3 +1,4 @@
+import assert from 'node:assert/strict';
 import { Step } from 'gauge-ts';
 import { buildRandomSuffix, getStoredUser } from '@/fixtures/fixture-helpers';
 import { type StoredTicket, testContext } from '@/tests/shared/runtime/test-context';
@@ -5,6 +6,8 @@ import {
   assertValidTicketAlias,
   assertValidUserAlias,
 } from '@/tests/shared/support/literal-validation';
+
+const SUB_TICKET_BUTTON_TIMEOUT_MS = 15000;
 
 export default class TicketsSteps {
   // ===========================================
@@ -94,12 +97,33 @@ export default class TicketsSteps {
     await testContext.activePage.locator("[data-testid='ticket-submit-button']").first().click();
   }
 
-  @Step('clicking on "[data-testid=\'create-sub-ticket-button\']"')
-  public async clickCreateSubTicketButton(): Promise<void> {
-    await testContext.activePage
-      .locator("[data-testid='create-sub-ticket-button']")
-      .first()
-      .click();
+  // Unique step text on purpose: a literal `clicking on "<selector>"` step is shadowed by the
+  // parameterized `clicking on <selector>` in browser.steps.ts, so it never runs.
+  @Step('opening the ticket relationships tab')
+  public async openTicketRelationshipsTab(): Promise<void> {
+    const page = testContext.activePage;
+    // create-sub-ticket-button only mounts on the Relationships tab, and clicking the tab does
+    // not hold — ThreadPannel re-applies ?selectedTab on every change. Select it via the URL.
+    const url = new URL(page.url());
+    if (url.searchParams.get('selectedTab') !== 'relationships') {
+      url.searchParams.set('selectedTab', 'relationships');
+      await page.goto(url.toString());
+    }
+    const createButton = page.locator("[data-testid='create-sub-ticket-button']").first();
+    const appeared = await createButton
+      .waitFor({ state: 'visible', timeout: SUB_TICKET_BUTTON_TIMEOUT_MS })
+      .then(() => true)
+      .catch(() => false);
+    if (!appeared) {
+      const active = await page
+        .locator("[role='tab'][aria-selected='true']")
+        .first()
+        .innerText()
+        .catch(() => '(none)');
+      assert.fail(
+        `Relationships tab did not expose create-sub-ticket-button. Selected tab "${active.replace(/\s+/g, ' ').trim()}", url ${page.url()}`
+      );
+    }
   }
 
   @Step('clicking on "[data-testid=\'ticket-detail-status-selector\']"')
