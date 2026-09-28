@@ -501,8 +501,10 @@ export const AUDIT_TABLE_CONFIG: Record<string, AuditTableConfig> = {
       assigneeUserGroupId: (value, res) => (value ? res.userGroupName(String(value)) : null),
       boardId: (value, res) => (value ? res.boardName(String(value)) : null),
       dlAliases: value => formatSet(parseJsonText(value)),
+      // Empty means the default: the first email reply stops the clock.
       frtStageNames: value =>
-        formatSet(parseJsonText(value), name => (name === FRT_EMAIL_REPLY ? 'Email reply' : name)),
+        formatSet(parseJsonText(value), name => (name === FRT_EMAIL_REPLY ? 'Email reply' : name)) ??
+        'Email reply',
       metricsGuestVisibility: value => formatGuestVisibility(value),
       duplicateScopeConfig: (value, res) => formatDuplicateScope(value, res),
       priorityClassificationThreshold: value =>
@@ -522,6 +524,7 @@ export const AUDIT_TABLE_CONFIG: Record<string, AuditTableConfig> = {
       appWebhookDeliveryEnabled: true,
       deskReportEnabled: false,
       deskReportRangeDays: 1,
+      frtStageNames: null,
     },
   },
 

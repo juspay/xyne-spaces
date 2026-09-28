@@ -11,6 +11,7 @@ import { AIFeaturesTab } from './tabs/AIFeaturesTab';
 import { MetricsTab } from './tabs/MetricsTab';
 import { AuditLogSection } from '../../UserGroup/AssignmentConfigScreen/AuditLogSection';
 import { AuditEntityType } from '@xyne/shared';
+import { useCanViewAnalytics } from '../../../hooks/usePermissions';
 import { Inbox, Route, Zap, Bot, X, BarChart3, History } from 'lucide-react';
 
 /** Props for the DeskSettings modal component */
@@ -68,6 +69,8 @@ export const DeskSettings: React.FC<DeskSettingsProps> = ({ open, onClose, chann
   const [activeAIFeaturesSubTab, setActiveAIFeaturesSubTab] =
     useState<AIFeaturesSubTabId>('ai-draft');
   const [signatures] = useCachedQuery(queries.userEmailSignatures());
+  // The audit-log API is ANALYTICS-admin only; hide the tab rather than show a dead error.
+  const canViewHistory = useCanViewAnalytics();
 
   const form = useDeskSettingsForm(channelId, userID, open);
   const {
@@ -96,11 +99,14 @@ export const DeskSettings: React.FC<DeskSettingsProps> = ({ open, onClose, chann
   }, [isDirty, onClose]);
 
   const availableTabs = useMemo(() => {
+    const tabs = canViewHistory
+      ? DESK_SETTINGS_TABS
+      : DESK_SETTINGS_TABS.filter(tab => tab.id !== 'history');
     if (isCall) {
-      return DESK_SETTINGS_TABS.filter(tab => ['assignment', 'Agent', 'history'].includes(tab.id));
+      return tabs.filter(tab => ['assignment', 'Agent', 'history'].includes(tab.id));
     }
-    return isEmail ? DESK_SETTINGS_TABS : DESK_SETTINGS_TABS.filter(tab => tab.id !== 'automation');
-  }, [isCall, isEmail]);
+    return isEmail ? tabs : tabs.filter(tab => tab.id !== 'automation');
+  }, [isCall, isEmail, canViewHistory]);
 
   useEffect(() => {
     if (!availableTabs.some(tab => tab.id === activeTab)) {

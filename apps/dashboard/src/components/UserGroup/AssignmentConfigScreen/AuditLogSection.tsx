@@ -42,7 +42,9 @@ const deriveSummary = (
       : actions.size === 1 && actions.has(AuditAction.DELETE)
         ? 'removed'
         : 'updated';
-  const noun = ENTITY_NOUNS[entityType];
+  const isRoutingOnly =
+    changes.length > 0 && changes.every(change => change.tableName === 'classification_mappings');
+  const noun = isRoutingOnly ? 'routing rule' : ENTITY_NOUNS[entityType];
   return `${verb} ${noun}${entityName ? ` for ${entityName}` : ''}`;
 };
 
