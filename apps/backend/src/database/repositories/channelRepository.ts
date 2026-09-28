@@ -1,7 +1,7 @@
 import { SDLC_MEMBERSHIP_RELATION } from '@xyne/shared';
 import { BaseRepository } from './base';
 import type { ChannelParticipantRepository } from './channelParticipantRepository';
-import { Channel } from '@prisma/client';
+import { Channel, Prisma } from '@prisma/client';
 import { ChannelRole, ChannelScopeType, ChannelVisibility, ChannelType, ProjectType } from '@xyne/shared';
 import { QueryOptions } from '@/types/database';
 import { logger } from '@/utils/logger';
@@ -378,10 +378,14 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
 
   /**
    * Atomically find or create a 1:1 DM. The pair's sorted user ids are its
-   * canonical key; an advisory transaction lock closes the probe-then-insert
-   * race without requiring a production-breaking unique-index migration over
-   * historical duplicate DMs. Participants and their status/count rows are
-   * committed in the same transaction as a newly-created channel.
+   * canonical key. The probe and insert run in one SERIALIZABLE transaction
+   * (same pattern as ticketRepository.claimReleaseInsightsGeneration): when two
+   * requests race for the same pair, Postgres fails one commit with a
+   * serialization error (Prisma P2034) and the retry re-probes and reuses the
+   * channel the winner created. This closes the probe-then-insert race without
+   * raw SQL (tenant extensions still see every query) and without a unique-index
+   * migration over historical duplicate DMs. Participants and their status/count
+   * rows are committed in the same transaction as a newly-created channel.
    */
   async findOrCreateOneOnOneDMChannel(options: {
     userId: string;
@@ -404,12 +408,9 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
       targetIsClosed = false,
     } = options;
     const name = [userId, targetUserId].sort().join(',');
-    const lockKey = `dm-channel:${workspaceId}:${name}`;
 
-    return withWorkspaceScope(() =>
+    const attemptFindOrCreate = () => withWorkspaceScope(() =>
       this.db.$transaction(async (tx) => {
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`;
-
         const existing = await tx.channel.findFirst({
           where: { workspaceId, scopeType: ChannelScopeType.DM, name },
           orderBy: { createdAt: 'asc' },
@@ -458,8 +459,25 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
         );
 
         return { channel, isExisting: false };
-      }, { timeout: 10_000 }),
+      }, {
+        timeout: 10_000,
+        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+      }),
     );
+
+    const maxAttempts = 3;
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        return await attemptFindOrCreate();
+      } catch (error) {
+        const isSerializationConflict = (error as { code?: string } | null)?.code === 'P2034';
+        if (!isSerializationConflict || attempt >= maxAttempts) throw error;
+        logger.info('DM find-or-create serialization conflict; retrying', {
+          workspaceId,
+          attempt,
+        });
+      }
+    }
   }
 
   /**
