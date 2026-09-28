@@ -104,15 +104,12 @@ export async function ensureDefaultAgentSpacesApps(input: {
 }
 
 /**
- * Install the org's default-agent apps into a newly created workspace. Skips
- * agents with no app bound (ensureDefaultAgentSpacesApps runs first on the
- * creation path). Spaces' installApp is itself idempotent, but we only call it
- * for workspaces the sync actually created — see the spaces-sync callers.
+ * Self-healing install: installs only agent apps missing from the workspace
+ * (presence-checked via Spaces' S2S installations endpoint); on check failure
+ * installs anyway — installApp is idempotent. Skips agents with no app bound.
  *
- * Note (current semantics, kept deliberately): `agents.spacesAppToken` holds a
- * single per-install JWT while installs are per-workspace — the newest
- * workspace's install overwrites the stored token. Inbound webhooks route by
- * appId + app-level signing secret and are unaffected.
+ * Note: one `spacesAppToken` per agent, installs are per-workspace — the
+ * newest install overwrites it. Webhooks route by appId + app secret, unaffected.
  */
 export async function installDefaultAgentsToWorkspace(input: {
   orgId: string;
@@ -125,6 +122,23 @@ export async function installDefaultAgentsToWorkspace(input: {
 
   for (const agent of agents) {
     try {
+      // Skip already-installed apps; on check failure install anyway (idempotent).
+      let alreadyInstalled = false;
+      try {
+        const checkRes = await fetch(
+          `${CONFIG.spacesInternalUrl}/api/internal/apps/${agent.spacesAppId}/installations/${input.spacesWorkspaceId}`,
+          { headers: internalS2sHeaders(), signal: AbortSignal.timeout(10_000) },
+        );
+        if (checkRes.ok) {
+          alreadyInstalled = (((await checkRes.json()) as { installed?: boolean }).installed) === true;
+        } else {
+          log.warn(`[provision-workspace-agents] installation check failed slug=${agent.slug} workspace=${input.spacesWorkspaceId} status=${checkRes.status} — attempting install anyway`);
+        }
+      } catch (err) {
+        log.warn(`[provision-workspace-agents] installation check errored slug=${agent.slug} workspace=${input.spacesWorkspaceId}: ${errMsg(err)} — attempting install anyway`);
+      }
+      if (alreadyInstalled) continue;
+
       const res = await fetch(`${CONFIG.spacesInternalUrl}/api/internal/apps/${agent.spacesAppId}/install`, {
         method: "POST",
         headers: internalS2sHeaders(),
