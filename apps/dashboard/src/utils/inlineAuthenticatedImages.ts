@@ -16,6 +16,18 @@ const TRANSPARENT_PIXEL =
 const MAX_IMAGES = 50;
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
+// Only these authenticated endpoints serve real images; fetching anything else
+// with the viewer's cookies and inlining the response would leak private data
+// into a script-capable iframe. Matched on the resolved pathname.
+const AUTHENTICATED_IMAGE_PATHS: RegExp[] = [
+  /^\/api\/users\/[^/]+\/picture$/,
+  /^\/api\/attachments\/[^/]+\/(thumbnail|download)$/,
+  /^\/api\/emojis\/[^/]+\/image$/,
+  /^\/api\/workflows\/artifacts\/image$/,
+];
+const isAllowedImagePath = (pathname: string): boolean =>
+  AUTHENTICATED_IMAGE_PATHS.some(re => re.test(pathname));
+
 const authenticatedOrigins = (): Set<string> => {
   const origins = new Set<string>([window.location.origin]);
   try {
@@ -63,7 +75,8 @@ export async function inlineAuthenticatedImages(
       const resolved = new URL(src, baseUrl);
       return (
         (resolved.protocol === 'https:' || resolved.protocol === 'http:') &&
-        origins.has(resolved.origin)
+        origins.has(resolved.origin) &&
+        isAllowedImagePath(resolved.pathname)
       );
     } catch {
       return false;
@@ -91,6 +104,9 @@ export async function inlineAuthenticatedImages(
           withCredentials: true,
         });
         const blob = response.data;
+        if (!blob.type.startsWith('image/')) {
+          throw new Error(`not an image (${blob.type || 'unknown'})`);
+        }
         if (blob.size > MAX_IMAGE_BYTES) throw new Error(`too large (${blob.size} bytes)`);
         img.setAttribute('src', await blobToDataUri(blob));
       } catch (error) {
