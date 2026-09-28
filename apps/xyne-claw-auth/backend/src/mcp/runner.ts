@@ -454,10 +454,9 @@ export async function listToolsForUser(
   serverName: string,
   credentials: Record<string, unknown>,
   agentSlug?: string,
-  options: { fresh?: boolean } = {},
-  lane?: SessionLane,
+  options: { fresh?: boolean; lane?: SessionLane } = {},
 ): Promise<McpServerTools> {
-  const fetchTools = () => fetchToolsFromServer(userId, serverType, credentials, agentSlug);
+  const fetchTools = () => fetchToolsFromServer(userId, serverType, credentials, agentSlug, options.lane);
   const useShared =
     !options.fresh && TOOL_LIST_CACHE_TTL_MS > 0 && SHARED_TOOL_LIST_SERVER_TYPES.has(serverType);
   const tools = useShared ? await sharedToolList(serverType, fetchTools) : await fetchTools();
@@ -472,6 +471,7 @@ async function fetchToolsFromServer(
   serverType: string,
   credentials: Record<string, unknown>,
   agentSlug?: string,
+  lane?: SessionLane,
 ): Promise<McpToolInfo[]> {
   const client = await getOrCreateSession(userId, serverType, credentials, agentSlug, lane);
   // Must pass BOTH `timeout` AND `signal`: the SDK runs an independent

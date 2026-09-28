@@ -239,7 +239,7 @@ appConnectorsInternalRouter.post("/tools", asyncHandler(async (req: Request, res
 
   let listed;
   try {
-    listed = await listToolsForUser(body.userId, body.serverType, row.name, credentials, undefined, "app");
+    listed = await listToolsForUser(body.userId, body.serverType, row.name, credentials, undefined, { lane: "app" });
   } catch (err) {
     log.error(`[app-connectors] list tools failed type=${body.serverType} user=${body.userId}: ${errMsg(err)}`);
     throw new HttpError(502, `${row.name} did not respond`, "upstream_failed");
@@ -275,7 +275,7 @@ appConnectorsInternalRouter.post("/call", asyncHandler(async (req: Request, res:
     const namesKey = toolNamesKey(body.userId, body.serverType, credentials);
     let names = cachedToolNames(namesKey);
     if (!names?.has(body.tool)) {
-      const listed = await listToolsForUser(body.userId, body.serverType, row.name, credentials, undefined, "app");
+      const listed = await listToolsForUser(body.userId, body.serverType, row.name, credentials, undefined, { lane: "app" });
       names = rememberToolNames(namesKey, listed.tools);
     }
     if (!names.has(body.tool)) {
