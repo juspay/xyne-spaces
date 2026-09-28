@@ -19,6 +19,11 @@ export class AppCommandACL extends BaseQueryACL<
     return { app: { is: await appVisibilityWhere(this.prisma, this.ctx.workspaceId) } }
   }
 
+  /** Service actors (S2S installs) get the same org-wide reads. */
+  async getServiceReadWhere(): Promise<Prisma.AppCommandWhereInput> {
+    return this.getWhereClause()
+  }
+
   /** Editing the command set is editing the template — only the app's creator may do it. */
   async getMutateWhere(): Promise<Prisma.AppCommandWhereInput> {
     return {

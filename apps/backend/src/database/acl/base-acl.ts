@@ -43,6 +43,17 @@ export class BaseQueryACL<
     return { workspaceId: this.ctx.workspaceId } as unknown as TWhereInput
   }
 
+  /**
+   * READ filter for SERVICE actors (jobs, workers, S2S — `!isRequestContext()`).
+   * Default null: "no opinion for service actors" → the extension keeps its
+   * plain `{ workspaceId }` scope (same as before this hook existed).
+   * A table whose read visibility is actor-agnostic (e.g. org-wide) returns it
+   * here — AppsACL and the app-template tables do exactly that.
+   */
+  async getServiceReadWhere(): Promise<TWhereInput | null> {
+    return null
+  }
+
   /** CREATE authorization — may `ctx` insert this row? `true` = allow (default). */
   async canCreate(_data: TData): Promise<boolean> {
     return true

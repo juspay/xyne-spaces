@@ -213,34 +213,38 @@ export function withAclExtension<T extends PrismaClient>(prisma: T): T {
             return query(args);
           }
 
-          const camel = toCamel(model);
-          // The table's per-user ACL applies only to a principal asking on their own behalf.
-          // Every other caller acts for the workspace and gets workspace scope alone.
-          const acl = !isRequestContext()
-            ? null
-            : ACLFactory.getACL(
-                camel as Uncapitalize<Prisma.ModelName>,
-                {
-                  userId: ctx!.userId,
-                  workspaceId: ws,
-                  role: ctx!.role,
-                  orgRole: ctx!.orgRole,
-                  memberId: ctx!.memberId,
-                },
-                base,
-              );
+           const camel = toCamel(model);
+           // The table's per-user ACL applies only to a principal asking on their own behalf
+           // (isRequestContext()). Every other caller acts for the workspace: reads may still
+           // consult the table's actor-agnostic policy via the opt-in `getServiceReadWhere`
+           // (BaseQueryACL), while writes skip `canCreate`/`getMutateWhere` and keep the plain
+           // workspace scope exactly as before.
+           const principalAsking = isRequestContext();
+           const acl = ACLFactory.getACL(
+                 camel as Uncapitalize<Prisma.ModelName>,
+                 {
+                   userId: ctx!.userId,
+                   workspaceId: ws,
+                   role: ctx!.role,
+                   orgRole: ctx!.orgRole,
+                   memberId: ctx!.memberId,
+                 },
+                 base,
+               );
 
-          if (isRead) {
-            let aclWhere = acl ? ((await acl.getWhereClause()) as Record<string, unknown> | null) : null;
-            if (!aclWhere) {
-              // Reached when the table's ACL expressed no opinion, or the caller is a
-              // service actor: fall back to plain workspace scope.
-              if (!isWorkspaceScopedModel(model)) {
-                warnUnscoped(model, operation, 'no-workspace-column');
-                return query(args);
-              }
-              aclWhere = { workspaceId: ws };
-            }
+           if (isRead) {
+             let aclWhere = principalAsking
+               ? ((await acl.getWhereClause()) as Record<string, unknown> | null)
+               : ((await acl.getServiceReadWhere()) as Record<string, unknown> | null);
+             if (!aclWhere) {
+               // Reached when the table's ACL expressed no opinion (or no service-actor
+               // opinion): fall back to plain workspace scope.
+               if (!isWorkspaceScopedModel(model)) {
+                 warnUnscoped(model, operation, 'no-workspace-column');
+                 return query(args);
+               }
+               aclWhere = { workspaceId: ws };
+             }
             // A table that declared itself unscoped (UnscopedACL) — pass straight through so
             // findUnique keeps its native, transaction-safe behaviour.
             if (isUnrestricted(aclWhere)) {
@@ -316,7 +320,7 @@ export function withAclExtension<T extends PrismaClient>(prisma: T): T {
             const rows: unknown[] = Array.isArray(data) ? data : data != null ? [data] : [];
             for (const row of rows) {
               reportForeignWorkspace(model, operation, row, ws);
-              if (acl) {
+              if (principalAsking) {
                 const ok = await acl.canCreate(row as Record<string, unknown>);
                 if (!ok) throw denyCreate(model, operation);
               }
@@ -330,7 +334,7 @@ export function withAclExtension<T extends PrismaClient>(prisma: T): T {
             reportWorkspaceReassignment(model, operation, (args as { data?: unknown }).data, ws);
           }
 
-          let mutateWhere = acl ? ((await acl.getMutateWhere()) as Record<string, unknown> | null) : null;
+          let mutateWhere = principalAsking ? ((await acl.getMutateWhere()) as Record<string, unknown> | null) : null;
           if (!mutateWhere) {
             // Service actors only — see the read branch.
             if (!isWorkspaceScopedModel(model)) {
@@ -376,7 +380,7 @@ export function withAclExtension<T extends PrismaClient>(prisma: T): T {
               }
               // Row doesn't exist → this upsert will insert; gate it like a create.
               reportForeignWorkspace(model, operation, a.create, ws);
-              if (acl) {
+              if (principalAsking) {
                 const ok = await acl.canCreate((a.create ?? {}) as Record<string, unknown>);
                 if (!ok) throw denyCreate(model, operation);
               }

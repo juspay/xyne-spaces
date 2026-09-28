@@ -4,7 +4,7 @@ import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { AppError } from '@/middleware/errorHandler';
 import { installApp } from '@/apps/core/appUtils';
-import { runAsServiceActor, runAsSystem, SYSTEM_USER_ID } from '@/database/tenant/context';
+import { runAsServiceActor, SYSTEM_USER_ID } from '@/database/tenant/context';
 import { decrypt, encrypt } from '@/services/encryptionService';
 import crypto from 'crypto';
 import { isValidUrl } from '@/utils/urlUtils';
@@ -90,7 +90,8 @@ router.post(
 
     // Apps are org-level but carry the creator's workspace as their tenant key — the
     // idempotency lookup must span workspaces or a second workspace would recreate the app.
-    const existing = await runAsSystem(() =>
+    // Under the service actor, AppsACL.getServiceReadWhere resolves it at org scope.
+    const existing = await runAsServiceActor(SYSTEM_USER_ID, input.workspaceId, () =>
       db.apps.findFirst({
         where: { orgId: input.orgId, name: { equals: input.name, mode: 'insensitive' } },
       }),

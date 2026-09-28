@@ -20,6 +20,11 @@ export class AppsACL extends BaseQueryACL<
     return appVisibilityWhere(this.prisma, this.ctx.workspaceId)
   }
 
+  /** Service actors (S2S installs, workers) get the same org-wide reads. */
+  async getServiceReadWhere(): Promise<Prisma.AppsWhereInput> {
+    return this.getWhereClause()
+  }
+
   /**
    * Writes stay with the creator, but follow them across the org: the app template is edited from
    * wherever its creator is, not only from the workspace the row was stamped with.
