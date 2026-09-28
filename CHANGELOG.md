@@ -1,3 +1,10 @@
+## [1.416.0](https://github.com/juspay/xyne-spaces/compare/v1.415.0...v1.416.0) (2026-09-28)
+
+
+### Features
+
+* desk kanban bord pagination ([#2347](https://github.com/juspay/xyne-spaces/issues/2347)) ([3bdc444](https://github.com/juspay/xyne-spaces/commit/3bdc444748ddb2eea51875be73ab160348e13cca))
+
 ## [1.415.0](https://github.com/juspay/xyne-spaces/compare/v1.414.3...v1.415.0) (2026-09-28)
 
 
