@@ -12,7 +12,6 @@ import {
   ChatDefault,
   Troubleshoot,
   ClipboardDefault,
-  Piechart01,
   FileText,
   CalendarTimer,
   Globe,
@@ -26,7 +25,6 @@ import {
   BuildingApartmentTwo,
   LightningThunderElectricOn,
   Atom,
-  ChatChatting,
   RocketShip,
   GitBranch,
   LayoutGridTwoVertical,
@@ -65,7 +63,8 @@ export type ChatNavKey =
   | 'bookmarks'
   | 'drafts-sent'
   | 'recap'
-  | 'radar';
+  | 'radar'
+  | 'scheduled-messages';
 
 /** A built-in Inbox entry, or an artifact app the user added (`app:<id>`). */
 export type InboxItemKey = ChatNavKey | `app:${string}`;
@@ -116,6 +115,13 @@ export const CHAT_NAV_ITEMS: ChatNavItem[] = [
     to: '/chat/drafts-sent',
     icon: SendPlaneSlant,
     trackName: 'OPEN_DRAFTS_AND_SENT',
+  },
+  {
+    key: 'scheduled-messages',
+    label: 'Scheduled Messages',
+    to: '/scheduled-messages',
+    icon: CalendarTimer,
+    trackName: 'OPEN_SCHEDULED_MESSAGES',
   },
   {
     key: 'recap',
@@ -188,7 +194,6 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
   { path: '/chat/canvas', label: 'My Canvas', icon: FileText, popout: true },
   { path: '/automations', label: 'Automations', icon: LightningThunderElectricOn, popout: true },
   { path: '/workflows', label: 'Workflows', icon: GitBranch, popout: true },
-  { path: '/scheduled-messages', label: 'Scheduled Messages', icon: CalendarTimer, popout: true },
   { path: '/user-groups', label: 'User Groups', icon: UserThree, popout: true },
   {
     path: '/resource-access',
@@ -206,15 +211,14 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
   { path: '/browser', label: 'Browser', icon: Globe, popout: true },
   { path: '/apps', label: 'Apps', icon: Grid02, popout: true },
   { path: '/guide', label: 'User Guide', icon: QuestionMarkCircle, popout: true },
-  { path: '/product-insights', label: 'Insights', icon: Piechart01, popout: true },
   { path: '/knowledge-base', label: 'Knowledge Base', icon: Notebook, popout: true },
   { path: '/memory', label: 'Context', icon: Database, popout: true },
   { path: '/dashboards', label: 'Dashboards', icon: GridDashboard01, popout: true },
   { path: '/listProjects', label: 'List Projects', icon: FolderDefault, popout: true },
   { path: '/releaseManager', label: 'Release Manager', icon: RocketShip, popout: true },
   {
-    path: '/jira-migration',
-    label: 'Jira Migration',
+    path: '/migrations',
+    label: 'Migrations',
     icon: SwapArrowHorizontal,
     iconSize: 18,
     popout: true,
@@ -223,20 +227,6 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
     path: '/migration/confluence',
     label: 'Confluence Migration',
     icon: Notebook,
-    iconSize: 18,
-    popout: true,
-  },
-  {
-    path: '/migration/whatsapp',
-    label: 'WhatsApp Migration',
-    icon: ChatChatting,
-    iconSize: 18,
-    popout: true,
-  },
-  {
-    path: '/slack-migration',
-    label: 'Slack Migration',
-    icon: SwapArrowHorizontal,
     iconSize: 18,
     popout: true,
   },
@@ -269,7 +259,6 @@ export const TOOLBAR_ITEM_DESCRIPTIONS: Record<string, string> = {
   '/recordings': 'Call and meeting recordings',
   '/chat/canvas': 'Personal canvas documents',
   '/automations': 'Workflow automation triggers and actions',
-  '/scheduled-messages': 'Messages scheduled for later delivery',
   '/browser': 'In-app browser tabs (desktop app only)',
   '/apps': 'Installed app integrations',
   '/guide': 'Product documentation and onboarding guide',
