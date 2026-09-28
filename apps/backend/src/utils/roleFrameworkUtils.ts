@@ -43,6 +43,43 @@ export async function getGroupRoleIdsByUser(
   return byUser;
 }
 
+/**
+ * The legacy responsibilities each group member effectively holds, derived from the union of
+ * their roles (both user_role_mappings USER_GROUP rows and the legacy user_group_mappings.roleId)
+ * mapped to the 5-enum via the role name. Used by the legacy responsibility-based assignment path
+ * so that a role assigned through the new multi-role UI (which no longer stamps `responsibility`)
+ * still counts as MANAGER/TEAM_LEAD/QA/etc. Returns Map<userId, Set<UserResponsibility>>.
+ */
+export async function getGroupResponsibilitiesByUser(
+  userGroupId: string,
+  client: PrismaClient = prisma,
+): Promise<Map<string, Set<UserResponsibility>>> {
+  const roleIdsByUser = await getGroupRoleIdsByUser(userGroupId, client);
+  const allRoleIds = [...new Set([...roleIdsByUser.values()].flatMap(set => [...set]))];
+  const result = new Map<string, Set<UserResponsibility>>();
+  if (allRoleIds.length === 0) return result;
+
+  const roles = await client.role.findMany({
+    where: { id: { in: allRoleIds } },
+    select: { id: true, name: true },
+  });
+  const enumById = new Map<string, UserResponsibility>();
+  for (const role of roles) {
+    const responsibility = DEFAULT_ROLE_NAME_TO_ENUM[role.name];
+    if (responsibility) enumById.set(role.id, responsibility);
+  }
+
+  for (const [userId, roleIds] of roleIdsByUser) {
+    const set = new Set<UserResponsibility>();
+    for (const roleId of roleIds) {
+      const responsibility = enumById.get(roleId);
+      if (responsibility) set.add(responsibility);
+    }
+    if (set.size > 0) result.set(userId, set);
+  }
+  return result;
+}
+
 export const DEFAULT_ROLE_NAME_TO_ENUM: Record<string, UserResponsibility> = {
   MANAGER: UserResponsibility.MANAGER,
   TEAM_LEAD: UserResponsibility.TEAM_LEAD,
