@@ -627,6 +627,48 @@ export async function spacesConversationExists(conversationId: string): Promise<
   }
 }
 
+export interface SpacesPostTarget {
+  channelName: string | null;
+  thread?: { author: string | null; html: string };
+}
+
+export async function getSpacesPostTarget(target: { channelId?: string; conversationId?: string }): Promise<SpacesPostTarget | null> {
+  const client = getClient();
+  if (!client) return null;
+  try {
+    let channelId = target.channelId?.trim() ?? "";
+    let thread: SpacesPostTarget["thread"];
+    const conversationId = target.conversationId?.trim() ?? "";
+    if (conversationId) {
+      const conv = await client.$queryRawUnsafe<Array<{ channelId: string | null; initialMessageId: string | null }>>(
+        `SELECT "channelId", "initialMessageId" FROM public.conversations WHERE "conversationId" = $1 LIMIT 1`,
+        conversationId,
+      );
+      channelId = conv[0]?.channelId ?? channelId;
+      const initialMessageId = conv[0]?.initialMessageId;
+      if (initialMessageId) {
+        const msg = await client.$queryRawUnsafe<Array<{ content: string | null; senderId: string | null }>>(
+          `SELECT left(content, 4000) AS content, "senderId" FROM public.messages WHERE "conversationId" = $1 AND "messageId" = $2 LIMIT 1`,
+          conversationId,
+          initialMessageId,
+        );
+        const senderId = msg[0]?.senderId;
+        const sender = senderId
+          ? await client.$queryRawUnsafe<Array<{ name: string | null }>>(`SELECT name FROM public.users WHERE id = $1 LIMIT 1`, senderId)
+          : [];
+        thread = { author: sender[0]?.name ?? null, html: msg[0]?.content ?? "" };
+      }
+    }
+    const channel = channelId
+      ? await client.$queryRawUnsafe<Array<{ name: string | null }>>(`SELECT name FROM public.channels WHERE id = $1 LIMIT 1`, channelId)
+      : [];
+    return { channelName: channel[0]?.name ?? null, ...(thread ? { thread } : {}) };
+  } catch (err) {
+    log.warn(`[spaces-db] post-target channelId=${target.channelId ?? ""} conversationId=${target.conversationId ?? ""} err=${errMsg(err)}`);
+    return null;
+  }
+}
+
 /** Resolve `@email@domain` → the active user with that email (email is @unique). */
 export async function getSpacesUserByEmail(email: string, workspaceId?: string): Promise<UserHit[]> {
   const client = getClient();

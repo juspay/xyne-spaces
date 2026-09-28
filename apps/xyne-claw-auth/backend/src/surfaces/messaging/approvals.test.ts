@@ -9,8 +9,10 @@ vi.mock("../../lib/approved-write.js", () => ({ executeApprovedWrite }));
 vi.mock("./delivery.js", () => ({ enqueueOutbound }));
 vi.mock("./identity.js", () => ({ resolveIdentity: async () => null }));
 vi.mock("./cards.js", () => ({ newCardToken: () => "t", parkOptions: vi.fn() }));
+const getSpacesPostTarget = vi.fn();
+vi.mock("../../lib/spaces-db.js", () => ({ getSpacesPostTarget }));
 
-const { redeemApproval } = await import("./approvals.js");
+const { redeemApproval, enqueueApprovalCards, describeWriteAction } = await import("./approvals.js");
 
 const account = { id: "acc", orgId: "org1", surfaceId: "whatsapp", accountKey: "acct_1" } as never;
 const base = {
@@ -79,5 +81,44 @@ describe("redeemApproval", () => {
       chatId: base.chatId,
     });
     expect(created).not.toHaveBeenCalled();
+  });
+});
+
+describe("user-send-message approval card", () => {
+  const signed = (params: Record<string, unknown>) => ({
+    serverType: "xyne-spaces",
+    tool: "user-send-message",
+    userId: "u1",
+    signature: "sig",
+    params,
+  });
+  const target = { channel: "whatsapp-cloud", connectedSurfaceId: "acc", accountKey: "k", chatId: "chat", senderId: "919", isGroup: false } as never;
+
+  beforeEach(() => {
+    enqueueOutbound.mockReset();
+    getSpacesPostTarget.mockReset();
+  });
+
+  it("names the channel instead of its id", async () => {
+    getSpacesPostTarget.mockResolvedValue({ channelName: "general" });
+    await enqueueApprovalCards({ target, userId: "u1", pendingActions: [signed({ channelId: "cmi345s9b07pmk5k4en17sbuy", content: "Go <b>try</b> it" })] });
+    const card = enqueueOutbound.mock.calls[0]?.[1].card;
+    expect(card.body).toBe('Send this message as you to *#general*:\n\n"Go *try* it"');
+    expect(getSpacesPostTarget).toHaveBeenCalledWith({ channelId: "cmi345s9b07pmk5k4en17sbuy" });
+  });
+
+  it("shows which thread a reply lands in: channel, author and the post it answers", () => {
+    const body = describeWriteAction("user-send-message", { conversationId: "eed03881", content: "Adding to this 🚀" }, {
+      channelName: "general",
+      thread: { author: "Samit Barai", html: '<p class="m-0">Build agents for your team.<br>Enable your team to do <i>deep</i> work.</p>' },
+    });
+    expect(body).toBe(
+      'Reply as you in the thread in *#general* started by *Samit Barai*:\n> Build agents for your team. Enable your team to do _deep_ work.\n\nYour reply:\n\n"Adding to this 🚀"',
+    );
+  });
+
+  it("falls back to ids when the Spaces DB has nothing", () => {
+    expect(describeWriteAction("user-send-message", { channelId: "ch1", content: "hi" }, null)).toBe('Send this message as you to #ch1:\n\n"hi"');
+    expect(describeWriteAction("user-send-message", { conversationId: "c1", content: "hi" }, null)).toBe('Reply as you in an existing thread:\n\n"hi"');
   });
 });
