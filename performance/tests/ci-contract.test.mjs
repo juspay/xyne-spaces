@@ -59,6 +59,7 @@ test('Jenkins adapter offers the Zero and REST scenarios by their explicit names
 
   assert.match(source, /'zero-query-transform'/);
   assert.match(source, /'rest-messaging'/);
+  assert.match(source, /'search'/);
   assert.doesNotMatch(source, /'messaging'/);
 });
 
@@ -105,4 +106,15 @@ test('CI runs the offline performance suite, so it is not hook-dependent', () =>
   assert.match(source, /perf:validate/);
   // Must be its own job, not bolted onto a build that could skip it.
   assert.match(source, /^\s{2}performance:/m);
+});
+
+test('the search scenario reads only — no write verbs, no mutation endpoints', () => {
+  const source = readFileSync(
+    path.join(repositoryRoot, 'performance', 'k6', 'scenarios', 'search.js'),
+    'utf8',
+  );
+
+  assert.match(source, /\/api\/vespaSearch/);
+  assert.doesNotMatch(source, /http\.(post|put|patch|del)\(/);
+  assert.match(source, /ENVIRONMENT_FAILURE[^\n]*token rejected/);
 });

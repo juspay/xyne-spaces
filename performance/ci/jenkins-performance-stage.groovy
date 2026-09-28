@@ -16,8 +16,8 @@ parameters {
   )
   choice(
     name: 'PERF_SCENARIO',
-    choices: ['zero-query-transform', 'rest-messaging', 'smoke'],
-    description: 'zero-query-transform reads (ACL/AST only); rest-messaging writes rows'
+    choices: ['zero-query-transform', 'search', 'rest-messaging', 'smoke'],
+    description: 'zero-query-transform and search read; rest-messaging writes rows'
   )
   string(name: 'PERF_VUS_OVERRIDE', defaultValue: '', description: 'Optional bounded VU override')
   string(

@@ -38,6 +38,10 @@ export function buildOptions(config) {
     if (config.scenario === 'zero-query-transform') {
       thresholds['zero_query_duration'] = ['p(95)<400'];
     }
+    if (config.scenario === 'search') {
+      // Production p95 for this group is ~2.0s; 2500 is a deliberate ceiling, not a target.
+      thresholds['search_duration'] = ['p(95)<2500'];
+    }
   }
 
   return {
@@ -76,4 +80,8 @@ export function readinessUrl(config) {
 
 export function zeroQueryUrl(config) {
   return `${config.baseUrl}/api/zero/query`;
+}
+
+export function searchUrl(config, path) {
+  return `${config.baseUrl}${path}`;
 }
