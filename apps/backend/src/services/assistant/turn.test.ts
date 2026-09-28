@@ -736,11 +736,10 @@ describe('a turn', () => {
     chat.hears({});
     const reply = await chat.say('what is the weather');
     expect(reply.say).toMatch(/^I can’t do that yet\. I can /);
-    // The closest actions, at most four, as buttons that start them.
+    // Nothing was even slightly likely: one way to start per area, as buttons.
     expect(
       reply.display?.kind === 'choices' && reply.display.options.map((option) => option.id)
-    ).toEqual(expect.arrayContaining(['create_channel', 'send_dm']));
-    expect(reply.display?.kind === 'choices' && reply.display.options).toHaveLength(4);
+    ).toEqual(['send_dm', 'create_channel']);
     const started = await chat.tap('create_channel');
     expect(started.say).toBe('What should I name the channel?');
   });

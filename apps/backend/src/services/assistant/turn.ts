@@ -1,5 +1,6 @@
 import {
   advance,
+  starterActions,
   type ActionCatalog,
   type ActionDefinition,
   type ClientContext,
@@ -56,6 +57,8 @@ export interface TurnServices {
 const CONTINUE_PROBABILITY = 0.5;
 /** Actions offered when nothing fits, closest first. */
 const MAX_SUGGESTIONS = 4;
+/** An action at least this likely is worth suggesting. */
+const MIN_SUGGESTION = 0.05;
 
 interface Outcome {
   session: AssistantSession;
@@ -217,11 +220,13 @@ function replyWhenNothingFits(
     case 'question':
       return replyForQuestion(text);
     case 'action': {
-      // A task the assistant cannot do yet: offer the closest ones it can.
-      const closest = ranked.length
-        ? ranked.map(({ action }) => action)
-        : [...catalog.values()].map(({ id }) => id);
-      return replyForNothingFits(catalog, closest.slice(0, MAX_SUGGESTIONS));
+      // A task the assistant cannot do yet: offer the closest ones it can, then one per area.
+      const likely = ranked.filter(({ probability }) => probability >= MIN_SUGGESTION);
+      const ids = [
+        ...likely.map(({ action }) => action),
+        ...starterActions(catalog).map(({ id }) => id),
+      ];
+      return replyForNothingFits(catalog, [...new Set(ids)].slice(0, MAX_SUGGESTIONS));
     }
     default:
       return replyForKind(kind, catalog);

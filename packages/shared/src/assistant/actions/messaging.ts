@@ -4,7 +4,7 @@ import type { ActionArea } from '../core/action.js';
 export const MESSAGING = {
   id: 'messaging',
   description:
-    'Messages: a direct message to a person, a post in an existing channel (with @mentions of people or agents), or finding past messages and threads by what they were about.',
+    'Messages: sending or opening a direct message with a person, a post in an existing channel (with @mentions of people or agents), or finding past messages and threads by what they were about.',
   actions: [
     {
       id: 'send_dm',
@@ -28,7 +28,7 @@ export const MESSAGING = {
           },
           {
             when: 'opening a DM without saying what to send ("open my DM with Priya")',
-            instead: 'that only opens the conversation',
+            instead: 'that opens the DM',
           },
           {
             when: 'forwarding or sharing a message that already exists ("forward this message to …", "share that with …"); "this message" is not the words to send',
@@ -59,6 +59,41 @@ export const MESSAGING = {
         { op: 'send_message', target: { fromStep: 0 }, text: '$message' },
       ],
       done: 'Sent to {recipient}.',
+    },
+    {
+      id: 'open_dm',
+      title: 'Open a direct message',
+      intent: {
+        description:
+          'Open the direct message conversation with one named person or app, without sending anything.',
+        examples: [
+          'Open my DM with Priya',
+          'Go to my chat with Daniel',
+          'Show my messages with Meera',
+          'Take me to my conversation with Sam',
+        ],
+        notFor: [
+          {
+            when: 'saying what to send ("tell Priya hi", "message Daniel that …")',
+            instead: 'that sends a direct message',
+          },
+        ],
+      },
+      effect: 'navigate',
+      fields: {
+        person: {
+          kind: 'person',
+          required: true,
+          ask: 'Whose DM should I open?',
+          describe: 'the one person or app whose direct messages to open',
+        },
+      },
+      summarize: 'Open your DM with {person}',
+      plan: [
+        { op: 'open_or_create_dm', user: '$person' },
+        { op: 'navigate', target: { fromStep: 0 } },
+      ],
+      done: 'Here’s your DM with {person}.',
     },
     {
       id: 'post_message',

@@ -476,6 +476,7 @@ test('every shipped action loads and renders with sample values', () => {
   const android = { kind: 'channel', id: 'c-android', name: 'android' };
   const samples = {
     recipient: priya,
+    person: priya,
     message: 'hi',
     name: 'ABC',
     visibility: 'public',

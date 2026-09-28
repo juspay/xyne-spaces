@@ -245,6 +245,29 @@ const CASES: EvalCase[] = [
     values: { recipient: 'arjun' },
   },
 
+  // Opening a direct message.
+  {
+    name: 'open dm',
+    group: 'request',
+    turns: ['open my DM with Priya Shah'],
+    action: 'open_dm',
+    values: { person: 'priya-shah' },
+  },
+  {
+    name: 'open dm chat',
+    group: 'request',
+    turns: ['go to my chat with Daniel Okafor'],
+    action: 'open_dm',
+    values: { person: 'daniel' },
+  },
+  {
+    name: 'open dm messages',
+    group: 'request',
+    turns: ['show my messages with Meera Iyer'],
+    action: 'open_dm',
+    values: { person: 'meera' },
+  },
+
   // Posting in a channel.
   {
     name: 'post that',
