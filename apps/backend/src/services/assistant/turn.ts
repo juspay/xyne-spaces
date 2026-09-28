@@ -150,9 +150,10 @@ async function understand(
   };
   const withDebug = (outcome: Outcome): Outcome => ({ ...outcome, debug });
 
-  if (draft) {
-    // Help or a question mid-request is answered, and the request's question asked again.
+  const action = draft && catalog.get(draft.action);
+  if (draft && action) {
     const asking = draft.awaiting?.kind === 'field' ? draft.awaiting.field : null;
+    // Help or a question mid-request is answered, and the request's question asked again.
     if (asking && !continues && (kind === 'help' || kind === 'question')) {
       const openQuestion = await applyEvent({ type: 'details', updates: [] }, session, services);
       return withDebug({
@@ -163,8 +164,6 @@ async function understand(
     // Otherwise it continues the request when Jev says so, or when a question is open: then
     // anything but a clear new request is its answer ("Random." when asked for a name).
     if (continues || (asking && decision.kind !== 'act')) {
-      const action = catalog.get(draft.action);
-      if (!action) return { session, reply: replyForError('That request is no longer available.') };
       const words = heard.words(action) ?? (await wordsFor(action, text, services));
       // Answering "which one?" with more details ("the one with Meera") looks again with the
       // same words, narrowed by the new ones.

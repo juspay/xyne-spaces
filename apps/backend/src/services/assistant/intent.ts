@@ -75,7 +75,7 @@ const CONTINUES: JevQuestion = {
   instructions:
     '`inProgress` is a request the assistant is still working on, and `inProgress.question` is what it just asked. Does `request` answer that question, or correct or add to that request, rather than start a new one?',
   criteria: {
-    true: 'It answers or adjusts the request in progress: "call it ABC", "private", "also add Priya", "actually make it Daniel Park", "the one with Meera".',
+    true: 'It answers or adjusts the request in progress: "call it ABC", "private", "also add Priya", "actually make it Daniel Park", "the one with Meera", or any words to send when `inProgress.question` asks what to say ("the build is green").',
     false:
       'It is a complete request of its own, even for the same kind of action: "tell Priya the build is green" while a message to Daniel is waiting, or "create a channel called Ops".',
   },

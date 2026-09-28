@@ -75,11 +75,18 @@ export const CHANNELS = {
       title: 'Open a channel',
       intent: {
         description: 'Open an existing channel the user can access, by its name or part of it.',
-        examples: ['Open the Android channel', 'Take me to release planning', 'Go to design review'],
+        examples: [
+          'Open the Android channel',
+          'Take me to release planning',
+          'Go to design review',
+          'Switch to marketing',
+          'Open random',
+        ],
         notFor: [
           {
             when: 'creating a new channel, or posting a message or @mentioning someone in one',
-            instead: 'those are different actions, even when they say “open” or “go to” the channel',
+            instead:
+              'those are different actions, even when they say “open” or “go to” the channel',
           },
         ],
       },

@@ -730,6 +730,8 @@ interface Score {
   fields: Array<{ field: string; ok: boolean; got: string }>;
   asks: boolean | null;
   kind: boolean | null;
+  /** Jev did not answer (a gateway refusal or timeout), so the case says nothing about understanding. */
+  jevFailed: boolean;
   ms: number[];
 }
 
@@ -783,11 +785,15 @@ live('understanding, end to end, with the real Jev', () => {
           .map(({ field, got }) => `${field}=${got}`);
         return `  ✗ ${score.name}${score.action === false ? ' [action]' : ''}${score.asks === false ? ' [asks]' : ''}${score.kind === false ? ' [kind]' : ''} ${wrong.join(' ')}`;
       });
+    const failed = scores.filter((score) => score.jevFailed).map((score) => score.name);
     const ms = scores.flatMap((score) => score.ms).sort((a, b) => a - b);
     const p = (q: number): number => ms[Math.min(ms.length - 1, Math.floor(q * ms.length))] ?? 0;
-    const report = [...rows, `turn time  median ${p(0.5)} ms · p90 ${p(0.9)} ms`, ...misses].join(
-      '\n'
-    );
+    const report = [
+      ...rows,
+      `jev failed ${failed.length}${failed.length ? ` (${failed.join(', ')})` : ''}`,
+      `turn time  median ${p(0.5)} ms · p90 ${p(0.9)} ms`,
+      ...misses,
+    ].join('\n');
     // eslint-disable-next-line no-console
     console.log(`\n${report}\n`);
     if (process.env.ASSISTANT_EVAL_OUT) {
@@ -821,6 +827,7 @@ live('understanding, end to end, with the real Jev', () => {
       const identity = { workspaceId: 'w', userId: 'me', sessionId: 's' };
 
       let response: TurnResponse | undefined;
+      let jevFailed = false;
       const ms: number[] = [];
       for (const turn of evalCase.turns) {
         const startedAt = Date.now();
@@ -829,6 +836,7 @@ live('understanding, end to end, with the real Jev', () => {
           : { kind: 'text' as const, text: turn, via: 'voice' as const };
         response = await handleTurn(input, identity, services, { onScreen });
         ms.push(Date.now() - startedAt);
+        jevFailed ||= response.say.startsWith('I couldn’t work that out');
         if (process.env.ASSISTANT_EVAL_TRACE) trace(evalCase.name, turn, response, session);
       }
       const seen = observe(session, response!);
@@ -844,6 +852,7 @@ live('understanding, end to end, with the real Jev', () => {
         })),
         asks: evalCase.asks ? seen.asks === evalCase.asks : null,
         kind: evalCase.kind ? seen.kind === evalCase.kind : null,
+        jevFailed,
         ms,
       });
     },

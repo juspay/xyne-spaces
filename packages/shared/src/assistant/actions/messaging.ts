@@ -18,6 +18,8 @@ export const MESSAGING = {
           'Create a DM with Daniel and message hello',
           'Let Sam know the build is green',
           'Message Ask AI that this ticket needs to be done',
+          'I want to send a message',
+          'Create a DM with Daniel',
         ],
         notFor: [
           {
@@ -89,7 +91,7 @@ export const MESSAGING = {
           required: true,
           ask: 'Which channel should I post in?',
           describe:
-            'the name of the existing channel to post in, like “general” or “design review”, or “here” for the one on screen',
+            'the name of the existing channel to post in: the words right after “in”, “to”, “go to”, or “open”, even without the word “channel” and even before a colon (“post in ios: …” → “ios”), or “here” for the one on screen',
         },
         mentions: {
           kind: 'person',
@@ -152,13 +154,15 @@ export const MESSAGING = {
           many: true,
           required: false,
           ask: 'Who was in it?',
-          describe: 'the other people who were in the conversation, never the user themselves (“me”, “I”)',
+          describe:
+            'the other people who were in the conversation, never the user themselves (“me”, “I”)',
         },
         in: {
           kind: 'channel',
           required: false,
           ask: 'Which channel was it in?',
-          describe: 'the channel the conversation was in',
+          describe:
+            'only the name of a channel the user says it was in (“in the android channel” → “android”), never the topic of the conversation',
         },
       },
       summarize: 'Open the conversation “{conversation}”',
