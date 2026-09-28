@@ -17,7 +17,7 @@ const DEFAULT_THINK_TIME_SECONDS = 1;
 // Scenarios that authenticate as a test identity need the fixture. Of those, only the
 // ones that call /api/zero/* are metered by the per-user Zero limiter, so only they
 // carry an identity-count floor.
-const FIXTURE_SCENARIOS = new Set(['zero-query-transform', 'rest-messaging']);
+const FIXTURE_SCENARIOS = new Set(['zero-query-transform', 'search', 'rest-messaging']);
 const ZERO_METERED_SCENARIOS = new Set(['zero-query-transform']);
 
 export function parseCliArgs(argv) {

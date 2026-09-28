@@ -216,6 +216,7 @@ test('every supported profile selects an existing scenario entry file', () => {
     ['stress', 'zero-query-transform'],
     ['soak', 'zero-query-transform'],
     ['release', 'rest-messaging'],
+    ['release', 'search'],
   ];
 
   for (const [profile, scenario] of combinations) {
@@ -234,7 +235,7 @@ function exists(file) {
 }
 
 test('requires an identity fixture for every authenticated scenario', () => {
-  for (const scenario of ['zero-query-transform', 'rest-messaging']) {
+  for (const scenario of ['zero-query-transform', 'rest-messaging', 'search']) {
     assert.throws(
       () => validateRuntime({
         root,
@@ -382,4 +383,23 @@ test('the write opt-in reaches the catalog from the environment', () => {
     true,
   );
   assert.equal(buildRunInput({}, {}).allowWriteScenarios, false);
+});
+
+test('search needs a fixture but not the Zero identity floor', () => {
+  const { temporaryRoot, write } = fixtureWorkspace();
+  write('one.json', identities(1));
+
+  // /api/vespaSearch goes through authMiddleware.authenticate, not the Zero rate
+  // limiter, so one identity is legal even at the load profile.
+  assert.equal(
+    validateRuntime({
+      root: temporaryRoot,
+      config: { scenario: 'search', profile: 'load' },
+      env: {
+        PERF_BASE_URL: 'https://preprod.example',
+        PERF_USERS_FILE: path.join(temporaryRoot, 'performance', 'test-data', 'one.json'),
+      },
+    }).identityCount,
+    1,
+  );
 });

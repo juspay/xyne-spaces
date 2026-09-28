@@ -26,7 +26,7 @@ test('defaults non-smoke profiles to the Zero query-transform read path', () => 
 test('offers the Zero and REST scenarios under explicit names', () => {
   assert.deepEqual(
     [...SCENARIOS].sort(),
-    ['rest-messaging', 'smoke', 'zero-query-transform'],
+    ['rest-messaging', 'search', 'smoke', 'zero-query-transform'],
   );
 });
 
@@ -130,4 +130,11 @@ test('allows a write scenario only on an explicit opt-in', () => {
 test('the read scenarios need no opt-in', () => {
   assert.equal(resolveRunConfig({ profile: 'release' }).scenario, 'zero-query-transform');
   assert.equal(resolveRunConfig({ profile: 'smoke' }).scenario, 'smoke');
+});
+
+test('search is a read scenario, so it carries no write gate', () => {
+  assert.equal(
+    resolveRunConfig({ profile: 'release', scenario: 'search' }).scenario,
+    'search',
+  );
 });
