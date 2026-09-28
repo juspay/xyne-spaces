@@ -36,6 +36,14 @@ export type RecordingSharingCommand =
       access?: GrantableEntityUserAccess;
       /** Optional share message. */
       messageContent?: string;
+      /**
+       * Internal callers can grant access without creating the visible
+       * channel/DM share post. Deliberately absent from the HTTP zod schema in
+       * recordingSharingController, so it can never be set from a request body.
+       * Used by the thread-linked recording auto-grant, where the recording
+       * already has its anchor message inside the thread.
+       */
+      post?: boolean;
     }
   | { action: 'revoke'; targets: RecordingShareTarget[] }
   | { action: 'link_ticket'; ticketId: string }
@@ -163,6 +171,7 @@ export class RecordingSharingService {
           command.targets,
           command.access ?? EntityUserAccess.VIEW,
           command.messageContent,
+          command.post ?? true,
         );
       case 'revoke':
         return this.revoke(callId, actor, command.targets);
@@ -205,6 +214,7 @@ export class RecordingSharingService {
     targets: RecordingShareTarget[],
     access: GrantableEntityUserAccess,
     messageContent?: string,
+    post = true,
   ): Promise<RecordingSharingResult> {
     await this.runTransaction(async tx => {
       const recording = await this.loadManageableRecording(tx, callId, actor);
@@ -254,6 +264,7 @@ export class RecordingSharingService {
 
         // Post once for channel and user shares.
         if (
+          post &&
           (target.type === 'channel' || target.type === 'user') &&
           !asSharePost(change.share.metadata)
         ) {
