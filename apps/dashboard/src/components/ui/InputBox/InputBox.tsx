@@ -74,6 +74,7 @@ import { sanitizeHtmlContent } from '../../Chat/ChatInput/ChatInput.utils';
 import { getEmojiFontSizeClass } from '../../../utils/emojiUtils';
 import { isEventFromInput } from '../../../utils/chatUtils';
 import { useDraftAttachments } from '../../../hooks/useDraft';
+import { useAttachmentUploadStore } from '../../../store/useAttachmentUploadStore';
 import { MediaViewer } from '../files';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { MobileEditor } from './MobileEditor';
@@ -306,7 +307,18 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       removeDroppedFile: providerRemoveDroppedFile,
       clearDroppedFiles: providerClearDroppedFiles,
       getDroppedFilesForEntity,
+      retryUpload: providerRetryUpload,
     } = useDraftAttachments();
+    const attachmentUploads = useAttachmentUploadStore(state => state.uploads);
+    const handleRetryUpload = useCallback(
+      (attachmentId: string) => {
+        void providerRetryUpload(attachmentId).then(ok => {
+          if (!ok)
+            toast.error('Upload failed again', { description: 'Check your connection and retry.' });
+        });
+      },
+      [providerRetryUpload],
+    );
     const { enterSendsMessage } = useEnterSendsMessage();
     const { defaultFormattingToolbarOpen } = useDefaultFormattingToolbarOpen();
     const shareableOrigin = useShareableOrigin();
@@ -1841,6 +1853,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                           onRemove={() => void handleRemoveAttachment({ attachmentId, file })}
                           onPreview={() => void handlePreview(file, attachmentId)}
                           isUploading={false}
+                          upload={attachmentUploads[attachmentId]}
+                          onRetry={() => handleRetryUpload(attachmentId)}
                         />
                       ))}
                       {attachedCanvas && (
@@ -1917,6 +1931,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                     onRemove={() => void handleRemoveAttachment({ attachmentId, file })}
                     onPreview={() => void handlePreview(file, attachmentId)}
                     isUploading={false}
+                    upload={attachmentUploads[attachmentId]}
+                    onRetry={() => handleRetryUpload(attachmentId)}
                   />
                 ))}
               </div>
