@@ -40,21 +40,27 @@ function clamp(value: string, max: number): string {
 const THREAD_PREVIEW_CHARS = 160;
 
 export function htmlToCardText(html: string): string {
-  return html
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<\/(p|div|li)>/gi, "\n")
-    .replace(/<(b|strong)>([\s\S]*?)<\/\1>/gi, "*$2*")
-    .replace(/<(i|em)>([\s\S]*?)<\/\1>/gi, "_$2_")
-    .replace(/<[^>]+>/g, "")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&amp;/g, "&")
-    .replace(/[ \t]+/g, " ")
-    .replace(/\n\s*\n+/g, "\n")
-    .trim();
+  let current = html;
+  let previous: string;
+  do {
+    previous = current;
+    current = current
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<\/(p|div|li)>/gi, "\n")
+      .replace(/<(b|strong)>([\s\S]*?)<\/\1>/gi, "*$2*")
+      .replace(/<(i|em)>([\s\S]*?)<\/\1>/gi, "_$2_")
+      .replace(/<[^>]+>/g, "")
+      .replace(/&nbsp;/g, " ")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&amp;/g, "&")
+      .replace(/[ \t]+/g, " ")
+      .replace(/\n\s*\n+/g, "\n")
+      .trim();
+  } while (current !== previous);
+  return current;
 }
 
 function describePostTarget(params: Record<string, unknown>, target: SpacesPostTarget | null): string {
