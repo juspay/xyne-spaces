@@ -68,16 +68,11 @@ export async function buildNotifyActionUrl(
     }
     case 'MESSAGE': {
       const msg = await db.message
-        .findUnique({
-          where: { messageId: id },
-          select: {
-            conversationId: true,
-            conversation: { select: { channelId: true } },
-          },
-        })
+        .findUnique({ where: { messageId: id }, select: { conversationId: true } })
         .catch((err: unknown) => { logger.error(`[notify-action-url] MESSAGE lookup failed id=${id}`, err); return null; });
-      const conv = msg?.conversation;
-      return msg && conv?.channelId
+      if (!msg?.conversationId) return undefined;
+      const conv = await repositories.conversations.findById(msg.conversationId).catch((err: unknown) => { logger.error(`[notify-action-url] CONVERSATION lookup failed id=${msg.conversationId}`, err); return null; });
+      return conv?.channelId
         ? `${await chatRouteBase(workspaceId, conv.channelId)}#origin=${msg.conversationId}&messageId=${id}`
         : undefined;
     }
