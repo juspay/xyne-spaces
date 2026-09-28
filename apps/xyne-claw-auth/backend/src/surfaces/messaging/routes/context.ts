@@ -68,13 +68,14 @@ export async function resolveAccountRequest(req: Request): Promise<AccountResolu
   if (!account || account.surface.key !== plugin.key || account.status !== "ACTIVE") {
     return { ok: false, status: 404, error: "Account not found" };
   }
-  // On a user-scoped channel the account IS someone's own number, so its
-  // owner manages it without being an admin. Everyone else — including other
-  // members of the same org — gets the same 404 as a stranger.
+  // On a user-scoped channel the account IS someone's own number: only its
+  // owner sees it. Everyone else — admins included — gets the same 404 as a
+  // stranger.
   const owned =
     plugin.accountScope === "user" &&
     sessionOrgId === account.orgId &&
     parseAccountConfig(account.config).ownerUserId === userId;
+  if (plugin.accountScope === "user" && !owned) return { ok: false, status: 404, error: "Account not found" };
   if (!owned) {
     const platformAdmin = await isClawAdmin(userId);
     if (!platformAdmin && (sessionOrgId !== account.orgId || !(await isOrgAdmin(userId, account.orgId)))) {
@@ -87,15 +88,15 @@ export async function resolveAccountRequest(req: Request): Promise<AccountResolu
 /** Who may create and list accounts on this channel: an org admin always, and
  *  on a user-scoped channel any member acting for themselves. */
 export type MemberResolution =
-  | { ok: true; userId: string; orgId: string; isAdmin: boolean }
+  | { ok: true; userId: string; orgId: string }
   | { ok: false; status: number; error: string };
 
 export async function resolveAccountAuthor(req: Request, plugin: AnyChannelPlugin): Promise<MemberResolution> {
   const admin = await resolveOrgAdmin(req);
-  if (admin.ok) return { ok: true, userId: admin.userId, orgId: admin.orgId, isAdmin: true };
+  if (admin.ok) return { ok: true, userId: admin.userId, orgId: admin.orgId };
   if (plugin.accountScope !== "user") return admin;
   const userId = getRequesterId(req);
   const orgId = getOrgId(req);
   if (!userId || !orgId) return { ok: false, status: 401, error: "Authenticated organization session required" };
-  return { ok: true, userId, orgId, isAdmin: false };
+  return { ok: true, userId, orgId };
 }

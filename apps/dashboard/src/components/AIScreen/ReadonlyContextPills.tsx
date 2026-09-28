@@ -3,7 +3,6 @@ import {
   Hash,
   Ticket,
   FileText,
-  Phone,
   BookOpen,
   Folder,
   FolderGit2,
@@ -13,6 +12,7 @@ import {
 } from 'lucide-react';
 import type { AttachedContextItem } from '../Chat/XyneAISidebar/components/ContextPickerPanel';
 import { cn } from '../../utils/classNames';
+import { PhoneDefault } from '@xyne/icons';
 
 /** Icon per attached-context type — mirrors the composer's pill row so a chip
  *  reads the same in the transcript as it did when the user attached it. Calls
@@ -29,7 +29,7 @@ function iconForType(type: string): ReactElement {
     case 'canvas':
       return <FileText className={className} aria-hidden />;
     case 'call':
-      return <Phone className={className} aria-hidden />;
+      return <PhoneDefault className={className} aria-hidden />;
     case 'collection':
       return <BookOpen className={className} aria-hidden />;
     case 'folder':

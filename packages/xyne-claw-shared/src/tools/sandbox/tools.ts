@@ -8,6 +8,7 @@ import { formatSandboxUnavailable, isSandboxUnavailableDeferEnabled } from "./un
 import { createLogger } from "../../logger.js";
 import { createReadStream } from "node:fs";
 import { resolve, join, sep } from "node:path";
+import { hasRange, sliceLines } from "./read-range.js";
 import {
   cleanupSdlcGitCredentialMaterial,
   installSdlcRepositoryAccess,
@@ -1360,7 +1361,8 @@ export const sandboxReadFile: ToolDefinition = {
   name: "Sandbox Read File",
   description:
     "Read a file from a sandbox session. " +
-    "Text files are returned inline. Binary files (images, PDFs, etc.) are loaded into your context for self-inspection ONLY — the user does NOT see them. " +
+    "Text files are returned inline with totalLines; for a large file pass offset (1-based first line) and limit (number of lines) to read just the part you need. " +
+    "Binary files (images, PDFs, etc.) are loaded into your context for self-inspection ONLY — the user does NOT see them. " +
     "If you want to actually send files to the user, call `sandbox-deliver-files` (it accepts multiple paths in one call).",
   source: "custom:sandbox",
   configSchema: SANDBOX_CONFIG_SCHEMA,
@@ -1374,6 +1376,14 @@ export const sandboxReadFile: ToolDefinition = {
       path: {
         type: "string",
         description: "Absolute path inside the sandbox to read",
+      },
+      offset: {
+        type: "number",
+        description: "Optional 1-based line number to start reading from (text files only).",
+      },
+      limit: {
+        type: "number",
+        description: "Optional maximum number of lines to return (text files only).",
       },
     },
     required: ["sessionId", "path"],
@@ -1403,7 +1413,10 @@ export const sandboxReadFile: ToolDefinition = {
         // redactor exists — defence-in-depth against accidental / unsophisticated
         // leaks; ephemeral creds are the real fix against determined attackers.
         const content = redactSecrets(buf.toString("utf8"));
-        return JSON.stringify({ path, content, encoding: "utf8" });
+        if (hasRange(params["offset"], params["limit"])) {
+          return JSON.stringify({ path, ...sliceLines(content, params["offset"], params["limit"]), encoding: "utf8" });
+        }
+        return JSON.stringify({ path, content, encoding: "utf8", totalLines: content.split("\n").length });
       }
       const fileName = path.split("/").pop() ?? "file";
       const mimeType = sandboxContentType(fileName);

@@ -23,6 +23,7 @@ import { markRunQueueDrainPaused, startRunQueueWorker } from "./run-queue-worker
 import { startLoopWatchdog, stopLoopWatchdog } from "./loop-watchdog.js";
 import { stopRunControlSubscriber } from "./run-control.js";
 import { createLogger } from "./logger.js";
+import { startPodAddressPublisher } from "./run-ownership.js";
 const log = createLogger("main");
 
 const DRAIN_TIMEOUT_MS = Number(process.env["DRAIN_TIMEOUT"] ?? 900) * 1_000;
@@ -86,6 +87,7 @@ app.use(litellmModelsRouter);
 
 const server = app.listen(SERVER.port, () => {
   log.info(`[xyne-claw] Server listening on port ${SERVER.port}`);
+  startPodAddressPublisher(SERVER.port);
 });
 
 let shuttingDown = false;

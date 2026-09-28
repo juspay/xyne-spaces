@@ -329,16 +329,8 @@ export function setupRequestInterceptor(): void {
   session.defaultSession.webRequest.onHeadersReceived(
     { urls: [`${config.BACKEND_URL}/*`] },
     (details, callback) => {
-      if (details.statusCode === 401) {
-        const contentType = details.responseHeaders?.['content-type']?.[0];
-        if (contentType?.includes('application/json')) {
-          void clearAllCookies();
-          mainWindow?.webContents.send('auth:token-expired');
-        }
-      }
-
       if (details.url.includes('/logout') && details.statusCode === 200) {
-        void clearAllCookies();
+        void clearAllCookies('logout_response');
       }
 
       callback({ responseHeaders: details.responseHeaders });

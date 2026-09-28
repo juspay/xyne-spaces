@@ -61,6 +61,19 @@ function clean(value: unknown, max = 200): string {
   return escapeHtml(cut);
 }
 
+function thinkingLabel(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value !== "object") return clean(value, 40);
+  const t = value as { requestedLevel?: unknown; effectiveLevel?: unknown; source?: unknown };
+  const effective = typeof t.effectiveLevel === "string" ? t.effectiveLevel : "";
+  const requested = typeof t.requestedLevel === "string" ? t.requestedLevel : "";
+  const source = typeof t.source === "string" ? t.source : "";
+  const level = effective || requested;
+  if (!level) return "";
+  const clamped = requested && effective && requested !== effective ? ` (requested ${requested})` : "";
+  return clean(`${level}${clamped}${source ? ` · ${source}` : ""}`, 80);
+}
+
 function cleanBlock(value: unknown, max: number): string {
   if (typeof value !== "string") return "";
   const scrubbed = scrub(value);
@@ -1048,7 +1061,7 @@ export function buildTraceParts(run: DebugTraceRun): TraceParts {
     ["Session", clean(run.sessionId, 80)],
     ["Conversation", clean(run.conversationId, 120)],
     ["Provider / model", `${clean(run.provider, 40) || "—"} / ${clean(run.model, 80) || "—"}`],
-    ["Thinking", clean(run.thinking, 40) || "—"],
+    ["Thinking", thinkingLabel(run.thinking) || "—"],
     ["Started", clean(startedAt, 40) || "—"],
     ["Finished", clean(finishedAt, 40) || "in progress"],
     ["Duration", ms(durationMs)],
