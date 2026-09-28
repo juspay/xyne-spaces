@@ -22,7 +22,11 @@ describe('isAllVisibleActivity', () => {
       true,
     );
     expect(
-      isAllVisibleActivity({ actorAction: 'replied_v2', actionSource: 'message', classification: null }),
+      isAllVisibleActivity({
+        actorAction: 'replied_v2',
+        actionSource: 'message',
+        classification: null,
+      }),
     ).toBe(true);
   });
 
@@ -43,7 +47,9 @@ describe('isAllVisibleActivity', () => {
   it('only counts DMs classified ACTIONABLE or FYI', () => {
     const dm = { actorAction: 'direct_message', actionSource: 'message' };
     expect(isAllVisibleActivity(dm)).toBe(false);
-    expect(isAllVisibleActivity({ ...dm, classification: ActivityClassification.PENDING })).toBe(false);
+    expect(isAllVisibleActivity({ ...dm, classification: ActivityClassification.PENDING })).toBe(
+      false,
+    );
     expect(isAllVisibleActivity({ ...dm, classification: ActivityClassification.ACTIONABLE })).toBe(
       true,
     );
