@@ -1,7 +1,8 @@
 import { SDLC_MEMBERSHIP_RELATION } from '@xyne/shared';
 import { BaseRepository } from './base';
+import type { ChannelParticipantRepository } from './channelParticipantRepository';
 import { Channel } from '@prisma/client';
-import { ChannelScopeType, ChannelVisibility, ChannelType, ProjectType } from '@xyne/shared';
+import { ChannelRole, ChannelScopeType, ChannelVisibility, ChannelType, ProjectType } from '@xyne/shared';
 import { QueryOptions } from '@/types/database';
 import { logger } from '@/utils/logger';
 import { withWorkspaceScope } from '@/database/tenant/context';
@@ -376,6 +377,92 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
   }
 
   /**
+   * Atomically find or create a 1:1 DM. The pair's sorted user ids are its
+   * canonical key; an advisory transaction lock closes the probe-then-insert
+   * race without requiring a production-breaking unique-index migration over
+   * historical duplicate DMs. Participants and their status/count rows are
+   * committed in the same transaction as a newly-created channel.
+   */
+  async findOrCreateOneOnOneDMChannel(options: {
+    userId: string;
+    targetUserId: string;
+    channelParticipants: ChannelParticipantRepository;
+    workspaceId: string;
+    projectId: string;
+    description?: string;
+    creatorIsClosed?: boolean;
+    targetIsClosed?: boolean;
+  }): Promise<{ channel: Channel; isExisting: boolean }> {
+    const {
+      userId,
+      targetUserId,
+      channelParticipants,
+      workspaceId,
+      projectId,
+      description,
+      creatorIsClosed = false,
+      targetIsClosed = false,
+    } = options;
+    const name = [userId, targetUserId].sort().join(',');
+    const lockKey = `dm-channel:${workspaceId}:${name}`;
+
+    return withWorkspaceScope(() =>
+      this.db.$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`;
+
+        const existing = await tx.channel.findFirst({
+          where: { workspaceId, scopeType: ChannelScopeType.DM, name },
+          orderBy: { createdAt: 'asc' },
+        });
+        if (existing) return { channel: existing, isExisting: true };
+
+        const channel = await tx.channel.create({
+          data: {
+            scopeType: ChannelScopeType.DM,
+            name,
+            description,
+            visibility: ChannelVisibility.PRIVATE,
+            createdBy: userId,
+            projectId,
+            workspaceId,
+          },
+        });
+
+        // Preserve ChannelRepository.create's channel→board dual-write.
+        const boards = await tx.board.findMany({
+          where: { projectId },
+          orderBy: { createdAt: 'asc' },
+          select: { id: true },
+        });
+        if (boards.length > 0) {
+          const now = new Date();
+          await tx.channelBoardMapping.createMany({
+            data: boards.map((board, index) => ({
+              channelId: channel.id,
+              boardId: board.id,
+              workspaceId,
+              isDefault: index === 0,
+              createdBy: userId,
+              createdAt: now,
+              updatedAt: now,
+            })),
+            skipDuplicates: true,
+          });
+        }
+
+        await channelParticipants.addParticipantInTransaction(
+          tx, channel.id, userId, null, ChannelRole.ADMIN, creatorIsClosed,
+        );
+        await channelParticipants.addParticipantInTransaction(
+          tx, channel.id, targetUserId, null, ChannelRole.MEMBER, targetIsClosed,
+        );
+
+        return { channel, isExisting: false };
+      }, { timeout: 10_000 }),
+    );
+  }
+
+  /**
    * Find or create a DM or GROUP_DM channel based on the number of invited users.
    * If the resulting channel name would exceed 255 characters (>~10 members),
    * falls back to the initiator's self-DM to avoid the DB constraint.
@@ -414,30 +501,14 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
     if (invitedUserIds.length === 1) {
       const targetUserId = invitedUserIds[0];
 
-      // Check if DM channel exists
-      let dmChannel = await this.getDMChannel(userId, targetUserId);
-
-      if (dmChannel) {
-        return dmChannel.id;
-      }
-
-      // Create new DM channel
-      const dmChannelName = [userId, targetUserId].sort().join(',');
-
-      dmChannel = await this.create({
-        scopeType: ChannelScopeType.DM,
-        name: dmChannelName,
-        visibility: ChannelVisibility.PRIVATE,
-        createdBy: userId,
-        projectId,
+      const { channel } = await this.findOrCreateOneOnOneDMChannel({
+        userId,
+        targetUserId,
+        channelParticipants,
         workspaceId,
+        projectId,
       });
-
-      // Add both users as participants
-      await channelParticipants.addParticipant(dmChannel.id, userId, 'ADMIN', false);
-      await channelParticipants.addParticipant(dmChannel.id, targetUserId, 'MEMBER', false);
-
-      return dmChannel.id;
+      return channel.id;
     }
 
     // Multiple users - create or find group DM channel
