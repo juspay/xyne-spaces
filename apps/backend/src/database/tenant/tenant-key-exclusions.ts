@@ -17,6 +17,4 @@ export const TENANT_KEY_EXCLUDED_MODELS = [
   'DoclingAsyncFile',
   'DoclingAsyncPart',
   'ConnectGroup',
-  'SecretDefinition',
-  'SecretVersion',
 ] as const satisfies readonly Prisma.ModelName[];

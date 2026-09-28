@@ -103,14 +103,14 @@ const columns: ColumnDef<SecretSummary>[] = [
   { field: 'name', header: 'Name' },
   { field: 'rotationState', header: 'Rotation state' },
   {
-    field: 'liveVersion',
-    header: 'Live version',
-    renderCell: (_value, row) => (row.liveVersion ? `v${row.liveVersion.version}` : '—'),
+    field: 'activeVersion',
+    header: 'Active version',
+    renderCell: (_value, row) => (row.activeVersion ? `v${row.activeVersion.version}` : '—'),
   },
   {
-    field: 'liveVersion',
+    field: 'activeVersion',
     header: 'Encryption',
-    renderCell: (_value, row) => row.liveVersion?.encryptionImpl ?? '—',
+    renderCell: (_value, row) => row.activeVersion?.encryptionImpl ?? '—',
   },
   {
     field: 'createdAt',

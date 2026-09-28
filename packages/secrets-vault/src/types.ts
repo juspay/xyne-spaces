@@ -26,7 +26,7 @@ export enum RotationState {
 
 export enum SecretVersionStatus {
   PENDING = 'pending',
-  LIVE = 'live',
+  ACTIVE = 'active',
   RETIRED = 'retired',
   REVOKED = 'revoked',
   FAILED = 'failed',
@@ -42,13 +42,14 @@ export interface SecretDefinitionRow {
   name: string;
   rotationState: string;
   createdBy: string;
+  updatedBy: string;
   createdAt: Date;
   updatedAt: Date;
 }
 
 export interface SecretVersionRow {
   id: string;
-  secretId: string;
+  secretDefinitionId: string;
   version: number;
   value: string;
   encryptionImpl: string;
@@ -68,16 +69,21 @@ export interface VaultPrismaClient {
   secretDefinition: {
     findUnique(args: { where: { name: string } }): Promise<SecretDefinitionRow | null>;
     create(args: {
-      data: { name: string; createdBy: string; rotationState: RotationState };
+      data: {
+        name: string;
+        createdBy: string;
+        updatedBy: string;
+        rotationState: RotationState;
+      };
     }): Promise<SecretDefinitionRow>;
   };
   secretVersion: {
     findFirst(args: {
-      where: { secretId: string; status: SecretVersionStatus };
+      where: { secretDefinitionId: string; status: SecretVersionStatus };
     }): Promise<SecretVersionRow | null>;
     create(args: {
       data: {
-        secretId: string;
+        secretDefinitionId: string;
         version: number;
         value: string;
         encryptionImpl: EncryptionImpl;

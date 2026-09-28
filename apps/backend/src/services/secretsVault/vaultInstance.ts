@@ -1,9 +1,12 @@
 import { createCustomEncryptionAdapter, createSecretsVault, parseHexEncryptionKey } from '@xyne/secrets-vault';
 import { config } from '@/config/env';
-import { DatabaseClient } from '@/database/client';
+import { CommonDatabaseClient } from '@/database/commonClient';
 import { genericEncryptionAdapter } from './genericEncryptionAdapter';
 
-const prisma = DatabaseClient.getInstance();
+// SecretDefinition/SecretVersion live in the common DB, not the main one — see
+// apps/backend/prisma-common/schema.prisma. Moved here so version allocation
+// (EntitySequenceService) and the row insert share one database.
+const prisma = CommonDatabaseClient.getInstance();
 
 if (!config.encryptionKey) {
   throw new Error('ENCRYPTION_KEY not found in environment variables');

@@ -13,8 +13,8 @@ interface CacheEntry {
   expiresAt: number;
 }
 
-function aadFor(secretId: string, version: number): string {
-  return `secrets-vault:1:${secretId}:${version}`;
+function aadFor(secretDefinitionId: string, version: number): string {
+  return `secrets-vault:1:${secretDefinitionId}:${version}`;
 }
 
 export function createSecretsVault(deps: SecretsVaultDeps) {
@@ -34,8 +34,8 @@ export function createSecretsVault(deps: SecretsVaultDeps) {
   }
 
   /**
-   * Returns the decrypted live value for `name`, or null if no SecretDefinition
-   * or no live SecretVersion exists. Callers are responsible for falling back to
+   * Returns the decrypted active value for `name`, or null if no SecretDefinition
+   * or no active SecretVersion exists. Callers are responsible for falling back to
    * their own hardcoded env var on null/throw (see DESIGN.md Fallback chain) —
    * this function does not know about env vars.
    */
@@ -50,15 +50,15 @@ export function createSecretsVault(deps: SecretsVaultDeps) {
     const definition = await deps.prisma.secretDefinition.findUnique({ where: { name } });
     if (!definition) return null;
 
-    const liveVersion = await deps.prisma.secretVersion.findFirst({
-      where: { secretId: definition.id, status: SecretVersionStatus.LIVE },
+    const activeVersion = await deps.prisma.secretVersion.findFirst({
+      where: { secretDefinitionId: definition.id, status: SecretVersionStatus.ACTIVE },
     });
-    if (!liveVersion) return null;
+    if (!activeVersion) return null;
 
-    const adapter = adapterFor(liveVersion.encryptionImpl as EncryptionImpl);
+    const adapter = adapterFor(activeVersion.encryptionImpl as EncryptionImpl);
     const plaintext = await adapter.decrypt(
-      liveVersion.value,
-      aadFor(definition.id, liveVersion.version),
+      activeVersion.value,
+      aadFor(definition.id, activeVersion.version),
     );
 
     if (cacheTtlMs > 0) {
@@ -70,7 +70,7 @@ export function createSecretsVault(deps: SecretsVaultDeps) {
 
   /**
    * Creates a new SecretDefinition plus its first SecretVersion, going straight
-   * to status "live" (skips verify — this is the same value already running in
+   * to status "active" (skips verify — this is the same value already running in
    * prod via env var, per DESIGN.md). `name` must already be registered in the
    * caller's secretConfig registry; that check is the caller's responsibility,
    * not this package's — this function only touches the DB.
@@ -81,7 +81,12 @@ export function createSecretsVault(deps: SecretsVaultDeps) {
     createdBy: string;
   }): Promise<void> {
     const definition = await deps.prisma.secretDefinition.create({
-      data: { name: input.name, createdBy: input.createdBy, rotationState: RotationState.IDLE },
+      data: {
+        name: input.name,
+        createdBy: input.createdBy,
+        updatedBy: input.createdBy,
+        rotationState: RotationState.IDLE,
+      },
     });
 
     const impl = activeEncryptionImpl();
@@ -91,11 +96,11 @@ export function createSecretsVault(deps: SecretsVaultDeps) {
 
     await deps.prisma.secretVersion.create({
       data: {
-        secretId: definition.id,
+        secretDefinitionId: definition.id,
         version,
         value: encrypted,
         encryptionImpl: impl,
-        status: SecretVersionStatus.LIVE,
+        status: SecretVersionStatus.ACTIVE,
       },
     });
 

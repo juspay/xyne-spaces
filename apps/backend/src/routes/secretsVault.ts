@@ -1,10 +1,11 @@
 import { createSecretsVaultRouter } from '@xyne/secrets-vault';
 import { AccessType } from '@xyne/shared';
 import { authorize } from '@/middleware/authorize';
-import { DatabaseClient } from '@/database/client';
+import { CommonDatabaseClient } from '@/database/commonClient';
 import { secretsVault } from '@/services/secretsVault/vaultInstance';
 
-const prisma = DatabaseClient.getInstance();
+// SecretDefinition/SecretVersion live in the common DB now — see prisma-common/schema.prisma.
+const prisma = CommonDatabaseClient.getInstance();
 
 const router = createSecretsVaultRouter({
   vault: secretsVault,

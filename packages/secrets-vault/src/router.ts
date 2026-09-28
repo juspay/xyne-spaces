@@ -11,7 +11,7 @@ export interface SecretsVaultRouterDeps {
     };
     secretVersion: VaultPrismaClient['secretVersion'] & {
       findFirst(args: {
-        where: { secretId: string; status: SecretVersionStatus };
+        where: { secretDefinitionId: string; status: SecretVersionStatus };
         select: {
           version: true;
           status: true;
@@ -47,8 +47,8 @@ export function createSecretsVaultRouter(deps: SecretsVaultRouterDeps): Router {
 
       const secrets = await Promise.all(
         definitions.map(async (def) => {
-          const liveVersion = await deps.prisma.secretVersion.findFirst({
-            where: { secretId: def.id, status: SecretVersionStatus.LIVE },
+          const activeVersion = await deps.prisma.secretVersion.findFirst({
+            where: { secretDefinitionId: def.id, status: SecretVersionStatus.ACTIVE },
             select: {
               version: true,
               status: true,
@@ -62,8 +62,9 @@ export function createSecretsVaultRouter(deps: SecretsVaultRouterDeps): Router {
             name: def.name,
             rotationState: def.rotationState,
             createdBy: def.createdBy,
+            updatedBy: def.updatedBy,
             createdAt: def.createdAt,
-            liveVersion,
+            activeVersion,
           };
         }),
       );
