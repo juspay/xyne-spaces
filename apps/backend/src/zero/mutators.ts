@@ -783,7 +783,7 @@ async function assignFullRoles(
     boardId,
     createdBy,
     projectId,
-    channelId: channelId ?? undefined,
+    channelId: channelId ?? null,
   });
 
   const primaryUserId = primaryUserIdOf(fullResult);
@@ -6369,7 +6369,7 @@ export function createMutators(
                       channelId: ticket.channelId,
                     });
                   } else {
-                    const assignmentResult = await evaluateAssignmentRule(ticket.userGroupId!, newBoardId, undefined, undefined, ticket.projectId);
+                    const assignmentResult = await evaluateAssignmentRule(ticket.userGroupId!, newBoardId, undefined, undefined, ticket.projectId, ticket.channelId);
                     if (assignmentResult.assignedUserId) {
                       logger.info(`[MUTATOR-TICKET-UPDATE] Autoassignment result: assigning to ${assignmentResult.assignedUserId}`);
 
@@ -6920,7 +6920,8 @@ export function createMutators(
                   targetBoardId,
                   AssignmentType.TICKET_ASSIGNEE,
                   undefined,
-                  ticket.projectId
+                  ticket.projectId,
+                  ticket.channelId
                 );
 
                   if (assignmentResult.assignedUserId) {

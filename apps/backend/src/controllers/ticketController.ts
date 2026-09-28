@@ -852,7 +852,9 @@ export class TicketController {
             // Full role assignment will be done after ticket creation
             pendingFullRoleAssignment = true;
           } else {
-            const assignmentResult = await evaluateAssignmentRule(userGroupId, boardId, undefined, undefined, projectId);
+            // The ticket lands in the source conversation's channel when one is given, else in channelId.
+            const ticketChannelId: string | null = (sourceConversationId ? validatedConversation?.channelId : channelId) ?? null;
+            const assignmentResult = await evaluateAssignmentRule(userGroupId, boardId, undefined, undefined, projectId, ticketChannelId);
             if (assignmentResult.assignedUserId) {
               finalAssignedTo = assignmentResult.assignedUserId;
             }
@@ -1389,6 +1391,7 @@ export class TicketController {
             boardId,
             createdBy: userId,
             projectId: ticket.projectId,
+            channelId: ticket.channelId,
           });
           const primaryUserId = primaryUserIdOf(fullRoles);
           if (primaryUserId) {

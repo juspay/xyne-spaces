@@ -1,6 +1,6 @@
 import { DatabaseClient } from '@/database/client';
 import { TicketStatusV2, UserResponsibility } from '@xyne/shared';
-import { evaluateAllRoles, evaluateAssignmentRule, evaluateRoleSlots } from '@/utils/assignmentEngine';
+import { evaluateAllRoles, evaluateAssignmentRule, evaluateRoleSlots, filterMappingsToChannelParticipants } from '@/utils/assignmentEngine';
 import { logger } from '@/utils/logger';
 import { syncUserWorkload } from '@/utils/workloadUtils';
 import { repositories } from '@/database/repositories';
@@ -88,13 +88,19 @@ export class TicketAssignmentService {
    */
   async assignTicket(params: {
     userGroupId: string;
+    channelId: string | null;
   }): Promise<AssignmentResult | null> {
-    const { userGroupId } = params;
+    const { userGroupId, channelId } = params;
 
     // Get all team members
-    const members = await prisma.userGroupMapping.findMany({
+    let members = await prisma.userGroupMapping.findMany({
       where: { userGroupId }
     });
+
+    // Private channels: only participants are eligible.
+    if (channelId) {
+      members = await filterMappingsToChannelParticipants(members, channelId);
+    }
 
     if (members.length === 0) return null;
 
@@ -225,7 +231,8 @@ export class TicketAssignmentService {
     boardId: string;
     createdBy: string;
     projectId?: string;
-    channelId?: string;
+    // Required so private-channel tickets are only assigned to channel participants.
+    channelId: string | null;
   }): Promise<FullRoleAssignmentResult | RoleDrivenAssignmentResult> {
     const { ticketId, userGroupId, boardId, createdBy, projectId, channelId } = params;
 
@@ -275,7 +282,7 @@ export class TicketAssignmentService {
     boardId: string;
     createdBy: string;
     projectId?: string;
-    channelId?: string;
+    channelId: string | null;
     assignmentRoles: AssignmentRoleSlot[];
     workspaceId: string;
   }): Promise<RoleDrivenAssignmentResult> {
@@ -381,7 +388,7 @@ export class TicketAssignmentService {
     boardId: string;
     createdBy: string;
     projectId?: string;
-    channelId?: string;
+    channelId: string | null;
     workspaceId: string;
   }): Promise<FullRoleAssignmentResult> {
     const { ticketId, userGroupId, boardId, createdBy, projectId, channelId, workspaceId } = params;
