@@ -5,7 +5,9 @@ import {
   useLocation,
   useNavigate,
   useParams,
+  type UIMatch,
 } from 'react-router-dom';
+import { KeepAliveOutlet } from '../components/KeepAliveOutlet/KeepAliveOutlet';
 import SplashScreen from './SplashScreen/SplashScreen';
 import ProtectedRoute from '../components/Auth/ProtectedRoute';
 import { useActivityTracker } from '../hooks/useActivityTracker';
@@ -1063,6 +1065,12 @@ const AppRoot = (): ReactElement => {
   );
 };
 
+/** One kept-alive pane per channel, so switching back to a recent channel is a visibility flip. */
+const channelPaneKey = (match: UIMatch): string => {
+  const channelId = match.params['channelId'];
+  return channelId ? `${match.id}:${channelId}` : match.id;
+};
+
 /** Real screen in the SDLC bundle; the framed placeholder in the main one. */
 const SdlcRouteElement = (): ReactElement =>
   isSdlcSurface ? <SdlcScreen /> : <SdlcFrameViewport />;
@@ -1223,7 +1231,7 @@ export const router = createBrowserRouter(
                       path: 'dir',
                       element: (
                         <ToolbarProtectedRoute path='/chat/dir'>
-                          <Outlet />
+                          <KeepAliveOutlet max={5} getKey={channelPaneKey} />
                         </ToolbarProtectedRoute>
                       ),
                       children: [
