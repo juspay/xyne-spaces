@@ -7,7 +7,6 @@ import type { AutomationContext } from '../types/context';
 import { variableRef } from '../engine/variable-ref';
 import { TicketController } from '@/controllers/ticketController';
 import { logger } from '@/utils/logger';
-import { inactiveAssigneeMessage, isInactiveUserId } from '@/utils/inactiveAssignee';
 import { extractPlainTextFromHtml } from '@/utils/contentUtils';
 import { generateTitle } from '@/services/agents/title-generator';
 
@@ -34,14 +33,12 @@ const CreateTicketOutputSchema = z.object({
   ticketId: z.string(),
   xyneId: z.string(),
   boardId: z.string(),
-  warnings: z.array(z.string()).optional(),
 });
 
 interface CreateTicketOutput extends Record<string, unknown> {
   ticketId: string;
   xyneId: string;
   boardId: string;
-  warnings?: string[];
 }
 
 const ticketController = new TicketController();
@@ -128,17 +125,7 @@ export class CreateTicketStep extends BaseActionStep<
       projectId: config.projectId as string,
       boardId: config.boardId as string,
     };
-    const warnings: string[] = [];
-    const assigneeId = config.assigneeId as string | undefined;
-    if (assigneeId && (await isInactiveUserId(assigneeId))) {
-      // Leave assignedTo unset rather than fail the run: the ticket still gets
-      // created, and with a userGroupId the controller auto-assigns a live owner.
-      const message = `${inactiveAssigneeMessage(assigneeId)}; ticket created without this assignee`;
-      warnings.push(message);
-      logger.warn(`[automations] CREATE_TICKET ${message} (automation=${context.automation.id})`);
-    } else if (config.assigneeId !== undefined) {
-      reqBody.assignedTo = config.assigneeId;
-    }
+    if (config.assigneeId !== undefined) reqBody.assignedTo = config.assigneeId;
     if (config.userGroupId !== undefined) reqBody.userGroupId = config.userGroupId;
     if (config.priority !== undefined) reqBody.priority = config.priority;
     if (config.status !== undefined) reqBody.statusV2 = config.status;
@@ -187,7 +174,6 @@ export class CreateTicketStep extends BaseActionStep<
       ticketId: ticket.id,
       xyneId: ticket.xyneId,
       boardId: ticket.boardId,
-      ...(warnings.length > 0 ? { warnings } : {}),
     };
   }
 }

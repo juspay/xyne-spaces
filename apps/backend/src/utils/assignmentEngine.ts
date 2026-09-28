@@ -1,5 +1,5 @@
 import { repositories } from '@/database/repositories';
-import { UserResponsibility, UserStatus } from '@xyne/shared';
+import { UserResponsibility } from '@xyne/shared';
 import { withWorkspaceScope } from '@/database/tenant/context';
 import { notificationService } from '@/services/notificationService';
 import { syncWorkloadForUsers } from './workloadUtils';
@@ -140,18 +140,6 @@ async function resolveStartOffsets(
   return offsets;
 }
 
-/**
- * Group members that can be picked by auto-assignment. Deactivated users are
- * excluded here rather than trusting every deactivation path to have deleted their
- * mappings: one that did not (a bare status write) left a departed user in the
- * pool, receiving new tickets while hidden from the group's member list.
- */
-async function loadCandidateMappings(userGroupId: string): Promise<UserGroupMapping[]> {
-  return repositories.userGroupMapping.findMany({
-    where: { userGroupId, user: { status: { not: UserStatus.INACTIVE } } },
-  });
-}
-
 async function filterMappingsToChannelParticipants(
   userGroupMappings: UserGroupMapping[],
   channelId: string,
@@ -278,7 +266,9 @@ export async function evaluateAssignmentRule(
   logger.info(`[Assignment] Evaluating for userGroupId: ${userGroupId}, boardId: ${boardId}, type: ${assignmentType}${excludeUserId ? `, excludeUserId: ${excludeUserId}` : ''}${projectId ? `, projectId: ${projectId}` : ''}${channelId ? `, channelId: ${channelId}` : ''}`);
 
   // Fetch user group mappings
-  let userGroupMappings = await loadCandidateMappings(userGroupId);
+  let userGroupMappings = await repositories.userGroupMapping.findMany({
+    where: { userGroupId },
+  });
 
   // Only consider members who can actually access the desk's channel.
   if (channelId) {
@@ -813,7 +803,7 @@ export async function evaluateAllRoles(
   logger.info(`[Assignment] evaluateAllRoles for userGroupId: ${userGroupId}, boardId: ${boardId}${projectId ? `, projectId: ${projectId}` : ''}${channelId ? `, channelId: ${channelId}` : ''}`);
 
   // ── Single round of DB fetches ─────────────────────────────────────────────
-  let userGroupMappings = await loadCandidateMappings(userGroupId);
+  let userGroupMappings = await repositories.userGroupMapping.findMany({ where: { userGroupId } });
 
   // Only consider members who can actually access the desk's channel.
   if (channelId) {
@@ -966,7 +956,7 @@ export async function evaluateRoleSlots(
   const result: RoleSlotsResult = {};
   if (roleIds.length === 0) return result;
 
-  let userGroupMappings = await loadCandidateMappings(userGroupId);
+  let userGroupMappings = await repositories.userGroupMapping.findMany({ where: { userGroupId } });
 
   if (channelId) {
     userGroupMappings = await filterMappingsToChannelParticipants(userGroupMappings, channelId);

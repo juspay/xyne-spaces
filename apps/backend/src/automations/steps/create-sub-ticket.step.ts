@@ -5,7 +5,6 @@ import type { AutomationContext } from '../types/context';
 import { variableRef } from '../engine/variable-ref';
 import { createSubTicket } from '@/services/subTicketService';
 import { logger } from '@/utils/logger';
-import { inactiveAssigneeMessage, isInactiveUserId } from '@/utils/inactiveAssignee';
 
 const CreateSubTicketConfigSchema = z.object({
   parentTicketId: variableRef(z.string().min(1)),
@@ -18,14 +17,12 @@ const CreateSubTicketOutputSchema = z.object({
   subTicketId: z.string(),
   mappingId: z.string(),
   parentTicketId: z.string(),
-  warnings: z.array(z.string()).optional(),
 });
 
 interface CreateSubTicketOutput extends Record<string, unknown> {
   subTicketId: string;
   mappingId: string;
   parentTicketId: string;
-  warnings?: string[];
 }
 
 export class CreateSubTicketStep extends BaseActionStep<
@@ -45,20 +42,11 @@ export class CreateSubTicketStep extends BaseActionStep<
     config: z.infer<typeof CreateSubTicketConfigSchema>,
     context: AutomationContext,
   ): Promise<CreateSubTicketOutput> {
-    const warnings: string[] = [];
-    let assignedTo = (config.assignedTo as string | undefined) || null;
-    if (assignedTo && (await isInactiveUserId(assignedTo))) {
-      const message = `${inactiveAssigneeMessage(assignedTo)}; sub-ticket created unassigned`;
-      warnings.push(message);
-      logger.warn(`[automations] CREATE_SUB_TICKET ${message} (automation=${context.automation.id})`);
-      assignedTo = null;
-    }
-
     const result = await createSubTicket({
       parentTicketId: config.parentTicketId as string,
       title: config.title as string,
       description: (config.description as string | undefined) ?? null,
-      assignedTo,
+      assignedTo: (config.assignedTo as string | undefined) ?? null,
       createdBy: context.automation.createdById,
     });
 
@@ -70,7 +58,6 @@ export class CreateSubTicketStep extends BaseActionStep<
       subTicketId: result.subTicketId,
       mappingId: result.mappingId,
       parentTicketId: result.parentTicketId,
-      ...(warnings.length > 0 ? { warnings } : {}),
     };
   }
 }

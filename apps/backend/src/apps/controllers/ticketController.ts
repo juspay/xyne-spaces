@@ -35,12 +35,6 @@ import { adapterRegistry } from '@/integrations/core/adapterRegistry';
 import { scopeExternalMessageIdToSource } from '@/integrations/core/deskSources';
 import { EmailChannelPreferenceRepository } from '@/database/repositories/emailChannelPreferenceRepository';
 import { createTicketCustomFieldActivity } from '@/services/ticketCustomFieldActivityService';
-import {
-  ASSIGNEE_INACTIVE_CODE,
-  inactiveAssigneeMessage,
-  isInactiveUser,
-  isInactiveUserId,
-} from '@/utils/inactiveAssignee';
 
 import { resolveChannelId } from '../utils/channelUtils';
 import { decodeCursor, paginateResults } from '../core/paginationUtils';
@@ -76,24 +70,6 @@ const emailChannelPreferenceRepo = new EmailChannelPreferenceRepository();
 const appsFilesBaseUrl = `${config.backendUrl.replace(/\/$/, '')}/api/apps/files`;
 
 export const prismaClient = DatabaseClient.getInstance();
-
-interface AssignmentWarning {
-  code: string;
-  message: string;
-}
-
-/**
- * A create that names a deactivated assignee still creates the ticket — losing it
- * would be worse than losing the assignee. The assignee is dropped so group
- * auto-assignment can pick a live owner, and the caller gets this warning so a
- * stale integration mapping gets noticed.
- */
-function inactiveAssigneeWarning(assignedToEmail: string): AssignmentWarning {
-  return {
-    code: ASSIGNEE_INACTIVE_CODE,
-    message: `${inactiveAssigneeMessage(assignedToEmail)}; the ticket was created without this assignee and auto-assigned from the user group, if one was given`,
-  };
-}
 
 const CreateTicketBodySchema = z.object({
   title: z.string().min(1, 'Title is required').trim(),
@@ -679,7 +655,6 @@ export class TicketController {
 
       // Resolve assignedToEmail to userId if provided
       let assignedTo: string | undefined;
-      const warnings: AssignmentWarning[] = [];
       if (assignedToEmail) {
         const user = await repositories.users.findByEmail(assignedToEmail, req.user!.workspaceId!);
         if (!user) {
@@ -689,12 +664,7 @@ export class TicketController {
           });
           return;
         }
-        if (isInactiveUser(user)) {
-          warnings.push(inactiveAssigneeWarning(assignedToEmail));
-          logger.warn(`[Apps Ticket Creation] Ignoring deactivated assignee ${assignedToEmail}`);
-        } else {
-          assignedTo = user.id;
-        }
+        assignedTo = user.id;
       }
 
       // Resolve assignedUserGroupAlias to userGroupId if provided
@@ -793,7 +763,7 @@ export class TicketController {
         }
       }
 
-      res.status(201).json(warnings.length > 0 ? { ...result, warnings } : result);
+      res.status(201).json(result);
     } catch (error) {
       logger.error('Error creating ticket:', error);
 
@@ -951,16 +921,6 @@ export class TicketController {
           return;
         }
         resolvedAssigneeId = user.id;
-      }
-
-      // An update names the assignee explicitly, so a departed one is the caller's
-      // error to fix — reject before any field is written.
-      if (resolvedAssigneeId && (await isInactiveUserId(resolvedAssigneeId))) {
-        res.status(422).json({
-          error: inactiveAssigneeMessage(assignedToEmail ?? resolvedAssigneeId),
-          code: 'USER_INACTIVE',
-        });
-        return;
       }
 
       // --- Resolve assignedUserGroupAlias to groupId ---
@@ -2329,19 +2289,13 @@ export class TicketController {
 
       // Resolve assignedToEmail → userId (same as createTicket)
       let assignedTo: string | undefined;
-      const warnings: AssignmentWarning[] = [];
       if (assignedToEmail) {
         const user = await repositories.users.findByEmail(assignedToEmail, workspaceId);
         if (!user) {
           res.status(404).json({ error: `User with email ${assignedToEmail} not found`, code: 'USER_NOT_FOUND' });
           return;
         }
-        if (isInactiveUser(user)) {
-          warnings.push(inactiveAssigneeWarning(assignedToEmail));
-          logger.warn(`[Apps Email Ticket Creation] Ignoring deactivated assignee ${assignedToEmail}`);
-        } else {
-          assignedTo = user.id;
-        }
+        assignedTo = user.id;
       }
 
       // Resolve assignedUserGroupAlias → userGroupId (same as createTicket)
@@ -2592,7 +2546,6 @@ export class TicketController {
         ticketId: ticket?.id,
         xyneId: ticket?.xyneId,
         conversationId: conversation?.conversationId,
-        ...(warnings.length > 0 ? { warnings } : {}),
       });
     } catch (error) {
       logger.error('[TicketController] createEmailTicket error:', error);

@@ -1,5 +1,5 @@
 import { DatabaseClient } from '@/database/client';
-import { TicketStatusV2, UserResponsibility, UserStatus } from '@xyne/shared';
+import { TicketStatusV2, UserResponsibility } from '@xyne/shared';
 import { evaluateAllRoles, evaluateAssignmentRule, evaluateRoleSlots } from '@/utils/assignmentEngine';
 import { logger } from '@/utils/logger';
 import { syncUserWorkload } from '@/utils/workloadUtils';
@@ -92,9 +92,8 @@ export class TicketAssignmentService {
     const { userGroupId } = params;
 
     // Get all team members
-    // Deactivated users can still hold a mapping; never pick them.
     const members = await prisma.userGroupMapping.findMany({
-      where: { userGroupId, user: { status: { not: UserStatus.INACTIVE } } }
+      where: { userGroupId }
     });
 
     if (members.length === 0) return null;
