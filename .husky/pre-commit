@@ -141,5 +141,11 @@ npm run test:enum || exit 1
 echo "Running raw SQL guard..."
 bash scripts/validate-no-raw-sql.sh || exit 1
 
+# Secret-in-log-message guard: blocks NEW log calls that interpolate a secret
+# (`${token}`, `Bearer ${x}`, `cookie ${name}=${value}`) into the message text,
+# which the runtime shredder cannot detect. Count-based, like the raw SQL guard.
+echo "🔐 Checking for secrets interpolated into log messages..."
+bash scripts/validate-no-secret-logging.sh || exit 1
+
 echo ""
 echo "✅ All pre-commit checks passed!"

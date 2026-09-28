@@ -37,21 +37,60 @@ const REDACTED = "[REDACTED]";
 // written onto an object (prototype pollution / property injection). They carry
 // no log value, so we drop them via an explicit literal guard at each write site.
 
-// Secret stems, matched as substrings on the normalized key (so accessToken,
-// x-api-key, refresh_token, clientSecret all hit).
-const SECRET_KEY_RE =
-  /(password|passwd|pwd|token|apikey|secret|authorization|credential|cookie|privatekey|jwt|passphrase)/;
+// KEY detector. A field name is split into words (camelCase, PascalCase,
+// ACRONYMCase, snake_case, kebab-case, dotted) and matched WORD BY WORD, not as
+// a substring — so `tokensIn`, `tokenEmail`, `cookieNames` are not mistaken for
+// secrets while `accessToken`, `x-api-key`, `REFRESH_TOKEN`, `clientSecret` are.
 
-// Safe siblings of a secret stem (masked preview, presence flag, source, expiry,
-// token count…). Checked first and wins over SECRET_KEY_RE.
-const SAFE_KEY_RE = /(preview|present|source|exp|expiry|expiresat|tokens|count|length|type|name|id)$/;
+// A single word that on its own names a secret.
+const SECRET_WORDS = new Set([
+  "password", "passwords", "passwd", "pwd",
+  "token", "apikey", "secret", "secrets",
+  "authorization", "credential", "credentials",
+  "cookie", "cookies", "privatekey", "jwt", "passphrase",
+]);
+
+// Two adjacent words that together name a secret (`api_key`, `privateKey`, `pass_phrase`).
+const SECRET_WORD_PAIRS = new Set(["api key", "private key", "pass phrase"]);
+
+// A glued all-lowercase word that ENDS in one of these is still a secret
+// (`accesstoken`, `xapikey`, `setcookie`, `clientsecret`) — HTTP headers and
+// some SDKs emit keys without separators.
+const GLUED_SECRET_SUFFIX_RE =
+  /(password|passwd|token|apikey|secret|authorization|credentials?|cookie|privatekey|jwt|passphrase)$/;
+
+// Last word (or last two words glued) that makes the field a safe sibling of a
+// secret stem: masked preview, presence flag, source, expiry, count, the owner's
+// identity from a decoded token, etc. Checked first and wins.
+const SAFE_LAST_WORDS = new Set([
+  "preview", "present", "source", "exp", "expiry", "expiresat", "expires",
+  "tokens", "count", "length", "type", "name", "names", "id", "ids",
+  "in", "out", "tried", "email", "sub", "suffix",
+]);
+
+// A boolean flag named `has*` / `is*` (`hasBroadcastToken`, `has_private_key`,
+// `isTokenValid`) can never carry a secret, whatever the rest of the name says.
+const BOOLEAN_FLAG_PREFIXES = new Set(["has", "is"]);
+
+/** Split a field name into lowercase words. */
+function keyWords(key: string): string[] {
+  return key
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+}
 
 /** Secret-shaped value patterns, redacted wherever they appear in any string. */
 const VALUE_PATTERNS: Array<[RegExp, string]> = [
   // PEM private-key blocks (any label: RSA/EC/OPENSSH/…). Must run first.
   [/-----BEGIN (?:[A-Z0-9 ]+ )?PRIVATE KEY-----[\s\S]*?-----END (?:[A-Z0-9 ]+ )?PRIVATE KEY-----/g, "[REDACTED_PEM]"],
-  // `Bearer <token>` in an Authorization header or free text.
-  [/\b[Bb]earer\s+[A-Za-z0-9._~+/=-]{8,}/g, "Bearer [REDACTED]"],
+  // Anything after `Authorization: Bearer` is a credential, whatever its shape.
+  [/\b(authorization["']?\s*[:=]\s*["']?[Bb]earer\s+)[A-Za-z0-9._~+/=-]{8,}/gi, "$1[REDACTED]"],
+  // `Bearer <token>` in an Authorization header or free text. The token must
+  // contain a digit or be 20+ chars, so prose like "bearer returned 401" survives.
+  [/\b[Bb]earer\s+(?=[A-Za-z0-9._~+/=-]*[0-9]|[A-Za-z0-9._~+/=-]{20,})[A-Za-z0-9._~+/=-]{8,}/g, "Bearer [REDACTED]"],
   // JSON Web Tokens: three base64url segments starting `eyJ…`.
   [/\beyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{4,}/g, "[REDACTED_JWT]"],
   // OpenAI / Anthropic style prefixed keys: sk-, sk-ant-, rk-, pk_live_, …
@@ -85,15 +124,27 @@ function redactString(s: string, max: number): string {
   return out;
 }
 
-function normalizeKey(key: string): string {
-  return key.toLowerCase().replace(/[_-]/g, "");
-}
-
 /** Whether a field name denotes a secret (and is not a safe sibling). */
 export function isSecretKey(key: string): boolean {
-  const n = normalizeKey(key);
-  if (SAFE_KEY_RE.test(n)) return false;
-  return SECRET_KEY_RE.test(n);
+  const words = keyWords(key);
+  const last = words[words.length - 1];
+  if (last === undefined) return false;
+  const prev = words[words.length - 2];
+  if (SAFE_LAST_WORDS.has(last) || (prev !== undefined && SAFE_LAST_WORDS.has(prev + last))) return false;
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i] as string;
+    if (SECRET_WORDS.has(w)) return true;
+    const next = words[i + 1];
+    if (next !== undefined && SECRET_WORD_PAIRS.has(`${w} ${next}`)) return true;
+  }
+  // Separator-less keys (`accesstoken`, `x-apikey`): only the final word may be glued.
+  return last.length > 3 && GLUED_SECRET_SUFFIX_RE.test(last);
+}
+
+/** Key detector applied to an actual field: boolean `has*`/`is*` flags are always kept. */
+function isSecretField(key: string, value: unknown): boolean {
+  if (typeof value === "boolean" && BOOLEAN_FLAG_PREFIXES.has(keyWords(key)[0] ?? "")) return false;
+  return isSecretKey(key);
 }
 
 function serializeError(err: Error, max: number): Record<string, LogValueOut> {
@@ -161,7 +212,7 @@ function shredNode(value: unknown, seen: WeakSet<object>, depth: number, opts: R
       count++;
       if (key === "__proto__" || key === "constructor" || key === "prototype") continue;
       // KEY detector: secret-named field redacted wholesale (don't recurse into it).
-      entries.push([key, isSecretKey(key) ? REDACTED : shredNode((value as Record<string, unknown>)[key], seen, depth + 1, opts)]);
+      entries.push([key, isSecretField(key, (value as Record<string, unknown>)[key]) ? REDACTED : shredNode((value as Record<string, unknown>)[key], seen, depth + 1, opts)]);
     }
     return Object.fromEntries(entries);
   } finally {
@@ -209,7 +260,7 @@ export function shredRecordInPlace<T extends Record<string, unknown>>(
         rec[key] = typeof value === "string" ? redactString(value, o.maxStringLength) : shred(value, o);
         continue;
       }
-      rec[key] = isSecretKey(key) ? REDACTED : shred(value, o);
+      rec[key] = isSecretField(key, value) ? REDACTED : shred(value, o);
     }
   } catch {
     /* never throw from the logging path */

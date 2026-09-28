@@ -6,15 +6,46 @@ const flat = (v: unknown) => JSON.stringify(shred(v));
 
 describe("isSecretKey", () => {
   it("flags secret-named keys (case/separator-insensitive)", () => {
-    for (const k of ["password", "apiKey", "api_key", "x-api-key", "accessToken", "refresh_token", "clientSecret", "Authorization", "cookie", "privateKey", "jwt", "passphrase"]) {
+    for (const k of ["password", "apiKey", "api_key", "x-api-key", "accessToken", "refresh_token", "clientSecret", "Authorization", "cookie", "privateKey", "jwt", "passphrase",
+      // Separator-less / header / env / nested-change forms seen in prod logs.
+      "accesstoken", "xapikey", "set-cookie", "OPENAI_API_KEY", "GITHUB_TOKEN", "fcmToken", "voipToken", "refreshToken", "private_key", "passwordHash", "retryToken", "token", "cookies", "credentials"]) {
       expect(isSecretKey(k), k).toBe(true);
     }
   });
 
   it("keeps safe siblings that merely share a stem", () => {
-    for (const k of ["tokenPreview", "tokenPresent", "tokenSource", "tokenExp", "tokenExpiry", "totalTokens", "promptTokens", "tokenCount", "secretName", "authorizationType", "passwordLength"]) {
+    for (const k of ["tokenPreview", "tokenPresent", "tokenSource", "tokenExp", "tokenExpiry", "totalTokens", "promptTokens", "tokenCount", "secretName", "authorizationType", "passwordLength",
+      // Real non-secret field names from the 25–28 Sep prod/pre-prod/SDLC replay.
+      "tokenEmail", "tokenSub", "tokensIn", "tokensOut", "tokensTried", "tokenSuffix", "cookieNames", "tokenWorkspaceId",
+      "fcmTokenPreview", "voipTokenPresent", "workspaceTokenPresent", "cookieTokenPresent", "accessTokenExpiresAt", "tokenizer"]) {
       expect(isSecretKey(k), k).toBe(false);
     }
+  });
+});
+
+describe("shred — boolean has*/is* flags", () => {
+  it("keeps boolean has*/is* flags even when they name a secret", () => {
+    const out = shred({ hasBroadcastToken: true, hasToken: false, has_private_key: true, hasCookieHeader: true, isTokenValid: false }) as Record<string, unknown>;
+    expect(out).toEqual({ hasBroadcastToken: true, hasToken: false, has_private_key: true, hasCookieHeader: true, isTokenValid: false });
+    const rec = shredRecordInPlace({ message: "m", hasToken: true } as Record<string, unknown>);
+    expect(rec.hasToken).toBe(true);
+  });
+
+  it("still redacts a has*/is* key whose value is NOT a boolean", () => {
+    const out = shred({ hasToken: "ya29.real-token-value", isSecret: "s3cr3t-value" }) as Record<string, unknown>;
+    expect(out.hasToken).toBe("[REDACTED]");
+    expect(out.isSecret).toBe("[REDACTED]");
+  });
+
+  it("keeps the replayed auth-middleware / LLM / notification fields", () => {
+    const out = shred({ tokenEmail: "a@juspay.in", tokenSub: "u_1", tokensIn: 1200, tokensOut: 300, tokensTried: 2, cookieNames: ["a", "b"], changes: { fcmToken: "real-device-token" } }) as Record<string, any>;
+    expect(out.tokenEmail).toBe("a@juspay.in");
+    expect(out.tokenSub).toBe("u_1");
+    expect(out.tokensIn).toBe(1200);
+    expect(out.tokensOut).toBe(300);
+    expect(out.tokensTried).toBe(2);
+    expect(out.cookieNames).toEqual(["a", "b"]);
+    expect(out.changes.fcmToken).toBe("[REDACTED]");
   });
 });
 
@@ -59,6 +90,21 @@ describe("shred — value detector", () => {
     const out = flat({ key: pem });
     expect(out).toContain("[REDACTED_PEM]");
     expect(out).not.toContain("MIIEpAIBAAKCAQEA1234");
+  });
+});
+
+describe("shred — Bearer rule", () => {
+  it("does not mangle prose after the word bearer", () => {
+    expect(shredText("upstream bearer returned 401")).toBe("upstream bearer returned 401");
+    expect(shredText("Bearer authentication required")).toBe("Bearer authentication required");
+  });
+  it("redacts real bearer tokens (has a digit, or 20+ chars)", () => {
+    expect(shredText("Authorization: Bearer ya29a0AfB1x2")).toBe("Authorization: Bearer [REDACTED]");
+    expect(shredText("Bearer abcdefghijklmnopqrstuvwxyz")).toBe("Bearer [REDACTED]");
+  });
+  it("always redacts the value of an Authorization: Bearer header, even letters-only", () => {
+    expect(shredText("Authorization: Bearer abcdefghijklmnop")).toBe("Authorization: Bearer [REDACTED]");
+    expect(shredText('{"authorization":"Bearer abcdefghijklmnop"}')).toBe('{"authorization":"Bearer [REDACTED]"}');
   });
 });
 
