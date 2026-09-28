@@ -13,23 +13,28 @@ const ORB = '[data-voice-orb]';
 export function useSpaceToTalk({
   onPress,
   onRelease,
+  onCancel,
 }: {
   onPress: () => void;
   onRelease: () => void;
+  onCancel: () => void;
 }): void {
-  const handlersRef = useRef({ onPress, onRelease });
+  const handlersRef = useRef({ onPress, onRelease, onCancel });
   useEffect(() => {
-    handlersRef.current = { onPress, onRelease };
-  }, [onPress, onRelease]);
+    handlersRef.current = { onPress, onRelease, onCancel };
+  }, [onPress, onRelease, onCancel]);
 
   useEffect(() => {
     let holdTimer: number | null = null;
     let talking = false;
 
-    const stop = (): void => {
+    const stop = (submit: boolean): void => {
       if (holdTimer !== null) window.clearTimeout(holdTimer);
       holdTimer = null;
-      if (talking) handlersRef.current.onRelease();
+      if (talking) {
+        if (submit) handlersRef.current.onRelease();
+        else handlersRef.current.onCancel();
+      }
       talking = false;
     };
     const onKeyDown = (event: KeyboardEvent): void => {
@@ -45,18 +50,20 @@ export function useSpaceToTalk({
     const onKeyUp = (event: KeyboardEvent): void => {
       if (event.code !== 'Space' || (holdTimer === null && !talking)) return;
       event.preventDefault();
-      stop();
+      stop(true);
     };
+    const onBlur = (): void => stop(false);
 
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
     // Switching windows mid-hold never delivers the keyup.
-    window.addEventListener('blur', stop);
+    window.addEventListener('blur', onBlur);
     return (): void => {
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
-      window.removeEventListener('blur', stop);
+      window.removeEventListener('blur', onBlur);
       if (holdTimer !== null) window.clearTimeout(holdTimer);
+      if (talking) handlersRef.current.onCancel();
     };
   }, []);
 }

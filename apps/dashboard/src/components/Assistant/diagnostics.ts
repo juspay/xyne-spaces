@@ -2,7 +2,7 @@ import type { TurnDebug, TurnInput, TurnResponse } from '@xyne/shared/assistant'
 
 /**
  * The Diagnose log: what happened in each turn and how long it took, one line per event.
- * TODO(before-merge): remove with the Diagnose panel; local development only.
+ * Local development only. Entries can contain user text; never send them to production logs.
  */
 
 export const DIAGNOSTICS_ENABLED = import.meta.env.DEV;

@@ -30,7 +30,7 @@ export interface VoiceStageProps {
   onShowText: () => void;
   onSpeaksRepliesChange: (on: boolean) => void;
   onEnd: () => void;
-  /** The Diagnose log; null hides the Diagnose control. TODO(before-merge): remove. */
+  /** Local development trace; null hides the Diagnose control. */
   trace: TraceEntry[] | null;
 }
 
@@ -162,7 +162,7 @@ export function VoiceStage({
     window.addEventListener('keydown', onKeyDown);
     return (): void => window.removeEventListener('keydown', onKeyDown);
   }, [onInterrupt]);
-  useSpaceToTalk({ onPress, onRelease });
+  useSpaceToTalk({ onPress, onRelease, onCancel: onInterrupt });
 
   // Focus the orb, so Space talks at once instead of typing into the Ask AI box.
   const orbRef = useRef<HTMLButtonElement>(null);
@@ -189,7 +189,7 @@ export function VoiceStage({
           type='button'
           onPointerDown={pressOrb}
           onPointerUp={onRelease}
-          onPointerCancel={onRelease}
+          onPointerCancel={onInterrupt}
           onContextMenu={event => event.preventDefault()}
           aria-label={holding ? 'Release to send' : 'Hold to talk'}
           aria-pressed={holding}
