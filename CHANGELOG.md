@@ -1,3 +1,10 @@
+## [1.416.2](https://github.com/juspay/xyne-spaces/compare/v1.416.1...v1.416.2) (2026-09-28)
+
+
+### Bug Fixes
+
+* make workspace-level KB files searchable and keep clId/clFd in lean summary ([#2359](https://github.com/juspay/xyne-spaces/issues/2359)) ([113b454](https://github.com/juspay/xyne-spaces/commit/113b454bb66314b506c70a21c0c992c6e33c7bf1)), closes [#1282](https://github.com/juspay/xyne-spaces/issues/1282)
+
 ## [1.416.1](https://github.com/juspay/xyne-spaces/compare/v1.416.0...v1.416.1) (2026-09-28)
 
 
