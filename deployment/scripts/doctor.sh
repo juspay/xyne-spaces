@@ -104,6 +104,39 @@ check_auth() {
   fi
 }
 
+check_aws_sso() {
+  local profile session start_url minutes file
+  [ "$DRY_RUN" = "1" ] && return 0
+  need_cmd aws || return 0
+  profile="${PROFILE:-default}"
+  session="$(aws configure get sso_session --profile "$profile" 2>/dev/null || true)"
+  if [ -n "$session" ]; then
+    start_url="$(awk -v s="[sso-session $session]" '$0 == s { f = 1; next } /^\[/ { f = 0 } f && $1 == "sso_start_url" { print $3; exit }' "${AWS_CONFIG_FILE:-$HOME/.aws/config}")"
+  else
+    start_url="$(aws configure get sso_start_url --profile "$profile" 2>/dev/null || true)"
+  fi
+  [ -n "$start_url" ] || return 0
+  minutes=""
+  refreshable=""
+  for file in "$HOME"/.aws/sso/cache/*.json; do
+    [ -f "$file" ] || continue
+    minutes="$(jq -r --arg u "$start_url" 'select(.startUrl == $u and .expiresAt != null) | ((.expiresAt | sub("\\.[0-9]+"; "") | fromdateiso8601) - now) / 60 | floor' "$file" 2>/dev/null || true)"
+    refreshable="$(jq -r --arg u "$start_url" 'select(.startUrl == $u) | (.refreshToken != null)' "$file" 2>/dev/null || true)"
+    [ -n "$minutes" ] && break
+  done
+  if [ -z "$minutes" ]; then
+    record FAIL "aws sso session" "no SSO login found for $start_url; run: aws sso login"
+  elif [ "$refreshable" = "true" ]; then
+    record PASS "aws sso session" "refreshable until the Identity Center session ends (8h after aws sso login by default); on InvalidGrantException run aws sso login"
+  elif [ "$minutes" -le 0 ]; then
+    record FAIL "aws sso session" "expired; run: aws sso login (Terraform cannot refresh it, even while the CLI still works)"
+  elif [ "$minutes" -lt 120 ]; then
+    record WARN "aws sso session" "expires in ${minutes} min; run aws sso login before a long setup"
+  else
+    record PASS "aws sso session" "valid for $((minutes / 60))h"
+  fi
+}
+
 check_file() {
   if [ -f "$1" ]; then
     record PASS "$(basename "$1")" "$1"
@@ -183,7 +216,7 @@ check_hindsight() {
     if [ -n "$llm_key" ]; then
       record PASS "hindsight_llm_api_key" "set"
     else
-      record WARN "hindsight_llm_api_key" "empty; Hindsight starts but cannot extract facts without an LLM key"
+      record FAIL "hindsight_llm_api_key" "required with enable_hindsight: hindsight-api exits at start without it (HINDSIGHT_API_LLM_API_KEY)"
     fi
   elif [ -n "$url" ]; then
     record PASS "hindsight" "using an existing instance at $url"
@@ -315,6 +348,40 @@ check_kubernetes_version() {
   esac
 }
 
+check_pool_capacity() {
+  local pool="$1" flag="$2" default_type="$3" hint="$4" type region offered
+  [ "$CLOUD" = "aws" ] || return 0
+  [ "$(tfvar_value "$INFRA_TFVARS" "$flag")" = "true" ] || return 0
+  if [ "$DRY_RUN" = "1" ]; then
+    record SKIP "$pool instance type" "not checked with --dry-run"
+    return 0
+  fi
+  type="$(tfvar_block_value "$INFRA_TFVARS" "$pool" instance_type)"
+  [ -n "$type" ] || type="$default_type"
+  region="$(tfvar_value "$INFRA_TFVARS" region)"
+  offered="$(aws ec2 describe-instance-type-offerings --region "$region" --location-type availability-zone --filters "Name=instance-type,Values=$type" --query 'length(InstanceTypeOfferings)' --output text 2>/dev/null || true)"
+  if [ -z "$offered" ] || [ "$offered" = "0" ]; then
+    record FAIL "$pool instance type" "$type is not offered in $region; set node_pools.$pool.instance_type to $hint that is"
+  else
+    record PASS "$pool instance type" "$type, offered in $offered zone(s) of $region"
+  fi
+}
+
+check_sandbox_capacity() {
+  check_pool_capacity sandbox sandbox_enabled m5.metal "an x86_64 .metal type"
+  check_pool_capacity gpu gpu_enabled g6.xlarge "an NVIDIA GPU type (g4dn, g5, g6, ...)"
+}
+
+check_vespa() {
+  [ -f "$PLATFORM_TFVARS" ] || return 0
+  [ "$(tfvar_value "$PLATFORM_TFVARS" enable_vespa)" = "true" ] || return 0
+  if grep -q 'proxyImage' "$PLATFORM_TFVARS"; then
+    record PASS "vespa proxy image" "set in addon_values"
+  else
+    record FAIL "vespa proxy image" "enable_vespa needs the tei-batch-proxy image, which is not published publicly; set addons.vespa.proxyImage through addon_values (docs/configuration.md)"
+  fi
+}
+
 check_dns() {
   local zone domain zone_json zone_name zone_ns live rg
   [ -f "$INFRA_TFVARS" ] || return 0
@@ -417,6 +484,7 @@ case "$CLOUD" in
   aws)
     check_tool aws
     check_auth "aws auth" show aws sts get-caller-identity --output text --query Arn
+    check_aws_sso
     ;;
   azure)
     check_tool az
@@ -432,6 +500,8 @@ check_required_vars "$PLATFORM_STACK" "$PLATFORM_TFVARS" "$PLATFORM_SECRETS"
 check_network
 check_ingress
 check_kubernetes_version
+check_sandbox_capacity
+check_vespa
 check_dns
 check_google
 check_hindsight

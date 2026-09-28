@@ -274,6 +274,11 @@ Exactly one certificate source must resolve in `cloud-lb` mode, checked by a pre
 | `sandbox_ami_ssm_parameter` | string | `""` | AMI for the sandbox pool; Canonical's EKS Ubuntu 24.04 for the cluster version when empty |
 | `node_pools` | object | `{}` | see [Node pool sizing](#node-pool-sizing) |
 | `zero_pool_enabled`, `vespa_enabled`, `sandbox_enabled` | bool | `false` | create those node groups; the sandbox group requires a `.metal` instance type |
+| `gpu_enabled` | bool | `false` | create the `gpu` node group (`AL2023_x86_64_NVIDIA`, taint `nvidia.com/gpu=present:NoSchedule`) for `xyne-lighton-model`; the root chart then installs the NVIDIA device plugin |
+
+Each node group is placed only in the node subnets whose availability zone offers its instance
+type, so a type missing from one zone (for example `g6.xlarge` in ap-south-1c) still works; a
+type offered in none of them fails the plan.
 | `use_pod_identity` | bool | `false` | add EKS Pod Identity associations next to IRSA |
 | `lb_controller_enabled` | bool | `true` | create the IAM role for `aws-load-balancer-controller` (without it the gateway gets no NLB) |
 
@@ -577,6 +582,8 @@ identical on the three clouds; only the state and provider variables differ.
 | `argocd_apps_chart_version` | string | `2.0.5` | `argocd-apps` Helm chart version |
 | `argocd_namespace` | string | `argocd` | |
 | `argocd_values` | string (YAML) | `""` | extra values for the `argo-cd` chart (merged after `fullnameOverride: argocd`, `configs.params.server.insecure: true`) |
+| `argocd_expose` | bool | `false` | serve the Argo CD UI through the Istio gateway on `argocd_host`. It uses the install's DNS and certificate (`*.domain` is already covered; in `acme` mode the host is added to the certificate). This puts the Argo CD login on the internet: change the initial admin password, or configure SSO in `argocd_values` |
+| `argocd_host` | string | `argocd.<domain>` | host name for `argocd_expose` |
 | `enable_vespa` | bool | `false` | `addons.vespa.enabled` |
 | `enable_hindsight` | bool | `false` | `addons.hindsight.enabled`; deploys the upstream Hindsight chart and points claw's long-term memory at it |
 | `hindsight` | object{url, tenant} | `{}` | point claw at a Hindsight you run elsewhere instead. `url` wins over the deployed addon; empty with the addon off disables memory entirely |
@@ -609,7 +616,8 @@ merged over `deployment/argocd/root/values.yaml`. What you can influence from `.
 | `xyne-claw-auth` | off | sets `XYNE_CLAW_AUTH_URL` on the backend |
 | `xyne-claw-auth-frontend` | off | adds the `/claw/` route; needs `xyne-claw-auth` |
 | `xyne-transcription-agent` | off | needs LiveKit |
-| `xyne-lighton-ocr` | off | sets `DOCLING_SERVICE_URL` on the backend |
+| `xyne-lighton-ocr` | off | sets `DOCLING_SERVICE_URL` on the backend; gets `REDIS_PASSWORD` from `xyne-backend-secrets`, and `LIGHTON_URL` when `xyne-lighton-model` is on |
+| `xyne-lighton-model` | off | vLLM (`vllm/vllm-openai`) serving `lightonai/LightOnOCR-2-1B-bbox` on one GPU on the `gpu` pool (`gpu_enabled` in `01-infra`); lighton-ocr is pointed at it automatically. The model downloads from Hugging Face on first start; an optional `HF_TOKEN` goes in `xyne-lighton-model-secrets` |
 
 `apps = { "<chart>" = { enabled = bool, values = "<YAML>", store_url = "<URL>" } }`. `values` is
 deep-merged over the values the root chart computes for that chart; any key of the service chart
@@ -684,7 +692,8 @@ disabled.
 | `general` | none | `e2-standard-4`, 1–5, 100 GB `pd-balanced` | `m6i.xlarge`, 1–5, 100 GB `gp3`, `AL2023_x86_64_STANDARD` | `Standard_D4s_v5`, 1–5, 128 GB `Managed`, `Ubuntu` |
 | `zero` | `storage-type=local-ssd:NoSchedule` | `e2-highmem-4`, 1–3, `local_ssd_count` 0 (needs N2/N2D/C2 when > 0) | `r6i.xlarge`, 1–3, `local_storage_raid0` false | `Standard_E4s_v5`, 1–3, `local_storage_temp_disk` false (needs a `d` size) |
 | `vespa` | `pool=vespa:NoSchedule` | `n2-standard-8`, 1–3, 200 GB `pd-ssd` | `m6i.2xlarge`, 1–3, 200 GB | `Standard_D8s_v5`, 1–3, 256 GB |
-| `sandbox` | `workload=sandbox:NoSchedule` | `n1-standard-4`, 1–5, `UBUNTU_CONTAINERD`, nested virtualization | `m5zn.metal`, 1–3, Ubuntu EKS AMI (must end in `.metal`) | `Standard_D4s_v3`, 1–3 (must be a v3/v4 D or E size) |
+| `sandbox` | `workload=sandbox:NoSchedule` | `n1-standard-4`, 1–5, `UBUNTU_CONTAINERD`, nested virtualization | `m5.metal`, 1–3, Ubuntu EKS AMI (must end in `.metal`, x86_64, and be offered in the region) | `Standard_D4s_v3`, 1–3 (must be a v3/v4 D or E size) |
+| `gpu` | `nvidia.com/gpu=present:NoSchedule` | not yet | `instance_types` `g6.xlarge`, `g5.xlarge`, `g6e.xlarge`, `g4dn.xlarge` (L4, A10G, L40S, T4), tried in that order when one is out of capacity; 1–2, `AL2023_x86_64_NVIDIA`, 100 GB. vLLM serves in bf16, and switches to fp16 (`--dtype half`) on its own on a GPU without bf16 such as the T4 | not yet |
 
 Common attributes: `min_count`, `max_count`, `disk_size_gb`, `disk_type`, `spot`, `labels`;
 plus `machine_type` (GCP), `instance_type`, `desired_count`, `ami_type` (AWS), `vm_size`,
@@ -723,6 +732,9 @@ app_secrets = {
 Then `setup.sh --env prod --only platform`. The backend gets `XYNE_CLAW_URL=http://xyne-claw:8081`
 and `XYNE_CLAW_AUTH_URL=http://xyne-claw-auth:3003`; the gateway gains the `/claw/` route.
 Sandboxed execution additionally needs the [sandbox addon](#turn-on-vespa-monitoring-or-the-sandbox).
+With both on, the gateway also gains `/claw-preview/<sandboxId>/` (live noVNC view of the agent's
+browser, served by `xyne-sandbox-router`), and claw posts those links using the public URL. The
+route carries no auth of its own; anyone holding a sandbox id can drive that sandbox's browser.
 
 ### Add a worker role
 
@@ -799,7 +811,6 @@ addon_values = {
   YAML
   sandbox = <<-YAML
     controller: {repoURL: https://github.com/example-org/agent-sandbox-manifests.git, targetRevision: main, path: config/default}
-    template: {image: registry.example.com/xyne/kata-workspace:1.0.0}
     policy: {allowedEgress: []}
   YAML
 }
@@ -817,8 +828,8 @@ addon_values = {
   defaulting to `qemu`, the Go runtime. That single value sets kata-deploy's `defaultShim` and
   the `SandboxTemplate`'s `runtimeClassName` to `kata-<shim>` together, so the two cannot drift
   and switching runtime is a one-field edit. The Rust runtime is installed but unused by
-  default: the sandbox image runs dockerd inside the microVM, and upstream tests Docker only
-  against QEMU. `kata.hypervisorAnnotations` is the allowlist of
+  default: upstream tests only QEMU against workloads that run nested containers inside the
+  microVM. `kata.hypervisorAnnotations` is the allowlist of
   `io.katacontainers.config.hypervisor.*` annotations a sandbox may set; an annotation missing
   from it is silently rejected and the microVM boots at kata's own defaults rather than the
   `template.vcpus` and `template.memory` you asked for. It also installs the agent-sandbox
@@ -834,7 +845,22 @@ addon_values = {
   `kubectl -n kube-system get ds node-local-dns -o jsonpath='{.spec.template.spec.containers[0].args}'`.
   It also installs `xyne-sandbox-router` and
   `xyne-egress-proxy`. `xyne-claw` then gets `KATA_ROUTER_URL`, `KATA_NAMESPACE`,
-  `KATA_TEMPLATE` and a mounted ServiceAccount token. `template.image` is required.
+  `KATA_TEMPLATE` and a mounted ServiceAccount token. `template.image` defaults to
+  `<imageRegistry or ghcr.io>/juspay/xyne-spaces-agent-workspace:<image_tag>`, built from
+  `claw-deployments/kata-infra/agent-workspace` and published with the other images. The image
+  is the same on every cloud and on-prem; only the pool, `kata.shim` and `template.vcpus` /
+  `template.memory` differ. It serves the workspace API on 8888, the noVNC preview on 6080
+  (`/claw-preview/`), code-server on 8443 and a Chromium CDP endpoint on 9223. Set
+  `template.env.WORKSPACE_REPO_URL` (plus optional `WORKSPACE_REPO_REF` and
+  `WORKSPACE_SETUP_COMMAND`) to clone and prepare a repository in each warm sandbox before it is
+  claimed. Use an `https://` URL: sandbox traffic leaves only through `xyne-egress-proxy`, so the
+  host must be in its `squid.allowedHosts` (GitHub is allowed by default). The template sets
+  `networkPolicyManagement: Unmanaged` while `policy.enabled` is on: in `Managed` mode the
+  controller adds its own policy allowing direct internet egress and rewrites pod DNS to
+  8.8.8.8/1.1.1.1, which bypasses the proxy and makes it unresolvable. Sandboxes run as their
+  own `xyne-sandbox` ServiceAccount with no cloud identity and no token. The policies need a
+  CNI that enforces NetworkPolicy; on EKS the stack turns on the VPC CNI's
+  `enableNetworkPolicy`.
 
 ### Switch Postgres to in-cluster (CloudNativePG)
 

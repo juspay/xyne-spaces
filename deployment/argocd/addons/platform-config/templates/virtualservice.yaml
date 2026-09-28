@@ -77,6 +77,17 @@ spec:
             port:
               number: {{ $s.clawAuthFrontend.port }}
     {{- end }}
+    {{- if .Values.routes.clawPreview }}
+    - name: claw-preview
+      match:
+        - uri:
+            prefix: /claw-preview/
+      route:
+        - destination:
+            host: {{ $s.sandboxRouter.host }}
+            port:
+              number: {{ $s.sandboxRouter.port }}
+    {{- end }}
     - name: dashboard
       match:
         - uri:

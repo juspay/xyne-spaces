@@ -24,6 +24,7 @@ Charts:
 - [xyne-claw-auth-frontend](#xyne-claw-auth-frontend)
 - [xyne-transcription-agent](#xyne-transcription-agent)
 - [xyne-lighton-ocr](#xyne-lighton-ocr)
+- [xyne-lighton-model](#xyne-lighton-model)
 - [xyne-vespa](#xyne-vespa)
 - [xyne-vespa-embedder](#xyne-vespa-embedder)
 - [xyne-tei-batch-proxy](#xyne-tei-batch-proxy)
@@ -612,7 +613,7 @@ the per-provider settings (`AZURE_OPENAI_STT_*`, `GOOGLE_STT_*`, `DEEPGRAM_*`, `
 `DIARIZATION_ENABLED` (`"false"`), `STORAGE_PROVIDER` (`s3`), `GCS_PROJECT_ID` and
 `TRANSCRIPTION_BUCKET_NAME` (both `""`; set the bucket).
 
-**Scaling and disruption.** 2 replicas, HPA 2-6, PDB `maxUnavailable: 1`. Scale-down is
+**Scaling and disruption.** 1 replica, HPA 1-1, PDB `maxUnavailable: 1`. Scale-down is
 deliberately slow (600 s window, one pod per 10 minutes) and `terminationGracePeriodSeconds` is
 600: removing a worker kills the transcription it is running. Requests 1 CPU / 2 GiB, limit 4 GiB.
 
@@ -654,6 +655,40 @@ empty), PDB `maxUnavailable: 1`. Requests 1 CPU / 2 GiB, limit 4 GiB.
 
 **Storage.** EmptyDir `tmp` at `/tmp`. `HOME=/tmp` on that emptyDir is needed by LibreOffice
 (`soffice`) for docx/pptx conversion.
+
+## xyne-lighton-model
+
+The model server `xyne-lighton-ocr` calls: vLLM serving `lightonai/LightOnOCR-2-1B-bbox`
+(Apache-2.0, not gated) behind an OpenAI-compatible API.
+
+**Image.** `docker.io/vllm/vllm-openai`, tag from `appVersion` (`v0.29.0`); not a xyne image, so
+the root chart's `global.imageTag` does not apply. Stay on v0.29.0: v0.30.0 ships transformers
+5.17, whose rename of `PixtralRotaryEmbedding` breaks every Pixtral-based model, LightOnOCR
+included (vllm-project/vllm#58755, fixed after v0.30.0).
+
+**Command.** `vllm serve lightonai/LightOnOCR-2-1B-bbox --host 0.0.0.0 --port 8000
+--limit-mm-per-prompt '{"image": 1}' --mm-processor-cache-gb 0 --no-enable-prefix-caching
+--gpu-memory-utilization 0.9 --dtype <auto|half>`, the serving flags from the model card. A
+short entrypoint reads the GPU's compute capability first: `auto` (the model's bf16) on 8.0 and
+newer (L4, A10G, L40S), `half` below it (T4), and `half` if the check fails.
+
+**Ports.** Container and Service `http` 8000. `xyne-lighton-ocr` reaches it at
+`http://xyne-lighton-model:8000/v1/chat/completions`, which the root chart sets as its
+`LIGHTON_URL`.
+
+**GPU.** Requests one `nvidia.com/gpu`; needs a GPU node and the NVIDIA device plugin, which the
+root chart installs with `gpu_enabled`. The root chart schedules it on the `gpu` pool.
+
+**Health.** `GET /health` on startup (period 10 s, 90 failures = 15 minutes, for the first model
+download and load), liveness every 30 s, readiness every 10 s.
+
+**Secrets.** `xyne-lighton-model-secrets`, optional: `HF_TOKEN`.
+
+**Scaling and disruption.** 1 replica, `Recreate` (one GPU per node), no HPA, no PDB. Requests
+2 CPU / 8 GiB, limit 12 GiB and one GPU.
+
+**Storage.** EmptyDir `models` at `/models` (`HF_HOME`, 40 GiB) for the Hugging Face cache, and
+an in-memory `/dev/shm` (2 GiB) for vLLM. The model is downloaded again when the pod moves.
 
 **Security.** The Dockerfile sets no `USER`; the chart runs it as uid 1001 with capabilities
 dropped. That is reasoned, not tested - fall back to root if conversion fails.
@@ -949,7 +984,8 @@ Forwards HTTP and WebSocket traffic to Kata sandbox pods, by `X-Sandbox-*` heade
 
 **Secrets.** None.
 
-**Environment.** `PROXY_TIMEOUT_SECONDS` (`"300"`; 180 in code) is the only variable it reads.
+**Environment.** `PROXY_TIMEOUT_SECONDS` (`"300"`; 180 in code) and `CLAW_PREVIEW_NAMESPACE`
+(`xyne-apps` in code).
 
 **Scaling and disruption.** 1 replica, HPA 1-3 on CPU/memory, PDB off, `RollingUpdate`
 `maxSurge: 1`. Requests 100m CPU / 256 MiB, limit 2 GiB (connections are long-lived WebSockets).
@@ -969,9 +1005,12 @@ capabilities dropped, `runAsNonRoot`.
 
 - `X-Sandbox-Namespace` falls back to `default` when absent; the caller (`xyne-claw` via
   `KATA_NAMESPACE`) must send the namespace the sandboxes live in.
-- The `/claw-preview/<sandboxId>/...` path mode (noVNC, no headers) has the namespace `xyne-apps`
-  and port 6080 hard-coded in the source. An install in another namespace needs the image changed
-  before that route works.
+- The `/claw-preview/<sandboxId>/...` path mode (noVNC, no headers) targets port 6080 in the
+  namespace from `CLAW_PREVIEW_NAMESPACE` (default `xyne-apps`); the root chart sets it to the
+  install namespace. The root chart also adds a `/claw-preview/` route on the main host to this
+  service (timeout `0s` for the noVNC WebSocket) and sets xyne-claw's `SANDBOX_PREVIEW_BASE_URL` to
+  the public URL, whenever both the sandbox addon and xyne-claw are on. The route has no auth:
+  anyone holding a sandbox id can watch and drive that sandbox's browser.
 - The sandbox NetworkPolicy in `deployment/argocd/addons/sandbox` admits pods labelled
   `app: xyne-sandbox-router`. That label is the chart's `fullname`; keep `fullnameOverride` in
   step with the addon's `router.name`.
@@ -1056,6 +1095,7 @@ replication-manager overrides and the three Vespa role overrides. `global.imageR
 | `xyne-claw-auth-frontend` | xyne-claw-auth-frontend | off | needs `xyne-claw-auth` |
 | `xyne-transcription-agent` | xyne-transcription-agent | off | needs a LiveKit server |
 | `xyne-lighton-ocr` | xyne-lighton-ocr | off | |
+| `xyne-lighton-model` | xyne-lighton-model | off | needs a GPU node and the NVIDIA device plugin |
 | `xyne-vespa` | xyne-vespa | off | the configserver; needs `image.tag` |
 | `xyne-vespa-content` | xyne-vespa (alias) | off | `fullnameOverride: vespa-content`; needs `image.tag` |
 | `xyne-vespa-feed` | xyne-vespa (alias) | off | `fullnameOverride: vespa-feed`; needs `image.tag` |

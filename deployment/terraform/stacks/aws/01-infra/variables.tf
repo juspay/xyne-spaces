@@ -202,6 +202,18 @@ variable "node_pools" {
       spot          = optional(bool)
       labels        = optional(map(string))
     }), {})
+    gpu = optional(object({
+      instance_type  = optional(string)
+      instance_types = optional(list(string))
+      min_count      = optional(number)
+      max_count      = optional(number)
+      desired_count  = optional(number)
+      disk_size_gb   = optional(number)
+      disk_type      = optional(string)
+      spot           = optional(bool)
+      labels         = optional(map(string))
+      ami_type       = optional(string)
+    }), {})
   })
   default = {}
 }
@@ -217,6 +229,11 @@ variable "vespa_enabled" {
 }
 
 variable "sandbox_enabled" {
+  type    = bool
+  default = false
+}
+
+variable "gpu_enabled" {
   type    = bool
   default = false
 }

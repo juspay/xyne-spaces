@@ -35,8 +35,10 @@ those can be reviewed and versioned while the secrets files are not.
              and GOOGLE_CLIENT_SECRET), with the steps to create one
 
 Optional values (litellm_api_key, hindsight_*) are yours to add to app_secrets
-in 02-platform.secrets.tfvars. A file that exists is left unchanged unless
---force is given.
+in 02-platform.secrets.tfvars. An existing 01-infra.secrets.tfvars only gets the
+secrets it lacks appended (for example the LiveKit keys once livekit_enabled is
+turned on); an existing 02-platform.secrets.tfvars is left unchanged. --force
+replaces either file.
 EOF
 }
 
@@ -168,31 +170,51 @@ emit() {
   log "wrote $file (mode 600)"
 }
 
+infra_block() {
+  case "$1" in
+    postgres_password) printf 'postgres_password = "%s"\n' "$(rand 32)" ;;
+    redis_auth) printf 'redis_auth = "%s"\n' "$(rand 48)" ;;
+    storage_credentials) printf 'storage_credentials = {\n  access_key_id     = "%s"\n  secret_access_key = "%s"\n}\n' "$(rand 20)" "$(rand 40)" ;;
+    livekit_api_key) printf 'livekit_api_key = "API%s"\n' "$(rand 12)" ;;
+    livekit_api_secret) printf 'livekit_api_secret = "%s"\n' "$(rand 48)" ;;
+  esac
+}
+
 infra_secrets() {
-  local storage livekit content names=(postgres_password redis_auth)
+  local storage livekit content name missing=() names=(postgres_password redis_auth)
   storage="$(tfvar_value "$INFRA_TFVARS" storage_mode)"
   livekit="$(tfvar_value "$INFRA_TFVARS" livekit_enabled)"
   [ "$storage" = "incluster" ] && names+=(storage_credentials)
   [ "$livekit" = "true" ] && names+=(livekit_api_key livekit_api_secret)
   refuse_duplicates "$INFRA_TFVARS" "$INFRA_SECRETS" "${names[@]}"
+
+  if [ -f "$INFRA_SECRETS" ] && [ "$FORCE" != "1" ]; then
+    for name in "${names[@]}"; do
+      tfvar_set "$INFRA_SECRETS" "$name" || missing+=("$name")
+    done
+    if [ "${#missing[@]}" -eq 0 ]; then
+      log "$(basename "$INFRA_SECRETS") has every secret it needs, left unchanged (--force replaces it)"
+      return 0
+    fi
+    content=""
+    for name in "${missing[@]}"; do
+      content="$content$(infra_block "$name")"$'\n'
+    done
+    if [ "$DRY_RUN" = "1" ]; then
+      log "would add ${missing[*]} to $INFRA_SECRETS:"
+      printf '%s' "$content" | sed -E 's/=([[:space:]]*)"[^"]*"/=\1"********"/; s/^/    /'
+      return 0
+    fi
+    (umask 077 && printf '\n%s' "$content" >> "$INFRA_SECRETS")
+    log "added ${missing[*]} to $INFRA_SECRETS; existing values unchanged"
+    return 0
+  fi
+
   should_write "$INFRA_SECRETS" || return 0
-
-  content="postgres_password = \"$(rand 32)\"
-redis_auth        = \"$(rand 48)\""
-  if [ "$storage" = "incluster" ]; then
-    content="$content
-
-storage_credentials = {
-  access_key_id     = \"$(rand 20)\"
-  secret_access_key = \"$(rand 40)\"
-}"
-  fi
-  if [ "$livekit" = "true" ]; then
-    content="$content
-
-livekit_api_key    = \"API$(rand 12)\"
-livekit_api_secret = \"$(rand 48)\""
-  fi
+  content=""
+  for name in "${names[@]}"; do
+    content="$content$(infra_block "$name")"$'\n'
+  done
   emit "$INFRA_SECRETS" "$content"
 }
 

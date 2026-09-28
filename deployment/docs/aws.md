@@ -106,6 +106,14 @@ helm version --short   # v3.14.0 or newer
 aws sts get-caller-identity --query Arn --output text
 ```
 
+**Signing in with IAM Identity Center (SSO).** Use AWS CLI v2 with `aws configure sso` and an
+`sso-session`, then `aws sso login`. `aws login` does not refresh for SSO roles. The CLI and
+Terraform renew credentials on their own until the Identity Center session ends, 8 hours after
+`aws sso login` by default. A setup that outlives it fails with `InvalidGrantException`: run
+`aws sso login` and rerun `setup.sh`, which resumes from state. Identity Center administrators set
+the session length (Settings, Authentication, Session duration, up to 90 days); the permission
+set's own session duration only affects role credentials, which renew automatically.
+
 ## 3. DNS: create a hosted zone or plan manual records
 
 The install needs `xyne.example.com`, `*.xyne.example.com`, and with LiveKit
@@ -362,9 +370,9 @@ docker run --rm livekit/livekit-server:v1.9.1 generate-keys
 
 Two more entries in `app_secrets` are optional and are not generated here. `hindsight_api_key` is
 the key claw presents when it calls the Hindsight API; leave it empty when the instance needs no
-auth. `hindsight_llm_api_key` is the LLM provider key Hindsight itself uses to extract facts, and
-applies only when you deploy Hindsight with `enable_hindsight`; without it Hindsight starts but
-extracts nothing. Both may be left empty.
+auth. `hindsight_llm_api_key` is the LLM provider key Hindsight itself uses to extract facts. It is
+**required** with `enable_hindsight`: `hindsight-api` exits at start without it, and the doctor
+fails. Leave both empty when you do not deploy Hindsight.
 
 ## 9. Run the doctor
 
@@ -716,7 +724,8 @@ Rough monthly shape of the defaults in `ap-south-1`, largest first: the `general
 `single_nat_gateway = true` for a non-production install), the EKS cluster fee, the NLB, four
 interface endpoints (hourly each), S3 by volume. LiveKit adds two `m6i.xlarge` and an ALB. The
 bastion (`t4g.micro`) is negligible. `postgres_read_replica` adds a third RDS instance;
-`sandbox_enabled` adds `m5zn.metal` nodes, by far the most expensive line if used.
+`sandbox_enabled` adds `m5.metal` nodes (at least one, always on), by far the most expensive line if
+used.
 
 ## Known limits
 
@@ -730,8 +739,12 @@ bastion (`t4g.micro`) is negligible. `postgres_read_replica` adds a third RDS in
   with `redis_mode = "managed"`.
 - **RDS creates one database**: the other four are the SQL in step 11.
 - **`.metal` for the sandbox**: `node_pools.sandbox.instance_type` must end in `.metal`
-  (`m5zn.metal` default), the only way to get nested virtualization on EC2. Kata itself is
-  experimental.
+  (`m5.metal` default), the only way to get nested virtualization on EC2. It must be x86_64 (the
+  Ubuntu EKS AMI and kata-qemu here are amd64) and offered in the region: `m5zn.metal`, for
+  example, is not offered in ap-south-1. `aws ec2 describe-instance-type-offerings --filters
+  Name=instance-type,Values=<type>` lists where it is; the doctor checks it. The node joins the
+  cluster through `templates/sandbox-user-data.yaml.tftpl`, which uses `nodeadm` or
+  `/etc/eks/bootstrap.sh`, whichever the image ships. Kata itself is experimental.
 - **Load balancer controller**: the gateway depends on it. If you set `lb_controller_enabled =
   false` in `01-infra` you must provide the controller yourself before the gateway Service can
   get an address.

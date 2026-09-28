@@ -68,5 +68,12 @@
     "dockerfile": "claw-deployments/kata-infra/sandbox-router-ws/Dockerfile",
     "context": "claw-deployments/kata-infra/sandbox-router-ws",
     "charts": ["xyne-sandbox-router"]
+  },
+  {
+    "name": "agent-workspace",
+    "image": "xyne-spaces-agent-workspace",
+    "dockerfile": "claw-deployments/kata-infra/agent-workspace/Dockerfile",
+    "context": "claw-deployments/kata-infra/agent-workspace",
+    "charts": []
   }
 ]

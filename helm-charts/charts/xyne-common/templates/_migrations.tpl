@@ -131,29 +131,31 @@ spec:
             {{- end }}
             {{- end }}
           {{- end }}
+          {{- $entries := dict }}
+          {{- $order := list }}
+          {{- range $k, $v := .Values.env }}
+          {{- if not (kindIs "invalid" $v) }}
+          {{- if not (hasKey $entries $k) }}{{- $order = append $order $k }}{{- end }}
+          {{- $_ := set $entries $k (dict "name" $k "value" (tpl (toString $v) $)) }}
+          {{- end }}
+          {{- end }}
+          {{- range (include "xyne-common.env" . | trim | fromYamlArray) }}
+          {{- if not (hasKey $entries .name) }}{{- $order = append $order .name }}{{- end }}
+          {{- $_ := set $entries .name . }}
+          {{- end }}
+          {{- range $m.secretEnv }}
+          {{- $ref := dict "name" .secret "key" (.key | default .name) }}
+          {{- if .optional }}{{- $_ := set $ref "optional" true }}{{- end }}
+          {{- if not (hasKey $entries .name) }}{{- $order = append $order .name }}{{- end }}
+          {{- $_ := set $entries .name (dict "name" .name "valueFrom" (dict "secretKeyRef" $ref)) }}
+          {{- end }}
+          {{- range $k, $v := $m.env }}
+          {{- if not (hasKey $entries $k) }}{{- $order = append $order $k }}{{- end }}
+          {{- $_ := set $entries $k (dict "name" $k "value" (tpl (toString $v) $)) }}
+          {{- end }}
           env:
-            {{- range $k, $v := .Values.env }}
-            {{- if not (kindIs "invalid" $v) }}
-            - name: {{ $k }}
-              value: {{ tpl (toString $v) $ | quote }}
-            {{- end }}
-            {{- end }}
-            {{- with (include "xyne-common.env" . | trim) }}
-            {{- . | nindent 12 }}
-            {{- end }}
-            {{- range $m.secretEnv }}
-            - name: {{ .name }}
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .secret }}
-                  key: {{ .key | default .name }}
-                  {{- if .optional }}
-                  optional: true
-                  {{- end }}
-            {{- end }}
-            {{- range $k, $v := $m.env }}
-            - name: {{ $k }}
-              value: {{ tpl (toString $v) $ | quote }}
+            {{- range $order }}
+            - {{- toYaml (index $entries .) | nindent 14 }}
             {{- end }}
           {{- with $m.resources }}
           resources:

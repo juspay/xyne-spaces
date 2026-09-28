@@ -36,20 +36,30 @@ locals {
       local_storage_raid0 = false
       custom_ami          = true
     }
+    gpu = {
+      taints = [
+        { key = "nvidia.com/gpu", value = "present", effect = "NO_SCHEDULE" },
+      ]
+      ami_type            = var.node_pools.gpu.ami_type
+      root_device_name    = "/dev/xvda"
+      local_storage_raid0 = false
+      custom_ami          = false
+    }
   }
 
   pools = {
     for key, fixed in local.pool_fixed : key => merge(
       {
-        enabled       = var.node_pools[key].enabled
-        instance_type = var.node_pools[key].instance_type
-        min_count     = var.node_pools[key].min_count
-        max_count     = var.node_pools[key].max_count
-        desired_count = var.node_pools[key].desired_count != null ? var.node_pools[key].desired_count : var.node_pools[key].min_count
-        disk_size_gb  = var.node_pools[key].disk_size_gb
-        disk_type     = var.node_pools[key].disk_type
-        spot          = var.node_pools[key].spot
-        labels        = merge(var.node_pools[key].labels, { pool = key })
+        enabled        = var.node_pools[key].enabled
+        instance_type  = var.node_pools[key].instance_type
+        instance_types = var.node_pools[key].instance_types != null ? var.node_pools[key].instance_types : [var.node_pools[key].instance_type]
+        min_count      = var.node_pools[key].min_count
+        max_count      = var.node_pools[key].max_count
+        desired_count  = var.node_pools[key].desired_count != null ? var.node_pools[key].desired_count : var.node_pools[key].min_count
+        disk_size_gb   = var.node_pools[key].disk_size_gb
+        disk_type      = var.node_pools[key].disk_type
+        spot           = var.node_pools[key].spot
+        labels         = merge(var.node_pools[key].labels, { pool = key })
       },
       fixed,
     )
@@ -78,8 +88,8 @@ locals {
   oidc_host   = trimprefix(local.oidc_issuer, "https://")
 
   addons_before_nodes = {
-    vpc-cni    = { role_arn = null }
-    kube-proxy = { role_arn = null }
+    vpc-cni    = { role_arn = null, config = jsonencode({ enableNetworkPolicy = "true" }) }
+    kube-proxy = { role_arn = null, config = null }
   }
 
   addons_after_nodes = {
@@ -97,6 +107,8 @@ locals {
         ca           = aws_eks_cluster.this.certificate_authority[0].data
         labels       = join(",", [for k, v in pool.labels : "${k}=${v}"])
         taints       = join(",", [for t in pool.taints : "${t.key}=${t.value}:${local.effect_names[t.effect]}"])
+        service_cidr = aws_eks_cluster.this.kubernetes_network_config[0].service_ipv4_cidr
+        dns_ip       = cidrhost(aws_eks_cluster.this.kubernetes_network_config[0].service_ipv4_cidr, 10)
         }) : (
         pool.local_storage_raid0 ? file("${path.module}/templates/nodeadm-local-storage.mime.tftpl") : ""
       )
@@ -348,6 +360,7 @@ resource "aws_eks_addon" "before_nodes" {
   addon_name                  = each.key
   addon_version               = lookup(var.addon_versions, each.key, null)
   service_account_role_arn    = each.value.role_arn
+  configuration_values        = each.value.config
   resolve_conflicts_on_create = "OVERWRITE"
   resolve_conflicts_on_update = "OVERWRITE"
 
@@ -413,16 +426,42 @@ resource "aws_launch_template" "this" {
   }
 }
 
+data "aws_subnet" "nodes" {
+  for_each = toset(var.subnet_ids)
+
+  id = each.value
+}
+
+data "aws_ec2_instance_type_offerings" "pools" {
+  for_each = local.enabled_pools
+
+  location_type = "availability-zone"
+
+  filter {
+    name   = "instance-type"
+    values = each.value.instance_types
+  }
+}
+
+locals {
+  pool_subnet_ids = {
+    for key, pool in local.enabled_pools : key => [
+      for id in var.subnet_ids : id
+      if contains(data.aws_ec2_instance_type_offerings.pools[key].locations, data.aws_subnet.nodes[id].availability_zone)
+    ]
+  }
+}
+
 resource "aws_eks_node_group" "this" {
   for_each = local.enabled_pools
 
   cluster_name           = aws_eks_cluster.this.name
   node_group_name_prefix = "${each.key}-"
   node_role_arn          = aws_iam_role.nodes.arn
-  subnet_ids             = var.subnet_ids
+  subnet_ids             = local.pool_subnet_ids[each.key]
   ami_type               = each.value.ami_type
   capacity_type          = each.value.spot ? "SPOT" : "ON_DEMAND"
-  instance_types         = [each.value.instance_type]
+  instance_types         = each.value.instance_types
   version                = each.value.custom_ami ? null : aws_eks_cluster.this.version
   labels                 = each.value.labels
 
@@ -455,6 +494,11 @@ resource "aws_eks_node_group" "this" {
   lifecycle {
     ignore_changes        = [scaling_config[0].desired_size]
     create_before_destroy = true
+
+    precondition {
+      condition     = length(local.pool_subnet_ids[each.key]) > 0
+      error_message = "node_pools.${each.key}: none of ${join(", ", each.value.instance_types)} is offered in any availability zone of the node subnets; pick types the region offers."
+    }
   }
 
   depends_on = [

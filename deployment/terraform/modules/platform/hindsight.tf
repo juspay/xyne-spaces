@@ -4,7 +4,7 @@ locals {
 }
 
 resource "kubernetes_namespace_v1" "hindsight" {
-  count = local.hindsight_secret ? 1 : 0
+  count = var.enable_hindsight ? 1 : 0
 
   metadata {
     name = var.hindsight_namespace

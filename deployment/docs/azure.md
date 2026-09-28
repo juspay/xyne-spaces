@@ -435,9 +435,9 @@ key is used. [secrets.md](secrets.md) has the details and the rotation procedure
 
 Two more entries in `app_secrets` are optional and are not generated here. `hindsight_api_key` is
 the key claw presents when it calls the Hindsight API; leave it empty when the instance needs no
-auth. `hindsight_llm_api_key` is the LLM provider key Hindsight itself uses to extract facts, and
-applies only when you deploy Hindsight with `enable_hindsight`; without it Hindsight starts but
-extracts nothing. Both may be left empty.
+auth. `hindsight_llm_api_key` is the LLM provider key Hindsight itself uses to extract facts. It is
+**required** with `enable_hindsight`: `hindsight-api` exits at start without it, and the doctor
+fails. Leave both empty when you do not deploy Hindsight.
 
 ## 9. Run the doctor
 

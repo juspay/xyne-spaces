@@ -25,6 +25,12 @@ locals {
     zero_change = "postgresql://${local.pg_userinfo}@${var.postgres.direct_host}:${var.postgres.port}/${var.postgres.databases.zero_cdb}?${local.pg_query}"
   }
 
+  node_pg_query = var.postgres.sslmode == "disable" ? "?${local.pg_query}" : ""
+  node_pg_urls = {
+    app_ro   = "postgresql://${local.pg_userinfo}@${var.postgres.ro_host}:${var.postgres.port}/${var.postgres.databases.app}${local.node_pg_query}"
+    zero_app = "postgresql://${local.pg_userinfo}@${var.postgres.direct_host}:${var.postgres.port}/${var.postgres.databases.app}${local.node_pg_query}"
+  }
+
   redis_scheme   = var.redis.tls ? "rediss" : "redis"
   redis_userinfo = local.redis_auth == "" ? "" : ":${urlencode(local.redis_auth)}@"
   redis_url      = "${local.redis_scheme}://${local.redis_userinfo}${var.redis.host}:${var.redis.port}"
@@ -54,8 +60,8 @@ locals {
     "xyne-backend-secrets" = {
       DATABASE_URL                   = local.pg_urls.app
       COMMON_DATABASE_URL            = local.pg_urls.common
-      DATABASE_READ_REPLICA_POOL_URL = local.pg_urls.app_ro
-      ZERO_UPSTREAM_DB               = local.pg_urls.zero_app
+      DATABASE_READ_REPLICA_POOL_URL = local.node_pg_urls.app_ro
+      ZERO_UPSTREAM_DB               = local.node_pg_urls.zero_app
       REDIS_URL                      = local.redis_url
       REDIS_PASSWORD                 = local.redis_auth
       JWT_SECRET                     = var.app_secrets.jwt_secret
@@ -195,6 +201,12 @@ locals {
 
   root_values = {
     platformRevision = var.root_revision
+    argocd = {
+      expose = {
+        enabled = var.argocd_expose
+        host    = var.argocd_host
+      }
+    }
     global = {
       cloud         = var.cluster.cloud
       domain        = local.domain

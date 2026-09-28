@@ -96,6 +96,38 @@ nodePorts:
     - /spec/replicas
 {{- end }}
 
+{{- define "xyne-root.statefulSetClaimIgnore" -}}
+- group: apps
+  kind: StatefulSet
+  jqPathExpressions:
+    - .spec.volumeClaimTemplates[]?.apiVersion
+    - .spec.volumeClaimTemplates[]?.kind
+    - .spec.volumeClaimTemplates[]?.status
+{{- end }}
+
+{{- define "xyne-root.istioWebhookIgnore" -}}
+- group: admissionregistration.k8s.io
+  kind: ValidatingWebhookConfiguration
+  jqPathExpressions:
+    - .webhooks[]?.failurePolicy
+    - .webhooks[]?.clientConfig.caBundle
+{{- end }}
+
+{{- define "xyne-root.generatedCertIgnore" -}}
+- kind: Secret
+  name: {{ .secret }}
+  jsonPointers:
+    - /data
+- group: admissionregistration.k8s.io
+  kind: MutatingWebhookConfiguration
+  jqPathExpressions:
+    - .webhooks[]?.clientConfig.caBundle
+- group: admissionregistration.k8s.io
+  kind: ValidatingWebhookConfiguration
+  jqPathExpressions:
+    - .webhooks[]?.clientConfig.caBundle
+{{- end }}
+
 {{- define "xyne-root.helmSource" -}}
 {{- $root := .root }}
 {{- $src := dict "repoURL" (.repoURL | default $root.Values.global.repoURL) "targetRevision" (.targetRevision | default $root.Values.global.chartRevision) }}
@@ -378,7 +410,7 @@ LIVEKIT_SERVER_URL: {{ $lk.url | quote }}
 {{- $v := include "xyne-root.appBase" (dict "root" $root "xyneImage" true "pool" "general" "identity" "worker") | fromYaml }}
 {{- $env := include "xyne-root.backendEnv" (dict "root" $root) | fromYaml }}
 {{- $env = mergeOverwrite $env (deepCopy (.worker.env | default dict)) }}
-{{- $_ := set $v "fullnameOverride" .worker.name }}
+{{- $_ := set $v "fullnameOverride" (printf "xyne-worker-%s" .worker.name) }}
 {{- $_ := set $v "env" $env }}
 {{- $_ := set $v "secretEnv" (include "xyne-root.backendSecretEnv" (dict "root" $root "readReplica" false) | fromYaml) }}
 {{- toYaml $v }}
@@ -503,6 +535,9 @@ pdb:
 {{- $_ := set $env "KATA_ROUTER_URL" "http://xyne-sandbox-router:8080" }}
 {{- $_ := set $env "KATA_NAMESPACE" $root.Values.global.namespace }}
 {{- $_ := set $env "KATA_TEMPLATE" $sb.template.name }}
+{{- $_ := set $env "SANDBOX_PREVIEW_BASE_URL" (include "xyne-root.publicUrl" $root) }}
+{{- else }}
+{{- $_ := set $env "SANDBOX_PREVIEW_BASE_URL" "" }}
 {{- $_ := set $v "serviceAccount" (mergeOverwrite ($v.serviceAccount | default dict) (dict "automount" true)) }}
 {{- end }}
 {{- $_ := set $v "env" $env }}
@@ -542,8 +577,17 @@ pdb:
 {{- define "xyne-root.appValues.xyne-lighton-ocr" -}}
 {{- $root := .root }}
 {{- $v := include "xyne-root.appBase" (dict "root" $root "xyneImage" true "pool" "general") | fromYaml }}
-{{- $_ := set $v "env" (include "xyne-root.redisEnv" (dict "root" $root) | fromYaml) }}
+{{- $env := include "xyne-root.redisEnv" (dict "root" $root) | fromYaml }}
+{{- if (index $root.Values.apps "xyne-lighton-model").enabled }}
+{{- $_ := set $env "LIGHTON_URL" "http://xyne-lighton-model:8000/v1/chat/completions" }}
+{{- end }}
+{{- $_ := set $v "env" $env }}
+{{- $_ := set $v "secretEnv" (dict "REDIS_PASSWORD" (dict "name" "xyne-backend-secrets" "key" "REDIS_PASSWORD" "optional" true)) }}
 {{- toYaml $v }}
+{{- end }}
+
+{{- define "xyne-root.appValues.xyne-lighton-model" -}}
+{{- include "xyne-root.appBase" (dict "root" .root "xyneImage" false "pool" "gpu") }}
 {{- end }}
 
 {{- define "xyne-root.app" -}}

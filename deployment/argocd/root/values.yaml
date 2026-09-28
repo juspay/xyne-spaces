@@ -10,6 +10,9 @@ global:
 platformRevision: main
 
 argocd:
+  expose:
+    enabled: false
+    host: ""
   project: xyne
   sourceRepos:
     - "*"
@@ -115,6 +118,10 @@ infra:
       enabled: false
       nodeSelector: {}
       tolerations: []
+    gpu:
+      enabled: false
+      nodeSelector: {}
+      tolerations: []
   ingress:
     domain: ""
     mode: gateway
@@ -151,6 +158,11 @@ addons:
     version: 9.59.0
     namespace: kube-system
     serviceAccountName: cluster-autoscaler
+    values: {}
+  nvidiaDevicePlugin:
+    enabled: null
+    version: 0.20.1
+    namespace: kube-system
     values: {}
   externalDns:
     enabled: null
@@ -352,6 +364,9 @@ apps:
     enabled: false
     values: {}
   xyne-lighton-ocr:
+    enabled: false
+    values: {}
+  xyne-lighton-model:
     enabled: false
     values: {}
   workers: []

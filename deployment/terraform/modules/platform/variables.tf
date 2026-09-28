@@ -285,6 +285,16 @@ variable "argocd_apps_chart_version" {
   default = "2.0.5"
 }
 
+variable "argocd_expose" {
+  type    = bool
+  default = false
+}
+
+variable "argocd_host" {
+  type    = string
+  default = ""
+}
+
 variable "db_init_image" {
   type    = string
   default = "docker.io/library/postgres:16"

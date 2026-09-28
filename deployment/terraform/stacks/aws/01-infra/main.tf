@@ -18,6 +18,7 @@ locals {
     zero    = merge(var.node_pools.zero, { enabled = var.zero_pool_enabled })
     vespa   = merge(var.node_pools.vespa, { enabled = var.vespa_enabled })
     sandbox = merge(var.node_pools.sandbox, { enabled = var.sandbox_enabled })
+    gpu     = merge(var.node_pools.gpu, { enabled = var.gpu_enabled })
   }
 
   lb_annotations = {

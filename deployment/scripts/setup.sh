@@ -205,9 +205,24 @@ if [ "$DO_OVERLAY" = "1" ]; then
   fi
 fi
 
+restart_argo_syncs() {
+  local ns="$1" app revision running
+  log "refreshing Argo CD Applications and restarting any sync from an older revision"
+  run kubectl -n "$ns" annotate application --all argocd.argoproj.io/refresh=hard --overwrite
+  if [ "$DRY_RUN" = "1" ]; then
+    return 0
+  fi
+  running="$(kubectl -n "$ns" get applications -o json | jq -r '.items[] | select(.status.operationState.phase == "Running") | .metadata.name')"
+  for app in $running; do
+    run kubectl -n "$ns" patch application "$app" --type merge -p '{"status":{"operationState":{"phase":"Terminating"}}}'
+  done
+  revision="$(kubectl -n "$ns" get application xyne-root -o jsonpath='{.spec.source.targetRevision}')"
+  run kubectl -n "$ns" patch application xyne-root --type merge -p "$(jq -nc --arg r "$revision" '{operation: {initiatedBy: {username: "setup.sh"}, sync: {revision: $r, prune: true}}}')"
+}
+
 wait_for_argo() {
   local ns="$1" deadline now rows pending
-  run kubectl -n "$ns" wait --for="jsonpath={.status.health.status}=Healthy" application/xyne-root --timeout=600s
+  restart_argo_syncs "$ns"
   printf '+ %s\n' "kubectl -n $ns get applications -o json | jq -r '.items[] | [.metadata.name, .status.sync.status, .status.health.status] | @tsv'"
   if [ "$DRY_RUN" = "1" ]; then
     log "would poll every 30s until every Application is Synced and Healthy or ${ARGO_TIMEOUT}s pass"
@@ -223,9 +238,10 @@ wait_for_argo() {
       log "all Argo CD Applications are Synced and Healthy"
       return 0
     fi
+    kubectl -n "$ns" get applications -o json | jq -r '.items[] | select((.status.sync.status // "") != "Synced" or (.status.health.status // "") != "Healthy") | ([(.status.conditions // [])[].message] + [.status.operationState.message // empty] | map(select(. != "")) | join(" | ") | gsub("\n"; " ")) as $why | select($why != "") | "  \(.metadata.name): \($why[0:200])"'
     now=$(date +%s)
     if [ "$now" -ge "$deadline" ]; then
-      die "$pending Application(s) still not Synced and Healthy after ${ARGO_TIMEOUT}s"
+      die "$pending Application(s) still not Synced and Healthy after ${ARGO_TIMEOUT}s; the reasons are listed above"
     fi
     log "$pending Application(s) pending, checking again in 30s"
     sleep 30
@@ -317,7 +333,12 @@ if [ "$LIVEKIT_ENABLED" = "true" ]; then
   printf '%-22s %s\n' "livekit turn address" "${LIVEKIT_TURN_ADDRESS:-pending}"
 fi
 printf '%-22s %s\n' "argo cd password" "kubectl -n $ARGOCD_NS get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d"
-printf '%-22s %s\n' "argo cd ui" "kubectl -n $ARGOCD_NS port-forward svc/argocd-server 8080:80 (then http://localhost:8080, user admin)"
+if [ "$(tfvar_value "$PLATFORM_TFVARS" argocd_expose)" = "true" ]; then
+  ARGOCD_HOST="$(tfvar_value "$PLATFORM_TFVARS" argocd_host)"
+  printf '%-22s %s\n' "argo cd ui" "https://${ARGOCD_HOST:-argocd.$DOMAIN} (user admin)"
+else
+  printf '%-22s %s\n' "argo cd ui" "kubectl -n $ARGOCD_NS port-forward svc/argocd-server 8080:80 (then http://localhost:8080, user admin)"
+fi
 DNS_TARGET="${PUBLIC_ADDRESS:-<ingress address>}"
 if [ "$INGRESS_MODE" = "external" ]; then
   printf '\n%s\n' "ingress_mode is external, point these records at your load balancer:"
