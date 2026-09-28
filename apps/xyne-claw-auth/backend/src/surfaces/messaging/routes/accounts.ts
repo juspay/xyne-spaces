@@ -91,9 +91,10 @@ router.get("/accounts", async (req: Request, res: Response) => {
     res.status(caller.status).json({ success: false, error: caller.error });
     return;
   }
-  const rows = caller.isAdmin
-    ? await listOrgAccounts(plugin.key, caller.orgId)
-    : await listOwnedAccounts(plugin.key, caller.orgId, caller.userId);
+  const rows =
+    plugin.accountScope === "user"
+      ? await listOwnedAccounts(plugin.key, caller.orgId, caller.userId)
+      : await listOrgAccounts(plugin.key, caller.orgId);
   res.json({ success: true, accounts: await Promise.all(rows.map((row) => accountView(row, plugin))) });
 });
 
