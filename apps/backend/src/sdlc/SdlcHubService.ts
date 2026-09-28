@@ -11,16 +11,16 @@ import {
   SDLC_WIKI_FOLDER,
   SDLC_TRACK_FLAT_RELATION,
   SDLC_STRUCTURAL_RELATIONS,
-  SDLC_TRACK_MEMBERSHIP_RELATION,
+  
   sdlcRepoIds,
-  CanvasVisibility,
-  ChannelAddUserPolicy,
+  
+  
   ChannelRole,
-  ChannelScopeType,
+  
   ChannelType,
-  ChannelVisibility,
-  normalizeChannelName,
-  validateChannelName,
+  
+  
+  
   type AttachSdlcRepositoryInput,
   type CreateSdlcChannelInput,
   type CreateSdlcClawArtifactInput,
@@ -53,7 +53,6 @@ import {
   requireSdlcHubReader,
   trackIdsForChannel,
 } from './sdlcChannelMembership';
-import { sdlcChannelCanvasParticipant } from './sdlcCanvasAccess';
 import { ensureLink, resolveFolderTrackId, resolveItemTrackId } from './entityLinkService';
 import { resolveSdlcNavTarget } from './sdlcNavTarget';
 import type {
@@ -68,15 +67,9 @@ import type {
 import { requireSdlcBaseBranch } from './sdlcRepositoryContext';
 import { sdlcAgentContext } from './SdlcAgentContextService';
 import { sdlcVcs, type ParsedRepository } from './vcs';
-import {
-  ensureHubKnowledgeFolder,
-  ensureHubWikiFolder,
-  ensureRepositoryWikiFolder,
-  placeHubItem,
-} from './hubFolders';
 import { sdlcWikiPageStore } from './wiki/SdlcWikiPageStore';
 
-const SDLC_FOLDERS = [SDLC_HUB_KNOWLEDGE_FOLDER, 'PRDs', 'Tech Docs'] as const;
+export const SDLC_FOLDERS = [SDLC_HUB_KNOWLEDGE_FOLDER, 'PRDs', 'Tech Docs'] as const;
 
 /** Add-only: an existing CONTEXT link is kept, a canvas outside the hub is skipped. */
 export async function linkRelatedCanvases(
@@ -107,11 +100,11 @@ export async function linkRelatedCanvases(
     );
   }
 }
-const channelRepository = new ChannelRepository();
-type TransactionClient = Prisma.TransactionClient;
+export const channelRepository = new ChannelRepository();
+export type TransactionClient = Prisma.TransactionClient;
 
 export class SdlcHubService implements SdlcHub {
-  constructor(private readonly prisma: PrismaClient = DatabaseClient.getInstance()) {}
+  constructor(readonly prisma: PrismaClient = DatabaseClient.getInstance()) {}
 
   async resolveRepositoryLink(actor: SdlcActor, input: ResolveSdlcRepositoryLinkInput) {
     const project = await this.prisma.project.findFirst({
@@ -828,7 +821,6 @@ export class SdlcHubService implements SdlcHub {
     ) {
       throw new AppError('Track folder not found in this track', 404);
     }
-    const actorRef = { workspaceId: actor.workspaceId, userId: actor.userId };
     return createTrackFolderFromClawTx(this, actor, input);
   }
 

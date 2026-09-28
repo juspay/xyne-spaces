@@ -5,9 +5,8 @@ import { sdlcChannelCanvasParticipant } from '@/sdlc/sdlcCanvasAccess';
 import { ensureHubKnowledgeFolder, placeHubItem, ensureHubWikiFolder, ensureRepositoryWikiFolder } from '@/sdlc/hubFolders';
 import { ensureLink } from '@/sdlc/entityLinkService';
 import { SdlcHubService, SDLC_FOLDERS, channelRepository, linkRelatedCanvases } from '@/sdlc/SdlcHubService';
-import type { SdlcSourceReference } from '@/sdlc/sdlcSourceReferences';
 import { type ParsedRepository, sdlcVcs } from '@/sdlc/vcs';
-import { CanvasVisibility, SDLC_CONTAINMENT_RELATION, SDLC_TRACK_FLAT_RELATION, SDLC_HUB_KNOWLEDGE_ARTIFACT_TYPE, stringifySdlcSourceReferences, SDLC_ARTIFACT_REPOSITORY_RELATION, SDLC_TRACK_MEMBERSHIP_RELATION, ChannelAddUserPolicy, ChannelRole, ChannelScopeType, ChannelType, ChannelVisibility, normalizeChannelName, validateChannelName, SDLC_MEMBERSHIP_RELATION } from '@xyne/shared';
+import { CanvasVisibility, SDLC_CONTAINMENT_RELATION, SDLC_TRACK_FLAT_RELATION, SDLC_HUB_KNOWLEDGE_ARTIFACT_TYPE, SDLC_ARTIFACT_REPOSITORY_RELATION, SDLC_TRACK_MEMBERSHIP_RELATION, ChannelAddUserPolicy, ChannelRole, ChannelScopeType, ChannelType, ChannelVisibility, normalizeChannelName, validateChannelName, SDLC_MEMBERSHIP_RELATION } from '@xyne/shared';
 import { Prisma } from '@prisma/client';
 import { BlockNoteBlock } from '@/types/blockNoteTypes';
 import { randomUUID } from 'crypto';
@@ -392,7 +391,7 @@ export async function createSdlcChannel(tx: TransactionClient, actor: SdlcActor,
     });
     if (boards.length > 0) {
       await tx.channelBoardMapping.createMany({
-        data: boards.map((board, index) => ({
+        data: boards.map((board: { id: string }, index: number) => ({
           id: randomUUID(),
           channelId,
           boardId: board.id,
@@ -407,7 +406,7 @@ export async function createSdlcChannel(tx: TransactionClient, actor: SdlcActor,
     }
 
     await tx.canvasFolder.createMany({
-      data: SDLC_FOLDERS.map((folderName) => ({
+      data: SDLC_FOLDERS.map((folderName: string) => ({
         id: randomUUID(),
         workspaceId: actor.workspaceId,
         projectId: input.projectId,
@@ -440,7 +439,7 @@ export async function attachRepositoriesToChannel(tx: TransactionClient, actor: 
     }
 
     await tx.sdlcEntityLink.createMany({
-      data: repos.map((repo) => ({
+      data: repos.map((repo: { id: string; name: string }) => ({
         workspaceId: actor.workspaceId,
         channelId,
         sourceType: 'CHANNEL',
@@ -458,5 +457,5 @@ export async function attachRepositoriesToChannel(tx: TransactionClient, actor: 
       await ensureRepositoryWikiFolder(tx, actor, channelId, repo);
     }
 
-    return repos.map((repo) => repo.id);
+    return repos.map((repo: { id: string; name: string }) => repo.id);
   }

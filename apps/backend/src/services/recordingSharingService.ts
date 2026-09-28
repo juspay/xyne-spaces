@@ -1,28 +1,24 @@
-import { randomUUID } from 'node:crypto';
+
 import { setVisibilityTx, validateGrantTargetsTx, grantTx2, revokeTx, linkTicketTx, unlinkTicketTx } from '@/bypassAcl/transactions/recordingSharingService';
 import { Prisma, type EntityAccess } from '@prisma/client';
 import {
-  addReplyToData,
+  
   EntityUserAccess,
-  parseRepliesMd,
-  buildInitialMessageMd,
-  serializeRepliesMd,
+  
+  
+  
   type GrantableEntityUserAccess,
   CallVisibility,
   CanvasRole,
-  CanvasVisibility,
-  ConversationParticipation,
-  MessageType,
+  
+  
+  
 } from '@xyne/shared';
-import { db } from '@/database/client';
-import { repositories } from '@/database/repositories';
-import { callShareService, type CallAccessLevel } from '@/services/callShareService';
 import { isRecording, shareEntityTypeFor } from '@/utils/callTypeUtils';
-import { sanitizeMessageContent } from '@/utils/contentUtils';
 import { logger } from '@/utils/logger';
 import {
   recordingSharingNotificationService,
-  type RecordingAccessActivity,
+  
 } from '@/services/recordingSharingNotificationService';
 
 export type RecordingShareTarget =
@@ -56,7 +52,7 @@ export interface RecordingSharingResult {
   visibility?: CallVisibility;
 }
 
-interface LoadedRecording {
+export interface LoadedRecording {
   id: string;
   externalId: string;
   title: string | null;
@@ -76,9 +72,9 @@ export interface AccessChange {
   levelChanged: boolean;
 }
 
-type RecordingShareIntent = 'direct_share' | 'ticket_link';
+export type RecordingShareIntent = 'direct_share' | 'ticket_link';
 
-const RECORDING_SHARE_INTENT = {
+export const RECORDING_SHARE_INTENT = {
   DIRECT_SHARE: 'direct_share',
   TICKET_LINK: 'ticket_link',
 } as const satisfies Record<string, RecordingShareIntent>;
@@ -101,13 +97,13 @@ export class RecordingSharingError extends Error {
   }
 }
 
-const asMetadata = (value: Prisma.JsonValue): Record<string, unknown> =>
+export const asMetadata = (value: Prisma.JsonValue): Record<string, unknown> =>
   value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
 
 // Posted conversation details stored on the access row.
-interface SharePost {
+export interface SharePost {
   channelId: string;
   conversationId: string;
   messageId: string;
@@ -121,7 +117,7 @@ const getShareIntent = (value: Prisma.JsonValue): RecordingShareIntent | null =>
     : null;
 };
 
-const asSharePost = (value: Prisma.JsonValue): SharePost | null => {
+export const asSharePost = (value: Prisma.JsonValue): SharePost | null => {
   const record = asMetadata(value);
   return typeof record['channelId'] === 'string' &&
     typeof record['conversationId'] === 'string' &&
@@ -193,23 +189,6 @@ export class RecordingSharingService {
     messageContent?: string,
   ): Promise<RecordingSharingResult> {
     await validateGrantTargetsTx(this, callId, actor, targets);
-
-    // Resolved only for a target about to be posted to: findOrCreateDMChannel
-    // enrols both users, so resolving up front left an empty DM behind on every
-    // level change. Memoised outside the transaction to survive its retries.
-    const dmChannelIds = new Map<string, string>();
-    const dmChannelFor = async (userId: string): Promise<string> => {
-      const cached = dmChannelIds.get(userId);
-      if (cached) return cached;
-      const channelId = await repositories.channels.findOrCreateDMChannel(
-        actor.userId,
-        [userId],
-        repositories.channelParticipants,
-        actor.workspaceId,
-      );
-      dmChannelIds.set(userId, channelId);
-      return channelId;
-    };
 
     const dmChannelIds = new Map<string, string>();
     const { shares, activities } = await grantTx2(this, callId, actor, targets, access, dmChannelIds, messageContent);

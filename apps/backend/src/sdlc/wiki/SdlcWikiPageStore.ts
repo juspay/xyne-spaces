@@ -1,8 +1,8 @@
-import { createHash, randomUUID } from 'crypto';
+
 import { ensureFolderPathTx, createTx, editTx, moveTx } from '@/bypassAcl/transactions/SdlcWikiPageStore';
-import { Prisma, type PrismaClient } from '@prisma/client';
+import {  type PrismaClient } from '@prisma/client';
 import {
-  CanvasVisibility,
+  
   SDLC_HUB_ITEM_FLAT_RELATION,
   SDLC_HUB_ITEM_RELATION,
   SDLC_MEMBERSHIP_RELATION,
@@ -14,14 +14,11 @@ import { DatabaseClient } from '@/database/client';
 import { AppError } from '@/middleware/errorHandler';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { convertMarkdownToBlockNote } from '@/services/canvasService';
-import type { BlockNoteBlock } from '@/types/blockNoteTypes';
 import { logger } from '@/utils/logger';
 import { syncToYSweet } from '@/utils/ysweetUtils';
 import { fileSchema, SubApp } from '@/vespa/src/types';
 import { commitAndSyncCanvasArtifact, readCanvasMarkdown } from '../sdlcCanvasSync';
-import { sdlcChannelCanvasParticipant } from '../sdlcCanvasAccess';
-import { ensureHubWikiFolder, ensureRepositoryWikiFolder, placeHubItem } from '../hubFolders';
-import { advisoryXactLock } from '@/bypassAcl/lockServices';
+import { ensureHubWikiFolder, ensureRepositoryWikiFolder } from '../hubFolders';
 import { mutateMarkdownSection } from '../markdownSection';
 
 export interface WikiScopeInput {
@@ -31,7 +28,7 @@ export interface WikiScopeInput {
   repoId?: string;
 }
 
-interface WikiScope {
+export interface WikiScope {
   workspaceId: string;
   actorUserId: string;
   channelId: string;
@@ -48,7 +45,7 @@ export interface WikiPageEntry {
   updatedAt: string;
 }
 
-type PageAction<T extends SdlcWikiPageAction['action']> = Extract<SdlcWikiPageAction, { action: T }>;
+export type PageAction<T extends SdlcWikiPageAction['action']> = Extract<SdlcWikiPageAction, { action: T }>;
 
 function splitFolderPath(folderPath: string | undefined): string[] {
   return (folderPath ?? '')
@@ -57,12 +54,12 @@ function splitFolderPath(folderPath: string | undefined): string[] {
     .filter(Boolean);
 }
 
-function versionName(action: string, commitSha: string | undefined): string {
+export function versionName(action: string, commitSha: string | undefined): string {
   return commitSha ? `Wiki ${commitSha.slice(0, 12)}: ${action}` : `Wiki: ${action}`;
 }
 
 export class SdlcWikiPageStore {
-  constructor(private readonly prisma: PrismaClient = DatabaseClient.getInstance()) {}
+  constructor(readonly prisma: PrismaClient = DatabaseClient.getInstance()) {}
 
   async listPages(input: WikiScopeInput & { includeArchived?: boolean }): Promise<WikiPageEntry[]> {
     return this.pagesIn(await this.scope(input, true), input.includeArchived ?? false);
@@ -311,32 +308,6 @@ export class SdlcWikiPageStore {
     const parentId = await this.ensureFolderPath(scope, page.folderPath);
     await moveTx(this, scope, existing, parentId, page);
     return this.entry(scope, existing.id);
-  }
-
-  private async recordVersion(
-    tx: Prisma.TransactionClient,
-    scope: WikiScope,
-    canvasId: string,
-    markdown: string,
-    content: BlockNoteBlock[],
-    action: string,
-    commitSha: string | undefined
-  ): Promise<void> {
-    const contentHash = createHash('sha256')
-      .update(`${markdown}\0${commitSha ?? ''}`)
-      .digest('hex');
-    await tx.canvasVersion.upsert({
-      where: { canvasId_contentHash: { canvasId, contentHash } },
-      create: {
-        workspaceId: scope.workspaceId,
-        canvasId,
-        name: versionName(action, commitSha),
-        content: content as unknown as Prisma.InputJsonValue,
-        contentHash,
-        createdBy: scope.actorUserId,
-      },
-      update: { name: versionName(action, commitSha) },
-    });
   }
 
   private async entry(scope: WikiScope, canvasId: string): Promise<WikiPageEntry> {

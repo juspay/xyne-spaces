@@ -5,7 +5,7 @@ import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { v4 as uuidv4 } from 'uuid';
 import { type Prisma } from '@prisma/client';
-import { CallOrigin, CallStatus, CallType, RecurringCallSeriesStatus, CalendarVisibility, CallVisibility, ChannelScopeType } from '@xyne/shared';
+import { CallOrigin, CallStatus,  RecurringCallSeriesStatus, CalendarVisibility, CallVisibility, ChannelScopeType } from '@xyne/shared';
 import { ZodError } from 'zod';
 import { scheduledCallNotificationService } from '@/services/scheduledCallNotificationService';
 import { ScheduleCallSchema, RecurringScheduleCallSchema, UpdateScheduleCallSchema, UpdateRecurringSeriesSchema, CancelScheduledCallSchema, CancelRecurringSeriesSchema } from '@/validators/callValidator';
@@ -25,7 +25,7 @@ import { messageMetadataService } from '@/services/messageMetadataService';
 import { withWorkspaceScope } from '@/database/tenant/context';
 
 // Number of milliseconds to buffer recurring call instances ahead of time (60 days)
-const INSTANCE_BUFFER_DAYS = 60 * 24 * 60 * 60 * 1000;
+export const INSTANCE_BUFFER_DAYS = 60 * 24 * 60 * 60 * 1000;
 
 type ExternalInvitationDelivery = 'standalone' | 'conversation_reply';
 

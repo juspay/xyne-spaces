@@ -1,6 +1,6 @@
 import { RecordingSharingService, RecordingSharingActor, asMetadata, RecordingSharingError, RecordingShareTarget, RECORDING_SHARE_INTENT, asSharePost, targetData, targetWhere, canvasRoleFor } from '@/services/recordingSharingService';
 import { shareEntityTypeFor } from '@/utils/callTypeUtils';
-import { EntityUserAccess, MessageType, serializeRepliesMd, addReplyToData, parseRepliesMd, ConversationParticipation, CallVisibility, CanvasVisibility, type GrantableEntityUserAccess, buildInitialMessageMd, CanvasRole } from '@xyne/shared';
+import { EntityUserAccess, MessageType, serializeRepliesMd, addReplyToData, parseRepliesMd, ConversationParticipation, CallVisibility, CanvasVisibility, type GrantableEntityUserAccess, buildInitialMessageMd } from '@xyne/shared';
 import { randomUUID } from 'node:crypto';
 import { Prisma, EntityAccess } from '@prisma/client';
 import type { RecordingAccessActivity } from '@/services/recordingSharingNotificationService';
@@ -39,7 +39,7 @@ async function runTransaction<T>(
 
 export function setVisibilityTx(self: RecordingSharingService, callId: string, actor: RecordingSharingActor, visibility: CallVisibility) {
   return runTransaction(['Call', 'Canvas', 'ChannelParticipant', 'EntityAccess', 'UserGroupMapping'], 'setVisibility: call visibility and linked canvas visibility must commit atomically; tx is not ACL-wrapped', async tx => {
-    const recording = await loadManageableRecording(self, tx, callId, actor);
+    const recording = await loadManageableRecording(tx, callId, actor);
     self.assertRecordingOnly(recording, 'Link access');
     await tx.call.update({
       where: { id: recording.id },
@@ -58,14 +58,14 @@ export function setVisibilityTx(self: RecordingSharingService, callId: string, a
 
 export function grantTx(self: RecordingSharingService, callId: string, actor: RecordingSharingActor, targets: RecordingShareTarget[]) {
   return runTransaction(['Call', 'Channel', 'ChannelParticipant', 'EntityAccess', 'User', 'UserGroup', 'UserGroupMapping'], 'grant: recording load and share-target validation must commit atomically; tx is not ACL-wrapped', async tx => {
-    const recording = await loadManageableRecording(self, tx, callId, actor);
+    const recording = await loadManageableRecording(tx, callId, actor);
     await self.validateTargets(tx, recording, actor.workspaceId, targets);
   });
 }
 
 export function validateGrantTargetsTx(self: RecordingSharingService, callId: string, actor: RecordingSharingActor, targets: RecordingShareTarget[]) {
   return runTransaction(['Call', 'Channel', 'User', 'UserGroup'], 'grant: pre-validation load and target checks must commit atomically; tx is not ACL-wrapped', async tx => {
-    const recording = await loadManageableRecording(self, tx, callId, actor);
+    const recording = await loadManageableRecording(tx, callId, actor);
     await self.validateTargets(tx, recording, actor.workspaceId, targets);
   });
 }
@@ -84,7 +84,7 @@ export function grantTx2(self: RecordingSharingService, callId: string, actor: R
     return channelId;
   };
   return runTransaction(['Call', 'CanvasParticipant', 'Channel', 'ChannelParticipant', 'Conversation', 'ConversationParticipant', 'EntityAccess', 'Message', 'User', 'UserGroup', 'UserGroupMapping'], 'grant: share rows, canvas access sync and share post messages must commit atomically; tx is not ACL-wrapped', async tx => {
-    const recording = await loadManageableRecording(self, tx, callId, actor);
+    const recording = await loadManageableRecording(tx, callId, actor);
     await self.validateTargets(tx, recording, actor.workspaceId, targets);
 
     const shares: Array<{ id: string; target: RecordingShareTarget; access: string }> = [];
@@ -127,7 +127,7 @@ export function revokeTx(self: RecordingSharingService, callId: string, actor: R
     const isSelfRevoke =
       targets.length > 0 &&
       targets.every(target => target.type === 'user' && target.id === actor.userId);
-    const recording = await loadManageableRecording(self, tx, callId, actor, isSelfRevoke ? 'view' : 'edit');
+    const recording = await loadManageableRecording(tx, callId, actor, isSelfRevoke ? 'view' : 'edit');
     const shares: Array<{ id: string; target: RecordingShareTarget; access: string }> = [];
     const activities: RecordingAccessActivity[] = [];
     const uniqueTargets = [
@@ -183,7 +183,7 @@ export function revokeTx(self: RecordingSharingService, callId: string, actor: R
 
 export function linkTicketTx(self: RecordingSharingService, callId: string, actor: RecordingSharingActor, ticketId: string) {
   return runTransaction(['Call', 'CanvasParticipant', 'Channel', 'ChannelParticipant', 'Conversation', 'ConversationParticipant', 'EntityAccess', 'Message', 'Ticket', 'UserGroupMapping'], 'linkTicket: ticket share, link message, participant rows and call metadata must commit atomically; tx is not ACL-wrapped', async tx => {
-    const recording = await loadManageableRecording(self, tx, callId, actor);
+    const recording = await loadManageableRecording(tx, callId, actor);
     self.assertRecordingOnly(recording, 'Ticket linking');
     const metadata = asMetadata(recording.metadata);
     const existingTicketId = metadata['linkedTicketId'];
@@ -316,7 +316,7 @@ export function linkTicketTx(self: RecordingSharingService, callId: string, acto
 
 export function unlinkTicketTx(self: RecordingSharingService, callId: string, actor: RecordingSharingActor) {
   return runTransaction(['Call', 'CanvasParticipant', 'ChannelParticipant', 'Conversation', 'ConversationParticipant', 'EntityAccess', 'Message', 'MessageAttachment', 'Reaction', 'ReactionCount', 'Ticket', 'UserGroupMapping'], 'unlinkTicket: linked ticket share, message and conversation cleanup must commit atomically; tx is not ACL-wrapped', async tx => {
-    const recording = await loadManageableRecording(self, tx, callId, actor);
+    const recording = await loadManageableRecording(tx, callId, actor);
     self.assertRecordingOnly(recording, 'Ticket linking');
     await removeLinkedTicket(self, tx, recording, actor);
   });
@@ -639,7 +639,7 @@ export async function removeLinkedTicket(self: RecordingSharingService, tx: Pris
     return { share: revokedShare, channelId: ticket.channelId };
   }
 
-export async function loadManageableRecording(self: RecordingSharingService, tx: Prisma.TransactionClient, callId: string, actor: RecordingSharingActor, required: CallAccessLevel = 'edit'): Promise<LoadedRecording> {
+export async function loadManageableRecording(tx: Prisma.TransactionClient, callId: string, actor: RecordingSharingActor, required: CallAccessLevel = 'edit'): Promise<LoadedRecording> {
   const call = await tx.call.findUnique({
     where: { externalId: callId },
     select: {
