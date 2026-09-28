@@ -57,6 +57,7 @@ import { BoardComplexityScoresACL } from '../tables/board-complexity-scores-acl'
 import { UserWorkloadMappingsACL } from '../tables/user-workload-mappings-acl';
 import { UserExpertiseMappingsACL } from '../tables/user-expertise-mappings-acl';
 import { StagePRStatusMappingsACL } from '../tables/stage-pr-status-mappings-acl';
+import { StageReleaseStatusMappingsACL } from '../tables/stage-release-status-mappings-acl';
 import { ResourcesACL } from '../tables/resources-acl';
 import { ResourceAccessACL } from '../tables/resource-access-acl';
 import { ProactiveNudgesACL } from '../tables/proactive-nudges-acl';
@@ -272,6 +273,8 @@ export class ACLFactory {
         return new StageAcl(ctx);
       case 'stage_pr_status_mappings':
         return new StagePRStatusMappingsACL(ctx);
+      case 'stage_release_status_mappings':
+        return new StageReleaseStatusMappingsACL(ctx);
       case 'sub_tickets':
         return new SubTicketsACL(ctx);
       case 'ticket_activities':

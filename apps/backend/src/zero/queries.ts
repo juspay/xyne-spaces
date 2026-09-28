@@ -3848,6 +3848,7 @@ export const queries: AnyQueryRegistry = defineQueries({
         stagesQuery
           .orderBy('sequenceNumber', 'asc')
           .related('prStatusMappings')
+          .related('releaseStatusMappings')
           .related('formContextMappings')
           .related('approvers'),
       )
@@ -3883,6 +3884,7 @@ export const queries: AnyQueryRegistry = defineQueries({
           .orderBy('sequenceNumber', 'asc')
           .related('approvers')
           .related('prStatusMappings')
+          .related('releaseStatusMappings')
           .related('formContextMappings', fcm => fcm.related('form')),
       )
       .related('formContextMappings', mappingQuery =>

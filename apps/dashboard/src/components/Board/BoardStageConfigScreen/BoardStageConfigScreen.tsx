@@ -535,6 +535,12 @@ const BoardStageConfigScreen = ({
         readonly prStatus: PRStatusEvent;
         readonly createdAt: number;
       }[];
+      readonly releaseStatusMappings?: readonly {
+        readonly id: string;
+        readonly stageId: string;
+        readonly releaseStatus: TicketStatusV2;
+        readonly createdAt: number;
+      }[];
       readonly approvers?: readonly {
         readonly id: string;
         readonly userId: string | null;
@@ -704,6 +710,7 @@ const BoardStageConfigScreen = ({
       sequenceNumber: 1,
       defaultTicketStatusV2: TicketStatusV2.TODO,
       prStatuses: [],
+      releaseStatuses: [],
       approvers: [],
       conditions: [],
       position: { x: 0, y: 0 },
@@ -715,6 +722,7 @@ const BoardStageConfigScreen = ({
       sequenceNumber: 2,
       defaultTicketStatusV2: TicketStatusV2.STARTED,
       prStatuses: [],
+      releaseStatuses: [],
       approvers: [],
       conditions: [],
       position: { x: 0, y: 0 },
@@ -726,6 +734,7 @@ const BoardStageConfigScreen = ({
       sequenceNumber: 3,
       defaultTicketStatusV2: TicketStatusV2.COMPLETED,
       prStatuses: [],
+      releaseStatuses: [],
       approvers: [],
       conditions: [],
       position: { x: 0, y: 0 },
@@ -737,6 +746,7 @@ const BoardStageConfigScreen = ({
       sequenceNumber: 4,
       defaultTicketStatusV2: TicketStatusV2.CANCELLED,
       prStatuses: [],
+      releaseStatuses: [],
       approvers: [],
       conditions: [],
       position: { x: 0, y: 0 },
@@ -947,6 +957,7 @@ const BoardStageConfigScreen = ({
     const loadedStages: Stage[] = boardStages.map((s, idx) => {
       // Extract PR statuses from prStatusMappings
       const prStatuses = s.prStatusMappings?.map(m => m.prStatus) || [];
+      const releaseStatuses = s.releaseStatusMappings?.map(m => m.releaseStatus) || [];
 
       // Convert prStatuses and formId into conditions for display
       const conditions: StageCondition[] = [];
@@ -966,6 +977,20 @@ const BoardStageConfigScreen = ({
         });
       });
 
+      // Release Status mappings: "When release status is X, move ticket here"
+      releaseStatuses.forEach(releaseStatus => {
+        conditions.push({
+          id: `release-${s.id}-${releaseStatus}`,
+          name: `Release Status - ${releaseStatus}`,
+          whenField: 'release_status',
+          whenCondition: 'is',
+          whenValue: releaseStatus,
+          thenField: 'status',
+          thenCondition: 'set_to',
+          thenValue: s.name,
+        });
+      });
+
       // Note: Form conditions will be added to PREVIOUS stage below
 
       return {
@@ -976,6 +1001,7 @@ const BoardStageConfigScreen = ({
         sequenceNumber: s.sequenceNumber,
         defaultTicketStatusV2: s.defaultTicketStatusV2 || TicketStatusV2.TODO,
         prStatuses,
+        releaseStatuses,
         approvers: (s.approvers ?? [])
           .map(a => {
             const type = a.approverType ?? ApproverType.USER;
@@ -1058,6 +1084,7 @@ const BoardStageConfigScreen = ({
         sequenceNumber: provisionalSequenceNumber,
         defaultTicketStatusV2: defaultStatus,
         prStatuses: [],
+        releaseStatuses: [],
         approvers: [],
         conditions: [],
         position: { x: 0, y: 0 },
@@ -1220,6 +1247,17 @@ const BoardStageConfigScreen = ({
               }
             }
 
+            // Case 1b: Release Status → Stage — store releaseStatus on the target stage
+            if (condition.whenField === 'release_status' && condition.thenField === 'status') {
+              const releaseStatus = condition.whenValue;
+              if (stage.name === condition.thenValue) {
+                const current = stage.releaseStatuses || [];
+                if (!current.includes(releaseStatus)) {
+                  updatedStage = { ...updatedStage, releaseStatuses: [...current, releaseStatus] };
+                }
+              }
+            }
+
             return updatedStage;
           }
 
@@ -1273,6 +1311,17 @@ const BoardStageConfigScreen = ({
             }
           }
 
+          // For Release Status case, update the target stage if needed
+          if (condition.whenField === 'release_status' && condition.thenField === 'status') {
+            const releaseStatus = condition.whenValue;
+            if (stage.name === condition.thenValue) {
+              const current = stage.releaseStatuses || [];
+              if (!current.includes(releaseStatus)) {
+                return { ...stage, releaseStatuses: [...current, releaseStatus] };
+              }
+            }
+          }
+
           return stage;
         });
       });
@@ -1318,6 +1367,20 @@ const BoardStageConfigScreen = ({
             stage = {
               ...stage,
               prStatuses: stage.prStatuses.filter(ps => ps !== prStatus),
+            };
+          }
+        }
+
+        if (
+          conditionToDelete.whenField === 'release_status' &&
+          conditionToDelete.thenField === 'status'
+        ) {
+          const targetStageName = conditionToDelete.thenValue;
+          const releaseStatus = conditionToDelete.whenValue;
+          if (stage.name === targetStageName && stage.releaseStatuses) {
+            stage = {
+              ...stage,
+              releaseStatuses: stage.releaseStatuses.filter(rs => rs !== releaseStatus),
             };
           }
         }
@@ -2102,6 +2165,7 @@ const BoardStageConfigScreen = ({
           sequenceNumber: stage.sequenceNumber,
           defaultTicketStatusV2: stage.defaultTicketStatusV2,
           prStatuses: (stage.prStatuses || []) as PRStatusEvent[],
+          releaseStatuses: (stage.releaseStatuses || []) as TicketStatusV2[],
           approvers: stage.approvers,
           formId: stage.formId,
           requestApprovalOnEntry: stage.requestApprovalOnEntry ?? false,
@@ -2113,6 +2177,17 @@ const BoardStageConfigScreen = ({
         (acc, stage) => {
           stage.prStatuses?.forEach(prStatus => {
             acc[`${stage.sequenceNumber}-${prStatus}`] = uuidv4();
+          });
+          return acc;
+        },
+        {} as Record<string, string>,
+      );
+
+      // Generate IDs for release status mappings (same contract as PR statuses)
+      const releaseStatusMappingIds = stages.reduce(
+        (acc, stage) => {
+          stage.releaseStatuses?.forEach(releaseStatus => {
+            acc[`${stage.sequenceNumber}-${releaseStatus}`] = uuidv4();
           });
           return acc;
         },
@@ -2150,6 +2225,7 @@ const BoardStageConfigScreen = ({
         stageIds,
         stages: stagesData,
         prStatusMappingIds,
+        releaseStatusMappingIds,
         ...(stageFormMappings.length > 0 && { stageFormMappings }),
         ...(stageApprovers.length > 0 && { stageApprovers }),
       };

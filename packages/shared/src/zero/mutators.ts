@@ -5041,6 +5041,7 @@ export const mutators = defineMutators({
               sequenceNumber: z.number(),
               defaultTicketStatusV2: z.string().optional(),
               prStatuses: z.array(z.nativeEnum(PRStatusEvent)).optional(),
+              releaseStatuses: z.array(z.nativeEnum(TicketStatusV2)).optional(),
               approverIds: z.array(z.string()).optional(),
               approvers: z
                 .array(
@@ -5058,6 +5059,7 @@ export const mutators = defineMutators({
         timestamp: z.number(),
         stageIds: z.record(z.string(), z.string()).optional(),
         prStatusMappingIds: z.record(z.string(), z.string()).optional(), // Map "stageSeq-prStatus" -> mappingId
+        releaseStatusMappingIds: z.record(z.string(), z.string()).optional(), // Map "stageSeq-releaseStatus" -> mappingId
       }),
       async ({
         tx,
@@ -5075,6 +5077,7 @@ export const mutators = defineMutators({
           timestamp,
           stageIds = {},
           prStatusMappingIds = {},
+          releaseStatusMappingIds = {},
           boardType,
         },
       }) => {
@@ -5230,6 +5233,40 @@ export const mutators = defineMutators({
                 });
               }
             }
+
+            // Differential release-status mapping sync (mirrors PR statuses)
+            if (stage.releaseStatuses !== undefined) {
+              const existingReleaseMappings = await tx.run(
+                zql.stage_release_status_mappings.where('stageId', stageId),
+              );
+              const existingReleaseStatuses = new Set(
+                existingReleaseMappings.map(m => m.releaseStatus),
+              );
+              const newReleaseStatuses = new Set(stage.releaseStatuses);
+
+              for (const mapping of existingReleaseMappings) {
+                if (!newReleaseStatuses.has(mapping.releaseStatus)) {
+                  await tx.mutate.stage_release_status_mappings.delete({ id: mapping.id });
+                }
+              }
+              for (const releaseStatus of stage.releaseStatuses) {
+                if (existingReleaseStatuses.has(releaseStatus)) continue;
+                const mappingKey = `${stage.sequenceNumber}-${releaseStatus}`;
+                const mappingId = releaseStatusMappingIds[mappingKey];
+                if (!mappingId) {
+                  throw new Error(
+                    `releaseStatusMappingId is required for stage ${stage.sequenceNumber} and release status ${releaseStatus}`,
+                  );
+                }
+                await tx.mutate.stage_release_status_mappings.insert({
+                  workspaceId: ctx.workspaceId,
+                  id: mappingId,
+                  stageId: stageId,
+                  releaseStatus: releaseStatus,
+                  createdAt: timestamp,
+                });
+              }
+            }
           }
 
           // Delete stages that were removed (not in the new stages array)
@@ -5264,6 +5301,16 @@ export const mutators = defineMutators({
             );
             for (const mapping of prStatusMappings) {
               await tx.mutate.stage_pr_status_mappings.delete({
+                id: mapping.id,
+              });
+            }
+
+            // Delete release status mappings for this stage
+            const releaseStatusMappings = await tx.run(
+              zql.stage_release_status_mappings.where('stageId', existingStage.id),
+            );
+            for (const mapping of releaseStatusMappings) {
+              await tx.mutate.stage_release_status_mappings.delete({
                 id: mapping.id,
               });
             }

@@ -6,6 +6,8 @@ import { recordTicketTimelineEvent } from '@/services/ticketTimelineEventService
 import { activityService } from '@/services/activity/activityService';
 import { notificationService } from '@/services/notificationService';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service';
+import { ticketService } from '@/services/ticketService';
+import { ActivitySource } from '@/types/ticket';
 
 const TICKET_BOT_ID = 'ticket-bot';
 
@@ -73,6 +75,8 @@ async function notifyDevTicketsOnReleaseStatusChange(params: NotifyParams): Prom
         conversationId: true,
         workspaceId: true,
         channelId: true,
+        boardId: true,
+        stageName: true,
         createdBy: true,
         assignedTo: true,
       },
@@ -90,6 +94,15 @@ async function notifyDevTicketsOnReleaseStatusChange(params: NotifyParams): Prom
   }
 
   const actorAction = RELEASE_ACTOR_ACTION[params.status];
+
+  // Board automation: boards can map a release status to a stage ("When Release
+  // Status is COMPLETED -> Status becomes Released"). Resolve the mapping once
+  // per board so the per-ticket loop is a lookup. Service scope: mappings are
+  // workspace config, not per-user data.
+  const targetStageByBoard = await resolveReleaseStatusStageByBoard(
+    [...new Set(devTickets.map(dev => dev.boardId).filter((id): id is string => Boolean(id)))],
+    params.status,
+  );
 
   const results = await Promise.allSettled(
     devTickets.map(async dev => {
@@ -157,6 +170,26 @@ async function notifyDevTicketsOnReleaseStatusChange(params: NotifyParams): Prom
           logger.error(`[ReleaseDevNotify] Failed to push release notification for ticket ${dev.id}:`, error);
         }
       }
+
+      // Board automation: move the dev ticket to the stage its board maps to
+      // this release status, if any. AUTOMATION source shows "Automation" in the
+      // activity feed; skipped when the ticket is already on the target stage.
+      const targetStage = dev.boardId ? targetStageByBoard.get(dev.boardId) : undefined;
+      if (targetStage && dev.stageName !== targetStage) {
+        try {
+          await ticketService.updateTicketStageForWorkflow(
+            dev.id,
+            bot.id,
+            targetStage,
+            ActivitySource.AUTOMATION,
+          );
+          logger.info(
+            `[ReleaseDevNotify] Auto-moved ${dev.xyneId} to stage "${targetStage}" (release ${release.xyneId} -> ${params.status})`,
+          );
+        } catch (error) {
+          logger.error(`[ReleaseDevNotify] Failed to auto-move ticket ${dev.id} to "${targetStage}":`, error);
+        }
+      }
     }),
   );
 
@@ -167,6 +200,40 @@ async function notifyDevTicketsOnReleaseStatusChange(params: NotifyParams): Prom
   logger.info(
     `[ReleaseDevNotify] Release ${release.xyneId} -> ${params.status}: notified ${delivered}/${devTickets.length} dev ticket(s)`,
   );
+}
+
+// Board -> target stage name for a release status, across the given boards.
+// One stage per release status per board (unique [stageId, releaseStatus] plus
+// the builder storing the status on the target stage), so first match wins.
+async function resolveReleaseStatusStageByBoard(
+  boardIds: string[],
+  status: TicketStatusV2,
+): Promise<Map<string, string>> {
+  const result = new Map<string, string>();
+  if (boardIds.length === 0) return result;
+  try {
+    const stages = await withWorkspaceScope(() =>
+      db.stage.findMany({
+        where: { boardId: { in: boardIds } },
+        select: { id: true, name: true, boardId: true },
+      }),
+    );
+    if (stages.length === 0) return result;
+    const stageById = new Map(stages.map(s => [s.id, s]));
+    const mappings = await withWorkspaceScope(() =>
+      db.stageReleaseStatusMapping.findMany({
+        where: { releaseStatus: status, stageId: { in: stages.map(s => s.id) } },
+        select: { stageId: true },
+      }),
+    );
+    for (const mapping of mappings) {
+      const stage = stageById.get(mapping.stageId);
+      if (stage && !result.has(stage.boardId)) result.set(stage.boardId, stage.name);
+    }
+  } catch (error) {
+    logger.error('[ReleaseDevNotify] Failed to resolve release-status stage mappings:', error);
+  }
+  return result;
 }
 
 export const releaseDevTicketNotifyService = { notifyDevTicketsOnReleaseStatusChange };

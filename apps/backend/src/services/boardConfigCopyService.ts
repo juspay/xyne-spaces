@@ -54,6 +54,7 @@ interface SourceStageRow {
   defaultTicketStatusV2: string;
   requestApprovalOnEntry: boolean;
   prStatuses: string[];
+  releaseStatuses: string[];
   approvers: Array<{ approverId: string; approverType: 'USER' | 'ROLE' }>;
   formId?: string;
 }
@@ -101,6 +102,7 @@ export interface PreparedStage {
   defaultTicketStatusV2: string;
   requestApprovalOnEntry: boolean;
   prStatuses: string[];
+  releaseStatuses: string[];
   approvers: Array<{ approverId: string; approverType: 'USER' | 'ROLE' }>;
   formId?: string;
 }
@@ -122,6 +124,7 @@ export interface PreparedBoardUpdate {
    */
   stages?: PreparedStage[];
   prStatusMappingIds?: Record<string, string>;
+  releaseStatusMappingIds?: Record<string, string>;
 }
 
 export interface PreparedBoardFormMapping {
@@ -246,9 +249,10 @@ export class BoardConfigCopyService {
     if (stages.length === 0) return [];
 
     const stageIds = stages.map(s => s.id);
-    const [approvers, prMappings, formMappings] = await Promise.all([
+    const [approvers, prMappings, releaseMappings, formMappings] = await Promise.all([
       db.stageApprovers.findMany({ where: { stageId: { in: stageIds } } }),
       db.stagePRStatusMapping.findMany({ where: { stageId: { in: stageIds } } }),
+      db.stageReleaseStatusMapping.findMany({ where: { stageId: { in: stageIds } } }),
       db.formContextMapping.findMany({
         where: { contextId: { in: stageIds }, contextType: FormContextType.STAGE, entityType: FormEntityType.TICKET },
       }),
@@ -272,6 +276,13 @@ export class BoardConfigCopyService {
       prByStage.set(m.stageId, list);
     }
 
+    const releaseByStage = new Map<string, string[]>();
+    for (const m of releaseMappings) {
+      const list = releaseByStage.get(m.stageId) ?? [];
+      list.push(m.releaseStatus);
+      releaseByStage.set(m.stageId, list);
+    }
+
     const formByStage = new Map<string, string>();
     for (const m of formMappings) {
       formByStage.set(m.contextId, m.formId);
@@ -285,6 +296,7 @@ export class BoardConfigCopyService {
       defaultTicketStatusV2: s.defaultTicketStatusV2,
       requestApprovalOnEntry: s.requestApprovalOnEntry ?? false,
       prStatuses: prByStage.get(s.id) ?? [],
+      releaseStatuses: releaseByStage.get(s.id) ?? [],
       approvers: approversByStage.get(s.id) ?? [],
       formId: formByStage.get(s.id),
     }));
@@ -664,6 +676,7 @@ export class BoardConfigCopyService {
 
     let preparedStages: PreparedStage[] | undefined;
     let prStatusMappingIds: Record<string, string> | undefined;
+    let releaseStatusMappingIds: Record<string, string> | undefined;
     let preparedTransitions: PreparedTransition[] | null = null;
     const ticketRemap: BoardConfigCopyTicketRemap[] = [];
 
@@ -680,6 +693,7 @@ export class BoardConfigCopyService {
         defaultTicketStatusV2: s.defaultTicketStatusV2,
         requestApprovalOnEntry: s.requestApprovalOnEntry,
         prStatuses: s.prStatuses,
+        releaseStatuses: s.releaseStatuses,
         approvers: s.approvers,
         ...(s.formId ? { formId: s.formId } : {}),
       }));
@@ -693,6 +707,18 @@ export class BoardConfigCopyService {
             'board-config-copy-pr-mapping',
             stage.id,
             prStatus,
+          );
+        }
+      }
+
+      // Same contract for release-status mappings, keyed "<sequenceNumber>-<releaseStatus>".
+      releaseStatusMappingIds = {};
+      for (const stage of preparedStages) {
+        for (const releaseStatus of stage.releaseStatuses) {
+          releaseStatusMappingIds[`${stage.sequenceNumber}-${releaseStatus}`] = this.deriveDeterministicId(
+            'board-config-copy-release-mapping',
+            stage.id,
+            releaseStatus,
           );
         }
       }
@@ -808,7 +834,7 @@ export class BoardConfigCopyService {
       boardId: targetBoard.id,
       boardType: sourceBoard.boardType,
       metadata: targetMetadata,
-      ...(preparedStages ? { stages: preparedStages, prStatusMappingIds } : {}),
+      ...(preparedStages ? { stages: preparedStages, prStatusMappingIds, releaseStatusMappingIds } : {}),
     };
 
     const boardFormMapping: PreparedBoardFormMapping | null = clonedFormId

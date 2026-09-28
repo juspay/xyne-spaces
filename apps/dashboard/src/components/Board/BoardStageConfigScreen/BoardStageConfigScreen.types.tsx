@@ -30,6 +30,7 @@ export interface StageNode {
   sequenceNumber: number;
   defaultTicketStatusV2: TicketStatusV2;
   prStatuses: string[];
+  releaseStatuses: string[];
   approvers: ApproverEntry[];
   formId?: string;
   // NULL/undefined treated as false in code; auto-create the approval request
