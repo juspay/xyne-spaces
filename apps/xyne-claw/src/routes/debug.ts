@@ -69,7 +69,34 @@ import {
 } from "../debug/index.js";
 
 import { createLogger } from "../logger.js";
+import { currentOwnerPod, podAddress, podName } from "../run-ownership.js";
 const log = createLogger("debug");
+
+const DEBUG_FORWARDED_HEADER = "x-debug-forwarded-from";
+const DEBUG_FORWARD_TIMEOUT_MS = Number(process.env["DEBUG_FORWARD_TIMEOUT_MS"] ?? 20_000);
+
+async function forwardToOwnerPod(req: Request, res: Response, sessionId: string): Promise<boolean> {
+  if (req.header(DEBUG_FORWARDED_HEADER)) return false;
+  const owner = await currentOwnerPod(sessionId);
+  if (!owner || owner === podName()) return false;
+  const base = await podAddress(owner);
+  if (!base) return false;
+  try {
+    const upstream = await fetch(`${base}${req.originalUrl}`, {
+      headers: { "x-s2s-key": req.header("x-s2s-key") ?? "", [DEBUG_FORWARDED_HEADER]: podName() },
+      signal: AbortSignal.timeout(DEBUG_FORWARD_TIMEOUT_MS),
+    });
+    if (!upstream.ok) {
+      log.warn(`[debug] owner pod ${owner} answered ${upstream.status} for session ${sessionId}; serving locally`);
+      return false;
+    }
+    res.status(upstream.status).type(upstream.headers.get("content-type") ?? "application/json").send(await upstream.text());
+    return true;
+  } catch (err) {
+    log.warn(`[debug] forward to owner pod ${owner} failed for session ${sessionId}; serving locally: ${err instanceof Error ? err.message : String(err)}`);
+    return false;
+  }
+}
 
 const router = Router();
 
@@ -752,6 +779,8 @@ router.get("/internal/sessions/:convId/debug", validateS2SKey, async (req: Reque
       fail(res, 400, "Invalid conversation id, agent slug, or user id", "invalid_id");
       return;
     }
+    const liveSessionId = typeof req.query["sessionId"] === "string" ? req.query["sessionId"] : undefined;
+    if (liveSessionId && isSafeId(liveSessionId) && (await forwardToOwnerPod(req, res, liveSessionId))) return;
 
     const warnings: string[] = [];
     const format = req.query["format"] === "v2" ? "v2" : "v1";
