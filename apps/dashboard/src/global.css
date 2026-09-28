@@ -479,10 +479,6 @@
 }
 
 @layer base {
-  * {
-    @apply border-border;
-  }
-
   /* Custom scrollbars: transparent rails + subtle thumb, scoped to the actual
      scroll containers (document root + Tailwind overflow utilities) instead of a
      universal `*` rule. The old `* { scrollbar-color: hsl(var(--border)) ... }`
@@ -583,6 +579,7 @@
   }
 }
 
+/* stylelint-disable-next-line selector-max-universal -- moving to html changes inheritance under font-mono and third-party roots; needs visual QA */
 * {
   font-family: "Inter", sans-serif;
 }
@@ -1926,6 +1923,7 @@ mark.chat-text-highlight,
 
 /* DM List Item Message Preview - scoped override for codeblocks */
 [data-message-preview="true"] .message-html-root,
+/* stylelint-disable-next-line selector-max-universal -- pre-existing */
 [data-message-preview="true"] .message-html-root * {
   display: inline !important;
   white-space: nowrap !important;
@@ -2198,6 +2196,7 @@ mark.chat-text-highlight,
   overflow-x: hidden;
 }
 
+/* stylelint-disable-next-line selector-max-universal -- pre-existing */
 [data-id="step-details"] * {
   max-width: 100%;
 }
@@ -2212,6 +2211,7 @@ mark.chat-text-highlight,
 
 /* Ensure MarkdownPreview content doesn't overflow */
 [data-id="step-details"] .wmde-markdown,
+/* stylelint-disable-next-line selector-max-universal -- pre-existing */
 [data-id="step-details"] .wmde-markdown * {
   max-width: 100% !important;
   overflow-wrap: break-word !important;
@@ -2302,6 +2302,7 @@ mark.chat-text-highlight,
 }
 
 @media (hover: none) and (pointer: coarse) {
+  /* stylelint-disable-next-line selector-max-universal -- pre-existing */
   * {
     user-select: none;
     -webkit-user-select: none;
@@ -3332,10 +3333,13 @@ html .bn-code-block-source-popup-ok-button:hover {
    layer was actually monospace throughout. Pin the metrics on both; only
    colour may vary between them. */
 .canvas-surface .bn-editor .canvas-highlighted-code,
+/* stylelint-disable-next-line selector-max-universal -- pre-existing */
 .canvas-surface .bn-editor .canvas-highlighted-code *,
 .canvas-surface .bn-editor .canvas-mermaid-source .canvas-code-editor,
+/* stylelint-disable-next-line selector-max-universal -- pre-existing */
 .canvas-surface .bn-editor .canvas-mermaid-source .canvas-code-editor *,
 .canvas-surface .bn-editor .canvas-math-source .canvas-code-editor,
+/* stylelint-disable-next-line selector-max-universal -- pre-existing */
 .canvas-surface .bn-editor .canvas-math-source .canvas-code-editor * {
   font-family:
     ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
@@ -3742,6 +3746,7 @@ img.inline-emoji,
 }
 
 /* ── XyneAI sidebar overrides — black text, blue links ── */
+/* stylelint-disable-next-line selector-max-universal -- pre-existing */
 .xyne-ai-markdown *:not(a):not(code):not(.mention-text):not(.mention-text *) {
   color: hsl(var(--foreground)) !important;
 }
@@ -4218,10 +4223,12 @@ img.inline-emoji,
  * week is a <tr> of day <td>s, so without the guard hovering any day paints the
  * whole week row. :where() keeps the exclusion specificity-free.
  */
+/* stylelint-disable-next-line selector-max-universal -- pre-existing */
 [data-theme="midnight"] tr:hover:not(:where(.rdp-root *)) > td {
   background-color: #222530 !important;
 }
 
+/* stylelint-disable-next-line selector-max-universal -- pre-existing */
 [data-theme="midnight"] tr:hover:not(:where(.rdp-root *)) {
   background-color: #222530 !important;
 }
@@ -4232,6 +4239,7 @@ img.inline-emoji,
   border: 1px solid rgba(59, 130, 246, 0.45) !important;
 }
 
+/* stylelint-disable-next-line selector-max-universal -- pre-existing */
 [data-theme="midnight"] .active-call-highlight * {
   color: #e5e7eb !important;
 }
@@ -4560,15 +4568,18 @@ img.inline-emoji,
    the two paths get different header colours in midnight. `.rdp-root` is
    excluded for the same reason — react-day-picker's weekday row is a real
    <thead><th>, which otherwise picks up the data-grid header surface. */
+/* stylelint-disable-next-line selector-max-universal -- pre-existing */
 [data-theme="midnight"]
   th:not(
     :where(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary, .rdp-root) *
   ),
+/* stylelint-disable-next-line selector-max-universal -- pre-existing */
 [data-theme="midnight"]
   th
   *:not(
     :where(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary, .rdp-root) *
   ),
+/* stylelint-disable-next-line selector-max-universal -- pre-existing */
 [data-theme="midnight"]
   th
   span:not(
@@ -4578,6 +4589,7 @@ img.inline-emoji,
 }
 
 /* Specific targeting for table header text with lower contrast */
+/* stylelint-disable-next-line selector-max-universal -- pre-existing */
 [data-theme="midnight"]
   thead
   th:not(
@@ -4588,6 +4600,7 @@ img.inline-emoji,
 }
 
 /* Table header text spans (Type, User Query, Summary, etc.) */
+/* stylelint-disable-next-line selector-max-universal -- pre-existing */
 [data-theme="midnight"]
   th
   :is(p, div, span):not(
@@ -4597,6 +4610,7 @@ img.inline-emoji,
 }
 
 /* Ensure high contrast for all header content */
+/* stylelint-disable-next-line selector-max-universal -- pre-existing */
 [data-theme="midnight"]
   thead
   *:not(
@@ -4650,6 +4664,7 @@ img.inline-emoji,
 }
 
 [data-theme="midnight"] [data-dropdown="dropdown"] [data-dropdown-value],
+/* stylelint-disable-next-line selector-max-universal -- pre-existing */
 [data-theme="midnight"] [data-dropdown="dropdown"] [data-dropdown-value] * {
   color: #d1d5db !important;
 }
@@ -5050,6 +5065,7 @@ img.inline-emoji,
    shifted (~9px, and it grows with zoom). Restoring `content-box` inside the
    viewer subtree realigns them. This is the exact fix xyne-search uses. */
 .pdfViewer,
+/* stylelint-disable-next-line selector-max-universal -- pre-existing */
 .pdfViewer * {
   box-sizing: content-box;
 }
@@ -5059,6 +5075,7 @@ img.inline-emoji,
    off the parent text-span's PDF font. Reinherit only `font-family` (not the
    `font` shorthand — pdf.js re-scales font-size/line-height on zoom). */
 .pdfViewer .textLayer .highlight,
+/* stylelint-disable-next-line selector-max-universal -- pre-existing */
 .pdfViewer .textLayer .highlight * {
   font-family: inherit !important;
 }
@@ -5251,6 +5268,7 @@ img.inline-emoji,
 
 /* Override React Flow's pointer cursor while drawing a group-selection box. */
 .flow-plan-editor--group-selection,
+/* stylelint-disable-next-line selector-max-universal -- pre-existing */
 .flow-plan-editor--group-selection * {
   -webkit-user-select: none !important;
   user-select: none !important;
