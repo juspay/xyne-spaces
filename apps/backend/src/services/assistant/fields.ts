@@ -26,7 +26,7 @@ const FRAME_WORDS = new Set(
 );
 /** The longest value, in words, except for the rest of the sentence (see `sentencePieces`). */
 export const MAX_VALUE_WORDS = 12;
-/** Jev takes 2–52 options per choice; one of them is "none". */
+/** Keep candidate spans bounded: 51 value spans plus the "none" option. */
 const MAX_PIECES = 51;
 const NONE = 'none';
 const EDGE_PUNCTUATION = /^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu;

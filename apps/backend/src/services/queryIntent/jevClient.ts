@@ -16,6 +16,8 @@ import { config as envConfig } from '@/config/env';
 const DEFAULT_URL = 'https://api.typesafe.ai/v1/systemone';
 /** Pinned, not a floating alias: thresholds are only valid for the model they were tuned on. */
 const DEFAULT_MODEL = 'jev-1.13.0';
+/** Jev Choice questions accept at most 255 options, including any fallback option. */
+const MAX_CHOICE_OPTIONS = 255;
 
 /** A yes/no question. Jev also has `score`; add it when a caller needs one. */
 export interface JevNoulQuestion {
@@ -168,6 +170,19 @@ export const askJev = async (
   const connection =
     overrideConnection === undefined ? configuredConnection() : overrideConnection;
   if (!connection) return null;
+
+  for (const [key, question] of Object.entries(questions)) {
+    if (question.type !== 'choice') continue;
+    const count = Object.keys(question.criteria).length;
+    if (count < 2 || count > MAX_CHOICE_OPTIONS) {
+      logger.warn('Jev choice question has an unsupported number of options', {
+        question: key,
+        count,
+        max: MAX_CHOICE_OPTIONS,
+      });
+      return null;
+    }
+  }
 
   try {
     const response = await fetch(connection.url, {
