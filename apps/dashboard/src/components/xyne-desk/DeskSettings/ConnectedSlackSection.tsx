@@ -3,12 +3,15 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Hash, Plus, Unplug } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../ui/Select';
+import { Switch } from '../../ui/Switch';
 import { DisconnectConfirmDialog } from '../DisconnectConfirmDialog';
 import {
+  SlackDeskTriggerMode,
   connectSlackToDesk,
   disconnectSlackDesk,
   listAvailableSlackChannels,
   listDeskSlackChannels,
+  updateSlackDeskTriggerMode,
 } from '../../../services/clients/slackDeskApi';
 
 interface ConnectedSlackSectionProps {
@@ -29,7 +32,7 @@ export const ConnectedSlackSection: React.FC<ConnectedSlackSectionProps> = ({
   const connectedKey = ['desk-slack-channels', channelId];
   // The route 403s non-owners; swallowing that would render "none connected" falsely.
   const {
-    data: connected,
+    data,
     isLoading,
     isError,
   } = useQuery({
@@ -37,6 +40,8 @@ export const ConnectedSlackSection: React.FC<ConnectedSlackSectionProps> = ({
     queryFn: () => listDeskSlackChannels(channelId),
     enabled: !!channelId,
   });
+  const connected = data?.slackChannels;
+  const triggerMode = data?.triggerMode ?? SlackDeskTriggerMode.ALL_MESSAGES;
 
   // Same endpoint as the create-desk picker; 503s when the workspace source isn't seeded.
   const { data: available, isError: pickerUnavailable } = useQuery({
@@ -74,6 +79,14 @@ export const ConnectedSlackSection: React.FC<ConnectedSlackSectionProps> = ({
       refresh();
     },
     onError: err => onError(err, 'Failed to disconnect Slack channel — please try again.'),
+  });
+
+  const triggerModeMutation = useMutation({
+    mutationFn: (mode: SlackDeskTriggerMode) => updateSlackDeskTriggerMode(channelId, mode),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: connectedKey });
+    },
+    onError: err => onError(err, 'Failed to update ticket trigger — please try again.'),
   });
 
   // The binding stores only the Slack channel id, so names come from the picker list.
@@ -131,6 +144,32 @@ export const ConnectedSlackSection: React.FC<ConnectedSlackSectionProps> = ({
               )}
             </div>
           ))}
+        </div>
+      )}
+
+      {!isLoading && !isError && !!connected?.length && (
+        <div className='flex w-full max-w-[480px] items-start justify-between gap-3 rounded-[14px] border border-border bg-background p-[12px] shadow-sm'>
+          <div className='flex flex-col gap-[2px]'>
+            <div className='text-desk-label'>Only create tickets when @-mentioned</div>
+            <div className='text-[12px] leading-[16px] text-desk-helper'>
+              Off: every Slack message becomes a ticket. On: only a message that tags the bot
+              does — anywhere in a thread. Tagging it mid-thread pulls the whole thread in as
+              one ticket instead of starting mid-conversation.
+            </div>
+          </div>
+          <Switch
+            variant='desk'
+            checked={triggerMode === SlackDeskTriggerMode.MENTION_ONLY}
+            disabled={!canManage || triggerModeMutation.isPending}
+            aria-label='Only create tickets when @-mentioned'
+            onCheckedChange={checked =>
+              triggerModeMutation.mutate(
+                checked ? SlackDeskTriggerMode.MENTION_ONLY : SlackDeskTriggerMode.ALL_MESSAGES,
+              )
+            }
+            data-track-category='DeskSettings'
+            data-track-name='ToggleDeskSlackMentionOnly'
+          />
         </div>
       )}
 

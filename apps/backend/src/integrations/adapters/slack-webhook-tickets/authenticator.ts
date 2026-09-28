@@ -15,10 +15,14 @@
 
 import crypto from 'crypto';
 import { logger } from '@/utils/logger';
+import { db } from '@/database/client';
+import { SlackDeskTriggerMode } from '@xyne/shared';
 import { BaseAuthenticator } from '../../core/baseAuthenticator';
 import { AuthResult } from '../../core/types';
 import { ExternalSourceRepository } from '../../../database/repositories/externalSourceRepository';
 import { ExternalMessageRepository } from '../../../database/repositories/externalMessageRepository';
+import { DESK_SOURCE_PREFIXES } from '../../core/deskSources';
+import { extractBotUserId, textMentionsBot } from '../slack-desk/botMention';
 import { SlackWebhookPayload, SlackEventType } from './types';
 
 export class SlackAuthenticator extends BaseAuthenticator {
@@ -87,7 +91,7 @@ export class SlackAuthenticator extends BaseAuthenticator {
 
   private async isOrphanThreadMessage(
     payload: SlackWebhookPayload,
-    sourceName: string
+    sourceName: string,
   ): Promise<boolean> {
     const event = payload?.event;
     if (!event?.thread_ts || event.thread_ts === event.ts) {
@@ -99,6 +103,22 @@ export class SlackAuthenticator extends BaseAuthenticator {
     const source = await this.externalSourceRepo.findByName(sourceName);
     if (!source) {
       return false;
+    }
+    // A @mention on a MENTION_ONLY desk is never an orphan — SlackDeskFlow backfills the
+    // thread for it. ALL_MESSAGES desks keep the orphan check unchanged.
+    if (sourceName.startsWith(DESK_SOURCE_PREFIXES.SLACK) && source.channelId) {
+      const pref = await db.emailChannelPreference.findUnique({
+        where: { channelId: source.channelId },
+        select: { slackDeskTriggerMode: true },
+      });
+      const targetMessage =
+        event.subtype === 'message_changed' && event.message ? event.message : event;
+      if (
+        pref?.slackDeskTriggerMode === SlackDeskTriggerMode.MENTION_ONLY &&
+        textMentionsBot(targetMessage?.text, extractBotUserId(payload))
+      ) {
+        return false;
+      }
     }
     const threadAnchor = await this.externalMessageRepo.findByThreadId(source.id, event.thread_ts);
     return !threadAnchor;

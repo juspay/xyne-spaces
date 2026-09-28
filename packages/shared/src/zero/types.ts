@@ -73,6 +73,13 @@ export enum EmailMergeMode {
   ENABLED = 'ENABLED',
 }
 
+/** Gates which Slack messages on a desk's bound channel become tickets. */
+// @ts-ignore TS1294
+export enum SlackDeskTriggerMode {
+  ALL_MESSAGES = 'ALL_MESSAGES',
+  MENTION_ONLY = 'MENTION_ONLY',
+}
+
 // @ts-ignore TS1294
 export enum UserResponsibility {
   MANAGER = 'MANAGER',

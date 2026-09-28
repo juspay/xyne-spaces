@@ -8,7 +8,7 @@
  */
 
 import express, { Request, Response } from 'express';
-import { isDeskChannelType } from '@xyne/shared';
+import { isDeskChannelType, SlackDeskTriggerMode } from '@xyne/shared';
 import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
 import { authV2Middleware } from '@/middleware/authV2Middleware';
 import { db } from '@/database/client';
@@ -349,19 +349,55 @@ router.get(
       if (!(await authorizeSlackDeskManager(channelId, req.user!.id, req.user!.workspaceId!, res)))
         return;
 
-      const sources = await db.externalSource.findMany({
-        where: { channelId, sourceType: 'slack-desk', isActive: true },
-        select: { id: true, name: true },
-      });
+      const [sources, pref] = await Promise.all([
+        db.externalSource.findMany({
+          where: { channelId, sourceType: 'slack-desk', isActive: true },
+          select: { id: true, name: true },
+        }),
+        db.emailChannelPreference.findUnique({
+          where: { channelId },
+          select: { slackDeskTriggerMode: true },
+        }),
+      ]);
       res.json({
         slackChannels: sources.map(s => ({
           sourceId: s.id,
           slackChannelId: extractSlackChannelId(s.name),
         })),
+        triggerMode:
+          pref?.slackDeskTriggerMode === SlackDeskTriggerMode.MENTION_ONLY
+            ? SlackDeskTriggerMode.MENTION_ONLY
+            : SlackDeskTriggerMode.ALL_MESSAGES,
       });
     } catch (error) {
       logger.error(`${TAG} Error listing desk Slack bindings`, { error });
       res.status(500).json({ error: 'Failed to list Slack channels for this desk' });
+    }
+  }
+);
+
+/** PATCH — how this desk's bound Slack channel decides which messages become tickets. */
+router.patch(
+  '/channels/:channelId/slack/trigger-mode',
+  authV2Middleware.authenticate,
+  validateZod(z.object({ triggerMode: z.nativeEnum(SlackDeskTriggerMode) })),
+  async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { channelId } = req.params;
+      const { triggerMode } = req.body as { triggerMode: SlackDeskTriggerMode };
+
+      if (!(await authorizeSlackDeskManager(channelId, req.user!.id, req.user!.workspaceId!, res)))
+        return;
+
+      await db.emailChannelPreference.update({
+        where: { channelId },
+        data: { slackDeskTriggerMode: triggerMode },
+      });
+
+      res.json({ triggerMode });
+    } catch (error) {
+      logger.error(`${TAG} Error updating Slack desk trigger mode`, { error });
+      res.status(500).json({ error: 'Failed to update trigger mode' });
     }
   }
 );

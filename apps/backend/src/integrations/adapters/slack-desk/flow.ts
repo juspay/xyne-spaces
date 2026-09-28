@@ -1,19 +1,29 @@
 import { ExternalSource } from '@prisma/client';
+import { WebClient } from '@slack/web-api';
+import { SlackDeskTriggerMode, ExternalEntityType } from '@xyne/shared';
 import { BaseFlow } from '../../core/baseFlow';
 import { TestPayloadResult } from '../../core/types';
 import { decrypt } from '../../../services/encryptionService';
 import { resolveSlackMentions, fetchSlackUserInfo } from '../slack-webhook-tickets/utils/slackUserResolver';
 import { ChannelRepository } from '../../../database/repositories/channelRepository';
 import { UserRepository } from '../../../database/repositories/users';
+import { ExternalMessageRepository } from '../../../database/repositories/externalMessageRepository';
+import { db } from '@/database/client';
 import { logger } from '../../../utils/logger';
 import { buildSlackDeskSourceName } from '../../core/deskSources';
+import { extractBotUserId, textMentionsBot } from './botMention';
 
 export class SlackDeskFlow extends BaseFlow {
+  private externalMessageRepo = new ExternalMessageRepository();
+
   getSourceNameFromDB(payload: any): string | undefined {
     const channelId = payload?.event?.channel;
     return channelId ? buildSlackDeskSourceName(channelId) : undefined;
   }
 
+  /** ALL_MESSAGES (default): unchanged. MENTION_ONLY (per-desk): only a message that
+   * @-mentions the bot opens/continues a ticket; once a thread has one, replies append
+   * normally without needing another mention. Mentioning mid-thread backfills the thread. */
   async preprocess(payload: any, source?: ExternalSource): Promise<any> {
     try {
       if (!source) {
@@ -21,7 +31,7 @@ export class SlackDeskFlow extends BaseFlow {
       }
 
       const decryptedCreds = decrypt(source.credentials);
-      const creds = JSON.parse(decryptedCreds);
+      const creds = JSON.parse(decryptedCreds) as { botOauthToken?: string };
 
       if (!creds.botOauthToken) {
         return payload;
@@ -41,57 +51,134 @@ export class SlackDeskFlow extends BaseFlow {
         return payload;
       }
 
-      // Resolve @mentions in text
-      if (targetMessage.text) {
-        targetMessage.text = await resolveSlackMentions(
-          targetMessage.text,
-          creds.botOauthToken,
-          false,
-          workspaceId
-        );
-      }
+      const triggerMode = source.channelId ? await this.getTriggerMode(source.channelId) : SlackDeskTriggerMode.ALL_MESSAGES;
 
-      // Resolve @mentions in attachments
-      if (targetMessage.attachments) {
-        const attachmentsJson = JSON.stringify(targetMessage.attachments);
-        const resolvedJson = await resolveSlackMentions(
-          attachmentsJson,
-          creds.botOauthToken,
-          true,
-          workspaceId
-        );
-        targetMessage.attachments = JSON.parse(resolvedJson);
-      }
+      if (triggerMode === SlackDeskTriggerMode.MENTION_ONLY) {
+        const isMention = textMentionsBot(targetMessage.text, extractBotUserId(payload));
+        const threadTs: string | undefined = targetMessage.thread_ts;
+        const isThreadReply = !!threadTs && threadTs !== targetMessage.ts;
+        const threadAlreadyTicketed =
+          isThreadReply && (await this.externalMessageRepo.findByThreadId(source.id, threadTs!, ExternalEntityType.EMAIL));
 
-      // Resolve message author: check our users table first, then Slack API, else raw ID
-      const authorSlackId = targetMessage.user || targetMessage.bot_id;
-      if (authorSlackId) {
-        try {
-          const userRepo = new UserRepository();
-          const dbUser = await userRepo.findByMetadataField('slackId', authorSlackId);
-          if (dbUser) {
-            payload._resolvedAuthor = {
-              name: dbUser.name,
-              email: dbUser.email,
-            };
-          } else if (creds.botOauthToken) {
-            const slackUser = await fetchSlackUserInfo(authorSlackId, creds.botOauthToken);
-            if (slackUser) {
-              payload._resolvedAuthor = {
-                name: slackUser.profile?.real_name || slackUser.profile?.display_name || authorSlackId,
-                email: slackUser.profile?.email,
-              };
-            }
-          }
-        } catch (err) {
-          logger.warn('[SlackDeskFlow] Failed to resolve author', { authorSlackId, error: err });
+        if (!isMention && !threadAlreadyTicketed) {
+          return { __skipIngestion: true, __skipReason: 'mention_required' };
         }
+        if (isMention && isThreadReply && !threadAlreadyTicketed) {
+          return await this.backfillThread(payload, source, creds.botOauthToken, threadTs!, workspaceId);
+        }
+        // Else: root-level mention, or reply into an already-ticketed thread — ingest as-is.
       }
 
+      await this.enrichMessage(payload, targetMessage, creds.botOauthToken, workspaceId);
       return payload;
     } catch {
       return payload;
     }
+  }
+
+  private async getTriggerMode(channelId: string): Promise<SlackDeskTriggerMode> {
+    const pref = await db.emailChannelPreference.findUnique({
+      where: { channelId },
+      select: { slackDeskTriggerMode: true },
+    });
+    return pref?.slackDeskTriggerMode === SlackDeskTriggerMode.MENTION_ONLY
+      ? SlackDeskTriggerMode.MENTION_ONLY
+      : SlackDeskTriggerMode.ALL_MESSAGES;
+  }
+
+  /** Resolves @mentions (text + attachments) and the author, in place, on one message. */
+  private async enrichMessage(
+    payload: any,
+    targetMessage: any,
+    botOauthToken: string,
+    workspaceId: string | undefined,
+  ): Promise<void> {
+    if (targetMessage.text) {
+      targetMessage.text = await resolveSlackMentions(targetMessage.text, botOauthToken, false, workspaceId);
+    }
+
+    if (targetMessage.attachments) {
+      const attachmentsJson = JSON.stringify(targetMessage.attachments);
+      const resolvedJson = await resolveSlackMentions(attachmentsJson, botOauthToken, true, workspaceId);
+      targetMessage.attachments = JSON.parse(resolvedJson);
+    }
+
+    const authorSlackId = targetMessage.user || targetMessage.bot_id;
+    if (!authorSlackId) {
+      return;
+    }
+    try {
+      const userRepo = new UserRepository();
+      const dbUser = await userRepo.findByMetadataField('slackId', authorSlackId);
+      if (dbUser) {
+        payload._resolvedAuthor = { name: dbUser.name, email: dbUser.email };
+      } else {
+        const slackUser = await fetchSlackUserInfo(authorSlackId, botOauthToken);
+        if (slackUser) {
+          payload._resolvedAuthor = {
+            name: slackUser.profile?.real_name || slackUser.profile?.display_name || authorSlackId,
+            email: slackUser.profile?.email,
+          };
+        }
+      }
+    } catch (err) {
+      logger.warn('[SlackDeskFlow] Failed to resolve author', { authorSlackId, error: err });
+    }
+  }
+
+  /** Fetches the whole thread (uncapped) via conversations.replies, returning an array of
+   * enriched payloads — core.ts transforms+syncs each in order, seeding the ticket with full
+   * thread context instead of just the tagging message. */
+  private async backfillThread(
+    triggerPayload: any,
+    source: ExternalSource,
+    botOauthToken: string,
+    threadTs: string,
+    workspaceId: string | undefined,
+  ): Promise<any[]> {
+    const channel = triggerPayload.event.channel;
+    const client = new WebClient(botOauthToken);
+    const messages: any[] = [];
+    let cursor: string | undefined;
+
+    try {
+      do {
+        const res = await client.conversations.replies({
+          channel,
+          ts: threadTs,
+          cursor,
+          limit: 200,
+        });
+        if (!res.ok) {
+          throw new Error(res.error ?? 'conversations.replies not ok');
+        }
+        messages.push(...(res.messages ?? []));
+        cursor = res.response_metadata?.next_cursor || undefined;
+      } while (cursor);
+    } catch (err) {
+      logger.warn('[SlackDeskFlow] Thread fetch failed, ingesting mention only', { channel, threadTs, error: err });
+    }
+
+    // Never drop the triggering message, even if the fetch above failed/errored.
+    const triggerTs = triggerPayload.event.ts;
+    if (!messages.some(m => m.ts === triggerTs)) {
+      messages.push(triggerPayload.event);
+    }
+
+    // Empty-content messages fail transform() downstream and would abort the whole batch.
+    const hasContent = (m: any): boolean =>
+      !!m.ts && !!(m.text?.trim() || (m.files && m.files.length > 0)) && !!(m.user || m.bot_id);
+
+    // parseFloat loses precision on Slack's 16-digit ts; string comparison is exact.
+    const ordered = messages.filter(hasContent).sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0));
+
+    const payloads: any[] = [];
+    for (const message of ordered) {
+      const raw = { type: 'event_callback', event: { ...message, channel, type: 'message' } };
+      await this.enrichMessage(raw, raw.event, botOauthToken, workspaceId);
+      payloads.push(raw);
+    }
+    return payloads;
   }
 
   /**

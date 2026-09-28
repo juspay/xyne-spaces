@@ -5,7 +5,10 @@
  * ExternalSource (isActive = false).
  */
 
+import { SlackDeskTriggerMode } from '@xyne/shared';
 import { apiInstance } from './apiClient';
+
+export { SlackDeskTriggerMode };
 
 /**
  * Soft-disconnect: server marks the Slack channel's ExternalSource inactive.
@@ -35,15 +38,29 @@ export async function listAvailableSlackChannels(): Promise<AvailableSlackChanne
   return data.channels;
 }
 
-export async function listDeskSlackChannels(channelId: string): Promise<DeskSlackChannel[]> {
-  const { data } = await apiInstance.get<{ slackChannels: DeskSlackChannel[] }>(
+export interface DeskSlackChannelsResponse {
+  slackChannels: DeskSlackChannel[];
+  triggerMode: SlackDeskTriggerMode;
+}
+
+export async function listDeskSlackChannels(channelId: string): Promise<DeskSlackChannelsResponse> {
+  const { data } = await apiInstance.get<DeskSlackChannelsResponse>(
     `/integrations/slack-desk/channels/${channelId}/slack`,
   );
-  return data.slackChannels;
+  return data;
 }
 
 export async function connectSlackToDesk(channelId: string, slackChannelId: string): Promise<void> {
   await apiInstance.post(`/integrations/slack-desk/channels/${channelId}/slack`, {
     slackChannelId,
+  });
+}
+
+export async function updateSlackDeskTriggerMode(
+  channelId: string,
+  triggerMode: SlackDeskTriggerMode,
+): Promise<void> {
+  await apiInstance.patch(`/integrations/slack-desk/channels/${channelId}/slack/trigger-mode`, {
+    triggerMode,
   });
 }
