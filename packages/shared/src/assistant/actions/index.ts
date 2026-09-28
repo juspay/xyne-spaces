@@ -1,4 +1,4 @@
-import { loadActions } from '../core/action.js';
+import { loadActions } from '../core/loadActions.js';
 import { CHANNELS } from './channels.js';
 import { MESSAGING } from './messaging.js';
 

@@ -4,6 +4,7 @@
  */
 export * from './core/action.js';
 export * from './core/conversation.js';
+export * from './core/loadActions.js';
 export * from './core/operations.js';
 export * from './core/references.js';
 export * from './core/templates.js';
