@@ -454,11 +454,12 @@ class NoteTakerTranscriptService {
 
   /**
    * Grants the thread's channel VIEW access to this recording (same
-   * EntityAccess/NOTE_TAKER share the manual "share to channel" flow uses),
-   * so every thread/channel member can see the recording message card and
-   * open /recordings/:callId. No-op for recordings not started from a thread
-   * (no channelId on Call.metadata). Best-effort — a failure here must never
-   * block transcript/summary processing. Public so
+   * EntityAccess/NOTE_TAKER share the manual "share to channel" flow uses,
+   * minus the share post), so every thread/channel member can see the
+   * recording message card and open /recordings/:callId. No-op for
+   * recordings not started from a thread (no channelId on Call.metadata).
+   * Best-effort — a failure here must never block transcript/summary
+   * processing. Public so
    * noteTakerWebhookController can call this immediately once the recording
    * ends (handleParticipantLeft / handleRoomFinished) — both canvases
    * already exist by then via eager creation, so there's no reason to wait
@@ -480,6 +481,9 @@ class NoteTakerTranscriptService {
           action: 'grant',
           targets: [{ type: 'channel', id: channelId }],
           access: EntityUserAccess.VIEW,
+          // Access only: the thread anchor message is already the recording's
+          // post, so a share post here would duplicate it at the channel's top level.
+          post: false,
         },
       );
     } catch (error) {
