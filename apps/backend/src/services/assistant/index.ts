@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { performance } from 'node:perf_hooks';
 import { ACTIONS } from '@xyne/shared/assistant';
 import type { ACLContext } from '@/database/acl/base-acl';
 import { config } from '@/config/env';
@@ -63,12 +64,26 @@ export async function isAssistantOn(workspaceId: string, userId: string): Promis
 }
 
 /** The real services for one user's request. */
-export function assistantServices(context: ACLContext): TurnServices {
+export interface AssistantRequestDiagnostics {
+  jevMs: number[];
+}
+
+export function assistantServices(
+  context: ACLContext,
+  diagnostics?: AssistantRequestDiagnostics
+): TurnServices {
   return {
     catalog: ACTIONS,
     sessions: redisSessionStore,
     records: databaseFinder(context),
-    askJev: askJevWithRetry,
+    async askJev(state, questions) {
+      const startedAt = performance.now();
+      try {
+        return await askJevWithRetry(state, questions);
+      } finally {
+        diagnostics?.jevMs.push(Math.round((performance.now() - startedAt) * 10) / 10);
+      }
+    },
     newId: randomUUID,
     debug: config.env !== 'production',
   };

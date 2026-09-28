@@ -60,6 +60,14 @@ export function describeDebug(debug: TurnDebug): string {
   return parts.filter(Boolean).join(' · ');
 }
 
+/** Compact timings correlated by request ID: total server time and Jev calls. */
+export function describeTimings(timings: { backendMs: number; jevMs: readonly number[] }): string {
+  const jev = timings.jevMs.length
+    ? timings.jevMs.map(ms => `${ms.toFixed(1)} ms`).join(', ')
+    : 'not called';
+  return `backend ${timings.backendMs.toFixed(1)} ms · Jev ${jev}`;
+}
+
 export function describeResults(
   results: ReadonlyArray<{ ok: boolean; error?: string | undefined }>,
 ): string {

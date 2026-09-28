@@ -9,6 +9,7 @@ import {
   describeInput,
   describeReply,
   describeDebug,
+  describeTimings,
   describeResults,
   type TraceEntry,
 } from './diagnostics';
@@ -126,17 +127,30 @@ export function useAssistant({
       const sessionId = sessionIdRef.current;
       let next: TurnInput | null = input;
       while (next) {
-        note('Sent', describeInput(next));
+        const requestId = uuidv4();
+        note('Sent', `${describeInput(next)} · requestId ${requestId}`);
         const sentAt = performance.now();
         const response = await assistantService.turn({
           sessionId,
-          requestId: uuidv4(),
+          requestId,
           input: next,
           context: { onScreen: [...onScreenRef.current] },
         });
         if (sessionId !== sessionIdRef.current) return;
-        note('Reply', `${Math.round(performance.now() - sentAt)} ms · ${describeReply(response)}`);
-        if (response.debug) note('Understood', describeDebug(response.debug));
+        note(
+          'Reply',
+          `API round trip ${Math.round(performance.now() - sentAt)} ms · ${describeReply(response)}`,
+        );
+        if (
+          response.debug?.kind ||
+          response.debug?.actions?.length ||
+          response.debug?.continues !== undefined
+        ) {
+          note('Understood', describeDebug(response.debug));
+        }
+        if (response.debug?.timings) {
+          note('Backend timing', describeTimings(response.debug.timings));
+        }
         reply(response);
         if (!response.run) return;
         const ranAt = performance.now();

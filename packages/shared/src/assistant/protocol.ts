@@ -86,4 +86,6 @@ export interface TurnDebug {
   kind?: Record<string, number>;
   actions?: Array<{ action: string; probability: number }>;
   continues?: number;
+  /** Local Diagnose timing summary; contains no user text or record IDs. */
+  timings?: { backendMs: number; jevMs: number[] };
 }

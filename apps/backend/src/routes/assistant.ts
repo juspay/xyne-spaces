@@ -1,6 +1,13 @@
 import { Router, type Request, type Response } from 'express';
+import { performance } from 'node:perf_hooks';
 import { turnRequestSchema, type TurnResponse } from '@xyne/shared/assistant';
-import { assistantServices, handleTurn, isAssistantOn, jevConnection } from '@/services/assistant';
+import {
+  assistantServices,
+  handleTurn,
+  isAssistantOn,
+  jevConnection,
+  type AssistantRequestDiagnostics,
+} from '@/services/assistant';
 import {
   getAssistantTurnDuration,
   getAssistantTurnsTotal,
@@ -37,32 +44,49 @@ router.post('/turn', async (req: Request, res: Response) => {
   }
 
   const { sessionId, requestId, input, context } = parsed.data;
-  const startedAt = Date.now();
+  const startedAt = performance.now();
+  const diagnostics: AssistantRequestDiagnostics = { jevMs: [] };
+  const services = assistantServices(
+    {
+      workspaceId: user.workspaceId,
+      userId: user.id,
+      role: user.role,
+    },
+    diagnostics
+  );
   try {
     const response = await handleTurn(
       input,
       { workspaceId: user.workspaceId, userId: user.id, sessionId },
-      assistantServices({
-        workspaceId: user.workspaceId,
-        userId: user.id,
-        role: user.role,
-      }),
+      services,
       context
     );
+    const durationMs = elapsed(startedAt);
     const outcome = outcomeOf(response);
-    record({ input: input.kind, outcome }, startedAt);
+    record({ input: input.kind, outcome }, durationMs);
+    if (services.debug) {
+      response.debug = {
+        ...(response.debug ?? {}),
+        timings: { backendMs: durationMs, jevMs: diagnostics.jevMs },
+      };
+    }
     // Metadata only: what the user said stays out of the logs.
     logger.info('[assistant] turn', {
       requestId,
       input: input.kind,
       outcome,
-      durationMs: Date.now() - startedAt,
+      durationMs,
+      jevMs: diagnostics.jevMs,
     });
     res.json(response);
   } catch (error) {
-    record({ input: input.kind, outcome: 'failed' }, startedAt);
+    const durationMs = elapsed(startedAt);
+    record({ input: input.kind, outcome: 'failed' }, durationMs);
     logger.error('[assistant] turn failed', {
       requestId,
+      input: input.kind,
+      durationMs,
+      jevMs: diagnostics.jevMs,
       error: error instanceof Error ? error.message : String(error),
     });
     if (error instanceof UnavailableError) {
@@ -79,9 +103,13 @@ function outcomeOf(response: TurnResponse): string {
   return response.expectsReply ? 'question' : 'reply';
 }
 
-function record(attributes: AssistantTurnAttributes, startedAt: number): void {
+function elapsed(startedAt: number): number {
+  return Math.round((performance.now() - startedAt) * 10) / 10;
+}
+
+function record(attributes: AssistantTurnAttributes, durationMs: number): void {
   getAssistantTurnsTotal().add(1, attributes);
-  getAssistantTurnDuration().record(Date.now() - startedAt, attributes);
+  getAssistantTurnDuration().record(durationMs, attributes);
 }
 
 export default router;

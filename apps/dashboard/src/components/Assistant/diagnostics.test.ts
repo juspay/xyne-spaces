@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { appendTrace, describeInput, describeReply, type TraceEntry } from './diagnostics';
+import {
+  appendTrace,
+  describeInput,
+  describeReply,
+  describeTimings,
+  type TraceEntry,
+} from './diagnostics';
 
 describe('the Diagnose log', () => {
   it('describes what was sent and what came back in one line each', () => {
@@ -27,5 +33,11 @@ describe('the Diagnose log', () => {
     for (let index = 0; index < 205; index += 1) trace = appendTrace(trace, 'Step', `${index}`);
     expect(trace).toHaveLength(200);
     expect(trace.at(-1)?.detail).toBe('204');
+  });
+
+  it('describes only backend and Jev timing', () => {
+    expect(describeTimings({ backendMs: 538.46, jevMs: [231.24, 89] })).toBe(
+      'backend 538.5 ms · Jev 231.2 ms, 89.0 ms',
+    );
   });
 });

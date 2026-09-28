@@ -49,16 +49,26 @@ export function useSpeech({
         item.audio ??= Promise.resolve(null);
         continue;
       }
-      item.audio ??= ttsService.synthesize(item.text).catch((error: unknown) => {
-        if (serverVoiceRef.current) {
-          serverVoiceRef.current = false;
+      item.audio ??= (async (): Promise<SynthesizedSpeech | null> => {
+        const startedAt = performance.now();
+        try {
+          const audio = await ttsService.synthesize(item.text);
           onTraceRef.current(
-            'Server voice failed',
-            `${getApiErrorMessage(error, 'unknown')} · using the browser voice`,
+            'Server voice ready',
+            `${Math.round(performance.now() - startedAt)} ms`,
           );
+          return audio;
+        } catch (error) {
+          if (serverVoiceRef.current) {
+            serverVoiceRef.current = false;
+            onTraceRef.current(
+              'Server voice failed',
+              `${Math.round(performance.now() - startedAt)} ms · ${getApiErrorMessage(error, 'unknown')} · using the browser voice`,
+            );
+          }
+          return null;
         }
-        return null;
-      });
+      })();
     }
   }, []);
 

@@ -166,7 +166,7 @@ export function useHoldToTalk({
         const mimeType = PREFERRED_TYPES.find(type => MediaRecorder.isTypeSupported(type));
         const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
         const chunks: Blob[] = [];
-        const startedAt = Date.now();
+        const startedAt = performance.now();
         recorder.ondataavailable = (event): void => {
           if (event.data.size > 0) chunks.push(event.data);
         };
@@ -175,11 +175,12 @@ export function useHoldToTalk({
           if (attempt !== attemptRef.current) return;
           recorderRef.current = null;
           const audio = new Blob(chunks, { type: recorder.mimeType });
+          const recordedMs = performance.now() - startedAt;
           callbacksRef.current.onTrace(
             'Recorded',
-            `${((Date.now() - startedAt) / 1000).toFixed(1)} s · ${Math.round(audio.size / 1024)} KB · ${recorder.mimeType}`,
+            `${(recordedMs / 1000).toFixed(1)} s · ${Math.round(audio.size / 1024)} KB · ${recorder.mimeType}`,
           );
-          if (Date.now() - startedAt < MIN_HOLD_MS) {
+          if (recordedMs < MIN_HOLD_MS) {
             moveTo('idle');
             callbacksRef.current.onProblem('Hold the orb while you talk.');
             return;
