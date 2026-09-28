@@ -25,7 +25,6 @@ import {
 import { quickChoice, quickText, type QuickReply } from './quickReplies';
 import { withScreen, type RecordFinder } from './records';
 import {
-  reminderFor,
   replyForActionChoice,
   replyForAside,
   replyForError,
@@ -159,7 +158,8 @@ async function understand(
 
   if (draft) {
     // Help or a question mid-request is answered, and the request's question asked again.
-    if (draft.asking && !continues && (kind === 'help' || kind === 'question')) {
+    const asking = draft.awaiting?.kind === 'field' ? draft.awaiting.field : null;
+    if (asking && !continues && (kind === 'help' || kind === 'question')) {
       const openQuestion = await applyEvent({ type: 'details', updates: [] }, session, services);
       return withDebug({
         ...openQuestion,
@@ -168,16 +168,15 @@ async function understand(
     }
     // Otherwise it continues the request when Jev says so, or when a question is open: then
     // anything but a clear new request is its answer ("Random." when asked for a name).
-    if (continues || (draft.asking && decision.kind !== 'act')) {
+    if (continues || (asking && decision.kind !== 'act')) {
       const action = catalog.get(draft.action);
       if (!action) return { session, reply: replyForError('That request is no longer available.') };
       const words = await wordsFor(action, text, services);
       // Answering "which one?" with more details ("the one with Meera") looks again with the
       // same words, narrowed by the new ones.
-      const { choosing } = draft;
-      if (choosing && !words[choosing.field]) words[choosing.field] = choosing.mention;
-      const answer =
-        draft.asking && !words[draft.asking] ? { [draft.asking]: bareAnswer(text) } : {};
+      const [name] = draft.open;
+      if (name?.options.length && !words[name.field]) words[name.field] = name.said;
+      const answer = asking && !words[asking] ? { [asking]: bareAnswer(text) } : {};
       const updates = await toFieldUpdates(
         action,
         { ...words, ...answer },
@@ -191,7 +190,7 @@ async function understand(
           { type: 'details', updates: requireLongTextPreview(action, text, updates) },
           session,
           services
-        ),
+        )
       );
     }
   }
@@ -294,70 +293,38 @@ function bareAnswer(text: string): string {
 async function applyEvent(
   event: TurnEvent,
   session: AssistantSession,
-  services: TurnServices,
+  services: TurnServices
 ): Promise<Outcome> {
-  let { state, step, notes } = advance(session.conversation, event, services.catalog);
-
-  // Message search waits for named filters that were ambiguous or not found. Once the user
-  // resolves or skips those filters, run the saved topic against the final, typed IDs.
-  const draft = state.active;
-  const action = draft && services.catalog.get(draft.action);
-  if (draft?.pendingLookup && action && !awaitingSearchFilter(draft, action)) {
-    const lookup = draft.pendingLookup;
+  let { state, step } = advance(session.conversation, event, services.catalog);
+  // A search waiting for the names that narrow it runs once they are settled.
+  while (step.kind === 'lookup') {
+    const draft = state.active;
+    const action = draft && services.catalog.get(draft.action);
+    if (!draft || !action)
+      return { session, reply: replyForError('That request is no longer available.') };
     const updates = await toFieldUpdates(
       action,
-      { [lookup.field]: lookup.mention },
+      { [step.field]: step.said },
       services.records,
       true,
-      draft.values,
+      draft.values
     );
-    const readyToSearch: typeof state = {
-      ...state,
-      active: { ...draft, pendingLookup: null },
-    };
-    ({ state, step, notes } = advance(
-      readyToSearch,
-      { type: 'details', updates },
-      services.catalog,
-    ));
+    ({ state, step } = advance(state, { type: 'details', updates }, services.catalog));
   }
 
   const next: AssistantSession = { ...session, conversation: state };
-  if (step.kind !== 'run') return withReply(next, replyForStep(step, notes));
+  if (step.kind !== 'run') return withReply(next, replyForStep(step));
 
   const runId = services.newId();
-  const after = reminderFor(notes);
   return {
     session: {
       ...next,
       question: null,
-      run: {
-        runId,
-        action: step.action,
-        expectedResults: step.plan.length,
-        done: step.done,
-        ...(after ? { after } : {}),
-      },
+      run: { runId, action: step.action, expectedResults: step.plan.length, done: step.done },
     },
     reply: { say: '', question: null, expectsReply: false },
     run: { runId, plan: step.plan },
   };
-}
-
-function awaitingSearchFilter(
-  draft: NonNullable<AssistantSession['conversation']['active']>,
-  action: ActionDefinition,
-): boolean {
-  const isFilter = (field: string): boolean => {
-    const kind = action.fields[field]?.kind;
-    return kind === 'person' || kind === 'channel';
-  };
-  return (
-    Boolean(draft.choosing && isFilter(draft.choosing.field)) ||
-    Boolean(draft.notFound && isFilter(draft.notFound.field)) ||
-    draft.resolutionQueue.some(({ field }) => isFilter(field)) ||
-    Boolean(draft.asking && isFilter(draft.asking) && !draft.skipped.includes(draft.asking))
-  );
 }
 
 /** The dashboard ran the plan: say the action's final words, or what went wrong. */
@@ -390,8 +357,7 @@ function finishRun(
       ),
     };
   }
-  const say = [run.done, run.after].filter(Boolean).join(' ');
-  return { session: cleared, reply: { say, question: null, expectsReply: false } };
+  return { session: cleared, reply: { say: run.done, question: null, expectsReply: false } };
 }
 
 function withReply(session: AssistantSession, reply: Reply): Outcome {

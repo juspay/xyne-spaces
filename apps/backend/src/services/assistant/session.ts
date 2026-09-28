@@ -2,7 +2,6 @@ import { z } from 'zod';
 import {
   EMPTY_CONVERSATION,
   entityRefSchema,
-  MAX_PARKED,
   type ChoiceOption,
   type ConversationState,
 } from '@xyne/shared/assistant';
@@ -27,8 +26,6 @@ export interface PendingRun {
   expectedResults?: number;
   /** Said when every operation succeeded. */
   done: string;
-  /** Said after `done`, e.g. a reminder that another request is on hold. */
-  after?: string;
 }
 
 export type OpenQuestion =
@@ -59,64 +56,31 @@ const choiceOptionSchema = z
   .strict();
 const fieldValueSchema = z.union([z.string(), entityRefSchema, z.array(entityRefSchema)]);
 const candidateSchema = choiceOptionSchema.extend({ value: fieldValueSchema }).strict();
-const choosingSchema = z
-  .object({
-    // Older sessions accidentally persisted the resolution queue's discriminator here.
-    kind: z.literal('choice').optional(),
-    field: z.string().min(1),
-    mention: z.string(),
-    candidates: z.array(candidateSchema),
-  })
-  .strict()
-  .transform(({ field, mention, candidates }) => ({ field, mention, candidates }));
-const notFoundSchema = z
-  .object({
-    // Older sessions accidentally persisted the resolution queue's discriminator here.
-    kind: z.literal('notFound').optional(),
-    field: z.string().min(1),
-    mention: z.string(),
-  })
-  .strict()
-  .transform(({ field, mention }) => ({ field, mention }));
-const pendingResolutionSchema = z.discriminatedUnion('kind', [
-  z
-    .object({
-      kind: z.literal('choice'),
-      field: z.string().min(1),
-      mention: z.string(),
-      candidates: z.array(candidateSchema),
-    })
-    .strict(),
-  z
-    .object({ kind: z.literal('notFound'), field: z.string().min(1), mention: z.string() })
-    .strict(),
-]);
+const openNameSchema = z
+  .object({ field: z.string().min(1), said: z.string(), options: z.array(candidateSchema) })
+  .strict();
 const draftSchema = z
   .object({
     id: z.string().min(1),
     action: z.string().min(1),
     values: z.record(fieldValueSchema),
-    certain: z.record(z.boolean()),
+    unsure: z.array(z.string()),
+    open: z.array(openNameSchema),
+    later: z.array(z.object({ field: z.string().min(1), said: z.string() }).strict()),
     offered: z.array(z.string()),
-    skipped: z.array(z.string()),
-    asking: z.string().nullable(),
-    choosing: choosingSchema.nullable(),
-    notFound: notFoundSchema.nullable(),
-    resolutionQueue: z.array(pendingResolutionSchema).default([]),
-    pendingLookup: z
-      .object({ field: z.string().min(1), mention: z.string() })
-      .strict()
-      .nullable()
-      .default(null),
-    previewFingerprint: z.string().nullable(),
+    awaiting: z
+      .discriminatedUnion('kind', [
+        z.object({ kind: z.literal('field'), field: z.string().min(1) }).strict(),
+        z.object({ kind: z.literal('preview'), fingerprint: z.string().min(1) }).strict(),
+      ])
+      .nullable(),
   })
   .strict();
 const conversationSchema = z
   .object({
-    version: z.literal(1),
+    version: z.literal(2),
     seq: z.number().int().nonnegative(),
     active: draftSchema.nullable(),
-    parked: z.array(draftSchema).max(MAX_PARKED),
   })
   .strict();
 const openQuestionSchema = z.discriminatedUnion('kind', [
@@ -142,7 +106,6 @@ const pendingRunSchema = z
     action: z.string().min(1),
     expectedResults: z.number().int().nonnegative().optional(),
     done: z.string(),
-    after: z.string().optional(),
   })
   .strict();
 const assistantSessionSchema: z.ZodType<AssistantSession, z.ZodTypeDef, unknown> = z
@@ -183,10 +146,6 @@ export function parseSession(raw: string | null): AssistantSession {
   }
 }
 
-/** The JSON to store. Over the size limit, requests set aside for later are dropped first. */
 export function serializeSession(session: AssistantSession): string {
-  const json = JSON.stringify(session);
-  if (json.length <= MAX_BYTES) return json;
-  const trimmed = { ...session, conversation: { ...session.conversation, parked: [] } };
-  return JSON.stringify(trimmed);
+  return JSON.stringify(session);
 }

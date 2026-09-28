@@ -1,8 +1,8 @@
 import {
   confirmPolicyOf,
   manyFieldsOf,
-  type ActionDefinition,
   type ActionCatalog,
+  type ActionDefinition,
 } from './action.js';
 import type { Plan } from './operations.js';
 import {
@@ -21,127 +21,78 @@ import {
 } from './templates.js';
 
 /**
- * The conversation engine: a pure function that decides the next step of a request that may
- * take several turns (ask, choose, preview, or run). Every action goes through it, so they all
- * behave the same. The backend turns what the user said into an event and calls `advance`.
+ * The conversation engine: decides the next step of a request that may take several turns.
+ * It is pure. The backend reads what the user said into an event, calls `advance`, and acts on
+ * the step: a question, a lookup, a preview, or a plan to run.
  */
+
+/** A name the user said that is not settled yet. No options means nothing matched. */
+export interface OpenName {
+  field: string;
+  said: string;
+  options: Candidate[];
+}
+
+/** What the last reply asked for. */
+export type Awaiting = { kind: 'field'; field: string } | { kind: 'preview'; fingerprint: string };
 
 /** A request being filled in. */
 export interface Draft {
   id: string;
   action: string;
   values: Record<string, FieldValue>;
-  /** Fields whose value was stated clearly, for the `when-unclear` confirmation policy. */
-  certain: Record<string, boolean>;
-  /** Optional fields already offered, and those the user declined. */
+  /** Fields whose value was not stated exactly, so a `send` previews first. */
+  unsure: string[];
+  /** Names to settle, in the order they were said. The first one is asked about. */
+  open: OpenName[];
+  /** Names to look up once every other name is settled, like a search narrowed by them. */
+  later: Array<{ field: string; said: string }>;
+  /** Optional fields already offered or declined. */
   offered: string[];
-  skipped: string[];
-  /** The field the last question was about. */
-  asking: string | null;
-  /** A spoken name matched several records; the user picks one. */
-  choosing: { field: string; mention: string; candidates: Candidate[] } | null;
-  /** A name that matched nothing, mentioned in the next question. */
-  notFound: { field: string; mention: string } | null;
-  /** Additional unresolved names from the same request, asked one at a time. */
-  resolutionQueue: PendingResolution[];
-  /** A search term held until its requested person or channel filters are resolved. */
-  pendingLookup: { field: string; mention: string } | null;
-  /** Set while a preview waits for approval; cleared whenever the draft changes. */
-  previewFingerprint: string | null;
+  awaiting: Awaiting | null;
 }
-
-export type PendingResolution =
-  | { kind: 'choice'; field: string; mention: string; candidates: Candidate[] }
-  | { kind: 'notFound'; field: string; mention: string };
 
 export interface ConversationState {
-  version: 1;
-  /** Counter for draft ids; keeps the engine deterministic. */
+  version: 2;
+  /** Counter for draft ids, so the engine stays deterministic. */
   seq: number;
   active: Draft | null;
-  /** Requests set aside by a switch to something else; the newest is last. */
-  parked: Draft[];
 }
 
-export const EMPTY_CONVERSATION: ConversationState = {
-  version: 1,
-  seq: 0,
-  active: null,
-  parked: [],
-};
+export const EMPTY_CONVERSATION: ConversationState = { version: 2, seq: 0, active: null };
 
-/** At most this many requests are held for "continue"; the oldest is dropped. */
-export const MAX_PARKED = 3;
-
-/** One detail the interpreter found in what the user said, already resolved where possible. */
+/** One detail read from what the user said, already looked up where possible. */
 export type FieldUpdate =
   | { field: string; op: 'set'; value: FieldValue; certain: boolean }
-  /** Adds one record to a `many` field ("also add Priya"). */
+  /** Adds one record to a field that holds several ("also add Priya"). */
   | { field: string; op: 'add'; value: EntityRef; certain: boolean }
   | { field: string; op: 'remove'; id: string }
-  /** Several records match the spoken name. */
-  | { field: string; op: 'ambiguous'; mention: string; candidates: Candidate[] }
-  /** Nothing matches the spoken name. */
-  | { field: string; op: 'unknown'; mention: string }
-  /** Keep a search term until its requested person or channel filters are resolved. */
-  | { field: string; op: 'defer'; mention: string };
+  /** A name that matched several records, or none. */
+  | { field: string; op: 'open'; said: string; options: Candidate[] }
+  | { field: string; op: 'later'; said: string };
 
 export type TurnEvent =
-  /** A new request for an action, with whatever details it included. */
   | { type: 'request'; action: string; updates: FieldUpdate[] }
-  /** More details (or corrections) for the request in progress. */
   | { type: 'details'; updates: FieldUpdate[] }
-  /** Picks an offered option by id (chip tap, or a spoken choice matched by the interpreter). */
+  /** A tapped or spoken option of the question on screen. */
   | { type: 'choose'; optionId: string }
   | { type: 'yes' }
   | { type: 'no' }
-  | { type: 'cancel' }
-  /** "Continue": bring back the most recently parked request. */
-  | { type: 'resume' };
+  | { type: 'cancel' };
 
 export type EngineStep =
-  | {
-      kind: 'ask';
-      draftId: string;
-      action: string;
-      field: string;
-      prompt: string;
-      options?: ChoiceOption[];
-      /** The user said "no" to a detail the request needs, so the question comes again. */
-      declined?: boolean;
-    }
-  | {
-      kind: 'confirm';
-      draftId: string;
-      action: string;
-      summary: string;
-      /** Compared with the draft before "yes" can run the plan. */
-      fingerprint: string;
-    }
-  | {
-      kind: 'run';
-      draftId: string;
-      action: string;
-      plan: Plan;
-      /** The fingerprint used to match this run to its preview. */
-      fingerprint: string;
-      /** Said once the plan succeeded. */
-      done: string;
-    }
-  | { kind: 'cancelled'; action: string }
-  | { kind: 'idle'; reason: 'nothing-pending' | 'nothing-parked' | 'unknown-action' };
-
-export type EngineNote =
-  | { kind: 'parked'; action: string; summary: string }
-  | { kind: 'resumed'; action: string }
-  /** After a run: a parked request is still waiting for "continue". */
-  | { kind: 'still-parked'; action: string; summary: string }
-  | { kind: 'ignored-field'; field: string };
+  | { kind: 'ask'; field: string; prompt: string; options?: ChoiceOption[]; declined?: boolean }
+  | { kind: 'choose'; field: string; said: string; prompt?: string; options: ChoiceOption[] }
+  | { kind: 'not-found'; field: string; said: string; prompt: string }
+  | { kind: 'lookup'; field: string; said: string }
+  | { kind: 'confirm'; summary: string; fingerprint: string }
+  | { kind: 'run'; action: string; plan: Plan; done: string }
+  | { kind: 'cancelled' }
+  | { kind: 'idle'; reason: 'nothing-pending' | 'unknown-action' };
 
 export interface Advance {
   state: ConversationState;
   step: EngineStep;
-  notes: EngineNote[];
 }
 
 export function advance(
@@ -149,484 +100,320 @@ export function advance(
   event: TurnEvent,
   catalog: ActionCatalog,
 ): Advance {
-  const notes: EngineNote[] = [];
-  let { active, parked, seq } = state;
+  const draft = state.active;
+  if (event.type === 'request') {
+    const action = catalog.get(event.action);
+    if (!action) return { state, step: { kind: 'idle', reason: 'unknown-action' } };
+    const seq = state.seq + 1;
+    const fresh = newDraft(`d${seq}`, action.id);
+    return proceed({ ...state, seq }, update(fresh, action, event.updates), action);
+  }
+  if (!draft) {
+    return { state, step: { kind: 'idle', reason: 'nothing-pending' } };
+  }
 
-  const definitionOf = (draft: Draft): ActionDefinition => {
-    const definition = catalog.get(draft.action);
-    if (!definition) throw new Error(`Unknown action in conversation: ${draft.action}`);
-    return definition;
-  };
-  const finish = (next: Draft | null, step: EngineStep): Advance => ({
-    state: { version: 1, seq, active: next, parked },
-    step,
-    notes,
-  });
-  // A request set aside in this very turn is reported once, as "parked", not also as waiting.
-  const parkedNow = new Set<string>();
-  const park = (draft: Draft): void => {
-    parkedNow.add(draft.id);
-    notes.push({
-      kind: 'parked',
-      action: draft.action,
-      summary: summarizeDraft(draft, definitionOf(draft)),
-    });
-    parked = [...parked, { ...draft, previewFingerprint: null }].slice(-MAX_PARKED);
-  };
-  const run = (draft: Draft, fingerprint: string): Advance => {
-    const waiting = parked.at(-1);
-    if (waiting && !parkedNow.has(waiting.id)) {
-      notes.push({
-        kind: 'still-parked',
-        action: waiting.action,
-        summary: summarizeDraft(waiting, definitionOf(waiting)),
-      });
-    }
-    return finish(null, runStep(draft, definitionOf(draft), fingerprint));
-  };
-  const proceed = (draft: Draft): Advance => {
-    const next = nextStep(draft, definitionOf(draft));
-    return next.kind === 'ready'
-      ? run(next.draft, next.fingerprint)
-      : finish(next.draft, next.step);
-  };
-  const update = (draft: Draft, updates: readonly FieldUpdate[]): Advance =>
-    proceed(applyUpdates(draft, definitionOf(draft), updates, notes));
-
+  const action = catalog.get(draft.action);
+  if (!action) throw new Error(`Unknown action in conversation: ${draft.action}`);
   switch (event.type) {
-    case 'request': {
-      const definition = catalog.get(event.action);
-      if (!definition) return finish(active, { kind: 'idle', reason: 'unknown-action' });
-      // A request is always new, even for the same action ("tell Priya…" while a DM to Daniel
-      // waits): the current one is set aside. Corrections to it arrive as `details`.
-      if (active && hasContent(active)) park(active);
-      seq += 1;
-      return update(newDraft(`d${seq}`, definition.id), event.updates);
-    }
-
     case 'details':
-      return active ? update(active, event.updates) : idle();
-
-    case 'choose': {
-      if (!active) return idle();
-      if (active.choosing) {
-        const { field, candidates } = active.choosing;
-        const picked = candidates.find(candidate => candidate.id === event.optionId);
-        if (!picked) return proceed(active);
-        const many = definitionOf(active).fields[field]?.many;
-        return update(active, [
-          many && isEntityRef(picked.value)
-            ? { field, op: 'add', value: picked.value, certain: true }
-            : { field, op: 'set', value: picked.value, certain: true },
-        ]);
-      }
-      const field = active.asking;
-      const option = field
-        ? definitionOf(active).fields[field]?.options?.find(choice => choice.id === event.optionId)
-        : undefined;
-      if (!field || !option) return proceed(active);
-      return update(active, [{ field, op: 'set', value: option.id, certain: true }]);
-    }
-
-    case 'yes': {
-      if (!active) return idle();
-      if (active.previewFingerprint) {
-        // Runs only what the preview showed: if the draft changed since, preview again.
-        if (active.previewFingerprint !== fingerprintOf(active, definitionOf(active))) {
-          return proceed(invalidate(active));
-        }
-        return run(active, active.previewFingerprint);
-      }
-      // "Yes" to "want to add anyone?" means "yes, I'll name them".
-      const field = active.asking ? definitionOf(active).fields[active.asking] : undefined;
-      if (active.asking && field && !field.required) {
-        return finish(active, {
-          kind: 'ask',
-          draftId: active.id,
-          action: active.action,
-          field: active.asking,
-          prompt: renderTemplate(field.ask, active.values),
-        });
-      }
-      return proceed(active);
-    }
-
-    case 'no': {
-      if (!active) return idle();
-      if (active.previewFingerprint)
-        return finish(null, { kind: 'cancelled', action: active.action });
-      if (active.choosing) {
-        const field = active.choosing.field;
-        if (!definitionOf(active).fields[field]?.required) {
-          return proceed({
-            ...active,
-            asking: null,
-            choosing: null,
-            skipped: [...active.skipped, field],
-            resolutionQueue: active.resolutionQueue.filter(item => item.field !== field),
-          });
-        }
-        return proceed({ ...active, choosing: null });
-      }
-      const skippedField = active.asking;
-      const field = skippedField ? definitionOf(active).fields[skippedField] : undefined;
-      if (skippedField && field && !field.required) {
-        return proceed({
-          ...active,
-          skipped: [...active.skipped, skippedField],
-          asking: null,
-          choosing: null,
-          notFound: active.notFound?.field === skippedField ? null : active.notFound,
-          resolutionQueue: active.resolutionQueue.filter(item => item.field !== skippedField),
-        });
-      }
-      const next = proceed(active);
-      return next.step.kind === 'ask' ? { ...next, step: { ...next.step, declined: true } } : next;
-    }
-
+      return proceed(state, update(draft, action, event.updates), action);
+    case 'choose':
+      return proceed(state, choose(draft, action, event.optionId), action);
+    case 'yes':
+      return yes(state, draft, action);
+    case 'no':
+      return no(state, draft, action);
     case 'cancel':
-      return active ? finish(null, { kind: 'cancelled', action: active.action }) : idle();
-
-    case 'resume': {
-      const latest = parked.at(-1);
-      if (!latest) return finish(active, { kind: 'idle', reason: 'nothing-parked' });
-      parked = parked.slice(0, -1);
-      if (active && hasContent(active)) park(active);
-      notes.push({ kind: 'resumed', action: latest.action });
-      return proceed({ ...latest, previewFingerprint: null });
-    }
-  }
-
-  function idle(): Advance {
-    return finish(active, { kind: 'idle', reason: 'nothing-pending' });
+      return { state: { ...state, active: null }, step: { kind: 'cancelled' } };
   }
 }
 
-type Next =
-  | { kind: 'step'; draft: Draft; step: EngineStep }
-  /** Complete, and allowed to run without a preview. */
-  | { kind: 'ready'; draft: Draft; fingerprint: string };
-
-/** What a draft needs next: a pick, a missing detail, an optional offer, a preview, or nothing. */
-function nextStep(draft: Draft, definition: ActionDefinition): Next {
-  const base = { draftId: draft.id, action: draft.action };
-  const ask = (field: string, prompt: string, options?: ChoiceOption[]): EngineStep => ({
-    ...base,
-    kind: 'ask',
-    field,
-    prompt,
-    ...(options ? { options } : {}),
-  });
-
-  if (!draft.choosing && !draft.notFound && draft.resolutionQueue.length > 0) {
-    const [pending, ...resolutionQueue] = draft.resolutionQueue;
-    if (pending?.kind === 'choice') {
-      return nextStep({ ...draft, resolutionQueue, choosing: choiceOf(pending) }, definition);
+function yes(state: ConversationState, draft: Draft, action: ActionDefinition): Advance {
+  const { awaiting } = draft;
+  if (awaiting?.kind === 'preview') {
+    // "Yes" runs only what the preview showed; anything changed since is previewed again.
+    if (awaiting.fingerprint !== fingerprintOf(draft, action)) {
+      return proceed(state, { ...draft, awaiting: null }, action);
     }
-    if (pending?.kind === 'notFound') {
-      return nextStep({ ...draft, resolutionQueue, notFound: notFoundOf(pending) }, definition);
+    return { state: { ...state, active: null }, step: runStep(draft, action) };
+  }
+  // "Yes" to "want to add anyone?" means "yes, I'll name them".
+  const offered = awaiting && action.fields[awaiting.field];
+  if (awaiting && offered && !offered.required) {
+    return {
+      state,
+      step: {
+        kind: 'ask',
+        field: awaiting.field,
+        prompt: renderTemplate(offered.ask, draft.values),
+      },
+    };
+  }
+  return proceed(state, draft, action);
+}
+
+function no(state: ConversationState, draft: Draft, action: ActionDefinition): Advance {
+  if (draft.awaiting?.kind === 'preview') {
+    return { state: { ...state, active: null }, step: { kind: 'cancelled' } };
+  }
+  const field = draft.open[0]?.field ?? draft.awaiting?.field;
+  if (field && !action.fields[field]?.required) {
+    return proceed(state, decline(draft, field), action);
+  }
+  const next = proceed(state, { ...draft, open: draft.open.slice(1) }, action);
+  return next.step.kind === 'ask' ? { ...next, step: { ...next.step, declined: true } } : next;
+}
+
+/** The next thing the draft needs, in order: a name settled, a lookup, a detail, a preview. */
+function proceed(state: ConversationState, draft: Draft, action: ActionDefinition): Advance {
+  const { draft: next, step } = nextStep(draft, action);
+  return { state: { ...state, active: next }, step };
+}
+
+function nextStep(
+  draft: Draft,
+  action: ActionDefinition,
+): { draft: Draft | null; step: EngineStep } {
+  const asking = (field: string): Draft => ({ ...draft, awaiting: { kind: 'field', field } });
+
+  const [name] = draft.open;
+  if (name) {
+    const field = action.fields[name.field];
+    if (name.options.length === 0) {
+      const prompt = renderTemplate(field?.ask ?? '', draft.values);
+      return {
+        draft: asking(name.field),
+        step: { kind: 'not-found', field: name.field, said: name.said, prompt },
+      };
     }
-  }
-
-  if (draft.choosing) {
-    const { field, mention, candidates } = draft.choosing;
-    const question = definition.fields[field]?.choose ?? 'Which one do you mean by “{mention}”?';
-    const options = candidates.map(({ id, label, detail }) => ({
-      id,
-      label,
-      ...(detail ? { detail } : {}),
-    }));
+    const prompt = field?.choose?.replace('{mention}', name.said);
     return {
-      kind: 'step',
-      draft: { ...draft, asking: field },
-      step: ask(field, question.replace('{mention}', mention), options),
+      draft: asking(name.field),
+      step: {
+        kind: 'choose',
+        field: name.field,
+        said: name.said,
+        ...(prompt ? { prompt } : {}),
+        options: name.options.map(({ id, label, detail }) => ({
+          id,
+          label,
+          ...(detail ? { detail } : {}),
+        })),
+      },
     };
   }
 
-  // A name that matched nobody is always reported, for optional details too ("add Zorro").
-  const notFound = draft.notFound ? definition.fields[draft.notFound.field] : undefined;
-  if (draft.notFound && notFound) {
-    const { field, mention } = draft.notFound;
+  const [lookup] = draft.later;
+  if (lookup) return { draft: { ...draft, awaiting: null }, step: { kind: 'lookup', ...lookup } };
+
+  const fields = Object.entries(action.fields);
+  const missing = fields.find(([id, field]) => field.required && !hasValue(draft.values[id]));
+  if (missing) {
+    const [id, field] = missing;
+    const prompt = renderTemplate(field.ask, draft.values);
     return {
-      kind: 'step',
-      // Keep the missing value pending until it is resolved or explicitly skipped. An aside
-      // (for example, "what can you do?") advances the draft without answering this question.
-      draft: { ...draft, asking: field },
-      step: ask(
-        field,
-        `I couldn't find “${mention}”. ${renderTemplate(notFound.ask, draft.values)}`,
-      ),
+      draft: asking(id),
+      step: {
+        kind: 'ask',
+        field: id,
+        prompt,
+        ...(field.options ? { options: field.options } : {}),
+      },
     };
   }
 
-  for (const [id, field] of Object.entries(definition.fields)) {
-    if (!field.required || hasValue(draft.values[id])) continue;
+  const offer = fields.find(
+    ([id, field]) => field.offer && !hasValue(draft.values[id]) && !draft.offered.includes(id),
+  );
+  if (offer) {
+    const [id, field] = offer;
+    const prompt = renderTemplate(field.offer ?? '', draft.values);
     return {
-      kind: 'step',
-      draft: { ...draft, asking: id },
-      step: ask(id, renderTemplate(field.ask, draft.values), field.options),
+      draft: { ...asking(id), offered: [...draft.offered, id] },
+      step: { kind: 'ask', field: id, prompt },
     };
   }
 
-  for (const [id, field] of Object.entries(definition.fields)) {
-    if (field.required || !field.offer || hasValue(draft.values[id])) continue;
-    if (draft.offered.includes(id) || draft.skipped.includes(id)) continue;
-    return {
-      kind: 'step',
-      draft: { ...draft, asking: id, offered: [...draft.offered, id] },
-      step: ask(id, renderTemplate(field.offer, draft.values)),
-    };
-  }
-
-  const fingerprint = fingerprintOf(draft, definition);
-  const clear = Object.keys(draft.values).every(id => draft.certain[id]);
-  const policy = confirmPolicyOf(definition);
-  if (policy === 'never' || (policy === 'when-unclear' && clear)) {
-    return { kind: 'ready', draft, fingerprint };
-  }
+  if (!needsPreview(draft, action)) return { draft: null, step: runStep(draft, action) };
+  const fingerprint = fingerprintOf(draft, action);
+  const summary = renderTemplate(action.summarize, draft.values);
   return {
-    kind: 'step',
-    draft: { ...draft, asking: null, previewFingerprint: fingerprint },
-    step: {
-      ...base,
-      kind: 'confirm',
-      summary: renderTemplate(definition.summarize, draft.values),
-      fingerprint,
-    },
+    draft: { ...draft, awaiting: { kind: 'preview', fingerprint } },
+    step: { kind: 'confirm', summary, fingerprint },
   };
 }
 
-function runStep(draft: Draft, definition: ActionDefinition, fingerprint: string): EngineStep {
+function needsPreview(draft: Draft, action: ActionDefinition): boolean {
+  const policy = confirmPolicyOf(action);
+  if (policy !== 'when-unclear') return policy === 'always';
+  return draft.unsure.some(field => hasValue(draft.values[field]));
+}
+
+function runStep(draft: Draft, action: ActionDefinition): EngineStep {
   return {
     kind: 'run',
-    draftId: draft.id,
-    action: draft.action,
-    plan: bindPlan(definition.plan as PlanStepDef[], manyFieldsOf(definition), draft.values),
-    fingerprint,
-    done: renderTemplate(definition.done, draft.values),
+    action: action.id,
+    plan: bindPlan(action.plan as PlanStepDef[], manyFieldsOf(action), draft.values),
+    done: renderTemplate(action.done, draft.values),
   };
 }
 
-function applyUpdates(
-  draft: Draft,
-  definition: ActionDefinition,
-  updates: readonly FieldUpdate[],
-  notes: EngineNote[],
-): Draft {
-  let next = draft;
-  for (const update of updates) {
-    const id = update.field;
-    if (!definition.fields[id]) {
-      notes.push({ kind: 'ignored-field', field: id });
-      continue;
+/** Applies updates in order. Any change voids a preview that has not been approved. */
+function update(draft: Draft, action: ActionDefinition, updates: readonly FieldUpdate[]): Draft {
+  const start =
+    draft.awaiting?.kind === 'preview' && updates.length ? { ...draft, awaiting: null } : draft;
+  return updates.reduce((next, change) => applyUpdate(next, action, change), start);
+}
+
+function applyUpdate(draft: Draft, action: ActionDefinition, change: FieldUpdate): Draft {
+  const field = action.fields[change.field];
+  if (!field) return draft;
+  const id = change.field;
+  switch (change.op) {
+    case 'set':
+      return {
+        ...settle(draft, id),
+        values: { ...draft.values, [id]: change.value },
+        unsure: mark(draft.unsure, id, !change.certain),
+      };
+    case 'add': {
+      const records = asRecords(draft.values[id]);
+      if (records.some(record => record.id === change.value.id)) return answered(draft, id);
+      return {
+        ...answered(draft, id),
+        values: { ...draft.values, [id]: [...records, change.value] },
+        unsure: change.certain ? draft.unsure : mark(draft.unsure, id, true),
+      };
     }
-    // Any change voids a preview the user has not approved yet.
-    next = invalidate(next);
-    switch (update.op) {
-      case 'set':
-        next = {
-          ...next,
-          values: { ...next.values, [id]: update.value },
-          certain: { ...next.certain, [id]: update.certain },
-          skipped: next.skipped.filter(skipped => skipped !== id),
-          choosing: next.choosing?.field === id ? null : next.choosing,
-          notFound: next.notFound?.field === id ? null : next.notFound,
-          resolutionQueue: definition.fields[id]?.many
-            ? next.resolutionQueue
-            : next.resolutionQueue.filter(item => item.field !== id),
-        };
-        break;
-      case 'add': {
-        const current = next.values[id];
-        const records = Array.isArray(current) ? current : [];
-        const alreadyPresent = records.some(record => record.id === update.value.id);
-        next = {
-          ...next,
-          values: alreadyPresent ? next.values : { ...next.values, [id]: [...records, update.value] },
-          certain: alreadyPresent
-            ? next.certain
-            : { ...next.certain, [id]: (next.certain[id] ?? true) && update.certain },
-          skipped: next.skipped.filter(skipped => skipped !== id),
-          choosing: next.asking === id && next.choosing?.field === id ? null : next.choosing,
-          notFound: next.asking === id && next.notFound?.field === id ? null : next.notFound,
-        };
-        break;
-      }
-      case 'remove': {
-        const current = next.values[id];
-        if (!Array.isArray(current)) break;
-        const values = { ...next.values };
-        const remaining = current.filter(record => record.id !== update.id);
-        if (remaining.length) values[id] = remaining;
-        else delete values[id];
-        next = { ...next, values };
-        break;
-      }
-      case 'ambiguous':
-        if (!definition.fields[id]?.many) {
-          const values = { ...next.values };
-          const certain = { ...next.certain };
-          delete values[id];
-          delete certain[id];
-          next = { ...next, values, certain };
-        }
-        next = addPendingResolution(next, {
-          kind: 'choice',
-          field: id,
-          mention: update.mention,
-          candidates: update.candidates,
-        }, Boolean(definition.fields[id]?.many));
-        break;
-      case 'unknown':
-        if (!definition.fields[id]?.many) {
-          const values = { ...next.values };
-          const certain = { ...next.certain };
-          delete values[id];
-          delete certain[id];
-          next = { ...next, values, certain };
-        }
-        next = addPendingResolution(
-          next,
-          { kind: 'notFound', field: id, mention: update.mention },
-          Boolean(definition.fields[id]?.many),
-        );
-        break;
-      case 'defer': {
-        const values = { ...next.values };
-        delete values[id];
-        const certain = { ...next.certain };
-        delete certain[id];
-        next = {
-          ...next,
-          values,
-          certain,
-          choosing: next.choosing?.field === id ? null : next.choosing,
-          notFound: next.notFound?.field === id ? null : next.notFound,
-          pendingLookup: { field: id, mention: update.mention },
-        };
-        break;
-      }
+    case 'remove': {
+      const values = { ...draft.values };
+      const remaining = asRecords(values[id]).filter(record => record.id !== change.id);
+      if (remaining.length) values[id] = remaining;
+      else delete values[id];
+      return { ...draft, values };
+    }
+    case 'open': {
+      const name = { field: id, said: change.said, options: change.options };
+      return field.many ? openAnother(draft, name) : openInstead(clear(draft, id), name);
+    }
+    case 'later': {
+      const cleared = clear(draft, id);
+      return { ...cleared, later: [...cleared.later, { field: id, said: change.said }] };
     }
   }
-  return next;
+}
+
+/** A tapped or spoken option: a record for the name on screen, or a choice field's option. */
+function choose(draft: Draft, action: ActionDefinition, optionId: string): Draft {
+  const [name] = draft.open;
+  if (name) {
+    const picked = name.options.find(option => option.id === optionId);
+    if (!picked) return draft;
+    const rest = { ...draft, open: draft.open.slice(1), awaiting: null };
+    const change: FieldUpdate =
+      action.fields[name.field]?.many && isEntityRef(picked.value)
+        ? { field: name.field, op: 'add', value: picked.value, certain: true }
+        : { field: name.field, op: 'set', value: picked.value, certain: true };
+    return applyUpdate(rest, action, change);
+  }
+  const field = draft.awaiting?.kind === 'field' ? draft.awaiting.field : undefined;
+  const option = field && action.fields[field]?.options?.find(choice => choice.id === optionId);
+  if (!field || !option) return draft;
+  return applyUpdate(draft, action, { field, op: 'set', value: option.id, certain: true });
+}
+
+/** A single field has one value: a new one replaces anything still open or waiting for it. */
+function settle(draft: Draft, id: string): Draft {
+  return {
+    ...draft,
+    open: draft.open.filter(name => name.field !== id),
+    later: draft.later.filter(item => item.field !== id),
+  };
+}
+
+/** An answer to the name on screen settles that name, once. */
+function answered(draft: Draft, id: string): Draft {
+  const onScreen = draft.awaiting?.kind === 'field' && draft.awaiting.field === id;
+  if (!onScreen || draft.open[0]?.field !== id) return draft;
+  return { ...draft, open: draft.open.slice(1), awaiting: null };
+}
+
+/** A single field: its new unsettled name replaces the old one, where it was in the order. */
+function openInstead(draft: Draft, name: OpenName): Draft {
+  const at = draft.open.findIndex(open => open.field === name.field);
+  if (at < 0) return { ...draft, open: [...draft.open, name] };
+  return { ...draft, open: draft.open.map((open, index) => (index === at ? name : open)) };
+}
+
+/** A field of several: a correction replaces the name on screen; other names wait their turn. */
+function openAnother(draft: Draft, name: OpenName): Draft {
+  const onScreen = draft.awaiting?.kind === 'field' && draft.awaiting.field === name.field;
+  if (onScreen && draft.open[0]?.field === name.field) {
+    return { ...draft, open: [name, ...draft.open.slice(1)], awaiting: null };
+  }
+  return { ...draft, open: [...draft.open, name] };
+}
+
+/** Forgets a single field's value and any lookup waiting for it, before it is settled again. */
+function clear(draft: Draft, id: string): Draft {
+  const values = { ...draft.values };
+  delete values[id];
+  return {
+    ...draft,
+    values,
+    unsure: mark(draft.unsure, id, false),
+    later: draft.later.filter(item => item.field !== id),
+  };
+}
+
+/** An optional field the user said no to: forget its open names and do not offer it again. */
+function decline(draft: Draft, id: string): Draft {
+  return {
+    ...draft,
+    open: draft.open.filter(name => name.field !== id),
+    later: draft.later.filter(item => item.field !== id),
+    offered: draft.offered.includes(id) ? draft.offered : [...draft.offered, id],
+    awaiting: null,
+  };
+}
+
+function mark(fields: readonly string[], id: string, on: boolean): string[] {
+  const rest = fields.filter(field => field !== id);
+  return on ? [...rest, id] : rest;
+}
+
+function asRecords(value: FieldValue | undefined): EntityRef[] {
+  return Array.isArray(value) ? value : [];
 }
 
 function newDraft(id: string, action: string): Draft {
-  return {
-    id,
-    action,
-    values: {},
-    certain: {},
-    offered: [],
-    skipped: [],
-    asking: null,
-    choosing: null,
-    notFound: null,
-    resolutionQueue: [],
-    pendingLookup: null,
-    previewFingerprint: null,
-  };
-}
-
-function addPendingResolution(draft: Draft, pending: PendingResolution, many: boolean): Draft {
-  const resolvesActiveField =
-    draft.choosing?.field === pending.field || draft.notFound?.field === pending.field;
-  const answeringActiveField = draft.asking === pending.field;
-
-  // A correction to the question on screen replaces that unresolved mention. For a `many`
-  // field, only replace once per answer so other names from the same sentence remain queued.
-  if (resolvesActiveField && (!many || answeringActiveField)) {
-    return {
-      ...draft,
-      asking: null,
-      choosing: pending.kind === 'choice' ? choiceOf(pending) : null,
-      notFound: pending.kind === 'notFound' ? notFoundOf(pending) : null,
-      resolutionQueue: many
-        ? draft.resolutionQueue
-        : draft.resolutionQueue.filter(item => item.field !== pending.field),
-    };
-  }
-
-  if (!many) {
-    const queuedIndex = draft.resolutionQueue.findIndex(item => item.field === pending.field);
-    if (queuedIndex >= 0) {
-      return {
-        ...draft,
-        resolutionQueue: draft.resolutionQueue.map((item, index) =>
-          index === queuedIndex ? pending : item,
-        ),
-      };
-    }
-  }
-  if (!draft.choosing && !draft.notFound) {
-    return pending.kind === 'choice'
-      ? { ...draft, choosing: choiceOf(pending) }
-      : { ...draft, notFound: notFoundOf(pending) };
-  }
-  return { ...draft, resolutionQueue: [...draft.resolutionQueue, pending] };
-}
-
-/** The draft stores the active choice; only queued resolutions need the `kind` tag. */
-function choiceOf(
-  pending: Extract<PendingResolution, { kind: 'choice' }>
-): NonNullable<Draft['choosing']> {
-  return {
-    field: pending.field,
-    mention: pending.mention,
-    candidates: pending.candidates,
-  };
-}
-
-/** The draft stores the missing mention; only queued resolutions need the `kind` tag. */
-function notFoundOf(
-  pending: Extract<PendingResolution, { kind: 'notFound' }>
-): NonNullable<Draft['notFound']> {
-  return { field: pending.field, mention: pending.mention };
-}
-
-function invalidate(draft: Draft): Draft {
-  return draft.previewFingerprint ? { ...draft, previewFingerprint: null } : draft;
-}
-
-function hasContent(draft: Draft): boolean {
-  return (
-    Object.keys(draft.values).length > 0 ||
-    draft.asking !== null ||
-    draft.choosing !== null ||
-    draft.notFound !== null ||
-    draft.resolutionQueue.length > 0 ||
-    draft.pendingLookup !== null
-  );
+  return { id, action, values: {}, unsure: [], open: [], later: [], offered: [], awaiting: null };
 }
 
 /** The preview line when complete; otherwise what is known so far ("create_channel (name: ABC)"). */
-export function summarizeDraft(draft: Draft, definition: ActionDefinition): string {
-  const complete = Object.entries(definition.fields).every(
+export function summarizeDraft(draft: Draft, action: ActionDefinition): string {
+  const complete = Object.entries(action.fields).every(
     ([id, field]) => !field.required || hasValue(draft.values[id]),
   );
-  if (complete) return renderTemplate(definition.summarize, draft.values);
+  if (complete) return renderTemplate(action.summarize, draft.values);
   const known = Object.entries(draft.values)
     .map(([id, value]) => `${id}: ${describeValue(value)}`)
     .join(', ');
-  return known ? `${definition.id} (${known})` : definition.id;
+  return known ? `${action.id} (${known})` : action.id;
 }
 
-/** A compact check that the action definition and collected values still match the preview. */
-function fingerprintOf(
-  draft: Pick<Draft, 'id' | 'action' | 'values'>,
-  definition: ActionDefinition,
-): string {
-  return `${draft.id}.${fnv1a(stableStringify([definition, draft.values]))}`;
+/** Changes whenever the action or any value changes, so a stale preview cannot be approved. */
+function fingerprintOf(draft: Draft, action: ActionDefinition): string {
+  return `${draft.id}.${fnv1a(stableStringify([action, draft.values]))}`;
 }
 
 function stableStringify(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
   if (value && typeof value === 'object') {
-    const entries = Object.keys(value)
+    const record = value as Record<string, unknown>;
+    const entries = Object.keys(record)
       .sort()
-      .map(
-        key => `${JSON.stringify(key)}:${stableStringify((value as Record<string, unknown>)[key])}`,
-      );
+      .map(key => `${JSON.stringify(key)}:${stableStringify(record[key])}`);
     return `{${entries.join(',')}}`;
   }
   return JSON.stringify(value);

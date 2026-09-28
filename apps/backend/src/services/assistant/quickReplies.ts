@@ -2,7 +2,7 @@ import type { TurnEvent } from '@xyne/shared/assistant';
 import type { OpenQuestion } from './session';
 
 /**
- * Replies that need no model: a button tap, "yes", "no", "cancel", "continue", a number, or
+ * Replies that need no model: a button tap, "yes", "no", "cancel", a number, or
  * an option's own label. They are exact, instant, and never misread. Anything else — or a
  * short word that does not answer the question on screen — goes to the intent model.
  */
@@ -38,7 +38,6 @@ const NO = [
   'thats all',
 ];
 const CANCEL = ['cancel', 'never mind', 'nevermind', 'forget it', 'stop', 'abort'];
-const RESUME = ['continue', 'resume', 'carry on', 'go back to it', 'where were we'];
 
 const ORDINALS: Record<string, number> = {
   first: 1,
@@ -81,7 +80,6 @@ export function quickChoice(optionId: string, question: OpenQuestion | null): Qu
 export function quickText(text: string, question: OpenQuestion | null): QuickReply | null {
   const words = normalize(text);
   if (CANCEL.includes(words)) return event({ type: 'cancel' });
-  if (RESUME.includes(words)) return event({ type: 'resume' });
   if (!question) return null;
 
   // An option on screen wins over yes/no, so an option labelled "None" is picked, not read as "no".

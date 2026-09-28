@@ -1,4 +1,4 @@
-import { ACTIONS } from '@xyne/shared/assistant';
+import { ACTIONS, type Draft } from '@xyne/shared/assistant';
 import type { JevAnswer } from '@/services/queryIntent/jevClient';
 import { createBreaker } from './breaker';
 import { readingFor, sentencePieces, type FieldReading } from './fields';
@@ -15,6 +15,19 @@ const visibility: OpenQuestion = {
     { id: 'private', label: 'Private' },
   ],
 };
+
+function emptyDraft(action: string): Draft {
+  return {
+    id: 'd1',
+    action,
+    values: {},
+    unsure: [],
+    open: [],
+    later: [],
+    offered: [],
+    awaiting: null,
+  };
+}
 
 describe('quick replies (no model)', () => {
   it('answers a question on screen from a word, a number, or a label', () => {
@@ -48,9 +61,8 @@ describe('quick replies (no model)', () => {
     });
   });
 
-  it('cancels or resumes at any time, even with no question on screen', () => {
+  it('cancels at any time, even with no question on screen', () => {
     expect(quickText('never mind', null)).toEqual({ kind: 'event', event: { type: 'cancel' } });
-    expect(quickText('Continue', null)).toEqual({ kind: 'event', event: { type: 'resume' } });
   });
 
   it('leaves everything else to the intent model', () => {
@@ -171,53 +183,36 @@ describe('choosing the action', () => {
 
   it('asks whether a sentence continues the request in progress', () => {
     const { questions } = buildIntentQuestions('ABC', ACTIONS, {
-      id: 'd1',
-      action: 'create_channel',
-      values: {},
-      certain: {},
-      offered: [],
-      skipped: [],
-      asking: 'name',
-      choosing: null,
-      notFound: null,
-      resolutionQueue: [],
-      pendingLookup: null,
-      previewFingerprint: null,
+      ...emptyDraft('create_channel'),
+      awaiting: { kind: 'field', field: 'name' },
     });
     expect(questions.continues?.type).toBe('noul');
   });
 
   it('gives Jev the topic and visible choices for a pending message search', () => {
     const { state } = buildIntentQuestions('open the Android one', ACTIONS, {
-      id: 'd1',
-      action: 'find_conversation',
-      values: {},
-      certain: {},
-      offered: [],
-      skipped: [],
-      asking: 'conversation',
-      choosing: {
-        field: 'conversation',
-        mention: 'mobile performance',
-        candidates: [
-          {
-            id: 'thread-1',
-            label: 'Android startup delay',
-            detail: '#android · Vinit',
-            value: {
-              kind: 'thread',
+      ...emptyDraft('find_conversation'),
+      awaiting: { kind: 'field', field: 'conversation' },
+      open: [
+        {
+          field: 'conversation',
+          said: 'mobile performance',
+          options: [
+            {
               id: 'thread-1',
-              name: 'Android startup delay',
-              channelId: 'channel-android',
-              channelName: 'android',
+              label: 'Android startup delay',
+              detail: '#android · Vinit',
+              value: {
+                kind: 'thread',
+                id: 'thread-1',
+                name: 'Android startup delay',
+                channelId: 'channel-android',
+                channelName: 'android',
+              },
             },
-          },
-        ],
-      },
-      notFound: null,
-      resolutionQueue: [],
-      pendingLookup: null,
-      previewFingerprint: null,
+          ],
+        },
+      ],
     });
 
     expect(state).toMatchObject({
@@ -326,22 +321,19 @@ describe('the stored session', () => {
         ...EMPTY_SESSION.conversation,
         seq: 1,
         active: {
-          id: 'd1',
-          action: 'create_channel',
+          ...emptyDraft('create_channel'),
           values: { members: [person] },
-          certain: { members: false },
+          unsure: ['members'],
+          open: [
+            {
+              field: 'members',
+              said: 'Priya',
+              options: [{ id: person.id, label: person.name, value: person }],
+            },
+          ],
+          later: [{ field: 'members', said: 'Meera' }],
           offered: ['members'],
-          skipped: [],
-          asking: 'visibility',
-          choosing: {
-            field: 'members',
-            mention: 'Priya',
-            candidates: [{ id: person.id, label: person.name, value: person }],
-          },
-          notFound: null,
-          resolutionQueue: [],
-          pendingLookup: null,
-          previewFingerprint: null,
+          awaiting: { kind: 'field' as const, field: 'visibility' },
         },
       },
       question: {
@@ -361,31 +353,6 @@ describe('the stored session', () => {
     };
 
     expect(parseSession(serializeSession(session))).toEqual(session);
-
-    // Accept and normalize sessions written before active choices stopped carrying `kind`.
-    const legacy = JSON.parse(serializeSession(session)) as {
-      conversation: { active: { choosing: { kind?: string } } };
-    };
-    legacy.conversation.active.choosing.kind = 'choice';
-    expect(parseSession(JSON.stringify(legacy))).toEqual(session);
-
-    const notFoundSession = {
-      ...session,
-      conversation: {
-        ...session.conversation,
-        active: {
-          ...session.conversation.active,
-          choosing: null,
-          notFound: { field: 'recipient', mention: 'Xyne Doctor' },
-        },
-      },
-      question: { kind: 'detail' as const, field: 'recipient', options: [] },
-    };
-    const legacyNotFound = JSON.parse(serializeSession(notFoundSession)) as {
-      conversation: { active: { notFound: { kind?: string } } };
-    };
-    legacyNotFound.conversation.active.notFound.kind = 'notFound';
-    expect(parseSession(JSON.stringify(legacyNotFound))).toEqual(notFoundSession);
   });
 
   it('starts fresh when nested conversation, reference, question, or run data is malformed', () => {
@@ -393,35 +360,29 @@ describe('the stored session', () => {
       ...EMPTY_SESSION,
       conversation: { ...EMPTY_SESSION.conversation, active: {} },
     };
-    const invalidParkedDraft: unknown = {
+    const oldVersion: unknown = {
       ...EMPTY_SESSION,
-      conversation: { ...EMPTY_SESSION.conversation, parked: [{}] },
+      conversation: { ...EMPTY_SESSION.conversation, version: 1 },
     };
     const invalidCandidateRef: unknown = {
       ...EMPTY_SESSION,
       conversation: {
         ...EMPTY_SESSION.conversation,
         active: {
-          id: 'd1',
-          action: 'create_channel',
-          values: {},
-          certain: {},
-          offered: [],
-          skipped: [],
-          asking: null,
-          choosing: {
-            field: 'members',
-            mention: 'Priya',
-            candidates: [
-              {
-                id: 'w-1',
-                label: 'Workspace',
-                value: { kind: 'workspace', id: 'w-1', name: 'Workspace' },
-              },
-            ],
-          },
-          notFound: null,
-          previewFingerprint: null,
+          ...emptyDraft('create_channel'),
+          open: [
+            {
+              field: 'members',
+              said: 'Priya',
+              options: [
+                {
+                  id: 'w-1',
+                  label: 'Workspace',
+                  value: { kind: 'workspace', id: 'w-1', name: 'Workspace' },
+                },
+              ],
+            },
+          ],
         },
       },
     };
@@ -436,7 +397,7 @@ describe('the stored session', () => {
 
     for (const value of [
       invalidActive,
-      invalidParkedDraft,
+      oldVersion,
       invalidCandidateRef,
       invalidQuestion,
       invalidRun,

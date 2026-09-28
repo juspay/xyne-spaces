@@ -3,7 +3,6 @@ import {
   type ActionCatalog,
   type ChoiceOption,
   type Display,
-  type EngineNote,
   type EngineStep,
 } from '@xyne/shared/assistant';
 import type { SentenceKind } from './intent';
@@ -24,28 +23,26 @@ export interface Reply {
   handoff?: { to: 'ask_ai'; text: string };
 }
 
-/** Words for an engine step. A `run` step is answered by the plan, not by words. */
-export function replyForStep(
-  step: Exclude<EngineStep, { kind: 'run' }>,
-  notes: EngineNote[]
-): Reply {
-  const lead = leadIn(notes);
+/** Words for an engine step. Plans and lookups are handled by the turn, not by words. */
+export function replyForStep(step: Exclude<EngineStep, { kind: 'run' | 'lookup' }>): Reply {
   switch (step.kind) {
     case 'ask': {
-      const options = step.options ?? [];
-      const prompt = step.declined
+      const say = step.declined
         ? `No problem. ${step.prompt} Or say “cancel” to stop.`
         : step.prompt;
-      return {
-        say: lead + prompt,
-        ...(options.length ? { display: { kind: 'choices', prompt: step.prompt, options } } : {}),
-        question: { kind: 'detail', field: step.field, options },
-        expectsReply: true,
-      };
+      return question(say, step.field, step.options ?? []);
     }
+    case 'choose':
+      return question(
+        step.prompt ?? `Which one do you mean by “${step.said}”?`,
+        step.field,
+        step.options
+      );
+    case 'not-found':
+      return question(`I couldn't find “${step.said}”. ${step.prompt}`, step.field, []);
     case 'confirm':
       return {
-        say: `${lead}${step.summary}?`,
+        say: `${step.summary}?`,
         display: {
           kind: 'preview',
           summary: step.summary,
@@ -60,6 +57,16 @@ export function replyForStep(
     case 'idle':
       return { say: IDLE_REPLIES[step.reason], question: null, expectsReply: false };
   }
+}
+
+/** A question about one detail, with buttons when it has options. */
+function question(say: string, field: string, options: ChoiceOption[]): Reply {
+  return {
+    say,
+    ...(options.length ? { display: { kind: 'choices', prompt: say, options } } : {}),
+    question: { kind: 'detail', field, options },
+    expectsReply: true,
+  };
 }
 
 /** "Did you mean … or …?" when two or three actions are equally likely. */
@@ -158,28 +165,8 @@ export function replyForError(message: string): Reply {
 
 const IDLE_REPLIES: Record<Extract<EngineStep, { kind: 'idle' }>['reason'], string> = {
   'nothing-pending': 'There’s nothing waiting for an answer right now.',
-  'nothing-parked': 'There’s nothing on hold to continue.',
   'unknown-action': 'I can’t do that yet.',
 };
-
-/** What happened to other requests this turn, said before the question. */
-function leadIn(notes: EngineNote[]): string {
-  return notes
-    .map((note) => {
-      if (note.kind === 'parked') return 'I’ve put your earlier request on hold. ';
-      if (note.kind === 'resumed') return 'Back to where we were. ';
-      return '';
-    })
-    .join('');
-}
-
-/** The reminder said after a finished action, when another request is still on hold. */
-export function reminderFor(notes: EngineNote[]): string | undefined {
-  const waiting = notes.find((note) => note.kind === 'still-parked');
-  return waiting && waiting.kind === 'still-parked'
-    ? `You also have a request on hold: ${lowerFirst(waiting.summary)}. Say “continue” to pick it up.`
-    : undefined;
-}
 
 /** Buttons that start these actions, labelled with their titles. */
 function actionOptions(catalog: ActionCatalog, ids: readonly string[]): ChoiceOption[] {

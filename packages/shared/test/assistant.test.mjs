@@ -10,7 +10,6 @@ import {
   intentCriteria,
   isEntityRef,
   loadActions,
-  MAX_PARKED,
   renderTemplate,
 } from '../dist/assistant/index.js';
 
@@ -53,7 +52,7 @@ test('an unclear detail gets a preview; "yes" runs exactly what was shown', () =
   assert.equal(preview.step.kind, 'confirm');
   assert.equal(preview.step.summary, 'Send “hello” to Daniel Okafor');
   assert.equal(approved.step.kind, 'run');
-  assert.equal(approved.step.fingerprint, preview.step.fingerprint);
+  assert.deepEqual(approved.step.plan[0], { op: 'open_or_create_dm', user: daniel });
 });
 
 test('one detail per turn, in the order the action asks', () => {
@@ -121,52 +120,16 @@ test('"yes" to an optional offer asks for it; "no" skips it', () => {
 
   const [, no] = converse(offerChannel, { type: 'no' });
   assert.equal(no.step.kind, 'confirm');
-  assert.deepEqual(no.state.active.skipped, ['members']);
+  assert.deepEqual(no.state.active.offered, ['members']);
 });
 
-test('switching to something else parks the request; "continue" brings it back', () => {
-  const [started, dm, resumed] = converse(
+test('a new request replaces the one in progress', () => {
+  const [, dm] = converse(
     request('create_channel', set('name', 'ABC')),
     request('send_dm', set('recipient', priya), set('message', 'hi')),
-    { type: 'resume' },
   );
-  assert.equal(started.step.field, 'visibility');
-
-  assert.deepEqual(dm.notes[0], {
-    kind: 'parked',
-    action: 'create_channel',
-    summary: 'create_channel (name: ABC)',
-  });
   assert.equal(dm.step.kind, 'run');
-  // Set aside in this very turn: reported once, not also as "still waiting".
-  assert.equal(dm.notes.length, 1);
-
-  assert.equal(resumed.notes.at(-1).kind, 'resumed');
-  assert.equal(resumed.step.field, 'visibility');
-  assert.equal(resumed.state.active.values.name, 'ABC');
-  assert.equal(resumed.state.parked.length, 0);
-});
-
-test('a new request for the same action is new: the waiting one is set aside, not overwritten', () => {
-  const [, second] = converse(
-    request('send_dm', set('recipient', daniel, false), set('message', 'hello')),
-    request('send_dm', set('recipient', priya, false), set('message', 'the build is green')),
-  );
-  assert.equal(second.step.summary, 'Send “the build is green” to Priya Shah');
-  assert.equal(second.state.parked.length, 1);
-  assert.equal(second.state.parked[0].values.recipient, daniel);
-});
-
-test(`at most ${MAX_PARKED} requests are held; the oldest goes first`, () => {
-  const results = converse(
-    ...['A1', 'B2', 'C3', 'D4', 'E5'].flatMap(name => [
-      request('create_channel', set('name', name)),
-      request('send_dm', set('recipient', priya)),
-    ]),
-  );
-  const { parked } = results.at(-1).state;
-  assert.equal(parked.length, MAX_PARKED);
-  assert.ok(parked.every(draft => draft.values.name !== 'A1'));
+  assert.equal(dm.state.active, null);
 });
 
 test('cancel drops the request at any point; nothing runs', () => {
@@ -175,7 +138,7 @@ test('cancel drops the request at any point; nothing runs', () => {
     { type: 'cancel' },
     { type: 'cancel' },
   );
-  assert.deepEqual(cancelled.step, { kind: 'cancelled', action: 'send_dm' });
+  assert.deepEqual(cancelled.step, { kind: 'cancelled' });
   assert.equal(cancelled.state.active, null);
   assert.deepEqual(nothing.step, { kind: 'idle', reason: 'nothing-pending' });
 });
@@ -243,12 +206,13 @@ test('a name matching several people asks which one, then continues', () => {
   const [ask, chosen] = converse(
     request(
       'send_dm',
-      { field: 'recipient', op: 'ambiguous', mention: 'Dee', candidates },
+      { field: 'recipient', op: 'open', said: 'Dee', options: candidates },
       set('message', 'hi'),
     ),
     { type: 'choose', optionId: 'u-deepak' },
   );
-  assert.equal(ask.step.prompt, 'Which one do you mean by “Dee”?');
+  assert.equal(ask.step.kind, 'choose');
+  assert.equal(ask.step.said, 'Dee');
   // Chips carry labels only; the records stay on the server.
   assert.deepEqual(ask.step.options, [
     { id: 'u-daniel', label: 'Daniel Okafor' },
@@ -260,31 +224,63 @@ test('a name matching several people asks which one, then continues', () => {
 
 test('a name matching nobody says so in the next question', () => {
   const [result] = converse(
-    request('send_dm', { field: 'recipient', op: 'unknown', mention: 'Zorro' }),
+    request('send_dm', { field: 'recipient', op: 'open', said: 'Zorro', options: [] }),
   );
-  assert.equal(result.step.prompt, "I couldn't find “Zorro”. Who should I message?");
+  assert.deepEqual(result.step, {
+    kind: 'not-found',
+    field: 'recipient',
+    said: 'Zorro',
+    prompt: 'Who should I message?',
+  });
 });
 
-test('a later request mentions one that is still waiting', () => {
-  const [, , later] = converse(
-    request('create_channel', set('name', 'ABC')),
-    request('send_dm', set('recipient', priya)),
-    { type: 'details', updates: [set('message', 'hi')] },
+test('names are settled one at a time, in order, before a waiting search', () => {
+  const android = { kind: 'channel', id: 'c-android', name: 'android' };
+  const candidates = [
+    { id: 'u-daniel', label: 'Daniel Okafor', value: daniel },
+    { id: 'u-deepak', label: 'Deepak Rao', value: deepak },
+  ];
+  const [first, second, lookup] = converse(
+    request(
+      'find_conversation',
+      { field: 'with', op: 'open', said: 'Dee', options: candidates },
+      { field: 'in', op: 'open', said: 'Nowhere', options: [] },
+      { field: 'conversation', op: 'later', said: 'release notes' },
+    ),
+    { type: 'choose', optionId: 'u-deepak' },
+    { type: 'details', updates: [set('in', android)] },
   );
-  assert.equal(later.step.kind, 'run');
-  assert.deepEqual(later.notes, [
-    { kind: 'still-parked', action: 'create_channel', summary: 'create_channel (name: ABC)' },
-  ]);
+  assert.equal(first.step.kind, 'choose');
+  assert.equal(second.step.kind, 'not-found');
+  assert.equal(second.step.field, 'in');
+  assert.deepEqual(lookup.step, { kind: 'lookup', field: 'conversation', said: 'release notes' });
+  assert.deepEqual(lookup.state.active.values.with, [deepak]);
+});
+
+test('a correction replaces the name being asked about; other names keep their turn', () => {
+  const [, corrected] = converse(
+    request(
+      'create_channel',
+      set('name', 'ABC'),
+      set('visibility', 'public'),
+      { field: 'members', op: 'open', said: 'Daneel', options: [] },
+      { field: 'members', op: 'open', said: 'Zorro', options: [] },
+    ),
+    { type: 'details', updates: [{ field: 'members', op: 'add', value: daniel, certain: true }] },
+  );
+  assert.equal(corrected.step.kind, 'not-found');
+  assert.equal(corrected.step.said, 'Zorro');
+  assert.deepEqual(corrected.state.active.values.members, [daniel]);
 });
 
 test('an unknown name is reported for optional details too ("add Zorro")', () => {
   const [, result] = converse(
     request('create_channel', set('name', 'ABC'), set('visibility', 'public')),
-    { type: 'details', updates: [{ field: 'members', op: 'unknown', mention: 'Zorro' }] },
+    { type: 'details', updates: [{ field: 'members', op: 'open', said: 'Zorro', options: [] }] },
   );
-  assert.equal(result.step.kind, 'ask');
+  assert.equal(result.step.kind, 'not-found');
   assert.equal(result.step.field, 'members');
-  assert.equal(result.step.prompt, "I couldn't find “Zorro”. Who should I add?");
+  assert.equal(result.step.prompt, 'Who should I add?');
 });
 
 test('several records of any kind can be collected, without duplicates', () => {
@@ -346,7 +342,7 @@ test('unknown actions and fields are reported, never guessed', () => {
     request('send_dm', set('subject', 'x')),
   );
   assert.deepEqual(unknown.step, { kind: 'idle', reason: 'unknown-action' });
-  assert.deepEqual(ignored.notes, [{ kind: 'ignored-field', field: 'subject' }]);
+  assert.deepEqual(ignored.state.active.values, {});
 });
 
 test('the engine is deterministic and never mutates its input', () => {

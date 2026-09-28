@@ -265,32 +265,6 @@ describe('a turn', () => {
     expect(opened.run?.plan).toEqual([{ op: 'navigate', target: perfThreads[1]!.record }]);
   });
 
-  it('keeps a topic-only search when the user switches tasks and says continue', async () => {
-    const chat = assistant();
-    chat.hears({
-      area: 'messaging',
-      action: 'find_conversation',
-      fields: { conversation: 'release notes' },
-    });
-    const matches = await chat.say('find the messages about release notes');
-    expect(matches.display?.kind).toBe('choices');
-
-    chat.hears({ area: 'channels', action: 'create_channel' });
-    expect((await chat.say('create a channel')).say).toBe(
-      'I’ve put your earlier request on hold. What should I name the channel?'
-    );
-    expect(chat.session().conversation.parked).toHaveLength(1);
-
-    const resumed = await chat.say('continue');
-    expect(resumed.display).toMatchObject({
-      kind: 'choices',
-      options: [
-        { id: 't-1', label: 'Reduce startup work' },
-        { id: 't-2', label: 'Cold start regression' },
-      ],
-    });
-  });
-
   it('narrows a search to the people named with it', async () => {
     const chat = assistant([daniel, meera]);
     chat.hears({
@@ -359,7 +333,7 @@ describe('a turn', () => {
       expectedHints: { people: [], channels: ['c-ops-north'] },
       answer: 'c-ops-north',
     },
-  ])('waits for the $name before searching messages', async scenario => {
+  ])('waits for the $name before searching messages', async (scenario) => {
     const chat = assistant();
     const threadSearches: Array<{ topic: string; hints: SearchHints | undefined }> = [];
     chat.services.records.find = async (kind, mention, hints) => {
@@ -378,7 +352,9 @@ describe('a turn', () => {
       fields: { conversation: 'release notes', [scenario.field]: scenario.mention },
     });
 
-    const clarification = await chat.say(`find release notes ${scenario.field} ${scenario.mention}`);
+    const clarification = await chat.say(
+      `find release notes ${scenario.field} ${scenario.mention}`
+    );
     expect(threadSearches).toEqual([]);
 
     let opened: TurnResponse;
@@ -391,9 +367,7 @@ describe('a turn', () => {
       opened = await chat.tap(scenario.answer);
     }
 
-    expect(threadSearches).toEqual([
-      { topic: 'release notes', hints: scenario.expectedHints },
-    ]);
+    expect(threadSearches).toEqual([{ topic: 'release notes', hints: scenario.expectedHints }]);
     expect(opened.run?.plan).toEqual([{ op: 'navigate', target: perfThreads[0]!.record }]);
   });
 
@@ -459,9 +433,9 @@ describe('a turn', () => {
     chat.hears({ kind: 'help', area: 'none', continues: 0.1 });
     const help = await chat.say('what can you do?');
     expect(help.say).toContain('Who was in it?');
-    expect(chat.session().conversation.active?.notFound).toMatchObject({
+    expect(chat.session().conversation.active?.open[0]).toMatchObject({
       field: 'with',
-      mention: 'Missing Person',
+      said: 'Missing Person',
     });
     expect(threadSearches).toEqual([]);
 
@@ -657,7 +631,7 @@ describe('a turn', () => {
     });
     const sent = await chat.say('tell Daniel Okafor hi');
     expect(sent.run?.plan[0]).toEqual({ op: 'open_or_create_dm', user: daniel.record });
-    expect(chat.session().conversation.parked).toHaveLength(1);
+    expect(chat.session().conversation.active).toBeNull();
   });
 
   it('finds a person whose name was spelled the way it sounds', async () => {
@@ -728,7 +702,7 @@ describe('a turn', () => {
     expect(reply.say).toBe(
       'I can send a direct message, or create a channel. Now, what should I name the channel?'
     );
-    expect(chat.session().conversation.active?.asking).toBe('name');
+    expect(chat.session().conversation.active?.awaiting).toEqual({ kind: 'field', field: 'name' });
   });
 
   it('takes a greeting as the message when asked what to say', async () => {

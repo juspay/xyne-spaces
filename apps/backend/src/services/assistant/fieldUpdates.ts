@@ -35,19 +35,18 @@ export async function toFieldUpdates(
   const selfUpdate = explicitSelfParticipant(action, finder.selfId, inputText);
   if (selfUpdate) namedUpdates.unshift(selfUpdate);
 
-  const hasUnresolvedSearchFilter = namedUpdates.some(
-    (update) =>
-      isSearchFilter(action, update.field) &&
-      (update.op === 'ambiguous' || update.op === 'unknown')
+  // A search narrowed by a person or channel waits until that name is settled.
+  const filterOpen = namedUpdates.some(
+    (update) => isSearchFilter(action, update.field) && update.op === 'open'
   );
-  if (searches.length > 0 && hasUnresolvedSearchFilter) {
-    const deferred = searches.flatMap(([field, value]) =>
+  if (searches.length > 0 && filterOpen) {
+    const later = searches.flatMap(([field, value]) =>
       (Array.isArray(value) ? value : [value])
-        .map((mention) => mention.trim())
+        .map((said) => said.trim())
         .filter(Boolean)
-        .map((mention) => ({ field, op: 'defer' as const, mention }))
+        .map((said) => ({ field, op: 'later' as const, said }))
     );
-    return [...namedUpdates, ...deferred];
+    return [...namedUpdates, ...later];
   }
 
   const hints = searchHints(action, namedUpdates, known);
@@ -115,9 +114,9 @@ async function fieldUpdates(
             ? { field, op: 'add', value: match.record, certain: clear && match.certain }
             : { field, op: 'set', value: match.record, certain: clear && match.certain };
         case 'several':
-          return { field, op: 'ambiguous', mention, candidates: match.candidates };
+          return { field, op: 'open', said: mention, options: match.candidates };
         case 'none':
-          return { field, op: 'unknown', mention };
+          return { field, op: 'open', said: mention, options: [] };
       }
     })
   );
@@ -155,12 +154,11 @@ function searchHints(
           current.filter((ref) => ref.id !== update.id)
         );
         break;
-      case 'ambiguous':
-      case 'unknown':
+      case 'open':
         // Do not let an old value silently stand in for a correction the user is making.
         values.delete(update.field);
         break;
-      case 'defer':
+      case 'later':
         break;
     }
   }

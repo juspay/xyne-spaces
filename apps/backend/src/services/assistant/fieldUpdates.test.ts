@@ -65,10 +65,9 @@ describe('message search field updates', () => {
       {},
       'Find the thread where me and Meera discussed mobile performance'
     );
-    const persistedPeople = firstUpdates
-      .flatMap((update) =>
-        update.field === 'with' && update.op === 'add' ? [update.value] : []
-      );
+    const persistedPeople = firstUpdates.flatMap((update) =>
+      update.field === 'with' && update.op === 'add' ? [update.value] : []
+    );
 
     await toFieldUpdates(
       action,
@@ -88,10 +87,7 @@ describe('message search field updates', () => {
       'Find me a thread about mobile performance with Meera'
     );
 
-    expect(persistedPeople).toEqual([
-      { kind: 'person', id: 'u-current', name: 'you' },
-      meera,
-    ]);
+    expect(persistedPeople).toEqual([{ kind: 'person', id: 'u-current', name: 'you' }, meera]);
     expect(seen).toEqual([
       { people: ['u-current', 'u-meera'], channels: [] },
       { people: ['u-current', 'u-meera'], channels: ['c-android'] },
@@ -99,7 +95,7 @@ describe('message search field updates', () => {
     ]);
   });
 
-  it('defers message search while a requested participant is unresolved', async () => {
+  it('holds a message search until the person it is narrowed by is settled', async () => {
     let threadSearches = 0;
     const finder: RecordFinder = {
       async find(kind) {
@@ -117,13 +113,13 @@ describe('message search field updates', () => {
       action,
       { conversation: 'offline sync', with: 'Unknown Person' },
       finder,
-      true,
+      true
     );
 
     expect(threadSearches).toBe(0);
     expect(updates).toEqual([
-      { field: 'with', op: 'unknown', mention: 'Unknown Person' },
-      { field: 'conversation', op: 'defer', mention: 'offline sync' },
+      { field: 'with', op: 'open', said: 'Unknown Person', options: [] },
+      { field: 'conversation', op: 'later', said: 'offline sync' },
     ]);
   });
 });

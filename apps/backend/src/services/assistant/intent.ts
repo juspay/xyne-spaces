@@ -93,39 +93,37 @@ export function buildIntentQuestions(
   const state: Record<string, unknown> = { request: text };
   const definition = inProgress && catalog.get(inProgress.action);
   if (inProgress && definition) {
-    const choiceField = inProgress.choosing && definition.fields[inProgress.choosing.field];
-    const missingField = inProgress.notFound && definition.fields[inProgress.notFound.field];
-    const askingField = inProgress.asking && definition.fields[inProgress.asking];
+    const [name, ...queued] = inProgress.open;
+    const nameField = name && definition.fields[name.field];
+    const askingId = inProgress.awaiting?.kind === 'field' ? inProgress.awaiting.field : null;
+    const askingField = askingId && definition.fields[askingId];
     const awaiting =
-      inProgress.choosing && choiceField
-        ? {
-            question: (choiceField.choose ?? choiceField.ask).replace(
-              '{mention}',
-              inProgress.choosing.mention
-            ),
-            options: inProgress.choosing.candidates.map(({ label, detail }) => ({
-              label,
-              ...(detail ? { detail } : {}),
-            })),
-          }
-        : inProgress.notFound && missingField
+      name && nameField
+        ? name.options.length
           ? {
-              question: `I couldn't find “${inProgress.notFound.mention}”. ${renderTemplate(missingField.ask, inProgress.values)}`,
+              question: (nameField.choose ?? nameField.ask).replace('{mention}', name.said),
+              options: name.options.map(({ label, detail }) => ({
+                label,
+                ...(detail ? { detail } : {}),
+              })),
             }
-          : askingField
-            ? { question: renderTemplate(askingField.ask, inProgress.values) }
-            : undefined;
+          : {
+              question: `I couldn't find “${name.said}”. ${renderTemplate(nameField.ask, inProgress.values)}`,
+            }
+        : askingField
+          ? { question: renderTemplate(askingField.ask, inProgress.values) }
+          : undefined;
+    const [waiting] = inProgress.later;
+    const summary = summarizeDraft(inProgress, definition);
     state.inProgress = {
-      request: inProgress.pendingLookup
-        ? `${summarizeDraft(inProgress, definition)} (message topic: “${inProgress.pendingLookup.mention}”)`
-        : summarizeDraft(inProgress, definition),
+      request: waiting ? `${summary} (message topic: “${waiting.said}”)` : summary,
       ...(awaiting ? { awaiting } : {}),
-      ...(inProgress.resolutionQueue.length
+      ...(queued.length
         ? {
-            queued: inProgress.resolutionQueue.map(({ field, mention, kind }) => ({
+            queued: queued.map(({ field, said, options }) => ({
               field,
-              mention,
-              kind,
+              mention: said,
+              kind: options.length ? 'choice' : 'notFound',
             })),
           }
         : {}),
