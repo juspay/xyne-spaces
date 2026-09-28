@@ -25,6 +25,9 @@ import TicketView from '../components/Tickets/TicketView/TicketView';
 import { BrowserTabsScreen } from './BrowserTabsScreen';
 import { getLastActiveWorkspaceId } from '../machines/authMachine';
 import AgentsScreen from './AgentsScreen/AgentScreen';
+// ClawSettingsScreen and ClawMetricsScreen are also mounted at /ai/settings and
+// /ai/metrics (via AISectionLayout below) — kept even though the standalone
+// /claw-agents module that used to own them is gone.
 import ClawSettingsScreen from './ClawAgentsScreen/ClawSettingsScreen';
 import ClawMetricsScreen from './ClawAgentsScreen/ClawMetricsScreen';
 import { RequireClawAdmin } from './AIScreen/screens/RequireClawAdmin';
@@ -174,7 +177,6 @@ import { KeyedComposeDmPanel } from '../components/Chat/AddDmForm/ComposeDmPanel
 import ProfileSidebar from '../components/ProfileSidebar/ProfileSidebar';
 import UserGroupSidePanel from '../components/UserGroup/UserGroupSidePanel/UserGroupSidePanel';
 import GlobalCommandMenu from '../components/GlobalCommandMenu/GlobalCommandMenu';
-import ProductInsightsScreen from './ProductInsightsScreen/ProductInsightsScreen';
 import TicketReportsScreen from './TicketReportsScreen/TicketReportsScreen';
 import LaunchScreen from './LaunchScreen/LaunchScreen';
 import { AssignmentConfigWrapper } from '../components/UserGroup/AssignmentConfigScreen';
@@ -235,6 +237,7 @@ import { ShareRecordingHandler } from '../components/Chat/ShareRecordingHandler/
 import { GlobalUploadProgress } from '../components/knowledgeBase/upload/GlobalUploadProgress';
 import JiraMigrationScreen from './JiraMigrationScreen/JiraMigrationScreen';
 import WhatsAppBulkMigrationScreen from './WhatsAppBulkMigrationScreen/WhatsAppBulkMigrationScreen';
+import MigrationsScreen, { MigrationsIndexRedirect } from './MigrationsScreen/MigrationsScreen';
 import { ErrorReportModal } from '../components/ErrorReportModal/ErrorReportModal';
 import { useScreenRecorder } from '../hooks/useScreenRecorder';
 import type { ScreenSource } from '../types/electron';
@@ -1112,17 +1115,6 @@ export const router = createBrowserRouter(
                   element: <HomeScreen />,
                 },
                 {
-                  // A saved artifact app on its own, opened from the toolbar.
-                  // Outside the /ai subtree on purpose: a workspace that has
-                  // disabled Xyne AI from the rail can still keep apps there.
-                  path: 'app/:appId',
-                  element: <ArtifactAppHostRoute placement={{ surface: 'toolbar' }} />,
-                },
-                {
-                  path: 'slack-migration',
-                  element: <SlackMigration />,
-                },
-                {
                   path: 'ai',
                   element: (
                     <ToolbarProtectedRoute path='/ai'>
@@ -1476,14 +1468,6 @@ export const router = createBrowserRouter(
                   element: (
                     <ResourceProtectedRoute resourceName='WORKFLOWS' minAccess='READ'>
                       <WorkflowsRouteElement />
-                    </ResourceProtectedRoute>
-                  ),
-                },
-                {
-                  path: 'product-insights',
-                  element: (
-                    <ResourceProtectedRoute resourceName='PRODUCT-INSIGHTS'>
-                      <ProductInsightsScreen />
                     </ResourceProtectedRoute>
                   ),
                 },
@@ -1891,14 +1875,6 @@ export const router = createBrowserRouter(
                   ),
                 },
                 {
-                  path: 'jira-migration',
-                  element: (
-                    <ResourceProtectedRoute resourceName='TICKET-MIGRATION'>
-                      <JiraMigrationScreen />
-                    </ResourceProtectedRoute>
-                  ),
-                },
-                {
                   path: 'migration/confluence',
                   element: (
                     <ResourceProtectedRoute resourceName='CONFLUENCE-MIGRATION'>
@@ -1907,12 +1883,28 @@ export const router = createBrowserRouter(
                   ),
                 },
                 {
-                  path: 'migration/whatsapp',
-                  element: (
-                    <ResourceProtectedRoute resourceName='TICKET-MIGRATION'>
-                      <WhatsAppBulkMigrationScreen />
-                    </ResourceProtectedRoute>
-                  ),
+                  path: 'migrations',
+                  element: <MigrationsScreen />,
+                  children: [
+                    { index: true, element: <MigrationsIndexRedirect /> },
+                    {
+                      path: 'jira',
+                      element: (
+                        <ResourceProtectedRoute resourceName='TICKET-MIGRATION'>
+                          <JiraMigrationScreen />
+                        </ResourceProtectedRoute>
+                      ),
+                    },
+                    {
+                      path: 'whatsapp',
+                      element: (
+                        <ResourceProtectedRoute resourceName='TICKET-MIGRATION'>
+                          <WhatsAppBulkMigrationScreen />
+                        </ResourceProtectedRoute>
+                      ),
+                    },
+                    { path: 'slack', element: <SlackMigration /> },
+                  ],
                 },
                 {
                   path: 'guide',

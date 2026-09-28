@@ -223,6 +223,7 @@ const CHAT_NAV_ROW_DEFAULT_CLASS = 'text-sidebar-foreground hover:text-sidebar-a
 const CHAT_NAV_TEST_IDS: Partial<Record<InboxItemKey, string>> = {
   bookmarks: 'open-bookmarks-button',
   'drafts-sent': 'open-drafts-and-sent-button',
+  'scheduled-messages': 'open-scheduled-messages-button',
 };
 
 const CHAT_NAV_SHORTCUTS: Partial<Record<InboxItemKey, ShortcutId>> = {
@@ -668,6 +669,10 @@ const ChatDirectory = ({
           : CHAT_NAV_ROW_DEFAULT_CLASS;
       case 'drafts-sent':
         return pathname.endsWith('/chat/drafts-sent')
+          ? 'text-sidebar-accent-foreground'
+          : CHAT_NAV_ROW_DEFAULT_CLASS;
+      case 'scheduled-messages':
+        return location.pathname.endsWith('/scheduled-messages')
           ? 'text-sidebar-accent-foreground'
           : CHAT_NAV_ROW_DEFAULT_CLASS;
       case 'recap':
