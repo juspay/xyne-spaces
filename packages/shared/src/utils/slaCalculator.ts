@@ -101,7 +101,7 @@ function addBusinessHours(start: Date, hours: number, policy: SlaPolicy): Date {
       current = new Date(current.getTime() + minutesToConsume * 60 * 1000);
     } else {
       // Skip to the next potential business window
-      current = skipToNextBusinessWindow(current, timezone, workdayStart, workdayEnd);
+      current = skipToNextBusinessWindow(current, timezone, workdayStart);
     }
   }
 
@@ -126,7 +126,7 @@ function snapToNextBusinessMinute(
     const isBusinessDay = isoWeekday >= 1 && isoWeekday <= 5;
     const isBusinessHour = localHour >= workdayStart && localHour < workdayEnd;
     if (isBusinessDay && isBusinessHour) return current;
-    current = skipToNextBusinessWindow(current, timezone, workdayStart, workdayEnd);
+    current = skipToNextBusinessWindow(current, timezone, workdayStart);
   }
   return current;
 }
@@ -134,31 +134,31 @@ function snapToNextBusinessMinute(
 /**
  * Advances `date` past the current non-business period to the very start of the
  * next business window. Strategy:
- *  - If it's a weekday but after business hours → jump to next day's workdayStart
  *  - If it's a weekday but before business hours → jump to today's workdayStart
- *  - If it's a weekend → jump forward by 1 day at a time until Mon
+ *  - Otherwise (after business hours, or a weekend) → jump to workdayStart of
+ *    the next day that is a weekday
  */
 function skipToNextBusinessWindow(
   date: Date,
   timezone: string,
   workdayStart: number,
-  workdayEnd: number,
 ): Date {
   const localHour = getLocalHour(date, timezone);
   const isoWeekday = getLocalIsoWeekday(date, timezone);
 
-  if (isoWeekday >= 1 && isoWeekday <= 5) {
-    if (localHour < workdayStart) {
-      // Before start today — jump to workdayStart today
-      return setLocalHour(date, timezone, workdayStart);
-    } else {
-      // After end today — jump to workdayStart tomorrow
-      return setLocalHour(addDays(date, 1), timezone, workdayStart);
-    }
-  } else {
-    // Weekend — advance one day and retry
-    return skipToNextBusinessWindow(addDays(date, 1), timezone, workdayStart, workdayEnd);
+  if (isoWeekday >= 1 && isoWeekday <= 5 && localHour < workdayStart) {
+    // Before start today — jump to workdayStart today
+    return setLocalHour(date, timezone, workdayStart);
   }
+
+  // After end today, or a weekend — jump to workdayStart of the next weekday.
+  // Weekend days are skipped here rather than by re-running the checks above,
+  // so the resulting workdayStart is never mistaken for "after hours" on that day.
+  let next = setLocalHour(addDays(date, 1), timezone, workdayStart);
+  while (getLocalIsoWeekday(next, timezone) > 5) {
+    next = setLocalHour(addDays(next, 1), timezone, workdayStart);
+  }
+  return next;
 }
 
 /** Returns a new Date that is `n` whole days after `date` (UTC midnight-safe). */
