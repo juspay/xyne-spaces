@@ -39,6 +39,7 @@ import {
   GitCompare,
   Loader2,
   MessageSquare,
+  PhoneCall,
   RotateCcw,
 } from 'lucide-react';
 import {
@@ -95,7 +96,11 @@ import { apiInstance } from '../../../services/clients/apiClient';
 import { xyneAIActor, type CanvasInfo } from '../../../machines/xyneAIMachine';
 import { useAllVisibleChannels } from '@xyne/shared/hooks';
 import { usePersistedCanvasPreferences } from '../../../hooks/usePersistedCanvasPreferences';
-import { getRecordingCanvasCallId } from '../canvasFilters';
+import {
+  getCanvasCallInternalId,
+  getRecordingCanvasCallId,
+  isRecordingCanvas,
+} from '../canvasFilters';
 import type { CanvasPanelOutletContext } from '../CanvasPanel/CanvasPanel';
 import { useNavigate } from '../../../hooks/useWorkspaceNavigate';
 import {
@@ -1177,13 +1182,29 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   };
 
   const recordingCallId = selectedCanvas ? getRecordingCanvasCallId(selectedCanvas) : null;
+  const canvasIsRecording = selectedCanvas ? isRecordingCanvas(selectedCanvas) : false;
+  const canvasCallInternalId = selectedCanvas ? getCanvasCallInternalId(selectedCanvas) : null;
   const handleOpenRecordingNotes = useCallback((): void => {
-    if (!recordingCallId) return;
+    const destination = canvasIsRecording
+      ? recordingCallId
+        ? `/recordings/${encodeURIComponent(recordingCallId)}?tab=notes`
+        : null
+      : canvasCallInternalId
+        ? `/calls/${encodeURIComponent(canvasCallInternalId)}/detail`
+        : null;
+    if (!destination) return;
 
-    void navigate(`/recordings/${encodeURIComponent(recordingCallId)}?tab=notes`, {
+    void navigate(destination, {
       state: { from: `${location.pathname}${location.search}` },
     });
-  }, [location.pathname, location.search, navigate, recordingCallId]);
+  }, [
+    canvasCallInternalId,
+    canvasIsRecording,
+    location.pathname,
+    location.search,
+    navigate,
+    recordingCallId,
+  ]);
 
   const handleExportMarkdown = useCallback((): void => {
     void (async (): Promise<void> => {
@@ -1467,13 +1488,15 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                           <Share01 size={16} className='shrink-0 opacity-60' />
                         </button>
 
-                        {recordingCallId && (
+                        {(canvasIsRecording ? recordingCallId : canvasCallInternalId) && (
                           <button
                             type='button'
                             onClick={handleOpenRecordingNotes}
                             className={`${headerIconButtonClass} bg-muted text-muted-foreground hover:bg-border hover:text-foreground`}
-                            title='Open recording notes'
-                            aria-label='Open recording notes'
+                            title={canvasIsRecording ? 'Open recording notes' : 'Open call notes'}
+                            aria-label={
+                              canvasIsRecording ? 'Open recording notes' : 'Open call notes'
+                            }
                             data-track-category='CANVAS'
                             data-track-name='Open_Recording_Notes_From_Canvas'
                             data-track-metadata={JSON.stringify({
@@ -1481,7 +1504,11 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                               recordingId: recordingCallId,
                             })}
                           >
-                            <AudioLines size={16} strokeWidth={2.2} className='shrink-0' />
+                            {canvasIsRecording ? (
+                              <AudioLines size={16} strokeWidth={2.2} className='shrink-0' />
+                            ) : (
+                              <PhoneCall size={16} strokeWidth={2.2} className='shrink-0' />
+                            )}
                           </button>
                         )}
 

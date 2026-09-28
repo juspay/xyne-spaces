@@ -60,6 +60,26 @@ export function getRecordingCanvasCallId(canvas: Canvas): string | null {
   return typeof callId === 'string' && callId ? callId : null;
 }
 
+export function isRecordingCanvas(canvas: Canvas): boolean {
+  const metadata = canvas.metadata;
+  return Boolean(
+    metadata &&
+    typeof metadata === 'object' &&
+    !Array.isArray(metadata) &&
+    (metadata as Record<string, unknown>)['isRecording'] === true,
+  );
+}
+
+export function getCanvasCallInternalId(canvas: Canvas): string | null {
+  const metadata = canvas.metadata;
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+    return null;
+  }
+
+  const callInternalId = (metadata as Record<string, unknown>)['callInternalId'];
+  return typeof callInternalId === 'string' && callInternalId ? callInternalId : null;
+}
+
 export function filterExcludedRecordingGeneratedCanvases(
   canvases: Canvas[],
   excludeRecordingGeneratedCanvases: boolean,

@@ -38,6 +38,7 @@ import {
   History,
   Loader2,
   MessageSquare,
+  PhoneCall,
   Plus,
   RotateCcw,
   Star,
@@ -54,8 +55,10 @@ import { useCurrentUserGroupIds } from '../../../hooks/useUserGroup';
 import {
   filterExcludedCallGeneratedCanvases,
   filterExcludedRecordingGeneratedCanvases,
+  getCanvasCallInternalId,
   getRecordingCanvasCallId,
   isExcludedRecordingGeneratedCanvas,
+  isRecordingCanvas,
 } from '../canvasFilters';
 import { usePersistedCanvasPreferences } from '../../../hooks/usePersistedCanvasPreferences';
 import { Switch } from '@/components/ui/Switch';
@@ -295,14 +298,30 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
   const isCanvasOwner = canvas?.createdBy === user?.id || effectiveAccessLevel === CanvasRole.OWNER;
   const isChannelArchived = !!channel?.isArchived;
   const recordingCallId = canvas ? getRecordingCanvasCallId(canvas) : null;
+  const canvasIsRecording = canvas ? isRecordingCanvas(canvas) : false;
+  const canvasCallInternalId = canvas ? getCanvasCallInternalId(canvas) : null;
 
   const handleOpenRecordingNotes = useCallback((): void => {
-    if (!recordingCallId) return;
+    const destination = canvasIsRecording
+      ? recordingCallId
+        ? `/recordings/${encodeURIComponent(recordingCallId)}?tab=notes`
+        : null
+      : canvasCallInternalId
+        ? `/calls/${encodeURIComponent(canvasCallInternalId)}/detail`
+        : null;
+    if (!destination) return;
 
-    void navigate(`/recordings/${encodeURIComponent(recordingCallId)}?tab=notes`, {
+    void navigate(destination, {
       state: { from: `${location.pathname}${location.search}` },
     });
-  }, [location.pathname, location.search, navigate, recordingCallId]);
+  }, [
+    canvasCallInternalId,
+    canvasIsRecording,
+    location.pathname,
+    location.search,
+    navigate,
+    recordingCallId,
+  ]);
 
   useEffect(() => {
     previewVersionRef.current = null;
@@ -1160,13 +1179,13 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
           {/* Share Button */}
           {canvas?.id && (
             <div className='ml-2 flex items-center gap-2'>
-              {recordingCallId && (
+              {(canvasIsRecording ? recordingCallId : canvasCallInternalId) && (
                 <Button
                   variant='secondary'
                   size='iconSm'
                   onClick={handleOpenRecordingNotes}
-                  title='Open recording notes'
-                  aria-label='Open recording notes'
+                  title={canvasIsRecording ? 'Open recording notes' : 'Open call notes'}
+                  aria-label={canvasIsRecording ? 'Open recording notes' : 'Open call notes'}
                   data-track-category='CANVAS'
                   data-track-name='Open_Recording_Notes_From_Channel_Canvas'
                   data-track-metadata={JSON.stringify({
@@ -1175,7 +1194,11 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
                     channelId,
                   })}
                 >
-                  <AudioLines size={16} strokeWidth={2.2} />
+                  {canvasIsRecording ? (
+                    <AudioLines size={16} strokeWidth={2.2} />
+                  ) : (
+                    <PhoneCall size={16} strokeWidth={2.2} />
+                  )}
                 </Button>
               )}
               <Button
