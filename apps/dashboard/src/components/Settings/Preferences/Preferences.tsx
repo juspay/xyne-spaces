@@ -88,6 +88,12 @@ import { useLastVisitedChannel } from '../../../hooks/useLastVisitedChannel';
 import ChannelIcon from '../../Chat/ChannelIcon/ChannelIcon';
 import { Popover } from '../../ui/Popover/Popover';
 import Input from '../../ui/Input/Input';
+import { setUserPreference, useUserPreference } from '../../../machines/userPreferencesMachine';
+import {
+  MAX_RELATED_CONTEXT_DEBOUNCE_MS,
+  MIN_RELATED_CONTEXT_DEBOUNCE_MS,
+  clampDebounceMs,
+} from '../../../hooks/useRelatedContext';
 import { useToolbarBuiltIns, useInboxBuiltIns, useChannelTabBuiltIns } from '../../BarCustomize';
 import { BarCustomizer } from './BarCustomizer';
 import type { PreferenceSection, PreferencesProps, NavItem } from '.';
@@ -810,8 +816,85 @@ const MessagingSection: FC<{ state: PreferencesState }> = ({ state }) => (
         />
       </div>
     )}
+    <RelatedContextPreference />
   </div>
 );
+
+/**
+ * Related conversations while writing — kept on this device (userPreferencesMachine),
+ * off by default. The delay is how long after the last keystroke to look, never
+ * under a second: every lookup is a search and a round of classification.
+ *
+ * TODO: move to the server-side user_preferences table, like the other Messaging
+ * preferences, once the feature is confirmed.
+ */
+const RelatedContextPreference: FC = () => {
+  const enabled = useUserPreference('relatedContextEnabled');
+  const debounceMs = useUserPreference('relatedContextDebounceMs');
+  const [delayDraft, setDelayDraft] = useState(String(debounceMs));
+  useEffect(() => setDelayDraft(String(debounceMs)), [debounceMs]);
+
+  const commitDelay = (): void => {
+    const parsed = Number.parseInt(delayDraft, 10);
+    const next = Number.isFinite(parsed) ? clampDebounceMs(parsed) : debounceMs;
+    setDelayDraft(String(next));
+    if (next !== debounceMs) {
+      setUserPreference('relatedContextDebounceMs', next);
+    }
+  };
+
+  return (
+    <div className='p-3 rounded-lg border border-border bg-muted/30 space-y-3'>
+      <div className='flex items-center justify-between gap-4'>
+        <div>
+          <p className='text-sm font-medium text-foreground'>Suggest related conversations</p>
+          <p className='text-xs text-muted-foreground mt-0.5'>
+            While you write, show threads, tickets, canvases and calls that answer or discuss the
+            same thing
+          </p>
+        </div>
+        <Switch
+          id='related-context-enabled'
+          checked={enabled}
+          onCheckedChange={value => setUserPreference('relatedContextEnabled', value)}
+        />
+      </div>
+      {enabled && (
+        <div className='flex items-center justify-between gap-4 border-t border-border pt-3'>
+          <div>
+            <p className='text-sm font-medium text-foreground'>Look up after</p>
+            <p className='text-xs text-muted-foreground mt-0.5'>
+              Milliseconds after you stop typing, from {MIN_RELATED_CONTEXT_DEBOUNCE_MS} to{' '}
+              {MAX_RELATED_CONTEXT_DEBOUNCE_MS}.
+            </p>
+          </div>
+          <div className='flex items-center gap-1.5'>
+            <Input
+              type='number'
+              inputMode='numeric'
+              min={MIN_RELATED_CONTEXT_DEBOUNCE_MS}
+              max={MAX_RELATED_CONTEXT_DEBOUNCE_MS}
+              step={100}
+              value={delayDraft}
+              onChange={e => setDelayDraft(e.target.value)}
+              onBlur={commitDelay}
+              onKeyDown={e => {
+                if (e.key === 'Enter') {
+                  commitDelay();
+                }
+              }}
+              className='w-24 text-right tabular-nums'
+              aria-label='Look up after, in milliseconds'
+              data-track-category='PREFERENCES_MESSAGING'
+              data-track-name='RelatedContextDebounceMs'
+            />
+            <span className='text-xs text-muted-foreground'>ms</span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
 
 // ─── Launch ─────────────────────────────────────────────────────────────────
 const LaunchSection: FC<{ state: PreferencesState }> = ({ state }) => (

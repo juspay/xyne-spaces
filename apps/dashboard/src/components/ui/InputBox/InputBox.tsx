@@ -292,6 +292,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       bottomLeftSlot,
       disableDraftUpload = false,
       dockSlot,
+      headerSlot,
+      borderActivity,
       slashCommandArtifactCommand,
       slashCommandArtifactChannelLabel,
       onCancelSlashCommandArtifact,
@@ -1722,7 +1724,14 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         {dockSlot}
 
         <div
-          className={isVoiceRecording ? 'xyne-voice-border-wrap' : undefined}
+          className={
+            isVoiceRecording
+              ? 'xyne-voice-border-wrap'
+              : borderActivity !== undefined && !isMobile
+                ? 'xyne-related-scan'
+                : undefined
+          }
+          data-active={borderActivity && !isVoiceRecording ? 'true' : undefined}
           style={isVoiceRecording && isMobile ? { borderRadius: '28px' } : undefined}
         >
           <div
@@ -1767,6 +1776,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                 </button>
               </div>
             )}
+            {!isMobile && headerSlot}
             {/* VoiceInput — always mounted so ref works on mobile too; headless on mobile since MobileEditor has its own mic button */}
             {isMobile && !hideVoiceInput && (
               <VoiceInput
