@@ -54,6 +54,7 @@ import { visibleAgentWhereForRunningUser } from "../lib/callable-agent-resolver.
 import { emitAgentWorkingSignal } from "../surfaces/spaces/client.js";
 import { resolveFastMode } from "../lib/fast-mode.js";
 import { dispatchXyneAiContinuationRun } from "../lib/xyne-ai-continuation.js";
+import { applyCreateSkill, isCreateSkillAction } from "../lib/skill-apply.js";
 import { isClawAdmin } from "../middleware/agent-acl.js";
 import { applyAgentToolAction, AGENT_TOOL_SLUGS } from "../lib/agent-tools-apply.js";
 import { registerRunRecovery } from "../queue/run-recovery-worker.js";
@@ -1102,49 +1103,21 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       // tool, params, userId} was verified above, so params are trusted here.
       // "agent-tools" is create-skill's CURRENT serverType (it moved groups);
       // "skill" is kept so actions signed before that deploy still apply.
-      if (serverType === "skill" || (serverType === "agent-tools" && tool === "create-skill")) {
-        const { skillRepository } = await import("../repositories/index.js");
-        const name = String(params["name"] ?? "").trim();
-        const description = String(params["description"] ?? "").trim();
-        const content = String(params["content"] ?? "");
-        let slug = String(params["slug"] ?? "").trim().toLowerCase();
-        if (!slug) slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80);
-        if (!name || !content.trim() || !slug) {
-          res.json({ type: "error", message: "Skill name, slug and content are required." } satisfies AppActionResponse);
+      if (isCreateSkillAction(serverType, tool)) {
+        const outcome = await applyCreateSkill(params, writeUserId);
+        if (outcome.status === "invalid") {
+          res.json({ type: "error", message: outcome.error } satisfies AppActionResponse);
           return;
         }
-        if (!/^[a-z0-9-]+$/.test(slug) || slug.startsWith("-") || slug.endsWith("-") || slug.includes("--")) {
-          res.json({ type: "error", message: "Invalid skill slug (use lowercase letters, digits and single hyphens)." } satisfies AppActionResponse);
-          return;
-        }
-        const user = await prisma.user.findUnique({ where: { id: writeUserId }, select: { orgId: true } });
-        const skillOrgId = user?.orgId;
-        if (!skillOrgId) {
-          res.json({ type: "error", message: "Could not resolve your organization to create the skill." } satisfies AppActionResponse);
-          return;
-        }
-        const existing = await skillRepository.findBySlug(slug, skillOrgId);
-        if (existing) {
-          const msg = `A skill with slug "${slug}" already exists.`;
-          resp = { type: "close_screen", finalMessage: `⚠️ ${msg}` };
+        if (outcome.status === "duplicate") {
+          resp = { type: "close_screen", finalMessage: `⚠️ ${outcome.error}` };
           res.json(resp);
-          void replaceFlowCardWithText(messageId, agentSlug, `⚠️ ${msg}`, conversationId, undefined, spacesAppId);
+          void replaceFlowCardWithText(messageId, agentSlug, `⚠️ ${outcome.error}`, conversationId, undefined, spacesAppId);
           return;
         }
-        await skillRepository.create({
-          slug,
-          name,
-          description,
-          content: content.trim(),
-          source: "agent-authored",
-          scope: "personal",
-          owner: { connect: { id: writeUserId } },
-          org: { connect: { id: skillOrgId } },
-        });
-        log.info(`[flow-action] create-skill approved slug=${slug} owner=${writeUserId} org=${skillOrgId}`);
-        resp = { type: "close_screen", finalMessage: `✅ Skill "${name}" created.` };
+        resp = { type: "close_screen", finalMessage: `✅ ${outcome.message}` };
         res.json(resp);
-        void replaceFlowCardWithText(messageId, agentSlug, `✅ **Skill created:** ${name} (\`${slug}\`)`, conversationId, undefined, spacesAppId);
+        void replaceFlowCardWithText(messageId, agentSlug, `✅ **Skill created:** ${outcome.name} (\`${outcome.slug}\`)`, conversationId, undefined, spacesAppId);
         return;
       }
 
