@@ -133,6 +133,9 @@ export async function runTests(
   const testCommand = buildTestCommand(targets);
   const envArgs = ['-e', `COMMIT_HASH=${commitHash}`];
   if (parallel) envArgs.push('-e', `PARALLEL=${parallel}`);
+  // RETRIES=0 gives a true first-pass measurement, and keeps a failing attempt's screenshot
+  // instead of discarding it the moment a retry passes.
+  if (process.env.RETRIES !== undefined) envArgs.push('-e', `RETRIES=${process.env.RETRIES}`);
 
   const result = await exec(
     'docker',
