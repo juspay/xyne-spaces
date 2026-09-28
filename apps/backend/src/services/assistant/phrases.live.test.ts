@@ -24,9 +24,9 @@ interface PhraseCase {
 
 const CASES: PhraseCase[] = [
   {
-    say: 'Send a message to Dipanshu saying the review is done',
+    say: 'Send a message to Priti saying the review is done',
     action: 'send_dm',
-    fields: { recipient: 'Dipanshu', message: 'the review is done' },
+    fields: { recipient: 'Priti', message: 'the review is done' },
   },
   {
     say: 'tell Priya the build is green',
@@ -49,11 +49,11 @@ const CASES: PhraseCase[] = [
     fields: { recipient: 'Daniel', message: 'hello' },
   },
   {
-    say: 'send hello to Deepanshu Sharma',
+    say: 'send hello to Preeti Sharma',
     action: 'send_dm',
-    fields: { recipient: 'Deepanshu Sharma', message: 'hello' },
+    fields: { recipient: 'Preeti Sharma', message: 'hello' },
   },
-  { say: 'DM Deepanshu', action: 'send_dm', fields: { recipient: 'Deepanshu' } },
+  { say: 'DM Preeti', action: 'send_dm', fields: { recipient: 'Preeti' } },
   { say: 'can you help me create a channel', action: 'create_channel' },
   { say: "let's make a channel called ops", action: 'create_channel', fields: { name: 'ops' } },
   {
@@ -73,19 +73,19 @@ const CASES: PhraseCase[] = [
     fields: { channel: 'release planning' },
   },
   {
-    say: 'Can you find me the messages where me and Deepanshu are discussing about mobile par?',
+    say: 'Can you find me the messages where me and Preeti are discussing about release nots?',
     action: 'find_conversation',
-    fields: { conversation: 'mobile par' },
+    fields: { conversation: 'release nots' },
   },
   {
-    say: 'Find me a thread where me and Dipanshu are discussing about mobile perf.',
+    say: 'Find me a thread where me and Priti are discussing about release notes.',
     action: 'find_conversation',
-    fields: { conversation: 'mobile perf', with: ['Dipanshu'] },
+    fields: { conversation: 'release notes', with: ['Priti'] },
   },
   {
-    say: 'find the thread where Karan and I discussed the release',
+    say: 'find the thread where Meera and I discussed the release',
     action: 'find_conversation',
-    fields: { with: ['Karan'] },
+    fields: { with: ['Meera'] },
   },
   {
     say: 'open the thread about the release plan',
@@ -104,14 +104,14 @@ const CASES: PhraseCase[] = [
   },
   { say: 'post hello here', action: 'post_message', fields: { channel: 'here', message: 'hello' } },
   {
-    say: 'go to general and mention Deepanshu to do the RCA',
+    say: 'go to general and mention Preeti to do the RCA',
     action: 'post_message',
-    fields: { channel: 'general', mentions: ['Deepanshu'] },
+    fields: { channel: 'general', mentions: ['Preeti'] },
   },
   {
-    say: 'open the general channel and mention Xyne Doctor and ask it to check the latest crash',
+    say: 'open the general channel and mention Build Bot and ask it to check the latest crash',
     action: 'post_message',
-    fields: { channel: 'general', mentions: ['Xyne Doctor'], message: 'check the latest crash' },
+    fields: { channel: 'general', mentions: ['Build Bot'], message: 'check the latest crash' },
   },
   { say: 'hi', kind: 'greeting' },
   { say: 'thanks', kind: 'thanks' },

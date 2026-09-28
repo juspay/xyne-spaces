@@ -101,21 +101,21 @@ describe('matching a spoken name to records', () => {
   });
 
   it('finds a name spelled the way it sounds, but never counts it as certain', () => {
-    const team = [person('4', 'Deepanshu Sharma', 'deepanshu@x.io'), person('5', 'Prisha Rao')];
-    expect(matchName('Dipanshu', team)).toMatchObject({
+    const team = [person('4', 'Preeti Sharma', 'preeti@x.io'), person('5', 'Prisha Rao')];
+    expect(matchName('Priti', team)).toMatchObject({
       kind: 'one',
       record: { id: '4' },
       certain: false,
     });
-    expect(matchName('dipanshu sharma', team)).toMatchObject({ kind: 'one', record: { id: '4' } });
-    expect(matchName('Deepanshu Sharma', team)).toMatchObject({ kind: 'one', certain: true });
+    expect(matchName('priti sharma', team)).toMatchObject({ kind: 'one', record: { id: '4' } });
+    expect(matchName('Preeti Sharma', team)).toMatchObject({ kind: 'one', certain: true });
     expect(matchName('Priya', team)).toEqual({ kind: 'none' });
     expect(matchName('Alistair', team)).toEqual({ kind: 'none' });
   });
 
   it('asks which one when two names sound alike', () => {
-    const team = [person('4', 'Deepanshu Sharma'), person('6', 'Dipanshu Verma')];
-    expect(matchName('Deepanshoo', team)).toMatchObject({ kind: 'several' });
+    const team = [person('4', 'Preeti Sharma'), person('6', 'Priti Verma')];
+    expect(matchName('Preetee', team)).toMatchObject({ kind: 'several' });
   });
 
   it('treats hyphens and spaces in channel names alike', () => {

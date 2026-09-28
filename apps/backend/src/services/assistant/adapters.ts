@@ -80,8 +80,8 @@ const MAX_PEOPLE = 250;
 const MAX_CHANNELS = 25;
 
 /**
- * People whose name contains every word said. A name heard by sound ("Dipanshu" for
- * "Deepanshu") matches none, so then the people whose name starts with the same letter are
+ * People whose name contains every word said. A name heard by sound ("Priti" for
+ * "Preeti") matches none, so then the people whose name starts with the same letter are
  * fetched, and `matchName` compares how they sound.
  */
 async function findPeople(

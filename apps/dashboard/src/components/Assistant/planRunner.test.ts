@@ -101,7 +101,7 @@ describe('running a plan', () => {
             id: 't-1',
             name: 'Reduce startup work',
             channelId: 'c-perf',
-            channelName: 'mobile-perf',
+            channelName: 'releases',
           },
         },
       ],

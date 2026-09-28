@@ -172,7 +172,7 @@ async function understand(
       const action = catalog.get(draft.action);
       if (!action) return { session, reply: replyForError('That request is no longer available.') };
       const words = await wordsFor(action, text, services);
-      // Answering "which one?" with more details ("the one with Karan") looks again with the
+      // Answering "which one?" with more details ("the one with Meera") looks again with the
       // same words, narrowed by the new ones.
       const { choosing } = draft;
       if (choosing && !words[choosing.field]) words[choosing.field] = choosing.mention;

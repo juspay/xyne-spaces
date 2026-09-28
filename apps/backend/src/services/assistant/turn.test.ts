@@ -30,9 +30,9 @@ const perfThreads: FoundRecord[] = [
       id: 't-1',
       name: 'Reduce startup work',
       channelId: 'c-perf',
-      channelName: 'mobile-perf',
+      channelName: 'releases',
     },
-    detail: '#mobile-perf · Deepanshu Sharma',
+    detail: '#releases · Preeti Sharma',
   },
   {
     record: {
@@ -40,15 +40,15 @@ const perfThreads: FoundRecord[] = [
       id: 't-2',
       name: 'Cold start regression',
       channelId: 'c-perf',
-      channelName: 'mobile-perf',
+      channelName: 'releases',
     },
-    detail: '#mobile-perf · Vinit',
+    detail: '#releases · Vinit',
   },
 ];
 
-const karan: FoundRecord = {
-  record: { kind: 'person', id: 'u-karan', name: 'Karan Mehta' },
-  detail: 'karan@x.io',
+const meera: FoundRecord = {
+  record: { kind: 'person', id: 'u-meera', name: 'Meera Mehta' },
+  detail: 'meera@x.io',
 };
 
 const identity = { workspaceId: 'w1', userId: 'me', sessionId: 's1' };
@@ -90,13 +90,13 @@ function assistant(people: FoundRecord[] = [daniel]) {
     },
     records: {
       // Like the real lookup: everyone in the workspace; `matchName` does the matching.
-      // A search narrowed to Karan finds only the thread he was in.
+      // A search narrowed to Meera finds only the thread she was in.
       find: async (kind, _mention, hints) =>
         kind === 'person'
           ? people
           : kind === 'channel'
             ? [android]
-            : hints?.people.includes('u-karan')
+            : hints?.people.includes('u-meera')
               ? [perfThreads[1]!]
               : perfThreads,
       get: async (kind, id) => (kind === 'channel' && id === general.record.id ? general : null),
@@ -231,14 +231,14 @@ describe('a turn', () => {
     chat.hears({
       area: 'messaging',
       action: 'find_conversation',
-      fields: { conversation: 'mobile par' },
+      fields: { conversation: 'release nots' },
     });
-    const which = await chat.say('find the messages about mobile par');
+    const which = await chat.say('find the messages about release nots');
     expect(which.display).toMatchObject({
       kind: 'choices',
       options: [
-        { id: 't-1', label: 'Reduce startup work', detail: '#mobile-perf · Deepanshu Sharma' },
-        { id: 't-2', label: 'Cold start regression', detail: '#mobile-perf · Vinit' },
+        { id: 't-1', label: 'Reduce startup work', detail: '#releases · Preeti Sharma' },
+        { id: 't-2', label: 'Cold start regression', detail: '#releases · Vinit' },
       ],
     });
     const opened = await chat.tap('t-2');
@@ -246,30 +246,30 @@ describe('a turn', () => {
   });
 
   it('narrows a search to the people named with it', async () => {
-    const chat = assistant([daniel, karan]);
+    const chat = assistant([daniel, meera]);
     chat.hears({
       area: 'messaging',
       action: 'find_conversation',
-      fields: { conversation: 'mobile perf', with: 'Karan' },
+      fields: { conversation: 'release notes', with: 'Meera' },
     });
-    const opened = await chat.say('find the thread where Karan and I discussed mobile perf');
+    const opened = await chat.say('find the thread where Meera and I discussed release notes');
     expect(opened.run?.plan).toEqual([{ op: 'navigate', target: perfThreads[1]!.record }]);
   });
 
   it('asks which one, and searches again when told who was in it', async () => {
-    const chat = assistant([daniel, karan]);
+    const chat = assistant([daniel, meera]);
     chat.hears({
       area: 'messaging',
       action: 'find_conversation',
-      fields: { conversation: 'mobile perf' },
+      fields: { conversation: 'release notes' },
     });
-    const which = await chat.say('find the messages about mobile perf');
+    const which = await chat.say('find the messages about release notes');
     expect(which.say).toBe(
-      'Here are the closest matches for “mobile perf”. Tap one, or tell me who was in it or which channel.'
+      'Here are the closest matches for “release notes”. Tap one, or tell me who was in it or which channel.'
     );
 
-    chat.hears({ continues: 0.9, fields: { with: 'Karan' } });
-    const opened = await chat.say('the one with Karan');
+    chat.hears({ continues: 0.9, fields: { with: 'Meera' } });
+    const opened = await chat.say('the one with Meera');
     expect(opened.run?.plan).toEqual([{ op: 'navigate', target: perfThreads[1]!.record }]);
   });
 
@@ -365,14 +365,14 @@ describe('a turn', () => {
   });
 
   it('finds a person whose name was spelled the way it sounds', async () => {
-    const deepanshu: FoundRecord = {
-      record: { kind: 'person', id: 'u-deep', name: 'Deepanshu Sharma' },
-      detail: 'deepanshu@x.io',
+    const preeti: FoundRecord = {
+      record: { kind: 'person', id: 'u-deep', name: 'Preeti Sharma' },
+      detail: 'preeti@x.io',
     };
-    const chat = assistant([daniel, deepanshu]);
-    chat.hears({ area: 'messaging', action: 'send_dm', fields: { recipient: 'Dipanshu' } });
-    const next = await chat.say('Send a direct message to Dipanshu.');
-    expect(next.say).toBe('What should I say to Deepanshu Sharma?');
+    const chat = assistant([daniel, preeti]);
+    chat.hears({ area: 'messaging', action: 'send_dm', fields: { recipient: 'Priti' } });
+    const next = await chat.say('Send a direct message to Priti.');
+    expect(next.say).toBe('What should I say to Preeti Sharma?');
   });
 
   it('answers "what can you do?", greetings, and thanks instead of "I can’t do that"', async () => {

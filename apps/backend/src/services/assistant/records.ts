@@ -11,7 +11,7 @@ export interface FoundRecord {
   detail?: string;
 }
 
-/** People and channels named with a search ("with Karan", "in security"), which narrow it. */
+/** People and channels named with a search ("with Meera", "in security"), which narrow it. */
 export interface SearchHints {
   people: string[];
   channels: string[];
@@ -107,7 +107,7 @@ const EXACT = 3;
 const WORDS = 2;
 /** Part of the name. */
 const PART = 1;
-/** Sounds like words of the name, as speech-to-text spells it ("Dipanshu" for "Deepanshu"). */
+/** Sounds like words of the name, as speech-to-text spells it ("Priti" for "Preeti"). */
 const SOUNDS_LIKE = 0.5;
 
 function nameScore(said: string, name: string): number {
@@ -137,7 +137,7 @@ const SOUND_RULES: ReadonlyArray<readonly [RegExp, string]> = [
   [/[ah]$/, ''], // a trailing a or h is often not heard
 ];
 
-/** "Deepanshu" and "Dipanshu" both sound like "dipansu". */
+/** "Preeti" and "Priti" both sound like "priti". */
 export function soundKey(word: string): string {
   return SOUND_RULES.reduce(
     (key, [pattern, replacement]) => key.replace(pattern, replacement),

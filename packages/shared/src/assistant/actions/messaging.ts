@@ -123,7 +123,7 @@ export const MESSAGING = {
           'Find the messages where we discussed the launch',
           'Open the thread about the release plan',
           'Where did we talk about login errors?',
-          'Show me the conversation about mobile performance',
+          'Show me the conversation about the pricing change',
         ],
         notFor: [
           {

@@ -447,7 +447,7 @@ test('every shipped action loads and renders with sample values', () => {
       id: 't-perf',
       name: 'Reduce startup work',
       channelId: 'c-perf',
-      channelName: 'mobile-perf',
+      channelName: 'releases',
     },
   };
   for (const definition of ACTIONS.values()) {

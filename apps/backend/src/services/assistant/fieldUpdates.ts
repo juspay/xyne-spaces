@@ -14,7 +14,7 @@ import { matchFound, type RecordFinder, type SearchHints } from './records';
  * itself was clear; a record also has to match exactly for the value to count as certain.
  *
  * Searches (conversations) run last, narrowed by the people and channels named with them,
- * now or earlier in the request (`known`): "the one with Karan" narrows "mobile perf".
+ * now or earlier in the request (`known`): "the one with Meera" narrows "release notes".
  */
 export async function toFieldUpdates(
   action: ActionDefinition,
