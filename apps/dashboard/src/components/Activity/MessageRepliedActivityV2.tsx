@@ -22,11 +22,11 @@ export const MessageRepliedActivityV2 = ({
   isExpanded: boolean;
 }): ReactElement | null => {
   const message = activity.message;
+  const conversation = activity.conversation;
   const actorUser = useUser(activity.actorId); // Most recent replier
   const { baseRoute } = useRouteContext();
 
-  if (!message || !message.conversation) return null;
-  const conversation = message.conversation;
+  if (!message || !conversation) return null;
   const latestReplyMessage = message;
   const artifact = parseSlashCommandArtifactMessage(latestReplyMessage.content);
 

@@ -89,7 +89,7 @@ type TabConfig = {
   filter: (activity: ActivityWithRelated) => boolean;
 };
 
-type ActivityCursor = NonNullable<Parameters<typeof queries.userActivitiesPaginatedV2>[0]['start']>;
+type ActivityCursor = NonNullable<Parameters<typeof queries.userActivitiesPaginatedV3>[0]['start']>;
 
 const isAllVisibleActivity = (activity: ActivityWithRelated): boolean => {
   const classification = activity.classification ?? ActivityClassification.PENDING;
@@ -441,7 +441,7 @@ const ActivityListView = (): ReactElement => {
 
   const activitiesQuery = useMemo(
     () =>
-      queries.userActivitiesPaginatedV2({
+      queries.userActivitiesPaginatedV3({
         limit: PAGE_SIZE,
         start: fetchCursor,
         types: currentTypes,

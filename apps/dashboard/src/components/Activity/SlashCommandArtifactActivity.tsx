@@ -49,13 +49,13 @@ export const SlashCommandArtifactActivity = ({
   isExpanded: boolean;
 }): ReactElement | null => {
   const message = activity.message;
+  const conversation = activity.conversation;
   const sender = useUser(message?.senderId ?? '');
   const { baseRoute } = useRouteContext();
   const artifact = parseSlashCommandArtifactMessage(message?.content);
 
-  if (!message || !sender || !message.conversation || !artifact) return null;
+  if (!message || !sender || !conversation || !artifact) return null;
 
-  const conversation = message.conversation;
   const isInitialMessage = conversation.initialMessageId === message.messageId;
   const targetPath = buildSlashCommandArtifactRoute({
     baseRoute,

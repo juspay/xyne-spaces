@@ -24,23 +24,24 @@ export const ReactionAddedActivity = ({
 }): ReactElement | null => {
   const reaction = activity.reaction;
   const message = activity.message;
+  const conversation = activity.conversation;
   const actorUser = useUser(reaction?.userId ?? '');
   const { baseRoute } = useRouteContext();
 
-  if (!reaction || !message || !reaction.userId || !message.conversation) return null;
+  if (!reaction || !message || !reaction.userId || !conversation) return null;
 
   const reactionPreview = getReactionMessagePreview(message.content);
   const artifact = parseSlashCommandArtifactMessage(message.content);
   const actionText = activity.actorAction === 'added' ? 'reacted' : 'removed reaction';
-  const isThreadReply = message.conversation?.initialMessageId !== message.messageId;
-  const targetPath = `${baseRoute}/${message.conversation?.channelId}${isThreadReply ? `/${message.conversation?.conversationId}` : ''}#origin=${message.conversation?.conversationId}${isThreadReply ? `&messageId=${message.messageId}` : ''}`;
+  const isThreadReply = conversation?.initialMessageId !== message.messageId;
+  const targetPath = `${baseRoute}/${conversation?.channelId}${isThreadReply ? `/${conversation?.conversationId}` : ''}#origin=${conversation?.conversationId}${isThreadReply ? `&messageId=${message.messageId}` : ''}`;
 
   return (
     <ActivityItemCard
       activity={activity}
       actorId={reaction.userId}
       actorName={getUserDisplayName(actorUser)}
-      channelId={message.conversation?.channelId}
+      channelId={conversation?.channelId}
       badgeIcon={renderEmoji(reaction.emojiName)}
       badgeColorClass='bg-muted'
       {...(artifact && {
@@ -54,7 +55,7 @@ export const ReactionAddedActivity = ({
       }
       targetPath={targetPath}
       focusThread={isThreadReply}
-      linkedItemCreatedAt={message.conversation.createdAt}
+      linkedItemCreatedAt={conversation.createdAt}
       useActivityCutoff
       isExpanded={isExpanded}
     >

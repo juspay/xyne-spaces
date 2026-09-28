@@ -22,15 +22,16 @@ export const MessageRepliedActivity = ({
   isExpanded: boolean;
 }): ReactElement | null => {
   const message = activity.message;
+  const conversation = activity.conversation;
   const sender = useUser(message?.senderId ?? '');
   const artifact = parseSlashCommandArtifactMessage(message?.content);
   const { baseRoute } = useRouteContext();
 
-  if (!message || !sender || !message.conversation) return null;
-  const targetPath = `${baseRoute}/${message.conversation?.channelId}/${message.conversation?.conversationId}#origin=${message.conversation?.conversationId}&messageId=${message.messageId}`;
+  if (!message || !sender || !conversation) return null;
+  const targetPath = `${baseRoute}/${conversation?.channelId}/${conversation?.conversationId}#origin=${conversation?.conversationId}&messageId=${message.messageId}`;
   const supportTargetPath =
-    message.conversation?.channelId && message.conversation?.conversationId
-      ? `/support/${message.conversation.channelId}?conversationId=${message.conversation.conversationId}&messageId=${message.messageId}`
+    conversation?.channelId && conversation?.conversationId
+      ? `/support/${conversation.channelId}?conversationId=${conversation.conversationId}&messageId=${message.messageId}`
       : undefined;
 
   return (
@@ -38,7 +39,7 @@ export const MessageRepliedActivity = ({
       activity={activity}
       actorId={sender.id}
       actorName={getUserDisplayName(sender)}
-      channelId={message.conversation?.channelId}
+      channelId={conversation?.channelId}
       badgeIcon={<ChatTyping className='size-3 text-yellow-600' />}
       badgeColorClass='bg-muted'
       {...(artifact && {
@@ -48,7 +49,7 @@ export const MessageRepliedActivity = ({
       targetPath={targetPath}
       focusThread
       supportTargetPath={supportTargetPath}
-      linkedItemCreatedAt={message.conversation.createdAt}
+      linkedItemCreatedAt={conversation.createdAt}
       useActivityCutoff
       isExpanded={isExpanded}
     >
