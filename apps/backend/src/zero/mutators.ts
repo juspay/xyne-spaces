@@ -85,6 +85,8 @@ import {
   parseFieldOptions,
   serializeFieldOptions,
   ReleaseTrackingMode,
+  RELEASE_COMMIT_FORM_NAME,
+  RELEASE_VERSION_FORM_NAME,
   parseRepliesMd,
   addReplyToData,
   serializeRepliesMd,
@@ -7698,6 +7700,10 @@ export function createMutators(
           mainBoardName: z.string(),
           releaseTrackingMode: z.nativeEnum(ReleaseTrackingMode),
           channelId: z.string(),
+          // Ids for the dev-board releaseVersion field provisioned in VERSION mode.
+          devVersionFieldId: z.string().optional(),
+          devFormId: z.string().optional(),
+          devFormMappingId: z.string().optional(),
           applications: z.array(
             z.object({
               id: z.string(),
@@ -7720,6 +7726,9 @@ export function createMutators(
             mainBoardName: rawMainBoardName,
             releaseTrackingMode,
             channelId,
+            devVersionFieldId,
+            devFormId,
+            devFormMappingId,
             applications: rawApplications,
           },
         }) => {
@@ -7873,12 +7882,10 @@ export function createMutators(
           // The Create Ticket modal reads one BOARD/TICKET mapping per board, so
           // switching modes updates the existing mapping instead of adding a second
           // form. The forms themselves are seed data (scripts/seed-release.ts).
-          const releaseCommitFormName = 'xyne_release_specs_form';
-          const releaseVersionFormName = 'xyne_release_version_specs_form';
           const targetReleaseFormName =
             releaseTrackingMode === ReleaseTrackingMode.VERSION
-              ? releaseVersionFormName
-              : releaseCommitFormName;
+              ? RELEASE_VERSION_FORM_NAME
+              : RELEASE_COMMIT_FORM_NAME;
           let targetReleaseFormId: string | null = null;
           let releaseFormLookedUp = false;
           const ensureBoardFormMapping = async (boardId: string): Promise<void> => {
@@ -7911,7 +7918,17 @@ export function createMutators(
             if (existingMapping) {
               // Skip the no-op write: an unchanged mapping would still be
               // replicated to every client subscribed to forms_context_mapping.
-              if (existingMapping.formId !== targetReleaseFormId) {
+              if (existingMapping.formId === targetReleaseFormId) return;
+              // Repoint only a board sitting on the OTHER mode's template — the one case
+              // a mode switch has to fix. Matching on id instead would also move a board
+              // off its own forked copy (losing its custom fields) or between duplicate
+              // seeded templates, and either strands the values already saved against it.
+              const boundForm = await tx.run(zql.forms.where('id', existingMapping.formId).one());
+              const previousModeFormName =
+                targetReleaseFormName === RELEASE_COMMIT_FORM_NAME
+                  ? RELEASE_VERSION_FORM_NAME
+                  : RELEASE_COMMIT_FORM_NAME;
+              if (boundForm?.formName === previousModeFormName) {
                 await tx.mutate.forms_context_mapping.update({
                   id: existingMapping.id,
                   formId: targetReleaseFormId,
@@ -7927,6 +7944,67 @@ export function createMutators(
               contextId: boardId,
               contextType: FormContextType.BOARD,
               entityType: FormEntityType.TICKET,
+            });
+          };
+
+          // A version release collects dev tickets whose own board carries a
+          // `releaseVersion` field holding the release's exact value. Only the
+          // release board is bound to the seeded version form, so without this a
+          // project has no field to tag work with and every version release is
+          // empty. Optional so it can never block ticket creation on the dev board.
+          const ensureDevBoardVersionField = async (): Promise<void> => {
+            if (releaseTrackingMode !== ReleaseTrackingMode.VERSION || !devVersionFieldId) return;
+
+            const projectBoards = await tx.run(zql.boards.where('projectId', projectId));
+            const devBoard = projectBoards.find(b => b.boardType === BoardType.DEFAULT);
+            if (!devBoard) return;
+
+            const devMapping = await tx.run(
+              zql.forms_context_mapping
+                .where('contextId', devBoard.id)
+                .where('contextType', FormContextType.BOARD)
+                .where('entityType', FormEntityType.TICKET)
+                .one(),
+            );
+
+            let devBoardFormId = devMapping?.formId;
+            if (!devBoardFormId) {
+              // Dev boards often have no form at all; give this one its own.
+              if (!devFormId || !devFormMappingId) return;
+              await tx.mutate.forms.insert({
+                id: devFormId,
+                formName: `${devBoard.name} Custom Fields`,
+                entityType: FormEntityType.TICKET,
+                contextType: FormContextType.BOARD,
+                workspaceId: project.workspaceId,
+                createdBy: authData.sub,
+                createdAt: Date.now(),
+                updatedAt: Date.now(),
+              });
+              await tx.mutate.forms_context_mapping.insert({
+                id: devFormMappingId,
+                workspaceId: project.workspaceId,
+                formId: devFormId,
+                contextId: devBoard.id,
+                contextType: FormContextType.BOARD,
+                entityType: FormEntityType.TICKET,
+              });
+              devBoardFormId = devFormId;
+            }
+
+            const devFields = await tx.run(zql.form_fields.where('formId', devBoardFormId));
+            if (devFields.some(field => field.fieldName === 'releaseVersion')) return;
+
+            await tx.mutate.form_fields.insert({
+              id: devVersionFieldId,
+              workspaceId: project.workspaceId,
+              formId: devBoardFormId,
+              fieldName: 'releaseVersion',
+              fieldType: FormFieldType.STRING,
+              isOptional: true,
+              sequenceNumber: devFields.length,
+              createdAt: Date.now(),
+              updatedAt: Date.now(),
             });
           };
 
@@ -7998,6 +8076,7 @@ export function createMutators(
               updatedAt: Date.now(),
             });
             await ensureBoardFormMapping(existingMainBoard.id);
+            await ensureDevBoardVersionField();
           } else {
             const projectBoardTs = Date.now();
             await tx.mutate.boards.insert({
@@ -8013,6 +8092,7 @@ export function createMutators(
             });
             await seedReleaseStages(mainBoardId, projectBoardTs);
             await ensureBoardFormMapping(mainBoardId);
+            await ensureDevBoardVersionField();
           }
 
           // Group-scoped edits only load applications owned by this main board.
@@ -12249,6 +12329,11 @@ export function createMutators(
       update: defineMutator(
         z.object({
           formId: z.string(),
+          // The board doing the editing, plus caller-generated ids used only if that board
+          // turns out to share its form. Generated outside: mutators stay deterministic.
+          boardId: z.string().optional(),
+          forkFormId: z.string().optional(),
+          forkFieldIds: z.record(z.string(), z.string()).optional(),
           projectId: z.string().optional(),
           formDescription: z.string().optional(),
           fields: z
@@ -12270,12 +12355,108 @@ export function createMutators(
         }),
         async ({
           tx,
-          args: { formId, projectId, formDescription, fields, timestamp, fieldIds = {} },
+          args: {
+            formId: requestedFormId,
+            boardId,
+            forkFormId,
+            forkFieldIds = {},
+            projectId,
+            formDescription,
+            fields: requestedFields,
+            timestamp,
+            fieldIds = {},
+          },
         }) => {
+          let formId = requestedFormId;
+          let fields = requestedFields;
           // Validate form exists
           const form = await tx.run(zql.forms.where('id', formId).one());
           if (!form) {
             throw new Error('Form not found');
+          }
+
+          // Release boards are all bound to ONE seeded form, so editing fields from one board would
+          // edit them for every other board bound to it. Give this board its own copy first.
+          if (boardId && forkFormId) {
+            const mappings = await tx.run(
+              zql.forms_context_mapping
+                .where('formId', formId)
+                .where('contextType', FormContextType.BOARD)
+                .where('entityType', FormEntityType.TICKET),
+            );
+            const board = await tx.run(zql.boards.where('id', boardId).one());
+            const ownMapping = mappings.find(m => m.contextId === boardId);
+            // The seeded forms are templates every release board is bound to as it is created, so a
+            // board must fork off one even while it is the only board currently pointing at it.
+            const isTemplate =
+              form.formName === RELEASE_COMMIT_FORM_NAME
+              || form.formName === RELEASE_VERSION_FORM_NAME;
+            const isShared = isTemplate || mappings.some(m => m.contextId !== boardId);
+            const sharedRows = isShared ? await tx.run(zql.form_fields.where('formId', formId)) : [];
+            // boardId is caller-supplied: only fork a board of this form's own workspace, and only
+            // one already bound to it.
+            if (ownMapping && isShared && board?.workspaceId === form.workspaceId) {
+              // A row this client had not synced yet has no copy id; editing on anyway would write
+              // onto the shared form, so fail and let the client refresh.
+              if (!sharedRows.every(row => forkFieldIds[row.id])) {
+                throw new Error('Form changed since it was loaded — refresh and retry');
+              }
+              await tx.mutate.forms.insert({
+                id: forkFormId,
+                // Name it for the board so a forked copy is not mistaken for the seeded template.
+                formName: board ? `${board.name} Custom Fields` : form.formName,
+                ...(form.formDescription ? { formDescription: form.formDescription } : {}),
+                entityType: form.entityType,
+                contextType: form.contextType,
+                workspaceId: form.workspaceId,
+                createdBy: authData.sub,
+                createdAt: timestamp,
+                updatedAt: timestamp,
+              });
+              const legacyRowIds = new Set<string>();
+              for (const row of sharedRows) {
+                if (!row.globalFieldId) legacyRowIds.add(row.id);
+                await tx.mutate.form_fields.insert({
+                  id: forkFieldIds[row.id]!,
+                  workspaceId: row.workspaceId,
+                  formId: forkFormId,
+                  ...(row.globalFieldId ? { globalFieldId: row.globalFieldId } : {}),
+                  ...(row.fieldName ? { fieldName: row.fieldName } : {}),
+                  ...(row.fieldType ? { fieldType: row.fieldType } : {}),
+                  ...(row.fieldEnum ? { fieldEnum: row.fieldEnum } : {}),
+                  ...(row.fieldOptions ? { fieldOptions: row.fieldOptions } : {}),
+                  ...(row.isOptional !== undefined ? { isOptional: row.isOptional } : {}),
+                  ...(row.sequenceNumber !== undefined ? { sequenceNumber: row.sequenceNumber } : {}),
+                  ...(row.parentOptionId ? { parentOptionId: row.parentOptionId } : {}),
+                  createdAt: timestamp,
+                  updatedAt: timestamp,
+                });
+              }
+              await tx.mutate.forms_context_mapping.update({ id: ownMapping.id, formId: forkFormId });
+              // Move only this board's saved values across. A legacy field resolves to its membership
+              // row id, so those follow the copy's row; a global-backed id is already stable.
+              const boardTicketIds = new Set(
+                (await tx.run(zql.tickets.where('boardId', boardId))).map(ticket => ticket.id),
+              );
+              for (const value of await tx.run(zql.form_entity_values.where('formId', formId))) {
+                if (!boardTicketIds.has(value.entityId)) continue;
+                await tx.mutate.form_entity_values.update({
+                  id: value.id,
+                  formId: forkFormId,
+                  ...(legacyRowIds.has(value.fieldId) ? { fieldId: forkFieldIds[value.fieldId]! } : {}),
+                  updatedAt: timestamp,
+                });
+              }
+              // The incoming list is keyed by the shared form's ids; move it onto the copy's.
+              fields = fields?.map(field => ({
+                ...field,
+                ...(field.id && forkFieldIds[field.id] ? { id: forkFieldIds[field.id]! } : {}),
+                ...(field.membershipId && forkFieldIds[field.membershipId]
+                  ? { membershipId: forkFieldIds[field.membershipId]! }
+                  : {}),
+              }));
+              formId = forkFormId;
+            }
           }
 
           // Update form description if provided

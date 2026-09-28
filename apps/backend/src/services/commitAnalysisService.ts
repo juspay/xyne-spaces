@@ -752,8 +752,6 @@ export class CommitAnalysisService {
           applicationId,
           changeType: XyneChangeType.ENV,
           releaseId: releaseContext.releaseId,
-          applicationReleaseId: releaseContext.applicationReleaseId ?? null,
-          devTicketXyneId: devTicketXyneId ?? null,
           commitId,
           filePath,
         });
@@ -822,8 +820,6 @@ export class CommitAnalysisService {
           applicationId,
           changeType: XyneChangeType.MIGRATION,
           releaseId: releaseContext.releaseId,
-          applicationReleaseId: releaseContext.applicationReleaseId ?? null,
-          devTicketXyneId: devTicketXyneId ?? null,
           commitId,
           filePath,
         });
@@ -941,15 +937,17 @@ export class CommitAnalysisService {
           applicationId,
           changeType: XyneChangeType.ENV,
           releaseId: releaseContext.releaseId,
-          applicationReleaseId: releaseContext.applicationReleaseId ?? null,
-          devTicketXyneId: devTicketXyneId ?? null,
           commitId: null,
           filePath,
         });
-        if (alreadySaved) continue;
-
         const diff = this.buildRawDiffFromPullRequestFile(diffFile);
         const fileName = filePath.split('/').pop() || filePath;
+        // Replays still report saved changes — the caller rebuilds the canvas from them.
+        if (alreadySaved) {
+          envChanges.push({ fileName, filePath, newValue: diff });
+          continue;
+        }
+
         const fileChange = fileChanges.find((change) => change.path === filePath);
         const envDiffResult = DiffParser.parseEnvDiff(diff, fileName);
 
@@ -1002,12 +1000,13 @@ export class CommitAnalysisService {
           applicationId,
           changeType: XyneChangeType.MIGRATION,
           releaseId: releaseContext.releaseId,
-          applicationReleaseId: releaseContext.applicationReleaseId ?? null,
-          devTicketXyneId: devTicketXyneId ?? null,
           commitId: null,
           filePath,
         });
-        if (alreadySaved) continue;
+        if (alreadySaved) {
+          migrationLinks.push({ filePath, diffUrl: prUrl ?? '' });
+          continue;
+        }
 
         const diff = this.buildRawDiffFromPullRequestFile(diffFile);
         const fileName = filePath.split('/').pop() || filePath;
@@ -1138,12 +1137,12 @@ export class CommitAnalysisService {
       .join('\n');
   }
 
+  // Same key createReleaseChangeInstance dedupes on: a file two dev tickets both touch is one
+  // change, so a narrower key would re-save its form values on every re-run.
   private async releaseChangeInstanceExists(input: {
     applicationId: string;
     changeType: string;
     releaseId: string;
-    applicationReleaseId: string | null;
-    devTicketXyneId: string | null;
     commitId: string | null;
     filePath: string;
   }): Promise<boolean> {
@@ -1153,8 +1152,6 @@ export class CommitAnalysisService {
         applicationId: input.applicationId,
         changeType: input.changeType,
         releaseId: input.releaseId,
-        applicationReleaseId: input.applicationReleaseId,
-        devTicketXyneId: input.devTicketXyneId,
         commitId: input.commitId,
         filePath: input.filePath,
       },
