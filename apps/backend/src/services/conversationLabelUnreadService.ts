@@ -34,7 +34,7 @@ type AuthScope = { userId: string; workspaceId: string };
  * Translates the desk filter payload into ticket where-clauses matching the
  * clause set of supportTicketsPageV4 (src/zero/queries.ts) field-for-field.
  */
-function buildDeskFilterWhere(filters: LabelUnreadFilters): Prisma.TicketWhereInput[] {
+export function buildDeskFilterWhere(filters: LabelUnreadFilters): Prisma.TicketWhereInput[] {
   const clauses: Prisma.TicketWhereInput[] = [];
 
   // Mirrors supportTicketsV4 assignee handling (src/zero/queries.ts): the
