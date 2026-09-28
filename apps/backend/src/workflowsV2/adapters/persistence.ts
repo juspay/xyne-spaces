@@ -19,7 +19,7 @@
  * read and stamps it on insert (see `database/tenant/`), and this adapter ALSO pushes
  * `XyneFilter` into its queries because that is the SDK's contract and the surface the
  * authorizer will extend with sharing. Methods that are genuinely cross-tenant say so
- * and wrap themselves in `runAsSystem()` — without it the ambient scope silently
+ * and go through bypassAcl's asSystem — without it the ambient scope silently
  * reduces them to the caller's workspace and they return nothing.
  *
  * @see docs/guidelines/workflows/PERSISTENCE.md
@@ -48,8 +48,14 @@ import { validateCredentialAuth, validateCredentialValues } from '@xyne/workflow
 import type { ResumePayload } from '@xyne/workflow-sdk/common';
 import type { Prisma } from '@prisma/client';
 import { db } from '@/database/client';
-import { runAsSystem } from '@/database/tenant/context';
 import { decrypt, encrypt } from '@/services/encryptionService';
+import {
+  findActiveWorkflowsQuery,
+  listAllActiveWorkflowsQuery,
+  listAllFoldersQuery,
+  countWorkflowsInFolderQuery,
+  getExecutionQuery,
+} from '@/bypassAcl/workflowServices';
 import { triggerTypeToEventType } from '@/automations/types/workflow-adapter';
 import {
   CREDENTIAL_ACTIVE,
@@ -139,20 +145,7 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
     eventType: string,
     eventScope: Record<string, unknown>,
   ): Promise<WorkflowRecord[]> {
-    const workspaceId =
-      typeof eventScope['workspaceId'] === 'string' ? eventScope['workspaceId'] : undefined;
-
-    return runAsSystem(async () => {
-      const rows = await db.workflow.findMany({
-        where: {
-          ...WORKFLOWS_SCOPE,
-          eventType,
-          status: 'ACTIVE',
-          ...(workspaceId ? { workspaceId } : {}),
-        },
-      });
-      return rows.map(toWorkflowRecord);
-    });
+    return findActiveWorkflowsQuery(eventType, eventScope);
   }
 
   /**
@@ -161,10 +154,7 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
    * restart, which is inherently cross-tenant.
    */
   async listAllActiveWorkflows(): Promise<WorkflowRecord[]> {
-    return runAsSystem(async () => {
-      const rows = await db.workflow.findMany({ where: { ...WORKFLOWS_SCOPE, status: 'ACTIVE' } });
-      return rows.map(toWorkflowRecord);
-    });
+    return listAllActiveWorkflowsQuery();
   }
 
   async createWorkflow(data: {
@@ -245,10 +235,7 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
    * returned to a caller.
    */
   async listAllFolders(): Promise<FolderRecord[]> {
-    return runAsSystem(async () => {
-      const rows = await db.workflowFolder.findMany();
-      return rows.map(toFolderRecord);
-    });
+    return listAllFoldersQuery();
   }
 
   /**
@@ -257,7 +244,7 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
    * caller delete a folder out from under someone else's workflows.
    */
   async countWorkflowsInFolder(folderId: string): Promise<number> {
-    return runAsSystem(() => db.workflow.count({ where: { folderId, ...WORKFLOWS_SCOPE } }));
+    return countWorkflowsInFolderQuery(folderId);
   }
 
   async createFolder(data: {
@@ -366,17 +353,7 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
    * workspace, and in the worker (no context yet) it would return nothing at all.
    */
   async getExecution(executionId: string): Promise<ExecutionRecord | null> {
-    return runAsSystem(async () => {
-      const row = await db.workflowExecution.findFirst({
-        where: { id: executionId, ...WORKFLOWS_SCOPE },
-        include: {
-          workflow: { select: { metadata: true } },
-          workflowExecutionState: { select: { fireAt: true, origin: true, endReason: true } },
-        },
-      });
-      if (!row) return null;
-      return toExecutionRecord(row, row.workflow?.metadata ?? null, row.workflowExecutionState);
-    });
+    return getExecutionQuery(executionId);
   }
 
   /**

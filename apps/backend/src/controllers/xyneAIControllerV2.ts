@@ -30,6 +30,7 @@ import {
   listAccessibleClawAgents,
   listClawAgentModels,
   deleteClawConversation,
+  CMDK_ANSWER_AGENT_SLUG,
   type ClawRunRequest,
 } from '@/services/clawAgentService';
 import { resolveAuthorizedSdlcLinkedContext } from '@/sdlc/SdlcLinkedContextResolver';
@@ -129,6 +130,8 @@ const XyneAIRequestSchemaV2 = z.object({
   // word, so camelCase and snake_case are identical — no dual key needed
   // (unlike webSearchEnabled/web_search_enabled above).
   instant: z.boolean().optional().default(false),
+  // cmd+K: the palette tab the `cmdk-answer` agent searches before answering.
+  tab: z.string().max(40).optional(),
   // Per-run thinking level from the composer's dropdown. Absent = the agent's
   // configured default (modelSettings.thinkingLevel or provider default).
   thinkingLevel: z.enum(['off', 'minimal', 'low', 'medium', 'high']).optional(),
@@ -305,6 +308,7 @@ export class XyneAIControllerV2 {
       model,
       modelProvider,
       agentSlug,
+      tab,
     } = parseResult.data;
 
     // Use snake_case as fallback for camelCase (Web Worker sends snake_case)
@@ -530,6 +534,8 @@ export class XyneAIControllerV2 {
           webSearchEnabled,
           deepResearchEnabled,
           instant,
+          // cmd+K scopes the agent's own search to the tab the answer is shown on.
+          ...(agentSlug === CMDK_ANSWER_AGENT_SLUG && { answerScope: tab ?? 'all' }),
           ...(thinkingLevel ? { thinkingLevel } : {}),
           ...(studioMode ? { studioMode } : {}),
           ...(sandboxMode ? { sandboxMode } : {}),
@@ -540,7 +546,8 @@ export class XyneAIControllerV2 {
           researchContext: effectiveResearchContext,
           ...(sdlcDashboardContext && { dashboardContext: sdlcDashboardContext }),
           createCanvasEnabled,
-          generateFollowUpSuggestions: true,
+          // cmd+K shows one answer and takes no reply, so follow-up chips are never drawn.
+          generateFollowUpSuggestions: agentSlug !== CMDK_ANSWER_AGENT_SLUG,
           sessionId: effectiveSessionId,
           // Branching: forward intent + tree position to claw-auth. The
           // `parentMessageId` is the JAF/v1-shared name; here it doubles as

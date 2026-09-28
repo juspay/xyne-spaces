@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { X, Download, RefreshCw, FileText } from 'lucide-react';
 import { toast } from 'sonner';
-import { Dialog } from '../../ui/Dialog/Dialog';
+import { DeskInsightsShell } from '../DeskInsights/DeskInsightsPanel';
 import { cn } from '../../../utils/classNames';
 import { apiInstance, BASE_URL } from '../../../services/clients/apiClient';
 import { showDownloadCompleteToast } from '../../../utils/downloadToast';
@@ -13,6 +13,8 @@ export interface DeskReportPanelProps {
   onClose: () => void;
   channelId: string;
   channelName?: string;
+  /** Render inline inside the Insights panel instead of its own dialog. */
+  embedded?: boolean;
 }
 
 interface LatestDeskReport {
@@ -42,6 +44,7 @@ export const DeskReportPanel: React.FC<DeskReportPanelProps> = ({
   onClose,
   channelId,
   channelName,
+  embedded,
 }) => {
   const [report, setReport] = useState<LatestDeskReport | null>(null);
   const [canGenerate, setCanGenerate] = useState(false);
@@ -154,7 +157,8 @@ export const DeskReportPanel: React.FC<DeskReportPanelProps> = ({
   }, [report?.url, channelName]);
 
   return (
-    <Dialog
+    <DeskInsightsShell
+      embedded={embedded}
       open={open}
       onOpenChange={next => {
         if (!next) onClose();
@@ -292,6 +296,6 @@ export const DeskReportPanel: React.FC<DeskReportPanelProps> = ({
           </div>
         </div>
       </div>
-    </Dialog>
+    </DeskInsightsShell>
   );
 };

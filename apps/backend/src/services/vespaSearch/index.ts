@@ -205,6 +205,7 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       in: inChannel, // Channel name or ID (renamed to avoid 'in' keyword)
       mentions,        // User ID(s) mentioned in the message (scoped mention search)
       channelMentions, // Channel ID(s) referenced in the message (scoped mention search)
+      groupMentions, // User-group ID(s) mentioned in the message (scoped mention search)
       mentionHighlights, // Display name(s) of bare mention chips — highlighted in results, not in YQL
       // Unified filters (work for both slack and ticket)
       projectId,   // Project ID(s) - comma-separated
@@ -237,6 +238,7 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       presentationSummary, // Optional Vespa presentation.summary profile (e.g. 'lean')
       includeBotMessages,  // 'true'|'false' string from cmd-K toggle; default behavior excludes BOT messages
       onlyMyChannels,      // 'true'|'false' string from cmd-K toggle; default behavior includes public channels
+      excludeArchived,     // 'true' => drop results resolving to an archived ticket (cmd+k + full-page Desk)
       includeDebugInfo,    // 'true' => attach matchfeatures/rankfeatures debug info to each result
       groupBy,    // Override Vespa grouping. Empty string => flat ranked list (no grouping).
       // Chunk-level KB drill-in mode used by claw-auth's kb-get-chunks /
@@ -256,6 +258,7 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
     // Joi validateQuery (convert: true) coerces includeDebugInfo to a boolean,
     // so normalize before comparing
     const wantDebugInfo = String(includeDebugInfo) === 'true';
+    const wantExcludeArchived = String(excludeArchived) === 'true';
 
     const userId = (req as any).user?.id;
     const userEmail = (req as any).user?.email;
@@ -808,6 +811,9 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
     if (channelMentions) {
       options.slack.mentionedChannelIds = channelMentions;
     }
+    if (groupMentions) {
+      options.slack.mentionedGroupIds = groupMentions;
+    }
     // Thread classification. threadType matches a thread's ROOT message, so it returns one
     // hit per thread; messageActs matches the individual messages the classifier cited as
     // evidence. Sent together they AND, which is how you ask for "the message that made this
@@ -1024,6 +1030,7 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
               hitsWithMatchFeatures,
               db,
               wantDebugInfo,
+              wantExcludeArchived,
             ),
           );
           return {
@@ -1054,6 +1061,7 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
         parsedResults.hits || [],
         db,
         wantDebugInfo,
+        wantExcludeArchived,
       );
 
       res.json({

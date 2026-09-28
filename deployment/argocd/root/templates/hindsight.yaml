@@ -1,0 +1,13 @@
+{{- $hs := .Values.addons.hindsight }}
+{{- if $hs.enabled }}
+{{- $base := dict
+  "fullnameOverride" "hindsight"
+  "api" (dict "enabled" true "service" (dict "type" "ClusterIP" "port" (int $hs.port)))
+  "ingress" (dict "enabled" false)
+}}
+{{- with $hs.existingSecret }}
+{{- $_ := set $base "existingSecret" . }}
+{{- end }}
+{{- $values := include "xyne-root.merge" (dict "base" $base "layers" (list $hs.values)) | fromYaml }}
+{{- include "xyne-root.application" (dict "root" $ "name" "hindsight" "namespace" $hs.namespace "wave" 1 "source" (include "xyne-root.helmSource" (dict "root" $ "repoURL" $hs.repoURL "targetRevision" $hs.targetRevision "path" $hs.path "releaseName" "hindsight" "values" $values) | fromYaml) "ignoreDifferences" (include "xyne-root.deploymentIgnore" . | fromYamlArray)) }}
+{{- end }}

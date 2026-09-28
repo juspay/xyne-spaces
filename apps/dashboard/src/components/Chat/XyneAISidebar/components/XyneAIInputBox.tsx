@@ -84,6 +84,7 @@ import type {
 } from './ContextPickerPanel';
 import type { Channel } from '@xyne/shared';
 import { ChannelVisibility } from '@xyne/shared';
+import { searchMentionableChannels } from '../../../../hooks/useChannels';
 import type { DisplaySearchResult } from '../../../../types/search';
 import { TabType } from '../../ChatDirectory/ChannelCommandMenu.types';
 
@@ -1184,18 +1185,15 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       }
     }, [inputValue, editor]);
 
-    // Convert channels to MentionResult format for MentionSelector (exclude DMs), filtered by search query
+    // Convert ranked, mentionable channels to MentionResult format for MentionSelector
     const channelMentionItems: MentionResult[] = useMemo(() => {
-      const query = channelSearchQuery.toLowerCase();
-      return nonDMChannels
-        .filter(channel => !query || channel.name.toLowerCase().includes(query))
-        .map(channel => ({
-          id: channel.id,
-          name: channel.name,
-          type: 'channel' as const,
-          isPrivate: String(channel.visibility) === 'PRIVATE',
-          ...(channel.description && { description: channel.description }),
-        }));
+      return searchMentionableChannels(nonDMChannels, channelSearchQuery, 10).map(channel => ({
+        id: channel.id,
+        name: channel.name,
+        type: 'channel' as const,
+        isPrivate: String(channel.visibility) === 'PRIVATE',
+        ...(channel.description && { description: channel.description }),
+      }));
     }, [nonDMChannels, channelSearchQuery]);
 
     // Handle channel search from # mention trigger

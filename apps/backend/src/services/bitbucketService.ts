@@ -570,7 +570,7 @@ export class BitbucketService {
         `Found ${commitIds.length} commit(s) between ${sinceCommitId} and ${untilCommitId}${branch ? ` on branch ${branch}` : ''} in ${projectKey}/${repositorySlug}`
       );
 
-      return [...commitIds, sinceCommitId];
+      return commitIds;
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       logger.error(

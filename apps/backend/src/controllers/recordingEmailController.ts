@@ -6,12 +6,12 @@ import { repositories } from '@/database/repositories';
 import { adapterRegistry } from '@/integrations/core/adapterRegistry';
 import type { OutgoingAttachment } from '@/integrations/core/baseMailReplySender';
 import { callRecordingService } from '@/services/callRecordingService';
-import { callShareService } from '@/services/callShareService';
+import { callShareService, type CallAccessLevel } from '@/services/callShareService';
 import { canvasAuthService } from '@/services/canvasAuthService';
 import { convertBlockNoteToMarkdown } from '@/services/canvasService';
 import { transcriptService } from '@/services/transcriptService';
 import { normalizeStoragePath } from '@xyne/storage';
-import { callSubject } from '@/utils/callTypeUtils';
+import { callSubject, isRecording } from '@/utils/callTypeUtils';
 import { extractEmailAddress } from '@/utils/email';
 import { readFromYSweet } from '@/utils/ysweetUtils';
 import { logger } from '@/utils/logger';
@@ -176,8 +176,8 @@ export class RecordingEmailController {
       throw new RecordingEmailError('Recording not found', 404);
     }
 
-    const canView = await callShareService.canView(call, userId, workspaceId);
-    if (!canView) {
+    const required: CallAccessLevel = isRecording(call) ? 'edit' : 'view';
+    if (!(await callShareService.hasAtLeast(call, userId, workspaceId, required))) {
       throw new RecordingEmailError('Access denied', 403);
     }
 

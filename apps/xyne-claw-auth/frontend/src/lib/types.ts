@@ -61,6 +61,32 @@ export interface Gateway {
   readonly updatedAt: string;
 }
 
+/** A service registered with the MCP Gateway registry (UI list view). */
+export interface GatewayServiceRow {
+  readonly serviceName: string;
+  readonly backendId: string;
+  readonly backendUrl: string;
+  readonly xAuthHeaderName: string | null;
+  readonly tokenEndpointUrl: string | null;
+  readonly toolCount: number;
+}
+
+/** A pending/approved/rejected MCP-gateway registration request. */
+export interface GatewayServiceRequest {
+  readonly id: string;
+  readonly serviceName: string;
+  readonly backendId: string;
+  readonly backendUrl: string;
+  readonly tokenEndpointUrl: string | null;
+  readonly xAuthHeaderName: string | null;
+  readonly toolCount: number;
+  readonly status: "pending" | "approved" | "rejected" | string;
+  readonly requestedByUserId: string;
+  readonly reviewedByUserId: string | null;
+  readonly reviewedAt: string | null;
+  readonly createdAt: string;
+}
+
 export interface GatewayIdentity {
   readonly id: string;
   readonly gatewayId: string;

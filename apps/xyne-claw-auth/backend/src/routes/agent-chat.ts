@@ -1,3 +1,4 @@
+import { s2sKeyMatches } from "../middleware/require-auth.js";
 import { isAgentOwnedRun } from "../lib/agent-owned-runs.js";
 import { applyAiScreenCommand } from "../lib/ai-screen-commands.js";
 import { parseSlashCommand } from "../lib/parseSlashCommand.js";
@@ -7,6 +8,7 @@ import { errMsg } from "../lib/errors.js";
 import { SDLC_AGENT_SLUG, isAgentInvocableBy, IMMEDIATE_TASK_COMMAND_RE, parseLocalSandboxCommand } from "xyne-claw-shared";
 import { recordDeliveredArtifacts } from "../lib/delivered-artifacts.js";
 import { recordUploadedArtifacts } from "../lib/conversation-artifact-signals.js";
+import { mintChatSessionId, beginChatRun, failChatRun, discardChatRun } from "../lib/chat-run-record.js";
 import {
   localFolderUnavailableMessage,
   splitLocalFolderContext,
@@ -67,6 +69,10 @@ const XYNE_CHAT_SURFACE_PRIMER = [
 function withXyneChatSurfacePrimer(systemPrompt: string | null | undefined): string {
   const base = (systemPrompt ?? "").trim();
   return base ? `${XYNE_CHAT_SURFACE_PRIMER}\n\n${base}` : XYNE_CHAT_SURFACE_PRIMER;
+}
+
+function sanitizeForLog(value: unknown): string {
+  return String(value).replace(/[\r\n]+/g, " ");
 }
 
 function withoutFollowUpRecorderInvocations(value: unknown[]): unknown[] {
@@ -188,37 +194,74 @@ function shouldRedactRun(crossUser: boolean, runUserId: string | null | undefine
   return !isAgentOwnedRun(triggerSource);
 }
 
+/** Payload keys whose VALUE is withheld from a viewer who doesn't own the run. */
+const REDACTED_KEYS = new Set(["result"]);
+
+/**
+ * A v2 trace carries a large payload either inline (`result`) or interned into
+ * the blob log and referenced by the SIBLING key `resultRef`, whose `preview`
+ * holds the first ~200 chars of that SAME content. Redacting only the inline
+ * spelling would hand a viewer a preview of the body we just withheld, so a
+ * redacted key's `<key>Ref` sibling is redacted too. Deriving this from one set
+ * keeps the two spellings from drifting if the list ever grows.
+ */
+function isRedactedKey(key: string): boolean {
+  return REDACTED_KEYS.has(key) || (key.endsWith("Ref") && REDACTED_KEYS.has(key.slice(0, -"Ref".length)));
+}
+
 /**
  * Strip RESULT bodies from a run's tool invocations while preserving every
  * other field (name, args, isError, status, subagent nesting). Used when an
  * admin inspects a run they don't own.
  */
 function redactToolResults(invocations: unknown[]): unknown[] {
-  return invocations.map((inv) =>
-    inv && typeof inv === "object" && "result" in inv
-      ? { ...(inv as Record<string, unknown>), result: REDACTED_TOOL_RESULT }
-      : inv,
-  );
+  return invocations.map((inv) => {
+    if (!inv || typeof inv !== "object") return inv;
+    const record = inv as Record<string, unknown>;
+    const hits = Object.keys(record).filter(isRedactedKey);
+    if (hits.length === 0) return inv;
+    const out = { ...record };
+    for (const key of hits) out[key] = REDACTED_TOOL_RESULT;
+    return out;
+  });
 }
 
 /**
- * Deeply replace every `result` field's value with the placeholder, anywhere in
- * a debug-artifact tree, preserving all other keys (toolName, args, input,
- * userId, sessionId, timing). Shape-agnostic on purpose — xyne-claw's snapshot
- * structure isn't typed here, so we redact by key rather than by known path,
- * which fails safe if the shape changes. Used for the deep "Debug" drawer when
- * an admin inspects another user's (non-private) run.
+ * Deeply replace every redacted field's value (and its blob-ref sibling) with
+ * the placeholder, anywhere in a debug-artifact tree, preserving all other keys
+ * (toolName, args, input, userId, sessionId, timing). Shape-agnostic on purpose
+ * — xyne-claw's snapshot structure isn't typed here, so we redact by key rather
+ * than by known path, which fails safe if the shape changes. Used for the deep
+ * "Debug" drawer when an admin inspects another user's (non-private) run.
  */
 function redactResultKeysDeep(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(redactResultKeysDeep);
   if (value && typeof value === "object") {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      out[k] = k === "result" ? REDACTED_TOOL_RESULT : redactResultKeysDeep(v);
+      out[k] = isRedactedKey(k) ? REDACTED_TOOL_RESULT : redactResultKeysDeep(v);
     }
     return out;
   }
   return value;
+}
+
+/**
+ * Re-state claw's page counters after the per-user ACL dropped runs from the
+ * page. claw counts every run in the conversation; a viewer must not be told
+ * about runs the ACL just hid, so those come off the total — but the runs we
+ * never fetched (older pages) stay counted, since "there is more history" is
+ * exactly what the drawer's "showing N of M" line has to say.
+ */
+function paginationAfterAcl(
+  fetchedRuns: number,
+  visibleRuns: number,
+  totalRuns: number | undefined,
+  truncated: boolean | undefined,
+): { totalRuns: number; truncated: boolean } {
+  const total = totalRuns ?? fetchedRuns;
+  const notFetched = Math.max(0, total - fetchedRuns);
+  return { totalRuns: visibleRuns + notFetched, truncated: truncated === true };
 }
 
 // Debug artifacts are no longer read off the local filesystem — they live on
@@ -1097,7 +1140,26 @@ router.get("/:slug/litellm-models", async (req: Request<{ slug: string }>, res: 
 });
 
 // POST /agents/:slug/chat — send a message, stream progress via SSE, return result
+
+function evalRunSwitches(
+  req: Request,
+  optimizations: unknown,
+  judgeBackend: unknown,
+): { optimizations?: string; judgeBackend?: string } {
+  if (!s2sKeyMatches(req.headers["x-s2s-key"])) return {};
+  return {
+    ...(typeof optimizations === "string" && /^[a-z0-9_,+\-]{1,400}$/i.test(optimizations) ? { optimizations } : {}),
+    ...(typeof judgeBackend === "string" && /^[a-z0-9_]{1,40}$/i.test(judgeBackend) ? { judgeBackend } : {}),
+  };
+}
+
 router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response) => {
+  // Visible to the outer catch. A turn that throws after these are set owns a
+  // placeholder and a run row that must both be driven to a terminal state —
+  // otherwise the assistant row sits at "running" forever and the run row (if it
+  // existed at all) never closes. This is the exact pair that used to go missing.
+  let pendingAssistantMsgId: string | undefined;
+  let pendingRunSessionId: string | undefined;
   try {
     const { slug } = req.params;
     const {
@@ -1106,6 +1168,8 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       attachmentIds,
       attachedContext,
       providerOverride,
+      optimizations: requestedOptimizations,
+      judgeBackend: requestedJudgeBackend,
       isRegenerate,
       isEditUserMessage,
       parentUserMessageId,
@@ -1126,6 +1190,8 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       attachmentIds?: string[];
       attachedContext?: unknown;
       providerOverride?: { provider?: string; model?: string };
+      optimizations?: unknown;
+      judgeBackend?: unknown;
       /** Branching: regenerate the assistant reply for `parentUserMessageId` as
        *  a sibling of the existing assistant. */
       isRegenerate?: boolean;
@@ -1464,6 +1530,33 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       parentId: assistantParentId,
       orgId: agent.orgId,
     });
+    pendingAssistantMsgId = assistantMsg.id;
+
+    // Record the run BEFORE anything can fail. The id is minted here rather than
+    // read back from the dispatch response: prepareRun honours a caller-supplied
+    // sessionId on internal runs, and keying the row on an id the dispatch call
+    // returns meant every pre-dispatch failure lost the row entirely.
+    //
+    // Awaited, and fatal on failure: a turn whose run cannot be recorded must not
+    // run. The old `.catch(log.warn)` made that loss silent.
+    const runSessionId = mintChatSessionId();
+    try {
+      await beginChatRun({
+        sessionId: runSessionId,
+        userId,
+        agentSlug: slug,
+        orgId: agent.orgId,
+        task: message.trim(),
+        conversationId,
+      });
+      pendingRunSessionId = runSessionId;
+    } catch (err) {
+      log.error("[agent-chat] AgentRun.start failed — refusing the turn:", errMsg(err));
+      const errContent = widgetErrorContent(undefined, "Could not start this run. Please try again.");
+      await chatMessageRepository.update(assistantMsg.id, { content: errContent, status: "failed" }).catch(() => {});
+      res.status(500).json({ success: false, error: "Could not start this run" });
+      return;
+    }
 
     // If this turn requires a branched PI session, clone it now (S2S to claw).
     if (cloneSourcePiConversationId) {
@@ -1485,6 +1578,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       if (!cloneRes.success) {
         const errContent = cloneRes.error ?? "Failed to create branch session";
         await chatMessageRepository.update(assistantMsg.id, { content: errContent, status: "failed" });
+        await failChatRun(runSessionId, errContent);
         res.status(500).json({ success: false, error: errContent });
         return;
       }
@@ -1784,6 +1878,10 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
     const fastModeEnabled = await resolveFastMode(conversationId, slug, effectiveAgentConfig);
 
     const forwardBody: Record<string, unknown> = {
+      // Pre-minted above and already persisted as an AgentRun row. prepareRun
+      // honours it because this is an internal run, so the row, the dispatch and
+      // every later callback all key on the same id.
+      sessionId: runSessionId,
       userId,
       userName: user?.name,
       userEmail: user?.email,
@@ -1822,6 +1920,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       // dashboard chat (same bug existed for webhook + scheduled jobs).
       ...(effectiveAgentConfig ? { agentConfig: effectiveAgentConfig } : {}),
       fastMode: fastModeEnabled,
+      ...evalRunSwitches(req, requestedOptimizations, requestedJudgeBackend),
     };
 
     const forwardedTask = typeof forwardBody["task"] === "string" ? forwardBody["task"] as string : "";
@@ -1911,6 +2010,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       }
       const dispatched = await dispatchLocalHarnessRun({
         target: localTarget,
+        sessionId: runSessionId,
         userId,
         orgId: agent.orgId,
         conversationId,
@@ -1960,22 +2060,17 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       runBody = (await runRes.json()) as { success: boolean; sessionId?: string; error?: string };
     }
 
-    // Track run for Agent Control Center
+    // The run row and the cc:events start signal were written before dispatch —
+    // nothing to record here any more, only the id to announce. A dispatch that
+    // came back under a DIFFERENT id than the one we minted would strand our row,
+    // so say so loudly rather than papering over it.
     if (runBody.success && runBody.sessionId) {
+      if (runBody.sessionId !== runSessionId) {
+        log.error(
+          `[agent-chat] dispatch returned sessionId=${runBody.sessionId} but the run row is keyed on ${runSessionId} (conv=${conversationId})`,
+        );
+      }
       res.write(`event: run\ndata: ${JSON.stringify({ sessionId: runBody.sessionId })}\n\n`);
-      agentRunRepository.start({
-        sessionId: runBody.sessionId,
-        userId,
-        agentSlug: slug,
-        orgId: agent.orgId,
-        triggerSource: "chat",
-        task: message.trim(),
-        conversationId,
-        fastMode: fastModeEnabled,
-      }).catch((e) => log.warn("[agent-chat] AgentRun.start failed:", e instanceof Error ? e.message : e));
-      redisService.getConnection()
-        .publish("cc:events", JSON.stringify({ type: "agent_start", sessionId: runBody.sessionId, agentSlug: slug }))
-        .catch(() => {});
     }
 
     // Deferred = this run was skipped because another worker already owns the
@@ -1987,6 +2082,11 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
     if (!runBody.success && runBody.deferred) {
       pendingStreams.delete(callbackId);
       await chatMessageRepository.deleteById(assistantMsg.id).catch(() => {});
+      // Drop the row too, for the same reason the placeholder goes: the owning
+      // run has its own, and recording this one as failed would invent a failed
+      // run for every duplicate dispatch.
+      await discardChatRun(runSessionId);
+      pendingRunSessionId = undefined;
       log.info(`[agent-chat] deferred run (conversation already locked) — dropped duplicate placeholder ${assistantMsg.id}, conv=${conversationId}`);
       res.write(`event: superseded\ndata: ${JSON.stringify({ id: assistantMsg.id })}\n\n`);
       res.end();
@@ -1999,6 +2099,10 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       // Update the pre-created placeholder rather than creating a second
       // assistant row — keeps the assistant id stable for the frontend.
       await chatMessageRepository.update(assistantMsg.id, { content: errContent, status: "failed" });
+      // Close the run we opened before dispatch. This is the case that used to
+      // leave no run row at all, so the failure never showed up in /runs.
+      await failChatRun(runSessionId, runBody.error ?? "Failed to start agent");
+      pendingRunSessionId = undefined;
       res.write(`event: done\ndata: ${JSON.stringify({
         id: assistantMsg.id,
         userMessageId: createdUserMessageId,
@@ -2011,6 +2115,12 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       res.end();
       return;
     }
+
+    // Dispatch succeeded: the result callback now owns the terminal state of both
+    // the run and the placeholder. Release them from the outer catch so a throw
+    // in the tail of this handler can't overwrite a finished turn.
+    pendingRunSessionId = undefined;
+    pendingAssistantMsgId = undefined;
 
     // Keep backend processing alive even if the client disconnects (e.g. user
     // clicked Stop and aborted the fetch). We still persist the final message/run.
@@ -2051,6 +2161,19 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
     }
   } catch (err) {
     log.error("[agent-chat] send error:", err);
+    // Drive the turn to a terminal state. Without this a throw anywhere in the
+    // pre-dispatch window left the assistant placeholder stuck at "running"
+    // forever — nothing reaps it, because orphan-run-finalizer only repairs runs
+    // that exist, and before this change no run row existed either.
+    if (pendingRunSessionId) await failChatRun(pendingRunSessionId, err);
+    if (pendingAssistantMsgId) {
+      await chatMessageRepository
+        .update(pendingAssistantMsgId, {
+          content: widgetErrorContent(undefined, "This run stopped unexpectedly."),
+          status: "failed",
+        })
+        .catch(() => {});
+    }
     if (!res.headersSent) {
       res.status(500).json({ success: false, error: "Internal server error" });
     } else {
@@ -2981,15 +3104,27 @@ router.get("/:slug/chat/:convId/debug", async (req: Request<{ slug: string; conv
     // xyne-claw's S2S debug endpoint, which reads its own PVC and lazily
     // restores from the GCS archive if the session was evicted. Authz was
     // already enforced above.
+    // claw caps the run list (default 25) and pages it with `before` (a runId
+    // cursor). Forward both: without them a long thread's older runs were
+    // unreachable — the drawer could not even ask for them.
+    const rawLimit = req.query["limit"];
+    const limitParam = typeof rawLimit === "string" && /^\d+$/.test(rawLimit) ? rawLimit : "";
+    const rawBefore = req.query["before"];
+    const beforeParam = typeof rawBefore === "string" && rawBefore !== "" ? rawBefore : "";
     const upstreamUrl =
       `${CONFIG.xyneClawUrl}/internal/sessions/${encodeURIComponent(req.params.convId)}/debug` +
       `?agentSlug=${encodeURIComponent(req.params.slug)}` +
-      `${ownerId ? `&userId=${encodeURIComponent(ownerId)}` : ""}`;
+      `${ownerId ? `&userId=${encodeURIComponent(ownerId)}` : ""}` +
+      `${limitParam ? `&limit=${limitParam}` : ""}` +
+      `${beforeParam ? `&before=${encodeURIComponent(beforeParam)}` : ""}`;
     let upstream: globalThis.Response;
     try {
       upstream = await fetch(upstreamUrl, {
         headers: { ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}) },
-        signal: AbortSignal.timeout(15_000),
+        // A long thread's bundle can take several seconds to assemble on claw's
+        // side once GCS runs are merged in. A 15s ceiling turned a slow-but-fine
+        // read into a 502 that looked to the user like "no debug data exists".
+        signal: AbortSignal.timeout(Number(process.env["DEBUG_PROXY_TIMEOUT_MS"] ?? 45_000)),
       });
     } catch (err) {
       log.error("[agent-chat] debug proxy fetch failed:", err instanceof Error ? err.message : err);
@@ -3006,6 +3141,10 @@ router.get("/:slug/chat/:convId/debug", async (req: Request<{ slug: string; conv
         debugEvents?: unknown[] | null;
         runs?: Array<{ fileName: string; data: { userId?: string; sessionId?: string; [k: string]: unknown } }>;
         subagents?: Array<{ fileName: string; data: { parentSessionId?: string } }>;
+        /** Runs in the whole conversation vs. runs on this page — claw caps the
+         *  page, so the drawer needs both to say "showing N of M". */
+        totalRuns?: number;
+        truncated?: boolean;
         followUpDiagnostics?: Array<{
           sessionId: string;
           startedAt: string;
@@ -3071,10 +3210,22 @@ router.get("/:slug/chat/:convId/debug", async (req: Request<{ slug: string; conv
             },
           })),
           subagents: [],
+          // The synth bundle IS every run we can see, so nothing is paged out.
+          totalRuns: active.length,
+          truncated: false,
         },
       };
     } else if (!upstream.ok) {
-      res.status(502).json({ success: false, error: `Debug service error (${upstream.status})` });
+      // Forward claw's own reason instead of flattening every failure to a bare
+      // 502 — a rejected id and an unconfigured S2S key are different problems
+      // and the drawer can only say which if the code survives the hop.
+      const upstreamBody = (await upstream.json().catch(() => null)) as { error?: string; code?: string } | null;
+      res.status(502).json({
+        success: false,
+        error: upstreamBody?.error ?? `Debug service error (${upstream.status})`,
+        ...(upstreamBody?.code ? { code: upstreamBody.code } : {}),
+        upstreamStatus: upstream.status,
+      });
       return;
     } else {
       body = (await upstream.json()) as typeof body;
@@ -3097,6 +3248,7 @@ router.get("/:slug/chat/:convId/debug", async (req: Request<{ slug: string; conv
         debugEvents: ownSession ? d.debugEvents ?? [] : [],
         runs: ownRuns,
         subagents: (d.subagents ?? []).filter((s) => ownSessionIds.has(s.data?.parentSessionId ?? "")),
+        ...paginationAfterAcl((d.runs ?? []).length, ownRuns.length, d.totalRuns, d.truncated),
       };
     } else if (hasElevatedDebugAccess && body?.data) {
       // Elevated viewers see everything EXCEPT other users' runs that executed under a
@@ -3134,6 +3286,13 @@ router.get("/:slug/chat/:convId/debug", async (req: Request<{ slug: string; conv
       const d = body.data;
       const hideDebugSession = d.debugSession?.sessionId ? hiddenSessionIds.has(d.debugSession.sessionId) : false;
       const debugSessionOwned = readable(d.debugSession?.sessionId, d.debugSession?.userId);
+      const visibleRuns = (d.runs ?? [])
+        .filter((r) => !hiddenSessionIds.has(r.data?.sessionId ?? ""))
+        .map((r) =>
+          readable(r.data?.sessionId, r.data?.userId)
+            ? r
+            : { ...r, data: redactResultKeysDeep(r.data) as typeof r.data },
+        );
       body.data = {
         ...d,
         debugSession: hideDebugSession
@@ -3146,18 +3305,13 @@ router.get("/:slug/chat/:convId/debug", async (req: Request<{ slug: string; conv
           : !d.debugSession || debugSessionOwned
             ? d.debugEvents ?? null
             : (redactResultKeysDeep(d.debugEvents ?? []) as unknown[]),
-        runs: (d.runs ?? [])
-          .filter((r) => !hiddenSessionIds.has(r.data?.sessionId ?? ""))
-          .map((r) =>
-            readable(r.data?.sessionId, r.data?.userId)
-              ? r
-              : { ...r, data: redactResultKeysDeep(r.data) as typeof r.data },
-          ),
+        runs: visibleRuns,
         subagents: (d.subagents ?? [])
           .filter((s) => !hiddenSessionIds.has(s.data?.parentSessionId ?? ""))
           .map((s) =>
             ownsSession(s.data?.parentSessionId) ? s : { ...s, data: redactResultKeysDeep(s.data) as typeof s.data },
           ),
+        ...paginationAfterAcl((d.runs ?? []).length, visibleRuns.length, d.totalRuns, d.truncated),
       };
     }
     if (body.data) {
@@ -3321,14 +3475,14 @@ router.get("/:slug/conversations", async (req: Request<{ slug: string }>, res: R
     // Get all messages for this user+agent, grouped by conversation
     const allMessages = await chatMessageRepository.findByUserAndAgent(userId, req.params.slug);
 
-    // Group by conversationId, skipping artifact-app threads. Those are real,
-    // durable conversations, but their prompts are written by app code on the
-    // user's behalf — surfacing them here would bury the user's own chats under
-    // machine-generated ones. They stay visible in the Agent Control Center via
-    // triggerSource "app". The id prefix is the marker, same as "scheduled_".
+    // Group by conversationId, skipping machine-initiated threads: artifact-app
+    // runs ("app_") and call-agent delegations ("a2a_"). Both are real, durable
+    // conversations, but their prompts are written on the user's behalf, so
+    // listing them here would bury the user's own chats. They stay reachable
+    // from the Agent Control Center, which links each run to its thread.
     const convMap = new Map<string, typeof allMessages>();
     for (const msg of allMessages) {
-      if (msg.conversationId.startsWith("app_")) continue;
+      if (msg.conversationId.startsWith("app_") || msg.conversationId.startsWith("a2a_")) continue;
       const list = convMap.get(msg.conversationId) ?? [];
       list.push(msg);
       convMap.set(msg.conversationId, list);

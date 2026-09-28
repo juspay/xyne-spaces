@@ -128,6 +128,23 @@ const inflight = new Map<string, Promise<Client>>();
  */
 const MCP_REQUEST_TIMEOUT_MS = 600_000;
 
+/**
+ * Timeout for the `initialize` handshake inside `client.connect()`. The SDK
+ * applies DEFAULT_REQUEST_TIMEOUT_MSEC (60s) to every request that does not
+ * pass one, and connect was the single call site still inheriting it — so a
+ * server that needed >60s to come up failed the handshake while the generous
+ * per-call ceiling above never got a chance to apply.
+ *
+ * 60s is not enough for a cold stdio server: the child may still be fetching
+ * its package (npx/uvx) or minting a first token. Sessions are evicted after
+ * SESSION_IDLE_TTL_MS, so this is paid on the first call after any idle gap,
+ * which is why the failures looked intermittent.
+ *
+ * Kept well under a typical caller-side budget (Birbal cuts off at 200s) so a
+ * genuinely stuck server surfaces OUR error, not theirs.
+ */
+const MCP_CONNECT_TIMEOUT_MS = Number(process.env["MCP_CONNECT_TIMEOUT_MS"] ?? 180_000);
+
 // Idle eviction. A cached session pins a child process (stdio) or an HTTP
 // client plus its buffers in claw-auth's heap. Previously sessions were only
 // dropped on token rotation / OAuth events / transport close — never on idle —
@@ -356,7 +373,9 @@ async function spawnSession(
     { jsonSchemaValidator: tolerantSchemaValidator },
   );
   try {
-    await client.connect(transport as Parameters<typeof client.connect>[0]);
+    await client.connect(transport as Parameters<typeof client.connect>[0], {
+      timeout: MCP_CONNECT_TIMEOUT_MS,
+    });
   } catch (err) {
     // Connect failed (timeout, server crash on startup, bad creds). The child
     // process is already spawned — reap it (close() does SIGTERM→SIGKILL) so a
@@ -379,13 +398,60 @@ async function spawnSession(
   return client;
 }
 
+const SHARED_TOOL_LIST_SERVER_TYPES = new Set<string>([
+  "xyne-spaces",
+  "xyne-spaces-app-tools",
+  "heisenberg",
+  "research-agent-mcp",
+]);
+const TOOL_LIST_CACHE_TTL_MS = Number(process.env["MCP_TOOL_LIST_CACHE_TTL_MS"] ?? 10 * 60 * 1000);
+const toolListCache = new Map<string, { tools: McpToolInfo[]; at: number }>();
+const toolListInflight = new Map<string, Promise<McpToolInfo[]>>();
+
+export function clearToolListCache(): void {
+  toolListCache.clear();
+  toolListInflight.clear();
+}
+
+async function sharedToolList(serverType: string, fetchTools: () => Promise<McpToolInfo[]>): Promise<McpToolInfo[]> {
+  const cached = toolListCache.get(serverType);
+  if (cached && Date.now() - cached.at < TOOL_LIST_CACHE_TTL_MS) return cached.tools;
+  const inflight = toolListInflight.get(serverType);
+  if (inflight) return inflight;
+  const started = fetchTools()
+    .then((tools) => {
+      if (tools.length > 0) toolListCache.set(serverType, { tools, at: Date.now() });
+      return tools;
+    })
+    .finally(() => toolListInflight.delete(serverType));
+  toolListInflight.set(serverType, started);
+  return started;
+}
+
 export async function listToolsForUser(
   userId: string,
   serverType: string,
   serverName: string,
   credentials: Record<string, unknown>,
   agentSlug?: string,
+  options: { fresh?: boolean } = {},
 ): Promise<McpServerTools> {
+  const fetchTools = () => fetchToolsFromServer(userId, serverType, credentials, agentSlug);
+  const useShared =
+    !options.fresh && TOOL_LIST_CACHE_TTL_MS > 0 && SHARED_TOOL_LIST_SERVER_TYPES.has(serverType);
+  const tools = useShared ? await sharedToolList(serverType, fetchTools) : await fetchTools();
+
+  const definition = await resolveConnectorDefinition(serverType);
+  const writeTools = definition?.writeTools ?? [];
+  return { serverType, serverName, tools, writeTools };
+}
+
+async function fetchToolsFromServer(
+  userId: string,
+  serverType: string,
+  credentials: Record<string, unknown>,
+  agentSlug?: string,
+): Promise<McpToolInfo[]> {
   const client = await getOrCreateSession(userId, serverType, credentials, agentSlug);
   // Must pass BOTH `timeout` AND `signal`: the SDK runs an independent
   // internal timer initialised from `options.timeout ?? DEFAULT_REQUEST_TIMEOUT_MSEC`
@@ -397,15 +463,11 @@ export async function listToolsForUser(
     signal: AbortSignal.timeout(MCP_REQUEST_TIMEOUT_MS),
   });
 
-  const tools: McpToolInfo[] = result.tools.map((t) => ({
+  return result.tools.map((t) => ({
     name: t.name,
     description: t.description ?? "",
     inputSchema: t.inputSchema as Record<string, unknown>,
   }));
-
-  const definition = await resolveConnectorDefinition(serverType);
-  const writeTools = definition?.writeTools ?? [];
-  return { serverType, serverName, tools, writeTools };
 }
 
 // Servers whose tools' binary output should be forwarded to the user as a file

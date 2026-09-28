@@ -29,6 +29,7 @@ export type KanbanGroupBy =
   | 'createdBy'
   | 'status'
   | 'priority'
+  | 'merchantId'
   | KanbanFormFieldGroup;
 
 export type KanbanTicketFilters = {

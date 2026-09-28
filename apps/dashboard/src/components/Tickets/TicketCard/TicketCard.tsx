@@ -271,6 +271,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
   const showTags = isVisible('tags');
   const showCreatedAt = isVisible('createdAt');
   const showCreatedBy = isVisible('createdBy');
+  const showMerchantId = isVisible('merchantId');
 
   // A user assignee (assignedTo) wins over a group; groups live in
   // userGroupId, with legacy rows still holding `group:<id>` in assignedTo.
@@ -310,7 +311,8 @@ export const TicketCard: React.FC<TicketCardProps> = ({
   const selectedTagNames = tags?.map(t => t.name) || [];
 
   // Check if any compact metadata should be shown
-  const hasCompactMetadata = isCompact && (showSubStatus || showCreatedAt || showCreatedBy);
+  const hasCompactMetadata =
+    isCompact && (showSubStatus || showCreatedAt || showCreatedBy || showMerchantId);
 
   // Check if ticket is from a release
   const releaseBoardBgColor =
@@ -706,6 +708,17 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                 )}
               </div>
               <div className={cn('flex items-center', isCompact ? 'gap-0' : 'gap-[15px]')}>
+                {/* Merchant ID — compact cards show it in the metadata grid below */}
+                {showMerchantId && ticket.merchantId && (
+                  <div className={cn(isCompact ? 'hidden' : 'hidden md:block')}>
+                    <Tooltip content={`Merchant ID: ${ticket.merchantId}`}>
+                      <span className='block max-w-[140px] truncate rounded-md border border-border bg-muted px-2 py-1 text-xs text-muted-foreground'>
+                        {ticket.merchantId}
+                      </span>
+                    </Tooltip>
+                  </div>
+                )}
+
                 {/*due date*/}
                 <div className={cn(isCompact ? 'hidden' : 'hidden md:block')}>
                   {showDueDate &&
@@ -1017,6 +1030,22 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                         {formatCreatedDate(ticket.createdAt)}
                       </span>
                     </Tooltip>
+                  </div>
+                )}
+
+                {/* Merchant ID — read-only; set at creation or via the app API */}
+                {showMerchantId && (
+                  <div className='flex flex-col gap-0.5'>
+                    <span className='text-xs text-muted-foreground'>Merchant ID</span>
+                    {ticket.merchantId ? (
+                      <TruncatedTooltip content={ticket.merchantId}>
+                        <span className='text-xs text-foreground truncate'>
+                          {ticket.merchantId}
+                        </span>
+                      </TruncatedTooltip>
+                    ) : (
+                      <span className='text-xs text-muted-foreground'>Not set</span>
+                    )}
                   </div>
                 )}
 

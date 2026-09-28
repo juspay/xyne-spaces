@@ -275,8 +275,8 @@ export function AgentKnowledgeTabV2({
         loading={skills.loading}
         isError={skills.isError}
         onRetry={skills.refetch}
-        selectedIds={knowledge.draftSkillIds}
-        onChange={knowledge.setDraftSkillIds}
+        selectedIds={knowledge.skillIds}
+        onChange={next => knowledge.saveSkills(next, 'Skills updated')}
       />
 
       <BrowseKnowledgeDialog
@@ -284,10 +284,10 @@ export function AgentKnowledgeTabV2({
         onOpenChange={open => {
           if (!open) knowledge.closeBrowse();
         }}
-        scope={knowledge.draftScope}
-        onScopeChange={knowledge.setDraftScope}
-        grants={knowledge.draftGrants}
-        onGrantsChange={knowledge.setDraftGrants}
+        scope={knowledge.scope}
+        onScopeChange={next => knowledge.saveKb(next, knowledge.grants, 'Documents updated')}
+        grants={knowledge.grants}
+        onGrantsChange={next => knowledge.saveKb(knowledge.scope, next, 'Documents updated')}
       />
 
       <MemoryManageDialog

@@ -1,6 +1,30 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
-import { FormFieldType } from '@xyne/shared';
+import { FormContextType, FormEntityType, FormFieldType } from '@xyne/shared';
 import { parseGlobalFieldEnum } from './globalFieldEnum';
+
+/** Minimal client shape for the board → ticket form lookup. */
+type FormContextMappingClient = Pick<PrismaClient, 'formContextMapping'>;
+
+/**
+ * The form driving a board's ticket custom fields, if one is mapped.
+ *
+ * Pair with resolveFormFieldDefinitionsForForm to get a board's ticket fields under the
+ * canonical ids (`globalFieldId ?? id`) that ticket writes and form_entity_values use.
+ */
+export const resolveBoardTicketFormId = async (
+  client: FormContextMappingClient,
+  boardId: string,
+): Promise<string | null> => {
+  const mapping = await client.formContextMapping.findFirst({
+    where: {
+      contextId: boardId,
+      contextType: FormContextType.BOARD,
+      entityType: FormEntityType.TICKET,
+    },
+    select: { formId: true },
+  });
+  return mapping?.formId ?? null;
+};
 
 /**
  * A resolved field definition, regardless of whether it lives in the new

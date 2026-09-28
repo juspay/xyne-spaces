@@ -79,6 +79,24 @@ const TOOL_TAB_LABELS = {
 
 type ToolTabKey = keyof typeof TOOL_TAB_LABELS;
 
+const TOOL_DISCOVERY_OPTIMIZATIONS = [
+  {
+    key: "catalog_full_index",
+    label: "Full tool index",
+    description: "List every loadable tool by name in the prompt, so the agent loads the right one directly instead of guessing with searches.",
+  },
+  {
+    key: "subagent_read_tools",
+    label: "Direct subagent tools",
+    description: "Let the agent search and load its subagents' tools, writes included, and call them itself first instead of waiting on a slow nested subagent run. Writes keep their approval settings.",
+  },
+  {
+    key: "active_tool_cap",
+    label: "Top-25 active tools",
+    description: "Start each run with only the agent's 25 most-used tools of the last 7 days. The rest stay listed by name and load with one call, so every request is smaller. Nothing is removed from the agent.",
+  },
+] as const;
+
 function kindToTab(kind: string): Exclude<ToolTabKey, "subagents"> {
   const map: Record<string, Exclude<ToolTabKey, "subagents">> = {
     mcp:     "integrations",
@@ -1597,6 +1615,8 @@ interface Props {
   // propose a plan and wait for the user's approval before doing multi-step work.
   draftPlanMode: boolean;
   onDraftPlanModeChange: (v: boolean) => void;
+  draftOptimizations: Record<string, boolean>;
+  onDraftOptimizationsChange: (v: Record<string, boolean>) => void;
   // Editable plan-mode primer (agent.config.planModePrompt) — how the agent scopes
   // a plan. Pre-filled with the default; only shown/saved when plan mode is on.
   draftPlanModePrompt: string;
@@ -1774,6 +1794,8 @@ export function AgentDetailLeftColumn({
   onDraftAutoGoalChange,
   draftPlanMode,
   onDraftPlanModeChange,
+  draftOptimizations,
+  onDraftOptimizationsChange,
   draftPlanModePrompt,
   onDraftPlanModePromptChange,
   draftMaxDelegations,
@@ -2649,7 +2671,7 @@ export function AgentDetailLeftColumn({
         label="Behaviour"
         tech="rules & autonomy"
         subtitle="extra rules applied on every turn"
-        summary={behaviorCount > 0 || draftSuggestGoal || draftPrefetchContext || draftAutoGoal || draftPlanMode || !draftPostTodos || draftMaxDelegations !== MAX_DELEGATIONS_PER_RUN_BOUNDS.DEFAULT ? "Customised" : "Defaults"}
+        summary={behaviorCount > 0 || draftSuggestGoal || draftPrefetchContext || draftAutoGoal || draftPlanMode || Object.keys(draftOptimizations).length > 0 || !draftPostTodos || draftMaxDelegations !== MAX_DELEGATIONS_PER_RUN_BOUNDS.DEFAULT ? "Customised" : "Defaults"}
         open={activeTab === "behavior"}
         onToggle={() => toggleSection("behavior")}
       />
@@ -3077,6 +3099,43 @@ export function AgentDetailLeftColumn({
               />
             </div>
           )}
+        </div>
+      )}
+
+      {activeTab === "behavior" && (canEdit || TOOL_DISCOVERY_OPTIMIZATIONS.some((o) => draftOptimizations[o.key] !== undefined)) && (
+        <div className="rounded-xl border border-xyne-border bg-xyne-surface p-4">
+          <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-xyne-fg-tertiary">Tool Discovery (beta)</div>
+          <p className="mb-3 text-[12px] leading-relaxed text-xyne-fg-secondary">
+            How the agent finds tools it has not loaded yet.
+            {" "}
+            <span className="text-xyne-fg-tertiary">Off = fleet default. Grants no new access: only tools this agent already has are affected.</span>
+          </p>
+          <div className="flex flex-col gap-3">
+            {TOOL_DISCOVERY_OPTIMIZATIONS.map((o) => (
+              <div key={o.key} className="flex items-start justify-between gap-4">
+                <div className="min-w-0 flex-1">
+                  <div className="text-[12px] font-medium text-xyne-fg-primary">{o.label}</div>
+                  <p className="text-[12px] leading-relaxed text-xyne-fg-secondary">{o.description}</p>
+                </div>
+                <label className="flex shrink-0 items-center gap-2 select-none">
+                  <input
+                    type="checkbox"
+                    checked={draftOptimizations[o.key] === true}
+                    onChange={(e) => {
+                      const next = { ...draftOptimizations };
+                      if (e.target.checked) next[o.key] = true;
+                      else delete next[o.key];
+                      onDraftOptimizationsChange(next);
+                    }}
+                    disabled={!canEdit}
+                    className="h-4 w-4 cursor-pointer accent-xyne-accent disabled:cursor-not-allowed disabled:opacity-60"
+                    aria-label={`Enable ${o.label}`}
+                  />
+                  <span className="text-[12px] text-xyne-fg-primary">{draftOptimizations[o.key] === true ? "On" : "Off"}</span>
+                </label>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

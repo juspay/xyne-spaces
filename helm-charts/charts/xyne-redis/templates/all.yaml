@@ -1,0 +1,4 @@
+{{- if .Values.auth.existingSecret }}
+{{- $_ := set .Values.secretEnv "REDIS_PASSWORD" (dict "name" .Values.auth.existingSecret "key" (.Values.auth.existingSecretKey | default "password")) }}
+{{- end }}
+{{- include "xyne-common.all" . }}

@@ -57,6 +57,9 @@ const rowMatchesGroup = (
   if (groupBy === 'createdBy') return row.createdBy === groupKey;
   if (groupBy === 'status') return (row.statusV2 as string) === groupKey;
   if (groupBy === 'priority') return (row.priority as string) === groupKey;
+  if (groupBy === 'merchantId') {
+    return groupKey === 'No Merchant' ? !row.merchantId : row.merchantId === groupKey;
+  }
   return true;
 };
 

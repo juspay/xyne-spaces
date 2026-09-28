@@ -1,0 +1,174 @@
+name: Publish Images
+
+on:
+  workflow_dispatch:
+    inputs:
+      image:
+        description: Image to publish (a name from ci/images.json, or all)
+        type: string
+        default: all
+      version:
+        description: Version to tag images with (default - the selected tag without the leading v)
+        type: string
+        default: ""
+      sync_charts:
+        description: Stamp the version onto the Helm charts afterwards
+        type: boolean
+        default: true
+  repository_dispatch:
+    types:
+      - publish-images
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Authorize + resolve images
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set.outputs.matrix }}
+      version: ${{ steps.set.outputs.version }}
+      ref: ${{ steps.set.outputs.ref }}
+      sync_charts: ${{ steps.set.outputs.sync_charts }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Restrict to allowed image builders
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          ALLOWED: ${{ vars.IMAGE_BUILDERS }}
+          ACTOR: ${{ github.actor }}
+        run: bash ci/scripts/authorize-actor.sh
+
+      - name: Resolve version, ref and build matrix
+        id: set
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT_IMAGE: ${{ inputs.image }}
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_SYNC: ${{ inputs.sync_charts }}
+          PAYLOAD_IMAGE: ${{ github.event.client_payload.image }}
+          PAYLOAD_VERSION: ${{ github.event.client_payload.version_tag }}
+          PAYLOAD_REF: ${{ github.event.client_payload.ref }}
+          PAYLOAD_SYNC: ${{ github.event.client_payload.sync_charts }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [ "${EVENT}" = "repository_dispatch" ]; then
+            IMAGE="${PAYLOAD_IMAGE:-all}"
+            VERSION="${PAYLOAD_VERSION}"
+            REF="${PAYLOAD_REF:-v${PAYLOAD_VERSION#v}}"
+            SYNC="${PAYLOAD_SYNC:-true}"
+          else
+            IMAGE="${INPUT_IMAGE:-all}"
+            VERSION="${INPUT_VERSION}"
+            REF="${REF_NAME}"
+            SYNC="${INPUT_SYNC}"
+            if [ -z "${VERSION}" ] && [ "${REF_TYPE}" = "tag" ]; then
+              VERSION="${REF_NAME}"
+            fi
+          fi
+          VERSION="${VERSION#v}"
+          if ! printf '%s' "${VERSION}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::No usable version. Run this on a vX.Y.Z tag or pass the version input (got '${VERSION}')."
+            exit 1
+          fi
+
+          if [ "${IMAGE}" = "all" ]; then
+            matrix="$(jq -c '{include: .}' ci/images.json)"
+          else
+            matrix="$(jq -c --arg n "${IMAGE}" '{include: map(select(.name == $n))}' ci/images.json)"
+            if [ "$(printf '%s' "${matrix}" | jq '.include | length')" -eq 0 ]; then
+              echo "::error::Unknown image '${IMAGE}'. Known: $(jq -r 'map(.name) | join(", ")' ci/images.json)"
+              exit 1
+            fi
+          fi
+
+          {
+            echo "matrix=${matrix}"
+            echo "version=${VERSION}"
+            echo "ref=${REF}"
+            echo "sync_charts=${SYNC}"
+          } >> "$GITHUB_OUTPUT"
+          echo "Publishing ${IMAGE} as ${VERSION} from ${REF}"
+
+  publish:
+    name: Publish ${{ matrix.name }}
+    needs: prepare
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      NODE_OPTIONS: "--max-old-space-size=8192"
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.prepare.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
+
+      - name: Resolve image name and commit
+        id: meta
+        env:
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          echo "image=ghcr.io/$(printf '%s' "${OWNER}" | tr '[:upper:]' '[:lower:]')/${{ matrix.image }}" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "short_sha=$(git rev-parse --short=10 HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push ${{ matrix.name }} (amd64)
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: true
+          platforms: linux/amd64
+          tags: |
+            ${{ steps.meta.outputs.image }}:${{ needs.prepare.outputs.version }}
+            ${{ steps.meta.outputs.image }}:sha-${{ steps.meta.outputs.short_sha }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ steps.meta.outputs.sha }}
+            org.opencontainers.image.version=${{ needs.prepare.outputs.version }}
+          build-args: |
+            SOURCE_COMMIT=${{ steps.meta.outputs.sha }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### ${{ matrix.name }}"
+            echo ""
+            echo "- \`${{ steps.meta.outputs.image }}:${{ needs.prepare.outputs.version }}\`"
+            echo "- \`${{ steps.meta.outputs.image }}:sha-${{ steps.meta.outputs.short_sha }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  sync-charts:
+    name: Stamp charts
+    needs: [prepare, publish]
+    if: needs.prepare.outputs.sync_charts == 'true'
+    permissions:
+      contents: write
+      packages: write
+    uses: ./.github/workflows/sync-chart-version.yml
+    with:
+      version_tag: ${{ needs.prepare.outputs.version }}
+      check_images: true
+    secrets: inherit

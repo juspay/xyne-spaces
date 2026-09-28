@@ -93,7 +93,7 @@ jobs:
       # errors-only (warnings ignored).
       - name: Lint (errors only)
         if: matrix.task == 'lint'
-        run: pnpm --filter xyne-spaces-dashboard run lint:errors-only
+        run: pnpm --filter xyne-spaces-dashboard run lint:errors-only:ci
 
       # --- typecheck leg ----------------------------------------------------
       - name: Format check
@@ -119,7 +119,7 @@ jobs:
 
   test:
     name: Automation tests
-    if: vars.RUN_TEST_CASE == 'true'
+    if: github.event_name == 'merge_group' && vars.RUN_TEST_CASE == 'true'
     runs-on: ci-cluster-github-runners
     env:
       TEST_ENV: test

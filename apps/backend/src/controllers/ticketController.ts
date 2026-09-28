@@ -2,7 +2,7 @@ import { NextFunction, Request, Response } from 'express';
 import { Ticket, MessageAttachment } from '@prisma/client';
 import { currentWorkspaceId, withWorkspaceScope } from '@/database/tenant/context';
 import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
-import { TicketRepository } from '../database/repositories/ticketRepository';
+import { TicketRepository, emitTicketCreated } from '../database/repositories/ticketRepository';
 import { ConversationRepository } from '../database/repositories/conversationRepository';
 import { BoardRepository } from '../database/repositories/boardRepository';
 import { ResourceRepository } from '../database/repositories/resources';
@@ -60,7 +60,7 @@ import { maybeCreateEntryApprovalRequest } from '@/services/stageTransition/stag
 import { db } from '@/database/client';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import { DatabaseClient } from '@/database/client';
-import { ticketDuplicateService } from '@/services/ticketDuplicateService';
+import { ticketDuplicateService, type DuplicateScopeFieldValue } from '@/services/ticketDuplicateService';
 import { ticketBoardService } from '@/services/ticketBoardService';
 import { versionReleaseMappingService } from '@/services/release/versionReleaseMappingService';
 import { BaseTicketType,
@@ -375,6 +375,10 @@ export class TicketController {
       void maybeCreateEntryApprovalRequest(ticket.id, createdBy, ticket.stageName);
     }
 
+    // Automations re-read the ticket on their own connection, so the event must
+    // not be published before the transaction above commits.
+    void emitTicketCreated(ticket, undefined, createdBy);
+
     ticketDuplicateService.persistDuplicateReferences({
       ticketId: ticket.id,
       ticketCreatedBy: ticket.createdBy,
@@ -382,6 +386,7 @@ export class TicketController {
       description,
       projectId,
       userId: createdBy,
+      channelId: ticket.channelId,
     }).catch((error: Error) => {
       logger.error('Failed to persist duplicate references for ticket', {
         ticketId: ticket.id,
@@ -874,6 +879,7 @@ export class TicketController {
       }
 
       let formFieldChangesForEmit: FormFieldChanges | undefined;
+      let duplicateScopeValues: DuplicateScopeFieldValue[] | undefined;
       if (formFields.length > 0) {
         const fieldsWithValues = formFields
           .filter((f: any) => dynamicFields[f.fieldName] !== undefined)
@@ -884,6 +890,7 @@ export class TicketController {
           }));
         if (fieldsWithValues.length > 0) {
           formFieldChangesForEmit = buildCreationFormFieldChanges(fieldsWithValues);
+          duplicateScopeValues = fieldsWithValues.map(fv => ({ fieldId: fv.fieldId, value: fv.actualFieldValue }));
         }
       }
 
@@ -1287,6 +1294,10 @@ export class TicketController {
         void maybeCreateEntryApprovalRequest(ticket.id, ticket.createdBy, ticket.stageName);
       }
 
+      // Automations re-read the ticket on their own connection, so the event must
+      // not be published before the transaction above commits.
+      void emitTicketCreated(ticket, formFieldChangesForEmit, ticket.createdBy);
+
       if (sourceConversationId) {
         void activityService.fillSdlcOwner(sourceConversationId, validatedConversation.channelId);
       }
@@ -1470,6 +1481,8 @@ export class TicketController {
         projectId,
         userId,
         parentTicketId,
+        channelId: ticket.channelId,
+        scopeFieldValues: duplicateScopeValues,
       }).catch(error => {
         logger.error('Failed to persist duplicate references for ticket', {
           ticketId: ticket.id,

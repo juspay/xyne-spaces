@@ -1,8 +1,11 @@
 import { Request, Response } from 'express';
 import { Prisma } from '@prisma/client';
 import { db } from '@/database/client';
-import { runAsSystem } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
+import {
+  runRecordingSummaryPointerBackfill,
+  getRecordingSummaryPointerBackfillStatus,
+} from '@/bypassAcl/recordingBackfillServices';
 
 /**
  * One-off backfill: link orphaned detailed-summary canvases onto their Call row.
@@ -35,7 +38,7 @@ import { logger } from '@/utils/logger';
  * Idempotent: only rows whose pointer is still absent are selected, so re-running
  * after the pipeline cutover picks up just the stragglers.
  *
- * Runs inside runAsSystem(): `db` is the ACL-wrapped client, and Call/Canvas both
+ * Runs inside bypassAcl's asSystem: `db` is the ACL-wrapped client, and Call/Canvas both
  * carry a workspaceId scalar, so an ordinary request context would silently narrow
  * this to the calling admin's own rows (isRequestContext() applies the per-table
  * user ACL) or at best to their single workspace. This repair spans every
@@ -62,13 +65,6 @@ type BackfillOptions = {
   cursor: string | null;
 };
 
-type BatchResult = {
-  batch: number;
-  updated: number;
-  /** Candidate rows left to scan after this batch (not all are linkable). */
-  remaining: number;
-};
-
 type CandidateCall = {
   id: string;
   externalId: string;
@@ -81,7 +77,7 @@ type LinkablePair = {
 };
 
 export class RecordingSummaryPointerBackfillController {
-  private static sleep(ms: number): Promise<void> {
+  static sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
@@ -114,13 +110,13 @@ export class RecordingSummaryPointerBackfillController {
    * key and an explicit JSON null, matching
    * `metadata ->> 'detailedSummaryCanvasId' IS NULL`.
    */
-  private static candidateWhere(): Prisma.CallWhereInput {
+  static candidateWhere(): Prisma.CallWhereInput {
     return {
       metadata: { path: [POINTER_KEY], equals: Prisma.AnyNull },
     };
   }
 
-  private static asRecord(value: Prisma.JsonValue | null): Record<string, unknown> {
+  static asRecord(value: Prisma.JsonValue | null): Record<string, unknown> {
     return value && typeof value === 'object' && !Array.isArray(value)
       ? (value as Record<string, unknown>)
       : {};
@@ -158,7 +154,7 @@ export class RecordingSummaryPointerBackfillController {
    * table is exhausted. Scanning past canvas-less rows here (rather than
    * re-selecting them every batch) is what keeps the run draining.
    */
-  private static async collectLinkable(
+  static async collectLinkable(
     batchSize: number,
     cursor: string | null,
   ): Promise<{ pairs: LinkablePair[]; nextCursor: string | null; exhausted: boolean }> {
@@ -209,7 +205,7 @@ export class RecordingSummaryPointerBackfillController {
    * the where-clause means a row that gained a pointer since it was read is left
    * alone rather than overwritten, and `count` reports what actually changed.
    */
-  private static async linkPair(pair: LinkablePair): Promise<boolean> {
+  static async linkPair(pair: LinkablePair): Promise<boolean> {
     const metadata = RecordingSummaryPointerBackfillController.asRecord(pair.call.metadata);
     const result = await db.call.updateMany({
       where: {
@@ -225,7 +221,7 @@ export class RecordingSummaryPointerBackfillController {
   }
 
   /** Candidate rows left to scan after `cursor` — not all of them are linkable. */
-  private static async countRemaining(cursor: string | null): Promise<number> {
+  static async countRemaining(cursor: string | null): Promise<number> {
     return db.call.count({
       where: {
         ...RecordingSummaryPointerBackfillController.candidateWhere(),
@@ -250,74 +246,7 @@ export class RecordingSummaryPointerBackfillController {
     logger.info(`${TAG} started`, { ...options });
 
     try {
-      const result = await runAsSystem(async () => {
-      const batches: BatchResult[] = [];
-      const linkedExternalIds: string[] = [];
-      let totalUpdated = 0;
-      let cursor = options.cursor;
-      let done = false;
-
-      for (let batchNumber = 1; batchNumber <= options.maxBatches; batchNumber += 1) {
-        const { pairs, nextCursor, exhausted } =
-          await RecordingSummaryPointerBackfillController.collectLinkable(
-            options.batchSize,
-            cursor,
-          );
-        cursor = nextCursor;
-
-        let updated = 0;
-        if (!options.dryRun) {
-          for (const pair of pairs) {
-            if (await RecordingSummaryPointerBackfillController.linkPair(pair)) {
-              updated += 1;
-              linkedExternalIds.push(pair.call.externalId);
-            }
-          }
-        } else {
-          updated = pairs.length;
-          linkedExternalIds.push(...pairs.map(pair => pair.call.externalId));
-        }
-
-        totalUpdated += updated;
-        const remaining = await RecordingSummaryPointerBackfillController.countRemaining(cursor);
-        batches.push({ batch: batchNumber, updated, remaining });
-        logger.info(`${TAG} batch #${batchNumber}`, {
-          updated,
-          remaining,
-          dryRun: options.dryRun,
-        });
-
-        if (exhausted) {
-          done = true;
-          break;
-        }
-        // Don't sleep only to return: skip the pause on the final allowed batch.
-        if (batchNumber === options.maxBatches) break;
-        if (options.delayMs > 0) {
-          await RecordingSummaryPointerBackfillController.sleep(options.delayMs);
-        }
-      }
-
-      logger.info(`${TAG} finished`, {
-        totalUpdated,
-        batches: batches.length,
-        done,
-        durationMs: Date.now() - startedAt,
-      });
-
-      return {
-        success: true as const,
-        dryRun: options.dryRun,
-        totalUpdated,
-        batches,
-        done,
-        // Pass this back as `cursor` on the next request to continue.
-        nextCursor: done ? null : cursor,
-        // The rollback key: removing 'detailedSummaryCanvasId' from these rows
-        // restores the exact prior state, since only absent keys were written.
-        linkedExternalIds,
-      };
-      });
+      const result = await runRecordingSummaryPointerBackfill(options, startedAt);
       res.json(result);
     } catch (error) {
       logger.error(`${TAG} failed`, {
@@ -336,32 +265,7 @@ export class RecordingSummaryPointerBackfillController {
    */
   static status = async (_req: Request, res: Response): Promise<void> => {
     try {
-      const result = await runAsSystem(async () => {
-      const pointerAbsent = await RecordingSummaryPointerBackfillController.countRemaining(null);
-
-      const canvases = await db.canvas.findMany({
-        where: { metadata: { path: ['source'], equals: CANVAS_SOURCE } },
-        select: { metadata: true },
-      });
-      const callIds = [
-        ...new Set(
-          canvases
-            .map(canvas => RecordingSummaryPointerBackfillController.asRecord(canvas.metadata)['callId'])
-            .filter((callId): callId is string => typeof callId === 'string'),
-        ),
-      ];
-
-      const linkable = callIds.length
-        ? await db.call.count({
-            where: {
-              ...RecordingSummaryPointerBackfillController.candidateWhere(),
-              externalId: { in: callIds },
-            },
-          })
-        : 0;
-
-      return { success: true as const, linkable, pointerAbsent, summaryCanvases: callIds.length };
-      });
+      const result = await getRecordingSummaryPointerBackfillStatus();
       res.json(result);
     } catch (error) {
       logger.error(`${TAG} status failed`, {

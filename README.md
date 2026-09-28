@@ -366,6 +366,17 @@ xyne-spaces/
 
 ---
 
+<a id="deploy"></a>
+
+## Deploy
+
+Run Xyne Spaces on your own GCP, AWS or Azure account with Terraform and Argo CD: one command
+brings up the network, cluster, managed Postgres/Redis/object storage, TLS ingress and every
+service. Start at [deployment/README.md](deployment/README.md), then follow the guide for your
+cloud ([GCP](deployment/docs/gcp.md), [AWS](deployment/docs/aws.md), [Azure](deployment/docs/azure.md)).
+
+---
+
 <a id="documentation"></a>
 
 ## Documentation

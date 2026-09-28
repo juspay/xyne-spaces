@@ -4,7 +4,7 @@ import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { v4 as uuidv4 } from 'uuid';
 import { type Prisma } from '@prisma/client';
-import { CallOrigin, CallStatus, CallType, RecurringCallSeriesStatus, CalendarVisibility, ChannelScopeType } from '@xyne/shared';
+import { CallOrigin, CallStatus, CallType, RecurringCallSeriesStatus, CalendarVisibility, CallVisibility, ChannelScopeType } from '@xyne/shared';
 import { ZodError } from 'zod';
 import { scheduledCallNotificationService } from '@/services/scheduledCallNotificationService';
 import { ScheduleCallSchema, RecurringScheduleCallSchema, UpdateScheduleCallSchema, UpdateRecurringSeriesSchema, CancelScheduledCallSchema, CancelRecurringSeriesSchema } from '@/validators/callValidator';
@@ -20,6 +20,8 @@ import {
 import { CallVespaFeedSource, queueCallVespaFeed } from '@/services/callVespaQueue';
 import { queueCallCalendarPush, queueCallCalendarPushMany } from '@/queues/callCalendarPushQueue';
 import { buildCallInviteUrl } from '@/utils/urlUtils';
+import { messageMetadataService } from '@/services/messageMetadataService';
+import { withWorkspaceScope } from '@/database/tenant/context';
 
 // Number of milliseconds to buffer recurring call instances ahead of time (60 days)
 const INSTANCE_BUFFER_DAYS = 60 * 24 * 60 * 60 * 1000;
@@ -399,6 +401,8 @@ export class ScheduleCallController {
       }
 
       const db = DatabaseClient.getInstance();
+      const resolvedCallOrigin = conversationId ? CallOrigin.CONVERSATION : CallOrigin.CHANNEL;
+      let pillConversationId: string | undefined;
 
       const { participantUserIds } = await db.$transaction(async (tx) => {
         const result = await repositories.calls.createCallWithParticipants({
@@ -408,7 +412,7 @@ export class ScheduleCallController {
           createdByUserId: userId,
           channelId: finalChannelId!,
           callType: CallType.AUDIO,
-          callOrigin: conversationId ? CallOrigin.CONVERSATION : CallOrigin.CHANNEL,
+          callOrigin: resolvedCallOrigin,
           roomLink,
           timezone: 'UTC',
           isRecurring: false,
@@ -420,8 +424,31 @@ export class ScheduleCallController {
           ...(normalizedExternalInvitees.length && { externalInvitees: normalizedExternalInvitees }),
         }, tx);
 
+        // Same transaction as the call, so a pill can never outlive a failed insert.
+        const workspaceId = await repositories.channels.getWorkspaceId(finalChannelId!);
+        const pill = await repositories.calls.createScheduledCallPill(tx, {
+          callId,
+          callExternalId: externalId,
+          channelId: finalChannelId!,
+          workspaceId,
+          senderId: userId,
+          senderName: req.user?.displayName || req.user?.name || 'Someone',
+          ...(conversationId && { threadConversationId: conversationId }),
+        });
+        // Only a channel-root pill is its conversation's initialMessage.
+        if (pill && !conversationId) pillConversationId = pill.conversationId;
+
         return result;
       });
+
+      // Eager, so initial_message_md is populated before the response returns.
+      if (pillConversationId) {
+        try {
+          await messageMetadataService.syncInitialMessageMd(pillConversationId);
+        } catch (error) {
+          logger.error(`Failed to sync initial_message_md for call pill ${callId}:`, error);
+        }
+      }
 
       if (hasExternals) {
         this.sendExternalInvitationInBackground({
@@ -675,6 +702,24 @@ export class ScheduleCallController {
       });
 
       logger.info(`[updateScheduledCall] repo update complete | callId=${call.id} resolvedChannelId=${resolvedChannelId}`);
+
+      // The call changed channels: retire the old pill as "moved" and post a fresh one.
+      if (channelChanged && resolvedChannelId) {
+        try {
+          const organizer = await repositories.users.findById(call.createdByUserId);
+          await repositories.calls.moveScheduledCallPill({
+            callId: call.id,
+            callExternalId: call.externalId,
+            callTitle: call.title,
+            newChannelId: resolvedChannelId,
+            workspaceId: await repositories.channels.getWorkspaceId(resolvedChannelId),
+            senderId: call.createdByUserId,
+            senderName: organizer?.displayName || organizer?.name || 'Someone',
+          });
+        } catch (error) {
+          logger.error(`Failed to move scheduled call pill for call ${call.id}:`, error);
+        }
+      }
 
       queueCallCalendarPush(call.id, 'updateScheduledCall');
 
@@ -1360,15 +1405,27 @@ export class ScheduleCallController {
         return;
       }
 
-      const calls = await repositories.calls.getScheduledCallsForUser(userId!, fromDate, toDate);
+      // Widen this ONE read to workspace scope: the per-user Call ACL would keep only the
+      // calls the requester is also on, which is not the set this endpoint exists to show.
+      // Workspace membership is checked above; the projection below still governs disclosure.
+      const calls = await withWorkspaceScope(() =>
+        repositories.calls.getScheduledCallsForUser(userId!, fromDate, toDate),
+      );
+
+      const busySlots = calls.map(c => ({ startsAt: c.startsAt, endsAt: c.endsAt }));
 
       if (targetUser.calendarVisibility === CalendarVisibility.PRIVATE) {
-        const busySlots = calls.map(c => ({ startsAt: c.startsAt, endsAt: c.endsAt }));
         res.json({ success: true, calendarVisibility: CalendarVisibility.PRIVATE, calls: busySlots });
         return;
       }
 
-      const safeCalls = calls.map(({ roomLink, transcript, aiSummary, metadata, ...rest }) => rest);
+      // PUBLIC calendar: allowlist projection. A call whose own visibility is not PUBLIC
+      // (null is treated as PRIVATE everywhere it's read) is reduced to a busy slot.
+      const safeCalls = calls.map(c =>
+        c.visibility !== CallVisibility.PUBLIC
+          ? { id: c.id, startsAt: c.startsAt, endsAt: c.endsAt, isRecurring: c.isRecurring, status: c.status }
+          : { id: c.id, title: c.title, startsAt: c.startsAt, endsAt: c.endsAt, isRecurring: c.isRecurring, status: c.status },
+      );
       res.json({ success: true, calendarVisibility: CalendarVisibility.PUBLIC, calls: safeCalls });
     } catch (error) {
       logger.error('Failed to fetch other user scheduled calls:', error);

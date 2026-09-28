@@ -3,7 +3,7 @@ import type { Session } from "@xyne/kata-sdk";
 import type { ToolDefinition, ToolExecutionContext } from "../types.js";
 import { SDLC_META_KEYS } from "../../sdlc/meta.js";
 import { redactSecrets, redactAndStringify } from "./redact.js";
-import { rotateTemplate, isSameTemplateFamily } from "./template-rotation.js";
+import { rotateTemplate, isSameTemplateFamily, rotatedTemplateNames } from "./template-rotation.js";
 import { formatSandboxUnavailable, isSandboxUnavailableDeferEnabled } from "./unavailable-signal.js";
 import { createLogger } from "../../logger.js";
 import { createReadStream } from "node:fs";
@@ -645,6 +645,18 @@ async function pinnedTemplateForContext(context: ToolExecutionContext): Promise<
   return REPO_CONFIGS[pinnedRepo]?.template;
 }
 
+/** An unknown template name from the LLM falls back to the agent's or default template instead of failing the claim. */
+async function knownTemplate(value: unknown): Promise<string | undefined> {
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  const { REPO_CONFIGS } = await import("./repo-configs.js");
+  const known = new Set([
+    "kata-workspace-template",
+    ...Object.values(REPO_CONFIGS).map((config) => config.template),
+    ...rotatedTemplateNames(),
+  ]);
+  return known.has(value.trim()) ? value.trim() : undefined;
+}
+
 /**
  * Create a persistent sandbox session. Returns a sessionId for follow-up tool calls.
  */
@@ -690,7 +702,7 @@ export const sandboxCreate: ToolDefinition = {
     // A UI-pinned sandbox repo wins over whatever template the LLM passed —
     // a pinned agent must always get its own sandbox, never the legacy kata one.
     const pinnedTemplate = await pinnedTemplateForContext(context);
-    const requestedTemplate = pinnedTemplate ?? (params["template"] as string | undefined);
+    const requestedTemplate = pinnedTemplate ?? (await knownTemplate(params["template"]));
     // ROTATE, exactly as the repo-setup path does. Without this, every
     // sandbox-create on a pinned agent clones the BASE template's single
     // snapshot: pinnedTemplateForContext returns REPO_CONFIGS[repo].template,
@@ -1229,11 +1241,20 @@ export const sandboxCopyIn: ToolDefinition = {
       // endpoint per chunk and appends server-side, so no single request is
       // large and no workspace-image change is needed. 256 KiB keeps a clear
       // margin under the observed cap.
-      const { bytesWritten } = await session.files.writeStream(
-        destPath,
-        createReadStream(sourceAbs),
-        { chunkBytes: 256 * 1024 },
-      );
+      // A read stream reports ENOENT through an async 'error' event, not by
+      // rejecting writeStream, so without this race the failure escapes the
+      // catch below and reaches the process handler — killing a pod that is
+      // serving every other session. Racing it makes a missing spill file an
+      // ordinary rejection, which is what the ENOENT branch below expects.
+      const source = createReadStream(sourceAbs);
+      const sourceFailure = new Promise<never>((_, reject) => {
+        source.once("error", reject);
+      });
+      void sourceFailure.catch(() => {});
+      const { bytesWritten } = await Promise.race([
+        session.files.writeStream(destPath, source, { chunkBytes: 256 * 1024 }),
+        sourceFailure,
+      ]).finally(() => source.destroy());
       return JSON.stringify({ sourcePath: relPath, destPath, bytes: bytesWritten, copied: true });
     } catch (err) {
       if (isStaleSessionError(err)) {
@@ -2503,6 +2524,10 @@ export const sdlcRepositoryAccess: ToolDefinition = {
     if (actorUserId !== context.meta?.["userId"]?.trim()) {
       return "Error: SDLC run context does not belong to this run's user.";
     }
+    // The tool's sessionId is the sandbox. claw-auth checks the run session the token was minted for.
+    const runSessionId = context.sessionId;
+    const sessionToken = context.sessionToken;
+    if (!runSessionId || !sessionToken) return "Error: SDLC repository access needs a claw-auth run session.";
     const session = SESSION_STORE.get(sessionId);
     if (!session) return `Error: Session ${sessionId} not found. Call sandbox-create first.`;
     if (!isSessionOwnedByContext(session, sessionId, context)) {
@@ -2512,11 +2537,16 @@ export const sdlcRepositoryAccess: ToolDefinition = {
       return "Error: A shared read-only sandbox cannot hold repository credentials. Call sandbox-create for your own sandbox.";
     }
     try {
-      const { mode, repository } = await installSdlcRepositoryAccess(session, {
-        repoId,
-        workspaceId,
-        actorUserId,
-      });
+      const { mode, repository } = await installSdlcRepositoryAccess(
+        session,
+        { repoId, workspaceId, actorUserId },
+        {
+          authUrl: context.config["XYNE_CLAW_AUTH_URL"] ?? process.env["XYNE_CLAW_AUTH_URL"] ?? AUTH_URL_DEFAULT,
+          s2sKey: context.s2sKey ?? context.config["XYNE_CLAW_S2S_KEY"] ?? process.env["XYNE_CLAW_S2S_KEY"] ?? "",
+          runSessionId,
+          sessionToken,
+        },
+      );
       return JSON.stringify({
         sessionId,
         repoId,

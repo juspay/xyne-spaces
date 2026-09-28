@@ -7,6 +7,7 @@ import { searchChannels as _searchChannels, searchChannelsWithScores as _searchC
 import type { Channel, ChannelUserStatus } from '../zero/schema.js';
 import { ChannelScopeType, ChannelVisibility } from '../zero/schema.js';
 import { isDeskChannelType } from '../utils/channel.js';
+import { searchMentionableChannels } from '../utils/channelMentionSearch.js';
 import { queries } from '../zero/queries.js';
 import { useQuery } from './useQuery.js';
 import { useCachedQuery } from './useCachedQuery';
@@ -156,9 +157,19 @@ export const useChannelByName = (channelName: string): Channel | undefined => {
   return channel || visibleChannel;
 };
 
+export { searchMentionableChannels };
+
 export const useChannelSearch = (query: string, limit: number): Channel[] => {
   const channels = useAllChannels();
   return useMemo(() => searchChannels(channels, query, limit), [channels, query, limit]);
+};
+
+export const useChannelMentionSearch = (query: string, limit: number): Channel[] => {
+  const channels = useAllChannels();
+  return useMemo(
+    () => searchMentionableChannels(channels, query, limit),
+    [channels, query, limit],
+  );
 };
 
 export const useBrowsableChannels = (): Channel[] => {

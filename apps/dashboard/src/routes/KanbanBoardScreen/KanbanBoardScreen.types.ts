@@ -59,4 +59,5 @@ export type GroupByType =
   | 'createdBy'
   | 'status'
   | 'priority'
+  | 'merchantId'
   | FormFieldGroup;

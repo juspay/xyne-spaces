@@ -884,8 +884,8 @@ You have direct access to Spaces tools, a \`spaces\` subagent, and a \`google\` 
 - **generate-image** — image from a detailed text prompt.
 - **artifacts** subagent — polished PPTX/PDF generation. Give it a rich brief.
 - **spaces-create-canvas** / **spaces-edit-canvas** — collaborative docs inside Spaces.
-- **spaces-sdlc-mutate-artifact** — create or update a PRD or Tech Doc only when active Spaces context explicitly identifies an SDLC repository. Use action create/update, supplied SDLC repository id, and require a parent PRD for a Tech Doc.
-- **spaces-sdlc-list-artifact-versions** then **spaces-sdlc-read-artifact-version** — inspect bounded immutable history for a Wiki page, Hub Knowledge document, PRD, or Tech Doc in the selected repository. Read the current artifact first, retrieve only relevant versions, and treat old text as supporting context rather than current truth.
+- **spaces-sdlc-write-artifact** — create or update a PRD or Tech Doc only when active Spaces context explicitly identifies an SDLC repository. Use action create/update, supplied SDLC repository id, and require a parent PRD for a Tech Doc.
+- **spaces-sdlc-list-artifact-versions** then **spaces-sdlc-read-artifact** with versionId — inspect bounded immutable history for a Wiki page, Hub Knowledge document, PRD, or Tech Doc in the selected repository. Read the current artifact first, retrieve only relevant versions, and treat old text as supporting context rather than current truth.
 
 # Write actions need approval
 These return "Action queued for approval" — that's **normal**, not an error: \`spaces-create-ticket\`, \`spaces-update-ticket\`, \`spaces-schedule-call\`, \`user-send-message\`, \`spaces-create-canvas\`, \`spaces-edit-canvas\`. Tell the user to hit Approve. Do NOT retry.
@@ -984,7 +984,7 @@ You:
             "user-send-message",
             "spaces-create-canvas",
             "spaces-edit-canvas",
-            "spaces-sdlc-mutate-artifact",
+            "spaces-sdlc-write-artifact",
             ...WORKFLOW_TOOL_NAMES,
           ],
           custom: ["genius-analytics", "genius-investigation", "query-codebase", "review-pull-request", "web-search", "deep-research", "generate-image", "add-citations", "visualize"]
@@ -1070,7 +1070,7 @@ You:
             "user-send-message",
             "spaces-create-canvas",
             "spaces-edit-canvas",
-            "spaces-sdlc-mutate-artifact",
+            "spaces-sdlc-write-artifact",
             ...WORKFLOW_TOOL_NAMES,
           ],
           custom: ["genius-analytics", "genius-investigation", "query-codebase", "review-pull-request", "web-search", "deep-research", "generate-image", "add-citations", "visualize"]
@@ -2223,11 +2223,34 @@ DRILL-DOWN: Use this path ONLY when the user wants to EXPLORE a focused tile's d
         update: {},
       });
       console.log("[seed] Pinned xyne-workflows MCP server to ask-ai");
+      // xyne-workflows is registered as pinned / not user-connectable, so it
+      // only reaches a session through an AgentMcpConnection row. The SDLC
+      // agent is granted the workflow tools in its generated profile, so it
+      // needs the same pin or those grants resolve to a server it cannot see.
+      await prisma.agentMcpConnection.upsert({
+        where: {
+          agentId_mcpServerId_slug: {
+            agentId: sdlcAgent.id,
+            mcpServerId: workflowsServerRow.id,
+            slug: "default",
+          },
+        },
+        create: {
+          agentId: sdlcAgent.id,
+          mcpServerId: workflowsServerRow.id,
+          slug: "default",
+          encryptedCreds: workflowsCredsPayload.encryptedCreds,
+          iv: workflowsCredsPayload.iv,
+          authTag: workflowsCredsPayload.authTag,
+        },
+        update: {},
+      });
+      console.log("[seed] Pinned xyne-workflows MCP server to sdlc-agent");
     } else {
-      console.warn("[seed] Skipped ask-ai workflows pin: xyne-workflows server row not found");
+      console.warn("[seed] Skipped workflows pins: xyne-workflows server row not found");
     }
   } else {
-    console.warn("[seed] Skipped ask-ai workflows pin: ENCRYPTION_KEY not set");
+    console.warn("[seed] Skipped workflows pins: ENCRYPTION_KEY not set");
   }
 
   // ── Claw concierge agent ─────────────────────────────────────────────────

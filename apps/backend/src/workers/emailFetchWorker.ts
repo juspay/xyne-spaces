@@ -13,10 +13,8 @@ import {
   type EmailFetchQueueJobData,
   type CursorCatchupJobData,
 } from '@/queues/emailFetchQueue';
-import { runAsServiceActor } from '@/database/tenant/context';
-import { socialMediaService } from '@/integrations/social-media/socialMediaService';
+import { catchUpEmailSource, refetchEmailSource, syncSocialMediaSources } from '@/bypassAcl/emailFetchServices';
 import { getHttpStatus } from '@/services/googleService';
-import { catchUpFromCursor } from '@/integrations/adapters/google/refetch';
 import { seedSyncCursor } from '@/services/syncCursorRecovery';
 
 const externalSourceRepo = new ExternalSourceRepository();
@@ -92,9 +90,7 @@ class EmailFetchWorker {
 
     const adapter = adapterRegistry.getAdapter(source.name);
     try {
-      const result = await runAsServiceActor('email-fetch-worker', workspaceId, () =>
-        catchUpFromCursor(source, adapter, cursor),
-      );
+      const result = await catchUpEmailSource(workspaceId, source, adapter, cursor);
 
       logger.info(
         `[EMAIL-FETCH-WORKER] Catchup done — source ${source.name}: processed=${result.processed} new=${result.newTickets} skipped=${result.skipped} errors=${result.errors?.length ?? 0}`,
@@ -160,9 +156,7 @@ class EmailFetchWorker {
     try {
       // Background job → open a tenant scope from the job's workspaceId so ingested
       // emails/drafts/assignments get workspaceId stamped instead of leaking NULL.
-      result = await runAsServiceActor('email-fetch-worker', job.data.workspaceId,
-        () => adapter.refetch!(source, options),
-      );
+      result = await refetchEmailSource(job.data.workspaceId, adapter, source, options);
     } catch (error) {
       if (job.data.isDlMemberSync && this.isFinalAttempt(job)) {
         await this.cleanupDlMemberSyncSource(sourceRepo, sourceId);
@@ -193,21 +187,7 @@ class EmailFetchWorker {
       `[EMAIL-FETCH-WORKER] Processing review sync job ${job.id} — channel ${channelId}`,
     );
 
-    const synced = await runAsServiceActor(
-      'social-media-fetch-worker',
-      workspaceId,
-      async () => {
-        let newInteractionCount = 0;
-        for (const sourceId of sourceIds) {
-          const result = await socialMediaService.syncSource(sourceId, {
-            ignoreSyncCursor: true,
-            ...(backfill && { backfill }),
-          });
-          newInteractionCount += result.synced;
-        }
-        return newInteractionCount;
-      },
-    );
+    const synced = await syncSocialMediaSources(workspaceId, sourceIds, backfill);
 
     logger.info(
       `[EMAIL-FETCH-WORKER] Review sync job ${job.id} done — new=${synced}`,

@@ -1,6 +1,11 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Plus, X, Check, Pencil, Trash2 } from 'lucide-react';
-import type { EmailSignature } from '@xyne/shared';
+import {
+  FormContextType,
+  FormEntityType,
+  MAX_DUPLICATE_SCOPE_FIELDS,
+  type EmailSignature,
+} from '@xyne/shared';
 import { v4 as uuidv4 } from 'uuid';
 import { toast } from 'sonner';
 import Avatar from '../../../ui/Avatar/Avatar';
@@ -12,11 +17,16 @@ import { AppStoreDeskIntegrationCard } from '../../DeskIntegrationCard/AppStoreD
 import { ConnectedAppsSection } from '../ConnectedAppsSection';
 import { InlineSignatureEditor } from '../InlineSignatureEditor';
 import { Switch } from '../../../ui/Switch';
+import { SearchableMultiSelect } from '../../../ui/SearchableMultiSelect/SearchableMultiSelect';
 import { matchesUserQuery } from '../../../../utils/userDisplayName';
 import { useChannelApps } from '../../../../hooks/useChannelApps';
+import { useCachedQuery } from '../../../../hooks/useCachedQuery';
 import { useUsers } from '../../../../hooks/useUsers';
 import { useZero } from '../../../../hooks/useZero';
 import { mutators } from '../../../../zero/mutators';
+import { queries } from '../../../../zero/queries';
+import { resolveDisplayFormFields } from '../../../../utils/board/resolveDisplayFormFields';
+import { getIconForFieldType } from '../../../Tickets/TicketFilters/fieldTypeIcons';
 import type { useDeskSettingsForm } from '../useDeskSettingsForm';
 import SignatureIcon from '../../../icons/SignatureIcon';
 
@@ -69,6 +79,11 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
     setAutoMergeEmails,
     appWebhookDeliveryEnabled,
     setAppWebhookDeliveryEnabled,
+    duplicateDetectionEnabled,
+    setDuplicateDetectionEnabled,
+    duplicateScopeFieldIds,
+    setDuplicateScopeFieldIds,
+    boardId,
   } = form;
 
   const [ccInputValue, setCcInputValue] = useState('');
@@ -96,6 +111,41 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
   // even before the first connect so the pre-existing control never disappears.
   const { data: connectedApps } = useChannelApps(channelId, isDeskChannel && canManage);
   const showAppWebhookDelivery = isApp || (connectedApps?.length ?? 0) > 0;
+
+  const [scopeFieldPickerOpen, setScopeFieldPickerOpen] = useState(false);
+  // The board's ticket form, not the project's global fields: a legacy form's fields have
+  // no GlobalField id, so project-wide options would offer keys the backend can't resolve.
+  const [scopeFieldsMapping, scopeFieldsDetails] = useCachedQuery(
+    queries.getFormMappingByContextId({
+      contextId: boardId || 'nonexistent',
+      contextType: FormContextType.BOARD,
+      entityType: FormEntityType.TICKET,
+    }),
+    { enabled: isDeskChannel && !!boardId },
+  );
+  const scopedFields = useMemo(
+    () =>
+      scopeFieldsMapping?.formFields
+        ? resolveDisplayFormFields(scopeFieldsMapping.formId, [...scopeFieldsMapping.formFields])
+        : [],
+    [scopeFieldsMapping?.formFields, scopeFieldsMapping?.formId],
+  );
+  // Chips come from the saved config, not the field list, so a deleted field still gets a
+  // chip to remove rather than a stranded id that counts toward the cap forever.
+  const scopeFieldById = useMemo(
+    () => new Map(scopedFields.map(field => [field.id, field])),
+    [scopedFields],
+  );
+  const selectedDuplicateScopeFields = duplicateScopeFieldIds.map(id => ({
+    id,
+    field: scopeFieldById.get(id),
+  }));
+  // No board and an unlanded sync both leave scopedFields empty, so nothing calls a saved
+  // field deleted until the result is complete.
+  const scopeFieldsResolved = !!boardId && scopeFieldsDetails.type === 'complete';
+  const hasUnresolvedScopeField =
+    scopeFieldsResolved && selectedDuplicateScopeFields.some(entry => !entry.field);
+  const duplicateScopeFieldCapReached = duplicateScopeFieldIds.length >= MAX_DUPLICATE_SCOPE_FIELDS;
 
   useEffect(() => {
     if (signatureModalOpen) {
@@ -430,6 +480,145 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
             disabled={!canManage}
             aria-label='Toggle auto-merge similar emails'
           />
+        </div>
+      )}
+
+      {isDeskChannel && (
+        <div className='flex flex-col gap-[16px]'>
+          <div className='flex items-start justify-between gap-4'>
+            <div className='flex flex-col gap-[4px]'>
+              <div className='text-desk-label'>Limit duplicate detection by field</div>
+              <div className='text-desk-helper w-full max-w-[500px]'>
+                Restrict possible-duplicate matching to tickets sharing the selected fields. Tickets
+                without a value keep project-wide detection. Select up to{' '}
+                {MAX_DUPLICATE_SCOPE_FIELDS} fields.
+              </div>
+            </div>
+            <Switch
+              variant='desk'
+              checked={duplicateDetectionEnabled}
+              onCheckedChange={setDuplicateDetectionEnabled}
+              disabled={!canManage}
+              aria-label='Toggle limiting duplicate detection by field'
+            />
+          </div>
+
+          {duplicateDetectionEnabled && (
+            <div className='flex flex-col gap-[8px]'>
+              <div className='text-desk-label'>Scope fields</div>
+              <div className='flex w-full max-w-[500px] flex-wrap items-center gap-[6px]'>
+                {selectedDuplicateScopeFields.map(({ id, field }) => {
+                  const isMissing = scopeFieldsResolved && !field;
+                  const unresolvedLabel = boardId ? 'Loading…' : 'Unresolved field';
+                  const label = field?.fieldName ?? (isMissing ? 'Deleted field' : unresolvedLabel);
+                  return (
+                    <div
+                      key={id}
+                      title={isMissing ? `This field no longer exists (${id})` : undefined}
+                      className={`inline-flex shrink-0 items-center gap-[4px] whitespace-nowrap rounded-[6px] py-[2px] pl-[6px] pr-[4px] ${
+                        isMissing
+                          ? 'bg-destructive/10 line-through decoration-destructive/60'
+                          : 'bg-desk-accent-subtle'
+                      }`}
+                    >
+                      <span
+                        className={`max-w-[220px] truncate text-[13px] font-medium leading-[18px] tracking-[-0.2px] ${
+                          isMissing ? 'text-destructive' : 'text-desk-accent-foreground'
+                        }`}
+                      >
+                        {label}
+                      </span>
+                      <button
+                        type='button'
+                        onClick={() =>
+                          setDuplicateScopeFieldIds(
+                            duplicateScopeFieldIds.filter(selected => selected !== id),
+                          )
+                        }
+                        disabled={!canManage || !duplicateDetectionEnabled}
+                        className={`hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 ${
+                          isMissing ? 'text-destructive' : 'text-desk-accent-foreground'
+                        }`}
+                        data-track-category='DeskSettings'
+                        data-track-name='RemoveDuplicateScopeField'
+                        aria-label={`Remove ${label}`}
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  );
+                })}
+                {scopeFieldsResolved && scopedFields.length > 0 && (
+                  <SearchableMultiSelect
+                    options={scopedFields.map(field => {
+                      const FieldTypeIcon = getIconForFieldType(field.fieldType);
+                      return {
+                        value: field.id,
+                        label: field.fieldName,
+                        icon: (
+                          <FieldTypeIcon size={13} className='shrink-0 text-muted-foreground' />
+                        ),
+                      };
+                    })}
+                    selectedValues={duplicateScopeFieldIds}
+                    onSelectedValuesChange={next => {
+                      // The trigger is disabled at the cap, but the popover stays open,
+                      // so a 6th option is still clickable in the already-open list.
+                      // Reject it loudly instead of letting the setter quietly slice it off.
+                      if (next.length > MAX_DUPLICATE_SCOPE_FIELDS) {
+                        toast.error(`Select up to ${MAX_DUPLICATE_SCOPE_FIELDS} scope fields.`);
+                        return;
+                      }
+                      setDuplicateScopeFieldIds(next);
+                    }}
+                    isOpen={scopeFieldPickerOpen && duplicateDetectionEnabled && canManage}
+                    onOpenChange={open => {
+                      if (open && (!duplicateDetectionEnabled || !canManage)) return;
+                      setScopeFieldPickerOpen(open);
+                    }}
+                    searchPlaceholder='Search fields...'
+                    searchAriaLabel='Search scope fields'
+                    listAriaLabel='Scope fields'
+                    emptyMessage='No matching fields'
+                    align='start'
+                    trackCategory='DeskSettings'
+                    trackName='DuplicateScopeFieldOption'
+                    trigger={
+                      <button
+                        type='button'
+                        className='inline-flex h-[28px] items-center gap-1.5 rounded-[10px] border border-border bg-background px-3 py-1.5 text-desk-label text-foreground shadow-sm transition-colors hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-50'
+                        disabled={
+                          !canManage || !duplicateDetectionEnabled || duplicateScopeFieldCapReached
+                        }
+                        data-track-category='DeskSettings'
+                        data-track-name='AddDuplicateScopeField'
+                      >
+                        <Plus size={14} />
+                        <span>Add field</span>
+                      </button>
+                    }
+                  />
+                )}
+              </div>
+              {hasUnresolvedScopeField && (
+                <div className='w-full max-w-[500px] text-[13px] leading-[18px] text-destructive'>
+                  A selected field is not on the board ticket form for this desk, so duplicate
+                  detection falls back to project-wide here. Remove it and pick a field from the
+                  list to re-enable scoping.
+                </div>
+              )}
+              {!boardId && (
+                <div className='text-desk-helper w-full max-w-[500px]'>
+                  Set a target board for this desk first — scope fields come from its ticket form.
+                </div>
+              )}
+              {scopeFieldsResolved && scopedFields.length === 0 && (
+                <div className='text-desk-helper w-full max-w-[500px]'>
+                  This board&apos;s ticket form has no fields yet. Add one there first.
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 

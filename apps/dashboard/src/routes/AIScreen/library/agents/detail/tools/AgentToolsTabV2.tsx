@@ -72,9 +72,6 @@ export function AgentToolsTabV2({
   const builtin = useBuiltinCatalog();
 
   const { saved } = tools;
-  // Deliberately NOT routed through tools.openManage/closeManage: that flow
-  // captures a draft on open and re-persists it on close, which would undo an
-  // add made while the dialog was open (the grant call writes config itself).
   const [agentsPickerOpen, setAgentsPickerOpen] = useState(false);
   const callable = useCallableAgents({
     agentSlug: agent.slug,
@@ -88,7 +85,7 @@ export function AgentToolsTabV2({
   // agents so a subagent/MCP/built-in edit never writes them out of the config.
   const withCallableAgents = (next: Required<ToolboxSelection>): ToolSelection => ({
     ...next,
-    callableAgents: tools.draft.callableAgents,
+    callableAgents: saved.callableAgents,
   });
 
   const subagentItems = useMemo<DetailListItem[]>(
@@ -275,8 +272,8 @@ export function AgentToolsTabV2({
         loading={subagents.loading}
         isError={subagents.isError}
         onRetry={subagents.refetch}
-        selection={tools.draft}
-        onSelectionChange={next => tools.setDraft(withCallableAgents(next))}
+        selection={saved}
+        onSelectionChange={next => tools.commit(withCallableAgents(next), 'Tools updated')}
         suggested={[]}
       />
 
@@ -303,8 +300,8 @@ export function AgentToolsTabV2({
         loading={mcp.loading}
         isError={mcp.isError}
         onRetry={mcp.refetch}
-        selection={tools.draft}
-        onSelectionChange={next => tools.setDraft(withCallableAgents(next))}
+        selection={saved}
+        onSelectionChange={next => tools.commit(withCallableAgents(next), 'Tools updated')}
         suggested={[]}
       />
 
@@ -317,8 +314,8 @@ export function AgentToolsTabV2({
         loading={builtin.loading}
         isError={builtin.isError}
         onRetry={builtin.refetch}
-        selection={tools.draft}
-        onSelectionChange={next => tools.setDraft(withCallableAgents(next))}
+        selection={saved}
+        onSelectionChange={next => tools.commit(withCallableAgents(next), 'Tools updated')}
         suggested={[]}
       />
     </div>

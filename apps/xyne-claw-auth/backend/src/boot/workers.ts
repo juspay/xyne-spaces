@@ -1,4 +1,5 @@
 import { createLogger } from "../logger.js";
+import { initEvalSweeper, closeEvalSweeper } from "../queue/eval-sweeper.js";
 import { ERROR_PIPELINE } from "../config.js";
 import { runner as errorPipelineRunner } from "../error-pipeline/runner/runner.js";
 import { connectDb } from "../db.js";
@@ -33,6 +34,7 @@ import { beginLocalHarnessDrain } from "../routes/local-harness.js";
 import { initLocalHarnessExpirySweep } from "../services/localHarnessExpiry.js";
 import { initMemoryCron } from "../services/memoryCronService.js";
 import { initSlackConfigTokenCron } from "../surfaces/slack/config-token-cron.js";
+import { initMessagingAccountManager, closeMessagingAccountManager } from "../surfaces/messaging/bootstrap.js";
 import { initDigitalTwinDaily } from "../services/digitalTwinDaily.js";
 import {
   startBitbucketStatsBackgroundRefresh,
@@ -54,6 +56,7 @@ const WORKERS: WorkerEntry[] = [
   { name: "local-harness-bridge", closeSync: beginLocalHarnessDrain },
   { name: "bitbucket-stats", closeSync: stopBitbucketStatsBackgroundRefresh },
   { name: "scheduled-jobs-worker", init: initScheduledJobsWorker, close: closeWorker },
+  { name: "eval-sweeper", init: initEvalSweeper, close: closeEvalSweeper },
   { name: "scheduled-jobs-queue", close: closeQueue },
   { name: "run-recovery-worker", init: initRunRecoveryWorker, close: closeRunRecoveryWorker },
   { name: "provider-retry-worker", init: initProviderRetryWorker, close: closeProviderRetryWorker },
@@ -70,6 +73,10 @@ const WORKERS: WorkerEntry[] = [
   { name: "entity-extraction-queue", close: closeEntityExtractionQueue },
   { name: "memory-cron", init: initMemoryCron },
   { name: "slack-config-token-cron", init: initSlackConfigTokenCron },
+  // Messaging channels: leases + sockets for WhatsApp/Telegram accounts. Must
+  // stop early on shutdown so the lease release and socket close reach Redis
+  // and the messenger before the shared connection goes away.
+  { name: "messaging-account-manager", init: initMessagingAccountManager, close: closeMessagingAccountManager },
   { name: "digital-twin-daily", init: initDigitalTwinDaily },
   // Daily Brief: bounded worker (caps concurrent LLM runs) + leader-locked
   // enqueue cron (fans out opted-in users once/day). See services/dailyBrief*.
@@ -96,6 +103,7 @@ const WORKERS: WorkerEntry[] = [
 
 const SHUTDOWN_SEQUENCE: string[] = [
   "local-harness-bridge",
+  "messaging-account-manager",
   "bitbucket-stats",
   "scheduled-jobs-worker",
   "run-recovery-worker",

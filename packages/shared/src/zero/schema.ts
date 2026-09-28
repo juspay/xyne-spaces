@@ -75,6 +75,7 @@ import {
   RCAStatus,
   RecapEntityType,
   RecurringCallSeriesStatus,
+  RingStatus,
   ReenterMode,
   ReleaseEventType,
   ReleaseTrackingMode,
@@ -439,6 +440,7 @@ export const userAssignmentStateTable = table('user_assignment_states')
     createdBy: string(),
   })
   .primaryKey('id');
+
 
 export const boardComplexityScoreTable = table('board_complexity_scores')
   .columns({
@@ -1254,6 +1256,7 @@ export const callParticipantTable = table('call_participants')
     displayName: string().optional(),
     email: string().optional(),
     isExternal: boolean(),
+    ringStatus: enumeration<RingStatus>().optional(),
   })
   .primaryKey('id');
 
@@ -1357,7 +1360,7 @@ export const canvasVersionTable = table('canvas_versions')
 export const canvasCommentThreadTable = table('canvas_comment_threads' /* CanvasCommentThread */)
   .columns({
     id: string(),
-    workspaceId: string().optional(), // denormalized tenant key (stamped on insert; nullable during backfill release)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     canvasId: string(),
     blockId: string(),
     anchorText: string().optional(),
@@ -1374,7 +1377,7 @@ export const canvasCommentThreadTable = table('canvas_comment_threads' /* Canvas
 export const canvasCommentTable = table('canvas_comments' /* CanvasComment */)
   .columns({
     id: string(),
-    workspaceId: string().optional(), // denormalized tenant key (stamped on insert; nullable during backfill release)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     threadId: string(),
     canvasId: string(),
     body: string(),
@@ -1701,6 +1704,7 @@ export const emailChannelPreferenceTable = table('email_channel_preferences')
     deskReportEnabled: boolean().optional(),
     deskReportAgentSlug: string().optional(),
     deskReportRangeDays: number().optional(),
+    duplicateScopeConfig: string().optional(),
   })
   .primaryKey('channelId');
 
@@ -3400,6 +3404,11 @@ export const channelTableRelationships = relationships(channelTable, ({ one, man
     destField: ['channelId'],
     destSchema: channelBoardMappingTable,
   }),
+  ticketDescriptions: many({
+    sourceField: ['id'],
+    destField: ['channelId'],
+    destSchema: ticketDescriptionTable,
+  }),
 }));
 
 export const channelBoardMappingTableRelationships = relationships(
@@ -3497,11 +3506,16 @@ export const sdlcTrackTableRelationships = relationships(sdlcTrackTable, ({ many
   }),
 }));
 
-export const channelStatsTableRelationships = relationships(channelStatsTable, ({ one }) => ({
+export const channelStatsTableRelationships = relationships(channelStatsTable, ({ one, many }) => ({
   channel: one({
     sourceField: ['channelId'],
     destField: ['id'],
     destSchema: channelTable,
+  }),
+  participants: many({
+    sourceField: ['channelId'],
+    destField: ['channelId'],
+    destSchema: channelParticipantTable,
   }),
 }));
 
@@ -5103,6 +5117,7 @@ export type Model = Row<typeof schema.tables.models>;
 export type Tool = Row<typeof schema.tables.tools>;
 export type AgentToolsMapping = Row<typeof schema.tables.agent_tools_mappings>;
 export type Ticket = Row<typeof schema.tables.tickets>;
+export type TicketDescription = Row<typeof schema.tables.ticket_descriptions>;
 export type SubTicket = Row<typeof schema.tables.sub_tickets>;
 export type TicketSubTicketMapping = Row<typeof schema.tables.ticket_sub_ticket_mappings>;
 export type TicketActivity = Row<typeof schema.tables.ticket_activities>;

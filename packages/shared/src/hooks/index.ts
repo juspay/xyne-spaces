@@ -58,6 +58,8 @@ export {
   useVisibleChannel,
   useChannelByName,
   useChannelSearch,
+  useChannelMentionSearch,
+  searchMentionableChannels,
   useBrowsableChannels,
   useMigratedChannels,
   useEmailChannels,

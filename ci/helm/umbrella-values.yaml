@@ -1,0 +1,44 @@
+xyne-backend:
+  enabled: true
+xyne-worker:
+  enabled: true
+xyne-dashboard:
+  enabled: true
+xyne-dashboard-external:
+  enabled: true
+xyne-dashboard-edge:
+  enabled: true
+xyne-zero:
+  enabled: true
+xyne-zero-replication:
+  enabled: true
+xyne-ysweet:
+  enabled: true
+xyne-claw:
+  enabled: true
+xyne-claw-auth:
+  enabled: true
+xyne-claw-auth-frontend:
+  enabled: true
+xyne-transcription-agent:
+  enabled: true
+xyne-lighton-ocr:
+  enabled: true
+xyne-vespa:
+  enabled: true
+xyne-vespa-content:
+  enabled: true
+xyne-vespa-feed:
+  enabled: true
+xyne-vespa-search:
+  enabled: true
+xyne-vespa-embedder:
+  enabled: true
+xyne-tei-batch-proxy:
+  enabled: true
+xyne-redis:
+  enabled: true
+xyne-sandbox-router:
+  enabled: true
+xyne-egress-proxy:
+  enabled: true

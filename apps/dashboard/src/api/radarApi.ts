@@ -41,6 +41,25 @@ export interface RadarApplyResult {
   dismissed: number;
 }
 
+export interface RadarDedupCheck {
+  title: string;
+  sourceMessageId: string;
+  /** Best-matching open item; null when Jev gave no answer. */
+  itemId: string | null;
+  itemTitle: string | null;
+  probability: number | null;
+  verdict: 'duplicate' | 'distinct' | 'unscored';
+  /** Only on a flagged create the parser was sent back over: what it did. */
+  outcome?: 'reassigned' | 'dropped' | 'kept';
+}
+
+export interface RadarDedupTrail {
+  threshold: number;
+  /** Whether the parser was sent back — for a duplicate, a no-op reassign, or both. */
+  recalled: boolean;
+  checks: RadarDedupCheck[];
+}
+
 export interface RadarRunLog {
   id: string;
   conversationId: string;
@@ -54,6 +73,8 @@ export interface RadarRunLog {
   applied: { created: number; resolved: number; reassigned: number } | null;
   /** Model's one-sentence read of the window — why these ops, or why none. */
   assessment: string | null;
+  /** Jev's duplicate verdict on each create the parser proposed, when the check ran. */
+  dedupChecks: RadarDedupTrail | null;
   error: string | null;
   durationMs: number | null;
   createdAt: string;
@@ -83,6 +104,49 @@ export function fetchRadarPendingOthers(): Promise<RadarThreadCard[]> {
   return unwrap(
     apiInstance.get<SuccessEnvelope<{ threads: RadarThreadCard[] }>>('/radar/feed/pending-others'),
   ).then(d => d.threads);
+}
+
+export interface RadarPendingOthersPageParams {
+  page: number;
+  mutedPage: number;
+  pageSize: number;
+  holderIds: string[];
+  channelIds: string[];
+  createdFrom: Date | null;
+  createdTo: Date | null;
+}
+
+export interface RadarPendingOthersPage {
+  threads: RadarThreadCard[];
+  totalThreads: number;
+  page: number;
+  mutedThreads: RadarThreadCard[];
+  mutedTotalThreads: number;
+  mutedItemCount: number;
+  mutedPage: number;
+  /** Unmuted open items left after the filters — the tab's badge. */
+  openItemCount: number;
+  facets: { holderIds: string[]; channelIds: string[] };
+}
+
+/** Pending Others one page at a time, filtered on the server — the feed is
+ *  workspace-wide, so it is never shipped whole to be paged in the browser. */
+export function fetchRadarPendingOthersPage(
+  params: RadarPendingOthersPageParams,
+): Promise<RadarPendingOthersPage> {
+  return unwrap(
+    apiInstance.get<SuccessEnvelope<RadarPendingOthersPage>>('/radar/feed/pending-others', {
+      params: {
+        page: params.page,
+        mutedPage: params.mutedPage,
+        pageSize: params.pageSize,
+        ...(params.holderIds.length ? { holders: params.holderIds.join(',') } : {}),
+        ...(params.channelIds.length ? { channels: params.channelIds.join(',') } : {}),
+        ...(params.createdFrom ? { createdFrom: params.createdFrom.toISOString() } : {}),
+        ...(params.createdTo ? { createdTo: params.createdTo.toISOString() } : {}),
+      },
+    }),
+  );
 }
 
 export interface RadarItemMutation {

@@ -1,6 +1,13 @@
 import { ReactElement, useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
-import { BoardType, deserializeFlowPlan, type FlowPlan, type VCSProviderType } from '@xyne/shared';
+import { formatDateNumeric } from '../../utils/dateUtils';
+import {
+  AuditEntityType,
+  BoardType,
+  deserializeFlowPlan,
+  type FlowPlan,
+  type VCSProviderType,
+} from '@xyne/shared';
 import { useCanManageRelease } from '../../hooks/usePermissions';
 import {
   ArrowLeft,
@@ -14,6 +21,8 @@ import {
 // Boxes has no @xyne/icons equivalent yet; lucide-react is still a live dep.
 import { Boxes } from 'lucide-react';
 import { BoardsTable, type BoardWithStages } from '../../components/Board';
+import { AuditLogSection } from '../../components/UserGroup/AssignmentConfigScreen/AuditLogSection';
+import { Dialog } from '../../components/ui/Dialog';
 import * as Tabs from '@radix-ui/react-tabs';
 
 import BoardEditScreen from '../../components/Board/BoardEditScreen/BoardEditScreen';
@@ -28,7 +37,6 @@ import { ReleaseConfigWizard } from '../../components/Release/ReleaseConfigWizar
 import { ReleasesSection } from './ReleasesSection';
 import { CreateTicketModal } from '../../components/Tickets/CreateTicketModal/CreateTicketModal';
 import { Button } from '../../components/ui/Button';
-import { Dialog } from '../../components/ui/Dialog/Dialog';
 import { SdlcRegisterRepositoryForm } from '../SdlcScreen/SdlcRegisterRepositoryForm';
 import { queries } from '../../zero/queries';
 import { mutators } from '../../zero/mutators';
@@ -90,7 +98,8 @@ const ProjectDetailScreen = (): ReactElement => {
   const initialTab = navState?.tab ?? 'boards';
   // Entry point gates the tab set: Release Manager shows release-repo config,
   // List Projects shows the SDLC repositories view.
-  const fromReleaseManager = navState?.from === 'releaseManager';
+  const fromReleaseManager =
+    navState?.from === 'releaseManager' || searchParams.get('from') === 'releaseManager';
   // Gate Create Release like the backend: admin/owner role, or a RELEASE-MANAGER WRITE grant.
   const canCreateRelease = useCanManageRelease();
   const backTo = fromReleaseManager
@@ -117,6 +126,7 @@ const ProjectDetailScreen = (): ReactElement => {
   const [configuringRolesForBoardId, setConfiguringRolesForBoardId] = useState<string | null>(null);
   const [boardIdToEdit, setBoardIdToEdit] = useState<string | null>(null);
   const [copyConfigTargetBoard, setCopyConfigTargetBoard] = useState<BoardWithStages | null>(null);
+  const [historyBoard, setHistoryBoard] = useState<BoardWithStages | null>(null);
   const [creatingRelease, setCreatingRelease] = useState(false);
 
   // Fetch project details
@@ -178,6 +188,27 @@ const ProjectDetailScreen = (): ReactElement => {
   const applicationBoardIds = useMemo(
     () => new Set(applicationByBoardId.keys()),
     [applicationByBoardId],
+  );
+
+  const visibleBoards = useMemo(() => {
+    const list = boards ?? [];
+    return list.filter(board => {
+      const isReleaseBoard =
+        board.boardType === BoardType.RELEASE || applicationBoardIds.has(board.id);
+      return fromReleaseManager ? isReleaseBoard : !isReleaseBoard;
+    });
+  }, [boards, fromReleaseManager, applicationBoardIds]);
+
+  const visibleApplicationByBoardId = useMemo(
+    () =>
+      fromReleaseManager
+        ? applicationByBoardId
+        : new Map<string, (typeof applicationList)[number]>(),
+    [fromReleaseManager, applicationByBoardId],
+  );
+  const visibleApplicationBoardIds = useMemo(
+    () => (fromReleaseManager ? applicationBoardIds : new Set<string>()),
+    [fromReleaseManager, applicationBoardIds],
   );
   const boardNamesById = useMemo(
     () => Object.fromEntries((boards ?? []).map(board => [board.id, board.name])),
@@ -425,7 +456,7 @@ const ProjectDetailScreen = (): ReactElement => {
                   <p className='text-muted-foreground mb-4'>{project.description}</p>
                 )}
                 <div className='text-sm text-muted-foreground'>
-                  Created: {new Date(project.createdAt).toLocaleDateString()}
+                  Created: {formatDateNumeric(project.createdAt)}
                 </div>
               </div>
               <div className='flex gap-2'>
@@ -478,7 +509,7 @@ const ProjectDetailScreen = (): ReactElement => {
                         ? 'Repositories'
                         : 'Releases'}
                 </h2>
-                {activeTab === 'boards' && (
+                {activeTab === 'boards' && !fromReleaseManager && (
                   <Button
                     variant='default'
                     onClick={() => setShowBoardTypeChooser(true)}
@@ -523,13 +554,15 @@ const ProjectDetailScreen = (): ReactElement => {
               {/* Boards Tab Content */}
               <Tabs.Content value='boards' className='outline-none'>
                 <BoardsTable
-                  boards={boards}
+                  boards={visibleBoards}
+                  showTypeColumn={!fromReleaseManager}
                   loading={boardsDetails.type !== 'complete' && (boards?.length ?? 0) === 0}
                   onEdit={handleEditBoard}
                   onClone={board => setCloningFlowBoard(board)}
                   onCopyConfig={board => setCopyConfigTargetBoard(board)}
-                  applicationBoardIds={applicationBoardIds}
-                  applicationByBoardId={applicationByBoardId}
+                  applicationBoardIds={visibleApplicationBoardIds}
+                  applicationByBoardId={visibleApplicationByBoardId}
+                  onHistory={board => setHistoryBoard(board)}
                   {...(fromReleaseManager ? { onWorkflowFields: setEditingBoard } : {})}
                   {...(workspaceId && projectId
                     ? {
@@ -1001,6 +1034,24 @@ const ProjectDetailScreen = (): ReactElement => {
           onClose={() => setCopyConfigTargetBoard(null)}
           onDone={() => setCopyConfigTargetBoard(null)}
         />
+      )}
+
+      {/* Board change history (audit trail) */}
+      {historyBoard && (
+        <Dialog
+          open={true}
+          onOpenChange={open => {
+            if (!open) setHistoryBoard(null);
+          }}
+          title={`Change history — ${historyBoard.name}`}
+          className='max-h-[80vh] overflow-y-auto sm:max-w-2xl'
+        >
+          <AuditLogSection
+            entityType={AuditEntityType.BOARD}
+            entityId={historyBoard.id}
+            entityName={historyBoard.name}
+          />
+        </Dialog>
       )}
 
       {/* Release-board creation begins here, then continues through the existing

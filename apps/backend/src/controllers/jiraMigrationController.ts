@@ -1,3 +1,5 @@
+import { syncToYSweet } from '@/utils/ysweetUtils';
+import type { BlockNoteBlock } from '@/types/blockNoteTypes';
 import { randomUUID } from 'crypto';
 import { Request, Response } from 'express';
 import { jiraMigrationPreviewService } from '@/services/jiraMigrationPreviewService';
@@ -1907,18 +1909,23 @@ export class JiraMigrationController {
       select: { workspaceId: true },
     });
     try {
+      const blocks = this.buildMigrationReportCanvasBlocks(result) as BlockNoteBlock[];
+      const synced = await syncToYSweet(canvasId, blocks, actorUserId);
+      if (!synced) {
+        throw new Error(`Failed to save Jira migration report canvas ${canvasId} to Y-Sweet`);
+      }
       await db.$transaction(async tx => {
         await tx.canvas.create({
           data: {
             id: canvasId,
             workspaceId: canvasChannel.workspaceId,
             title: `Jira Migration Report: ${result.jiraProjectKey}`,
-            content: this.buildMigrationReportCanvasBlocks(result) as any,
+            content: [],
             channelId,
             createdBy: actorUserId,
             visibility: CanvasVisibility.PUBLIC,
             isTemplate: false,
-            isCollaborative: false,
+            isCollaborative: true,
             lastEditedBy: actorUserId,
             lastEditedAt: now,
             createdAt: now,

@@ -6,8 +6,11 @@
 // migrations and on the single release canvas.
 //
 // Matching is driven by the PR's repo identity (owner/name for GitHub,
-// projectKey/slug for Bitbucket) + the release ticket's stored `branch` form
-// value.
+// projectKey/slug for Bitbucket) + the release branch, which is the release
+// ticket's title (e.g. ticket "release-20260923" ↔ branch release-20260923).
+// NOT the stored `branch` form value — that is the branch the release was cut
+// FROM (usually main), so matching on it treats every post-freeze merge into
+// main as a hotfix and misses the real hotfixes landing on the release branch.
 
 import { BaseTicketType, FormEntityType, ReleaseTrackingMode, VCSProviderType } from '@xyne/shared';
 import { db } from '@/database/client';
@@ -117,6 +120,7 @@ export async function syncReleaseOnPRMerge(params: ReleaseMergeSyncParams): Prom
       orderBy: { createdAt: 'desc' },
       select: {
         id: true,
+        title: true,
         xyneId: true,
         conversationId: true,
         channelId: true,
@@ -141,9 +145,11 @@ export async function syncReleaseOnPRMerge(params: ReleaseMergeSyncParams): Prom
       return;
     }
 
-    // 3. First (most recent) ticket whose stored branch matches the PR base branch.
+    // 3. First (most recent) ticket whose release branch is the PR's base branch.
     const formsRepo = new FormsRepository();
     for (const ticket of tickets) {
+      if (ticket.title.trim() !== baseBranch) continue;
+
       // Prefer this repo's release_repositories row (the ticket's scalar form
       // values describe only the primary repo); fall back for legacy single-repo.
       const repoRow = repoRowByReleaseId.get(ticket.id);
@@ -160,7 +166,6 @@ export async function syncReleaseOnPRMerge(params: ReleaseMergeSyncParams): Prom
         deployedCommitId = String(formValues['deployedCommitId'] ?? '').trim();
         newCommitId = String(formValues['newCommitId'] ?? '').trim();
       }
-      if (branch !== baseBranch) continue;
 
       if (!deployedCommitId || !newCommitId) {
         // No analyzed range yet (e.g. a just-created release ticket); try the
@@ -188,12 +193,14 @@ export async function syncReleaseOnPRMerge(params: ReleaseMergeSyncParams): Prom
           // rows; hotfixOverride below supplies the per-repo delta otherwise.
           deployedCommitId: newCommitId,
           newCommitId: mergeCommitSha!,
-          branch,
+          // The delta lives on the release branch, so PR lookup must target it —
+          // the hotfix PRs have base.ref = baseBranch, not the cut-from branch.
+          branch: baseBranch,
           currentTicketId: ticket.id,
           userName: bot?.name || 'System',
           workspaceId: ticket.workspaceId,
           hotfixSync: true,
-          hotfixOverride: { boardIds, mergeCommitSha: mergeCommitSha! },
+          hotfixOverride: { boardIds, mergeCommitSha: mergeCommitSha!, branch: baseBranch },
         });
         if (result.success) {
           logger.info(`[${source}] Synced hotfix (${newCommitId.slice(0, 8)}...${mergeCommitSha!.slice(0, 8)}) for ${ticket.xyneId}`);

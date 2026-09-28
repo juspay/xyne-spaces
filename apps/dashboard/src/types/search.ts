@@ -113,6 +113,7 @@ export interface VespaSearchFilters {
   in?: string; // Channel IDs (scope: within channel/DM)
   mentions?: string; // User IDs the message mentions (scoped mention search; bare @user chip)
   channelMentions?: string; // Channel IDs the message references (scoped mention search; bare #channel chip)
+  groupMentions?: string; // User-group IDs the message mentions (scoped mention search; @user-group chip)
   mentionHighlights?: string[]; // Display name(s) of bare mention chips — highlighted in results, not in YQL
   offset?: number;
   limit?: number;
@@ -160,6 +161,11 @@ export interface VespaSearchFilters {
   // Cmd-K "Include my channels" toggle. Default on → backend scopes to member channels.
   onlyMyChannels?: boolean;
 
+  // When true, the backend drops results that resolve to an archived ticket. Default off
+  // (undefined) preserves current behavior. Set true by cmd+k always, and by the full-page
+  // Desk tab unless its "Show archived" toggle is on.
+  excludeArchived?: boolean;
+
   // Override Vespa grouping. Empty string => flat ranked list (no grouping).
   groupBy?: string;
 }
@@ -169,6 +175,13 @@ export interface VespaSearchGroup {
   groupValue: string;
   count: number;
   results: DisplaySearchResult[];
+}
+
+/** Backend verdict on how the cmd+K palette should treat a query. */
+export interface QueryIntent {
+  mode: 'lexical' | 'ai';
+  /** Probability that the query needs AI (from Jev). */
+  pAI: number;
 }
 
 export interface VespaSearchResponse {

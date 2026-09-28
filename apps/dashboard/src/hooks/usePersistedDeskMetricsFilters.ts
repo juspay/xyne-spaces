@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 import { type DateRangeValue } from '../components/ui/DateRangeFilter';
-import { TicketPriority } from '@xyne/shared';
+import { TicketPriority, type DeskMetricsDateBasis } from '@xyne/shared';
 
 type RangeLabel =
   | 'Today'
@@ -102,6 +102,7 @@ const isPerKeyValues = (v: unknown): v is Record<string, string[]> =>
 export const CHART_VIEW_LABELS = {
   priority: 'Priority',
   trend: 'Created vs Resolved',
+  resolutionTrend: 'Avg Resolution Time',
   assignee: 'Assignee',
   tags: 'Tags',
   csat: 'CSAT',
@@ -126,6 +127,7 @@ interface StoredFilters {
   customEnd?: string;
   startTime: string;
   endTime: string;
+  dateBasis: DeskMetricsDateBasis;
   selectedAssigneeIds: string[];
   selectedStageNames: string[];
   selectedPriorities: TicketPriority[];
@@ -144,6 +146,7 @@ const DEFAULT_STORED: StoredFilters = {
   rangeLabel: 'Last 7 days',
   startTime: '00:00',
   endTime: '23:59',
+  dateBasis: 'created',
   selectedAssigneeIds: [],
   selectedStageNames: [],
   selectedPriorities: [],
@@ -177,6 +180,7 @@ const readStorage = (key: string): StoredFilters => {
         : DEFAULT_STORED.rangeLabel,
       startTime: typeof p['startTime'] === 'string' ? p['startTime'] : DEFAULT_STORED.startTime,
       endTime: typeof p['endTime'] === 'string' ? p['endTime'] : DEFAULT_STORED.endTime,
+      dateBasis: p['dateBasis'] === 'active' ? 'active' : DEFAULT_STORED.dateBasis,
       selectedAssigneeIds: isStringArray(p['selectedAssigneeIds'])
         ? p['selectedAssigneeIds']
         : typeof p['selectedAssigneeId'] === 'string'
@@ -223,6 +227,7 @@ export interface PersistedDeskMetricsFilters {
   dateRange: DateRangeValue;
   startTime: string;
   endTime: string;
+  dateBasis: DeskMetricsDateBasis;
   selectedAssigneeIds: string[];
   selectedStageNames: string[];
   selectedPriorities: TicketPriority[];
@@ -235,6 +240,7 @@ export interface PersistedDeskMetricsFilters {
   chartView: ChartView;
   activeTab: ActiveTab;
   setDateRange: (dr: DateRangeValue, st: string, et: string) => void;
+  setDateBasis: (basis: DeskMetricsDateBasis) => void;
   setSelectedAssigneeIds: (ids: string[]) => void;
   setSelectedStageNames: (names: string[]) => void;
   setSelectedPriorities: (priorities: TicketPriority[]) => void;
@@ -285,6 +291,13 @@ export const usePersistedDeskMetricsFilters = (
         }
         return next;
       });
+    },
+    [persist],
+  );
+
+  const setDateBasis = useCallback(
+    (basis: DeskMetricsDateBasis) => {
+      persist(prev => ({ ...prev, dateBasis: basis }));
     },
     [persist],
   );
@@ -372,6 +385,7 @@ export const usePersistedDeskMetricsFilters = (
     dateRange,
     startTime: stored.startTime,
     endTime: stored.endTime,
+    dateBasis: stored.dateBasis,
     selectedAssigneeIds: stored.selectedAssigneeIds,
     selectedStageNames: stored.selectedStageNames,
     selectedPriorities: stored.selectedPriorities,
@@ -384,6 +398,7 @@ export const usePersistedDeskMetricsFilters = (
     chartView: stored.chartView,
     activeTab: stored.activeTab,
     setDateRange,
+    setDateBasis,
     setSelectedAssigneeIds,
     setSelectedStageNames,
     setSelectedPriorities,

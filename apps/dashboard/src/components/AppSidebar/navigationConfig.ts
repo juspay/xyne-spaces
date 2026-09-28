@@ -27,7 +27,6 @@ import {
   LightningThunderElectricOn,
   Atom,
   ChatChatting,
-  Bot,
   RocketShip,
   GitBranch,
   LayoutGridTwoVertical,
@@ -68,8 +67,11 @@ export type ChatNavKey =
   | 'recap'
   | 'radar';
 
+/** A built-in Inbox entry, or an artifact app the user added (`app:<id>`). */
+export type InboxItemKey = ChatNavKey | `app:${string}`;
+
 export interface ChatNavItem {
-  key: ChatNavKey;
+  key: InboxItemKey;
   label: string;
   to: string;
   icon: PikaIcon;
@@ -134,6 +136,8 @@ export const CHAT_NAV_ITEMS: ChatNavItem[] = [
   },
 ];
 
+// The full built-in set, radar-gated. The Inbox itself renders the user's
+// ordered selection — see useInboxNavItems — this is what the picker offers.
 export const chatNavItems = (radarEnabled: boolean): ChatNavItem[] =>
   CHAT_NAV_ITEMS.filter(item => !item.requiresRadar || radarEnabled);
 
@@ -239,7 +243,6 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
     popout: true,
   },
   { path: '/team-intelligence', label: 'Team Intelligence', icon: Atom, popout: true },
-  { path: '/claw-agents', label: 'Claw Agents', icon: Bot, popout: true },
 ];
 
 // Paths shown in the toolbar by default (before any user customization).
@@ -275,7 +278,6 @@ export const TOOLBAR_ITEM_DESCRIPTIONS: Record<string, string> = {
   '/knowledge-base': 'File and folder knowledge base for Ask AI',
   '/memory': 'Saved context and memory for AI',
   '/releaseManager': 'Release and deployment tracking',
-  '/claw-agents': 'Claw AI agents dashboard',
 };
 
 type Permissions = ReturnType<typeof usePermissions>;

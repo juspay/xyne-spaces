@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import { Popover } from '../../ui/Popover';
 import EmojiPicker, { EmojiStyle, Theme } from 'emoji-picker-react';
 import {
@@ -24,14 +24,16 @@ import {
 import { EditMessageIcon } from '../../../assets/icons';
 import { UnpinIcon } from '../../../assets/icons/UnpinIcon';
 import { XyneAIStar } from '../../icons/xyne-ai';
-import { useReactions } from '../../../hooks/useReaction';
-import { useAuth } from '../../../hooks/useAuth';
 import { useCanCreateTicket } from '../../../hooks/usePermissions';
-import { parseReactionsMd } from '@xyne/shared';
 import { Tooltip } from '../../ui/Tooltip/Tooltip';
 import { ShortcutHint } from '../../ui/ShortcutHint';
 import Button from '../../ui/Button';
 import { useCustomEmojis } from '../../../hooks/useCustomEmojis';
+import { FrequentEmojiRow } from '../FrequentEmojis/FrequentEmojiRow';
+import { InlineQuickReactions } from '../FrequentEmojis/InlineQuickReactions';
+import { EMOJI_PICKER_CATEGORIES } from '../../../utils/emojiPickerCategories';
+import { toEmojiToken } from '../../../utils/customEmojiUtils';
+import { useApplyReaction } from '../../../hooks/useApplyReaction';
 import { useTheme } from '../../../hooks/useTheme';
 import { ConversationSubscription } from '../ConversationSubscription';
 import {
@@ -163,8 +165,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
     ...(conversationId !== undefined && { conversationId }),
   });
 
-  const { toggleReaction } = useReactions();
-  const { user } = useAuth();
+  const { applyReaction: toggleEmoji, hasReacted } = useApplyReaction(messageId, reactionsMd);
   const canCreateTicket = useCanCreateTicket();
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
@@ -172,11 +173,20 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
   const { data: customEmojis } = useCustomEmojis();
   const { theme } = useTheme();
   const emojiPickerTheme = theme === 'midnight' ? Theme.DARK : Theme.LIGHT;
-  const reactionsData = useMemo(() => parseReactionsMd(reactionsMd), [reactionsMd]);
 
   const handleEmojiOpenChange = (open: boolean): void => {
+    // Only report a real transition: the inline strip reacts without ever opening the
+    // popover, and an unconditional `false` tells the parent the picker just closed.
+    if (open === emojiOpen) return;
     setEmojiOpen(open);
     onEmojiPickerOpenChange?.(open);
+  };
+
+  // One path for every emoji this toolbar can apply — the picker grid, the Frequently Used
+  // row and the inline strip — so the toggle semantics and close behaviour cannot drift.
+  const applyReaction = (emojiName: string): void => {
+    toggleEmoji(emojiName);
+    handleEmojiOpenChange(false);
   };
 
   const handleDropdownOpenChange = (open: boolean): void => {
@@ -205,8 +215,17 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
   return (
     <div
       key={`hover-actions-toolbar-${messageId}`}
-      className={`absolute ${placement === 'below' ? 'top-1' : '-top-7'} right-4 z-50 p-1 flex items-center gap-1 rounded-lg border border-border bg-popover shadow-md`}
+      className={`absolute ${placement === 'below' ? 'top-1' : '-top-7'} right-4 z-50 p-1 flex max-w-[calc(100%-2rem)] flex-wrap items-center justify-end gap-1 rounded-lg border border-border bg-popover shadow-md`}
     >
+      {/* Frequently used emojis, one click each — then the full picker */}
+      {onEmojiPickerOpenChange && (
+        <InlineQuickReactions
+          onSelect={applyReaction}
+          hasReacted={hasReacted}
+          messageId={messageId}
+        />
+      )}
+
       {/* Emojis */}
       {onEmojiPickerOpenChange && (
         <Popover
@@ -231,32 +250,21 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
           avoidCollisions={true}
           className='z-[60] bg-popover rounded-lg shadow-md p-0'
         >
-          <EmojiPicker
-            style={{
-              width: '320px',
-              ['--epr-emoji-size' as string]: '22px',
-              ['--epr-emoji-gap' as string]: '4px',
-            }}
-            theme={emojiPickerTheme}
-            emojiStyle={EmojiStyle.NATIVE}
-            onEmojiClick={emoji => {
-              // For custom emojis, store the emojiId with a prefix
-              const emojiName = emoji.isCustom
-                ? `custom:${emoji.emoji}:${emoji.names[0] || 'custom'}`
-                : emoji.emoji;
-              // Check if the user has already reacted with this emoji
-              const hasReacted = !!user && (reactionsData[emojiName] || []).includes(user.id);
-
-              toggleReaction({
-                messageId,
-                emoji: emojiName,
-                hasReacted,
-              });
-              handleEmojiOpenChange(false);
-            }}
-            customEmojis={customEmojis || []}
-            previewConfig={{ showPreview: true }}
-          />
+          <div className='w-[320px]'>
+            <FrequentEmojiRow onSelect={applyReaction} messageId={messageId} />
+            <EmojiPicker
+              style={{
+                ['--epr-emoji-size' as string]: '22px',
+                ['--epr-emoji-gap' as string]: '4px',
+              }}
+              categories={EMOJI_PICKER_CATEGORIES}
+              theme={emojiPickerTheme}
+              emojiStyle={EmojiStyle.NATIVE}
+              onEmojiClick={emoji => applyReaction(toEmojiToken(emoji))}
+              customEmojis={customEmojis || []}
+              previewConfig={{ showPreview: true }}
+            />
+          </div>
         </Popover>
       )}
 

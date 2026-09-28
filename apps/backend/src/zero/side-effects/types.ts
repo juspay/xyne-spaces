@@ -42,6 +42,7 @@ export interface MessagePreviousValue {
   isDeleted?: boolean;
   channelId?: string;
   isThreadReply: boolean;
+  metadata?: unknown;
 }
 
 export interface TicketTagPreviousValue {

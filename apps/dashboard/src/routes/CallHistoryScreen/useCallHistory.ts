@@ -282,8 +282,13 @@ export function useCallHistory(
     // in this set it has ended. allScheduledCalls covers the ACTIVE→SCHEDULED reversion
     // (call ended before endsAt) where the call leaves userCallHistory but the
     // cumulative accumulator still holds an ACTIVE entry.
-    // When calendar view is inactive, fall back to upcomingScheduledCallRows for stale detection.
-    const scheduledSource = scheduledCallRows ?? upcomingScheduledCallRows;
+    // Must follow isCalendarView, NOT `scheduledCallRows ?? ...`. The calendar query is
+    // gated behind `enabled: isCalendarView`, and a disabled useCachedQuery still returns
+    // its (IndexedDB-persisted) cache entry while nothing can ever refresh it — Zero never
+    // subscribes, so the cache-update effect never fires. Falling back to it here meant one
+    // visit to Calendar view froze a snapshot that then shadowed the live upcoming query,
+    // resurrecting calls that had since ended as joinable rows.
+    const scheduledSource = isCalendarView ? scheduledCallRows : upcomingScheduledCallRows;
     const activeCallExternalIds = new Set(activeCalls?.map(c => c.externalId) ?? []);
     const scheduledCallIds = new Set(scheduledSource?.map(c => c.id) ?? []);
 
@@ -332,7 +337,15 @@ export function useCallHistory(
       const bTime = b.startsAt || b.startedAt || b.createdAt;
       return new Date(bTime).getTime() - new Date(aTime).getTime();
     });
-  }, [calls, scheduledCallRows, upcomingScheduledCallRows, activeCalls, showChannelCalls, userId]);
+  }, [
+    calls,
+    scheduledCallRows,
+    upcomingScheduledCallRows,
+    isCalendarView,
+    activeCalls,
+    showChannelCalls,
+    userId,
+  ]);
 
   const missedCalls = useMemo(() => {
     if (!recentCalls || !userId) return [];

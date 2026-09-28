@@ -46,6 +46,8 @@ import {
   etaSignalsFromResult,
   writeEtaActivitiesPrisma,
 } from '@/services/etaManagement';
+import { lockTicketMetadataAndEta } from '@/bypassAcl/rowLockServices';
+import { lockTicketStatusV2 } from '@/bypassAcl/rowLockServices';
 //import { queueTicketIngestion } from '@/queues/vespaQueue';
 
 const prisma = DatabaseClient.getInstance();
@@ -116,6 +118,34 @@ const makeFallbackCountsSnapshot = (ticket: {
   qaAssigned: [],
   roleAssignments: [],
 });
+
+/**
+ * Publish TICKET_CREATED. Must run *after* the creating transaction commits:
+ * the automation worker re-reads the ticket on another connection, and an
+ * uncommitted row is invisible to it, which makes every configured
+ * board/project/channel filter fail closed and the run get SKIPPED.
+ */
+export async function emitTicketCreated(
+  ticket: { id: string; workspaceId: string },
+  formFieldChanges: FormFieldChanges | undefined,
+  createdBy: string,
+): Promise<void> {
+  try {
+    await eventRouter.emit(
+      {
+        type: TICKET_CREATED_EVENT,
+        payload: {
+          ticketId: ticket.id,
+          formFieldChanges,
+          performedBy: { id: createdBy },
+        },
+      },
+      ticket.workspaceId,
+    );
+  } catch (err) {
+    logger.error(`[automations] TICKET_CREATED emit failed for ticket ${ticket.id}:`, err);
+  }
+}
 
 export class TicketRepository {
 
@@ -376,23 +406,13 @@ export class TicketRepository {
     }
 
 
-    void (async (): Promise<void> => {
-      try {
-        await eventRouter.emit(
-          {
-            type: TICKET_CREATED_EVENT,
-            payload: {
-              ticketId: ticket.id,
-              formFieldChanges: data.formFieldChanges,
-              performedBy: { id: data.createdBy },
-            },
-          },
-          ticket.workspaceId,
-        );
-      } catch (err) {
-        logger.error(`[automations] TICKET_CREATED emit failed for ticket ${ticket.id}:`, err);
-      }
-    })();
+    // Automations read the ticket back on their own connection, so the event may
+    // only be published once the row is committed. When `tx` was supplied the
+    // caller still owns the transaction and nothing is committed yet — that
+    // caller emits after its transaction resolves (see emitTicketCreated).
+    if (!tx) {
+      void emitTicketCreated(ticket, data.formFieldChanges, data.createdBy);
+    }
 
     return ticket;
   }
@@ -498,12 +518,7 @@ export class TicketRepository {
           ? await updateWhileFlowRunActive({
               runTransaction: operation => prisma.$transaction(operation),
               lockAndReadRootStatus: async tx => {
-                const [root] = await tx.$queryRaw<{ statusV2: TicketStatusV2 }[]>`
-                  SELECT "statusV2"
-                  FROM "tickets"
-                  WHERE "id" = ${options.requiredActiveFlowRootId}
-                  FOR UPDATE
-                `;
+                const root = await lockTicketStatusV2(tx, options.requiredActiveFlowRootId!);
                 return root?.statusV2 ?? null;
               },
               update,
@@ -667,12 +682,7 @@ export class TicketRepository {
       // FOR UPDATE locks the row so that can't happen. Both locked values feed evaluateEta:
       // eta is the extend-only baseline and a fingerprint input, so a stale one could decide
       // against - and then overwrite - a due date someone else just moved.
-      const [lockedTicket] = await tx.$queryRaw<{ metadata: unknown; eta: Date | null }[]>`
-        SELECT "metadata", "eta"
-        FROM "tickets"
-        WHERE "id" = ${ticketId}
-        FOR UPDATE
-      `;
+      const lockedTicket = await lockTicketMetadataAndEta(tx, ticketId);
       const lockedEta = lockedTicket?.eta ?? null;
       const boardEtaCtx = await loadBoardEtaContext(tx, currentTicket.boardId);
       const currentTicketEtaManagement = parseTicketEtaManagement(lockedTicket?.metadata);

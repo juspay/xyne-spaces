@@ -98,8 +98,6 @@ export const buildDynamicFieldFilterEntries = (
 const SCALAR_EQUALITY_FIELD_TYPES = new Set<FormFieldType>([
   FormFieldType.BOOLEAN,
   FormFieldType.NUMBER,
-  FormFieldType.SINGLE_SELECT,
-  FormFieldType.STRING,
 ]);
 
 export const toDynamicFieldQueryFilters = (
@@ -141,7 +139,6 @@ export const ticketMatchesDynamicFieldEntries = (
 ): boolean => {
   for (const entry of entries) {
     if (entry.fieldType === undefined) continue;
-    if (SCALAR_EQUALITY_FIELD_TYPES.has(entry.fieldType)) continue;
     const fieldValue = formEntityValues?.find(v => v.fieldId === entry.fieldId);
     if (!fieldValue) return false;
     if (!matchesDynamicFieldValue(entry.fieldType, entry.value, fieldValue.actualFieldValue)) {

@@ -3,7 +3,7 @@ import { MultipleCrossCancelDefault, PlusDefault } from '@xyne/icons';
 import type { AgentCapability, AgentIdentity } from '@xyne/shared';
 import { cn } from '../../../../utils/classNames';
 import useMeasure from '../../../../hooks/useMeasure';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { CapabilityIcon } from './CapabilityIcon';
 
 /**
@@ -300,13 +300,15 @@ export const AgentConnectPrompt: React.FC<{
   className?: string;
 }> = ({ agent, agentExists = false, className }) => {
   const navigate = useNavigate();
+  const { workspaceId } = useParams<{ workspaceId?: string }>();
   const unconnected = (agent.capabilities ?? []).filter(c => c.requiresConnection);
   if (unconnected.length === 0) {
     return null;
   }
+  const libraryPath = workspaceId ? `/${workspaceId}/ai/library` : '/ai/library';
   const target = agentExists
-    ? `/claw-agents/agents/${agent.slug}?tab=connections`
-    : '/claw-agents/mcp';
+    ? `${libraryPath}/agent/${agent.slug}?tab=tools`
+    : `${libraryPath}?tab=mcp`;
 
   return (
     <div className={cn('min-w-0 shrink-0', className)}>

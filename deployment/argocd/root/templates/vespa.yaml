@@ -1,0 +1,113 @@
+{{- $vespa := .Values.addons.vespa }}
+{{- if $vespa.enabled }}
+{{- $ns := .Values.global.namespace }}
+{{- $pool := include "xyne-root.pool" (dict "root" $ "pool" "vespa") | fromYaml }}
+{{- $image := dict "registry" $vespa.image.registry "repository" $vespa.image.repository "tag" $vespa.image.tag }}
+{{- $global := dict }}
+{{- with .Values.global.imageRegistry }}
+{{- $global = dict "global" (dict "imageRegistry" .) }}
+{{- end }}
+{{- $common := mergeOverwrite (dict "image" $image "istio" (dict "destinationRule" (dict "enabled" true) "virtualService" (dict "enabled" false))) $global }}
+{{- $roles := dict
+  "xyne-vespa" (dict "persistence" (dict "size" $vespa.configserverStorage "storageClass" $vespa.storageClass))
+  "xyne-vespa-content" (include "xyne-root.vespaContent" $ | fromYaml)
+  "xyne-vespa-feed" (include "xyne-root.vespaFeed" $ | fromYaml)
+  "xyne-vespa-search" (include "xyne-root.vespaSearch" $ | fromYaml)
+}}
+{{- $layers := dict "xyne-vespa" $vespa.values.configserver "xyne-vespa-content" $vespa.values.content "xyne-vespa-feed" $vespa.values.feed "xyne-vespa-search" $vespa.values.search }}
+{{- range $name := list "xyne-vespa" "xyne-vespa-content" "xyne-vespa-feed" "xyne-vespa-search" }}
+{{- $values := include "xyne-root.merge" (dict "base" $common "layers" (list $pool (index $roles $name) (index $layers $name))) | fromYaml }}
+{{- include "xyne-root.application" (dict "root" $ "name" $name "namespace" $ns "wave" 1 "source" (include "xyne-root.helmSource" (dict "root" $ "path" "helm-charts/charts/xyne-vespa" "releaseName" $name "values" $values) | fromYaml)) }}
+{{- end }}
+{{- if $vespa.embedder.enabled }}
+{{- $tolerations := concat ($pool.tolerations | default list) (list (dict "key" "nvidia.com/gpu" "operator" "Exists" "effect" "NoSchedule")) }}
+{{- $embedder := include "xyne-root.merge" (dict "base" (mergeOverwrite (dict "istio" (dict "destinationRule" (dict "enabled" true) "virtualService" (dict "enabled" false))) $global) "layers" (list $pool (dict "tolerations" $tolerations) $vespa.values.embedder)) | fromYaml }}
+{{- include "xyne-root.application" (dict "root" $ "name" "xyne-vespa-embedder" "namespace" $ns "wave" 1 "source" (include "xyne-root.helmSource" (dict "root" $ "path" "helm-charts/charts/xyne-vespa-embedder" "releaseName" "xyne-vespa-embedder" "values" $embedder) | fromYaml) "ignoreDifferences" (include "xyne-root.deploymentIgnore" . | fromYamlArray)) }}
+{{- $proxyImage := dict "registry" $vespa.proxyImage.registry "repository" $vespa.proxyImage.repository "tag" $vespa.proxyImage.tag }}
+{{- $proxy := include "xyne-root.merge" (dict "base" (mergeOverwrite (dict "image" $proxyImage "istio" (dict "destinationRule" (dict "enabled" true) "virtualService" (dict "enabled" false))) $global) "layers" (list $pool $vespa.values.proxy)) | fromYaml }}
+{{- include "xyne-root.application" (dict "root" $ "name" "xyne-tei-batch-proxy" "namespace" $ns "wave" 1 "source" (include "xyne-root.helmSource" (dict "root" $ "path" "helm-charts/charts/xyne-tei-batch-proxy" "releaseName" "xyne-tei-batch-proxy" "values" $proxy) | fromYaml) "ignoreDifferences" (include "xyne-root.deploymentIgnore" . | fromYamlArray)) }}
+{{- end }}
+{{- end }}
+
+{{- define "xyne-root.vespaContent" -}}
+fullnameOverride: vespa-content
+args:
+  - services
+containerPorts:
+  - name: http
+    containerPort: 19107
+    protocol: TCP
+service:
+  ports:
+    - name: http
+      port: 19107
+      targetPort: http
+readinessProbe: null
+resources: null
+persistence:
+  size: {{ .Values.addons.vespa.contentStorage }}
+  storageClass: {{ .Values.addons.vespa.storageClass | quote }}
+{{- end }}
+
+{{- define "xyne-root.vespaFeed" -}}
+fullnameOverride: vespa-feed
+args:
+  - services
+containerPorts:
+  - name: http
+    containerPort: 8080
+    protocol: TCP
+service:
+  clusterIP: null
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+resources:
+  requests:
+    cpu: "1"
+    memory: 8Gi
+  limits:
+    cpu: "3"
+    memory: 8Gi
+podSecurityContext: null
+securityContext:
+  runAsUser: 0
+podAnnotations:
+  sidecar.istio.io/inject: null
+  traffic.sidecar.istio.io/includeInboundPorts: "8080"
+  traffic.sidecar.istio.io/includeOutboundPorts: "8080,8088"
+podAntiAffinityPreset: ""
+persistence:
+  enabled: false
+{{- end }}
+
+{{- define "xyne-root.vespaSearch" -}}
+fullnameOverride: vespa-search
+args:
+  - services
+containerPorts:
+  - name: http
+    containerPort: 8080
+    protocol: TCP
+service:
+  clusterIP: null
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+resources:
+  requests:
+    cpu: "1"
+    memory: 10Gi
+  limits:
+    cpu: "3"
+    memory: 10Gi
+podSecurityContext: null
+podAnnotations:
+  sidecar.istio.io/inject: null
+  traffic.sidecar.istio.io/includeInboundPorts: "8080"
+  traffic.sidecar.istio.io/includeOutboundPorts: "8080"
+persistence:
+  enabled: false
+{{- end }}

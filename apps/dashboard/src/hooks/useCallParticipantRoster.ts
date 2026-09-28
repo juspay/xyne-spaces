@@ -48,11 +48,12 @@ export function useCallParticipantRoster(
   isEnabled: boolean,
   currentUserId: string | undefined,
 ): UseCallParticipantRosterResult {
+  // Live calls always fetch: `participantCount` is only refreshed when the call ends.
   const hasFullParticipants =
-    call?.status === CallStatus.ACTIVE ||
-    (call?.participantCount !== null &&
-      call?.participantCount !== undefined &&
-      call.participantCount <= (call.participants?.length ?? 0));
+    call?.status !== CallStatus.ACTIVE &&
+    call?.participantCount !== null &&
+    call?.participantCount !== undefined &&
+    call.participantCount <= (call.participants?.length ?? 0);
 
   const [fullParticipants, fullParticipantsDetails] = useCachedQuery(
     queries.callParticipantsByCallId({ callId: call?.id ?? '' }),
@@ -106,12 +107,22 @@ export function useCallParticipantRoster(
 
   const participants = useMemo<CallParticipantRow[]>(() => {
     const merged = [...previewParticipants];
-    const seen = new Set(merged.map(participant => participant.userId));
+    const indexByUserId = new Map(merged.map((participant, index) => [participant.userId, index]));
 
+    // Fetched rows replace preview rows in place, whose join flag can be stale.
     for (const participant of fullParticipants ?? []) {
-      if (participant.userId && !seen.has(participant.userId)) {
-        merged.push({ ...participant, isCurrentUser: participant.userId === currentUserId });
-        seen.add(participant.userId);
+      if (!participant.userId) continue;
+
+      const fullParticipant = {
+        ...participant,
+        isCurrentUser: participant.userId === currentUserId,
+      };
+      const index = indexByUserId.get(participant.userId);
+      if (index === undefined) {
+        indexByUserId.set(participant.userId, merged.length);
+        merged.push(fullParticipant);
+      } else {
+        merged[index] = fullParticipant;
       }
     }
 
