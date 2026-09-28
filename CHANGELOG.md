@@ -1,3 +1,10 @@
+## [1.416.1](https://github.com/juspay/xyne-spaces/compare/v1.416.0...v1.416.1) (2026-09-28)
+
+
+### Bug Fixes
+
+* align activity badge unread count with Activity tab (All) ([#2384](https://github.com/juspay/xyne-spaces/issues/2384)) ([da53a19](https://github.com/juspay/xyne-spaces/commit/da53a194d00f58baa61d592f3813626a6a17e5c4))
+
 ## [1.416.0](https://github.com/juspay/xyne-spaces/compare/v1.415.0...v1.416.0) (2026-09-28)
 
 
