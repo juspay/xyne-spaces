@@ -1,0 +1,114 @@
+# tei-batch-proxy: OpenAI-/v1/embeddings-compatible proxy between Vespa's feed
+# embedder and TEI (vespa-embedder). Splits an embedding request into
+# <= EMBEDDINGS_BATCH_SIZE sub-batches so a large document (e.g. 1885 chunks)
+# never exceeds TEI's --max-client-batch-size and 413s during indexing.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tei-batch-proxy
+  namespace: xyne-vespa
+spec:
+  replicas: 2          # stateless — scale horizontally; istio L7 LBs across pods
+  selector:
+    matchLabels:
+      app: tei-batch-proxy
+  template:
+    metadata:
+      labels:
+        app: tei-batch-proxy
+      annotations:
+        # Mesh like vespa-feed, but on a DISTINCT port (8088) — feed already owns 8080.
+        # Keep the istio sidecar and only intercept the proxy's own port (8088), so
+        # feed -> proxy is mesh (mTLS, L7-balanced across pods) while the proxy's
+        # outbound call to vespa-embedder:80 bypasses the sidecar — same pattern as
+        # feed -> embedder today. NOTE: requires vespa-feed's includeOutboundPorts to
+        # also list 8088 (see containers.yaml) for the feed sidecar to route here.
+        traffic.sidecar.istio.io/includeInboundPorts: "8088"
+        traffic.sidecar.istio.io/includeOutboundPorts: "8088"
+    spec:
+      serviceAccountName: tei-batch-proxy
+      automountServiceAccountToken: false
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      # Co-locate with vespa-feed (the proxy's only caller). The feed pool is
+      # tainted v-role=feed:NoSchedule, so we must both select it and tolerate it.
+      nodeSelector: { v-role: feed }
+      tolerations:
+      - key: "v-role"
+        operator: "Equal"
+        value: "feed"
+        effect: "NoSchedule"
+      containers:
+      - name: tei-batch-proxy
+        image: <REGISTRY>/tei-batch-proxy:<tag>
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 10001
+          runAsGroup: 10001
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        ports:
+        - containerPort: 8088
+        env:
+        - name: PORT
+          value: "8088"
+        # Fan out to the existing TEI embedder (bge-base, 768-dim) — unchanged model/dims.
+        - name: UPSTREAM_FILE_EMBEDDINGS_URL
+          value: "http://vespa-embedder.xyne-vespa.svc.cluster.local:80/v1/embeddings"
+        - name: UPSTREAM_EMBEDDINGS_URL
+          value: "http://vespa-embedder-search.xyne-vespa.svc.cluster.local:80/v1/embeddings"
+        - name: EMBEDDINGS_BATCH_SIZE   # < TEI --max-client-batch-size (1000)
+          value: "512"
+        - name: UPSTREAM_CONCURRENCY
+          value: "2"
+        - name: REQUEST_TIMEOUT_MS
+          value: "120000"
+        - name: MAX_RETRIES
+          value: "0"
+        - name: RETRY_BASE_MS
+          value: "1000"
+        - name: PROXY_PAYLOAD_LIMIT_BYTES
+          value: "200000000"
+        resources:
+          requests:
+            cpu: "250m"
+            memory: "2Gi"
+          limits:
+            cpu: "2"
+            memory: "4Gi"
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8088
+          initialDelaySeconds: 3
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8088
+          initialDelaySeconds: 5
+          periodSeconds: 20
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tei-batch-proxy
+  namespace: xyne-vespa
+spec:
+  selector:
+    app: tei-batch-proxy
+  ports:
+  # Distinct port 8088 (feed owns 8080). Vespa endpoint:
+  #   http://tei-batch-proxy.xyne-vespa.svc.cluster.local:8088/v1/embeddings
+  - port: 8088
+    targetPort: 8088
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tei-batch-proxy
+  namespace: xyne-vespa
+automountServiceAccountToken: false
