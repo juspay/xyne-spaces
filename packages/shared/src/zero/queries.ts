@@ -235,6 +235,132 @@ const relateSupportDynamicFieldValues = (
     : fev.where('fieldId', '__no_dynamic_field_filters__');
 };
 
+const supportTicketFilterArgsSchema = z.object({
+  channelId: z.string(),
+  isMember: z.boolean(),
+  merchantMid: z.string().optional(),
+  assignedTo: z.array(z.string()).optional(),
+  createdBy: z.array(z.string()).optional(),
+  priority: z.array(z.nativeEnum(TicketPriority)).optional(),
+  stageName: z.array(z.string()).optional(),
+  aiCategory: z.array(z.string()).optional(),
+  conversationIds: z.array(z.string()).optional(),
+  hasAiDraft: z.boolean().optional(),
+  hasSubTickets: z.boolean().optional(),
+  userGroups: z.array(z.string()).optional(),
+  lastEmailAtStart: z.number().optional(),
+  lastEmailAtEnd: z.number().optional(),
+  createdAtStart: z.number().optional(),
+  createdAtEnd: z.number().optional(),
+  conversationLabelId: z.string().optional(),
+  dynamicFieldFilters: supportDynamicFieldFiltersSchema,
+  formEntityValueFieldIds: z.array(z.string()).optional(),
+});
+
+const isCreatedAtRangeValid = (args: { createdAtStart?: number; createdAtEnd?: number }) =>
+  args.createdAtStart === undefined || args.createdAtEnd === undefined || args.createdAtStart <= args.createdAtEnd;
+const CREATED_AT_RANGE_MESSAGE = 'createdAtStart must be less than or equal to createdAtEnd';
+
+const applySupportTicketFilters = (
+  args: z.infer<typeof supportTicketFilterArgsSchema>,
+) => {
+  const { channelId, merchantMid, assignedTo, createdBy, priority, stageName, aiCategory, conversationIds, hasAiDraft, hasSubTickets, userGroups, lastEmailAtStart, lastEmailAtEnd, createdAtStart, createdAtEnd, conversationLabelId, dynamicFieldFilters } = args;
+  let query = zql.tickets.where('channelId', channelId);
+  query = query.where('isArchived', false);
+
+  if (merchantMid) {
+    query = query.where('merchantId', merchantMid);
+  }
+
+  if (assignedTo && assignedTo.length > 0) {
+    // Desk tickets store a raw user id in assignedTo (no user:/group: prefixing).
+    // The shared 'Unassigned' sentinel filters tickets with no assignee
+    // (zero stores nullable strings, so unassigned = IS null OR '').
+    const { inverted, includeUnassigned, ids } = parseAssigneeFilter(assignedTo);
+    if (!inverted) {
+      query = query.where(({ or, cmp }) =>
+        or(
+          ...(ids.length ? [cmp('assignedTo', 'IN', ids)] : []),
+          ...(includeUnassigned ? [cmp('assignedTo', 'IS', null), cmp('assignedTo', '')] : []),
+        ),
+      );
+    } else if (includeUnassigned) {
+      query = query.where(({ and, cmp }) =>
+        and(
+          ...(ids.length ? [cmp('assignedTo', 'NOT IN', ids)] : []),
+          cmp('assignedTo', 'IS NOT', null),
+          cmp('assignedTo', '!=', ''),
+        ),
+      );
+    } else {
+      query = query.where(({ or, cmp }) =>
+        or(
+          cmp('assignedTo', 'NOT IN', ids),
+          cmp('assignedTo', 'IS', null),
+          cmp('assignedTo', ''),
+        ),
+      );
+    }
+  }
+
+  if (createdBy && createdBy.length > 0) {
+    query = query.where('createdBy', 'IN', createdBy);
+  }
+
+  if (priority && priority.length > 0) {
+    query = query.where('priority', 'IN', priority);
+  }
+
+  if (stageName && stageName.length > 0) {
+    query = query.where('stageName', 'IN', stageName);
+  }
+
+  if (aiCategory && aiCategory.length > 0) {
+    query = query.where('aiCategory', 'IN', aiCategory);
+  }
+
+  if (conversationIds !== undefined) {
+    query = query.where('conversationId', 'IN', conversationIds.length > 0 ? conversationIds : ['']);
+  }
+
+  if (hasAiDraft) {
+    query = query.where(({ exists }) =>
+      exists('emailDrafts', (draft) => draft.where('userId', 'IS', null)),
+    );
+  }
+
+  if (hasSubTickets) {
+    query = query.where(({ exists }) => exists('subTicketMappings'));
+  }
+
+  if (userGroups && userGroups.length > 0) {
+    query = query.where('userGroupId', 'IN', userGroups);
+  }
+  if (conversationLabelId) {
+    query = query.where(({ exists }) =>
+      exists('conversationLabelMappings', (m) => m.where('labelId', conversationLabelId)),
+    );
+  }
+
+  if (lastEmailAtStart !== undefined) {
+    query = query.where('lastEmailAt', '>=', lastEmailAtStart);
+  }
+
+  if (lastEmailAtEnd !== undefined) {
+    query = query.where('lastEmailAt', '<=', lastEmailAtEnd);
+  }
+
+  if (createdAtStart !== undefined) {
+    query = query.where('createdAt', '>=', createdAtStart);
+  }
+
+  if (createdAtEnd !== undefined) {
+    query = query.where('createdAt', '<=', createdAtEnd);
+  }
+
+  return applySupportDynamicFieldFilters(query, dynamicFieldFilters) as typeof query;
+};
+
 const applyKanbanTicketPageConditions = (
   query: any,
   ctx: { userID: string },
@@ -1426,127 +1552,9 @@ export const queries = defineQueries({
   ),
 
   supportTicketsFilteredV4: defineQuery(
-    z.object({
-      channelId: z.string(),
-      isMember: z.boolean(),
-      merchantMid: z.string().optional(),
-      assignedTo: z.array(z.string()).optional(),
-      createdBy: z.array(z.string()).optional(),
-      priority: z.array(z.nativeEnum(TicketPriority)).optional(),
-      stageName: z.array(z.string()).optional(),
-      aiCategory: z.array(z.string()).optional(),
-      conversationIds: z.array(z.string()).optional(),
-      hasAiDraft: z.boolean().optional(),
-      hasSubTickets: z.boolean().optional(),
-      userGroups: z.array(z.string()).optional(),
-      lastEmailAtStart: z.number().optional(),
-      lastEmailAtEnd: z.number().optional(),
-      createdAtStart: z.number().optional(),
-      createdAtEnd: z.number().optional(),
-      conversationLabelId: z.string().optional(),
-      dynamicFieldFilters: supportDynamicFieldFiltersSchema,
-      formEntityValueFieldIds: z.array(z.string()).optional(),
-    }).refine(
-      args => args.createdAtStart === undefined || args.createdAtEnd === undefined || args.createdAtStart <= args.createdAtEnd,
-      'createdAtStart must be less than or equal to createdAtEnd',
-    ),
-    ({ ctx, args: { channelId, merchantMid, assignedTo, createdBy, priority, stageName, aiCategory, conversationIds, hasAiDraft, hasSubTickets, userGroups, lastEmailAtStart, lastEmailAtEnd, createdAtStart, createdAtEnd, conversationLabelId, dynamicFieldFilters, formEntityValueFieldIds } }) => {
-      let query = zql.tickets.where('channelId', channelId);
-      query = query.where('isArchived', false);
-
-      if (merchantMid) {
-        query = query.where('merchantId', merchantMid);
-      }
-
-      if (assignedTo && assignedTo.length > 0) {
-        // Desk tickets store a raw user id in assignedTo (no user:/group: prefixing).
-        // The shared 'Unassigned' sentinel filters tickets with no assignee
-        // (zero stores nullable strings, so unassigned = IS null OR '').
-        const { inverted, includeUnassigned, ids } = parseAssigneeFilter(assignedTo);
-        if (!inverted) {
-          query = query.where(({ or, cmp }) =>
-            or(
-              ...(ids.length ? [cmp('assignedTo', 'IN', ids)] : []),
-              ...(includeUnassigned ? [cmp('assignedTo', 'IS', null), cmp('assignedTo', '')] : []),
-            ),
-          );
-        } else if (includeUnassigned) {
-          query = query.where(({ and, cmp }) =>
-            and(
-              ...(ids.length ? [cmp('assignedTo', 'NOT IN', ids)] : []),
-              cmp('assignedTo', 'IS NOT', null),
-              cmp('assignedTo', '!=', ''),
-            ),
-          );
-        } else {
-          query = query.where(({ or, cmp }) =>
-            or(
-              cmp('assignedTo', 'NOT IN', ids),
-              cmp('assignedTo', 'IS', null),
-              cmp('assignedTo', ''),
-            ),
-          );
-        }
-      }
-
-      if (createdBy && createdBy.length > 0) {
-        query = query.where('createdBy', 'IN', createdBy);
-      }
-
-      if (priority && priority.length > 0) {
-        query = query.where('priority', 'IN', priority);
-      }
-
-      if (stageName && stageName.length > 0) {
-        query = query.where('stageName', 'IN', stageName);
-      }
-
-      if (aiCategory && aiCategory.length > 0) {
-        query = query.where('aiCategory', 'IN', aiCategory);
-      }
-
-      if (conversationIds !== undefined) {
-        query = query.where('conversationId', 'IN', conversationIds.length > 0 ? conversationIds : ['']);
-      }
-
-      if (hasAiDraft) {
-        query = query.where(({ exists }) =>
-          exists('emailDrafts', (draft) => draft.where('userId', 'IS', null)),
-        );
-      }
-
-      if (hasSubTickets) {
-        query = query.where(({ exists }) => exists('subTicketMappings'));
-      }
-
-      if (userGroups && userGroups.length > 0) {
-        query = query.where('userGroupId', 'IN', userGroups);
-      }
-      if (conversationLabelId) {
-        query = query.where(({ exists }) =>
-          exists('conversationLabelMappings', (m) => m.where('labelId', conversationLabelId)),
-        );
-      }
-
-      if (lastEmailAtStart !== undefined) {
-        query = query.where('lastEmailAt', '>=', lastEmailAtStart);
-      }
-
-      if (lastEmailAtEnd !== undefined) {
-        query = query.where('lastEmailAt', '<=', lastEmailAtEnd);
-      }
-
-      if (createdAtStart !== undefined) {
-        query = query.where('createdAt', '>=', createdAtStart);
-      }
-
-      if (createdAtEnd !== undefined) {
-        query = query.where('createdAt', '<=', createdAtEnd);
-      }
-
-      query = applySupportDynamicFieldFilters(query, dynamicFieldFilters);
-
-      return query
+    supportTicketFilterArgsSchema.refine(isCreatedAtRangeValid, CREATED_AT_RANGE_MESSAGE),
+    ({ ctx, args }) =>
+      applySupportTicketFilters(args)
         .orderBy('createdAt', 'desc')
         .related('project')
         .related('tagMappings')
@@ -1554,7 +1562,42 @@ export const queries = defineQueries({
         .related('conversation', c => c.related('channel'))
         .related('emailReads', q => q.where('userId', ctx.userID))
         .related('formEntityValues', fev =>
-          relateSupportDynamicFieldValues(fev, dynamicFieldFilters, formEntityValueFieldIds),
+          relateSupportDynamicFieldValues(fev, args.dynamicFieldFilters, args.formEntityValueFieldIds),
+        ),
+  ),
+
+  // One Desk kanban column, newest activity first. Paged by growing `limit` rather than a
+  // cursor: updatedAt moves on every edit, so a cursor would skip or repeat rows.
+  // `otherStageNames` is set on the first column only, which also collects tickets whose
+  // stage is not on the board.
+  supportKanbanTicketsPage: defineQuery(
+    supportTicketFilterArgsSchema
+      .extend({
+        stage: z.string(),
+        otherStageNames: z.array(z.string()).optional(),
+        limit: z.number(),
+      })
+      .refine(isCreatedAtRangeValid, CREATED_AT_RANGE_MESSAGE),
+    ({ ctx, args }) => {
+      const { stage, otherStageNames, limit } = args;
+      let query = applySupportTicketFilters(args);
+      query = otherStageNames
+        ? query.where(({ or, cmp }) =>
+            or(cmp('stageName', stage), cmp('stageName', 'NOT IN', [stage, ...otherStageNames])),
+          )
+        : query.where('stageName', stage);
+
+      return query
+        .orderBy('updatedAt', 'desc')
+        .orderBy('id', 'desc')
+        .limit(limit)
+        .related('project')
+        .related('tagMappings')
+        .related('entity')
+        .related('conversation', c => c.related('channel'))
+        .related('emailReads', q => q.where('userId', ctx.userID))
+        .related('formEntityValues', fev =>
+          relateSupportDynamicFieldValues(fev, args.dynamicFieldFilters, args.formEntityValueFieldIds),
         );
     },
   ),
