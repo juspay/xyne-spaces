@@ -1,3 +1,10 @@
+## [1.408.0-release-20260928.2](https://github.com/juspay/xyne-spaces/compare/v1.408.0-release-20260928.1...v1.408.0-release-20260928.2) (2026-09-28)
+
+
+### Bug Fixes
+
+* phantom logout fixes (cherry-pick of [#2293](https://github.com/juspay/xyne-spaces/issues/2293), [#2294](https://github.com/juspay/xyne-spaces/issues/2294), [#2295](https://github.com/juspay/xyne-spaces/issues/2295)) ([#2381](https://github.com/juspay/xyne-spaces/issues/2381)) ([0de23fe](https://github.com/juspay/xyne-spaces/commit/0de23fe88b3b91f1e61a1261f1f2f454ac74283b))
+
 ## [1.408.0-release-20260928.1](https://github.com/juspay/xyne-spaces/compare/v1.407.2-release-20260928.2...v1.408.0-release-20260928.1) (2026-09-28)
 
 
