@@ -20,7 +20,8 @@ import { newCardToken, parkOptions, type ParkedOption } from "./cards.js";
 import { enqueueOutbound } from "./delivery.js";
 import { chatMessageRepository } from "../../repositories/index.js";
 import { resolveIdentity } from "./identity.js";
-import { getSpacesPostTarget, type SpacesPostTarget } from "../../lib/spaces-db.js";
+import { getSpacesPostTarget, type SpacesPostTarget } from "../../lib/spaces-post-target.js";
+import { getSpacesAuthForUser } from "../../lib/spaces-db.js";
 import type { ChannelAccount, ChannelDeliveryTarget, InteractiveCard } from "./plugin.js";
 
 const log = createLogger("channel-approvals");
@@ -135,6 +136,18 @@ function parseSignedAction(raw: unknown): SignedWriteAction | null {
   };
 }
 
+async function lookupPostTarget(action: SignedWriteAction): Promise<SpacesPostTarget | null> {
+  const auth = await getSpacesAuthForUser(action.userId, "write-action").catch(() => null);
+  if (!auth) return null;
+  return getSpacesPostTarget(
+    {
+      ...(str(action.params["channelId"]) ? { channelId: str(action.params["channelId"]) } : {}),
+      ...(str(action.params["conversationId"]) ? { conversationId: str(action.params["conversationId"]) } : {}),
+    },
+    auth,
+  ).catch(() => null);
+}
+
 /**
  * Turn the run's pending actions into cards and queue them behind the reply.
  * Called from /webhook/result, which may be any pod — parking is in Redis and
@@ -169,13 +182,7 @@ export async function enqueueApprovalCards(input: {
     ];
     await parkOptions(input.target.connectedSurfaceId, parked);
 
-    const postTarget =
-      action.tool === "user-send-message"
-        ? await getSpacesPostTarget({
-            ...(str(action.params["channelId"]) ? { channelId: str(action.params["channelId"]) } : {}),
-            ...(str(action.params["conversationId"]) ? { conversationId: str(action.params["conversationId"]) } : {}),
-          }).catch(() => null)
-        : null;
+    const postTarget = action.tool === "user-send-message" ? await lookupPostTarget(action) : null;
     const card: InteractiveCard = {
       kind: "buttons",
       header: "Approval needed",

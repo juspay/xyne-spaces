@@ -17,8 +17,7 @@ vi.mock("./servers/xyne-spaces-client.js", async (importOriginal) => {
 });
 
 const spacesConversationExists = vi.fn(async (_id: string) => null as boolean | null);
-vi.mock("../lib/spaces-db.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../lib/spaces-db.js")>()),
+vi.mock("../lib/spaces-post-target.js", () => ({
   spacesConversationExists: (id: string) => spacesConversationExists(id),
 }));
 

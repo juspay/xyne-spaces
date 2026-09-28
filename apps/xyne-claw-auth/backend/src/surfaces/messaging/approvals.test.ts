@@ -10,7 +10,9 @@ vi.mock("./delivery.js", () => ({ enqueueOutbound }));
 vi.mock("./identity.js", () => ({ resolveIdentity: async () => null }));
 vi.mock("./cards.js", () => ({ newCardToken: () => "t", parkOptions: vi.fn() }));
 const getSpacesPostTarget = vi.fn();
-vi.mock("../../lib/spaces-db.js", () => ({ getSpacesPostTarget }));
+const getSpacesAuthForUser = vi.fn(async () => ({ token: "t", sessionId: "s", workspaceId: "ws" }));
+vi.mock("../../lib/spaces-post-target.js", () => ({ getSpacesPostTarget }));
+vi.mock("../../lib/spaces-db.js", () => ({ getSpacesAuthForUser }));
 
 const { redeemApproval, enqueueApprovalCards, describeWriteAction } = await import("./approvals.js");
 
@@ -104,7 +106,8 @@ describe("user-send-message approval card", () => {
     await enqueueApprovalCards({ target, userId: "u1", pendingActions: [signed({ channelId: "cmi345s9b07pmk5k4en17sbuy", content: "Go <b>try</b> it" })] });
     const card = enqueueOutbound.mock.calls[0]?.[1].card;
     expect(card.body).toBe('Send this message as you to *#general*:\n\n"Go *try* it"');
-    expect(getSpacesPostTarget).toHaveBeenCalledWith({ channelId: "cmi345s9b07pmk5k4en17sbuy" });
+    expect(getSpacesPostTarget).toHaveBeenCalledWith({ channelId: "cmi345s9b07pmk5k4en17sbuy" }, { token: "t", sessionId: "s", workspaceId: "ws" });
+    expect(getSpacesAuthForUser).toHaveBeenCalledWith("u1", "write-action");
   });
 
   it("shows which thread a reply lands in: channel, author and the post it answers", () => {
