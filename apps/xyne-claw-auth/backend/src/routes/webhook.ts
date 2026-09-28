@@ -116,7 +116,7 @@ import { sendStoredExternalResultCallback, isInternalCallbackOrigin, isAllowedEx
 import { encryptSurfaceSecret } from "../lib/surface-resolver.js";
 import { deliverSlackResult, type SlackDeliveryTarget } from "../surfaces/slack/delivery.js";
 import { deliverChannelResult } from "../surfaces/messaging/delivery.js";
-import { maybeSendCheckpoint, sendInterimMessage, stopCheckpoints } from "../surfaces/messaging/checkpoints.js";
+import { sendInterimMessage } from "../surfaces/messaging/interim.js";
 import { designShareUrl, upsertDesignShare } from "./design-shares.js";
 import {
   getActivePlanCard,
@@ -4149,7 +4149,6 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     const channelTarget = ctx.channelDelivery;
     const channelUserId = ctx.targetUserId ?? ctx.mentionedUserId ?? "";
     const channelPendingActions = (payload as { pendingActions?: Array<Record<string, unknown>> }).pendingActions;
-    await stopCheckpoints(sessionId);
     await deleteSession(sessionId);
     // A run that produced nothing is not a success worth reporting as one.
     // Downgrading here rather than in claw keeps the change to this surface:
@@ -7258,12 +7257,7 @@ router.post("/progress", requireStrictS2S, async (req: Request, res: Response) =
 
   const log = createLogger("webhook/progress", ctx.traceId ?? sessionId.slice(0, 8));
 
-  if (ctx.channelDelivery) {
-    await maybeSendCheckpoint(sessionId, ctx.channelDelivery, toolLabel).catch((err) => {
-      log.warn("Channel checkpoint failed", { error: errMsg(err) });
-    });
-    return;
-  }
+  if (ctx.channelDelivery) return;
 
   // Spaces-side progress needs a real Spaces surface. Two cases produce
   // thousands of guaranteed-4xx calls a day (prod 2026-08-11):
