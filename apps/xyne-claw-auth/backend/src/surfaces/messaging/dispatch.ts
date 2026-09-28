@@ -9,7 +9,7 @@ import { fetch as httpFetch } from "undici";
 import { CONFIG } from "../../config.js";
 import { resolveAgentProviderConfigs, resolveSubagentProviderMode } from "../../lib/agent-provider-config.js";
 import { runAttachmentRefsEnabled, uploadRunAttachment } from "../../lib/run-attachment-store.js";
-import { setSession } from "../../lib/session-context.js";
+import { setSession, type SessionContext } from "../../lib/session-context.js";
 import { getChannel, type ChannelDeliveryTarget, type MessagingChannelKey } from "./plugin.js";
 import { channelConversationId } from "./ids.js";
 import type { BoundAgent } from "./store.js";
@@ -100,7 +100,7 @@ async function toRunAttachments(
   );
 }
 
-export async function dispatchChannelRun(input: {
+export interface ChannelRunInput {
   agent: BoundAgent;
   userId: string;
   task: string;
@@ -113,7 +113,14 @@ export async function dispatchChannelRun(input: {
   idempotencyKey: string;
   senderName?: string;
   target: ChannelDeliveryTarget;
-}): Promise<string> {
+}
+
+export interface ChannelRun {
+  body: Record<string, unknown>;
+  sessionContext: SessionContext;
+}
+
+export async function buildChannelRun(input: ChannelRunInput): Promise<ChannelRun> {
   // Invocation whitelist — fail fast with a clear reason before the dispatch
   // round-trip; /internal/run enforces it again as the backstop.
   if (!isAgentInvocableBy(input.agent.config as Record<string, unknown> | null, input.userId)) {
@@ -122,13 +129,8 @@ export async function dispatchChannelRun(input: {
   const runAttachments = await toRunAttachments(input.conversationId, input.idempotencyKey, input.attachments ?? []);
 
   const providers = await resolveAgentProviderConfigs({ id: input.agent.id, config: input.agent.config });
-  const response = await httpFetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
-    },
-    body: JSON.stringify({
+  return {
+    body: {
       userId: input.userId,
       task: input.task,
       conversationId: input.conversationId,
@@ -147,7 +149,39 @@ export async function dispatchChannelRun(input: {
       additionalInstructions: channelSurfaceInstructions(input.target.channel),
       subagentProviderMode: resolveSubagentProviderMode(input.agent.config),
       ...(input.agent.config ? { agentConfig: input.agent.config } : {}),
-    }),
+    },
+    sessionContext: {
+      mentionedUserId: input.userId,
+      targetUserId: input.userId,
+      senderId: input.userId,
+      senderName: input.senderName ?? input.target.senderId,
+      channelId: input.target.chatId,
+      channelName: input.target.chatId,
+      conversationId: input.conversationId,
+      sourceMessageId: input.idempotencyKey,
+      task: input.task,
+      agentId: input.agent.id,
+      agentOrgId: input.agent.orgId,
+      agentSlug: input.agent.slug,
+      responseMode: "conversation",
+      appToken: "",
+      spacesAppId: "",
+      spacesAppUserId: "",
+      rootAgentSlug: input.agent.slug,
+      triggerSource: input.target.channel,
+      channelDelivery: input.target,
+    },
+  };
+}
+
+export async function postChannelRun(run: ChannelRun): Promise<string> {
+  const response = await httpFetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+    },
+    body: JSON.stringify(run.body),
   });
   const body = (await response.json().catch(() => null)) as {
     success?: boolean;
@@ -155,29 +189,9 @@ export async function dispatchChannelRun(input: {
     error?: string;
   } | null;
   if (!response.ok || !body?.success || !body.sessionId) {
-    throw new Error(`${input.target.channel} run dispatch failed: ${body?.error ?? `HTTP ${response.status}`}`);
+    const channel = run.sessionContext.channelDelivery?.channel ?? "channel";
+    throw new Error(`${channel} run dispatch failed: ${body?.error ?? `HTTP ${response.status}`}`);
   }
-
-  await setSession(body.sessionId, {
-    mentionedUserId: input.userId,
-    targetUserId: input.userId,
-    senderId: input.userId,
-    senderName: input.senderName ?? input.target.senderId,
-    channelId: input.target.chatId,
-    channelName: input.target.chatId,
-    conversationId: input.conversationId,
-    sourceMessageId: input.idempotencyKey,
-    task: input.task,
-    agentId: input.agent.id,
-    agentOrgId: input.agent.orgId,
-    agentSlug: input.agent.slug,
-    responseMode: "conversation",
-    appToken: "",
-    spacesAppId: "",
-    spacesAppUserId: "",
-    rootAgentSlug: input.agent.slug,
-    triggerSource: input.target.channel,
-    channelDelivery: input.target,
-  });
+  await setSession(body.sessionId, run.sessionContext);
   return body.sessionId;
 }

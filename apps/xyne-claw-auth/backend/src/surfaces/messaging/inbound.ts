@@ -22,7 +22,7 @@ import {
 import { enqueueOutbound, typingCancelled, typingFinished, typingStarted } from "./delivery.js";
 import { pickAckReaction } from "./ack.js";
 import { agentActionGatesOf } from "./agent-tools.js";
-import { dispatchChannelRun } from "./dispatch.js";
+import { dispatchOrQueueChannelRun } from "./busy.js";
 import { channelConversationId } from "./ids.js";
 import { consumeGroupContext, readGroupContext, rememberGroupMessage, renderGroupContext } from "./group-context.js";
 import { resolveIdentity } from "./identity.js";
@@ -106,12 +106,11 @@ async function overRateLimit(accountId: string, senderId: string, limit: number)
  * were sent (serialize.ts) — a slow photo cannot be overtaken by the text
  * sent straight after it.
  *
- * The remaining gap, named here because the comment used to overclaim: the
- * chat's queue releases once a turn has been ACCEPTED, not once the agent has
- * answered. A message arriving while a run is still working starts a second
- * run on the same conversation, blind to the first. Closing
- * that means either steering the live run or waiting on /webhook/result, both
- * of which are larger changes than this one.
+ * The chat's in-memory queue releases once a turn has been ACCEPTED, not once
+ * the agent has answered. A message arriving while a run is still working goes
+ * through the same busy slot and FIFO as a Spaces thread mention
+ * (lib/conversation-gate.ts): the live run is asked to wrap up, and the new
+ * message is dispatched from /webhook/result once it has answered.
  */
 export async function handleInbound(ctx: InboundContext, msg: InboundMessage): Promise<void> {
   const { account } = ctx;
@@ -422,7 +421,7 @@ async function handleOne(ctx: InboundContext, msg: InboundMessage): Promise<void
   const contextBlock = renderGroupContext(overheard);
 
   try {
-    const sessionId = await dispatchChannelRun({
+    const outcome = await dispatchOrQueueChannelRun({
       agent,
       userId,
       task: contextBlock ? `${contextBlock}${task}` : task,
@@ -433,6 +432,17 @@ async function handleOne(ctx: InboundContext, msg: InboundMessage): Promise<void
       ...(msg.attachments?.length ? { attachments: msg.attachments } : {}),
       target,
     });
+    if (outcome.kind === "queued") {
+      if (outcome.accepted) {
+        await consumeGroupContext(account.id, msg.chatId, overheard.length);
+      } else if (plugin.capabilities.typing && (await typingFinished(account.id, msg.chatId))) {
+        await enqueueOutbound(account.id, { kind: "typing", chatId: msg.chatId, on: false });
+      }
+      await reply(outcome.notice);
+      log.info(`[inbound] queued behind the active run agent=${agent.slug} account=${account.id} chat=${msg.chatId} accepted=${outcome.accepted}`);
+      return;
+    }
+    const { sessionId } = outcome;
     // Quoted and accepted, so these lines must not reach a second run.
     await consumeGroupContext(account.id, msg.chatId, overheard.length);
     await rememberActiveRun(account.id, msg.chatId, { sessionId, agentSlug: agent.slug, startedAt: Date.now() });
