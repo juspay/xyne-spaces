@@ -4,7 +4,10 @@
 // string). Cycle-safe, size-capped, control-char scrubbed, and never throws.
 
 export interface ShredOptions {
-  /** Max characters kept per string before truncation. Default 8192. */
+  /**
+   * Max characters kept per string before truncation. Default 65536 (64 KB).
+   * Pass `Infinity` to disable truncation (see CLIENT_EVENT_SHRED_OPTIONS).
+   */
   maxStringLength?: number;
   /** Max nesting depth before a node collapses to a placeholder. Default 12. */
   maxDepth?: number;
@@ -13,10 +16,20 @@ export interface ShredOptions {
 }
 
 const DEFAULTS: Required<ShredOptions> = {
-  maxStringLength: 8192,
+  maxStringLength: 65536,
   maxDepth: 12,
   maxEntries: 1000,
 };
+
+/**
+ * Options for client-originated events (dashboard log worker, electron
+ * enrollment logger). These carry crash reports / client stacks that routinely
+ * exceed 64 KB and are only useful whole, so they skip string truncation.
+ * Secret redaction, depth and entry caps still apply.
+ */
+export const CLIENT_EVENT_SHRED_OPTIONS: Readonly<ShredOptions> = Object.freeze({
+  maxStringLength: Number.POSITIVE_INFINITY,
+});
 
 const REDACTED = "[REDACTED]";
 

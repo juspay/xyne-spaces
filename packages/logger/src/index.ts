@@ -15,6 +15,7 @@ export {
   shredText,
   shredRecordInPlace,
   isSecretKey,
+  CLIENT_EVENT_SHRED_OPTIONS,
   type ShredOptions,
 } from "./shredder.js";
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { shred, shredRecordInPlace, isSecretKey } from "../src/shredder.js";
+import { shred, shredText, shredRecordInPlace, isSecretKey, CLIENT_EVENT_SHRED_OPTIONS } from "../src/shredder.js";
 
 // A stringified clone is the easiest way to assert "no secret survives anywhere".
 const flat = (v: unknown) => JSON.stringify(shred(v));
@@ -92,10 +92,22 @@ describe("shred — structural safety", () => {
     expect(out).toContain("[Object]");
   });
 
-  it("truncates over-long strings", () => {
-    const out = shred({ blob: "x".repeat(20000) }) as { blob: string };
-    expect(out.blob.length).toBeLessThan(20000);
-    expect(out.blob).toContain("truncated");
+  it("keeps strings up to the 64 KB default intact", () => {
+    const out = shred({ blob: "x".repeat(65536) }) as { blob: string };
+    expect(out.blob).toBe("x".repeat(65536));
+  });
+
+  it("truncates strings over the 64 KB default", () => {
+    const out = shred({ blob: "x".repeat(70000) }) as { blob: string };
+    expect(out.blob.startsWith("x".repeat(65536) + "…[truncated 4464 chars]")).toBe(true);
+    expect(shredText("y".repeat(70000))).toContain("[truncated 4464 chars]");
+  });
+
+  it("truncates Error stacks over 64 KB by default", () => {
+    const err = new Error("boom");
+    err.stack = "s".repeat(70000);
+    const out = shred({ err }) as { err: { stack: string } };
+    expect(out.err.stack).toContain("[truncated");
   });
 
   it("caps very large arrays", () => {
@@ -180,5 +192,24 @@ describe("shred — retryToken truncation note", () => {
   it("redacts a retryToken field", () => {
     const out = shred({ retryToken: "cap_abcdefghijklmnop" }) as { retryToken: string };
     expect(out.retryToken).toBe("[REDACTED]");
+  });
+});
+
+describe("shred — client events (CLIENT_EVENT_SHRED_OPTIONS)", () => {
+  it("does not truncate large client crash reports", () => {
+    const stack = "at frame\n".repeat(12000); // ~108 KB, like lotus_crash_detected
+    const out = shred({ event: "lotus_crash_detected", stack }, CLIENT_EVENT_SHRED_OPTIONS) as { stack: string };
+    expect(out.stack).not.toContain("truncated");
+    expect(out.stack.length).toBe(stack.length);
+  });
+
+  it("still redacts secrets in client events", () => {
+    const out = shred(
+      { accessToken: "abc123abc123", note: "Authorization: Bearer abcdefghijklmnop", blob: "z".repeat(100000) },
+      CLIENT_EVENT_SHRED_OPTIONS,
+    ) as { accessToken: string; note: string; blob: string };
+    expect(out.accessToken).toBe("[REDACTED]");
+    expect(out.note).toContain("Bearer [REDACTED]");
+    expect(out.blob.length).toBe(100000);
   });
 });

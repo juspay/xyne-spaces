@@ -8,7 +8,7 @@
 
 import log from 'electron-log/main';
 import { v4 as uuidv4 } from 'uuid';
-import { shred } from '@xyne/logger';
+import { CLIENT_EVENT_SHRED_OPTIONS, shred } from '@xyne/logger';
 import type { EnrollmentEventType } from './enrollment-events';
 import * as os from 'os';
 import { net, app } from 'electron';
@@ -275,7 +275,8 @@ class LoggerService {
 
     // Shred secret values out of every field before it reaches any sink
     // (log files + the POST buffer). Field names are preserved — values only.
-    const safeEntry = shred(logEntry) as LogEntry;
+    // Client events are exempt from the 64 KB per-string cap (crash reports).
+    const safeEntry = shred(logEntry, CLIENT_EVENT_SHRED_OPTIONS) as LogEntry;
 
     // Write to main log (all levels)
     log.info(`[${logType ?? 'EnrollmentLogger'}]`, JSON.stringify(safeEntry));
