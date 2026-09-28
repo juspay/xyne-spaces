@@ -24,6 +24,7 @@ export function buildSummary(data, config) {
     messageSendP95Ms: metricValue(data, 'message_send_duration', 'p(95)'),
     zeroQueryP95Ms: metricValue(data, 'zero_query_duration', 'p(95)'),
     searchP95Ms: metricValue(data, 'search_duration', 'p(95)'),
+    attachmentP95Ms: metricValue(data, 'attachment_duration', 'p(95)'),
   };
   const reportDirectory = __ENV.K6_REPORT_DIR || '/reports';
 
