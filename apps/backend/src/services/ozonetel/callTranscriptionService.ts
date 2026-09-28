@@ -4,11 +4,15 @@ import { logger } from '@/utils/logger';
 import { storageService } from '@/services/storage';
 import { MessageAttachmentRepository } from '@/database/repositories/messageAttachmentRepository';
 import { telephonyEmailService } from './telephonyEmailService';
+import { transcriptService } from '@/services/transcriptService';
 import {
   CALL_TRANSCRIPT_ATTACHMENT_TYPE,
   buildCallTranscriptFilename,
+  cleanCallSummary,
+  extractTranscriptBody,
   findCallTranscriptAttachment,
   formatCallTranscript,
+  numberTranscriptForSummary,
 } from './callTranscript';
 import {
   transcriptionAgentClient,
@@ -22,6 +26,10 @@ const TAG = '[CallTranscriptionService]';
 export type CallTranscriptionOutcome =
   | { status: 'done'; attachmentId: string }
   | { status: 'failed'; reason: string };
+
+export type CallSummaryOutcome =
+  | { ok: true; summary: string; alreadyExisted: boolean }
+  | { ok: false; code: 'call_not_found' | 'no_transcript' | 'empty_transcript' | 'generation_failed' };
 
 /**
  * Bull processor for the `call-transcription` queue.
@@ -64,6 +72,7 @@ export class CallTranscriptionService {
       await telephonyEmailService.setTranscriptionState(emailId, workspaceId, {
         status: 'done',
         attachmentId: existing.id,
+        ...(email.payload.transcription?.summary && { summary: email.payload.transcription.summary }),
       });
       logger.info(`${TAG} transcript already exists | emailId=${emailId} | attachmentId=${existing.id}`);
       return { status: 'done', attachmentId: existing.id };
@@ -125,16 +134,78 @@ export class CallTranscriptionService {
       metadata: { type: CALL_TRANSCRIPT_ATTACHMENT_TYPE, provider: result.provider },
     });
 
+    // The transcript is usable now; mark done before the (slower, optional) summary.
     await telephonyEmailService.setTranscriptionState(emailId, workspaceId, {
       status: 'done',
       attachmentId: attachment.id,
     });
-
     logger.info(
       `${TAG} done | emailId=${emailId} | attachmentId=${attachment.id} | bytes=${buffer.length}` +
         ` | provider=${result.provider} | elapsed=${Date.now() - t0}ms`,
     );
+
+    const summary = await this.generateSummary(emailId, text);
+    if (summary) {
+      await this.safeSetState(data, { status: 'done', attachmentId: attachment.id, summary });
+      logger.info(`${TAG} summary stored | emailId=${emailId} | chars=${summary.length} | elapsed=${Date.now() - t0}ms`);
+    }
+
     return { status: 'done', attachmentId: attachment.id };
+  }
+
+  /**
+   * Manual "Summarize": (re)generate the summary for a call whose transcript
+   * already exists (an earlier transcription, or one whose automatic summary
+   * failed). Reads the transcript file back from attachment storage.
+   */
+  async summarizeExistingTranscript(emailId: string, workspaceId: string): Promise<CallSummaryOutcome> {
+    const email = await telephonyEmailService.getCallEmailWithPayload(emailId, workspaceId);
+    if (!email) return { ok: false, code: 'call_not_found' };
+
+    const existingSummary = email.payload.transcription?.summary?.trim();
+    const attachment = findCallTranscriptAttachment(
+      await this.attachments.findByEntityIdAndType(emailId, AttachmentEntityType.EMAIL),
+    );
+    if (!attachment) return { ok: false, code: 'no_transcript' };
+    if (existingSummary) return { ok: true, summary: existingSummary, alreadyExisted: true };
+
+    const stream = await storageService.createReadStream(attachment.url);
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) {
+      chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
+    }
+    const text = extractTranscriptBody(Buffer.concat(chunks).toString('utf8'));
+    if (!text) return { ok: false, code: 'empty_transcript' };
+
+    const summary = await this.generateSummary(emailId, text);
+    if (!summary) return { ok: false, code: 'generation_failed' };
+
+    await telephonyEmailService.setTranscriptionState(emailId, workspaceId, {
+      status: 'done',
+      attachmentId: attachment.id,
+      summary,
+    });
+    logger.info(`${TAG} summary stored (manual) | emailId=${emailId} | chars=${summary.length}`);
+    return { ok: true, summary, alreadyExisted: false };
+  }
+
+  /**
+   * AI summary via the shared call-summary prompt (same one Xyne call recordings
+   * use). Best effort: any failure just leaves the transcript without a summary.
+   */
+  private async generateSummary(emailId: string, transcript: string): Promise<string | null> {
+    try {
+      const markdown = await transcriptService.generateCallSummary(numberTranscriptForSummary(transcript));
+      const cleaned = markdown ? cleanCallSummary(markdown) : '';
+      if (!cleaned) {
+        logger.warn(`${TAG} summary unavailable | emailId=${emailId}`);
+        return null;
+      }
+      return cleaned;
+    } catch (error) {
+      logger.error(`${TAG} summary failed | emailId=${emailId}:`, error);
+      return null;
+    }
   }
 
   /** Called by the queue's `failed` listener once Bull has exhausted attempts. */
@@ -149,7 +220,7 @@ export class CallTranscriptionService {
 
   private async safeSetState(
     data: CallTranscriptionJobData,
-    state: { status: 'queued' | 'processing' | 'done' | 'failed'; error?: string; attachmentId?: string },
+    state: { status: 'queued' | 'processing' | 'done' | 'failed'; error?: string; attachmentId?: string; summary?: string },
   ): Promise<void> {
     try {
       await telephonyEmailService.setTranscriptionState(data.emailId, data.workspaceId, state);

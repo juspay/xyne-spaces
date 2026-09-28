@@ -14,6 +14,7 @@ import { MessageAttachmentRepository, CreateMessageAttachmentInput } from '../da
 import { EmailRepository } from '../database/repositories/emailRepository';
 import { telephonyEmailService } from '@/services/ozonetel/telephonyEmailService';
 import { findCallTranscriptAttachment } from '@/services/ozonetel/callTranscript';
+import { callTranscriptionService } from '@/services/ozonetel/callTranscriptionService';
 import { callTranscriptionQueue } from '@/queues/callTranscriptionQueue';
 import { ReleaseRepository } from '../database/repositories/releaseRepository';
 import { getGroupedTagsWithConfig, DESK_EMAIL_SOURCE_TYPE, deskEmailConfigKey } from '@/tags';
@@ -2005,6 +2006,66 @@ export class TicketController {
     } catch (error) {
       logger.error('[TicketController] transcribeCallRecording failed:', error);
       res.status(500).json({ error: 'Failed to start transcription' });
+    }
+  };
+
+  /**
+   * POST /api/tickets/:ticketId/emails/:emailId/summarize
+   * Manual trigger: generate the AI summary for a call that already has a
+   * transcript (transcribed before summaries existed, or whose automatic summary
+   * failed). Synchronous: one LLM round trip, the summary is written into the call
+   * email body (`transcription.summary`) and returned.
+   */
+  summarizeCallTranscript = async (req: Request, res: Response): Promise<void> => {
+    const { ticketId, emailId } = req.params;
+    const userId = req.user?.id;
+    const workspaceId = req.user?.workspaceId;
+    if (!userId || !workspaceId) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    try {
+      const ticket = await prisma.ticket.findUnique({
+        where: { id: ticketId },
+        select: { conversationId: true, channelId: true, workspaceId: true },
+      });
+      if (!ticket || ticket.workspaceId !== workspaceId) {
+        res.status(404).json({ error: 'Ticket not found' });
+        return;
+      }
+      const channel = await this.channelRepository.findById(ticket.channelId);
+      if (channel && channel.visibility === 'PRIVATE') {
+        const isParticipant = await this.channelParticipantRepository.isParticipant(ticket.channelId, userId);
+        if (!isParticipant) {
+          res.status(403).json({ error: 'Access denied - you do not have permission to access this conversation' });
+          return;
+        }
+      }
+      const email = await telephonyEmailService.getCallEmailWithPayload(emailId, workspaceId);
+      if (!email || email.conversationId !== ticket.conversationId) {
+        res.status(404).json({ error: 'Call not found in this ticket' });
+        return;
+      }
+
+      const outcome = await callTranscriptionService.summarizeExistingTranscript(emailId, workspaceId);
+      if (!outcome.ok) {
+        const responses: Record<typeof outcome.code, { status: number; error: string }> = {
+          call_not_found: { status: 404, error: 'Call not found in this ticket' },
+          no_transcript: { status: 409, error: 'Transcribe the call before summarizing it' },
+          empty_transcript: { status: 409, error: 'The transcript is empty, nothing to summarize' },
+          generation_failed: { status: 502, error: 'Summary could not be generated right now' },
+        };
+        const { status, error } = responses[outcome.code];
+        res.status(status).json({ error });
+        return;
+      }
+
+      logger.info(`[TicketController] call summary ${outcome.alreadyExisted ? 'reused' : 'generated'} | ticketId=${ticketId} | emailId=${emailId} | userId=${userId}`);
+      res.status(200).json({ summary: outcome.summary });
+    } catch (error) {
+      logger.error('[TicketController] summarizeCallTranscript failed:', error);
+      res.status(500).json({ error: 'Failed to generate summary' });
     }
   };
 
