@@ -53,10 +53,10 @@ export async function buildNotifyActionUrl(
         : `/${workspaceId}/tickets?tickets=${id}`;
     }
     case 'CHANNEL':
-      return `/${workspaceId}/chat/${id}`;
+      return `/${workspaceId}/chat/dir/${id}`;
     case 'CONVERSATION': {
       const conv = await repositories.conversations.findById(id).catch((err: unknown) => { logger.error(`[notify-action-url] CONVERSATION lookup failed id=${id}`, err); return null; });
-      return conv?.channelId ? `/${workspaceId}/chat/${conv.channelId}#origin=${id}` : undefined;
+      return conv?.channelId ? `/${workspaceId}/chat/dir/${conv.channelId}#origin=${id}` : undefined;
     }
     case 'MESSAGE': {
       const msg = await db.message
@@ -65,7 +65,7 @@ export async function buildNotifyActionUrl(
       if (!msg?.conversationId) return undefined;
       const conv = await repositories.conversations.findById(msg.conversationId).catch((err: unknown) => { logger.error(`[notify-action-url] CONVERSATION lookup failed id=${msg.conversationId}`, err); return null; });
       return conv?.channelId
-        ? `/${workspaceId}/chat/${conv.channelId}#origin=${msg.conversationId}&messageId=${id}`
+        ? `/${workspaceId}/chat/dir/${conv.channelId}#origin=${msg.conversationId}&messageId=${id}`
         : undefined;
     }
     case 'EMAIL': {
@@ -73,7 +73,7 @@ export async function buildNotifyActionUrl(
         .findUnique({ where: { id }, select: { conversationId: true, channelId: true } })
         .catch((err: unknown) => { logger.error(`[notify-action-url] EMAIL lookup failed id=${id}`, err); return null; });
       return email?.channelId && email?.conversationId
-        ? `/${workspaceId}/chat/${email.channelId}#origin=${email.conversationId}`
+        ? `/${workspaceId}/chat/dir/${email.channelId}#origin=${email.conversationId}`
         : undefined;
     }
     default:

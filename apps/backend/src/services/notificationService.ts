@@ -1037,7 +1037,7 @@ class NotificationService {
       type: NotificationType.CHANNEL_MESSAGE,
       relatedEntityType: 'message' as const,
       relatedEntityId: messageId,
-      actionUrl: `/${workspaceId}/chat/${channelId}#origin=${conversationId}&messageId=${messageId}`,
+      actionUrl: `/${workspaceId}/chat/dir/${channelId}#origin=${conversationId}&messageId=${messageId}`,
       metadata: {
         channelId,
         conversationId,
@@ -1148,8 +1148,8 @@ class NotificationService {
     });
 
     const mentionActionUrl = isThreadMessage
-      ? `/${workspaceId}/chat/${channelId}/${conversationId}#origin=${conversationId}&messageId=${messageId}`
-      : `/${workspaceId}/chat/${channelId}#origin=${conversationId}&messageId=${messageId}`;
+      ? `/${workspaceId}/chat/dir/${channelId}/${conversationId}#origin=${conversationId}&messageId=${messageId}`
+      : `/${workspaceId}/chat/dir/${channelId}#origin=${conversationId}&messageId=${messageId}`;
 
     const conversationData = await fetchConversationForNotification(conversationId);
 
@@ -1249,8 +1249,8 @@ class NotificationService {
     });
 
     const actionUrl = isThreadMessage
-      ? `/${workspaceId}/chat/${channelId}/${conversationId}#origin=${conversationId}&messageId=${messageId}`
-      : `/${workspaceId}/chat/${channelId}#origin=${conversationId}&messageId=${messageId}`;
+      ? `/${workspaceId}/chat/dir/${channelId}/${conversationId}#origin=${conversationId}&messageId=${messageId}`
+      : `/${workspaceId}/chat/dir/${channelId}#origin=${conversationId}&messageId=${messageId}`;
 
     const conversationData = await fetchConversationForNotification(conversationId);
 
@@ -1646,7 +1646,7 @@ class NotificationService {
       type: NotificationType.THREAD_REPLY,
       relatedEntityType: 'message' as const,
       relatedEntityId: replyMessageId,
-      actionUrl: `/${workspaceId}/chat/${channelId}/${conversationId}#origin=${conversationId}&messageId=${replyMessageId}`,
+      actionUrl: `/${workspaceId}/chat/dir/${channelId}/${conversationId}#origin=${conversationId}&messageId=${replyMessageId}`,
       metadata: {
         channelId,
         conversationId,
