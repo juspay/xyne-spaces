@@ -13,7 +13,11 @@ import { ShineBorder } from '../../components/ui/shine-border';
 import { ThemeProvider } from '@juspay/blend-design-system';
 import { reactNativeBridge } from '../../utils/reactNativeBridge';
 import { usePlatform } from '../../hooks/usePlatform';
-import { PENDING_WORKSPACE_ID_KEY, PENDING_WORKSPACE_NAME_KEY } from '../../machines/authMachine';
+import {
+  PENDING_WORKSPACE_ID_KEY,
+  PENDING_WORKSPACE_NAME_KEY,
+  clearEnterpriseLoginIntent,
+} from '../../machines/authMachine';
 import { WorkspaceType } from '@xyne/shared';
 
 interface CommunityWorkspaceListItem {
@@ -230,6 +234,14 @@ const AuthScreen = (): ReactElement | null => {
     const path = `${location.pathname}${location.search}${location.hash}`;
     reactNativeBridge.notifyRouteReady(path);
   }, [location]);
+
+  const entryLocationState = useRef(location.state).current;
+  useEffect(() => {
+    const state = entryLocationState as { enterpriseLoginEntry?: boolean } | null;
+    if (!state?.enterpriseLoginEntry) {
+      clearEnterpriseLoginIntent();
+    }
+  }, [entryLocationState]);
 
   // Redirect multi-workspace selection to the dedicated workspace hub
   useEffect(() => {

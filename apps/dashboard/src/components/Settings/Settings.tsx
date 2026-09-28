@@ -21,7 +21,6 @@ import { cn } from '../../utils/classNames';
 import { ShortcutHint } from '../ui/ShortcutHint';
 import { isStatusExpired } from '../../utils/statusUtils';
 import { useChannelByName } from '../../hooks/useChannels';
-import { default_seeded_channel_name } from '@xyne/shared';
 import { useSelf } from '../../hooks/useUsers';
 import { mutators } from '../../zero/mutators';
 import { v4 as uuidv4 } from 'uuid';
@@ -55,7 +54,7 @@ const Settings = ({
   const [customDate, setCustomDate] = useState<Date | null>(null);
   const zero = useZero();
 
-  const generalChannel = useChannelByName(default_seeded_channel_name);
+  const generalChannel = useChannelByName('general');
   const navigate = useNavigate();
   const { channelId } = useParams<{ channelId?: string }>();
   const path = usePath();

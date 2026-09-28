@@ -20,7 +20,6 @@ import { useZero } from '../../../hooks/useZero';
 import { useAuth } from '../../../hooks/useAuth';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useChannelByName } from '../../../hooks/useChannels';
-import { default_seeded_channel_name } from '@xyne/shared';
 import Avatar from '../../ui/Avatar/Avatar';
 import { StatusIndicator } from '../../ui/StatusIndicator';
 import { Button } from '../../ui/Button/Button';
@@ -82,7 +81,7 @@ const ProfileView = ({
   const zero = useZero();
   const navigate = useNavigate();
   const { channelId } = useParams<{ channelId?: string }>();
-  const generalChannel = useChannelByName(default_seeded_channel_name);
+  const generalChannel = useChannelByName('general');
 
   // Handle click outside to close presence dropdown
   useEffect(() => {

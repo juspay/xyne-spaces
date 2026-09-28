@@ -1,4 +1,4 @@
-import { TicketPriority, default_seeded_channel_name } from '@xyne/shared';
+import { TicketPriority } from '@xyne/shared';
 /**
  * Conversation content for `demo-seed.ts`.
  *
@@ -46,7 +46,7 @@ export const DEMO_USERS = [
 
 export const CHANNELS: ChannelSpec[] = [
   {
-    slug: default_seeded_channel_name,
+    slug: 'general',
     purpose: 'Everything and anything — the whole team is here.',
     members: [0, 1, 2, 3, 4, 5],
     conversations: [
