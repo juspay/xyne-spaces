@@ -1,8 +1,9 @@
-import { asService } from './base';
+import { asService, asSystem } from './base';
 import { externalSourceCore } from '@/integrations/core/core';
 import type { BitbucketWebhookService } from '@/services/bitbucketWebhookService';
 import type { BitbucketWebhookEnvelope } from '@/routes/webhooks';
 import type { GcsPollingService } from '@/services/gcsPollingService';
+import type { GitHubWebhookService } from '@/services/githubWebhookService';
 
 /**
  * Relocated from integrations/routes/external-source-sync.ts's sync route. Unauthenticated
@@ -41,6 +42,36 @@ export function runBitbucketWebhook(
     'bitbucket-webhook',
     workspaceId,
     () => service.processWebhookEvent(eventKey, payload, workspaceId),
+  );
+}
+
+/**
+ * Relocated from services/githubWebhookService.ts's handleWebhookEvent. Unauthenticated webhook
+ * (no req.user). The new /webhooks/github/:workspaceId route carries a workspaceId — used to
+ * open scope before the PR-metrics/ticket-sync writes pull_request events trigger. The legacy
+ * /webhooks/github route (no workspaceId) only acknowledges pull_request events and processes
+ * issue_comment ones, which resolve their own workspace deeper inside xyneCommentService — no
+ * tenant is knowable at this entry point, so that branch runs as system instead.
+ */
+export function runGitHubWebhook(
+  service: GitHubWebhookService,
+  eventType: string,
+  payload: unknown,
+  workspaceId: string | undefined,
+): ReturnType<GitHubWebhookService['processWebhookEvent']> {
+  if (workspaceId) {
+    return asService(
+      ['PullRequests', 'Ticket', 'TicketActivity', 'WorkflowExecution', 'Workflow'],
+      'github webhook: unauthenticated, workspaceId comes only from the internal request URL',
+      'github-webhook',
+      workspaceId,
+      () => service.processWebhookEvent(eventType, payload, workspaceId),
+    );
+  }
+  return asSystem(
+    ['Ticket', 'Message', 'Conversation'],
+    'github webhook: legacy route carries no workspaceId, only acknowledges pull_request and processes issue_comment, which resolves its own workspace downstream',
+    () => service.processWebhookEvent(eventType, payload, workspaceId),
   );
 }
 
