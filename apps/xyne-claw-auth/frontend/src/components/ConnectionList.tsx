@@ -10,6 +10,7 @@ import {
   connectDocuSign,
   connectEgnyte,
   connectMiro,
+  connectClickUp,
   connectWebflow,
   connectWix,
   connectAttio,
@@ -192,7 +193,18 @@ const OAUTH_PROVIDERS: readonly OAuthProvider[] = [
     subtext: "text-teal-400/70",
     button: "bg-teal-600 hover:bg-teal-500",
     connect: connectCustomerio,
-  }
+  },
+  {
+    type: "clickup",
+    name: "ClickUp",
+    description: "Connect to manage tasks, docs, goals, and chat across your ClickUp workspace",
+    border: "border-pink-800/50",
+    bg: "bg-pink-950/30",
+    text: "text-pink-300",
+    subtext: "text-pink-400/70",
+    button: "bg-pink-600 hover:bg-pink-500",
+    connect: connectClickUp,
+  },
 ] as const;
 
 // ── API-key providers ─────────────────────────────────────────────────────

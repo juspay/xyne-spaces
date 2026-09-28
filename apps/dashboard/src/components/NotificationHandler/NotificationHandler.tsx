@@ -109,7 +109,7 @@ const buildChatActionUrl = (notification: NotificationData['notification']): str
   const conversationId = notification.data?.conversationId;
   const messageId = notification.data?.messageId;
   const isDirectMessage = notification.type.toLowerCase() === 'direct_message';
-  const routeBase = isDirectMessage ? `/chat/dm/${channelId}` : `/chat/${channelId}`;
+  const routeBase = isDirectMessage ? `/chat/dm/${channelId}` : `/chat/dir/${channelId}`;
 
   if (!channelId) return undefined;
   let path: string;

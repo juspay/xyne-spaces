@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback, memo } from 'react';
 import { BaseViewerProps } from './utils';
+import { inlineAuthenticatedImages } from '../../utils/inlineAuthenticatedImages';
 
 const declaresEncoding = async (file: Blob): Promise<boolean> => {
   const head = new Uint8Array(await file.slice(0, 1024).arrayBuffer());
@@ -26,7 +27,20 @@ const HtmlViewer: React.FC<BaseViewerProps> = memo(({ source }) => {
 
       const type = (await declaresEncoding(source)) ? 'text/html' : 'text/html;charset=utf-8';
 
-      const url = URL.createObjectURL(source.slice(0, source.size, type));
+      // The sandbox='allow-scripts' iframe below runs from an opaque origin —
+      // its <img> loads send no cookies, so authenticated-origin images would
+      // 401 (broken render, and in Electron a session-killing 401). Inline
+      // them first; when the document has none, keep the original bytes so
+      // non-UTF-8 files are untouched.
+      let fileBlob = source.slice(0, source.size, type);
+      try {
+        const { html, changed } = await inlineAuthenticatedImages(await fileBlob.text());
+        if (changed) fileBlob = new Blob([html], { type: 'text/html;charset=utf-8' });
+      } catch {
+        // Fall back to the original document.
+      }
+
+      const url = URL.createObjectURL(fileBlob);
       setBlobUrl(url);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load HTML file');
