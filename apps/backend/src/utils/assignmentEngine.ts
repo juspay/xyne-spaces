@@ -3,7 +3,7 @@ import { UserResponsibility } from '@xyne/shared';
 import { withWorkspaceScope } from '@/database/tenant/context';
 import { notificationService } from '@/services/notificationService';
 import { syncWorkloadForUsers } from './workloadUtils';
-import { getGroupRoleIdsByUser } from './roleFrameworkUtils';
+import { getGroupRoleIdsByUser, getGroupResponsibilitiesByUser } from './roleFrameworkUtils';
 import { logger } from './logger';
 import type {
   UserGroupMapping,
@@ -41,35 +41,41 @@ export enum AssignmentType {
  */
 function filterUsersByResponsibility(
   userGroupMappings: UserGroupMapping[],
-  assignmentType: AssignmentType
+  assignmentType: AssignmentType,
+  responsibilitiesByUser?: Map<string, Set<UserResponsibility>>,
 ): string[] {
   return userGroupMappings
     .filter(mapping => {
-      const responsibility = mapping.responsibility as UserResponsibility;
-      
+      // Effective responsibilities = the legacy `responsibility` column UNION the
+      // responsibilities derived from the member's roles (user_role_mappings + legacy roleId).
+      // Without the union, a role assigned via the new multi-role UI — which no longer stamps
+      // `responsibility` — would be invisible to this legacy assignment path.
+      const effective = new Set<UserResponsibility>(responsibilitiesByUser?.get(mapping.userId) ?? []);
+      if (mapping.responsibility) effective.add(mapping.responsibility as UserResponsibility);
+
       switch (assignmentType) {
         case AssignmentType.TICKET_ASSIGNEE:
-          // Everyone EXCEPT QA can be assigned regular tickets (assignedTo field)
-          return responsibility !== 'QA';
+          // Everyone except a pure-QA member can be assigned regular tickets. A member with no
+          // responsibility at all is eligible (matches the legacy default-MEMBER behavior).
+          return effective.size === 0 || [...effective].some(r => r !== UserResponsibility.QA);
 
         case AssignmentType.MANAGER:
-          return responsibility === 'MANAGER';
+          return effective.has(UserResponsibility.MANAGER);
 
         case AssignmentType.TEAM_LEAD:
-          return responsibility === 'TEAM_LEAD';
+          return effective.has(UserResponsibility.TEAM_LEAD);
 
         case AssignmentType.MEMBER:
-          return responsibility === 'MEMBER';
+          return effective.has(UserResponsibility.MEMBER);
 
-        
         case AssignmentType.PR_REVIEWER:
           // Only PR_REVIEWER can be assigned for PR review
-          return responsibility === 'PR_REVIEWER';
-        
+          return effective.has(UserResponsibility.PR_REVIEWER);
+
         case AssignmentType.QA:
           // Only QA can be assigned for QA tasks
-          return responsibility === 'QA';
-        
+          return effective.has(UserResponsibility.QA);
+
         default:
           return false;
       }
@@ -282,8 +288,10 @@ export async function evaluateAssignmentRule(
     return { reason: 'NO_ON_CALL_USERS' };
   }
 
-  // Filter users by responsibility based on assignment type
-  const userIds = filterUsersByResponsibility(userGroupMappings, assignmentType);
+  // Filter users by responsibility based on assignment type. Union in role-derived
+  // responsibilities so roles assigned via the new multi-role UI are honored here.
+  const responsibilitiesByUser = await getGroupResponsibilitiesByUser(userGroupId);
+  const userIds = filterUsersByResponsibility(userGroupMappings, assignmentType, responsibilitiesByUser);
 
   if (userIds.length === 0) {
     logger.info(`[Assignment] No users with eligible responsibility (${assignmentType}) in userGroupId: ${userGroupId}`);
@@ -901,8 +909,11 @@ export async function evaluateAllRoles(
   };
 
   // ── Per-role pools ─────────────────────────────────────────────────────────
+  // Union in role-derived responsibilities so roles assigned via the new multi-role UI
+  // (which no longer stamp `responsibility`) are honored by this legacy assignment path.
+  const responsibilitiesByUser = await getGroupResponsibilitiesByUser(userGroupId);
   const poolFor = (type: AssignmentType) =>
-    filterUsersByResponsibility(userGroupMappings, type);
+    filterUsersByResponsibility(userGroupMappings, type, responsibilitiesByUser);
 
   // Round 1: MANAGER, TEAM_LEAD, MEMBER, QA
   const [manager, teamLead, member, qa] = await Promise.all([

@@ -5,29 +5,34 @@ import { TableSchema, MutationACLError } from '../core/types';
 import { assertCanManageRoles, canManageUserGroup } from '../core/admin-access';
 import { zql } from '../../queries';
 import { getRoleInWorkspaceOrThrow } from './roles-acl';
+import { getUserGroupInWorkspaceOrThrow } from './user-groups-acl';
+import { getUserInWorkspaceOrThrow } from './users-acl';
 import { assertGuestWriteBlocked } from '../core/guest-access';
 
 export class UserRoleMappingsACL extends BaseACL<'user_role_mappings'> {
   /**
-   * Authorize a write against the entity the mapping belongs to.
+   * Authorize a write against the entity the mapping belongs to, enforcing tenant isolation.
+   * zql reads inside mutation ACLs are NOT workspace-scoped, so we verify every referenced
+   * entity belongs to the caller's workspace (mirrors user-group-mappings-acl.ts).
    *
-   * - WORKSPACE rows (and legacy/undefined entityType): gated by workspace
-   *   role-management permission (`assertCanManageRoles`).
-   * - USER_GROUP rows: gated by group-management permission for the group
-   *   identified by `entityId` (`canManageUserGroup(..., 'members')`).
+   * - The target user must be in the caller's workspace.
+   * - WORKSPACE rows (and legacy/undefined entityType): entityId, when set, must be the
+   *   caller's workspace; gated by workspace role-management permission (`assertCanManageRoles`).
+   * - USER_GROUP rows: the group must be in the caller's workspace; gated by group-management
+   *   permission (`canManageUserGroup(..., 'members')`).
    */
   private async authorizeByEntity(
     entityType: string | null | undefined,
     entityId: string | null | undefined,
+    userId: string,
     tx: Transaction<Schema>,
   ): Promise<void> {
+    // The user the role is being (un)assigned to must belong to the caller's workspace.
+    await getUserInWorkspaceOrThrow(userId, this.ctx.workspaceId, tx);
+
     if (entityType === UserRoleMappingEntityType.USER_GROUP) {
-      const userGroup = await tx.run(
-        zql.user_groups.where('id', entityId ?? '').one(),
-      );
-      if (!userGroup) {
-        throw new MutationACLError('User role mapping failed: the specified group does not exist', 'user_role_mappings');
-      }
+      // Throws if the group doesn't exist or is in another workspace.
+      const userGroup = await getUserGroupInWorkspaceOrThrow(entityId ?? '', this.ctx.workspaceId, tx);
       const canManage = await canManageUserGroup(this.ctx, tx, userGroup, 'members');
       if (!canManage) {
         throw new MutationACLError(
@@ -37,7 +42,11 @@ export class UserRoleMappingsACL extends BaseACL<'user_role_mappings'> {
       }
       return;
     }
-    // WORKSPACE (and legacy/undefined default)
+
+    // WORKSPACE (and legacy/undefined default): a scoped entityId must be the caller's workspace.
+    if (entityId && entityId !== this.ctx.workspaceId) {
+      throw new MutationACLError('User role mapping failed: workspace scope mismatch', 'user_role_mappings');
+    }
     await assertCanManageRoles(this.ctx, tx);
   }
 
@@ -50,7 +59,7 @@ export class UserRoleMappingsACL extends BaseACL<'user_role_mappings'> {
       throw new MutationACLError('User role mapping not found', 'user_role_mappings');
     }
     await getRoleInWorkspaceOrThrow(mapping.roleId, this.ctx.workspaceId, tx);
-    await this.authorizeByEntity(mapping.entityType, mapping.entityId, tx);
+    await this.authorizeByEntity(mapping.entityType, mapping.entityId, mapping.userId, tx);
   }
 
   async canInsert(
@@ -59,7 +68,7 @@ export class UserRoleMappingsACL extends BaseACL<'user_role_mappings'> {
   ): Promise<void> {
     await getRoleInWorkspaceOrThrow(args.roleId, this.ctx.workspaceId, tx);
     assertGuestWriteBlocked(this.ctx, 'user_role_mappings', 'insert', 'User role mapping');
-    await this.authorizeByEntity(args.entityType, args.entityId, tx);
+    await this.authorizeByEntity(args.entityType, args.entityId, args.userId, tx);
   }
 
   async canUpdate(

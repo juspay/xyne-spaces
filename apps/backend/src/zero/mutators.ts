@@ -6199,6 +6199,17 @@ export function createMutators(
                     ? { roleId: mapping.roleId ?? null, responsibility: mapping.responsibility ?? null }
                     : null;
                 },
+                // Union in the multi-role bindings (user_role_mappings) so roles assigned via
+                // the new UI count toward ticket-control permission, not just legacy roleId.
+                getUserGroupRoleIds: async (userId, userGroupId) => {
+                  const roleRows = await tx.run(
+                    zql.user_role_mappings
+                      .where('userId', userId)
+                      .where('entityType', 'USER_GROUP')
+                      .where('entityId', userGroupId),
+                  );
+                  return roleRows.map(r => r.roleId);
+                },
               },
             );
             if (!permission.allowed) {
@@ -7133,6 +7144,17 @@ export function createMutators(
                   ? { roleId: mapping.roleId ?? null, responsibility: mapping.responsibility ?? null }
                   : null;
               },
+              // Union in the multi-role bindings (user_role_mappings) so roles assigned via
+              // the new UI count toward ticket-control permission, not just legacy roleId.
+              getUserGroupRoleIds: async (userId, userGroupId) => {
+                const roleRows = await tx.run(
+                  zql.user_role_mappings
+                    .where('userId', userId)
+                    .where('entityType', 'USER_GROUP')
+                    .where('entityId', userGroupId),
+                );
+                return roleRows.map(r => r.roleId);
+              },
             },
           );
           if (!permission.allowed) {
@@ -7366,6 +7388,17 @@ export function createMutators(
                   return mapping
                     ? { roleId: mapping.roleId ?? null, responsibility: mapping.responsibility ?? null }
                     : null;
+                },
+                // Union in the multi-role bindings (user_role_mappings) so roles assigned via
+                // the new UI count toward ticket-control permission, not just legacy roleId.
+                getUserGroupRoleIds: async (userId, userGroupId) => {
+                  const roleRows = await tx.run(
+                    zql.user_role_mappings
+                      .where('userId', userId)
+                      .where('entityType', 'USER_GROUP')
+                      .where('entityId', userGroupId),
+                  );
+                  return roleRows.map(r => r.roleId);
                 },
               },
             );
@@ -18506,6 +18539,17 @@ export function createMutators(
                   return mapping
                     ? { roleId: mapping.roleId ?? null, responsibility: mapping.responsibility ?? null }
                     : null;
+                },
+                // Union in the multi-role bindings (user_role_mappings) so roles assigned via
+                // the new UI count toward ticket-control permission, not just legacy roleId.
+                getUserGroupRoleIds: async (userId, userGroupId) => {
+                  const roleRows = await tx.run(
+                    zql.user_role_mappings
+                      .where('userId', userId)
+                      .where('entityType', 'USER_GROUP')
+                      .where('entityId', userGroupId),
+                  );
+                  return roleRows.map(r => r.roleId);
                 },
               },
             );
