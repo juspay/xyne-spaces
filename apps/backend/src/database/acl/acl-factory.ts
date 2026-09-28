@@ -551,6 +551,12 @@ export class ACLFactory {
       return new BaseQueryACL(ctx, prisma)
     case 'deskAutoLabelRuleReference':
       return new BaseQueryACL(ctx, prisma)
+    case 'serviceAccount':
+      return new BaseQueryACL(ctx, prisma)
+    case 'serviceAccountKey':
+      return new BaseQueryACL(ctx, prisma)
+    case 'serviceAccountResource':
+      return new BaseQueryACL(ctx, prisma)
     }
   }
 }

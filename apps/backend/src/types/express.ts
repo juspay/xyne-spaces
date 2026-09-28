@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import type { ServiceAccount } from '@prisma/client';
 
 export interface ApiResponse<T = any> {
   success: boolean;
@@ -61,6 +62,7 @@ declare global {
     interface Request {
       user?: AuthenticatedUser;
       authenticatedSessionId?: string;
+      serviceAccount?: ServiceAccount;
     }
   }
 }

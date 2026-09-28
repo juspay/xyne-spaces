@@ -208,6 +208,9 @@ import sdlcVcsInternalRoutes from '@/routes/sdlcVcsInternal';
 import sdlcAgentInternalRoutes from '@/routes/sdlcAgentInternal';
 import { createSdkPublicRouter, createSdkRouter } from '@/api/sdk';
 import { errorHandler as sdkErrorHandler } from '@/api/sdk/handler';
+import { createS2sRouter } from '@/api/s2s';
+import { authenticateSdk } from '@/middleware/sdkAuth';
+import serviceAccountRoutes from '@/routes/serviceAccounts';
 
 
 export class App {
@@ -371,8 +374,10 @@ export class App {
     // SDK's own error envelope.
     if (config.sdk.enabled) {
       this.app.use('/api/sdk', createSdkPublicRouter());
-      this.app.use('/api/sdk', authMiddleware.authenticate, createSdkRouter(), sdkErrorHandler);
+      this.app.use('/api/sdk', authenticateSdk, createSdkRouter(), sdkErrorHandler);
       logger.info('Public SDK API mounted at /api/sdk');
+      this.app.use('/api/s2s', createS2sRouter());
+      this.app.use('/api/service-accounts', authMiddleware.authenticate, serviceAccountRoutes);
     }
 
     this.app.use('/api/automation-webhooks', webhookLimiter, automationWebhookRoutes);
