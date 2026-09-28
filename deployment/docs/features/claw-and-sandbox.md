@@ -32,6 +32,25 @@ gateway with:
 litellm_api_key = "sk-…"
 ```
 
+The install does not run the gateway itself. Claw expects an OpenAI-compatible LiteLLM endpoint at
+`http://litellm:4000`; point it at yours, with a model the gateway serves, through the app values:
+
+```hcl
+apps = {
+  xyne-claw = {
+    enabled = true
+    values  = <<-YAML
+      env:
+        LITELLM_URL: https://llm-gateway.example.com
+        LITELLM_MODEL: <model id from the gateway's /v1/models>
+    YAML
+  }
+}
+```
+
+`LITELLM_URL` is the base without `/v1`. Without a reachable gateway every Ask AI and agent run
+fails with `Connection error.` in the claw log and `getaddrinfo ENOTFOUND litellm`.
+
 `setup.sh --env prod --only platform`. The backend gets `XYNE_CLAW_URL=http://xyne-claw:8081` and
 `XYNE_CLAW_AUTH_URL=http://xyne-claw-auth:3003`, and the gateway serves the claw UI at `/claw/`
 (the frontend) with its API at `/claw/api/` and `/claw/health` (claw-auth).
