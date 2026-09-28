@@ -21,7 +21,7 @@ export {
   type SendResult,
 } from './send.js';
 
-export { subscribeSendLifecycle } from './mutationLifecycle.js';
+export { subscribeMutationOutcome, subscribeSendLifecycle } from './mutationLifecycle.js';
 
 export {
   getMessagesSnapshot,

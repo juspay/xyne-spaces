@@ -20,6 +20,48 @@ const isTransientError = (error: unknown): boolean =>
 
 type SendOutcome = 'client-applied' | 'app-error';
 
+/**
+ * Fires once after both mutation halves settle. Transient `zero` errors are
+ * treated as success because Replicache retries them. Non-transient client or
+ * server errors are `app-error`.
+ *
+ * Use this when a caller needs server confirmation. `subscribeSendLifecycle`'s
+ * `onSettled` still fires on a successful client apply, before the server
+ * responds.
+ */
+export function subscribeMutationOutcome(
+  mutation: PromiseWithServerResult,
+  onOutcome: (outcome: SendOutcome) => void,
+): void {
+  let done = false;
+  const finish = (outcome: SendOutcome): void => {
+    if (done) return;
+    done = true;
+    onOutcome(outcome);
+  };
+
+  mutation.client
+    .then(clientResult => {
+      if (clientResult.type === 'error' && !isTransientError(clientResult.error)) {
+        finish('app-error');
+        return;
+      }
+
+      return mutation.server.then(serverResult => {
+        if (serverResult.type === 'error' && !isTransientError(serverResult.error)) {
+          finish('app-error');
+          return;
+        }
+        finish('ok');
+      });
+    })
+    .catch(() => finish('app-error'));
+
+  mutation.server.catch(err => {
+    if (!isTransientError(err)) finish('app-error');
+  });
+}
+
 export function subscribeSendLifecycle(
   mutation: PromiseWithServerResult,
   onAppError: () => void,
