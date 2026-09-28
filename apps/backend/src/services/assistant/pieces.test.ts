@@ -101,7 +101,11 @@ describe('matching a spoken name to records', () => {
   });
 
   it('finds a name spelled the way it sounds, but never counts it as certain', () => {
-    const team = [person('4', 'Preeti Sharma', 'preeti@x.io'), person('5', 'Prisha Rao')];
+    const team = [
+      person('4', 'Preeti Sharma', 'preeti@x.io'),
+      person('5', 'Prisha Rao'),
+      person('6', 'Xyne Doctor'),
+    ];
     expect(matchName('Priti', team)).toMatchObject({
       kind: 'one',
       record: { id: '4' },
@@ -109,6 +113,11 @@ describe('matching a spoken name to records', () => {
     });
     expect(matchName('priti sharma', team)).toMatchObject({ kind: 'one', record: { id: '4' } });
     expect(matchName('Preeti Sharma', team)).toMatchObject({ kind: 'one', certain: true });
+    expect(matchName('Zyne', team)).toMatchObject({
+      kind: 'one',
+      certain: false,
+      record: { id: '6' },
+    });
     expect(matchName('Priya', team)).toEqual({ kind: 'none' });
     expect(matchName('Alistair', team)).toEqual({ kind: 'none' });
   });
@@ -352,6 +361,31 @@ describe('the stored session', () => {
     };
 
     expect(parseSession(serializeSession(session))).toEqual(session);
+
+    // Accept and normalize sessions written before active choices stopped carrying `kind`.
+    const legacy = JSON.parse(serializeSession(session)) as {
+      conversation: { active: { choosing: { kind?: string } } };
+    };
+    legacy.conversation.active.choosing.kind = 'choice';
+    expect(parseSession(JSON.stringify(legacy))).toEqual(session);
+
+    const notFoundSession = {
+      ...session,
+      conversation: {
+        ...session.conversation,
+        active: {
+          ...session.conversation.active,
+          choosing: null,
+          notFound: { field: 'recipient', mention: 'Xyne Doctor' },
+        },
+      },
+      question: { kind: 'detail' as const, field: 'recipient', options: [] },
+    };
+    const legacyNotFound = JSON.parse(serializeSession(notFoundSession)) as {
+      conversation: { active: { notFound: { kind?: string } } };
+    };
+    legacyNotFound.conversation.active.notFound.kind = 'notFound';
+    expect(parseSession(JSON.stringify(legacyNotFound))).toEqual(notFoundSession);
   });
 
   it('starts fresh when nested conversation, reference, question, or run data is malformed', () => {

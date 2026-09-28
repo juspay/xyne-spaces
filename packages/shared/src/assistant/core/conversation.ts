@@ -322,10 +322,10 @@ function nextStep(draft: Draft, definition: ActionDefinition): Next {
   if (!draft.choosing && !draft.notFound && draft.resolutionQueue.length > 0) {
     const [pending, ...resolutionQueue] = draft.resolutionQueue;
     if (pending?.kind === 'choice') {
-      return nextStep({ ...draft, resolutionQueue, choosing: pending }, definition);
+      return nextStep({ ...draft, resolutionQueue, choosing: choiceOf(pending) }, definition);
     }
     if (pending?.kind === 'notFound') {
-      return nextStep({ ...draft, resolutionQueue, notFound: pending }, definition);
+      return nextStep({ ...draft, resolutionQueue, notFound: notFoundOf(pending) }, definition);
     }
   }
 
@@ -540,8 +540,8 @@ function addPendingResolution(draft: Draft, pending: PendingResolution, many: bo
     return {
       ...draft,
       asking: null,
-      choosing: pending.kind === 'choice' ? pending : null,
-      notFound: pending.kind === 'notFound' ? pending : null,
+      choosing: pending.kind === 'choice' ? choiceOf(pending) : null,
+      notFound: pending.kind === 'notFound' ? notFoundOf(pending) : null,
       resolutionQueue: many
         ? draft.resolutionQueue
         : draft.resolutionQueue.filter(item => item.field !== pending.field),
@@ -561,10 +561,28 @@ function addPendingResolution(draft: Draft, pending: PendingResolution, many: bo
   }
   if (!draft.choosing && !draft.notFound) {
     return pending.kind === 'choice'
-      ? { ...draft, choosing: pending }
-      : { ...draft, notFound: pending };
+      ? { ...draft, choosing: choiceOf(pending) }
+      : { ...draft, notFound: notFoundOf(pending) };
   }
   return { ...draft, resolutionQueue: [...draft.resolutionQueue, pending] };
+}
+
+/** The draft stores the active choice; only queued resolutions need the `kind` tag. */
+function choiceOf(
+  pending: Extract<PendingResolution, { kind: 'choice' }>
+): NonNullable<Draft['choosing']> {
+  return {
+    field: pending.field,
+    mention: pending.mention,
+    candidates: pending.candidates,
+  };
+}
+
+/** The draft stores the missing mention; only queued resolutions need the `kind` tag. */
+function notFoundOf(
+  pending: Extract<PendingResolution, { kind: 'notFound' }>
+): NonNullable<Draft['notFound']> {
+  return { field: pending.field, mention: pending.mention };
 }
 
 function invalidate(draft: Draft): Draft {

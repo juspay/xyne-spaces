@@ -1,7 +1,7 @@
 import { ACTIONS, type EntityRef, type TurnInput, type TurnResponse } from '@xyne/shared/assistant';
 import type { JevAnswer } from '@/services/queryIntent/jevClient';
 import type { FoundRecord, SearchHints } from './records';
-import { EMPTY_SESSION, type AssistantSession } from './session';
+import { EMPTY_SESSION, parseSession, serializeSession, type AssistantSession } from './session';
 import { handleTurn, type TurnServices } from './turn';
 
 const daniel: FoundRecord = {
@@ -83,9 +83,10 @@ function assistant(people: FoundRecord[] = [daniel]) {
   const services: TurnServices = {
     catalog: ACTIONS,
     sessions: {
-      load: async () => session,
+      // Exercise the same JSON boundary as Redis on every turn.
+      load: async () => parseSession(serializeSession(session)),
       save: async (_identity, next) => {
-        session = next;
+        session = parseSession(serializeSession(next));
       },
     },
     records: {
@@ -668,6 +669,27 @@ describe('a turn', () => {
     chat.hears({ area: 'messaging', action: 'send_dm', fields: { recipient: 'Priti' } });
     const next = await chat.say('Send a direct message to Priti.');
     expect(next.say).toBe('What should I say to Preeti Sharma?');
+  });
+
+  it('previews a close agent-name match before sending', async () => {
+    const xyneAgent: FoundRecord = {
+      record: { kind: 'person', id: 'app-xyne', name: 'Xyne Doctor' },
+      detail: 'Agent',
+    };
+    const chat = assistant([xyneAgent]);
+    chat.hears({
+      area: 'messaging',
+      action: 'send_dm',
+      fields: { recipient: 'Zahn Doctor', message: 'hello' },
+    });
+
+    const preview = await chat.say('send a direct message to Zahn Doctor and say hello');
+
+    expect(preview).toMatchObject({
+      say: 'Send “hello” to Xyne Doctor?',
+      display: { kind: 'preview' },
+    });
+    expect(preview.run).toBeUndefined();
   });
 
   it('answers "what can you do?", greetings, and thanks instead of "I can’t do that"', async () => {

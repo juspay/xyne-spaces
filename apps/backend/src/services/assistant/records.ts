@@ -5,7 +5,7 @@ import type { Candidate, EntityKind, EntityRef } from '@xyne/shared/assistant';
  * it runs inside the request, so the app's own rules decide what the user may see.
  */
 
-/** A record that could match, with a line that tells it apart from namesakes (an email). */
+/** A record that could match, with a line that helps distinguish people and app users. */
 export interface FoundRecord {
   record: EntityRef;
   detail?: string;
@@ -118,6 +118,9 @@ function nameScore(said: string, name: string): number {
   const saidWords = said.split(' ');
   if (saidWords.every((word) => nameWords.includes(word))) return WORDS;
   if (name.includes(said)) return PART;
+  // Speech recognition can get one name wrong while retaining a useful surname or role
+  // word ("Zahn Doctor" for "Xyne Doctor"). Offer this only as an uncertain match.
+  if (saidWords.some((word) => nameWords.includes(word))) return PART;
   const nameSounds = nameWords.map(soundKey);
   return saidWords.every((word) => nameSounds.some((sound) => soundsAlike(soundKey(word), sound)))
     ? SOUNDS_LIKE
@@ -129,6 +132,7 @@ function nameScore(said: string, name: string): number {
  * Indian names included, which English-only codes such as Soundex handle badly.
  */
 const SOUND_RULES: ReadonlyArray<readonly [RegExp, string]> = [
+  [/^x(?=[aeiouy])/, 'z'], // X is often spoken as Z at the start of names (Xyne/Zyne).
   [/ph/g, 'f'],
   [/([bdgkst])h/g, '$1'], // bh, dh, gh, kh, sh, th
   [/ee|ea|ie/g, 'i'],

@@ -59,6 +59,25 @@ const choiceOptionSchema = z
   .strict();
 const fieldValueSchema = z.union([z.string(), entityRefSchema, z.array(entityRefSchema)]);
 const candidateSchema = choiceOptionSchema.extend({ value: fieldValueSchema }).strict();
+const choosingSchema = z
+  .object({
+    // Older sessions accidentally persisted the resolution queue's discriminator here.
+    kind: z.literal('choice').optional(),
+    field: z.string().min(1),
+    mention: z.string(),
+    candidates: z.array(candidateSchema),
+  })
+  .strict()
+  .transform(({ field, mention, candidates }) => ({ field, mention, candidates }));
+const notFoundSchema = z
+  .object({
+    // Older sessions accidentally persisted the resolution queue's discriminator here.
+    kind: z.literal('notFound').optional(),
+    field: z.string().min(1),
+    mention: z.string(),
+  })
+  .strict()
+  .transform(({ field, mention }) => ({ field, mention }));
 const pendingResolutionSchema = z.discriminatedUnion('kind', [
   z
     .object({
@@ -81,18 +100,8 @@ const draftSchema = z
     offered: z.array(z.string()),
     skipped: z.array(z.string()),
     asking: z.string().nullable(),
-    choosing: z
-      .object({
-        field: z.string().min(1),
-        mention: z.string(),
-        candidates: z.array(candidateSchema),
-      })
-      .strict()
-      .nullable(),
-    notFound: z
-      .object({ field: z.string().min(1), mention: z.string() })
-      .strict()
-      .nullable(),
+    choosing: choosingSchema.nullable(),
+    notFound: notFoundSchema.nullable(),
     resolutionQueue: z.array(pendingResolutionSchema).default([]),
     pendingLookup: z
       .object({ field: z.string().min(1), mention: z.string() })

@@ -80,11 +80,7 @@ export function databaseFinder(context: ACLContext): RecordFinder {
 const MAX_PEOPLE = 250;
 const MAX_CHANNELS = 25;
 
-/**
- * People whose name contains every word said. A name heard by sound ("Priti" for
- * "Preeti") matches none, so then the people whose name starts with the same letter are
- * fetched, and `matchName` compares how they sound.
- */
+/** First try all spoken words; on a miss, allow one name word to be misheard. */
 async function findPeople(
   words: string[],
   selfId: string,
@@ -99,13 +95,39 @@ async function findPeople(
     })),
   });
   if (byName.length > 0) return byName;
-  const initial = words[0]?.charAt(0) ?? '';
-  return people(selfId, access, {
-    OR: [
-      { name: { startsWith: initial, mode: 'insensitive' as const } },
-      { displayName: { startsWith: initial, mode: 'insensitive' as const } },
-    ],
+
+  // Let one name word be misheard, but require every other spoken word to match.
+  // This keeps a common word such as "doctor" from pulling unrelated workspace users.
+  const likelyNames = words.map((word, index) => {
+    const initials = likelyInitials(word);
+    const context = words.filter((_, otherIndex) => otherIndex !== index);
+    return {
+      AND: [
+        {
+          OR: initials.flatMap((letter) => [
+            { name: { startsWith: letter, mode: 'insensitive' as const } },
+            { displayName: { startsWith: letter, mode: 'insensitive' as const } },
+          ]),
+        },
+        ...context.map((contextWord) => ({
+          OR: [
+            { name: { contains: contextWord, mode: 'insensitive' as const } },
+            { displayName: { contains: contextWord, mode: 'insensitive' as const } },
+          ],
+        })),
+      ],
+    };
   });
+
+  return people(selfId, access, {
+    OR: likelyNames,
+  });
+}
+
+/** X and Z can be confused at the start of a spoken name ("Xyne" / "Zyne"). */
+function likelyInitials(word: string): string[] {
+  const initial = word.charAt(0);
+  return initial === 'x' || initial === 'z' ? ['x', 'z'] : [initial];
 }
 
 async function people(
@@ -117,12 +139,15 @@ async function people(
     where: {
       AND: [{ status: 'ACTIVE', id: { not: selfId }, ...match }, access],
     },
-    select: { id: true, name: true, displayName: true, email: true },
+    select: { id: true, name: true, displayName: true, email: true, userType: true },
     take: MAX_PEOPLE,
   });
   return rows.map((row) => {
     const record: PersonRef = { kind: 'person', id: row.id, name: row.displayName || row.name };
-    return { record, detail: row.email };
+    return {
+      record,
+      detail: row.userType === 'USER' ? row.email : row.userType === 'BOT' ? 'Agent' : 'App',
+    };
   });
 }
 
