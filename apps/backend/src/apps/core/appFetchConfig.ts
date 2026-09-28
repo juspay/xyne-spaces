@@ -177,16 +177,6 @@ export const AppFetchConfigSchema = z.object({
     const sentBody = cfg.method === 'GET' ? '' : (cfg.body ?? '');
     const templated = [cfg.url, sentBody, ...Object.values(cfg.headers ?? {})].join('\n');
 
-    // Rejected rather than silently ignored: a body left behind by a method
-    // switch reads as configuration that is in force when it is not.
-    if (cfg.method === 'GET' && (cfg.body ?? '').trim()) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['body'],
-        message:
-          'A GET request sends no body. Move these parameters into the URL, or clear the body.',
-      });
-    }
     // Offset pagination advances a counter the app never sees unless the
     // template sends it. Without this a config paginates forever over page one,
     // re-ingesting it until the run budget expires, and reports success.
