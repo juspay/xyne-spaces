@@ -35,7 +35,7 @@ domain = "spaces.example.com" puts every record for the install in the
 example.com zone, and other installs can share it.
 
 register reads the registrant from dns-contact.json in the environment
-directory; see docs/dns.md for its fields. It is personal data: keep the
+directory; see docs/install/dns.md for its fields. It is personal data: keep the
 file out of version control.
 
 On gcp and azure, register the domain at any registrar, run zone, and set the
@@ -156,7 +156,7 @@ aws_contact_json() {
 
 validate_contact() {
   local missing
-  [ -f "$CONTACT_FILE" ] || die "missing $CONTACT_FILE; see docs/dns.md for its fields"
+  [ -f "$CONTACT_FILE" ] || die "missing $CONTACT_FILE; see docs/install/dns.md for its fields"
   missing="$(jq -r '[("first_name","last_name","email","phone","address_line_1","city","postal_code","country") as $k | select((.[$k] // "") == "") | $k] | join(", ")' "$CONTACT_FILE")"
   [ -z "$missing" ] || die "$CONTACT_FILE is missing: $missing"
   jq -e '.phone | test("^\\+[0-9]{1,3}\\.[0-9]{4,}$")' "$CONTACT_FILE" >/dev/null || die "phone in $CONTACT_FILE must look like +91.9876543210"

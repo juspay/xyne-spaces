@@ -17,7 +17,7 @@
   "certManager" (dict "enabled" (and $cm.enabled (not (has $ing.tls (list "existing" "none")))) "mode" $ing.tls "email" $cm.email "issuer" $cm.issuer "server" $cm.server "wildcard" $wildcard)
   "argocd" (dict "enabled" ($argo.enabled | default false) "host" $argoHost "namespace" .Release.Namespace)
   "peerAuthentication" (dict "enabled" (ne $istio.peerAuthentication "") "mode" ($istio.peerAuthentication | default "STRICT"))
-  "routes" (dict "externalDashboard" ((index .Values.apps "xyne-dashboard-external").enabled | default false) "clawAuthFrontend" ((index .Values.apps "xyne-claw-auth-frontend").enabled | default false) "clawPreview" (and .Values.addons.sandbox.enabled ((index .Values.apps "xyne-claw").enabled | default false)) "health" $ing.edgeTerminated)
+  "routes" (dict "externalDashboard" ((index .Values.apps "xyne-dashboard-external").enabled | default false) "clawAuth" ((index .Values.apps "xyne-claw-auth").enabled | default false) "clawAuthFrontend" ((index .Values.apps "xyne-claw-auth-frontend").enabled | default false) "clawPreview" (and .Values.addons.sandbox.enabled ((index .Values.apps "xyne-claw").enabled | default false)) "health" $ing.edgeTerminated)
   "storageClass" (dict "enabled" (not (empty (include "xyne-root.awsDefault" (dict "root" $ "value" $sc.enabled)))))
 }}
 {{- $values := include "xyne-root.merge" (dict "base" $base "layers" (list $pc.values)) | fromYaml }}

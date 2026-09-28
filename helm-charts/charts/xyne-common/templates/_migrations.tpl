@@ -37,9 +37,11 @@ record_history() {
 }
 
 migrate() {
-  schema="$1"
+  reseed="$1"
+  schema="$2"
   baseline="$(dirname "$schema")/baseline"
-  shift
+  shift 2
+  seeded=0
   if [ ! -f "$baseline/migrations.txt" ] || has_history "$schema"; then
     echo "$schema: applying pending migrations"
   elif has_table "$schema" _xyne_baseline || is_empty "$schema"; then
@@ -57,6 +59,7 @@ migrate() {
       echo "seeding with $seed"
       "$tsx" "$seed"
     done
+    seeded=1
     record_history "$schema" "$baseline/migrations.txt"
     printf '%s\n' 'DROP TABLE "_xyne_baseline";' | "$prisma" db execute --stdin --schema "$schema"
   else
@@ -64,9 +67,15 @@ migrate() {
     exit 1
   fi
   "$prisma" migrate deploy --schema "$schema"
+  if [ "$reseed" = 1 ] && [ "$seeded" = 0 ]; then
+    for seed in "$@"; do
+      echo "reseeding with $seed"
+      "$tsx" "$seed"
+    done
+  fi
 }
 {{- range (.Values.migrations | default dict).schemas }}
-migrate {{ .path | quote }}{{ range .seeds }} {{ . | quote }}{{ end }}
+migrate {{ ternary "1" "0" (.reseed | default false) }} {{ .path | quote }}{{ range .seeds }} {{ . | quote }}{{ end }}
 {{- end }}
 {{- end }}
 
@@ -104,6 +113,14 @@ spec:
       {{- with .Values.tolerations }}
       tolerations:
         {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $m.volumes }}
+      volumes:
+        {{- tpl (toYaml .) $ | nindent 8 }}
+      {{- end }}
+      {{- with $m.initContainers }}
+      initContainers:
+        {{- tpl (toYaml .) $ | nindent 8 }}
       {{- end }}
       containers:
         - name: migrate
@@ -157,6 +174,10 @@ spec:
             {{- range $order }}
             - {{- toYaml (index $entries .) | nindent 14 }}
             {{- end }}
+          {{- with $m.volumeMounts }}
+          volumeMounts:
+            {{- tpl (toYaml .) $ | nindent 12 }}
+          {{- end }}
           {{- with $m.resources }}
           resources:
             {{- toYaml . | nindent 12 }}

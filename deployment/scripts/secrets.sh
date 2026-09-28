@@ -22,7 +22,7 @@ those can be reviewed and versioned while the secrets files are not.
   --env-dir <path>  directory holding environments (default: $ENV_DIR_BASE)
   --dry-run         list what would be written, with every value masked
   --force           replace existing secrets files; this rotates every value
-                    in them, see docs/secrets.md#rotation first
+                    in them, see docs/reference/secrets.md#rotation first
   --only <stack>    write only 01-infra.secrets.tfvars (infra) or only
                     02-platform.secrets.tfvars (platform)
 
@@ -97,7 +97,7 @@ Sign-in uses a Google OAuth client. Create one (any Google Cloud project):
        Authorized JavaScript origin:  https://$domain
        Authorized redirect URI:       https://$domain/api/auth/exchange
   3. Copy the client ID and client secret.
-See docs/secrets.md#google-sign-in.
+See docs/reference/secrets.md#google-sign-in.
 
 EOF
 }

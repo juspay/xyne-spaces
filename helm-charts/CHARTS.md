@@ -833,7 +833,12 @@ The `null`s are load-bearing: Helm merges maps, so `sidecar.istio.io/inject: nul
 the configserver's sidecar opt-out, `clusterIP: null` is what turns the headless default back into
 a normal VIP (feed and search are load-balanced, not addressed per pod), `readinessProbe: null`
 removes the configserver's probe, and `podSecurityContext: null` lets the feed container run as
-root (`securityContext.runAsUser: 0`).
+root (`securityContext.runAsUser: 0`). A `null` only survives if the values reach Helm as text:
+Kubernetes server-side apply deletes `null` fields from structured data, so an Argo CD
+Application that carries these under `helm.valuesObject` silently loses them (content then
+gets the configserver's readiness probe and never turns ready, and feed/search Services flip to
+headless, which the API server rejects). The root chart passes every app's values as a
+`helm.values` string for this reason.
 
 Bring them up in order: `vespa-configserver`, then content, feed and search, then deploy the
 application package.
@@ -889,13 +894,19 @@ must match the Vespa schemas.
 `tei-batch-proxy` and the Vespa `hugging-face-embedder` component address
 (`http://vespa-embedder:80`). `fullnameOverride: vespa-embedder` is the chart default.
 
-**Health.** Liveness (every 30 s) and readiness `GET /health`, timeout 1 s.
+**Health.** Startup `GET /health` every 10 s for up to 30 minutes, then liveness (every 30 s)
+and readiness. The long startup window is for the first boot of the `cuda-` image, which
+compiles its kernels for the GPU it finds before `/health` answers; a plain liveness probe
+kills it mid-compile and it starts over.
 
-**Secrets.** None. **Environment.** `NVIDIA_VISIBLE_DEVICES=all`,
-`NVIDIA_DRIVER_CAPABILITIES=compute,utility`.
+**Secrets.** None. **Environment.** None: the NVIDIA device plugin sets `NVIDIA_VISIBLE_DEVICES`
+to the GPU it allocated. Setting it to `all` in the pod would expose every GPU on the node,
+including ones allocated to other pods.
 
-**Scaling and disruption.** 1 replica, autoscaling off, PDB off, `RollingUpdate` with
-`maxUnavailable: 25%`. `resources` requests and limits `nvidia.com/gpu: "1"` and nothing else;
+**Scaling and disruption.** 1 replica, autoscaling off, PDB off, `Recreate`: a rolling update
+would start the new pod while the old one still holds the only free GPU, and with the GPU pool
+at its maximum the new pod stays Pending forever. `resources` requests and limits
+`nvidia.com/gpu: "1"` and nothing else;
 tolerates `nvidia.com/gpu` `NoSchedule`. No anti-affinity preset.
 
 **Storage.** None by default (`persistence` would be 50 GiB at `/data`; the model is downloaded on
@@ -936,8 +947,10 @@ is the chart default.
 stateless and scales horizontally, but every replica adds `UPSTREAM_CONCURRENCY` (4) concurrent
 streams against one GPU.
 
-**Security.** No security context. Pod annotations restrict the Istio sidecar to port 8080
-inbound and outbound; the embedder has no sidecar, so calls to it on port 80 bypass the mesh.
+**Security.** Runs as uid/gid 10001 (the image's `USER`), `runAsNonRoot`, read-only root
+filesystem, no privilege escalation, every capability dropped, `RuntimeDefault` seccomp. Pod
+annotations restrict the Istio sidecar to port 8080 inbound and outbound; the embedder has no
+sidecar, so calls to it on port 80 bypass the mesh.
 
 **Gotchas.**
 

@@ -48,6 +48,7 @@ argocd:
 
 routes:
   externalDashboard: false
+  clawAuth: false
   clawAuthFrontend: false
   clawPreview: false
   apiTimeout: 50s
@@ -68,6 +69,9 @@ services:
   externalDashboard:
     host: xyne-dashboard-external
     port: 80
+  clawAuth:
+    host: xyne-claw-auth
+    port: 3003
   clawAuthFrontend:
     host: xyne-claw-auth-frontend
     port: 80

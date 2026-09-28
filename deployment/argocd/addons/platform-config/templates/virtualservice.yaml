@@ -66,11 +66,26 @@ spec:
             port:
               number: {{ $s.externalDashboard.port }}
     {{- end }}
+    {{- if .Values.routes.clawAuth }}
+    - name: claw-api
+      match:
+        - uri:
+            prefix: /claw/api/
+        - uri:
+            exact: /claw/health
+      route:
+        - destination:
+            host: {{ $s.clawAuth.host }}
+            port:
+              number: {{ $s.clawAuth.port }}
+    {{- end }}
     {{- if .Values.routes.clawAuthFrontend }}
     - name: claw
       match:
         - uri:
             prefix: /claw/
+        - uri:
+            exact: /claw
       route:
         - destination:
             host: {{ $s.clawAuthFrontend.host }}

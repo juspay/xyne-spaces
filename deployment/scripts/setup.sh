@@ -15,7 +15,7 @@ for Argo CD and prints how to reach the install.
 
 The ingress addresses are reserved before the network and the cluster are
 built, so the records can be created and propagate while the slow part of the
-build runs. See docs/ingress.md.
+build runs. See docs/concepts/ingress.md.
 
   --env <env>              environment name: the directory <env-dir>/<env>/ with
                            env.conf, 01-infra.tfvars, 02-platform.tfvars and the
@@ -184,6 +184,10 @@ if [ "$DO_INFRA" = "1" ]; then
 fi
 
 if [ "$DO_PLATFORM" = "1" ] || [ "$DO_OVERLAY" = "1" ]; then
+  if [ "$DO_INFRA" != "1" ]; then
+    write_backend "$INFRA_STACK" 01-infra
+    tf "$INFRA_STACK" init -reconfigure -input=false
+  fi
   fetch_kubeconfig
 fi
 

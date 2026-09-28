@@ -277,4 +277,4 @@ reaching Istio. If it answers but WebSockets drop after a minute, the idle
 timeout on the edge is too low. If the health check never passes, check the
 status node port rather than the traffic port.
 
-See [operations.md](operations.md#troubleshooting) for the rest.
+See [troubleshooting](../operate/troubleshooting.md#ingress-dns-and-certificates) for the rest.

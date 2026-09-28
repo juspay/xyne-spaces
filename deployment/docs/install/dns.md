@@ -121,13 +121,13 @@ out of version control, as with the rest of the environment directory.
   "first_name": "Asha",
   "last_name": "Rao",
   "organization": "Example Pvt Ltd",
-  "email": "dns@eabc.com",
-  "phone": "+xx.xxxxx",
-  "address_line_1": "xxxx",
+  "email": "dns@example.com",
+  "phone": "+91.8000000000",
+  "address_line_1": "1 Example Road",
   "address_line_2": "",
   "city": "Bengaluru",
   "state": "KA",
-  "postal_code": "xxxx",
+  "postal_code": "560001",
   "country": "IN",
   "privacy": true
 }
@@ -147,4 +147,4 @@ out of version control, as with the rest of the environment directory.
 
 Leave `dns_zone = ""`. `setup.sh` prints the records to create by hand, and on AWS LiveKit needs a
 certificate you supply (`livekit_certificate_arn`). See
-[ingress.md](ingress.md#addresses-and-dns-come-first).
+[ingress.md](../concepts/ingress.md#addresses-and-dns-come-first).

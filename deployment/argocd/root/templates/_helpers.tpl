@@ -136,7 +136,7 @@ nodePorts:
 {{- else }}
 {{- $_ := set $src "path" .path }}
 {{- end }}
-{{- $helm := dict "releaseName" .releaseName "valuesObject" (.values | default dict) }}
+{{- $helm := dict "releaseName" .releaseName "values" (toYaml (.values | default dict)) }}
 {{- $_ := set $src "helm" $helm }}
 {{- toYaml $src }}
 {{- end }}

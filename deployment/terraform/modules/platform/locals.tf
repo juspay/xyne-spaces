@@ -217,11 +217,11 @@ locals {
       }
     }
     global = {
-      cloud         = var.cluster.cloud
-      domain        = local.domain
-      namespace     = var.namespace
-      repoURL       = var.repo_url
-      chartRevision = var.chart_revision
+      cloud           = var.cluster.cloud
+      domain          = local.domain
+      namespace       = var.namespace
+      repoURL         = var.repo_url
+      chartRevision   = var.chart_revision
       imageRegistry   = var.image_registry
       imageTag        = var.image_tag
       secretChecksums = local.secret_checksums

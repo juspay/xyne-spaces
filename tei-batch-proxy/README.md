@@ -5,7 +5,7 @@ A tiny OpenAI-compatible (`POST /v1/embeddings`) proxy that sits **between Vespa
 
 ## Why this exists
 
-On GKE (`xyne-vespa`), Vespa embeds documents at index time via `input chunks | embed`,
+Vespa embeds documents at index time via `input chunks | embed`,
 which sends the **entire `chunks` array in one request** to the embedder. The embedder is
 TEI (`vespa-embedder`, `BAAI/bge-base-en-v1.5`) started with `--max-client-batch-size 1000`.
 
@@ -37,49 +37,38 @@ It keeps the **same model and dimension** (bge-base, 768-dim), so **no re-index*
 
 Routes: `POST /v1/embeddings` (proxied), `GET /health`.
 
-## Build (Jenkins)
+`POST /v1/embeddings/file` does the same against `UPSTREAM_FILE_EMBEDDINGS_URL`
+(defaults to `UPSTREAM_EMBEDDINGS_URL`), so file chunks can go to a separate embedder.
 
-Pure Node stdlib — no dependencies. Build & push the image, then set it in
-`deploy/k8s/deployment.yaml` (the `image:` field):
+## Build
+
+Pure Node stdlib, no dependencies. The image runs as uid 10001 and needs no writable
+filesystem. It is published with the other images by `.github/workflows/publish-images.yml`
+(entry `tei-batch-proxy` in `ci/images.json`) as `ghcr.io/juspay/xyne-spaces-tei-batch-proxy`.
+A local build:
 
 ```bash
-docker build -t <REGISTRY>/tei-batch-proxy:<tag> tei-batch-proxy/
-docker push <REGISTRY>/tei-batch-proxy:<tag>
+docker build -t tei-batch-proxy tei-batch-proxy/
 ```
-
-Add a build/push stage for `tei-batch-proxy/` to the root `Jenkinsfile`.
 
 ## Deploy
 
-```bash
-kubectl apply -f tei-batch-proxy/deploy/k8s/deployment.yaml
-kubectl apply -f tei-batch-proxy/deploy/k8s/service.yaml
-kubectl -n xyne-vespa rollout status deploy/tei-batch-proxy
-```
-
-## REQUIRED: point Vespa at the proxy
-
-Deploying the proxy alone does nothing until Vespa's embedder endpoint is repointed
-from TEI directly to this proxy. In the Vespa app package's `services.xml`:
-
-```xml
-<component id="embedder" type="openai-embedder">
-    <model>BAAI/bge-base-en-v1.5</model>
-    <dimensions>768</dimensions>
-    <!-- was: http://vespa-embedder.../v1/embeddings -->
-    <endpoint>http://tei-batch-proxy.xyne-vespa.svc.cluster.local/v1/embeddings</endpoint>
-</component>
-```
-
-Then redeploy the Vespa application package. (This `services.xml` change lives in the
-Vespa deployment repo, not here.)
+Through the `xyne-tei-batch-proxy` Helm chart, which the deployment's root chart installs
+with Vespa (`enable_vespa = true`), next to the embedder and the Vespa application package.
+The Service is `tei-batch-proxy:8080`, and both embedder components in
+`vespa-core/vespa` (`hf-embedder` and `embed-file`) already point at it. See
+`deployment/docs/features/search.md`.
 
 ## Verify
 
+The proxy's port is in the mesh with strict mTLS, so call it from a pod that has a sidecar,
+such as the backend:
+
 ```bash
-# 200 with N embeddings for an oversized batch (would 413 against TEI directly):
-kubectl -n xyne-vespa run curltest --rm -it --image=curlimages/curl --restart=Never -- \
-  sh -c 'python3 - <<PY | curl -s -XPOST http://tei-batch-proxy/v1/embeddings -H "content-type: application/json" -d @- | head -c 200
-import json;print(json.dumps({"model":"bge","input":["x"]*1885}))
-PY'
+kubectl -n <namespace> exec deploy/xyne-backend -c xyne-backend -- node -e '
+fetch("http://tei-batch-proxy:8080/v1/embeddings",{method:"POST",headers:{"content-type":"application/json"},
+  body:JSON.stringify({model:"BAAI/bge-base-en-v1.5",input:["hello"]})})
+.then(async r=>{const d=await r.json();console.log(r.status,d.data?.[0]?.embedding?.length)})'
 ```
+
+`200 768` means the proxy reaches TEI.

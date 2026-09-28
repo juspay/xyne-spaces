@@ -237,9 +237,9 @@ check_google() {
     fi
   done
   if [ -z "$found" ] || [ -z "$id" ] || [ -z "$secret" ]; then
-    record FAIL "google sign-in client" "google_client_id and google_client_secret are required in app_secrets; see docs/secrets.md#google-sign-in"
+    record FAIL "google sign-in client" "google_client_id and google_client_secret are required in app_secrets; see docs/reference/secrets.md#google-sign-in"
   elif printf '%s %s' "$id" "$secret" | grep -q 'replace-with-'; then
-    record FAIL "google sign-in client" "still a placeholder in $found; see docs/secrets.md#google-sign-in"
+    record FAIL "google sign-in client" "still a placeholder in $found; see docs/reference/secrets.md#google-sign-in"
   elif ! printf '%s' "$id" | grep -qE '\.apps\.googleusercontent\.com$'; then
     record WARN "google sign-in client" "google_client_id in $found does not end in .apps.googleusercontent.com; sign-in will fail"
   else
@@ -390,7 +390,7 @@ check_vespa() {
   if grep -q 'ENABLE_VESPA_WORKER' "$PLATFORM_TFVARS"; then
     record PASS "vespa ingestion worker" "a worker sets ENABLE_VESPA_WORKER"
   else
-    record WARN "vespa ingestion worker" "no worker sets ENABLE_VESPA_WORKER, so nothing is indexed into Vespa (docs/configuration.md#add-a-worker-role)"
+    record WARN "vespa ingestion worker" "no worker sets ENABLE_VESPA_WORKER, so nothing is indexed into Vespa (docs/features/search.md#turn-it-on)"
   fi
 }
 
