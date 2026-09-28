@@ -26,6 +26,10 @@ export const OPTIMIZATIONS = {
     summary: "large list-shaped results from retrieval tools are relevance-filtered against the user's request before reaching the model; the full result is always saved to a file first",
     defaultOn: false,
   },
+  jev_verify_prefilter: {
+    summary: "Verify Responses asks Jev first: drafts Jev is confident are fine are delivered without the LLM verifier, the rest go to the LLM as before, and when the LLM verifier is unavailable a high-risk draft is sent back instead of passing unchecked",
+    defaultOn: false,
+  },
   catalog_full_index: {
     summary: "the system-prompt tool index names every loadable tool, fitted to a size budget, instead of collapsing catalogs over 15 tools to a single line — so the model loads by exact name rather than guessing search terms",
     defaultOn: false,

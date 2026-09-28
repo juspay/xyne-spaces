@@ -1,3 +1,38 @@
+## [1.412.0](https://github.com/juspay/xyne-spaces/compare/v1.411.0...v1.412.0) (2026-09-28)
+
+
+### Features
+
+* Jev pre-check for Verify Responses ([#2362](https://github.com/juspay/xyne-spaces/issues/2362)) ([315a12c](https://github.com/juspay/xyne-spaces/commit/315a12c7fd1eb53ff99436cb2265f83fd7dc70b6))
+
+## [1.411.0](https://github.com/juspay/xyne-spaces/compare/v1.410.4...v1.411.0) (2026-09-28)
+
+
+### Features
+
+* Add connector routes to claw, backend and sdk ([#2297](https://github.com/juspay/xyne-spaces/issues/2297)) ([7b1c776](https://github.com/juspay/xyne-spaces/commit/7b1c776044adc196725bba95577d2e6f0cd30c1f))
+
+
+### Bug Fixes
+
+* cap concurrent automation runs so human requests keep platform-model capacity ([#2360](https://github.com/juspay/xyne-spaces/issues/2360)) ([7706261](https://github.com/juspay/xyne-spaces/commit/77062618e6ec9a36be7b573720b95168a0d410b9))
+
+## [1.410.4](https://github.com/juspay/xyne-spaces/compare/v1.410.3...v1.410.4) (2026-09-28)
+
+## [1.410.3](https://github.com/juspay/xyne-spaces/compare/v1.410.2...v1.410.3) (2026-09-28)
+
+
+### Bug Fixes
+
+* round the label chip in the create-ticket modal ([#2356](https://github.com/juspay/xyne-spaces/issues/2356)) ([5de4713](https://github.com/juspay/xyne-spaces/commit/5de47138556337d45525af226de65fe8cbde18d7))
+
+## [1.410.2](https://github.com/juspay/xyne-spaces/compare/v1.410.1...v1.410.2) (2026-09-28)
+
+
+### Bug Fixes
+
+* build @xyne/cache in the runner, test and dev backend images ([#2348](https://github.com/juspay/xyne-spaces/issues/2348)) ([588d277](https://github.com/juspay/xyne-spaces/commit/588d277d2be5ce7733ecaea13ea2bcdbfa71109b))
+
 ## [1.410.1](https://github.com/juspay/xyne-spaces/compare/v1.410.0...v1.410.1) (2026-09-28)
 
 
