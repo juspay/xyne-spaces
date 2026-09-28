@@ -217,6 +217,7 @@ test('every supported profile selects an existing scenario entry file', () => {
     ['soak', 'zero-query-transform'],
     ['release', 'rest-messaging'],
     ['release', 'search'],
+    ['release', 'attachments'],
   ];
 
   for (const [profile, scenario] of combinations) {
@@ -235,7 +236,7 @@ function exists(file) {
 }
 
 test('requires an identity fixture for every authenticated scenario', () => {
-  for (const scenario of ['zero-query-transform', 'rest-messaging', 'search']) {
+  for (const scenario of ['zero-query-transform', 'rest-messaging', 'search', 'attachments']) {
     assert.throws(
       () => validateRuntime({
         root,

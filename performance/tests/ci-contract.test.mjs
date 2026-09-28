@@ -60,6 +60,7 @@ test('Jenkins adapter offers the Zero and REST scenarios by their explicit names
   assert.match(source, /'zero-query-transform'/);
   assert.match(source, /'rest-messaging'/);
   assert.match(source, /'search'/);
+  assert.match(source, /'attachments'/);
   assert.doesNotMatch(source, /'messaging'/);
 });
 
@@ -116,5 +117,18 @@ test('the search scenario reads only — no write verbs, no mutation endpoints',
 
   assert.match(source, /\/api\/vespaSearch/);
   assert.doesNotMatch(source, /http\.(post|put|patch|del)\(/);
+  assert.match(source, /ENVIRONMENT_FAILURE[^\n]*token rejected/);
+});
+
+test('the attachments scenario reads only and does not buffer file bodies', () => {
+  const source = readFileSync(
+    path.join(repositoryRoot, 'performance', 'k6', 'scenarios', 'attachments.js'),
+    'utf8',
+  );
+
+  assert.match(source, /\/api\/attachments/);
+  assert.doesNotMatch(source, /http\.(post|put|patch|del)\(/);
+  // Bodies are discarded after transfer so a large file does not sit in k6 memory.
+  assert.match(source, /responseType:\s*'none'/);
   assert.match(source, /ENVIRONMENT_FAILURE[^\n]*token rejected/);
 });

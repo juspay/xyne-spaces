@@ -26,7 +26,7 @@ test('defaults non-smoke profiles to the Zero query-transform read path', () => 
 test('offers the Zero and REST scenarios under explicit names', () => {
   assert.deepEqual(
     [...SCENARIOS].sort(),
-    ['rest-messaging', 'search', 'smoke', 'zero-query-transform'],
+    ['attachments', 'rest-messaging', 'search', 'smoke', 'zero-query-transform'],
   );
 });
 
@@ -60,7 +60,7 @@ test('allows only short profiles in sandbox', () => {
 
 test('rejects unknown profiles and scenarios', () => {
   assert.throws(() => resolveRunConfig({ profile: 'maximum' }), /unknown profile/i);
-  assert.throws(() => resolveRunConfig({ scenario: 'attachments' }), /unknown scenario/i);
+  assert.throws(() => resolveRunConfig({ scenario: 'not-a-scenario' }), /unknown scenario/i);
 });
 
 test('accepts bounded VU and duration overrides', () => {
