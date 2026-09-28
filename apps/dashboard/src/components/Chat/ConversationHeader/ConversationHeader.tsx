@@ -50,6 +50,7 @@ import { useUser } from '../../../hooks/useUsers';
 import { isOneToOneDMChannel, isDMChannel, keyBetween } from '../ChatDirectory/ChatDirectory.utils';
 import { StatusIndicator } from '../../ui/StatusIndicator';
 import { xyneAIActor } from '../../../machines/xyneAIMachine';
+import { useAskAIAvailable } from '../../../contexts/AskAIAvailabilityContext';
 import { useNavigate } from 'react-router-dom';
 import { useRouteContext } from '../../../hooks/useRouteContext';
 import { standaloneNavigate, APP_DRAG_STYLE, APP_NO_DRAG_STYLE } from '../../../utils/electronApp';
@@ -144,6 +145,7 @@ const ConversationHeader = ({
   const context = useAuthContextValues();
   const zero = useZero();
   const channel = useVisibleChannel(channelId);
+  const askAIAvailable = useAskAIAvailable();
   const channelTabBuiltIns = useChannelTabBuiltIns(channel?.scopeType);
   // Null in a DM, a group DM or a ticket/document channel: those show the
   // built-in tabs with no ×, no + and no dragging.
@@ -452,28 +454,30 @@ const ConversationHeader = ({
               <CalendarEvent size={16} />
             </Button>
           </Tooltip>
-          <Tooltip
-            content={showOnboardingTooltip ? 'Ask AI lives here! Click anytime.' : 'Ask AI'}
-            {...(showOnboardingTooltip ? { open: true } : {})}
-            side='bottom'
-          >
-            <Button
-              variant='ghost'
-              size='sm'
-              onClick={() => {
-                // Trigger xstate machine to open XyneAI. The otel
-                // ask_ai_opened counter fires from the sidebar's open effect
-                // so every entry point counts, not just this one.
-                xyneAIActor.send({ type: 'OPEN', channelId, trackSource: 'channel_header' });
-              }}
-              className='h-7 w-7 rounded-lg'
-              data-track-category='CHANNELS'
-              data-track-name='OPEN_XYNE_AI'
-              data-track-metadata={JSON.stringify({ channelId })}
+          {askAIAvailable && (
+            <Tooltip
+              content={showOnboardingTooltip ? 'Ask AI lives here! Click anytime.' : 'Ask AI'}
+              {...(showOnboardingTooltip ? { open: true } : {})}
+              side='bottom'
             >
-              <XyneAIStar />
-            </Button>
-          </Tooltip>
+              <Button
+                variant='ghost'
+                size='sm'
+                onClick={() => {
+                  // Trigger xstate machine to open XyneAI. The otel
+                  // ask_ai_opened counter fires from the sidebar's open effect
+                  // so every entry point counts, not just this one.
+                  xyneAIActor.send({ type: 'OPEN', channelId, trackSource: 'channel_header' });
+                }}
+                className='h-7 w-7 rounded-lg'
+                data-track-category='CHANNELS'
+                data-track-name='OPEN_XYNE_AI'
+                data-track-metadata={JSON.stringify({ channelId })}
+              >
+                <XyneAIStar />
+              </Button>
+            </Tooltip>
+          )}
           {!isCompact && (
             <ShortcutTooltip label='Search in this channel' shortcut='global.findInChannel'>
               <Button
