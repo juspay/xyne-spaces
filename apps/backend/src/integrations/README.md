@@ -324,7 +324,10 @@ An app returning Xyne's own shape needs no mapping at all:
 
 ```json
 { "messages": [ { "externalId", "externalThreadId", "subject", "body",
-                  "sender": { "email", "name" }, "recipients", "sentAt" } ],
+                  "sender": { "email", "name" }, "recipients", "sentAt",
+                  "additionalFormFields": { "orderId": "123" },
+                  "attachments": [ { "fileName": "receipt.pdf",
+                                     "fileUrl": "https://…", "mimeType", "size" } ] } ],
   "nextCursor": "…" }
 ```
 
@@ -334,10 +337,23 @@ Anything else is described by `response` in the config (`AppFetchResponseMapping
 | --- | --- |
 | `messagesPath` | Dot path to the message array. **Empty means the response is a bare array.** |
 | `nextCursorPath` | Dot path to the continuation token. Cursor pagination only. |
-| `fields.*` | Where each Xyne field lives on the app's item. Dot paths, so `additionalFormFields.messageCreatedAt` is fine. |
+| `fields.*` | Where each Xyne field lives on the app's item. Dot paths, so `meta.createdAt` is fine. |
 | `idFields` | Paths combined (joined with `\|`) into the deduplication id. Empty uses `fields.externalId` alone. |
 
-Only **`externalId` and `sentAt`** are mandatory per message; everything else degrades (a missing sender falls back to the desk owner, a missing subject to `(no subject)`). A mapping pointing at a field the app does not send fails with that path named, so the **Test fetch** button reports `message 3 has no timestamp at "additionalFormFields.messageCreatedAt"` rather than a generic shape error. `sampleMessage` in the test result is the **mapped** message, which is where a wrong path shows up.
+Only **`externalId` and `sentAt`** are mandatory per message; everything else degrades (a missing sender falls back to the desk owner, a missing subject to `(no subject)`). A mapping pointing at a field the app does not send fails with that path named, so the **Test fetch** button reports `message 3 has no timestamp at "meta.createdAt"` rather than a generic shape error. `sampleMessage` in the test result is the **mapped** message, which is where a wrong path shows up.
+
+##### Custom form fields and attachments (both optional)
+
+These two exist so a **pulled** ticket lands the same way a **pushed** one does (`POST /api/apps/tickets/appDeskInbound`). Send them and Xyne runs the same code the push endpoint runs; omit them and nothing happens.
+
+- **`additionalFormFields`** — an object of the app's own field names to values, mapped onto the desk board's custom fields exactly as the push endpoint's `additionalFormFields` is. The values also feed the desk's **duplicate-scope** rule, so a rule like "same Order ID" matches on pulled history too. Non-string values are kept. Per-field problems (a name the board's form does not have) are logged and skipped — they never fail the message.
+- **`attachments`** — an array of `{ fileName, fileUrl, mimeType?, size? }`. `fileName` and `fileUrl` are both required; entries missing either are dropped. The push endpoint takes attachments as `multipart/form-data` file parts, which a JSON export cannot carry, so the pull side takes URLs and Xyne GETs each one — the same downloader Slack and Zoho go through.
+
+  **Xyne sends no credentials on that GET.** An app whose files are not public must issue pre-signed or otherwise unguessable URLs. A download that fails is logged and the message is still ingested without it.
+
+  `fileUrl` is app-supplied, so it is fetched through the same SSRF guard as the export URL itself (`safeWebhookFetch`): the host is DNS-pinned and refused if it resolves to a private, loopback, link-local or cloud-metadata address, and redirects are **not** followed — a 3xx is a URL the guard has not validated, so the attachment is dropped rather than chased. At most 20 attachments per message and 25MB each are taken; the rest are skipped with a warning, because neither number is bounded by the 32MB page limit.
+
+Neither field can be used in `idFields`: a dedup path is read as a scalar, and an object or array yields no value, so every row would be rejected as "dedup key incomplete". The config UI leaves them out of the dedup-key picker for that reason.
 
 ##### Why `idFields` exists
 

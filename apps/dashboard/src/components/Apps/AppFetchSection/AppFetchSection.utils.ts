@@ -20,6 +20,8 @@ export const DEFAULT_RESPONSE_MAPPING: AppFetchResponseMapping = {
     senderName: 'sender.name',
     recipients: 'recipients',
     sentAt: 'sentAt',
+    additionalFormFields: 'additionalFormFields',
+    attachments: 'attachments',
   },
   idFields: [],
 };
@@ -39,6 +41,8 @@ export const MAPPED_FIELDS: readonly {
   key: keyof AppFetchResponseMapping['fields'];
   label: string;
   required?: boolean;
+  hint?: string;
+  structured?: boolean;
 }[] = [
   { key: 'externalId', label: 'Message id', required: true },
   { key: 'sentAt', label: 'Sent at', required: true },
@@ -48,6 +52,18 @@ export const MAPPED_FIELDS: readonly {
   { key: 'senderName', label: 'Sender name' },
   { key: 'senderEmail', label: 'Sender email' },
   { key: 'recipients', label: 'Recipients' },
+  {
+    key: 'additionalFormFields',
+    label: 'Custom form fields',
+    hint: 'Optional. An object of your field names to values, mapped onto the board’s custom fields.',
+    structured: true,
+  },
+  {
+    key: 'attachments',
+    label: 'Attachments',
+    hint: 'Optional. An array of { fileName, fileUrl }. Xyne downloads each URL without sending credentials.',
+    structured: true,
+  },
 ];
 
 /** The form value is untyped; these read one field back with a safe default. */

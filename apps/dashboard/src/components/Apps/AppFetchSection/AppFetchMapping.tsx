@@ -37,8 +37,9 @@ export const AppFetchMapping = ({
   const setField = (key: string, next: string): void =>
     setMapping({ fields: { ...mapping.fields, [key]: next } });
 
+  const dedupableFields = MAPPED_FIELDS.filter(f => f.structured !== true);
   const mappedPaths = new Set(
-    MAPPED_FIELDS.map(f => mapping.fields[f.key]).filter((p): p is string => Boolean(p)),
+    dedupableFields.map(f => mapping.fields[f.key]).filter((p): p is string => Boolean(p)),
   );
   const unmappedIdFields = mapping.idFields.filter(p => !mappedPaths.has(p));
 
@@ -46,7 +47,7 @@ export const AppFetchMapping = ({
   // subset of them. `allowCreate` still permits a path that is not mapped.
   const idFieldOptions: SelectorOption[] = ((): SelectorOption[] => {
     const seen = new Map<string, string>();
-    for (const field of MAPPED_FIELDS) {
+    for (const field of dedupableFields) {
       const path = mapping.fields[field.key];
       if (path && !seen.has(path)) seen.set(path, field.label);
     }
@@ -171,21 +172,28 @@ export const AppFetchMapping = ({
             <span className='text-xs font-medium'>Field paths</span>
             <div className='grid gap-2 md:grid-cols-2'>
               {MAPPED_FIELDS.map(field => (
-                <div key={field.key} className='flex items-center gap-2'>
-                  <label
-                    className='w-32 shrink-0 text-[11px] text-muted-foreground'
-                    htmlFor={`app-fetch-field-${field.key}`}
-                  >
-                    {field.label}
-                    {field.required ? ' *' : ''}
-                  </label>
-                  <Input
-                    id={`app-fetch-field-${field.key}`}
-                    value={mapping.fields[field.key] ?? ''}
-                    onChange={e => setField(field.key, e.target.value)}
-                    className={cn('h-8 flex-1 min-w-0 font-mono text-xs')}
-                    disabled={readOnly}
-                  />
+                <div key={field.key} className='flex flex-col gap-1'>
+                  <div className='flex items-center gap-2'>
+                    <label
+                      className='w-32 shrink-0 text-[11px] text-muted-foreground'
+                      htmlFor={`app-fetch-field-${field.key}`}
+                    >
+                      {field.label}
+                      {field.required ? ' *' : ''}
+                    </label>
+                    <Input
+                      id={`app-fetch-field-${field.key}`}
+                      value={mapping.fields[field.key] ?? ''}
+                      onChange={e => setField(field.key, e.target.value)}
+                      className={cn('h-8 flex-1 min-w-0 font-mono text-xs')}
+                      disabled={readOnly}
+                    />
+                  </div>
+                  {field.hint ? (
+                    <span className='pl-[8.5rem] text-[10px] leading-snug text-muted-foreground'>
+                      {field.hint}
+                    </span>
+                  ) : null}
                 </div>
               ))}
             </div>

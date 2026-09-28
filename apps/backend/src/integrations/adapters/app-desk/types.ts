@@ -14,6 +14,8 @@
  * request rendering, the signature scheme and throttling.
  */
 
+import type { MappedExportAttachment } from '@/apps/core/appFetchConfig';
+
 export interface AppDeskExportSender {
   email: string;
   name?: string;
@@ -27,6 +29,8 @@ export interface AppDeskExportMessage {
   sender: AppDeskExportSender;
   recipients?: string[];
   sentAt: string;
+  additionalFormFields?: Record<string, unknown>;
+  attachments?: MappedExportAttachment[];
 }
 
 export interface AppDeskExportPage {

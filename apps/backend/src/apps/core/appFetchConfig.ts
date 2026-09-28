@@ -93,6 +93,8 @@ export const AppFetchResponseMappingSchema = z.object({
       senderName: z.string().default('sender.name'),
       recipients: z.string().default('recipients'),
       sentAt: z.string().default('sentAt'),
+      additionalFormFields: z.string().default('additionalFormFields'),
+      attachments: z.string().default('attachments'),
     })
     .default({}),
   /**
@@ -503,6 +505,44 @@ function readString(source: unknown, path: string): string | undefined {
 }
 
 /**
+ * A mapped path pointing at a plain JSON object, for the app's form field record.
+ * Arrays are rejected: `typeof [] === 'object'`, and a list of form fields is a
+ * mapping mistake rather than something to coerce.
+ */
+function readRecord(source: unknown, path: string): Record<string, unknown> | undefined {
+  const value = readPath(source, path);
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  return value as Record<string, unknown>;
+}
+
+/**
+ * Attachment descriptors at a mapped path.
+ *
+ * Entries without both a name and a URL are dropped rather than failing the row:
+ * an unfetchable attachment is not a reason to lose the message it belongs to,
+ * and the download step reports what it could not retrieve.
+ */
+function readAttachments(source: unknown, path: string): MappedExportAttachment[] | undefined {
+  const value = readPath(source, path);
+  if (!Array.isArray(value)) return undefined;
+  const mapped = value.flatMap((entry): MappedExportAttachment[] => {
+    const fileName = readString(entry, 'fileName');
+    const fileUrl = readString(entry, 'fileUrl');
+    if (!fileName || !fileUrl) return [];
+    const size = readPath(entry, 'size');
+    return [
+      {
+        fileName,
+        fileUrl,
+        mimeType: readString(entry, 'mimeType'),
+        ...(typeof size === 'number' && Number.isFinite(size) && { size }),
+      },
+    ];
+  });
+  return mapped.length > 0 ? mapped : undefined;
+}
+
+/**
  * Translate one page of the app's response into Xyne's export shape.
  *
  * Throws AppFetchConfigError with the offending path named, because the most
@@ -578,6 +618,8 @@ export function mapExportPage(
         ? recipients.filter((r): r is string => typeof r === 'string')
         : undefined,
       sentAt,
+      additionalFormFields: readRecord(row, f.additionalFormFields),
+      attachments: readAttachments(row, f.attachments),
     });
   });
 
@@ -589,6 +631,14 @@ export function mapExportPage(
   return { messages, invalidRows, ...(nextCursor && { nextCursor }) };
 }
 
+/** One attachment an app offers for download alongside a pulled message. */
+export interface MappedExportAttachment {
+  fileName: string;
+  fileUrl: string;
+  mimeType?: string;
+  size?: number;
+}
+
 /** Xyne's message shape, as produced by the mapping. */
 export interface MappedExportMessage {
   externalId: string;
@@ -598,6 +648,8 @@ export interface MappedExportMessage {
   sender: { email: string; name?: string };
   recipients?: string[];
   sentAt: string;
+  additionalFormFields?: Record<string, unknown>;
+  attachments?: MappedExportAttachment[];
 }
 
 export interface SignedFetchRequest {

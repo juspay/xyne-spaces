@@ -15,7 +15,7 @@
  */
 
 import { ExternalSource, Prisma } from '@prisma/client';
-import { EmailType, ExternalEntityType } from '@xyne/shared';
+import { EmailType, ExternalEntityType, isDeskChannelType } from '@xyne/shared';
 import { BaseRefetch, RefetchOptions, RefetchResult } from '../../core/baseRefetch';
 import { resolveAppDeskInstalledAppId, scopeExternalMessageIdToSource } from '../../core/deskSources';
 import { logger } from '@/utils/logger';
@@ -25,6 +25,18 @@ import { repositories } from '@/database/repositories';
 import { ExternalSourceRepository, MAILBOX_SOURCE_TYPES } from '@/database/repositories/externalSourceRepository';
 import { ExternalMessageRepository } from '@/database/repositories/externalMessageRepository';
 import { emailService } from '@/services/emailService';
+import {
+  AttachmentConversionService,
+  ExternalAttachmentService,
+  type ExternalAttachment,
+} from '@/services/externalAttachmentService';
+import { SsrfBlockedError, safeWebhookFetch } from '@/utils/ssrfGuard';
+import type { UploadedFileResult } from '@/services/fileUploadService';
+import {
+  buildPartialCustomFieldWritePayload,
+  CustomFieldWritePayload,
+  syncCustomFieldValues,
+} from '@/services/ticketCustomFieldService';
 import { extractEmailAddress } from '@/utils/email';
 import {
   AppFetchResponseTooLargeError,
@@ -41,6 +53,7 @@ import {
 import { config } from '@/config/env';
 import { AppDeskExportMessage, AppDeskExportPage } from './types';
 import { AppDeskExportError, AppDeskExportThrottledError } from './errors';
+import { DuplicateScopeFieldValue } from '@/services/ticketDuplicateService';
 
 const TAG = '[AppDeskRefetch]';
 const MAX_PAGES = 500;
@@ -61,6 +74,9 @@ const ingestBatchSize = (): number => Math.max(1, config.emailFetch.batchSize);
 // the job would have Bull replay every earlier page straight back into the
 // limit the app just reported.
 const MAX_THROTTLE_RETRIES = 5;
+const MAX_ATTACHMENTS_PER_MESSAGE = 20;
+const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+const ATTACHMENT_TIMEOUT_MS = 30_000;
 const THROTTLE_BACKOFF_BASE_MS = 1_000;
 
 const externalSourceRepo = new ExternalSourceRepository();
@@ -113,10 +129,11 @@ const windowKey = (startDate: string, endDate: string): string => `${startDate}|
 interface IngestContext {
   source: ExternalSource;
   channelId: string;
-  userId: string;
   recipientEmail: string;
   installedAppId: string;
-  ownerUser: { name: string; email: string } | null;
+  actingUser: { id: string; name?: string; email?: string };
+  boardId: string;
+  workspaceId: string;
 }
 
 export class AppDeskRefetch extends BaseRefetch {
@@ -146,6 +163,7 @@ export class AppDeskRefetch extends BaseRefetch {
         fetchConfig: true,
         appId: true,
         webhookUrl: true,
+        userId: true,
         app: { select: { signingSecret: true } },
       },
     });
@@ -187,9 +205,14 @@ export class AppDeskRefetch extends BaseRefetch {
         `${TAG} channel ${channelId} has no desk board configured (email_channel_preferences.boardId)`,
       );
     }
-    if (!preference.ownerUserId) {
+
+    const channel = await db.channel.findUnique({
+      where: { id: channelId },
+      select: { name: true, type: true },
+    });
+    if (!channel || !isDeskChannelType(channel.type)) {
       throw new AppDeskExportError(
-        `${TAG} channel ${channelId} has no desk owner configured (email_channel_preferences.ownerUserId)`,
+        `${TAG} channel ${channelId} is not a desk channel — refusing to ingest`,
       );
     }
     const ownerUser = preference?.ownerUserId
@@ -204,22 +227,24 @@ export class AppDeskRefetch extends BaseRefetch {
       ownerUser?.email ||
       `desk-${channelId}@apps.xyne.ai`;
 
+    const installingUser = await repositories.users.findById(installedApp.userId);
+
     const ctx: IngestContext = {
       source,
       channelId,
-      userId: preference.ownerUserId,
       recipientEmail,
       installedAppId,
-      ownerUser: ownerUser ? { name: ownerUser.name, email: ownerUser.email } : null,
+      actingUser: {
+        id: installedApp.userId,
+        ...(installingUser && { name: installingUser.name, email: installingUser.email }),
+      },
+      boardId: preference.boardId,
+      workspaceId: source.workspaceId,
     };
 
-    // Everything an install's body template may interpolate. `channel` is what
-    // lets one app serve many desks off a single config: the app branches on the
-    // id we send rather than us holding a separate config per channel.
-    const channel = await db.channel.findUnique({
-      where: { id: channelId },
-      select: { name: true },
-    });
+    // Everything an install's body template may interpolate. `channel` (read
+    // above) is what lets one app serve many desks off a single config: the app
+    // branches on the id we send rather than us holding a config per channel.
     const { startDate, endDate } = options;
     const buildVars = (pageCursor: string | undefined, offset: number): AppFetchVariables => ({
       fetch: {
@@ -367,7 +392,31 @@ export class AppDeskRefetch extends BaseRefetch {
           recordError(invalid);
         }
 
-        const threadGroups = groupPageByThread(page.messages);
+        // Pre-dedup the page in one query, as GoogleRefetch does before it
+        // fetches anything. Without it a re-run over an already-ingested window
+        // costs one lookup per message across every page. The filter runs before
+        // ingestThread, so a duplicate also costs no attachment download.
+        let pageMessages = page.messages;
+        if (pageMessages.length > 0) {
+          const scopedIds = pageMessages.map(m =>
+            scopeExternalMessageIdToSource(source.id, m.externalId),
+          );
+          const existingRows = await externalMessageRepo.findByExternalIds(source.id, scopedIds);
+          if (existingRows.length > 0) {
+            const existing = new Set(existingRows.map(r => r.externalId));
+            const remaining = pageMessages.filter(
+              m => !existing.has(scopeExternalMessageIdToSource(source.id, m.externalId)),
+            );
+            skipped += pageMessages.length - remaining.length;
+            logger.info(`${TAG} pre-dedup: skipped ${pageMessages.length - remaining.length} already-ingested messages`, {
+              sourceId: source.id,
+              remaining: remaining.length,
+            });
+            pageMessages = remaining;
+          }
+        }
+
+        const threadGroups = groupPageByThread(pageMessages);
         const batchSize = ingestBatchSize();
         for (let i = 0; i < threadGroups.length; i += batchSize) {
           await Promise.all(
@@ -628,10 +677,6 @@ export class AppDeskRefetch extends BaseRefetch {
     const externalThreadId = message.externalThreadId ?? message.externalId;
     const externalMessageId = scopeExternalMessageIdToSource(source.id, message.externalId);
 
-    // ExternalMessage's (externalSourceId, externalId) unique key is the dedup.
-    const existing = await externalMessageRepo.findByExternalId(source.id, externalMessageId);
-    if (existing) return 'skipped';
-
     const senderEmail = message.sender?.email?.trim() || undefined;
     const senderName = message.sender?.name?.trim() || undefined;
     let emailFrom =
@@ -640,9 +685,9 @@ export class AppDeskRefetch extends BaseRefetch {
       senderEmail ||
       '';
     if (!emailFrom) {
-      emailFrom = ctx.ownerUser?.email
-        ? `${ctx.ownerUser.name} <${ctx.ownerUser.email}>`
-        : ctx.ownerUser?.name ?? 'External user';
+      emailFrom = ctx.actingUser.email
+        ? `${ctx.actingUser.name} <${ctx.actingUser.email}>`
+        : ctx.actingUser.name ?? 'External user';
     }
     const emailSubject = message.subject?.trim() || '(no subject)';
     const recipients = (message.recipients ?? []).map(r => r.trim()).filter(Boolean);
@@ -679,6 +724,8 @@ export class AppDeskRefetch extends BaseRefetch {
       }
     }
 
+    const uploadedFiles = await this.downloadAttachments(ctx, message);
+
     if (threadEmail) {
       await emailService.addEmailToConversation({
         conversationId: threadEmail.conversationId,
@@ -691,13 +738,20 @@ export class AppDeskRefetch extends BaseRefetch {
         externalMessageId,
         emailType: EmailType.DEFAULT,
         receivedAt,
+        ...(uploadedFiles.length > 0 && { uploadedFiles }),
       });
+      await this.applyFormFieldsToThread(ctx, message, threadEmail.conversationId);
       return 'appended';
     }
 
+    const { customFieldValues, scopeFieldValues, validationErrors } =
+      await this.buildFormFieldWrite(ctx.boardId, ctx, message, {
+        requireAllRequiredFields: true,
+      });
+
     const result = await emailService.createConversationWithEmail({
       channelId,
-      userId: ctx.userId,
+      userId: ctx.actingUser.id,
       emailSubject,
       emailBody: message.body ?? '',
       emailFrom,
@@ -712,11 +766,16 @@ export class AppDeskRefetch extends BaseRefetch {
           appName: source.displayName ?? ctx.installedAppId,
         },
         ...(senderEmail && {
-          reporterEmail: extractEmailAddress(senderEmail) ?? senderEmail.toLowerCase(),
+          ...(extractEmailAddress(senderEmail) && {
+            reporterEmail: extractEmailAddress(senderEmail)!,
+          }),
           fromEmailAddress: senderEmail,
         }),
       },
       receivedAt,
+      boardId: ctx.boardId,
+      ...(uploadedFiles.length > 0 && { uploadedFiles }),
+      ...(scopeFieldValues && { scopeFieldValues }),
     });
     // Guard mirrors appDeskInbound: the live shape is
     // { conversation, ... } | { isDuplicate: true }, but stay null-safe and
@@ -726,6 +785,203 @@ export class AppDeskRefetch extends BaseRefetch {
     if (guardable && 'blocked' in guardable && guardable.blocked) return 'failed';
     if (guardable && 'isDuplicate' in guardable && guardable.isDuplicate) return 'skipped';
     if (!guardable) return 'failed';
+
+    this.logFormFieldIssues(message, validationErrors);
+    const { ticket } = guardable as { ticket?: { id?: string } };
+    if (customFieldValues && customFieldValues.fieldValues.length > 0 && ticket?.id) {
+      await syncCustomFieldValues(ticket.id, customFieldValues, ctx.actingUser.id);
+    }
     return 'created';
+  }
+
+  /**
+   * Fetch the message's attachments into storage, in the shape
+   * createConversationWithEmail already takes from the push path's multipart
+   * upload. The export is JSON and cannot carry file parts, so an app sends URLs
+   * and this reuses the same downloader Slack and Zoho go through.
+   *
+   * Never throws: an attachment that cannot be fetched must not cost us the
+   * message it belongs to, nor the rest of the page.
+   */
+  private async downloadAttachments(
+    ctx: IngestContext,
+    message: AppDeskExportMessage,
+  ): Promise<UploadedFileResult[]> {
+    if (!message.attachments || message.attachments.length === 0) return [];
+    // Capped because the count is app-controlled and unrelated to the 32MB page
+    // limit: a page well inside that limit can declare thousands of URLs, and
+    // each one is buffered whole.
+    const attachments = message.attachments.slice(0, MAX_ATTACHMENTS_PER_MESSAGE);
+    if (message.attachments.length > attachments.length) {
+      logger.warn(`${TAG} message declares more attachments than the per-message cap — ignoring the rest`, {
+        externalId: message.externalId,
+        declared: message.attachments.length,
+        cap: MAX_ATTACHMENTS_PER_MESSAGE,
+      });
+    }
+    try {
+      const fetched: ExternalAttachment[] = [];
+      for (const a of attachments) {
+        const bytes = await this.fetchAttachmentBytes(ctx, message, a);
+        if (bytes) {
+          fetched.push({
+            fileName: a.fileName,
+            buffer: bytes.buffer,
+            fileUrl: a.fileUrl,
+            mimeType: bytes.contentType ?? a.mimeType,
+            size: bytes.buffer.length,
+          });
+        }
+      }
+      if (fetched.length === 0) return [];
+      const downloaded = await new ExternalAttachmentService().downloadAttachmentsForSource(
+        ctx.source.name,
+        fetched,
+        { scopeType: 'EXTERNAL_MESSAGE', scopeId: ctx.source.id },
+      );
+      return AttachmentConversionService.convertDownloadedToUploaded(downloaded);
+    } catch (error) {
+      logger.warn(`${TAG} could not download attachments — ingesting the message without them`, {
+        externalId: message.externalId,
+        externalSourceId: ctx.source.id,
+        attachmentCount: attachments.length,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return [];
+    }
+  }
+
+  /**
+   * One attachment's bytes and served content type, or null if it must not or
+   * cannot be fetched.
+   *
+   * `safeWebhookFetch` is the same guard `dispatchAppFetch` applies to the export
+   * URL: it DNS-pins against private, loopback, link-local and cloud-metadata
+   * addresses so a second DNS answer cannot swing the connection after the check.
+   * `redirect: 'manual'` is mandatory with it — a 3xx target is a fresh URL it has
+   * not validated, and following one would reopen the hole on a host that passed.
+   */
+  private async fetchAttachmentBytes(
+    ctx: IngestContext,
+    message: AppDeskExportMessage,
+    attachment: { fileName: string; fileUrl: string },
+  ): Promise<{ buffer: Buffer; contentType?: string } | null> {
+    const drop = (reason: string): null => {
+      logger.warn(`${TAG} attachment skipped`, {
+        externalId: message.externalId,
+        externalSourceId: ctx.source.id,
+        fileName: attachment.fileName,
+        reason,
+      });
+      return null;
+    };
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), ATTACHMENT_TIMEOUT_MS);
+    try {
+      const response = await safeWebhookFetch(attachment.fileUrl, {
+        method: 'GET',
+        redirect: 'manual',
+        signal: controller.signal,
+      });
+      if (response.status >= 300 && response.status < 400) {
+        return drop(`redirected (${response.status}) — the target is an unvalidated URL`);
+      }
+      if (!response.ok) return drop(`HTTP ${response.status}`);
+      const declared = Number(response.headers.get('content-length'));
+      if (Number.isFinite(declared) && declared > MAX_ATTACHMENT_BYTES) {
+        return drop(`declares ${declared} bytes (max ${MAX_ATTACHMENT_BYTES})`);
+      }
+      const buffer = Buffer.from(await response.arrayBuffer());
+      // Re-checked against the body: content-length is the app's claim, not a fact.
+      if (buffer.length > MAX_ATTACHMENT_BYTES) {
+        return drop(`${buffer.length} bytes exceeds the ${MAX_ATTACHMENT_BYTES} limit`);
+      }
+      const contentType = response.headers.get('content-type')?.split(';')[0]?.trim() || undefined;
+      return { buffer, contentType };
+    } catch (error) {
+      if (error instanceof SsrfBlockedError) {
+        return drop(`blocked destination — ${error.message}`);
+      }
+      return drop(error instanceof Error ? error.message : String(error));
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
+  private async buildFormFieldWrite(
+    boardId: string,
+    ctx: IngestContext,
+    message: AppDeskExportMessage,
+    options: { requireAllRequiredFields: boolean },
+  ): Promise<{
+    customFieldValues?: CustomFieldWritePayload;
+    scopeFieldValues?: DuplicateScopeFieldValue[];
+    validationErrors: Array<{ error: string; code: 'VALIDATION_ERROR' }>;
+  }> {
+    if (!message.additionalFormFields) return { validationErrors: [] };
+    const { customFieldValues, validationErrors } = await buildPartialCustomFieldWritePayload(
+      boardId,
+      ctx.workspaceId,
+      message.additionalFormFields,
+      options,
+    );
+    const scopeFieldValues =
+      customFieldValues && customFieldValues.fieldValues.length > 0
+        ? customFieldValues.fieldValues.map(fv => ({
+            fieldId: fv.fieldId,
+            value: fv.actualFieldValue,
+          }))
+        : undefined;
+    return { customFieldValues, scopeFieldValues, validationErrors };
+  }
+
+  /**
+   * Append branch — mirrors appDeskInbound's: the fields belong to the ticket
+   * that already owns the thread, so they are written against *its* board rather
+   * than the channel's, which may since have changed.
+   */
+  private async applyFormFieldsToThread(
+    ctx: IngestContext,
+    message: AppDeskExportMessage,
+    conversationId: string,
+  ): Promise<void> {
+    if (!message.additionalFormFields) return;
+    const ticket = await db.ticket.findFirst({
+      where: { conversationId },
+      select: { id: true, boardId: true },
+    });
+    if (!ticket?.id) return;
+    if (!ticket.boardId) {
+      logger.warn(`${TAG} ticket has no board — skipping form fields for appended message`, {
+        ticketId: ticket.id,
+        externalId: message.externalId,
+      });
+      return;
+    }
+    const { customFieldValues, validationErrors } = await this.buildFormFieldWrite(
+      ticket.boardId,
+      ctx,
+      message,
+      { requireAllRequiredFields: false },
+    );
+    this.logFormFieldIssues(message, validationErrors);
+    if (customFieldValues && customFieldValues.fieldValues.length > 0) {
+      await syncCustomFieldValues(ticket.id, customFieldValues, ctx.actingUser.id);
+    }
+  }
+
+  /**
+   * Per-field problems are reported, not thrown: the app's form and the board's
+   * can drift, and one unmapped key should leave the rest of the ticket intact.
+   */
+  private logFormFieldIssues(
+    message: AppDeskExportMessage,
+    validationErrors: Array<{ error: string; code: 'VALIDATION_ERROR' }>,
+  ): void {
+    if (validationErrors.length === 0) return;
+    logger.warn(`${TAG} form field values were rejected for a pulled message`, {
+      externalId: message.externalId,
+      errors: validationErrors.map(e => e.error),
+    });
   }
 }

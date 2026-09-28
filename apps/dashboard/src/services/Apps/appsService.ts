@@ -61,6 +61,10 @@ export interface AppFetchResponseMapping {
     senderName: string;
     recipients: string;
     sentAt: string;
+    /** Optional: a record of the app's form field keys to values. */
+    additionalFormFields: string;
+    /** Optional: an array of `{ fileName, fileUrl, mimeType?, size? }`. */
+    attachments: string;
   };
   /**
    * Paths combined into the dedup id. An app's own id is not always unique —
