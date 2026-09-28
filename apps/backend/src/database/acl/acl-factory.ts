@@ -537,5 +537,7 @@ export class ACLFactory {
     case 'deskAutoLabelRuleReference':
       return new BaseQueryACL(ctx, prisma)
     }
+
+    throw new Error(`ACLFactory: uncapitalized model '${modelName}' has no ACL class`)
   }
 }

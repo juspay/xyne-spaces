@@ -25,7 +25,6 @@ function cbcBlob(
 async function freshModules() {
   vi.resetModules();
   return {
-    config: await import("./spaces-encryption-key-ring-config.js"),
     crypto: await import("./crypto.js"),
   };
 }
@@ -40,7 +39,7 @@ describe("spaces encryption (config + crypto)", () => {
   });
 
   it("decrypts legacy ciphertext with only SPACES_ENCRYPTION_KEY semantics", async () => {
-    const { config, crypto } = await freshModules();
+    const { crypto } = await freshModules();
 
     expect(
       crypto.decryptSpacesCbc(
@@ -49,7 +48,7 @@ describe("spaces encryption (config + crypto)", () => {
       ),
     ).toBe(PLAINTEXT);
 
-    const loaded = config.loadSpacesEncryptionRuntimeConfig();
+    const loaded = crypto.loadSpacesEncryptionRuntimeConfig();
     expect(loaded.mode).toBe("legacy");
     expect(loaded.reason).toBe("keyring_not_configured");
   });
@@ -61,8 +60,8 @@ describe("spaces encryption (config + crypto)", () => {
       .spyOn(process.stdout, "write")
       .mockImplementation(() => true);
 
-    const { config, crypto } = await freshModules();
-    const loaded = config.loadSpacesEncryptionRuntimeConfig();
+    const { crypto } = await freshModules();
+    const loaded = crypto.loadSpacesEncryptionRuntimeConfig();
 
     expect(loaded.mode).toBe("legacy");
     expect(loaded.reason).toBe("keyring_json_invalid");
@@ -93,8 +92,8 @@ describe("spaces encryption (config + crypto)", () => {
 
   it("non-array JSON is a validation failure, not a JSON failure", async () => {
     vi.stubEnv("SPACES_ENCRYPTION_KEYS", "{}");
-    const { config } = await freshModules();
-    expect(config.loadSpacesEncryptionRuntimeConfig().reason).toBe(
+    const { crypto } = await freshModules();
+    expect(crypto.loadSpacesEncryptionRuntimeConfig().reason).toBe(
       "keyring_validation_failed",
     );
   });
@@ -108,8 +107,8 @@ describe("spaces encryption (config + crypto)", () => {
       ]),
     );
 
-    const { config, crypto } = await freshModules();
-    expect(config.loadSpacesEncryptionRuntimeConfig().mode).toBe(
+    const { crypto } = await freshModules();
+    expect(crypto.loadSpacesEncryptionRuntimeConfig().mode).toBe(
       "keyring-read",
     );
 

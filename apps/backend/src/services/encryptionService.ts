@@ -1,24 +1,148 @@
 /**
  * Backward-compatible AES-256-CBC encryption service.
  *
- * Mode selection lives in encryptionKeyRingConfig.ts:
+ * Mode selection and the key-ring parser both live in this file:
  *   legacy        original behavior, writes `iv:ciphertext`
  *   keyring-read  still writes `iv:ciphertext`, additionally
  *                 reads `v2:keyId:iv:ciphertext`
  *   keyring-write writes `v2:keyId:iv:ciphertext` with the
  *                 configured ENCRYPTION_ACTIVE_KEY_ID, reads both
  *                 formats
+ *
+ * Key-ring configuration comes from ENCRYPTION_KEYS (JSON) and
+ * ENCRYPTION_ACTIVE_KEY_ID; the parser is shared with claw-auth via
+ * @xyne/shared/server/encryption-key-ring.
  */
 
 import crypto from 'crypto';
+import { logger } from '@/utils/logger';
 import {
-  loadEncryptionRuntimeConfig,
-  type EncryptionRuntimeConfig,
-} from './encryptionKeyRingConfig.js';
+  EncryptionKeyRingConfigError,
+  parseEncryptionKeyRing,
+} from '@xyne/shared/server/encryption-key-ring';
+
+export type EncryptionMode = 'legacy' | 'keyring-read' | 'keyring-write';
+
+export type EncryptionModeReason =
+  | 'keyring_not_configured'
+  | 'keyring_json_invalid'
+  | 'keyring_validation_failed'
+  | 'active_key_not_configured'
+  | 'active_key_not_found'
+  | 'keyring_write_enabled';
+
+export interface EncryptionRuntimeConfig {
+  mode: EncryptionMode;
+  reason: EncryptionModeReason;
+  keys: ReadonlyMap<string, Buffer>;
+  activeKeyId: string | null;
+}
 
 const ALGORITHM = 'aes-256-cbc';
 const IV_LENGTH = 16;
 const VERSION_TAG = 'v2';
+
+let cachedConfig: EncryptionRuntimeConfig | null = null;
+
+function selected(
+  config: EncryptionRuntimeConfig,
+  level: 'info' | 'warn'
+): EncryptionRuntimeConfig {
+  logger[level](
+    `[EncryptionService] mode=${config.mode} ` +
+      `reason=${config.reason}` +
+      (config.activeKeyId ? ` activeKeyId=${config.activeKeyId}` : '')
+  );
+
+  return config;
+}
+
+export function loadEncryptionRuntimeConfig(): EncryptionRuntimeConfig {
+  if (cachedConfig) {
+    return cachedConfig;
+  }
+
+  const rawKeys = process.env.ENCRYPTION_KEYS?.trim();
+
+  if (!rawKeys) {
+    cachedConfig = selected(
+      {
+        mode: 'legacy',
+        reason: 'keyring_not_configured',
+        keys: new Map(),
+        activeKeyId: null,
+      },
+      'info'
+    );
+
+    return cachedConfig;
+  }
+
+  let keys: ReadonlyMap<string, Buffer>;
+
+  try {
+    keys = parseEncryptionKeyRing(rawKeys).keys;
+  } catch (error) {
+    const reason: EncryptionModeReason =
+      error instanceof EncryptionKeyRingConfigError
+        ? error.reason
+        : 'keyring_validation_failed';
+
+    cachedConfig = selected(
+      {
+        mode: 'legacy',
+        reason,
+        keys: new Map(),
+        activeKeyId: null,
+      },
+      'warn'
+    );
+
+    return cachedConfig;
+  }
+
+  const rawActiveKeyId = process.env.ENCRYPTION_ACTIVE_KEY_ID?.trim();
+
+  if (!rawActiveKeyId) {
+    cachedConfig = selected(
+      {
+        mode: 'keyring-read',
+        reason: 'active_key_not_configured',
+        keys,
+        activeKeyId: null,
+      },
+      'info'
+    );
+
+    return cachedConfig;
+  }
+
+  if (!keys.has(rawActiveKeyId)) {
+    cachedConfig = selected(
+      {
+        mode: 'keyring-read',
+        reason: 'active_key_not_found',
+        keys,
+        activeKeyId: null,
+      },
+      'warn'
+    );
+
+    return cachedConfig;
+  }
+
+  cachedConfig = selected(
+    {
+      mode: 'keyring-write',
+      reason: 'keyring_write_enabled',
+      keys,
+      activeKeyId: rawActiveKeyId,
+    },
+    'info'
+  );
+
+  return cachedConfig;
+}
 
 class EncryptionServiceError extends Error {
   constructor(

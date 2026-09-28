@@ -1,7 +1,8 @@
 import { randomBytes, createCipheriv, createDecipheriv, hkdfSync } from "node:crypto";
 import {
-  loadSpacesEncryptionRuntimeConfig,
-} from "./spaces-encryption-key-ring-config.js";
+  EncryptionKeyRingConfigError,
+  parseEncryptionKeyRing,
+} from "@xyne/shared/server/encryption-key-ring";
 
 const ALGORITHM = "aes-256-gcm";
 const IV_LENGTH = 12;
@@ -100,6 +101,74 @@ function decryptSpacesCbcPayload(
   ]);
 
   return decrypted.toString("utf8");
+}
+
+/**
+ * Environment-based key-ring configuration, shared with the
+ * Spaces backend via `@xyne/shared/server/encryption-key-ring`.
+ *
+ * SPACES_ENCRYPTION_KEY always remains the legacy reader for
+ * the backend's `iv:ciphertext` format. SPACES_ENCRYPTION_KEYS
+ * is optional: a valid array of [{id,key}] additionally enables
+ * reads of `v2:keyId:iv:ciphertext`, matched by key ID. Blank or
+ * malformed values fall back to legacy-only with one sanitized log.
+ */
+
+export type SpacesEncryptionMode = "legacy" | "keyring-read";
+
+export type SpacesEncryptionModeReason =
+  | "keyring_not_configured"
+  | "keyring_json_invalid"
+  | "keyring_validation_failed"
+  | "keyring_read_enabled";
+
+interface SpacesEncryptionRuntimeConfig {
+  mode: SpacesEncryptionMode;
+  reason: SpacesEncryptionModeReason;
+  keys: ReadonlyMap<string, Buffer>;
+}
+
+let cachedConfig: SpacesEncryptionRuntimeConfig | null = null;
+
+export function loadSpacesEncryptionRuntimeConfig(): SpacesEncryptionRuntimeConfig {
+  if (cachedConfig) {
+    return cachedConfig;
+  }
+
+  const rawKeys = process.env.SPACES_ENCRYPTION_KEYS?.trim();
+
+  if (!rawKeys) {
+    cachedConfig = {
+      mode: "legacy",
+      reason: "keyring_not_configured",
+      keys: new Map(),
+    };
+
+    return cachedConfig;
+  }
+
+  try {
+    const { keys } = parseEncryptionKeyRing(rawKeys);
+
+    cachedConfig = {
+      mode: "keyring-read",
+      reason: "keyring_read_enabled",
+      keys,
+    };
+
+    return cachedConfig;
+  } catch (error) {
+    cachedConfig = {
+      mode: "legacy",
+      reason:
+        error instanceof EncryptionKeyRingConfigError
+          ? error.reason
+          : "keyring_validation_failed",
+      keys: new Map(),
+    };
+
+    return cachedConfig;
+  }
 }
 
 /**
