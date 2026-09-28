@@ -1147,9 +1147,10 @@ class NotificationService {
       notificationContext,
     });
 
+    const mentionRouteBase = `/${workspaceId}/chat/${isDMChannel || isGroupDM ? 'dm' : 'dir'}/${channelId}`;
     const mentionActionUrl = isThreadMessage
-      ? `/${workspaceId}/chat/dir/${channelId}/${conversationId}#origin=${conversationId}&messageId=${messageId}`
-      : `/${workspaceId}/chat/dir/${channelId}#origin=${conversationId}&messageId=${messageId}`;
+      ? `${mentionRouteBase}/${conversationId}#origin=${conversationId}&messageId=${messageId}`
+      : `${mentionRouteBase}#origin=${conversationId}&messageId=${messageId}`;
 
     const conversationData = await fetchConversationForNotification(conversationId);
 
@@ -1646,7 +1647,7 @@ class NotificationService {
       type: NotificationType.THREAD_REPLY,
       relatedEntityType: 'message' as const,
       relatedEntityId: replyMessageId,
-      actionUrl: `/${workspaceId}/chat/dir/${channelId}/${conversationId}#origin=${conversationId}&messageId=${replyMessageId}`,
+      actionUrl: `/${workspaceId}/chat/${isDMChannel || isGroupDM ? 'dm' : 'dir'}/${channelId}/${conversationId}#origin=${conversationId}&messageId=${replyMessageId}`,
       metadata: {
         channelId,
         conversationId,
