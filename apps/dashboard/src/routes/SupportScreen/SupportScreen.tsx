@@ -136,6 +136,7 @@ import {
   TICKET_LIST_COLUMNS,
 } from '../../components/Tickets/TicketListView/ticketListColumns';
 import DuplicateTicketsBanner from './DuplicateTicketsBanner';
+import { useRecheckTicketDuplicates } from '../../hooks/useRecheckTicketDuplicates';
 import type { LabelUnreadFilters } from '../../api/conversationLabelsApi';
 import { tagsConfigApi } from '../../api/tagsConfigApi';
 import { classificationApi } from '../../api/classificationApi';
@@ -5555,6 +5556,8 @@ export const SupportTicketDetail = ({
   const [isScheduleCallModalOpen, setIsScheduleCallModalOpen] = useState(false);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [labelPickerOpen, setLabelPickerOpen] = useState(false);
+  const { isRechecking: isRecheckingDuplicates, recheck: recheckDuplicates } =
+    useRecheckTicketDuplicates(ticket?.id);
   if (!ticketIdParam) {
     return (
       <div className='h-full flex items-center justify-center'>
@@ -5834,6 +5837,22 @@ export const SupportTicketDetail = ({
                         <LinkIcon size={14} className='shrink-0' />
                         Copy link
                       </DropdownMenuItem>
+                      {ticket?.id && !ticket.isArchived && (
+                        <DropdownMenuItem
+                          onSelect={recheckDuplicates}
+                          disabled={isRecheckingDuplicates}
+                          data-track-category='Support'
+                          data-track-name='RecheckDuplicates'
+                          data-track-metadata={JSON.stringify({ surface: 'more_menu' })}
+                        >
+                          {isRecheckingDuplicates ? (
+                            <Loader2 size={14} className='animate-spin shrink-0' />
+                          ) : (
+                            <RefreshCw size={14} className='shrink-0' />
+                          )}
+                          Check for duplicates
+                        </DropdownMenuItem>
+                      )}
                       {emails.length > 0 &&
                         channel?.type !== ChannelType.SLACK &&
                         channel?.type !== ChannelType.APP && (

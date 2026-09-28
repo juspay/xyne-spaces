@@ -40,6 +40,8 @@ const DEFAULT_SHADOW_TAG_GENERATION_LOG_ENABLED = false;
 const DEFAULT_TICKET_BOARD_MODEL = 'glm-flash-experimental';
 const DEFAULT_RELEASE_NOTES_GENERATOR_MODEL = 'glm-latest';
 const DEFAULT_RELEASE_AI_MODEL = 'glm-flash-experimental';
+const DEFAULT_TICKET_DUPLICATE_JEV_ENABLED = false;
+const DEFAULT_TICKET_DUPLICATE_JEV_THRESHOLD = 0.75;
 const DEFAULT_SUMMARISER_MODEL = 'glm-flash-experimental';
 const DEFAULT_ATTACHMENT_SUMMARISER_MODEL = 'kimi-latest';
 const DEFAULT_CLASSIFICATION_MODEL = 'glm-flash-experimental';
@@ -84,6 +86,8 @@ const CAC_KEYS = {
   tagGenerationModel: 'tag_generation_model_name',
   shadowTagGenerationEnabled: 'shadow_tag_generation_enabled',
   shadowTagGenerationLogEnabled: 'shadow_tag_generation_log_enabled',
+  ticketDuplicateJevEnabled: 'ticket_duplicate_jev_enabled',
+  ticketDuplicateJevThreshold: 'ticket_duplicate_jev_threshold',
   ticketBoardModel: 'ticket_board_model_name',
   releaseNotesGeneratorModel: 'release_notes_generator_model_name',
   releaseAiModel: 'release_ai_model_name',
@@ -134,6 +138,8 @@ export class AgentsConfig {
   public readonly ticketBoardModelName: string;
   public readonly releaseNotesGeneratorModelName: string;
   public readonly releaseAiModelName: string;
+  public readonly ticketDuplicateJevEnabled: boolean;
+  public readonly ticketDuplicateJevThreshold: number;
   public readonly summariserModelName: string;
   public readonly attachmentSummariserModelName: string;
 
@@ -192,6 +198,8 @@ export class AgentsConfig {
     releaseAiModelName: string,
     shadowTagGenerationEnabled: boolean,
     shadowTagGenerationLogEnabled: boolean,
+    ticketDuplicateJevEnabled: boolean,
+    ticketDuplicateJevThreshold: number,
   ) {
     this.xyneAiTracingEnabled = xyneAiTracingEnabled;
     this.xyneAiMaskingEnabled = xyneAiMaskingEnabled;
@@ -221,6 +229,8 @@ export class AgentsConfig {
     this.releaseAiModelName = releaseAiModelName;
     this.shadowTagGenerationEnabled = shadowTagGenerationEnabled;
     this.shadowTagGenerationLogEnabled = shadowTagGenerationLogEnabled;
+    this.ticketDuplicateJevEnabled = ticketDuplicateJevEnabled;
+    this.ticketDuplicateJevThreshold = ticketDuplicateJevThreshold;
   }
 
   /**
@@ -270,6 +280,8 @@ export class AgentsConfig {
       const ticketBoardModelName = getValue<string>(CAC_KEYS.ticketBoardModel, DEFAULT_TICKET_BOARD_MODEL);
       const releaseNotesGeneratorModelName = getValue<string>(CAC_KEYS.releaseNotesGeneratorModel, DEFAULT_RELEASE_NOTES_GENERATOR_MODEL);
       const releaseAiModelName = getValue<string>(CAC_KEYS.releaseAiModel, DEFAULT_RELEASE_AI_MODEL);
+      const ticketDuplicateJevEnabled = getValue<boolean>(CAC_KEYS.ticketDuplicateJevEnabled, DEFAULT_TICKET_DUPLICATE_JEV_ENABLED);
+      const ticketDuplicateJevThreshold = getValue<number>(CAC_KEYS.ticketDuplicateJevThreshold, DEFAULT_TICKET_DUPLICATE_JEV_THRESHOLD);
       const summariserModelName = getValue<string>(CAC_KEYS.summariserModel, DEFAULT_SUMMARISER_MODEL);
       const attachmentSummariserModelName = getValue<string>(CAC_KEYS.attachmentSummariserModel, DEFAULT_ATTACHMENT_SUMMARISER_MODEL);
 
@@ -538,6 +550,8 @@ export class AgentsConfig {
         releaseAiModelName,
         shadowTagGenerationEnabled,
         shadowTagGenerationLogEnabled,
+        ticketDuplicateJevEnabled,
+        ticketDuplicateJevThreshold,
       );
     } catch (error) {
       logger.error('[Agents Config] Error fetching CAC config, using DEFAULTS:', error);
@@ -571,6 +585,8 @@ export class AgentsConfig {
         DEFAULT_RELEASE_AI_MODEL,
         DEFAULT_SHADOW_TAG_GENERATION_ENABLED,
         DEFAULT_SHADOW_TAG_GENERATION_LOG_ENABLED,
+        DEFAULT_TICKET_DUPLICATE_JEV_ENABLED,
+        DEFAULT_TICKET_DUPLICATE_JEV_THRESHOLD,
       );
     }
   }
@@ -605,6 +621,8 @@ export class AgentsConfig {
       DEFAULT_RELEASE_AI_MODEL,
       DEFAULT_SHADOW_TAG_GENERATION_ENABLED,
       DEFAULT_SHADOW_TAG_GENERATION_LOG_ENABLED,
+      DEFAULT_TICKET_DUPLICATE_JEV_ENABLED,
+      DEFAULT_TICKET_DUPLICATE_JEV_THRESHOLD,
     );
   }
 }
