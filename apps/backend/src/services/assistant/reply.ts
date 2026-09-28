@@ -76,13 +76,8 @@ export function replyForActionChoice(
   text: string
 ): Reply {
   const options = actionOptions(catalog, actions);
-  const prompt = `Did you mean to ${options.map((option) => lowerFirst(option.label)).join(', or ')}?`;
-  return {
-    say: prompt,
-    display: { kind: 'choices', prompt, options },
-    question: { kind: 'action', options, text },
-    expectsReply: true,
-  };
+  const labels = options.map((option) => lowerFirst(option.label));
+  return offerActions(`Did you mean to ${labels.join(', or ')}?`, options, text);
 }
 
 /**
@@ -104,13 +99,7 @@ export function replyForKind(kind: keyof typeof KIND_REPLIES, catalog: ActionCat
   const { say: template, offersActions } = KIND_REPLIES[kind];
   const options = starterOptions(catalog);
   const say = template.replace('{actions}', listOfActions(options));
-  if (!offersActions) return { say, question: null, expectsReply: false };
-  return {
-    say,
-    display: { kind: 'choices', prompt: say, options },
-    question: { kind: 'action', options, text: '' },
-    expectsReply: true,
-  };
+  return offersActions ? offerActions(say, options) : { say, question: null, expectsReply: false };
 }
 
 /** A question to answer rather than a task: Xyne AI answers those, so offer to ask it. */
@@ -150,13 +139,7 @@ export function replyForAside(
  */
 export function replyForNothingFits(catalog: ActionCatalog, suggested: readonly string[]): Reply {
   const options = actionOptions(catalog, suggested);
-  const say = `I can’t do that yet. I can ${listOfActions(options)}.`;
-  return {
-    say,
-    display: { kind: 'choices', prompt: say, options },
-    question: { kind: 'action', options, text: '' },
-    expectsReply: true,
-  };
+  return offerActions(`I can’t do that yet. I can ${listOfActions(options)}.`, options);
 }
 
 export function replyForError(message: string): Reply {
@@ -167,6 +150,16 @@ const IDLE_REPLIES: Record<Extract<EngineStep, { kind: 'idle' }>['reason'], stri
   'nothing-pending': 'There’s nothing waiting for an answer right now.',
   'unknown-action': 'I can’t do that yet.',
 };
+
+/** Buttons that start actions; `text` is the sentence to read again for the one tapped. */
+function offerActions(say: string, options: ChoiceOption[], text = ''): Reply {
+  return {
+    say,
+    display: { kind: 'choices', prompt: say, options },
+    question: { kind: 'action', options, text },
+    expectsReply: true,
+  };
+}
 
 /** Buttons that start these actions, labelled with their titles. */
 function actionOptions(catalog: ActionCatalog, ids: readonly string[]): ChoiceOption[] {

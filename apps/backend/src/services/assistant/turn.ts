@@ -175,8 +175,7 @@ async function understand(
         { ...words, ...answer },
         services.records,
         true,
-        draft.values,
-        text
+        draft.values
       );
       return withDebug(
         await applyEvent(
@@ -240,7 +239,7 @@ async function startAction(
   const action = services.catalog.get(actionId);
   if (!action) return withReply(session, replyForError('I can’t do that yet.'));
   const words = text ? (heard?.words(action) ?? (await wordsFor(action, text, services))) : {};
-  const updates = await toFieldUpdates(action, words, services.records, true, {}, text);
+  const updates = await toFieldUpdates(action, words, services.records, true);
   return applyEvent(
     {
       type: 'request',
@@ -252,24 +251,16 @@ async function startAction(
   );
 }
 
-/** A long request can produce a plausible but incomplete text span. Make the send preview
- * explicit while leaving exact people and channel matches certain. */
+/** A long sentence may have been read short, so the words it sends are previewed first. */
 function requireLongTextPreview(
   action: ActionDefinition,
   text: string,
   updates: FieldUpdate[]
 ): FieldUpdate[] {
-  const wordCount = text.trim().split(/\s+/).filter(Boolean).length;
-  if (
-    action.effect !== 'send' ||
-    wordCount <= MAX_VALUE_WORDS ||
-    !Object.values(action.fields).some((field) => field.kind === 'text')
-  ) {
-    return updates;
-  }
-
+  const long = text.split(/\s+/).filter(Boolean).length > MAX_VALUE_WORDS;
+  if (action.effect !== 'send' || !long) return updates;
   return updates.map((update) =>
-    action.fields[update.field]?.kind === 'text' && update.op === 'set'
+    update.op === 'set' && action.fields[update.field]?.kind === 'text'
       ? { ...update, certain: false }
       : update
   );
@@ -342,17 +333,11 @@ function finishRun(
   }
   const cleared: AssistantSession = { ...session, run: null };
   const failed = results.find((result) => !result.ok);
-  if (failed || results.length === 0) {
-    const reason = failed?.error ? `: ${failed.error}` : '.';
+  if (failed) {
+    const reason = failed.error ? `: ${failed.error}` : '.';
     return { session: cleared, reply: replyForError(`That didn’t finish${reason}`) };
   }
-  if (run.expectedResults !== undefined && results.length > run.expectedResults) {
-    return {
-      session: cleared,
-      reply: replyForError('That result doesn’t match the actions I ran.'),
-    };
-  }
-  if (run.expectedResults !== undefined && results.length !== run.expectedResults) {
+  if (results.length !== run.expectedResults) {
     return {
       session: cleared,
       reply: replyForError(

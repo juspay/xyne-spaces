@@ -63,11 +63,12 @@ export async function isAssistantOn(workspaceId: string, userId: string): Promis
   return Promise.race([flag, timeout]);
 }
 
-/** The real services for one user's request. */
+/** Time spent in Jev during one turn, for the Diagnose log. */
 export interface AssistantRequestDiagnostics {
   jevMs: number[];
 }
 
+/** The real services for one user's request. */
 export function assistantServices(
   context: ACLContext,
   diagnostics?: AssistantRequestDiagnostics

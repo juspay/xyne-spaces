@@ -11,56 +11,12 @@ export type QuickReply =
   /** The user picked one of the actions offered by "Did you mean …?". */
   | { kind: 'pick-action'; action: string };
 
-const YES = [
-  'yes',
-  'yeah',
-  'yep',
-  'yup',
-  'sure',
-  'ok',
-  'okay',
-  'go ahead',
-  'do it',
-  'confirm',
-  'please do',
-];
-const NO = [
-  'no',
-  'nope',
-  'no thanks',
-  'not now',
-  'skip',
-  'none',
-  'nobody',
-  'no one',
-  'done',
-  "that's all",
-  'thats all',
-];
-const CANCEL = ['cancel', 'never mind', 'nevermind', 'forget it', 'stop', 'abort'];
+const YES = words('yes|yeah|yep|yup|sure|ok|okay|go ahead|do it|confirm|please do');
+const NO = words("no|nope|no thanks|not now|skip|none|nobody|no one|done|that's all|thats all");
+const CANCEL = words('cancel|never mind|nevermind|forget it|stop|abort');
 
-const ORDINALS: Record<string, number> = {
-  first: 1,
-  one: 1,
-  second: 2,
-  two: 2,
-  third: 3,
-  three: 3,
-  fourth: 4,
-  four: 4,
-  fifth: 5,
-  five: 5,
-  sixth: 6,
-  six: 6,
-  seventh: 7,
-  seven: 7,
-  eighth: 8,
-  eight: 8,
-  ninth: 9,
-  nine: 9,
-  tenth: 10,
-  ten: 10,
-};
+const ORDINALS = words('first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth');
+const NUMBERS = words('one|two|three|four|five|six|seven|eight|nine|ten');
 
 /** A button tap, answered against the question it belongs to. */
 export function quickChoice(optionId: string, question: OpenQuestion | null): QuickReply | null {
@@ -95,6 +51,10 @@ export function quickText(text: string, question: OpenQuestion | null): QuickRep
   return null;
 }
 
+function words(list: string): string[] {
+  return list.split('|');
+}
+
 function event(turnEvent: TurnEvent): QuickReply {
   return { kind: 'event', event: turnEvent };
 }
@@ -103,7 +63,8 @@ function event(turnEvent: TurnEvent): QuickReply {
 function optionNumber(words: string): number {
   const match = /^(?:the\s+|number\s+|option\s+)?(\w+)(?:\s+one)?$/.exec(words);
   const token = match?.[1] ?? '';
-  return /^\d+$/.test(token) ? Number(token) : (ORDINALS[token] ?? 0);
+  if (/^\d+$/.test(token)) return Number(token);
+  return Math.max(ORDINALS.indexOf(token), NUMBERS.indexOf(token)) + 1;
 }
 
 function normalize(text: string): string {

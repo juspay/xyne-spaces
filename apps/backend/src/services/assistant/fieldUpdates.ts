@@ -21,8 +21,7 @@ export async function toFieldUpdates(
   words: FieldWords,
   finder: RecordFinder,
   clear: boolean,
-  known: Readonly<Record<string, FieldValue>> = {},
-  inputText = ''
+  known: Readonly<Record<string, FieldValue>> = {}
 ): Promise<FieldUpdate[]> {
   const entries = Object.entries(words);
   const searches = entries.filter(([field]) => action.fields[field]?.kind === 'thread');
@@ -32,8 +31,6 @@ export async function toFieldUpdates(
     others.map(([field, value]) => fieldUpdates(action, field, value, finder, clear))
   );
   const namedUpdates = named.flat();
-  const selfUpdate = explicitSelfParticipant(action, finder.selfId, inputText);
-  if (selfUpdate) namedUpdates.unshift(selfUpdate);
 
   // A search narrowed by a person or channel waits until that name is settled.
   const filterOpen = namedUpdates.some(
@@ -54,29 +51,6 @@ export async function toFieldUpdates(
     searches.map(([field, value]) => fieldUpdates(action, field, value, finder, clear, hints))
   );
   return [...namedUpdates, ...searched.flat()];
-}
-
-function explicitSelfParticipant(
-  action: ActionDefinition,
-  selfId: string | undefined,
-  inputText: string
-): FieldUpdate | undefined {
-  const participantField = action.fields.with;
-  if (
-    action.id !== 'find_conversation' ||
-    participantField?.kind !== 'person' ||
-    !participantField.many ||
-    !selfId ||
-    !explicitlyNamesSelfAsParticipant(inputText)
-  ) {
-    return undefined;
-  }
-  return {
-    field: 'with',
-    op: 'add',
-    value: { kind: 'person', id: selfId, name: 'you' },
-    certain: true,
-  };
 }
 
 async function fieldUpdates(
@@ -177,11 +151,4 @@ function isSearchFilter(action: ActionDefinition, field: string): boolean {
 
 function entityRefs(value: FieldValue): EntityRef[] {
   return Array.isArray(value) ? value.filter(isEntityRef) : isEntityRef(value) ? [value] : [];
-}
-
-/** Avoid treating polite "find me a thread" as a participant filter. */
-function explicitlyNamesSelfAsParticipant(text: string): boolean {
-  return /\b(?:me\s+(?:and|with)|(?:and|with)\s+(?:me|i)|i\s+and|(?:i|we)\s+(?:discuss|talk|chat|said|wrote|were|was)\w*)\b/i.test(
-    text
-  );
 }

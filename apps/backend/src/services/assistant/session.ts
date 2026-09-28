@@ -22,8 +22,8 @@ export interface AssistantSession {
 export interface PendingRun {
   runId: string;
   action: string;
-  /** The dashboard must return one result for each completed operation. */
-  expectedResults?: number;
+  /** One result per operation: fewer means the run did not finish. */
+  expectedResults: number;
   /** Said when every operation succeeded. */
   done: string;
 }
@@ -104,7 +104,7 @@ const pendingRunSchema = z
   .object({
     runId: z.string().min(1),
     action: z.string().min(1),
-    expectedResults: z.number().int().nonnegative().optional(),
+    expectedResults: z.number().int().nonnegative(),
     done: z.string(),
   })
   .strict();

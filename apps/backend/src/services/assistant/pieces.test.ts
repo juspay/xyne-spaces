@@ -404,19 +404,10 @@ describe('the stored session', () => {
     }
   });
 
-  it('accepts a pending run written before expected result counts were stored', () => {
-    const legacyRun = {
-      ...EMPTY_SESSION,
-      run: { runId: 'run-old', action: 'open_channel', done: 'Opened it.' },
-    };
-
-    expect(parseSession(JSON.stringify(legacyRun))).toEqual(legacyRun);
-  });
-
   it('rejects a stored session that exceeds the byte limit', () => {
     const oversized = {
       ...EMPTY_SESSION,
-      run: { runId: 'run-1', action: 'send_dm', done: '🙂'.repeat(17_000) },
+      run: { runId: 'run-1', action: 'send_dm', expectedResults: 1, done: '🙂'.repeat(17_000) },
     };
 
     expect(Buffer.byteLength(JSON.stringify(oversized), 'utf8')).toBeGreaterThan(64 * 1024);

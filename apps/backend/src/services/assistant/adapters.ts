@@ -28,7 +28,10 @@ import {
   type SessionStore,
 } from './session';
 
-/** The real services behind the assistant: Redis for the session, the database for names, and Vespa for past messages. */
+/**
+ * The real services behind the assistant: Redis for the session, the database for names, and
+ * Vespa for past messages.
+ */
 
 export const redisSessionStore: SessionStore = {
   async load(identity) {
@@ -48,7 +51,6 @@ export function databaseFinder(context: ACLContext): RecordFinder {
   const channelsAcl = new ChannelsACL(context, db);
 
   return {
-    selfId: context.userId,
     async find(kind, mention, hints) {
       if (kind === 'thread') return findConversations(mention, context.userId, hints);
       const words = normalizeName(mention)
@@ -86,42 +88,28 @@ async function findPeople(
   selfId: string,
   access: Prisma.UserWhereInput
 ): Promise<FoundRecord[]> {
-  const byName = await people(selfId, access, {
-    AND: words.map((word) => ({
-      OR: [
-        { name: { contains: word, mode: 'insensitive' as const } },
-        { displayName: { contains: word, mode: 'insensitive' as const } },
+  const byName = await people(selfId, access, { AND: words.map(nameHas) });
+  if (byName.length > 0) return byName;
+  // One word may be misheard: match its first letter, and every other word as said. Requiring
+  // the other words keeps a common word such as "doctor" from pulling unrelated people.
+  return people(selfId, access, {
+    OR: words.map((word, index) => ({
+      AND: [
+        { OR: likelyInitials(word).map(nameStarts) },
+        ...words.filter((_, other) => other !== index).map(nameHas),
       ],
     })),
   });
-  if (byName.length > 0) return byName;
+}
 
-  // Let one name word be misheard, but require every other spoken word to match.
-  // This keeps a common word such as "doctor" from pulling unrelated workspace users.
-  const likelyNames = words.map((word, index) => {
-    const initials = likelyInitials(word);
-    const context = words.filter((_, otherIndex) => otherIndex !== index);
-    return {
-      AND: [
-        {
-          OR: initials.flatMap((letter) => [
-            { name: { startsWith: letter, mode: 'insensitive' as const } },
-            { displayName: { startsWith: letter, mode: 'insensitive' as const } },
-          ]),
-        },
-        ...context.map((contextWord) => ({
-          OR: [
-            { name: { contains: contextWord, mode: 'insensitive' as const } },
-            { displayName: { contains: contextWord, mode: 'insensitive' as const } },
-          ],
-        })),
-      ],
-    };
-  });
+function nameHas(word: string): Prisma.UserWhereInput {
+  const contains = { contains: word, mode: 'insensitive' as const };
+  return { OR: [{ name: contains }, { displayName: contains }] };
+}
 
-  return people(selfId, access, {
-    OR: likelyNames,
-  });
+function nameStarts(letter: string): Prisma.UserWhereInput {
+  const startsWith = { startsWith: letter, mode: 'insensitive' as const };
+  return { OR: [{ name: startsWith }, { displayName: startsWith }] };
 }
 
 /** X and Z can be confused at the start of a spoken name ("Xyne" / "Zyne"). */
