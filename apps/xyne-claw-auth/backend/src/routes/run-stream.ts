@@ -2225,6 +2225,39 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
       log.warn(`[connector-card] xyne-ai suggestion cards failed:`, errMsg(suggestErr));
     }
 
+    // Request side only — the action and its result card are surface-aware in
+    // flow-action.ts. Every other write tool keeps its PendingActionBlock.
+    if (pendingActions?.length) {
+      try {
+        const { resolveXyneAiCardTarget } = await import("../lib/flow-card-delivery.js");
+        const ticketTarget = await resolveXyneAiCardTarget({ assistantMessageId });
+        if (ticketTarget) {
+          const { readPendingWriteAction, renderXyneAiTicketProposalCard } = await import(
+            "../lib/ticket-card-render.js"
+          );
+          for (const raw of pendingActions) {
+            const writeAction = readPendingWriteAction(raw);
+            if (!writeAction) continue;
+            const flow = await renderXyneAiTicketProposalCard({
+              action: writeAction,
+              target: ticketTarget,
+            });
+            if (!flow) continue;
+            const ticketStream = pendingStreams.get(streamId);
+            if (ticketStream) ticketStream.sendEvent("ui-flow", { flow });
+            else
+              publishStreamEvent({
+                kind: "progress",
+                streamId,
+                events: [{ event: "ui-flow", data: { flow } }],
+              });
+          }
+        }
+      } catch (ticketErr) {
+        log.warn(`[ticket-card] xyne-ai ticket card failed:`, errMsg(ticketErr));
+      }
+    }
+
     // Finalize AgentRun (same pattern as /agent-chat). Pod-independent —
     // agentRunRepository.finalize is keyed on sessionId so it's safe to
     // run from any pod.

@@ -88,7 +88,7 @@ import type {
 } from '../utils/XyneAITypes';
 import { ActivityBlock } from './ActivityBlock';
 import { FlowScreenManager } from '../../../flowUI/FlowScreenManager';
-import { flowMessageId } from '../utils/XyneAITypes';
+import { flowMessageId, pendingActionIndex, unpresentedPendingActions } from '../utils/XyneAITypes';
 import { PendingActionBlock } from './PendingActionBlock';
 import { respondToPendingAction } from '../../../../services/XyneAI/XyneAIPendingActionService';
 import { Link2 } from 'lucide-react';
@@ -1795,6 +1795,11 @@ const MessageContent = ({
   // Memoize markdown components to prevent re-renders on parent updates
   const markdownComponents = useMemo(() => createMarkdownComponents(message.id), [message.id]);
 
+  const visiblePendingActions = useMemo(
+    () => unpresentedPendingActions(message.pendingActions, message.uiFlows),
+    [message.pendingActions, message.uiFlows],
+  );
+
   // Extend markdown components with image download button for sidebar
   const sidebarMarkdownComponents = useMemo<Components>(() => {
     return {
@@ -1997,14 +2002,24 @@ const MessageContent = ({
         ))}
 
       {/* v2: Pending Actions (Human-in-the-loop) */}
-      {message.pendingActions && message.pendingActions.length > 0 && (
+      {visiblePendingActions.length > 0 && (
         <PendingActionBlock
-          actions={message.pendingActions}
-          onApprove={async (action, index) => {
-            await respondToPendingAction(message, action, index, true);
+          actions={visiblePendingActions}
+          onApprove={async action => {
+            await respondToPendingAction(
+              message,
+              action,
+              pendingActionIndex(message.pendingActions, action),
+              true,
+            );
           }}
-          onDecline={async (action, index) => {
-            await respondToPendingAction(message, action, index, false);
+          onDecline={async action => {
+            await respondToPendingAction(
+              message,
+              action,
+              pendingActionIndex(message.pendingActions, action),
+              false,
+            );
           }}
         />
       )}

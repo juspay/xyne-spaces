@@ -506,6 +506,32 @@ export function flowMessageId(flow: FlowDefinition, fallback: string): string {
   return typeof stored === 'string' && stored ? stored : fallback;
 }
 
+/** A card carrying an action's signature IS that approval; without one the row
+ *  stays, so a missing card can never make an action unapprovable. */
+export function unpresentedPendingActions(
+  actions: PendingAction[] | undefined,
+  flows: FlowDefinition[] | undefined,
+): PendingAction[] {
+  if (!actions?.length) return [];
+  if (!flows?.length) return actions;
+  const presented = new Set(
+    flows
+      .map(flow => flow.data?.['pendingSignature'])
+      .filter((signature): signature is string => typeof signature === 'string' && !!signature),
+  );
+  if (presented.size === 0) return actions;
+  return actions.filter(action => !presented.has(action.signature));
+}
+
+/** Position in the FULL list — the stored resolution id is keyed on it. */
+export function pendingActionIndex(
+  actions: PendingAction[] | undefined,
+  action: PendingAction,
+): number {
+  const at = actions?.indexOf(action) ?? -1;
+  return at >= 0 ? at : 0;
+}
+
 export interface PlanTodo {
   id?: string;
   title: string;

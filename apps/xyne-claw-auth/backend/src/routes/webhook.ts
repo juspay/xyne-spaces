@@ -82,6 +82,7 @@ import { publishLiveEvent } from "../lib/live-conversation-bus.js";
 import { deliverXyneAiFlow, postFlowCard, resolveXyneAiCardTarget } from "../lib/flow-card-delivery.js";
 import { renderAgentProfileCard, renderAgentProfileListCard, renderAgentSummaryCard } from "../lib/agent-card-render.js";
 import { renderConnectorSuggestCard, renderProviderSuggestCard, resolveConnectorSuggestions } from "../lib/connector-card-render.js";
+import { buildTicketProposalCardFlow, mintWriteCardAction, readPendingWriteAction } from "../lib/ticket-card-render.js";
 import { UNREGISTERED_USER_TEMPLATE } from "../constants.js";
 import {
   registerRunRecovery,
@@ -138,7 +139,6 @@ import JSZip from "jszip";
 
 import {
   buildWriteApprovalFlow,
-  buildTicketProposalFlow,
   buildTwinApprovalFlow,
   buildUserQuestionFlow,
   buildCapacityRetryFlow,
@@ -1076,9 +1076,6 @@ export async function fetchConversationHistory(
  *  since the executed payload comes from the HMAC-signed action, not the card. */
 const BULK_TICKETS_CARD_LIMIT = 25;
 
-type TicketCardPriority = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
-const TICKET_CARD_PRIORITIES: TicketCardPriority[] = ["LOW", "MEDIUM", "HIGH", "CRITICAL"];
-
 function formatActionDescription(tool: string, params: Record<string, unknown>, options?: { channelName?: string }): string {
   if (tool === "user-send-message") {
     const content = (params["content"] as string ?? "").slice(0, 300);
@@ -1225,49 +1222,26 @@ async function postWriteApprovalAction(args: {
   // The pending-action signature is minted before the Spaces delivery target is
   // known. Verify it, then bind the trusted session agent to the card signature
   // so flow-action cannot be replayed with another org's app credentials.
-  const { signAction, verifyActionSignature } = await import("./mcp.js");
-  const pendingActionPayload = {
-    serverType: action["serverType"] as string,
-    tool: action["tool"] as string,
-    params,
-    userId: action["userId"] as string,
-  };
-  if (!verifyActionSignature(pendingActionPayload, action["signature"] as string)) {
-    throw new Error("Invalid pending write-action signature");
+  const pendingWriteAction = readPendingWriteAction(action);
+  if (!pendingWriteAction) {
+    throw new Error("Invalid pending write-action shape");
   }
   const agentSlug = ctx.agentSlug ?? "";
   const spacesAppId = ctx.spacesAppId ?? "";
-  const cardSignature = signAction({ ...pendingActionPayload, agentSlug, spacesAppId });
-
-  const cardAction = {
-    serverType: pendingActionPayload.serverType,
-    tool: pendingActionPayload.tool,
-    params,
-    userId: pendingActionPayload.userId,
-    signature: cardSignature,
+  const cardAction = await mintWriteCardAction(pendingWriteAction, {
     agentSlug,
+    spacesAppId,
     channelId: ctx.channelId,
     conversationId: ctx.conversationId,
-  };
+  });
 
-  const ticketTitle = typeof params?.["title"] === "string" ? params["title"].trim() : "";
   // The rich `ticket` FlowUI component is only rendered by newer Spaces
   // backends; older deployments reject it. Track when we used it so a flow-
   // schema rejection can fall back to the generic approval card below.
-  const usedRichTicketCard = pendingActionPayload.tool === "spaces-create-ticket" && !!ticketTitle;
+  const ticketFlow = buildTicketProposalCardFlow(cardAction);
+  const usedRichTicketCard = ticketFlow !== null;
   const writeFlow = withSpacesAppId(
-    usedRichTicketCard
-      ? buildTicketProposalFlow({
-          title: ticketTitle,
-          ...(TICKET_CARD_PRIORITIES.includes(params["priority"] as TicketCardPriority)
-            ? { priority: params["priority"] as TicketCardPriority }
-            : {}),
-          ...(typeof params["eta"] === "string" && params["eta"] ? { eta: params["eta"] } : {}),
-          ...(typeof params["assignedTo"] === "string" && params["assignedTo"]
-            ? { assigneeId: params["assignedTo"] }
-            : {}),
-        }, cardAction)
-      : buildWriteApprovalFlow(actionDesc, cardAction),
+    ticketFlow ?? buildWriteApprovalFlow(actionDesc, cardAction),
     spacesAppId,
   );
 
@@ -1329,7 +1303,7 @@ async function postWriteApprovalAction(args: {
     // with no code change.
     if (!usedRichTicketCard || !isFlowSchemaRejection(err)) throw err;
     clog.warn(
-      `[webhook/result] ticket approval card rejected by Spaces flow schema; falling back to generic approval card tool=${pendingActionPayload.tool} channelId=${ctx.channelId} conversationId=${ctx.conversationId ?? ""}`,
+      `[webhook/result] ticket approval card rejected by Spaces flow schema; falling back to generic approval card tool=${cardAction.tool} channelId=${ctx.channelId} conversationId=${ctx.conversationId ?? ""}`,
     );
     await postCard(withSpacesAppId(buildWriteApprovalFlow(actionDesc, cardAction), spacesAppId));
   }

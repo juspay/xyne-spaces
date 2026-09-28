@@ -97,7 +97,11 @@ import { useCitationDocs, panelDocFromCitation } from './citationDocs';
 import { MessageReactArtifacts, toArtifactRef } from './ReactArtifact';
 import { FlowScreenManager } from '../flowUI/FlowScreenManager';
 import { useFlowActionComplete } from '../../hooks/useFlowActionComplete';
-import { flowMessageId } from '../Chat/XyneAISidebar/utils/XyneAITypes';
+import {
+  flowMessageId,
+  pendingActionIndex,
+  unpresentedPendingActions,
+} from '../Chat/XyneAISidebar/utils/XyneAITypes';
 import { OpenUrlActions } from './OpenUrlActions';
 import { ArtifactRestoreNotice } from './ReactArtifact/ArtifactRestoreNotice';
 import { PromptMarkerRail, type PromptMarker } from './PromptMarkerRail';
@@ -1165,6 +1169,10 @@ function ChatMessageBubble({
   const hasAttachedContext =
     isUser && !!message.attachedContext && message.attachedContext.length > 0;
   const passage = isUser ? message.pageSelection : undefined;
+  const visiblePendingActions = useMemo(
+    () => unpresentedPendingActions(message.pendingActions, message.uiFlows),
+    [message.pendingActions, message.uiFlows],
+  );
   if (isUser && !hasUserContent && !hasUserAttachments) {
     return null as unknown as ReactElement;
   }
@@ -1367,15 +1375,27 @@ function ChatMessageBubble({
               </div>
             ))}
 
-          {!isUser && message.pendingActions && message.pendingActions.length > 0 && (
+          {!isUser && visiblePendingActions.length > 0 && (
             <PendingActionBlock
-              actions={message.pendingActions}
-              onApprove={async (action, index) => {
-                await respondToPendingAction(message, action, index, true, agentSlug || 'ask-ai');
+              actions={visiblePendingActions}
+              onApprove={async action => {
+                await respondToPendingAction(
+                  message,
+                  action,
+                  pendingActionIndex(message.pendingActions, action),
+                  true,
+                  agentSlug || 'ask-ai',
+                );
                 onPendingActionResolved?.();
               }}
-              onDecline={async (action, index) => {
-                await respondToPendingAction(message, action, index, false, agentSlug || 'ask-ai');
+              onDecline={async action => {
+                await respondToPendingAction(
+                  message,
+                  action,
+                  pendingActionIndex(message.pendingActions, action),
+                  false,
+                  agentSlug || 'ask-ai',
+                );
                 onPendingActionResolved?.();
               }}
             />

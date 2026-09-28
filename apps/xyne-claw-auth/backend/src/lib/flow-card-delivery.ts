@@ -115,6 +115,47 @@ export async function deliverXyneAiFlow(
   return stamped;
 }
 
+/** No-channel counterpart to Spaces' `/chat/updateMessage`. `chatMessageId`
+ *  arrives inside the card the client sent back, so the row is re-checked
+ *  against the acting user before anything is written. */
+export async function replaceFlowCardOnRow(input: {
+  chatMessageId: string;
+  screenId: string;
+  flow: FlowDefinition;
+  userId: string;
+}): Promise<boolean> {
+  const row = await prisma.chatMessage
+    .findUnique({
+      where: { id: input.chatMessageId },
+      select: { id: true, userId: true, conversationId: true, agentSlug: true },
+    })
+    .catch(() => null);
+  if (!row || row.userId !== input.userId) {
+    log.warn(`[xyne-ai] card replace refused for message ${input.chatMessageId}`);
+    return false;
+  }
+
+  const replaced = await chatMessageRepository
+    .replaceUiFlow(row.id, input.screenId, input.flow)
+    .catch((err: unknown) => {
+      log.warn(`[xyne-ai] card replace failed for ${input.screenId}: ${errMsg(err)}`);
+      return false;
+    });
+  if (!replaced) return false;
+
+  if (CONFIG.liveToolCallsEnabled) {
+    publishLiveEvent(row.conversationId, {
+      type: "ui-flow",
+      conversationId: row.conversationId,
+      agentSlug: row.agentSlug,
+      userId: row.userId,
+      flow: input.flow,
+      ts: Date.now(),
+    });
+  }
+  return true;
+}
+
 /**
  * The one delivery seam for FlowUI cards. The Spaces branch is the pre-existing
  * `/chat/postMessage` call verbatim; the Xyne AI branch goes through uiFlows.
