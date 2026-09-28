@@ -56,15 +56,8 @@ export function setVisibilityTx(self: RecordingSharingService, callId: string, a
   });
 }
 
-export function grantTx(self: RecordingSharingService, callId: string, actor: RecordingSharingActor, targets: RecordingShareTarget[]) {
-  return runTransaction(['Call', 'Channel', 'ChannelParticipant', 'EntityAccess', 'User', 'UserGroup', 'UserGroupMapping'], 'grant: recording load and share-target validation must commit atomically; tx is not ACL-wrapped', async tx => {
-    const recording = await loadManageableRecording(tx, callId, actor);
-    await self.validateTargets(tx, recording, actor.workspaceId, targets);
-  });
-}
-
 export function validateGrantTargetsTx(self: RecordingSharingService, callId: string, actor: RecordingSharingActor, targets: RecordingShareTarget[]) {
-  return runTransaction(['Call', 'Channel', 'User', 'UserGroup'], 'grant: pre-validation load and target checks must commit atomically; tx is not ACL-wrapped', async tx => {
+  return runTransaction(['Call', 'Channel', 'ChannelParticipant', 'EntityAccess', 'User', 'UserGroup', 'UserGroupMapping'], 'grant: pre-validation load and target checks must commit atomically; tx is not ACL-wrapped', async tx => {
     const recording = await loadManageableRecording(tx, callId, actor);
     await self.validateTargets(tx, recording, actor.workspaceId, targets);
   });
