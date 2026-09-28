@@ -93,11 +93,6 @@ const TOOL_DISCOVERY_OPTIMIZATIONS = [
     description: "Let the agent search and load its subagents' tools, writes included, and call them itself first instead of waiting on a slow nested subagent run. Writes keep their approval settings.",
   },
   {
-    key: "subagent_direct_only",
-    label: "No built-in subagents",
-    description: "Stop offering built-in subagents like spaces or bitbucket at all. Their tools, writes included, are loaded and called directly, so no answer waits minutes on a nested run. Custom subagents stay. Always on for WhatsApp and other messaging channels.",
-  },
-  {
     key: "active_tool_cap",
     label: "Top-25 active tools",
     description: "Start each run with only the agent's 25 most-used tools of the last 7 days. The rest stay listed by name and load with one call, so every request is smaller. Nothing is removed from the agent.",
