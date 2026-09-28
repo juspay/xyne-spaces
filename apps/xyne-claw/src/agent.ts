@@ -18,6 +18,7 @@ import { createScopedToolMap } from "./scoped-tools.js";
 import { metric } from "./metrics.js";
 import { isFencedSession } from "./run-ownership.js";
 import { compactionExtension, setCompactionSubmitTool } from "./compaction-extension.js";
+import { toolResultSiftExtension } from "./tool-result-sift.js";
 import { takeCitations, takeDebug } from "./citations.js";
 import { applyAutoCitations } from "./auto-citations.js";
 import { extractSessionClfTokens } from "./citation-sanitizer.js";
@@ -2142,7 +2143,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   }
 
   // Build skill trigger + prompt injection extensions if configured
-  const extensions: import("@earendil-works/pi-coding-agent").ExtensionFactory[] = [compactionExtension];
+  const extensions: import("@earendil-works/pi-coding-agent").ExtensionFactory[] = [compactionExtension, toolResultSiftExtension];
 
   if (promptInjections && promptInjections.length > 0) {
     const injections = promptInjections;

@@ -30,6 +30,10 @@ export const OPTIMIZATIONS = {
     summary: "Verify Responses asks Jev first: drafts Jev is confident are fine are delivered without the LLM verifier, the rest go to the LLM as before, and when the LLM verifier is unavailable a high-risk draft is sent back instead of passing unchecked",
     defaultOn: false,
   },
+  jev_tool_result_sift: {
+    summary: "large file reads (read, sandbox-read-file, git show, MCP file contents) and long command output (sandbox-run, git-read) are cut to the parts Jev scores as relevant to the request; omitted ranges are marked with their line numbers, full command output is saved to a file first, and files can be re-read by range",
+    defaultOn: false,
+  },
   catalog_full_index: {
     summary: "the system-prompt tool index names every loadable tool, fitted to a size budget, instead of collapsing catalogs over 15 tools to a single line — so the model loads by exact name rather than guessing search terms",
     defaultOn: false,

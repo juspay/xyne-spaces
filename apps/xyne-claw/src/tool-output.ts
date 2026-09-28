@@ -38,6 +38,7 @@ import { createLogger } from "./logger.js";
 import { optEnabled } from "./optimizations.js";
 import { siftToolResult } from "./result-sift.js";
 import { currentRunTask } from "./run-context.js";
+import { siftText } from "./tool-result-sift.js";
 const log = createLogger("tool-output");
 
 // MCP/custom tool results are often structure-heavy JSON, so we use a tighter
@@ -251,6 +252,90 @@ async function siftIntoContext(
   ].join("\n");
 }
 
+const FILE_OUTPUT_TOOL = /(^|__)(get_file_contents?|file_content)$/i;
+const COMMAND_OUTPUT_TOOLS: ReadonlySet<string> = new Set(["sandbox-run", "git-read", "sandbox-poll-job"]);
+
+function parseObject(text: string): Record<string, unknown> | null {
+  try {
+    const value: unknown = JSON.parse(text);
+    return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+async function saveFullOutput(outputBaseDir: string, category: string, toolName: string, text: string): Promise<string | null> {
+  const safeCategory = category.replace(/[^a-zA-Z0-9_-]/g, "_");
+  const safeTool = toolName.replace(/[^a-zA-Z0-9_-]/g, "_");
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const dir = resolvePath(outputBaseDir, ".context", "tool-results");
+  const fileName = `${safeCategory}-${safeTool}-${stamp}-${randomUUID().slice(0, 8)}.json`;
+  const absPath = joinPath(dir, fileName);
+  const lined = lineifyForSpill(text);
+  try {
+    await mkdir(dir, { recursive: true });
+    await writeFile(absPath, lined, { encoding: "utf8" });
+    void gcsUploadSessionFile(basename(outputBaseDir), joinPath(".context", "tool-results", fileName), lined);
+    return absPath;
+  } catch (err) {
+    log.warn(`[tool-output] ${safeCategory}/${safeTool} sift skipped — full output could not be saved: ${err instanceof Error ? err.message : String(err)}`);
+    return null;
+  }
+}
+
+const OMITTED_HINT = 'Omitted ranges are marked "── lines a–b omitted ──".';
+
+export async function siftToolOutput(outputBaseDir: string, category: string, toolName: string, clean: string): Promise<string | null> {
+  const task = currentRunTask();
+  if (toolName === "sandbox-read-file") {
+    const obj = parseObject(clean);
+    if (!obj || typeof obj["content"] !== "string" || obj["encoding"] !== "utf8") return null;
+    const result = await siftText({
+      text: obj["content"],
+      kind: "file",
+      label: String(obj["path"] ?? "file"),
+      task,
+      firstLine: Number(obj["startLine"]) || 1,
+    });
+    if (!result) return null;
+    return JSON.stringify({
+      ...obj,
+      content: result.text,
+      sifted: `Showing the parts relevant to the request (${result.keptLines} of ${result.totalLines} lines). ${OMITTED_HINT} Read any of them with sandbox-read-file offset/limit.`,
+    });
+  }
+  if (COMMAND_OUTPUT_TOOLS.has(toolName)) {
+    const obj = parseObject(clean);
+    if (!obj) return null;
+    const next: Record<string, unknown> = { ...obj };
+    let changed = false;
+    for (const field of ["stdout", "stderr"]) {
+      const value = obj[field];
+      if (typeof value !== "string") continue;
+      const result = await siftText({ text: value, kind: "log", label: `${toolName} (${field})`, task });
+      if (result) {
+        next[field] = result.text;
+        changed = true;
+      }
+    }
+    if (!changed) return null;
+    const saved = await saveFullOutput(outputBaseDir, category, toolName, clean);
+    if (!saved) return null;
+    return JSON.stringify({
+      ...next,
+      sifted: `Long output trimmed to the parts relevant to the request. ${OMITTED_HINT} The complete output is saved at ${saved} — read or grep it if you need more.`,
+    });
+  }
+  if (FILE_OUTPUT_TOOL.test(toolName)) {
+    const result = await siftText({ text: clean, kind: "file", label: toolName, task });
+    if (!result) return null;
+    const saved = await saveFullOutput(outputBaseDir, category, toolName, clean);
+    if (!saved) return null;
+    return `[Showing the parts of this file relevant to the request: ${result.keptLines} of ${result.totalLines} lines. ${OMITTED_HINT} The complete file is saved at ${saved} — read it with offset/limit if you need more.]\n${result.text}`;
+  }
+  return null;
+}
+
 export async function promoteIfOversized(
   outputBaseDir: string,
   category: string,
@@ -266,7 +351,11 @@ export async function promoteIfOversized(
   forceFile = false,
 ): Promise<string> {
   const cap = inlineCapBytes ?? inlineCapForTool(toolName);
-  const clean = stripControlChars(rawContent);
+  let clean = stripControlChars(rawContent);
+  if (!forceFile && optEnabled("jev_tool_result_sift")) {
+    const trimmed = await siftToolOutput(outputBaseDir, category, toolName, clean).catch(() => null);
+    if (trimmed) clean = trimmed;
+  }
   if (optEnabled("jev_result_sift") && isRetrievalTool(toolName)) {
     const sifted = await siftIntoContext(outputBaseDir, category, toolName, clean, cap);
     if (sifted) return sifted;
