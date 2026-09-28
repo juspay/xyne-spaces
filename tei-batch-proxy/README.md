@@ -27,7 +27,8 @@ It keeps the **same model and dimension** (bge-base, 768-dim), so **no re-index*
 
 | Var | Default | Notes |
 |-----|---------|-------|
-| `UPSTREAM_EMBEDDINGS_URL` | `http://vespa-embedder:80/v1/embeddings` | The TEI service to fan out to |
+| `UPSTREAM_EMBEDDINGS_URL` | `http://vespa-embedder:80/v1/embeddings` | TEI upstream for `POST /v1/embeddings` (every document type except `file`) |
+| `UPSTREAM_FILE_EMBEDDINGS_URL` | `UPSTREAM_EMBEDDINGS_URL` | TEI upstream for `POST /v1/embeddings/file` (the `file` document type) |
 | `EMBEDDINGS_BATCH_SIZE` | `256` (we set `512`) | Must be `< TEI --max-client-batch-size` |
 | `UPSTREAM_CONCURRENCY` | `1` | Concurrent sub-batch requests to TEI |
 | `MAX_RETRIES` | `8` | Retries on 429/5xx with exponential backoff |
@@ -35,27 +36,28 @@ It keeps the **same model and dimension** (bge-base, 768-dim), so **no re-index*
 | `PROXY_PAYLOAD_LIMIT_BYTES` | `200000000` | Max inbound body size (200 MB) |
 | `PORT` | `8080` | Listen port |
 
-Routes: `POST /v1/embeddings` (proxied), `GET /health`.
+Routes: `POST /v1/embeddings`, `POST /v1/embeddings/file` (proxied), `GET /health`.
 
-## Build (Jenkins)
+## Build
 
-Pure Node stdlib — no dependencies. Build & push the image, then set it in
-`deploy/k8s/deployment.yaml` (the `image:` field):
+Pure Node stdlib — no dependencies.
 
 ```bash
 docker build -t <REGISTRY>/tei-batch-proxy:<tag> tei-batch-proxy/
 docker push <REGISTRY>/tei-batch-proxy:<tag>
 ```
 
-Add a build/push stage for `tei-batch-proxy/` to the root `Jenkinsfile`.
-
 ## Deploy
 
+Per-environment manifests live in `deploy/k8s/sandbox/` and `deploy/k8s/prod/`. Set the
+`image:` field to the image you pushed, then:
+
 ```bash
-kubectl apply -f tei-batch-proxy/deploy/k8s/deployment.yaml
-kubectl apply -f tei-batch-proxy/deploy/k8s/service.yaml
+kubectl apply -f tei-batch-proxy/deploy/k8s/<env>/tei-batch-proxy.yaml
 kubectl -n xyne-vespa rollout status deploy/tei-batch-proxy
 ```
+
+For Helm installs, use the `xyne-tei-batch-proxy` chart in `helm-charts/charts/`.
 
 ## REQUIRED: point Vespa at the proxy
 
@@ -67,7 +69,7 @@ from TEI directly to this proxy. In the Vespa app package's `services.xml`:
     <model>BAAI/bge-base-en-v1.5</model>
     <dimensions>768</dimensions>
     <!-- was: http://vespa-embedder.../v1/embeddings -->
-    <endpoint>http://tei-batch-proxy.xyne-vespa.svc.cluster.local/v1/embeddings</endpoint>
+    <endpoint>http://tei-batch-proxy.xyne-vespa.svc.cluster.local:8088/v1/embeddings</endpoint>
 </component>
 ```
 
@@ -79,7 +81,7 @@ Vespa deployment repo, not here.)
 ```bash
 # 200 with N embeddings for an oversized batch (would 413 against TEI directly):
 kubectl -n xyne-vespa run curltest --rm -it --image=curlimages/curl --restart=Never -- \
-  sh -c 'python3 - <<PY | curl -s -XPOST http://tei-batch-proxy/v1/embeddings -H "content-type: application/json" -d @- | head -c 200
+  sh -c 'python3 - <<PY | curl -s -XPOST http://tei-batch-proxy:8088/v1/embeddings -H "content-type: application/json" -d @- | head -c 200
 import json;print(json.dumps({"model":"bge","input":["x"]*1885}))
 PY'
 ```
