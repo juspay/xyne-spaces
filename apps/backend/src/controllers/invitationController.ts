@@ -11,7 +11,7 @@ import { withWorkspaceScope } from '@/database/tenant/context';
 import { createOwnerInvitation, syncAllBotUsersForNewWorkspace } from '@/bypassAcl/orgServices';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
-import { ProjectType } from '@xyne/shared';
+import { ProjectType, WorkspaceRole } from '@xyne/shared';
 import { aiProvisioningService } from '@/services/aiProvisioningService';
 import { isOrganizationPolicyError, organizationDomainService } from '@/services/organizationDomainService';
 import { CacConfigService } from '@/services/cacConfigService';
@@ -81,7 +81,11 @@ export class InvitationController {
 
       // Only workspace admins/owners can send invitations
       const inviterRole = req.user?.role;
-      if (inviterRole !== 'ADMIN' && inviterRole !== 'OWNER') {
+      if (
+        inviterRole !== 'ADMIN' &&
+        inviterRole !== 'OWNER' &&
+        role !== WorkspaceRole.COMMUNITY_MEMBER
+      ) {
         res.status(403).json({ error: 'Only workspace admins can send invitations' });
         return;
       }

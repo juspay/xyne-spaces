@@ -116,6 +116,7 @@ import { sendStoredExternalResultCallback, isInternalCallbackOrigin, isAllowedEx
 import { encryptSurfaceSecret } from "../lib/surface-resolver.js";
 import { deliverSlackResult, type SlackDeliveryTarget } from "../surfaces/slack/delivery.js";
 import { deliverChannelResult } from "../surfaces/messaging/delivery.js";
+import { sendInterimMessage } from "../surfaces/messaging/interim.js";
 import { claimOrQueue } from "../lib/conversation-gate.js";
 import { designShareUrl, upsertDesignShare } from "./design-shares.js";
 import {
@@ -7137,6 +7138,17 @@ router.post("/progress", requireStrictS2S, async (req: Request, res: Response) =
     return;
   }
 
+  if (body["kind"] === "interim" && typeof body["text"] === "string") {
+    const interimText = body["text"];
+    const ctx = await resolveSessionContext(sessionId, conversationId, agentSlug).catch(() => null);
+    if (ctx?.channelDelivery) {
+      await sendInterimMessage(sessionId, ctx.channelDelivery, interimText).catch((err) => {
+        clog.warn(`[webhook/progress] interim message failed for ${sessionId}: ${errMsg(err)}`);
+      });
+    }
+    return;
+  }
+
   await touchRunRecovery(sessionId).catch((err) => {
     clog.warn(`[webhook/progress] touchRunRecovery failed for ${sessionId}:`, err instanceof Error ? err.message : err);
   });
@@ -7219,6 +7231,8 @@ router.post("/progress", requireStrictS2S, async (req: Request, res: Response) =
   }
 
   const log = createLogger("webhook/progress", ctx.traceId ?? sessionId.slice(0, 8));
+
+  if (ctx.channelDelivery) return;
 
   // Spaces-side progress needs a real Spaces surface. Two cases produce
   // thousands of guaranteed-4xx calls a day (prod 2026-08-11):

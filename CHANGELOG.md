@@ -1,3 +1,47 @@
+## [1.415.0](https://github.com/juspay/xyne-spaces/compare/v1.414.3...v1.415.0) (2026-09-28)
+
+
+### Features
+
+* onboarding experience ([#2329](https://github.com/juspay/xyne-spaces/issues/2329)) ([c92ac86](https://github.com/juspay/xyne-spaces/commit/c92ac86701f697146f8104ce7bac85bb74e8cc89))
+
+## [1.414.3](https://github.com/juspay/xyne-spaces/compare/v1.414.2...v1.414.3) (2026-09-28)
+
+
+### Bug Fixes
+
+* speed up WhatsApp runs and send interim findings while the agent works ([#2375](https://github.com/juspay/xyne-spaces/issues/2375)) ([7d45b54](https://github.com/juspay/xyne-spaces/commit/7d45b54f98450ced10ff6693d830a60aae0eab4b))
+
+## [1.414.2](https://github.com/juspay/xyne-spaces/compare/v1.414.1...v1.414.2) (2026-09-28)
+
+
+### Bug Fixes
+
+* emit full avatar URLs from claw spaces-tools and stop cookieless avatar 401s in desk-report view ([#2295](https://github.com/juspay/xyne-spaces/issues/2295)) ([05533f0](https://github.com/juspay/xyne-spaces/commit/05533f09d579d8edf5cbaba8bb5cc154e4cc1c88))
+* inline authenticated images in sandboxed iframes and stop gating session on localStorage user_id ([#2294](https://github.com/juspay/xyne-spaces/issues/2294)) ([0d44eab](https://github.com/juspay/xyne-spaces/commit/0d44eabd988dec2face6a1e07ecdabeae0359eeb))
+* narrow electron 401 interceptor to auth endpoints with cookies and await cookie clear ([#2293](https://github.com/juspay/xyne-spaces/issues/2293)) ([e109664](https://github.com/juspay/xyne-spaces/commit/e109664ef81eef84db5d79b5eeca9e4e1e70cf27))
+
+## [1.414.1](https://github.com/juspay/xyne-spaces/compare/v1.414.0...v1.414.1) (2026-09-28)
+
+
+### Bug Fixes
+
+* link to /chat/dir so notification clicks don't flash 'Redirecting…' ([#2358](https://github.com/juspay/xyne-spaces/issues/2358)) ([dc255f7](https://github.com/juspay/xyne-spaces/commit/dc255f734b34a270a40b7eb4d54ca1778521004e))
+
+## [1.414.0](https://github.com/juspay/xyne-spaces/compare/v1.413.1...v1.414.0) (2026-09-28)
+
+
+### Features
+
+* line ranges for sandbox-read-file ([#2371](https://github.com/juspay/xyne-spaces/issues/2371)) ([f6d8738](https://github.com/juspay/xyne-spaces/commit/f6d87384fb91a3da2afbd1c5ba8ef53c8e321968))
+* route a shared WhatsApp Cloud number by sender's org; Baileys devices visible only to their owner ([#2372](https://github.com/juspay/xyne-spaces/issues/2372)) ([2676583](https://github.com/juspay/xyne-spaces/commit/26765838cfdbad24a9866b113c329b6995eaa022))
+
+
+### Bug Fixes
+
+* route /debug for in-progress runs to the owning claw pod ([#2370](https://github.com/juspay/xyne-spaces/issues/2370)) ([b88dd3b](https://github.com/juspay/xyne-spaces/commit/b88dd3bfd3dd72647f018584aec468322f5c3fbb))
+* share the Spaces busy-slot queue with messaging channels so follow-ups stop failing with session_locked ([#2368](https://github.com/juspay/xyne-spaces/issues/2368)) ([801c94c](https://github.com/juspay/xyne-spaces/commit/801c94caaea96204bd77cfdcc561625bd9436431))
+
 ## [1.413.1](https://github.com/juspay/xyne-spaces/compare/v1.413.0...v1.413.1) (2026-09-28)
 
 
