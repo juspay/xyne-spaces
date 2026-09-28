@@ -10,10 +10,10 @@ type FieldTypeToValue<T extends FormFieldType> =
     T extends FormFieldType.USER ? string :
     string;
 
-type InferFormValue<T extends FormField> = T['required'] extends true ? FieldTypeToValue<T['type']> : FieldTypeToValue<T['type']> | undefined;
-
 export type InferFormValues<T extends readonly FormField[]> = {
-    [K in T[number]['name']]: InferFormValue<Extract<T[number], { name: K }>>
+    [F in T[number] as F['required'] extends true ? F['name'] : never]: FieldTypeToValue<F['type']>
+} & {
+    [F in T[number] as F['required'] extends true ? never : F['name']]?: FieldTypeToValue<F['type']>
 };
 
 export type FormValues<T extends readonly FormField[]> = InferFormValues<T>;

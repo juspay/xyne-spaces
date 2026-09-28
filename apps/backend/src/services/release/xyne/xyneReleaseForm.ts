@@ -42,6 +42,20 @@ export class XyneFormSchemaProvider extends FormSchemaProvider<XyneChangeType> {
             required: true,
             description: "The SQL query to execute",
         },
+        {
+            name: "tags",
+            label: "Tags",
+            type: FormFieldType.MULTI_SELECT,
+            required: false,
+            description: "Deployment-risk tags set by the release manager",
+        },
+        {
+            name: "note",
+            label: "Deployment note",
+            type: FormFieldType.STRING,
+            required: false,
+            description: "Free-text guidance for whoever runs this migration",
+        },
     ] as const;
 
     static readonly ENV_CHANGE_FIELDS = [
