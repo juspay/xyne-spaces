@@ -378,7 +378,7 @@ export class AppDeskRefetch extends BaseRefetch {
         if (offsetMode) {
           // No continuation token exists in this mode: an empty page is the
           // only end-of-data signal, so it must be checked before advancing.
-          if (page.messages.length === 0) break;
+          if (page.messages.length === 0 && page.invalidRows.length === 0) break;
           offset += fetchConfig.pageSize;
         } else {
           if (!page.nextCursor) break;

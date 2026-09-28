@@ -158,6 +158,17 @@ function readUrl(value: AppFetchFormValue): string {
   return typeof raw === 'string' ? raw.trim() : '';
 }
 
+/** The form's headers, which are untyped in the shared step-form value. */
+export function readHeaders(value: AppFetchFormValue): Record<string, string> {
+  const raw = value['headers'];
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  return Object.fromEntries(
+    Object.entries(raw as Record<string, unknown>).filter(
+      (entry): entry is [string, string] => typeof entry[1] === 'string',
+    ),
+  );
+}
+
 /** A form with no URL is the "no configuration" state — saving it removes the config. */
 export function isBlankForm(value: AppFetchFormValue): boolean {
   return readUrl(value).length === 0;

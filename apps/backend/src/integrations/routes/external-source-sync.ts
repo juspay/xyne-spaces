@@ -91,7 +91,7 @@ export async function resolveChannelMailbox(
       }
     }
   }
-  return mailbox ? { source: mailbox, targetChannelId, dlEmail } : null;
+  return mailbox?.isActive ? { source: mailbox, targetChannelId, dlEmail } : null;
 }
 
 const router = Router();

@@ -19,6 +19,7 @@ import {
   configToFormValue,
   formError,
   isBlankForm,
+  readHeaders,
   readPagination,
   readValidationIssues,
 } from './AppFetchSection.utils';
@@ -101,7 +102,7 @@ export const AppFetchSection = ({
    * dirty, which previously left the install unfixable and unremovable.
    */
   const willRemove = blank && (configured || invalid);
-  const canSave = (dirty || invalid) && (willRemove || !error);
+  const canSave = (dirty || invalid || (!configured && !blank)) && (willRemove || !error);
 
   const handleChange = useCallback((next: AppFetchFormValue): void => {
     setValue(next);
@@ -125,12 +126,32 @@ export const AppFetchSection = ({
         setTestResult(null);
         toast.success('Fetch configuration removed');
       } else {
-        await appsService.saveFetchConfig(installedAppId, value as unknown as AppFetchConfig);
+        const saved = await appsService.saveFetchConfig(
+          installedAppId,
+          value as unknown as AppFetchConfig,
+        );
         setConfigured(true);
-        toast.success('Fetch configuration saved');
+        const next = configToFormValue(saved.config);
+        setValue(next);
+        setBaseline(JSON.stringify(next));
+        setFormKey(k => k + 1);
+        const droppedSecrets = Object.keys(readHeaders(value)).filter(
+          name => !(name in readHeaders(next)),
+        );
+        if (droppedSecrets.length > 0) {
+          // An error rather than a success toast: the config saved, but the
+          // fetch will now go out unauthenticated until this is re-entered,
+          // which otherwise surfaces later as an unexplained 401 from the app.
+          toast.error('Saved, but a stored credential was cleared', {
+            description: `${droppedSecrets.join(', ')} was dropped because the destination host changed. Re-enter it and save again.`,
+            duration: 8000,
+          });
+        } else {
+          toast.success('Fetch configuration saved');
+        }
       }
       setInvalid(false);
-      setBaseline(JSON.stringify(value));
+      if (willRemove) setBaseline(JSON.stringify(value));
     } catch (err) {
       // The server names the offending field; without this the rules it
       // enforces (a missing {{fetch.startDate}}, a reserved header) surface as

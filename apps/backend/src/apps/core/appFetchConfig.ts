@@ -156,7 +156,9 @@ export const AppFetchConfigSchema = z.object({
 })
   .superRefine((cfg, ctx) => {
     for (const name of Object.keys(cfg.headers ?? {})) {
-      if (RESERVED_HEADERS.has(name.trim().toLowerCase())) {
+      const lower = name.trim().toLowerCase();
+      if (lower === 'content-type' && cfg.encoding === 'RAW') continue;
+      if (RESERVED_HEADERS.has(lower)) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ['headers', name],
@@ -172,17 +174,39 @@ export const AppFetchConfigSchema = z.object({
       });
     }
 
-    const templated = `${cfg.url}\n${cfg.body ?? ''}`;
+    const sentBody = cfg.method === 'GET' ? '' : (cfg.body ?? '');
+    const templated = [cfg.url, sentBody, ...Object.values(cfg.headers ?? {})].join('\n');
+
+    // Rejected rather than silently ignored: a body left behind by a method
+    // switch reads as configuration that is in force when it is not.
+    if (cfg.method === 'GET' && (cfg.body ?? '').trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['body'],
+        message:
+          'A GET request sends no body. Move these parameters into the URL, or clear the body.',
+      });
+    }
     // Offset pagination advances a counter the app never sees unless the
     // template sends it. Without this a config paginates forever over page one,
     // re-ingesting it until the run budget expires, and reports success.
-    if (cfg.pagination === 'offset' && !templated.includes('{{fetch.offset}}')) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['url'],
-        message:
-          'Offset pagination requires {{fetch.offset}} in the URL or body, otherwise every page repeats the first',
-      });
+    if (cfg.pagination === 'offset') {
+      if (!templated.includes('{{fetch.offset}}')) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['url'],
+          message:
+            'Offset pagination requires {{fetch.offset}} in the URL or body, otherwise every page repeats the first',
+        });
+      }
+      if (!templated.includes('{{fetch.limit}}')) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['url'],
+          message:
+            'Offset pagination requires {{fetch.limit}} in the URL or body — a hardcoded limit that differs from the page size silently skips or re-reads rows',
+        });
+      }
     }
     // Without a window the app returns its entire history, so a one-week
     // request silently backfills everything. Xyne cannot filter afterwards —
@@ -324,8 +348,11 @@ export function redactFetchConfig(config: AppFetchConfig): AppFetchConfig {
     ...config,
     headers: Object.fromEntries(
       Object.entries(config.headers).map(([name, value]) => {
-        if (!isSensitiveHeader(name, config.secretHeaders) || !value.startsWith('enc:')) {
+        if (!isSensitiveHeader(name, config.secretHeaders)) {
           return [name, value];
+        }
+        if (!value.startsWith('enc:')) {
+          return [name, redactHeaderValue(value)];
         }
         let decrypted: string | null = null;
         try {
@@ -519,6 +546,12 @@ export function mapExportPage(
       invalidRows.push(`row ${index}: no timestamp at "${f.sentAt}"`);
       return;
     }
+    if (Number.isNaN(new Date(sentAt).getTime())) {
+      invalidRows.push(
+        `row ${index}: timestamp at "${f.sentAt}" is not a valid date ("${sentAt.slice(0, 40)}")`,
+      );
+      return;
+    }
 
     // Every listed dedup path must resolve.
     let id: string | undefined;
@@ -558,12 +591,6 @@ export function mapExportPage(
     });
   });
 
-  // A page where nothing mapped is a mapping error
-  if (rows.length > 0 && messages.length === 0) {
-    throw new AppFetchConfigError(
-      `no row on this page could be mapped — ${invalidRows.slice(0, 3).join('; ')}`,
-    );
-  }
 
   // Offset pagination has no continuation token — the caller advances the
   // offset itself and stops on an empty page.

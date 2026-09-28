@@ -346,7 +346,20 @@ export class FetchConfigController {
       }
       const durationMs = Date.now() - startedAt;
 
-      const text = await readCappedText(response).catch(() => '');
+      let text: string;
+      try {
+        text = await readCappedText(response);
+      } catch (error) {
+        res.status(200).json({
+          ok: false,
+          stage: 'response',
+          status: response.status,
+          durationMs,
+          error: error instanceof Error ? error.message : String(error),
+          sent,
+        });
+        return;
+      }
       const preview = text.slice(0, TEST_BODY_PREVIEW_LIMIT);
       if (!response.ok) {
         res.status(200).json({

@@ -223,24 +223,32 @@ class EmailFetchWorker {
       const newCount = result.newTickets;
       const skipped = result.skipped;
       const isMemberSync = data.isDlMemberSync;
+      const errors = result.errors ?? [];
+      const nothingLanded = newCount === 0 && skipped === 0 && errors.length > 0;
       const title = isMemberSync
         ? (newCount > 0
           ? `Synced ${newCount} older ${newCount === 1 ? 'email' : 'emails'} from DL member`
           : 'No older emails found to sync')
-        : result.partial
-          ? (newCount > 0
-            ? `Partially fetched ${newCount} new ${newCount === 1 ? 'email' : 'emails'} — rerun Fetch to continue`
-            : 'Partially fetched — rerun Fetch to continue')
-          : (newCount > 0
-            ? `Fetched ${newCount} new ${newCount === 1 ? 'email' : 'emails'}`
-            : 'Inbox is up to date');
+        : nothingLanded
+          ? 'Fetch completed but imported nothing — check the source configuration'
+          : result.partial
+            ? (newCount > 0
+              ? `Partially fetched ${newCount} new ${newCount === 1 ? 'email' : 'emails'} — rerun Fetch to continue`
+              : 'Partially fetched — rerun Fetch to continue')
+            : (newCount > 0
+              ? `Fetched ${newCount} new ${newCount === 1 ? 'email' : 'emails'}`
+              : 'Inbox is up to date');
       const message = isMemberSync
         ? (newCount > 0
           ? `${newCount} new, ${skipped} already existed.`
           : `All ${skipped} emails were already in the desk.`)
-        : (newCount > 0
-          ? `${newCount} new, ${skipped} already imported.`
-          : `${skipped} emails were already imported.`);
+        : nothingLanded
+          // The first error carries the offending field path, which is what an
+          // operator needs — a count alone sends them to the logs.
+          ? `${errors.length} ${errors.length === 1 ? 'problem' : 'problems'}: ${errors[0]}`
+          : (newCount > 0
+            ? `${newCount} new, ${skipped} already imported.${errors.length > 0 ? ` ${errors.length} skipped with errors.` : ''}`
+            : `${skipped} emails were already imported.${errors.length > 0 ? ` ${errors.length} skipped with errors.` : ''}`);
 
       await notificationService.sendNotification(
         data.requesterUserId,
