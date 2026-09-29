@@ -54,6 +54,7 @@ import {
   type RadarPendingOthersPageParams,
 } from '../../api/radarApi';
 import { ChannelScopeType, parseInitialMessageMd, type User } from '@xyne/shared';
+import { htmlToPlainText } from '../../utils/sanitizer';
 import { useAuth } from '../../hooks/useAuth';
 import { useRadarEnabled } from '../../hooks/radarCacConfig';
 import {
@@ -807,23 +808,26 @@ const RadarPanel = (): ReactElement => {
   // Some threads' preview/title text is a raw `:::initialMessage ... :::`
   // metadata block (a forwarded message's carrier format, meant to be parsed
   // before display, never shown as-is) rather than the human text it wraps.
-  // Unwrap it to that real content when present.
+  // Unwrap it to that real content when present. The unwrapped content is
+  // editor HTML, and a title from any other source can be too, so the text is
+  // always flattened to plain text before it is rendered — DOMParser is
+  // fault-tolerant, so even a mid-tag truncated string degrades to readable
+  // text instead of leaking markup into the heading.
   const cleanText = (text: string): string => {
-    if (!text.trimStart().startsWith(':::initialMessage')) return text;
-    const parsed = parseInitialMessageMd(text);
-    return parsed?.content || text;
+    const unwrapped = text.trimStart().startsWith(':::initialMessage')
+      ? parseInitialMessageMd(text)?.content || text
+      : text;
+    return htmlToPlainText(unwrapped) || unwrapped;
   };
 
   // The card's headline: what a reader scans first. Falls back through the
   // thread preview to the lead item's own title so a card never renders
   // blank above the numbered list.
   const threadTitle = (card: RadarThreadCard): string => {
-    // threadPreview is truncated to a single line server-side, so when the
-    // source message itself was a `:::initialMessage` block, the truncated
-    // copy never reaches the closing `:::` — cleanText can't parse a block
-    // it can't fully see, and hands the raw marker text back unchanged.
-    // That's worse than no preview: fall through to the item's own title,
-    // which is never truncated mid-block.
+    // threadPreview is truncated to a single line server-side. The server now
+    // unwraps a `:::initialMessage` block before cutting, but an item stored
+    // before that fix can still carry marker text here — that's worse than no
+    // preview, so fall through to the item's own title in that case.
     const cleaned = card.threadPreview && cleanText(card.threadPreview);
     if (cleaned && !cleaned.trimStart().startsWith(':::initialMessage')) return cleaned;
     return cleanText(card.items[0]?.title || 'Thread');
@@ -1031,7 +1035,7 @@ const RadarPanel = (): ReactElement => {
               openThread(card, item.conversationId, item.sourceMessageId);
             }}
           >
-            {index !== null ? `${index + 1}. ${item.title}` : item.title}
+            {index !== null ? `${index + 1}. ${cleanText(item.title)}` : cleanText(item.title)}
           </button>
           {item.contextSummary && (
             <ul className='mt-2 space-y-1'>
