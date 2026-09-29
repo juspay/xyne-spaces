@@ -10,7 +10,7 @@ vi.mock("./delivery.js", () => ({ enqueueOutbound }));
 vi.mock("./identity.js", () => ({ resolveIdentity: async () => null }));
 vi.mock("./cards.js", () => ({ newCardToken: () => "t", parkOptions: vi.fn() }));
 
-const { redeemApproval } = await import("./approvals.js");
+const { describeWriteAction, redeemApproval } = await import("./approvals.js");
 
 const account = { id: "acc", orgId: "org1", surfaceId: "whatsapp", accountKey: "acct_1" } as never;
 const base = {
@@ -20,6 +20,17 @@ const base = {
   conversationId: "whatsapp-acct_1-assistant-chat",
   agentSlug: "assistant",
 };
+
+describe("describeWriteAction", () => {
+  it("shows the DM recipient on the approval card", () => {
+    expect(
+      describeWriteAction("user-send-message", {
+        recipientUserId: "user_2",
+        content: "hello",
+      }),
+    ).toContain("DM user user_2");
+  });
+});
 
 describe("redeemApproval", () => {
   beforeEach(() => {
