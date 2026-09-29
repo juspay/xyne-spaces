@@ -16,10 +16,11 @@ import {
   UserStatus,
   WorkspaceJoinRequestStatus,
   WorkspaceType,
+  UserPresenceStatus,
   type WorkspaceType as WorkspaceTypeValue,
   type WorkspaceJoinPolicy as WorkspaceJoinPolicyValue,
 } from '@xyne/shared';
-import { asSystem } from './base';
+import { asSystem, asService } from './base';
 
 interface WorkspaceCreateError extends Error {
   statusCode?: number;
@@ -311,6 +312,83 @@ export function getWorkspacesByEmailData(email: string): Promise<Array<{
         }));
 
       return [...activeWorkspaces, ...approvedRequestWorkspaces];
+    },
+  );
+}
+
+/**
+ * Relocated from services/userService.ts's findAuthIdentityByEmail. Returns the auth identity
+ * (provider + providerUserId) already associated with this email across any workspace, if a
+ * user record exists — deliberately cross-workspace by design: used to detect logins that use a
+ * different method than the account was originally created with, before any workspace has been
+ * selected. Looks at the earliest-created record.
+ */
+export function findAuthIdentityByEmailData(
+  email: string,
+): Promise<{ authProvider: AuthProvider; providerUserId: string } | null> {
+  return asSystem(
+    ['User'],
+    'provider-mismatch check runs before login: no workspace is selected yet, and the check is deliberately cross-workspace',
+    async () => {
+      const user = await db.user.findFirst({
+        where: { email: { equals: email, mode: 'insensitive' } },
+        select: { authProvider: true, providerUserId: true },
+        orderBy: { createdAt: 'asc' },
+      });
+      return user
+        ? { authProvider: user.authProvider as AuthProvider, providerUserId: user.providerUserId }
+        : null;
+    },
+  );
+}
+
+/**
+ * Relocated from services/userService.ts's ensureUserPresence. Runs on the login/switch request
+ * itself, before any ambient tenant context exists, for the specific user+workspace just
+ * resolved. Kept in this module rather than bypassAcl/authServices.ts: that file instantiates
+ * UserService at module scope, and UserService imports this function — importing it back from
+ * there would be a circular import.
+ */
+export function ensureUserPresenceData(userId: string, workspaceId: string): Promise<void> {
+  return asService(
+    ['UserPresence'],
+    'post-login user-presence upsert: runs on the request that is itself creating the session, no ambient tenant context exists yet',
+    userId,
+    workspaceId,
+    async () => {
+      try {
+        const existingPresence = await db.userPresence.findUnique({
+          where: { userId },
+        });
+
+        if (!existingPresence) {
+          logger.info(`Creating user presence entry for user ${userId}`);
+          await db.userPresence.create({
+            data: {
+              userId,
+              workspaceId,
+              status: UserPresenceStatus.ONLINE,
+              lastActiveAt: new Date(),
+              lastSeenAt: new Date(),
+              isManual: false,
+            },
+          });
+          logger.info(`Successfully created user presence entry for user ${userId}`);
+        } else {
+          // Update last seen and last active timestamps on login
+          await db.userPresence.update({
+            where: { userId },
+            data: {
+              lastActiveAt: new Date(),
+              lastSeenAt: new Date(),
+            },
+          });
+          logger.debug(`Updated user presence timestamps for user ${userId}`);
+        }
+      } catch (error) {
+        logger.error(`Error ensuring user presence for user ${userId}:`, error);
+        // Don't throw - this shouldn't block authentication
+      }
     },
   );
 }

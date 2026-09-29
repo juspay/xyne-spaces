@@ -47,6 +47,7 @@ import { Button } from '../../ui/Button';
 import { CallTriggerModal } from '../../Call/CallTriggerModal/CallTriggerModal';
 import { getTargetUserIdForCall } from './ConversationHeader.utils';
 import { useUser } from '../../../hooks/useUsers';
+import { useIsDmReadOnly } from '../../../hooks/useIsDmReadOnly';
 import { isOneToOneDMChannel, isDMChannel, keyBetween } from '../ChatDirectory/ChatDirectory.utils';
 import { StatusIndicator } from '../../ui/StatusIndicator';
 import { xyneAIActor } from '../../../machines/xyneAIMachine';
@@ -170,6 +171,11 @@ const ConversationHeader = ({
   // Get user status for 1-on-1 DMs only (not group DMs)
   const isDM = channel && isOneToOneDMChannel(channel.scopeType);
   const dmUser = useUser(avatarUserId || '');
+  // A DM with a deactivated partner is a read-only archive — every header
+  // action (call, ask-AI, notifications, recording, three-dot menu, …) either
+  // targets the dead partner or writes to the archive, so the whole action
+  // group is suppressed. `onClose` (×) stays: it's navigation, not an action.
+  const isDmReadOnly = useIsDmReadOnly(channelId);
 
   const { width } = useMeasure({ observeResize: true });
 
@@ -394,205 +400,213 @@ const ConversationHeader = ({
           className='flex items-center gap-1 shrink-0'
           style={APP_NO_DRAG_STYLE}
         >
-          {!isCompact &&
-            (channel.channelStats?.participantCount ?? 0) > 1 &&
-            !isOneToOneDMChannel(channel.scopeType) && (
-              <Tooltip content='View members'>
+          {!isDmReadOnly && (
+            <>
+              {!isCompact &&
+                (channel.channelStats?.participantCount ?? 0) > 1 &&
+                !isOneToOneDMChannel(channel.scopeType) && (
+                  <Tooltip content='View members'>
+                    <Button
+                      variant='ghost'
+                      size='sm'
+                      onClick={() => {
+                        setInfoDefaultTab('members');
+                        setIsInfoOpen(true);
+                      }}
+                      className={cn('h-7 gap-1.5 px-2 rounded-[10px]', actionIconClass)}
+                      data-track-category='CHANNELS'
+                      data-track-name='VIEW_MEMBERS'
+                      data-track-metadata={JSON.stringify({ channelId })}
+                    >
+                      <span className='shrink-0'>
+                        <UserTwo size={16} />
+                      </span>
+                      <span className='shrink-0'>
+                        {channel.channelStats?.participantCount ?? 0}
+                      </span>
+                    </Button>
+                  </Tooltip>
+                )}
+              {!isCompact && channelUserStatus && (
+                <Tooltip content='Notifications'>
+                  <Button
+                    variant='ghost'
+                    size='sm'
+                    onClick={() => {
+                      setInfoDefaultTab('notifications');
+                      setIsInfoOpen(true);
+                    }}
+                    data-track-category='CHANNELS'
+                    data-track-name='OPEN_CHANNEL_NOTIFICATIONS'
+                    className={cn('h-7 w-7 rounded-lg', actionIconClass)}
+                  >
+                    <span className='shrink-0'>
+                      <NotificationBellOn size={16} />
+                    </span>
+                  </Button>
+                </Tooltip>
+              )}
+              <Tooltip content='Check Your Calendar' side='bottom'>
                 <Button
                   variant='ghost'
                   size='sm'
                   onClick={() => {
-                    setInfoDefaultTab('members');
-                    setIsInfoOpen(true);
+                    if (isAIOnboardingActive()) return;
+                    xyneCalendarActor.send({
+                      type: xyneCalendarActor.getSnapshot().matches('open') ? 'CLOSE' : 'OPEN',
+                    });
                   }}
-                  className={cn('h-7 gap-1.5 px-2 rounded-[10px]', actionIconClass)}
+                  className={cn('h-7 w-7 rounded-lg', actionIconClass)}
+                  aria-label='Toggle Calendar sidebar'
                   data-track-category='CHANNELS'
-                  data-track-name='VIEW_MEMBERS'
-                  data-track-metadata={JSON.stringify({ channelId })}
+                  data-track-name='TOGGLE_CALENDAR_SIDEBAR'
                 >
-                  <span className='shrink-0'>
-                    <UserTwo size={16} />
-                  </span>
-                  <span className='shrink-0'>{channel.channelStats?.participantCount ?? 0}</span>
+                  <CalendarEvent size={16} />
                 </Button>
               </Tooltip>
-            )}
-          {!isCompact && channelUserStatus && (
-            <Tooltip content='Notifications'>
-              <Button
-                variant='ghost'
-                size='sm'
-                onClick={() => {
-                  setInfoDefaultTab('notifications');
-                  setIsInfoOpen(true);
-                }}
-                data-track-category='CHANNELS'
-                data-track-name='OPEN_CHANNEL_NOTIFICATIONS'
-                className={cn('h-7 w-7 rounded-lg', actionIconClass)}
-              >
-                <span className='shrink-0'>
-                  <NotificationBellOn size={16} />
-                </span>
-              </Button>
-            </Tooltip>
-          )}
-          <Tooltip content='Check Your Calendar' side='bottom'>
-            <Button
-              variant='ghost'
-              size='sm'
-              onClick={() => {
-                if (isAIOnboardingActive()) return;
-                xyneCalendarActor.send({
-                  type: xyneCalendarActor.getSnapshot().matches('open') ? 'CLOSE' : 'OPEN',
-                });
-              }}
-              className={cn('h-7 w-7 rounded-lg', actionIconClass)}
-              aria-label='Toggle Calendar sidebar'
-              data-track-category='CHANNELS'
-              data-track-name='TOGGLE_CALENDAR_SIDEBAR'
-            >
-              <CalendarEvent size={16} />
-            </Button>
-          </Tooltip>
-          {askAIAvailable && (
-            <Tooltip
-              content={showOnboardingTooltip ? 'Ask AI lives here! Click anytime.' : 'Ask AI'}
-              {...(showOnboardingTooltip ? { open: true } : {})}
-              side='bottom'
-            >
-              <Button
-                variant='ghost'
-                size='sm'
-                onClick={() => {
-                  // Trigger xstate machine to open XyneAI. The otel
-                  // ask_ai_opened counter fires from the sidebar's open effect
-                  // so every entry point counts, not just this one.
-                  xyneAIActor.send({ type: 'OPEN', channelId, trackSource: 'channel_header' });
-                }}
-                className='h-7 w-7 rounded-lg'
-                data-track-category='CHANNELS'
-                data-track-name='OPEN_XYNE_AI'
-                data-track-metadata={JSON.stringify({ channelId })}
-              >
-                <XyneAIStar />
-              </Button>
-            </Tooltip>
-          )}
-          {!isCompact && (
-            <ShortcutTooltip label='Search in this channel' shortcut='global.findInChannel'>
-              <Button
-                variant='ghost'
-                size='sm'
-                onClick={() => invokeShortcut('mod+f')}
-                className={cn('h-7 w-7 rounded-lg', actionIconClass)}
-                data-track-category='CHANNELS'
-                data-track-name='SEARCH_IN_CHANNEL'
-                data-track-metadata={JSON.stringify({ channelId })}
-              >
-                <SearchDefault size={16} />
-              </Button>
-            </ShortcutTooltip>
-          )}
-          {isCompact && (
-            <CompactActionsMenu
-              items={compactMenuItems}
-              triggerClassName={cn('h-7 w-7 rounded-lg', actionIconClass)}
-            />
-          )}
-          <CallTriggerModal
-            channelId={channelId}
-            targetUserIds={targetUserId ? [targetUserId] : []}
-            scopeType={channel.scopeType}
-            channelName={displayName}
-            participantCount={channel.channelStats?.participantCount ?? 0}
-            callDisplayName={displayName}
-            isMember={!!channelUserStatus}
-            disabled={channel.isArchived}
-            trackSource='chat_header'
-          />
-          {!isCompact && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant='ghost'
-                  size='sm'
-                  className={cn('h-7 w-7 rounded-lg', actionIconClass)}
-                  data-track-category='CHANNELS'
-                  data-track-name='OPEN_CHANNEL_MENU'
+              {askAIAvailable && (
+                <Tooltip
+                  content={showOnboardingTooltip ? 'Ask AI lives here! Click anytime.' : 'Ask AI'}
+                  {...(showOnboardingTooltip ? { open: true } : {})}
+                  side='bottom'
                 >
-                  <ThreeDotsMenuVertical size={16} />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align='end' className='min-w-[180px]'>
-                <DropdownMenuItem
-                  className='gap-2'
-                  onClick={() => {
-                    setInfoDefaultTab('about');
-                    setIsInfoOpen(true);
-                  }}
-                  data-track-category='CHANNELS'
-                  data-track-name='OPEN_CHANNEL_ABOUT'
-                >
-                  <InformationCircle size={16} className='shrink-0' />
-                  Channel details
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  className='gap-2'
-                  onClick={() => handleOpenAllLinks()}
-                  data-track-category='CHANNELS'
-                  data-track-name='OPEN_ALL_CHANNEL_LINKS'
-                >
-                  <ExternalLinkSquare size={16} className='shrink-0' />
-                  Open all links
-                </DropdownMenuItem>
-                <AddToStreamMenuItem source={{ kind: 'channel', channelId }} />
-                <DropdownMenuSub>
-                  <DropdownMenuSubTrigger className='gap-2'>
-                    <FolderArrowRight size={16} className='shrink-0' />
-                    Move to section
-                  </DropdownMenuSubTrigger>
-                  <DropdownMenuSubContent>
-                    {!channelSections || channelSections.length === 0 ? (
-                      <DropdownMenuItem disabled>No sections yet</DropdownMenuItem>
-                    ) : (
-                      channelSections.map(section => (
-                        <DropdownMenuItem
-                          key={section.id}
-                          className='gap-2'
-                          onClick={() => handleMoveToSection(section.id)}
-                          data-track-category='CHANNELS'
-                          data-track-name='MOVE_CHANNEL_TO_SECTION'
-                        >
-                          {section.emoji && (
-                            <span className='shrink-0'>{renderEmoji(section.emoji, 'size-4')}</span>
-                          )}
-                          <span className='flex-1 truncate'>{section.name}</span>
-                          {!channelUserStatus?.isStarred &&
-                            channelUserStatus?.sectionId === section.id && (
-                              <CheckTickSingle size={14} className='shrink-0' />
-                            )}
-                        </DropdownMenuItem>
-                      ))
-                    )}
-                  </DropdownMenuSubContent>
-                </DropdownMenuSub>
-                {!isChannelDM && !!channelUserStatus && (
-                  <>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem
-                      className='gap-2 text-destructive focus:text-destructive'
-                      onClick={handleLeaveChannel}
+                  <Button
+                    variant='ghost'
+                    size='sm'
+                    onClick={() => {
+                      // Trigger xstate machine to open XyneAI. The otel
+                      // ask_ai_opened counter fires from the sidebar's open effect
+                      // so every entry point counts, not just this one.
+                      xyneAIActor.send({ type: 'OPEN', channelId, trackSource: 'channel_header' });
+                    }}
+                    className='h-7 w-7 rounded-lg'
+                    data-track-category='CHANNELS'
+                    data-track-name='OPEN_XYNE_AI'
+                    data-track-metadata={JSON.stringify({ channelId })}
+                  >
+                    <XyneAIStar />
+                  </Button>
+                </Tooltip>
+              )}
+              {!isCompact && (
+                <ShortcutTooltip label='Search in this channel' shortcut='global.findInChannel'>
+                  <Button
+                    variant='ghost'
+                    size='sm'
+                    onClick={() => invokeShortcut('mod+f')}
+                    className={cn('h-7 w-7 rounded-lg', actionIconClass)}
+                    data-track-category='CHANNELS'
+                    data-track-name='SEARCH_IN_CHANNEL'
+                    data-track-metadata={JSON.stringify({ channelId })}
+                  >
+                    <SearchDefault size={16} />
+                  </Button>
+                </ShortcutTooltip>
+              )}
+              {isCompact && (
+                <CompactActionsMenu
+                  items={compactMenuItems}
+                  triggerClassName={cn('h-7 w-7 rounded-lg', actionIconClass)}
+                />
+              )}
+              <CallTriggerModal
+                channelId={channelId}
+                targetUserIds={targetUserId ? [targetUserId] : []}
+                scopeType={channel.scopeType}
+                channelName={displayName}
+                participantCount={channel.channelStats?.participantCount ?? 0}
+                callDisplayName={displayName}
+                isMember={!!channelUserStatus}
+                disabled={channel.isArchived}
+                trackSource='chat_header'
+              />
+              {!isCompact && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant='ghost'
+                      size='sm'
+                      className={cn('h-7 w-7 rounded-lg', actionIconClass)}
                       data-track-category='CHANNELS'
-                      data-track-name='LEAVE_CHANNEL'
-                      data-track-metadata={JSON.stringify(channelTrackingMetadata(channel))}
+                      data-track-name='OPEN_CHANNEL_MENU'
                     >
-                      <UserArrowRight size={16} className='shrink-0' />
-                      Leave channel
+                      <ThreeDotsMenuVertical size={16} />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align='end' className='min-w-[180px]'>
+                    <DropdownMenuItem
+                      className='gap-2'
+                      onClick={() => {
+                        setInfoDefaultTab('about');
+                        setIsInfoOpen(true);
+                      }}
+                      data-track-category='CHANNELS'
+                      data-track-name='OPEN_CHANNEL_ABOUT'
+                    >
+                      <InformationCircle size={16} className='shrink-0' />
+                      Channel details
                     </DropdownMenuItem>
-                  </>
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
+                    <DropdownMenuItem
+                      className='gap-2'
+                      onClick={() => handleOpenAllLinks()}
+                      data-track-category='CHANNELS'
+                      data-track-name='OPEN_ALL_CHANNEL_LINKS'
+                    >
+                      <ExternalLinkSquare size={16} className='shrink-0' />
+                      Open all links
+                    </DropdownMenuItem>
+                    <AddToStreamMenuItem source={{ kind: 'channel', channelId }} />
+                    <DropdownMenuSub>
+                      <DropdownMenuSubTrigger className='gap-2'>
+                        <FolderArrowRight size={16} className='shrink-0' />
+                        Move to section
+                      </DropdownMenuSubTrigger>
+                      <DropdownMenuSubContent>
+                        {!channelSections || channelSections.length === 0 ? (
+                          <DropdownMenuItem disabled>No sections yet</DropdownMenuItem>
+                        ) : (
+                          channelSections.map(section => (
+                            <DropdownMenuItem
+                              key={section.id}
+                              className='gap-2'
+                              onClick={() => handleMoveToSection(section.id)}
+                              data-track-category='CHANNELS'
+                              data-track-name='MOVE_CHANNEL_TO_SECTION'
+                            >
+                              {section.emoji && (
+                                <span className='shrink-0'>
+                                  {renderEmoji(section.emoji, 'size-4')}
+                                </span>
+                              )}
+                              <span className='flex-1 truncate'>{section.name}</span>
+                              {!channelUserStatus?.isStarred &&
+                                channelUserStatus?.sectionId === section.id && (
+                                  <CheckTickSingle size={14} className='shrink-0' />
+                                )}
+                            </DropdownMenuItem>
+                          ))
+                        )}
+                      </DropdownMenuSubContent>
+                    </DropdownMenuSub>
+                    {!isChannelDM && !!channelUserStatus && (
+                      <>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          className='gap-2 text-destructive focus:text-destructive'
+                          onClick={handleLeaveChannel}
+                          data-track-category='CHANNELS'
+                          data-track-name='LEAVE_CHANNEL'
+                          data-track-metadata={JSON.stringify(channelTrackingMetadata(channel))}
+                        >
+                          <UserArrowRight size={16} className='shrink-0' />
+                          Leave channel
+                        </DropdownMenuItem>
+                      </>
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
+            </>
           )}
           {onClose && (
             <Button

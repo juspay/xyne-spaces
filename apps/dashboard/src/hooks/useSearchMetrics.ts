@@ -834,6 +834,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     // Clear the dedup guard's text so reopening the palette and re-entering the same query
     // (notably a paste of the last search) isn't skipped as a duplicate and re-runs the search.
     lastSearchedParamsRef.current.text = '';
+    lastSearchedParamsRef.current.mentionsKey = '';
     // Re-arm the loader latch: after a clear/close, re-entering a query must show the
     // spinner again rather than a stale "No results".
     setIsSearchPending(false);
@@ -1408,8 +1409,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       allDefaultRankProfile === lastSearchedParamsRef.current.allDefaultRankProfile &&
       flatAllRankProfilesKey === lastSearchedParamsRef.current.flatAllRankProfilesKey &&
       includeDebugInfo === lastSearchedParamsRef.current.includeDebugInfo &&
-      structuredFiltersKey === lastSearchedParamsRef.current.structuredFiltersKey &&
-      normalizedText !== ''
+      structuredFiltersKey === lastSearchedParamsRef.current.structuredFiltersKey
     ) {
       // Terminal exit with no dispatch — no performSearch().finally runs to disarm the loader.
       // Reconcile to the real in-flight state so a cancelled arm can't strand the spinner true.
