@@ -21,6 +21,7 @@ import QuestionnaireScreen from './QuestionnaireScreen/QuestionnaireScreen';
 import IntentPlaygroundScreen from './IntentPlaygroundScreen';
 import ChatScreen from './ChatScreen/ChatScreen';
 import ThreadMessages from '../components/Chat/ThreadPannel';
+import DeactivatedUserPreview from '../components/Chat/DeactivatedUserPreview/DeactivatedUserPreview';
 import TicketView from '../components/Tickets/TicketView/TicketView';
 import { BrowserTabsScreen } from './BrowserTabsScreen';
 import { getLastActiveWorkspaceId } from '../machines/authMachine';
@@ -1306,6 +1307,13 @@ export const router = createBrowserRouter(
                         {
                           path: 'my-tickets',
                           element: <MyTicketsScreen />,
+                        },
+                        // Deactivated user preview: Cmd+K opens this when the target is
+                        // deactivated and there's no prior DM. Must come before :channelId
+                        // so `deactivated-user` isn't parsed as a channel id.
+                        {
+                          path: 'deactivated-user/:userId',
+                          element: <DeactivatedUserPreview />,
                         },
                         // An artifact app added to the Inbox menubar, shown in
                         // the chat panel with the directory still alongside.
