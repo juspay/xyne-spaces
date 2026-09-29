@@ -1,3 +1,10 @@
+## [1.419.0](https://github.com/juspay/xyne-spaces/compare/v1.418.1...v1.419.0) (2026-09-29)
+
+
+### Features
+
+* microsoft and google connectors ([#2404](https://github.com/juspay/xyne-spaces/issues/2404)) ([0f2b5ed](https://github.com/juspay/xyne-spaces/commit/0f2b5ed135fcd1619183221fde9ca700e86db6d2))
+
 ## [1.418.1](https://github.com/juspay/xyne-spaces/compare/v1.418.0...v1.418.1) (2026-09-29)
 
 
