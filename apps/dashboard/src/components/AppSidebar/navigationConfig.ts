@@ -1,10 +1,8 @@
 import { createElement, type ComponentType, type ReactElement } from 'react';
 import {
   GraphTrendLine,
-  Settings01,
   Notebook,
   TicketToken,
-  UserThree,
   FolderDefault,
   Hashtag,
   PhoneDefault,
@@ -15,8 +13,6 @@ import {
   FileText,
   CalendarTimer,
   Globe,
-  UserShield,
-  ShieldCheck,
   Database,
   GridDashboard01,
   SwapArrowHorizontal,
@@ -44,6 +40,7 @@ import { isElectronApp } from '../../utils/electronApp';
 import type { usePermissions } from '../../hooks/usePermissions';
 import { AccessType } from '@xyne/shared';
 import { XyneAISidebarIcon } from '../icons/xyne-ai';
+import { organisationsAccess } from '../../routes/OrganisationsModule/organisationsAccess';
 
 /** A themeable pika-icon component (accepts size, color, variant, strokeWidth, className). */
 export type PikaIcon = ComponentType<PikaIconProps>;
@@ -194,18 +191,10 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
   { path: '/chat/canvas', label: 'My Canvas', icon: FileText, popout: true },
   { path: '/automations', label: 'Automations', icon: LightningThunderElectricOn, popout: true },
   { path: '/workflows', label: 'Workflows', icon: GitBranch, popout: true },
-  { path: '/user-groups', label: 'User Groups', icon: UserThree, popout: true },
-  {
-    path: '/resource-access',
-    label: 'User Management',
-    icon: UserShield,
-    iconSize: 18,
-    popout: true,
-  },
-  { path: '/roles', label: 'Roles', icon: ShieldCheck, iconSize: 18, popout: true },
-  { path: '/workspace-management', label: 'Workspace Management', icon: Settings01, popout: true },
+  // Administration (the /organisations module) holds Workspace Management,
+  // Members (formerly User Management), User Groups, Roles and Organisations.
+  { path: '/organisations', label: 'Administration', icon: BuildingApartmentTwo, popout: true },
   { path: '/tag-review', label: 'Tag Review', icon: Tag, iconSize: 18, popout: true },
-  { path: '/organisations', label: 'Organisations', icon: BuildingApartmentTwo, popout: true },
   { path: '/analytics', label: 'Analytics', icon: GraphTrendLine, popout: true },
   { path: '/forms', label: 'Forms', icon: ClipboardDefault, popout: true },
   { path: '/browser', label: 'Browser', icon: Globe, popout: true },
@@ -281,19 +270,13 @@ export const filterNavItemsByPermission = (
     const requiresAccess = resourceName !== undefined;
 
     let hasAccess = true;
-    if (requiresAccess) {
+    if (item.path === '/organisations') {
+      const access = organisationsAccess(permissions, canManageOwnUserGroups);
+      hasAccess = Object.values(access).some(Boolean);
+    } else if (requiresAccess) {
       if (resourceName === 'SDLC') {
         // Any tier (READ/WRITE/ADMIN) unlocks the screen.
         hasAccess = permissions.some(p => p.resourceName === resourceName);
-      } else if (resourceName === 'USER-GROUPS' || resourceName === 'ROLES') {
-        hasAccess = permissions.some(
-          p =>
-            p.resourceName === resourceName &&
-            (p.accessType === AccessType.ADMIN || p.accessType === AccessType.WRITE),
-        );
-        if (resourceName === 'USER-GROUPS') {
-          hasAccess ||= canManageOwnUserGroups;
-        }
       } else {
         hasAccess = permissions.some(
           p => p.resourceName === resourceName && p.accessType === AccessType.ADMIN,

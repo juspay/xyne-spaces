@@ -64,6 +64,13 @@ export const toolbarItemsStore = createBarItemsStore({
   storageKey: 'xyne:toolbar-items-v2',
   defaults: DEFAULT_TOOLBAR_PATHS,
   migrate: migrateToolbar,
+  // These became sections of Organisations; keep a user's pin on the rail.
+  aliases: {
+    '/workspace-management': '/organisations',
+    '/resource-access': '/organisations',
+    '/user-groups': '/organisations',
+    '/roles': '/organisations',
+  },
 });
 
 /**

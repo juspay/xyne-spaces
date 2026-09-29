@@ -175,7 +175,7 @@ const UserGroupsScreen = (): ReactElement => {
   }
 
   return (
-    <div className='h-full w-full bg-background md:rounded-2xl overflow-hidden shadow-md flex flex-col'>
+    <div className='h-full w-full bg-background overflow-hidden flex flex-col'>
       {/* Header */}
       <div className='shrink-0'>
         <div className='flex w-full flex-col gap-5 px-6 pt-5'>

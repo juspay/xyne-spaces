@@ -213,13 +213,26 @@ import { AttachmentCitationPreview } from '../components/FileViewer/AttachmentCi
 import { ThreadCitationModal } from '../components/xyne-desk/ThreadCitationModal/ThreadCitationModal';
 import { TranscriptCitationModal } from '../components/Chat/TranscriptCitationModal';
 import { sharedChatRoutes } from './SharedChatRoutes';
-import { ResourceAccessScreen } from './ResourceAccessScreen/ResourceAccessScreen';
 import { RoleManagementScreen } from './RoleManagementScreen';
 import { TagReviewView } from '../components/tags/TagReview/TagReviewView';
 import { ResourceProtectedRoute } from '../components/Auth/ResourceProtectedRoute';
 import { WorkflowScreen } from './WorkflowScreen';
 import { ToolbarProtectedRoute } from '../components/Auth/ToolbarProtectedRoute';
-import { WorkspaceManagementScreen } from './WorkspaceManagementScreen';
+import {
+  GeneralTab,
+  GuestUsersTab,
+  InvitationsTab,
+  MembersTab,
+  RepositoryCredentialsTab,
+  ToolbarTab,
+} from './WorkspaceManagementScreen';
+import OrganisationsModuleScreen, {
+  LegacyOrganisationsRedirect,
+  OrganisationsIndexRedirect,
+  OrganisationsPage,
+  OrganisationsSectionGuard,
+  legacyWorkspaceTab,
+} from './OrganisationsModule/OrganisationsModuleScreen';
 import OrganisationsScreen from './OrganisationsScreen/OrganisationsScreen';
 import { AcceptInvitation } from './InvitationScreen/AcceptInvitation';
 import NoOrganizationAccessScreen from './NoOrganizationAccessScreen/NoOrganizationAccessScreen';
@@ -1638,15 +1651,7 @@ export const router = createBrowserRouter(
                 },
                 {
                   path: 'user-groups',
-                  element: (
-                    <ResourceProtectedRoute
-                      resourceName='USER-GROUPS'
-                      minAccess='WRITE'
-                      allowUserGroupCreator
-                    >
-                      <UserGroupsScreen />
-                    </ResourceProtectedRoute>
-                  ),
+                  element: <LegacyOrganisationsRedirect section='user-groups' />,
                 },
                 {
                   path: 'listProjects',
@@ -1708,15 +1713,7 @@ export const router = createBrowserRouter(
                 },
                 {
                   path: 'user-groups/:userGroupId/assignment-config',
-                  element: (
-                    <ResourceProtectedRoute
-                      resourceName='USER-GROUPS'
-                      minAccess='WRITE'
-                      allowUserGroupCreator
-                    >
-                      <AssignmentConfigWrapper />
-                    </ResourceProtectedRoute>
-                  ),
+                  element: <LegacyOrganisationsRedirect section='user-groups' />,
                 },
                 {
                   path: 'analytics-dashboard',
@@ -1796,19 +1793,116 @@ export const router = createBrowserRouter(
                 },
                 {
                   path: 'workspace-management',
-                  element: (
-                    <ResourceProtectedRoute resourceName='WORKSPACE'>
-                      <WorkspaceManagementScreen />
-                    </ResourceProtectedRoute>
-                  ),
+                  element: <LegacyOrganisationsRedirect section={legacyWorkspaceTab} />,
                 },
                 {
+                  // One sidebar module for workspace settings, members, user
+                  // groups, roles and organisations — see OrganisationsModule.
                   path: 'organisations',
-                  element: (
-                    <ResourceProtectedRoute resourceName='ORGANIZATIONS'>
-                      <OrganisationsScreen />
-                    </ResourceProtectedRoute>
-                  ),
+                  element: <OrganisationsModuleScreen />,
+                  children: [
+                    { index: true, element: <OrganisationsIndexRedirect /> },
+                    {
+                      path: 'general',
+                      element: (
+                        <OrganisationsSectionGuard section='general'>
+                          <OrganisationsPage>
+                            <GeneralTab isActive />
+                          </OrganisationsPage>
+                        </OrganisationsSectionGuard>
+                      ),
+                    },
+                    {
+                      path: 'members',
+                      element: (
+                        <OrganisationsSectionGuard section='members'>
+                          <OrganisationsPage>
+                            <MembersTab />
+                          </OrganisationsPage>
+                        </OrganisationsSectionGuard>
+                      ),
+                    },
+                    {
+                      path: 'invitations',
+                      element: (
+                        <OrganisationsSectionGuard section='invitations'>
+                          <OrganisationsPage>
+                            <InvitationsTab isActive />
+                          </OrganisationsPage>
+                        </OrganisationsSectionGuard>
+                      ),
+                    },
+                    {
+                      path: 'guests',
+                      element: (
+                        <OrganisationsSectionGuard section='guests'>
+                          <OrganisationsPage>
+                            <GuestUsersTab isActive />
+                          </OrganisationsPage>
+                        </OrganisationsSectionGuard>
+                      ),
+                    },
+                    {
+                      path: 'repository-credentials',
+                      element: (
+                        <OrganisationsSectionGuard section='repository-credentials'>
+                          <OrganisationsPage>
+                            <RepositoryCredentialsTab isActive />
+                          </OrganisationsPage>
+                        </OrganisationsSectionGuard>
+                      ),
+                    },
+                    {
+                      path: 'toolbar',
+                      element: (
+                        <OrganisationsSectionGuard section='toolbar'>
+                          <OrganisationsPage>
+                            <ToolbarTab isActive />
+                          </OrganisationsPage>
+                        </OrganisationsSectionGuard>
+                      ),
+                    },
+                    {
+                      path: 'user-groups',
+                      element: (
+                        <ResourceProtectedRoute
+                          resourceName='USER-GROUPS'
+                          minAccess='WRITE'
+                          allowUserGroupCreator
+                        >
+                          <UserGroupsScreen />
+                        </ResourceProtectedRoute>
+                      ),
+                    },
+                    {
+                      path: 'user-groups/:userGroupId/assignment-config',
+                      element: (
+                        <ResourceProtectedRoute
+                          resourceName='USER-GROUPS'
+                          minAccess='WRITE'
+                          allowUserGroupCreator
+                        >
+                          <AssignmentConfigWrapper />
+                        </ResourceProtectedRoute>
+                      ),
+                    },
+                    {
+                      path: 'roles',
+                      element: (
+                        <ResourceProtectedRoute resourceName='ROLES'>
+                          <RoleManagementScreen />
+                        </ResourceProtectedRoute>
+                      ),
+                    },
+                    {
+                      path: 'all',
+                      element: (
+                        <ResourceProtectedRoute resourceName='ORGANIZATIONS'>
+                          <OrganisationsScreen />
+                        </ResourceProtectedRoute>
+                      ),
+                    },
+                  ],
                 },
                 {
                   path: 'forms',
@@ -1852,19 +1946,11 @@ export const router = createBrowserRouter(
                 },
                 {
                   path: 'resource-access',
-                  element: (
-                    <ResourceProtectedRoute resourceName='USERS'>
-                      <ResourceAccessScreen />
-                    </ResourceProtectedRoute>
-                  ),
+                  element: <LegacyOrganisationsRedirect section='members' />,
                 },
                 {
                   path: 'roles',
-                  element: (
-                    <ResourceProtectedRoute resourceName='ROLES'>
-                      <RoleManagementScreen />
-                    </ResourceProtectedRoute>
-                  ),
+                  element: <LegacyOrganisationsRedirect section='roles' />,
                 },
                 {
                   path: 'tag-review',
