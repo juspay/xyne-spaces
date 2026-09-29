@@ -4,6 +4,7 @@ import { AuthProvider } from './providers/AuthProvider';
 import { AnalyticsProvider } from './providers/AnalyticsProvider';
 import { RouterProvider } from 'react-router-dom';
 import { router } from './routes/AppRoot';
+import { createStableRouter, StableRouterContext } from './hooks/useStableRouter';
 import { ThemeProvider } from '@juspay/blend-design-system';
 import { Toaster } from 'sonner';
 import './styles/sonner-overrides.css';
@@ -41,6 +42,8 @@ import {
   InformationCircle,
   MultipleCrossCancelDefault,
 } from '@xyne/icons';
+
+const stableRouter = createStableRouter(router);
 
 const App = (): ReactElement => {
   // Initialize theme on app load
@@ -187,7 +190,9 @@ const App = (): ReactElement => {
                   <TooltipProvider delayDuration={0}>
                     <main className='h-screen' style={{ background: 'var(--root-bg)' }}>
                       <Wallpaper />
-                      <RouterProvider router={router}></RouterProvider>
+                      <StableRouterContext.Provider value={stableRouter}>
+                        <RouterProvider router={router}></RouterProvider>
+                      </StableRouterContext.Provider>
                     </main>
                     <SwitchLoadingOverlay />
                     <InterruptGuard />
