@@ -1,3 +1,10 @@
+## [1.427.0](https://github.com/juspay/xyne-spaces/compare/v1.426.0...v1.427.0) (2026-09-29)
+
+
+### Features
+
+* log-only Jev shadow run for desk email tag generation ([#2383](https://github.com/juspay/xyne-spaces/issues/2383)) ([0053a34](https://github.com/juspay/xyne-spaces/commit/0053a34e4c56c4d8b5c4d2215dbfe147194e7e2d))
+
 ## [1.426.0](https://github.com/juspay/xyne-spaces/compare/v1.425.0...v1.426.0) (2026-09-29)
 
 
