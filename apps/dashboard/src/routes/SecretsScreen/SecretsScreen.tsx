@@ -7,6 +7,13 @@ import Input from '../../components/ui/Input';
 import { Table } from '../../components/ui/Table';
 import type { ColumnDef } from '../../components/ui/Table/Table.types';
 import { secretsVaultApi, type SecretSummary } from '../../api/secretsVaultApi';
+import { SecretDetailDialog } from './SecretDetailDialog';
+import { useUser } from '../../hooks/useUsers';
+
+function CreatedByName({ userId }: { userId: string }): ReactElement {
+  const user = useUser(userId);
+  return <>{user?.name ?? userId}</>;
+}
 
 const SECRETS_QUERY_KEY = ['secrets-vault'];
 
@@ -101,10 +108,9 @@ function AddSecretDialog(): ReactElement {
 
 const columns: ColumnDef<SecretSummary>[] = [
   { field: 'name', header: 'Name' },
-  { field: 'rotationState', header: 'Rotation state' },
   {
     field: 'activeVersion',
-    header: 'Active version',
+    header: 'Active Version',
     renderCell: (_value, row) => (row.activeVersion ? `v${row.activeVersion.version}` : '—'),
   },
   {
@@ -114,10 +120,19 @@ const columns: ColumnDef<SecretSummary>[] = [
   },
   {
     field: 'createdAt',
-    header: 'Created',
+    header: 'Created At',
     renderCell: (_value, row) => new Date(row.createdAt).toLocaleString(),
   },
-  { field: 'createdBy', header: 'Created by' },
+  {
+    field: 'createdBy',
+    header: 'Created By',
+    renderCell: (_value, row) => <CreatedByName userId={row.createdBy} />,
+  },
+  {
+    field: 'id',
+    header: 'Actions',
+    renderCell: (_value, row) => <SecretDetailDialog name={row.name} />,
+  },
 ];
 
 const SecretsScreen = (): ReactElement => {

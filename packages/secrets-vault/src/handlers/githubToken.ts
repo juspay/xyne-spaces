@@ -19,6 +19,13 @@ export async function verifyGithubToken(value: string): Promise<boolean> {
     },
     signal: AbortSignal.timeout(GITHUB_API_TIMEOUT_MS),
   });
+
+  if (!response.ok) {
+    console.warn(
+      `[secrets-vault] verifyGithubToken: GitHub rejected the candidate token (HTTP ${response.status})`,
+    );
+  }
+
   return response.ok;
 }
 
