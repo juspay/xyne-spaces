@@ -23,6 +23,11 @@ const assignmentScope = (row: AuditRow): AuditScope => ({
   entityId: rowString(row, 'userGroupId') || rowString(row, 'id'),
 });
 
+const deskScope = (row: AuditRow): AuditScope => ({
+  entityType: AuditEntityType.DESK,
+  entityId: rowString(row, 'channelId'),
+});
+
 /** Cap on stored audit values — keeps the feed readable; full text stays in the row via tooltip. */
 const MAX_AUDIT_VALUE_LENGTH = 100;
 
@@ -139,6 +144,58 @@ const approverLabel = (row: AuditRow, res: AuditResolution): string | null => {
   if (row.roleId) return res.roleName(String(row.roleId));
   if (row.userId) return res.userName(String(row.userId));
   return null;
+};
+
+/** Desk columns that store JSON serialised into TEXT (Zero compatibility). */
+const parseJsonText = (value: unknown): unknown => {
+  if (typeof value !== 'string') return value;
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return value;
+  }
+};
+
+/** Sorted join for list settings that are really sets, so a reorder isn't a change. */
+const formatSet = (
+  values: unknown,
+  label: (value: string) => string = value => value,
+): string | null => {
+  if (!Array.isArray(values) || values.length === 0) return null;
+  return values.map(value => label(String(value))).sort().join(', ');
+};
+
+/** frtStageNames sentinel: the first email reply stops the first-response clock. */
+const FRT_EMAIL_REPLY = '__emailReply';
+
+interface DuplicateScopeConfig {
+  enabled?: boolean;
+  scopeFieldGlobalIds?: string[];
+}
+
+const duplicateScopeFieldIds = (value: unknown): string[] => {
+  const scope = parseJsonText(value) as DuplicateScopeConfig | null;
+  return Array.isArray(scope?.scopeFieldGlobalIds) ? scope.scopeFieldGlobalIds.map(String) : [];
+};
+
+const formatDuplicateScope = (value: unknown, res: AuditResolution): string | null => {
+  const scope = parseJsonText(value) as DuplicateScopeConfig | null;
+  if (!scope || typeof scope !== 'object') return null;
+  if (!scope.enabled) return 'off';
+  const fields = formatSet(scope.scopeFieldGlobalIds, id => res.globalFieldName(id));
+  return fields ? `on: ${fields}` : 'on';
+};
+
+/** Guest visibility is a { key: visible } map where a missing key means visible. */
+const formatGuestVisibility = (value: unknown): string | null => {
+  const visibility = parseJsonText(value);
+  if (!visibility || typeof visibility !== 'object' || Array.isArray(visibility)) return null;
+  const hidden = formatSet(
+    Object.entries(visibility)
+      .filter(([, visible]) => visible === false)
+      .map(([key]) => key),
+  );
+  return hidden ? `hidden: ${hidden}` : null;
 };
 
 export const AUDIT_TABLE_CONFIG: Record<string, AuditTableConfig> = {
@@ -418,6 +475,79 @@ export const AUDIT_TABLE_CONFIG: Record<string, AuditTableConfig> = {
     ignoreFields: ['boardId', 'userGroupId', 'userId'],
     createDefaults: { hasExpertise: false, percentage: 0, maxTickets: 0 },
     deleteSummary: { field: 'hasExpertise' },
+  },
+
+  // One row per desk: Inbox, Assignment & Routing, Agent and Metrics settings.
+  // Deletes aren't recorded — the row only goes away with its desk.
+  email_channel_preferences: {
+    primaryKey: 'channelId',
+    resolveScope: async row => deskScope(row),
+    resolveTargetName: async () => 'Desk settings',
+    prewarm: async (beforeRow, afterRow, res) => {
+      await Promise.all([
+        res.warmUsers([beforeRow?.ownerUserId, afterRow?.ownerUserId].filter(Boolean).map(String)),
+        res.warmUserGroups(
+          [beforeRow?.assigneeUserGroupId, afterRow?.assigneeUserGroupId].filter(Boolean).map(String),
+        ),
+        res.warmBoards([beforeRow?.boardId, afterRow?.boardId].filter(Boolean).map(String)),
+        res.warmGlobalFields([
+          ...duplicateScopeFieldIds(beforeRow?.duplicateScopeConfig),
+          ...duplicateScopeFieldIds(afterRow?.duplicateScopeConfig),
+        ]),
+      ]);
+    },
+    fieldFormatters: {
+      ownerUserId: (value, res) => (value ? res.userName(String(value)) : null),
+      assigneeUserGroupId: (value, res) => (value ? res.userGroupName(String(value)) : null),
+      boardId: (value, res) => (value ? res.boardName(String(value)) : null),
+      dlAliases: value => formatSet(parseJsonText(value)),
+      // Empty means the default: the first email reply stops the clock.
+      frtStageNames: value =>
+        formatSet(parseJsonText(value), name => (name === FRT_EMAIL_REPLY ? 'Email reply' : name)) ??
+        'Email reply',
+      metricsGuestVisibility: value => formatGuestVisibility(value),
+      duplicateScopeConfig: (value, res) => formatDuplicateScope(value, res),
+      priorityClassificationThreshold: value =>
+        typeof value === 'number' ? `${Math.round(value * 100)}%` : null,
+      deskReportRangeDays: value =>
+        typeof value === 'number' ? `${value} day${value === 1 ? '' : 's'}` : null,
+    },
+    ignoreFields: ['deskType'],
+    // Column defaults. metricsEnabled is left out: Prisma creates it as null, Zero as false.
+    createDefaults: {
+      classificationEnabled: false,
+      emailMergeMode: 'ENABLED',
+      twoStepSendEnabled: false,
+      priorityClassificationEnabled: false,
+      priorityClassificationThreshold: 0.5,
+      autoDraftMode: 'OFF',
+      appWebhookDeliveryEnabled: true,
+      deskReportEnabled: false,
+      deskReportRangeDays: 1,
+      frtStageNames: null,
+    },
+  },
+
+  // Category -> user group routing rules (Agent -> Attribution).
+  classification_mappings: {
+    resolveScope: async row => deskScope(row),
+    resolveTargetName: async row => {
+      const subCategory = rowString(row, 'subCategory');
+      return `Routing rule · ${rowString(row, 'category')}${subCategory ? ` › ${subCategory}` : ''}`;
+    },
+    prewarm: async (beforeRow, afterRow, res) => {
+      await res.warmUserGroups(
+        [beforeRow?.userGroupId, afterRow?.userGroupId].filter(Boolean).map(String),
+      );
+    },
+    fieldFormatters: {
+      userGroupId: (value, res) => (value ? res.userGroupName(String(value)) : null),
+    },
+    ignoreFields: ['channelId'],
+    deleteSummary: {
+      field: 'userGroupId',
+      value: (row, res) => res.userGroupName(rowString(row, 'userGroupId')),
+    },
   },
 };
 
