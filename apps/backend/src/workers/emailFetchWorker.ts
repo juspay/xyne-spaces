@@ -40,7 +40,7 @@ class EmailFetchWorker {
       return this.processCursorCatchup(job as Bull.Job<CursorCatchupJobData>);
     });
 
-    // Call pulls sleep 31s between Ozonetel requests, so they get their own slot instead of blocking email refetches.
+    // Call pulls sleep 31s between Ozonetel requests; a separate job name keeps them from queueing behind email refetches.
     queue.process('ozonetel-refetch', 1, async (job) => {
       return this.processJob(job as Bull.Job<EmailFetchJobData>);
     });
@@ -231,10 +231,17 @@ class EmailFetchWorker {
       const isMemberSync = data.isDlMemberSync;
       const errors = result.errors ?? [];
       const nothingLanded = newCount === 0 && skipped === 0 && errors.length > 0;
+      // A failed Ozonetel request drops a whole day of calls, so the user must not read "up to date".
+      const failedCount = noun === 'call' ? errors.length : 0;
+      const failedNote = failedCount > 0
+        ? ` ${failedCount} part${failedCount === 1 ? '' : 's'} could not be fetched, so some calls may be missing. Fetch again later.`
+        : '';
       const title = isMemberSync
         ? (newCount > 0
           ? `Synced ${newCount} older ${newCount === 1 ? 'email' : 'emails'} from DL member`
           : 'No older emails found to sync')
+        : failedCount > 0 && newCount === 0
+          ? 'Call fetch finished with errors'
         : nothingLanded
           ? 'Fetch completed but imported nothing — check the source configuration'
           : result.partial
@@ -248,6 +255,8 @@ class EmailFetchWorker {
         ? (newCount > 0
           ? `${newCount} new, ${skipped} already existed.`
           : `All ${skipped} emails were already in the desk.`)
+        : failedCount > 0
+          ? `${newCount} new, ${skipped} already imported.${failedNote}`
         : nothingLanded
           // The first error carries the offending field path, which is what an
           // operator needs — a count alone sends them to the logs.

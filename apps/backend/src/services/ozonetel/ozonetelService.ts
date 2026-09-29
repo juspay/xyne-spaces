@@ -16,6 +16,7 @@ async function sendJsonGetWithBody(
   urlString: string,
   headers: Record<string, string>,
   body: Record<string, unknown>,
+  prepareText: (text: string) => string = text => text,
 ): Promise<{ status: number; data: unknown }> {
   const payload = JSON.stringify(body);
   const url = new URL(urlString);
@@ -45,9 +46,7 @@ async function sendJsonGetWithBody(
             return;
           }
           try {
-            // Call ids arrive as bare integers beyond 2^53; keep them as strings so they don't round.
-            const safeText = text.replace(/("(?:UCID|CallID|monitorUCID)"\s*:\s*)(\d+)/g, '$1"$2"');
-            resolve({ status: res.statusCode ?? 0, data: JSON.parse(safeText) });
+            resolve({ status: res.statusCode ?? 0, data: JSON.parse(prepareText(text)) });
           } catch {
             resolve({ status: res.statusCode ?? 0, data: text });
           }
@@ -178,6 +177,8 @@ export const ozonetelService = {
         'Content-Type': 'application/json',
       },
       { fromDate, toDate, userName: cfg.apiUser, ...(campaignName ? { campaignName } : {}) },
+      // Call ids arrive as bare integers beyond 2^53; keep them as strings so they don't round.
+      text => text.replace(/("(?:UCID|CallID|monitorUCID)"\s*:\s*)(\d+)/g, '$1"$2"'),
     );
     const data = result.data as { status?: unknown; message?: unknown; details?: unknown } | null;
     if (
