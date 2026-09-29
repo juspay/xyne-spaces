@@ -174,6 +174,21 @@ describe('running a plan', () => {
     expect(results).toEqual([{ ok: true }, { ok: true }]);
   });
 
+  it('sends a requested agent mention as a reply in the selected thread', async () => {
+    const doctor: PersonRef = { kind: 'person', id: 'u-xyne-doctor', name: 'Xyne Doctor' };
+    const { actions, calls } = recordingActions();
+
+    await runPlan(
+      [
+        { op: 'navigate', target: thread },
+        { op: 'send_message', target: thread, text: 'do an RCA', mentions: [doctor] },
+      ],
+      actions
+    );
+
+    expect(calls).toEqual(['go c-release/t-1', 'reply t-1 do an RCA @u-xyne-doctor']);
+  });
+
   it('forwards the selected message to an existing channel', async () => {
     const { actions, calls } = recordingActions();
     const target: ChannelRef = { kind: 'channel', id: 'c-design', name: 'design' };

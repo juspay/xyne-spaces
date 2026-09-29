@@ -322,6 +322,50 @@ describe('reading details from the sentence', () => {
     ).toEqual({ name: 'ops weekly' });
   });
 
+  it('preserves the reply body when its words overlap with the thread topic', () => {
+    const reading = readingFor(ACTIONS.get('reply_in_thread')!, 'reply here saying looks good');
+    const sameWords = optionFor(reading, 'thread', 'looks good');
+
+    expect(
+      reading.read({
+        thread: picked(sameWords),
+        mentions: picked('none'),
+        message: picked(optionFor(reading, 'message', 'looks good')),
+      })
+    ).toEqual({ thread: 'looks good', message: 'looks good' });
+  });
+
+  it('offers the open thread as a destination without treating it as message text', () => {
+    const reading = readingFor(
+      ACTIONS.get('reply_in_thread')!,
+      'reply here saying looks good',
+      { threadOpen: true }
+    );
+    const threadQuestion = reading.questions.thread;
+    const threadChoice =
+      threadQuestion?.type === 'choice'
+        ? Object.keys(threadQuestion.criteria).find((id) => id === 'current_thread')
+        : undefined;
+
+    expect(
+      reading.read({
+        thread: picked(threadChoice ?? 'none'),
+        message: picked(optionFor(reading, 'message', 'looks good')),
+      })
+    ).toEqual({ thread: 'this thread', message: 'looks good' });
+  });
+
+  it.each([
+    'summarize this channel',
+    'review this message',
+    'explain who I should talk to',
+  ])('preserves a message body ending in a framing word: %s', (message) => {
+    const reading = readingFor(ACTIONS.get('reply_in_thread')!, message);
+    const selected = optionFor(reading, 'message', message);
+
+    expect(reading.read({ message: picked(selected) })).toEqual({ message });
+  });
+
   it('removes an explicitly added member from the channel name', () => {
     const reading = readingFor(
       ACTIONS.get('create_channel')!,

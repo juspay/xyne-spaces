@@ -61,9 +61,12 @@ function event(turnEvent: TurnEvent): QuickReply {
 
 /** "The second one", "number 2", "option two", "2" → 2. Anything else → 0. */
 function optionNumber(words: string): number {
-  const match = /^(?:the\s+|number\s+|option\s+)?(\w+)(?:\s+one)?$/.exec(words);
+  const match =
+    /^(?:(?:open|choose|select|pick|show|go to|take me to)\s+)?(?:the\s+|number\s+|option\s+)?(\w+)(?:\s+one)?$/.exec(
+      words
+    );
   const token = match?.[1] ?? '';
-  if (/^\d+$/.test(token)) return Number(token);
+  if (/^\d+(?:st|nd|rd|th)?$/.test(token)) return Number.parseInt(token, 10);
   return Math.max(ORDINALS.indexOf(token), NUMBERS.indexOf(token)) + 1;
 }
 

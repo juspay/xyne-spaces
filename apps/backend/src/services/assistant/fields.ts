@@ -20,8 +20,8 @@ export interface FieldReading {
 /** Words that frame a request rather than carry a value: a value never starts or ends on one. */
 const FRAME_WORDS = new Set(
   (
-    'a about an add and ask called channel create dm find in know let make me mention message ' +
-    'named open ping please post say saying send show tell that to with'
+    'a about an add and ask called channel conversation create dm find in know let make me ' +
+    'mention message named open ping please post say saying send show tell that thread to with'
   ).split(' ')
 );
 /** The longest value, in words, except for the rest of the sentence (see `sentencePieces`). */
@@ -29,6 +29,7 @@ export const MAX_VALUE_WORDS = 12;
 /** Keep candidate spans bounded: 51 value spans plus the "none" option. */
 const MAX_PIECES = 51;
 const NONE = 'none';
+const CURRENT_THREAD = 'current_thread';
 const EDGE_PUNCTUATION = /^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu;
 
 /**
@@ -37,6 +38,10 @@ const EDGE_PUNCTUATION = /^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu;
  * or a topic usually does), then the shortest.
  */
 export function sentencePieces(text: string): string[] {
+  return piecesFrom(text, false);
+}
+
+function piecesFrom(text: string, preserveFraming: boolean): string[] {
   const words = text.split(/\s+/).filter(Boolean);
   const pieces = new Set<string>();
   for (let start = 0; start < words.length; start += 1) {
@@ -46,7 +51,8 @@ export function sentencePieces(text: string): string[] {
     if (start < MAX_VALUE_WORDS && last < words.length) ends.push(words.length);
     for (const end of ends) {
       const run = words.slice(start, end);
-      if (isFrame(run[0]) || isFrame(run.at(-1))) continue;
+      const hasContent = run.some((word) => !isFrame(word));
+      if (!hasContent || (!preserveFraming && (isFrame(run[0]) || isFrame(run.at(-1))))) continue;
       const piece = run.join(' ').replace(EDGE_PUNCTUATION, '');
       if (piece) pieces.add(piece);
     }
@@ -66,12 +72,13 @@ export function sentencePieces(text: string): string[] {
 export function readingFor(
   action: ActionDefinition,
   text: string,
-  { key = (field: string) => field, premise = '' } = {}
+  {
+    key = (field: string) => field,
+    premise = '',
+    threadOpen = false,
+  }: { key?: (field: string) => string; premise?: string; threadOpen?: boolean } = {}
 ): FieldReading {
   const pieces = sentencePieces(text);
-  const pieceOptions = Object.fromEntries(
-    pieces.map((piece, index) => [`p${index}`, `“${piece}”`])
-  );
   const questions: Record<string, JevQuestion> = {};
   for (const [id, field] of Object.entries(action.fields)) {
     if (field.kind === 'choice') {
@@ -83,7 +90,17 @@ export function readingFor(
         instructions: `${premise}Which option does \`request\` give for ${field.describe}?`,
         criteria: { ...options, [NONE]: 'The request does not say.' },
       };
-    } else if (pieces.length > 0) {
+    } else {
+      const fieldPieces = field.preserveText ? piecesFrom(text, true) : pieces;
+      const pieceOptions = Object.fromEntries(
+        fieldPieces.map((piece, index) => [`p${index}`, `“${piece}”`])
+      );
+      const includesCurrentThread = id === 'thread' && action.id === 'reply_in_thread' && threadOpen;
+      if (includesCurrentThread) {
+        pieceOptions[CURRENT_THREAD] =
+          'the thread already open on screen, when the user means “here” or asks an agent to act there without naming another thread';
+      }
+      if (fieldPieces.length === 0 && !includesCurrentThread) continue;
       questions[key(id)] = {
         type: 'choice',
         instructions: `${premise}Which option is exactly ${field.describe}, in the user’s own words?`,
@@ -101,14 +118,20 @@ export function readingFor(
         const choice = stated(answers[key(id)]);
         if (!choice) continue;
         const field = action.fields[id];
-        const value = field?.kind === 'choice' ? choice : pieces[Number(choice.slice(1))];
+        const fieldPieces = field?.preserveText ? piecesFrom(text, true) : pieces;
+        const value =
+          field?.kind === 'choice'
+            ? choice
+            : choice === CURRENT_THREAD
+              ? 'this thread'
+              : fieldPieces[Number(choice.slice(1))];
         if (!value) continue;
         words[id] = field?.many ? value.split(/\s*,\s*|\s+and\s+/).filter(Boolean) : value;
       }
-      // Text fields exclude record names from anywhere in the action, then earlier text fields.
+      // Other text fields exclude record names, then earlier text fields.
       // This keeps a member out of a channel name and a channel name out of its first message.
       const recordValues = Object.entries(words).flatMap(([id, value]) =>
-        ['text', 'choice'].includes(action.fields[id]?.kind ?? '')
+        ['text', 'choice', 'thread'].includes(action.fields[id]?.kind ?? '')
           ? []
           : Array.isArray(value)
             ? value
@@ -118,7 +141,9 @@ export function readingFor(
       for (const [id, value] of Object.entries(words)) {
         const field = action.fields[id];
         if (field?.kind === 'text' && typeof value === 'string') {
-          const trimmed = trimEdges(value, [...recordValues, ...earlierTextValues]);
+          const trimmed = field.preserveText
+            ? value
+            : trimEdges(value, [...recordValues, ...earlierTextValues]);
           if (trimmed) words[id] = trimmed;
           else delete words[id];
         }

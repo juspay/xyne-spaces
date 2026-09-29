@@ -6,7 +6,11 @@ import {
   type FieldValue,
 } from '@xyne/shared/assistant';
 import type { FieldWords } from './fields';
-import { matchFound, type RecordFinder, type SearchHints } from './records';
+import { matchFound, normalizeName, type RecordFinder, type SearchHints } from './records';
+
+const CHANNEL_REFERENCE_WORDS = new Set(
+  'and channel here in one that the this was where which'.split(' ')
+);
 
 /**
  * Turns the words read from a request into engine updates: text as it was said, a choice
@@ -30,7 +34,9 @@ export async function toFieldUpdates(
   const named = await Promise.all(
     others.map(([field, value]) => fieldUpdates(action, field, value, finder, clear))
   );
-  const namedUpdates = named.flat();
+  const namedUpdates = named.flat().filter((update, _, updates) =>
+    !isChannelPhraseMistakenForPerson(action, update, updates)
+  );
 
   // A search narrowed by a person or channel waits until that name is settled.
   const filterOpen = namedUpdates.some(
@@ -51,6 +57,35 @@ export async function toFieldUpdates(
     searches.map(([field, value]) => fieldUpdates(action, field, value, finder, clear, hints))
   );
   return [...namedUpdates, ...searched.flat()];
+}
+
+/** Jev can assign “the one in ios” to both the channel and participant fields. */
+function isChannelPhraseMistakenForPerson(
+  action: ActionDefinition,
+  update: FieldUpdate,
+  updates: readonly FieldUpdate[]
+): boolean {
+  if (update.op !== 'open' || !action.fields[update.field]?.searchFilter) return false;
+
+  const channelNames = updates.flatMap((candidate) => {
+    if (
+      candidate.op !== 'set' ||
+      !action.fields[candidate.field]?.searchFilter ||
+      !isEntityRef(candidate.value) ||
+      candidate.value.kind !== 'channel'
+    ) {
+      return [];
+    }
+    return [normalizeName(candidate.value.name)];
+  });
+
+  return channelNames.some((channel) => {
+    const channelWords = new Set(channel.split(' '));
+    const leftover = normalizeName(update.said)
+      .split(' ')
+      .filter((word) => !channelWords.has(word));
+    return leftover.length > 0 && leftover.every((word) => CHANNEL_REFERENCE_WORDS.has(word));
+  });
 }
 
 async function fieldUpdates(
@@ -145,8 +180,7 @@ function searchHints(
 }
 
 function isSearchFilter(action: ActionDefinition, field: string): boolean {
-  const kind = action.fields[field]?.kind;
-  return kind === 'person' || kind === 'channel';
+  return action.fields[field]?.searchFilter === true;
 }
 
 function entityRefs(value: FieldValue): EntityRef[] {

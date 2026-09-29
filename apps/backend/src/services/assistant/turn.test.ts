@@ -201,6 +201,55 @@ describe('a turn', () => {
     expect(chat.session().run).toBeNull();
   });
 
+  it('resolves a short recipient answer without asking Jev again', async () => {
+    const deepanshu: FoundRecord = {
+      record: { kind: 'person', id: 'u-deepanshu', name: 'Deepanshu Sharma' },
+    };
+    const chat = assistant([deepanshu]);
+    chat.hears({ action: 'send_dm' });
+
+    const question = await chat.say('Send a direct message');
+    expect(question.say).toBe('Who should I message?');
+    const jevCalls = chat.jevCalls();
+
+    const answer = await chat.say('deepanshu');
+
+    expect(answer.say).toBe('What should I say to Deepanshu Sharma?');
+    expect(answer.run).toBeUndefined();
+    expect(chat.jevCalls()).toBe(jevCalls);
+    expect(chat.session().conversation.active?.values.recipient).toMatchObject({
+      kind: 'person',
+      id: 'u-deepanshu',
+    });
+  });
+
+  it('keeps the typed message for preview when Jev is unavailable', async () => {
+    const deepanshu: FoundRecord = {
+      record: { kind: 'person', id: 'u-deepanshu', name: 'Deepanshu Sharma' },
+    };
+    const chat = assistant([deepanshu]);
+    chat.hears({ action: 'send_dm' });
+
+    await chat.say('Send a direct message');
+    await chat.say('deepanshu');
+    chat.services.askJev = async () => null;
+    const message = 'The project meeting starts at 3.';
+
+    const preview = await chat.say(message);
+
+    expect(preview).toMatchObject({
+      say: `Send “${message}” to Deepanshu Sharma?`,
+      display: { kind: 'preview', confirmLabel: 'Yes', cancelLabel: 'Cancel' },
+    });
+    expect(preview.run).toBeUndefined();
+    const sent = await chat.tap('yes');
+    expect(sent.run?.plan).toEqual([
+      { op: 'open_or_create_dm', user: deepanshu.record },
+      { op: 'navigate', target: { fromStep: 0 } },
+      { op: 'send_message', target: { fromStep: 0 }, text: message },
+    ]);
+  });
+
   it('does not report success when an all-success result list is incomplete', async () => {
     const chat = assistant();
     chat.hears({
@@ -270,8 +319,18 @@ describe('a turn', () => {
     expect(done.say).toBe('Opened android.');
   });
 
-  it('finds a conversation by its topic: the matches are buttons, and a tap opens one', async () => {
+  it('opens a numbered conversation match without asking Jev again', async () => {
     const chat = assistant();
+    const thirdThread: FoundRecord = {
+      record: {
+        kind: 'thread',
+        id: 't-3',
+        name: 'Android login errors',
+        channelId: 'c-android',
+        channelName: 'android',
+      },
+    };
+    chat.services.records.find = async (kind) => (kind === 'thread' ? [...perfThreads, thirdThread] : []);
     chat.hears({
       action: 'find_conversation',
       fields: { conversation: 'release nots' },
@@ -282,10 +341,13 @@ describe('a turn', () => {
       options: [
         { id: 't-1', label: 'Reduce startup work', detail: '#releases · Preeti Sharma' },
         { id: 't-2', label: 'Cold start regression', detail: '#releases · Vinit' },
+        { id: 't-3', label: 'Android login errors' },
       ],
     });
-    const opened = await chat.tap('t-2');
-    expect(opened.run?.plan).toEqual([{ op: 'navigate', target: perfThreads[1]!.record }]);
+    const before = chat.jevCalls();
+    const opened = await chat.say('open the third one');
+    expect(chat.jevCalls()).toBe(before);
+    expect(opened.run?.plan).toEqual([{ op: 'navigate', target: thirdThread.record }]);
   });
 
   it('narrows a search to the people named with it', async () => {
@@ -620,8 +682,114 @@ describe('a turn', () => {
     ]);
   });
 
+  it('mentions an agent in the visible thread and previews the requested task', async () => {
+    const bot: FoundRecord = {
+      record: { kind: 'person', id: 'u-build-bot', name: 'Build Bot' },
+      detail: 'Agent',
+    };
+    const chat = assistant([bot]);
+    chat.lookingAt([openThread]);
+    chat.hears({
+      action: 'reply_in_thread',
+      fields: { mentions: 'Build Bot', message: 'check the latest crash' },
+    });
+
+    const preview = await chat.say('mention Build Bot in this thread and ask it to check the latest crash');
+
+    expect(preview).toMatchObject({
+      say: 'Reply “check the latest crash” in this thread mentioning Build Bot?',
+      display: { kind: 'preview', confirmLabel: 'Yes', cancelLabel: 'Cancel' },
+    });
+    expect(preview.run).toBeUndefined();
+    expect(chat.session().conversation.active?.values).toMatchObject({
+      thread: openThread,
+      mentions: [bot.record],
+      message: 'check the latest crash',
+    });
+  });
+
+  it('finds and narrows a thread, opens the third result, then drafts an agent task there', async () => {
+    const deepanshu: FoundRecord = {
+      record: { kind: 'person', id: 'u-deepanshu', name: 'Deepanshu Sharma' },
+    };
+    const doctor: FoundRecord = {
+      record: { kind: 'person', id: 'u-doctor', name: 'Xyne Doctor' },
+      detail: 'Agent',
+    };
+    const android: FoundRecord = {
+      record: { kind: 'channel', id: 'c-android', name: 'android' },
+    };
+    const androidThreads: FoundRecord[] = [1, 2, 3].map((number) => ({
+      record: {
+        kind: 'thread',
+        id: `t-android-${number}`,
+        name: `Android login issue ${number}`,
+        channelId: android.record.id,
+        channelName: android.record.name,
+      },
+    }));
+    const chat = assistant([deepanshu, doctor]);
+    chat.services.records.find = async (kind, mention) => {
+      if (kind === 'person') return mention.includes('Xyne') ? [doctor] : [deepanshu];
+      if (kind === 'channel') return [android];
+      if (kind === 'thread') return androidThreads;
+      return [];
+    };
+    chat.services.records.get = async (kind, id) =>
+      kind === 'thread' ? androidThreads.find(({ record }) => record.id === id) ?? null : null;
+
+    chat.hears({
+      action: 'find_conversation',
+      fields: { conversation: 'mobile login issues', with: 'Deepanshu Sharma' },
+    });
+    const found = await chat.say('find the thread where Deepanshu and I discussed mobile login issues');
+    expect(found.display?.kind).toBe('choices');
+
+    chat.hears({
+      continues: 0.9,
+      fields: {
+        conversation: 'the one in the android channel',
+        with: 'the one in the android',
+        in: 'android',
+      },
+    });
+    const narrowed = await chat.say('the one in the android channel');
+    expect(narrowed.display?.kind).toBe('choices');
+    expect(narrowed.display?.kind === 'choices' ? narrowed.display.options : []).toHaveLength(3);
+
+    const opened = await chat.say('open the third one');
+    const selectedThread = androidThreads[2]!.record;
+    expect(opened.run?.plan).toEqual([{ op: 'navigate', target: selectedThread }]);
+    await chat.ran(opened.run!.runId, [{ ok: true }]);
+
+    chat.lookingAt([selectedThread]);
+    chat.hears({
+      action: 'reply_in_thread',
+      fields: { mentions: 'Xyne Doctor', message: 'summarize this thread' },
+    });
+    const preview = await chat.say('invoke Xyne Doctor and ask it to summarize this thread');
+    expect(preview.display).toMatchObject({ kind: 'preview', confirmLabel: 'Yes' });
+    expect(chat.session().conversation.active?.values).toMatchObject({
+      thread: selectedThread,
+      mentions: [doctor.record],
+      message: 'summarize this thread',
+    });
+
+    const confirmed = await chat.tap('yes');
+    expect(confirmed.run?.plan).toEqual([
+      { op: 'navigate', target: selectedThread },
+      {
+        op: 'send_message',
+        target: selectedThread,
+        text: 'summarize this thread',
+        mentions: [doctor.record],
+      },
+    ]);
+  });
+
   it('finds a thread by topic and replies there from typed input', async () => {
     const chat = assistant();
+    chat.lookingAt([openThread]);
     const releaseThread: FoundRecord = {
       record: {
         kind: 'thread',

@@ -46,6 +46,7 @@ export const MESSAGING = {
         },
         message: {
           kind: 'text',
+          preserveText: true,
           required: true,
           ask: 'What should I say[ to {recipient}]?',
           describe:
@@ -140,6 +141,7 @@ export const MESSAGING = {
         },
         message: {
           kind: 'text',
+          preserveText: true,
           required: true,
           ask: 'What should I post[ in {channel}]?',
           describe:
@@ -158,12 +160,15 @@ export const MESSAGING = {
       title: 'Reply in a thread',
       intent: {
         description:
-          'Reply inside an existing thread: the one open on screen ("here", "this thread") or one found by what it was about.',
+          'Reply inside an existing thread: the one open on screen ("here", "this thread") or one found by what it was about. When a thread is open, asking an agent to do work in it means mention the agent in a reply there.',
         examples: [
           'Reply here saying looks good',
           'Reply in this thread that I will check it today',
           'Reply to the thread about the release notes saying it is done',
           'In this thread, tell them the fix is live',
+          'Mention Build Bot in this thread and ask it to check the latest crash',
+          'Invoke Xyne Doctor and ask it to summarize this thread',
+          'Mention Xyne Doctor and ask it to explain who I should talk to',
         ],
         notFor: [
           {
@@ -184,21 +189,23 @@ export const MESSAGING = {
           ask: 'Which thread should I reply in?',
           choose: 'Which thread do you mean by “{mention}”?',
           describe:
-            'the thread to reply in: “here” or “this thread” for the one open on screen; otherwise keep only its topic (“reply to the thread about the release notes draft” → “release notes draft”)',
+            'the destination thread topic, without wrapper words such as “thread about” or reply text (“reply to the thread about release notes draft saying it is done” → “release notes draft”). Use the thread open on screen when the user says “here” or “this thread”, or asks an agent to act without naming another thread.',
         },
         mentions: {
           kind: 'person',
           many: true,
           required: false,
           ask: 'Who should I mention?',
-          describe: 'the people or agents to @mention in the reply',
+          describe:
+            'only the exact names of the people, apps, or agents the user asks to @mention; leave their requested task in the message',
         },
         message: {
           kind: 'text',
+          preserveText: true,
           required: true,
           ask: 'What should I reply?',
           describe:
-            'the exact words of the reply: never the thread, its topic, “here”, or the names being mentioned (“reply here saying looks good” → “looks good”)',
+            'the exact reply body in the user’s own words. For a normal reply, keep what follows the reply cue (“reply here saying looks good” → “looks good”); for an agent request, keep what the agent should do (“invoke Xyne Doctor and ask it to summarize this thread” → “summarize this thread”). Remove only the wording that asks to mention or invoke the named person or agent. Preserve task words such as “channel”, “message”, or “to”.',
         },
       },
       summarize: 'Reply “{message}” in {thread}[ mentioning {mentions}]',
@@ -340,6 +347,7 @@ export const MESSAGING = {
         with: {
           kind: 'person',
           many: true,
+          searchFilter: true,
           required: false,
           ask: 'Who was in it?',
           describe:
@@ -347,6 +355,7 @@ export const MESSAGING = {
         },
         in: {
           kind: 'channel',
+          searchFilter: true,
           required: false,
           ask: 'Which channel was it in?',
           describe:

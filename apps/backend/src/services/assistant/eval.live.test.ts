@@ -52,6 +52,7 @@ const PEOPLE = [
   person('sam', 'Sam Carter'),
   person('build-bot', 'Build Bot'),
   person('release-helper', 'Release Helper'),
+  person('xyne-doctor', 'Xyne Doctor'),
 ];
 const CHANNELS = [
   channel('general', 'general'),
@@ -135,6 +136,8 @@ interface EvalCase {
   required?: boolean;
   /** The action the user wanted, or what kind of sentence it was when it is not a task. */
   action?: string;
+  /** Actions offered when the destination is ambiguous. */
+  actionChoices?: string[];
   kind?: 'help' | 'greeting' | 'thanks' | 'question' | 'unclear' | 'cannot';
   /** Values the request should hold: record ids, choice ids, or the words of a text field. */
   values?: Record<string, Expected>;
@@ -187,11 +190,11 @@ const CASES: EvalCase[] = [
     values: { recipient: 'priya-shah', message: 'thanks for the help' },
   },
   {
-    name: 'dm agent',
+    name: 'clarify where to tell an agent',
     group: 'request',
     turns: ['tell Build Bot to check the latest crash'],
-    action: 'send_dm',
-    values: { recipient: 'build-bot', message: 'check the latest crash' },
+    actionChoices: ['send_dm', 'post_message'],
+    required: true,
   },
   {
     name: 'dm question text',
@@ -656,6 +659,46 @@ const CASES: EvalCase[] = [
     turns: ['find messages about login errors', 'the one in the ios channel'],
     action: 'find_conversation',
     values: { conversation: 't-login-ios' },
+    required: true,
+  },
+  {
+    name: 'ask an agent to check the latest crash in the open thread',
+    group: 'follow-up',
+    turns: ['mention Build Bot in this thread and ask it to check the latest crash'],
+    threadScreen: 't-login',
+    action: 'reply_in_thread',
+    values: {
+      thread: 't-login',
+      mentions: ['build-bot'],
+      message: 'check the latest crash',
+    },
+    required: true,
+  },
+  {
+    name: 'ask agent to summarize the open thread',
+    group: 'follow-up',
+    turns: ['invoke Xyne Doctor and ask it to summarize this thread'],
+    threadScreen: 't-login',
+    action: 'reply_in_thread',
+    values: {
+      thread: 't-login',
+      mentions: ['xyne-doctor'],
+      message: 'summarize this thread',
+    },
+    required: true,
+  },
+  {
+    name: 'keep a task ending in a framing word',
+    group: 'follow-up',
+    turns: ['Mention Xyne Doctor and ask it to explain who I should talk to'],
+    threadScreen: 't-login',
+    action: 'reply_in_thread',
+    values: {
+      thread: 't-login',
+      mentions: ['xyne-doctor'],
+      message: 'explain who I should talk to',
+    },
+    required: true,
   },
   {
     name: 'new request mid-way',
@@ -728,6 +771,7 @@ const CASES: EvalCase[] = [
 /** What the user ended up with: the action, its values, and the question on screen. */
 interface Observed {
   action: string | null;
+  actionChoices: string[];
   values: Record<string, FieldValue>;
   asks: string | null;
   kind: string | null;
@@ -740,6 +784,7 @@ function observe(session: AssistantSession, response: TurnResponse): Observed {
     const action = ACTIONS.get(session.run.action);
     return {
       action: session.run.action,
+      actionChoices: [],
       values: action ? valuesFromPlan(action, response.run.plan) : {},
       asks: null,
       kind: null,
@@ -747,6 +792,8 @@ function observe(session: AssistantSession, response: TurnResponse): Observed {
   }
   return {
     action: draft?.action ?? null,
+    actionChoices:
+      session.question?.kind === 'action' ? session.question.options.map(({ id }) => id) : [],
     values: draft?.values ?? {},
     asks,
     kind: draft ? null : kindOf(response),
@@ -785,12 +832,17 @@ function trace(
   session: AssistantSession
 ): void {
   const draft = session.conversation.active;
+  const open = draft?.open.map(({ field, said, options }) => ({
+    field,
+    said,
+    options: options.map(({ id }) => id),
+  }));
   const debug = response.debug?.actions
     ?.map((a) => `${a.action} ${a.probability.toFixed(2)}`)
     .join(', ');
   // eslint-disable-next-line no-console
   console.log(
-    `${name} | “${said}” → “${response.say}” | draft ${draft ? `${draft.action} ${JSON.stringify(draft.values)}` : '—'} | plan ${response.run ? JSON.stringify(response.run.plan) : '—'} | ${debug ?? ''} | continues ${response.debug?.continues ?? '—'}`
+    `${name} | “${said}” → “${response.say}” | draft ${draft ? `${draft.action} ${JSON.stringify(draft.values)}` : '—'} | open ${JSON.stringify(open)} | awaiting ${JSON.stringify(draft?.awaiting)} | plan ${response.run ? JSON.stringify(response.run.plan) : '—'} | ${debug ?? ''} | continues ${response.debug?.continues ?? '—'}`
   );
 }
 
@@ -819,6 +871,7 @@ interface Score {
   group: string;
   name: string;
   action: boolean | null;
+  actionChoices: boolean | null;
   fields: Array<{ field: string; ok: boolean; got: string }>;
   asks: boolean | null;
   kind: boolean | null;
@@ -849,22 +902,24 @@ live('understanding, end to end, with the real Jev', () => {
       checks.length ? `${checks.filter(Boolean).length}/${checks.length}` : '—';
     const rows = ['request', 'follow-up', 'not a task', 'all'].map((group) => {
       const inGroup = scores.filter((score) => group === 'all' || score.group === group);
-      const pick = (key: 'action' | 'asks' | 'kind'): boolean[] =>
+      const pick = (key: 'action' | 'actionChoices' | 'asks' | 'kind'): boolean[] =>
         inGroup.map((score) => score[key]).filter((ok): ok is boolean => ok !== null);
       const fields = inGroup.flatMap((score) => score.fields.map(({ ok }) => ok));
       const whole = inGroup.map(
         (score) =>
           score.action !== false &&
+          score.actionChoices !== false &&
           score.asks !== false &&
           score.kind !== false &&
           score.fields.every(({ ok }) => ok)
       );
-      return `${group.padEnd(11)} cases ${rate(whole).padEnd(7)} action ${rate(pick('action')).padEnd(7)} fields ${rate(fields).padEnd(7)} asks ${rate(pick('asks')).padEnd(6)} kind ${rate(pick('kind'))}`;
+      return `${group.padEnd(11)} cases ${rate(whole).padEnd(7)} action ${rate(pick('action')).padEnd(7)} choice ${rate(pick('actionChoices')).padEnd(7)} fields ${rate(fields).padEnd(7)} asks ${rate(pick('asks')).padEnd(6)} kind ${rate(pick('kind'))}`;
     });
     const misses = scores
       .filter(
         (score) =>
           score.action === false ||
+          score.actionChoices === false ||
           score.asks === false ||
           score.kind === false ||
           score.fields.some(({ ok }) => !ok)
@@ -873,7 +928,7 @@ live('understanding, end to end, with the real Jev', () => {
         const wrong = score.fields
           .filter(({ ok }) => !ok)
           .map(({ field, got }) => `${field}=${got}`);
-        return `  ✗ ${score.name}${score.action === false ? ' [action]' : ''}${score.asks === false ? ' [asks]' : ''}${score.kind === false ? ' [kind]' : ''} ${wrong.join(' ')}`;
+        return `  ✗ ${score.name}${score.action === false ? ' [action]' : ''}${score.actionChoices === false ? ' [action choices]' : ''}${score.asks === false ? ' [asks]' : ''}${score.kind === false ? ' [kind]' : ''} ${wrong.join(' ')}`;
       });
     const failed = scores.filter((score) => score.jevFailed);
     const failedSummary = failed.map(({ name, jevFailures }) => {
@@ -883,7 +938,10 @@ live('understanding, end to end, with the real Jev', () => {
     const requiredMisses = scores.filter(
       (score) =>
         score.required &&
-        (score.jevFailed || score.action === false || score.fields.some(({ ok }) => !ok))
+        (score.jevFailed ||
+          score.action === false ||
+          score.actionChoices === false ||
+          score.fields.some(({ ok }) => !ok))
     );
     const ms = scores.flatMap((score) => score.ms).sort((a, b) => a - b);
     const p = (q: number): number => ms[Math.min(ms.length - 1, Math.floor(q * ms.length))] ?? 0;
@@ -976,6 +1034,10 @@ live('understanding, end to end, with the real Jev', () => {
         group: evalCase.group,
         name: evalCase.name,
         action: evalCase.action ? seen.action === evalCase.action : null,
+        actionChoices: evalCase.actionChoices
+          ? seen.actionChoices.length === evalCase.actionChoices.length &&
+            evalCase.actionChoices.every((id) => seen.actionChoices.includes(id))
+          : null,
         fields: Object.entries(evalCase.values ?? {}).map(([field, expected]) => ({
           field,
           ok: matches(expected, seen.values[field]),

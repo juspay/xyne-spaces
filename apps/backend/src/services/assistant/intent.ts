@@ -24,6 +24,8 @@ export interface SentenceContext {
   draft: Draft | null;
   /** The name of the channel open on screen, which "here" means. */
   screen?: string;
+  /** Whether the user is looking at a thread; Jev uses this to understand contextual replies. */
+  threadOpen?: boolean;
 }
 
 export interface RankedAction {
@@ -94,7 +96,7 @@ export function readSentence(
 ): SentenceReading {
   const actions = [...catalog.values()];
   const inProgress = context.draft ? catalog.get(context.draft.action) : undefined;
-  const fields = fieldReadings(text, actions, inProgress);
+  const fields = fieldReadings(text, actions, inProgress, context.threadOpen ?? false);
   const questions: Record<string, JevQuestion> = {
     kind: {
       type: 'choice',
@@ -115,7 +117,14 @@ export function readSentence(
   };
   const state = {
     request: text,
-    ...(context.screen ? { screen: { channel: context.screen } } : {}),
+    ...(context.screen || context.threadOpen
+      ? {
+          screen: {
+            ...(context.screen ? { channel: context.screen } : {}),
+            ...(context.threadOpen ? { threadOpen: true } : {}),
+          },
+        }
+      : {}),
     ...(context.draft && inProgress
       ? { inProgress: describeInProgress(context.draft, inProgress) }
       : {}),
@@ -148,7 +157,8 @@ export function readSentence(
 function fieldReadings(
   text: string,
   actions: readonly ActionDefinition[],
-  inProgress: ActionDefinition | undefined
+  inProgress: ActionDefinition | undefined,
+  threadOpen: boolean
 ): Map<string, FieldReading> {
   const count = actions.reduce((sum, action) => sum + Object.keys(action.fields).length, 0);
   const asked = count <= MAX_FIELD_QUESTIONS ? actions : inProgress ? [inProgress] : [];
@@ -157,7 +167,14 @@ function fieldReadings(
       const answers = action === inProgress ? '`request` answers `inProgress` or ' : '`request` ';
       const premise = `If ${answers}asks to ${lowerFirst(action.title)}: `;
       const key = (field: string): string => `${action.id}.${field}`;
-      return [action.id, readingFor(action, text, { key, premise })];
+      return [
+        action.id,
+        readingFor(action, text, {
+          key,
+          premise,
+          threadOpen: action.id === 'reply_in_thread' && threadOpen,
+        }),
+      ];
     })
   );
 }

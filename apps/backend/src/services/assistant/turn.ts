@@ -131,12 +131,21 @@ async function understand(
   services: TurnServices,
   onScreen: readonly EntityRef[]
 ): Promise<Outcome> {
+  const pendingRecord = await answerPendingRecord(text, session, services);
+  if (pendingRecord) return pendingRecord;
+
   const { catalog } = services;
   const draft = session.conversation.active;
   const screen = await channelName(onScreen, services.records);
-  const reading = readSentence(text, catalog, { draft, ...(screen ? { screen } : {}) });
+  const reading = readSentence(text, catalog, {
+    draft,
+    ...(screen ? { screen } : {}),
+    threadOpen: onScreen.some((ref) => ref.kind === 'thread'),
+  });
   const answers = await services.askJev(reading.state, reading.questions);
   if (!answers) {
+    const pendingText = await answerPendingText(text, session, services);
+    if (pendingText) return pendingText;
     return {
       session,
       reply: replyForError('I couldn’t work that out just now. Please try again.'),
@@ -210,6 +219,79 @@ async function understand(
   }
 }
 
+/** Resolve a short name answer to the field the assistant just asked about, without Jev. */
+async function answerPendingRecord(
+  text: string,
+  session: AssistantSession,
+  services: TurnServices
+): Promise<Outcome | null> {
+  const draft = session.conversation.active;
+  if (!draft || draft.awaiting?.kind !== 'field') return null;
+  const awaiting = draft.awaiting;
+  if (draft.open.some(({ field }) => field === awaiting.field)) return null;
+
+  const fieldId = awaiting.field;
+  const action = services.catalog.get(draft.action);
+  const field = action?.fields[fieldId];
+  const answer = bareAnswer(text);
+  if (
+    !action ||
+    !field ||
+    field.kind === 'text' ||
+    field.kind === 'choice' ||
+    !answer ||
+    answer.split(/\s+/).length > 5
+  ) {
+    return null;
+  }
+
+  const updates = await toFieldUpdates(
+    action,
+    { [fieldId]: answer },
+    services.records,
+    true,
+    draft.values
+  );
+  const resolved = updates.some(
+    (update) =>
+      update.field === fieldId &&
+      (update.op === 'set' ||
+        update.op === 'add' ||
+        (update.op === 'open' && update.options.length > 0))
+  );
+  return resolved ? applyEvent({ type: 'details', updates }, session, services) : null;
+}
+
+/** Keep a text answer as a draft if Jev is unavailable; uncertainty forces a send preview. */
+async function answerPendingText(
+  text: string,
+  session: AssistantSession,
+  services: TurnServices
+): Promise<Outcome | null> {
+  const draft = session.conversation.active;
+  if (!draft || draft.awaiting?.kind !== 'field') return null;
+
+  const fieldId = draft.awaiting.field;
+  const action = services.catalog.get(draft.action);
+  if (!action || action.fields[fieldId]?.kind !== 'text' || draft.open.some((name) => name.field === fieldId)) {
+    return null;
+  }
+
+  const answer = text.trim();
+  if (!answer) return null;
+
+  const updates = await toFieldUpdates(
+    action,
+    { [fieldId]: answer },
+    services.records,
+    false,
+    draft.values
+  );
+  return updates.some((update) => update.field === fieldId && update.op === 'set')
+    ? applyEvent({ type: 'details', updates }, session, services)
+    : null;
+}
+
 /** The name of the channel open on screen, read again under the user's access. */
 async function channelName(
   onScreen: readonly EntityRef[],
@@ -254,6 +336,10 @@ async function startAction(
   const action = services.catalog.get(actionId);
   if (!action) return withReply(session, replyForError('I can’t do that yet.'));
   const words = text ? await wordsForAction(action, text, services, heard) : {};
+  if (actionId === 'reply_in_thread' && words.thread === undefined) {
+    const [openThread] = await services.records.find('thread', 'this thread');
+    if (openThread) words.thread = 'this thread';
+  }
   const updates = await toFieldUpdates(action, words, services.records, true);
   return applyEvent(
     {

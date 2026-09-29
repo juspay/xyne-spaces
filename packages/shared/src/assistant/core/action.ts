@@ -30,6 +30,10 @@ const fieldShape = z
     kind: z.enum(FIELD_KINDS),
     /** Holds several records, like members to add. */
     many: z.boolean().optional(),
+    /** Keep message text the way the user wrote it. */
+    preserveText: z.boolean().optional(),
+    /** Use this person or channel to narrow a conversation search. */
+    searchFilter: z.boolean().optional(),
     /** Required details are asked for until given; optional ones are offered once, if `offer` is set. */
     required: z.boolean(),
     /** The question. It may use earlier details: "What should I say[ to {recipient}]?" */
@@ -56,6 +60,14 @@ const FIELD_RULES: ReadonlyArray<[broken: (field: FieldShape) => boolean, messag
   [
     field => Boolean(field.many) && (field.kind === 'text' || field.kind === 'choice'),
     'only record fields can hold several values',
+  ],
+  [
+    field => Boolean(field.preserveText) && field.kind !== 'text',
+    'only text fields can preserve text',
+  ],
+  [
+    field => Boolean(field.searchFilter) && field.kind !== 'person' && field.kind !== 'channel',
+    'only people and channels can filter a conversation search',
   ],
   [field => Boolean(field.offer) && field.required, 'only optional fields are offered'],
 ];
