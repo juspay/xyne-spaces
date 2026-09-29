@@ -128,3 +128,14 @@ test("falls open to the old behaviour when the catalog answer is missing", async
 
   expect(ref.value).toEqual({ serverTypes: ["figma"] });
 });
+
+test("sends the run's agent so its own connections count as connected", async () => {
+  const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({ success: true, connected: ["grafana"], known: true }) }) as unknown as Response);
+  vi.stubGlobal("fetch", fetchMock);
+
+  const tool = buildSuggestConnectorsTool({}, "user-1", { agentSlug: "infra-doctor" });
+  await (tool as unknown as { execute: (id: string, p: unknown) => Promise<unknown> }).execute("tc-1", { serverTypes: ["grafana"] });
+
+  const init = fetchMock.mock.calls[0]?.[1] as unknown as { body: string };
+  expect(JSON.parse(init.body)).toEqual({ userId: "user-1", serverTypes: ["grafana"], agentSlug: "infra-doctor" });
+});

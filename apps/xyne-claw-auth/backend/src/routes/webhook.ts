@@ -4758,6 +4758,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     : null;
   const connectorCardIdentity = {
     agentSlug: ctx.agentSlug,
+    agentOrgId: ctx.agentOrgId ?? null,
     userId: ctx.senderId,
     conversationId: ctx.conversationId,
     channelId: ctx.channelId,

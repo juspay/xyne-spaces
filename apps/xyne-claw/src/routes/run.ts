@@ -3050,7 +3050,7 @@ export async function processTask(
       allTools.push(buildDescribeAgentTool(describeAgentRef));
     }
     if (interactiveCardRun && hasSpacesCardSurface) {
-      allTools.push(buildSuggestConnectorsTool(suggestConnectorsRef, userId));
+      allTools.push(buildSuggestConnectorsTool(suggestConnectorsRef, userId, { agentSlug }));
     }
 
 

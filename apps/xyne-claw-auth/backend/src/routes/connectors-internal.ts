@@ -10,8 +10,10 @@ const MAX_TYPES = 12;
 export const connectorsInternalRouter = Router();
 
 connectorsInternalRouter.post("/available", async (req: Request, res: Response) => {
-  const body = (req.body ?? {}) as { userId?: unknown; serverTypes?: unknown };
+  const body = (req.body ?? {}) as { userId?: unknown; serverTypes?: unknown; agentSlug?: unknown; agentOrgId?: unknown };
   const userId = typeof body.userId === "string" ? body.userId.trim() : "";
+  const agentSlug = typeof body.agentSlug === "string" && body.agentSlug.trim() ? body.agentSlug.trim() : undefined;
+  const agentOrgId = typeof body.agentOrgId === "string" && body.agentOrgId.trim() ? body.agentOrgId.trim() : undefined;
   const serverTypes = Array.isArray(body.serverTypes)
     ? [
         ...new Set(
@@ -28,7 +30,7 @@ connectorsInternalRouter.post("/available", async (req: Request, res: Response) 
     return;
   }
 
-  const available = await availableServerTypesSafe(userId, serverTypes);
+  const available = await availableServerTypesSafe(userId, serverTypes, { agentSlug, agentOrgId });
   if (!available) {
     log.warn(`[connectors-internal] availability unknown for user ${userId}`);
     res.json({ success: true, connected: [], known: false });
