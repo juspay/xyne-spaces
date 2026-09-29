@@ -156,7 +156,8 @@ const envSchema = Joi.object({
   // anything trackable and which item a reaction settles; LOG writes its answers next to
   // the parser's; REPLACE acts on them — a window Jev rates as chatter is not parsed, and a
   // reaction is resolved by Jev alone, falling back to the parser when Jev has no answer.
-  // LOG and REPLACE need RUN. Same explicit JEV_* requirement as the duplicate check.
+  // LOG and REPLACE need RUN, and Jev needs JEV_API_KEY. The parser's input — DM and
+  // private-channel messages included — is sent to JEV_URL (TypeSafe's hosted Jev by default).
   RADAR_JEV_ENABLED: Joi.boolean().default(false),
   RADAR_JEV_LOG_ENABLED: Joi.boolean().default(false),
   RADAR_JEV_REPLACE: Joi.boolean().default(false),
@@ -294,8 +295,8 @@ const envSchema = Joi.object({
   // Jev for thread-type classification (services/messageClassification/jev.ts). Three
   // independent switches: RUN asks Jev at all, LOG writes its answer (next to the LLM's when
   // both ran), REPLACE stores Jev's answer instead of calling the LLM. REPLACE and LOG do
-  // nothing without RUN. Needs JEV_API_KEY, JEV_URL and JEV_MODEL all set explicitly —
-  // threads include DMs, so they never go to the default public endpoint.
+  // nothing without RUN, and Jev needs JEV_API_KEY. The whole thread — DMs and private
+  // channels included — is sent to JEV_URL (TypeSafe's hosted Jev by default).
   MESSAGE_CLASSIFICATION_JEV_ENABLED: Joi.boolean().default(false),
   MESSAGE_CLASSIFICATION_JEV_LOG_ENABLED: Joi.boolean().default(false),
   MESSAGE_CLASSIFICATION_JEV_REPLACE: Joi.boolean().default(false),

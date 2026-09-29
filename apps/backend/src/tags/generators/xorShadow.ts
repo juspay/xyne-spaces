@@ -7,6 +7,7 @@ import {
   type JevChoiceQuestion,
   type JevFailure,
 } from '@/services/queryIntent/jevClient';
+import { logJevComparison, logJevNoAnswer } from '@/services/queryIntent/jevShadowLog';
 import type { CategoryConfig, GeneratedTag } from '../types';
 
 /**
@@ -72,20 +73,13 @@ export async function runShadowTagGeneration(
     if (!shouldLog) return;
 
     if (!answers) {
-      const reason =
-        failure?.kind === 'status' ? `status ${failure.status}` : (failure?.kind ?? 'unknown');
-      logger.info(
-        `[TAG][SHADOW] ${meta.sourceId}  NO ANSWER (${reason})  ` +
-          `[${context.length} chars, ${SHADOW_TIMEOUT_MS}ms limit]`,
-        {
-          ...meta,
-          reason: failure?.kind ?? 'unknown',
-          ...(failure?.kind === 'status' ? { status: failure.status } : {}),
-          timeoutMs: SHADOW_TIMEOUT_MS,
-          stateChars: context.length,
-          categories: Object.keys(questions),
-        },
-      );
+      logJevNoAnswer('[TAG][SHADOW]', meta.sourceId, {
+        failure,
+        timeoutMs: SHADOW_TIMEOUT_MS,
+        stateChars: context.length,
+        categories: Object.keys(questions),
+        meta,
+      });
       return;
     }
 
@@ -107,33 +101,14 @@ export async function runShadowTagGeneration(
       ];
     });
 
-    const primaryModel = cacConfig.tagGenerationModelName;
-    const shadowModel = envConfig.jev.model;
-    const agreedCount = comparison.filter((c) => c.agreed).length;
-
-    // Reads as: priority low == low (0.35) — '==' agree, '!=' differ, Jev's confidence.
-    const perCategory = comparison
-      .map((c) => {
-        const primaryText = c.primary.length > 0 ? c.primary.join('/') : '(none)';
-        const confidenceText = c.confidence === undefined ? 'n/a' : c.confidence.toFixed(2);
-        return `${c.category} ${primaryText} ${c.agreed ? '==' : '!='} ${c.shadow} (${confidenceText})`;
-      })
-      .join('  |  ');
-
     // Not named emailId: the logger injects its own `emailId` meaning the user's address.
-    logger.info(
-      `[TAG][SHADOW] ${meta.sourceId}  ${agreedCount}/${comparison.length} agree  ` +
-        `[${primaryModel} vs ${shadowModel}]  ${perCategory}`,
-      {
-        ...meta,
-        primaryModel,
-        shadowModel,
-        agreedCount,
-        totalCount: comparison.length,
-        stateChars: context.length,
-        comparison,
-      },
-    );
+    logJevComparison('[TAG][SHADOW]', meta.sourceId, {
+      primaryModel: cacConfig.tagGenerationModelName,
+      shadowModel: envConfig.jev.model,
+      stateChars: context.length,
+      comparison,
+      meta,
+    });
   } catch (error) {
     // Logged regardless of shouldLog: that gate hides comparisons, not breakage.
     logger.warn('[TAG][SHADOW] Shadow run failed', {

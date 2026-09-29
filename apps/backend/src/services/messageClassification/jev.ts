@@ -1,6 +1,5 @@
 import type { ThreadTypeEntry } from '@xyne/shared';
 import { config } from '@/config/env';
-import { logger } from '@/utils/logger';
 import {
   askJev,
   isJevConfigured,
@@ -9,6 +8,13 @@ import {
   type JevFailure,
   type JevNoulQuestion,
 } from '@/services/queryIntent/jevClient';
+import {
+  describeJevFailure,
+  logJevComparison,
+  logJevDecision,
+  logJevNoAnswer,
+  type JevComparison,
+} from '@/services/queryIntent/jevShadowLog';
 import type { Classification, ClassifierInput } from './index';
 
 /**
@@ -25,6 +31,9 @@ import type { Classification, ClassifierInput } from './index';
  *
  * The result has the LLM's shape, so the caller writes thread and message tags through the
  * same code whichever model answered.
+ *
+ * Where the data goes: the whole thread — DMs and private channels included — is sent to
+ * JEV_URL, which is TypeSafe's hosted Jev unless the env points elsewhere.
  *
  * Thresholds are tuned per JEV_MODEL — re-tune them against the shadow logs when it changes.
  */
@@ -44,18 +53,12 @@ const OPTION_TEXT_CHARS = 400;
 /** Citations kept per type — the same cap the LLM is given (MAX_SOURCES_PER_TYPE). */
 const MAX_SOURCES_PER_TYPE = 3;
 
-const TAG = '[MSG-TAG][JEV]';
+const SHADOW_TAG = '[MSG-TAG][SHADOW]';
+const REPLACE_TAG = '[MSG-TAG][REPLACE]';
 
-/**
- * Thread text includes DMs and private channels, so it only goes to a Jev that was pointed
- * at explicitly — never the default public endpoint — and only on a named model, since the
- * thresholds above are tuned per model. Same rule as the Radar duplicate check.
- */
+/** RUN is on and Jev has a key. JEV_URL / JEV_MODEL always have values (TypeSafe's by default). */
 const isJevClassificationActive = (): boolean =>
-  config.messageClassification.jev.enabled &&
-  isJevConfigured() &&
-  !!config.jev.url &&
-  !!config.jev.model;
+  config.messageClassification.jev.enabled && isJevConfigured();
 
 type JevClassificationResult =
   | {
@@ -64,7 +67,7 @@ type JevClassificationResult =
       /** Jev's probability for every type it was asked about, for the log. */
       typeScores: Record<string, number>;
     }
-  | { ok: false; reason: string };
+  | { ok: false; reason: string; failure?: JevFailure };
 
 const SCOPE =
   'Classify the chat thread in `thread_messages`. `ticket`, when present, was written ' +
@@ -72,9 +75,6 @@ const SCOPE =
   'earlier DM context only — it is not part of the thread. A definition phrased as ' +
   '"Done = …" is about the thread as a piece of work; any other is about whether the thread ' +
   'itself contains that answer — judge what it answers, not what it discusses.';
-
-const failureReason = (failure: JevFailure | undefined): string =>
-  failure?.kind === 'status' ? `status ${failure.status}` : (failure?.kind ?? 'unknown');
 
 /**
  * The keys of `questions` that did not come back as a usable answer of the type asked.
@@ -134,7 +134,9 @@ async function classifyThreadWithJev(
         typeFailure = failure;
       },
     });
-    if (!typeAnswers) return { ok: false, reason: `types: ${failureReason(typeFailure)}` };
+    if (!typeAnswers) {
+      return { ok: false, reason: `types: ${describeJevFailure(typeFailure)}`, failure: typeFailure };
+    }
     const missingTypes = unanswered(typeQuestions, typeAnswers);
     if (missingTypes.length > 0) {
       return { ok: false, reason: `types: ${missingTypes.length} unanswered` };
@@ -194,7 +196,11 @@ async function classifyThreadWithJev(
     // Types without their evidence would clear every message tag in the thread, so a
     // failed or partial second call fails the whole answer rather than writing half of one.
     if (!evidenceAnswers) {
-      return { ok: false, reason: `evidence: ${failureReason(evidenceFailure)}` };
+      return {
+        ok: false,
+        reason: `evidence: ${describeJevFailure(evidenceFailure)}`,
+        failure: evidenceFailure,
+      };
     }
     const missingEvidence = unanswered(evidenceQuestions, evidenceAnswers);
     if (missingEvidence.length > 0) {
@@ -221,83 +227,93 @@ async function classifyThreadWithJev(
   }
 }
 
-interface LogMeta {
+type LogMeta = {
   conversationId: string;
   workspaceId: string;
+};
+
+interface LogContext {
+  meta: LogMeta;
+  vocabulary: readonly ThreadTypeEntry[];
+  /** Size of what Jev was sent, for the log. */
+  stateChars: number;
 }
 
 /**
- * One line per thread: Jev's answer, and the LLM's beside it when both ran.
- *
- * Names, ids and scores only — never message text, which can come from DMs.
+ * Shadow mode: every type in the vocabulary, the LLM's answer beside Jev's —
+ * `ISSUE yes == yes (0.91)` — plus which messages each cited as evidence.
  */
-function logJevClassification(
-  meta: LogMeta,
-  jev: JevClassificationResult,
-  llm: Classification | null,
-  mode: 'shadow' | 'replace',
-): void {
-  const jevModel = config.jev.model;
-  const llmModel = config.messageClassification.model;
-
-  if (!jev.ok) {
-    logger.info(`${TAG} ${meta.conversationId}  NO ANSWER (${jev.reason})  [${mode}]`, {
-      ...meta,
-      mode,
-      reason: jev.reason,
-      jevModel,
-    });
-    return;
-  }
-
-  const jevTypes = jev.classification.threadTypes;
-  const scores = Object.entries(jev.typeScores)
-    .sort(([, a], [, b]) => b - a)
-    .map(([name, p]) => `${name} ${p.toFixed(2)}`)
-    .join(' · ');
-
-  if (!llm) {
-    logger.info(
-      `${TAG} ${meta.conversationId}  [${mode}] jev ${jevTypes.map(t => t.name).join(',')}  (${scores})`,
-      { ...meta, mode, jevModel, jev: jevTypes, typeScores: jev.typeScores },
-    );
-    return;
-  }
-
+function logComparison(tag: string, ctx: LogContext, jev: JevClassificationResult & { ok: true }, llm: Classification): void {
   const llmByName = new Map(llm.threadTypes.map(t => [t.name, t]));
-  const jevByName = new Map(jevTypes.map(t => [t.name, t]));
-  const agreed = jevTypes.filter(t => llmByName.has(t.name)).map(t => t.name);
-  const llmOnly = llm.threadTypes.filter(t => !jevByName.has(t.name)).map(t => t.name);
-  const jevOnly = jevTypes.filter(t => !llmByName.has(t.name)).map(t => t.name);
+  const jevByName = new Map(jev.classification.threadTypes.map(t => [t.name, t]));
+
+  const comparison: Array<JevComparison & { primaryEvidence: string[]; shadowEvidence: string[] }> =
+    ctx.vocabulary.map(({ name }) => {
+      const inLlm = llmByName.has(name);
+      const inJev = jevByName.has(name);
+      return {
+        category: name,
+        primary: [inLlm ? 'yes' : 'no'],
+        shadow: inJev ? 'yes' : 'no',
+        confidence: jev.typeScores[name],
+        agreed: inLlm === inJev,
+        primaryEvidence: llmByName.get(name)?.sourceMessageIds ?? [],
+        shadowEvidence: jevByName.get(name)?.sourceMessageIds ?? [],
+      };
+    });
 
   // For the types both chose: do they point at the same evidence? Both citing nothing
   // counts as agreeing — the type came from the ticket for both.
-  const citationsAgreed = agreed.filter(name => {
-    const a = llmByName.get(name)?.sourceMessageIds ?? [];
-    const b = jevByName.get(name)?.sourceMessageIds ?? [];
-    return a.length === 0 && b.length === 0 ? true : a.some(id => b.includes(id));
-  });
+  const both = comparison.filter(c => c.primary[0] === 'yes' && c.shadow === 'yes');
+  const citationsAgreed = both.filter(c =>
+    c.primaryEvidence.length === 0 && c.shadowEvidence.length === 0
+      ? true
+      : c.primaryEvidence.some(id => c.shadowEvidence.includes(id)),
+  ).length;
 
-  const union = new Set([...llmByName.keys(), ...jevByName.keys()]).size;
-  logger.info(
-    `${TAG} ${meta.conversationId}  types ${agreed.length}/${union} agree  ` +
-      `citations ${citationsAgreed.length}/${agreed.length} agree  [${llmModel} vs ${jevModel}]  ` +
-      `llm ${llm.threadTypes.map(t => t.name).join(',') || '(none)'} | ` +
-      `jev ${jevTypes.map(t => t.name).join(',')}  (${scores})`,
-    {
-      ...meta,
-      mode,
-      llmModel,
-      jevModel,
-      agreed,
-      llmOnly,
-      jevOnly,
-      citationsAgreed,
-      llm: llm.threadTypes,
-      jev: jevTypes,
-      typeScores: jev.typeScores,
-    },
-  );
+  logJevComparison(tag, ctx.meta.conversationId, {
+    primaryModel: config.messageClassification.model,
+    shadowModel: config.jev.model,
+    stateChars: ctx.stateChars,
+    comparison,
+    meta: { ...ctx.meta, citationsAgreed, citationsCompared: both.length },
+    note: `citations ${citationsAgreed}/${both.length} agree`,
+  });
+}
+
+/** Replace mode: Jev's answer for every type, which is what gets written. */
+function logDecision(ctx: LogContext, jev: JevClassificationResult & { ok: true }): void {
+  const jevByName = new Map(jev.classification.threadTypes.map(t => [t.name, t]));
+  logJevDecision(REPLACE_TAG, ctx.meta.conversationId, {
+    shadowModel: config.jev.model,
+    stateChars: ctx.stateChars,
+    decisions: ctx.vocabulary.map(({ name }) => ({
+      category: name,
+      shadow: jevByName.has(name) ? 'yes' : 'no',
+      confidence: jev.typeScores[name],
+      evidence: jevByName.get(name)?.sourceMessageIds ?? [],
+    })),
+    meta: ctx.meta,
+  });
+}
+
+function logNoAnswer(
+  tag: string,
+  ctx: LogContext,
+  jev: JevClassificationResult & { ok: false },
+  level: 'info' | 'warn',
+  note?: string,
+): void {
+  logJevNoAnswer(tag, ctx.meta.conversationId, {
+    failure: jev.failure,
+    reason: jev.reason,
+    timeoutMs: JEV_TIMEOUT_MS,
+    stateChars: ctx.stateChars,
+    categories: ctx.vocabulary.map(entry => entry.name),
+    meta: ctx.meta,
+    level,
+    note,
+  });
 }
 
 // ─── Entry point: the step right before the model ───────────────────────────────
@@ -325,21 +341,27 @@ export async function runJevBeforeLlm(
 ): Promise<JevBeforeLlm | null> {
   if (!isJevClassificationActive()) return null;
   const { replace, logEnabled } = config.messageClassification.jev;
+  const ctx: LogContext = { meta, vocabulary, stateChars: JSON.stringify(input).length };
 
   const pending = classifyThreadWithJev(input, vocabulary);
   if (!replace) {
     return {
       answer: null,
       afterLlm: llm => {
-        if (logEnabled) void pending.then(jev => logJevClassification(meta, jev, llm, 'shadow'));
+        if (!logEnabled) return;
+        void pending.then(jev =>
+          jev.ok ? logComparison(SHADOW_TAG, ctx, jev, llm) : logNoAnswer(SHADOW_TAG, ctx, jev, 'info'),
+        );
       },
     };
   }
 
   const jev = await pending;
-  if (logEnabled) logJevClassification(meta, jev, null, 'replace');
-  if (jev.ok) return { answer: jev.classification, afterLlm: () => {} };
+  if (jev.ok) {
+    if (logEnabled) logDecision(ctx, jev);
+    return { answer: jev.classification, afterLlm: () => {} };
+  }
   // Logged whatever the log switch says: that switch hides comparisons, not breakage.
-  logger.warn(`${TAG} Jev had no answer, falling back to the LLM`, { ...meta, reason: jev.reason });
+  logNoAnswer(REPLACE_TAG, ctx, jev, 'warn', '→ falling back to the LLM');
   return { answer: null, afterLlm: () => {} };
 }
