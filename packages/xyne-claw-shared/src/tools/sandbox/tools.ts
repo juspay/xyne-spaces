@@ -642,17 +642,18 @@ function makeClient(config: Record<string, string>, templateOverride?: string): 
 async function pinnedTemplateForContext(context: ToolExecutionContext): Promise<string | undefined> {
   const pinnedRepo = context.meta?.["sandboxRepo"]?.trim();
   if (!pinnedRepo) return undefined;
-  const { REPO_CONFIGS } = await import("./repo-configs.js");
-  return REPO_CONFIGS[pinnedRepo]?.template;
+  const { getRepoConfig } = await import("./repo-config-source.js");
+  return (await getRepoConfig(pinnedRepo))?.template;
 }
 
 /** An unknown template name from the LLM falls back to the agent's or default template instead of failing the claim. */
 async function knownTemplate(value: unknown): Promise<string | undefined> {
   if (typeof value !== "string" || !value.trim()) return undefined;
-  const { REPO_CONFIGS } = await import("./repo-configs.js");
+  const { getRepoConfigs } = await import("./repo-config-source.js");
+  const repoConfigs = await getRepoConfigs();
   const known = new Set([
     "kata-workspace-template",
-    ...Object.values(REPO_CONFIGS).map((config) => config.template),
+    ...Object.values(repoConfigs).map((config) => config.template),
     ...rotatedTemplateNames(),
   ]);
   return known.has(value.trim()) ? value.trim() : undefined;
@@ -2458,7 +2459,9 @@ export const sandboxRepoSetup: ToolDefinition = {
     const requestedBranchName = params["branchName"] as string;
     const sessionDurationMs = params["sessionDurationMs"] as number | undefined;
     // Import here to avoid circular dependency
-    const { REPO_CONFIGS, isReadOnlyJob } = await import("./repo-configs.js");
+    const { isReadOnlyJob } = await import("./repo-configs.js");
+    const { getRepoConfigs } = await import("./repo-config-source.js");
+    const repoConfigs = await getRepoConfigs();
 
     // ── Routing ──────────────────────────────────────────────────────────
     // 1. Always-read-only contexts → shared read-only sbx-git (no snapshot
@@ -2480,7 +2483,7 @@ export const sandboxRepoSetup: ToolDefinition = {
       return resolveSbxGit(repoName, context);
     }
 
-    const config = REPO_CONFIGS[repoName];
+    const config = repoConfigs[repoName];
 
     // 2. Per-repo READ-FIRST (config.readFirst, e.g. xyne-spaces): default every
     //    interactive run to read-only sbx-git; only claim a writable golden dev
@@ -2494,7 +2497,7 @@ export const sandboxRepoSetup: ToolDefinition = {
     // 3. Provision a writable dev sandbox (golden clone). Reached when a
     //    read-first repo asked write:true, OR a non-read-first (legacy) repo.
     if (!config) {
-      const availableRepos = Object.keys(REPO_CONFIGS).join(", ");
+      const availableRepos = Object.keys(repoConfigs).join(", ");
       return `Error: Repository '${repoName}' not found. Available repos: ${availableRepos}`;
     }
     // branchName is now optional in the schema (read-first calls don't pass it).
