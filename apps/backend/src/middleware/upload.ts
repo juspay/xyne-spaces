@@ -76,7 +76,7 @@ const ALLOWED_UPLOAD_EXTENSIONS = new Set([
   // keys / certificates
   'pem', 'crt', 'cer', 'csr', 'pub', 'asc', 'gpg', 'pgp',
   // other formats with real traffic
-  'bin', 'dat', 'stl', 'kml', 'ditamap', 'xsd', 'ttf', 'otf', 'plist',
+  'bin', 'dat', 'stl', 'kml', 'ditamap', 'xsd', 'ttf', 'otf', 'plist', 'fig',
   // Outlook uses .com content-id filenames for inline images; inbound email runs
   // through this filter. Downloads as an opaque octet-stream regardless.
   'com',
