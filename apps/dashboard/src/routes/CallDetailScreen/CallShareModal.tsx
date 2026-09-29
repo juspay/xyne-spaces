@@ -12,9 +12,7 @@ import { getApiErrorMessage } from '../../utils/apiError';
 import { getRecordingSharePost } from '../../utils/recordingUtils';
 
 export interface CallShareModalProps {
-  /** The call row id — what `queries.callById` and the detail route both key on. */
-  callId: string;
-  /** The call's public id, which the sharing endpoints take. */
+  /** The public call id used by the detail route and sharing endpoints. */
   externalId: string;
   createdByUserId: string;
   onClose?: () => void;
@@ -25,7 +23,6 @@ export interface CallShareModalProps {
  * call has no shareable link, only the explicit shares listed here.
  */
 export const CallShareModal: React.FC<CallShareModalProps> = ({
-  callId,
   externalId,
   createdByUserId,
   onClose,
@@ -33,7 +30,7 @@ export const CallShareModal: React.FC<CallShareModalProps> = ({
   // Revoking is optimistic: the row leaves the list at once, and Zero catches up.
   const [locallyRevokedShareIds, setLocallyRevokedShareIds] = useState<Set<string>>(new Set());
 
-  const [callRow] = useCachedQuery(queries.callById({ callId }));
+  const [callRow] = useCachedQuery(queries.callByExternalId({ callId: externalId }));
   const usersById = useUsersById();
   const allChannels = useAllChannels();
   const channelNamesById = useMemo(

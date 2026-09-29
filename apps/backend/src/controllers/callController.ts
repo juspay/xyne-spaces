@@ -444,6 +444,7 @@ export class CallController {
           metadata: {
             source: 'call_notes',
             callId: callExternalId,
+            isRecording: true,
           },
         });
 
@@ -466,7 +467,7 @@ export class CallController {
           undefined,
           undefined,
           req.user!.workspaceId,
-          { summaryModelPreference: summaryModelPref },
+          { summaryModelPreference: summaryModelPref, isRecording: true },
         );
         if (!detailedSummaryCanvasId) {
           throw new Error('Failed to create detailed summary canvas');
