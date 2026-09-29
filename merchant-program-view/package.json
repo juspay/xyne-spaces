@@ -1,0 +1,37 @@
+{
+  "name": "merchant-watch",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "bundle:sdk": "esbuild scripts/slim-spaces-entry.js --bundle --minify --format=esm --platform=browser --outfile=lib/vendor/spaces-sdk.js && esbuild node_modules/@xyne/storage-sdk/dist/index.js --bundle --minify --format=esm --platform=browser --outfile=lib/vendor/storage-sdk.js",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@xyne/spaces-sdk": "https://drive.google.com/uc?export=download&id=1sgBCBIMugTvYCcwTyXy4pykt1wT-8wV0",
+    "@xyne/storage-sdk": "https://drive.google.com/uc?export=download&id=1Y-k9KnpiFJbWOTHqPX5WNnqu-M1-s2lB",
+    "class-variance-authority": "latest",
+    "clsx": "latest",
+    "cn": "^0.4.0",
+    "lucide-react": "latest",
+    "radix-ui": "^1.6.7",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tailwind-merge": "latest"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.0.0",
+    "@types/node": "^22.0.0",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "esbuild": "^0.25.0",
+    "tailwindcss": "^4.0.0",
+    "typescript": "^5.6.0",
+    "vite": "^5.4.0",
+    "vitest": "^2.1.9"
+  }
+}

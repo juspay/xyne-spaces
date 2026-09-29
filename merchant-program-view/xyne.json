@@ -1,0 +1,16 @@
+{
+  "title": "Merchant watch",
+  "entry": "/App.tsx",
+  "devSurface": "standalone",
+  "dependencies": {
+    "class-variance-authority": "latest",
+    "clsx": "latest",
+    "cn": "^0.4.0",
+    "lucide-react": "latest",
+    "radix-ui": "^1.6.7",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tailwind-merge": "latest"
+  },
+  "appId": "cmulc37f500xb2u01171ak322"
+}
