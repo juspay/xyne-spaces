@@ -1,3 +1,11 @@
+## [1.431.0](https://github.com/juspay/xyne-spaces/compare/v1.430.1...v1.431.0) (2026-09-29)
+
+
+### Features
+
+* allow writable sandboxes for workflow-engine agent steps ([#2463](https://github.com/juspay/xyne-spaces/issues/2463)) ([22fdcb4](https://github.com/juspay/xyne-spaces/commit/22fdcb497a8d97c0c358cd8346561451095cba8b))
+* audit logs for desk ([#2345](https://github.com/juspay/xyne-spaces/issues/2345)) ([43043d8](https://github.com/juspay/xyne-spaces/commit/43043d8cad56c682bbdbe0f5b8529121bc84f5cc))
+
 ## [1.430.1](https://github.com/juspay/xyne-spaces/compare/v1.430.0...v1.430.1) (2026-09-29)
 
 
