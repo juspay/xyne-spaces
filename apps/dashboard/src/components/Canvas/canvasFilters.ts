@@ -46,11 +46,7 @@ export function isExcludedRecordingGeneratedCanvas(canvas: Canvas): boolean {
   return source ? RECORDING_GENERATED_SOURCES.has(source) : false;
 }
 
-export function getRecordingCanvasCallId(canvas: Canvas): string | null {
-  if (!isExcludedRecordingGeneratedCanvas(canvas)) {
-    return null;
-  }
-
+export function getCanvasCallId(canvas: Canvas): string | null {
   const metadata = canvas.metadata;
   if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
     return null;
@@ -68,16 +64,6 @@ export function isRecordingCanvas(canvas: Canvas): boolean {
     !Array.isArray(metadata) &&
     (metadata as Record<string, unknown>)['isRecording'] === true,
   );
-}
-
-export function getCanvasCallInternalId(canvas: Canvas): string | null {
-  const metadata = canvas.metadata;
-  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
-    return null;
-  }
-
-  const callInternalId = (metadata as Record<string, unknown>)['callInternalId'];
-  return typeof callInternalId === 'string' && callInternalId ? callInternalId : null;
 }
 
 export function filterExcludedRecordingGeneratedCanvases(

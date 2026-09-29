@@ -288,7 +288,7 @@ class NoteTakerTranscriptService {
   private async notifySummaryReady(call: Call): Promise<void> {
     const actionUrl = isRecording(call)
       ? `/recordings/${call.externalId}`
-      : `/calls/${call.id}/detail`;
+      : `/calls/${call.externalId}/detail`;
     try {
       if (!call.workspaceId) return;
       // The AI title may have landed after our `call` snapshot was taken —

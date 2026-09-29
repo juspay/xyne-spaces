@@ -55,8 +55,7 @@ import { useCurrentUserGroupIds } from '../../../hooks/useUserGroup';
 import {
   filterExcludedCallGeneratedCanvases,
   filterExcludedRecordingGeneratedCanvases,
-  getCanvasCallInternalId,
-  getRecordingCanvasCallId,
+  getCanvasCallId,
   isExcludedRecordingGeneratedCanvas,
   isRecordingCanvas,
 } from '../canvasFilters';
@@ -297,31 +296,19 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
 
   const isCanvasOwner = canvas?.createdBy === user?.id || effectiveAccessLevel === CanvasRole.OWNER;
   const isChannelArchived = !!channel?.isArchived;
-  const recordingCallId = canvas ? getRecordingCanvasCallId(canvas) : null;
   const canvasIsRecording = canvas ? isRecordingCanvas(canvas) : false;
-  const canvasCallInternalId = canvas ? getCanvasCallInternalId(canvas) : null;
+  const canvasCallId = canvas ? getCanvasCallId(canvas) : null;
 
   const handleOpenRecordingNotes = useCallback((): void => {
+    if (!canvasCallId) return;
     const destination = canvasIsRecording
-      ? recordingCallId
-        ? `/recordings/${encodeURIComponent(recordingCallId)}?tab=notes`
-        : null
-      : canvasCallInternalId
-        ? `/calls/${encodeURIComponent(canvasCallInternalId)}/detail`
-        : null;
-    if (!destination) return;
+      ? `/recordings/${encodeURIComponent(canvasCallId)}?tab=notes`
+      : `/calls/${encodeURIComponent(canvasCallId)}/detail`;
 
     void navigate(destination, {
       state: { from: `${location.pathname}${location.search}` },
     });
-  }, [
-    canvasCallInternalId,
-    canvasIsRecording,
-    location.pathname,
-    location.search,
-    navigate,
-    recordingCallId,
-  ]);
+  }, [canvasCallId, canvasIsRecording, location.pathname, location.search, navigate]);
 
   useEffect(() => {
     previewVersionRef.current = null;
@@ -1179,7 +1166,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
           {/* Share Button */}
           {canvas?.id && (
             <div className='ml-2 flex items-center gap-2'>
-              {(canvasIsRecording ? recordingCallId : canvasCallInternalId) && (
+              {canvasCallId && (
                 <Button
                   variant='secondary'
                   size='iconSm'
@@ -1190,7 +1177,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
                   data-track-name='Open_Recording_Notes_From_Channel_Canvas'
                   data-track-metadata={JSON.stringify({
                     canvasId: canvas.id,
-                    recordingId: recordingCallId,
+                    recordingId: canvasIsRecording ? canvasCallId : null,
                     channelId,
                   })}
                 >

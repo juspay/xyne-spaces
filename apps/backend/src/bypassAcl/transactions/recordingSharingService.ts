@@ -340,7 +340,7 @@ export async function createRecordingPostMessage(tx: Prisma.TransactionClient, r
             isRecordingMessage: true,
             operation: 'recording_ended',
           }
-        : { messageSubtype: 'call_share_post', isCallShareMessage: true, callRowId: recording.id }),
+        : { messageSubtype: 'call_share_post', isCallShareMessage: true }),
       ...(sanitizedMessageContent ? { messageContent: sanitizedMessageContent } : {}),
     };
 

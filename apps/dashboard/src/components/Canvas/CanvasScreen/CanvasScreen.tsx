@@ -96,11 +96,7 @@ import { apiInstance } from '../../../services/clients/apiClient';
 import { xyneAIActor, type CanvasInfo } from '../../../machines/xyneAIMachine';
 import { useAllVisibleChannels } from '@xyne/shared/hooks';
 import { usePersistedCanvasPreferences } from '../../../hooks/usePersistedCanvasPreferences';
-import {
-  getCanvasCallInternalId,
-  getRecordingCanvasCallId,
-  isRecordingCanvas,
-} from '../canvasFilters';
+import { getCanvasCallId, isRecordingCanvas } from '../canvasFilters';
 import type { CanvasPanelOutletContext } from '../CanvasPanel/CanvasPanel';
 import { useNavigate } from '../../../hooks/useWorkspaceNavigate';
 import {
@@ -1181,30 +1177,18 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
     });
   };
 
-  const recordingCallId = selectedCanvas ? getRecordingCanvasCallId(selectedCanvas) : null;
   const canvasIsRecording = selectedCanvas ? isRecordingCanvas(selectedCanvas) : false;
-  const canvasCallInternalId = selectedCanvas ? getCanvasCallInternalId(selectedCanvas) : null;
+  const canvasCallId = selectedCanvas ? getCanvasCallId(selectedCanvas) : null;
   const handleOpenRecordingNotes = useCallback((): void => {
+    if (!canvasCallId) return;
     const destination = canvasIsRecording
-      ? recordingCallId
-        ? `/recordings/${encodeURIComponent(recordingCallId)}?tab=notes`
-        : null
-      : canvasCallInternalId
-        ? `/calls/${encodeURIComponent(canvasCallInternalId)}/detail`
-        : null;
-    if (!destination) return;
+      ? `/recordings/${encodeURIComponent(canvasCallId)}?tab=notes`
+      : `/calls/${encodeURIComponent(canvasCallId)}/detail`;
 
     void navigate(destination, {
       state: { from: `${location.pathname}${location.search}` },
     });
-  }, [
-    canvasCallInternalId,
-    canvasIsRecording,
-    location.pathname,
-    location.search,
-    navigate,
-    recordingCallId,
-  ]);
+  }, [canvasCallId, canvasIsRecording, location.pathname, location.search, navigate]);
 
   const handleExportMarkdown = useCallback((): void => {
     void (async (): Promise<void> => {
@@ -1488,7 +1472,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                           <Share01 size={16} className='shrink-0 opacity-60' />
                         </button>
 
-                        {(canvasIsRecording ? recordingCallId : canvasCallInternalId) && (
+                        {canvasCallId && (
                           <button
                             type='button'
                             onClick={handleOpenRecordingNotes}
@@ -1501,7 +1485,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                             data-track-name='Open_Recording_Notes_From_Canvas'
                             data-track-metadata={JSON.stringify({
                               canvasId: selectedCanvas.id,
-                              recordingId: recordingCallId,
+                              recordingId: canvasIsRecording ? canvasCallId : null,
                             })}
                           >
                             {canvasIsRecording ? (

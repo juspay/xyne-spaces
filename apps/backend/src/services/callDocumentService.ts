@@ -1435,7 +1435,6 @@ MANDATORY OUTPUT CONTRACT:
       deferInsertSideEffects?: boolean;
       summaryModelPreference?: 'fast' | 'thinking';
       isRecording?: boolean;
-      callInternalId?: string;
     } = {},
   ): Promise<string | null> {
     try {
@@ -1521,7 +1520,6 @@ MANDATORY OUTPUT CONTRACT:
     citationCtx?: CitationContext,
     callStartedAt?: Date,
     isRecording: boolean = false,
-    callInternalId?: string,
   ): Promise<string | null> {
     try {
       const prisma = DatabaseClient.getInstance();
@@ -1562,8 +1560,7 @@ MANDATORY OUTPUT CONTRACT:
           metadata: {
             source: 'call_detailed_summary',
             callId,
-            ...(isRecording ? { isRecording: true } : {}),
-            ...(callInternalId ? { callInternalId } : {}),
+            isRecording,
             isAiGenerated: true,
             generatedAt: now.toISOString(),
             mentionedUserIds,
@@ -1603,7 +1600,6 @@ MANDATORY OUTPUT CONTRACT:
     citationCtx?: CitationContext,
     sideEffectContextPromise?: Promise<CanvasSideEffectContext | null>,
     isRecording: boolean = false,
-    callInternalId?: string,
   ): Promise<boolean> {
     try {
       const prisma = DatabaseClient.getInstance();
@@ -1637,8 +1633,7 @@ MANDATORY OUTPUT CONTRACT:
           metadata: {
             source: 'call_detailed_summary',
             callId,
-            ...(isRecording ? { isRecording: true } : {}),
-            ...(callInternalId ? { callInternalId } : {}),
+            isRecording,
             isAiGenerated: true,
             generatedAt: now.toISOString(),
             mentionedUserIds,
@@ -1724,7 +1719,6 @@ MANDATORY OUTPUT CONTRACT:
     citationCtx?: CitationContext,
     workspaceIdOverride?: string,
     isRecording: boolean = false,
-    callInternalId?: string,
   ): Promise<{ canvasId: string | null; version: number }> {
     // Check if an existing canvas exists for this call
     const existingCanvas = await findExistingDetailedSummaryCanvas(callId);
@@ -1742,7 +1736,6 @@ MANDATORY OUTPUT CONTRACT:
         citationCtx,
         callStartedAt,
         isRecording,
-        callInternalId,
       );
 
       await this.linkDetailedSummaryCanvasToCall(callId, updatedCanvasId);
@@ -1765,7 +1758,7 @@ MANDATORY OUTPUT CONTRACT:
       callTitle,
       citationCtx,
       workspaceIdOverride,
-      { isRecording, callInternalId },
+      { isRecording },
     );
 
     await this.linkDetailedSummaryCanvasToCall(callId, canvasId);
@@ -2354,7 +2347,6 @@ A comprehensive detailed summary has been generated from this call.
           citationCtx,
           undefined,
           false,
-          call.id,
         );
         if (!canvasId) {
           logDetailedSummaryFailed(callId, 'canvas_update_failed');
@@ -2449,7 +2441,7 @@ A comprehensive detailed summary has been generated from this call.
             resolvedCallTitle,
             citationCtx,
             undefined,
-            { deferInsertSideEffects: true, callInternalId: call.id },
+            { deferInsertSideEffects: true },
           );
           if (!canvasId) {
             throw new Error('Failed to create detailed summary canvas');
@@ -2578,7 +2570,6 @@ A comprehensive detailed summary has been generated from this call.
         citationCtx,
         sideEffectContextPromise ?? undefined,
         false,
-        call.id,
       );
       if (!finalized) {
         logDetailedSummaryFailed(callId, 'canvas_finalize_failed');

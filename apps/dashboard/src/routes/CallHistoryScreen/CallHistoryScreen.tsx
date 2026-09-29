@@ -1397,7 +1397,7 @@ const CallHistoryScreen = (): ReactElement => {
                           onDetailClick={() => {
                             // The labels on screen right now double as the detail picker's
                             // suggestions — same rows this screen's label filter is built from.
-                            void navigate(`${call.id}/detail`, {
+                            void navigate(`${call.externalId}/detail`, {
                               state: { call, labelSuggestions: availableCallLabels },
                             });
                           }}

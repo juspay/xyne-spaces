@@ -70,7 +70,7 @@ export async function createPRDCanvasTx(prisma: PrismaClient, canvasId: string, 
   return { result, accessMode };
 }
 
-export async function createDetailedSummaryCanvasTx(prisma: PrismaClient, canvasId: string, title: string, channelId: string | null, workspaceId: string, createdByUserId: string, now: Date, callId: string, conversationId: string | null, mentionedUserIds: string[], options: { deferInsertSideEffects?: boolean; summaryModelPreference?: "fast" | "thinking"; isRecording?: boolean; callInternalId?: string; }, accessMode: string, callCreatorUserId: string) {
+export async function createDetailedSummaryCanvasTx(prisma: PrismaClient, canvasId: string, title: string, channelId: string | null, workspaceId: string, createdByUserId: string, now: Date, callId: string, conversationId: string | null, mentionedUserIds: string[], options: { deferInsertSideEffects?: boolean; summaryModelPreference?: "fast" | "thinking"; isRecording?: boolean; }, accessMode: string, callCreatorUserId: string) {
   const result = await transaction(['Call', 'CallParticipant', 'Canvas', 'CanvasParticipant'], 'createDetailedSummaryCanvas: summary canvas creation and call access grants must commit atomically; tx is not ACL-wrapped', prisma, async (tx) => {
     await tx.canvas.create({
       data: {
@@ -91,8 +91,7 @@ export async function createDetailedSummaryCanvasTx(prisma: PrismaClient, canvas
           source: 'call_detailed_summary',
           callId,
           conversationId,
-          ...(options.isRecording ? { isRecording: true } : {}),
-          ...(options.callInternalId ? { callInternalId: options.callInternalId } : {}),
+          isRecording: options.isRecording === true,
           isAiGenerated: true,
           generatedAt: now.toISOString(),
           mentionedUserIds, // Store mentioned users for side effect handler
