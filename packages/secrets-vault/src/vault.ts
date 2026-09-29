@@ -13,6 +13,24 @@ export type AddVersionResult =
   | { status: SecretVersionStatus.ACTIVE; version: number }
   | { status: SecretVersionStatus.FAILED; version: number };
 
+/** Thrown when a claim on SecretDefinition.rotationState loses the race — someone else is already rotating this secret. */
+export class RotationInProgressError extends Error {
+  constructor(name: string) {
+    super(`Secret "${name}" is already being rotated by another request`);
+    this.name = 'RotationInProgressError';
+  }
+}
+
+/** Thrown when revokeActiveVersion's expectedVersion doesn't match what's actually active — someone else changed it first. */
+export class ActiveVersionMismatchError extends Error {
+  constructor(name: string, expectedVersion: number, actualVersion: number) {
+    super(
+      `Secret "${name}": expected version ${expectedVersion} to be active, but version ${actualVersion} is — refusing to revoke`,
+    );
+    this.name = 'ActiveVersionMismatchError';
+  }
+}
+
 interface CacheEntry {
   value: string;
   expiresAt: number;
@@ -150,46 +168,168 @@ export function createSecretsVault(deps: SecretsVaultDeps) {
       throw new Error(`Secret "${input.name}" does not exist`);
     }
 
-    const impl = activeEncryptionImpl();
-    const adapter = adapterFor(impl);
-    const version = await deps.allocateVersion(definition.id);
-    const encrypted = await adapter.encrypt(input.value, aadFor(definition.id, version));
-
-    await deps.prisma.secretVersion.create({
-      data: {
-        secretDefinitionId: definition.id,
-        version,
-        value: encrypted,
-        encryptionImpl: impl,
-        status: SecretVersionStatus.PENDING,
-      },
+    // CAS claim: only one caller can hold this secret's rotation lock at a
+    // time. The WHERE clause (not a prior read) is what Postgres evaluates
+    // atomically — see DESIGN.md for the full B1/B2 walkthrough.
+    const claimed = await deps.prisma.secretDefinition.updateMany({
+      where: { id: definition.id, rotationState: RotationState.IDLE },
+      data: { rotationState: RotationState.CLAIMED },
     });
-
-    const passed = await input.verify(input.value);
-
-    if (!passed) {
-      await deps.prisma.secretVersion.updateMany({
-        where: { secretDefinitionId: definition.id, version },
-        data: { status: SecretVersionStatus.FAILED },
-      });
-      return { status: SecretVersionStatus.FAILED, version };
+    if (claimed.count !== 1) {
+      throw new RotationInProgressError(input.name);
     }
 
-    await setActiveVersion(definition.id, version);
+    try {
+      const impl = activeEncryptionImpl();
+      const adapter = adapterFor(impl);
+      const version = await deps.allocateVersion(definition.id);
+      const encrypted = await adapter.encrypt(input.value, aadFor(definition.id, version));
+
+      await deps.prisma.secretVersion.create({
+        data: {
+          secretDefinitionId: definition.id,
+          version,
+          value: encrypted,
+          encryptionImpl: impl,
+          status: SecretVersionStatus.PENDING,
+        },
+      });
+
+      const passed = await input.verify(input.value);
+
+      if (!passed) {
+        await deps.prisma.secretVersion.updateMany({
+          where: { secretDefinitionId: definition.id, version },
+          data: { status: SecretVersionStatus.FAILED },
+        });
+        return { status: SecretVersionStatus.FAILED, version };
+      }
+
+      await setActiveVersion(definition.id, version);
+      await deps.prisma.secretDefinition.update({
+        where: { id: definition.id },
+        data: { updatedBy: input.updatedBy },
+      });
+      cache.delete(input.name);
+
+      return { status: SecretVersionStatus.ACTIVE, version };
+    } finally {
+      // Release unconditionally — whether the attempt succeeded, failed
+      // verification, or threw, the lock must not stay claimed forever.
+      await deps.prisma.secretDefinition.updateMany({
+        where: { id: definition.id },
+        data: { rotationState: RotationState.IDLE },
+      });
+    }
+  }
+
+  /**
+   * Rolls back to an older version's value. Matches how HashiCorp Vault's
+   * `kv rollback` works: never reactivates the old row in place — instead
+   * decrypts its value and runs it through `addVersion` as a brand-new
+   * candidate, so it gets a fresh version number, goes through `verify()`
+   * again (the restored credential might have been revoked at the external
+   * service since it was retired), and the full history (old row included)
+   * stays untouched either way. Monotonic version numbers, full audit trail.
+   */
+  async function rollbackToVersion(input: {
+    name: string;
+    version: number;
+    updatedBy: string;
+    verify: (value: string) => Promise<boolean>;
+  }): Promise<AddVersionResult> {
+    const definition = await deps.prisma.secretDefinition.findUnique({
+      where: { name: input.name },
+    });
+    if (!definition) {
+      throw new Error(`Secret "${input.name}" does not exist`);
+    }
+
+    const targetVersion = await deps.prisma.secretVersion.findUnique({
+      where: {
+        secretDefinitionId_version: { secretDefinitionId: definition.id, version: input.version },
+      },
+    });
+    if (!targetVersion) {
+      throw new Error(`Secret "${input.name}" has no version ${input.version}`);
+    }
+
+    const adapter = adapterFor(targetVersion.encryptionImpl as EncryptionImpl);
+    const plaintext = await adapter.decrypt(
+      targetVersion.value,
+      aadFor(definition.id, targetVersion.version),
+    );
+
+    return addVersion({
+      name: input.name,
+      value: plaintext,
+      updatedBy: input.updatedBy,
+      verify: input.verify,
+    });
+  }
+
+  /**
+   * Kill-switch: flips whatever is currently active straight to "revoked,"
+   * independent of any rotation attempt and without requiring a replacement
+   * to be ready. Deliberately bypasses the rotationState lock — an "this
+   * leaked, kill it now" action shouldn't have to wait behind an in-progress
+   * rotation; the next getSecret() call simply finds no active version and
+   * returns null, so callers fall back to their own env var (see DESIGN.md
+   * Fallback chain) — revoking is safe by construction. Returns null if
+   * there was nothing active to revoke.
+   *
+   * `expectedVersion` is required: the caller must confirm which version they
+   * believe is active before an irreversible-ish action like this proceeds.
+   * If the currently-active version has moved on since the caller last
+   * checked (e.g. a rotate landed in between), this throws
+   * ActiveVersionMismatchError instead of silently revoking the wrong one.
+   */
+  async function revokeActiveVersion(input: {
+    name: string;
+    expectedVersion: number;
+    updatedBy: string;
+  }): Promise<{ status: SecretVersionStatus.REVOKED; version: number } | null> {
+    const definition = await deps.prisma.secretDefinition.findUnique({
+      where: { name: input.name },
+    });
+    if (!definition) {
+      throw new Error(`Secret "${input.name}" does not exist`);
+    }
+
+    const active = await deps.prisma.secretVersion.findFirst({
+      where: { secretDefinitionId: definition.id, status: SecretVersionStatus.ACTIVE },
+    });
+    if (!active) return null;
+
+    if (active.version !== input.expectedVersion) {
+      throw new ActiveVersionMismatchError(input.name, input.expectedVersion, active.version);
+    }
+
+    await deps.prisma.secretVersion.updateMany({
+      where: { secretDefinitionId: definition.id, version: active.version },
+      data: { status: SecretVersionStatus.REVOKED, retiredAt: new Date() },
+    });
     await deps.prisma.secretDefinition.update({
       where: { id: definition.id },
       data: { updatedBy: input.updatedBy },
     });
     cache.delete(input.name);
 
-    return { status: SecretVersionStatus.ACTIVE, version };
+    return { status: SecretVersionStatus.REVOKED, version: active.version };
   }
 
   function invalidateCache(name: string): void {
     cache.delete(name);
   }
 
-  return { getSecret, createSecret, addVersion, invalidateCache };
+  return {
+    getSecret,
+    createSecret,
+    addVersion,
+    rollbackToVersion,
+    revokeActiveVersion,
+    invalidateCache,
+  };
 }
 
 export type SecretsVault = ReturnType<typeof createSecretsVault>;
