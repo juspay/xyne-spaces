@@ -8,10 +8,11 @@ import {
   type Plan,
   type TurnResponse,
 } from '@xyne/shared/assistant';
-import type { JevQuestion, JevState } from '@/services/queryIntent/jevClient';
+import { askJev, type JevConnection, type JevFailure } from '@/services/queryIntent/jevClient';
 import { normalizeName, type FoundRecord, type RecordFinder } from './records';
 import { EMPTY_SESSION, parseSession, serializeSession, type AssistantSession } from './session';
 import { handleTurn, type TurnServices } from './turn';
+import { jevConnection } from './gateway';
 
 /**
  * How well the assistant understands people, measured end to end: real sentences go through
@@ -20,8 +21,8 @@ import { handleTurn, type TurnServices } from './turn';
  * stays valid when the code behind it changes. Run it before and after any change to
  * understanding, and compare:
  *
- *   npx dotenv -e .env.local -- env ASSISTANT_LIVE=1 ASSISTANT_EVAL_OUT=/tmp/eval.json \
- *     npx jest -c jest.assistant.config.cjs src/services/assistant/eval
+ *   pnpm exec dotenv -e .env.local -- sh -c \
+ *     'ASSISTANT_LIVE=1 pnpm exec jest --runInBand --runTestsByPath src/services/assistant/eval.live.test.ts'
  */
 
 const person = (id: string, name: string): FoundRecord => ({
@@ -74,24 +75,32 @@ const THREADS = [
   thread('t-migration', 'Migration rollback on staging', 'ops-north', ['daniel']),
   thread('t-hiring', 'Hiring plans for next quarter', 'general', ['priya-shah']),
 ];
+const SELECTED_MESSAGE: FoundRecord = {
+  record: {
+    kind: 'message',
+    id: 'm-selected',
+    name: 'The build is green',
+    channelId: 'android',
+  },
+  detail: '#android',
+};
 
 /** Like the database lookup: names containing every word said, else the same first letter. */
 const workspace: RecordFinder = {
-  selfId: 'me',
   async find(kind, mention, hints) {
     const words = normalizeName(mention)
       .split(' ')
       .filter((word) => word.length >= 2);
     if (kind === 'thread') {
+      const topicWords = words.filter((word) => word.length >= 4);
       return THREADS.filter(
         ({ found, people }) =>
-          words.some(
-            (word) => word.length >= 4 && found.record.name.toLowerCase().includes(word)
-          ) &&
+          topicWords.every((word) => normalizeName(found.record.name).includes(word)) &&
           (hints?.people ?? []).every((id) => id === 'me' || people.includes(id)) &&
           (hints?.channels ?? []).every((id) => id === found.record.channelId)
       ).map(({ found }) => found);
     }
+    if (kind === 'message') return [];
     const pool = kind === 'person' ? PEOPLE : CHANNELS;
     const named = pool.filter(({ record }) =>
       words.every((word) => normalizeName(record.name).includes(word))
@@ -100,7 +109,10 @@ const workspace: RecordFinder = {
     return pool.filter(({ record }) => record.name.toLowerCase().startsWith(words[0]?.[0] ?? '#'));
   },
   async get(kind, id) {
-    return kind === 'channel' ? (CHANNELS.find(({ record }) => record.id === id) ?? null) : null;
+    if (kind === 'channel') return CHANNELS.find(({ record }) => record.id === id) ?? null;
+    if (kind === 'thread') return THREADS.find(({ found }) => found.record.id === id)?.found ?? null;
+    if (kind === 'message' && id === SELECTED_MESSAGE.record.id) return SELECTED_MESSAGE;
+    return null;
   },
 };
 
@@ -113,6 +125,14 @@ interface EvalCase {
   turns: string[];
   /** The channel open on the left, by id. */
   screen?: string;
+  /** The thread open in the chat route, by conversation id. */
+  threadScreen?: string;
+  /** Whether the selected message is the one opened with Ask AI. */
+  messageOnScreen?: boolean;
+  /** Use typed input for this case; voice is the default. */
+  via?: 'typed' | 'voice';
+  /** Fail the live eval if this core messaging behavior is misunderstood. */
+  required?: boolean;
   /** The action the user wanted, or what kind of sentence it was when it is not a task. */
   action?: string;
   kind?: 'help' | 'greeting' | 'thanks' | 'question' | 'unclear' | 'cannot';
@@ -297,6 +317,7 @@ const CASES: EvalCase[] = [
     turns: ['go to android and mention Arjun Mehta to check the crash'],
     action: 'post_message',
     values: { channel: 'android', mentions: ['arjun'], message: 'check the crash' },
+    required: true,
   },
   {
     name: 'post everyone',
@@ -520,10 +541,49 @@ const CASES: EvalCase[] = [
   { name: 'noise', group: 'not a task', turns: ['uh the'], kind: 'unclear' },
   { name: 'reminder', group: 'not a task', turns: ['set a reminder for 5pm'], kind: 'cannot' },
   {
-    name: 'forward',
-    group: 'not a task',
+    name: 'forward selected message to a person',
+    group: 'request',
     turns: ['forward this message to Priya Shah'],
-    kind: 'cannot',
+    messageOnScreen: true,
+    action: 'forward_message',
+    values: { message: 'm-selected', recipient: 'priya-shah' },
+    required: true,
+  },
+  {
+    name: 'forward selected message to an ambiguous name',
+    group: 'request',
+    turns: ['forward this message to Priya', 'tap:priya-shah'],
+    messageOnScreen: true,
+    action: 'forward_message',
+    values: { message: 'm-selected', recipient: 'priya-shah' },
+    required: true,
+  },
+  {
+    name: 'share selected message to a channel',
+    group: 'request',
+    turns: ['share this in #design'],
+    messageOnScreen: true,
+    action: 'forward_to_channel',
+    values: { message: 'm-selected', channel: 'design' },
+    required: true,
+  },
+  {
+    name: 'reply in the thread open on screen',
+    group: 'request',
+    turns: ['reply here saying looks good'],
+    threadScreen: 't-login',
+    action: 'reply_in_thread',
+    values: { thread: 't-login', message: 'looks good' },
+    required: true,
+  },
+  {
+    name: 'reply to a thread by topic with typed input',
+    group: 'request',
+    turns: ['Reply to the thread about the release notes draft saying looks good'],
+    via: 'typed',
+    action: 'reply_in_thread',
+    values: { thread: 't-release', message: 'looks good' },
+    required: true,
   },
 
   // Follow-ups: the sentence only makes sense with what came before.
@@ -603,6 +663,15 @@ const CASES: EvalCase[] = [
     turns: ['send a message to Arjun Mehta', 'tell Meera Iyer the doc is ready'],
     action: 'send_dm',
     values: { recipient: 'meera', message: 'the doc is ready' },
+    required: true,
+  },
+  {
+    name: 'new request while message is pending',
+    group: 'follow-up',
+    turns: ['message Daniel Okafor', 'let Meera Iyer know the review moved to four'],
+    action: 'send_dm',
+    values: { recipient: 'meera', message: 'the review moved to four' },
+    required: true,
   },
   {
     name: 'add member mid-way',
@@ -755,26 +824,24 @@ interface Score {
   kind: boolean | null;
   /** Jev did not answer (a gateway refusal or timeout), so the case says nothing about understanding. */
   jevFailed: boolean;
+  /** Safe failure categories only; never store the request or provider response. */
+  jevFailures: string[];
+  required: boolean;
   ms: number[];
 }
 
 const live = process.env.ASSISTANT_LIVE === '1' ? describe : describe.skip;
 
 live('understanding, end to end, with the real Jev', () => {
-  let ask: TurnServices['askJev'];
+  let connection: JevConnection;
   const scores: Score[] = [];
 
-  beforeAll(async () => {
-    const { askJev } = await import('@/services/queryIntent/jevClient');
-    const { jevConnection } = await import('./gateway');
-    // Like production: a request refused at once is tried again.
-    const options = { connection: jevConnection() };
-    ask = async (state: JevState, questions: Record<string, JevQuestion>) => {
-      const startedAt = Date.now();
-      const answers = await askJev(state, questions, 8000, undefined, options);
-      if (answers || Date.now() - startedAt > 1000) return answers;
-      return askJev(state, questions, 8000, undefined, options);
-    };
+  beforeAll(() => {
+    const configured = jevConnection();
+    if (!configured) {
+      throw new Error('Live Jev evaluation needs LITELLM_BASE_URL and LITELLM_API_KEY.');
+    }
+    connection = configured;
   });
 
   afterAll(() => {
@@ -808,12 +875,21 @@ live('understanding, end to end, with the real Jev', () => {
           .map(({ field, got }) => `${field}=${got}`);
         return `  ✗ ${score.name}${score.action === false ? ' [action]' : ''}${score.asks === false ? ' [asks]' : ''}${score.kind === false ? ' [kind]' : ''} ${wrong.join(' ')}`;
       });
-    const failed = scores.filter((score) => score.jevFailed).map((score) => score.name);
+    const failed = scores.filter((score) => score.jevFailed);
+    const failedSummary = failed.map(({ name, jevFailures }) => {
+      const reason = jevFailures.join(', ') || 'no usable answer';
+      return `${name}: ${reason}`;
+    });
+    const requiredMisses = scores.filter(
+      (score) =>
+        score.required &&
+        (score.jevFailed || score.action === false || score.fields.some(({ ok }) => !ok))
+    );
     const ms = scores.flatMap((score) => score.ms).sort((a, b) => a - b);
     const p = (q: number): number => ms[Math.min(ms.length - 1, Math.floor(q * ms.length))] ?? 0;
     const report = [
       ...rows,
-      `jev failed ${failed.length}${failed.length ? ` (${failed.join(', ')})` : ''}`,
+      `jev failed ${failed.length}${failed.length ? ` (${failedSummary.join('; ')})` : ''}`,
       `turn time  median ${p(0.5)} ms · p90 ${p(0.9)} ms`,
       ...misses,
     ].join('\n');
@@ -822,12 +898,32 @@ live('understanding, end to end, with the real Jev', () => {
     if (process.env.ASSISTANT_EVAL_OUT) {
       writeFileSync(process.env.ASSISTANT_EVAL_OUT, JSON.stringify({ report, scores }, null, 2));
     }
+    if (failed.length > 0) {
+      throw new Error(`Jev returned no usable answer for ${failed.length} live evaluation case(s).`);
+    }
+    if (requiredMisses.length > 0) {
+      throw new Error(
+        `Core assistant cases failed: ${requiredMisses.map(({ name }) => name).join(', ')}.`
+      );
+    }
   });
 
   it.each(CASES)(
     '$name',
     async (evalCase) => {
       let session: AssistantSession = EMPTY_SESSION;
+      const jevFailures: JevFailure[] = [];
+      const ask: TurnServices['askJev'] = async (state, questions) => {
+        // Mirror production: retry once when Jev refuses a request immediately.
+        const options = {
+          connection,
+          onFailure: (failure: JevFailure) => jevFailures.push(failure),
+        };
+        const startedAt = Date.now();
+        const answers = await askJev(state, questions, 8000, undefined, options);
+        if (answers || Date.now() - startedAt > 1000) return answers;
+        return askJev(state, questions, 8000, undefined, options);
+      };
       const services: TurnServices = {
         catalog: ACTIONS,
         sessions: {
@@ -844,9 +940,21 @@ live('understanding, end to end, with the real Jev', () => {
         })(),
         debug: true,
       };
-      const onScreen: EntityRef[] = evalCase.screen
-        ? [{ kind: 'channel', id: evalCase.screen, name: '' }]
-        : [];
+      const onScreen: EntityRef[] = [
+        ...(evalCase.screen ? [{ kind: 'channel' as const, id: evalCase.screen, name: '' }] : []),
+        ...(evalCase.threadScreen
+          ? [
+              {
+                kind: 'thread' as const,
+                id: evalCase.threadScreen,
+                name: '',
+                channelId: 'android',
+                channelName: 'android',
+              },
+            ]
+          : []),
+        ...(evalCase.messageOnScreen ? [SELECTED_MESSAGE.record] : []),
+      ];
       const identity = { workspaceId: 'w', userId: 'me', sessionId: 's' };
 
       let response: TurnResponse | undefined;
@@ -856,7 +964,7 @@ live('understanding, end to end, with the real Jev', () => {
         const startedAt = Date.now();
         const input = turn.startsWith('tap:')
           ? { kind: 'choose' as const, optionId: turn.slice(4) }
-          : { kind: 'text' as const, text: turn, via: 'voice' as const };
+          : { kind: 'text' as const, text: turn, via: evalCase.via ?? 'voice' };
         response = await handleTurn(input, identity, services, { onScreen });
         ms.push(Date.now() - startedAt);
         jevFailed ||= response.say.startsWith('I couldn’t work that out');
@@ -876,6 +984,10 @@ live('understanding, end to end, with the real Jev', () => {
         asks: evalCase.asks ? seen.asks === evalCase.asks : null,
         kind: evalCase.kind ? seen.kind === evalCase.kind : null,
         jevFailed,
+        jevFailures: jevFailures.map((failure) =>
+          failure.kind === 'status' ? `status ${failure.status}` : failure.kind
+        ),
+        required: evalCase.required ?? false,
         ms,
       });
     },

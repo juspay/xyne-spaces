@@ -4,7 +4,7 @@ import type { ActionArea } from '../core/action.js';
 export const MESSAGING = {
   id: 'messaging',
   description:
-    'Messages: sending or opening a direct message with a person, a post in an existing channel (with @mentions of people or agents), or finding past messages and threads by what they were about.',
+    'Messages: sending or opening a direct message with a person, a post in an existing channel or a reply in a thread (with @mentions of people or agents), forwarding a message, or finding past messages and threads by what they were about.',
   actions: [
     {
       id: 'send_dm',
@@ -49,7 +49,7 @@ export const MESSAGING = {
           required: true,
           ask: 'What should I say[ to {recipient}]?',
           describe:
-            'the exact words to send, without the request around them and never the name of who it goes to ("tell Priya hi" → "hi")',
+            'the exact words to send, without the request around them and never the name of who it goes to ("tell Priya hi" → "hi"; "let Daniel know the meeting moved to 4" → "the meeting moved to 4"; "tell Meera Iyer the doc is ready" → "the doc is ready")',
         },
       },
       summarize: 'Send “{message}” to {recipient}',
@@ -102,7 +102,9 @@ export const MESSAGING = {
         description:
           'Post a message in an existing channel, or in the one open on screen ("here"), optionally @mentioning people or agents.',
         examples: [
+          'I want to post something',
           'Post in general that the build is green',
+          'In release planning, tell everyone the release is on Friday',
           'Go to the release channel and mention the on-call agent to check the logs',
           'Say hello here',
           'Tell the design channel that the review moved to 3',
@@ -126,21 +128,22 @@ export const MESSAGING = {
           required: true,
           ask: 'Which channel should I post in?',
           describe:
-            'the name of the existing channel to post in: the words right after “in”, “to”, “go to”, or “open”, even without the word “channel” and even before a colon (“post in ios: …” → “ios”), or “here” for the one on screen',
+            'the name of the existing channel to post in: the words right after “in”, “to”, “go to”, or “open”, even without “channel” (“in release planning, tell everyone …” → “release planning”; “the one in the ios channel” → “ios”), even before a colon (“post in ios: …” → “ios”), or “here” for the one on screen',
         },
         mentions: {
           kind: 'person',
           many: true,
           required: false,
           ask: 'Who should I mention?',
-          describe: 'the people or agents to @mention in the message',
+          describe:
+            'only people or agents explicitly named for an @mention; “tell everyone” is message wording, not a person to mention',
         },
         message: {
           kind: 'text',
           required: true,
           ask: 'What should I post[ in {channel}]?',
           describe:
-            'the exact words to post: never the channel’s name, “here”, or the names being mentioned (“mention Priya to check the logs” → “check the logs”)',
+            'the exact words to post: never the channel’s name, “here”, or the names being mentioned (“mention Priya to check the logs” → “check the logs”; “in release planning, tell everyone the release is on Friday” → “the release is on Friday”)',
         },
       },
       summarize: 'Post “{message}” in {channel}[ mentioning {mentions}]',
@@ -149,6 +152,154 @@ export const MESSAGING = {
         { op: 'send_message', target: '$channel', text: '$message', mentions: '$mentions' },
       ],
       done: 'Posted in {channel}.',
+    },
+    {
+      id: 'reply_in_thread',
+      title: 'Reply in a thread',
+      intent: {
+        description:
+          'Reply inside an existing thread: the one open on screen ("here", "this thread") or one found by what it was about.',
+        examples: [
+          'Reply here saying looks good',
+          'Reply in this thread that I will check it today',
+          'Reply to the thread about the release notes saying it is done',
+          'In this thread, tell them the fix is live',
+        ],
+        notFor: [
+          {
+            when: 'a new message in a channel, not inside a thread',
+            instead: 'that is a post in the channel',
+          },
+          {
+            when: 'messaging one person directly',
+            instead: 'that is a direct message',
+          },
+        ],
+      },
+      effect: 'send',
+      fields: {
+        thread: {
+          kind: 'thread',
+          required: true,
+          ask: 'Which thread should I reply in?',
+          choose: 'Which thread do you mean by “{mention}”?',
+          describe:
+            'the thread to reply in: “here” or “this thread” for the one open on screen; otherwise keep only its topic (“reply to the thread about the release notes draft” → “release notes draft”)',
+        },
+        mentions: {
+          kind: 'person',
+          many: true,
+          required: false,
+          ask: 'Who should I mention?',
+          describe: 'the people or agents to @mention in the reply',
+        },
+        message: {
+          kind: 'text',
+          required: true,
+          ask: 'What should I reply?',
+          describe:
+            'the exact words of the reply: never the thread, its topic, “here”, or the names being mentioned (“reply here saying looks good” → “looks good”)',
+        },
+      },
+      summarize: 'Reply “{message}” in {thread}[ mentioning {mentions}]',
+      plan: [
+        { op: 'navigate', target: '$thread' },
+        { op: 'send_message', target: '$thread', text: '$message', mentions: '$mentions' },
+      ],
+      done: 'Replied in {thread}.',
+    },
+    {
+      id: 'forward_message',
+      title: 'Forward a message',
+      intent: {
+        description:
+          'Forward a message that already exists, the one on screen ("this message", "this", "it"), to one person or app.',
+        examples: [
+          'Forward this message to Priya',
+          'Forward this to Daniel',
+          'Share this message with Meera',
+          'Send this to Sam',
+        ],
+        notFor: [
+          {
+            when: 'forwarding to a channel ("forward this to #design", "share this in general")',
+            instead: 'that forwards to the channel',
+          },
+          {
+            when: 'new words to send ("tell Priya the build is green")',
+            instead: 'that is a direct message',
+          },
+        ],
+      },
+      effect: 'send',
+      confirm: 'always',
+      fields: {
+        message: {
+          kind: 'message',
+          required: true,
+          ask: 'Which message? Use Ask AI on it, or open its thread, then ask me again.',
+          describe: 'the message to forward: “this”, “this message”, or “it” for the one on screen',
+        },
+        recipient: {
+          kind: 'person',
+          required: true,
+          ask: 'Who should I forward it to?',
+          describe: 'the one person or app to forward it to',
+        },
+      },
+      summarize: 'Forward {message} to {recipient}',
+      plan: [
+        { op: 'open_or_create_dm', user: '$recipient' },
+        { op: 'navigate', target: { fromStep: 0 } },
+        { op: 'forward_message', message: '$message', target: { fromStep: 0 } },
+      ],
+      done: 'Forwarded to {recipient}.',
+    },
+    {
+      id: 'forward_to_channel',
+      title: 'Forward a message to a channel',
+      intent: {
+        description:
+          'Forward a message that already exists, the one on screen ("this message", "this", "it"), into an existing channel.',
+        examples: [
+          'Forward this to the design channel',
+          'Share this message in general',
+          'Forward this message to android',
+          'Post this in release planning',
+        ],
+        notFor: [
+          {
+            when: 'forwarding to a person ("forward this to Priya")',
+            instead: 'that forwards to the person',
+          },
+          {
+            when: 'new words to post ("post in general that the build is green")',
+            instead: 'that is a post in the channel',
+          },
+        ],
+      },
+      effect: 'send',
+      confirm: 'always',
+      fields: {
+        message: {
+          kind: 'message',
+          required: true,
+          ask: 'Which message? Use Ask AI on it, or open its thread, then ask me again.',
+          describe: 'the message to forward: “this”, “this message”, or “it” for the one on screen',
+        },
+        channel: {
+          kind: 'channel',
+          required: true,
+          ask: 'Which channel should I forward it to?',
+          describe: 'the name of the existing channel to forward it to',
+        },
+      },
+      summarize: 'Forward {message} to {channel}',
+      plan: [
+        { op: 'navigate', target: '$channel' },
+        { op: 'forward_message', message: '$message', target: '$channel' },
+      ],
+      done: 'Forwarded to {channel}.',
     },
     {
       id: 'find_conversation',
@@ -161,6 +312,8 @@ export const MESSAGING = {
           'Open the thread about the release plan',
           'Where did we talk about login errors?',
           'Show me the conversation about the pricing change',
+          'Find the login errors thread, then narrow it to the one in ios',
+          'Find the release notes thread with Meera',
         ],
         notFor: [
           {
@@ -190,14 +343,14 @@ export const MESSAGING = {
           required: false,
           ask: 'Who was in it?',
           describe:
-            'the other people who were in the conversation, never the user themselves (“me”, “I”)',
+            'only participant names, such as after “with” or “me and”; never a channel phrase such as “the one in ios” or the user themselves (“find the messages where Meera and I discussed the offsite” → Meera)',
         },
         in: {
           kind: 'channel',
           required: false,
           ask: 'Which channel was it in?',
           describe:
-            'only the name of a channel the user says it was in (“in the android channel” → “android”), never the topic of the conversation',
+            'only the name of a channel the user says it was in (“in the android channel” or “the one in the ios channel” → “android” or “ios”), never the topic of the conversation',
         },
       },
       summarize: 'Open the conversation “{conversation}”',

@@ -1,11 +1,24 @@
 import { describe, expect, it } from 'vitest';
 import type { MutatorResultDetails } from '@rocicorp/zero';
-import type { ChannelRef, PersonRef, Plan } from '@xyne/shared/assistant';
+import type { ChannelRef, MessageRef, PersonRef, Plan, ThreadRef } from '@xyne/shared/assistant';
 import { runPlan, type AppActions, type PlanStep } from './planRunner';
 import { requireServerMutation } from './serverMutation';
 
 const daniel: PersonRef = { kind: 'person', id: 'u-daniel', name: 'Daniel Okafor' };
 const dm: ChannelRef = { kind: 'channel', id: 'c-dm', name: 'Daniel Okafor', isDirect: true };
+const thread: ThreadRef = {
+  kind: 'thread',
+  id: 't-1',
+  name: 'Release notes',
+  channelId: 'c-release',
+  channelName: 'release',
+};
+const message: MessageRef = {
+  kind: 'message',
+  id: 'm-1',
+  name: 'The build is green',
+  channelId: 'c-release',
+};
 
 /** App actions that record every call, in order. */
 function recordingActions(overrides: Partial<AppActions> = {}): {
@@ -26,6 +39,15 @@ function recordingActions(overrides: Partial<AppActions> = {}): {
     sendMessage: (channelId, text, mentions) => {
       const tagged = mentions.map(person => ` @${person.id}`).join('');
       calls.push(`send ${channelId} ${text}${tagged}`);
+      return Promise.resolve();
+    },
+    replyInThread: (threadId, text, mentions) => {
+      const tagged = mentions.map(person => ` @${person.id}`).join('');
+      calls.push(`reply ${threadId} ${text}${tagged}`);
+      return Promise.resolve();
+    },
+    forwardMessage: (messageId, channelId) => {
+      calls.push(`forward ${messageId} ${channelId}`);
       return Promise.resolve();
     },
     navigate: ({ channelId, threadId }) => {
@@ -137,6 +159,77 @@ describe('running a plan', () => {
       actions,
     );
     expect(calls).toEqual(['send c-general do the RCA @u-daniel', 'go c-perf/t-1']);
+  });
+
+  it('replies to the thread conversation id and waits for it before finishing', async () => {
+    const { actions, calls } = recordingActions();
+    const results = await runPlan(
+      [
+        { op: 'navigate', target: thread },
+        { op: 'send_message', target: thread, text: 'looks good', mentions: [daniel] },
+      ],
+      actions,
+    );
+    expect(calls).toEqual(['go c-release/t-1', 'reply t-1 looks good @u-daniel']);
+    expect(results).toEqual([{ ok: true }, { ok: true }]);
+  });
+
+  it('forwards the selected message to an existing channel', async () => {
+    const { actions, calls } = recordingActions();
+    const target: ChannelRef = { kind: 'channel', id: 'c-design', name: 'design' };
+    const results = await runPlan([{ op: 'forward_message', message, target }], actions);
+    expect(calls).toEqual(['forward m-1 c-design']);
+    expect(results).toEqual([{ ok: true }]);
+  });
+
+  it('forwards to the DM opened earlier in the plan', async () => {
+    const { actions, calls } = recordingActions();
+    await runPlan(
+      [
+        { op: 'open_or_create_dm', user: daniel },
+        { op: 'navigate', target: { fromStep: 0 } },
+        { op: 'forward_message', message, target: { fromStep: 0 } },
+      ],
+      actions,
+    );
+    expect(calls).toEqual(['dm u-daniel', 'go c-dm', 'forward m-1 c-dm']);
+  });
+
+  it('stops the plan when the server rejects a forward', async () => {
+    const { actions, calls } = recordingActions({
+      forwardMessage: (messageId, channelId) => {
+        calls.push(`forward ${messageId} ${channelId}`);
+        return Promise.reject(new Error('You are not a participant of the target channel'));
+      },
+    });
+    const results = await runPlan(
+      [
+        { op: 'forward_message', message, target: dm },
+        { op: 'navigate', target: dm },
+      ],
+      actions,
+    );
+    expect(calls).toEqual(['forward m-1 c-dm']);
+    expect(results).toEqual([
+      { ok: false, error: 'You are not a participant of the target channel' },
+    ]);
+  });
+
+  it('marks replies and forwards with distinct progress labels', async () => {
+    const { actions } = recordingActions();
+    const updates: PlanStep[][] = [];
+    await runPlan(
+      [
+        { op: 'send_message', target: thread, text: 'looks good' },
+        { op: 'forward_message', message, target: dm },
+      ],
+      actions,
+      steps => updates.push(steps),
+    );
+    expect(updates.at(-1)).toEqual([
+      { label: 'Replied “looks good” in the thread', status: 'done' },
+      { label: 'Forwarded the message to your DM with Daniel Okafor', status: 'done' },
+    ]);
   });
 
   it('fails a step that points at a step which opened nothing', async () => {

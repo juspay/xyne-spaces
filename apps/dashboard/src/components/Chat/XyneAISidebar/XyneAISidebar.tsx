@@ -10,7 +10,7 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from 'react';
 import { toast } from 'sonner';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useQuery as useZeroQuery } from '../../../hooks/useQuery';
 import { queries } from '../../../zero/queries';
@@ -79,6 +79,7 @@ import { AskAIDebugPanel } from './components/AskAIDebugPanel';
 import type { UserActivity } from '../../../hooks/useUserActivity';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useSelectedAgent } from '../../../hooks/useSelectedAgent';
+import type { EntityRef, ThreadRef } from '@xyne/shared/assistant';
 import { fetchAccessibleClawAgents } from '../../../services/clawAgentListService';
 import { fetchClawAgentModels } from '../../../services/clawAgentModelsService';
 import {
@@ -104,6 +105,25 @@ function newStreamSlotKey(): string {
     return crypto.randomUUID();
   }
   return `draft-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+}
+
+/** Reads the thread conversation from the chat URL, including the threads and recap routes. */
+function threadFromPath(pathname: string): ThreadRef | null {
+  const parts = pathname.split('/').filter(Boolean);
+  const chatIndex = parts.indexOf('chat');
+  const surface = parts[chatIndex + 1];
+  if (chatIndex < 0 || !surface) return null;
+
+  let routeParts = parts.slice(chatIndex + 2);
+  if (surface === 'dir' && ['threads', 'recap', 'radar'].includes(routeParts[0] ?? '')) {
+    routeParts = routeParts.slice(1);
+  } else if (!['dir', 'dm', 'activity', 'bookmarks'].includes(surface)) {
+    return null;
+  }
+
+  const [channelId, id] = routeParts;
+  if (!channelId || !id || ['canvas', 'group', 'profile', 'tickets'].includes(id)) return null;
+  return { kind: 'thread', id, name: '', channelId, channelName: '' };
 }
 
 const DEBUGGER_WIDTH_STORAGE_KEY = 'ask-ai-debug-width';
@@ -343,24 +363,6 @@ const XyneAISidebar = ({
     autoSendPendingQueryRef.current = question;
     setInputValue(question);
   }, []);
-  // The channel open on the left: "post … here" goes there.
-  const onScreen = useMemo(
-    () => (channelId ? [{ kind: 'channel' as const, id: channelId, name: '' }] : []),
-    [channelId],
-  );
-  const assistant = useAssistant({ onAskAI: askXyneAI, onScreen });
-  const {
-    start: startAssistant,
-    reset: resetAssistant,
-    turns: assistantTurns,
-    choose: chooseAssistantChip,
-  } = assistant;
-  const assistantEnabled = !isFullscreen;
-  const assistantLive = assistantEnabled && assistant.open;
-  const showVoiceStage = assistantLive && assistant.view === 'voice';
-  useEffect(() => {
-    if (assistantEnabled && openInVoiceMode) startAssistant();
-  }, [assistantEnabled, openInVoiceMode, startAssistant]);
   // Seed *without* sending, which `autoSendNonce` above deliberately cannot do —
   // it exists for callers that already know the whole question. A host that hands
   // over a starting point instead needs the text in the box and the cursor after
@@ -378,6 +380,49 @@ const XyneAISidebar = ({
   const [deepResearchEnabled, setDeepResearchEnabled] = useState(false);
   const [createCanvasEnabled, setCreateCanvasEnabled] = useState(false);
   const [activeThreadInfo, setActiveThreadInfo] = useState<ThreadInfo | null>(threadInfo ?? null);
+  const { pathname } = useLocation();
+  const onScreen = useMemo<EntityRef[]>(() => {
+    const currentThread = threadFromPath(pathname);
+    const shownChannelId = currentThread?.channelId ?? channelId;
+    const records: EntityRef[] = shownChannelId
+      ? [{ kind: 'channel', id: shownChannelId, name: '' }]
+      : [];
+
+    if (currentThread) records.push(currentThread);
+    else if (activeThreadInfo?.isThreadMessage && activeThreadInfo.channelId) {
+      records.push({
+        kind: 'thread',
+        id: activeThreadInfo.conversationId,
+        name: '',
+        channelId: activeThreadInfo.channelId,
+        channelName: '',
+      });
+    }
+
+    const messageChannelId = activeThreadInfo?.channelId ?? shownChannelId;
+    if (activeThreadInfo?.messageId && messageChannelId) {
+      records.push({
+        kind: 'message',
+        id: activeThreadInfo.messageId,
+        name: activeThreadInfo.previewText,
+        channelId: messageChannelId,
+      });
+    }
+    return records;
+  }, [activeThreadInfo, channelId, pathname]);
+  const assistant = useAssistant({ onAskAI: askXyneAI, onScreen });
+  const {
+    start: startAssistant,
+    reset: resetAssistant,
+    turns: assistantTurns,
+    choose: chooseAssistantChip,
+  } = assistant;
+  const assistantEnabled = !isFullscreen;
+  const assistantLive = assistantEnabled && assistant.open;
+  const showVoiceStage = assistantLive && assistant.view === 'voice';
+  useEffect(() => {
+    if (assistantEnabled && openInVoiceMode) startAssistant();
+  }, [assistantEnabled, openInVoiceMode, startAssistant]);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [selectedActivities, setSelectedActivities] = useState<UserActivity[]>([]);
   const [selectedTickets, setSelectedTickets] = useState<SelectedTicket[]>([]);

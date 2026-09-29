@@ -1,6 +1,10 @@
 import { Router, type Request, type Response } from 'express';
 import { performance } from 'node:perf_hooks';
-import { turnRequestSchema, type TurnResponse } from '@xyne/shared/assistant';
+import {
+  assistantSessionParamsSchema,
+  turnRequestSchema,
+  type TurnResponse,
+} from '@xyne/shared/assistant';
 import {
   assistantServices,
   handleTurn,
@@ -23,7 +27,7 @@ import { logger } from '@/utils/logger';
  */
 const router = Router();
 
-router.post('/turn', async (req: Request, res: Response) => {
+router.post('/sessions/:sessionId/turns', async (req: Request, res: Response) => {
   const user = req.user;
   if (!user?.id || !user.workspaceId) {
     res.status(401).json({ error: 'Sign in to use the assistant.' });
@@ -37,13 +41,15 @@ router.post('/turn', async (req: Request, res: Response) => {
     res.status(503).json({ error: 'The assistant is turned off right now.' });
     return;
   }
+  const params = assistantSessionParamsSchema.safeParse(req.params);
   const parsed = turnRequestSchema.safeParse(req.body);
-  if (!parsed.success) {
+  if (!params.success || !parsed.success) {
     res.status(400).json({ error: 'This request is not a valid assistant turn.' });
     return;
   }
 
-  const { sessionId, requestId, input, context } = parsed.data;
+  const { sessionId } = params.data;
+  const { requestId, input, context } = parsed.data;
   const startedAt = performance.now();
   const diagnostics: AssistantRequestDiagnostics = { jevMs: [] };
   const services = assistantServices(

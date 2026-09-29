@@ -37,6 +37,10 @@ export interface AppActions {
   createChannel(channel: NewChannel): Promise<ChannelRef>;
   /** A new top-level message, @mentioning `mentions` first. Resolves once the server has it. */
   sendMessage(channelId: string, text: string, mentions: readonly PersonRef[]): Promise<void>;
+  /** A reply in an existing thread, @mentioning `mentions` first. */
+  replyInThread(threadId: string, text: string, mentions: readonly PersonRef[]): Promise<void>;
+  /** Copies an existing message into a channel or DM. */
+  forwardMessage(messageId: string, channelId: string): Promise<void>;
   navigate(to: Conversation): void;
 }
 
@@ -95,8 +99,19 @@ async function runStep(
       });
     case 'send_message': {
       const { channelId, threadId } = conversationOf(step.target, earlier);
-      if (threadId) throw new Error('replies in a thread aren’t supported yet');
-      await actions.sendMessage(channelId, step.text, step.mentions ?? []);
+      if (threadId) {
+        await actions.replyInThread(threadId, step.text, step.mentions ?? []);
+      } else {
+        await actions.sendMessage(channelId, step.text, step.mentions ?? []);
+      }
+      return undefined;
+    }
+    case 'forward_message': {
+      const target = conversationOf(step.target, earlier);
+      if (target.threadId) {
+        throw new Error('A message can only be forwarded to a channel or direct message.');
+      }
+      await actions.forwardMessage(step.message.id, target.channelId);
       return undefined;
     }
     case 'navigate':
@@ -145,7 +160,20 @@ function stepLabels(step: Operation, plan: Plan): { doing: string; done: string 
     case 'send_message': {
       const text =
         step.text.length > MAX_QUOTED ? `${step.text.slice(0, MAX_QUOTED - 1)}…` : step.text;
+      if ('kind' in step.target && step.target.kind === 'thread') {
+        return {
+          doing: `Replying “${text}” in the thread`,
+          done: `Replied “${text}” in the thread`,
+        };
+      }
       return { doing: `Sending “${text}”`, done: `Sent “${text}”` };
+    }
+    case 'forward_message': {
+      const target = placeOf(step.target, plan);
+      return {
+        doing: `Forwarding the message to ${target}`,
+        done: `Forwarded the message to ${target}`,
+      };
     }
   }
 }
@@ -157,5 +185,6 @@ function placeOf(target: Target, plan: Plan): string {
     if (origin?.op === 'create_channel') return `“${origin.name}”`;
     return 'it';
   }
-  return target.kind === 'thread' ? 'the thread' : `#${target.name}`;
+  if (target.kind === 'thread') return 'the thread';
+  return target.isDirect ? `your DM with ${target.name}` : `#${target.name}`;
 }

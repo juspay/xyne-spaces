@@ -12,10 +12,32 @@ const danielPark: FoundRecord = {
   record: { kind: 'person', id: 'u-park', name: 'Daniel Park' },
   detail: 'park@x.io',
 };
+const priyaShah: FoundRecord = {
+  record: { kind: 'person', id: 'u-priya-shah', name: 'Priya Shah' },
+  detail: 'priya.shah@x.io',
+};
+const priyaNair: FoundRecord = {
+  record: { kind: 'person', id: 'u-priya-nair', name: 'Priya Nair' },
+  detail: 'priya.nair@x.io',
+};
 
 const android: FoundRecord = {
   record: { kind: 'channel', id: 'c-android', name: 'android' },
   detail: '#android',
+};
+
+const openThread = {
+  kind: 'thread' as const,
+  id: 't-open',
+  name: 'this thread',
+  channelId: 'c-general',
+  channelName: 'general',
+};
+const openMessage = {
+  kind: 'message' as const,
+  id: 'm-open',
+  name: 'this message',
+  channelId: 'c-general',
 };
 
 const general: FoundRecord = {
@@ -91,15 +113,18 @@ function assistant(people: FoundRecord[] = [daniel]) {
     records: {
       // Like the real lookup: everyone in the workspace; `matchName` does the matching.
       // A search narrowed to Meera finds only the thread she was in.
-      find: async (kind, _mention, hints) =>
-        kind === 'person'
-          ? people
-          : kind === 'channel'
-            ? [android]
-            : hints?.people.includes('u-meera')
-              ? [perfThreads[1]!]
-              : perfThreads,
-      get: async (kind, id) => (kind === 'channel' && id === general.record.id ? general : null),
+      find: async (kind, _mention, hints) => {
+        if (kind === 'person') return people;
+        if (kind === 'channel') return [android];
+        if (kind === 'message') return [];
+        return hints?.people.includes('u-meera') ? [perfThreads[1]!] : perfThreads;
+      },
+      get: async (kind, id) => {
+        if (kind === 'channel' && id === general.record.id) return general;
+        if (kind === 'thread' && id === openThread.id) return { record: openThread };
+        if (kind === 'message' && id === openMessage.id) return { record: openMessage };
+        return null;
+      },
     },
     askJev: async (_state, questions) => {
       jevCalls += 1;
@@ -147,7 +172,7 @@ function assistant(people: FoundRecord[] = [daniel]) {
     lookingAt(refs: EntityRef[]): void {
       onScreen = refs;
     },
-    say: (text: string) => send({ kind: 'text', text, via: 'voice' }),
+    say: (text: string, via: 'typed' | 'voice' = 'voice') => send({ kind: 'text', text, via }),
     tap: (optionId: string) => send({ kind: 'choose', optionId }),
     ran: (runId: string, results: Array<{ ok: boolean; error?: string }>) =>
       send({ kind: 'planResult', runId, results }),
@@ -287,6 +312,38 @@ describe('a turn', () => {
     chat.hears({ continues: 0.9, fields: { with: 'Meera' } });
     const opened = await chat.say('the one with Meera');
     expect(opened.run?.plan).toEqual([{ op: 'navigate', target: perfThreads[1]!.record }]);
+  });
+
+  it('keeps the original topic when a filter answer repeats it as filler', async () => {
+    const chat = assistant();
+    const androidThread: FoundRecord = {
+      record: {
+        kind: 'thread',
+        id: 't-android-release',
+        name: 'Release notes in Android',
+        channelId: android.record.id,
+        channelName: android.record.name,
+      },
+    };
+    chat.services.records.find = async (kind, _mention, hints) => {
+      if (kind === 'channel') return [android];
+      if (kind === 'thread' && hints?.channels.includes(android.record.id)) {
+        return [androidThread];
+      }
+      return kind === 'thread' ? perfThreads : [];
+    };
+    chat.hears({ action: 'find_conversation', fields: { conversation: 'release notes' } });
+
+    const choices = await chat.say('find the messages about release notes');
+    expect(choices.display?.kind).toBe('choices');
+
+    chat.hears({
+      continues: 0.9,
+      fields: { conversation: 'the one in android', in: 'android' },
+    });
+    const opened = await chat.say('the one in android');
+
+    expect(opened.run?.plan).toEqual([{ op: 'navigate', target: androidThread.record }]);
   });
 
   it.each([
@@ -550,6 +607,120 @@ describe('a turn', () => {
     ]);
   });
 
+  it('replies in the thread open on screen', async () => {
+    const chat = assistant();
+    chat.lookingAt([{ ...openThread, name: '', channelName: '' }]);
+    chat.hears({ action: 'reply_in_thread', fields: { thread: 'here', message: 'looks good' } });
+    const preview = await chat.say('reply here saying looks good');
+    expect(preview.say).toBe('Reply “looks good” in this thread?');
+    const replied = await chat.tap('yes');
+    expect(replied.run?.plan).toEqual([
+      { op: 'navigate', target: openThread },
+      { op: 'send_message', target: openThread, text: 'looks good', mentions: [] },
+    ]);
+  });
+
+  it('finds a thread by topic and replies there from typed input', async () => {
+    const chat = assistant();
+    const releaseThread: FoundRecord = {
+      record: {
+        kind: 'thread',
+        id: 't-release',
+        name: 'Release notes draft',
+        channelId: 'c-release',
+        channelName: 'release-planning',
+      },
+      detail: '#release-planning · Meera Iyer',
+    };
+    const searched: string[] = [];
+    chat.services.records.find = async (kind, mention) => {
+      if (kind === 'thread') {
+        searched.push(mention);
+        return [releaseThread];
+      }
+      return kind === 'person' ? [daniel] : [];
+    };
+    chat.hears({
+      action: 'reply_in_thread',
+      fields: { thread: 'release notes draft', message: 'looks good' },
+    });
+
+    const preview = await chat.say(
+      'Reply to the thread about the release notes draft saying looks good',
+      'typed',
+    );
+
+    expect(searched).toEqual(['release notes draft']);
+    expect(preview.say).toBe('Reply “looks good” in Release notes draft?');
+    const confirmed = await chat.tap('yes');
+    expect(confirmed.run?.plan).toEqual([
+      { op: 'navigate', target: releaseThread.record },
+      { op: 'send_message', target: releaseThread.record, text: 'looks good', mentions: [] },
+    ]);
+  });
+
+  it('forwards the message on screen to a person, always after a preview', async () => {
+    const chat = assistant();
+    chat.lookingAt([{ ...openMessage, name: '“Ship it today”' }]);
+    chat.hears({
+      action: 'forward_message',
+      fields: { message: 'this', recipient: 'Daniel Okafor' },
+    });
+    const preview = await chat.say('forward this message to Daniel Okafor');
+    expect(preview.say).toBe('Forward “Ship it today” to Daniel Okafor?');
+    const forwarded = await chat.tap('yes');
+    expect(forwarded.run?.plan).toEqual([
+      { op: 'open_or_create_dm', user: daniel.record },
+      { op: 'navigate', target: { fromStep: 0 } },
+      {
+        op: 'forward_message',
+        message: { ...openMessage, name: '“Ship it today”' },
+        target: { fromStep: 0 },
+      },
+    ]);
+  });
+
+  it('asks which Priya, then confirms before forwarding', async () => {
+    const chat = assistant([priyaShah, priyaNair]);
+    chat.lookingAt([{ ...openMessage, name: '“Ship it today”' }]);
+    chat.hears({
+      action: 'forward_message',
+      fields: { message: 'this', recipient: 'Priya' },
+    });
+
+    const ambiguous = await chat.say('forward this message to Priya');
+    expect(ambiguous.display).toMatchObject({
+      kind: 'choices',
+      options: [
+        { id: 'u-priya-shah', label: 'Priya Shah' },
+        { id: 'u-priya-nair', label: 'Priya Nair' },
+      ],
+    });
+
+    const selected = await chat.tap('u-priya-shah');
+    expect(selected.say).toBe('Forward “Ship it today” to Priya Shah?');
+    const confirmed = await chat.tap('yes');
+    expect(confirmed.run?.plan).toEqual([
+      { op: 'open_or_create_dm', user: priyaShah.record },
+      { op: 'navigate', target: { fromStep: 0 } },
+      {
+        op: 'forward_message',
+        message: { ...openMessage, name: '“Ship it today”' },
+        target: { fromStep: 0 },
+      },
+    ]);
+  });
+
+  it('asks the user to pick a message when none is on screen', async () => {
+    const chat = assistant();
+    chat.hears({
+      action: 'forward_message',
+      fields: { message: 'this', recipient: 'Daniel Okafor' },
+    });
+    const ask = await chat.say('forward this message to Daniel Okafor');
+    expect(ask.say).toBe('Which message? Use Ask AI on it, or open its thread, then ask me again.');
+  });
+
   it('asks which Daniel, with buttons, and continues from the tap', async () => {
     const chat = assistant([daniel, danielPark]);
     chat.hears({
@@ -620,6 +791,39 @@ describe('a turn', () => {
     const sent = await chat.say('tell Daniel Okafor hi');
     expect(sent.run?.plan[0]).toEqual({ op: 'open_or_create_dm', user: daniel.record });
     expect(chat.session().conversation.active).toBeNull();
+  });
+
+  it('re-reads a new same-action request when its pending-context read misses required text', async () => {
+    const chat = assistant();
+    chat.hears({ action: 'send_dm', fields: { recipient: 'Daniel Okafor' } });
+    expect((await chat.say('message Daniel Okafor')).say).toBe(
+      'What should I say to Daniel Okafor?'
+    );
+    const beforeNewRequest = chat.jevCalls();
+
+    chat.hears({
+      action: 'send_dm',
+      continues: 0.1,
+      fields: { recipient: 'Daniel Okafor' },
+    });
+    const reply = await chat.say('tell Daniel Okafor the build is green');
+
+    expect(reply.say).toBe('What should I say to Daniel Okafor?');
+    expect(reply.run).toBeUndefined();
+    // One read distinguishes a new request from the pending one; the second reads its fields
+    // without that pending context. Missing message text is still requested, never invented.
+    expect(chat.jevCalls() - beforeNewRequest).toBe(2);
+  });
+
+  it('re-reads a missing post body after recognizing the channel, then asks instead of sending', async () => {
+    const chat = assistant();
+    chat.hears({ action: 'post_message', fields: { channel: 'android' } });
+
+    const reply = await chat.say('go to android and mention Arjun Mehta to check the crash');
+
+    expect(reply.say).toBe('What should I post in android?');
+    expect(reply.run).toBeUndefined();
+    expect(chat.jevCalls()).toBe(2);
   });
 
   it('finds a person whose name was spelled the way it sounds', async () => {

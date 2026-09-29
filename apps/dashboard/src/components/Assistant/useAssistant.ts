@@ -130,8 +130,7 @@ export function useAssistant({
         const requestId = uuidv4();
         note('Sent', `${describeInput(next)} · requestId ${requestId}`);
         const sentAt = performance.now();
-        const response = await assistantService.turn({
-          sessionId,
+        const response = await assistantService.turn(sessionId, {
           requestId,
           input: next,
           context: { onScreen: [...onScreenRef.current] },

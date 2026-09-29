@@ -45,7 +45,7 @@ function problemsIn(action: ActionDefinition): string[] {
     ]),
     ...textProblems(action, 'summarize', action.summarize),
     ...textProblems(action, 'done', action.done),
-    ...steps.flatMap((step, index) => stepProblems(action, steps, index)),
+    ...steps.flatMap((_step, index) => stepProblems(action, steps, index)),
   ];
 }
 

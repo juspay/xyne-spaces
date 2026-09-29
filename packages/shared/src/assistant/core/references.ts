@@ -1,14 +1,14 @@
 import { z } from 'zod';
 
 /**
- * Real records the assistant talks about: people, channels, threads. Only the backend's
+ * Real records the assistant talks about: people, channels, threads, messages. Only the backend's
  * resolvers create these, from names the user said; the language model never produces an id.
  *
  * Every record has the same base (kind, id, name). Adding a kind also needs changes to the
  * backend resolver and any operation or client code that consumes that record.
  */
 
-export const ENTITY_KINDS = ['person', 'channel', 'thread'] as const;
+export const ENTITY_KINDS = ['person', 'channel', 'thread', 'message'] as const;
 export type EntityKind = (typeof ENTITY_KINDS)[number];
 
 interface EntityBase<K extends EntityKind> {
@@ -31,7 +31,12 @@ export interface ThreadRef extends EntityBase<'thread'> {
   channelName: string;
 }
 
-export type EntityRef = PersonRef | ChannelRef | ThreadRef;
+/** A message that already exists, such as the one selected on screen. `name` is its preview. */
+export interface MessageRef extends EntityBase<'message'> {
+  channelId: string;
+}
+
+export type EntityRef = PersonRef | ChannelRef | ThreadRef | MessageRef;
 
 export const personRefSchema = z
   .object({ kind: z.literal('person'), id: z.string().min(1), name: z.string() })
@@ -56,11 +61,21 @@ export const threadRefSchema = z
   })
   .strict();
 
+export const messageRefSchema = z
+  .object({
+    kind: z.literal('message'),
+    id: z.string().min(1),
+    name: z.string(),
+    channelId: z.string().min(1),
+  })
+  .strict();
+
 /** Checks a complete, supported record shape. */
 export const entityRefSchema = z.discriminatedUnion('kind', [
   personRefSchema,
   channelRefSchema,
   threadRefSchema,
+  messageRefSchema,
 ]) satisfies z.ZodType<EntityRef>;
 
 /** A collected detail: text (or a choice id), one record, or several records. */

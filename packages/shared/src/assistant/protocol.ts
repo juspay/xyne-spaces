@@ -32,11 +32,16 @@ const turnInput = z.discriminatedUnion('kind', [
     .strict(),
 ]);
 
-/** What the dashboard sends for every turn. Checked on arrival. */
+/** Path parameters for POST /api/assistant/sessions/{sessionId}/turns. */
+export const assistantSessionParamsSchema = z
+  .object({
+    sessionId: z.string().min(1).max(100),
+  })
+  .strict();
+
+/** JSON body for one assistant turn. Session identity belongs in the route. */
 export const turnRequestSchema = z
   .object({
-    /** One conversation; the dashboard keeps it for the life of the panel. */
-    sessionId: z.string().min(1).max(100),
     /** Correlates logs across speech-to-text, the backend, and the plan runner. */
     requestId: z.string().min(1).max(100),
     input: turnInput,

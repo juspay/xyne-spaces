@@ -33,7 +33,7 @@ export const CHANNELS = {
           required: true,
           ask: 'What should I name the channel?',
           describe:
-            'the new channel’s name exactly as the user gave it, without "named" or "called"',
+            'only the new channel name, without visibility or the word “channel” (“create a public channel design sync” → “design sync”; “called hiring with Meera” → “hiring”)',
         },
         visibility: {
           kind: 'choice',
@@ -51,14 +51,14 @@ export const CHANNELS = {
           required: false,
           ask: 'Who should I add?',
           offer: 'Want to add anyone? Say their names, or say no.',
-          describe: 'people to add to the channel',
+          describe: 'people the user explicitly names to add; never the channel name',
         },
         firstMessage: {
           kind: 'text',
           required: false,
           ask: 'What should I post first?',
           describe:
-            'a message to post in the channel right after creating it ("…and message hello" → "hello")',
+            'only the exact message the user explicitly asks to post after creating the channel ("…and message hello" → "hello"); never reuse the channel name',
         },
       },
       summarize:
@@ -80,6 +80,7 @@ export const CHANNELS = {
           'Take me to release planning',
           'Go to design review',
           'Switch to marketing',
+          'Switch to ios',
           'Open random',
         ],
         notFor: [
@@ -96,7 +97,8 @@ export const CHANNELS = {
           kind: 'channel',
           required: true,
           ask: 'Which channel should I open?',
-          describe: 'the name of the existing channel to open',
+          describe:
+            'the existing channel name only: “show me the general channel” → “general”; “switch to ios” → “ios”; omit words like “the” and “channel”',
         },
       },
       summarize: 'Open {channel}',

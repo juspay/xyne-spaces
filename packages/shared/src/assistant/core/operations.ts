@@ -2,6 +2,7 @@ import { z } from 'zod';
 import {
   channelRefSchema,
   entityRefSchema,
+  messageRefSchema,
   personRefSchema,
   threadRefSchema,
   type EntityKind,
@@ -16,12 +17,9 @@ import {
  * something none of these can express, and teach the dashboard's runner to perform it.
  */
 
-/** A conversation to act in: a channel or thread the backend found, or one an earlier step made. */
-const conversation = z.union([
-  channelRefSchema,
-  threadRefSchema,
-  z.object({ fromStep: z.number().int().min(0) }).strict(),
-]);
+/** A reference to a channel or thread found by the backend, or a channel made by an earlier step. */
+const fromStep = z.object({ fromStep: z.number().int().min(0) }).strict();
+const conversation = z.union([channelRefSchema, threadRefSchema, fromStep]);
 
 const openOrCreateDm = z
   .object({ op: z.literal('open_or_create_dm'), user: personRefSchema })
@@ -46,7 +44,16 @@ const sendMessage = z
     mentions: z.array(personRefSchema).optional(),
   })
   .strict()
-  .describe('A new top-level message in a channel or DM.');
+  .describe('A new message in a channel or DM, or a reply in a thread.');
+
+const forwardMessage = z
+  .object({
+    op: z.literal('forward_message'),
+    message: messageRefSchema,
+    target: z.union([channelRefSchema, fromStep]),
+  })
+  .strict()
+  .describe('Forwards a message that already exists into a channel or DM.');
 
 const navigate = z
   .object({ op: z.literal('navigate'), target: conversation })
@@ -57,6 +64,7 @@ export const operationSchema = z.discriminatedUnion('op', [
   openOrCreateDm,
   createChannel,
   sendMessage,
+  forwardMessage,
   navigate,
 ]);
 

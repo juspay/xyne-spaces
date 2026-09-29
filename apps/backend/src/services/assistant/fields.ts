@@ -105,14 +105,27 @@ export function readingFor(
         if (!value) continue;
         words[id] = field?.many ? value.split(/\s*,\s*|\s+and\s+/).filter(Boolean) : value;
       }
-      // A text value never starts or ends with another field's value: "general that the build
-      // is green", with the channel "general", is the message "the build is green".
+      // Text fields exclude record names from anywhere in the action, then earlier text fields.
+      // This keeps a member out of a channel name and a channel name out of its first message.
+      const recordValues = Object.entries(words).flatMap(([id, value]) =>
+        ['text', 'choice'].includes(action.fields[id]?.kind ?? '')
+          ? []
+          : Array.isArray(value)
+            ? value
+            : [value]
+      );
+      const earlierTextValues: string[] = [];
       for (const [id, value] of Object.entries(words)) {
-        if (action.fields[id]?.kind !== 'text' || typeof value !== 'string') continue;
-        const others = Object.entries(words).flatMap(([other, said]) => (other === id ? [] : said));
-        const trimmed = trimEdges(value, others);
-        if (trimmed) words[id] = trimmed;
-        else delete words[id];
+        const field = action.fields[id];
+        if (field?.kind === 'text' && typeof value === 'string') {
+          const trimmed = trimEdges(value, [...recordValues, ...earlierTextValues]);
+          if (trimmed) words[id] = trimmed;
+          else delete words[id];
+        }
+        const current = words[id];
+        if (field?.kind === 'text' && typeof current === 'string') {
+          earlierTextValues.push(current);
+        }
       }
       return words;
     },
@@ -153,7 +166,7 @@ function trimEdges(text: string, others: readonly string[]): string {
     }
     for (const other of others) {
       const size = other.split(/\s+/).length;
-      if (size >= words.length) continue;
+      if (size > words.length) continue;
       if (matches(words.slice(0, size), other)) {
         words = words.slice(size);
         return true;

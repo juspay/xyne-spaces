@@ -6,6 +6,8 @@ jest.mock('@/database/client', () => ({
   db: {
     user: { findMany: jest.fn() },
     channel: { findMany: jest.fn(), findFirst: jest.fn() },
+    conversation: { findFirst: jest.fn() },
+    message: { findFirst: jest.fn() },
   },
 }));
 jest.mock('@xyne/shared', () => ({
@@ -19,6 +21,8 @@ jest.mock('@/services/vespaSearch', () => ({ vespaService: {} }));
 const userFindMany = db.user.findMany as jest.Mock;
 const channelFindMany = db.channel.findMany as jest.Mock;
 const channelFindFirst = db.channel.findFirst as jest.Mock;
+const conversationFindFirst = db.conversation.findFirst as jest.Mock;
+const messageFindFirst = db.message.findFirst as jest.Mock;
 
 describe('assistant record access', () => {
   beforeEach(() => {
@@ -115,5 +119,35 @@ describe('assistant record access', () => {
       expect(serialized).toContain('"visibility":"PUBLIC"');
       expect(serialized).toContain('"userId":"caller"');
     }
+  });
+
+  it('reads the thread and message on screen only through channels the caller can read', async () => {
+    const finder = databaseFinder({ userId: 'caller', workspaceId: 'workspace-a', role: 'MEMBER' });
+    conversationFindFirst.mockResolvedValue({ channel: { id: 'c-design', name: 'design' } });
+    messageFindFirst.mockResolvedValue({ conversation: { channelId: 'c-design' } });
+
+    expect(await finder.get('thread', 't-1')).toEqual({
+      record: {
+        kind: 'thread',
+        id: 't-1',
+        name: 'this thread',
+        channelId: 'c-design',
+        channelName: 'design',
+      },
+    });
+    expect(await finder.get('message', 'm-1')).toEqual({
+      record: { kind: 'message', id: 'm-1', name: 'this message', channelId: 'c-design' },
+    });
+    for (const where of [
+      conversationFindFirst.mock.calls[0]?.[0].where,
+      messageFindFirst.mock.calls[0]?.[0].where,
+    ]) {
+      const serialized = JSON.stringify(where);
+      expect(serialized).toContain('"workspaceId":"workspace-a"');
+      expect(serialized).toContain('"userId":"caller"');
+    }
+    expect(JSON.stringify(messageFindFirst.mock.calls[0]?.[0].where)).toContain(
+      '"isDeleted":false'
+    );
   });
 });

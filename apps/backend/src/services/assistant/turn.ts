@@ -171,7 +171,17 @@ async function understand(
       // Answering "which one?" with more details ("the one with Meera") looks again with the
       // same words, narrowed by the new ones.
       const [name] = draft.open;
-      if (name?.options.length && !words[name.field]) words[name.field] = name.said;
+      const addsSearchFilter = Object.keys(words).some((field) => {
+        const kind = action.fields[field]?.kind;
+        return kind === 'person' || kind === 'channel';
+      });
+      if (
+        name?.options.length &&
+        action.fields[name.field]?.kind === 'thread' &&
+        (addsSearchFilter || !words[name.field])
+      ) {
+        words[name.field] = name.said;
+      }
       const answer = asking && !words[asking] ? { [asking]: bareAnswer(text) } : {};
       const updates = await toFieldUpdates(
         action,
@@ -243,7 +253,7 @@ async function startAction(
 ): Promise<Outcome> {
   const action = services.catalog.get(actionId);
   if (!action) return withReply(session, replyForError('I can’t do that yet.'));
-  const words = text ? (heard?.words(action) ?? (await wordsFor(action, text, services))) : {};
+  const words = text ? await wordsForAction(action, text, services, heard) : {};
   const updates = await toFieldUpdates(action, words, services.records, true);
   return applyEvent(
     {
@@ -254,6 +264,28 @@ async function startAction(
     session,
     services
   );
+}
+
+/** Re-read missing text when Jev identified another required detail. */
+async function wordsForAction(
+  action: ActionDefinition,
+  text: string,
+  services: TurnServices,
+  heard?: Understanding
+): Promise<FieldWords> {
+  const words = heard?.words(action) ?? (await wordsFor(action, text, services));
+  const requiredFields = Object.entries(action.fields).filter(([, field]) => field.required);
+  const missingText = requiredFields.some(
+    ([id, field]) => field.kind === 'text' && words[id] === undefined
+  );
+  const hasOtherRequiredField = requiredFields.some(
+    ([id, field]) => field.kind !== 'text' && words[id] !== undefined
+  );
+  if (!heard || !missingText || !hasOtherRequiredField) return words;
+
+  // The first read also judged the action. Read this action's details alone, then fill only gaps.
+  const focusedWords = await wordsFor(action, text, services);
+  return { ...focusedWords, ...words };
 }
 
 /** A long sentence may have been read short, so the words it sends are previewed first. */

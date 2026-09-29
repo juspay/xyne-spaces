@@ -6,7 +6,8 @@ import { mutators } from '../../zero/mutators';
 import { channelService } from '../../services/Chat/channelService';
 import { sendConversationWithAttachments } from '../Chat/AddDmForm/useExistingDmChannel';
 import { processMessageForSending } from '../Chat/ChatInput/ChatInput.utils';
-import type { ChannelRef } from '@xyne/shared/assistant';
+import { MessageType } from '@xyne/shared';
+import type { ChannelRef, PersonRef } from '@xyne/shared/assistant';
 import { userToMentionResult } from '@xyne/shared/utils';
 import type { AppActions } from './planRunner';
 import { requireServerMutation } from './serverMutation';
@@ -64,10 +65,44 @@ export function useAppActions(): AppActions {
       // and leaves any draft the user is typing in that conversation alone. "@Name" becomes a
       // real mention the way the composer does it, which is also what makes an agent answer.
       sendMessage: (channelId, text, mentions): Promise<void> => {
-        const said = [...mentions.map(person => `@${person.name}`), text].join(' ');
-        const people = mentions.map(person => userToMentionResult(person, false));
-        const html = processMessageForSending(plainTextToHtml(said), people);
-        return sendConversationWithAttachments(channelId, html, []);
+        return sendConversationWithAttachments(channelId, messageContent(text, mentions), []);
+      },
+
+      // Thread replies use the same Zero mutator as the thread composer. Passing the thread's
+      // conversation id and no attachments keeps this reply isolated from any user draft.
+      replyInThread: async (threadId, text, mentions): Promise<void> => {
+        await requireServerMutation(
+          zero.mutate(
+            mutators.messages.send({
+              conversationId: threadId,
+              content: messageContent(text, mentions),
+              type: MessageType.USER,
+              showInChannel: false,
+              timestamp: Date.now(),
+              messageId: uuidv4(),
+              attachmentIds: [],
+            }),
+          ),
+          'Could not reply in the thread.',
+        );
+      },
+
+      // Use the existing forwarding mutator so server-side membership and source access checks
+      // remain authoritative. The runner waits for its server result before marking the step done.
+      forwardMessage: async (messageId, channelId): Promise<void> => {
+        await requireServerMutation(
+          zero.mutate(
+            mutators.conversations.forwardMessage({
+              targetChannelId: channelId,
+              originalMessageId: messageId,
+              conversationId: uuidv4(),
+              messageId: uuidv4(),
+              timestamp: Date.now(),
+              conversationParticipantId: uuidv4(),
+            }),
+          ),
+          'Could not forward the message.',
+        );
       },
 
       navigate: ({ channelId, threadId }): void => {
@@ -76,6 +111,13 @@ export function useAppActions(): AppActions {
     }),
     [zero, navigate],
   );
+}
+
+/** Builds composer-ready HTML, preserving real mention nodes for users and agents. */
+function messageContent(text: string, mentions: readonly PersonRef[]): string {
+  const said = [...mentions.map(person => `@${person.name}`), text].join(' ');
+  const people = mentions.map(person => userToMentionResult(person, false));
+  return processMessageForSending(plainTextToHtml(said), people);
 }
 
 /** Message bodies are HTML; the assistant's text is plain, so it is escaped first. */

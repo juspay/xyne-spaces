@@ -77,7 +77,7 @@ const CONTINUES: JevQuestion = {
   criteria: {
     true: 'It answers or adjusts the request in progress: "call it ABC", "private", "also add Priya", "actually make it Daniel Park", "the one with Meera", or any words to send when `inProgress.question` asks what to say ("the build is green").',
     false:
-      'It is a complete request of its own, even for the same kind of action: "tell Priya the build is green" while a message to Daniel is waiting, or "create a channel called Ops".',
+      'It is a complete request of its own, even for the same kind of action: if a message to Arjun is waiting for its text and `request` says "tell Meera the doc is ready", start a new message to Meera with "the doc is ready"; also "create a channel called Ops" starts a new request.',
   },
 };
 
@@ -180,6 +180,7 @@ function describeInProgress(draft: Draft, action: ActionDefinition): Record<stri
   );
   return {
     request: summarizeDraft(draft, action),
+    ...(name ? { openField: { field: name.field, said: name.said } } : {}),
     ...(question ? { question } : {}),
     ...(options?.length ? { options } : {}),
   };

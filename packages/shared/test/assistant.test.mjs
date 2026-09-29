@@ -5,12 +5,15 @@ import {
   advance,
   bindPlan,
   ACTIONS,
+  assistantSessionParamsSchema,
   confirmPolicyOf,
   EMPTY_CONVERSATION,
   intentCriteria,
   isEntityRef,
   loadActions,
+  operationSchema,
   renderTemplate,
+  turnRequestSchema,
 } from '../dist/assistant/index.js';
 
 const priya = { kind: 'person', id: 'u-priya', name: 'Priya Shah' };
@@ -19,6 +22,18 @@ const deepak = { kind: 'person', id: 'u-deepak', name: 'Deepak Rao' };
 
 const set = (field, value, certain = true) => ({ field, op: 'set', value, certain });
 const request = (action, ...updates) => ({ type: 'request', action, updates });
+
+test('assistant turn session identity is a path parameter, not body data', () => {
+  const body = {
+    requestId: 'request-1',
+    input: { kind: 'text', text: 'Find the thread', via: 'typed' },
+    context: { onScreen: [] },
+  };
+
+  assert.equal(assistantSessionParamsSchema.safeParse({ sessionId: 'session-1' }).success, true);
+  assert.equal(turnRequestSchema.safeParse(body).success, true);
+  assert.equal(turnRequestSchema.safeParse({ ...body, sessionId: 'session-1' }).success, false);
+});
 
 /** Runs a sequence of events from an empty conversation; returns every result. */
 function converse(...events) {
@@ -257,6 +272,32 @@ test('names are settled one at a time, in order, before a waiting search', () =>
   assert.deepEqual(lookup.state.active.values.with, [deepak]);
 });
 
+test('a new search filter clears the old conversation choices before looking up again', () => {
+  const candidate = {
+    id: 't-login',
+    label: 'Login errors',
+    value: { kind: 'thread', id: 't-login', name: 'Login errors' },
+  };
+  const first = advance(
+    EMPTY_CONVERSATION,
+    request('find_conversation', {
+      field: 'conversation',
+      op: 'open',
+      said: 'login errors',
+      options: [candidate],
+    }),
+    ACTIONS,
+  );
+
+  assert.equal(first.step.kind, 'choose');
+  const narrowed = advance(first.state, {
+    type: 'details',
+    updates: [{ field: 'conversation', op: 'later', said: 'login errors' }],
+  }, ACTIONS);
+
+  assert.deepEqual(narrowed.step, { kind: 'lookup', field: 'conversation', said: 'login errors' });
+});
+
 test('a correction replaces the name being asked about; other names keep their turn', () => {
   const [, corrected] = converse(
     request(
@@ -406,6 +447,21 @@ test('a bound plan is validated: a wrong value never reaches the runner', () => 
   );
 });
 
+test('forwarding targets a channel or a channel created earlier, never a thread', () => {
+  const channel = { kind: 'channel', id: 'c-android', name: 'android' };
+  const thread = {
+    kind: 'thread',
+    id: 't-1',
+    name: 'Release notes',
+    channelId: 'c-android',
+    channelName: 'android',
+  };
+  const message = { kind: 'message', id: 'm-1', name: 'Build is green', channelId: 'c-android' };
+  const forward = { op: 'forward_message', message, target: channel };
+  assert.equal(operationSchema.safeParse(forward).success, true);
+  assert.equal(operationSchema.safeParse({ ...forward, target: thread }).success, false);
+});
+
 test('every mistake in a definition stops startup and names the problem', () => {
   const cases = [
     [{ id: 'Bad-Id' }, /action Bad-Id: id must be snake_case/],
@@ -474,26 +530,34 @@ test('every mistake in a definition stops startup and names the problem', () => 
 
 test('every shipped action loads and renders with sample values', () => {
   const android = { kind: 'channel', id: 'c-android', name: 'android' };
+  const thread = {
+    kind: 'thread',
+    id: 't-perf',
+    name: 'Reduce startup work',
+    channelId: 'c-perf',
+    channelName: 'releases',
+  };
+  const selectedMessage = {
+    kind: 'message',
+    id: 'm-1',
+    name: '“Ship it today”',
+    channelId: 'c-perf',
+  };
   const samples = {
+    thread,
     recipient: priya,
     person: priya,
     message: 'hi',
     name: 'ABC',
     visibility: 'public',
     channel: android,
-    conversation: {
-      kind: 'thread',
-      id: 't-perf',
-      name: 'Reduce startup work',
-      channelId: 'c-perf',
-      channelName: 'releases',
-    },
+    conversation: thread,
   };
   for (const definition of ACTIONS.values()) {
     const values = Object.fromEntries(
       Object.entries(definition.fields)
         .filter(([, field]) => field.required)
-        .map(([id]) => [id, samples[id]]),
+        .map(([id, field]) => [id, field.kind === 'message' ? selectedMessage : samples[id]]),
     );
     assert.ok(Object.values(values).every(Boolean), `${definition.id}: add sample values`);
     assert.ok(renderTemplate(definition.summarize, values).length > 0);

@@ -27,18 +27,27 @@ export interface RecordFinder {
 /** A finder's source is down: say so, rather than "I couldn't find it". */
 export class UnavailableError extends Error {}
 
-/** Words that point at the conversation open on screen. */
-const HERE_WORDS = new Set(['here', 'this channel', 'this conversation', 'this chat']);
+/** Words that point at what is on screen: the open channel or thread, or the selected message. */
+const ON_SCREEN_WORDS = new Set(
+  'here|this|that|it|this one|this channel|this conversation|this chat|this thread|that thread|this message|that message'.split(
+    '|'
+  )
+);
 
-/** The same finder, where "here" means the channel open on screen (checked by id). */
+/**
+ * The same finder, where "here", "this thread", or "this message" mean the record of that kind
+ * on screen. It is read again by id, so the user's access applies; the screen only lends its
+ * display name, such as a message's preview.
+ */
 export function withScreen(finder: RecordFinder, onScreen: readonly EntityRef[]): RecordFinder {
-  const open = onScreen.find((ref) => ref.kind === 'channel');
   return {
     ...finder,
     async find(kind, mention, hints) {
-      if (kind !== 'channel' || !open || !isHere(mention)) return finder.find(kind, mention, hints);
-      const found = await finder.get('channel', open.id);
-      return found ? [found] : [];
+      const shown = isOnScreen(mention) ? onScreen.find((ref) => ref.kind === kind) : undefined;
+      if (!shown) return finder.find(kind, mention, hints);
+      const found = await finder.get(kind, shown.id);
+      if (!found) return [];
+      return [{ ...found, record: { ...found.record, name: shown.name || found.record.name } }];
     },
   };
 }
@@ -52,15 +61,17 @@ export function matchFound(
   mention: string,
   found: readonly FoundRecord[]
 ): NameMatch {
-  if (kind !== 'thread' && !isHere(mention)) return matchName(mention, found);
+  const byName = (kind === 'person' || kind === 'channel') && !isOnScreen(mention);
+  if (byName) return matchName(mention, found);
   const [first] = found;
   if (!first) return { kind: 'none' };
   if (found.length === 1) return { kind: 'one', record: first.record, certain: false };
   return { kind: 'several', candidates: found.map(toCandidate) };
 }
 
-function isHere(mention: string): boolean {
-  return HERE_WORDS.has(normalizeName(mention));
+/** "here", "this", "this message": words that point at the screen rather than name something. */
+export function isOnScreen(mention: string): boolean {
+  return ON_SCREEN_WORDS.has(normalizeName(mention));
 }
 
 export type NameMatch =
@@ -114,7 +125,12 @@ function nameScore(said: string, name: string): number {
   if (said === name) return EXACT;
   const nameWords = name.split(' ');
   const saidWords = said.split(' ');
-  if (saidWords.every((word) => nameWords.includes(word))) return WORDS;
+  const exactWords = saidWords.filter((word) => nameWords.includes(word)).length;
+  if (exactWords === saidWords.length) return WORDS;
+  const allWordsSoundLike = saidWords.every((word) =>
+    nameWords.some((nameWord) => soundsAlike(soundKey(word), soundKey(nameWord)))
+  );
+  if (allWordsSoundLike) return WORDS + exactWords / (saidWords.length + 1);
   if (name.includes(said)) return PART;
   // Speech recognition can get one name wrong while retaining a useful surname or role
   // word ("Zahn Doctor" for "Xyne Doctor"). Offer this only as an uncertain match.

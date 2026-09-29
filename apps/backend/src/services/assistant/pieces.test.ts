@@ -137,6 +137,11 @@ describe('matching a spoken name to records', () => {
   it('asks which one when two names sound alike', () => {
     const team = [person('4', 'Preeti Sharma'), person('6', 'Priti Verma')];
     expect(matchName('Preetee', team)).toMatchObject({ kind: 'several' });
+    expect(matchName('Priti Sharma', team)).toMatchObject({
+      kind: 'one',
+      record: { id: '4' },
+      certain: false,
+    });
   });
 
   it('treats hyphens and spaces in channel names alike', () => {
@@ -218,6 +223,7 @@ describe('choosing the action', () => {
     });
     expect(state).toMatchObject({
       inProgress: {
+        openField: { field: 'conversation', said: 'mobile performance' },
         question:
           'Here are the closest matches for “mobile performance”. Tap one, or tell me who was in it or which channel.',
         options: ['Android startup delay · #android · Vinit'],
@@ -300,6 +306,35 @@ describe('reading details from the sentence', () => {
   it('skips a field when the sentence has no words it could be', () => {
     const reading = readingFor(ACTIONS.get('create_channel')!, 'create a channel');
     expect(Object.keys(reading.questions)).toEqual(['visibility']);
+  });
+
+  it('does not reuse a channel name as its first message', () => {
+    const reading = readingFor(ACTIONS.get('create_channel')!, 'call it ops weekly');
+    const sameWords = optionFor(reading, 'name', 'ops weekly');
+
+    expect(
+      reading.read({
+        name: picked(sameWords),
+        visibility: picked('none'),
+        members: picked('none'),
+        firstMessage: picked(sameWords),
+      })
+    ).toEqual({ name: 'ops weekly' });
+  });
+
+  it('removes an explicitly added member from the channel name', () => {
+    const reading = readingFor(
+      ACTIONS.get('create_channel')!,
+      'new private channel called hiring with Meera Iyer'
+    );
+
+    expect(
+      reading.read({
+        name: picked(optionFor(reading, 'name', 'hiring with Meera Iyer')),
+        visibility: picked('private'),
+        members: picked(optionFor(reading, 'members', 'Meera Iyer')),
+      })
+    ).toEqual({ name: 'hiring', visibility: 'private', members: ['Meera Iyer'] });
   });
 });
 

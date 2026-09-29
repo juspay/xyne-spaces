@@ -361,8 +361,11 @@ function clear(draft: Draft, id: string): Draft {
   return {
     ...draft,
     values,
+    open: draft.open.filter(name => name.field !== id),
     unsure: mark(draft.unsure, id, false),
     later: draft.later.filter(item => item.field !== id),
+    awaiting:
+      draft.awaiting?.kind === 'field' && draft.awaiting.field === id ? null : draft.awaiting,
   };
 }
 

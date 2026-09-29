@@ -1,5 +1,5 @@
 import type { Prisma } from '@prisma/client';
-import type { ChannelRef, PersonRef, ThreadRef } from '@xyne/shared/assistant';
+import type { ChannelRef, MessageRef, PersonRef, ThreadRef } from '@xyne/shared/assistant';
 import type { ACLContext } from '@/database/acl/base-acl';
 import { ChannelsACL } from '@/database/acl/tables/channels-acl';
 import { UsersACL } from '@/database/acl/tables/users-acl';
@@ -63,17 +63,58 @@ export function databaseFinder(context: ACLContext): RecordFinder {
           return findPeople(words, context.userId, (await usersAcl.getWhereClause()) ?? {});
         case 'channel':
           return findChannels(words, (await channelsAcl.getWhereClause()) ?? {});
+        case 'message':
+          // A message is only ever the one on screen ("this message"), never found by name.
+          return [];
       }
     },
     async get(kind, id) {
-      if (kind !== 'channel') return null;
-      const row = await db.channel.findFirst({
-        where: {
-          AND: [{ id, isArchived: false }, (await channelsAcl.getWhereClause()) ?? {}],
-        },
-        select: { id: true, name: true },
-      });
-      return row ? channelRecord(row) : null;
+      const channel = {
+        is: { AND: [{ isArchived: false }, (await channelsAcl.getWhereClause()) ?? {}] },
+      };
+      switch (kind) {
+        case 'channel': {
+          const row = await db.channel.findFirst({
+            where: { id, ...channel.is },
+            select: { id: true, name: true },
+          });
+          return row ? channelRecord(row) : null;
+        }
+        case 'thread': {
+          const row = await db.conversation.findFirst({
+            where: { conversationId: id, channel },
+            select: { channel: { select: { id: true, name: true } } },
+          });
+          const record: ThreadRef | null = row && {
+            kind: 'thread',
+            id,
+            name: 'this thread',
+            channelId: row.channel.id,
+            channelName: row.channel.name,
+          };
+          return record && { record };
+        }
+        case 'message': {
+          const row = await db.message.findFirst({
+            where: {
+              messageId: id,
+              isDeleted: false,
+              OR: [{ visibleTo: null }, { visibleTo: context.userId }],
+              conversation: { is: { channel } },
+            },
+            select: { conversation: { select: { channelId: true } } },
+          });
+          const record: MessageRef | null = row && {
+            kind: 'message',
+            id,
+            name: 'this message',
+            channelId: row.conversation.channelId,
+          };
+          return record && { record };
+        }
+        default:
+          return null;
+      }
     },
   };
 }
