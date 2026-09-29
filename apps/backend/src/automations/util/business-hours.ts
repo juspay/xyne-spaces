@@ -59,6 +59,7 @@ export function isWithinBusinessHours(at: Date, hours: BusinessHours): boolean {
 }
 
 export function fitsWithinMaxWait(durationMs: number, hours: BusinessHours): boolean {
+  if (!Number.isFinite(durationMs) || durationMs > MAX_WAIT_MS) return false;
   const referenceMonday = Date.UTC(2024, 0, 1) - IST_OFFSET_MS;
   return hours.days.every((day) => {
     const windowClose = referenceMonday + ((day + 6) % 7) * DAY_MS + timeMs(hours.endTime);

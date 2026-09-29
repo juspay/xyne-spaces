@@ -6,7 +6,11 @@ import type {
   SwitchStepConfig,
   Condition,
 } from '../types/automation-config';
-import { getVariableRefInnerSchema, scheduleOffsetMs } from '../types/automation-config';
+import {
+  getVariableRefInnerSchema,
+  ScheduleOffsetSchema,
+  scheduleOffsetMs,
+} from '../types/automation-config';
 import { BusinessHoursSchema, fitsWithinMaxWait } from '../util/business-hours';
 import { ControlFlowStepType } from '../types/known-types';
 import { ValidationIssueCode } from '../types/validation';
@@ -270,7 +274,12 @@ export class ConfigValidator {
     const schedule = config.schedule;
     if (schedule?.type === 'SCHEDULED' && schedule.businessHoursOnly) {
       const hours = BusinessHoursSchema.safeParse(schedule.businessHours);
-      if (!hours.success || !fitsWithinMaxWait(scheduleOffsetMs(schedule.offset), hours.data)) {
+      const offset = ScheduleOffsetSchema.safeParse(schedule.offset);
+      if (
+        !hours.success ||
+        !offset.success ||
+        !fitsWithinMaxWait(scheduleOffsetMs(offset.data), hours.data)
+      ) {
         issues.push({
           path: 'schedule.businessHours',
           code: ValidationIssueCode.SHAPE,
