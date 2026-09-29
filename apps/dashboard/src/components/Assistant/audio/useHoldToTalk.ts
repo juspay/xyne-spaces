@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { voiceInputService } from '../../../services/VoiceInput/voiceInputService';
 import type { VoiceLevelStore } from './levelStore';
+import { liveTranscript, type LiveTranscript } from './liveTranscript';
 
 export type HoldState = 'idle' | 'requesting' | 'listening' | 'transcribing';
 
@@ -15,6 +16,8 @@ const MIN_HOLD_MS = 300;
 /** A stuck button stops recording after this long. */
 const MAX_HOLD_MS = 30_000;
 const METER_INTERVAL_MS = 50;
+/** The recording is sent on in pieces this long, so it is heard while the user talks. */
+const CHUNK_MS = 250;
 
 export interface HoldToTalk {
   state: HoldState;
@@ -28,7 +31,8 @@ export interface HoldToTalk {
 
 /**
  * Press and hold to talk: the microphone records only while held, so background noise between
- * commands is never heard. On release the recording is transcribed once and handed to `onText`.
+ * commands is never heard. The recording is heard while the user talks, and on release what
+ * was said is handed to `onText`; if it could not be heard live, the recording is uploaded.
  */
 export function useHoldToTalk({
   levelStore,
@@ -48,6 +52,7 @@ export function useHoldToTalk({
   const attemptRef = useRef(0);
   const releasedEarlyRef = useRef(false);
   const recorderRef = useRef<MediaRecorder | null>(null);
+  const liveRef = useRef<LiveTranscript | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const timersRef = useRef<number[]>([]);
@@ -77,6 +82,8 @@ export function useHoldToTalk({
     const recorder = recorderRef.current;
     recorderRef.current = null;
     if (recorder?.state === 'recording') recorder.stop();
+    liveRef.current?.close();
+    liveRef.current = null;
     releaseDevices();
     moveTo('idle');
   }, [moveTo, releaseDevices]);
@@ -110,21 +117,21 @@ export function useHoldToTalk({
   );
 
   const transcribe = useCallback(
-    async (audio: Blob, attempt: number): Promise<void> => {
+    async (audio: Blob, live: LiveTranscript | null, attempt: number): Promise<void> => {
       moveTo('transcribing');
       const startedAt = performance.now();
       try {
-        const { text } = await voiceInputService.transcribeAudio({
-          audioBlob: audio,
-          mimeType: audio.type,
-        });
+        const heard = live ? await live.finish() : null;
+        if (attempt !== attemptRef.current) return;
+        // Nothing heard live is checked against the whole recording before giving up on it.
+        const text = heard || (await transcribeUpload(audio));
         if (attempt !== attemptRef.current) return;
         callbacksRef.current.onTrace(
           'Transcribed',
-          `${Math.round(performance.now() - startedAt)} ms · “${text.trim()}”`,
+          `${Math.round(performance.now() - startedAt)} ms · ${heard ? 'live' : 'uploaded'} · “${text}”`,
         );
         moveTo('idle');
-        if (text.trim()) callbacksRef.current.onText(text.trim());
+        if (text) callbacksRef.current.onText(text);
         else callbacksRef.current.onProblem('I didn’t catch that. Hold the orb and try again.');
       } catch (error) {
         if (attempt !== attemptRef.current) return;
@@ -166,9 +173,13 @@ export function useHoldToTalk({
         const mimeType = PREFERRED_TYPES.find(type => MediaRecorder.isTypeSupported(type));
         const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
         const chunks: Blob[] = [];
+        const live = openLiveTranscript();
+        liveRef.current = live;
         const startedAt = performance.now();
         recorder.ondataavailable = (event): void => {
-          if (event.data.size > 0) chunks.push(event.data);
+          if (event.data.size === 0) return;
+          chunks.push(event.data);
+          live?.send(event.data);
         };
         recorder.onstop = (): void => {
           releaseDevices();
@@ -181,14 +192,15 @@ export function useHoldToTalk({
             `${(recordedMs / 1000).toFixed(1)} s · ${Math.round(audio.size / 1024)} KB · ${recorder.mimeType}`,
           );
           if (recordedMs < MIN_HOLD_MS) {
+            live?.close();
             moveTo('idle');
             callbacksRef.current.onProblem('Hold the orb while you talk.');
             return;
           }
-          void transcribe(audio, attempt);
+          void transcribe(audio, live, attempt);
         };
         recorderRef.current = recorder;
-        recorder.start();
+        recorder.start(CHUNK_MS);
         callbacksRef.current.onTrace(
           'Microphone on',
           `${Math.round(performance.now() - pressedAt)} ms after pressing`,
@@ -217,4 +229,22 @@ export function useHoldToTalk({
   useEffect(() => cancel, [cancel]);
 
   return { state, press, release, cancel };
+}
+
+/** Reads the whole recording at once: slower, and does not depend on the live stream. */
+async function transcribeUpload(audio: Blob): Promise<string> {
+  const { text } = await voiceInputService.transcribeAudio({
+    audioBlob: audio,
+    mimeType: audio.type,
+  });
+  return text.trim();
+}
+
+/** Starts hearing the recording live, or null where that cannot start; it is uploaded then. */
+function openLiveTranscript(): LiveTranscript | null {
+  try {
+    return liveTranscript(voiceInputService.openStreamSession());
+  } catch {
+    return null;
+  }
 }

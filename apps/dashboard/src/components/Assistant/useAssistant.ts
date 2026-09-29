@@ -184,18 +184,18 @@ export function useAssistant({
             `${status ?? 'no response'} · ${getApiErrorMessage(error, 'unknown')}`,
           );
           if (sessionId === sessionIdRef.current) {
-            addTurn({
-              role: 'assistant',
-              text: getApiErrorMessage(error, 'I couldn’t reach the assistant. Please try again.'),
-              tone: 'error',
-            });
+            // Without a response there is only the network's own wording, such as a timeout.
+            const unreachable = 'I couldn’t reach the assistant. Please try again.';
+            const text = status ? getApiErrorMessage(error, unreachable) : unreachable;
+            addTurn({ role: 'assistant', text, tone: 'error' });
+            speak(text);
           }
         } finally {
           setWaiting(false);
         }
       });
     },
-    [addTurn, exchange, note, stopSpeaking],
+    [addTurn, exchange, note, speak, stopSpeaking],
   );
 
   const send = useCallback(
