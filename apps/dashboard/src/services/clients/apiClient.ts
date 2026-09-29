@@ -108,7 +108,7 @@ apiConfig.interceptors.request.use(
             ? localStorage.getItem(`lastActiveWorkspaceId_${userEmail}`) || undefined
             : undefined);
       }
-      if (workspaceId && workspaceId !== 'auth') {
+      if (workspaceId && workspaceId !== 'auth' && workspaceId !== 'sdk-sso') {
         config.headers['x-workspace-id'] = workspaceId;
       }
 

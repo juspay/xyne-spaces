@@ -932,6 +932,37 @@ export class UserManagementService {
   }
 
   /**
+   * Remove profile picture for a user. The avatar falls back to initials.
+   */
+  async removeProfilePicture(userId: string): Promise<void> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { picture: true },
+    });
+    const previousPicture = user?.picture;
+    if (!previousPicture) return;
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { picture: null },
+    });
+
+    // Only uploaded pictures live in our storage; SSO pictures are external URLs
+    if (!previousPicture.startsWith('http')) {
+      try {
+        await getStorageService().deleteFile(previousPicture);
+      } catch (error) {
+        logger.warn(`Failed to delete stored profile picture for user ${userId}`, {
+          filePath: previousPicture,
+          error,
+        });
+      }
+    }
+
+    logger.info(`Profile picture removed for user ${userId}`);
+  }
+
+  /**
    * Extract a speaker embedding from an audio file and store it as the user's voice signature.
    *
    * Flow:

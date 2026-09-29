@@ -554,6 +554,13 @@ class RecordingService {
     return response.data.template;
   }
 
+  /** Scribe admins only. Creates every template, or none. */
+  async bulkCreateSummaryTemplates(templates: SummaryTemplateInput[]): Promise<SummaryTemplate[]> {
+    const response: AxiosResponse<{ success: boolean; templates: SummaryTemplate[] }> =
+      await apiInstance.post('/calls/summary-templates/bulk', { templates });
+    return response.data.templates;
+  }
+
   async updateSummaryTemplate(
     templateId: string,
     update: Partial<SummaryTemplateInput>,

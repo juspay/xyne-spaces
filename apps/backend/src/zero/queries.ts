@@ -3565,6 +3565,22 @@ export const queries: AnyQueryRegistry = defineQueries({
             ),
           ),
         )
+        // Only the viewer's own shares: Zero does not ACL-filter `related()`.
+        .related('shares', shares =>
+          shares
+            .where('workspaceId', ctx.workspaceId)
+            .where('shareableEntityType', ShareableEntityType.SUMMARY_TEMPLATE)
+            .where('entityUserAccess', '!=', EntityUserAccess.REVOKED)
+            .where(({ or, cmp, exists }) =>
+              or(
+                cmp('userId', ctx.userID),
+                exists('userGroupMemberships', membership =>
+                  membership.where('userId', ctx.userID),
+                ),
+                exists('channelMembers', member => member.where('userId', ctx.userID)),
+              ),
+            ),
+        )
         .orderBy('name', 'asc')
         .orderBy('version', 'desc'),
   ),
