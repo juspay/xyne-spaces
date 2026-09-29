@@ -2,6 +2,7 @@ import { createCustomEncryptionAdapter, createSecretsVault, parseHexEncryptionKe
 import { config } from '@/config/env';
 import { CommonDatabaseClient } from '@/database/commonClient';
 import { EntitySequenceService, SequenceEntityType } from '@/services/entitySequenceService';
+import { logger } from '@/utils/logger';
 import { genericEncryptionAdapter } from './genericEncryptionAdapter';
 
 // SecretDefinition/SecretVersion live in the common DB, not the main one — see
@@ -26,4 +27,5 @@ export const secretsVault = createSecretsVault({
   cacheTtlMs: config.secretsVault.cacheTtlMs,
   allocateVersion: (secretDefinitionId) =>
     EntitySequenceService.getNextSequence(SequenceEntityType.SECRET_VERSION, secretDefinitionId),
+  logger,
 });

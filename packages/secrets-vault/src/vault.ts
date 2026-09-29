@@ -1,12 +1,18 @@
 import { EncryptionImpl, SecretVersionStatus, RotationState } from './types.js';
 import type { EncryptionAdapter, VaultPrismaClient } from './types.js';
 
+export interface VaultLogger {
+  info: (message: string) => void;
+  warn: (message: string) => void;
+}
+
 export interface SecretsVaultDeps {
   prisma: VaultPrismaClient;
   encryptionAdapters: Record<EncryptionImpl, EncryptionAdapter>;
   isGenericEncryptionEnabled: () => boolean;
   cacheTtlMs?: number;
   allocateVersion: (secretDefinitionId: string) => Promise<number>;
+  logger?: VaultLogger;
 }
 
 export type AddVersionResult =
@@ -43,6 +49,7 @@ function aadFor(secretDefinitionId: string, version: number): string {
 export function createSecretsVault(deps: SecretsVaultDeps) {
   const cacheTtlMs = deps.cacheTtlMs ?? 0;
   const cache = new Map<string, CacheEntry>();
+  const logger = deps.logger ?? console;
 
   function activeEncryptionImpl(): EncryptionImpl {
     return deps.isGenericEncryptionEnabled() ? EncryptionImpl.GENERIC : EncryptionImpl.CUSTOM;
@@ -202,6 +209,9 @@ export function createSecretsVault(deps: SecretsVaultDeps) {
           where: { secretDefinitionId: definition.id, version },
           data: { status: SecretVersionStatus.FAILED },
         });
+        logger.warn(
+          `[secrets-vault] addVersion: "${input.name}" v${version} failed verification (updatedBy=${input.updatedBy}) — previous active version untouched`,
+        );
         return { status: SecretVersionStatus.FAILED, version };
       }
 
@@ -211,6 +221,7 @@ export function createSecretsVault(deps: SecretsVaultDeps) {
         data: { updatedBy: input.updatedBy },
       });
       cache.delete(input.name);
+      logger.info(`[secrets-vault] addVersion: "${input.name}" v${version} verified and now active`);
 
       return { status: SecretVersionStatus.ACTIVE, version };
     } finally {
@@ -314,6 +325,9 @@ export function createSecretsVault(deps: SecretsVaultDeps) {
       data: { updatedBy: input.updatedBy },
     });
     cache.delete(input.name);
+    logger.warn(
+      `[secrets-vault] revokeActiveVersion: "${input.name}" v${active.version} revoked by ${input.updatedBy} — no version is active until rotate/rollback`,
+    );
 
     return { status: SecretVersionStatus.REVOKED, version: active.version };
   }
