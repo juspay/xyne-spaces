@@ -4757,7 +4757,7 @@ export const queries: AnyQueryRegistry = defineQueries({
       let query = zql.message_attachments
         .where('isDeleted', false)
         .where('entityType', 'IN', CHANNEL_VISIBLE_ATTACHMENT_ENTITY_TYPES)
-        .whereExists('conversation', (conv) => conv.where('channelId', channelId));
+        .where('channelId', channelId);
 
       if (start) {
         query = query.start(
