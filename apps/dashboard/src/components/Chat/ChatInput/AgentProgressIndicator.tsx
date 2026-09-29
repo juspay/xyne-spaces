@@ -27,7 +27,8 @@ const rowStyle: CSSProperties = {
  * The trailing `\uFE0F`/ZWJ run is part of the glyph (🛠️ is U+1F6E0 U+FE0F);
  * leaving it behind would strand a stray selector at the head of the text.
  */
-const LEADING_PICTOGRAPH = /^(\p{Extended_Pictographic}(?:\uFE0F|\u200D\p{Extended_Pictographic})*)\s*/u;
+const LEADING_PICTOGRAPH =
+  /^(\p{Extended_Pictographic}(?:\uFE0F|\u200D\p{Extended_Pictographic})*)\s*/u;
 
 function splitLeadingIcon(label: string): { icon: string | null; text: string } {
   const m = LEADING_PICTOGRAPH.exec(label);
@@ -37,7 +38,6 @@ function splitLeadingIcon(label: string): { icon: string | null; text: string } 
   // keep the original string intact in that case.
   return text.trim() ? { icon: m[1] ?? null, text } : { icon: null, text: label };
 }
-
 
 /**
  * Renders a transient "agent is working" pill next to the chat input.
