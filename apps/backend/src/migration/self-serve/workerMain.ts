@@ -60,6 +60,11 @@ async function boot(): Promise<void> {
     await queues.pauseIngestionOnFirstInit().catch((e: unknown) =>
       logger.error('[SlackMigration] failed to initialise ingestion queue paused', { error: e instanceof Error ? e.message : String(e) }),
     );
+    // Kill-switch: with MIGRATION_INGEST_CONTROL off, pause a queue that was left running before the flag was disabled.
+    if (!config.slackMigration.ingestControlEnabled) {
+      const paused = await queues.pauseIngestionIfRunning().catch(() => false);
+      if (paused) logger.warn('[SlackMigration] ingestion paused on boot — MIGRATION_INGEST_CONTROL is off');
+    }
   }
 
   new MigrationWorkers(queues, store, engine).register();

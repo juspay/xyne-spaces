@@ -92,6 +92,14 @@ export class MigrationQueues {
     if (firstInit) await q.pause();
   }
 
+  /** Pause the ingestion queue if it's running; returns true if it paused. MIGRATION_INGEST_CONTROL kill-switch on boot. */
+  async pauseIngestionIfRunning(): Promise<boolean> {
+    const q = this.queue(QueueName.INGESTION);
+    if (await q.isPaused()) return false;
+    await q.pause();
+    return true;
+  }
+
   private queue(name: QueueName): Bull.Queue<JobRef> {
     const q = this.queues.get(name);
     if (!q) throw new Error(`queue ${name} not initialized`);

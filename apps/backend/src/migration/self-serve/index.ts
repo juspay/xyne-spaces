@@ -81,6 +81,12 @@ if (config.runSlackMigrationWorkers) {
         error: e instanceof Error ? e.message : String(e),
       }),
     );
+    // Kill-switch: with MIGRATION_INGEST_CONTROL off, pause a queue that was left running before the flag was disabled.
+    if (!config.slackMigration.ingestControlEnabled) {
+      void queues.pauseIngestionIfRunning()
+        .then((paused) => { if (paused) logger.warn('[SlackMigration] ingestion paused on boot — MIGRATION_INGEST_CONTROL is off'); })
+        .catch((e: unknown) => logger.error('[SlackMigration] failed to pause ingestion (control disabled)', { error: e instanceof Error ? e.message : String(e) }));
+    }
     new MigrationWorkers(queues, store, engine).register();
   }
 }
