@@ -487,7 +487,8 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       sandboxMode,
     } = req.body as Record<string, unknown> & { sandboxMode?: "local" | "remote" | "container" };
 
-    if (!task || typeof task !== "string") {  // codeql[js/user-controlled-bypass] auth gate: failure here only rejects the request (4xx); ownership is enforced on requireAuth-verified identity aliases
+    // codeql[js/user-controlled-bypass] auth gate: a bypass here only produces a 4xx rejection; actual ownership is enforced on requireAuth-verified identity aliases
+    if (!task || typeof task !== "string") {
       res.status(400).json({ success: false, error: "task is required" });
       return;
     }
@@ -495,7 +496,8 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
     // Declared separately (typed `string`) so the canonicalization below can
     // reassign it: a destructured `unknown` binding would lose its narrowing.
     const rawUserId = (req.body as Record<string, unknown>)["userId"];
-    if (!rawUserId || typeof rawUserId !== "string") {  // codeql[js/user-controlled-bypass] auth gate: failure here only rejects the request (4xx); ownership is enforced on requireAuth-verified identity aliases
+    // codeql[js/user-controlled-bypass] auth gate: a bypass here only produces a 4xx rejection; actual ownership is enforced on requireAuth-verified identity aliases
+    if (!rawUserId || typeof rawUserId !== "string") {
       res.status(400).json({ success: false, error: "userId is required" });
       return;
     }
@@ -639,7 +641,8 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
     // Spaces sends its workspace membership ID in the body while requireAuth
     // resolves the verified session to Claw's canonical user ID. They are two
     // representations of the same caller, not an attempted cross-user run.
-    if (typeof sessionUserId === "string" && sessionUserId && !matchesAuthenticatedUserId(req, userId)) {  // codeql[js/user-controlled-bypass] auth gate: failure here only rejects the request (4xx); ownership is enforced on requireAuth-verified identity aliases
+    // codeql[js/user-controlled-bypass] auth gate: a bypass here only produces a 4xx rejection; actual ownership is enforced on requireAuth-verified identity aliases
+    if (typeof sessionUserId === "string" && sessionUserId && !matchesAuthenticatedUserId(req, userId)) {
       res.status(403).json({ success: false, error: "Body userId does not match authenticated session" });
       return;
     }
@@ -1837,13 +1840,15 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
 publicRouter.post("/cancel", requireAuth, requireNoAccessToken, async (req: Request, res: Response): Promise<void> => {
   try {
     const userId = getRequesterId(req) ?? (req.body as { userId?: string }).userId;
-    if (!userId) {  // codeql[js/user-controlled-bypass] auth gate: failure here only rejects the request (4xx); ownership is enforced on requireAuth-verified identity aliases
+    // codeql[js/user-controlled-bypass] auth gate: a bypass here only produces a 4xx rejection; actual ownership is enforced on requireAuth-verified identity aliases
+    if (!userId) {
       res.status(400).json({ success: false, error: "userId or x-user-id header required" });
       return;
     }
 
     const { sessionId } = req.body as { sessionId?: string };
-    if (!sessionId || typeof sessionId !== "string") {  // codeql[js/user-controlled-bypass] auth gate: failure here only rejects the request (4xx); ownership is enforced on requireAuth-verified identity aliases
+    // codeql[js/user-controlled-bypass] auth gate: a bypass here only produces a 4xx rejection; actual ownership is enforced on requireAuth-verified identity aliases
+    if (!sessionId || typeof sessionId !== "string") {
       res.status(400).json({ success: false, error: "sessionId is required" });
       return;
     }

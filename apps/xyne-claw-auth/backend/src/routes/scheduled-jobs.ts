@@ -155,7 +155,8 @@ async function resolveScopedUserIdFilter(
     // S2S — trust the caller's target user, still matching every id form.
     return explicitUserId ? { in: await userIdAliasesFor(explicitUserId) } : undefined;
   }
-  if (explicitUserId && !matchesAuthenticatedUserId(req, explicitUserId)) {  // codeql[js/user-controlled-bypass] auth gate: failure here only rejects the request (4xx); ownership is enforced on requireAuth-verified identity aliases
+  // codeql[js/user-controlled-bypass] auth gate: a bypass here only produces a 4xx rejection; actual ownership is enforced on requireAuth-verified identity aliases
+  if (explicitUserId && !matchesAuthenticatedUserId(req, explicitUserId)) {
     if (await isClawAdmin(requesterId)) return { in: await userIdAliasesFor(explicitUserId) };
     return { in: getRequesterAliases(req) }; // non-admin attempting cross-user read — clamp to self
   }
@@ -370,8 +371,10 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
   // admin passing their OWN raw Spaces id must not be treated as a cross-user
   // create (which would store the raw form).
   const requesterId = getRequesterId(req);
-  const userId = requesterId  // codeql[js/user-controlled-bypass] auth gate: failure here only rejects the request (4xx); ownership is enforced on requireAuth-verified identity aliases
-    ? (bodyUserId && !matchesAuthenticatedUserId(req, bodyUserId) && (await isClawAdmin(requesterId))  // codeql[js/user-controlled-bypass] auth gate: failure here only rejects the request (4xx); ownership is enforced on requireAuth-verified identity aliases
+  // codeql[js/user-controlled-bypass] auth gate: a bypass here only produces a 4xx rejection; actual ownership is enforced on requireAuth-verified identity aliases
+  const userId = requesterId
+    // codeql[js/user-controlled-bypass] auth gate: a bypass here only produces a 4xx rejection; actual ownership is enforced on requireAuth-verified identity aliases
+    ? (bodyUserId && !matchesAuthenticatedUserId(req, bodyUserId) && (await isClawAdmin(requesterId))
         ? bodyUserId
         : requesterId)
     : bodyUserId;

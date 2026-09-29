@@ -1419,7 +1419,8 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       }
 
       // Verify caller is the intended user. Fail closed on missing callerUserId.
-      if (!callerUserId || !matchesCallerUserId(answerUserId)) {  // codeql[js/user-controlled-bypass] auth gate: failure here only rejects the request (4xx); ownership is enforced on requireAuth-verified identity aliases
+      // codeql[js/user-controlled-bypass] auth gate: a bypass here only produces a 4xx rejection; actual ownership is enforced on requireAuth-verified identity aliases
+      if (!callerUserId || !matchesCallerUserId(answerUserId)) {
         log.error(`[flow-action] Unauthorized: caller ${callerUserId ?? "(none)"} != expected ${answerUserId}`);
         res.status(403).json({ type: "error", message: "Unauthorized" } satisfies AppActionResponse);
         return;
@@ -2180,7 +2181,8 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       // Only the original recipient (the user the suggestion was offered to)
       // can promote it. Prevents anyone else in the thread from hijacking
       // the button to start a goal under someone else's identity.
-      if (!callerUserId || !matchesCallerUserId(goalUserId)) {  // codeql[js/user-controlled-bypass] auth gate: failure here only rejects the request (4xx); ownership is enforced on requireAuth-verified identity aliases
+      // codeql[js/user-controlled-bypass] auth gate: a bypass here only produces a 4xx rejection; actual ownership is enforced on requireAuth-verified identity aliases
+      if (!callerUserId || !matchesCallerUserId(goalUserId)) {
         log.error(`[flow-action] start-goal: unauthorized — caller ${callerUserId ?? "(none)"} != expected ${goalUserId}`);
         res.status(403).json({ type: "error", message: "Unauthorized" } satisfies AppActionResponse);
         return;
