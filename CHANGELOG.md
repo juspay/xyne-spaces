@@ -1,3 +1,10 @@
+## [1.430.0](https://github.com/juspay/xyne-spaces/compare/v1.429.0...v1.430.0) (2026-09-29)
+
+
+### Features
+
+* added fetch logic for app type desks ([#1692](https://github.com/juspay/xyne-spaces/issues/1692)) ([a781ee5](https://github.com/juspay/xyne-spaces/commit/a781ee5debc3e24453ea48012f9f1f812dc09c46))
+
 ## [1.429.0](https://github.com/juspay/xyne-spaces/compare/v1.428.0...v1.429.0) (2026-09-29)
 
 
