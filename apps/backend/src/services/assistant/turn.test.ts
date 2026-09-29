@@ -310,6 +310,62 @@ describe('a turn', () => {
     expect(preview.run).toBeUndefined();
   });
 
+  it('reads a long sentence again with every piece, and uses that answer', async () => {
+    const chat = assistant([daniel, priyaShah]);
+    chat.hears({
+      action: 'post_message',
+      fields: {
+        channel: 'android',
+        mentions: 'Daniel Okafor and Priya Shah',
+        message: 'check the crash on the new android build today',
+      },
+    });
+
+    // The names are cut from the combined request's pieces, so only the second read finds them.
+    await chat.say(
+      'in the design review channel mention Daniel Okafor and Priya Shah to check the crash on the new android build today'
+    );
+
+    expect(chat.jevCalls()).toBe(2);
+    expect(chat.session().conversation.active?.values).toMatchObject({
+      channel: android.record,
+      mentions: [daniel.record, priyaShah.record],
+      message: 'check the crash on the new android build today',
+    });
+  });
+
+  it('reads a long answer to an open question once, keeping who it goes to', async () => {
+    const chat = assistant([daniel, priyaShah]);
+    chat.hears({ action: 'send_dm', fields: { recipient: 'Daniel Okafor' } });
+    await chat.say('message Daniel Okafor');
+    const asked = chat.jevCalls();
+    const answer =
+      'the crash on the new android build is fixed and Priya Shah will check the release notes today';
+    chat.hears({ continues: 0.9, fields: { message: answer } });
+
+    // Read on its own, without the question it answers, "Priya Shah" could pass for a recipient.
+    await chat.say(answer);
+
+    expect(chat.jevCalls()).toBe(asked + 1);
+    expect(chat.session().conversation.active?.values).toMatchObject({
+      recipient: daniel.record,
+      message: answer,
+    });
+  });
+
+  it('reads a short sentence once', async () => {
+    const chat = assistant();
+    chat.hears({
+      action: 'send_dm',
+      fields: { recipient: 'Daniel Okafor', message: 'the build is green' },
+    });
+
+    const planned = await chat.say('tell Daniel Okafor the build is green');
+
+    expect(planned.run).toBeDefined();
+    expect(chat.jevCalls()).toBe(1);
+  });
+
   it('opens a channel said by name, without a preview', async () => {
     const chat = assistant();
     chat.hears({ action: 'open_channel', fields: { channel: 'Android' } });

@@ -14,7 +14,13 @@ import {
 } from '@xyne/shared/assistant';
 import type { JevAnswer, JevQuestion, JevState } from '@/services/queryIntent/jevClient';
 import { toFieldUpdates } from './fieldUpdates';
-import { MAX_VALUE_WORDS, readingFor, type FieldWords } from './fields';
+import {
+  MAX_VALUE_WORDS,
+  namesRecords,
+  piecesWereCut,
+  readingFor,
+  type FieldWords,
+} from './fields';
 import { readSentence, type RankedAction, type SentenceKind, type Understanding } from './intent';
 import { quickChoice, quickText, type QuickReply } from './quickReplies';
 import { withScreen, type RecordFinder } from './records';
@@ -356,26 +362,42 @@ async function startAction(
   );
 }
 
-/** Re-read missing text when Jev identified another required detail. */
+/**
+ * The details of a new request. The first read also judged the action, so this action's
+ * details are read once more on their own in two cases: a required text is missing although
+ * another required detail was found, which fills the gaps; or the sentence is long enough
+ * that a name may have been left out of what the first read was offered, which reads the names
+ * again from every piece.
+ */
 async function wordsForAction(
   action: ActionDefinition,
   text: string,
   services: TurnServices,
   heard?: Understanding
 ): Promise<FieldWords> {
-  const words = heard?.words(action) ?? (await wordsFor(action, text, services));
+  const combined = heard?.words(action);
+  if (!combined) return wordsFor(action, text, services);
   const requiredFields = Object.entries(action.fields).filter(([, field]) => field.required);
   const missingText = requiredFields.some(
-    ([id, field]) => field.kind === 'text' && words[id] === undefined
+    ([id, field]) => field.kind === 'text' && combined[id] === undefined
   );
   const hasOtherRequiredField = requiredFields.some(
-    ([id, field]) => field.kind !== 'text' && words[id] !== undefined
+    ([id, field]) => field.kind !== 'text' && combined[id] !== undefined
   );
-  if (!heard || !missingText || !hasOtherRequiredField) return words;
+  const fillsGaps = missingText && hasOtherRequiredField;
+  const cut = piecesWereCut(action, text);
+  if (!fillsGaps && !cut) return combined;
 
-  // The first read also judged the action. Read this action's details alone, then fill only gaps.
-  const focusedWords = await wordsFor(action, text, services);
-  return { ...focusedWords, ...words };
+  const focused = await wordsFor(action, text, services, cut);
+  const names = Object.entries(focused).filter(([id]) => {
+    const field = action.fields[id];
+    return field !== undefined && namesRecords(field);
+  });
+  return {
+    ...(fillsGaps ? focused : {}),
+    ...combined,
+    ...(cut ? Object.fromEntries(names) : {}),
+  };
 }
 
 /** A long sentence may have been read short, so the words it sends are previewed first. */
@@ -393,13 +415,17 @@ function requireLongTextPreview(
   );
 }
 
-/** The details the sentence gives for `action`: the words of it that Jev picked. */
+/**
+ * The details the sentence gives for `action`: the words of it that Jev picked. `every` offers
+ * all the pieces of a long sentence rather than the first of them.
+ */
 async function wordsFor(
   action: ActionDefinition,
   text: string,
-  services: TurnServices
+  services: TurnServices,
+  every = false
 ): Promise<FieldWords> {
-  const reading = readingFor(action, text);
+  const reading = readingFor(action, text, { every });
   if (Object.keys(reading.questions).length === 0) return {};
   const answers = await services.askJev(reading.state, reading.questions);
   return answers ? reading.read(answers) : {};

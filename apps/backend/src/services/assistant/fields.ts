@@ -1,4 +1,4 @@
-import type { ActionDefinition, EntityKind } from '@xyne/shared/assistant';
+import type { ActionDefinition, EntityKind, FieldDefinition } from '@xyne/shared/assistant';
 import type { JevAnswer, JevQuestion, JevState } from '@/services/queryIntent/jevClient';
 
 /**
@@ -28,6 +28,11 @@ const FRAME_WORDS = new Set(
 export const MAX_VALUE_WORDS = 12;
 /** Keep candidate spans bounded: 51 value spans plus the "none" option. */
 const MAX_PIECES = 51;
+/**
+ * The most a focused read offers: Jev takes 255 options per question, and one is "none" and
+ * one may be what is open on screen.
+ */
+const MAX_FOCUSED_PIECES = 253;
 const NONE = 'none';
 const EDGE_PUNCTUATION = /^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu;
 
@@ -40,7 +45,31 @@ export function sentencePieces(text: string): string[] {
   return piecesFrom(text, false);
 }
 
-function piecesFrom(text: string, preserveFraming: boolean): string[] {
+/** The pieces of `text` that one question offers, at most `limit` of them. */
+function piecesFrom(text: string, preserveFraming: boolean, limit = MAX_PIECES): string[] {
+  return allPieces(text, preserveFraming).slice(0, limit);
+}
+
+/** Whether the field holds records found by name or by search, rather than text or a choice. */
+export function namesRecords(field: FieldDefinition): boolean {
+  return field.kind !== 'text' && field.kind !== 'choice';
+}
+
+/**
+ * Whether a name in `text` may be missing from what a combined request offers `action`: the
+ * sentence has more pieces than one question takes there, and the action has names to find.
+ * A message is not at risk the same way: it runs to the end of the sentence, and those
+ * pieces are offered first.
+ */
+export function piecesWereCut(action: ActionDefinition, text: string): boolean {
+  return (
+    Object.values(action.fields).some(namesRecords) &&
+    allPieces(text, false).length > MAX_PIECES
+  );
+}
+
+/** Every piece of `text`, in the order they are offered: sentence endings first, then shortest. */
+function allPieces(text: string, preserveFraming: boolean): string[] {
   const words = text.split(/\s+/).filter(Boolean);
   const pieces = new Set<string>();
   for (let start = 0; start < words.length; start += 1) {
@@ -60,14 +89,15 @@ function piecesFrom(text: string, preserveFraming: boolean): string[] {
   const rest = [...pieces]
     .filter((piece) => !endings.includes(piece))
     .sort((a, b) => a.length - b.length);
-  return [...endings, ...rest].slice(0, MAX_PIECES);
+  return [...endings, ...rest];
 }
 
 /**
  * One Jev question per field of `action`, answered from the pieces of `text`. When the same
  * request also asks about other actions, `key` keeps the question ids apart and `premise` says
  * which action the questions are about. A field that names a record kind in `onScreen` also
- * offers the record of that kind open on screen.
+ * offers the record of that kind open on screen. `every` offers all the pieces Jev can take,
+ * for a request that asks about this action alone.
  */
 export function readingFor(
   action: ActionDefinition,
@@ -76,13 +106,17 @@ export function readingFor(
     key = (field: string) => field,
     premise = '',
     onScreen = new Set<EntityKind>(),
+    every = false,
   }: {
     key?: (field: string) => string;
     premise?: string;
     onScreen?: ReadonlySet<EntityKind>;
+    every?: boolean;
   } = {}
 ): FieldReading {
-  const pieces = sentencePieces(text);
+  const limit = every ? MAX_FOCUSED_PIECES : MAX_PIECES;
+  const pieces = piecesFrom(text, false, limit);
+  const preservedPieces = piecesFrom(text, true, limit);
   const questions: Record<string, JevQuestion> = {};
   for (const [id, field] of Object.entries(action.fields)) {
     if (field.kind === 'choice') {
@@ -95,7 +129,7 @@ export function readingFor(
         criteria: { ...options, [NONE]: 'The request does not say.' },
       };
     } else {
-      const fieldPieces = field.preserveText ? piecesFrom(text, true) : pieces;
+      const fieldPieces = field.preserveText ? preservedPieces : pieces;
       const pieceOptions = Object.fromEntries(
         fieldPieces.map((piece, index) => [`p${index}`, `“${piece}”`])
       );
@@ -119,7 +153,7 @@ export function readingFor(
       for (const [id, field] of Object.entries(action.fields)) {
         const choice = stated(answers[key(id)]);
         if (!choice) continue;
-        const fieldPieces = field.preserveText ? piecesFrom(text, true) : pieces;
+        const fieldPieces = field.preserveText ? preservedPieces : pieces;
         const value =
           field.kind === 'choice'
             ? choice

@@ -1,7 +1,7 @@
 import { ACTIONS, type Draft, type EntityKind } from '@xyne/shared/assistant';
 import type { JevAnswer } from '@/services/queryIntent/jevClient';
 import { createBreaker } from './breaker';
-import { readingFor, sentencePieces, type FieldReading } from './fields';
+import { piecesWereCut, readingFor, sentencePieces, type FieldReading } from './fields';
 import { decideIntent, readSentence } from './intent';
 import { quickChoice, quickText } from './quickReplies';
 import { matchName, type FoundRecord } from './records';
@@ -277,6 +277,8 @@ describe('reading details from the sentence', () => {
     const question = reading.questions[field];
     return question?.type === 'choice' ? question.criteria : {};
   };
+  const LONG_SENTENCE =
+    'in the design review channel mention Daniel Okafor and Priya Shah to check the crash on the new android build today';
 
   it('offers only runs of words that do not start or end on a framing word', () => {
     const pieces = sentencePieces('Message Arjun, I will pick it up later');
@@ -395,6 +397,30 @@ describe('reading details from the sentence', () => {
     const selected = optionFor(reading, 'message', message);
 
     expect(reading.read({ message: picked(selected) })).toEqual({ message });
+  });
+
+  it('cuts a long sentence to 51 pieces, unless the details are read on their own', () => {
+    const postMessage = ACTIONS.get('post_message')!;
+    const names = 'Daniel Okafor and Priya Shah';
+
+    expect(sentencePieces(LONG_SENTENCE)).toHaveLength(51);
+    expect(piecesWereCut(postMessage, LONG_SENTENCE)).toBe(true);
+    expect(optionFor(readingFor(postMessage, LONG_SENTENCE), 'mentions', names)).toBe('none');
+
+    const everything = readingFor(postMessage, LONG_SENTENCE, { every: true });
+    expect(optionFor(everything, 'mentions', names)).not.toBe('none');
+    expect(Object.keys(criteriaOf(everything, 'message')).length).toBeLessThanOrEqual(255);
+  });
+
+  it('asks the same questions with or without every piece when none were cut', () => {
+    const text = 'tell Priya hi';
+
+    for (const action of ACTIONS.values()) {
+      expect(piecesWereCut(action, text)).toBe(false);
+      expect(readingFor(action, text, { every: true }).questions).toEqual(
+        readingFor(action, text).questions
+      );
+    }
   });
 
   it('removes an explicitly added member from the channel name', () => {
