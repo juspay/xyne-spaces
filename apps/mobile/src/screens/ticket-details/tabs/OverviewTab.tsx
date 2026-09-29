@@ -1,5 +1,6 @@
-import { useEffect, useState, type ReactElement } from 'react';
-import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { useEffect, useState, type ReactElement, type ReactNode } from 'react';
+import { Pressable, Text, TextInput, View } from 'react-native';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useCSSVariable } from 'uniwind';
 
@@ -24,6 +25,8 @@ type OverviewTabProps = {
   onSaveDescription: (description: string) => void;
   /** Extra top inset when embedded under absolute chrome (xyne-desk). */
   contentPaddingTop?: number;
+  /** Board custom fields (desk Details / ticket overview Fields section). */
+  customFields?: ReactNode;
 };
 
 export function OverviewTab({
@@ -40,6 +43,7 @@ export function OverviewTab({
   onSaveTitle,
   onSaveDescription,
   contentPaddingTop = 0,
+  customFields,
 }: OverviewTabProps): ReactElement {
   const insets = useSafeAreaInsets();
   const { accentText: actionPrimaryColor } = useBubbleAccent();
@@ -73,8 +77,10 @@ export function OverviewTab({
   };
 
   return (
-    <ScrollView
-      className='flex-1'
+    <KeyboardAwareScrollView
+      style={{ flex: 1 }}
+      keyboardShouldPersistTaps='handled'
+      bottomOffset={72}
       contentContainerStyle={{
         paddingTop: contentPaddingTop,
         paddingBottom: Math.max(insets.bottom, 16),
@@ -203,6 +209,8 @@ export function OverviewTab({
           </View>
         ))}
       </View>
-    </ScrollView>
+
+      {customFields}
+    </KeyboardAwareScrollView>
   );
 }

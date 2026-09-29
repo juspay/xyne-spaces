@@ -49,6 +49,53 @@ export const FormFieldType = {
   TICKET: 'TICKET',
 } as const;
 
+export const FormContextType = {
+  BOARD: 'BOARD',
+  RELEASE_CHANGE: 'RELEASE_CHANGE',
+  STAGE: 'STAGE',
+} as const;
+
+export const FormEntityType = {
+  TICKET: 'TICKET',
+  SUB_TICKET: 'SUB_TICKET',
+  RELEASE_MIGRATION_FORM: 'RELEASE_MIGRATION_FORM',
+  RELEASE_ENV_FORM: 'RELEASE_ENV_FORM',
+} as const;
+
+export function isFieldActive(
+  field: { parentOptionId?: string | null },
+  _allFields: readonly unknown[],
+  _getFieldEffectiveValue: (fieldId: string) => string | null | undefined,
+): boolean {
+  return !field.parentOptionId;
+}
+
+export function orderFieldsWithBranchChildrenAfterParent<T>(fields: readonly T[]): T[] {
+  return [...fields];
+}
+
+export function parseFieldOptions(fieldEnum: unknown): Array<{ id: string; value: string }> {
+  if (!Array.isArray(fieldEnum)) return [];
+  return fieldEnum.flatMap((entry, index) => {
+    if (typeof entry === 'string' && entry.trim()) {
+      return [{ id: `opt-${index}`, value: entry.trim() }];
+    }
+    if (
+      entry &&
+      typeof entry === 'object' &&
+      typeof (entry as { id?: unknown }).id === 'string' &&
+      typeof (entry as { value?: unknown }).value === 'string'
+    ) {
+      return [{ id: (entry as { id: string }).id, value: (entry as { value: string }).value }];
+    }
+    return [];
+  });
+}
+
+export function parseFieldOptionValues(fieldEnum: unknown): string[] {
+  return parseFieldOptions(fieldEnum).map(option => option.value);
+}
+
 export const BaseTicketType = {
   Fix: 'Fix',
   Feature: 'Feature',
