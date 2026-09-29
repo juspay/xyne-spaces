@@ -5,7 +5,8 @@ import { StepCategory } from '../types/categories';
 import { variableRef } from '../engine/variable-ref';
 import type { AutomationContext } from '../types/context';
 import { repositories } from '@/database/repositories';
-import { livekitService } from '@/services/liveKitService';
+import { livekitService, DEFAULT_ROOM_EMPTY_TIMEOUT_SECONDS, PENDING_CALL_LOCK_TTL_SECONDS } from '@/services/liveKitService';
+import { redisService } from '@/services/redisService';
 import { callSideEffectService } from '@/services/callSideEffectService';
 import { CallType, CallOrigin, CallStatus, ProjectType, UserType } from '@xyne/shared';
 import { logger } from '@/utils/logger';
@@ -225,6 +226,87 @@ export class MakeCallStep extends BaseActionStep<typeof MakeCallConfigSchema, Ma
       );
     }
 
+    // Race guard: dedupe concurrent call creation for this channel against BOTH
+    // other automation runs and channel-level human-initiated calls. This step
+    // always creates CallOrigin.CHANNEL calls, and initiateCall claims this exact
+    // same call:pending:<channelId> key for its own channel-level (no
+    // conversationId) calls - so a workflow firing twice, or racing a person
+    // pressing "call" on the channel, can't each create their own room. A
+    // human's thread/conversation-scoped call uses a different, suffixed key
+    // (call:pending:<channelId>:<conversationId>) and is intentionally not
+    // covered here: thread calls are a separate CallOrigin.CONVERSATION track
+    // that can legitimately run alongside a channel-level call.
+    const pendingCallKey = `call:pending:${channelId}`;
+    let claimedCallLock: boolean;
+    try {
+      claimedCallLock = await redisService.set(pendingCallKey, 'pending', PENDING_CALL_LOCK_TTL_SECONDS, true /* NX */);
+    } catch (error) {
+      // Fail CLOSED here: unlike a human-facing join, this step creates a
+      // fully populated, ringing call in one shot. Proceeding unguarded during
+      // a Redis outage risks double-ringing every invitee if a concurrent run
+      // (automation or human) is also mid-flight. Let the workflow engine's
+      // normal retry policy handle it instead.
+      throw new Error(
+        `[MakeCallStep] Unable to acquire call dedupe lock (Redis unavailable): workspaceId=${workspaceId}, automationId=${automationId}, error=${error}`
+      );
+    }
+
+    if (!claimedCallLock) {
+      // pendingCallKey isn't cleared on a winner's success (see below — it stays
+      // around as a pointer to a real ACTIVE call), so a lost claim here can mean
+      // two different things: a genuine concurrent winner still mid-creation, or a
+      // stale key left over from a PREVIOUS call in this channel that has already
+      // ended. Poll briefly before concluding it's stale: this step's own critical
+      // path to a visible DB row is just one LiveKit room creation + one DB
+      // transaction (no agent-resolution wait like callController's join path), so
+      // a few seconds is ample margin for a genuine winner without making a stale
+      // key block this channel for the rest of its TTL.
+      const STALE_LOCK_POLL_INTERVAL_MS = 300;
+      const STALE_LOCK_POLL_DEADLINE_MS = 5000;
+      const pollDeadline = Date.now() + STALE_LOCK_POLL_DEADLINE_MS;
+      let existingCall = await repositories.calls.findActiveCallByChannelId(channelId);
+      while (!existingCall && Date.now() < pollDeadline) {
+        await new Promise((resolve) => setTimeout(resolve, STALE_LOCK_POLL_INTERVAL_MS));
+        existingCall = await repositories.calls.findActiveCallByChannelId(channelId);
+      }
+
+      const existingMetadata = existingCall?.metadata as { conversationId?: string } | null;
+      if (existingCall && existingMetadata?.conversationId) {
+        logger.info('[MakeCallStep] joining_racing_call', {
+          channelId,
+          callId: existingCall.externalId,
+          automationId,
+        });
+
+        return {
+          callId: existingCall.externalId,
+          roomLink: existingCall.roomLink ?? buildCallInviteUrl(existingCall.externalId),
+          channelId,
+          conversationId: existingMetadata.conversationId,
+        };
+      }
+
+      // Still no active call after waiting out a genuine winner's realistic setup
+      // time — the key is stale (its owning call already ended, or its owner
+      // crashed before committing). Reclaim it for our own call rather than
+      // leaving this channel stuck failing for the rest of the TTL.
+      logger.warn('[MakeCallStep] pending_call_lock_reclaimed', {
+        channelId,
+        automationId,
+        reason: 'no_active_call_after_wait',
+      });
+      await redisService.set(pendingCallKey, 'pending', PENDING_CALL_LOCK_TTL_SECONDS);
+    }
+
+    // From here on, any thrown error (LiveKit/DB failure, or the all-rings-failed
+    // cancellation below) must release pendingCallKey - otherwise it sits there for
+    // the full PENDING_CALL_LOCK_TTL_SECONDS (130s) with no ACTIVE call for the next
+    // attempt's findActiveCallByChannelId to find, so every retry in that window hits
+    // the same "Another call is already being created" throw for nothing. The success
+    // path leaves the key alone: it's now a valid pointer to a real ACTIVE call, and
+    // future duplicate claims resolve it via findActiveCallByChannelId above.
+    try {
+
     // uuidv4() is synchronous and CPU-local; sequential generation is
     // intentional and avoids pretending there is useful async work to parallelize.
     const externalId = uuidv4();
@@ -256,7 +338,7 @@ export class MakeCallStep extends BaseActionStep<typeof MakeCallConfigSchema, Ma
     await livekitService.createRoom({
       name: externalId,
       maxParticipants: effectiveMaxParticipants,
-      emptyTimeout: config.emptyTimeout ?? 120,
+      emptyTimeout: config.emptyTimeout ?? DEFAULT_ROOM_EMPTY_TIMEOUT_SECONDS,
       metadata: roomMetadata,
     });
 
@@ -386,6 +468,11 @@ export class MakeCallStep extends BaseActionStep<typeof MakeCallConfigSchema, Ma
     });
 
     return { callId, roomLink, channelId, conversationId };
+
+    } catch (error) {
+      await redisService.del(pendingCallKey).catch(() => undefined);
+      throw error;
+    }
   }
 }
 
