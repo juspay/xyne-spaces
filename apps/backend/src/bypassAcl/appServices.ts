@@ -6,7 +6,7 @@ import { findOrCreateConversation } from '@/apps/core/conversationUtils';
 import { createTicketWithConversation } from '@/apps/core/ticketutils';
 import { SlackBlockKitParser } from '@/integrations/adapters/slack-webhook-tickets/utils/slackBlockKitParser';
 import { resolveSlackMessageParts } from '@/integrations/adapters/slack-webhook-tickets/utils/slackUtils';
-import { MessageType, AppIncomingWebhookAction, validateFlowDefinition } from '@xyne/shared';
+import { MessageType, AppIncomingWebhookAction, validateFlowDefinition, ChannelRole } from '@xyne/shared';
 import type { FlowDefinition } from '@xyne/shared';
 import { config } from '@/config/env';
 import {
@@ -30,6 +30,11 @@ import { buildPingdomFlow, normalizePingdom, parsePingdomPayload } from '@/apps/
 import { buildGcpFlow, normalizeGcp, parseGcpPayload } from '@/apps/controllers/gcpWebhookParser';
 import type { WebhookContext } from '@/apps/controllers/incomingWebhookController';
 import { db } from '@/database/client';
+import { AppError } from '@/middleware/errorHandler';
+import { SYSTEM_USER_ID } from '@/database/tenant/context';
+import { ensureUserInGeneralChannel } from '@/utils/workspaceGeneralChannel';
+import { vespaQueue } from '@/queues/vespaQueue';
+import { appSchema } from '@/vespa/src/types';
 import { asSystem, asService, rawQuery } from './base';
 
 /**
@@ -89,6 +94,202 @@ export async function claimAppSigningSecret(appId: string, fresh: string) {
     () => db.$queryRaw<{ signingSecret: string | null }[]>`
         UPDATE apps SET "signingSecret" = COALESCE("signingSecret", ${fresh})
         WHERE id = ${appId} RETURNING "signingSecret"`,
+  );
+}
+
+// ─── Internal S2S org-app provisioning (routes/appsInternal.ts; claw-auth spaces-sync) ────
+// Apps are ORG-level but tenant-keyed to their creator's workspace: org-spanning reads run
+// asSystem with explicit filters; writes run asService under the workspace that owns the rows.
+
+/** Relocated from appsInternal POST / + /:appId/install (org↔workspace checks). */
+export function findWorkspaceOrgId(workspaceId: string): Promise<string | null> {
+  return asSystem(
+    ['Workspace'],
+    'S2S org-app sync validates the caller-named workspace; it is not the caller\'s own',
+    async () =>
+      (await db.workspace.findUnique({ where: { id: workspaceId }, select: { orgId: true } }))
+        ?.orgId ?? null,
+  );
+}
+
+/**
+ * Relocated from appsInternal POST / ensure-lookup. Must span the org's workspaces or a second
+ * workspace would recreate the app. Same case-insensitive org+name rule as createApp.
+ */
+export function findOrgAppByName(orgId: string, name: string) {
+  return asSystem(
+    ['Apps'],
+    'org-app idempotency lookup spans the org\'s workspaces (app tenant key = creator\'s workspace)',
+    () =>
+      db.apps.findFirst({
+        where: { orgId, name: { equals: name.trim(), mode: 'insensitive' } },
+      }),
+  );
+}
+
+/**
+ * Org app template by id, regardless of the stamping workspace. Relocated from appUtils'
+ * installApp: sibling-workspace installs 404 on a workspace-scoped findById. Callers make
+ * their own org-eligibility check before acting on the row.
+ */
+export function findOrgAppTemplate(appId: string) {
+  return asSystem(
+    ['Apps'],
+    'install/sync reads the org-owned template from a sibling workspace of the same org',
+    () => db.apps.findUnique({ where: { id: appId } }),
+  );
+}
+
+/**
+ * Relocated from AppPermissionRepository.copyFromApp: installs copy template permissions into
+ * the target workspace while the rows are stamped with the creator's.
+ */
+export function listAppTemplatePermissionRefs(appId: string): Promise<{ permissionId: string }[]> {
+  return asSystem(
+    ['AppPermission'],
+    'install copies template permissions across workspaces of the same org (rows are creator-workspace stamped)',
+    () => db.appPermission.findMany({ where: { appId }, select: { permissionId: true } }),
+  );
+}
+
+interface OrgAppConfig {
+  webhookUrl?: string;
+  /** Template permission scopes (e.g. ["chat:write"]); intersected with the registry. */
+  permissions?: string[];
+}
+
+/**
+ * Relocated from appsInternal POST / ensure path. Runs under the APP'S OWN tenant key (creator's
+ * workspace): service-actor writes are gated by the enforced workspace, and permission rows
+ * must be stamped with it.
+ */
+export function ensureOrgAppConfig(appId: string, appWorkspaceId: string, config: OrgAppConfig): Promise<void> {
+  return asService(
+    ['Apps', 'AppPermission', 'AvailableAppPermission'],
+    'S2S sync converges the org app on its desired config; writes target the app\'s own tenant key',
+    SYSTEM_USER_ID,
+    appWorkspaceId,
+    async () => {
+      if (config.webhookUrl) {
+        const current = await db.apps.findUnique({ where: { id: appId }, select: { webhookUrl: true } });
+        if (current && current.webhookUrl !== config.webhookUrl) {
+          await db.apps.update({ where: { id: appId }, data: { webhookUrl: config.webhookUrl } });
+        }
+      }
+      if (config.permissions?.length) {
+        // Grant only scopes the registry knows — it may be partially seeded per environment.
+        const registry = await repositories.appPermissions.findAll();
+        const available = new Set(registry.map((p) => `${p.name}:${String(p.type).toLowerCase()}`));
+        const grantable = config.permissions.filter((s) => available.has(s));
+        if (grantable.length > 0) {
+          await repositories.appPermissions.setAppPermissions(appId, grantable);
+        }
+      }
+    },
+  );
+}
+
+interface ProvisionOrgAppInput {
+  orgId: string;
+  name: string;
+  description?: string;
+  /** Tenant scope the app is created under (creator snapshot + permission rows). */
+  workspaceId: string;
+  /** Preferred owner — must be a user of `workspaceId`; falls back to that workspace's oldest active user. */
+  preferredCreatedByUserId?: string;
+}
+
+/**
+ * Relocated from appsInternal POST / create path. Owner = preferred user when valid in this
+ * workspace, else its oldest active user. Mirrors AppController.createApp's Vespa feed.
+ */
+export function provisionOrgApp(input: ProvisionOrgAppInput) {
+  return asService(
+    ['Apps', 'User'],
+    'S2S provisioning creates the org app under the caller-named workspace',
+    SYSTEM_USER_ID,
+    input.workspaceId,
+    async () => {
+      const creator =
+        (input.preferredCreatedByUserId
+          ? await db.user.findFirst({
+              where: { id: input.preferredCreatedByUserId, workspaceId: input.workspaceId, status: 'ACTIVE' },
+              select: { id: true },
+            })
+          : null) ??
+        (await db.user.findFirst({
+          where: { workspaceId: input.workspaceId, status: 'ACTIVE' },
+          orderBy: { createdAt: 'asc' },
+          select: { id: true },
+        }));
+      if (!creator) {
+        throw new AppError('No active user available to own the app in this workspace', 409);
+      }
+
+      const app = await repositories.apps.createApp({
+        name: input.name,
+        description: input.description,
+        createdBy: creator.id,
+        orgId: input.orgId,
+      });
+
+      vespaQueue
+        .addJob({ schema: appSchema, jobType: 'feed', docId: app.id })
+        .catch((err) => logger.error(`Failed to queue Vespa feed for app ${app.id}:`, err));
+
+      return app;
+    },
+  );
+}
+
+/** Relocated from appsInternal GET /:appId/installations/:workspaceId. */
+export function isAppInstalledInWorkspace(appId: string, workspaceId: string): Promise<boolean> {
+  return asService(
+    ['InstalledApps'],
+    'S2S install-presence check for the caller-named workspace',
+    SYSTEM_USER_ID,
+    workspaceId,
+    async () =>
+      Boolean(
+        await repositories.installedApps.findFirst({
+          where: { appId, user: { workspaceId } },
+        }),
+      ),
+  );
+}
+
+/**
+ * Wraps appUtils' installApp for the S2S route: org eligibility is checked by the caller,
+ * same gate as AppController.installApp; installApp's org-spanning template reads are
+ * themselves relocated in this module (findOrgAppTemplate / listAppTemplatePermissionRefs).
+ */
+export function installOrgAppForWorkspace(appId: string, workspaceId: string) {
+  return asService(
+    ['Apps', 'InstalledApps', 'AppPermission', 'InstalledAppPermission', 'AppCommand', 'InstalledAppCommand', 'User', 'OrgMember', 'Workspace'],
+    'S2S app install into the caller-named workspace; org eligibility checked by the caller',
+    SYSTEM_USER_ID,
+    workspaceId,
+    async () => {
+      const { installApp } = await import('@/apps/core/appUtils');
+      return installApp(appId, workspaceId);
+    },
+  );
+}
+
+/** Relocated from appsInternal's post-install #general join (caller treats it as best-effort). */
+export function joinAppBotToGeneralChannel(appId: string, workspaceId: string): Promise<string | null> {
+  return asService(
+    ['InstalledApps', 'Channel', 'ChannelParticipant'],
+    'S2S post-install join of the app\'s bot user to the workspace general channel',
+    SYSTEM_USER_ID,
+    workspaceId,
+    async () => {
+      const installed = await repositories.installedApps.findFirst({
+        where: { appId, user: { workspaceId } },
+      });
+      if (!installed) return null;
+      return ensureUserInGeneralChannel(db, workspaceId, installed.userId, ChannelRole.MEMBER);
+    },
   );
 }
 

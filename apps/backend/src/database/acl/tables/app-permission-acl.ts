@@ -19,11 +19,6 @@ export class AppPermissionACL extends BaseQueryACL<
     return { app: { is: await appVisibilityWhere(this.prisma, this.ctx.workspaceId) } }
   }
 
-  /** Service actors (S2S installs: copyFromApp) get the same org-wide reads. */
-  async getServiceReadWhere(): Promise<Prisma.AppPermissionWhereInput> {
-    return this.getWhereClause()
-  }
-
   async getMutateWhere(): Promise<Prisma.AppPermissionWhereInput> {
     return {
       app: {

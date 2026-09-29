@@ -1,24 +1,28 @@
 import { Router, type NextFunction, type Request, type Response } from 'express';
 import { z } from 'zod';
-import { db } from '@/database/client';
-import { repositories } from '@/database/repositories';
 import { AppError } from '@/middleware/errorHandler';
-import { installApp } from '@/apps/core/appUtils';
-import { runAsServiceActor, SYSTEM_USER_ID } from '@/database/tenant/context';
+import {
+  claimAppSigningSecret,
+  ensureOrgAppConfig,
+  findOrgAppByName,
+  findOrgAppTemplate,
+  findWorkspaceOrgId,
+  installOrgAppForWorkspace,
+  isAppInstalledInWorkspace,
+  joinAppBotToGeneralChannel,
+  provisionOrgApp,
+} from '@/bypassAcl/appServices';
 import { decrypt, encrypt } from '@/services/encryptionService';
 import crypto from 'crypto';
 import { isValidUrl } from '@/utils/urlUtils';
-import { vespaQueue } from '@/queues/vespaQueue';
-import { appSchema } from '@/vespa/src/types';
 import { logger } from '@/utils/logger';
-import { ChannelRole } from '@xyne/shared';
-import { ensureUserInGeneralChannel } from '@/utils/workspaceGeneralChannel';
 
 /**
  * Internal S2S routes for org-scoped app provisioning (mounted at /api/internal/apps,
  * guarded by validateS2SKey in app.ts). Used by claw-auth's spaces-sync flow to create
  * the org's default-agent apps and install them into newly created workspaces — the
- * user-auth /api/apps/* routes are unreachable from that context.
+ * user-auth /api/apps/* routes are unreachable from that context. All DB access is
+ * delegated to named operations in bypassAcl/appServices.ts (bypass audit boundary).
  */
 const router = Router();
 
@@ -54,15 +58,12 @@ function substituteAppId(template: string, appId: string): string {
   return url;
 }
 
-/** Grant only scopes the registry knows — the registry may be partially seeded per environment. */
-async function grantRegistryIntersection(appId: string, permissions: string[]): Promise<string[]> {
-  const registry = await repositories.appPermissions.findAll();
-  const available = new Set(registry.map((p) => `${p.name}:${String(p.type).toLowerCase()}`));
-  const grantable = permissions.filter((s) => available.has(s));
-  if (grantable.length > 0) {
-    await repositories.appPermissions.setAppPermissions(appId, grantable);
-  }
-  return grantable;
+/** Lazily claim the at-rest signing secret for legacy apps that lack it, sharing installApp's atomic COALESCE claim. */
+async function ensureSigningSecretEnc(appId: string, signingSecretEnc: string | null): Promise<string> {
+  if (signingSecretEnc) return signingSecretEnc;
+  const fresh = await encrypt(crypto.randomBytes(32).toString('hex'));
+  const rows = await claimAppSigningSecret(appId, fresh);
+  return rows[0]?.signingSecret ?? fresh;
 }
 
 /**
@@ -77,95 +78,47 @@ router.post(
   route(async (req, res) => {
     const input = createAppSchema.parse(req.body);
 
-    // Defence-in-depth (same rule install enforces): the workspace the app is
-    // tenant-keyed to must belong to the org the app is scoped to. S2S-trusted
-    // callers should never send a mismatched pair, but the write is cross-org.
-    const workspace = await runAsServiceActor(SYSTEM_USER_ID, input.workspaceId, () =>
-      db.workspace.findUnique({ where: { id: input.workspaceId }, select: { orgId: true } }),
-    );
-    if (!workspace) throw new AppError('Workspace not found', 404);
-    if (workspace.orgId !== input.orgId) {
+    // Defence-in-depth: the tenant-key workspace must belong to the app's org.
+    const workspaceOrgId = await findWorkspaceOrgId(input.workspaceId);
+    if (!workspaceOrgId) throw new AppError('Workspace not found', 404);
+    if (workspaceOrgId !== input.orgId) {
       throw new AppError('workspaceId does not belong to orgId', 400);
     }
 
-    // Apps are org-level but carry the creator's workspace as their tenant key — the
-    // idempotency lookup must span workspaces or a second workspace would recreate the app.
-    // Under the service actor, AppsACL.getServiceReadWhere resolves it at org scope.
-    const existing = await runAsServiceActor(SYSTEM_USER_ID, input.workspaceId, () =>
-      db.apps.findFirst({
-        where: { orgId: input.orgId, name: { equals: input.name, mode: 'insensitive' } },
-      }),
-    );
-
+    const existing = await findOrgAppByName(input.orgId, input.name);
     if (existing) {
-      // Legacy/migrated apps may lack a signing secret — lazy-generate one with the
-      // same atomic COALESCE installApp uses, so concurrent ensures can't race.
-      let signingSecretEnc = existing.signingSecret;
-      if (!signingSecretEnc) {
-        const fresh = await encrypt(crypto.randomBytes(32).toString('hex'));
-        const rows = await db.$queryRaw<{ signingSecret: string | null }[]>`
-          UPDATE apps SET "signingSecret" = COALESCE("signingSecret", ${fresh})
-          WHERE id = ${existing.id} RETURNING "signingSecret"`;
-        signingSecretEnc = rows[0]?.signingSecret ?? fresh;
-      }
-      // Ensure-ups run under the APP'S OWN tenant key (its creator's workspace),
-      // not the caller's: the ACL extension gates updates by the enforced
-      // workspace, and this app may have been created under a different one.
-      await runAsServiceActor(SYSTEM_USER_ID, existing.workspaceId, async () => {
-        if (input.webhookUrlTemplate) {
-          const webhookUrl = substituteAppId(input.webhookUrlTemplate, existing.id);
-          if (existing.webhookUrl !== webhookUrl) {
-            await db.apps.update({ where: { id: existing.id }, data: { webhookUrl } });
-          }
-        }
-        if (input.permissions?.length) {
-          await grantRegistryIntersection(existing.id, input.permissions);
-        }
+      await ensureOrgAppConfig(existing.id, existing.workspaceId, {
+        webhookUrl: input.webhookUrlTemplate
+          ? substituteAppId(input.webhookUrlTemplate, existing.id)
+          : undefined,
+        permissions: input.permissions,
       });
+      const signingSecretEnc = await ensureSigningSecretEnc(existing.id, existing.signingSecret);
       res.status(200).json({ id: existing.id, signingSecret: decrypt(signingSecretEnc), created: false });
       return;
     }
 
-    const created = await runAsServiceActor(SYSTEM_USER_ID, input.workspaceId, async () => {
-      const creator =
-        (input.preferredCreatedByUserId
-          ? await db.user.findFirst({
-              where: { id: input.preferredCreatedByUserId, workspaceId: input.workspaceId, status: 'ACTIVE' },
-              select: { id: true },
-            })
-          : null) ??
-        (await db.user.findFirst({
-          where: { workspaceId: input.workspaceId, status: 'ACTIVE' },
-          orderBy: { createdAt: 'asc' },
-          select: { id: true },
-        }));
-      if (!creator) {
-        throw new AppError('No active user available to own the app in this workspace', 409);
+    let created;
+    try {
+      created = await provisionOrgApp(input);
+    } catch (err) {
+      // Lost a concurrent create race — the winner answers the same lookup now.
+      if (err instanceof Error && err.message.includes('already exists')) {
+        const winner = await findOrgAppByName(input.orgId, input.name);
+        if (winner) {
+          const signingSecretEnc = await ensureSigningSecretEnc(winner.id, winner.signingSecret);
+          res.status(200).json({ id: winner.id, signingSecret: decrypt(signingSecretEnc), created: false });
+          return;
+        }
       }
+      throw err;
+    }
 
-      const app = await repositories.apps.createApp({
-        name: input.name,
-        description: input.description,
-        createdBy: creator.id,
-        orgId: input.orgId,
-      });
-
-      if (input.webhookUrlTemplate) {
-        await db.apps.update({
-          where: { id: app.id },
-          data: { webhookUrl: substituteAppId(input.webhookUrlTemplate, app.id) },
-        });
-      }
-      if (input.permissions?.length) {
-        await grantRegistryIntersection(app.id, input.permissions);
-      }
-
-      // Mirror AppController.createApp: queue Vespa indexing for the new app.
-      vespaQueue
-        .addJob({ schema: appSchema, jobType: 'feed', docId: app.id })
-        .catch((err) => logger.error(`Failed to queue Vespa feed for app ${app.id}:`, err));
-
-      return app;
+    await ensureOrgAppConfig(created.id, created.workspaceId, {
+      webhookUrl: input.webhookUrlTemplate
+        ? substituteAppId(input.webhookUrlTemplate, created.id)
+        : undefined,
+      permissions: input.permissions,
     });
 
     logger.info(`[apps-internal] Created org app ${created.id} (${input.name}) for org ${input.orgId}`);
@@ -186,12 +139,7 @@ router.get(
       .object({ appId: z.string().min(1), workspaceId: z.string().min(1) })
       .parse(req.params);
 
-    const installed = await runAsServiceActor(SYSTEM_USER_ID, workspaceId, () =>
-      repositories.installedApps.findFirst({
-        where: { appId, user: { workspaceId } },
-      }),
-    );
-    res.status(200).json({ installed: Boolean(installed) });
+    res.status(200).json({ installed: await isAppInstalledInWorkspace(appId, workspaceId) });
   }),
 );
 
@@ -207,31 +155,23 @@ router.post(
     const { appId } = z.object({ appId: z.string().min(1) }).parse(req.params);
     const { workspaceId, addToGeneralChannel } = installAppSchema.parse(req.body);
 
-    const app = await repositories.apps.findById(appId);
+    const app = await findOrgAppTemplate(appId);
     if (!app) throw new AppError('App not found', 404);
 
-    const result = await runAsServiceActor(SYSTEM_USER_ID, workspaceId, async () => {
-      if (app.scope === 'ORG') {
-        const workspace = await db.workspace.findUnique({ where: { id: workspaceId }, select: { orgId: true } });
-        if (!workspace) throw new AppError('Workspace not found', 404);
-        if (workspace.orgId !== app.orgId) {
-          throw new AppError('This app is not available to your workspace', 403);
-        }
+    if (app.scope === 'ORG') {
+      const workspaceOrgId = await findWorkspaceOrgId(workspaceId);
+      if (!workspaceOrgId) throw new AppError('Workspace not found', 404);
+      if (workspaceOrgId !== app.orgId) {
+        throw new AppError('This app is not available to your workspace', 403);
       }
-      return installApp(appId, workspaceId);
-    });
+    }
+
+    const result = await installOrgAppForWorkspace(appId, workspaceId);
 
     if (addToGeneralChannel) {
-      // Best-effort: the install above already succeeded; a missing general
-      // channel or join failure must not fail the install response.
+      // Best-effort: the install already succeeded; a join failure must not fail the response.
       try {
-        const channelId = await runAsServiceActor(SYSTEM_USER_ID, workspaceId, async () => {
-          const installed = await repositories.installedApps.findFirst({
-            where: { appId, user: { workspaceId } },
-          });
-          if (!installed) return undefined;
-          return ensureUserInGeneralChannel(db, workspaceId, installed.userId, ChannelRole.MEMBER);
-        });
+        const channelId = await joinAppBotToGeneralChannel(appId, workspaceId);
         if (channelId) {
           logger.info(`[apps-internal] joined app ${appId} bot to general channel ${channelId} in workspace ${workspaceId}`);
         } else {
