@@ -395,6 +395,20 @@ export interface MerchantTicketListItem {
   senderEmail?: string;
   senderName?: string;
   customFormData?: TicketCustomFormData | null;
+  assignedTo?: string | null;
+  assignedToUser?: TicketUserInfo | null;
+  createdBy?: string;
+  createdByUser?: TicketUserInfo | null;
+}
+
+/**
+ * Identity details of a user attached to a ticket (assignee / creator / updater).
+ */
+export interface TicketUserInfo {
+  userId: string;
+  email: string;
+  name: string;
+  displayName: string | null;
 }
 
 export interface MerchantTicketsListResponse extends PaginatedResponse<MerchantTicketListItem> {}
