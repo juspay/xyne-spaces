@@ -1213,9 +1213,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
                 onClick={() => setVoiceMode(true)}
                 trackName='ENTER_VOICE_MODE'
               />
-              {assistantVoice && (
-                <VoiceToggleButton voice={assistantVoice} className='h-8 w-8' />
-              )}
+              {assistantVoice && <VoiceToggleButton voice={assistantVoice} className='h-8 w-8' />}
 
               {pending ? (
                 <button

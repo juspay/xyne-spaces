@@ -183,7 +183,7 @@ describe('running a plan', () => {
         { op: 'navigate', target: thread },
         { op: 'send_message', target: thread, text: 'do an RCA', mentions: [doctor] },
       ],
-      actions
+      actions,
     );
 
     expect(calls).toEqual(['go c-release/t-1', 'reply t-1 do an RCA @u-xyne-doctor']);
