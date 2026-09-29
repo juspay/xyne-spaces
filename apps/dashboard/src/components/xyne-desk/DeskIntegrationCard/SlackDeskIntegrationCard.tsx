@@ -27,8 +27,6 @@ export const SlackDeskIntegrationCard = ({
     useChannelIntegrationInfo(channelId);
   const queryClient = useQueryClient();
 
-  // Shares EmailChannelPreference.slackDeskTriggerMode with ConnectedSlackSection — this
-  // card just fronts the SLACK-type desk's single binding instead of a bound-on secondary one.
   const triggerModeKey = ['desk-slack-channels', channelId];
   const { data } = useQuery({
     queryKey: triggerModeKey,
@@ -39,7 +37,9 @@ export const SlackDeskIntegrationCard = ({
     mutationFn: (mode: SlackDeskTriggerMode) => updateSlackDeskTriggerMode(channelId, mode),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: triggerModeKey }),
     onError: err =>
-      toast.error(err instanceof Error ? err.message : 'Failed to update ticket trigger — please try again.'),
+      toast.error(
+        err instanceof Error ? err.message : 'Failed to update ticket trigger — please try again.',
+      ),
   });
 
   if (sourceType !== 'slack-desk' || !hasSource) return null;
@@ -81,9 +81,9 @@ export const SlackDeskIntegrationCard = ({
           <div className='flex flex-col gap-[2px]'>
             <div className='text-desk-label'>Only create tickets when @-mentioned</div>
             <div className='text-[12px] leading-[16px] text-desk-helper'>
-              Off: every Slack message becomes a ticket. On: only a message that tags the bot
-              does — anywhere in a thread. Tagging it mid-thread pulls the whole thread in as
-              one ticket instead of starting mid-conversation.
+              Off: every Slack message becomes a ticket. On: only a message that tags the bot does —
+              anywhere in a thread. Tagging it mid-thread pulls the whole thread in as one ticket
+              instead of starting mid-conversation.
             </div>
           </div>
           <Switch

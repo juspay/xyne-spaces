@@ -306,7 +306,6 @@ router.get(
   }
 );
 
-/** Desk-owner gate, same rule as `/:channelId/disconnect`, but with a workspace check. */
 async function authorizeSlackDeskManager(
   channelId: string,
   userId: string,
@@ -339,7 +338,6 @@ async function authorizeSlackDeskManager(
   return channel.name;
 }
 
-/** GET — active bindings only; the /channels picker re-offers disconnected ones. */
 router.get(
   '/channels/:channelId/slack',
   authV2Middleware.authenticate,
@@ -376,7 +374,6 @@ router.get(
   }
 );
 
-/** PATCH — how this desk's bound Slack channel decides which messages become tickets. */
 router.patch(
   '/channels/:channelId/slack/trigger-mode',
   authV2Middleware.authenticate,
@@ -402,7 +399,6 @@ router.patch(
   }
 );
 
-/** POST — credentials are copied from the workspace-level source, as channel creation does. */
 router.post(
   '/channels/:channelId/slack',
   authV2Middleware.authenticate,
@@ -432,8 +428,7 @@ router.post(
         botOauthToken: creds.botOauthToken,
       }));
 
-      // One binding per desk (sendSlackReply stays unambiguous) and one desk per Slack
-      // channel (ingest resolves by name); repointing either would orphan other tickets.
+      // One binding per desk (sendSlackReply picks by channel) and one desk per Slack channel (ingest resolves by name).
       const name = buildSlackDeskSourceName(slackChannelId);
       const clash = await db.externalSource.findFirst({
         where: {

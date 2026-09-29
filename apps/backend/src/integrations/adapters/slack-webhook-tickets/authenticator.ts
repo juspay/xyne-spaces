@@ -91,7 +91,7 @@ export class SlackAuthenticator extends BaseAuthenticator {
 
   private async isOrphanThreadMessage(
     payload: SlackWebhookPayload,
-    sourceName: string,
+    sourceName: string
   ): Promise<boolean> {
     const event = payload?.event;
     if (!event?.thread_ts || event.thread_ts === event.ts) {
@@ -104,8 +104,7 @@ export class SlackAuthenticator extends BaseAuthenticator {
     if (!source) {
       return false;
     }
-    // A @mention on a MENTION_ONLY desk is never an orphan — SlackDeskFlow backfills the
-    // thread for it. ALL_MESSAGES desks keep the orphan check unchanged.
+    // On a MENTION_ONLY desk a mid-thread @mention isn't an orphan: SlackDeskFlow backfills the thread.
     if (sourceName.startsWith(DESK_SOURCE_PREFIXES.SLACK) && source.channelId) {
       const pref = await db.emailChannelPreference.findUnique({
         where: { channelId: source.channelId },

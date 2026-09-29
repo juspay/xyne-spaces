@@ -19,7 +19,6 @@ interface ConnectedSlackSectionProps {
   canManage: boolean;
 }
 
-/** Slack channels bound to a desk — sibling of ConnectedAppsSection. */
 export const ConnectedSlackSection: React.FC<ConnectedSlackSectionProps> = ({
   channelId,
   canManage,
@@ -31,11 +30,7 @@ export const ConnectedSlackSection: React.FC<ConnectedSlackSectionProps> = ({
 
   const connectedKey = ['desk-slack-channels', channelId];
   // The route 403s non-owners; swallowing that would render "none connected" falsely.
-  const {
-    data,
-    isLoading,
-    isError,
-  } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: connectedKey,
     queryFn: () => listDeskSlackChannels(channelId),
     enabled: !!channelId,
@@ -152,9 +147,9 @@ export const ConnectedSlackSection: React.FC<ConnectedSlackSectionProps> = ({
           <div className='flex flex-col gap-[2px]'>
             <div className='text-desk-label'>Only create tickets when @-mentioned</div>
             <div className='text-[12px] leading-[16px] text-desk-helper'>
-              Off: every Slack message becomes a ticket. On: only a message that tags the bot
-              does — anywhere in a thread. Tagging it mid-thread pulls the whole thread in as
-              one ticket instead of starting mid-conversation.
+              Off: every Slack message becomes a ticket. On: only a message that tags the bot does —
+              anywhere in a thread. Tagging it mid-thread pulls the whole thread in as one ticket
+              instead of starting mid-conversation.
             </div>
           </div>
           <Switch

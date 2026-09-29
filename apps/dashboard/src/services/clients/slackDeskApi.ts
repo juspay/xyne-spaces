@@ -30,7 +30,6 @@ export interface AvailableSlackChannel {
   alreadyConnected: boolean;
 }
 
-/** Slack channels the bot is a member of, across the workspace. */
 export async function listAvailableSlackChannels(): Promise<AvailableSlackChannel[]> {
   const { data } = await apiInstance.get<{ channels: AvailableSlackChannel[] }>(
     '/integrations/slack-desk/channels',

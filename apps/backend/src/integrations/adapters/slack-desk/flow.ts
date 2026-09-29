@@ -13,6 +13,8 @@ import { logger } from '../../../utils/logger';
 import { buildSlackDeskSourceName } from '../../core/deskSources';
 import { extractBotUserId, textMentionsBot } from './botMention';
 
+const BACKFILL_MAX_PAGES = 5;
+
 export class SlackDeskFlow extends BaseFlow {
   private externalMessageRepo = new ExternalMessageRepository();
 
@@ -21,9 +23,6 @@ export class SlackDeskFlow extends BaseFlow {
     return channelId ? buildSlackDeskSourceName(channelId) : undefined;
   }
 
-  /** ALL_MESSAGES (default): unchanged. MENTION_ONLY (per-desk): only a message that
-   * @-mentions the bot opens/continues a ticket; once a thread has one, replies append
-   * normally without needing another mention. Mentioning mid-thread backfills the thread. */
   async preprocess(payload: any, source?: ExternalSource): Promise<any> {
     try {
       if (!source) {
@@ -64,9 +63,8 @@ export class SlackDeskFlow extends BaseFlow {
           return { __skipIngestion: true, __skipReason: 'mention_required' };
         }
         if (isMention && isThreadReply && !threadAlreadyTicketed) {
-          return await this.backfillThread(payload, source, creds.botOauthToken, threadTs!, workspaceId);
+          return await this.backfillThread(payload, creds.botOauthToken, threadTs!, workspaceId);
         }
-        // Else: root-level mention, or reply into an already-ticketed thread — ingest as-is.
       }
 
       await this.enrichMessage(payload, targetMessage, creds.botOauthToken, workspaceId);
@@ -86,7 +84,6 @@ export class SlackDeskFlow extends BaseFlow {
       : SlackDeskTriggerMode.ALL_MESSAGES;
   }
 
-  /** Resolves @mentions (text + attachments) and the author, in place, on one message. */
   private async enrichMessage(
     payload: any,
     targetMessage: any,
@@ -126,20 +123,19 @@ export class SlackDeskFlow extends BaseFlow {
     }
   }
 
-  /** Fetches the whole thread (uncapped) via conversations.replies, returning an array of
-   * enriched payloads — core.ts transforms+syncs each in order, seeding the ticket with full
-   * thread context instead of just the tagging message. */
+  /** Returns one payload per thread message; core.ts ingests them in order as one ticket. */
   private async backfillThread(
     triggerPayload: any,
-    source: ExternalSource,
     botOauthToken: string,
     threadTs: string,
     workspaceId: string | undefined,
   ): Promise<any[]> {
     const channel = triggerPayload.event.channel;
-    const client = new WebClient(botOauthToken);
+    // Runs inside Slack's synchronous webhook, so fail fast instead of the default ~30 min retry.
+    const client = new WebClient(botOauthToken, { retryConfig: { retries: 2 }, rejectRateLimitedCalls: true });
     const messages: any[] = [];
     let cursor: string | undefined;
+    let pages = 0;
 
     try {
       do {
@@ -154,7 +150,11 @@ export class SlackDeskFlow extends BaseFlow {
         }
         messages.push(...(res.messages ?? []));
         cursor = res.response_metadata?.next_cursor || undefined;
-      } while (cursor);
+        pages += 1;
+      } while (cursor && pages < BACKFILL_MAX_PAGES);
+      if (cursor) {
+        logger.warn('[SlackDeskFlow] Thread backfill hit page cap', { channel, threadTs, fetched: messages.length });
+      }
     } catch (err) {
       logger.warn('[SlackDeskFlow] Thread fetch failed, ingesting mention only', { channel, threadTs, error: err });
     }
