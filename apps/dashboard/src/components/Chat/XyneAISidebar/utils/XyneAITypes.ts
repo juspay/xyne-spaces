@@ -282,6 +282,7 @@ export interface ConversationHistory {
   sessionId: string;
   threadConversationId?: string;
   title: string;
+  titleGenerated?: boolean;
   messages: StoredMessage[];
   createdAt: Date;
   lastUpdated: Date;

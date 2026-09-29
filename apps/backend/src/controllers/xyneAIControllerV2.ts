@@ -30,6 +30,7 @@ import {
   listAccessibleClawAgents,
   listClawAgentModels,
   deleteClawConversation,
+  patchClawConversation,
   CMDK_ANSWER_AGENT_SLUG,
   type ClawRunRequest,
 } from '@/services/clawAgentService';
@@ -549,6 +550,9 @@ export class XyneAIControllerV2 {
           createCanvasEnabled,
           // cmd+K shows one answer and takes no reply, so follow-up chips are never drawn.
           generateFollowUpSuggestions: agentSlug !== CMDK_ANSWER_AGENT_SLUG,
+          // Neither cmd+K nor the compose subject helper puts its thread in the
+          // chat list, so a generated name is a completion nobody can ever see.
+          generateTitle: agentSlug !== CMDK_ANSWER_AGENT_SLUG && !draftMode,
           sessionId: effectiveSessionId,
           // Branching: forward intent + tree position to claw-auth. The
           // `parentMessageId` is the JAF/v1-shared name; here it doubles as
@@ -1161,6 +1165,60 @@ export class XyneAIControllerV2 {
       const message = error instanceof Error ? error.message : 'Internal server error';
       logger.error('[XyneAIv2] deleteConversation error:', error);
       res.status(503).json({ success: false, error: message });
+    }
+  };
+
+  /**
+   * PATCH /api/xyne-ai/v2/conversations/:convId
+   * Rename and/or pin a conversation. Ownership is enforced by claw-auth.
+   */
+  updateConversation = async (req: Request, res: Response): Promise<void> => {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
+    }
+
+    const { convId } = req.params;
+    if (!convId) {
+      res.status(400).json({ success: false, error: 'convId is required' });
+      return;
+    }
+
+    const { title, pinned } = (req.body ?? {}) as { title?: unknown; pinned?: unknown };
+    if (title === undefined && pinned === undefined) {
+      res.status(400).json({ success: false, error: 'title or pinned is required' });
+      return;
+    }
+    if (title !== undefined && (typeof title !== 'string' || !title.trim())) {
+      res.status(400).json({ success: false, error: 'title must be a non-empty string' });
+      return;
+    }
+    if (pinned !== undefined && typeof pinned !== 'boolean') {
+      res.status(400).json({ success: false, error: 'pinned must be a boolean' });
+      return;
+    }
+
+    const agentSlug = (req.query.agentSlug as string) || 'ask-ai';
+
+    try {
+      const result = await patchClawConversation(
+        { headers: req.headers, userId },
+        convId,
+        {
+          ...(typeof title === 'string' ? { title } : {}),
+          ...(typeof pinned === 'boolean' ? { pinned } : {}),
+        },
+        agentSlug
+      );
+      res.json(result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Internal server error';
+      logger.error('[XyneAIv2] updateConversation error:', error);
+      res.status(message === 'Conversation not found' ? 404 : 503).json({
+        success: false,
+        error: message,
+      });
     }
   };
 

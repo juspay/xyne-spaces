@@ -19,6 +19,7 @@ import { TrackSource } from 'livekit-server-sdk';
 import {
   HideCallSchema,
   SaveWhiteboardAttachmentSchema,
+  UpdateRingStatusSchema,
   UpdateRsvpSchema,
 } from '@/validators/callValidator';
 import { notificationService } from '@/services/notificationService';
@@ -2570,6 +2571,62 @@ export class CallController {
     } catch (error) {
       logger.error('Failed to decline call:', error);
       res.status(500).json({ success: false, error: 'Failed to decline call' });
+    }
+  };
+
+  /**
+   * POST /api/calls/:callId/ring-status
+   * Callee device reports it is ringing, or BUSY when the ring arrives silenced.
+   * Mirrors the Zero `calls.updateRingStatus` mutator for clients that have no Zero
+   * connection when the call arrives (native app woken by a VoIP push).
+   */
+  updateRingStatus = async (req: Request, res: Response): Promise<void> => {
+    const userId = req.user?.id;
+    const { callId } = req.params;
+
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    if (!callId) {
+      res.status(400).json({ success: false, error: 'Call ID is required' });
+      return;
+    }
+
+    try {
+      const { ringStatus } = UpdateRingStatusSchema.parse(req.body);
+
+      const call = await repositories.calls.findByExternalId(callId);
+      if (!call) {
+        logger.warn(`[CallController] Call not found for ring status: ${callId}`);
+        res.status(404).json({ success: false, error: 'Call not found' });
+        return;
+      }
+
+      const participant = await repositories.calls.findParticipant(call.id, userId);
+      if (!participant) {
+        logger.warn(`[CallController] Participant not found for ring status: callId=${callId}, userId=${userId}`);
+        res.status(404).json({ success: false, error: 'Participant not found' });
+        return;
+      }
+
+      // No-op unless still INVITED; a reported RINGING does not replace BUSY.
+      const count = await repositories.calls.updateParticipantRingStatus(participant.id, ringStatus);
+
+      if (count > 0) {
+        logger.info(`User ${userId} reported ring status ${ringStatus} for call ${callId}`);
+      }
+
+      res.json({ success: true });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ success: false, error: error.errors[0]?.message || 'Invalid request body' });
+        return;
+      }
+
+      logger.error('Failed to update ring status:', error);
+      res.status(500).json({ success: false, error: 'Failed to update ring status' });
     }
   };
 

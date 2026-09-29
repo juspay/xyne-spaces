@@ -74,6 +74,12 @@ export enum EmailMergeMode {
 }
 
 // @ts-ignore TS1294
+export enum SlackDeskTriggerMode {
+  ALL_MESSAGES = 'ALL_MESSAGES',
+  MENTION_ONLY = 'MENTION_ONLY',
+}
+
+// @ts-ignore TS1294
 export enum UserResponsibility {
   MANAGER = 'MANAGER',
   TEAM_LEAD = 'TEAM_LEAD',

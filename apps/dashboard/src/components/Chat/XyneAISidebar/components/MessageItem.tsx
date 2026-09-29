@@ -13,6 +13,7 @@ import {
 } from 'react';
 import {
   Globe,
+  Copy,
   Pencil,
   RefreshCw,
   ChevronLeft,
@@ -425,7 +426,7 @@ const UserTagComponent = React.memo(({ userTag }: { userTag: UserTag }) => {
 UserTagComponent.displayName = 'UserTagComponent';
 
 /** Resolves a candidate "@name" to a real workspace user, or null otherwise. */
-type MentionResolver = (rawName: string) => UserTag | null;
+export type MentionResolver = (rawName: string) => UserTag | null;
 
 const MENTION_AMBIGUOUS: unique symbol = Symbol('mention-ambiguous');
 
@@ -599,15 +600,21 @@ export const processNodeForUserTags = (
 };
 
 /**
- * Process a string to replace user tags with actual user names for copying
- * Returns plain text with user names instead of <Full Name> tags
+ * Replace `<Full Name>` tags with the plain name, so copied text matches what
+ * the bubble renders.
+ *
+ * Takes the same resolver the renderer uses rather than the raw `userTags`
+ * map. `userTags` only exists on a message while its run is live — it is not
+ * persisted, so after a reload (and on the AI screen, whose composer never
+ * produces it) the map is empty and a map-based lookup silently copied the raw
+ * tag. The resolver falls back to the live workspace directory, which is
+ * exactly why the rendered chip still showed the name.
  */
-const processTextForCopy = (str: string, userTags?: Record<string, UserTag>): string => {
-  if (!userTags || Object.keys(userTags).length === 0) return str;
+export const processTextForCopy = (str: string, resolveMention?: MentionResolver): string => {
+  if (!resolveMention) return str;
 
-  // Updated regex to match any content inside < > (e.g., <Pradeep J>, <Prajwal Prasad>)
-  return str.replace(/<([^>]+)>/g, match => {
-    const userTag = userTags[match];
+  return str.replace(/<([^>]+)>/g, (match, rawName: string) => {
+    const userTag = resolveMention(rawName);
     return userTag ? userTag.name : match;
   });
 };
@@ -1249,20 +1256,23 @@ export const MessageItem = React.memo(
       // Get summary/content
       if (message.agentType === 'summarizer' && message.summarizerOutput?.summary) {
         // Process summary to replace user tags with plain text names
-        textToCopy = processTextForCopy(message.summarizerOutput.summary, message.userTags);
+        textToCopy = processTextForCopy(message.summarizerOutput.summary, resolveMention);
         // Add key points
         if (message.summarizerOutput.keyPoints && message.summarizerOutput.keyPoints.length > 0) {
           textToCopy += '\n\nKey Points:\n';
           textToCopy += message.summarizerOutput.keyPoints
             .map(kp => {
               // Process key points to replace user tags with plain text names
-              return `• ${processTextForCopy(kp.point, message.userTags)}`;
+              return `• ${processTextForCopy(kp.point, resolveMention)}`;
             })
             .join('\n');
         }
       } else {
         // Genius or generic message
-        textToCopy = message.content || message.streamingContent || '';
+        textToCopy = processTextForCopy(
+          message.content || message.streamingContent || '',
+          resolveMention,
+        );
         // Add key points from parsed content
         if (message.parsedContent && message.parsedContent.keypoints.length > 0) {
           textToCopy += '\n\nKey Points:\n';
@@ -1270,7 +1280,7 @@ export const MessageItem = React.memo(
             .map(point => {
               // Remove markdown bold markers (**text**) and replace user tags
               const cleanedPoint = point.replace(/\*\*([^*]+)\*\*/g, '$1');
-              return `• ${processTextForCopy(cleanedPoint, message.userTags)}`;
+              return `• ${processTextForCopy(cleanedPoint, resolveMention)}`;
             })
             .join('\n');
         }
@@ -1286,25 +1296,6 @@ export const MessageItem = React.memo(
       <div
         className={`group/message flex ${message.type === 'user' ? 'justify-end gap-3' : 'justify-start'}`}
       >
-        {/* Edit button for user messages - appears on hover to the left of the bubble */}
-        {message.type === 'user' && (onEditSubmit || onEditMobile) && !isEditing && (
-          <button
-            onClick={() => {
-              if (onEditMobile) {
-                onEditMobile();
-              } else {
-                startEditing();
-              }
-            }}
-            className='self-start mt-2 p-1 rounded opacity-0 group-hover/message:opacity-100 transition-opacity hover:bg-accent flex-shrink-0'
-            title='Edit message'
-            data-track-category='XyneAI'
-            data-track-name='EDIT_MESSAGE'
-          >
-            <Pencil size={14} className='text-muted-foreground' />
-          </button>
-        )}
-
         <div
           className={
             message.type === 'user'
@@ -1711,6 +1702,44 @@ export const MessageItem = React.memo(
                 </div>
               );
             })()}
+
+          {message.type === 'user' && !isEditing && (
+            <div className='mt-0.5 flex items-center gap-1 opacity-0 group-hover/message:opacity-100 transition-opacity'>
+              {Boolean(message.content || message.streamingContent) && (
+                <button
+                  onClick={handleCopy}
+                  className='p-1.5 rounded transition-colors hover:bg-accent'
+                  title={copied ? 'Copied!' : 'Copy'}
+                  data-track-category='XyneAI'
+                  data-track-name='COPY_USER_MESSAGE'
+                  data-track-metadata={JSON.stringify({ ...trackContext, messageId: message.id })}
+                >
+                  {copied ? (
+                    <Check size={16} className='text-muted-foreground' />
+                  ) : (
+                    <Copy size={16} className='text-muted-foreground' />
+                  )}
+                </button>
+              )}
+              {(onEditSubmit || onEditMobile) && (
+                <button
+                  onClick={() => {
+                    if (onEditMobile) {
+                      onEditMobile();
+                    } else {
+                      startEditing();
+                    }
+                  }}
+                  className='p-1.5 rounded transition-colors hover:bg-accent'
+                  title='Edit message'
+                  data-track-category='XyneAI'
+                  data-track-name='EDIT_MESSAGE'
+                >
+                  <Pencil size={16} className='text-muted-foreground' />
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </div>
     );

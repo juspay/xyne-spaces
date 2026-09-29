@@ -1,3 +1,52 @@
+## [1.426.0](https://github.com/juspay/xyne-spaces/compare/v1.425.0...v1.426.0) (2026-09-29)
+
+
+### Features
+
+* add seconds, configurable business hours and IS_OUTSIDE_BUSINESS_HOURS step to automations ([#2424](https://github.com/juspay/xyne-spaces/issues/2424)) ([c7a5597](https://github.com/juspay/xyne-spaces/commit/c7a5597e98bc789a76035604ba31724bbc23db8f))
+* allow connecting a Slack channel to an existing emai… ([#1612](https://github.com/juspay/xyne-spaces/issues/1612)) ([6d1dada](https://github.com/juspay/xyne-spaces/commit/6d1dada971610da3df12880bc00495e9cec67cbe))
+* expose email rating as an automation trigger variable ([#2439](https://github.com/juspay/xyne-spaces/issues/2439)) ([470c200](https://github.com/juspay/xyne-spaces/commit/470c20039e5186e1fef5adb8bf2ea01c6587d676))
+
+
+### Bug Fixes
+
+* fix claw-auth build — hand-off test passed fields the helper does not accept ([#2442](https://github.com/juspay/xyne-spaces/issues/2442)) ([f89d6ad](https://github.com/juspay/xyne-spaces/commit/f89d6ad249e099a1fcb8f0f6db61a1e7321c8b70)), closes [#2436](https://github.com/juspay/xyne-spaces/issues/2436)
+
+## [1.425.0](https://github.com/juspay/xyne-spaces/compare/v1.424.0...v1.425.0) (2026-09-29)
+
+
+### Features
+
+* name, rename and pin Xyne AI chats, and copy your own messages ([#2298](https://github.com/juspay/xyne-spaces/issues/2298)) ([d0e79f5](https://github.com/juspay/xyne-spaces/commit/d0e79f561121501fe1d58e51ab0abc7978d494dc))
+* ringing status api ([#2438](https://github.com/juspay/xyne-spaces/issues/2438)) ([bd41210](https://github.com/juspay/xyne-spaces/commit/bd412101450bf17b086b6963d7efed7c016e2648))
+
+## [1.424.0](https://github.com/juspay/xyne-spaces/compare/v1.423.1...v1.424.0) (2026-09-29)
+
+
+### Features
+
+* auto-arrange the transition graph and remember stage positions ([#2397](https://github.com/juspay/xyne-spaces/issues/2397)) ([a6753cd](https://github.com/juspay/xyne-spaces/commit/a6753cdd1af6872dd7c235ddb4246351fe3e63ce))
+
+
+### Bug Fixes
+
+* run automation step validation retries instead of absorbing them as duplicates ([#2432](https://github.com/juspay/xyne-spaces/issues/2432)) ([abdd06f](https://github.com/juspay/xyne-spaces/commit/abdd06fc2ffd66fcb69868c0c2bcbf5bffefacc9))
+* search all project labels in the create ticket form ([#2426](https://github.com/juspay/xyne-spaces/issues/2426)) ([9d9508e](https://github.com/juspay/xyne-spaces/commit/9d9508eb52d3bcec34226b580f0362272ddac6cf)), closes [#2344](https://github.com/juspay/xyne-spaces/issues/2344)
+
+## [1.423.1](https://github.com/juspay/xyne-spaces/compare/v1.423.0...v1.423.1) (2026-09-29)
+
+
+### Bug Fixes
+
+* carry the user's original request and files through every workflow hand-off ([#2436](https://github.com/juspay/xyne-spaces/issues/2436)) ([06aba17](https://github.com/juspay/xyne-spaces/commit/06aba17b3d18b0384f4ab1bd1ece42bb6d40e6e0))
+
+## [1.423.0](https://github.com/juspay/xyne-spaces/compare/v1.422.4...v1.423.0) (2026-09-29)
+
+
+### Features
+
+* Support FlowUI artifacts in Xyne AI chat ([#2291](https://github.com/juspay/xyne-spaces/issues/2291)) ([893c641](https://github.com/juspay/xyne-spaces/commit/893c641e77322073fbf6cc02d476689ce76d14a4))
+
 ## [1.422.4](https://github.com/juspay/xyne-spaces/compare/v1.422.3...v1.422.4) (2026-09-29)
 
 
