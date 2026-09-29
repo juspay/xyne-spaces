@@ -102,12 +102,6 @@ export interface HoverActionsToolbarProps {
   /** Called when user clicks “Show all shortcuts” */
   onShowAllShortcuts?: () => void;
   /**
-   * Vertical placement relative to the hovered row. Defaults to 'above', which
-   * lifts the bar clear of the row. Set from ChatBubble's registered actions;
-   * only the thread parent passes 'below'.
-   */
-  placement?: 'above' | 'below';
-  /**
    * The message's current acts (stringified JSON array, or null). Presence of this prop is
    * what renders the tag button — set only when the message is taggable, mirroring how the
    * other optional actions gate themselves.
@@ -155,7 +149,6 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
   messageShortcuts,
   onRunShortcut,
   onShowAllShortcuts,
-  placement = 'above',
 }) => {
   // Shared identity for every action in this toolbar. `conversationId` is the
   // thread key — it joins to a channel server-side, and it is what lets message
@@ -215,7 +208,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
   return (
     <div
       key={`hover-actions-toolbar-${messageId}`}
-      className={`absolute ${placement === 'below' ? 'top-1' : '-top-7'} right-4 z-50 p-1 flex max-w-[calc(100%-2rem)] flex-wrap items-center justify-end gap-1 rounded-lg border border-border bg-popover shadow-md`}
+      className='absolute -top-7 right-4 z-50 p-1 flex max-w-[calc(100%-2rem)] flex-wrap items-center justify-end gap-1 rounded-lg border border-border bg-popover shadow-md'
     >
       {/* Frequently used emojis, one click each — then the full picker */}
       {onEmojiPickerOpenChange && (
