@@ -553,58 +553,6 @@ function hubCapabilityFieldsFromEdit(
   return classification.fields;
 }
 
-export const WALK_STANDUP_USER_TEXT = 'I want a standup scribe for the eng team.';
-export const WALK_CHAT_RENAME_USER_TEXT = 'Walk chat rename: Agent Title From Chat.';
-export const WALK_SKILL_HUB_USER_TEXT = 'Walk: add one skill to the agent hub.';
-export const WALK_BUILTIN_HUB_USER_TEXT = 'Walk: add one builtin tool to the agent hub.';
-export const WALK_KNOWLEDGE_HUB_USER_TEXT = 'Walk: add one knowledge source to the agent hub.';
-
-/** Deterministic live-walk canvas actions (not the scripted route player). */
-export function resolveWalkCreateAction(userText: string): CreateCanvasAction | null {
-  const trimmed = userText.trim();
-  if (trimmed === WALK_STANDUP_USER_TEXT) {
-    return {
-      type: 'draft',
-      intent: 'standup scribe for the eng team',
-      // Structured seed for canvas parsing only; chat display compacts profile dumps.
-      visibleReply:
-        '**Name**: Standup Scribe (@standup-scribe)\n' +
-        '**Description**: Captures daily standups for the eng team.\n' +
-        '**Instructions**:\nYou are Standup Scribe. Capture blockers, progress, and next steps for the eng team.\n' +
-        'XYNE_CREATE_DRAFT: standup scribe for the eng team',
-      fields: firstDraftFields(trimmed),
-    };
-  }
-  if (trimmed === WALK_CHAT_RENAME_USER_TEXT) {
-    return { type: 'rename', name: 'Agent Title From Chat' };
-  }
-  if (trimmed === WALK_SKILL_HUB_USER_TEXT) {
-    return {
-      type: 'draft',
-      intent: trimmed,
-      visibleReply: '',
-      fields: ['skills'],
-    };
-  }
-  if (trimmed === WALK_BUILTIN_HUB_USER_TEXT) {
-    return {
-      type: 'draft',
-      intent: trimmed,
-      visibleReply: '',
-      fields: ['tools'],
-    };
-  }
-  if (trimmed === WALK_KNOWLEDGE_HUB_USER_TEXT) {
-    return {
-      type: 'draft',
-      intent: trimmed,
-      visibleReply: '',
-      fields: ['knowledge'],
-    };
-  }
-  return null;
-}
-
 export function decideCreateCanvasAction(args: {
   userText: string;
   canvasEmpty: boolean;

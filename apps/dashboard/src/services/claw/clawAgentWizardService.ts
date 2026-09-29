@@ -27,9 +27,13 @@ export interface CreateAgentPayload {
   ownerUserId?: string;
   kbScope?: 'COLLECTIONS' | 'USER';
   knowledgeBase?: KbSelection[];
+  /** Tools, permission mode and other agent config, stored in the same write. */
+  config?: Record<string, unknown>;
+  /** Skill ids to attach. */
+  skills?: string[];
 }
 
-/** Create the agent (identity + persona + KB scope/grants). */
+/** Create the agent (identity + persona + KB scope/grants, plus config and skills when given). */
 export async function createAgent(payload: CreateAgentPayload): Promise<Agent> {
   const data = await clawRequest<{ success: boolean; data: Agent }>('/api/v1/agents', {
     method: 'POST',

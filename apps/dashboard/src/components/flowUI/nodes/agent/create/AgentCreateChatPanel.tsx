@@ -29,7 +29,6 @@ import {
   createModeQuery,
   decideCreateCanvasAction,
   parseCreateChatAction,
-  resolveWalkCreateAction,
   shouldHoldDraftChatAck,
   visibleCreateReply,
   type CreateCanvasSnapshot,
@@ -259,19 +258,13 @@ function LiveAgentCreateChatPanel({
     };
     host.__xyneCreateProofTurn = async (userText, visibleReply) => {
       setCanvasError(null);
-      const walk = resolveWalkCreateAction(userText);
-      const raw =
-        walk && walk.type === 'draft'
-          ? `${walk.visibleReply || visibleReply || ''}\nXYNE_CREATE_DRAFT: ${walk.intent}`
-          : (visibleReply ?? userText);
+      const raw = visibleReply ?? userText;
       const marker = parseCreateChatAction(raw);
-      const action =
-        walk ??
-        decideCreateCanvasAction({
-          userText,
-          canvasEmpty: canvasRef.current.empty,
-          marker,
-        });
+      const action = decideCreateCanvasAction({
+        userText,
+        canvasEmpty: canvasRef.current.empty,
+        marker,
+      });
       const userId = `proof-user-${Date.now()}`;
       const botId = `proof-bot-${Date.now()}`;
       const holdAck =

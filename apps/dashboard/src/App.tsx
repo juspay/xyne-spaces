@@ -1,5 +1,5 @@
 import './App.css';
-import { ReactElement, useEffect } from 'react';
+import { ReactElement, Suspense, lazy, useEffect } from 'react';
 import { AuthProvider } from './providers/AuthProvider';
 import { AnalyticsProvider } from './providers/AnalyticsProvider';
 import { RouterProvider } from 'react-router-dom';
@@ -7,9 +7,6 @@ import { router } from './routes/AppRoot';
 import { ThemeProvider } from '@juspay/blend-design-system';
 import { Toaster } from 'sonner';
 import './styles/sonner-overrides.css';
-import { DialRoot } from 'dialkit';
-import 'dialkit/styles.css';
-import { Mesurer } from 'mesurer';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { queryClient } from './services/clients/queryClient';
 import { XYNE_FOUNDATION_TOKENS } from './themes/XYNE_FOUNDATION_TOKENS';
@@ -40,6 +37,11 @@ import {
   InformationCircle,
   MultipleCrossCancelDefault,
 } from '@xyne/icons';
+
+/** Design-tuning overlays stay out of production bundles. */
+const DevDesignTools = import.meta.env.DEV
+  ? lazy(() => import('./components/DevDesignTools'))
+  : null;
 
 const App = (): ReactElement => {
   // Initialize theme on app load
@@ -213,8 +215,11 @@ const App = (): ReactElement => {
           </KeyboardProvider>
         </QueryClientProvider>
       </ErrorBoundary>
-      <DialRoot />
-      <Mesurer />
+      {DevDesignTools ? (
+        <Suspense fallback={null}>
+          <DevDesignTools />
+        </Suspense>
+      ) : null}
     </>
   );
 };

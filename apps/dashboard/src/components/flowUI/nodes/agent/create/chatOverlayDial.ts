@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useDialKitController, type DialConfig } from 'dialkit';
 
 /** Live side card. Figma 1941:36346 is the other version of the same element. */
@@ -47,7 +47,36 @@ export function chatOverlayShadow(on: boolean): string {
   return on ? CURRENT_SHADOW : 'none';
 }
 
-export function useChatOverlayDial(): ChatOverlayDial & { setWidth: (width: number) => void } {
+type ChatOverlayControls = ChatOverlayDial & { setWidth: (width: number) => void };
+
+const WIDTH_STORAGE_KEY = 'xyne.agentCreate.chatOverlayWidth';
+
+function readStoredWidth(): number {
+  try {
+    const raw = Number(window.localStorage.getItem(WIDTH_STORAGE_KEY));
+    return Number.isFinite(raw) && raw > 0 ? clampChatOverlayWidth(raw) : VERSIONS.Current.width;
+  } catch {
+    return VERSIONS.Current.width;
+  }
+}
+
+/** Production: the shipped "Current" look, with the dragged width remembered per browser. */
+function useFixedChatOverlay(): ChatOverlayControls {
+  const [width, setWidthState] = useState(readStoredWidth);
+  const setWidth = useCallback((next: number) => {
+    const clamped = clampChatOverlayWidth(next);
+    setWidthState(clamped);
+    try {
+      window.localStorage.setItem(WIDTH_STORAGE_KEY, String(clamped));
+    } catch {
+      // Storage blocked: the width still applies for this page view.
+    }
+  }, []);
+  return { ...VERSIONS.Current, version: 'Current', width, setWidth };
+}
+
+/** Dev: every value is a live DialKit control (DialRoot is only mounted in dev builds). */
+function useDialChatOverlay(): ChatOverlayControls {
   const dial = useDialKitController('Chat Overlay', CHAT_OVERLAY_DIAL, {
     id: CHAT_OVERLAY_DIAL_ID,
   });
@@ -77,3 +106,7 @@ export function useChatOverlayDial(): ChatOverlayDial & { setWidth: (width: numb
 
   return { ...dial.values, version, setWidth };
 }
+
+export const useChatOverlayDial: () => ChatOverlayControls = import.meta.env.DEV
+  ? useDialChatOverlay
+  : useFixedChatOverlay;

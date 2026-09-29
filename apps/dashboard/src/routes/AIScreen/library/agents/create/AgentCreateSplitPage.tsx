@@ -8,16 +8,12 @@ import {
 } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { useAuth } from '@/hooks/useAuth';
 import { useAgentNameCheck } from '@/hooks/useAgentNameCheck';
 import { usePlatform } from '@/hooks/usePlatform';
-import { AgentConfigAttachError } from '@/hooks/useCreateClawAgent';
-import {
-  createAgent,
-  generateAgentPrompt,
-  updateAgent,
-} from '@/services/claw/clawAgentWizardService';
-import { getAvailableTools } from '@/services/claw/clawToolsService';
+import { createAgent, generateAgentPrompt } from '@/services/claw/clawAgentWizardService';
+import { ClawApiError } from '@/services/claw/clawRequest';
 import { effectiveSlug, slugify } from '@/routes/ClawAgentsScreen/create/wizardState';
 import { AgentCreateCanvas } from '@/components/flowUI/nodes/agent/create/AgentCreateCanvas';
 import { AgentDraftChatPanel } from '@/components/flowUI/nodes/agent/create/AgentDraftChatPanel';
@@ -33,16 +29,10 @@ import { DiscardDraftDialog } from '@/components/flowUI/nodes/agent/create/Disca
 import {
   applyCreateHubDraft,
   decideCreateCanvasAction,
-  resolveWalkCreateAction,
-  WALK_BUILTIN_HUB_USER_TEXT,
   type CreateCanvasSnapshot,
 } from '@/components/flowUI/nodes/agent/create/createChatMode';
 import { preferredToolsHubRow } from '@/components/flowUI/nodes/agent/create/classifyCreateTurn';
 import { PROGRESS_THINKING } from '@/components/flowUI/nodes/agent/create/createProgressLabel';
-import {
-  buildBuiltinCatalog,
-  enableEntry as enableBuiltinEntry,
-} from '@/routes/AIScreen/library/shared/pickers/builtin/builtinCatalog';
 import { listAccessibleKnowledgeBase } from '@/services/claw/clawKnowledgeBaseService';
 import { listSkills } from '@/services/claw/clawSkillsService';
 import { sanitizeAgentCanvasName } from '@/components/flowUI/nodes/agent/create/canvasFromIdentity';
@@ -56,7 +46,6 @@ import {
   dismissHubPick,
   EMPTY_HUB_SUGGESTIONS,
   hubPatchFromPlan,
-  isAuthoritativePlan,
   loadHubPlanContext,
   removeHubSuggestion,
   replaceHubSuggestions,
@@ -64,13 +53,6 @@ import {
   type HubPlanPatch,
   type HubPlanResult,
 } from '@/components/flowUI/nodes/agent/create/hubPlan';
-import { inferNeededCapabilities } from '@/components/flowUI/nodes/agent/create/capabilityInference';
-import {
-  canvasHasCapability,
-  capabilityGapMessage,
-  jobIntentFromForm,
-  validateCanvasCapabilities,
-} from '@/components/flowUI/nodes/agent/create/capabilityValidation';
 import {
   EMPTY_CREATE_FORM,
   type AgentCreateChatPatch,
@@ -79,6 +61,14 @@ import {
   type HubPickKind,
 } from '@/components/flowUI/nodes/agent/create/types';
 import { useAgentCreateForm } from '@/components/flowUI/nodes/agent/create/useAgentCreateForm';
+import {
+  agentDraftStorageKey,
+  clearAgentDraft,
+  readAgentDraft,
+  writeAgentDraft,
+} from '@/components/flowUI/nodes/agent/create/agentCreateDraftStorage';
+import { buildCreateAgentPayload } from './agentCreatePayload';
+import { computeSaveGate } from './saveGate';
 import {
   seedScriptedHubCatalog,
   watchScriptedHubCatalog,
@@ -195,9 +185,8 @@ export function AgentCreateSplitPage({
   const [createdSlug, setCreatedSlug] = useState<string | null>(null);
   const [skeletonIdentity, setSkeletonIdentity] = useState(false);
   const [progressLabel, setProgressLabel] = useState<string | null>(null);
-  const [capabilityBlock, setCapabilityBlock] = useState(false);
+  const [drafting, setDrafting] = useState(false);
   const canvasTurnChainRef = useRef(Promise.resolve());
-  const lastJobIntentRef = useRef('');
   // Hub plan (XOR-backed suggest-tools) of the latest draft turn, ids the user removed
   // this session, and the dashed suggestion chips. Kept out of useAgentCreateForm so
   // none of it feeds dirty checks or conflicts.
@@ -212,6 +201,9 @@ export function AgentCreateSplitPage({
     dismissHubPick(dismissedRef.current, kind, id);
     setHubSuggestions(prev => removeHubSuggestion(prev, kind, id));
   }, []);
+  const turnsInFlightRef = useRef(0);
+  const draftKey = agentDraftStorageKey(workspaceId, user?.id);
+  const storageReady = !scripted && Boolean(user?.id);
 
   const slug = effectiveSlug({
     name: createForm.form.name,
@@ -233,20 +225,38 @@ export function AgentCreateSplitPage({
     return watchScriptedHubCatalog(queryClient, user?.id);
   }, [queryClient, scripted, user?.id]);
 
-  // Manual canvas picks clear a sticky Create block once chips cover job needs.
+  // Reopen the last unsaved draft for this workspace + user.
+  const { restore: restoreForm } = createForm;
+  const discardRef = useRef<() => void>(() => {});
   useEffect(() => {
-    if (!capabilityBlock) return;
-    const intent = lastJobIntentRef.current || jobIntentFromForm('', createForm.form);
-    const needed = inferNeededCapabilities(intent);
-    if (needed.length === 0) {
-      setCapabilityBlock(false);
-      return;
-    }
-    if (needed.every(cls => canvasHasCapability(createForm.form, cls))) {
-      setCapabilityBlock(false);
-      setCreateError(null);
-    }
-  }, [capabilityBlock, createForm.form]);
+    if (!storageReady) return;
+    const stored = readAgentDraft(draftKey);
+    if (!stored) return;
+    restoreForm(stored.form);
+    setPhase('draft');
+    toast('Restored your unsaved agent draft', {
+      id: 'agent-draft-restored',
+      action: { label: 'Start over', onClick: () => discardRef.current() },
+    });
+  }, [draftKey, restoreForm, storageReady]);
+
+  // Keep the stored draft in step with the canvas.
+  useEffect(() => {
+    if (!storageReady || phase === 'created') return undefined;
+    const form = createForm.form;
+    const timer = window.setTimeout(() => writeAgentDraft(draftKey, form), 400);
+    return () => window.clearTimeout(timer);
+  }, [createForm.form, draftKey, phase, storageReady]);
+
+  // A turn still writing the canvas would be lost on reload.
+  useEffect(() => {
+    if (!drafting) return undefined;
+    const warn = (event: BeforeUnloadEvent): void => {
+      event.preventDefault();
+    };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [drafting]);
 
   const scriptedPlayer = useScriptedCreatePlayer({
     enabled: scripted,
@@ -264,131 +274,17 @@ export function AgentCreateSplitPage({
     seedHub,
   });
 
-  const canCreate =
-    phase !== 'created' &&
-    createForm.form.name.trim().length > 0 &&
-    slug.length > 0 &&
-    createForm.form.description.trim().length > 0 &&
-    createForm.form.systemPrompt.trim().length > 0 &&
-    createForm.conflicts.length === 0 &&
-    !capabilityBlock &&
-    (scripted ||
-      !nameCheck.checking ||
-      (nameCheck.nameError === null && nameCheck.slugError === null));
-
-  /** Heal missing hubs from catalog once; returns validation after heal. */
-  const healMissingCapabilities = useCallback(
-    async (intent: string): Promise<ReturnType<typeof validateCanvasCapabilities>> => {
-      const liveForm = createForm.getForm();
-      const jobIntent = jobIntentFromForm(intent, liveForm);
-      let catalog = await getAvailableTools().catch(() => null);
-      let skillCount = 0;
-      let knowledgeCount = 0;
-      try {
-        if (user?.id) skillCount = (await listSkills(user.id)).length;
-      } catch {
-        skillCount = 0;
-      }
-      try {
-        knowledgeCount = (await listAccessibleKnowledgeBase()).collections.length;
-      } catch {
-        knowledgeCount = 0;
-      }
-
-      let result = validateCanvasCapabilities({
-        intent: jobIntent,
-        form: liveForm,
-        catalog,
-        skillCount,
-        knowledgeCount,
-      });
-      if (result.healable.length === 0) return result;
-
-      const patch: AgentCreateChatPatch = {};
-      const toolsGap = result.healable.some(
-        cls => cls === 'mcp' || cls === 'builtin' || cls === 'subagent',
-      );
-      if (toolsGap) {
-        const selected = await selectHubToolsForIntent({
-          intent: jobIntent,
-          current: liveForm.tools,
-          systemPrompt: liveForm.systemPrompt || undefined,
-          catalog,
-        });
-        if (selected) {
-          patch.tools = selected.selection;
-          catalog = selected.catalog;
-        }
-      }
-      if (result.healable.includes('skills') && user?.id) {
-        try {
-          const skills = await listSkills(user.id);
-          skillCount = skills.length;
-          // Never fall back to skills[0] — empty is honest when nothing ranks.
-          const intentLower = jobIntent.toLowerCase();
-          const tokens = intentLower.split(/[^a-z0-9]+/).filter(t => t.length >= 3);
-          const ranked = skills
-            .map(skill => {
-              const hay =
-                `${skill.name} ${skill.slug} ${skill.label} ${skill.description}`.toLowerCase();
-              let score = 0;
-              for (const token of tokens) {
-                if (hay.includes(token)) score += token.length;
-              }
-              return { skill, score };
-            })
-            .sort((a, b) => b.score - a.score);
-          const pick = ranked[0] && ranked[0].score > 0 ? ranked[0].skill : null;
-          if (pick?.id) {
-            patch.selectedSkillIds = [...new Set([...liveForm.selectedSkillIds, pick.id])];
-          }
-        } catch {
-          /* keep gap */
-        }
-      }
-      if (result.healable.includes('knowledge')) {
-        try {
-          const { collections } = await listAccessibleKnowledgeBase();
-          knowledgeCount = collections.length;
-          // Never fall back to collections[0] when score is 0.
-          const intentLower = jobIntent.toLowerCase();
-          const ranked = collections
-            .map(collection => {
-              const hay = `${collection.name ?? ''} ${collection.id}`.toLowerCase();
-              let score = 0;
-              if (/\b(docs?|documentation|product|knowledge|wiki)\b/.test(intentLower)) {
-                if (/\b(docs?|product|wiki|knowledge)\b/.test(hay)) score += 10;
-              }
-              for (const token of intentLower.split(/[^a-z0-9]+/).filter(t => t.length >= 3)) {
-                if (hay.includes(token)) score += token.length;
-              }
-              return { collection, score };
-            })
-            .sort((a, b) => b.score - a.score);
-          const pick = ranked[0] && ranked[0].score > 0 ? ranked[0].collection : null;
-          if (pick?.id) {
-            patch.selectedKbScope = 'COLLECTIONS';
-            patch.selectedKbResources = [{ collectionId: pick.id, fileId: null }];
-          }
-        } catch {
-          /* keep gap */
-        }
-      }
-      if (Object.keys(patch).length > 0) {
-        createForm.applyChatPatch(`hub-cap-heal-${Date.now()}`, patch, { highlight: false });
-      }
-
-      result = validateCanvasCapabilities({
-        intent: jobIntent,
-        form: createForm.getForm(),
-        catalog,
-        skillCount,
-        knowledgeCount,
-      });
-      return result;
-    },
-    [createForm, user?.id],
-  );
+  const saveGate = computeSaveGate({
+    created: phase === 'created',
+    creating,
+    drafting,
+    name: createForm.form.name,
+    slug,
+    description: createForm.form.description,
+    instructions: createForm.form.systemPrompt,
+    conflictCount: createForm.conflicts.length,
+    nameCheck,
+  });
 
   const canvasSnapshot: CreateCanvasSnapshot = {
     empty: canvasIsEmpty(createForm.form),
@@ -402,18 +298,17 @@ export function AgentCreateSplitPage({
     (turn: CreateChatTurn): Promise<void> => {
       if (scripted) return Promise.resolve();
       markCreate('turn');
+      turnsInFlightRef.current += 1;
+      setDrafting(true);
       const run = canvasTurnChainRef.current.then(async (): Promise<void> => {
         const canvasEmpty = canvasIsEmpty(createForm.form);
         const userText = turn.userText;
 
-        const walkAction = resolveWalkCreateAction(userText);
-        const action =
-          walkAction ??
-          decideCreateCanvasAction({
-            userText,
-            canvasEmpty,
-            marker: turn.marker,
-          });
+        const action = decideCreateCanvasAction({
+          userText,
+          canvasEmpty,
+          marker: turn.marker,
+        });
 
         if (action.type === 'idle') {
           createForm.clearHighlights();
@@ -425,7 +320,6 @@ export function AgentCreateSplitPage({
         }
 
         setCreateError(null);
-        setCapabilityBlock(false);
         createForm.clearHighlightMarks();
         setProgressLabel(PROGRESS_THINKING);
 
@@ -477,14 +371,13 @@ export function AgentCreateSplitPage({
         }
 
         // One suggest-tools call decides every hub. Start it now so the ~1s call hides
-        // behind the identity animation; it is also what makes heal / Create block moot.
+        // behind the identity animation.
         const planIntent = [userText.trim(), action.intent.trim()].filter(Boolean).join('\n');
         const wantsPlan =
-          !walkAction &&
-          (canvasEmpty ||
-            action.fields.some(
-              field => field === 'tools' || field === 'skills' || field === 'knowledge',
-            ));
+          canvasEmpty ||
+          action.fields.some(
+            field => field === 'tools' || field === 'skills' || field === 'knowledge',
+          );
         const planContext = wantsPlan ? loadHubPlanContext(user?.id) : undefined;
         if (wantsPlan) planRef.current = null;
         const hubPlan = wantsPlan
@@ -508,8 +401,7 @@ export function AgentCreateSplitPage({
           if (firstDescribe) {
             setSkeletonIdentity(false);
           }
-          const toolsHubRow =
-            userText === WALK_BUILTIN_HUB_USER_TEXT ? 'builtin' : preferredToolsHubRow(userText);
+          const toolsHubRow = preferredToolsHubRow(userText);
           await applyCreateHubDraft({
             action,
             canvasEmpty,
@@ -567,20 +459,6 @@ export function AgentCreateSplitPage({
               ? {
                   fillTools: async (incoming: AgentCreateChatPatch) => {
                     try {
-                      if (userText === WALK_BUILTIN_HUB_USER_TEXT) {
-                        const catalog = await getAvailableTools().catch(() => null);
-                        if (!catalog) return;
-                        const built = buildBuiltinCatalog(catalog);
-                        const pick = built.find(entry => entry.tools.length > 0);
-                        if (pick) {
-                          const live = createForm.getForm();
-                          incoming.tools = {
-                            ...enableBuiltinEntry(live.tools, pick),
-                            callableAgents: live.tools.callableAgents,
-                          };
-                        }
-                        return;
-                      }
                       // Prefer userText — model draftIntent often drops “Slack”/“GitHub”.
                       const selectIntent = [userText.trim(), action.intent.trim()]
                         .filter(Boolean)
@@ -688,28 +566,9 @@ export function AgentCreateSplitPage({
                 }
               : {}),
           });
-          lastJobIntentRef.current = [userText.trim(), action.intent.trim()]
-            .filter(Boolean)
-            .join('\n');
-          // The plan is settled by now (hard 4s ceiling); it sets the authoritative flag.
+          // The plan is settled by now (hard 4s ceiling). No word-match "heal" pass and no
+          // Save block on capabilities: the plan and the chips decide what is bound.
           if (hubPlan) await hubPlan;
-          if (isAuthoritativePlan(planRef.current)) {
-            // XOR scored every hub: nothing to heal, nothing to block Create on.
-            setCapabilityBlock(false);
-          } else {
-            // Legacy path: heal missing hubs the job needs, then gate Create.
-            const capResult = await healMissingCapabilities(lastJobIntentRef.current);
-            if (capResult.healable.length > 0) {
-              setCapabilityBlock(true);
-              setCreateError(capabilityGapMessage(capResult));
-            } else {
-              setCapabilityBlock(false);
-              const miss = capabilityGapMessage(capResult);
-              if (miss && capResult.catalogMiss.length > 0) {
-                setCreateError(miss);
-              }
-            }
-          }
           markCreate('ready');
           await sleep(300);
           createForm.setWritingField(null);
@@ -726,100 +585,58 @@ export function AgentCreateSplitPage({
           throw err;
         }
       });
-      canvasTurnChainRef.current = run.catch(() => {});
+      const settled = run.catch(() => {});
+      void settled.then(() => {
+        turnsInFlightRef.current = Math.max(0, turnsInFlightRef.current - 1);
+        if (turnsInFlightRef.current === 0) setDrafting(false);
+      });
+      canvasTurnChainRef.current = settled;
       return run;
     },
-    [createForm, healMissingCapabilities, scripted, user?.id],
+    [createForm, scripted, user?.id],
+  );
+
+  const agentPath = useCallback(
+    (agentSlug: string): string =>
+      `${workspaceId ? `/${workspaceId}` : ''}/ai/library/agent/${agentSlug}?tab=persona`,
+    [workspaceId],
   );
 
   const persist = useCallback(async (): Promise<void> => {
-    if (scripted || !canCreate || creating) return;
+    if (scripted || !saveGate.canSave || creating) return;
     setCreating(true);
     setCreateError(null);
-    // XOR-decided hubs need no re-check: Save makes no selection network call.
-    if (!isAuthoritativePlan(planRef.current)) {
-      const intent = lastJobIntentRef.current || jobIntentFromForm('', createForm.getForm());
-      const capResult = await healMissingCapabilities(intent);
-      if (capResult.healable.length > 0) {
-        setCapabilityBlock(true);
-        setCreateError(capabilityGapMessage(capResult));
-        setCreating(false);
-        return;
-      }
-    }
-    setCapabilityBlock(false);
-    // catalogMiss is honest-only — Create may proceed (draft already warned).
-    const form = { ...createForm.getForm(), slug };
     try {
-      const agent = await createAgent({
-        slug: form.slug,
-        name: form.name.trim(),
-        description: form.description.trim(),
-        systemPrompt: form.systemPrompt.trim(),
-        color: form.color,
-        kbScope: form.selectedKbScope,
-        ...(user?.id ? { ownerUserId: user.id } : {}),
-        ...(form.selectedKbScope === 'USER' || form.selectedKbResources.length === 0
-          ? {}
-          : { knowledgeBase: form.selectedKbResources }),
-      });
-      const hasTools =
-        form.tools.subagents.length > 0 ||
-        form.tools.direct.length > 0 ||
-        form.tools.custom.length > 0 ||
-        form.tools.gateway.length > 0;
-      const hasSkills = form.selectedSkillIds.length > 0;
-      if (hasTools || hasSkills) {
-        const config: Record<string, unknown> = {};
-        if (hasTools) {
-          config['tools'] = {
-            subagents: form.tools.subagents,
-            direct: form.tools.direct,
-            custom: form.tools.custom,
-            gateway: form.tools.gateway,
-          };
-        }
-        try {
-          await updateAgent(agent.slug, {
-            ...(Object.keys(config).length > 0 ? { config } : {}),
-            ...(hasSkills ? { skills: form.selectedSkillIds } : {}),
-          });
-        } catch (err) {
-          throw new AgentConfigAttachError(
-            agent.slug,
-            err instanceof Error ? err.message : 'tools and skills did not save',
-          );
-        }
-      }
+      const agent = await createAgent(
+        buildCreateAgentPayload(createForm.getForm(), slug, user?.id),
+      );
+      clearAgentDraft(draftKey);
       setCreatedSlug(agent.slug);
       setPhase('created');
       void queryClient.invalidateQueries({ queryKey: ['accessible-claw-agents'] });
       void queryClient.invalidateQueries({ queryKey: ['claw-auth-agents'] });
+      toast.success(`@${agent.slug} is ready`);
+      void navigate(agentPath(agent.slug), { state: { justCreated: true } });
     } catch (err) {
-      if (err instanceof AgentConfigAttachError) {
-        setCreatedSlug(err.slug);
-        setPhase('created');
-        void queryClient.invalidateQueries({ queryKey: ['accessible-claw-agents'] });
-        void queryClient.invalidateQueries({ queryKey: ['claw-auth-agents'] });
+      if (err instanceof ClawApiError && err.status === 409) {
+        setCreateError(`@${slug} is already taken. Change the handle and save again.`);
+      } else {
+        const reason = err instanceof Error && err.message ? err.message : 'Something went wrong.';
         setCreateError(
-          `Agent @${err.slug} was created, but tools and skills didn't save. Open the agent to add them.`,
+          `Couldn't save @${slug || 'this agent'}: ${reason} Your draft is still here.`,
         );
-        return;
       }
-      const handle = slug || 'this agent';
-      setCreateError(
-        `Couldn't create @${handle}. Check the handle is unique and try Create Agent again. Your draft is still here.`,
-      );
-      setPhase('draft');
     } finally {
       setCreating(false);
     }
   }, [
-    canCreate,
+    agentPath,
     createForm,
     creating,
-    healMissingCapabilities,
+    draftKey,
+    navigate,
     queryClient,
+    saveGate.canSave,
     scripted,
     slug,
     user?.id,
@@ -829,6 +646,15 @@ export function AgentCreateSplitPage({
     const libraryPath = workspaceId ? `/${workspaceId}/ai/library` : '/ai/library';
     void navigate(`${libraryPath}?tab=agents`);
   }, [navigate, workspaceId]);
+
+  const discardDraft = useCallback((): void => {
+    clearAgentDraft(draftKey);
+    createForm.resetFrom(EMPTY_CREATE_FORM);
+    setPhase('empty');
+    setCreateError(null);
+    setSkeletonIdentity(false);
+  }, [createForm, draftKey]);
+  discardRef.current = discardDraft;
 
   const requestCancel = useCallback((): void => {
     if (creating) return;
@@ -868,7 +694,8 @@ export function AgentCreateSplitPage({
         void persist();
       }}
       onCancel={requestCancel}
-      canSave={canCreate}
+      canSave={saveGate.canSave}
+      saveBlockedReason={phase === 'empty' ? null : saveGate.reason}
       saving={creating}
       saveError={createError}
       readOnly={phase === 'created' || (scripted && scriptedPlayer.playing)}
@@ -978,12 +805,18 @@ export function AgentCreateSplitPage({
         onOpenChange={setDiscardOpen}
         onConfirm={() => {
           setDiscardOpen(false);
-          createForm.resetFrom(EMPTY_CREATE_FORM);
-          setPhase('empty');
-          setCreateError(null);
-          setSkeletonIdentity(false);
+          discardDraft();
           leaveCreate();
         }}
+        {...(storageReady
+          ? {
+              onKeepForLater: () => {
+                setDiscardOpen(false);
+                writeAgentDraft(draftKey, createForm.getForm());
+                leaveCreate();
+              },
+            }
+          : {})}
       />
     </div>
   );

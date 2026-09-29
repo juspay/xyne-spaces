@@ -177,6 +177,19 @@ export function useAgentCreateForm(initial: AgentCreateFormState = EMPTY_CREATE_
     if (sourceId) lastSourceRef.current = sourceId;
   }, []);
 
+  /**
+   * Load a stored draft. The baseline stays put, so the canvas still counts as
+   * unsaved, and no field is marked user-owned, so chat can keep editing it.
+   */
+  const restore = useCallback((next: AgentCreateFormState) => {
+    setForm(next);
+    formRef.current = next;
+    setDirty({});
+    dirtyRef.current = {};
+    setConflicts([]);
+    conflictsRef.current = [];
+  }, []);
+
   const onFieldFocus = useCallback((field: AgentCreateField | null) => {
     focusedRef.current = field;
     setFocused(field);
@@ -199,6 +212,7 @@ export function useAgentCreateForm(initial: AgentCreateFormState = EMPTY_CREATE_
     applyChatPatch,
     resolveConflict,
     resetFrom,
+    restore,
     onFieldFocus,
     setForm,
     markHighlights,

@@ -1,8 +1,17 @@
-import { useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from 'react';
+import {
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type ReactElement,
+  type ReactNode,
+} from 'react';
 import { AtMark, PencilEditLine } from '@xyne/icons';
 import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Skeleton } from '@/components/ui/Skeleton';
+import { Tooltip } from '@/components/ui/Tooltip';
 import { cn } from '@/utils/classNames';
 import { AutoWidthInput } from '@/routes/AIScreen/library/shared/primitives/AutoWidthInput';
 import { BuiltinCapabilityRow } from '@/routes/AIScreen/library/shared/pickers/builtin/BuiltinCapabilityRow';
@@ -51,6 +60,8 @@ interface AgentCreateCanvasProps {
   onSave?: () => void;
   onCancel?: () => void;
   canSave?: boolean;
+  /** Why Save is disabled, shown as its tooltip. */
+  saveBlockedReason?: string | null;
   saving?: boolean;
   saveError?: string | null;
   readOnly?: boolean;
@@ -109,6 +120,49 @@ function ConflictChooser({
   );
 }
 
+/** Save, with the blocking reason as a tooltip (a disabled button gets no hover, so the span is the trigger). */
+function SaveButton({
+  onSave,
+  disabled,
+  saving,
+  blockedReason,
+}: {
+  onSave: () => void;
+  disabled: boolean;
+  saving: boolean;
+  blockedReason: string | null;
+}): ReactElement {
+  const reasonId = useId();
+  const button = (
+    <Button
+      type='button'
+      variant='default'
+      size='sm'
+      onClick={onSave}
+      disabled={disabled}
+      loading={saving}
+      aria-describedby={blockedReason ? reasonId : undefined}
+      data-track-category='AGENT_ARTIFACT'
+      data-track-name='CLICK_APPROVE'
+      data-testid='create-agent-save'
+      data-save-blocked-reason={blockedReason ?? ''}
+    >
+      Save
+    </Button>
+  );
+  if (!blockedReason) return button;
+  return (
+    <Tooltip content={blockedReason} side='bottom'>
+      <span className='inline-flex'>
+        {button}
+        <span id={reasonId} className='sr-only'>
+          {blockedReason}
+        </span>
+      </span>
+    </Tooltip>
+  );
+}
+
 function IdentitySkeleton(): ReactElement {
   return (
     <div
@@ -151,6 +205,7 @@ export function AgentCreateCanvas({
   onSave,
   onCancel,
   canSave = false,
+  saveBlockedReason,
   saving = false,
   saveError,
   readOnly,
@@ -204,6 +259,7 @@ export function AgentCreateCanvas({
 
   const rowHasContent = (row: AgentCreateHubRow): boolean => {
     switch (row) {
+      // Same buckets the pickers write: MCP → direct/gateway, built-in → custom.
       case 'mcp':
         return form.tools.gateway.length > 0 || form.tools.direct.length > 0;
       case 'builtin':
@@ -323,19 +379,12 @@ export function AgentCreateCanvas({
               </Button>
             ) : null}
             {isProfile && onSave ? (
-              <Button
-                type='button'
-                variant='default'
-                size='sm'
-                onClick={onSave}
-                disabled={!canSave || disabled}
-                loading={saving}
-                data-track-category='AGENT_ARTIFACT'
-                data-track-name='CLICK_APPROVE'
-                data-testid='create-agent-save'
-              >
-                Save
-              </Button>
+              <SaveButton
+                onSave={onSave}
+                disabled={!canSave || Boolean(disabled)}
+                saving={saving}
+                blockedReason={disabled || saving ? null : (saveBlockedReason ?? null)}
+              />
             ) : null}
             {onClose ? (
               <button
