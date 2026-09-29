@@ -203,6 +203,22 @@ export function FullCallView({
     state => state.context.isTranscriptionEnabled,
   );
 
+  const actingHostId = useSelector(roomActor, state => state.context.actingHostId);
+
+  // Display name of whoever holds host powers (creator, else the acting host) for
+  // the non-host "who can remove the agent" note in the transcription popover.
+  const hostName = useMemo(() => {
+    if (!room?.metadata) return null;
+    try {
+      const createdBy = (JSON.parse(room.metadata) as { createdBy?: string }).createdBy;
+      const inControl = actingHostId ?? createdBy;
+      if (!inControl) return null;
+      return participants.find(p => p.identity === inControl)?.name ?? null;
+    } catch {
+      return null;
+    }
+  }, [room?.metadata, participants, actingHostId]);
+
   // Active-recording state is driven by room metadata so every participant (incl.
   // late joiners) sees the indicator. `isRecordingProp`/optimistic local state are
   // only fallbacks for the brief window before metadata propagates.
@@ -528,6 +544,7 @@ export function FullCallView({
             hideInvite={hideInvite}
             raisedHands={raisedHands}
             onToggleHandRaise={onToggleHandRaise}
+            hostName={hostName}
             agentControls={
               hideAIAssistant
                 ? undefined
@@ -600,6 +617,8 @@ export function FullCallView({
         <div className='flex min-w-0 items-center gap-2 sm:gap-3'>
           <CallPrivacyIndicator
             isTranscriptionEnabled={isTranscriptionEnabled}
+            isHost={isHost}
+            hostName={hostName}
             onToggleTranscription={() => roomActor.send({ type: 'TOGGLE_TRANSCRIPTION' })}
             isRecordingActive={isRecordingActive}
             recordingType={displayRecordingType}

@@ -26,7 +26,6 @@ import {
   parseAIDataMessage,
   decodeDataPayload,
   AI_DATA_TOPIC,
-  ACTING_HOST_METADATA_KEY,
   type AIInviteUser,
   type AIEvent,
 } from '@xyne/shared';
@@ -197,7 +196,7 @@ export interface RoomContext {
   isAIAssistantEnabled: boolean; // Track Xyne Automatic state
   transcriptionAgentLeft: boolean; // Track if the transcription agent left mid-call
   isTranscriptionEnabled: boolean; // Host/acting-host kill-switch: false = agent silenced (audio unsubscribed)
-  transcriptionToggleNotice: { enabled: boolean; byName: string; byIdentity?: string } | null; // Drives the toggle toast
+  transcriptionToggleNotice: { enabled: boolean; byName: string } | null; // Drives the toggle toast
   privacyPopoverOpen: boolean; // Shared open-state for the CallPrivacyIndicator popover
   transcriptionPending: boolean; // A toggle is in-flight, awaiting the agent's confirmation
   // Acting host (longest-present human while the real host is absent) — gets every
@@ -327,8 +326,8 @@ export type RoomMachineEvent =
   | { type: 'AI_CONTROLLER_CHANGED'; controller: string | null; controllerName: string | null }
   | { type: 'TRANSCRIPTION_AGENT_LEFT' } // LiveKit signalled the agent dropped mid-call
   | { type: 'DISMISS_AGENT_LEFT_WARNING' } // User acknowledged the agent-left toast
-  | { type: 'TOGGLE_TRANSCRIPTION' } // Host/delegate requested a transcription on/off change (command only)
-  | { type: 'TRANSCRIPTION_CONFIRMED'; enabled: boolean; by?: { identity: string; name: string } } // Agent's authoritative state broadcast
+  | { type: 'TOGGLE_TRANSCRIPTION' } // Host requested a transcription on/off change (command only)
+  | { type: 'TRANSCRIPTION_CONFIRMED'; enabled: boolean } // Agent's authoritative state broadcast
   | { type: 'TRANSCRIPTION_TIMEOUT' } // No agent confirmation within the timeout window
   | { type: 'DISMISS_TRANSCRIPTION_NOTICE' } // User acknowledged the transcription-toggle toast
   | { type: 'SET_PRIVACY_POPOVER'; open: boolean } // Open/close the transcription privacy popover
@@ -512,8 +511,7 @@ export const roomMachine = setup({
         const syncActingHost = (metadata?: string) => {
           if (!metadata) return;
           try {
-            const parsed = JSON.parse(metadata) as Record<string, unknown>;
-            const actingHostId = parsed[ACTING_HOST_METADATA_KEY];
+            const { actingHostId } = JSON.parse(metadata) as { actingHostId?: unknown };
             if (typeof actingHostId === 'string' || actingHostId === null) {
               sendBack({ type: 'SYNC_ACTING_HOST', actingHostId });
             }
@@ -835,11 +833,7 @@ export const roomMachine = setup({
                   !!_participant?.identity &&
                   isTranscriptionAgentIdentity(_participant.identity)
                 ) {
-                  sendBack({
-                    type: 'TRANSCRIPTION_CONFIRMED',
-                    enabled: event.enabled,
-                    ...(event.by && { by: event.by }),
-                  } as const);
+                  sendBack({ type: 'TRANSCRIPTION_CONFIRMED', enabled: event.enabled } as const);
                 }
                 break;
             }
@@ -2193,18 +2187,19 @@ export const roomMachine = setup({
             },
           ],
         },
-        // Agent's authoritative confirmation: reflect real state + clear pending.
-        // `by` names who applied it (host or delegate); falls back to 'The host'.
+        // Agent's authoritative confirmation: reflect the real state + clear pending.
+        // Peers get the toast, naming the acting host when one is standing in.
         TRANSCRIPTION_CONFIRMED: {
           actions: assign({
             isTranscriptionEnabled: ({ event }) => event.enabled,
             isAIAssistantEnabled: ({ event, context }) =>
               event.enabled ? context.isAIAssistantEnabled : false,
             transcriptionPending: () => false,
-            transcriptionToggleNotice: ({ event }) => ({
+            transcriptionToggleNotice: ({ event, context }) => ({
               enabled: event.enabled,
-              byName: event.by?.name ?? 'The host',
-              ...(event.by?.identity && { byIdentity: event.by.identity }),
+              byName:
+                context.participants.find(p => p.identity === context.actingHostId)?.name ??
+                'The host',
             }),
           }),
         },

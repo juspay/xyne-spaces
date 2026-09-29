@@ -39,7 +39,6 @@ import { useShortcutById, useShortcut } from '../../../shortcuts';
 import { InvitationResponse, type Call, type RecordingType } from '@xyne/shared';
 import { RecordingButton } from './RecordingButton';
 import { MarkMomentButton } from './MarkMomentButton';
-import { useHostAuthority } from '../hooks/useHostAuthority';
 import {
   buildCallInviteText,
   getAiButtonColorClass,
@@ -213,13 +212,7 @@ export function CallControls({
   const currentCall = useMemo(() => {
     return (activeCalls as ActiveCallForControls[]).find(c => c.externalId === externalId);
   }, [activeCalls, externalId]);
-  // Real host (DB, correct even before LiveKit metadata loads) OR acting host
-  // (LiveKit-resolved stand-in) — same "who's in control" resolver every other
-  // host-only gate in the call UI reads from.
-  const isRealHostByDb =
-    !!localParticipantId && currentCall?.createdByUserId === localParticipantId;
-  const hostAuthority = useHostAuthority();
-  const isHost = isRealHostByDb || hostAuthority.isHost;
+  const isHost = !!localParticipantId && currentCall?.createdByUserId === localParticipantId;
 
   const hostName = useMemo(() => {
     const hostId = currentCall?.createdByUserId;

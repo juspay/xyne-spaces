@@ -11,7 +11,6 @@ import { useAgentLeftWarning } from '../hooks/useAgentLeftWarning';
 import { useTranscriptionToggleNotice } from '../hooks/useTranscriptionToggleNotice';
 import { useTranscriptionHostToast } from '../hooks/useTranscriptionHostToast';
 import { useTranscriptionPendingTimeout } from '../hooks/useTranscriptionPendingTimeout';
-import { useHostAuthority } from '../hooks/useHostAuthority';
 import { useActingHostNotice } from '../hooks/useActingHostNotice';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { AIInviteDialog } from '../CallModals/AIInviteDialog';
@@ -211,24 +210,18 @@ export function CustomLiveKitRoom({
   const [dispositionSubmitting, setDispositionSubmitting] = useState(false);
   const [dispositionError, setDispositionError] = useState<string | null>(null);
 
-  // Real host (DB, correct pre-connect) OR acting host — single source, threaded
-  // down as `isHost` to every child so one place decides who's in control.
-  const isRealHostByDb = useIsCallHost(externalId, user?.id);
-  const hostAuthority = useHostAuthority();
-  const isHost = isRealHostByDb || hostAuthority.isHost;
-  const myIdentity = room?.localParticipant.identity ?? null;
-  // Was I the one who toggled? by.identity if the agent sent it, else fall back to
-  // isHost (older agent builds without `by`).
-  const isToggleActor =
-    !!transcriptionToggleNotice &&
-    (transcriptionToggleNotice.byIdentity !== undefined
-      ? transcriptionToggleNotice.byIdentity === myIdentity
-      : isHost);
-  useTranscriptionHostToast(transcriptionToggleNotice, isToggleActor);
-  useTranscriptionToggleNotice(transcriptionToggleNotice, isToggleActor);
+  const isHost = useIsCallHost(externalId, user?.id);
+  // Host's own "Transcription off … Undo" toast when they stop the agent.
+  useTranscriptionHostToast(isTranscriptionEnabled, isHost);
+  // Peers see "the host stopped transcription" (host skipped — they get the toast above).
+  useTranscriptionToggleNotice(transcriptionToggleNotice, isHost);
+  // Fail-safe: clear pending + error if the agent never confirms a toggle.
   useTranscriptionPendingTimeout(transcriptionPending);
-  useActingHostNotice(hostAuthority.isActingHost, hostAuthority.activeHostName);
-  // Mirror the on/off state into room metadata so late joiners stay in sync.
+  // Tell me when I start/stop standing in for an absent host.
+  useActingHostNotice();
+  // Mirror the host's transcription on/off into room metadata (on change) so
+  // participants who join later stay in sync — LiveKit data messages don't reach
+  // participants who weren't present when the host toggled.
   const prevTranscriptionEnabledRef = useRef(isTranscriptionEnabled);
   useEffect(() => {
     if (!isHost) return;

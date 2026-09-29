@@ -12,8 +12,8 @@ import { logger } from '@/utils/logger';
 import { redisService } from '@/services/redisService';
 import { repositories } from '@/database/repositories';
 import { superpositionClient } from '@/services/superpositionClient';
-import { resolveActingHost } from '@/services/actingHost';
-import { ACTING_HOST_METADATA_KEY, DEFAULT_HOST_CONTROLS, normalizeHostControls, type HostControls } from '@xyne/shared';
+import { ACTING_HOST_METADATA_KEY, resolveActingHost } from '@/services/actingHost';
+import { DEFAULT_HOST_CONTROLS, normalizeHostControls, type HostControls } from '@xyne/shared';
 
 /** Open-ended role/slot name ('default', 'test', or any future canary arm) — not a fixed enum. */
 type TranscriptionAgentRole = string;
@@ -697,7 +697,8 @@ export class LiveKitService {
 
       let actingHostId: string | null;
       try {
-        const participants = await this.roomService.listParticipants(roomName);
+        // No known host → can't tell if they're present, so elect nobody.
+        const participants = hostId ? await this.roomService.listParticipants(roomName) : [];
         actingHostId = resolveActingHost({
           hostId,
           participants,

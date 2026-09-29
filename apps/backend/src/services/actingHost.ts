@@ -8,6 +8,9 @@ import { logger } from '@/utils/logger';
  * Two-way import with liveKitService is safe here (ES2020, function-scoped use only).
  */
 
+/** Room-metadata key the acting host is published under (agent + clients read it). */
+export const ACTING_HOST_METADATA_KEY = 'actingHostId';
+
 /** Human (via isHumanParticipant) and not an external guest — guests get no admin rights. */
 function isEligibleForActingHost(participant: ParticipantInfo): boolean {
   if (!isHumanParticipant(participant)) return false;

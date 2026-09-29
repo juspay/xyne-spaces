@@ -359,14 +359,13 @@ async def entrypoint(ctx: JobContext):
 
             elif payload.get("type") == "transcription_toggle":
                 # Kill-switch, host or acting host only — see _is_authorized_transcription_controller.
-                # Agent is authoritative: always broadcasts its ACTUAL state, tagged
-                # with `by` on apply; untagged (unchanged state) on reject.
-                def _publish_transcription_state(enabled_now: bool, by: dict | None = None):
+                # Agent is authoritative: always broadcasts its ACTUAL state (unchanged
+                # on reject) so clients never show "off" unless it really stopped.
+                def _publish_transcription_state(enabled_now: bool):
                     try:
-                        message: dict = {"type": "transcription_state", "enabled": enabled_now}
-                        if by:
-                            message["by"] = by
-                        state = json.dumps(message).encode("utf-8")
+                        state = json.dumps(
+                            {"type": "transcription_state", "enabled": enabled_now}
+                        ).encode("utf-8")
                         asyncio.create_task(
                             ctx.room.local_participant.publish_data(
                                 state, reliable=True, topic="ai-actions"
@@ -392,10 +391,7 @@ async def entrypoint(ctx: JobContext):
 
                     async def _apply_and_confirm(target: bool):
                         await multi_user_transcriber.set_transcription_enabled(target)
-                        _publish_transcription_state(
-                            multi_user_transcriber.is_enabled(),
-                            by={"identity": participant_id, "name": participant_name or participant_id},
-                        )
+                        _publish_transcription_state(multi_user_transcriber.is_enabled())
 
                     asyncio.create_task(_apply_and_confirm(requested))
 
@@ -451,7 +447,6 @@ async def entrypoint(ctx: JobContext):
     # and to notify transcript-ready later.
     webhook = WebhookNotifier(config.backend_url, config.transcription_agent_api_key)
 
-    room_metadata = {}
     try:
         if ctx.room.metadata:
             room_metadata = json.loads(ctx.room.metadata)
