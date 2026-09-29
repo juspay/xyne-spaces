@@ -360,6 +360,23 @@ router.get("/check-name", asyncHandler(async (req: Request, res: Response, next)
 // ── Agent CRUD ───────────────────────────────────────────────────────
 
 router.get("/", asyncHandler(async (req: Request, res: Response) => {
+  // Spaces asks "is this app a Claw agent?" when it creates the app's user
+  // (installApp decides AGENT vs APP). Answer from the app link alone — no
+  // visibility, org or enabled filter — or personal/cloned and disabled agents
+  // would be stamped APP for good. S2S only: unfiltered, it would reveal other
+  // users' private agents.
+  // Present-but-malformed (empty, repeated) must fail, not fall through to the
+  // normal list — a non-empty list would read as "is an agent".
+  const rawSpacesAppId = req.query["spacesAppId"];
+  if (rawSpacesAppId !== undefined) {
+    if (!s2sKeyMatches(req.headers["x-s2s-key"])) throw forbidden("spacesAppId lookup is service-to-service only");
+    const spacesAppId = typeof rawSpacesAppId === "string" ? rawSpacesAppId.trim() : "";
+    if (!spacesAppId) throw badRequest("spacesAppId must be a single non-empty value");
+    const agent = await agentRepository.findBySpacesAppId(spacesAppId);
+    ok(res, agent ? [lightAgentProjection(agent as unknown as Record<string, unknown>)] : []);
+    return;
+  }
+
   // The caller-passed userId is honoured as a "scope" hint (lets a frontend
   // ask "what would user X see"), but the ADMIN bypass is determined from
   // the AUTHENTICATED user — requireAuth has already verified their cookie
