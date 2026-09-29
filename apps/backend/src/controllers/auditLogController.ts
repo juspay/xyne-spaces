@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { ApiResponse } from '@/types/express';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
-import { assertChannelMembership } from '@/utils/channelMembership';
+import { assertChannelMembership, isDeskOwnerOrChannelAdmin } from '@/utils/channelMembership';
 import { AuditEntityType, type AuditLogPage } from '@xyne/shared';
 
 const TAG = '[AuditLogController]';
@@ -53,11 +53,24 @@ export class AuditLogController {
     const { entityType, entityId } = parsed.data;
     const limit = parsed.data.limit ?? DEFAULT_LIMIT;
 
-    // Desk history exposes prompts and routing; same membership rule as the desk endpoints.
+    // Desk history exposes prompts and routing: only those who can edit desk settings see it.
     if (entityType === AuditEntityType.DESK) {
       const access = await assertChannelMembership(req, entityId);
       if (!access.ok) {
         res.status(access.status).json({ success: false, error: access.error });
+        return;
+      }
+      const ownerUserId = (
+        await db.emailChannelPreference.findUnique({
+          where: { channelId: entityId },
+          select: { ownerUserId: true },
+        })
+      )?.ownerUserId;
+      if (!(await isDeskOwnerOrChannelAdmin(entityId, access.userId, ownerUserId))) {
+        res.status(403).json({
+          success: false,
+          error: 'Only the desk owner or a channel admin can view this desk history',
+        });
         return;
       }
     }
