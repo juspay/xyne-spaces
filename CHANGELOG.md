@@ -1,3 +1,10 @@
+## [1.423.0](https://github.com/juspay/xyne-spaces/compare/v1.422.4...v1.423.0) (2026-09-29)
+
+
+### Features
+
+* Support FlowUI artifacts in Xyne AI chat ([#2291](https://github.com/juspay/xyne-spaces/issues/2291)) ([893c641](https://github.com/juspay/xyne-spaces/commit/893c641e77322073fbf6cc02d476689ce76d14a4))
+
 ## [1.422.4](https://github.com/juspay/xyne-spaces/compare/v1.422.3...v1.422.4) (2026-09-29)
 
 
