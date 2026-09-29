@@ -4,7 +4,7 @@ import { matchName } from './records';
 
 jest.mock('@/database/client', () => ({
   db: {
-    user: { findMany: jest.fn() },
+    user: { findMany: jest.fn(), findFirst: jest.fn() },
     channel: { findMany: jest.fn(), findFirst: jest.fn() },
     conversation: { findFirst: jest.fn() },
     message: { findFirst: jest.fn() },
@@ -19,6 +19,7 @@ jest.mock('@/services/redisService', () => ({ redisService: {} }));
 jest.mock('@/services/vespaSearch', () => ({ vespaService: {} }));
 
 const userFindMany = db.user.findMany as jest.Mock;
+const userFindFirst = db.user.findFirst as jest.Mock;
 const channelFindMany = db.channel.findMany as jest.Mock;
 const channelFindFirst = db.channel.findFirst as jest.Mock;
 const conversationFindFirst = db.conversation.findFirst as jest.Mock;
@@ -28,6 +29,7 @@ describe('assistant record access', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     userFindMany.mockResolvedValue([]);
+    userFindFirst.mockResolvedValue(null);
     channelFindMany.mockResolvedValue([]);
     channelFindFirst.mockResolvedValue(null);
   });
@@ -149,5 +151,74 @@ describe('assistant record access', () => {
     expect(JSON.stringify(messageFindFirst.mock.calls[0]?.[0].where)).toContain(
       '"isDeleted":false'
     );
+  });
+
+  it('reads a person by id only when they are active and in the caller’s workspace', async () => {
+    const finder = databaseFinder({ userId: 'caller', workspaceId: 'workspace-a', role: 'MEMBER' });
+    userFindFirst.mockResolvedValueOnce({
+      id: 'u-daniel',
+      name: 'Daniel Okafor',
+      displayName: 'Dan',
+      email: 'daniel@example.test',
+      userType: 'USER',
+    });
+
+    expect(await finder.get('person', 'u-daniel')).toEqual({
+      record: { kind: 'person', id: 'u-daniel', name: 'Dan' },
+      detail: 'daniel@example.test',
+    });
+    const serialized = JSON.stringify(userFindFirst.mock.calls[0]?.[0].where);
+    expect(serialized).toContain('"id":"u-daniel"');
+    expect(serialized).toContain('"status":"ACTIVE"');
+    expect(serialized).toContain('"workspaceId":"workspace-a"');
+    expect(await finder.get('person', 'u-hidden')).toBeNull();
+  });
+
+  it('names the other person of a one-to-one DM', async () => {
+    const finder = databaseFinder({ userId: 'caller', workspaceId: 'workspace-a', role: 'MEMBER' });
+    channelFindFirst.mockResolvedValue({
+      id: 'c-dm',
+      name: 'dm',
+      scopeType: 'DM',
+      participants: [{ user: { id: 'u-daniel', name: 'Daniel Okafor', displayName: null } }],
+    });
+
+    expect(await finder.get('channel', 'c-dm')).toEqual({
+      record: { kind: 'channel', id: 'c-dm', name: 'dm' },
+      detail: '#dm',
+      partner: { kind: 'person', id: 'u-daniel', name: 'Daniel Okafor' },
+    });
+    const { select } = channelFindFirst.mock.calls[0]?.[0];
+    expect(JSON.stringify(select.participants.where)).toContain('"userId":{"not":"caller"}');
+  });
+
+  it('gives no partner for a channel, or a DM without exactly one other person', async () => {
+    const finder = databaseFinder({ userId: 'caller', workspaceId: 'workspace-a', role: 'MEMBER' });
+    const daniel = { user: { id: 'u-daniel', name: 'Daniel Okafor', displayName: null } };
+    const priya = { user: { id: 'u-priya', name: 'Priya Shah', displayName: null } };
+
+    channelFindFirst.mockResolvedValueOnce({
+      id: 'c-android',
+      name: 'android',
+      scopeType: 'DEFAULT',
+      participants: [daniel],
+    });
+    expect(await finder.get('channel', 'c-android')).not.toHaveProperty('partner');
+
+    channelFindFirst.mockResolvedValueOnce({
+      id: 'c-dm',
+      name: 'dm',
+      scopeType: 'DM',
+      participants: [],
+    });
+    expect(await finder.get('channel', 'c-dm')).not.toHaveProperty('partner');
+
+    channelFindFirst.mockResolvedValueOnce({
+      id: 'c-dm',
+      name: 'dm',
+      scopeType: 'DM',
+      participants: [daniel, priya],
+    });
+    expect(await finder.get('channel', 'c-dm')).not.toHaveProperty('partner');
   });
 });

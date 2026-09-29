@@ -6,7 +6,7 @@ import {
   type EngineStep,
 } from '@xyne/shared/assistant';
 import type { SentenceKind } from './intent';
-import { isOnScreen } from './records';
+import { isNotAName } from './records';
 import type { OpenQuestion } from './session';
 
 /**
@@ -40,8 +40,8 @@ export function replyForStep(step: Exclude<EngineStep, { kind: 'run' | 'lookup' 
         step.options
       );
     case 'not-found': {
-      // "this" with nothing of that kind on screen: just ask, there was no name to look for.
-      const lead = isOnScreen(step.said) ? '' : `I couldn't find “${step.said}”. `;
+      // "this" or "him" with nothing to point at: just ask, there was no name to look for.
+      const lead = isNotAName(step.said) ? '' : `I couldn't find “${step.said}”. `;
       return question(lead + step.prompt, step.field, []);
     }
     case 'confirm':

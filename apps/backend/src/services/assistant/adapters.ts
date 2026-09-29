@@ -73,12 +73,31 @@ export function databaseFinder(context: ACLContext): RecordFinder {
         is: { AND: [{ isArchived: false }, (await channelsAcl.getWhereClause()) ?? {}] },
       };
       switch (kind) {
+        case 'person': {
+          const row = await db.user.findFirst({
+            where: { AND: [{ id, status: 'ACTIVE' }, (await usersAcl.getWhereClause()) ?? {}] },
+            select: PERSON_FIELDS,
+          });
+          return row ? personRecord(row) : null;
+        }
         case 'channel': {
           const row = await db.channel.findFirst({
             where: { id, ...channel.is },
-            select: { id: true, name: true },
+            select: {
+              id: true,
+              name: true,
+              scopeType: true,
+              // Up to two people other than the user: one more than a one-to-one DM has.
+              participants: {
+                where: { userId: { not: context.userId } },
+                select: { user: { select: { id: true, name: true, displayName: true } } },
+                take: 2,
+              },
+            },
           });
-          return row ? channelRecord(row) : null;
+          if (!row) return null;
+          const partner = dmPartner(row);
+          return { ...channelRecord(row), ...(partner ? { partner } : {}) };
         }
         case 'thread': {
           const row = await db.conversation.findFirst({
@@ -122,6 +141,15 @@ export function databaseFinder(context: ACLContext): RecordFinder {
 /** Rows fetched per lookup; `matchName` ranks them. */
 const MAX_PEOPLE = 250;
 const MAX_CHANNELS = 25;
+
+/** What is read of each person: enough to name them and tell people from agents and apps. */
+const PERSON_FIELDS = {
+  id: true,
+  name: true,
+  displayName: true,
+  email: true,
+  userType: true,
+} as const;
 
 /** First try all spoken words; on a miss, allow one name word to be misheard. */
 async function findPeople(
@@ -168,16 +196,27 @@ async function people(
     where: {
       AND: [{ status: 'ACTIVE', id: { not: selfId }, ...match }, access],
     },
-    select: { id: true, name: true, displayName: true, email: true, userType: true },
+    select: PERSON_FIELDS,
     take: MAX_PEOPLE,
   });
-  return rows.map((row) => {
-    const record: PersonRef = { kind: 'person', id: row.id, name: row.displayName || row.name };
-    return {
-      record,
-      detail: row.userType === 'USER' ? row.email : row.userType === 'BOT' ? 'Agent' : 'App',
-    };
-  });
+  return rows.map(personRecord);
+}
+
+/** What names a person: the display name, when they have one, else the name. */
+interface PersonName {
+  id: string;
+  name: string;
+  displayName: string | null;
+}
+
+function personRef(row: PersonName): PersonRef {
+  return { kind: 'person', id: row.id, name: row.displayName || row.name };
+}
+
+/** A person, with a line that tells people, agents, and apps apart. */
+function personRecord(row: PersonName & { email: string; userType: string }): FoundRecord {
+  const detail = row.userType === 'USER' ? row.email : row.userType === 'BOT' ? 'Agent' : 'App';
+  return { record: personRef(row), detail };
 }
 
 async function findChannels(
@@ -204,6 +243,15 @@ async function findChannels(
 function channelRecord(row: { id: string; name: string }): FoundRecord {
   const record: ChannelRef = { kind: 'channel', id: row.id, name: row.name };
   return { record, detail: `#${row.name}` };
+}
+
+/** The other person of a one-to-one DM; no one for any other channel. */
+function dmPartner(row: {
+  scopeType: string;
+  participants: Array<{ user: PersonName }>;
+}): PersonRef | undefined {
+  const [other, ...more] = row.participants;
+  return row.scopeType === 'DM' && other && more.length === 0 ? personRef(other.user) : undefined;
 }
 
 /** Conversations offered per search, one button each. */

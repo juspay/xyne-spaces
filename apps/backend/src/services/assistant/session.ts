@@ -2,8 +2,11 @@ import { z } from 'zod';
 import {
   EMPTY_CONVERSATION,
   entityRefSchema,
+  isEntityRef,
   type ChoiceOption,
   type ConversationState,
+  type EntityRef,
+  type Plan,
 } from '@xyne/shared/assistant';
 
 /**
@@ -17,6 +20,10 @@ export interface AssistantSession {
   question: OpenQuestion | null;
   /** A plan the dashboard is running; its results must quote this `runId`. */
   run: PendingRun | null;
+  /**
+   * The people and channels of the last actions, newest first, so "him" and "there" mean them.
+   */
+  recent: EntityRef[];
 }
 
 export interface PendingRun {
@@ -41,7 +48,36 @@ export const EMPTY_SESSION: AssistantSession = {
   conversation: EMPTY_CONVERSATION,
   question: null,
   run: null,
+  recent: [],
 };
+
+/** Most people and channels kept in `recent`. */
+const MAX_RECENT = 6;
+
+/**
+ * The people and channels just talked about, then the ones before them: `refs` come first,
+ * the same record is kept once (as the newer one), and only the newest few are kept. Threads
+ * and messages are not remembered.
+ */
+export function remember(recent: readonly EntityRef[], refs: readonly EntityRef[]): EntityRef[] {
+  const kept: EntityRef[] = [];
+  for (const ref of [...refs, ...recent]) {
+    if (ref.kind !== 'person' && ref.kind !== 'channel') continue;
+    if (kept.some((other) => other.kind === ref.kind && other.id === ref.id)) continue;
+    kept.push(ref);
+  }
+  return kept.slice(0, MAX_RECENT);
+}
+
+/** Every record an action's plan names, in order: a value that is a record, or a list of them. */
+export function refsInPlan(plan: Plan): EntityRef[] {
+  return plan.flatMap((operation) =>
+    Object.values(operation).flatMap((value: unknown): EntityRef[] => {
+      const values: unknown[] = Array.isArray(value) ? value : [value];
+      return values.filter(isEntityRef);
+    })
+  );
+}
 
 export const SESSION_IDLE_SECONDS = 2 * 60 * 60;
 /** Far above any real conversation; stops a runaway session from growing without bound. */
@@ -114,6 +150,8 @@ const assistantSessionSchema: z.ZodType<AssistantSession, z.ZodTypeDef, unknown>
     conversation: conversationSchema,
     question: openQuestionSchema.nullable(),
     run: pendingRunSchema.nullable(),
+    // Sessions saved before this was kept have none; they still load.
+    recent: z.array(entityRefSchema).default([]),
   })
   .strict();
 

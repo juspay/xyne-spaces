@@ -34,7 +34,13 @@ import {
   replyForStep,
   type Reply,
 } from './reply';
-import type { AssistantSession, SessionIdentity, SessionStore } from './session';
+import {
+  refsInPlan,
+  remember,
+  type AssistantSession,
+  type SessionIdentity,
+  type SessionStore,
+} from './session';
 
 /**
  * One turn of the conversation, start to finish:
@@ -80,7 +86,7 @@ export async function handleTurn(
   context: ClientContext
 ): Promise<TurnResponse> {
   const session = await services.sessions.load(identity);
-  const records = withScreen(services.records, context.onScreen);
+  const records = withScreen(services.records, context.onScreen, session.recent);
   const outcome = await respond(input, session, { ...services, records }, context.onScreen);
   await services.sessions.save(identity, outcome.session);
   return {
@@ -468,6 +474,7 @@ async function applyEvent(
       ...next,
       question: null,
       run: { runId, action: step.action, expectedResults: step.plan.length, done: step.done },
+      recent: remember(session.recent, refsInPlan(step.plan)),
     },
     reply: { say: '', question: null, expectsReply: false },
     run: { runId, plan: step.plan },

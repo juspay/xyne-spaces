@@ -1,11 +1,34 @@
-import { ACTIONS, type Draft, type EntityKind } from '@xyne/shared/assistant';
+import {
+  ACTIONS,
+  type Draft,
+  type EntityKind,
+  type EntityRef,
+  type PersonRef,
+  type Plan,
+} from '@xyne/shared/assistant';
 import type { JevAnswer } from '@/services/queryIntent/jevClient';
 import { createBreaker } from './breaker';
 import { piecesWereCut, readingFor, sentencePieces, type FieldReading } from './fields';
 import { decideIntent, readSentence } from './intent';
 import { quickChoice, quickText } from './quickReplies';
-import { matchName, type FoundRecord } from './records';
-import { EMPTY_SESSION, parseSession, serializeSession, type OpenQuestion } from './session';
+import {
+  isNotAName,
+  isOnScreen,
+  matchFound,
+  matchName,
+  pointsBack,
+  withScreen,
+  type FoundRecord,
+  type RecordFinder,
+} from './records';
+import {
+  EMPTY_SESSION,
+  parseSession,
+  refsInPlan,
+  remember,
+  serializeSession,
+  type OpenQuestion,
+} from './session';
 
 const visibility: OpenQuestion = {
   kind: 'detail',
@@ -148,6 +171,120 @@ describe('matching a spoken name to records', () => {
     const channel: FoundRecord = { record: { kind: 'channel', id: 'c', name: 'release-planning' } };
     expect(matchName('Release Planning', [channel])).toMatchObject({ kind: 'one', certain: true });
     expect(matchName('Zorro', people)).toEqual({ kind: 'none' });
+  });
+});
+
+describe('words that point back at someone just talked about', () => {
+  const danielRef: PersonRef = { kind: 'person', id: 'u-daniel', name: 'Daniel Okafor' };
+  const daniel: FoundRecord = { record: danielRef, detail: 'daniel@x.io' };
+  const android: FoundRecord = {
+    record: { kind: 'channel', id: 'c-android', name: 'android' },
+    detail: '#android',
+  };
+  const dm: FoundRecord = {
+    record: { kind: 'channel', id: 'c-dm', name: 'dm' },
+    partner: danielRef,
+  };
+  const stranger: FoundRecord = { record: { kind: 'person', id: 'u-stranger', name: 'Stranger' } };
+
+  /** Reads by id from `known`; a search finds only the stranger. */
+  const finderOf = (known: FoundRecord[]): RecordFinder => ({
+    find: async () => [stranger],
+    get: async (kind, id) =>
+      known.find(({ record }) => record.kind === kind && record.id === id) ?? null,
+  });
+
+  it('knows which words point back, for which kind of record', () => {
+    for (const word of ['him', 'Her', 'them', 'that person', 'the same person']) {
+      expect(pointsBack('person', word)).toBe(true);
+      expect(pointsBack('channel', word)).toBe(false);
+      expect(isOnScreen(word)).toBe(false);
+    }
+    for (const word of ['there', 'That channel', 'the same channel']) {
+      expect(pointsBack('channel', word)).toBe(true);
+      expect(pointsBack('person', word)).toBe(false);
+      expect(isOnScreen(word)).toBe(false);
+    }
+    expect(pointsBack('person', 'Daniel')).toBe(false);
+    expect(pointsBack('thread', 'him')).toBe(false);
+  });
+
+  it('tells a word that points from a name', () => {
+    for (const word of ['here', 'this channel', 'him', 'there']) {
+      expect(isNotAName(word)).toBe(true);
+    }
+    expect(isNotAName('Daniel')).toBe(false);
+  });
+
+  it('takes "him" to be the person of the last actions, read again for access', async () => {
+    const recent = [android.record, daniel.record];
+
+    const found = await withScreen(finderOf([android, daniel]), [], recent).find('person', 'him');
+    const gone = await withScreen(finderOf([android]), [], recent).find('person', 'him');
+
+    expect(found).toEqual([daniel]);
+    expect(gone).toEqual([]);
+  });
+
+  it('takes "there" to be the channel of the last actions, and never a person', async () => {
+    const finder = finderOf([android, daniel]);
+
+    const both = withScreen(finder, [], [daniel.record, android.record]);
+    const onlyPerson = withScreen(finder, [], [daniel.record]);
+
+    expect(await both.find('channel', 'there')).toEqual([android]);
+    expect(await onlyPerson.find('channel', 'there')).toEqual([]);
+    // Asked for a person, "there" is only a name to search for.
+    expect(await both.find('person', 'there')).toEqual([stranger]);
+  });
+
+  it('takes "him" to be the other person of the DM on screen', async () => {
+    const shown: EntityRef[] = [{ kind: 'channel', id: 'c-dm', name: '' }];
+
+    const found = await withScreen(finderOf([dm, daniel]), shown).find('person', 'him');
+    const gone = await withScreen(finderOf([dm]), shown).find('person', 'him');
+
+    expect(found).toEqual([daniel]);
+    expect(gone).toEqual([]);
+  });
+
+  it('prefers the person of the last actions to the DM on screen', async () => {
+    const priya: FoundRecord = { record: { kind: 'person', id: 'u-priya', name: 'Priya Shah' } };
+    const shown: EntityRef[] = [{ kind: 'channel', id: 'c-dm', name: '' }];
+    const finder = withScreen(finderOf([dm, daniel, priya]), shown, [priya.record]);
+
+    expect(await finder.find('person', 'her')).toEqual([priya]);
+  });
+
+  it('finds no one for "him" with nobody talked about and no DM on screen', async () => {
+    const notDirect: EntityRef[] = [{ kind: 'channel', id: 'c-android', name: '' }];
+
+    expect(await withScreen(finderOf([daniel]), []).find('person', 'him')).toEqual([]);
+    expect(await withScreen(finderOf([android]), notDirect).find('person', 'him')).toEqual([]);
+  });
+
+  it('still takes "here" to be the channel on screen, with its shown name', async () => {
+    const shown: EntityRef[] = [{ kind: 'channel', id: 'c-android', name: 'Android team' }];
+    const finder = withScreen(finderOf([android]), shown, [android.record]);
+
+    expect(await finder.find('channel', 'here')).toEqual([
+      { ...android, record: { ...android.record, name: 'Android team' } },
+    ]);
+  });
+
+  it('is never certain about a word that points back, so the user sees the name first', () => {
+    expect(matchFound('person', 'him', [daniel])).toEqual({
+      kind: 'one',
+      record: daniel.record,
+      certain: false,
+    });
+    expect(matchFound('channel', 'there', [android])).toEqual({
+      kind: 'one',
+      record: android.record,
+      certain: false,
+    });
+    expect(matchFound('person', 'him', [])).toEqual({ kind: 'none' });
+    expect(matchFound('person', 'Daniel Okafor', [daniel])).toMatchObject({ certain: true });
   });
 });
 
@@ -451,6 +588,7 @@ describe('the stored session', () => {
     const person = { kind: 'person' as const, id: 'u-1', name: 'Priya Shah' };
     const session = {
       ...EMPTY_SESSION,
+      recent: [person],
       conversation: {
         ...EMPTY_SESSION.conversation,
         seq: 1,
@@ -487,6 +625,17 @@ describe('the stored session', () => {
     };
 
     expect(parseSession(serializeSession(session))).toEqual(session);
+  });
+
+  it('loads a session saved before it remembered people, keeping the conversation', () => {
+    const saved = {
+      version: 1,
+      conversation: { ...EMPTY_SESSION.conversation, seq: 3, active: emptyDraft('send_dm') },
+      question: null,
+      run: null,
+    };
+
+    expect(parseSession(JSON.stringify(saved))).toEqual({ ...saved, recent: [] });
   });
 
   it('starts fresh when nested conversation, reference, question, or run data is malformed', () => {
@@ -548,6 +697,65 @@ describe('the stored session', () => {
 
     expect(Buffer.byteLength(JSON.stringify(oversized), 'utf8')).toBeGreaterThan(64 * 1024);
     expect(parseSession(JSON.stringify(oversized))).toEqual(EMPTY_SESSION);
+  });
+});
+
+describe('remembering who was just talked about', () => {
+  const priya = { kind: 'person' as const, id: 'u-priya', name: 'Priya Shah' };
+  const daniel = { kind: 'person' as const, id: 'u-daniel', name: 'Daniel Okafor' };
+  const design = { kind: 'channel' as const, id: 'c-design', name: 'design' };
+  const thread = {
+    kind: 'thread' as const,
+    id: 't-1',
+    name: 'Release notes',
+    channelId: 'c-design',
+    channelName: 'design',
+  };
+  const message = {
+    kind: 'message' as const,
+    id: 'm-1',
+    name: 'Ship it',
+    channelId: 'c-design',
+  };
+  const people = (count: number): EntityRef[] =>
+    Array.from({ length: count }, (_, index) => ({
+      kind: 'person' as const,
+      id: `u-${index}`,
+      name: `Person ${index}`,
+    }));
+
+  it('puts the newest first, in the order given', () => {
+    expect(remember([daniel], [priya, design])).toEqual([priya, design, daniel]);
+    expect(remember([], [])).toEqual([]);
+  });
+
+  it('keeps a record once, as the newer one', () => {
+    const renamed = { ...priya, name: 'Priya S.' };
+    expect(remember([daniel, priya], [renamed])).toEqual([renamed, daniel]);
+    // The same id under another kind is another record.
+    expect(remember([{ ...design, id: 'x' }], [{ ...priya, id: 'x' }])).toHaveLength(2);
+  });
+
+  it('does not remember threads or messages', () => {
+    expect(remember([], [thread, message, design])).toEqual([design]);
+    expect(remember([thread], [message])).toEqual([]);
+  });
+
+  it('keeps only the newest six', () => {
+    const older = people(6);
+    expect(remember([], people(8))).toEqual(people(6));
+    expect(remember(older, [priya])).toEqual([priya, ...older.slice(0, 5)]);
+  });
+
+  it('collects the people and channels a plan names, in order', () => {
+    const plan: Plan = [
+      { op: 'open_or_create_dm', user: daniel },
+      { op: 'navigate', target: { fromStep: 0 } },
+      { op: 'send_message', target: { fromStep: 0 }, text: 'hello' },
+      { op: 'send_message', target: design, text: 'hi', mentions: [priya] },
+      { op: 'send_message', target: thread, text: 'thanks' },
+    ];
+    expect(refsInPlan(plan)).toEqual([daniel, design, priya, thread]);
   });
 });
 

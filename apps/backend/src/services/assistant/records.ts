@@ -1,4 +1,4 @@
-import type { Candidate, EntityKind, EntityRef } from '@xyne/shared/assistant';
+import type { Candidate, EntityKind, EntityRef, PersonRef } from '@xyne/shared/assistant';
 
 /**
  * Matches a spoken name to real records. The lookup itself is an adapter (see adapters.ts):
@@ -9,6 +9,8 @@ import type { Candidate, EntityKind, EntityRef } from '@xyne/shared/assistant';
 export interface FoundRecord {
   record: EntityRef;
   detail?: string;
+  /** The other person, when the record is a one-to-one DM. */
+  partner?: PersonRef;
 }
 
 /** People and channels named with a search ("with Meera", "in security"), which narrow it. */
@@ -34,17 +36,31 @@ const ON_SCREEN_WORDS = new Set(
   )
 );
 
+/** Words that point back at someone just talked about ("tell him"), never at a place. */
+const PEOPLE_POINTING_BACK = new Set('him|her|them|that person|the same person'.split('|'));
+/** Words that point back at a channel just talked about ("post there"), never at a person. */
+const CHANNELS_POINTING_BACK = new Set('there|that channel|the same channel'.split('|'));
+
 /**
  * The same finder, where "here", "this thread", or "this message" mean the record of that kind
- * on screen. It is read again by id, so the user's access applies; the screen only lends its
- * display name, such as a message's preview.
+ * on screen, and "him" or "there" mean the person or channel of the last actions (`recent`).
+ * Each is read again by id, so the user's access applies; the screen only lends its display
+ * name, such as a message's preview.
  */
-export function withScreen(finder: RecordFinder, onScreen: readonly EntityRef[]): RecordFinder {
+export function withScreen(
+  finder: RecordFinder,
+  onScreen: readonly EntityRef[],
+  recent: readonly EntityRef[] = []
+): RecordFinder {
   return {
     ...finder,
     async find(kind, mention, hints) {
       const shown = isOnScreen(mention) ? onScreen.find((ref) => ref.kind === kind) : undefined;
-      if (!shown) return finder.find(kind, mention, hints);
+      if (!shown) {
+        return pointsBack(kind, mention)
+          ? findPointedBack(finder, kind, onScreen, recent)
+          : finder.find(kind, mention, hints);
+      }
       const found = await finder.get(kind, shown.id);
       if (!found) return [];
       return [{ ...found, record: { ...found.record, name: shown.name || found.record.name } }];
@@ -53,15 +69,41 @@ export function withScreen(finder: RecordFinder, onScreen: readonly EntityRef[])
 }
 
 /**
- * How a mention picks among what was found: search results and "here" are ranked already,
- * so the first is the answer and several are a choice; names are ranked by `matchName`.
+ * The record a word such as "him" or "there" points back at: the latest of its kind in
+ * `recent`. With nobody recent, "him" is the other person of the one-to-one DM open on screen.
+ */
+async function findPointedBack(
+  finder: RecordFinder,
+  kind: EntityKind,
+  onScreen: readonly EntityRef[],
+  recent: readonly EntityRef[]
+): Promise<FoundRecord[]> {
+  const id =
+    recent.find((ref) => ref.kind === kind)?.id ??
+    (kind === 'person' ? await openPartnerId(finder, onScreen) : undefined);
+  const found = id ? await finder.get(kind, id) : null;
+  return found ? [found] : [];
+}
+
+async function openPartnerId(
+  finder: RecordFinder,
+  onScreen: readonly EntityRef[]
+): Promise<string | undefined> {
+  const open = onScreen.find((ref) => ref.kind === 'channel');
+  return open ? (await finder.get('channel', open.id))?.partner?.id : undefined;
+}
+
+/**
+ * How a mention picks among what was found: search results, "here", and "him" are ranked
+ * already, so the first is the answer and several are a choice; names are ranked by `matchName`.
  */
 export function matchFound(
   kind: EntityKind,
   mention: string,
   found: readonly FoundRecord[]
 ): NameMatch {
-  const byName = (kind === 'person' || kind === 'channel') && !isOnScreen(mention);
+  const byName =
+    (kind === 'person' || kind === 'channel') && !isOnScreen(mention) && !pointsBack(kind, mention);
   if (byName) return matchName(mention, found);
   const [first] = found;
   if (!first) return { kind: 'none' };
@@ -72,6 +114,20 @@ export function matchFound(
 /** "here", "this", "this message": words that point at the screen rather than name something. */
 export function isOnScreen(mention: string): boolean {
   return ON_SCREEN_WORDS.has(normalizeName(mention));
+}
+
+/** "him", "there": words that point back at a person or channel of the last actions. */
+export function pointsBack(kind: EntityKind, mention: string): boolean {
+  const said = normalizeName(mention);
+  return (
+    (kind === 'person' && PEOPLE_POINTING_BACK.has(said)) ||
+    (kind === 'channel' && CHANNELS_POINTING_BACK.has(said))
+  );
+}
+
+/** A word that points at a record instead of naming it, so there is no name to look for. */
+export function isNotAName(mention: string): boolean {
+  return isOnScreen(mention) || pointsBack('person', mention) || pointsBack('channel', mention);
 }
 
 export type NameMatch =

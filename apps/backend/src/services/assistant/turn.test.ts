@@ -121,6 +121,7 @@ function assistant(people: FoundRecord[] = [daniel]) {
       },
       get: async (kind, id) => {
         if (kind === 'channel' && id === general.record.id) return general;
+        if (kind === 'person') return people.find(({ record }) => record.id === id) ?? null;
         if (kind === 'thread' && id === openThread.id) return { record: openThread };
         if (kind === 'message' && id === openMessage.id) return { record: openMessage };
         return null;
@@ -364,6 +365,57 @@ describe('a turn', () => {
 
     expect(planned.run).toBeDefined();
     expect(chat.jevCalls()).toBe(1);
+  });
+
+  it('takes "him" to be the person just messaged, and previews before sending', async () => {
+    const chat = assistant();
+    chat.hears({
+      action: 'send_dm',
+      fields: { recipient: 'Daniel Okafor', message: 'the build is green' },
+    });
+    const first = await chat.say('tell Daniel Okafor the build is green');
+    await chat.ran(first.run!.runId, [{ ok: true }, { ok: true }, { ok: true }]);
+    expect(chat.session().recent).toEqual([daniel.record]);
+
+    chat.hears({ action: 'send_dm', fields: { recipient: 'him', message: 'we ship on Friday' } });
+    const preview = await chat.say('tell him we ship on Friday');
+
+    expect(preview.say).toBe('Send “we ship on Friday” to Daniel Okafor?');
+    expect(preview.run).toBeUndefined();
+    const sent = await chat.tap('yes');
+    expect(sent.run?.plan).toEqual([
+      { op: 'open_or_create_dm', user: daniel.record },
+      { op: 'navigate', target: { fromStep: 0 } },
+      { op: 'send_message', target: { fromStep: 0 }, text: 'we ship on Friday' },
+    ]);
+  });
+
+  it('takes "him" to be the other person of the DM on screen', async () => {
+    const chat = assistant();
+    const dm: FoundRecord = {
+      record: { kind: 'channel', id: 'c-dm', name: 'dm' },
+      partner: { kind: 'person', id: 'u-daniel', name: 'Daniel Okafor' },
+    };
+    chat.services.records.get = async (kind, id) => {
+      if (kind === 'channel' && id === dm.record.id) return dm;
+      return kind === 'person' && id === daniel.record.id ? daniel : null;
+    };
+    chat.lookingAt([{ kind: 'channel', id: 'c-dm', name: '' }]);
+    chat.hears({ action: 'send_dm', fields: { recipient: 'him', message: 'hi' } });
+
+    const preview = await chat.say('message him hi');
+
+    expect(preview.say).toBe('Send “hi” to Daniel Okafor?');
+  });
+
+  it('asks who to message when "him" points at no one', async () => {
+    const chat = assistant();
+    chat.hears({ action: 'send_dm', fields: { recipient: 'him', message: 'hi' } });
+
+    const reply = await chat.say('tell him hi');
+
+    expect(reply.say).toBe('Who should I message?');
+    expect(reply.run).toBeUndefined();
   });
 
   it('opens a channel said by name, without a preview', async () => {
