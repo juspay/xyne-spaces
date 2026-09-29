@@ -7,7 +7,11 @@ import {
   type JevFailure,
   type JevNoulQuestion,
 } from '@/services/queryIntent/jevClient';
-import type { ParserInput, ParserOperation } from '@/services/radar/radarParser';
+import type {
+  ParsedTransitions,
+  ParserInput,
+  ParserOperation,
+} from '@/services/radar/radarParser';
 
 /**
  * Jev for Radar's two parser calls, behind RADAR_JEV_* (run / log / replace).
@@ -22,8 +26,8 @@ import type { ParserInput, ParserOperation } from '@/services/radar/radarParser'
  *  - A REACTION pass may only resolve, and only one of a short list of open items. That is
  *    a closed choice, so Jev answers it whole and replacing means no parser call at all.
  *
- * Jev's state is always the parser's own input (buildParserInput), so both judge the same
- * pass from the same facts.
+ * Called from radarParser.parseWindow right before the model, with the very input the
+ * model is about to be sent, so both judge the same pass from the same facts.
  *
  * Jev's yes/no answers are probabilities, so every decision below is a threshold on one.
  * Thresholds are tuned per JEV_MODEL — re-tune them against the logs when it changes.
@@ -57,7 +61,7 @@ const TAG = '[RADAR-JEV]';
  * at explicitly — never the default public endpoint — and only on a named model, since the
  * thresholds above are tuned per model. Same rule as the duplicate scorer.
  */
-export const isRadarJevActive = (): boolean =>
+const isRadarJevActive = (): boolean =>
   config.radar.jev.enabled && isJevConfigured() && !!config.jev.url && !!config.jev.model;
 
 const failureReason = (failure: JevFailure | undefined): string =>
@@ -65,7 +69,7 @@ const failureReason = (failure: JevFailure | undefined): string =>
 
 // ─── Window: is anything trackable? ─────────────────────────────────────────────
 
-export type WindowCheck =
+type WindowCheck =
   | { ok: true; probability: number; skip: boolean }
   | { ok: false; reason: string };
 
@@ -86,7 +90,7 @@ const WINDOW_QUESTION: JevNoulQuestion = {
 };
 
 /** Never throws. `input` is exactly what the parser is sent for this window. */
-export async function checkWindow(input: ParserInput): Promise<WindowCheck> {
+async function checkWindow(input: ParserInput): Promise<WindowCheck> {
   try {
     let failure: JevFailure | undefined;
     const answers = await askJev({ ...input }, { trackable: WINDOW_QUESTION }, JEV_TIMEOUT_MS, undefined, {
@@ -110,10 +114,10 @@ export async function checkWindow(input: ParserInput): Promise<WindowCheck> {
  * What Jev said beside what the parser did — or, on a skip, that the parser never ran.
  * Ids and counts only: never message text, which can come from DMs.
  */
-export function logWindowCheck(
+function logWindowCheck(
   meta: { conversationId: string; windowSize: number },
   check: WindowCheck,
-  parser: { validOps: ParserOperation[] } | 'skipped',
+  parser: ParserOperation[] | 'skipped',
 ): void {
   const mode = config.radar.jev.replace ? 'replace' : 'shadow';
   if (!check.ok) {
@@ -134,7 +138,7 @@ export function logWindowCheck(
     });
     return;
   }
-  const ops = parser.validOps;
+  const ops = parser;
   // The case that matters for the threshold: Jev would have skipped a window the parser
   // found work in. Every one of these is a real ask that replace mode would drop.
   const verdict = !check.skip ? 'kept' : ops.length > 0 ? 'WOULD-MISS' : 'would-skip';
@@ -153,7 +157,7 @@ export function logWindowCheck(
 
 // ─── Reaction: which item, if any, does it settle? ──────────────────────────────
 
-export type ReactionCheck =
+type ReactionCheck =
   | {
       ok: true;
       /** The resolve to apply — none when the reaction settles nothing. */
@@ -170,7 +174,7 @@ export type ReactionCheck =
  * reacted message as the one entry in new_messages, the items the reactor is party to,
  * and who reacted with what.
  */
-export async function checkReaction(input: ParserInput): Promise<ReactionCheck> {
+async function checkReaction(input: ParserInput): Promise<ReactionCheck> {
   try {
     const message = input.new_messages[0];
     const emoji = input.reaction?.emoji;
@@ -260,7 +264,7 @@ export async function checkReaction(input: ParserInput): Promise<ReactionCheck> 
 }
 
 /** What Jev chose beside what the parser resolved, when both ran. Ids and scores only. */
-export function logReactionCheck(
+function logReactionCheck(
   meta: { conversationId: string; emoji: string; candidates: number },
   check: ReactionCheck,
   parserResolved: string[] | null,
@@ -292,4 +296,101 @@ export function logReactionCheck(
       `${compared}  (${scores})  [${mode}]`,
     { ...meta, mode, jevResolved, parserResolved, completion: check.completion, itemId: check.itemId, itemProbability: check.itemProbability },
   );
+}
+
+// ─── Entry point: the step right before the model ───────────────────────────────
+
+export interface JevBeforeLlm {
+  /** Replace mode's answer, when Jev gave one: return it instead of calling the model. */
+  answer: ParsedTransitions | null;
+  /** Hand it the model's answer once the model has run, to log the two side by side. */
+  afterLlm(llm: ParsedTransitions): void;
+}
+
+const resolvedIds = (transitions: ParsedTransitions): string[] =>
+  transitions.operations
+    .filter(op => op.op === 'resolve' && op.itemId)
+    .map(op => op.itemId as string);
+
+/**
+ * Jev's part of one parse, per RADAR_JEV_*. Null when Jev is off, and the caller calls the
+ * model as it always has. A reaction pass is the one carrying `input.reaction`.
+ *
+ *  - shadow (replace off): Jev runs alongside the model and is only logged — started here,
+ *    not awaited, so it costs the parse no time.
+ *  - replace: Jev is awaited. A window it rates as chatter comes back as an empty answer,
+ *    which is what the model returns for chatter; a reaction comes back resolved or not.
+ *    When Jev has no answer, or the window may hold something, the model runs as usual.
+ */
+export async function runJevBeforeLlm(
+  input: ParserInput,
+  conversationId: string,
+): Promise<JevBeforeLlm | null> {
+  if (!isRadarJevActive()) return null;
+  const { replace, logEnabled } = config.radar.jev;
+
+  if (input.reaction) {
+    const meta = { conversationId, emoji: input.reaction.emoji, candidates: input.open_items.length };
+    const pending = checkReaction(input);
+    if (!replace) {
+      return {
+        answer: null,
+        afterLlm: llm => {
+          if (logEnabled) void pending.then(check => logReactionCheck(meta, check, resolvedIds(llm)));
+        },
+      };
+    }
+    const check = await pending;
+    if (check.ok) {
+      if (logEnabled) logReactionCheck(meta, check, null);
+      return {
+        answer: { operations: check.operations, assessment: check.assessment, decidedBy: 'jev' },
+        afterLlm: () => {},
+      };
+    }
+    // Logged whatever the log switch says: that switch hides comparisons, not breakage.
+    logger.warn(`${TAG} reaction: Jev had no answer, falling back to the parser`, {
+      conversationId,
+      reason: check.reason,
+    });
+    return { answer: null, afterLlm: () => {} };
+  }
+
+  const meta = { conversationId, windowSize: input.new_messages.length };
+  const pending = checkWindow(input);
+  if (!replace) {
+    return {
+      answer: null,
+      afterLlm: llm => {
+        if (logEnabled) void pending.then(check => logWindowCheck(meta, check, llm.operations));
+      },
+    };
+  }
+  const check = await pending;
+  if (check.ok && check.skip) {
+    if (logEnabled) logWindowCheck(meta, check, 'skipped');
+    return {
+      answer: {
+        operations: [],
+        // The run log's answer to "why was nothing tracked here".
+        assessment:
+          `Jev rated this window ${check.probability.toFixed(2)} likely to hold anything ` +
+          'trackable — parse skipped.',
+        decidedBy: 'jev',
+      },
+      afterLlm: () => {},
+    };
+  }
+  if (!check.ok) {
+    logger.warn(`${TAG} window: Jev had no answer, parsing as usual`, {
+      conversationId,
+      reason: check.reason,
+    });
+  }
+  return {
+    answer: null,
+    afterLlm: llm => {
+      if (logEnabled) logWindowCheck(meta, check, llm.operations);
+    },
+  };
 }

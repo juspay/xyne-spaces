@@ -5,7 +5,6 @@ import { logger } from '@/utils/logger';
 import { extractGroupMentions, extractUserMentions } from '@/utils/mentionParser';
 import { AttachmentEntityType } from '@xyne/shared';
 import {
-  buildParserInput,
   radarParser,
   type ParserOpenItem,
   type ParserWindowMessage,
@@ -19,7 +18,6 @@ import {
   type DedupCheck,
 } from '@/services/radar/radarDedupScorer';
 import type { RadarScope } from '@/services/radar/radarScope';
-import { checkWindow, isRadarJevActive, logWindowCheck } from '@/services/radar/radarJev';
 
 const prisma = DatabaseClient.getInstance();
 
@@ -378,46 +376,15 @@ class RadarExecutionService {
           // model's first schema-valid answer.
           let dedupChecks: DedupCheck[] = [];
           let firstAttempt: Validated | null = null;
-          const parserOpenItems = openItems.map(({ conversationId, ...item }) =>
-            threadLabels.size > 0
-              ? { ...item, thread: threadLabels.get(conversationId) ?? null }
-              : item,
-          );
-          const parserMessages = this.toParserMessages(window, mentionsByMessage, nameById, attachmentsByMessage, threadLabels);
-          const parserContext = this.toParserMessages(context, contextMentions, nameById, attachmentsByMessage, threadLabels);
-
-          // Jev's read of the very input the parser gets: is anything here trackable?
-          // Started before the parse so it costs no time in shadow mode; in replace mode a
-          // confident "no" consumes the window without a parse.
-          const jevCheck = isRadarJevActive()
-            ? checkWindow(buildParserInput(parserOpenItems, parserMessages, knownUsers, parserContext))
-            : null;
-          const jevMeta = { conversationId: scope.key, windowSize: window.length };
-          if (jevCheck && config.radar.jev.replace) {
-            const check = await jevCheck;
-            if (check.ok && check.skip) {
-              if (config.radar.jev.logEnabled) logWindowCheck(jevMeta, check, 'skipped');
-              run.parserRan = false;
-              // The debug panel's answer to "why was nothing tracked here".
-              run.assessment = `Jev rated this window ${check.probability.toFixed(2)} likely to hold anything trackable — parse skipped.`;
-              await this.saveWatermark(scope.key, window[window.length - 1], 0);
-              await this.recordRun(run, startedAt);
-              continue;
-            }
-            if (!check.ok) {
-              // Logged whatever the log switch says: that switch hides comparisons, not breakage.
-              logger.warn('[RADAR-JEV] window check had no answer, parsing as usual', {
-                conversationId,
-                reason: check.reason,
-              });
-            }
-          }
-
           const transitions = await radarParser.parseWindow(
-            parserOpenItems,
-            parserMessages,
+            openItems.map(({ conversationId, ...item }) =>
+              threadLabels.size > 0
+                ? { ...item, thread: threadLabels.get(conversationId) ?? null }
+                : item,
+            ),
+            this.toParserMessages(window, mentionsByMessage, nameById, attachmentsByMessage, threadLabels),
             knownUsers,
-            parserContext,
+            this.toParserMessages(context, contextMentions, nameById, attachmentsByMessage, threadLabels),
             undefined,
             // The validator doubles as the parser's semantic check: a reassign
             // it would drop as a no-op goes back to the model once, because
@@ -461,15 +428,15 @@ class RadarExecutionService {
               }
               return feedback.length > 0 ? feedback.join('\n\n') : null;
             },
+            { conversationId: scope.key },
           );
+          // Jev answering in the model's place (RADAR_JEV_REPLACE) means no parse ran.
+          run.parserRan = transitions.decidedBy !== 'jev';
           run.proposedOps = transitions.operations;
           run.assessment = transitions.assessment;
           const { valid, dropped } = validateTransitions(transitions.operations, validationCtx);
           await this.directDmOwnerless(valid, scope, windowSenders, allowedUserIds);
           run.validOps = valid;
-          if (jevCheck && config.radar.jev.logEnabled) {
-            void jevCheck.then(check => logWindowCheck(jevMeta, check, { validOps: valid }));
-          }
           // The semantic check validated the first answer; it is only the
           // first attempt when that answer was sent back.
           // (Assigned inside the callback, which TypeScript cannot see.)

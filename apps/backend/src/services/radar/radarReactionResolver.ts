@@ -2,13 +2,7 @@ import { config } from '@/config/env';
 import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { extractUserMentions } from '@/utils/mentionParser';
-import {
-  buildParserInput,
-  radarParser,
-  type ParsedTransitions,
-  type ParserOperation,
-} from '@/services/radar/radarParser';
-import { checkReaction, isRadarJevActive, logReactionCheck } from '@/services/radar/radarJev';
+import { radarParser, type ParserOperation } from '@/services/radar/radarParser';
 import { radarApplier } from '@/services/radar/radarApplier';
 import { radarScopeFor } from '@/services/radar/radarScope';
 
@@ -161,62 +155,36 @@ class RadarReactionResolver {
       ]);
       const reactorName = nameById.get(reaction.userId) ?? reaction.userId;
 
-      // The pass exactly as the parser receives it. Jev is handed the same object, so both
-      // judge the reaction from the same facts: who reacted, who asked, who holds what.
-      const parserItems = eligible.map(c => ({
-        id: c.id,
-        title: c.title,
-        context: c.contextSummary,
-        requested_by: c.requestedBy,
-        pending_on: c.pendingOn,
-        source_message_id: c.sourceMessageId,
-      }));
-      const parserMessages = [
-        {
-          id: message.messageId,
-          author: { id: reaction.userId, name: reactorName },
-          text: message.content,
-          mentions: extractUserMentions(message.content).map(id => ({
-            id,
-            name: nameById.get(id) ?? id,
-          })),
-          timestamp_iso: message.createdAt.toISOString(),
-        },
-      ];
-      const knownUsers = Object.fromEntries(nameById);
-      const reactionInfo = { by: reactorName, emoji: reaction.emojiName };
-
-      // Jev can answer a reaction whole: the only legal move is resolving one of these
-      // items. Started before the parser so shadow mode costs no time.
-      const jevCheck = isRadarJevActive()
-        ? checkReaction(buildParserInput(parserItems, parserMessages, knownUsers, [], reactionInfo))
-        : null;
-      const jevMeta = { conversationId: scope.key, emoji: reaction.emojiName, candidates: eligible.length };
-      const replaced = jevCheck && config.radar.jev.replace ? await jevCheck : null;
-      if (replaced && config.radar.jev.logEnabled) logReactionCheck(jevMeta, replaced, null);
-      if (replaced && !replaced.ok) {
-        logger.warn(`${TAG} Jev had no answer, falling back to the parser`, { reason: replaced.reason });
-      }
-
-      let transitions: ParsedTransitions;
-      if (replaced?.ok) {
-        transitions = { operations: replaced.operations, assessment: replaced.assessment };
-      } else {
-        run.parserRan = true;
-        transitions = await radarParser.parseWindow(
-          parserItems,
-          parserMessages,
-          knownUsers,
-          [],
-          reactionInfo,
-        );
-        if (jevCheck && !replaced && config.radar.jev.logEnabled) {
-          const parserResolved = transitions.operations
-            .filter(op => op.op === 'resolve' && op.itemId)
-            .map(op => op.itemId as string);
-          void jevCheck.then(check => logReactionCheck(jevMeta, check, parserResolved));
-        }
-      }
+      run.parserRan = true;
+      const transitions = await radarParser.parseWindow(
+        eligible.map(c => ({
+          id: c.id,
+          title: c.title,
+          context: c.contextSummary,
+          requested_by: c.requestedBy,
+          pending_on: c.pendingOn,
+          source_message_id: c.sourceMessageId,
+        })),
+        [
+          {
+            id: message.messageId,
+            author: { id: reaction.userId, name: reactorName },
+            text: message.content,
+            mentions: extractUserMentions(message.content).map(id => ({
+              id,
+              name: nameById.get(id) ?? id,
+            })),
+            timestamp_iso: message.createdAt.toISOString(),
+          },
+        ],
+        Object.fromEntries(nameById),
+        [],
+        { by: reactorName, emoji: reaction.emojiName },
+        undefined,
+        { conversationId: scope.key },
+      );
+      // Jev answering in the model's place (RADAR_JEV_REPLACE) means no parse ran.
+      run.parserRan = transitions.decidedBy !== 'jev';
 
       run.proposedOps = transitions.operations;
       run.assessment = transitions.assessment;

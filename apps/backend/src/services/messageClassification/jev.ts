@@ -53,13 +53,13 @@ const TAG = '[MSG-TAG][JEV]';
  * at explicitly — never the default public endpoint — and only on a named model, since the
  * thresholds above are tuned per model. Same rule as the Radar duplicate check.
  */
-export const isJevClassificationActive = (): boolean =>
+const isJevClassificationActive = (): boolean =>
   config.messageClassification.jev.enabled &&
   isJevConfigured() &&
   !!config.jev.url &&
   !!config.jev.model;
 
-export type JevClassificationResult =
+type JevClassificationResult =
   | {
       ok: true;
       classification: Classification;
@@ -85,7 +85,7 @@ const toState = (input: ClassifierInput): Record<string, unknown> => ({ ...input
  * Classify a thread with Jev. Never throws: any failure comes back as `ok: false`, and in
  * that case nothing about the thread should be written from it.
  */
-export async function classifyThreadWithJev(
+async function classifyThreadWithJev(
   input: ClassifierInput,
   vocabulary: readonly ThreadTypeEntry[],
 ): Promise<JevClassificationResult> {
@@ -200,7 +200,7 @@ interface LogMeta {
  *
  * Names, ids and scores only — never message text, which can come from DMs.
  */
-export function logJevClassification(
+function logJevClassification(
   meta: LogMeta,
   jev: JevClassificationResult,
   llm: Classification | null,
@@ -267,4 +267,48 @@ export function logJevClassification(
       typeScores: jev.typeScores,
     },
   );
+}
+
+// ─── Entry point: the step right before the model ───────────────────────────────
+
+export interface JevBeforeLlm {
+  /** Replace mode's answer, when Jev gave one: return it instead of calling the model. */
+  answer: Classification | null;
+  /** Hand it the model's answer once the model has run, to log the two side by side. */
+  afterLlm(llm: Classification): void;
+}
+
+/**
+ * Jev's part of one classification, per MESSAGE_CLASSIFICATION_JEV_*. Null when Jev is off,
+ * and the caller calls the model as it always has.
+ *
+ *  - shadow (replace off): Jev runs alongside the model and is only logged — started here,
+ *    not awaited, so it costs the job no time.
+ *  - replace: Jev is awaited and its answer is the classification. When Jev has no answer
+ *    the model runs as usual, so the thread is still classified.
+ */
+export async function runJevBeforeLlm(
+  input: ClassifierInput,
+  vocabulary: readonly ThreadTypeEntry[],
+  meta: LogMeta,
+): Promise<JevBeforeLlm | null> {
+  if (!isJevClassificationActive()) return null;
+  const { replace, logEnabled } = config.messageClassification.jev;
+
+  const pending = classifyThreadWithJev(input, vocabulary);
+  if (!replace) {
+    return {
+      answer: null,
+      afterLlm: llm => {
+        if (logEnabled) void pending.then(jev => logJevClassification(meta, jev, llm, 'shadow'));
+      },
+    };
+  }
+
+  const jev = await pending;
+  if (logEnabled) logJevClassification(meta, jev, null, 'replace');
+  if (jev.ok) return { answer: jev.classification, afterLlm: () => {} };
+  // Logged whatever the log switch says: that switch hides comparisons, not breakage.
+  logger.warn(`${TAG} Jev had no answer, falling back to the LLM`, { ...meta, reason: jev.reason });
+  return { answer: null, afterLlm: () => {} };
 }
