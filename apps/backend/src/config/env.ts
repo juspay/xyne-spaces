@@ -500,7 +500,8 @@ const envSchema = Joi.object({
   ENCRYPTION_REQUEST_TIMEOUT_MS: Joi.number().integer().min(1).default(5000),
   // Shared s2s secret sent as X-Internal-Service-Secret to internal services.
   INTERNAL_SERVICE_SECRET: Joi.string().allow('').default(''),
-  // Dedicated secret for POST /internal/users/deactivate (X-User-Deactivation-Secret).
+  // Dedicated secret for POST /internal/users/deactivate, sent in the standard
+  // X-Internal-Service-Secret header.
   USER_DEACTIVATION_SERVICE_SECRET: Joi.string().allow('').default(''),
   // mTLS certificate service (s2s). Empty url disables cert revocation.
   MTLS_SERVICE_URL: Joi.string().uri().allow('').default(''),
