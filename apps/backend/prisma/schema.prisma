@@ -2383,6 +2383,7 @@ model EmailChannelPreference {
   deskReportAgentSlug    String?
   deskReportRangeDays    Int?     @default(1) // 1 = "Last 1 day", 7 = "Last 1 week"
   duplicateScopeConfig   String?    // Scoped duplicate detection: JSON-serialized { enabled, scopeFieldGlobalIds }; stored as string for Zero compatibility, parsed at code level (null = project-wide legacy behavior)
+  slackDeskTriggerMode   String?  // ALL_MESSAGES | MENTION_ONLY; null == ALL_MESSAGES
   @@index([ownerUserId])
   @@index([assigneeUserGroupId])
   @@index([boardId])

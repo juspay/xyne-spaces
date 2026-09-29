@@ -1353,8 +1353,20 @@ export class ChannelController {
 
       res.setHeader('Cache-Control', 'private, no-cache');
 
+      // Slack channels and apps can be bound onto any desk type; they must not shadow the desk's own source.
       const source = await db.externalSource.findFirst({
-        where: { channelId, workspaceId },
+        where: {
+          channelId,
+          workspaceId,
+          NOT: {
+            sourceType: {
+              in: [
+                ...(channel.type === ChannelType.SLACK ? [] : [ExternalSourcePlatform.SLACK_DESK]),
+                ...(channel.type === ChannelType.APP ? [] : [ExternalSourcePlatform.APP_DESK]),
+              ],
+            },
+          },
+        },
         select: { name: true, displayName: true, sourceType: true, isActive: true, externalIdentifier: true },
         orderBy: { createdAt: 'desc' },
       });

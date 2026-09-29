@@ -16,10 +16,16 @@ import { SlackDeskTransformer } from './transformer';
 import { SlackDeskFlow } from './flow';
 import { SlackDeskPostprocessor } from './postprocessor';
 
+const slackDeskFlow = new SlackDeskFlow();
+
 export const slackDeskAdapter = AdapterFactory.create(
   ExternalSourcePlatform.SLACK_DESK,
   new SlackAuthenticator(),
   new SlackDeskTransformer(),
-  new SlackDeskFlow(),
+  slackDeskFlow,
   new SlackDeskPostprocessor()
 );
+
+// Frees the thread-backfill lock when the root message fails to sync.
+slackDeskAdapter.onIngestFailures = (source, failedExternalIds) =>
+  slackDeskFlow.onIngestFailures(source, failedExternalIds);
