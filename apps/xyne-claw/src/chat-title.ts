@@ -1,4 +1,4 @@
-import { LITELLM } from "./config.js";
+import { LITELLM, litellmEndpoint } from "./config.js";
 import { createLogger } from "./logger.js";
 
 const log = createLogger("chat-title");
@@ -87,7 +87,7 @@ export async function generateChatTitle(input: ChatTitleInput): Promise<string |
   }
 
   try {
-    const response = await fetch(`${LITELLM.url.replace(/\/$/, "")}/v1/chat/completions`, {
+    const response = await fetch(litellmEndpoint("/v1/chat/completions"), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
