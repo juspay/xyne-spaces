@@ -1,3 +1,10 @@
+## [1.429.0](https://github.com/juspay/xyne-spaces/compare/v1.428.0...v1.429.0) (2026-09-29)
+
+
+### Features
+
+* workflows in argocd ([#2460](https://github.com/juspay/xyne-spaces/issues/2460)) ([4e1a400](https://github.com/juspay/xyne-spaces/commit/4e1a400774cc856081a3c0d4f384839fbe4a0630))
+
 ## [1.428.0](https://github.com/juspay/xyne-spaces/compare/v1.427.0...v1.428.0) (2026-09-29)
 
 
