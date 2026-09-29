@@ -9,17 +9,51 @@ import type {
   StyleSchema,
 } from '@blocknote/core';
 
-export const removeUnknownBlocks = <T extends { type?: string; children?: unknown }>(
+// Blocks whose ProseMirror node only accepts unmarked text. A link or a styled
+// run inside one makes createChecked throw "Invalid content for node codeBlock",
+// which aborts editor creation and crashes the whole canvas page (XYNE-65102).
+const PLAIN_TEXT_BLOCK_TYPES: ReadonlySet<string> = new Set(['codeBlock']);
+
+type InlineNode = { type?: string; text?: string; content?: unknown };
+
+const inlineToPlainText = (content: unknown): string => {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return (content as InlineNode[])
+    .map(node => (typeof node?.text === 'string' ? node.text : inlineToPlainText(node?.content)))
+    .join('');
+};
+
+type PlainTextNode = { type: 'text'; text: string; styles: Record<string, never> };
+
+const toPlainTextContent = (content: unknown): PlainTextNode[] => {
+  const text = inlineToPlainText(content);
+  return text ? [{ type: 'text', text, styles: {} }] : [];
+};
+
+/**
+ * Drop blocks the schema has no spec for and flatten inline content that a
+ * plain-text block (codeBlock) cannot hold, so stored content that another
+ * writer produced can always be turned into an editor document.
+ */
+export const removeUnknownBlocks = <
+  T extends { type?: string; children?: unknown; content?: unknown },
+>(
   blocks: T[],
   knownBlockTypes: ReadonlySet<string>,
 ): T[] =>
   blocks
     .filter(block => !block?.type || knownBlockTypes.has(block.type))
-    .map(block =>
-      Array.isArray(block.children) && block.children.length > 0
-        ? { ...block, children: removeUnknownBlocks(block.children as T[], knownBlockTypes) }
-        : block,
-    );
+    .map(block => {
+      let next = block;
+      if (block.type && PLAIN_TEXT_BLOCK_TYPES.has(block.type) && Array.isArray(block.content)) {
+        next = { ...next, content: toPlainTextContent(block.content) };
+      }
+      if (Array.isArray(block.children) && block.children.length > 0) {
+        next = { ...next, children: removeUnknownBlocks(block.children as T[], knownBlockTypes) };
+      }
+      return next;
+    });
 
 export const knownBlockTypesOf = (schema: unknown): ReadonlySet<string> =>
   new Set(Object.keys((schema as { blockSchema: Record<string, unknown> }).blockSchema));
