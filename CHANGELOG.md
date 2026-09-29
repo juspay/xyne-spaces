@@ -1,3 +1,15 @@
+## [1.432.0](https://github.com/juspay/xyne-spaces/compare/v1.431.2...v1.432.0) (2026-09-29)
+
+
+### Features
+
+* raise app file count and size limits ([#2469](https://github.com/juspay/xyne-spaces/issues/2469)) ([3054e68](https://github.com/juspay/xyne-spaces/commit/3054e688fddf129d730706acf791c4d7a5bb9b21))
+
+
+### Bug Fixes
+
+* count agent-level credentials when deciding whether to show a connector card ([#2470](https://github.com/juspay/xyne-spaces/issues/2470)) ([4a233e4](https://github.com/juspay/xyne-spaces/commit/4a233e41f537d28924af58883d7363709e312fa6))
+
 ## [1.431.2](https://github.com/juspay/xyne-spaces/compare/v1.431.1...v1.431.2) (2026-09-29)
 
 ## [1.431.1](https://github.com/juspay/xyne-spaces/compare/v1.431.0...v1.431.1) (2026-09-29)
