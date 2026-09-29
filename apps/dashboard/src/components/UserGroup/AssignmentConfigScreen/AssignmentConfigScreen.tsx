@@ -41,6 +41,17 @@ const ROTATION_INTERVAL_OPTIONS: { value: RotationInterval; label: string }[] = 
 /** Radix Select rejects an empty-string item value, so "no board filter" needs a sentinel. */
 const ALL_BOARDS_VALUE = '__all_boards__';
 
+// Mirrors the backend default and the mutator's accepted range for percentageWindowDays
+const DEFAULT_SHARE_WINDOW_DAYS = 7;
+const MAX_SHARE_WINDOW_DAYS = 90;
+
+/** Which tickets received in the share window count toward a member's % share. */
+type ShareBasis = 'ALL' | 'OPEN';
+const SHARE_BASIS_OPTIONS: { value: ShareBasis; label: string }[] = [
+  { value: 'ALL', label: 'All tickets' },
+  { value: 'OPEN', label: 'Open tickets only' },
+];
+
 const TABLE_HEAD_CELL =
   'px-6 py-3 text-xs font-medium uppercase tracking-wider text-muted-foreground';
 
@@ -90,6 +101,13 @@ export const AssignmentConfigScreen = ({
   const [localMaxTickets, setLocalMaxTickets] = useState<Map<string, number>>(new Map());
   const [localBoardWeight, setLocalBoardWeight] = useState<number>(1);
   const [localUsePercentage, setLocalUsePercentage] = useState<boolean>(false);
+  // Look-back window (days) the engine uses to measure each member's % share
+  const [shareWindowDaysInput, setShareWindowDaysInput] = useState<string>(
+    String(DEFAULT_SHARE_WINDOW_DAYS),
+  );
+  const [localShareWindowDays, setLocalShareWindowDays] =
+    useState<number>(DEFAULT_SHARE_WINDOW_DAYS);
+  const [localShareBasis, setLocalShareBasis] = useState<ShareBasis>('ALL');
 
   // Group-level rotation state
   const [localAutoRotationEnabled, setLocalAutoRotationEnabled] = useState<boolean>(false);
@@ -301,10 +319,17 @@ export const AssignmentConfigScreen = ({
       setBoardWeight(String(weight));
       setLocalBoardWeight(weight);
       setLocalUsePercentage(score?.usePercentage ?? false);
+      const windowDays = score?.percentageWindowDays ?? DEFAULT_SHARE_WINDOW_DAYS;
+      setShareWindowDaysInput(String(windowDays));
+      setLocalShareWindowDays(windowDays);
+      setLocalShareBasis(score?.percentageShareBasis === 'OPEN' ? 'OPEN' : 'ALL');
     } else {
       setBoardWeight('1');
       setLocalBoardWeight(1);
       setLocalUsePercentage(false);
+      setShareWindowDaysInput(String(DEFAULT_SHARE_WINDOW_DAYS));
+      setLocalShareWindowDays(DEFAULT_SHARE_WINDOW_DAYS);
+      setLocalShareBasis('ALL');
     }
     setHasChanges(false);
   }, [selectedBoardId, boardComplexityScores]);
@@ -616,6 +641,18 @@ export const AssignmentConfigScreen = ({
     }
   };
 
+  const handleShareWindowDaysChange = (value: string): void => {
+    const withoutLeadingZeros = value.replace(/[^0-9]/g, '').replace(/^0+/, '');
+    if (withoutLeadingZeros === '') {
+      setShareWindowDaysInput('');
+      return;
+    }
+    const days = Math.min(parseInt(withoutLeadingZeros, 10), MAX_SHARE_WINDOW_DAYS);
+    setShareWindowDaysInput(String(days));
+    setLocalShareWindowDays(days);
+    setHasChanges(true);
+  };
+
   const handleSave = (): void => {
     // Check if user is disabling auto-rotation - show warning if so
     const isDisablingRotation =
@@ -674,6 +711,8 @@ export const AssignmentConfigScreen = ({
             boardId: selectedBoardId,
             weight: localBoardWeight,
             usePercentage: localUsePercentage,
+            percentageWindowDays: localShareWindowDays,
+            percentageShareBasis: localShareBasis,
           }
         : undefined;
 
@@ -1376,6 +1415,75 @@ export const AssignmentConfigScreen = ({
                       }}
                     />
                   </div>
+
+                  {localUsePercentage && (
+                    <div className='mt-4 flex flex-col gap-2 border-t border-border pt-4'>
+                      <label
+                        htmlFor='share-window-days'
+                        className='text-[13px] font-medium text-foreground'
+                      >
+                        Share window (days)
+                      </label>
+                      <p className='text-xs leading-[1.4] text-muted-foreground'>
+                        New tickets go to whoever is furthest below their % share of the tickets
+                        assigned on this board over this many days. Range: 1 to{' '}
+                        {MAX_SHARE_WINDOW_DAYS}.
+                      </p>
+                      <Input
+                        type='text'
+                        inputMode='numeric'
+                        id='share-window-days'
+                        value={shareWindowDaysInput}
+                        onChange={e => handleShareWindowDaysChange(e.target.value)}
+                        onBlur={() => {
+                          // Restore the last valid value if left empty
+                          if (shareWindowDaysInput === '') {
+                            setShareWindowDaysInput(String(localShareWindowDays));
+                          }
+                        }}
+                        placeholder={String(DEFAULT_SHARE_WINDOW_DAYS)}
+                        className='mt-1 w-24 text-sm'
+                        data-track-event='change'
+                        data-track-category='UserGroups'
+                        data-track-name='SetShareWindowDays'
+                      />
+                    </div>
+                  )}
+
+                  {localUsePercentage && (
+                    <div className='mt-4 flex flex-col gap-2 border-t border-border pt-4'>
+                      <span className='text-[13px] font-medium text-foreground'>
+                        Tickets counted
+                      </span>
+                      <p className='text-xs leading-[1.4] text-muted-foreground'>
+                        Which tickets received in the share window count toward each person&apos;s
+                        share. With open only, a ticket stops counting once it is closed.
+                      </p>
+                      <Select
+                        value={localShareBasis}
+                        onValueChange={value => {
+                          setLocalShareBasis(value as ShareBasis);
+                          setHasChanges(true);
+                        }}
+                      >
+                        <SelectTrigger
+                          className='mt-1 w-full max-w-[240px]'
+                          aria-label='Tickets counted'
+                          data-track-category='UserGroups'
+                          data-track-name='SelectShareBasis'
+                        >
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {SHARE_BASIS_OPTIONS.map(option => (
+                            <SelectItem key={option.value} value={option.value}>
+                              {option.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1503,19 +1611,20 @@ export const AssignmentConfigScreen = ({
                     experts go first.
                   </li>
                   <li>
-                    <strong className='font-medium text-foreground'>Score</strong>: the lowest score
-                    gets the ticket —{' '}
-                    <code className='font-mono text-xs'>
-                      weightedActiveTasks − expertiseBonus − percentDiff
-                    </code>
+                    <strong className='font-medium text-foreground'>Score</strong>: without % share,
+                    the lowest score gets the ticket —{' '}
+                    <code className='font-mono text-xs'>weightedActiveTasks − expertiseBonus</code>
                   </li>
                   <li>
                     <strong className='font-medium text-foreground'>Expertise bonus</strong>:
                     experts get −10 points, which moves them up the queue.
                   </li>
                   <li>
-                    <strong className='font-medium text-foreground'>% Share</strong>: anyone below
-                    their target share gets priority, which evens out distribution.
+                    <strong className='font-medium text-foreground'>% Share</strong>: when on for a
+                    board, each ticket goes to whoever is furthest below their share of the tickets
+                    assigned on that board in the share window (all of them, or only those still
+                    open). Open tickets only break ties, and people at 0% get tickets only when
+                    everyone else is at their limit.
                   </li>
                   <li>
                     <strong className='font-medium text-foreground'>Max tickets</strong>: people at
