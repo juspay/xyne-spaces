@@ -3,6 +3,8 @@ import { fcmPushService } from '@/services/fcmService';
 import { mtlsCertificateService } from '@/services/mtlsCertificateService';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
+import { UserStatus } from '@xyne/shared';
+import { userActivationService } from '@/services/userActivationService';
 
 interface DeactivatedUser {
   userId: string;
@@ -43,12 +45,49 @@ class AccountDeactivationService {
   async handleDeactivatedEmail(email: string): Promise<UserDeactivationResult[]> {
     const users = await db.user.findMany({
       where: { email: { equals: email, mode: 'insensitive' } },
-      select: { id: true, email: true },
+      select: { id: true, email: true, workspaceId: true },
     });
+
+    // Mark every row INACTIVE through the same function the user-management
+    // deactivation uses, so this endpoint leaves a user in exactly the state an
+    // admin deactivation does: status + leftAt, user group / assignment /
+    // expertise rows torn down, open tickets handed off. Revoking certificates
+    // and sessions alone would leave the account looking live and still in the
+    // auto-assignment candidate pool. bulkUpdateUserStatus is workspace-scoped,
+    // hence one call per workspace.
+    const usersByWorkspace = new Map<string, string[]>();
+    for (const user of users) {
+      const userIds = usersByWorkspace.get(user.workspaceId) ?? [];
+      userIds.push(user.id);
+      usersByWorkspace.set(user.workspaceId, userIds);
+    }
+
+    const markedInactive = new Set<string>();
+    for (const [workspaceId, userIds] of usersByWorkspace) {
+      const { successful, failed } = await userActivationService.bulkUpdateUserStatus(
+        userIds,
+        UserStatus.INACTIVE,
+        workspaceId,
+      );
+      successful.forEach((userId) => markedInactive.add(userId));
+      failed.forEach(({ userId, error }) =>
+        logger.error('[Deactivation] Marking user INACTIVE failed', { userId, error }));
+    }
 
     const results: UserDeactivationResult[] = [];
     for (const user of users) {
-      results.push(await this.handleDeactivatedUser({ userId: user.id, email: user.email }));
+      const result = await this.handleDeactivatedUser({ userId: user.id, email: user.email });
+      // Reported as a step like the others, so a failed row write shows up in the
+      // response (and the 207) instead of being hidden behind revoked sessions.
+      const markInactive: DeactivationStepResult = {
+        name: 'markInactive',
+        ok: markedInactive.has(user.id),
+      };
+      results.push({
+        ...result,
+        ok: result.ok && markInactive.ok,
+        steps: [markInactive, ...result.steps],
+      });
     }
     return results;
   }
