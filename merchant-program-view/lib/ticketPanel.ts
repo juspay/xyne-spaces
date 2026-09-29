@@ -62,26 +62,40 @@ export function stageMove(target: Pick<PanelStage, 'name' | 'defaultTicketStatus
   return nonLinear ? { kind: 'transition', toStageName: target.name } : { kind: 'update', data: { stageName: target.name, statusV2: target.defaultTicketStatusV2 } };
 }
 
+type Terminal = 'COMPLETED' | 'CANCELLED';
+
 export type DoneMove =
-  | { kind: 'update'; data: { stageName?: string; statusV2: 'COMPLETED' } }
+  | { kind: 'update'; data: { stageName?: string; statusV2: Terminal } }
   | { kind: 'transition'; toStageName: string }
   | { kind: 'blocked'; reason: string };
 
 /**
- * How to mark a ticket done the way the dashboard would: move it to the board's first Completed
- * stage (a transition on non-linear boards), or, when no stage means Completed, set just the status
- * like the status picker does. Gated moves and Flow boards are left to Xyne.
+ * Move a ticket to a terminal state the way the dashboard would: to the board's first stage whose
+ * default status is the first of `prefer` the board has (a transition on non-linear boards), or, when
+ * no stage is terminal, set just the status like the status picker does. Gated moves and Flow boards
+ * are left to Xyne.
  */
-export function doneMove(current: string, stages: PanelStage[], transitions: PanelTransition[], boardType: string | null | undefined): DoneMove {
+function terminalMove(current: string, stages: PanelStage[], transitions: PanelTransition[], boardType: string | null | undefined, prefer: Terminal[]): DoneMove {
   if (boardType === 'FLOW') return { kind: 'blocked', reason: 'Flow tickets finish through their steps' };
   const nonLinear = boardType === 'NON_LINEAR';
-  const target = [...stages].sort(bySeq).find(s => s.defaultTicketStatusV2 === 'COMPLETED');
-  if (!target || target.name === current) return { kind: 'update', data: { statusV2: 'COMPLETED' } };
+  const sorted = [...stages].sort(bySeq);
+  const target = prefer.map(p => sorted.find(s => s.defaultTicketStatusV2 === p)).find(Boolean);
+  if (!target) return { kind: 'update', data: { statusV2: prefer[0] } };
+  const status = target.defaultTicketStatusV2 as Terminal;
+  if (target.name === current) return { kind: 'update', data: { statusV2: status } };
   const opt = stageOptions(current, stages, transitions, nonLinear).find(o => o.id === target.id)!;
   if (opt.gate) return { kind: 'blocked', reason: `${target.name} needs ${opt.gate === 'form' ? 'a form' : 'approval'}` };
   if (!opt.allowed) return { kind: 'blocked', reason: `no move to ${target.name} from ${current}` };
-  return nonLinear ? { kind: 'transition', toStageName: target.name } : { kind: 'update', data: { stageName: target.name, statusV2: 'COMPLETED' } };
+  return nonLinear ? { kind: 'transition', toStageName: target.name } : { kind: 'update', data: { stageName: target.name, statusV2: status } };
 }
+
+/** Mark done: the board's Completed stage, or just the Completed status. */
+export const doneMove = (current: string, stages: PanelStage[], transitions: PanelTransition[], boardType: string | null | undefined): DoneMove =>
+  terminalMove(current, stages, transitions, boardType, ['COMPLETED']);
+
+/** Close an abandoned ticket: the board's Cancelled stage if it has one, else Completed, else the Cancelled status. */
+export const closeMove = (current: string, stages: PanelStage[], transitions: PanelTransition[], boardType: string | null | undefined): DoneMove =>
+  terminalMove(current, stages, transitions, boardType, ['CANCELLED', 'COMPLETED']);
 
 /* ---------- custom fields ---------- */
 

@@ -198,3 +198,24 @@ describe('merchantView nudges', () => {
     expect(nudges(mk('t', { kids: ['t1'], placeholders: [{ title: 'Later', d: 1 }] }), mk('t1', { ...done, parent: 't', root: 't' }))).toEqual([['t', []]]);
   });
 });
+
+describe('merchantView abandoned', () => {
+  it("lists the merchant's old idle tickets", () => {
+    const X = model(mk('o', { d: 150, u: 40 }), mk('y', { d: 150, u: 2 }));
+    expect(merchantView(X, withFlags(X), 'acme', 'open').abandoned.map(t => t.id)).toEqual(['o']);
+    expect(merchantView(M, F, 'acme', 'open').abandoned).toEqual([]);
+  });
+});
+
+describe('merchantView Created range', () => {
+  it('counts only tickets created in the range, like the portfolio; abandoned ignores it', () => {
+    // d: d1 12, c1 11, p1 10, p2 9 (closed), c2 24 (closed), d2 1
+    const v = merchantView(M, F, 'acme', 'all', null, 11);
+    expect(v.threads.map(t => t.rootId).sort()).toEqual(['c1', 'd2']);
+    expect(v.kpis.find(k => k.id === 'open')).toMatchObject({ value: '3', sub: '4 total' });
+    expect(v.range).toBe(11);
+    expect(merchantView(M, F, 'acme', 'open').range).toBe('all');
+    const X = model(mk('o', { d: 150, u: 40 }));
+    expect(merchantView(X, withFlags(X), 'acme', 'open', null, 7).abandoned.map(t => t.id)).toEqual(['o']);
+  });
+});

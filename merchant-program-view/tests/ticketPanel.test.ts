@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { avatarUrl, etaState, fieldSave, parseOptions, parseValues, resolveFields, doneMove, stageMove, stageOptions, stageEtaState } from '../lib/ticketPanel';
+import { avatarUrl, etaState, fieldSave, parseOptions, parseValues, resolveFields, closeMove, doneMove, stageMove, stageOptions, stageEtaState } from '../lib/ticketPanel';
 
 const DAY = 86_400_000;
 const NOW = 100 * DAY;
@@ -141,5 +141,23 @@ describe('doneMove', () => {
     const approval = board.map(s => (s.id === 'p' ? { ...s, requestApprovalOnEntry: true } : s));
     expect(doneMove('To be Picked Up', approval, [], 'DEFAULT')).toEqual({ kind: 'blocked', reason: 'Prod needs approval' });
     expect(doneMove('To be Picked Up', board, [], 'FLOW')).toEqual({ kind: 'blocked', reason: 'Flow tickets finish through their steps' });
+  });
+});
+
+describe('closeMove', () => {
+  const st2 = (id: string, name: string, seq: number, status: string) => st(id, name, seq, { defaultTicketStatusV2: status });
+
+  it('prefers the board\'s Cancelled stage, then its Completed stage', () => {
+    const b = [st2('a', 'To be Picked Up', 1, 'TODO'), st2('p', 'Prod', 7, 'COMPLETED'), st2('r', 'Rejected', 8, 'CANCELLED')];
+    expect(closeMove('To be Picked Up', b, [], 'DEFAULT')).toEqual({ kind: 'update', data: { stageName: 'Rejected', statusV2: 'CANCELLED' } });
+    const noCancel = b.slice(0, 2);
+    expect(closeMove('To be Picked Up', noCancel, [], 'DEFAULT')).toEqual({ kind: 'update', data: { stageName: 'Prod', statusV2: 'COMPLETED' } });
+  });
+
+  it('cancels by status alone when no stage is terminal, and keeps the same gates', () => {
+    expect(closeMove('To Do', [st2('t', 'To Do', 1, 'STARTED'), st2('c', 'Completed', 6, 'STARTED')], [], 'DEFAULT')).toEqual({ kind: 'update', data: { statusV2: 'CANCELLED' } });
+    const b = [st2('a', 'Open', 1, 'TODO'), st2('r', 'Dropped', 2, 'CANCELLED')];
+    expect(closeMove('Open', b, [{ toStageId: 'r', formId: 'f' }], 'DEFAULT')).toEqual({ kind: 'blocked', reason: 'Dropped needs a form' });
+    expect(closeMove('Open', b, [{ fromStageId: 'a', toStageId: 'r' }], 'NON_LINEAR')).toEqual({ kind: 'transition', toStageName: 'Dropped' });
   });
 });

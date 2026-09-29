@@ -34,6 +34,45 @@ export function saveRange(store: Storage | null, v: Range): void {
   }
 }
 
+/** The filter pills and tab, remembered between visits (search and one-off KPI filters aren't). */
+export interface SavedFilters {
+  tab: 'merchants' | 'tickets';
+  desks: string[];
+  boards: string[];
+  owners: string[];
+  health: ('red' | 'amber' | 'watch' | 'ok')[];
+}
+
+const FILTERS_KEY = 'mpv.filters';
+const HEALTH = ['red', 'amber', 'watch', 'ok'] as const;
+const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
+
+export function loadFilters(store: Storage | null): SavedFilters {
+  let v: Record<string, unknown> = {};
+  try {
+    const raw = store?.getItem(FILTERS_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : {};
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) v = parsed as Record<string, unknown>;
+  } catch {
+    // Unreadable or blocked: start with no filters.
+  }
+  return {
+    tab: v.tab === 'tickets' ? 'tickets' : 'merchants',
+    desks: strings(v.desks),
+    boards: strings(v.boards),
+    owners: strings(v.owners),
+    health: strings(v.health).filter((h): h is SavedFilters['health'][number] => (HEALTH as readonly string[]).includes(h)),
+  };
+}
+
+export function saveFilters(store: Storage | null, f: SavedFilters): void {
+  try {
+    store?.setItem(FILTERS_KEY, JSON.stringify({ tab: f.tab, desks: f.desks, boards: f.boards, owners: f.owners, health: f.health }));
+  } catch {
+    // Blocked storage: filters just last for this session.
+  }
+}
+
 const PICKS_KEY = 'mpv.midPicks';
 const PICKS_MAX = 50;
 type Picks = Record<string, { n: number; at: number }>;

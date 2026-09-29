@@ -57,11 +57,6 @@ describe('drawer', () => {
     expect(drawer(m, byId, 'p1', null, users, NOW).fields).toContainEqual({ k: 'Merchant ID', v: 'no MID · inherits acme' });
   });
 
-  it('turns activity into readable lines, newest first, skipping noise', () => {
-    const d = drawer(m, byId, 'e1', acts, users, NOW);
-    expect(d.activity.map(x => x.text)).toEqual(['Moved to IN DEV', 'Assigned to Lisa Roy', 'Sub-ticket P1 created', 'Created in TO BE PICKED']);
-    expect(d.activity[0].when).toBe('4d ago');
-  });
 
   it('keeps long histories to the latest stages', () => {
     // 100 newest activities: the ticket's creation and earliest moves are cut off.
@@ -84,7 +79,6 @@ describe('drawer', () => {
     const d = drawer(m, byId, 'e1', null, users, NOW);
     expect(d.timing[1]).toMatchObject({ k: 'In current stage', v: '…' });
     expect(d.history).toEqual([{ name: 'IN DEV', days: 'now', current: true }]);
-    expect(d.activity).toEqual([]);
   });
 
   it('says the time in stage is unknown when activity failed to load', () => {

@@ -228,3 +228,25 @@ describe('paginate', () => {
     expect(paginate([], 1)).toMatchObject({ rows: [], pages: 1, text: '0–0 of 0' });
   });
 });
+
+describe('abandoned tickets', () => {
+  const X = model(
+    mk('old1', { midR: ['acme'], mids: ['acme'], d: 200, u: 60, who: 'Lisa Roy' }),
+    mk('old2', { midR: ['beta'], mids: ['beta'], d: 120, u: 45, kind: 'desk', src: 'Desk · support', who: 'Vivek Nikam' }),
+    mk('busy', { midR: ['acme'], mids: ['acme'], d: 200, u: 5 }),
+    mk('new', { midR: ['acme'], mids: ['acme'], d: 10, u: 60 }),
+  );
+  const ids = (over: object) => portfolio(X, { ...DEFAULT_PSTATE, ...over }).abandoned.map(t => t.id);
+
+  it('lists old idle tickets oldest first, whatever the Created range', () => {
+    expect(ids({})).toEqual(['old1', 'old2']);
+    expect(ids({ range: 30 })).toEqual(['old1', 'old2']);
+  });
+
+  it('follows the merchant search and the Desks, Boards and Assignee filters', () => {
+    expect(ids({ mids: ['beta'] })).toEqual(['old2']);
+    expect(ids({ search: 'acm' })).toEqual(['old1']);
+    expect(ids({ desks: ['Desk · support'] })).toEqual(['old2']);
+    expect(ids({ owners: ['Lisa Roy'] })).toEqual(['old1']);
+  });
+});

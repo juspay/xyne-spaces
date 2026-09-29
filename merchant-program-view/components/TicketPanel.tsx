@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode, type Ref } from 'react';
 import { Calendar, ChevronRight, Clock, Copy, ExternalLink, MoreHorizontal, Plus, SquareKanban, Tag, X } from 'lucide-react';
-import type { Drawer } from '../lib/drawer';
+import type { ActivityRow, Drawer } from '../lib/drawer';
 import type { St } from '../lib/model';
 import { usePeople } from '../lib/people';
 import { etaState, resolveFields, stageEtaState, stageOptions, type FieldRow } from '../lib/ticketPanel';
@@ -8,6 +8,7 @@ import { useTicketPanel } from '../lib/useTicketPanel';
 import { Avatar, Button, ChevronDown, PriorityIcon, SECTION_LABEL, StatusGlyph, useEscape } from './primitives';
 import { CHIP, ChipX, DASHED, DateTimeEditor, FieldValueEditor, InlineText, Marker, OptionList, Pop, SelectValue, type Opt } from './TicketEditors';
 import { WatchDetails } from './TicketDrawer';
+import { ActivityFeed } from './ActivityFeed';
 
 /**
  * The Desk-style right-side ticket view (Details only), loaded live through the Spaces SDK and
@@ -43,6 +44,8 @@ export function TicketPanel({
   dt,
   loadingActivity,
   activityError,
+  activities,
+  boardNames,
   deskChannels,
   onClose,
   onOpen,
@@ -56,6 +59,10 @@ export function TicketPanel({
   dt: Drawer | null;
   loadingActivity: boolean;
   activityError: boolean;
+  /** The ticket's activity rows (null until loaded). */
+  activities: ActivityRow[] | null;
+  /** Board names by id, for "moved ticket from board" rows. */
+  boardNames: Map<string, string>;
   deskChannels: Map<string, string>;
   onClose: () => void;
   onOpen: (id: string) => void;
@@ -172,9 +179,12 @@ export function TicketPanel({
           {state && t && <Details state={state} people={people} deskChannels={deskChannels} actions={actions} />}
           {dt && (
             <Collapsible sectionRef={watch} open title="Merchant watch" summary={dt.flags.length ? `${dt.flags.length} ${dt.flags.length === 1 ? 'flag' : 'flags'}` : 'nothing flagged'} dots={dt.flags.map(f => f.sev)}>
-              <WatchDetails dt={dt} loadingActivity={loadingActivity} activityError={activityError} onOpen={onOpen} />
+              <WatchDetails dt={dt} onOpen={onOpen} />
             </Collapsible>
           )}
+          <Collapsible open title="Activity" summary={activities ? String(activities.length) : undefined}>
+            <ActivityFeed rows={activities} loading={loadingActivity} error={activityError} groups={state?.groups ?? []} boardNames={boardNames} />
+          </Collapsible>
         </div>
 
         <div style={{ padding: '12px 16px', borderTop: '1px solid var(--bd2)', display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
@@ -556,7 +566,8 @@ function Collapsible({
         {dots?.slice(0, 6).map((d, i) => <span key={i} style={{ width: 6, height: 6, borderRadius: '50%', background: dot[d] ?? 'var(--t5)' }} />)}
         <span style={{ flex: 1, height: 1, background: 'var(--bd2)' }} />
       </button>
-      {open && <div style={{ marginTop: 12 }}>{children}</div>}
+      {/* Indented to line up with the title, past the chevron (13px icon + 8px gap). */}
+      {open && <div style={{ marginTop: 12, paddingLeft: 21 }}>{children}</div>}
     </section>
   );
 }

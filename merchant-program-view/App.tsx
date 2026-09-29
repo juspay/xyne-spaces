@@ -1,7 +1,8 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { MerchantPage, nudgeKey } from './components/MerchantPage';
+import { CleanupDialog, CleanupStrip } from './components/CleanupDialog';
 import { markDone } from './lib/markDone';
-import { ActiveChips, AgeBar, FilterPills, KpiCards, MerchantsTable, PortfolioHeader, Tabs, TicketsTable, type SyncStatus } from './components/Portfolio';
+import { ActiveChips, AgeBar, FilterPills, KpiCards, MerchantsTable, PortfolioHeader, SourcePills, Tabs, TicketsTable, type SyncStatus } from './components/Portfolio';
 import { SearchBox } from './components/SearchBox';
 import { PortfolioSkeleton } from './components/Skeleton';
 import { TicketPanel } from './components/TicketPanel';
@@ -11,8 +12,8 @@ import { drawer, type ActivityRow } from './lib/drawer';
 import { formatClock, updateBarText } from './lib/format';
 import { merchantView, sameFocus, type MFocus, type Nudge, type ThreadStatus } from './lib/merchantView';
 import { buildModel } from './lib/model';
-import { DEFAULT_PSTATE, defaultMidSuggestions, midSuggestions, portfolio, type Kpi, type PState } from './lib/portfolio';
-import { browserStorage, loadMidPicks, loadRange, recordMidPick, saveRange } from './lib/prefs';
+import { DEFAULT_PSTATE, defaultMidSuggestions, midSuggestions, portfolio, type FTicket, type Kpi, type PState } from './lib/portfolio';
+import { browserStorage, loadFilters, loadMidPicks, loadRange, recordMidPick, saveFilters, saveRange } from './lib/prefs';
 import { M_FIRST, T_FIRST, nextSort, sortMerchantRows, sortTicketRows, type MKey, type Sort, type TKey } from './lib/sort';
 import { THEME_CSS } from './lib/theme';
 import { useMerchantData } from './lib/useMerchantData';
@@ -32,10 +33,17 @@ export default function App() {
   const data = useMerchantData();
   const { store, version, resolveParents } = data;
   const [view, setView] = useState<View>({ kind: 'portfolio' });
-  const [ps, setPs] = useState<PState>(() => ({ ...DEFAULT_PSTATE, range: loadRange(browserStorage()) }));
+  const [ps, setPs] = useState<PState>(() => ({ ...DEFAULT_PSTATE, range: loadRange(browserStorage()), ...loadFilters(browserStorage()) }));
+  // Remember the filter pills and tab for the next visit.
+  useEffect(() => {
+    saveFilters(browserStorage(), { tab: ps.tab, desks: ps.desks, boards: ps.boards, owners: ps.owners, health: ps.health });
+  }, [ps.tab, ps.desks, ps.boards, ps.owners, ps.health]);
   const [threadStatus, setThreadStatus] = useState<ThreadStatus>('open');
   const [mFocus, setMFocus] = useState<MFocus | null>(null);
   const [nudging, setNudging] = useState<string | null>(null);
+  // The clean-up review being shown, and tickets just closed (hidden until a sync sees them closed).
+  const [cleanup, setCleanup] = useState<FTicket[] | null>(null);
+  const [closedIds, setClosedIds] = useState<Set<string>>(() => new Set());
   const [drawerId, setDrawerId] = useState<string | null>(null);
   const [act, setAct] = useState<ActivityState | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -74,7 +82,16 @@ export default function App() {
   // Typing stays responsive: the lists catch up with the filters a frame later.
   const deferredPs = useDeferredValue(ps);
   const pf = useMemo(() => portfolio(model, deferredPs), [model, deferredPs]);
+  const abandoned = useMemo(() => pf.abandoned.filter(t => !closedIds.has(t.id)), [pf.abandoned, closedIds]);
   const set = useCallback((p: Partial<PState>) => setPs(s => ({ ...s, ...p })), []);
+  // One Created range for the portfolio and the merchant page, remembered between visits.
+  const onRange = useCallback(
+    (range: PState['range']) => {
+      set({ range });
+      saveRange(browserStorage(), range);
+    },
+    [set],
+  );
   const [mSort, setMSort] = useState<Sort<MKey> | null>(null);
   const [tSort, setTSort] = useState<Sort<TKey> | null>(null);
   const merchantRows = useMemo(() => sortMerchantRows(pf.merchantRows, mSort), [pf.merchantRows, mSort]);
@@ -109,8 +126,20 @@ export default function App() {
     let cancelled = false;
     // Keep showing the previous rows for this ticket while a post-sync refetch runs.
     setAct(prev => (prev?.id === drawerId && !prev.error ? prev : { id: drawerId, rows: null, error: false }));
-    spaces.tickets
-      .listActivitiesForTickets({ ticketIds: [drawerId], limit: 100 })
+    // The feed shows the whole history, like the dashboard: page back (newest first) until a short page.
+    const loadAll = async (): Promise<ActivityRow[]> => {
+      const out: ActivityRow[] = [];
+      let start: { timestamp: number; id: string } | undefined;
+      for (let page = 0; page < 10; page++) {
+        const rows = await spaces.tickets.listActivitiesForTickets({ ticketIds: [drawerId], limit: 100, ...(start ? { start } : {}) });
+        out.push(...rows);
+        if (rows.length < 100) break;
+        const last = rows[rows.length - 1];
+        start = { timestamp: last.timestamp, id: last.id };
+      }
+      return out;
+    };
+    loadAll()
       .then(rows => {
         if (!cancelled) setAct({ id: drawerId, rows, error: false });
       })
@@ -130,8 +159,8 @@ export default function App() {
   const closeDrawer = useCallback(() => setDrawerId(null), []);
 
   const mv = useMemo(
-    () => (view.kind === 'merchant' && model.byMid.has(view.mid) ? merchantView(model, pf.byId, view.mid, threadStatus, mFocus) : null),
-    [view, model, pf.byId, threadStatus, mFocus],
+    () => (view.kind === 'merchant' && model.byMid.has(view.mid) ? merchantView(model, pf.byId, view.mid, threadStatus, mFocus, ps.range) : null),
+    [view, model, pf.byId, threadStatus, mFocus, ps.range],
   );
 
   const dt = useMemo(() => {
@@ -184,12 +213,10 @@ export default function App() {
       {view.kind === 'portfolio' ? (
         <div className="page" style={{ gap: 22 }}>
           <PortfolioHeader
+            filters={<SourcePills s={ps} set={set} pf={pf} />}
             search={<SearchBox mids={ps.mids} search={ps.search} suggestions={suggestions} defaults={defaults} onPicked={onPicked} onMids={mids => set({ mids })} onSearch={search => set({ search })} />}
             range={ps.range}
-            onRange={range => {
-              set({ range });
-              saveRange(browserStorage(), range);
-            }}
+            onRange={onRange}
             sync={sync}
             onRefresh={data.refresh}
             onFullReload={data.fullReload}
@@ -213,6 +240,7 @@ export default function App() {
             </div>
           ) : (
             <>
+              <CleanupStrip count={abandoned.length} onReview={() => setCleanup(abandoned)} />
               <KpiCards kpis={pf.kpis} isActive={kpiActive} onClick={kpiClick} />
               <AgeBar counts={pf.buckets} bucket={ps.bucket} onBucket={bucketClick} />
               <Tabs tab={ps.tab} counts={{ merchants: pf.merchantRows.length, tickets: pf.ticketRows.length }} onTab={tab => set({ tab })}>
@@ -237,6 +265,9 @@ export default function App() {
           }}
           onFocus={f => setMFocus(cur => (sameFocus(cur, f) ? null : f))}
           onClearFocus={() => setMFocus(null)}
+          abandoned={mv.abandoned.filter(t => !closedIds.has(t.id))}
+          onRange={onRange}
+          onCleanup={setCleanup}
           nudging={nudging}
           onNudge={runNudge}
           selected={drawerId}
@@ -265,12 +296,28 @@ export default function App() {
           dt={dt}
           loadingActivity={act?.id === drawerId && act.rows === null}
           activityError={act?.id === drawerId && act.error}
+          activities={act?.id === drawerId && !act.error ? act.rows : null}
+          boardNames={store.lookups.boards}
           deskChannels={store.lookups.deskChannels}
           onClose={closeDrawer}
           onOpen={setDrawerId}
           onMerchant={view.kind === 'portfolio' ? openMerchant : null}
           onToast={showToast}
           onChanged={data.refresh}
+        />
+      )}
+      {cleanup && (
+        <CleanupDialog
+          tickets={cleanup}
+          onClose={() => setCleanup(null)}
+          onClosed={ids => {
+            setClosedIds(prev => new Set([...prev, ...ids]));
+            data.refresh();
+          }}
+          onRestored={ids => {
+            setClosedIds(prev => new Set([...prev].filter(id => !ids.includes(id))));
+            data.refresh();
+          }}
         />
       )}
       {toast && <Toast text={toast} />}

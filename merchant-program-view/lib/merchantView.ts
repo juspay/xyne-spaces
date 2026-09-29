@@ -1,4 +1,5 @@
 import { FLAG_CFG } from './config';
+import { isAbandoned } from './cleanup';
 import { RANK, fmtDays, type Sev } from './flags';
 import { BUCKETS, bucketOf, median, merchantRow, type FTicket, type MerchantRow } from './portfolio';
 import type { Court, Model, Pri } from './model';
@@ -81,6 +82,9 @@ export interface MerchantView {
   hist: number[];
   court: { id: Court; label: string; count: number; pct: number }[];
   closed: FTicket[];
+  range: 'all' | number;
+  /** This merchant's tickets that look abandoned, oldest first (whatever the Created range). */
+  abandoned: FTicket[];
 }
 
 const ago = (d: number): string => (d < 1 / 24 ? 'just now' : `${fmtDays(d)} ago`);
@@ -98,8 +102,18 @@ const byChain = (a: Thread, b: Thread): number =>
 
 const COURT_LABELS: [Court, string][] = [['us', 'With us'], ['merchant', 'With merchant'], ['external', 'External']];
 
-export function merchantView(m: Model, byId: Map<string, FTicket>, mid: string, status: ThreadStatus, focus: MFocus | null = null, cfg = FLAG_CFG): MerchantView {
-  const tickets = (m.byMid.get(mid) ?? []).map(t => byId.get(t.id)!).filter(Boolean);
+export function merchantView(
+  m: Model,
+  byId: Map<string, FTicket>,
+  mid: string,
+  status: ThreadStatus,
+  focus: MFocus | null = null,
+  range: 'all' | number = 'all',
+  cfg = FLAG_CFG,
+): MerchantView {
+  const everything = (m.byMid.get(mid) ?? []).map(t => byId.get(t.id)!).filter(Boolean);
+  // The portfolio's Created range carries over: only tickets created in it count here.
+  const tickets = range === 'all' ? everything : everything.filter(t => t.d <= range);
   const row = merchantRow(mid, tickets);
   const inSet = new Set(tickets.map(t => t.id));
   const open = row.open;
@@ -230,6 +244,8 @@ export function merchantView(m: Model, byId: Map<string, FTicket>, mid: string, 
     hist: row.counts,
     court: COURT_LABELS.map(([id, label]) => ({ id, label, count: row.court[id], pct: Math.round((row.court[id] / total) * 100) })),
     closed,
+    range,
+    abandoned: everything.filter(t => isAbandoned(t, byId)).sort((a, b) => b.d - a.d),
   };
 }
 

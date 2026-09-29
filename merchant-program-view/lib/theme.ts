@@ -52,7 +52,6 @@ export const THEME_CSS = `
 .mpv .kpi:hover{border-color:var(--t6)!important}
 .mpv .solid:hover{opacity:.9}
 .mpv .outline:hover{background:var(--bg3)!important}
-.mpv .tabp:hover{background:color-mix(in srgb,var(--bg3) 60%,transparent)}
 .mpv input::placeholder{color:var(--t5)}
 .mpv .page{max-width:1200px;margin:0 auto;padding:32px 40px 72px;display:flex;flex-direction:column}
 .mpv .mv-grid{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:20px;align-items:start}
@@ -61,6 +60,7 @@ export const THEME_CSS = `
 @keyframes mpvIn{from{opacity:0;transform:translateX(16px)}to{opacity:1;transform:none}}
 @keyframes mpvUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 @keyframes mpvPulse{0%,100%{opacity:1}50%{opacity:.35}}
+@keyframes mpvSpin{to{transform:rotate(360deg)}}
 .mpv .sorth .sorti{opacity:0;transition:opacity .12s}
 .mpv .sorth:hover .sorti{opacity:1}
 .mpv :focus-visible{outline:none!important;box-shadow:0 0 0 3px color-mix(in srgb,var(--ring) 70%,transparent)!important}

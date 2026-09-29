@@ -2,7 +2,7 @@ import { fmtDays, type Flag } from './flags';
 import type { FTicket } from './portfolio';
 import type { Court, Model, Pri, St } from './model';
 
-/** The ticket drawer: header, flags, timing, stage history, details, linked tickets and activity. */
+/** Merchant watch's view of one ticket: flags, timing, stage history, details and linked tickets. */
 
 export interface ActivityRow {
   id: string;
@@ -10,6 +10,8 @@ export interface ActivityRow {
   activityType: string;
   value: unknown;
   timestamp: number;
+  /** User id of whoever made the change. */
+  updatedBy?: string | null;
 }
 
 export interface Timing {
@@ -53,7 +55,6 @@ export interface Drawer {
   history: { name: string; days: string; current: boolean; earlier?: boolean }[];
   fields: { k: string; v: string }[];
   links: LinkRow[];
-  activity: { text: string; when: string }[];
 }
 
 export const STATUS_LABEL: Record<St, string> = { todo: 'To do', started: 'In progress', paused: 'Paused', completed: 'Done', cancelled: 'Cancelled' };
@@ -80,32 +81,6 @@ interface StageValue {
 const val = (a: ActivityRow): StageValue => (a.value && typeof a.value === 'object' ? (a.value as StageValue) : {});
 const isStageChange = (a: ActivityRow): boolean => (a.activityType === 'STATUS' || a.activityType === 'STAGE_NAME') && val(a).field === 'stageName';
 
-function activityText(a: ActivityRow, users: Map<string, string>): string | null {
-  const v = val(a);
-  switch (a.activityType) {
-    case 'TICKET_CREATED':
-      return v.stageName ? `Created in ${v.stageName}` : 'Created';
-    case 'STATUS':
-    case 'STAGE_NAME':
-      if (v.field === 'stageName') return `Moved to ${v.newValue}`;
-      if (v.field === 'statusV2') return `Status ${String(v.oldValue ?? '').toLowerCase()} → ${String(v.newValue ?? '').toLowerCase()}`;
-      return null;
-    case 'ASSIGNED_TO':
-      return v.newValue ? `Assigned to ${users.get(v.newValue) ?? 'someone'}` : 'Unassigned';
-    case 'SUBTICKET_CREATED':
-      return `Sub-ticket ${v.subTicketXyneId ?? ''} created`.replace('  ', ' ');
-    case 'SUBTICKET_LINKED':
-      return 'Sub-ticket linked';
-    case 'EMAIL_SENT':
-      return 'Reply sent to the merchant';
-    case 'PRIORITY':
-      return v.newValue ? `Priority set to ${String(v.newValue).toLowerCase()}` : null;
-    case 'MERGED':
-      return v.sourceTicketXyneId ? `Merged ${v.sourceTicketXyneId} into this ticket` : 'Merged a ticket';
-    default:
-      return null;
-  }
-}
 
 export function drawer(
   m: Model,
@@ -199,13 +174,6 @@ export function drawer(
     { k: 'Waiting on', v: t.open ? COURT_LABEL[t.court] : '—' },
   ];
 
-  const activity = asc
-    ? [...asc]
-        .reverse()
-        .map(a => ({ text: activityText(a, users), when: ago((now - a.timestamp) / DAY) }))
-        .filter((x): x is { text: string; when: string } => x.text !== null)
-        .slice(0, 15)
-    : [];
 
   return {
     id: t.id,
@@ -226,6 +194,5 @@ export function drawer(
     history,
     fields,
     links,
-    activity,
   };
 }

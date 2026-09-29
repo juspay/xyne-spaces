@@ -3,21 +3,9 @@ import { Avatar, DONE_COLOR, PAL, PriorityIcon, SECTION_LABEL, StatusGlyph, ageC
 
 /**
  * Merchant watch's own view of a ticket, shown as a collapsible section in the ticket panel: why it
- * needs attention, timing, stage history, details, linked tickets and activity.
+ * needs attention, timing and linked tickets.
  */
-export function WatchDetails({
-  dt,
-  loadingActivity,
-  activityError,
-  onOpen,
-}: {
-  dt: Drawer;
-  loadingActivity: boolean;
-  activityError: boolean;
-  onOpen: (id: string) => void;
-}) {
-  const overdue = dt.flags.some(f => f.type === 'stageEta');
-  const open = dt.st !== 'completed' && dt.st !== 'cancelled';
+export function WatchDetails({ dt, onOpen }: { dt: Drawer; onOpen: (id: string) => void }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       {dt.flags.map((f, i) => (
@@ -35,44 +23,6 @@ export function WatchDetails({
               <span style={{ fontSize: 12, color: 'var(--t4)' }}>{c.k}</span>
               <span style={{ fontSize: 16, fontWeight: 600, color: toneColor(c.tone, c.v), fontVariantNumeric: 'tabular-nums' }}>{c.v}</span>
               <span style={{ fontSize: 12, color: 'var(--t4)' }}>{c.sub}</span>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <span style={SECTION_LABEL}>Stage history</span>
-        <div style={{ display: 'flex', flexDirection: 'column' }}>
-          {dt.history.map((h, i) => {
-            if (h.earlier) {
-              return (
-                <div key={i} style={{ display: 'grid', gridTemplateColumns: '14px 1fr', gap: 10, alignItems: 'center', padding: '5px 0', fontSize: 13, color: 'var(--t4)' }}>
-                  <span style={{ width: 8, height: 8, borderRadius: '50%', marginLeft: 3, border: '1.5px dashed var(--t6)' }} />
-                  <span>{h.name}</span>
-                </div>
-              );
-            }
-            const dot = !h.current ? 'var(--t6)' : !open ? 'var(--green)' : overdue ? 'var(--red)' : 'var(--t1)';
-            const ring = !h.current ? 'transparent' : !open ? 'var(--greenBg)' : overdue ? 'var(--redBg)' : 'var(--bg3)';
-            return (
-              <div key={i} style={{ display: 'grid', gridTemplateColumns: '14px 1fr auto', gap: 10, alignItems: 'center', padding: '5px 0', fontSize: 13 }}>
-                <span style={{ width: 8, height: 8, borderRadius: '50%', marginLeft: 3, background: dot, boxShadow: `0 0 0 3px ${ring}` }} />
-                <span style={{ color: 'var(--t1)', fontWeight: h.current ? 600 : 400 }}>{h.name}</span>
-                <span style={{ color: h.current ? (overdue && open ? 'var(--redT)' : 'var(--t3)') : 'var(--t4)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{h.days}</span>
-              </div>
-            );
-          })}
-          {loadingActivity && <span style={{ fontSize: 12, color: 'var(--t4)', padding: '4px 0' }}>Loading stage changes…</span>}
-        </div>
-      </section>
-
-      <section style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <span style={SECTION_LABEL}>Details</span>
-        <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr', rowGap: 9, columnGap: 12, fontSize: 13 }}>
-          {dt.fields.map(f => (
-            <div key={f.k} style={{ display: 'contents' }}>
-              <span style={{ color: 'var(--t4)' }}>{f.k}</span>
-              <span style={{ color: 'var(--t1)', minWidth: 0, overflowWrap: 'anywhere' }}>{f.v}</span>
             </div>
           ))}
         </div>
@@ -122,19 +72,6 @@ export function WatchDetails({
         </section>
       )}
 
-      <section style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <span style={SECTION_LABEL}>Activity</span>
-        {loadingActivity && <span style={{ fontSize: 13, color: 'var(--t4)' }}>Loading activity…</span>}
-        {activityError && <span style={{ fontSize: 13, color: 'var(--t4)' }}>Couldn't load the activity. Open the ticket in Xyne to see it.</span>}
-        {!loadingActivity && !activityError && dt.activity.length === 0 && <span style={{ fontSize: 13, color: 'var(--t4)' }}>No activity recorded.</span>}
-        {dt.activity.map((a, i) => (
-          <div key={i} style={{ display: 'grid', gridTemplateColumns: '14px 1fr auto', gap: 10, alignItems: 'start', fontSize: 13 }}>
-            <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--t6)', margin: '5px 0 0 3px' }} />
-            <span style={{ color: 'var(--t2)', lineHeight: 1.45 }}>{a.text}</span>
-            <span style={{ color: 'var(--t5)', fontSize: 12, whiteSpace: 'nowrap' }}>{a.when}</span>
-          </div>
-        ))}
-      </section>
     </div>
   );
 }

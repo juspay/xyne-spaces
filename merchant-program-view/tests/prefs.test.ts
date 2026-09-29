@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { loadRange, loadMidPicks, recordMidPick, saveRange } from '../lib/prefs';
+import { loadFilters, loadRange, loadMidPicks, recordMidPick, saveFilters, saveRange } from '../lib/prefs';
 
 function mem(): Storage {
   const m = new Map<string, string>();
@@ -62,5 +62,29 @@ describe('merchant ID search history', () => {
     s.setItem('mpv.midPicks', 'nope');
     expect(loadMidPicks(s)).toEqual([]);
     expect(loadMidPicks(null)).toEqual([]);
+  });
+});
+
+describe('saved filters', () => {
+  const EMPTY = { tab: 'merchants', desks: [], boards: [], owners: [], health: [] };
+
+  it('starts empty and round-trips the pills and tab', () => {
+    const s = mem();
+    expect(loadFilters(s)).toEqual(EMPTY);
+    const f = { tab: 'tickets' as const, desks: ['Desk · support'], boards: ['Euler / ISSUE'], owners: ['Lisa Roy'], health: ['red' as const, 'amber' as const] };
+    saveFilters(s, f);
+    expect(loadFilters(s)).toEqual(f);
+  });
+
+  it('drops anything malformed and survives blocked storage', () => {
+    const s = mem();
+    s.setItem('mpv.filters', JSON.stringify({ tab: 'nope', desks: 'x', boards: [1, 'b'], owners: null, health: ['red', 'purple'] }));
+    expect(loadFilters(s)).toEqual({ ...EMPTY, boards: ['b'], health: ['red'] });
+    s.setItem('mpv.filters', '{not json');
+    expect(loadFilters(s)).toEqual(EMPTY);
+    const blocked = { getItem: () => { throw new Error('blocked'); }, setItem: () => { throw new Error('blocked'); } } as unknown as Storage;
+    expect(loadFilters(blocked)).toEqual(EMPTY);
+    expect(() => saveFilters(blocked, EMPTY as never)).not.toThrow();
+    expect(loadFilters(null)).toEqual(EMPTY);
   });
 });

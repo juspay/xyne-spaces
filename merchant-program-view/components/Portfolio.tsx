@@ -1,5 +1,5 @@
 import { useEffect, useState, type CSSProperties, type ReactNode } from 'react';
-import { MoreHorizontal } from 'lucide-react';
+import { MoreHorizontal, RotateCw } from 'lucide-react';
 import { FLAG_LABEL, HEALTH, RANK, fmtDays } from '../lib/flags';
 import { BUCKETS, paginate, type FTicket, type Kpi, type MerchantRow, type PState, type Portfolio } from '../lib/portfolio';
 import type { Sev } from '../lib/flags';
@@ -49,74 +49,37 @@ export interface SyncStatus {
 }
 
 /** Sync status and Refresh: the dot pulses amber and Refresh is disabled while a sync runs. */
-export function SyncPill({ sync, onRefresh }: { sync: SyncStatus; onRefresh: () => void }) {
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', height: 32, border: '1px solid var(--bd)', borderRadius: 6, background: 'var(--bg)', overflow: 'hidden', minWidth: 0, maxWidth: '100%' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '0 12px', fontSize: 13, fontWeight: 500, color: 'var(--t3)', whiteSpace: 'nowrap', maxWidth: 340, minWidth: 0, overflow: 'hidden' }}>
-        <span
-          style={{
-            flex: 'none',
-            width: 7,
-            height: 7,
-            borderRadius: '50%',
-            background: sync.busy ? 'var(--amber)' : sync.error ? 'var(--red)' : 'var(--green)',
-            animation: sync.busy ? 'mpvPulse 1.4s ease-in-out infinite' : undefined,
-          }}
-        />
-        <span data-tip={sync.error} style={{ overflow: 'hidden', textOverflow: 'ellipsis', color: sync.error ? 'var(--redT)' : undefined }}>{sync.text}</span>
-      </div>
-      <span style={{ width: 1, alignSelf: 'stretch', margin: '7px 0', background: 'var(--bd)' }} />
-      <button
-        type="button"
-        className="hov"
-        onClick={onRefresh}
-        disabled={sync.busy}
-        style={{ all: 'unset', cursor: sync.busy ? 'default' : 'pointer', height: '100%', padding: '0 12px', fontSize: 13.5, fontWeight: 500, color: sync.busy ? 'var(--t5)' : 'var(--t1)' }}
-      >
-        Refresh
-      </button>
-    </div>
-  );
-}
-
-export function PortfolioHeader({
-  range,
-  onRange,
-  sync,
-  onRefresh,
-  onFullReload,
-  search,
-}: {
-  /** The merchant ID search, shown before the Created menu. */
-  search?: ReactNode;
-  range: 'all' | number;
-  onRange: (r: 'all' | number) => void;
-  sync: SyncStatus;
-  onRefresh: () => void;
-  onFullReload: () => void;
-}) {
+/**
+ * Sync status as a quiet line: a dot (green, amber and pulsing while syncing, red if the last
+ * refresh failed), the status text, a refresh icon that spins while it runs, and optionally a menu
+ * with Full reload.
+ */
+export function SyncPill({ sync, onRefresh, onFullReload }: { sync: SyncStatus; onRefresh: () => void; onFullReload?: () => void }) {
   const [moreOpen, setMoreOpen] = useState(false);
   useEscape(moreOpen, () => setMoreOpen(false));
+  const icon: CSSProperties = { all: 'unset', cursor: 'pointer', width: 24, height: 24, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--t4)', flex: 'none' };
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-      <h1 style={{ margin: 0, fontSize: 28, lineHeight: 1.2, fontWeight: 600 }}>Merchant watch</h1>
-      {/* Filters on the left, sync status on the right, one row. */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-        {search}
-        <Menu prefix="Created" value={range} options={RANGES} onChange={onRange} width={200} radius={6} />
-      <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', minWidth: 0, maxWidth: '100%' }}>
-        <SyncPill sync={sync} onRefresh={onRefresh} />
-        <div style={{ position: 'relative' }}>
-          <button
-            type="button"
-            className="hov"
-            aria-label="More"
-            aria-haspopup="true"
-            aria-expanded={moreOpen}
-            onClick={() => setMoreOpen(o => !o)}
-            style={{ all: 'unset', cursor: 'pointer', width: 32, height: 32, boxSizing: 'border-box', border: '1px solid var(--bd)', borderRadius: 6, background: 'var(--bg)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--t3)' }}
-          >
-            <MoreHorizontal size={16} strokeWidth={1.75} />
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, maxWidth: '100%', fontSize: 12, color: 'var(--t4)' }}>
+      <span
+        style={{
+          flex: 'none',
+          width: 6,
+          height: 6,
+          borderRadius: '50%',
+          background: sync.busy ? 'var(--amber)' : sync.error ? 'var(--red)' : 'var(--green)',
+          animation: sync.busy ? 'mpvPulse 1.4s ease-in-out infinite' : undefined,
+        }}
+      />
+      <span data-tip={sync.error} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 320, color: sync.error ? 'var(--redT)' : undefined }}>
+        {sync.text}
+      </span>
+      <button type="button" className="hov" aria-label="Refresh" data-tip={sync.busy ? undefined : 'Refresh'} disabled={sync.busy} onClick={onRefresh} style={{ ...icon, cursor: sync.busy ? 'default' : 'pointer' }}>
+        <RotateCw size={13} strokeWidth={2} style={{ animation: sync.busy ? 'mpvSpin 1s linear infinite' : undefined }} />
+      </button>
+      {onFullReload && (
+        <div style={{ position: 'relative', flex: 'none' }}>
+          <button type="button" className="hov" aria-label="More" aria-haspopup="true" aria-expanded={moreOpen} onClick={() => setMoreOpen(o => !o)} style={icon}>
+            <MoreHorizontal size={15} strokeWidth={1.75} />
           </button>
           {moreOpen && (
             <>
@@ -138,7 +101,46 @@ export function PortfolioHeader({
             </>
           )}
         </div>
+      )}
+    </div>
+  );
+}
+
+export function PortfolioHeader({
+  range,
+  onRange,
+  sync,
+  onRefresh,
+  onFullReload,
+  search,
+  filters,
+}: {
+  /** The merchant ID search, at the left of the filter row. */
+  search?: ReactNode;
+  /** Filters shown right after the search (Desks, Boards). */
+  filters?: ReactNode;
+  range: 'all' | number;
+  onRange: (r: 'all' | number) => void;
+  sync: SyncStatus;
+  onRefresh: () => void;
+  onFullReload: () => void;
+}) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+      {/* Title with the quiet sync status at its right. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        <h1 style={{ margin: 0, fontSize: 28, lineHeight: 1.2, fontWeight: 600 }}>Merchant watch</h1>
+        <div style={{ marginLeft: 'auto', minWidth: 0, maxWidth: '100%' }}>
+          <SyncPill sync={sync} onRefresh={onRefresh} onFullReload={onFullReload} />
+        </div>
       </div>
+      {/* Search, Desks and Boards on the left; the Created range at the right. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+        {search}
+        {filters}
+        <div style={{ marginLeft: 'auto' }}>
+          <Menu prefix="Created" value={range} options={RANGES} onChange={onRange} width={200} radius={6} align="right" />
+        </div>
       </div>
     </div>
   );
@@ -226,9 +228,9 @@ export function Tabs({
     ['tickets', 'Tickets'],
   ];
   return (
-    <div style={{ position: 'sticky', top: 0, zIndex: 6, background: 'var(--bg)', padding: '8px 0', marginTop: -8, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', borderBottom: '1px solid var(--bd2)' }}>
-      {/* Spaces Tabs: 32px pills, the active one on muted. */}
-      <div role="tablist" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+    <div style={{ position: 'sticky', top: 0, zIndex: 6, background: 'var(--bg)', paddingTop: 8, marginTop: -8, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', borderBottom: '1px solid var(--bd2)' }}>
+      {/* Underline tabs: the active one bold with a dark rule on the row's border. */}
+      <div role="tablist" style={{ display: 'flex', alignItems: 'center' }}>
       {tabs.map(([id, label]) => (
         <button
           key={id}
@@ -236,25 +238,23 @@ export function Tabs({
           role="tab"
           aria-selected={tab === id}
           onClick={() => onTab(id)}
-          className={tab === id ? undefined : 'tabp'}
           style={{
             all: 'unset',
             cursor: 'pointer',
-            height: 32,
-            boxSizing: 'border-box',
-            padding: '0 12px',
-            borderRadius: 8,
-            fontSize: 14,
-            fontWeight: 500,
+            padding: '9px 2px 10px',
+            marginRight: 14,
+            fontSize: 13.5,
+            fontWeight: tab === id ? 600 : 500,
             color: tab === id ? 'var(--t1)' : 'var(--t3)',
-            background: tab === id ? 'var(--bg3)' : 'transparent',
+            borderBottom: `2px solid ${tab === id ? 'var(--t1)' : 'transparent'}`,
+            marginBottom: -1,
             display: 'flex',
             gap: 6,
             alignItems: 'center',
           }}
         >
           {label}
-          <span style={{ fontSize: 12, color: 'var(--t4)', fontVariantNumeric: 'tabular-nums' }}>{counts[id]}</span>
+          <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--t4)', background: 'var(--bg3)', borderRadius: 999, padding: '1px 7px', fontVariantNumeric: 'tabular-nums' }}>{counts[id]}</span>
         </button>
       ))}
       </div>
@@ -283,6 +283,7 @@ function MultiPill({
   searchable = true,
   placeholder = 'Search…',
   width = 250,
+  align = 'right',
 }: {
   label: string;
   options: PillOption[];
@@ -291,6 +292,8 @@ function MultiPill({
   searchable?: boolean;
   placeholder?: string;
   width?: number;
+  /** Which edge the menu lines up with; pills at the left of a row open rightwards. */
+  align?: 'left' | 'right';
 }) {
   const [open, setOpen] = useState(false);
   useEscape(open, () => setOpen(false));
@@ -348,7 +351,7 @@ function MultiPill({
       {open && (
         <>
           <div onClick={close} style={{ position: 'fixed', inset: 0, zIndex: 24 }} />
-          <div style={{ ...MENU_STYLE, top: 36, right: 0, width: Math.min(Math.max(width, 180), 280), maxWidth: 'calc(100vw - 32px)', padding: 0 }}>
+          <div style={{ ...MENU_STYLE, top: 36, ...(align === 'left' ? { left: 0 } : { right: 0 }), width: Math.min(Math.max(width, 180), 280), maxWidth: 'calc(100vw - 32px)', padding: 0 }}>
             {searchable && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, height: 36, padding: '0 10px', borderBottom: '1px solid var(--bd)' }}>
                 <SearchIcon size={14} />
@@ -420,12 +423,20 @@ export function typeFilterLabel(t: PState['typeFilter']): string {
   return t === 'anyEta' ? 'ETA breached · ticket or stage' : FLAG_LABEL[t];
 }
 
-/** Desks, Boards, Assignee and Health pills, shown at the right of the tabs row. */
-export function FilterPills({ s, set, pf }: { s: PState; set: (p: Partial<PState>) => void; pf: Pick<Portfolio, 'people' | 'deskOptions' | 'boardOptions'> }) {
+/** Desks and Boards pills, shown next to the merchant search (their menus open to the right). */
+export function SourcePills({ s, set, pf }: { s: PState; set: (p: Partial<PState>) => void; pf: Pick<Portfolio, 'deskOptions' | 'boardOptions'> }) {
   return (
     <>
-      <MultiPill label="Desks" options={pf.deskOptions.map(d => ({ value: d, label: d.replace(/^Desk · /, '') }))} selected={s.desks} onChange={desks => set({ desks })} placeholder="Search desks…" />
-      <MultiPill label="Boards" options={pf.boardOptions.map(b => ({ value: b, label: b }))} selected={s.boards} onChange={boards => set({ boards })} placeholder="Search boards…" width={280} />
+      <MultiPill label="Desks" options={pf.deskOptions.map(d => ({ value: d, label: d.replace(/^Desk · /, '') }))} selected={s.desks} onChange={desks => set({ desks })} placeholder="Search desks…" align="left" />
+      <MultiPill label="Boards" options={pf.boardOptions.map(b => ({ value: b, label: b }))} selected={s.boards} onChange={boards => set({ boards })} placeholder="Search boards…" width={280} align="left" />
+    </>
+  );
+}
+
+/** Assignee and Health pills, shown at the right of the tabs row. */
+export function FilterPills({ s, set, pf }: { s: PState; set: (p: Partial<PState>) => void; pf: Pick<Portfolio, 'people'> }) {
+  return (
+    <>
       <MultiPill label="Assignee" options={pf.people.map(p => ({ value: p, label: p, person: true }))} selected={s.owners} onChange={owners => set({ owners })} placeholder="Search people…" width={240} />
       <MultiPill label="Health" options={HEALTH_OPTS} selected={s.health} onChange={health => set({ health: health as Sev[] })} searchable={false} width={200} />
     </>

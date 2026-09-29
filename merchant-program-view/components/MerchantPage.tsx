@@ -2,7 +2,9 @@ import { useState } from 'react';
 import { HEALTH, RANK, fmtDays } from '../lib/flags';
 import { BUCKETS, sameFocus, type MFocus, type MerchantView, type Nudge, type Thread, type ThreadRow, type ThreadStatus } from '../lib/merchantView';
 import { STATUS_LABEL, PRI_LABEL } from '../lib/drawer';
-import { SyncPill, type SyncStatus } from './Portfolio';
+import { RANGES, SyncPill, type SyncStatus } from './Portfolio';
+import { CleanupStrip } from './CleanupDialog';
+import type { FTicket } from '../lib/portfolio';
 import { threadLines } from '../lib/ui';
 import { Avatar, BUCKET_COLOR, ChevronDown, ChevronLeft, Close, DONE_COLOR, HealthPill, Menu, PAL, PriorityIcon, StatusGlyph, pressable, ageColor, toneColor } from './primitives';
 
@@ -266,6 +268,9 @@ export function MerchantPage({
   onClearFocus,
   nudging,
   onNudge,
+  abandoned,
+  onCleanup,
+  onRange,
 }: {
   v: MerchantView;
   status: ThreadStatus;
@@ -282,6 +287,11 @@ export function MerchantPage({
   /** Key of the nudge being saved, if any. */
   nudging: string | null;
   onNudge: (n: Nudge) => void;
+  /** This merchant's tickets that look abandoned, and opening their clean-up review. */
+  abandoned: FTicket[];
+  onCleanup: (tickets: FTicket[]) => void;
+  /** The Created range, shared with the portfolio. */
+  onRange: (r: 'all' | number) => void;
 }) {
   const statusOpts = [
     { value: 'open' as const, label: 'Open tickets', count: v.threadCounts.open },
@@ -290,10 +300,16 @@ export function MerchantPage({
   ];
   return (
     <div className="page" style={{ paddingTop: 24, gap: 20 }}>
-      <button type="button" onClick={onBack} style={{ all: 'unset', cursor: 'pointer', alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: 4, fontSize: 13, color: 'var(--t3)' }}>
-        <ChevronLeft />
-        All merchants
-      </button>
+      {/* Back link, with the quiet sync status at the right. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        <button type="button" onClick={onBack} style={{ all: 'unset', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, fontSize: 13, color: 'var(--t3)' }}>
+          <ChevronLeft />
+          All merchants
+        </button>
+        <div style={{ marginLeft: 'auto', minWidth: 0, maxWidth: '100%' }}>
+          <SyncPill sync={sync} onRefresh={onRefresh} />
+        </div>
+      </div>
 
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 20, flexWrap: 'wrap' }}>
         <div style={{ flex: 1, minWidth: 280, display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -306,8 +322,8 @@ export function MerchantPage({
             {resolving && <span style={{ color: 'var(--t4)' }}> · looking up parent tickets…</span>}
           </p>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <SyncPill sync={sync} onRefresh={onRefresh} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <Menu prefix="Created" value={v.range} options={RANGES} onChange={onRange} width={200} radius={6} align="right" />
         </div>
       </div>
 
@@ -346,6 +362,7 @@ export function MerchantPage({
 
       <div className="mv-grid">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
+          <CleanupStrip count={abandoned.length} onReview={() => onCleanup(abandoned)} />
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
               <span style={{ fontSize: 15, fontWeight: 600 }}>Tickets</span>
