@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  ensurePromptContract,
   normalizePermissionMode,
   validateSystemPromptContract,
 } from "./agent-prompt-contract.js";
@@ -58,6 +59,39 @@ describe("validateSystemPromptContract", () => {
 `);
     expect(res.ok).toBe(false);
     expect(res.error).toMatch(/Guardrails/i);
+  });
+});
+
+describe("ensurePromptContract", () => {
+  it("leaves a passing prompt untouched", () => {
+    const res = ensurePromptContract(GOOD, { permissionMode: "ask-first" });
+    expect(res.repaired).toBe(false);
+    expect(res.text).toBe(GOOD.trim());
+  });
+
+  it("adds the missing Workflow and Guardrails so Save cannot 400", () => {
+    const res = ensurePromptContract("You are the weekday DM brief agent. Keep it short and calm.", {
+      permissionMode: "read-only",
+    });
+    expect(res.repaired).toBe(true);
+    expect(validateSystemPromptContract(res.text).ok).toBe(true);
+    expect(res.text).toMatch(/Never send, post, create, edit or delete anything\. Read and report only/);
+  });
+
+  it("only adds what is missing", () => {
+    const res = ensurePromptContract(
+      "You are a triage agent.\n\n## Operational Workflow\n1. Read the ticket.\n2. Route it.\n",
+      { permissionMode: "ask-first" },
+    );
+    expect(res.text.match(/## Operational Workflow/g)).toHaveLength(1);
+    expect(res.text).toMatch(/## Guardrails/);
+    expect(res.text).toMatch(/asking the user first/);
+  });
+
+  it("builds a valid prompt from nothing", () => {
+    const res = ensurePromptContract("", { permissionMode: "can-write", name: "Scribe" });
+    expect(res.text.startsWith("You are Scribe.")).toBe(true);
+    expect(validateSystemPromptContract(res.text).ok).toBe(true);
   });
 });
 

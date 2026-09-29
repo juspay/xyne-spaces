@@ -172,10 +172,52 @@ export type {
 } from "./memory/index.js";
 export { USER_MEMORY_SUBSYSTEMS } from "./memory/index.js";
 export {
+  SHORTLIST_TOP_K,
+  SUGGEST_BUDGET_MS,
+  SELECTION_THRESHOLDS,
+  BUILTIN_RULE_TABLE,
+  selectionThreshold,
+  namedItemConfidence,
+  applySkillThresholds,
+  applyKnowledgeThresholds,
+  applySubagentThresholds,
+  applyBuiltinThresholds,
+  applyMcpThresholds,
+} from "./selection-thresholds.js";
+export type {
+  HubPickKind,
+  JudgedPick,
+  HubJudgement,
+  AppliedHubResult,
+} from "./selection-thresholds.js";
+export {
   ClawSseParser,
+  SseParser,
   KEEPALIVE_FRAME,
   frameSseEvent,
 } from "./stream/events.js";
+export {
+  ensurePromptContract,
+  isReadOnlyMode,
+} from "./agent-prompt-contract.js";
+export { frameDraftEvent } from "./stream/agent-draft-events.js";
+export type {
+  AgentDraftBody,
+  AgentDraftEvent,
+  AgentDraftRequest,
+  AgentDraftCanvas,
+  ClawDraftRequest,
+  DraftCatalog,
+  DraftCapabilityRef,
+  DraftCapabilityRemoval,
+  DraftErrorCode,
+  DraftField,
+  DraftHub,
+  DraftMode,
+  DraftPick,
+  DraftSchedule,
+  DraftTimings,
+} from "./stream/agent-draft-events.js";
 export type {
   ClawStreamEvent,
   ClawStreamEventName,

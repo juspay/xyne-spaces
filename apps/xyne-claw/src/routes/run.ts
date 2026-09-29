@@ -5430,6 +5430,11 @@ router.post("/generate-prompt", validateS2SKey, async (req, res: Response) => {
     ? `Here is the current system prompt for an agent${agentName ? ` called "${agentName}"` : ""}:\n\n---\n${existingPrompt}\n---\n\nThe user wants to update it with the following instructions:\n\n"${intent}"\n\nApply the requested changes to the existing prompt. Keep the parts that are not affected by the update. Return the full updated prompt.`
     : `Generate a system prompt for an agent${agentName ? ` called "${agentName}"` : ""}. The user described it as:\n\n"${intent}"\n\nThe prompt should:\n- Define the agent's role and personality\n- List what the agent can and cannot do\n- Include guidelines for response style\n- Be concise but thorough (200-400 words)`;
 
+  const callerGone = new AbortController();
+  res.on("close", () => {
+    if (!res.writableEnded) callerGone.abort();
+  });
+
   try {
     const llmRes = await fetch(`${LITELLM.url}/v1/chat/completions`, {
       method: "POST",
@@ -5457,7 +5462,7 @@ router.post("/generate-prompt", validateS2SKey, async (req, res: Response) => {
         reasoning_effort: "none",
         thinking: { type: "disabled" },
       }),
-      signal: AbortSignal.timeout(30_000),
+      signal: AbortSignal.any([AbortSignal.timeout(30_000), callerGone.signal]),
     });
 
     if (!llmRes.ok) {
@@ -5870,6 +5875,13 @@ router.post("/suggest-tools", validateS2SKey, async (req, res: Response) => {
 }`,
   ].join("\n");
 
+  // claw-auth gives up at its own budget (20s) well before this call's timeout;
+  // stop the LLM call when the caller hangs up instead of letting it run on.
+  const callerGone = new AbortController();
+  res.on("close", () => {
+    if (!res.writableEnded) callerGone.abort();
+  });
+
   try {
     const llmRes = await fetch(`${LITELLM.suggestUrl}/v1/chat/completions`, {
       method: "POST",
@@ -5892,7 +5904,7 @@ router.post("/suggest-tools", validateS2SKey, async (req, res: Response) => {
         response_format: { type: "json_object" },
       }),
       // Suggest uses a dedicated fast model/proxy; claw-auth still wraps a budget.
-      signal: AbortSignal.timeout(LITELLM.suggestTimeoutMs),
+      signal: AbortSignal.any([AbortSignal.timeout(LITELLM.suggestTimeoutMs), callerGone.signal]),
     });
 
     if (!llmRes.ok) {

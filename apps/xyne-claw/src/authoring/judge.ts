@@ -1,0 +1,240 @@
+/**
+ * Capability judge for the streamed agent draft: which MCP products, built-in
+ * tools, subagents, skills and knowledge collections does this job need?
+ *
+ * One fast-model JSON call covers every hub. Ids the model returns are checked
+ * against the catalog it was shown, then the shared confidence thresholds
+ * decide what is bound to the canvas and what is only suggested.
+ */
+import {
+  BUILTIN_RULE_TABLE,
+  applyBuiltinThresholds,
+  applyKnowledgeThresholds,
+  applyMcpThresholds,
+  applySkillThresholds,
+  applySubagentThresholds,
+  type AppliedHubResult,
+  type ClawDraftRequest,
+  type DraftHub,
+  type DraftPick,
+  type JudgedPick,
+} from "xyne-claw-shared";
+import { chatJson, type AuthoringMessage } from "./authoring-llm.js";
+
+/** How many tool names to show per integration. The judge picks products, not tools. */
+const TOOL_NAMES_PER_INTEGRATION = 10;
+const MAX_SUBAGENT_PICKS = 4;
+/** A pick this sure was named by the user, not inferred. */
+const NAMED_CONFIDENCE = 0.95;
+const MAX_MCP_PICKS = 6;
+
+export interface JudgeInput {
+  /** The job, in the user's words plus any context worth matching. */
+  intent: string;
+  catalog: ClawDraftRequest["catalog"];
+  skills: ClawDraftRequest["skillCandidates"];
+  knowledge: ClawDraftRequest["knowledgeCandidates"];
+  hubs: readonly DraftHub[];
+}
+
+export interface JudgedCapabilities {
+  hubs: Record<DraftHub, AppliedHubResult>;
+  /** Flat list of every bound and suggested pick, with labels resolved. */
+  bound: DraftPick[];
+  suggested: DraftPick[];
+}
+
+const truncate = (text: string, max: number): string => {
+  const trimmed = (text ?? "").trim();
+  return trimmed.length <= max ? trimmed : `${trimmed.slice(0, max - 1)}…`;
+};
+
+const names = (tools: Array<{ name: string }>): string => {
+  const shown = tools.slice(0, TOOL_NAMES_PER_INTEGRATION).map((t) => t.name).join(", ");
+  return tools.length > TOOL_NAMES_PER_INTEGRATION ? `${shown}, +${tools.length - TOOL_NAMES_PER_INTEGRATION} more` : shown;
+};
+
+function integrationLine(i: JudgeInput["catalog"]["integrations"][number]): string {
+  const reads = i.readTools.length > 0 ? ` | read: ${names(i.readTools)}` : "";
+  const writes = i.writeTools.length > 0 ? ` | write: ${names(i.writeTools)}` : "";
+  return `- ${i.slug} | ${i.label}${reads}${writes}`;
+}
+
+export function buildJudgePrompt(input: JudgeInput): string {
+  const wanted = new Set(input.hubs);
+  const products = input.catalog.integrations.filter((i) => i.kind === "mcp" || i.kind === "gateway");
+  const builtins = input.catalog.integrations.filter((i) => i.kind === "builtin" || i.kind === "custom");
+  const sections: string[] = [];
+  if (wanted.has("mcp")) {
+    sections.push(`Products (MCP / gateway; id = slug):\n${products.map(integrationLine).join("\n") || "(none)"}`);
+  }
+  if (wanted.has("builtin")) {
+    sections.push(`Built-in tools (id = slug):\n${builtins.map(integrationLine).join("\n") || "(none)"}`);
+  }
+  if (wanted.has("subagent")) {
+    sections.push(
+      `Subagents (id = name):\n${input.catalog.subagents.map((s) => `- ${s.name}: ${truncate(s.description, 110)}`).join("\n") || "(none)"}`,
+    );
+  }
+  if (wanted.has("skill")) {
+    sections.push(
+      `Skills (id = slug):\n${input.skills.map((s) => `- ${s.slug}: ${truncate(`${s.name} — ${s.description}`, 120)}`).join("\n") || "(none)"}`,
+    );
+  }
+  if (wanted.has("knowledge")) {
+    sections.push(
+      `Knowledge collections (id = id):\n${input.knowledge.map((k) => `- ${k.id}: ${truncate(k.name, 80)}`).join("\n") || "(none)"}`,
+    );
+  }
+  const shape = [...wanted]
+    .map((hub) => `  "${hub}": [{"id":"…","confidence":0.0,"reason":"under 12 words"${hub === "mcp" ? ',"access":"read|write"' : ""}}]`)
+    .join(",\n");
+  return [
+    "Pick what this agent needs from the catalog below. Judge every hub in one answer.",
+    "",
+    "Job:",
+    truncate(input.intent, 1500),
+    "",
+    ...sections.flatMap((s) => [s, ""]),
+    "Rules:",
+    "- Use only ids listed above. Never invent one.",
+    "- Return an empty array for a hub the job does not clearly need. Fewer is better.",
+    "- confidence is 0 to 1. A product or tool the user names outright is 1.0.",
+    "- mcp: set access to \"write\" only when the job must send, post, create, edit or delete. Reading and reporting is \"read\".",
+    "- Pick at most 2 subagents, 3 skills, 1 knowledge collection.",
+    "- A messaging or email product is needed only when the job names it or must send through it. Reading the user's Spaces DMs and tickets uses the Spaces product.",
+    "",
+    "Return only JSON in this shape:",
+    `{\n${shape}\n}`,
+  ].join("\n");
+}
+
+interface RawPick {
+  id?: unknown;
+  confidence?: unknown;
+  reason?: unknown;
+  access?: unknown;
+}
+
+function cleanPicks(raw: unknown, known: Map<string, string>): Array<JudgedPick & { access?: "read" | "write" }> {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const out: Array<JudgedPick & { access?: "read" | "write" }> = [];
+  for (const item of raw as RawPick[]) {
+    if (!item || typeof item !== "object" || typeof item.id !== "string") continue;
+    // An empty catalog list means we had nothing to check against: accept nothing.
+    if (!known.has(item.id) || seen.has(item.id)) continue;
+    seen.add(item.id);
+    const confidence = typeof item.confidence === "number" && Number.isFinite(item.confidence)
+      ? Math.min(1, Math.max(0, item.confidence))
+      : 0.5;
+    out.push({
+      id: item.id,
+      confidence,
+      reason: typeof item.reason === "string" ? truncate(item.reason, 100) : "",
+      ...(item.access === "write" ? { access: "write" as const } : item.access === "read" ? { access: "read" as const } : {}),
+    });
+  }
+  return out;
+}
+
+const normalize = (text: string): string => text.toLowerCase().replace(/[^a-z0-9]+/g, "");
+
+/** Built-in ids whose rule-table trigger matches the job, so the lower judge bar applies. */
+export function ruleMatchedBuiltinIds(
+  intent: string,
+  builtins: ReadonlyArray<{ slug: string; label: string }>,
+): Set<string> {
+  const matched = new Set<string>();
+  for (const rule of BUILTIN_RULE_TABLE) {
+    if (!rule.re.test(intent)) continue;
+    for (const builtin of builtins) {
+      const hay = normalize(`${builtin.slug} ${builtin.label}`);
+      if (rule.needles.some((needle) => hay.includes(normalize(needle)))) matched.add(builtin.slug);
+    }
+  }
+  return matched;
+}
+
+/** Apply catalog checks and thresholds to the model's raw answer. Exported for tests. */
+export function resolveJudgement(raw: Record<string, unknown>, input: JudgeInput): JudgedCapabilities {
+  const wanted = new Set(input.hubs);
+  const products = input.catalog.integrations.filter((i) => i.kind === "mcp" || i.kind === "gateway");
+  const builtins = input.catalog.integrations.filter((i) => i.kind === "builtin" || i.kind === "custom");
+  const labels: Record<DraftHub, Map<string, string>> = {
+    mcp: new Map(products.map((i) => [i.slug, i.label])),
+    builtin: new Map(builtins.map((i) => [i.slug, i.label])),
+    subagent: new Map(input.catalog.subagents.map((s) => [s.name, s.name])),
+    skill: new Map(input.skills.map((s) => [s.slug, s.name])),
+    knowledge: new Map(input.knowledge.map((k) => [k.id, k.name])),
+  };
+  const empty: AppliedHubResult = { bound: [], suggested: [], none: true };
+  const hubs: Record<DraftHub, AppliedHubResult> = {
+    mcp: empty,
+    builtin: empty,
+    subagent: empty,
+    skill: empty,
+    knowledge: empty,
+  };
+  const access = new Map<string, "read" | "write">();
+  const connection = new Map(products.filter((p) => p.requiresConnection).map((p) => [p.slug, p.requiresConnection as string]));
+
+  for (const hub of ["mcp", "builtin", "subagent", "skill", "knowledge"] as const) {
+    if (!wanted.has(hub)) continue;
+    const picks = cleanPicks(raw[hub], labels[hub]);
+    if (hub === "mcp") {
+      for (const pick of picks) if (pick.access) access.set(pick.id, pick.access);
+    }
+    const trimmed = picks.map(({ id, confidence, reason }) => ({ id, confidence, reason }));
+    hubs[hub] =
+      hub === "mcp"
+        ? applyMcpThresholds(trimmed.slice(0, MAX_MCP_PICKS))
+        : hub === "builtin"
+          ? applyBuiltinThresholds(trimmed, ruleMatchedBuiltinIds(input.intent, builtins))
+          : hub === "subagent"
+            ? applySubagentThresholds(
+                trimmed.slice(0, MAX_SUBAGENT_PICKS),
+                // Delegation changes how the agent runs: bind only what the user named
+                // (the judge scores a named item 1.0); the rest are suggestions.
+                new Set(trimmed.filter((p) => p.confidence >= NAMED_CONFIDENCE).map((p) => p.id)),
+              )
+            : hub === "skill"
+              ? applySkillThresholds(trimmed)
+              : applyKnowledgeThresholds(trimmed.slice(0, 1));
+  }
+
+  const toPick = (hub: DraftHub) => (pick: JudgedPick): DraftPick => ({
+    hub,
+    id: pick.id,
+    label: labels[hub].get(pick.id) ?? pick.id,
+    confidence: pick.confidence,
+    reason: pick.reason,
+    ...(hub === "mcp" ? { access: access.get(pick.id) ?? "read" } : {}),
+    ...(hub === "mcp" && connection.has(pick.id) ? { requiresConnection: connection.get(pick.id) as string } : {}),
+  });
+  const bound: DraftPick[] = [];
+  const suggested: DraftPick[] = [];
+  for (const hub of ["mcp", "builtin", "subagent", "skill", "knowledge"] as const) {
+    bound.push(...hubs[hub].bound.map(toPick(hub)));
+    suggested.push(...hubs[hub].suggested.map(toPick(hub)));
+  }
+  return { hubs, bound, suggested };
+}
+
+export async function judgeCapabilities(input: JudgeInput, signal?: AbortSignal): Promise<JudgedCapabilities> {
+  const messages: AuthoringMessage[] = [
+    {
+      role: "system",
+      content:
+        "You judge which catalog items an AI agent needs. Return only compact JSON. Prefer fewer items over guessing. Never invent ids.",
+    },
+    { role: "user", content: buildJudgePrompt(input) },
+  ];
+  const raw = await chatJson<Record<string, unknown>>(messages, {
+    maxTokens: 700,
+    timeoutMs: 9_000,
+    temperature: 0.1,
+    ...(signal ? { signal } : {}),
+  });
+  return resolveJudgement(raw, input);
+}
