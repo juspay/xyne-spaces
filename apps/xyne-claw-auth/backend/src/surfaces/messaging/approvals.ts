@@ -20,7 +20,8 @@ import { newCardToken, parkOptions, type ParkedOption } from "./cards.js";
 import { enqueueOutbound } from "./delivery.js";
 import { chatMessageRepository } from "../../repositories/index.js";
 import { resolveIdentity } from "./identity.js";
-import { getSpacesPostTarget, type SpacesPostTarget } from "../../lib/spaces-post-target.js";
+import { getSpacesPostTarget, looksLikeMemberIdList, type SpacesPostTarget } from "../../lib/spaces-post-target.js";
+import { mentionShorthandToText } from "../../lib/mention-transform.js";
 import { getSpacesAuthForUser } from "../../lib/spaces-db.js";
 import type { ChannelAccount, ChannelDeliveryTarget, InteractiveCard } from "./plugin.js";
 
@@ -64,18 +65,27 @@ export function htmlToCardText(html: string): string {
 }
 
 function describePostTarget(params: Record<string, unknown>, target: SpacesPostTarget | null): string {
-  const channel = target?.channelName ? `*#${target.channelName}*` : "";
+  const dm = target?.directMessage;
+  const dmWith = dm?.with.length ? ` with *${dm.with.join(", ")}*` : "";
+  const channel = !dm && target?.channelName && !looksLikeMemberIdList(target.channelName) ? `*#${target.channelName}*` : "";
   if (str(params["conversationId"])) {
     const thread = target?.thread;
-    const preview = thread ? clamp(htmlToCardText(thread.html).replace(/\n+/g, " "), THREAD_PREVIEW_CHARS) : "";
-    const inChannel = channel ? ` in ${channel}` : "";
+    const preview = thread ? clamp(cardText(thread.html).replace(/\n+/g, " "), THREAD_PREVIEW_CHARS) : "";
+    const inChannel = dm ? ` in your direct message${dmWith}` : channel ? ` in ${channel}` : "";
     const by = thread?.author ? ` by *${thread.author}*` : "";
     return preview
       ? `Reply as you in the thread${inChannel} started${by}:\n> ${preview}\n\nYour reply`
       : `Reply as you in an existing thread${inChannel}`;
   }
-  if (str(params["channelId"])) return `Send this message as you to ${channel || `#${str(params["channelId"])}`}`;
+  if (str(params["channelId"])) {
+    if (dm) return `Send this message as you in a direct message${dmWith ? dmWith.replace(" with ", " to ") : ""}`;
+    return `Send this message as you to ${channel || "a Spaces channel"}`;
+  }
   return "Send this message as you to Xyne Spaces";
+}
+
+function cardText(html: string): string {
+  return mentionShorthandToText(htmlToCardText(html));
 }
 
 /**
@@ -87,7 +97,7 @@ function describePostTarget(params: Record<string, unknown>, target: SpacesPostT
 export function describeWriteAction(tool: string, params: Record<string, unknown>, postTarget: SpacesPostTarget | null = null): string {
   switch (tool) {
     case "user-send-message": {
-      const content = clamp(htmlToCardText(str(params["content"])), MAX_DETAIL_CHARS);
+      const content = clamp(cardText(str(params["content"])), MAX_DETAIL_CHARS);
       return `${describePostTarget(params, postTarget)}:\n\n"${content}"`;
     }
     case "spaces-create-ticket": {
@@ -151,6 +161,7 @@ async function lookupPostTarget(action: SignedWriteAction): Promise<SpacesPostTa
       ...(str(action.params["conversationId"]) ? { conversationId: str(action.params["conversationId"]) } : {}),
     },
     auth,
+    action.userId,
   ).catch(() => null);
 }
 
