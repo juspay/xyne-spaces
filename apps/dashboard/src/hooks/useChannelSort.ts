@@ -5,10 +5,13 @@ import { VisibleChannel } from '../machines/stateMachine';
 import { stateMachineActor } from '../machines/stateMachine';
 import { useZero } from './useZero';
 import { mutators } from '../zero/mutators';
+import { useUsersById } from './useUsers';
 import {
   groupChannelsByScope,
   DEFAULT_FILTER_MODE,
   DEFAULT_GROUP_SORT_ORDER,
+  getChannelSortKey,
+  pinSelfDMsLast,
 } from '../components/Chat/ChatDirectory/ChatDirectory.utils';
 
 export type SidebarGroup = 'starred' | 'channels' | 'dms';
@@ -34,6 +37,7 @@ export const useChannelSort = (
   currentUserId: string,
 ): UseChannelSortResult => {
   const zero = useZero();
+  const usersById = useUsersById();
   const userPreference = useSelector(stateMachineActor, state => state.context.userPreference);
   const channelSortOrder = userPreference?.channelSortOrder ?? ChannelSortOrder.RECENCY;
   const groupPreferences: Record<SidebarGroup, SidebarGroupPreference> = {
@@ -88,10 +92,22 @@ export const useChannelSort = (
         (a, b) => (b.channelStats?.lastActivityAt ?? 0) - (a.channelStats?.lastActivityAt ?? 0),
       );
 
-    const sortAlphabetical = (list: VisibleChannel[]): VisibleChannel[] =>
-      [...list].sort((a, b) =>
-        (a.name ?? '').toLowerCase().localeCompare((b.name ?? '').toLowerCase()),
-      );
+    const sortAlphabetical = (list: VisibleChannel[]): VisibleChannel[] => {
+      // Sort by the RENDERED label, not `channel.name` — a DM's name column holds
+      // participant cuids, which is why "A-Z" looked random (XYNE-65074).
+      const keys = new Map<string, string>();
+      for (const channel of list) {
+        keys.set(channel.id, getChannelSortKey(channel, currentUserId, usersById));
+      }
+      return [...list].sort((a, b) => {
+        const keyA = (keys.get(a.id) ?? '').toLowerCase();
+        const keyB = (keys.get(b.id) ?? '').toLowerCase();
+        const byKey = keyA.localeCompare(keyB);
+        if (byKey !== 0) return byKey;
+        // Deterministic tiebreak on the raw name for equal-key rows.
+        return (a.name ?? '').toLowerCase().localeCompare((b.name ?? '').toLowerCase());
+      });
+    };
 
     const sortByUnreadAndActivity = (list: VisibleChannel[]): VisibleChannel[] => {
       const withUnread: VisibleChannel[] = [];
@@ -132,12 +148,17 @@ export const useChannelSort = (
     return {
       starred: sortBy(grouped.starred, starredSortOrder),
       channels: sortBy(grouped.channels, channelSortOrder),
-      directMessages: sortBy(grouped.directMessages, dmSortOrder),
+      // Self-DM pinned last in ALPHABETICAL/RECENCY; UNREAD grouping is left untouched.
+      directMessages:
+        dmSortOrder === ChannelSortOrder.UNREAD
+          ? sortBy(grouped.directMessages, dmSortOrder)
+          : pinSelfDMsLast(sortBy(grouped.directMessages, dmSortOrder), currentUserId),
     };
   }, [
     channelData,
     allChannelsUserStatus,
     currentUserId,
+    usersById,
     channelSortOrder,
     starredSortOrder,
     dmSortOrder,

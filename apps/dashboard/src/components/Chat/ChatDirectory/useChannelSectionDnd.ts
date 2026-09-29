@@ -21,10 +21,13 @@ import { useZero } from '../../../hooks/useZero';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
 import { mutators } from '../../../zero/mutators';
+import { useUsersById } from '../../../hooks/useUsers';
 import {
   applyChannelFilter,
   bucketChannelsBySection,
   DEFAULT_FILTER_MODE,
+  getChannelSortKey,
+  pinSelfDMsLast,
   isDMChannel,
   keyBetween,
   suppressNextClick,
@@ -49,6 +52,7 @@ interface UseChannelSectionDndParams {
   unreadCounts: Record<string, number>;
   mentionCounts: Record<string, number>;
   activeChannelId?: string | undefined;
+  currentUserId: string;
 }
 
 interface ChannelSectionDnd {
@@ -87,8 +91,10 @@ export const useChannelSectionDnd = ({
   unreadCounts,
   mentionCounts,
   activeChannelId,
+  currentUserId,
 }: UseChannelSectionDndParams): ChannelSectionDnd => {
   const zero = useZero();
+  const usersById = useUsersById();
   const [channelSections] = useCachedQuery(queries.userChannelSections({}));
   const allSectionable = useMemo(
     () => [...channels, ...directMessages],
@@ -141,15 +147,28 @@ export const useChannelSectionDnd = ({
     if (!sortOrder) return chs;
     const sorted = [...chs];
     if (sortOrder === ChannelSortOrder.ALPHABETICAL) {
-      return sorted.sort((a, b) =>
-        (a.name ?? '').toLowerCase().localeCompare((b.name ?? '').toLowerCase()),
+      // Sort by the rendered label, not `channel.name` — DM names are participant
+      // cuids, which is why "A-Z" looked random (XYNE-65074).
+      const keys = new Map<string, string>();
+      for (const channel of sorted) {
+        keys.set(channel.id, getChannelSortKey(channel, currentUserId, usersById));
+      }
+      return pinSelfDMsLast(
+        sorted.sort((a, b) => {
+          const keyA = (keys.get(a.id) ?? '').toLowerCase();
+          const keyB = (keys.get(b.id) ?? '').toLowerCase();
+          const byKey = keyA.localeCompare(keyB);
+          if (byKey !== 0) return byKey;
+          return (a.name ?? '').toLowerCase().localeCompare((b.name ?? '').toLowerCase());
+        }),
+        currentUserId,
       );
     }
     const lastActivity = (c: VisibleChannel) => c.channelStats?.lastActivityAt ?? 0;
     const lastViewed = (c: VisibleChannel) => statuses.get(c.id)?.lastViewedAt ?? 0;
     const unread = (c: VisibleChannel) => statuses.get(c.id)?.unreadCount ?? 0;
     if (sortOrder === ChannelSortOrder.RECENCY) {
-      return sorted.sort((a, b) => lastActivity(b) - lastActivity(a));
+      return pinSelfDMsLast(sorted.sort((a, b) => lastActivity(b) - lastActivity(a)), currentUserId);
     }
     return sorted.sort((a, b) => {
       const aUnread = unread(a) > 0 ? 2 : lastActivity(a) > lastViewed(a) ? 1 : 0;

@@ -298,6 +298,7 @@ const ChatDirectory = ({
     starred,
     channelData,
     allChannelsUserStatus,
+    currentUserId: context.userID,
     groupPreferences,
     unreadCounts,
     mentionCounts,
