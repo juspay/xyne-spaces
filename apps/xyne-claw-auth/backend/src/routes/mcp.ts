@@ -81,6 +81,7 @@ import {
   type SubagentToolRefs,
 } from "./mcp-agent-tools.js";
 import { listTools, searchTools } from "../services/tool-index/index.js";
+import { draftAgentSlug } from "../lib/draft-chat.js";
 
 const log = createLogger("mcp");
 
@@ -1900,12 +1901,19 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
       });
       return;
     }
-    if (sessionAgentTools?.permissionMode === "read-only" && isWriteTool) {
-      log.info(`[mcp/call] denied ${serverType}/${tool} for agent=${agentSlug} (permissionMode=read-only)`);
+    // A create-page test run (draft-<user> slug, no Agent row yet) has no
+    // approval surface, so it is read-only regardless of the draft's mode.
+    const isDraftTestRun = !sessionAgentTools && agentSlug === draftAgentSlug(userId);
+    if ((sessionAgentTools?.permissionMode === "read-only" || isDraftTestRun) && isWriteTool) {
+      log.info(
+        `[mcp/call] denied ${serverType}/${tool} for agent=${agentSlug} (${isDraftTestRun ? "draft test run" : "permissionMode=read-only"})`,
+      );
       res.json({
         success: true,
         data: {
-          content: `Blocked: this agent is read-only and cannot call write tool ${tool}.`,
+          content: isDraftTestRun
+            ? `Blocked: ${tool} is a write action and this is a test run of an unsaved draft. Save the agent to use it.`
+            : `Blocked: this agent is read-only and cannot call write tool ${tool}.`,
         },
       });
       return;

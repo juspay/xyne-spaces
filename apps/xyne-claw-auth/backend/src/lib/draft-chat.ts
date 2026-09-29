@@ -1,5 +1,3 @@
-import { randomUUID } from "node:crypto";
-
 export interface DraftChatTools {
   subagents: string[];
   direct: string[];
@@ -87,12 +85,19 @@ export function draftAgentSlug(userId: string): string {
   return `draft-${safe || "user"}`;
 }
 
+/** Test runs of an unsaved draft have no approval surface, so writes are blocked. */
+export const DRAFT_TEST_RUN_NOTE =
+  "This is a test run of an unsaved agent draft. Write actions (sending, posting, creating, editing, deleting) are blocked; describe what you would do instead.";
+
 /**
  * Forward body for claw `/run`. No Agent row and no Spaces app identity.
  * MCP gateway ids are dropped: those connections live on AgentMcpConnection
- * and only exist after the agent is saved.
+ * and only exist after the agent is saved. The caller mints `sessionToken`
+ * for `sessionId` (claw rejects runs without one).
  */
 export function buildDraftRunBody(input: {
+  sessionId: string;
+  sessionToken: string;
   userId: string;
   userName?: string | undefined;
   userEmail?: string | undefined;
@@ -110,7 +115,7 @@ export function buildDraftRunBody(input: {
     snapshot.description.trim() ? `Description: ${snapshot.description.trim()}` : "",
   ].filter(part => part.length > 0).join("\n\n");
 
-  const notes: string[] = [];
+  const notes: string[] = [DRAFT_TEST_RUN_NOTE];
   if (tools.gateway.length > 0) {
     notes.push(
       `Selected MCP connections are not available until this agent is saved: ${tools.gateway.join(", ")}.`,
@@ -126,7 +131,9 @@ export function buildDraftRunBody(input: {
   }
 
   return {
-    sessionId: randomUUID(),
+    sessionId: input.sessionId,
+    sessionToken: input.sessionToken,
+    idempotencyKey: input.sessionId,
     userId: input.userId,
     ...(input.userName ? { userName: input.userName } : {}),
     ...(input.userEmail ? { userEmail: input.userEmail } : {}),
@@ -136,6 +143,7 @@ export function buildDraftRunBody(input: {
     agentSlug: draftAgentSlug(input.userId),
     systemPrompt: persona,
     agentConfig: {
+      permissionMode: "read-only",
       tools: {
         subagents: tools.subagents,
         direct: tools.direct,
@@ -145,6 +153,6 @@ export function buildDraftRunBody(input: {
     },
     ...(tools.callableAgents.length > 0 ? { callableAgents: tools.callableAgents } : {}),
     ...(input.skills && input.skills.length > 0 ? { skills: input.skills } : {}),
-    ...(notes.length > 0 ? { additionalInstructions: notes.join("\n") } : {}),
+    additionalInstructions: notes.join("\n"),
   };
 }
