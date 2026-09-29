@@ -88,9 +88,9 @@ export function WatchDetails({
                 key={l.id}
                 className="hov"
                 {...pressable(() => onOpen(l.id))}
-                style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '8px 10px', border: '1px solid var(--bd)', borderRadius: 8, cursor: 'pointer', fontSize: 13 }}
+                style={{ display: 'flex', alignItems: 'flex-start', gap: 9, padding: '8px 10px', border: '1px solid var(--bd)', borderRadius: 8, cursor: 'pointer', fontSize: 13 }}
               >
-                <span data-tip={`${l.stage} · ${STATUS_LABEL[l.st]}`} style={{ display: 'inline-flex' }}>
+                <span data-tip={`${l.stage} · ${STATUS_LABEL[l.st]}`} style={{ display: 'inline-flex', marginTop: 3 }}>
                   <StatusGlyph st={l.st} size={13} />
                 </span>
                 <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -99,10 +99,23 @@ export function WatchDetails({
                     <span data-tip={`Priority · ${PRI_LABEL[l.pri]}`} style={{ display: 'inline-flex' }}>
                       <PriorityIcon pri={l.pri} />
                     </span>
-                    <span className="mono">{l.key}</span> · {l.rel} · {l.stage} · <Avatar name={l.who} size={14} /> {l.who}
+                    <span className="mono">{l.key}</span>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      · {l.rel} · {l.stage}
+                    </span>
                   </span>
                 </div>
-                <span style={{ flex: 'none', fontSize: 12, fontWeight: 600, color: ac.c }}>{l.age}</span>
+                {/* Assignee top right, age under it. */}
+                <div style={{ flex: 'none', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+                  <span data-tip={l.who} style={{ display: 'inline-flex' }}>
+                    {l.who === 'Unassigned' ? (
+                      <span style={{ width: 18, height: 18, boxSizing: 'border-box', borderRadius: '50%', border: '1px dashed var(--t5)' }} />
+                    ) : (
+                      <Avatar name={l.who} size={18} />
+                    )}
+                  </span>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: ac.c }}>{l.age}</span>
+                </div>
               </div>
             );
           })}

@@ -164,7 +164,13 @@ export interface MidSuggestion {
 }
 
 /** Merchant IDs matching the search text (prefix matches first), for the search box's suggestions. */
-export function midSuggestions(m: Model, query: string, selected: string[], limit = 8): MidSuggestion[] {
+/** Open and total counts over the tickets the page would show for this Created range. */
+function midCounts(mid: string, ts: MTicket[], range: PState['range']): MidSuggestion {
+  const inRange = range === 'all' ? ts : ts.filter(t => t.d <= range);
+  return { mid, open: inRange.filter(t => t.open).length, total: inRange.length };
+}
+
+export function midSuggestions(m: Model, query: string, selected: string[], range: PState['range'] = 'all', limit = 8): MidSuggestion[] {
   const q = query.trim().toLowerCase();
   if (!q) return [];
   const skip = new Set(selected);
@@ -172,7 +178,7 @@ export function midSuggestions(m: Model, query: string, selected: string[], limi
   for (const [mid, ts] of m.byMid) {
     if (skip.has(mid)) continue;
     const at = mid.toLowerCase().indexOf(q);
-    if (at >= 0) hits.push({ mid, at, open: ts.filter(t => t.open).length, total: ts.length });
+    if (at >= 0) hits.push({ ...midCounts(mid, ts, range), at });
   }
   // Prefix matches first, then busier merchants.
   hits.sort((a, b) => Number(a.at > 0) - Number(b.at > 0) || b.total - a.total || a.mid.localeCompare(b.mid));
@@ -204,12 +210,9 @@ function inRangeRows(m: Model, byId: Map<string, FTicket>, range: PState['range'
  * What the search box offers before anything is typed: the viewer's most-searched merchants, or the
  * busiest ones (most open tickets) when there's no history yet.
  */
-export function defaultMidSuggestions(m: Model, picks: string[], selected: string[], limit = 6): { title: string; items: MidSuggestion[] } {
+export function defaultMidSuggestions(m: Model, picks: string[], selected: string[], range: PState['range'] = 'all', limit = 6): { title: string; items: MidSuggestion[] } {
   const skip = new Set(selected);
-  const row = (mid: string): MidSuggestion => {
-    const ts = m.byMid.get(mid)!;
-    return { mid, open: ts.filter(t => t.open).length, total: ts.length };
-  };
+  const row = (mid: string): MidSuggestion => midCounts(mid, m.byMid.get(mid)!, range);
   const recent = picks.filter(mid => m.byMid.has(mid) && !skip.has(mid)).slice(0, limit);
   if (recent.length) return { title: 'Frequently searched', items: recent.map(row) };
   const busiest = [...m.byMid.keys()]

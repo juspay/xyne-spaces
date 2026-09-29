@@ -160,7 +160,7 @@ describe('midSuggestions', () => {
 
   it('is case-insensitive, skips selected MIDs and caps the list', () => {
     expect(midSuggestions(X, 'SMALL', ['smallcase']).map(s => s.mid)).toEqual(['bigsmall']);
-    expect(midSuggestions(X, 'a', [], 2)).toHaveLength(2);
+    expect(midSuggestions(X, 'a', [], 'all', 2)).toHaveLength(2);
   });
 
   it('ranks busier merchants first among equally good matches', () => {
@@ -172,12 +172,38 @@ describe('midSuggestions', () => {
     expect(midSuggestions(Y, 'rail', []).map(s => s.mid)).toEqual(['railyatri', 'railbus']);
   });
 
+  it('counts only tickets created within the Created range, like the page does', () => {
+    const R = model(
+      mk('r1', { midR: ['test'], mids: ['test'], d: 5 }),
+      mk('r2', { midR: ['test'], mids: ['test'], d: 45 }),
+      mk('r3', { midR: ['testold'], mids: ['testold'], d: 60 }),
+    );
+    expect(midSuggestions(R, 'test', [], 30)).toEqual([
+      { mid: 'test', open: 1, total: 1 },
+      { mid: 'testold', open: 0, total: 0 },
+    ]);
+    expect(midSuggestions(R, 'test', [], 'all')[0]).toEqual({ mid: 'test', open: 2, total: 2 });
+  });
+
   it('suggests nothing for an empty query', () => {
     expect(midSuggestions(X, '  ', [])).toEqual([]);
   });
 });
 
 describe('defaultMidSuggestions', () => {
+  it('counts and ranks within the Created range', () => {
+    const R = model(
+      mk('r1', { midR: ['old'], mids: ['old'], d: 90 }),
+      mk('r2', { midR: ['old'], mids: ['old'], d: 90 }),
+      mk('r3', { midR: ['new'], mids: ['new'], d: 3 }),
+    );
+    expect(defaultMidSuggestions(R, [], [], 30).items).toEqual([
+      { mid: 'new', open: 1, total: 1 },
+      { mid: 'old', open: 0, total: 0 },
+    ]);
+    expect(defaultMidSuggestions(R, ['old'], [], 30).items).toEqual([{ mid: 'old', open: 0, total: 0 }]);
+  });
+
   const X = model(
     mk('x1', { midR: ['small'], mids: ['small'] }),
     mk('x2', { midR: ['big'], mids: ['big'] }),
@@ -190,7 +216,7 @@ describe('defaultMidSuggestions', () => {
   });
 
   it('falls back to the busiest merchants when there is no history', () => {
-    expect(defaultMidSuggestions(X, [], [], 2)).toEqual({ title: 'Busiest merchants', items: [{ mid: 'big', open: 2, total: 2 }, { mid: 'mid', open: 1, total: 1 }] });
+    expect(defaultMidSuggestions(X, [], [], 'all', 2)).toEqual({ title: 'Busiest merchants', items: [{ mid: 'big', open: 2, total: 2 }, { mid: 'mid', open: 1, total: 1 }] });
   });
 });
 

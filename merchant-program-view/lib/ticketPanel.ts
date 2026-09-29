@@ -62,6 +62,27 @@ export function stageMove(target: Pick<PanelStage, 'name' | 'defaultTicketStatus
   return nonLinear ? { kind: 'transition', toStageName: target.name } : { kind: 'update', data: { stageName: target.name, statusV2: target.defaultTicketStatusV2 } };
 }
 
+export type DoneMove =
+  | { kind: 'update'; data: { stageName?: string; statusV2: 'COMPLETED' } }
+  | { kind: 'transition'; toStageName: string }
+  | { kind: 'blocked'; reason: string };
+
+/**
+ * How to mark a ticket done the way the dashboard would: move it to the board's first Completed
+ * stage (a transition on non-linear boards), or, when no stage means Completed, set just the status
+ * like the status picker does. Gated moves and Flow boards are left to Xyne.
+ */
+export function doneMove(current: string, stages: PanelStage[], transitions: PanelTransition[], boardType: string | null | undefined): DoneMove {
+  if (boardType === 'FLOW') return { kind: 'blocked', reason: 'Flow tickets finish through their steps' };
+  const nonLinear = boardType === 'NON_LINEAR';
+  const target = [...stages].sort(bySeq).find(s => s.defaultTicketStatusV2 === 'COMPLETED');
+  if (!target || target.name === current) return { kind: 'update', data: { statusV2: 'COMPLETED' } };
+  const opt = stageOptions(current, stages, transitions, nonLinear).find(o => o.id === target.id)!;
+  if (opt.gate) return { kind: 'blocked', reason: `${target.name} needs ${opt.gate === 'form' ? 'a form' : 'approval'}` };
+  if (!opt.allowed) return { kind: 'blocked', reason: `no move to ${target.name} from ${current}` };
+  return nonLinear ? { kind: 'transition', toStageName: target.name } : { kind: 'update', data: { stageName: target.name, statusV2: 'COMPLETED' } };
+}
+
 /* ---------- custom fields ---------- */
 
 /** Stored values come as a string, a JSON array string, an array, or a scalar. */

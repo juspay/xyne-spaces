@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode, type Ref } from 'react';
 import { Calendar, ChevronRight, Clock, Copy, ExternalLink, MoreHorizontal, Plus, SquareKanban, Tag, X } from 'lucide-react';
 import type { Drawer } from '../lib/drawer';
 import type { St } from '../lib/model';
@@ -76,6 +76,16 @@ export function TicketPanel({
 
   useEscape(true, onClose);
   const panel = useRef<HTMLDivElement>(null);
+  const body = useRef<HTMLDivElement>(null);
+  const watch = useRef<HTMLElement>(null);
+  const scrolled = useRef(false);
+  // Open at Merchant watch: once the details above it have loaded (so its position is final),
+  // scroll the panel to it. Only once per ticket; reloads after an edit leave the scroll alone.
+  useEffect(() => {
+    if (scrolled.current || !state || !body.current || !watch.current) return;
+    scrolled.current = true;
+    body.current.scrollTop += watch.current.getBoundingClientRect().top - body.current.getBoundingClientRect().top - 8;
+  }, [state, dt]);
   useEffect(() => {
     const before = document.activeElement as HTMLElement | null;
     panel.current?.focus();
@@ -149,7 +159,7 @@ export function TicketPanel({
           </IconButton>
         </div>
 
-        <div style={{ flex: 1, overflow: 'auto', padding: '4px 20px 32px' }}>
+        <div ref={body} style={{ flex: 1, overflow: 'auto', padding: '4px 20px 32px' }}>
           {error && !state && (
             <div style={{ marginTop: 20, padding: '12px 14px', border: '1px solid var(--redBd)', background: 'var(--redBg)', borderRadius: 8, fontSize: 13, color: 'var(--t2)', display: 'flex', gap: 10 }}>
               <span style={{ flex: 1 }}>Couldn't load this ticket. {error}</span>
@@ -161,7 +171,7 @@ export function TicketPanel({
           {!state && !error && <PanelSkeleton />}
           {state && t && <Details state={state} people={people} deskChannels={deskChannels} actions={actions} />}
           {dt && (
-            <Collapsible title="Merchant watch" summary={dt.flags.length ? `${dt.flags.length} ${dt.flags.length === 1 ? 'flag' : 'flags'}` : 'nothing flagged'} dots={dt.flags.map(f => f.sev)}>
+            <Collapsible sectionRef={watch} open title="Merchant watch" summary={dt.flags.length ? `${dt.flags.length} ${dt.flags.length === 1 ? 'flag' : 'flags'}` : 'nothing flagged'} dots={dt.flags.map(f => f.sev)}>
               <WatchDetails dt={dt} loadingActivity={loadingActivity} activityError={activityError} onOpen={onOpen} />
             </Collapsible>
           )}
@@ -518,11 +528,25 @@ function FieldRowView({ label, children }: { label: string; children: ReactNode 
   );
 }
 
-function Collapsible({ title, children, open: initial = false, summary, dots }: { title: string; children: ReactNode; open?: boolean; summary?: string; dots?: string[] }) {
+function Collapsible({
+  title,
+  children,
+  open: initial = false,
+  summary,
+  dots,
+  sectionRef,
+}: {
+  title: string;
+  children: ReactNode;
+  open?: boolean;
+  summary?: string;
+  dots?: string[];
+  sectionRef?: Ref<HTMLElement>;
+}) {
   const [open, setOpen] = useState(initial);
   const dot: Record<string, string> = { red: 'var(--red)', amber: 'var(--amber)', watch: 'var(--t5)', ok: 'var(--green)' };
   return (
-    <section style={{ marginTop: 22 }}>
+    <section ref={sectionRef} style={{ marginTop: 22 }}>
       <button type="button" aria-expanded={open} onClick={() => setOpen(o => !o)} style={{ all: 'unset', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, width: '100%' }}>
         <span style={{ display: 'flex', transform: open ? 'none' : 'rotate(-90deg)', transition: 'transform .15s' }}>
           <ChevronDown size={13} />

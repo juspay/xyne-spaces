@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { avatarUrl, etaState, fieldSave, parseOptions, parseValues, resolveFields, stageMove, stageOptions, stageEtaState } from '../lib/ticketPanel';
+import { avatarUrl, etaState, fieldSave, parseOptions, parseValues, resolveFields, doneMove, stageMove, stageOptions, stageEtaState } from '../lib/ticketPanel';
 
 const DAY = 86_400_000;
 const NOW = 100 * DAY;
@@ -109,5 +109,37 @@ describe('avatarUrl', () => {
     expect(avatarUrl('https://lh3.googleusercontent.com/a/x')).toBe('https://lh3.googleusercontent.com/a/x');
     expect(avatarUrl('attachments/2026/08/1-profile')).toBeNull();
     expect(avatarUrl(null)).toBeNull();
+  });
+});
+
+describe('doneMove', () => {
+  const board = [
+    st('a', 'To be Picked Up', 1, { defaultTicketStatusV2: 'TODO' }),
+    st('b', 'Dev in Progress', 2),
+    st('p', 'Prod', 7, { defaultTicketStatusV2: 'COMPLETED' }),
+    st('r', 'Rejected', 8, { defaultTicketStatusV2: 'CANCELLED' }),
+  ];
+
+  it('moves to the first Completed stage on a linear board, like the stage picker', () => {
+    expect(doneMove('To be Picked Up', board, [], 'DEFAULT')).toEqual({ kind: 'update', data: { stageName: 'Prod', statusV2: 'COMPLETED' } });
+  });
+
+  it('only sets the status when no stage is Completed, like the status picker', () => {
+    // e.g. a "Completed" stage whose default status is STARTED
+    const noDone = [st('t', 'To Do', 1), st('c', 'Completed', 6)];
+    expect(doneMove('To Do', noDone, [], 'DEFAULT')).toEqual({ kind: 'update', data: { statusV2: 'COMPLETED' } });
+    expect(doneMove('Prod', board, [], 'DEFAULT')).toEqual({ kind: 'update', data: { statusV2: 'COMPLETED' } });
+  });
+
+  it('uses a transition on non-linear boards, and needs an edge to the done stage', () => {
+    expect(doneMove('Dev in Progress', board, [{ fromStageId: 'b', toStageId: 'p' }], 'NON_LINEAR')).toEqual({ kind: 'transition', toStageName: 'Prod' });
+    expect(doneMove('Dev in Progress', board, [{ fromStageId: 'a', toStageId: 'p' }], 'NON_LINEAR')).toEqual({ kind: 'blocked', reason: 'no move to Prod from Dev in Progress' });
+  });
+
+  it('sends gated moves and Flow boards to Xyne', () => {
+    expect(doneMove('To be Picked Up', board, [{ toStageId: 'p', formId: 'f1' }], 'DEFAULT')).toEqual({ kind: 'blocked', reason: 'Prod needs a form' });
+    const approval = board.map(s => (s.id === 'p' ? { ...s, requestApprovalOnEntry: true } : s));
+    expect(doneMove('To be Picked Up', approval, [], 'DEFAULT')).toEqual({ kind: 'blocked', reason: 'Prod needs approval' });
+    expect(doneMove('To be Picked Up', board, [], 'FLOW')).toEqual({ kind: 'blocked', reason: 'Flow tickets finish through their steps' });
   });
 });

@@ -1,5 +1,6 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
-import { MerchantPage } from './components/MerchantPage';
+import { MerchantPage, nudgeKey } from './components/MerchantPage';
+import { markDone } from './lib/markDone';
 import { ActiveChips, AgeBar, FilterPills, KpiCards, MerchantsTable, PortfolioHeader, Tabs, TicketsTable, type SyncStatus } from './components/Portfolio';
 import { SearchBox } from './components/SearchBox';
 import { PortfolioSkeleton } from './components/Skeleton';
@@ -8,7 +9,7 @@ import { TipLayer, Toast } from './components/primitives';
 import { Warnings } from './components/Warnings';
 import { drawer, type ActivityRow } from './lib/drawer';
 import { formatClock, updateBarText } from './lib/format';
-import { merchantView, type ThreadStatus } from './lib/merchantView';
+import { merchantView, sameFocus, type MFocus, type Nudge, type ThreadStatus } from './lib/merchantView';
 import { buildModel } from './lib/model';
 import { DEFAULT_PSTATE, defaultMidSuggestions, midSuggestions, portfolio, type Kpi, type PState } from './lib/portfolio';
 import { browserStorage, loadMidPicks, loadRange, recordMidPick, saveRange } from './lib/prefs';
@@ -33,6 +34,8 @@ export default function App() {
   const [view, setView] = useState<View>({ kind: 'portfolio' });
   const [ps, setPs] = useState<PState>(() => ({ ...DEFAULT_PSTATE, range: loadRange(browserStorage()) }));
   const [threadStatus, setThreadStatus] = useState<ThreadStatus>('open');
+  const [mFocus, setMFocus] = useState<MFocus | null>(null);
+  const [nudging, setNudging] = useState<string | null>(null);
   const [drawerId, setDrawerId] = useState<string | null>(null);
   const [act, setAct] = useState<ActivityState | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -43,6 +46,24 @@ export default function App() {
     if (toastTimer.current) clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToast(null), 2800);
   }, []);
+
+  // One ticket at a time, so a refusal names the ticket; then refresh to show the new statuses.
+  const runNudge = useCallback(
+    async (n: Nudge) => {
+      setNudging(nudgeKey(n));
+      const failed: string[] = [];
+      for (const t of n.targets) {
+        const r = await markDone(t.id).catch((e: unknown) => ({ ok: false as const, reason: e instanceof Error ? e.message : String(e) }));
+        if (!r.ok) failed.push(`${t.key}: ${r.reason}`);
+      }
+      const doneCount = n.targets.length - failed.length;
+      const doneText = doneCount === 0 ? '' : doneCount === 1 && n.targets.length === 1 ? `Marked ${n.targets[0].key} as done` : `Marked ${doneCount} as done`;
+      showToast([doneText, failed.length ? `Couldn't finish ${failed.join('; ')} — do it in Xyne` : ''].filter(Boolean).join('. '));
+      setNudging(null);
+      data.refresh();
+    },
+    [showToast, data.refresh],
+  );
 
   useEffect(() => {
     if (data.summary) showToast(data.summary.text);
@@ -58,10 +79,10 @@ export default function App() {
   const [tSort, setTSort] = useState<Sort<TKey> | null>(null);
   const merchantRows = useMemo(() => sortMerchantRows(pf.merchantRows, mSort), [pf.merchantRows, mSort]);
   const ticketRows = useMemo(() => sortTicketRows(pf.ticketRows, tSort), [pf.ticketRows, tSort]);
-  const suggestions = useMemo(() => midSuggestions(model, ps.search, ps.mids), [model, ps.search, ps.mids]);
+  const suggestions = useMemo(() => midSuggestions(model, ps.search, ps.mids, ps.range), [model, ps.search, ps.mids, ps.range]);
   // Bumped on each pick so the "Frequently searched" list refreshes.
   const [picksVersion, setPicksVersion] = useState(0);
-  const defaults = useMemo(() => defaultMidSuggestions(model, loadMidPicks(browserStorage()), ps.mids), [model, ps.mids, picksVersion]);
+  const defaults = useMemo(() => defaultMidSuggestions(model, loadMidPicks(browserStorage()), ps.mids, ps.range), [model, ps.mids, ps.range, picksVersion]);
   const onPicked = useCallback((mid: string) => {
     recordMidPick(browserStorage(), mid);
     setPicksVersion(v => v + 1);
@@ -70,6 +91,7 @@ export default function App() {
   const openMerchant = useCallback((mid: string) => {
     setView({ kind: 'merchant', mid });
     setThreadStatus('open');
+    setMFocus(null);
     setDrawerId(null);
     window.scrollTo(0, 0);
   }, []);
@@ -108,8 +130,8 @@ export default function App() {
   const closeDrawer = useCallback(() => setDrawerId(null), []);
 
   const mv = useMemo(
-    () => (view.kind === 'merchant' && model.byMid.has(view.mid) ? merchantView(model, pf.byId, view.mid, threadStatus) : null),
-    [view, model, pf.byId, threadStatus],
+    () => (view.kind === 'merchant' && model.byMid.has(view.mid) ? merchantView(model, pf.byId, view.mid, threadStatus, mFocus) : null),
+    [view, model, pf.byId, threadStatus, mFocus],
   );
 
   const dt = useMemo(() => {
@@ -122,9 +144,11 @@ export default function App() {
     ? { text: 'Opening saved data…', busy: true }
     : data.activity
       ? { text: updateBarText(data.activity, data.progress), busy: true }
-      : data.syncedAt !== null
-        ? { text: `Synced ${formatClock(data.syncedAt)}`, busy: false }
-        : { text: 'Not loaded', busy: false };
+      : data.error !== null
+        ? { text: 'Refresh failed · try again', busy: false, error: data.error }
+        : data.syncedAt !== null
+          ? { text: `Synced ${formatClock(data.syncedAt)}`, busy: false }
+          : { text: 'Not loaded', busy: false };
 
   const kpiActive = (k: Kpi): boolean => {
     const t = k.target;
@@ -207,7 +231,14 @@ export default function App() {
         <MerchantPage
           v={mv}
           status={threadStatus}
-          onStatus={setThreadStatus}
+          onStatus={st => {
+            setThreadStatus(st);
+            setMFocus(null);
+          }}
+          onFocus={f => setMFocus(cur => (sameFocus(cur, f) ? null : f))}
+          onClearFocus={() => setMFocus(null)}
+          nudging={nudging}
+          onNudge={runNudge}
           selected={drawerId}
           resolving={data.resolvingParents}
           onBack={() => {
@@ -216,6 +247,7 @@ export default function App() {
           }}
           onRefresh={data.refresh}
           onOpen={setDrawerId}
+          sync={sync}
         />
       ) : (
         <div className="page" style={{ gap: 16 }}>

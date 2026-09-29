@@ -1,4 +1,5 @@
-import { defineConfig, loadEnv, type ProxyOptions } from 'vite';
+import { loadEnv, type ProxyOptions } from 'vite';
+import { configDefaults, defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import path from 'node:path';
@@ -39,7 +40,12 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [react(), tailwindcss()],
     resolve: { alias: { '@': path.resolve(__dirname, '.') } },
-    server: { proxy: { '/api': proxyWithLogging(), '/claw': proxyWithLogging() } },
+    server: {
+      proxy: { '/api': proxyWithLogging(), '/claw': proxyWithLogging() },
+      // Agent worktrees live under .claude/; edits there must not reload the running app.
+      watch: { ignored: ['**/.claude/**'] },
+    },
+    test: { exclude: [...configDefaults.exclude, '**/.claude/**'] },
     define: {
       __XYNE_TOKEN__: JSON.stringify(env.XYNE_TOKEN ?? ''),
       __XYNE_APP_ID__: JSON.stringify(env.XYNE_APP_ID ?? ''),

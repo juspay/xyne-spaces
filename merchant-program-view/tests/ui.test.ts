@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { pageWindow, threadLines } from '../lib/ui';
+import { pageWindow, selectAll, threadLines } from '../lib/ui';
 
 describe('threadLines', () => {
   it('draws nothing for a root without children', () => {
@@ -24,6 +24,13 @@ describe('threadLines', () => {
     expect(lines[0]).toEqual({ l: '16.25px', t: '0', h: '100%', w: '0', bb: 'none', r: '0' });
     expect(lines[1]).toMatchObject({ l: '40.25px', h: '18px', w: '14px' });
   });
+
+  it('shifts every line right when the tree starts after leading columns', () => {
+    expect(threadLines(0, [], true, true, 18, 138)).toEqual([{ l: '144.25px', t: '28px', h: 'calc(100% - 28px)', w: '0', bb: 'none', r: '0' }]);
+    const lines = threadLines(2, [true], false, false, 18, 138);
+    expect(lines.map(l => l.l)).toEqual(['144.25px', '168.25px', '168.25px']);
+    expect(lines[1]).toMatchObject({ h: '18px', w: '14px' });
+  });
 });
 
 describe('pageWindow', () => {
@@ -36,5 +43,19 @@ describe('pageWindow', () => {
     expect(pageWindow(50, 104)).toEqual([1, null, 49, 50, 51, null, 104]);
     expect(pageWindow(104, 104)).toEqual([1, null, 102, 103, 104]);
     expect(pageWindow(3, 104)).toEqual([1, 2, 3, 4, null, 104]);
+  });
+});
+
+describe('selectAll', () => {
+  it('adds every shown option that is not picked yet, keeping earlier picks', () => {
+    expect(selectAll(['a', 'b', 'c'], ['x', 'b'])).toEqual({ all: false, next: ['x', 'b', 'a', 'c'] });
+  });
+
+  it('unpicks just the shown options once they are all picked', () => {
+    expect(selectAll(['a', 'b'], ['x', 'a', 'b'])).toEqual({ all: true, next: ['x'] });
+  });
+
+  it('treats an empty list as nothing to select', () => {
+    expect(selectAll([], ['x'])).toEqual({ all: false, next: ['x'] });
   });
 });

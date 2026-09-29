@@ -52,7 +52,7 @@ export interface PanelState {
 
 // Workspace-wide lists and per-board config change rarely; keep them for the session.
 const cache = new Map<string, Promise<unknown>>();
-function once<T>(key: string, load: () => Promise<T>): Promise<T> {
+export function once<T>(key: string, load: () => Promise<T>): Promise<T> {
   let p = cache.get(key) as Promise<T> | undefined;
   if (!p) {
     p = load();

@@ -143,8 +143,9 @@ export function SearchBox({
               <span className="mono" style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--t1)', fontWeight: i === exact ? 600 : 400 }}>
                 {s.mid}
               </span>
-              <span style={{ fontSize: 12, color: 'var(--t3)', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
-                {s.open} open · {s.total} total
+              {/* Counts follow the Created range, so they match what picking the merchant shows. */}
+              <span style={{ fontSize: 12, color: s.total ? 'var(--t3)' : 'var(--t4)', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
+                {s.total ? `${s.open} open · ${s.total} total` : 'none in this range'}
               </span>
             </button>
           ))}

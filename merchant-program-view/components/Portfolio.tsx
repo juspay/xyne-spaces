@@ -4,7 +4,7 @@ import { FLAG_LABEL, HEALTH, RANK, fmtDays } from '../lib/flags';
 import { BUCKETS, paginate, type FTicket, type Kpi, type MerchantRow, type PState, type Portfolio } from '../lib/portfolio';
 import type { Sev } from '../lib/flags';
 import type { MKey, Sort, TKey } from '../lib/sort';
-import { pageWindow } from '../lib/ui';
+import { pageWindow, selectAll } from '../lib/ui';
 import {
   Avatar,
   BUCKET_COLOR,
@@ -42,8 +42,41 @@ const ago = (d: number): string => (d < 1 / 24 ? 'just now' : `${fmtDays(d)} ago
 
 export interface SyncStatus {
   text: string;
-  /** Green at rest, amber while loading or syncing. */
+  /** Green at rest, amber while loading or syncing, red when the last refresh failed. */
   busy: boolean;
+  /** The last load or refresh failed; `error` says why. */
+  error?: string;
+}
+
+/** Sync status and Refresh: the dot pulses amber and Refresh is disabled while a sync runs. */
+export function SyncPill({ sync, onRefresh }: { sync: SyncStatus; onRefresh: () => void }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', height: 32, border: '1px solid var(--bd)', borderRadius: 6, background: 'var(--bg)', overflow: 'hidden', minWidth: 0, maxWidth: '100%' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '0 12px', fontSize: 13, fontWeight: 500, color: 'var(--t3)', whiteSpace: 'nowrap', maxWidth: 340, minWidth: 0, overflow: 'hidden' }}>
+        <span
+          style={{
+            flex: 'none',
+            width: 7,
+            height: 7,
+            borderRadius: '50%',
+            background: sync.busy ? 'var(--amber)' : sync.error ? 'var(--red)' : 'var(--green)',
+            animation: sync.busy ? 'mpvPulse 1.4s ease-in-out infinite' : undefined,
+          }}
+        />
+        <span data-tip={sync.error} style={{ overflow: 'hidden', textOverflow: 'ellipsis', color: sync.error ? 'var(--redT)' : undefined }}>{sync.text}</span>
+      </div>
+      <span style={{ width: 1, alignSelf: 'stretch', margin: '7px 0', background: 'var(--bd)' }} />
+      <button
+        type="button"
+        className="hov"
+        onClick={onRefresh}
+        disabled={sync.busy}
+        style={{ all: 'unset', cursor: sync.busy ? 'default' : 'pointer', height: '100%', padding: '0 12px', fontSize: 13.5, fontWeight: 500, color: sync.busy ? 'var(--t5)' : 'var(--t1)' }}
+      >
+        Refresh
+      </button>
+    </div>
+  );
 }
 
 export function PortfolioHeader({
@@ -72,31 +105,7 @@ export function PortfolioHeader({
         {search}
         <Menu prefix="Created" value={range} options={RANGES} onChange={onRange} width={200} radius={6} />
       <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', minWidth: 0, maxWidth: '100%' }}>
-        <div style={{ display: 'flex', alignItems: 'center', height: 32, border: '1px solid var(--bd)', borderRadius: 6, background: 'var(--bg)', overflow: 'hidden', minWidth: 0, maxWidth: '100%' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '0 12px', fontSize: 13, fontWeight: 500, color: 'var(--t3)', whiteSpace: 'nowrap', maxWidth: 340, minWidth: 0, overflow: 'hidden' }}>
-            <span
-              style={{
-                flex: 'none',
-                width: 7,
-                height: 7,
-                borderRadius: '50%',
-                background: sync.busy ? 'var(--amber)' : 'var(--green)',
-                animation: sync.busy ? 'mpvPulse 1.4s ease-in-out infinite' : undefined,
-              }}
-            />
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{sync.text}</span>
-          </div>
-          <span style={{ width: 1, alignSelf: 'stretch', margin: '7px 0', background: 'var(--bd)' }} />
-          <button
-            type="button"
-            className="hov"
-            onClick={onRefresh}
-            disabled={sync.busy}
-            style={{ all: 'unset', cursor: sync.busy ? 'default' : 'pointer', height: '100%', padding: '0 12px', fontSize: 13.5, fontWeight: 500, color: sync.busy ? 'var(--t5)' : 'var(--t1)' }}
-          >
-            Refresh
-          </button>
-        </div>
+        <SyncPill sync={sync} onRefresh={onRefresh} />
         <div style={{ position: 'relative' }}>
           <button
             type="button"
@@ -288,6 +297,8 @@ function MultiPill({
   const [q, setQ] = useState('');
   const shown = searchable ? options.filter(o => o.label.toLowerCase().includes(q.trim().toLowerCase())) : options;
   const on = selected.length > 0;
+  const every = selectAll(shown.map(o => o.value), selected);
+  const allPicked = options.length > 1 && options.every(o => selected.includes(o.value));
   const toggle = (v: string): void => onChange(selected.includes(v) ? selected.filter(x => x !== v) : [...selected, v]);
   const labelOf = (v: string): string => options.find(o => o.value === v)?.label ?? v;
   const close = (): void => {
@@ -307,7 +318,9 @@ function MultiPill({
       >
         {label}
         {on &&
-          (selected.length <= 2 ? (
+          (allPicked ? (
+            <span style={{ height: 22, display: 'inline-flex', alignItems: 'center', padding: '0 7px', borderRadius: 4, background: 'var(--bg3)', fontSize: 12, fontWeight: 500, color: 'var(--t1)' }}>All</span>
+          ) : selected.length <= 2 ? (
             selected.map(v => (
               <span key={v} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, height: 22, padding: '0 4px 0 7px', borderRadius: 4, background: 'var(--bg3)', fontSize: 12, fontWeight: 500, color: 'var(--t1)', maxWidth: 160 }}>
                 <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{labelOf(v).replace(/^Desk · /, '')}</span>
@@ -343,6 +356,23 @@ function MultiPill({
               </div>
             )}
             <div style={{ maxHeight: 200, overflowY: 'auto', display: 'flex', flexDirection: 'column', padding: 4 }}>
+              {shown.length > 1 && (
+                <>
+                  <button
+                    type="button"
+                    role="menuitemcheckbox"
+                    aria-checked={every.all}
+                    className="hov"
+                    onClick={() => onChange(every.next)}
+                    style={{ all: 'unset', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, minHeight: 26, padding: '0 8px', borderRadius: 4, fontSize: 12, color: 'var(--t3)' }}
+                  >
+                    <span style={{ flex: 1 }}>{q.trim() ? `Select all ${shown.length} matching` : 'Select all'}</span>
+                    <span style={{ display: 'flex', opacity: every.all ? 1 : 0 }}>
+                      <Check size={12} />
+                    </span>
+                  </button>
+                </>
+              )}
               {shown.map(o => {
                 const checked = selected.includes(o.value);
                 return (
