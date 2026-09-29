@@ -34,6 +34,11 @@ import {
   type AgentProviderCredentialStatus,
 } from "../../../../lib/api";
 import { SpacesDefaultRowV3 } from "./SpacesDefaultRowV3";
+import { useOrcaRouterCatalog } from "../../../hooks/useOrcaRouterCatalog";
+import {
+  OrcaRouterModelPicker,
+  ORCAROUTER_BASE_URL,
+} from "../../ui/orcarouter";
 
 /* ─────────────────────────────────────────────────────────────────────
  * Display dictionaries — translate the wire-level provider keys and
@@ -41,7 +46,7 @@ import { SpacesDefaultRowV3 } from "./SpacesDefaultRowV3";
  * kept untouched in state + payloads; only what the user reads changes.
  * ───────────────────────────────────────────────────────────────────── */
 
-type ProviderKey = "codex" | "claude" | "copilot" | "openrouter" | "litellm" | "spaces";
+type ProviderKey = "codex" | "claude" | "copilot" | "openrouter" | "orcarouter" | "litellm" | "spaces";
 
 const PROVIDER_DISPLAY: Record<string, string> = {
   spaces: "Spaces",
@@ -49,6 +54,7 @@ const PROVIDER_DISPLAY: Record<string, string> = {
   claude: "Anthropic Claude",
   codex: "OpenAI Codex",
   openrouter: "OpenRouter",
+  orcarouter: "OrcaRouter",
   litellm: "LiteLLM (own key)",
 };
 
@@ -57,7 +63,7 @@ const AUTH_TYPE_DISPLAY: Record<string, string> = {
   oauth_token: "OAuth",
 };
 
-const ALL_PROVIDERS: ProviderKey[] = ["codex", "claude", "copilot", "openrouter", "litellm", "spaces"];
+const ALL_PROVIDERS: ProviderKey[] = ["codex", "claude", "copilot", "openrouter", "orcarouter", "litellm", "spaces"];
 
 /* ─────────────────────────────────────────────────────────────────────
  * Ordered provider list + "Available providers" chips. Used twice: for the
@@ -334,7 +340,7 @@ export function ProviderTabV3({ agent, userId }: Props) {
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
   const [form, setForm] = useState({
-    provider: "codex" as "copilot" | "claude" | "codex" | "openrouter" | "litellm",
+    provider: "codex" as "copilot" | "claude" | "codex" | "openrouter" | "orcarouter" | "litellm",
     apiKey: "",
     model: "",
     baseUrl: "",
@@ -504,6 +510,11 @@ export function ProviderTabV3({ agent, userId }: Props) {
   // Debounced so we don't hit the proxy on every keystroke of the pasted key.
   const [litellmModels, setLitellmModels] = useState<Array<{ id: string; name: string }> | null>(null);
   const [litellmModelsErr, setLitellmModelsErr] = useState<string | null>(null);
+
+  // OrcaRouter's model requirement — which attachment type the chosen model
+  // must accept. Part of the catalog request, so changing it refetches.
+  const [orcaModality, setOrcaModality] = useState<"" | "image" | "audio" | "video">("");
+  const [orcaRecomputeNotice, setOrcaRecomputeNotice] = useState<string | null>(null);
   const hasLitellmCred = creds.some((c) => c.provider === "litellm" && c.configured);
   useEffect(() => {
     if (form.provider !== "litellm") {
@@ -545,6 +556,39 @@ export function ProviderTabV3({ agent, userId }: Props) {
     }, 400);
     return () => { cancelled = true; clearTimeout(t); };
   }, [form.provider, form.apiKey, form.baseUrl, hasLitellmCred, agent.slug]);
+
+  // OrcaRouter model catalog — the dropdown is fed by the backend catalog
+  // route, never free text. Re-runs when the provider changes, when the
+  // credential appears, when the required attachment modality changes, and on
+  // an explicit refresh. `hasOrcaCred`/`form.apiKey` mirror how the claude and
+  // litellm lists decide whether a fetch can authenticate.
+  const hasOrcaCred = creds.some((c) => c.provider === "orcarouter" && c.configured);
+  const orcaCatalog = useOrcaRouterCatalog({
+    userId,
+    provider: form.provider,
+    enabled: hasOrcaCred || form.apiKey.trim().length > 0,
+    capability: "chat",
+    modalities: orcaModality ? [orcaModality] : [],
+    debounceMs: 400,
+  });
+
+  // Capability recompute: clear a previously selected model that the current
+  // requirement no longer offers, and tell the user to re-select.
+  const orcaCatalogKey = `${orcaModality}|${orcaCatalog.source ?? "none"}|${orcaCatalog.models.map((m) => m.id).join(",")}`;
+  useEffect(() => {
+    if (form.provider !== "orcarouter") return;
+    if (orcaCatalog.loading || orcaCatalog.error) return;
+    if (orcaCatalog.models.length === 0) return;
+    if (!form.model) return;
+    if (orcaCatalog.models.some((m) => m.id === form.model)) return;
+    setForm((p) => ({ ...p, model: "" }));
+    setOrcaRecomputeNotice(
+      `${form.model} is not available for the current requirement` +
+        (orcaModality ? ` (${orcaModality} attachments)` : "") +
+        ". Select a model again.",
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.provider, orcaCatalogKey, orcaCatalog.loading, orcaCatalog.error, orcaModality]);
 
   const reload = async () => {
     setLoading(true);
@@ -1190,7 +1234,7 @@ export function ProviderTabV3({ agent, userId }: Props) {
                     onClick={() => {
                       setError(null);
                       setForm({
-                        provider: c.provider as "copilot" | "claude" | "codex" | "openrouter",
+                        provider: c.provider as "copilot" | "claude" | "codex" | "openrouter" | "orcarouter",
                         apiKey: "",
                         model: c.model ?? "",
                         baseUrl: c.baseUrl ?? "",
@@ -1240,7 +1284,7 @@ export function ProviderTabV3({ agent, userId }: Props) {
                     </button>
                   )}
                 >
-                  {(["codex", "claude", "copilot", "openrouter", "litellm"] as const).map((key) => (
+                  {(["codex", "claude", "copilot", "openrouter", "orcarouter", "litellm"] as const).map((key) => (
                     <MenuItem
                       key={key}
                       selected={form.provider === key}
@@ -1462,7 +1506,7 @@ export function ProviderTabV3({ agent, userId }: Props) {
                     type="password"
                     value={form.apiKey}
                     onChange={(e) => setForm((p) => ({ ...p, apiKey: e.target.value }))}
-                    placeholder="sk-…  or  {access_token: ...}"
+                    placeholder={form.provider === "orcarouter" ? (hasOrcaCred ? "••••••••" : "sk-orca-…") : "sk-…  or  {access_token: ...}"}
                     className="w-full rounded-lg border border-xyne-border bg-xyne-surface px-3 py-2.5 font-mono text-[13px] text-xyne-fg-primary placeholder-xyne-fg-muted focus:border-xyne-border-focus focus:outline-none focus:shadow-[var(--comp-focus-ring)]"
                   />
                   <p className="text-[12px] text-xyne-fg-tertiary">
@@ -1472,7 +1516,61 @@ export function ProviderTabV3({ agent, userId }: Props) {
                   </p>
                 </div>
               )}
-              {(() => {
+              {form.provider === "orcarouter" ? (
+                <div className="flex flex-col gap-3">
+                  <OrcaRouterModelPicker
+                    catalog={orcaCatalog}
+                    value={form.model}
+                    onSelect={(next) => {
+                      setForm((p) => ({ ...p, model: next }));
+                      setOrcaRecomputeNotice(null);
+                    }}
+                    hint={orcaRecomputeNotice}
+                  />
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[12px] font-semibold text-xyne-fg-secondary">
+                      Attachments the model must accept
+                    </label>
+                    <Menu
+                      align="start"
+                      trigger={(triggerProps) => (
+                        <button
+                          {...(triggerProps as React.ButtonHTMLAttributes<HTMLButtonElement>)}
+                          type="button"
+                          className="flex w-full items-center justify-between gap-2 rounded-lg border border-xyne-border bg-xyne-surface px-3 py-2.5 text-[13px] text-xyne-fg-primary transition-colors hover:border-xyne-border-strong"
+                        >
+                          <span>
+                            {orcaModality === "" ? "Text only"
+                              : orcaModality === "image" ? "Text + images"
+                              : orcaModality === "audio" ? "Text + audio"
+                              : "Text + video"}
+                          </span>
+                          <CaretDownIcon size={12} className="text-xyne-fg-tertiary" />
+                        </button>
+                      )}
+                    >
+                      {([["", "Text only"], ["image", "Text + images"], ["audio", "Text + audio"], ["video", "Text + video"]] as const).map(([value, label]) => (
+                        <MenuItem
+                          key={value || "text"}
+                          selected={orcaModality === value}
+                          onSelect={() => {
+                            setOrcaModality(value);
+                            setOrcaRecomputeNotice(null);
+                          }}
+                          trailing={orcaModality === value ? <CheckIcon size={12} weight="bold" /> : undefined}
+                        >
+                          {label}
+                        </MenuItem>
+                      ))}
+                    </Menu>
+                    <p className="text-[12px] text-xyne-fg-tertiary">
+                      The list is re-fetched when this changes; a model that cannot take the
+                      chosen attachment type is dropped.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+              (() => {
                 // Model dropdown sourced from /v1/models — for codex, claude,
                 // and litellm (each scoped to that credential's key). Free-text
                 // only when the list is unavailable.
@@ -1541,7 +1639,8 @@ export function ProviderTabV3({ agent, userId }: Props) {
                 )}
               </div>
                 );
-              })()}
+              })()
+              )}
               <div className="flex flex-col gap-1.5">
                 <label className="text-[12px] font-semibold text-xyne-fg-secondary">
                   Base URL
@@ -1552,7 +1651,11 @@ export function ProviderTabV3({ agent, userId }: Props) {
                 <input
                   value={form.baseUrl}
                   onChange={(e) => setForm((p) => ({ ...p, baseUrl: e.target.value }))}
-                  placeholder={form.provider === "litellm" ? "blank = platform LiteLLM proxy" : "https://openrouter.ai/api/v1"}
+                  placeholder={
+                    form.provider === "litellm" ? "blank = platform LiteLLM proxy"
+                    : form.provider === "orcarouter" ? ORCAROUTER_BASE_URL
+                    : "https://openrouter.ai/api/v1"
+                  }
                   className="w-full rounded-lg border border-xyne-border bg-xyne-surface px-3 py-2.5 text-[13px] text-xyne-fg-primary placeholder-xyne-fg-muted focus:border-xyne-border-focus focus:outline-none focus:shadow-[var(--comp-focus-ring)]"
                 />
               </div>

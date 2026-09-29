@@ -448,7 +448,7 @@ function ProviderTab({ agent, onSave }: { agent: Agent; onSave: () => void }) {
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
   const [form, setForm] = useState({
-    provider: "codex" as "copilot" | "claude" | "codex" | "openrouter",
+    provider: "codex" as "copilot" | "claude" | "codex" | "openrouter" | "orcarouter",
     apiKey: "",
     model: "",
     baseUrl: "",
@@ -637,7 +637,7 @@ function ProviderTab({ agent, onSave }: { agent: Agent; onSave: () => void }) {
           </ol>
         )}
         <div className="flex flex-wrap items-center gap-2">
-          {(["codex", "claude", "copilot", "openrouter", "spaces"] as const)
+          {(["codex", "claude", "copilot", "openrouter", "orcarouter", "spaces"] as const)
             .filter((p) => !providerOrder.includes(p))
             .map((p) => (
               <button
@@ -727,6 +727,7 @@ function ProviderTab({ agent, onSave }: { agent: Agent; onSave: () => void }) {
                   <option value="claude">Claude (Anthropic)</option>
                   <option value="copilot">Copilot</option>
                   <option value="openrouter">OpenRouter</option>
+                  <option value="orcarouter">OrcaRouter</option>
                 </select>
               </div>
               <div>
@@ -886,7 +887,11 @@ function ProviderTab({ agent, onSave }: { agent: Agent; onSave: () => void }) {
                 <input
                   value={form.baseUrl}
                   onChange={(e) => setForm((p) => ({ ...p, baseUrl: e.target.value }))}
-                  placeholder="https://openrouter.ai/api/v1"
+                  placeholder={
+                    form.provider === "orcarouter"
+                      ? "https://api.orcarouter.ai/v1"
+                      : "https://openrouter.ai/api/v1"
+                  }
                   className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 placeholder-zinc-600 focus:border-purple-500 focus:outline-none"
                 />
               </div>

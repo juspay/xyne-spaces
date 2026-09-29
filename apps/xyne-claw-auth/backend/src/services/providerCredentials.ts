@@ -48,6 +48,8 @@ function defaultModelForProvider(provider: string): string {
   // gpt-4.1 is NOT servable through Codex ChatGPT-account OAuth (400
   // "model is not supported when using Codex with a ChatGPT account").
   if (provider === "codex") return "gpt-5.5";
+  // OrcaRouter's `auto` entry routes to whatever the account is entitled to.
+  if (provider === "orcarouter") return "orcarouter/auto";
   // claude-sonnet-4-5 is no longer servable on the anthropic-user OAuth path.
   return "claude-opus-4-8";
 }

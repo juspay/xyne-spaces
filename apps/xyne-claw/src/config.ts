@@ -75,6 +75,14 @@ export const LITELLM = {
   subagentFastModelPercent: clampPercent(process.env["LITELLM_SUBAGENT_FAST_MODEL_PERCENT"], 100),
 } as const;
 
+// OrcaRouter — OpenAI-compatible aggregator the user connects with their own
+// `sk-orca-…` key. Only the INFERENCE origin lives here: authentication and
+// code exchange run on the separate auth origin (https://www.orcarouter.ai)
+// and are handled by claw-auth, so never derive one from the other.
+export const ORCAROUTER = {
+  baseUrl: process.env["ORCA_API_BASE_URL"] ?? process.env["ORCA_BASE_URL"] ?? "https://api.orcarouter.ai/v1",
+} as const;
+
 export const AGENT = {
   thinkingLevel: process.env["XYNE_CLAW_THINKING"] ?? "medium",
 } as const;

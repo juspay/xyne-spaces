@@ -433,7 +433,7 @@ router.get("/mcp-servers/:type/global-credentials", requireClawAdmin, asyncHandl
 // agents via AgentProviderCredentials.sharedCredentialId. Kills the per-agent
 // token-copy pattern where every re-auth of one copy invalidated the others.
 
-const SHAREABLE_PROVIDERS = new Set(["codex", "claude", "copilot", "openrouter", "litellm"]);
+const SHAREABLE_PROVIDERS = new Set(["codex", "claude", "copilot", "openrouter", "orcarouter", "litellm"]);
 
 router.get("/provider-credentials", requireClawAdmin, asyncHandler(async (req: Request, res: Response) => {
   const orgId = (typeof req.query["orgId"] === "string" && req.query["orgId"].trim()) || getOrgId(req);

@@ -13,6 +13,7 @@ import {
   Loader2,
   Plane,
   Plug,
+  RefreshCw,
   Settings,
   Sparkles,
   Trash2,
@@ -37,14 +38,18 @@ import {
   deleteSubagentRouting,
   exchangeClaudeOauth,
   exchangeCodexOauth,
+  exchangeOrcaRouterOauth,
   initiateCopilotGitHubLogin,
   listClaudeModelsForUser,
   listCodexModelsForUser,
   listCopilotModelsForUser,
+  listOrcaRouterModelsForUser,
   listProviderCredentials,
   pollCopilotGitHubLogin,
   startClaudeOauth,
   startCodexOauth,
+  startOrcaRouterOauth,
+  cancelOrcaRouterOauth,
   type ClaudeOauthFlow,
   type CredentialHealth,
   upsertProviderCredential,
@@ -60,6 +65,8 @@ import type {
   ClaudeModelInfo,
   CodexOauthStart,
   GitHubDeviceCode,
+  OrcaRouterCatalog,
+  OrcaRouterOauthStart,
   ProviderCredential,
   ProviderId,
   ProviderModelOption,
@@ -89,6 +96,11 @@ const PROVIDER_META: Record<ProviderId, { name: string; description: string; ico
       description: 'One key, many models across providers',
       icon: Plug,
     },
+    orcarouter: {
+      name: 'OrcaRouter',
+      description: 'One account, many models — API key or OrcaRouter sign-in',
+      icon: Plug,
+    },
     litellm: {
       name: 'LiteLLM (own key)',
       description: 'Use models allowed by your Grid/LiteLLM key',
@@ -96,18 +108,20 @@ const PROVIDER_META: Record<ProviderId, { name: string; description: string; ico
     },
   };
 
-const PROVIDERS: ProviderId[] = ['copilot', 'claude', 'codex', 'openrouter', 'litellm'];
+const PROVIDERS: ProviderId[] = ['copilot', 'claude', 'codex', 'openrouter', 'orcarouter', 'litellm'];
 
 /* eslint-disable @typescript-eslint/naming-convention */
 const DEFAULT_MODEL_BY_PROVIDER: Partial<Record<ProviderId, string>> = {
   claude: 'claude-sonnet-4-5',
   codex: 'gpt-4.1',
+  orcarouter: 'orcarouter/auto',
 };
 
 const DEFAULT_BASE_URL_BY_PROVIDER: Partial<Record<ProviderId, string>> = {
   claude: 'https://api.anthropic.com',
   codex: 'https://api.openai.com/v1',
   openrouter: 'https://openrouter.ai/api/v1',
+  orcarouter: 'https://api.orcarouter.ai/v1',
 };
 /* eslint-enable @typescript-eslint/naming-convention */
 const EMPTY_CREDENTIALS: ProviderCredential[] = [];
@@ -179,6 +193,7 @@ const ProviderCard = ({
   const hasKey = credential?.hasApiKey ?? false;
   const isConnected = hasKey && health?.status !== 'invalid';
   const isBroken = hasKey && health?.status === 'invalid';
+  const isOrcaRouter = id === 'orcarouter';
 
   return (
     <div
@@ -198,7 +213,19 @@ const ProviderCard = ({
                 : 'bg-background text-muted-foreground',
             )}
           >
-            <Icon className='size-5' />
+            {isOrcaRouter ? (
+              <img
+                src='https://www.orcarouter.ai/orca-logo-classic.png'
+                alt='OrcaRouter'
+                width={20}
+                height={20}
+                loading='lazy'
+                decoding='async'
+                className='size-5 shrink-0 object-contain'
+              />
+            ) : (
+              <Icon className='size-5' />
+            )}
           </div>
           <div className='min-w-0'>
             <div className='flex min-w-0 items-center gap-2'>
@@ -601,6 +628,7 @@ const GenericProviderConfigForm = ({
   const isClaude = provider === 'claude';
   const isCodex = provider === 'codex';
   const isLitellm = provider === 'litellm';
+  const isOrcaRouter = provider === 'orcarouter';
   // Only these two have an OAuth flow and a fetchable model catalogue; the rest
   // are plain API-key providers. LiteLLM additionally has no reasoning knob —
   // the same rules credentialForm.ts encodes for the agent-level form.
@@ -627,6 +655,17 @@ const GenericProviderConfigForm = ({
   // credential that now exists. `hasKey` comes from the parent's snapshot and
   // does not update until it refetches, which is too late for this dialog.
   const [credentialNonce, setCredentialNonce] = useState(0);
+  // OrcaRouter: the catalog is proxied by the backend (which holds the key),
+  // and the out-of-band sign-in is a third, explicit path alongside a pasted
+  // key. `orcaNonce` doubles as the attempt generation guard and the catalog
+  // refresh trigger.
+  const [orcaCatalog, setOrcaCatalog] = useState<OrcaRouterCatalog | null>(null);
+  const [orcaCatalogError, setOrcaCatalogError] = useState<string | null>(null);
+  const [orcaModality, setOrcaModality] = useState<'' | 'image' | 'audio' | 'video'>('');
+  const [orcaFlow, setOrcaFlow] = useState<OrcaRouterOauthStart | null>(null);
+  const [orcaCode, setOrcaCode] = useState('');
+  const [orcaBusy, setOrcaBusy] = useState(false);
+  const [orcaRecomputeNotice, setOrcaRecomputeNotice] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -678,6 +717,52 @@ const GenericProviderConfigForm = ({
       cancelled = true;
     };
   }, [hasKey, userId, isClaude, hasModelCatalog, credentialNonce]);
+
+  // OrcaRouter model catalog — dropdown/search only, never free text. Re-runs
+  // when the provider changes, when a credential appears, when the required
+  // attachment modality changes, and on an explicit refresh.
+  useEffect(() => {
+    if (!isOrcaRouter) {
+      setOrcaCatalog(null);
+      setOrcaCatalogError(null);
+      return undefined;
+    }
+    if (!hasKey && credentialNonce === 0) return undefined;
+    let cancelled = false;
+    setOrcaCatalogError(null);
+    listOrcaRouterModelsForUser(userId, {
+      capability: 'chat',
+      modalities: orcaModality ? [orcaModality] : [],
+    })
+      .then(catalog => {
+        if (cancelled) return;
+        setOrcaCatalog(catalog);
+        setOrcaCatalogError(null);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setOrcaCatalog(null);
+        setOrcaCatalogError(errMsg(err, 'Failed to load OrcaRouter models'));
+      });
+    return (): void => {
+      cancelled = true;
+    };
+  }, [isOrcaRouter, hasKey, credentialNonce, userId, orcaModality]);
+
+  // Capability recompute: clear a previously selected model the current
+  // requirement no longer offers, and tell the user to re-select.
+  useEffect(() => {
+    if (!isOrcaRouter || !orcaCatalog || orcaCatalog.models.length === 0) return;
+    if (!model) return;
+    if (orcaCatalog.models.some(option => option.id === model)) return;
+    setModel('');
+    setOrcaRecomputeNotice(
+      `${model} is not available for the current requirement` +
+        (orcaModality ? ` (${orcaModality} attachments)` : '') +
+        '. Select a model again.',
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOrcaRouter, orcaCatalog, orcaModality]);
 
   const handleSave = async (): Promise<void> => {
     if (!apiKey && !hasKey) {
@@ -786,6 +871,66 @@ const GenericProviderConfigForm = ({
     }
   };
 
+  const startOrcaOAuth = async (): Promise<void> => {
+    setOrcaBusy(true);
+    setError(null);
+    try {
+      const flow = await startOrcaRouterOauth(userId);
+      setOrcaFlow(flow);
+      window.open(flow.url, '_blank', 'noopener,noreferrer');
+    } catch (err) {
+      setError(errMsg(err, 'Failed to start OrcaRouter sign-in'));
+    } finally {
+      setOrcaBusy(false);
+    }
+  };
+
+  const completeOrcaOAuth = async (): Promise<void> => {
+    if (!orcaFlow) return;
+    setOrcaBusy(true);
+    setError(null);
+    try {
+      await exchangeOrcaRouterOauth(userId, { code: orcaCode.trim(), state: orcaFlow.state });
+      setOrcaFlow(null);
+      setOrcaCode('');
+      await onMutate();
+      // Stay open: the credential exists now, so the catalog becomes
+      // fetchable and the user still has to pick a model.
+      setCredentialNonce(nonce => nonce + 1);
+      toast.success('OrcaRouter connected — pick a model');
+    } catch (err) {
+      setError(errMsg(err, 'OrcaRouter sign-in failed'));
+    } finally {
+      setOrcaBusy(false);
+    }
+  };
+
+  // Cancel the pending sign-in when the dialog goes away or the provider
+  // changes — a stale attempt must not stay live server-side.
+  useEffect(() => {
+    return (): void => {
+      if (orcaFlow) {
+        void cancelOrcaRouterOauth(userId, { state: orcaFlow.state });
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orcaFlow?.state]);
+
+  // `pagehide` may freeze the page into the back-forward cache. Clear the
+  // pending UI synchronously and cancel with `keepalive`; do not rely on the
+  // guarded `finally` of the invalidated request, which would leave a restored
+  // page permanently busy.
+  useEffect(() => {
+    const onPageHide = (): void => {
+      setOrcaFlow(null);
+      setOrcaCode('');
+      setOrcaBusy(false);
+      void cancelOrcaRouterOauth(userId, {}, { keepalive: true });
+    };
+    window.addEventListener('pagehide', onPageHide);
+    return (): void => window.removeEventListener('pagehide', onPageHide);
+  }, [userId]);
+
   return (
     <div className='flex flex-col gap-4'>
       {hasKey && keyHealth?.status === 'invalid' ? (
@@ -803,6 +948,94 @@ const GenericProviderConfigForm = ({
             <span>{healthChecking ? 'Checking…' : 'Connected'}</span>
           </div>
         )
+      )}
+
+      {isOrcaRouter && (
+        <div className='grid grid-cols-1 gap-3 sm:grid-cols-2'>
+          <div className='flex flex-col gap-2 rounded-lg border border-border bg-card p-3'>
+            <span className='text-xs font-semibold text-foreground'>OrcaRouter - API</span>
+            <p className='text-[11px] leading-4 text-muted-foreground'>
+              Paste an existing OrcaRouter key. The browser sends it once; afterwards this form
+              only ever shows masked state.
+            </p>
+            <LabeledInput
+              type='password'
+              label='OrcaRouter API key'
+              value={apiKey}
+              onChange={setApiKey}
+              placeholder={hasKey ? '••••••••' : 'sk-orca-…'}
+              {...(hasKey ? { hint: 'A key is stored — leave blank to keep it.' } : {})}
+            />
+          </div>
+
+          <div className='flex flex-col gap-2 rounded-lg border border-border bg-card p-3'>
+            <span className='text-xs font-semibold text-foreground'>OrcaRouter - Auth</span>
+            <p className='text-[11px] leading-4 text-muted-foreground'>
+              Sign in to your OrcaRouter account. The key is issued server-side and never
+              reaches this browser.
+            </p>
+            {!orcaFlow ? (
+              <Button
+                size='sm'
+                onClick={() => void startOrcaOAuth()}
+                disabled={orcaBusy}
+                data-track-category='claw-settings'
+                data-track-name='START_ORCAROUTER_OAUTH'
+              >
+                {orcaBusy ? (
+                  <Loader2 className='size-4 animate-spin' />
+                ) : (
+                  <KeyRound className='size-4' />
+                )}
+                {orcaBusy ? 'Opening...' : 'Connect with OrcaRouter'}
+              </Button>
+            ) : (
+              <>
+                <p className='text-[11px] leading-4 text-muted-foreground'>
+                  Approve access on the OrcaRouter consent screen — it shows a code. If the tab
+                  did not open, use the URL below.
+                </p>
+                <input
+                  readOnly
+                  value={orcaFlow.url}
+                  onFocus={event => event.currentTarget.select()}
+                  aria-label='OrcaRouter authorization URL'
+                  className='h-8 w-full rounded-md border border-border bg-muted px-2 font-mono text-[11px] text-muted-foreground'
+                />
+                <Input
+                  value={orcaCode}
+                  onChange={event => setOrcaCode(event.target.value)}
+                  placeholder='Paste the code from the consent screen'
+                  aria-label='OrcaRouter authorization code'
+                />
+                <div className='flex gap-2'>
+                  <Button
+                    size='sm'
+                    onClick={() => void completeOrcaOAuth()}
+                    disabled={orcaBusy || !orcaCode.trim()}
+                    data-track-category='claw-settings'
+                    data-track-name='COMPLETE_ORCAROUTER_OAUTH'
+                  >
+                    {orcaBusy ? 'Verifying...' : 'Complete sign-in'}
+                  </Button>
+                  <Button
+                    size='sm'
+                    variant='ghost'
+                    onClick={() => {
+                      void cancelOrcaRouterOauth(userId, { state: orcaFlow.state });
+                      setOrcaFlow(null);
+                      setOrcaCode('');
+                    }}
+                    data-track-category='claw-settings'
+                    data-track-name='CANCEL_ORCAROUTER_OAUTH'
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
       )}
 
       {hasOauthOption && (
@@ -953,7 +1186,7 @@ const GenericProviderConfigForm = ({
         </div>
       )}
 
-      {(!isOauth || isClaude) && (
+      {!isOrcaRouter && (!isOauth || isClaude) && (
         <LabeledInput
           type='password'
           label={isOauth && isClaude ? 'OAuth Token' : 'API Key'}
@@ -964,37 +1197,113 @@ const GenericProviderConfigForm = ({
         />
       )}
 
-      <div>
-        <span className='mb-1.5 block text-xs font-medium text-muted-foreground'>Model</span>
-        {models && models.length > 0 ? (
-          // Radix Select cannot hold an empty string, so "no model chosen" is
-          // carried by a sentinel and mapped back to '' on the way out — the
-          // API treats a blank model as "use the platform default".
+      {isOrcaRouter ? (
+        <div className='flex flex-col gap-2'>
+          <span className='mb-1.5 block text-xs font-medium text-muted-foreground'>
+            Model — from the OrcaRouter catalog
+          </span>
           <Select
             value={model || DEFAULT_MODEL_VALUE}
-            onValueChange={value => setModel(value === DEFAULT_MODEL_VALUE ? '' : value)}
+            onValueChange={value => {
+              setModel(value === DEFAULT_MODEL_VALUE ? '' : value);
+              setOrcaRecomputeNotice(null);
+            }}
           >
             <SelectTrigger className='w-full'>
-              <SelectValue placeholder='Use default' />
+              <SelectValue placeholder='Select a model' />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value={DEFAULT_MODEL_VALUE}>Use default</SelectItem>
-              {models.map(option => (
+              <SelectItem value={DEFAULT_MODEL_VALUE}>Select a model</SelectItem>
+              {(orcaCatalog?.models ?? []).map(option => (
                 <SelectItem key={option.id} value={option.id}>
-                  {modelLabel(option)}
+                  {option.name}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
-        ) : (
-          <Input value={model} onChange={event => setModel(event.target.value)} />
-        )}
-        {modelsError && (
-          <p className='mt-1 line-clamp-2 text-xs text-amber-600' title={modelsError}>
-            Could not fetch models — {modelsError}
-          </p>
-        )}
-      </div>
+          <div className='flex items-center gap-2'>
+            <span className='text-[11px] leading-4 text-muted-foreground'>Requires</span>
+            <Select
+              value={orcaModality || 'text'}
+              onValueChange={value => {
+                setOrcaModality(value === 'text' ? '' : (value as 'image' | 'audio' | 'video'));
+                setOrcaRecomputeNotice(null);
+              }}
+            >
+              <SelectTrigger className='h-8 w-48'>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value='text'>Text only</SelectItem>
+                <SelectItem value='image'>Text + images</SelectItem>
+                <SelectItem value='audio'>Text + audio</SelectItem>
+                <SelectItem value='video'>Text + video</SelectItem>
+              </SelectContent>
+            </Select>
+            <Button
+              size='sm'
+              variant='ghost'
+              onClick={() => setCredentialNonce(nonce => nonce + 1)}
+              data-track-category='claw-settings'
+              data-track-name='REFRESH_ORCAROUTER_MODELS'
+            >
+              <RefreshCw className='size-4' />
+              Refresh
+            </Button>
+          </div>
+          {orcaCatalog?.degraded && (
+            <p className='text-[11px] leading-4 text-amber-600'>
+              Live catalog unreachable — showing the verified fallback list.
+            </p>
+          )}
+          {orcaRecomputeNotice && (
+            <p className='text-[11px] leading-4 text-amber-600'>{orcaRecomputeNotice}</p>
+          )}
+          {orcaCatalogError && (
+            <p className='line-clamp-2 text-xs text-amber-600' title={orcaCatalogError}>
+              Could not fetch models — {orcaCatalogError}
+            </p>
+          )}
+          {!orcaCatalogError && orcaCatalog && orcaCatalog.models.length === 0 && (
+            <p className='text-[11px] leading-4 text-amber-600'>
+              No OrcaRouter model matches this requirement. Change the attachment type or
+              re-connect.
+            </p>
+          )}
+        </div>
+      ) : (
+        <div>
+          <span className='mb-1.5 block text-xs font-medium text-muted-foreground'>Model</span>
+          {models && models.length > 0 ? (
+            // Radix Select cannot hold an empty string, so "no model chosen" is
+            // carried by a sentinel and mapped back to '' on the way out — the
+            // API treats a blank model as "use the platform default".
+            <Select
+              value={model || DEFAULT_MODEL_VALUE}
+              onValueChange={value => setModel(value === DEFAULT_MODEL_VALUE ? '' : value)}
+            >
+              <SelectTrigger className='w-full'>
+                <SelectValue placeholder='Use default' />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={DEFAULT_MODEL_VALUE}>Use default</SelectItem>
+                {models.map(option => (
+                  <SelectItem key={option.id} value={option.id}>
+                    {modelLabel(option)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : (
+            <Input value={model} onChange={event => setModel(event.target.value)} />
+          )}
+          {modelsError && (
+            <p className='mt-1 line-clamp-2 text-xs text-amber-600' title={modelsError}>
+              Could not fetch models — {modelsError}
+            </p>
+          )}
+        </div>
+      )}
 
       <LabeledInput
         label='Base URL'

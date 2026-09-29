@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Select } from "@base-ui-components/react/select";
 import { ChevronDown, Check } from "lucide-react";
 import { cn } from "../../lib/utils";
@@ -28,6 +28,9 @@ import {
   listLitellmModelsForUser,
   startCodexOauth,
   exchangeCodexOauth,
+  startOrcaRouterOauth,
+  exchangeOrcaRouterOauth,
+  cancelOrcaRouterOauth,
   shareMyProviderCredential,
   listAgents,
   type ProviderCredential,
@@ -50,6 +53,17 @@ import {
   ShareNetworkIcon,
 } from "@phosphor-icons/react";
 import type { AgentLight } from "../../lib/types";
+import { useOrcaRouterCatalog } from "../hooks/useOrcaRouterCatalog";
+import {
+  OrcaRouterAuthPanel,
+  OrcaRouterLogo,
+  OrcaRouterModelPicker,
+  ORCAROUTER_BASE_URL,
+  ORCAROUTER_DEFAULT_MODEL,
+  ORCAROUTER_DISPLAY_NAME,
+  ORCAROUTER_PROVIDER_ID,
+  type OrcaRouterLoginAttempt,
+} from "./ui/orcarouter";
 
 /* =================================================================== */
 /*  CONFIG                                                              */
@@ -57,7 +71,7 @@ import type { AgentLight } from "../../lib/types";
 
 const PROVIDER_META: Record<
   string,
-  { name: string; description: string; icon: typeof AirplaneTiltIcon }
+  { name: string; description: string; icon: typeof AirplaneTiltIcon; logo?: boolean }
 > = {
   copilot: {
     name: "GitHub Copilot",
@@ -78,6 +92,12 @@ const PROVIDER_META: Record<
     name: "LiteLLM (own key)",
     description: "Use models allowed by your Grid/LiteLLM key",
     icon: SparkleIcon,
+  },
+  [ORCAROUTER_PROVIDER_ID]: {
+    name: ORCAROUTER_DISPLAY_NAME,
+    description: "One account, many models — API key or OrcaRouter sign-in",
+    icon: PlugIcon,
+    logo: true,
   },
 };
 
@@ -474,7 +494,7 @@ function ProviderCard({
               isConnected ? "bg-xyne-success/20 text-xyne-success" : "bg-xyne-surface-subtle text-xyne-fg-muted"
             }`}
           >
-            <Icon size={20} />
+            {meta.logo ? <OrcaRouterLogo size={20} /> : <Icon size={20} />}
           </div>
           <div className="min-w-0">
             <div className="flex items-center gap-2">
@@ -553,6 +573,13 @@ function ProviderConfigDialog({
     >
       {provider === "copilot" ? (
         <CopilotConfigForm userId={userId} onMutate={onMutate} onError={onError} onClose={onClose} />
+      ) : provider === ORCAROUTER_PROVIDER_ID ? (
+        <OrcaRouterConfigForm
+          userId={userId}
+          onMutate={onMutate}
+          onError={onError}
+          onClose={onClose}
+        />
       ) : (
         <GenericProviderConfigForm
           provider={provider}
@@ -563,6 +590,399 @@ function ProviderConfigDialog({
         />
       )}
     </Dialog>
+  );
+}
+
+/* ── OrcaRouter config ─────────────────────────────────────────────── */
+/*
+ * One provider, two explicit authentication choices, side by side and
+ * independently usable:
+ *
+ *   OrcaRouter - API   paste an `sk-orca-…` key (stored server-side, only
+ *                      ever shown back as masked state).
+ *   OrcaRouter - Auth  "Connect with OrcaRouter" — out-of-band PKCE: the
+ *                      backend mints the verifier, we open the consent URL,
+ *                      the user pastes back the code the consent screen shows.
+ *
+ * Both write the SAME credential row (`provider = "orcarouter"`), so only one
+ * may be in flight at a time — switching between them bumps the attempt
+ * generation and cancels the server-side PKCE attempt.
+ */
+
+type OrcaAuthMethod = "api" | "auth";
+
+function OrcaRouterConfigForm({
+  userId,
+  onMutate,
+  onError,
+  onClose,
+}: {
+  userId: string;
+  onMutate: () => void;
+  onError: (msg: string) => void;
+  onClose: () => void;
+}) {
+  const [existing, setExisting] = useState<ProviderCredential | undefined>();
+  const [loaded, setLoaded] = useState(false);
+  const [method, setMethod] = useState<OrcaAuthMethod>("api");
+  const [apiKey, setApiKey] = useState("");
+  const [model, setModel] = useState("");
+  const [baseUrl, setBaseUrl] = useState("");
+  const [reasoningEffort, setReasoningEffort] = useState<"" | "low" | "medium" | "high">("medium");
+  const [needModality, setNeedModality] = useState<"" | "image" | "audio" | "video">("");
+  const [recomputeNotice, setRecomputeNotice] = useState<string | null>(null);
+  const [authPending, setAuthPending] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  // Attempt generation — monotonic across every auth choice and dialog state,
+  // so a stale start/exchange response can never land on a newer attempt.
+  const [generation, setGeneration] = useState(1);
+  const generationRef = useRef(1);
+  const bumpGeneration = useCallback(() => {
+    generationRef.current += 1;
+    setGeneration(generationRef.current);
+    return generationRef.current;
+  }, []);
+
+  const hasKey = existing?.hasApiKey ?? false;
+  const catalog = useOrcaRouterCatalog({
+    userId,
+    provider: ORCAROUTER_PROVIDER_ID,
+    enabled: hasKey,
+    capability: "chat",
+    modalities: needModality ? [needModality] : [],
+  });
+  const modelRef = useRef(model);
+  modelRef.current = model;
+
+  useEffect(() => {
+    let cancelled = false;
+    listProviderCredentials(userId)
+      .then((creds) => {
+        if (cancelled) return;
+        const cred = creds.find((c) => c.provider === ORCAROUTER_PROVIDER_ID);
+        setExisting(cred);
+        setModel(cred?.model ?? ORCAROUTER_DEFAULT_MODEL);
+        setBaseUrl(cred?.baseUrl ?? ORCAROUTER_BASE_URL);
+        if (
+          cred?.reasoningEffort === "low" ||
+          cred?.reasoningEffort === "medium" ||
+          cred?.reasoningEffort === "high"
+        ) {
+          setReasoningEffort(cred.reasoningEffort);
+        }
+        setLoaded(true);
+      })
+      .catch(() => {
+        if (!cancelled) setLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+
+  // Capability recompute: when the catalog for the current requirement lands,
+  // a previously selected model that is no longer offered (e.g. it cannot take
+  // images) is cleared, and the user is told to pick again.
+  const lastCatalogKey = useRef("");
+  useEffect(() => {
+    if (!loaded || !hasKey) return;
+    if (catalog.loading) return;
+    const key = `${needModality}|${catalog.source ?? "none"}|${catalog.models.map((m) => m.id).join(",")}`;
+    if (key === lastCatalogKey.current) return;
+    lastCatalogKey.current = key;
+    if (catalog.error || catalog.models.length === 0) return;
+    const current = modelRef.current;
+    if (!current) return;
+    if (catalog.models.some((m) => m.id === current)) return;
+    setModel("");
+    setRecomputeNotice(
+      `${current} is not available for the current requirement` +
+        (needModality ? ` (${needModality} attachments)` : "") +
+        ". Select a model again.",
+    );
+  }, [loaded, hasKey, catalog.loading, catalog.error, catalog.models, catalog.source, needModality]);
+
+  const stopServerWork = useCallback(
+    (_gen: number, attempt: OrcaRouterLoginAttempt | null, opts?: { keepalive?: boolean }) => {
+      // Cancel only when there is a real pending attempt — sending an empty
+      // body on every unmount would be a request with nothing to act on.
+      if (!attempt?.state) return;
+      void cancelOrcaRouterOauth(
+        userId,
+        { state: attempt.state },
+        { keepalive: opts?.keepalive ?? false },
+      ).catch(() => {});
+    },
+    [userId],
+  );
+  // The panel tells us whenever a sign-in is pending; holding the attempt here
+  // lets the unmount cleanup below cancel the exact server-side attempt.
+  const [pendingAttempt, setPendingAttempt] = useState<OrcaRouterLoginAttempt | null>(null);
+  const pendingAttemptRef = useRef<OrcaRouterLoginAttempt | null>(null);
+  pendingAttemptRef.current = pendingAttempt;
+
+  // Dialog close, provider switch, unmount: bump the generation and release the
+  // server-side attempt. No UI writes — the component is going away.
+  useEffect(() => {
+    return () => {
+      generationRef.current += 1;
+      const pending = pendingAttemptRef.current;
+      if (pending?.state) {
+        void cancelOrcaRouterOauth(userId, { state: pending.state }, { keepalive: false }).catch(
+          () => {},
+        );
+      }
+    };
+  }, [userId]);
+
+  const switchMethod = (next: OrcaAuthMethod) => {
+    if (next === method) return;
+    bumpGeneration();
+    const pending = pendingAttemptRef.current;
+    if (pending?.state) {
+      void cancelOrcaRouterOauth(userId, { state: pending.state }, { keepalive: false }).catch(
+        () => {},
+      );
+    }
+    setPendingAttempt(null);
+    setMethod(next);
+    setErr(null);
+    setApiKey("");
+  };
+
+  const save = async () => {
+    const payload: {
+      apiKey?: string;
+      model?: string;
+      baseUrl?: string;
+      authType?: "api_key" | "oauth_token";
+      reasoningEffort?: "low" | "medium" | "high";
+    } = {
+      model: model.trim() || ORCAROUTER_DEFAULT_MODEL,
+      baseUrl: baseUrl.trim() || ORCAROUTER_BASE_URL,
+      authType: "api_key",
+      reasoningEffort: reasoningEffort === "" ? undefined : reasoningEffort,
+    };
+    const typed = apiKey.trim();
+    if (typed) payload.apiKey = typed;
+    else if (!hasKey) {
+      setErr("Paste an OrcaRouter API key, or use Connect with OrcaRouter.");
+      return;
+    }
+
+    setSaving(true);
+    setErr(null);
+    try {
+      await upsertProviderCredential(userId, ORCAROUTER_PROVIDER_ID, payload);
+      setApiKey("");
+      onMutate();
+      onClose();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Save failed";
+      setErr(msg);
+      onError(msg);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const remove = async () => {
+    setDeleting(true);
+    setErr(null);
+    try {
+      await deleteProviderCredential(userId, ORCAROUTER_PROVIDER_ID);
+      onMutate();
+      onClose();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Disconnect failed";
+      setErr(msg);
+      onError(msg);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex items-center gap-2">
+        <OrcaRouterLogo size={18} />
+        {hasKey ? (
+          <span className="flex items-center gap-1.5 text-[13px] text-xyne-success-fg">
+            <CheckCircleIcon size={16} />
+            Connected — the key is stored on the server and never sent back to this browser.
+          </span>
+        ) : (
+          <span className="text-[13px] text-xyne-fg-muted">
+            Choose one of the two ways to connect.
+          </span>
+        )}
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="flex flex-col gap-2 rounded-lg border border-xyne-border bg-xyne-surface p-3">
+          <div className="flex items-center gap-2">
+            <PlugIcon size={14} className="text-xyne-fg-secondary" />
+            <span className="text-[13px] font-medium text-xyne-fg-primary">
+              {ORCAROUTER_DISPLAY_NAME} - API
+            </span>
+          </div>
+          <p className="text-[11px] text-xyne-fg-muted">
+            Paste an existing OrcaRouter key. The browser only ever sends it once; afterwards
+            this form shows masked state.
+          </p>
+          <TextField
+            type="password"
+            label="OrcaRouter API key"
+            autoComplete="off"
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            placeholder={hasKey ? "••••••••" : "sk-orca-…"}
+            hint={hasKey ? "A key is stored — leave blank to keep it." : undefined}
+          />
+          <Button
+            size="sm"
+            variant="primary"
+            onClick={() => {
+              switchMethod("api");
+              void save();
+            }}
+            disabled={saving || authPending || (!apiKey.trim() && !hasKey)}
+          >
+            {saving ? "Saving…" : hasKey ? "Save changes" : "Connect with API key"}
+          </Button>
+        </div>
+
+        <div className="flex flex-col gap-2 rounded-lg border border-xyne-border bg-xyne-surface p-3">
+          <div className="flex items-center gap-2">
+            <OrcaRouterLogo size={14} />
+            <span className="text-[13px] font-medium text-xyne-fg-primary">
+              {ORCAROUTER_DISPLAY_NAME} - Auth
+            </span>
+          </div>
+          <p className="text-[11px] text-xyne-fg-muted">
+            Sign in to your OrcaRouter account instead of pasting a key. The key is issued
+            server-side and stays there.
+          </p>
+          <OrcaRouterAuthPanel
+            generation={generation}
+            onStart={async (gen) => {
+              const flow = await startOrcaRouterOauth(userId);
+              if (generationRef.current !== gen) {
+                void cancelOrcaRouterOauth(userId, { state: flow.state }).catch(() => {});
+              }
+              return { url: flow.url, state: flow.state, expiresIn: flow.expiresIn };
+            }}
+            onExchange={async (gen, attempt, code) => {
+              await exchangeOrcaRouterOauth(userId, { code, state: attempt.state });
+              if (generationRef.current !== gen) return;
+              setApiKey("");
+              onMutate();
+            }}
+            onCancel={stopServerWork}
+            onAttemptChange={(attempt) => {
+              setPendingAttempt(attempt);
+              // A sign-in is running, so Auth is the chosen method. Set it
+              // directly rather than via switchMethod — that would bump the
+              // generation and cancel the attempt just started.
+              if (attempt) {
+                setAuthPending(true);
+                setMethod("auth");
+              } else {
+                setAuthPending(false);
+              }
+            }}
+            onConnected={() => {
+              setErr(null);
+              void listProviderCredentials(userId)
+                .then((creds) =>
+                  setExisting(creds.find((c) => c.provider === ORCAROUTER_PROVIDER_ID)),
+                )
+                .catch(() => {});
+            }}
+          />
+        </div>
+      </div>
+
+      {hasKey && (
+        <div className="flex flex-col gap-3 rounded-lg border border-xyne-border bg-xyne-surface-subtle p-3">
+          <OrcaRouterModelPicker
+            catalog={catalog}
+            value={model}
+            onSelect={(next) => {
+              setModel(next);
+              setRecomputeNotice(null);
+            }}
+            hint={recomputeNotice}
+          />
+          <div>
+            <label className="mb-1.5 block text-[12px] font-medium text-xyne-fg-secondary">
+              Attachments the model must accept
+            </label>
+            <SelectField
+              value={needModality}
+              onValueChange={(v) => {
+                setNeedModality(v === "image" || v === "audio" || v === "video" ? v : "");
+                setRecomputeNotice(null);
+              }}
+              options={[
+                { value: "", label: "Text only" },
+                { value: "image", label: "Text + images" },
+                { value: "audio", label: "Text + audio" },
+                { value: "video", label: "Text + video" },
+              ]}
+            />
+            <p className="mt-1 text-[11px] text-xyne-fg-muted">
+              The list is re-fetched when this changes; a model that cannot take the chosen
+              attachment type is removed from the list.
+            </p>
+          </div>
+        </div>
+      )}
+
+      <TextField
+        label="Base URL"
+        value={baseUrl}
+        onChange={(e) => setBaseUrl(e.target.value)}
+        placeholder={ORCAROUTER_BASE_URL}
+        hint="Inference origin. Authentication uses a separate origin server-side."
+      />
+
+      <div>
+        <label className="mb-1.5 block text-[12px] font-medium text-xyne-fg-secondary">
+          Reasoning Effort
+        </label>
+        <SelectField
+          value={reasoningEffort}
+          onValueChange={(v) => {
+            if (v === "" || v === "low" || v === "medium" || v === "high") setReasoningEffort(v);
+          }}
+          options={[
+            { value: "low", label: "Low — fastest, minimal think time" },
+            { value: "medium", label: "Medium — balanced (default)" },
+            { value: "high", label: "High — deepest reasoning, slowest" },
+          ]}
+        />
+        <p className="mt-1 text-[11px] text-xyne-fg-secondary">
+          Only applies to reasoning-capable OrcaRouter models.
+        </p>
+      </div>
+
+      {err && <p className="text-[13px] text-xyne-error-fg">{err}</p>}
+
+      <div className="flex items-center justify-end gap-2 pt-2">
+        {hasKey && (
+          <Button variant="ghost" onClick={() => void remove()} disabled={deleting || saving}>
+            {deleting ? "Removing…" : "Remove"}
+          </Button>
+        )}
+        <Button variant="ghost" onClick={onClose} disabled={saving}>
+          Close
+        </Button>
+      </div>
+    </div>
   );
 }
 

@@ -149,7 +149,7 @@ function validateOutputFormat(raw: unknown): ConfigValidationResult {
 /** Validate the model-related keys of an agent `config` payload. */
 // Mirrors KNOWN_PROVIDERS in agent-provider-config.ts (kept local so this
 // module stays dependency-free).
-const PROFILE_PROVIDERS = new Set(["codex", "claude", "copilot", "openrouter", "litellm", "spaces"]);
+const PROFILE_PROVIDERS = new Set(["codex", "claude", "copilot", "openrouter", "orcarouter", "litellm", "spaces"]);
 
 /** config.fastModeProfile — which providers fast mode runs on (see
  *  agent-provider-config.ts → parseFastModeProfile for the shape). */

@@ -38,7 +38,7 @@ export interface ResolvedAgentProviders {
 /** The provider keys valid in an agent's config.providerOrder / config.provider.
  *  SINGLE SOURCE OF TRUTH — imported by every dispatch site (webhook, agent-chat,
  *  run-stream, flow-action) so adding a provider means editing ONE list. */
-export const KNOWN_PROVIDERS = new Set(["codex", "claude", "copilot", "openrouter", "litellm", "spaces"]);
+export const KNOWN_PROVIDERS = new Set(["codex", "claude", "copilot", "openrouter", "orcarouter", "litellm", "spaces"]);
 
 /**
  * Per-agent setting controlling which provider a SUBAGENT runs on when it has no
@@ -250,6 +250,9 @@ export function buildProviderConfig(provider: string, row: CredRow): ProviderCon
       // account") — every defaulted call failed and fell back to spaces.
       provider === "codex" ? "gpt-5.5" :
       provider === "litellm" ? "private-large" :
+      // OrcaRouter's `auto` entry routes to whatever the account is entitled
+      // to, so a fresh credential has a working default with no model pick.
+      provider === "orcarouter" ? "orcarouter/auto" :
       // claude-sonnet-4-5 is no longer servable on the anthropic-user OAuth
       // path (0 ok / 1425 fail over 72h).
       "claude-opus-4-8";
