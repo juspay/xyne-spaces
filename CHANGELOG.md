@@ -1,3 +1,10 @@
+## [1.420.1](https://github.com/juspay/xyne-spaces/compare/v1.420.0...v1.420.1) (2026-09-29)
+
+
+### Bug Fixes
+
+* calendar sync back fix ([#2411](https://github.com/juspay/xyne-spaces/issues/2411)) ([7a7a2dc](https://github.com/juspay/xyne-spaces/commit/7a7a2dcc3491c1de6a1833256f5932b5dda01595))
+
 ## [1.420.0](https://github.com/juspay/xyne-spaces/compare/v1.419.0...v1.420.0) (2026-09-29)
 
 
