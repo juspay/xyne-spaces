@@ -62,6 +62,7 @@ import { usePageSelection } from './Workspace/pageSelectionContext';
 import { fetchAccessibleClawAgents } from '../../services/clawAgentListService';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
 import useMeasure from '../../hooks/useMeasure';
+import { VoiceToggleButton, type VoiceModeToggle } from '../Assistant/ui/VoiceToggleButton';
 
 export interface AIComposerAttachment {
   id: string;
@@ -117,6 +118,8 @@ interface AIComposerProps {
    *  the latest snapshot so selections survive switching to a recent chat,
    *  matching XyneAISidebar (where composer state lives in the parent). */
   onContextChange?: ((context: ComposerContext) => void) | undefined;
+  /** The assistant's voice mode button, shown next to the dictation microphone. */
+  assistantVoice?: VoiceModeToggle | undefined;
 }
 
 interface XyneAIConfigResponse {
@@ -237,6 +240,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
     showAgentSelector = true,
     initialExtras,
     onContextChange,
+    assistantVoice,
   },
   ref,
 ): ReactElement {
@@ -1211,6 +1215,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
                 onClick={() => setVoiceMode(true)}
                 trackName='ENTER_VOICE_MODE'
               />
+              {assistantVoice && <VoiceToggleButton voice={assistantVoice} className='h-8 w-8' />}
 
               {pending ? (
                 <button

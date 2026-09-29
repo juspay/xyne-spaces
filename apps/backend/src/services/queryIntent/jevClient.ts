@@ -16,6 +16,8 @@ import { config as envConfig } from '@/config/env';
 const DEFAULT_URL = 'https://api.typesafe.ai/v1/systemone';
 /** Pinned, not a floating alias: thresholds are only valid for the model they were tuned on. */
 const DEFAULT_MODEL = 'jev-1.13.0';
+/** Jev Choice questions accept at most 255 options, including any fallback option. */
+const MAX_CHOICE_OPTIONS = 255;
 
 /** A yes/no question. Jev also has `score`; add it when a caller needs one. */
 export interface JevNoulQuestion {
@@ -32,6 +34,9 @@ export interface JevChoiceQuestion {
 }
 
 export type JevQuestion = JevNoulQuestion | JevChoiceQuestion;
+
+/** Background Jev judges against: plain text, or structured JSON with named parts. */
+export type JevState = string | Record<string, unknown>;
 
 export type JevAnswer =
   | { type: 'noul'; noul: number }
@@ -52,6 +57,25 @@ export type JevFailure =
   | { kind: 'unusable' };
 
 export const isJevConfigured = (): boolean => Boolean(envConfig.jev.apiKey);
+
+/** Explicit Jev endpoint credentials, used by the assistant's existing LiteLLM gateway. */
+export interface JevConnection {
+  url: string;
+  apiKey: string;
+  model: string;
+}
+
+function configuredConnection(): JevConnection | null {
+  const { apiKey, url, model } = envConfig.jev;
+  return apiKey ? { apiKey, url: url || DEFAULT_URL, model: model || DEFAULT_MODEL } : null;
+}
+
+interface JevRequestOptions {
+  partial?: boolean;
+  onFailure?: (failure: JevFailure) => void;
+  /** Overrides environment config for callers that use a distinct Jev gateway. */
+  connection?: JevConnection | null;
+}
 
 const isProbability = (p: unknown): p is number => typeof p === 'number' && p >= 0 && p <= 1;
 
@@ -137,23 +161,37 @@ export const askJevNouls = async (
  * Never throws.
  */
 export const askJev = async (
-  state: string | Record<string, unknown>,
+  state: JevState,
   questions: Record<string, JevQuestion>,
   timeoutMs: number,
   signal?: AbortSignal,
-  {
-    partial = false,
-    onFailure,
-  }: { partial?: boolean; onFailure?: (failure: JevFailure) => void } = {}
+  { partial = false, onFailure, connection: overrideConnection }: JevRequestOptions = {}
 ): Promise<Record<string, JevAnswer> | null> => {
-  const { apiKey, url, model } = envConfig.jev;
-  if (!apiKey) return null;
+  const connection =
+    overrideConnection === undefined ? configuredConnection() : overrideConnection;
+  if (!connection) return null;
+
+  for (const [key, question] of Object.entries(questions)) {
+    if (question.type !== 'choice') continue;
+    const count = Object.keys(question.criteria).length;
+    if (count < 2 || count > MAX_CHOICE_OPTIONS) {
+      logger.warn('Jev choice question has an unsupported number of options', {
+        question: key,
+        count,
+        max: MAX_CHOICE_OPTIONS,
+      });
+      return null;
+    }
+  }
 
   try {
-    const response = await fetch(url || DEFAULT_URL, {
+    const response = await fetch(connection.url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({ model: model || DEFAULT_MODEL, state, questions }),
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${connection.apiKey}`,
+      },
+      body: JSON.stringify({ model: connection.model, state, questions }),
       signal: signal
         ? AbortSignal.any([AbortSignal.timeout(timeoutMs), signal])
         : AbortSignal.timeout(timeoutMs),

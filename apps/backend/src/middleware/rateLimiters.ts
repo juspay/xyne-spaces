@@ -44,6 +44,20 @@ export const aiTitleLimiter: RateLimitRequestHandler = rateLimit({
   legacyHeaders: false,
 });
 
+/** Per-user limiter for the voice and text assistant: each turn can ask Jev twice and search. */
+export const assistantLimiter: RateLimitRequestHandler = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 30,
+  keyGenerator: (req): string => req.user?.id ?? ipKeyGenerator(req.ip ?? 'unknown'),
+  message: {
+    success: false,
+    error: 'You’re going a bit fast for the assistant. Please wait a moment and try again.',
+    timestamp: new Date().toISOString(),
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 /** Per-user limiter for the self-serve Slack migration API (~2 req/s/user): above polling, blocks refresh/script spam. */
 export const slackMigrationLimiter: RateLimitRequestHandler = rateLimit({
   windowMs: 60 * 1000, // 1 minute

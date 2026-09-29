@@ -21,5 +21,7 @@ module.exports = {
     // source so ts-jest transforms it.
     '^@xyne/shared/(.*)$': '<rootDir>/../../packages/shared/src/$1',
     '^@xyne/cache$': '<rootDir>/../../packages/cache/src/index.ts',
+    // Shared source imports its own files as './x.js' (Node ESM style); in TS source that is './x.ts'.
+    '^(\\.{1,2}/.*)\\.js$': '$1',
   },
 };

@@ -156,6 +156,7 @@ export interface SlackFilters {
   docType?: string[];
   senderId?: string[];
   participants?: string[]; // Participant filter (user IDs) - matches userId, threadMentions, threadSenders
+  participantsMode?: 'any' | 'all'; // Whether one or every listed user must be involved; defaults to any.
   // Mention filters (scoped search): messages that mention a user (mentions field, now holds userIds)
   // or reference a channel (channelMentions field). Both are exact attribute membership filters.
   mentionedUserIds?: string[];
@@ -918,7 +919,7 @@ export class YqlBuilder {
           threadSenders contains ${participant}
         )`;
         })
-        .join(' or ');
+        .join(filters.participantsMode === 'all' ? ' and ' : ' or ');
       conditions.push(`(${participantConditions})`);
     }
 

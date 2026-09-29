@@ -40,6 +40,7 @@ import ProjectDetailScreen from './ProjectDetailScreen/ProjectDetailScreen';
 import SdlcScreen from './SdlcScreen/SdlcScreen';
 import SdlcWindow from './SdlcScreen/SdlcWindow';
 import { APP_BASE_PATH, isSdlcSurface } from '../config';
+import { AssistantLauncher } from '../components/Assistant/ui/AssistantLauncher';
 import SdlcFrameHost from './SdlcScreen/SdlcFrameHost';
 import SdlcFrameViewport from './SdlcScreen/SdlcFrameViewport';
 import { SdlcFrameProvider } from './SdlcScreen/SdlcFrameContext';
@@ -492,6 +493,7 @@ const AppRoot = (): ReactElement => {
     state => state.context.initialContextSelections,
   );
   const xyneAIContextOpenNonce = useSelector(xyneAIActor, state => state.context.contextOpenNonce);
+  const xyneAIOpenInVoiceMode = useSelector(xyneAIActor, state => state.context.openInVoiceMode);
   const xyneAIKbCollectionId = useSelector(xyneAIActor, state => state.context.kbCollectionId);
   const xyneAIKbChannelId = useSelector(xyneAIActor, state => state.context.kbChannelId);
   const xyneAIKbDocId = useSelector(xyneAIActor, state => state.context.kbDocId);
@@ -596,6 +598,16 @@ const AppRoot = (): ReactElement => {
     !isOnStreamsPage &&
     !isSdlcRoute;
 
+  // The floating assistant button, wherever the side panel can open.
+  const showAssistantLauncher =
+    !isXyneAIDrawerOpen &&
+    !isMobile &&
+    !isOnboarding &&
+    !isInPanelWebview &&
+    !isOnAIChatExperiencePage &&
+    !isOnStreamsPage &&
+    !isSdlcRoute;
+
   const showCalendarPanel = isCalendarOpen && !isMobile && !isSdlcRoute && !showXyneAIPanel;
   // The SDLC lane ships Ask AI inside its own frame (see the isInPanelWebview
   // branch), so this is what decides whether that in-frame panel is showing.
@@ -621,6 +633,7 @@ const AppRoot = (): ReactElement => {
             canvasInfo={xyneAICanvasInfo}
             initialContextSelections={xyneAIInitialContextSelections}
             contextOpenNonce={xyneAIContextOpenNonce}
+            openInVoiceMode={xyneAIOpenInVoiceMode}
             kbCollectionId={xyneAIKbCollectionId ?? ''}
             kbChannelId={xyneAIKbChannelId ?? ''}
             kbDocId={xyneAIKbDocId ?? ''}
@@ -1053,6 +1066,17 @@ const AppRoot = (): ReactElement => {
                             />
                           </Drawer>
                         )}
+                      {showAssistantLauncher && (
+                        <AssistantLauncher
+                          onActivate={() =>
+                            xyneAIActor.send({
+                              type: 'OPEN',
+                              startVoiceMode: true,
+                              trackSource: 'floating_assistant',
+                            })
+                          }
+                        />
+                      )}
                     </SdlcFrameProvider>
                   </EditProvider>
                 </SlashCommandArtifactSideEffectProvider>

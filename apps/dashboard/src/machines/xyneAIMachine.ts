@@ -131,6 +131,8 @@ export interface XyneAIContext {
   initialContextSelections: AskAIInitialContextSelections | null;
   /** Re-seeds context even when a user clicks Ask AI on the same item twice. */
   contextOpenNonce: number;
+  /** This open should start in the assistant's voice mode (the floating button). */
+  openInVoiceMode: boolean;
   /** Session to focus when opening from a background completion toast */
   focusSessionId: string | null;
   /** Set when Ask AI is opened on a Xyne Desk auto-draft. That claw conversation
@@ -187,6 +189,8 @@ export type XyneAIEvent =
       kbFolderName?: string | null;
       workflowInfo?: WorkflowInfo | null;
       initialContextSelections?: AskAIInitialContextSelections | null;
+      /** Opens the panel in the assistant's voice mode. */
+      startVoiceMode?: boolean;
       researchContext?: XyneAIResearchContext | null;
       initialQuery?: string | null;
       /** Analytics attribution for XYNE_AI_OPENED — which surface opened the panel. */
@@ -563,6 +567,7 @@ export const xyneAIMachine = setup({
             event.initialContextSelections !== undefined
               ? context.contextOpenNonce + 1
               : context.contextOpenNonce,
+          openInVoiceMode: event.startVoiceMode === true,
           focusSessionId:
             'focusSessionId' in event && event.focusSessionId !== undefined
               ? event.focusSessionId
@@ -647,6 +652,7 @@ export const xyneAIMachine = setup({
             event.initialContextSelections !== undefined
               ? context.contextOpenNonce + 1
               : context.contextOpenNonce,
+          openInVoiceMode: event.startVoiceMode === true,
           focusSessionId:
             'focusSessionId' in event && event.focusSessionId !== undefined
               ? event.focusSessionId
@@ -880,6 +886,7 @@ export const xyneAIMachine = setup({
     canvasContexts: [],
     initialContextSelections: null,
     contextOpenNonce: 0,
+    openInVoiceMode: false,
     focusSessionId: null,
     deskAutoDraft: null,
     kbCollectionId: null,

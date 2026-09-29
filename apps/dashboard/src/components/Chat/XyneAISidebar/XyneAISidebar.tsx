@@ -10,7 +10,7 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from 'react';
 import { toast } from 'sonner';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useQuery as useZeroQuery } from '../../../hooks/useQuery';
 import { queries } from '../../../zero/queries';
@@ -69,6 +69,9 @@ import {
 import { ConversationHistory } from './components/ConversationHistory';
 import { XyneAIHeader } from './components/XyneAIHeader';
 import { XyneAIOnboardingHeader } from './components/XyneAIOnboardingHeader';
+import { useAssistant } from '../../Assistant/useAssistant';
+import { chipWithLabel, isAssistantMessage, toChatMessages } from '../../Assistant/transcript';
+import { AssistantBar, AssistantStage } from '../../Assistant/ui/AssistantStage';
 import { useAIOnboarding, ALL_ONBOARDING_SUGGESTIONS } from '../../../contexts/AIOnboardingContext';
 import { XyneAIStar } from '../../icons/xyne-ai';
 import { UserActivityPanel } from './components/UserActivityPanel';
@@ -76,6 +79,7 @@ import { AskAIDebugPanel } from './components/AskAIDebugPanel';
 import type { UserActivity } from '../../../hooks/useUserActivity';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useSelectedAgent } from '../../../hooks/useSelectedAgent';
+import type { EntityRef, ThreadRef } from '@xyne/shared/assistant';
 import { fetchAccessibleClawAgents } from '../../../services/clawAgentListService';
 import { fetchClawAgentModels } from '../../../services/clawAgentModelsService';
 import {
@@ -103,6 +107,25 @@ function newStreamSlotKey(): string {
   return `draft-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
 }
 
+/** Reads the thread conversation from the chat URL, including the threads and recap routes. */
+function threadFromPath(pathname: string): ThreadRef | null {
+  const parts = pathname.split('/').filter(Boolean);
+  const chatIndex = parts.indexOf('chat');
+  const surface = parts[chatIndex + 1];
+  if (chatIndex < 0 || !surface) return null;
+
+  let routeParts = parts.slice(chatIndex + 2);
+  if (surface === 'dir' && ['threads', 'recap', 'radar'].includes(routeParts[0] ?? '')) {
+    routeParts = routeParts.slice(1);
+  } else if (!['dir', 'dm', 'activity', 'bookmarks'].includes(surface)) {
+    return null;
+  }
+
+  const [channelId, id] = routeParts;
+  if (!channelId || !id || ['canvas', 'group', 'profile', 'tickets'].includes(id)) return null;
+  return { kind: 'thread', id, name: '', channelId, channelName: '' };
+}
+
 const DEBUGGER_WIDTH_STORAGE_KEY = 'ask-ai-debug-width';
 
 interface XyneAIConfigResponse {
@@ -120,6 +143,8 @@ interface XyneAISidebarProps {
   initialContextSelections?: AskAIInitialContextSelections | null;
   /** Re-applies the supplied context on every explicit Ask AI open. */
   contextOpenNonce?: number;
+  /** Start in the assistant's voice mode (opened from the floating button). */
+  openInVoiceMode?: boolean;
   variant?: 'sidebar' | 'fullscreen';
   onClose?: () => void;
   preserveStreamingOnClose?: boolean;
@@ -186,6 +211,7 @@ const XyneAISidebar = ({
   canvasInfo,
   initialContextSelections,
   contextOpenNonce,
+  openInVoiceMode = false,
   startFreshChat = false,
   variant = 'sidebar',
   onClose,
@@ -331,6 +357,12 @@ const XyneAISidebar = ({
     autoSendPendingQueryRef.current = initialQuery;
     setInputValue(initialQuery);
   }, [autoSendNonce, initialQuery]);
+  // The assistant lives in the side panel; full screen keeps its own composer layout.
+  // Questions for Xyne AI go through the same auto-send path as any seeded question.
+  const askXyneAI = useCallback((question: string): void => {
+    autoSendPendingQueryRef.current = question;
+    setInputValue(question);
+  }, []);
   // Seed *without* sending, which `autoSendNonce` above deliberately cannot do —
   // it exists for callers that already know the whole question. A host that hands
   // over a starting point instead needs the text in the box and the cursor after
@@ -348,6 +380,49 @@ const XyneAISidebar = ({
   const [deepResearchEnabled, setDeepResearchEnabled] = useState(false);
   const [createCanvasEnabled, setCreateCanvasEnabled] = useState(false);
   const [activeThreadInfo, setActiveThreadInfo] = useState<ThreadInfo | null>(threadInfo ?? null);
+  const { pathname } = useLocation();
+  const onScreen = useMemo<EntityRef[]>(() => {
+    const currentThread = threadFromPath(pathname);
+    const shownChannelId = currentThread?.channelId ?? channelId;
+    const records: EntityRef[] = shownChannelId
+      ? [{ kind: 'channel', id: shownChannelId, name: '' }]
+      : [];
+
+    if (currentThread) records.push(currentThread);
+    else if (activeThreadInfo?.isThreadMessage && activeThreadInfo.channelId) {
+      records.push({
+        kind: 'thread',
+        id: activeThreadInfo.conversationId,
+        name: '',
+        channelId: activeThreadInfo.channelId,
+        channelName: '',
+      });
+    }
+
+    const messageChannelId = activeThreadInfo?.channelId ?? shownChannelId;
+    if (activeThreadInfo?.messageId && messageChannelId) {
+      records.push({
+        kind: 'message',
+        id: activeThreadInfo.messageId,
+        name: activeThreadInfo.previewText,
+        channelId: messageChannelId,
+      });
+    }
+    return records;
+  }, [activeThreadInfo, channelId, pathname]);
+  const assistant = useAssistant({ onAskAI: askXyneAI, onScreen });
+  const {
+    start: startAssistant,
+    reset: resetAssistant,
+    turns: assistantTurns,
+    choose: chooseAssistantChip,
+  } = assistant;
+  const assistantEnabled = !isFullscreen;
+  const assistantLive = assistantEnabled && assistant.open;
+  const showVoiceStage = assistantLive && assistant.view === 'voice';
+  useEffect(() => {
+    if (assistantEnabled && openInVoiceMode) startAssistant();
+  }, [assistantEnabled, openInVoiceMode, startAssistant]);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [selectedActivities, setSelectedActivities] = useState<UserActivity[]>([]);
   const [selectedTickets, setSelectedTickets] = useState<SelectedTicket[]>([]);
@@ -392,6 +467,28 @@ const XyneAISidebar = ({
   const displayMessages = useMemo(
     () => resolveActivePath(messages, branchSelections),
     [messages, branchSelections],
+  );
+  // Assistant turns join the Ask AI transcript in time order.
+  const assistantMessages = useMemo(() => toChatMessages(assistantTurns), [assistantTurns]);
+  const transcriptMessages = useMemo(
+    () =>
+      assistantMessages.length === 0
+        ? displayMessages
+        : [...displayMessages, ...assistantMessages].sort(
+            (left, right) => left.timestamp.getTime() - right.timestamp.getTime(),
+          ),
+    [assistantMessages, displayMessages],
+  );
+  const displayIndexById = useMemo(
+    () => new Map(displayMessages.map((message, index) => [message.id, index])),
+    [displayMessages],
+  );
+  const chooseAssistantSuggestion = useCallback(
+    (label: string): void => {
+      const chip = chipWithLabel(assistantTurns, label);
+      if (chip) chooseAssistantChip(chip);
+    },
+    [assistantTurns, chooseAssistantChip],
   );
 
   const isActiveSessionStreaming = useMemo(
@@ -1020,6 +1117,10 @@ const XyneAISidebar = ({
     });
   }, []);
 
+  useEffect(() => {
+    if (assistantTurns.length > 0) scrollToBottom();
+  }, [assistantTurns, scrollToBottom]);
+
   // AI Onboarding: derive answered count and visible suggestions from messages
   // No context dispatches — avoids re-renders that interfere with streaming
   // Count completed bot responses (not streaming) for the "Done" button threshold
@@ -1216,6 +1317,7 @@ const XyneAISidebar = ({
   };
 
   const handleLoadConversation = async (conversation: ConversationHistoryType): Promise<void> => {
+    resetAssistant();
     setLoadingHistorySessionId(conversation.sessionId);
     setStreamThreadKey(conversation.sessionId);
     setConversationId(conversation.sessionId);
@@ -1347,6 +1449,7 @@ const XyneAISidebar = ({
       invalidateV2Sessions(effectiveAgentSlug);
       // If deleted conversation was active, clear messages
       if (conversation.sessionId === conversationId) {
+        resetAssistant();
         setMessages([]);
         setBranchSelections({});
         setConversationId('');
@@ -1363,6 +1466,7 @@ const XyneAISidebar = ({
   };
 
   const handleNewChat = useCallback((): void => {
+    resetAssistant();
     // Clear machine focus first — otherwise the focus subscription sees stale focusSessionId
     // while conversationId is '' and re-loads the previous session (flicker).
     xyneAIActor.send({ type: 'SET_FOCUS_SESSION', sessionId: null });
@@ -1387,7 +1491,7 @@ const XyneAISidebar = ({
     setShowUserActivityPanel(false);
 
     processedSelectionKeysRef.current.clear();
-  }, []);
+  }, [resetAssistant]);
 
   // When user selects a different agent from the global selector,
   // reset to a fresh conversation scoped to that agent.
@@ -1408,6 +1512,7 @@ const XyneAISidebar = ({
       if (!isV2) return;
       if (slug === selectedAgentSlug) return;
       setSelectedAgentSlug(slug);
+      resetAssistant();
       // Clear active conversation but stay on history page
       setConversationId('');
       setMessages([]);
@@ -1417,7 +1522,7 @@ const XyneAISidebar = ({
       // Refresh sessions list for the new agent
       void refetchV2Sessions();
     },
-    [isV2, selectedAgentSlug, setSelectedAgentSlug, refetchV2Sessions],
+    [isV2, selectedAgentSlug, setSelectedAgentSlug, refetchV2Sessions, resetAssistant],
   );
 
   const handleLoadConversationRef = useRef(handleLoadConversation);
@@ -2123,7 +2228,15 @@ const XyneAISidebar = ({
     selectionInfos: activeSelectionInfos,
     inputValue,
     onInputChange: setInputValue,
-    onSubmit: (trigger?: 'button' | 'enter') => void handleSubmit(trigger),
+    onSubmit: (trigger?: 'button' | 'enter'): void => {
+      if (assistantLive) {
+        assistant.send(inputValue);
+        setInputValue('');
+        return;
+      }
+      void handleSubmit(trigger);
+    },
+    ...(assistantEnabled ? { assistantVoice: assistant } : {}),
     onThreadInfoChange: setActiveThreadInfo,
     onSelectionInfosChange: setActiveSelectionInfos,
     onAttachmentsChange: setAttachments,
@@ -2305,6 +2418,8 @@ const XyneAISidebar = ({
               />
             )}
 
+            {assistantLive && !showVoiceStage && <AssistantBar assistant={assistant} />}
+
             {hasBackgroundStreamingElsewhere ? (
               <div className='flex-shrink-0 border-b border-border bg-muted/35 px-3 py-2 text-xs text-muted-foreground flex flex-wrap items-center gap-x-2 gap-y-1'>
                 <span>Another chat is still generating.</span>
@@ -2349,7 +2464,14 @@ const XyneAISidebar = ({
             ) : null}
 
             <div className='min-h-0 flex-1 overflow-hidden'>
-              <div className='flex h-full min-h-0 flex-col overflow-y-auto overflow-x-hidden'>
+              {showVoiceStage && <AssistantStage assistant={assistant} />}
+              {/* Kept mounted under the voice view so "Show text" returns to the same place. */}
+              <div
+                className={cn(
+                  'flex h-full min-h-0 flex-col overflow-y-auto overflow-x-hidden',
+                  showVoiceStage && 'hidden',
+                )}
+              >
                 {isLoadingConversation ? (
                   <div className='px-3 py-4'>
                     <div className='space-y-4'>
@@ -2365,7 +2487,7 @@ const XyneAISidebar = ({
                       </div>
                     </div>
                   </div>
-                ) : messages.length === 0 ? (
+                ) : messages.length === 0 && assistantMessages.length === 0 ? (
                   isFullscreen ? (
                     <AILandingHeroErrorBoundary>
                       <AILandingHero
@@ -2444,7 +2566,23 @@ const XyneAISidebar = ({
                             // lastBotIndex / lastUserIndex / siblingIndexById are
                             // computed in the memo above; just consume here so this
                             // IIFE doesn't re-walk both lists on every render.
-                            return displayMessages.map((message: Message, index: number) => {
+                            return transcriptMessages.map((message: Message) => {
+                              if (isAssistantMessage(message.id)) {
+                                return (
+                                  <MessageItem
+                                    key={message.id}
+                                    message={message}
+                                    readOnly
+                                    onFeedback={() => undefined}
+                                    onCitationClick={handleCitationClick}
+                                    onSummarizerCitationClick={handleSummarizerCitationClick}
+                                    feedbackValue={null}
+                                    isLatestBotMessage={message === assistantMessages.at(-1)}
+                                    onFollowUpSuggestionClick={chooseAssistantSuggestion}
+                                  />
+                                );
+                              }
+                              const index = displayIndexById.get(message.id) ?? -1;
                               const isLatestBotMessage =
                                 message.type === 'bot' && index === lastBotIndex;
                               const isLatestUserMessage =
