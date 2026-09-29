@@ -14,6 +14,7 @@ import {
   PRESENTATION_CATALOG_SOURCE,
 } from "xyne-claw-shared";
 import type { McpToolGroup } from "./mcp.js";
+import { matchesDirectPick } from "./tool-resolution.js";
 import type { CustomSubagentSpec } from "./subagent-tools.js";
 
 export interface ToolCatalogEntry {
@@ -186,16 +187,16 @@ function resolveCustomSubagentTools(
   groups: McpToolGroup[],
   customTools: ToolDefinition[] | undefined,
 ): ToolDefinition[] {
-  const directNames = new Set(toolsConfig.direct ?? []);
+  const directPicks = toolsConfig.direct ?? [];
   const customSlugs = new Set(toolsConfig.custom ?? []);
   const out: ToolDefinition[] = [];
 
-  if (directNames.size > 0) {
+  if (directPicks.length > 0) {
     for (const group of groups) {
       const writeSet = new Set(group.writeTools.map(String));
       for (const tool of group.tools) {
         const runtimeName = extractRuntimeToolName(tool.name);
-        if (directNames.has(runtimeName) && !(excludeWritesFromCatalog() && writeSet.has(runtimeName))) out.push(tool);
+        if (matchesDirectPick(tool, directPicks) && !(excludeWritesFromCatalog() && writeSet.has(runtimeName))) out.push(tool);
       }
     }
   }
