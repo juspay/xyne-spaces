@@ -1,6 +1,6 @@
 import { logger, Event as LogEvent } from '../../../utils/logger';
 import React, { ReactElement, useEffect, useMemo, useState, useRef, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { Command } from 'cmdk';
 import { CalendarDays, LayoutGrid, SignalHigh, X, ChevronDown } from 'lucide-react';
 import {
@@ -79,7 +79,7 @@ import {
   openSearchResult,
 } from '../../../utils/searchNavigation';
 import { isElectronApp } from '../../../utils/electronApp';
-import { useAllChannels } from '../../../hooks/useChannels';
+import { useAllChannels, useChannelByName } from '../../../hooks/useChannels';
 import { useAffinityCallback } from '../../../hooks/useAffinityCallback';
 import { useDeskContacts } from '../../../hooks/useDeskContacts';
 import { useDeskPeople, ALL_DESK } from '../../../hooks/useDeskPeople';
@@ -576,6 +576,19 @@ const ChannelCommandMenu = ({
 }: ChannelCommandMenuProps): ReactElement | null => {
   const navigate = useNavigate();
   const channelData = useAllChannels();
+  // Anchor for the profile-view fallback in navigateToUser: clicking a
+  // deactivated user with no prior DM otherwise lands nowhere (backend 404s the
+  // createDm). The profile route is nested under a channel, so we anchor it on
+  // whichever channel the user was already viewing — falling back to #general —
+  // so the profile opens in place instead of yanking them into another channel.
+  const location = useLocation();
+  const currentChannelIdFromRoute = useMemo(() => {
+    const match = location.pathname.match(/\/chat\/dir\/([^/?#]+)/);
+    return match?.[1] ?? null;
+  }, [location.pathname]);
+  const generalChannelForProfileFallback = useChannelByName('general');
+  const profileFallbackAnchorChannelId =
+    currentChannelIdFromRoute ?? generalChannelForProfileFallback?.id ?? null;
   const { workspaceId } = useAuthContextValues(); // Per-user, per-workspace key for recents
   const commandRef = useRef<HTMLDivElement | null>(null);
   // MutationObserver (owned by attachCommandRef) that recomputes the ⌥↵ hint when cmdk adds/removes rows.
@@ -1666,7 +1679,12 @@ const ChannelCommandMenu = ({
           relevanceScore: 1,
           metadata: {},
         };
-        await navigateToUser(result, navigate, channelData || []);
+        await navigateToUser(result, navigate, channelData || [], {
+          callerUserId: currentUserID,
+          ...(profileFallbackAnchorChannelId && {
+            profileFallbackAnchorChannelId,
+          }),
+        });
         return;
       }
 
@@ -2572,9 +2590,20 @@ const ChannelCommandMenu = ({
           { modifier: true, isElectron: isElectronApp(), isMobile },
           navigate,
           channelData || [],
+          {
+            callerUserId: currentUserID,
+            ...(profileFallbackAnchorChannelId && {
+              profileFallbackAnchorChannelId,
+            }),
+          },
         );
       } else {
-        await navigateToSearchResult(result, navigate, channelData || []);
+        await navigateToSearchResult(result, navigate, channelData || [], {
+          callerUserId: currentUserID,
+          ...(profileFallbackAnchorChannelId && {
+            profileFallbackAnchorChannelId,
+          }),
+        });
       }
       onOpenChange(false);
     } catch (err) {
