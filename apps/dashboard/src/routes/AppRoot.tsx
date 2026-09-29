@@ -111,6 +111,7 @@ import NotFoundScreen from './NotFoundScreen/NotFoundScreen';
 import ChatRedirect from '../components/Chat/ChatRedirect/ChatRedirect';
 import DirectoryRedirect from '../components/Chat/DirectoryRedirect/DirectoryRedirect';
 import CallsRoute from './CallsRoute/CallsRoute';
+import CallsAdminScreen from './CallsAdminScreen/CallsAdminScreen';
 import CallDetailScreen from './CallDetailScreen/CallDetailScreen';
 import RecordingsRoute from './RecordingsRoute/RecordingsRoute';
 import RecordingDetailRoute from './RecordingDetailRoute/RecordingDetailRoute';
@@ -1700,6 +1701,15 @@ export const router = createBrowserRouter(
                       element: <CallDetailScreen />,
                     },
                   ],
+                },
+                {
+                  // Deliberately not ResourceProtectedRoute: non-SCRIBE users manage their own calls here.
+                  path: 'calls/admin',
+                  element: (
+                    <ToolbarProtectedRoute path='/calls'>
+                      <CallsAdminScreen />
+                    </ToolbarProtectedRoute>
+                  ),
                 },
                 {
                   path: 'calls/:callId/:callType',
