@@ -603,7 +603,7 @@ export const OrganisationsScreen = (): ReactElement => {
   return (
     <div
       data-testid='organisations-page'
-      className='h-full bg-muted flex flex-col md:rounded-2xl overflow-hidden shadow-[0_0_8px_0_rgba(0,0,0,0.15)] border-root-border border'
+      className='h-full bg-background flex flex-col overflow-hidden'
     >
       {/* ── Org mismatch guard ── */}
       {orgMismatch ? (
