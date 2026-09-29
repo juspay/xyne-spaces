@@ -165,9 +165,7 @@ export const navigateToUser = async (
     if (options?.profileFallbackAnchorChannelId) {
       // Most common cause: target is deactivated so createDm 404s. Fall back to
       // the existing profile route so the click produces a visible result.
-      void navigate(
-        `/chat/dir/${options.profileFallbackAnchorChannelId}/profile/${result.id}`,
-      );
+      void navigate(`/chat/dir/${options.profileFallbackAnchorChannelId}/profile/${result.id}`);
       return;
     }
     logger.error(LogEvent.FRONTEND_ERROR, {
