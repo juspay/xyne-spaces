@@ -1,3 +1,10 @@
+## [1.430.1](https://github.com/juspay/xyne-spaces/compare/v1.430.0...v1.430.1) (2026-09-29)
+
+
+### Bug Fixes
+
+* run MCP-gateway writes approved on WhatsApp instead of sending people back to Spaces ([#2458](https://github.com/juspay/xyne-spaces/issues/2458)) ([4848f42](https://github.com/juspay/xyne-spaces/commit/4848f42a5e844c7215626e978812244b327a7a86))
+
 ## [1.430.0](https://github.com/juspay/xyne-spaces/compare/v1.429.0...v1.430.0) (2026-09-29)
 
 
