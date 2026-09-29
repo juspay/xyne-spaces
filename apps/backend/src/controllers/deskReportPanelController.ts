@@ -7,6 +7,79 @@ import { deskReportGenerationService, STUCK_PENDING_HOURS } from '@/services/des
 import { storageService } from '@/services/storage/index';
 import { normalizeStoragePath } from '@xyne/storage';
 import { config } from '@/config/env';
+import { UserManagementService } from '@/services/userManagementService';
+
+const userManagementService = UserManagementService.getInstance();
+
+/** Hard cap on how many distinct avatars we inline per report — a
+ *  prompt-injected report must not fan out into unbounded storage reads. */
+const MAX_INLINE_AVATARS = 50;
+/** Skip (placeholder) any single avatar larger than this once inlined. */
+const MAX_AVATAR_BYTES = 2 * 1024 * 1024; // 2 MB
+/** 1x1 transparent GIF used when an avatar can't be resolved — we must never
+ *  leave the original authenticated URL behind (it 401s cookielessly). */
+const TRANSPARENT_PIXEL =
+  'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+
+// <img ... src="URL"> / src='URL' — captures pre-src text, the quote, and the URL.
+const IMG_SRC_RE = /(<img\b[^>]*?\bsrc\s*=\s*)(["'])(.*?)\2/gi;
+// Authenticated same-origin avatar endpoint, relative or absolute:
+//   /api/users/<id>/picture?v=<path>   or   https://host/api/users/<id>/picture
+const AVATAR_URL_RE = /^(?:https?:\/\/[^/]+)?\/api\/users\/([^/?#]+)\/picture(?:[?#].*)?$/i;
+
+/** Resolve one user's avatar to a data: URI using the SAME storage path a
+ *  direct GET /api/users/<id>/picture would (mirrors
+ *  userManagementController.streamProfilePicture). Returns null on any miss
+ *  or oversize so the caller can fall back to a neutral placeholder. */
+async function resolveAvatarDataUri(userId: string): Promise<string | null> {
+  try {
+    const user = await userManagementService.getUser(userId);
+    const gcsPath = user?.picture;
+    if (!gcsPath) return null;
+    if (!(await storageService.fileExists(gcsPath))) return null;
+    const metadata = await storageService.getFileMetadata(gcsPath);
+    const declaredSize = parseInt(String(metadata.size ?? '0'), 10);
+    if (Number.isFinite(declaredSize) && declaredSize > MAX_AVATAR_BYTES) return null;
+    const buffer = await storageService.getFileBuffer(gcsPath);
+    if (buffer.length > MAX_AVATAR_BYTES) return null;
+    const contentType = metadata.contentType || 'image/png';
+    return `data:${contentType};base64,${buffer.toString('base64')}`;
+  } catch (err) {
+    logger.warn('[DeskReportPanel] failed to inline avatar', { userId, error: err });
+    return null;
+  }
+}
+
+/** Rewrite authenticated same-origin avatar <img> sources in the report HTML
+ *  to self-contained data: URIs, so the report renders inside the still-opaque
+ *  sandboxed iframe without any cookie'd request. Non-authenticated, external,
+ *  and data: images are left untouched. */
+async function inlineAvatarImages(html: string): Promise<string> {
+  const ids = new Set<string>();
+  for (const m of html.matchAll(IMG_SRC_RE)) {
+    const avatar = AVATAR_URL_RE.exec(m[3] ?? '');
+    if (!avatar) continue;
+    ids.add(avatar[1]!);
+    if (ids.size >= MAX_INLINE_AVATARS) break;
+  }
+  if (ids.size === 0) return html;
+
+  const resolved = new Map<string, string>();
+  await Promise.all(
+    [...ids].map(async (id) => {
+      resolved.set(id, (await resolveAvatarDataUri(id)) ?? TRANSPARENT_PIXEL);
+    }),
+  );
+
+  return html.replace(IMG_SRC_RE, (full: string, pre: string, quote: string, src: string) => {
+    const avatar = AVATAR_URL_RE.exec(src);
+    if (!avatar) return full;
+    // Ids beyond the cap were never resolved — still must not keep their
+    // authenticated URL (cookieless 401), so fall back to the placeholder.
+    const dataUri = resolved.get(avatar[1]!) ?? TRANSPARENT_PIXEL;
+    return `${pre}${quote}${dataUri}${quote}`;
+  });
+}
 
 /** Maps the DB's uppercase enum to the lowercase status shape the frontend expects. */
 function toClientStatus(uploadStatus: string | null): 'pending' | 'completed' | 'failed' {
@@ -175,6 +248,10 @@ export class DeskReportPanelController {
         return;
       }
       const buffer = await storageService.getFileBuffer(filePath);
+      // Inline authenticated avatar <img>s as data: URIs so the report renders
+      // inside the opaque sandboxed iframe (and in a downloaded file) without
+      // any cookie'd /api/users/.../picture request that would 401.
+      const html = await inlineAvatarImages(buffer.toString('utf-8'));
 
       const download = req.query['download'] === '1';
       const filename = encodeURIComponent(latest.originalFilename || 'desk-report.html');
@@ -189,6 +266,12 @@ export class DeskReportPanelController {
         res.setHeader(
           'Content-Security-Policy',
           [
+            // Keep the report on an OPAQUE origin: it is agent-generated,
+            // prompt-injection-influenceable HTML, so it must never run its
+            // scripts with first-party (allow-same-origin) privileges. The
+            // authenticated avatar <img>s that used to 401 cookielessly under
+            // this sandbox are instead inlined as data: URIs server-side
+            // (see inlineAvatarImages), so no directive needs relaxing.
             'sandbox allow-scripts',
             "default-src 'none'",
             "script-src 'unsafe-inline'",
@@ -202,7 +285,7 @@ export class DeskReportPanelController {
           ].join('; '),
         );
       }
-      res.send(buffer);
+      res.send(html);
     } catch (err) {
       logger.error('[DeskReportPanel] serveReport failed', { channelId, error: err });
       res.status(500).send('Failed to load desk report');

@@ -5,7 +5,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { reactNativeBridge } from '../utils/reactNativeBridge';
 import { posthogService } from '../services/Analytics/posthogService';
 import { API_BASE_URL, isSdlcSurface, isTestEnv } from '../config';
-import { logger } from '../utils/logger';
+import { logger, Event as LoggerEvent } from '../utils/logger';
 import {
   CommunityJoinResultStatus,
   WorkspaceType,
@@ -14,6 +14,31 @@ import {
 
 export const PENDING_WORKSPACE_ID_KEY = 'pending_workspace_id';
 export const PENDING_WORKSPACE_NAME_KEY = 'pending_workspace_name';
+
+const ENTERPRISE_LOGIN_INTENT_KEY = 'enterprise_login_intent';
+
+/**
+ * Marks the current sign-in attempt as an enterprise ("Continue with work
+ * email") flow. The backend stores this in OAuth state and uses it to fail
+ * fast on public email domains and filter community workspaces.
+ */
+export const setEnterpriseLoginIntent = (): void => {
+  sessionStorage.setItem(ENTERPRISE_LOGIN_INTENT_KEY, 'true');
+};
+
+export const clearEnterpriseLoginIntent = (): void => {
+  sessionStorage.removeItem(ENTERPRISE_LOGIN_INTENT_KEY);
+};
+
+/**
+ * The enterprise intent only applies when the user is not joining a pending
+ * community workspace — a pending community join always wins so gmail users
+ * can still sign in to join communities.
+ */
+const shouldRequestEnterpriseLogin = (): boolean =>
+  sessionStorage.getItem(ENTERPRISE_LOGIN_INTENT_KEY) === 'true' &&
+  !localStorage.getItem(PENDING_WORKSPACE_ID_KEY);
+
 import { clearAllSessionKeys } from '../services/sessionKeyStore';
 import { indexedDBService } from '../services/indexedDBService';
 import { resetEncryption } from './encryptionMachine';
@@ -272,11 +297,15 @@ export const authMachine = createMachine(
             guard: 'hasOAuthCallback',
           },
           {
+            // Always confirm the session against the server. The real session
+            // lives in httpOnly cookies (the source of truth); the localStorage
+            // `user_id` read in this state's entry is only an optimization used to
+            // pre-fill context.user for optimistic UI. Its absence must NOT be
+            // treated as "no session" — a spurious clearAuthTokens() (e.g. from a
+            // transient 401) removes `user_id` and would otherwise strand a user
+            // with valid server cookies on /auth. validateSession's onError still
+            // routes genuinely-unauthenticated users to `unauthenticated`.
             target: 'validatingSession',
-            guard: 'hasStoredSession',
-          },
-          {
-            target: 'unauthenticated',
           },
         ],
       },
@@ -736,14 +765,22 @@ export const authMachine = createMachine(
               }),
             },
           ],
-          onError: {
-            target: 'unauthenticated',
-            actions: [
-              'clearSessionCookies',
-              { type: 'notifySignOut', params: { reason: 'Token validation failed' } },
-              assign(() => createClearedContext()),
-            ],
-          },
+          onError: [
+            {
+              // Transient failure (network/timeout/5xx) with an existing session — don't strand.
+              guard: 'canKeepOptimisticSession',
+              target: 'authenticated',
+              actions: assign(({ context }) => ({ ...context, error: null })),
+            },
+            {
+              target: 'unauthenticated',
+              actions: [
+                'clearSessionCookies',
+                { type: 'notifySignOut', params: { reason: 'Token validation failed' } },
+                assign(() => createClearedContext()),
+              ],
+            },
+          ],
         },
       },
       authenticated: {
@@ -1145,10 +1182,6 @@ export const authMachine = createMachine(
 
         return hasCallback;
       },
-      hasStoredSession: () => {
-        const userId = localStorage.getItem('user_id');
-        return !!userId;
-      },
       isTestEnvironment: () => isTestEnv,
       hasUserInOutput: ({ event }) => {
         const e = event as { output?: OAuthCallbackOutput };
@@ -1199,6 +1232,12 @@ export const authMachine = createMachine(
         const e = event as { output?: OAuthCallbackOutput };
         return !!e.output?.autoLoginWorkspace;
       },
+      // Transient validate failure (not a 401) with an optimistic user already in
+      // context — keep the session rather than strand a logged-in user on /auth.
+      canKeepOptimisticSession: ({ context, event }) => {
+        const status = (event as { error?: { status?: number } }).error?.status;
+        return status !== 401 && !!context.user?.id;
+      },
     },
     actions: {
       clearSessionCookies: () => {
@@ -1207,6 +1246,7 @@ export const authMachine = createMachine(
         localStorage.removeItem('user_email');
         localStorage.removeItem(PENDING_WORKSPACE_ID_KEY);
         localStorage.removeItem(PENDING_WORKSPACE_NAME_KEY);
+        clearEnterpriseLoginIntent();
         clearOnboardingCookie();
         decryptionCache.clear();
         resetEncryption();
@@ -1263,6 +1303,9 @@ export const authMachine = createMachine(
           if (invitationId) {
             loginParams.set('invitationId', invitationId);
           }
+          if (shouldRequestEnterpriseLogin()) {
+            loginParams.set('enterpriseLogin', 'true');
+          }
           const loginQuery = loginParams.toString();
           const loginUrl = `${API_BASE_URL}/auth/login${loginQuery ? `?${loginQuery}` : ''}`;
 
@@ -1307,6 +1350,9 @@ export const authMachine = createMachine(
           }
           if (invitationId) {
             loginParams.set('invitationId', invitationId);
+          }
+          if (shouldRequestEnterpriseLogin()) {
+            loginParams.set('enterpriseLogin', 'true');
           }
           const loginQuery = loginParams.toString();
           const loginUrl = `${API_BASE_URL}/v2/auth/microsoft/login${loginQuery ? `?${loginQuery}` : ''}`;
@@ -1357,8 +1403,14 @@ export const authMachine = createMachine(
     },
     actors: {
       performLogout: fromPromise(async () => {
+        // A 401 here is itself a signal: cookies were already gone before this
+        // POST — the signature of an externally-triggered (phantom) logout
+        // rather than a user-initiated one. Force-flush: the log buffer is
+        // in-memory only and the page is about to be torn down.
+        logger.info(LoggerEvent.LOGOUT_STARTED, {});
+        logger.pushlogs();
         try {
-          await axios.post(
+          const response = await axios.post(
             `${API_BASE_URL}/auth/logout`,
             {},
             {
@@ -1369,9 +1421,14 @@ export const authMachine = createMachine(
               },
             },
           );
-        } catch {
-          /* empty */
+          logger.info(LoggerEvent.LOGOUT_REQUEST_COMPLETED, { status: response.status });
+        } catch (error) {
+          logger.warn(LoggerEvent.LOGOUT_REQUEST_FAILED, {
+            status: axios.isAxiosError(error) ? error.response?.status : undefined,
+            error: error instanceof Error ? error.message : String(error),
+          });
         }
+        logger.pushlogs();
 
         // Logout is the one place a cross-lane drop is right: both bundles are going
         // away. The lane must not take out its host's store, so it only drops its own.
@@ -1666,11 +1723,15 @@ export const authMachine = createMachine(
           };
         } catch (error) {
           if (axios.isAxiosError(error)) {
+            const status = error.response?.status;
             const errorData = error.response?.data as ApiErrorResponse;
-            throw new Error(
-              errorData?.error ||
-                `Session validation failed: ${error.response?.status || 'unknown'}`,
-            );
+            // Preserve status so onError can tell a dead session (401) from a
+            // transient failure (network/timeout/5xx) and not strand a logged-in user.
+            const err = new Error(
+              errorData?.error || `Session validation failed: ${status ?? 'unknown'}`,
+            ) as Error & { status?: number };
+            if (status !== undefined) err.status = status;
+            throw err;
           }
           throw new Error('Session validation failed: unknown error');
         }

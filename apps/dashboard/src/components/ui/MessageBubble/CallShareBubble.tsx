@@ -1,9 +1,9 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Phone } from 'lucide-react';
 import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import { EntitySharePill } from './EntitySharePill';
 import { MessageMetadata } from './MessageBubble.utils';
+import { PhoneDefault } from '@xyne/icons';
 
 interface CallShareBubbleProps {
   message: {
@@ -44,7 +44,7 @@ export const CallShareBubble: React.FC<CallShareBubbleProps> = ({ message }) => 
       <EntitySharePill
         title={title}
         durationMs={durationMs}
-        icon={<Phone size={14} strokeWidth={2.5} />}
+        icon={<PhoneDefault size={14} strokeWidth={2.5} />}
         ariaLabel={`Open call ${title}`}
         onOpen={
           callRowId

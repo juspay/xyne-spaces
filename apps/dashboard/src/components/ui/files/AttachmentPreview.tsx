@@ -5,7 +5,7 @@
 // ============================================================================
 
 import React, { useState, useEffect, useRef } from 'react';
-import { X, FileText, Image as ImageIcon, Video, Music, Loader2, Headphones } from 'lucide-react';
+import { X, FileText, Image as ImageIcon, Video, Music, Loader2 } from 'lucide-react';
 import {
   getFileCategory,
   getFileExtension,
@@ -22,6 +22,7 @@ import {
 } from '../../../services/heicAttachmentService';
 import { createPreviewUrl } from '../../../services/clients/fileFetchService';
 import { usePlatform } from '../../../hooks/usePlatform';
+import { PhoneDefault } from '@xyne/icons';
 
 // Type guard to check if file is a browser File object
 const isBrowserFile = (file: File | UploadedFile): file is File => {
@@ -423,7 +424,7 @@ export const AttachmentPreview: React.FC<AttachmentPreviewProps> = ({
               />
             ) : category === 'audio' ? (
               <div className='w-full h-full bg-red-500 flex items-center justify-center'>
-                <Headphones className='size-4 text-white' />
+                <PhoneDefault className='size-4 text-white' />
               </div>
             ) : (
               <div

@@ -5,13 +5,32 @@ import { getKanbanCounts } from '@/services/tickets/kanbanCountsService';
 import { logger } from '@/utils/logger';
 
 const kanbanCountsBodySchema = z.object({
-  viewMode: z.enum(['project', 'board', 'my-tickets', 'user-tickets', 'group-tickets']),
+  viewMode: z.enum(['project', 'board', 'my-tickets', 'user-tickets', 'group-tickets', 'desk']),
   columnType: z.enum(['stage', 'status']).optional(),
   projectId: z.string().optional(),
   boardId: z.string().optional(),
   boardIds: z.array(z.string()).optional(),
   userId: z.string().optional(),
   groupId: z.string().optional(),
+  channelId: z.string().optional(),
+  deskFilters: z
+    .object({
+      assignedTo: z.array(z.string()).optional(),
+      createdBy: z.array(z.string()).optional(),
+      priority: z.array(z.nativeEnum(TicketPriority)).optional(),
+      stageName: z.array(z.string()).optional(),
+      aiCategory: z.array(z.string()).optional(),
+      conversationIds: z.array(z.string()).optional(),
+      hasAiDraft: z.boolean().optional(),
+      hasSubTickets: z.boolean().optional(),
+      userGroups: z.array(z.string()).optional(),
+      lastEmailAtStart: z.number().optional(),
+      lastEmailAtEnd: z.number().optional(),
+      createdAtStart: z.number().optional(),
+      createdAtEnd: z.number().optional(),
+      conversationLabelId: z.string().optional(),
+    })
+    .optional(),
   ...flowStepVisibilitySchemaShape,
   filters: z
     .object({
@@ -58,7 +77,7 @@ const kanbanCountsBodySchema = z.object({
     ])
     .optional(),
   showOverdueOnly: z.boolean().optional(),
-});
+}).refine(body => body.viewMode !== 'desk' || !!body.channelId, 'channelId is required for desk counts');
 
 export class KanbanTicketController {
   getCounts = async (req: Request, res: Response): Promise<void> => {

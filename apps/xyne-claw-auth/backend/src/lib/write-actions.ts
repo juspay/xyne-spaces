@@ -149,7 +149,10 @@ export async function executeWriteAction(action: SignedWriteAction): Promise<Wri
       const live = await getSpacesAuthForUser(userId, "write-action");
       if (live) {
         credentials = {
-          url: CONFIG.spacesAppUrl,
+          // Server-to-server call from the claw-auth pod: use the in-cluster
+          // Spaces URL, same as credentials-loader (flow-action path). The
+          // public spacesAppUrl is not reachable from here ("fetch failed").
+          url: CONFIG.spacesInternalUrl,
           token: live.token,
           sessionId: live.sessionId,
           workspaceId: live.workspaceId,

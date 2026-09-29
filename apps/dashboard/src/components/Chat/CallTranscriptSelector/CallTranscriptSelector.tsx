@@ -1,7 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import DOMPurify from 'dompurify';
 import {
-  Phone,
   Calendar,
   ChevronRight,
   FileText,
@@ -18,6 +17,7 @@ import { useAuth } from '../../../hooks/useAuth';
 import { Virtuoso } from 'react-virtuoso';
 import { usePaginatedCalls } from '../../../hooks/usePaginatedCalls';
 import { type Call } from '../../../routes/CallHistoryScreen/callHistoryItem.utils';
+import { PhoneDefault } from '@xyne/icons';
 
 // TODO: TranscriptEntry interface for future transcript display
 // interface TranscriptEntry {
@@ -113,7 +113,7 @@ export const CallTranscriptSelector: React.FC<CallTranscriptSelectorProps> = ({
     const isMissedCall = isCallEnded && !isOutgoingCall && !hasCurrentUserJoined;
     const isActive = call.endedAt === null;
 
-    if (isActive) return <Phone size={16} className='text-status-success' />;
+    if (isActive) return <PhoneDefault size={16} className='text-status-success' />;
     if (isMissedCall) return <PhoneMissed size={16} className='text-destructive' />;
     if (isOutgoingCall) return <PhoneOutgoing size={16} className='text-muted-foreground' />;
     return <PhoneIncoming size={16} className='text-muted-foreground' />;
@@ -134,7 +134,7 @@ export const CallTranscriptSelector: React.FC<CallTranscriptSelectorProps> = ({
         <div className='flex-1 overflow-hidden p-2 custom-scrollbar'>
           {!calls || calls.length === 0 ? (
             <div className='h-full flex flex-col items-center justify-center text-muted-foreground/50 p-8 text-center'>
-              <Phone size={24} className='mb-2 opacity-20' />
+              <PhoneDefault size={24} className='mb-2 opacity-20' />
               <p className='text-xs italic'>No recent calls</p>
             </div>
           ) : (

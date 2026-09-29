@@ -12,6 +12,7 @@ import { xyneCommentService } from '@/services/xyneCommentService';
 import { prCheckApprovalService } from '@/services/prCheckApprovalService';
 import { syncReleaseOnPRMerge } from '@/services/release/releaseWebhookSync';
 import { VCSProviderType } from '@xyne/shared';
+import { runGitHubWebhook } from '@/bypassAcl/webhookIngestServices';
 
 /**
  * GitHub webhook event types for pull requests
@@ -119,9 +120,22 @@ export class GitHubWebhookService {
   }
 
   /**
-   * Main entry point for handling webhook events
+   * Main entry point for handling webhook events. Unauthenticated webhook (no req.user): the
+   * scope is opened explicitly before this runs — see runGitHubWebhook (bypassAcl/webhookIngestServices).
    */
   async handleWebhookEvent(
+    eventType: string,
+    payload: unknown,
+    workspaceId?: string,
+  ): Promise<{ success: boolean; message: string }> {
+    return runGitHubWebhook(this, eventType, payload, workspaceId);
+  }
+
+  /**
+   * Runs one webhook event. Called only through runGitHubWebhook (bypassAcl/webhookIngestServices),
+   * which opens the tenant scope this needs.
+   */
+  async processWebhookEvent(
     eventType: string,
     payload: unknown,
     workspaceId?: string,

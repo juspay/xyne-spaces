@@ -30,7 +30,7 @@ export const createTicket = async (payload: CreateTicketRequest): Promise<Create
   return response.data;
 };
 
-export type KanbanCountsViewMode = 'project' | 'board' | 'my-tickets';
+export type KanbanCountsViewMode = 'project' | 'board' | 'my-tickets' | 'desk';
 
 export type KanbanCountsGroupBy =
   | 'none'
@@ -67,12 +67,31 @@ export interface KanbanCountsFilters {
   dynamicFields?: Record<string, string[] | { start?: number; end?: number }>;
 }
 
+export interface KanbanCountsDeskFilters {
+  assignedTo?: string[];
+  createdBy?: string[];
+  priority?: TicketPriority[];
+  stageName?: string[];
+  aiCategory?: string[];
+  conversationIds?: string[];
+  hasAiDraft?: boolean;
+  hasSubTickets?: boolean;
+  userGroups?: string[];
+  lastEmailAtStart?: number;
+  lastEmailAtEnd?: number;
+  createdAtStart?: number;
+  createdAtEnd?: number;
+  conversationLabelId?: string;
+}
+
 export interface KanbanCountsRequest extends FlowStepVisibilityOptions {
   viewMode: KanbanCountsViewMode;
   columnType?: 'stage' | 'status';
   projectId?: string;
   boardId?: string;
   boardIds?: string[];
+  channelId?: string;
+  deskFilters?: KanbanCountsDeskFilters;
   filters?: KanbanCountsFilters;
   groupBy?: KanbanCountsGroupBy;
   showOverdueOnly?: boolean;

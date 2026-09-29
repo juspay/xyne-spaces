@@ -5,7 +5,6 @@ import {
   X,
   Check,
   HelpCircle,
-  Headphones,
   Headset,
   ChevronDown,
   Users,
@@ -53,6 +52,7 @@ import {
 import { roomActor } from '../../machines/roomMachine';
 import { useNowWithBoundary } from '../../hooks/useNowWithBoundary';
 import { queries } from '../../zero/queries';
+import { PhoneDefault } from '@xyne/icons';
 
 interface CalendarCallPopupProps {
   call: Call;
@@ -457,7 +457,7 @@ const CalendarCallPopup = ({
         {/* Call icon */}
         <div className='mb-4'>
           <div className='size-12 rounded-xl bg-blue-100 flex items-center justify-center'>
-            <Headphones className='size-6 text-blue-500' />
+            <PhoneDefault className='size-6 text-blue-500' />
           </div>
         </div>
 
@@ -500,7 +500,7 @@ const CalendarCallPopup = ({
       <div className='p-5'>
         <div className='mb-4'>
           <div className='size-12 rounded-xl bg-blue-100 flex items-center justify-center'>
-            <Headphones className='size-6 text-blue-500' />
+            <PhoneDefault className='size-6 text-blue-500' />
           </div>
         </div>
         <h3 className='font-semibold text-foreground text-base mb-1'>Hide recurring event</h3>
