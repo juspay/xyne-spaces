@@ -79,7 +79,7 @@ function isEligibleShape(event: GCalEvent): SkipReason | null {
   // Xyne pushed this event out from a call it already owns (callCalendarPushService).
   // It carries its own Xyne link; resolving a *second* hosted Call for it would
   // fork the meeting in two.
-  if (isXyneOriginatedEvent(event.extendedProperties?.private)) return 'xyne_originated';
+  if (isXyneOriginatedEvent(event.extendedProperties)) return 'xyne_originated';
   return null;
 }
 
