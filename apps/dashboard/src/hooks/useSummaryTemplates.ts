@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { EntityUserAccess } from '@xyne/shared';
 import { queries } from '../zero/queries';
 import { useQuery } from './useQuery';
 import { useSelf } from './useUsers';
@@ -10,6 +11,8 @@ import type {
 interface UseSummaryTemplatesResult {
   templates: SummaryTemplate[];
   isLoading: boolean;
+  /** The server has confirmed the whole list. */
+  isComplete: boolean;
 }
 
 export function useSummaryTemplates(enabled: boolean): UseSummaryTemplatesResult {
@@ -32,7 +35,10 @@ export function useSummaryTemplates(enabled: boolean): UseSummaryTemplatesResult
         createdBy: row.createdBy,
         createdAt: new Date(row.createdAt).toISOString(),
         visibility: row.visibility as SummaryTemplate['visibility'],
-        canEdit: row.createdBy === currentUser?.id,
+        // The creator, or anyone holding an EDIT share.
+        canEdit:
+          row.createdBy === currentUser?.id ||
+          (row.shares ?? []).some(share => share.entityUserAccess === EntityUserAccess.EDIT),
         isSystem: false,
       })),
     [currentUser?.id, rows],
@@ -41,6 +47,7 @@ export function useSummaryTemplates(enabled: boolean): UseSummaryTemplatesResult
   return {
     templates,
     isLoading: enabled && details.type !== 'complete' && rows.length === 0,
+    isComplete: enabled && details.type === 'complete',
   };
 }
 

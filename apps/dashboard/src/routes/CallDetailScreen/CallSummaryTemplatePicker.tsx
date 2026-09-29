@@ -44,6 +44,13 @@ const DEFAULT_TEMPLATE_OPTION: SummaryTemplateOption = {
   icon: '✨',
 };
 
+/** A template the viewer cannot read; the empty id disables regenerating with it. */
+const PRIVATE_TEMPLATE_OPTION: SummaryTemplateOption = {
+  id: '',
+  name: 'Private template',
+  icon: '🔒',
+};
+
 interface CallSummaryTemplatePickerProps {
   /** Template the call's existing summary was written with, when one is recorded. */
   selectedTemplateId?: string | null;
@@ -78,12 +85,15 @@ export function CallSummaryTemplatePicker({
     shouldLoadTemplates || templatesModalMode !== null,
   );
   const storedTemplateId = selectedTemplateId ?? '';
-  const [storedTemplate] = useCachedQuery(
+  const shouldQueryStoredTemplate =
+    storedTemplateId.length > 0 && storedTemplateId !== DEFAULT_TEMPLATE_OPTION.id;
+  const [storedTemplate, storedTemplateDetails] = useCachedQuery(
     queries.summaryTemplateById({ templateId: storedTemplateId }),
-    {
-      enabled: storedTemplateId.length > 0 && storedTemplateId !== DEFAULT_TEMPLATE_OPTION.id,
-    },
+    { enabled: shouldQueryStoredTemplate },
   );
+  // Held apart from "still loading", which also yields no row.
+  const storedTemplateDenied =
+    shouldQueryStoredTemplate && storedTemplateDetails.type === 'complete' && !storedTemplate;
 
   const templateOptions: SummaryTemplateOption[] = [
     DEFAULT_TEMPLATE_OPTION,
@@ -108,7 +118,7 @@ export function CallSummaryTemplatePicker({
   const selectedTemplate: SummaryTemplateOption =
     templateOptions.find(template => template.id === selectedTemplateId) ??
     storedTemplateOption ??
-    DEFAULT_TEMPLATE_OPTION;
+    (storedTemplateDenied ? PRIVATE_TEMPLATE_OPTION : DEFAULT_TEMPLATE_OPTION);
 
   const fullLabel = getSummaryTemplateLabel(selectedTemplate);
   const label = truncateTemplateName(fullLabel);
@@ -185,7 +195,7 @@ export function CallSummaryTemplatePicker({
           isLoading={templatesLoading}
           isRegenerating={isRegenerating}
           regeneratingTemplateId={regeneratingTemplateId}
-          canRegenerate={Boolean(onRegenerate)}
+          canRegenerate={Boolean(onRegenerate) && Boolean(selectedTemplate.id)}
           onSelectTemplate={regenerate}
           onRegenerate={() => regenerate(selectedTemplate.id)}
           onOpenTemplates={() => setTemplatesModalMode('browse')}
