@@ -1,6 +1,8 @@
 import { useMemo, useState, type ReactElement } from 'react';
 import { Ai01, InformationCircle, PlusDefault } from '@xyne/icons';
+import type { CreateHubSuggestions } from '@/components/flowUI/nodes/agent/create/types';
 import { Tooltip } from '@/components/ui/Tooltip/Tooltip';
+import { matchSuggestedTools, suggestionFromPicks } from '../../primitives/suggestionMatch';
 import { DotGridLoader } from '../mcp/DotGridLoader';
 import { BrowseBuiltinToolsDialog } from './BrowseBuiltinToolsDialog';
 import { BuiltinChip } from './BuiltinChip';
@@ -15,6 +17,11 @@ interface BuiltinCapabilityRowProps {
   onSelectionChange: (next: BuiltinSelection) => void;
   suggestContext: { systemPrompt: string; description: string };
   layout?: 'profile';
+  /** Create page: mid-confidence picks shown as dashed chips (profile layout). */
+  hubSuggestions?: CreateHubSuggestions | undefined;
+  onSuggestionAccepted?: ((source: string) => void) | undefined;
+  /** A chip was removed: the caller never re-adds it this session. */
+  onPickDismissed?: ((source: string) => void) | undefined;
 }
 
 export function BuiltinCapabilityRow({
@@ -22,6 +29,9 @@ export function BuiltinCapabilityRow({
   onSelectionChange,
   suggestContext,
   layout,
+  hubSuggestions,
+  onSuggestionAccepted,
+  onPickDismissed,
 }: BuiltinCapabilityRowProps): ReactElement {
   const [browseOpen, setBrowseOpen] = useState(false);
   const [browseSource, setBrowseSource] = useState<string | null>(null);
@@ -35,6 +45,20 @@ export function BuiltinCapabilityRow({
   const suggestedChips = useMemo(
     () => suggestions.suggested.filter(match => !isEntryEnabled(selection, match.entry)),
     [suggestions.suggested, selection],
+  );
+
+  const planChips = useMemo(
+    () =>
+      hubSuggestions && hubSuggestions.builtin.length > 0
+        ? matchSuggestedTools(
+            suggestionFromPicks(hubSuggestions.builtin),
+            entries,
+            entry => entry.source,
+            entry => entry.tools,
+            entry => entry.label,
+          ).filter(match => !isEntryEnabled(selection, match.entry))
+        : [],
+    [hubSuggestions, entries, selection],
   );
 
   const renderSuggestAction = (): ReactElement => {
@@ -92,7 +116,7 @@ export function BuiltinCapabilityRow({
   if (layout === 'profile') {
     return (
       <>
-        {selectedEntries.length === 0 ? (
+        {selectedEntries.length === 0 && planChips.length === 0 ? (
           <button
             type='button'
             onClick={() => {
@@ -116,7 +140,21 @@ export function BuiltinCapabilityRow({
                   setBrowseSource(entry.source);
                   setBrowseOpen(true);
                 }}
-                onToggle={() => onSelectionChange(disableEntry(selection, entry))}
+                onToggle={() => {
+                  onSelectionChange(disableEntry(selection, entry));
+                  onPickDismissed?.(entry.source);
+                }}
+              />
+            ))}
+            {planChips.map(match => (
+              <BuiltinChip
+                key={`suggested-${match.entry.source}`}
+                label={match.entry.label}
+                selected={false}
+                onToggle={() => {
+                  onSelectionChange(enableEntry(selection, match.entry, match.tools));
+                  onSuggestionAccepted?.(match.entry.source);
+                }}
               />
             ))}
           </div>

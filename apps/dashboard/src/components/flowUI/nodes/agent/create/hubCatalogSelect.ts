@@ -96,8 +96,17 @@ function entryMatchesNeedles(entry: McpCatalogEntry, needles: readonly string[])
   });
 }
 
-/** Match named + soft job-cue products in the utterance to org MCP/gateway rows. */
-export function matchNamedMcpEntries(intent: string, catalog: AvailableTools): McpCatalogEntry[] {
+/**
+ * Match named + soft job-cue products in the utterance to org MCP/gateway rows.
+ * `hardOnly` keeps explicit product names ("Slack", "GitHub MCP") and drops the
+ * soft job cues, for callers that already have a scored selector.
+ */
+export function matchNamedMcpEntries(
+  intent: string,
+  catalog: AvailableTools,
+  options?: { hardOnly?: boolean },
+): McpCatalogEntry[] {
+  const hardOnly = options?.hardOnly === true;
   const mcpCatalog = buildMcpCatalog(catalog, []);
   const matched: McpCatalogEntry[] = [];
   const seen = new Set<string>();
@@ -115,16 +124,19 @@ export function matchNamedMcpEntries(intent: string, catalog: AvailableTools): M
     if (!alias.re.test(intent)) continue;
     pushNeedles(alias.needles);
   }
-  // Soft cues: standup → Slack, Spaces DM → Spaces, X.com → X (not Xyne via "x").
-  for (const cue of SOFT_PRODUCT_CUES) {
-    if (!cue.re.test(intent)) continue;
-    pushNeedles(cue.needles);
+  if (!hardOnly) {
+    // Soft cues: standup → Slack, Spaces DM → Spaces, X.com → X (not Xyne via "x").
+    for (const cue of SOFT_PRODUCT_CUES) {
+      if (!cue.re.test(intent)) continue;
+      pushNeedles(cue.needles);
+    }
+    const soft = softProductNeedles(intent);
+    if (soft.length > 0) pushNeedles(soft);
   }
-  const soft = softProductNeedles(intent);
-  if (soft.length > 0) pushNeedles(soft);
 
   // X.com / Twitter → bind X product rows even when needle length guards apply.
-  if (/\bx\.com\b|\btwitter\b|\btweets?\b/i.test(intent)) {
+  const xCue = hardOnly ? /\bx\.com\b|\btwitter\b/i : /\bx\.com\b|\btwitter\b|\btweets?\b/i;
+  if (xCue.test(intent)) {
     for (const entry of mcpCatalog) {
       if (!entry.selectable || seen.has(entry.slug)) continue;
       if (!entryIsXProduct(entry)) continue;
@@ -415,7 +427,7 @@ function filterSuggestionToRelevant(
 }
 
 /** When job is Spaces/X/email and Slack wasn't named, strip Slack from suggestion. */
-function filterIrrelevantChatMcps(
+export function filterIrrelevantChatMcps(
   selection: AgentToolboxSelection,
   intent: string,
   catalog: AvailableTools,

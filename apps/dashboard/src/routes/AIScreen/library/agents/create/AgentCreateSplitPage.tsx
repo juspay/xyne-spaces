@@ -46,7 +46,24 @@ import {
 import { listAccessibleKnowledgeBase } from '@/services/claw/clawKnowledgeBaseService';
 import { listSkills } from '@/services/claw/clawSkillsService';
 import { sanitizeAgentCanvasName } from '@/components/flowUI/nodes/agent/create/canvasFromIdentity';
-import { selectHubToolsForIntent } from '@/components/flowUI/nodes/agent/create/hubCatalogSelect';
+import {
+  applyLocalHubBinds,
+  describeSelectedTools,
+  selectHubToolsForIntent,
+} from '@/components/flowUI/nodes/agent/create/hubCatalogSelect';
+import {
+  createDismissedHubIds,
+  dismissHubPick,
+  EMPTY_HUB_SUGGESTIONS,
+  hubPatchFromPlan,
+  isAuthoritativePlan,
+  loadHubPlanContext,
+  removeHubSuggestion,
+  replaceHubSuggestions,
+  requestHubPlan,
+  type HubPlanPatch,
+  type HubPlanResult,
+} from '@/components/flowUI/nodes/agent/create/hubPlan';
 import { inferNeededCapabilities } from '@/components/flowUI/nodes/agent/create/capabilityInference';
 import {
   canvasHasCapability,
@@ -58,6 +75,8 @@ import {
   EMPTY_CREATE_FORM,
   type AgentCreateChatPatch,
   type AgentCreatePhase,
+  type CreateHubSuggestions,
+  type HubPickKind,
 } from '@/components/flowUI/nodes/agent/create/types';
 import { useAgentCreateForm } from '@/components/flowUI/nodes/agent/create/useAgentCreateForm';
 import {
@@ -73,6 +92,13 @@ import {
 } from '@/components/flowUI/nodes/agent/create/chatOverlayDial';
 
 const WRITE_MS = 1100;
+
+type CreateMark = 'turn' | 'plan-ready' | 'tools-filled' | 'prompt-done' | 'ready';
+
+/** Dev-only timing marks (`create:turn` … `create:ready`) for the create pipeline. */
+function markCreate(mark: CreateMark): void {
+  if (import.meta.env.DEV) performance.mark(`create:${mark}`);
+}
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => {
@@ -172,6 +198,20 @@ export function AgentCreateSplitPage({
   const [capabilityBlock, setCapabilityBlock] = useState(false);
   const canvasTurnChainRef = useRef(Promise.resolve());
   const lastJobIntentRef = useRef('');
+  // Hub plan (XOR-backed suggest-tools) of the latest draft turn, ids the user removed
+  // this session, and the dashed suggestion chips. Kept out of useAgentCreateForm so
+  // none of it feeds dirty checks or conflicts.
+  const planRef = useRef<HubPlanResult | null>(null);
+  const dismissedRef = useRef(createDismissedHubIds());
+  const [hubSuggestions, setHubSuggestions] = useState<CreateHubSuggestions>(EMPTY_HUB_SUGGESTIONS);
+
+  const onHubSuggestionAccepted = useCallback((kind: HubPickKind, id: string): void => {
+    setHubSuggestions(prev => removeHubSuggestion(prev, kind, id));
+  }, []);
+  const onHubPickDismissed = useCallback((kind: HubPickKind, id: string): void => {
+    dismissHubPick(dismissedRef.current, kind, id);
+    setHubSuggestions(prev => removeHubSuggestion(prev, kind, id));
+  }, []);
 
   const slug = effectiveSlug({
     name: createForm.form.name,
@@ -361,12 +401,14 @@ export function AgentCreateSplitPage({
   const onTurnComplete = useCallback(
     (turn: CreateChatTurn): Promise<void> => {
       if (scripted) return Promise.resolve();
+      markCreate('turn');
       const run = canvasTurnChainRef.current.then(async (): Promise<void> => {
         const canvasEmpty = canvasIsEmpty(createForm.form);
         const userText = turn.userText;
 
+        const walkAction = resolveWalkCreateAction(userText);
         const action =
-          resolveWalkCreateAction(userText) ??
+          walkAction ??
           decideCreateCanvasAction({
             userText,
             canvasEmpty,
@@ -434,6 +476,28 @@ export function AgentCreateSplitPage({
           return;
         }
 
+        // One suggest-tools call decides every hub. Start it now so the ~1s call hides
+        // behind the identity animation; it is also what makes heal / Create block moot.
+        const planIntent = [userText.trim(), action.intent.trim()].filter(Boolean).join('\n');
+        const wantsPlan =
+          !walkAction &&
+          (canvasEmpty ||
+            action.fields.some(
+              field => field === 'tools' || field === 'skills' || field === 'knowledge',
+            ));
+        const planContext = wantsPlan ? loadHubPlanContext(user?.id) : undefined;
+        if (wantsPlan) planRef.current = null;
+        const hubPlan = wantsPlan
+          ? requestHubPlan({
+              intent: planIntent,
+              systemPrompt: createForm.getForm().systemPrompt || undefined,
+            }).then(plan => {
+              planRef.current = plan;
+              if (plan) markCreate('plan-ready');
+              return plan;
+            })
+          : undefined;
+
         const firstDescribe = canvasEmpty;
         if (firstDescribe) {
           setSkeletonIdentity(true);
@@ -464,6 +528,41 @@ export function AgentCreateSplitPage({
             applyChatPatch: createForm.applyChatPatch,
             sleep,
             ...(turn.announceSection ? { onSectionComplete: turn.announceSection } : {}),
+            onPerfMark: markCreate,
+            onHubSuggestions: (next, hubs) =>
+              setHubSuggestions(prev => replaceHubSuggestions(prev, next, hubs)),
+            ...(hubPlan && planContext
+              ? {
+                  hubPlan,
+                  resolveHubPlan: async (plan: HubPlanResult): Promise<HubPlanPatch | null> => {
+                    const context = await planContext;
+                    const live = createForm.getForm();
+                    return hubPatchFromPlan({
+                      plan,
+                      intent: planIntent,
+                      catalog: context.catalog,
+                      current: live,
+                      skills: context.skills,
+                      kbCollections: context.collections,
+                      dismissed: dismissedRef.current,
+                    });
+                  },
+                  // Soft deadline missed: regex binds only, the plan then adds chips.
+                  fillToolsLocal: async (
+                    incoming: AgentCreateChatPatch,
+                  ): Promise<string[] | undefined> => {
+                    const context = await planContext;
+                    if (!context.catalog) return;
+                    const next = applyLocalHubBinds(
+                      planIntent,
+                      context.catalog,
+                      createForm.getForm().tools,
+                    );
+                    incoming.tools = next;
+                    return describeSelectedTools(next, context.catalog);
+                  },
+                }
+              : {}),
             ...(action.fields.includes('tools')
               ? {
                   fillTools: async (incoming: AgentCreateChatPatch) => {
@@ -592,19 +691,27 @@ export function AgentCreateSplitPage({
           lastJobIntentRef.current = [userText.trim(), action.intent.trim()]
             .filter(Boolean)
             .join('\n');
-          // Post-bind validation: heal missing hubs the job needs, then gate Create.
-          const capResult = await healMissingCapabilities(lastJobIntentRef.current);
-          if (capResult.healable.length > 0) {
-            setCapabilityBlock(true);
-            setCreateError(capabilityGapMessage(capResult));
-          } else {
+          // The plan is settled by now (hard 4s ceiling); it sets the authoritative flag.
+          if (hubPlan) await hubPlan;
+          if (isAuthoritativePlan(planRef.current)) {
+            // XOR scored every hub: nothing to heal, nothing to block Create on.
             setCapabilityBlock(false);
-            const miss = capabilityGapMessage(capResult);
-            if (miss && capResult.catalogMiss.length > 0) {
-              setCreateError(miss);
+          } else {
+            // Legacy path: heal missing hubs the job needs, then gate Create.
+            const capResult = await healMissingCapabilities(lastJobIntentRef.current);
+            if (capResult.healable.length > 0) {
+              setCapabilityBlock(true);
+              setCreateError(capabilityGapMessage(capResult));
+            } else {
+              setCapabilityBlock(false);
+              const miss = capabilityGapMessage(capResult);
+              if (miss && capResult.catalogMiss.length > 0) {
+                setCreateError(miss);
+              }
             }
           }
-          await sleep(WRITE_MS * 2);
+          markCreate('ready');
+          await sleep(300);
           createForm.setWritingField(null);
           createForm.setAttentionField(null);
           setProgressLabel(null);
@@ -629,13 +736,16 @@ export function AgentCreateSplitPage({
     if (scripted || !canCreate || creating) return;
     setCreating(true);
     setCreateError(null);
-    const intent = lastJobIntentRef.current || jobIntentFromForm('', createForm.getForm());
-    const capResult = await healMissingCapabilities(intent);
-    if (capResult.healable.length > 0) {
-      setCapabilityBlock(true);
-      setCreateError(capabilityGapMessage(capResult));
-      setCreating(false);
-      return;
+    // XOR-decided hubs need no re-check: Save makes no selection network call.
+    if (!isAuthoritativePlan(planRef.current)) {
+      const intent = lastJobIntentRef.current || jobIntentFromForm('', createForm.getForm());
+      const capResult = await healMissingCapabilities(intent);
+      if (capResult.healable.length > 0) {
+        setCapabilityBlock(true);
+        setCreateError(capabilityGapMessage(capResult));
+        setCreating(false);
+        return;
+      }
     }
     setCapabilityBlock(false);
     // catalogMiss is honest-only — Create may proceed (draft already warned).
@@ -745,6 +855,9 @@ export function AgentCreateSplitPage({
       writingHubRow={createForm.writingHubRow}
       attentionField={createForm.attentionField}
       attentionHubRow={createForm.attentionHubRow}
+      hubSuggestions={hubSuggestions}
+      onHubSuggestionAccepted={onHubSuggestionAccepted}
+      onHubPickDismissed={onHubPickDismissed}
       phase={phase === 'created' ? 'created' : phase === 'empty' ? 'empty' : 'draft'}
       builtBy={builtBy}
       handleError={handleError}

@@ -25,12 +25,36 @@ export const SYSTEM_ONE_BACKENDS = {
     envPrefix: "OUR_TRAINED_JEV",
     sharedEnvPrefix: "OUR_JEV",
   },
+  // Grid's calibrated classifier. Its key allows only a handful of parallel
+  // requests, so it is explicit-only (see EXPLICIT_ONLY_BACKENDS).
+  xor: {
+    label: "XOR (Grid)",
+    envPrefix: "XOR",
+    defaultUrl: "https://grid.ai.juspay.net/v1/systemone",
+    defaultModel: "jev-latest",
+  },
 } as const satisfies Record<string, SystemOneBackendSpec>;
 
 export type SystemOneBackendName = keyof typeof SYSTEM_ONE_BACKENDS;
 export const SYSTEM_ONE_BACKEND_NAMES = Object.keys(SYSTEM_ONE_BACKENDS) as SystemOneBackendName[];
 
-export const JUDGE_BACKENDS = [...SYSTEM_ONE_BACKEND_NAMES, "llm"] as const;
+/**
+ * Backends a call site must name itself (`jevAskOn("xor", ...)`). They can never
+ * be a run's pinned judge, a JUDGE_SHADOW mirror target, or an eval-UI option:
+ * each of those would fan every Jev call onto a rate-limited key.
+ */
+export const EXPLICIT_ONLY_BACKENDS = ["xor"] as const satisfies readonly SystemOneBackendName[];
+
+export function isExplicitOnlyBackend(backend: JudgeBackendName): boolean {
+  return (EXPLICIT_ONLY_BACKENDS as readonly string[]).includes(backend);
+}
+
+/** System One backends that may be selected per run, mirrored, or listed in the eval UI. */
+export const SELECTABLE_SYSTEM_ONE_BACKEND_NAMES = SYSTEM_ONE_BACKEND_NAMES.filter(
+  (name) => !(EXPLICIT_ONLY_BACKENDS as readonly string[]).includes(name),
+);
+
+export const JUDGE_BACKENDS = [...SELECTABLE_SYSTEM_ONE_BACKEND_NAMES, "llm"] as const;
 export type JudgeBackendName = SystemOneBackendName | "llm";
 
 export function judgeBackendLabel(backend: JudgeBackendName): string {

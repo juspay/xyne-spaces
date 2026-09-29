@@ -3,6 +3,7 @@ import { useMutation } from '@tanstack/react-query';
 import { ClawApiError } from '@/services/claw/clawRequest';
 import { suggestTools } from '@/services/claw/clawToolsService';
 import type { ToolSuggestion } from '@/services/claw/clawToolsTypes';
+import { withSuggestedPicks } from '../../primitives/suggestionMatch';
 import type { SubagentCatalogEntry } from './subagentCatalog';
 
 export interface SubagentSuggestions {
@@ -60,7 +61,7 @@ export function useSubagentSuggestions(
   }, [canRun, isPending, mutate, systemPrompt, description]);
 
   const suggested = useMemo(
-    () => resolveSuggestion(mutation.data, catalog),
+    () => resolveSuggestion(withSuggestedPicks(mutation.data), catalog),
     [mutation.data, catalog],
   );
 

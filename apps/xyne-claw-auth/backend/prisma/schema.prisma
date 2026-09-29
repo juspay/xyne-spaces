@@ -1810,7 +1810,7 @@ model Tool {
 }
 
 
-/// Selection decisions from Hub /suggest-tools (Laya shadow/fast gate).
+/// Selection decisions from Hub /suggest-tools: which path decided (xor|judge|shortlist) and each candidate's XOR score.
 model AgentToolDecision {
   id           String   @id @default(cuid())
   orgId        String
@@ -1824,10 +1824,15 @@ model AgentToolDecision {
   fallback     String   @default("none")
   mode         String   @default("shadow")
   packVersion  String   @default("authoring-pack-v2")
+  /// xor | judge | shortlist
+  source       String   @default("judge")
+  /// { candidates: [{ hub, id, p }] } — raw XOR probabilities for offline threshold tuning.
+  scores       Json     @default("{}")
   createdAt    DateTime @default(now())
 
   @@index([orgId, createdAt])
   @@index([mode, createdAt])
+  @@index([source, createdAt])
   @@map("agent_tool_decisions")
 }
 

@@ -1,29 +1,46 @@
 /**
  * Per-hub selection rules and confidence thresholds (stage E).
- * Starting points from competitor research; tune on golden eval.
+ * Starting points from competitor research; tune on the golden eval (`--sweep`).
+ * Each threshold can be overridden per deploy with `XOR_TH_<SNAKE_NAME>`,
+ * e.g. `XOR_TH_AUTO_BIND=0.8`.
  */
 
 export const SHORTLIST_TOP_K = 8;
 
-/** Whole suggest budget — must cover fast-model JSON pick (was 3.5s; Grid kimi often exceeds that). */
+/** Whole suggest budget — must cover the XOR call plus the LLM-judge fallback. */
 export const SUGGEST_BUDGET_MS = 20_000;
 
 export const SELECTION_THRESHOLDS = {
-  /** Skills / knowledge auto-bind floor. */
+  /** MCP / skills auto-bind floor. */
   autoBind: 0.75,
-  /** Skills / knowledge suggest band lower bound. */
+  /** Suggest band lower bound (one-click chip). */
   suggestMin: 0.5,
-  /** Builtin: rule match + judge. */
+  /** Builtin: rule match + XOR. */
   builtinRuleAndJudge: 0.6,
-  /** Builtin: judge alone. */
+  /** Builtin: XOR alone. */
   builtinJudgeAlone: 0.8,
-  /** Subagent suggest floor (never auto-bound). */
+  /** Subagent suggest floor (only named subagents are auto-bound). */
   subagentSuggest: 0.75,
-  /** Max subagents suggested. */
+  /** Max subagents bound or suggested. */
   subagentCap: 2,
-  /** Max auto-bound skills. */
+  /** Max auto-bound skills / knowledge collections. */
   skillAutoCap: 3,
+  /** Knowledge collections have generic names, so bind only on strong signal. */
+  knowledgeAutoBind: 0.85,
 } as const;
+
+type ThresholdName = keyof typeof SELECTION_THRESHOLDS;
+
+/** Read a threshold, honouring the `XOR_TH_*` env override. */
+export function selectionThreshold(name: ThresholdName): number {
+  const envName = `XOR_TH_${name.replace(/[A-Z]/g, (c) => `_${c}`).toUpperCase()}`;
+  const raw = process.env[envName];
+  if (raw !== undefined && raw.trim() !== "") {
+    const n = Number(raw);
+    if (Number.isFinite(n)) return n;
+  }
+  return SELECTION_THRESHOLDS[name];
+}
 
 export type HubPickKind = "bound" | "suggested" | "none";
 
@@ -51,15 +68,20 @@ export function namedItemConfidence(): number {
   return 1.0;
 }
 
-export function applySkillThresholds(picks: JudgedPick[]): AppliedHubResult {
-  const ranked = [...picks]
-    .filter((p) => p.confidence >= SELECTION_THRESHOLDS.suggestMin)
-    .sort((a, b) => b.confidence - a.confidence);
-  const bound = ranked
-    .filter((p) => p.confidence >= SELECTION_THRESHOLDS.autoBind)
-    .slice(0, SELECTION_THRESHOLDS.skillAutoCap);
+function byConfidence(a: JudgedPick, b: JudgedPick): number {
+  return b.confidence - a.confidence;
+}
+
+function splitAt(picks: JudgedPick[], bindAt: number, boundCap?: number): { bound: JudgedPick[]; suggested: JudgedPick[] } {
+  const ranked = picks.filter((p) => p.confidence >= selectionThreshold("suggestMin")).sort(byConfidence);
+  let bound = ranked.filter((p) => p.confidence >= bindAt);
+  if (boundCap !== undefined) bound = bound.slice(0, boundCap);
   const boundIds = new Set(bound.map((p) => p.id));
-  const suggested = ranked.filter((p) => !boundIds.has(p.id));
+  return { bound, suggested: ranked.filter((p) => !boundIds.has(p.id)) };
+}
+
+export function applySkillThresholds(picks: JudgedPick[]): AppliedHubResult {
+  const { bound, suggested } = splitAt(picks, selectionThreshold("autoBind"), selectionThreshold("skillAutoCap"));
   if (bound.length === 0 && suggested.length === 0) {
     return { bound: [], suggested: [], none: true, reason: "No skill needed" };
   }
@@ -67,62 +89,66 @@ export function applySkillThresholds(picks: JudgedPick[]): AppliedHubResult {
 }
 
 export function applyKnowledgeThresholds(picks: JudgedPick[]): AppliedHubResult {
-  return applySkillThresholds(picks);
+  const { bound, suggested } = splitAt(
+    picks,
+    selectionThreshold("knowledgeAutoBind"),
+    selectionThreshold("skillAutoCap"),
+  );
+  if (bound.length === 0 && suggested.length === 0) {
+    return { bound: [], suggested: [], none: true, reason: "No knowledge collection needed" };
+  }
+  return { bound, suggested, none: false };
 }
 
-export function applySubagentThresholds(picks: JudgedPick[]): AppliedHubResult {
-  const suggested = [...picks]
-    .filter((p) => p.confidence >= SELECTION_THRESHOLDS.subagentSuggest)
-    .sort((a, b) => b.confidence - a.confidence)
-    .slice(0, SELECTION_THRESHOLDS.subagentCap);
-  if (suggested.length === 0) {
-    return {
-      bound: [],
-      suggested: [],
-      none: true,
-      reason: "No subagent needed",
-    };
+/**
+ * Delegating to a subagent changes how the agent runs, so only subagents the
+ * request names are bound; the rest are one-click suggestions.
+ */
+export function applySubagentThresholds(picks: JudgedPick[], namedIds: ReadonlySet<string> = new Set()): AppliedHubResult {
+  const cap = selectionThreshold("subagentCap");
+  const bound = picks
+    .filter((p) => namedIds.has(p.id))
+    .sort(byConfidence)
+    .slice(0, cap);
+  const boundIds = new Set(bound.map((p) => p.id));
+  const suggested = picks
+    .filter((p) => !boundIds.has(p.id) && p.confidence >= selectionThreshold("subagentSuggest"))
+    .sort(byConfidence)
+    .slice(0, Math.max(0, cap - bound.length));
+  if (bound.length === 0 && suggested.length === 0) {
+    return { bound: [], suggested: [], none: true, reason: "No subagent needed" };
   }
-  // Subagents are suggest-only — never auto-bound.
-  return { bound: [], suggested, none: false };
+  return { bound, suggested, none: false };
 }
 
 export function applyBuiltinThresholds(
   picks: JudgedPick[],
-  ruleMatchedIds: Set<string>,
+  ruleMatchedIds: ReadonlySet<string>,
 ): AppliedHubResult {
   const bound: JudgedPick[] = [];
   const suggested: JudgedPick[] = [];
   for (const p of picks) {
     const ruleHit = ruleMatchedIds.has(p.id);
     if (
-      (ruleHit && p.confidence >= SELECTION_THRESHOLDS.builtinRuleAndJudge) ||
-      p.confidence >= SELECTION_THRESHOLDS.builtinJudgeAlone
+      (ruleHit && p.confidence >= selectionThreshold("builtinRuleAndJudge")) ||
+      p.confidence >= selectionThreshold("builtinJudgeAlone")
     ) {
       bound.push(p);
-    } else if (p.confidence >= SELECTION_THRESHOLDS.suggestMin) {
+    } else if (p.confidence >= selectionThreshold("suggestMin")) {
       suggested.push(p);
     }
   }
+  bound.sort(byConfidence);
+  suggested.sort(byConfidence);
   if (bound.length === 0 && suggested.length === 0) {
-    return {
-      bound: [],
-      suggested: [],
-      none: true,
-      reason: "No built-in tools needed",
-    };
+    return { bound: [], suggested: [], none: true, reason: "No built-in tools needed" };
   }
   return { bound, suggested, none: false };
 }
 
 export function applyMcpThresholds(picks: JudgedPick[]): AppliedHubResult {
   // MCP: auto-bind high confidence; suggest mid; named already 1.0.
-  const ranked = [...picks]
-    .filter((p) => p.confidence >= SELECTION_THRESHOLDS.suggestMin)
-    .sort((a, b) => b.confidence - a.confidence);
-  const bound = ranked.filter((p) => p.confidence >= SELECTION_THRESHOLDS.autoBind);
-  const boundIds = new Set(bound.map((p) => p.id));
-  const suggested = ranked.filter((p) => !boundIds.has(p.id));
+  const { bound, suggested } = splitAt(picks, selectionThreshold("autoBind"));
   if (bound.length === 0 && suggested.length === 0) {
     return { bound: [], suggested: [], none: true, reason: "No MCP needed" };
   }
@@ -131,7 +157,8 @@ export function applyMcpThresholds(picks: JudgedPick[]): AppliedHubResult {
 
 /**
  * Builtin rule table — fixed triggers for small catalog (<20).
- * Mirrors GPT Builder / Copilot Studio precedent.
+ * Mirrors GPT Builder / Copilot Studio precedent. A rule that matches the
+ * request lowers the bar for a builtin whose slug or tools contain a needle.
  */
 export const BUILTIN_RULE_TABLE: ReadonlyArray<{
   id: string;

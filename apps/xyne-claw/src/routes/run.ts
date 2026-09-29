@@ -58,6 +58,7 @@ import { loadCustomTools } from "../custom-tools.js";
 import { buildCopilotTool } from "../copilot.js";
 import { pinRunJudgeBackend } from "../judge-backend.js";
 import { optEnabled, pinRunOptimizations } from "../optimizations.js";
+import { pinRunFlags } from "../run-context.js";
 import { activeToolCap, demotedCatalogItem, planActiveToolCap, readToolUsageRank } from "../active-tool-cap.js";
 import { buildExperimentTools, buildExperimentReviewTools, type ExperimentContext } from "../experiment.js";
 import {
@@ -554,6 +555,8 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     resumedFromHandoff,
     judgeBackend,
     optimizations,
+    instant,
+    disableTools,
     memoryBankId,
     twinDestinations,
     senderName,
@@ -568,6 +571,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
   const experiment = normalizeExperimentContext(rawExperiment);
   pinRunJudgeBackend(judgeBackend);
   pinRunOptimizations(optimizations, agentConfig?.["optimizations"]);
+  pinRunFlags({ instant, disableTools });
 
   // [AUTODBG] claw-side receipt of every /run forward (esp. automations). Confirms
   // the request crossed claw-auth → claw and which session id it arrived under
@@ -1670,8 +1674,8 @@ export async function processTask(
     const explicitTaskCommand = parseTaskCommand(task);
     const routedMode = await routeTaskMode(task, explicitTaskCommand, abortSignal);
     const taskCommand = routedMode.command;
-    if (routedMode.source === "model" && taskCommand) {
-      log(`[task-command] ${taskCommand.command} selected by the mode router`);
+    if ((routedMode.source === "model" || routedMode.source === "xor") && taskCommand) {
+      log(`[task-command] ${taskCommand.command} selected by the mode router (${routedMode.source})`);
     }
     const recordSkillCommand = taskCommand?.command === "/record-skill";
     const {

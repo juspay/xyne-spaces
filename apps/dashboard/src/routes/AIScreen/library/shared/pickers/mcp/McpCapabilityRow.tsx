@@ -1,7 +1,9 @@
 import { useMemo, useState, type ReactElement } from 'react';
 import { Ai01, InformationCircle, PlusDefault } from '@xyne/icons';
 import { PropertyAddButton } from '@/components/flowUI/nodes/agent/create/PropertyAddButton';
+import type { CreateHubSuggestions } from '@/components/flowUI/nodes/agent/create/types';
 import { Tooltip } from '@/components/ui/Tooltip/Tooltip';
+import { matchSuggestedTools, suggestionFromPicks } from '../../primitives/suggestionMatch';
 import { disableEntry, enableEntry, isEntryEnabled, type McpSelection } from './mcpCatalog';
 import { BrowseMcpsDialog } from './BrowseMcpsDialog';
 import { DotGridLoader } from './DotGridLoader';
@@ -17,6 +19,11 @@ interface McpCapabilityRowProps {
   suggestContext: { systemPrompt: string; description: string };
   /** Profile properties list: placeholder or chips, without the stacked header. */
   layout?: 'profile';
+  /** Create page: mid-confidence picks shown as dashed chips (profile layout). */
+  hubSuggestions?: CreateHubSuggestions | undefined;
+  onSuggestionAccepted?: ((slug: string) => void) | undefined;
+  /** A chip was removed: the caller never re-adds it this session. */
+  onPickDismissed?: ((slug: string) => void) | undefined;
 }
 
 export function McpCapabilityRow({
@@ -24,6 +31,9 @@ export function McpCapabilityRow({
   onSelectionChange,
   suggestContext,
   layout,
+  hubSuggestions,
+  onSuggestionAccepted,
+  onPickDismissed,
 }: McpCapabilityRowProps): ReactElement {
   const [browseOpen, setBrowseOpen] = useState(false);
   const [browseSlug, setBrowseSlug] = useState<string | null>(null);
@@ -38,6 +48,20 @@ export function McpCapabilityRow({
   const suggestedChips = useMemo(
     () => suggestions.suggested.filter(match => !isEntryEnabled(selection, match.entry)),
     [suggestions.suggested, selection],
+  );
+
+  const planChips = useMemo(
+    () =>
+      hubSuggestions && hubSuggestions.mcp.length > 0
+        ? matchSuggestedTools(
+            suggestionFromPicks(hubSuggestions.mcp),
+            entries,
+            entry => entry.slug,
+            entry => entry.tools,
+            entry => entry.label,
+          ).filter(match => !isEntryEnabled(selection, match.entry))
+        : [],
+    [hubSuggestions, entries, selection],
   );
 
   const renderSuggestAction = (): ReactElement => {
@@ -97,7 +121,7 @@ export function McpCapabilityRow({
   if (layout === 'profile') {
     return (
       <>
-        {selectedEntries.length === 0 ? (
+        {selectedEntries.length === 0 && planChips.length === 0 ? (
           <PropertyAddButton
             label='Add MCP'
             trackName='Create agent v2: browse MCPs'
@@ -118,7 +142,22 @@ export function McpCapabilityRow({
                   setBrowseSlug(entry.slug);
                   setBrowseOpen(true);
                 }}
-                onToggle={() => onSelectionChange(disableEntry(entries, selection, entry))}
+                onToggle={() => {
+                  onSelectionChange(disableEntry(entries, selection, entry));
+                  onPickDismissed?.(entry.slug);
+                }}
+              />
+            ))}
+            {planChips.map(match => (
+              <McpChip
+                key={`suggested-${match.entry.slug}`}
+                label={match.entry.label}
+                iconType={match.entry.iconType}
+                selected={false}
+                onToggle={() => {
+                  onSelectionChange(enableEntry(entries, selection, match.entry, match.tools));
+                  onSuggestionAccepted?.(match.entry.slug);
+                }}
               />
             ))}
           </div>

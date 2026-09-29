@@ -38,6 +38,10 @@ export const OPTIMIZATIONS = {
     summary: "with the open palette on, tools it admitted (not ones the agent was granted) stay hidden in the catalog — including write tools — and under a reads+writes palette the forced `spaces` wrapper is dropped since its tools are loadable directly",
     defaultOn: false,
   },
+  xor_mode_router: {
+    summary: "the mode router asks XOR (a ~0.25s typed classifier) which working mode a message plainly wants and only falls back to the LLM router when XOR is unsure, unavailable or rate-limited",
+    defaultOn: true,
+  },
   active_tool_cap: {
     summary: "when an agent starts with more active tools than its cap (25 by default), only its most-used tools of the last 7 days stay active; the rest move to the catalog, are named in the tool index and load with one load-tools call — nothing is removed from the grant",
     defaultOn: false,

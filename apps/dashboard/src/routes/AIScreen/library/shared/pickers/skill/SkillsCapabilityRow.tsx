@@ -1,6 +1,7 @@
 import { useMemo, useState, type ReactElement } from 'react';
 import { InformationCircle, PlusDefault } from '@xyne/icons';
 import { PropertyAddButton } from '@/components/flowUI/nodes/agent/create/PropertyAddButton';
+import type { CreateHubSuggestions } from '@/components/flowUI/nodes/agent/create/types';
 import { Tooltip } from '@/components/ui/Tooltip/Tooltip';
 import { BrowseSkillsDialog } from './BrowseSkillsDialog';
 import { SkillChip } from './SkillChip';
@@ -13,12 +14,20 @@ interface SkillsCapabilityRowProps {
   selectedIds: readonly string[];
   onChange: (next: string[]) => void;
   layout?: 'profile';
+  /** Create page: mid-confidence picks shown as dashed chips (profile layout). */
+  hubSuggestions?: CreateHubSuggestions | undefined;
+  onSuggestionAccepted?: ((skillId: string) => void) | undefined;
+  /** A chip was removed: the caller never re-adds it this session. */
+  onPickDismissed?: ((skillId: string) => void) | undefined;
 }
 
 export function SkillsCapabilityRow({
   selectedIds,
   onChange,
   layout,
+  hubSuggestions,
+  onSuggestionAccepted,
+  onPickDismissed,
 }: SkillsCapabilityRowProps): ReactElement {
   const [browseOpen, setBrowseOpen] = useState(false);
   const [browseId, setBrowseId] = useState<string | null>(null);
@@ -29,10 +38,15 @@ export function SkillsCapabilityRow({
     [entries, selectedIds],
   );
 
+  const planChips = useMemo(
+    () => (hubSuggestions?.skills ?? []).filter(pick => !selectedIds.includes(pick.id)),
+    [hubSuggestions, selectedIds],
+  );
+
   if (layout === 'profile') {
     return (
       <>
-        {selectedEntries.length === 0 ? (
+        {selectedEntries.length === 0 && planChips.length === 0 ? (
           <PropertyAddButton
             label='Add skill'
             trackName='Create agent v2: browse skills'
@@ -52,7 +66,21 @@ export function SkillsCapabilityRow({
                   setBrowseId(entry.id);
                   setBrowseOpen(true);
                 }}
-                onToggle={() => onChange(disableSkill(selectedIds, entry))}
+                onToggle={() => {
+                  onChange(disableSkill(selectedIds, entry));
+                  onPickDismissed?.(entry.id);
+                }}
+              />
+            ))}
+            {planChips.map(pick => (
+              <SkillChip
+                key={`suggested-${pick.id}`}
+                label={pick.label}
+                selected={false}
+                onToggle={() => {
+                  onChange([...selectedIds, pick.id]);
+                  onSuggestionAccepted?.(pick.id);
+                }}
               />
             ))}
           </div>

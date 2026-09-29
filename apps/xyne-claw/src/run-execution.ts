@@ -1,5 +1,6 @@
 import { pinRunJudgeBackend } from "./judge-backend.js";
 import { pinRunOptimizations } from "./optimizations.js";
+import { pinRunFlags } from "./run-context.js";
 import {
   ensureActiveRun,
   finishActiveRun,
@@ -126,6 +127,10 @@ export interface InternalRunPayload {
   resumedFromHandoff?: boolean;
   judgeBackend?: string;
   optimizations?: unknown;
+  /** Create-page chat turn: skip pre-run deliberation (the mode router). Set by claw-auth. */
+  instant?: boolean;
+  /** Create-page chat turn: no tools at all. Set by claw-auth. */
+  disableTools?: boolean;
   memoryBankId?: string;
   /** Digital Twin mention flow: real reply destinations the user can post in
    *  (their accessible channels/threads), built by claw-auth from Spaces
@@ -227,6 +232,8 @@ export async function executeRunFromPayload(
     resumedFromHandoff,
     judgeBackend,
     optimizations,
+    instant,
+    disableTools,
     memoryBankId,
     twinDestinations,
     senderName,
@@ -251,6 +258,7 @@ export async function executeRunFromPayload(
 
   pinRunJudgeBackend(judgeBackend);
   pinRunOptimizations(optimizations, agentConfig?.["optimizations"]);
+  pinRunFlags({ instant, disableTools });
 
   try {
     // Process in background

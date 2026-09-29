@@ -54,7 +54,7 @@ void describe('parseCreateChatAction', () => {
     );
     assert.equal(
       sectionCompleteChatLine({ field: 'tools', hubRow: 'mcp', toolLabels: ['Slack'] }),
-      'Also suggested MCP: Slack.',
+      'Added MCP: Slack.',
     );
     assert.equal(
       sectionCompleteChatLine({
@@ -62,7 +62,7 @@ void describe('parseCreateChatAction', () => {
         hubRow: 'subagent',
         toolLabels: ['Slack', 'subagent:web-research'],
       }),
-      'Also suggested MCP: Slack; subagent: web-research.',
+      'Added MCP: Slack; subagent: web-research.',
     );
     assert.equal(
       sectionCompleteChatLine({ field: 'tools', hubRow: 'subagent', toolLabels: [] }),
@@ -75,7 +75,7 @@ void describe('parseCreateChatAction', () => {
     assert.equal(sectionCompleteChatLine({ field: 'skills' }), null);
     assert.equal(
       sectionCompleteChatLine({ field: 'skills', skillLabel: 'API design review' }),
-      'Also suggested skill: API design review.',
+      'Added skill: API design review.',
     );
     assert.equal(
       sectionCompleteChatLine({ field: 'knowledge', bindMiss: true }),

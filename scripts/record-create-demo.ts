@@ -4,7 +4,7 @@
  *
  * Usage:
  *   cd apps/dashboard
- *   pnpm exec tsx ../../scripts/record-laya-create-demo.ts
+ *   pnpm exec tsx ../../scripts/record-create-demo.ts
  *
  * Optional:
  *   STORAGE_STATE=~/.xyne-spaces-storage.json  (from playwright state-save)
@@ -14,7 +14,7 @@ import { chromium } from "playwright";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 
-const outDir = join(process.cwd(), "files/media/laya-validate");
+const outDir = join(process.cwd(), "files/media/create-validate");
 mkdirSync(outDir, { recursive: true });
 
 const createUrl =

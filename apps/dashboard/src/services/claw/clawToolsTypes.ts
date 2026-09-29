@@ -39,6 +39,10 @@ export interface AvailableTools {
 // AI-suggested tool selection from an agent's intent (system prompt or short
 // description). Rendered as a proposal the user accepts/rejects before it
 // touches the selection.
+
+/** Capability hubs the suggest-tools call can decide. */
+export type SuggestHub = 'mcp' | 'builtin' | 'subagent' | 'skill' | 'knowledge';
+
 export interface HubJudgedPick {
   id: string;
   confidence: number;
@@ -51,6 +55,28 @@ export interface HubJudgement {
   reason?: string;
 }
 
+/** Mid-confidence MCP / built-in integration offered as a one-click chip. */
+export interface SuggestedIntegration {
+  slug: string;
+  label: string;
+  confidence: number;
+  readTools: string[];
+  writeTools: string[];
+}
+
+export interface SuggestedPicks {
+  integrations: SuggestedIntegration[];
+  subagents: Array<{ name: string; confidence: number }>;
+  skills: Array<{ slug: string; confidence: number }>;
+  knowledge: Array<{ id: string; name: string; confidence: number }>;
+}
+
+/**
+ * Response of POST /agents/suggest-tools. The legacy arrays (`subagents`,
+ * `integrations`, `skillSlugs`, `knowledgeIds`) hold auto-bound picks only;
+ * mid-confidence picks live under `suggested`. Every field added by the XOR
+ * selector is optional so the judge / shortlist fallbacks keep working.
+ */
 export interface ToolSuggestion {
   subagents: string[];
   integrations: Array<{
@@ -59,15 +85,27 @@ export interface ToolSuggestion {
     writeTools: string[];
   }>;
   reasoning: Record<string, string>;
-  /** Optional org skill slugs from Laya gap shortlist / judge. */
+  /** Optional org skill slugs the selector auto-bound. */
   skillSlugs?: string[];
-  /** Per-hub judge output (stage D). */
+  /** Auto-bound knowledge collection ids (match ids in the KB tree). */
+  knowledgeIds?: string[];
+  /** Per-hub output: `picks` is bound ∪ suggested. */
   hubs?: {
     mcp?: HubJudgement;
     builtin?: HubJudgement;
     subagent?: HubJudgement;
     skill?: HubJudgement;
+    knowledge?: HubJudgement;
   };
+  /** Mid-confidence picks to show as dashed "suggested" chips. */
+  suggested?: SuggestedPicks;
+  /** Max candidate probability per hub; present when the selector scored them. */
+  needs?: Partial<Record<SuggestHub, number>>;
+  /** How many write-intent questions scored high (0 = read-only job). */
+  writes?: number;
+  /** Which selector produced this response. */
+  source?: 'xor' | 'judge' | 'shortlist';
+  latencyMs?: number;
 }
 
 /** The wizard's tool selection, threaded through ToolboxPicker value/onChange. */

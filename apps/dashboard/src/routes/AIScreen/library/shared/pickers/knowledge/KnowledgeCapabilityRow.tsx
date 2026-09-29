@@ -1,9 +1,11 @@
 import { useMemo, useState, type ReactElement } from 'react';
 import { InformationCircle, MultipleCrossCancelDefault, PlusDefault } from '@xyne/icons';
 import { PropertyAddButton } from '@/components/flowUI/nodes/agent/create/PropertyAddButton';
+import type { CreateHubSuggestions } from '@/components/flowUI/nodes/agent/create/types';
 import { Tooltip } from '@/components/ui/Tooltip/Tooltip';
 import { useClawKnowledgeBaseTree } from '@/hooks/useClawKnowledgeBaseTree';
 import type { KbSelection } from '@/services/claw/clawKnowledgeBaseTypes';
+import { CapabilityChip } from '../CapabilityChip';
 import { BrowseKnowledgeDialog } from './BrowseKnowledgeDialog';
 import { buildKbIndex, describeGrants, removeGrant, type KbScope } from './knowledgeCatalog';
 
@@ -15,6 +17,11 @@ interface KnowledgeCapabilityRowProps {
   grants: KbSelection[];
   onGrantsChange: (next: KbSelection[]) => void;
   layout?: 'profile';
+  /** Create page: mid-confidence picks shown as dashed chips (profile layout). */
+  hubSuggestions?: CreateHubSuggestions | undefined;
+  onSuggestionAccepted?: ((collectionId: string) => void) | undefined;
+  /** A chip was removed: the caller never re-adds it this session. */
+  onPickDismissed?: ((collectionId: string) => void) | undefined;
 }
 
 export function KnowledgeCapabilityRow({
@@ -23,6 +30,9 @@ export function KnowledgeCapabilityRow({
   grants,
   onGrantsChange,
   layout,
+  hubSuggestions,
+  onSuggestionAccepted,
+  onPickDismissed,
 }: KnowledgeCapabilityRowProps): ReactElement {
   const [browseOpen, setBrowseOpen] = useState(false);
   const tree = useClawKnowledgeBaseTree();
@@ -32,11 +42,18 @@ export function KnowledgeCapabilityRow({
     return describeGrants(grants, index);
   }, [tree.data?.collections, grants]);
 
+  const planChips = useMemo(() => {
+    // "Match the running user's access" makes collection grants moot.
+    if (scope === 'USER') return [];
+    const granted = new Set(grants.map(grant => grant.collectionId));
+    return (hubSuggestions?.knowledge ?? []).filter(pick => !granted.has(pick.id));
+  }, [hubSuggestions, scope, grants]);
+
   if (layout === 'profile') {
     const filled = scope === 'USER' || labels.length > 0;
     return (
       <>
-        {!filled ? (
+        {!filled && planChips.length === 0 ? (
           <PropertyAddButton
             label='Add knowledge'
             trackName='Create agent v2: browse knowledge'
@@ -59,7 +76,10 @@ export function KnowledgeCapabilityRow({
                   </span>
                   <button
                     type='button'
-                    onClick={() => onGrantsChange(removeGrant(grants, grant.selection))}
+                    onClick={() => {
+                      onGrantsChange(removeGrant(grants, grant.selection));
+                      onPickDismissed?.(grant.selection.collectionId);
+                    }}
                     aria-label={`Remove ${grant.label}`}
                     data-track-category='Claw Agents'
                     data-track-name='Create agent v2: remove knowledge'
@@ -70,6 +90,18 @@ export function KnowledgeCapabilityRow({
                 </span>
               ))
             )}
+            {planChips.map(pick => (
+              <CapabilityChip
+                key={`suggested-${pick.id}`}
+                label={pick.name}
+                selected={false}
+                onToggle={() => {
+                  onGrantsChange([...grants, { collectionId: pick.id, fileId: null }]);
+                  onSuggestionAccepted?.(pick.id);
+                }}
+                trackName='Create agent v2: toggle knowledge chip'
+              />
+            ))}
           </div>
         )}
         <BrowseKnowledgeDialog

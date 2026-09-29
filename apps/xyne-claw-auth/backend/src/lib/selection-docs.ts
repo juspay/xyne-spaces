@@ -125,8 +125,16 @@ export function enrichSkillDoc(s: {
   };
 }
 
-export function enrichKnowledgeDoc(k: { id: string; name: string }): SelectionDoc {
-  const useWhen = syntheticUseWhen(k.name, "knowledge collection", [
+export function enrichKnowledgeDoc(k: {
+  id: string;
+  name: string;
+  description?: string | null;
+  channelName?: string;
+  projectName?: string;
+}): SelectionDoc {
+  const where = [k.channelName, k.projectName].filter(Boolean).join(" · ");
+  const description = [k.description, where].filter(Boolean).join(" — ") || "knowledge collection";
+  const useWhen = syntheticUseWhen(k.name, description, [
     "answering from product docs",
     "looking up handbook or wiki",
   ]);
@@ -134,8 +142,8 @@ export function enrichKnowledgeDoc(k: { id: string; name: string }): SelectionDo
     id: k.id,
     hub: "knowledge",
     name: k.name,
-    description: "knowledge collection",
-    text: [k.name, k.id, ...useWhen].join("\n"),
+    description,
+    text: [k.name, description, ...useWhen].join("\n"),
     useWhen,
   };
 }

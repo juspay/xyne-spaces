@@ -9,7 +9,13 @@ import {
 } from './classifyCreateTurn.ts';
 import { buildDraftCanvasPatch, draftFromModelReply } from './canvasFromIdentity.ts';
 import { progressLabelForField, PROGRESS_THINKING } from './createProgressLabel.ts';
-import type { AgentCreateChatPatch, AgentCreateField, AgentCreateHubRow } from './types.ts';
+import type { HubPlanField, HubPlanPatch, HubPlanResult } from './hubPlan.ts';
+import type {
+  AgentCreateChatPatch,
+  AgentCreateField,
+  AgentCreateHubRow,
+  CreateHubSuggestions,
+} from './types.ts';
 import { slicePatch } from './mergeChatPatch.ts';
 
 const ANTICIPATE_MS = 520;
@@ -170,6 +176,8 @@ export async function revealCreatePatchFields(args: {
   ) => AgentCreateField[];
   sleep: (ms: number) => Promise<void>;
   onFieldComplete?: (field: CreateTurnField, hubRow: AgentCreateHubRow | null) => void;
+  /** Fires right after a hub slice lands on the canvas (before the settle pause). */
+  onFieldApplied?: (field: CreateTurnField) => void;
 }): Promise<void> {
   const patch = pickPatch(args.incoming, [...args.fields]);
   const reveal = CREATE_REVEAL_FIELD_ORDER.filter(field => args.fields.includes(field));
@@ -266,6 +274,7 @@ export async function revealCreatePatchFields(args: {
       args.setWritingField(null);
       continue;
     }
+    args.onFieldApplied?.(field);
     await args.sleep(args.writeMs);
     args.setWritingField(null);
     args.onFieldComplete?.(field, hubRow);
@@ -347,12 +356,18 @@ export function sectionCompleteChatLine(args: {
   field: CreateTurnField;
   hubRow?: AgentCreateHubRow | null;
   name?: string | null;
-  /** Human labels from catalog select — never invent email/X. Chips are SoT. */
+  /** Human labels of tools bound to the canvas — never invent email/X. Chips are SoT. */
   toolLabels?: readonly string[] | null;
+  /** Tools offered as dashed chips (same `subagent:` / `builtin:` label scheme). */
+  suggestedToolLabels?: readonly string[] | null;
   /** Skill display name when a skill chip was actually bound. */
   skillLabel?: string | null;
+  /** Skill offered as a dashed chip. */
+  suggestedSkillLabel?: string | null;
   /** Knowledge label when a KB chip was actually bound. */
   knowledgeLabel?: string | null;
+  /** Knowledge offered as a dashed chip. */
+  suggestedKnowledgeLabel?: string | null;
   /** When true, field was requested but catalog had no match — honest miss. */
   bindMiss?: boolean;
 }): string | null {
@@ -360,10 +375,21 @@ export function sectionCompleteChatLine(args: {
     field,
     name = null,
     toolLabels = null,
+    suggestedToolLabels = null,
     skillLabel = null,
+    suggestedSkillLabel = null,
     knowledgeLabel = null,
+    suggestedKnowledgeLabel = null,
     bindMiss = false,
   } = args;
+  const joinLines = (...lines: Array<string | null>): string | null => {
+    const kept = lines.filter((line): line is string => Boolean(line));
+    return kept.length > 0 ? kept.join(' ') : null;
+  };
+  const added = (text: string | null | undefined): string | null =>
+    text?.trim() ? `Added ${text.trim()}.` : null;
+  const suggested = (text: string | null | undefined): string | null =>
+    text?.trim() ? `Suggested (tap + to add): ${text.trim()}.` : null;
   if (field === 'name') {
     const trimmed = name?.trim();
     return trimmed ? `Name set to ${trimmed}.` : 'Name is on the canvas.';
@@ -372,34 +398,50 @@ export function sectionCompleteChatLine(args: {
     return 'Instructions are on the canvas.';
   }
   if (field === 'tools') {
-    const labels = (toolLabels ?? []).map(label => label.trim()).filter(Boolean);
-    if (labels.length === 0) {
+    const bound = describeToolLabels(toolLabels);
+    const offered = describeToolLabels(suggestedToolLabels);
+    if (!bound && !offered) {
       return bindMiss ? "Couldn't bind tools — no catalog match." : null;
     }
-    const subagent = labels
-      .filter(label => label.startsWith('subagent:'))
-      .map(label => label.slice('subagent:'.length));
-    const builtin = labels
-      .filter(label => label.startsWith('builtin:'))
-      .map(label => label.slice('builtin:'.length));
-    const mcp = labels.filter(
-      label => !label.startsWith('subagent:') && !label.startsWith('builtin:'),
-    );
-    const parts: string[] = [];
-    if (mcp.length > 0) parts.push(`MCP: ${mcp.join(', ')}`);
-    if (subagent.length > 0) parts.push(`subagent: ${subagent.join(', ')}`);
-    if (builtin.length > 0) parts.push(`built-in: ${builtin.join(', ')}`);
-    return parts.length > 0 ? `Also suggested ${parts.join('; ')}.` : null;
+    return joinLines(added(bound), suggested(offered));
   }
   if (field === 'skills') {
-    if (skillLabel?.trim()) return `Also suggested skill: ${skillLabel.trim()}.`;
-    return bindMiss ? "Couldn't bind a skill — none available." : null;
+    const bound = skillLabel?.trim() ? `skill: ${skillLabel.trim()}` : null;
+    const offered = suggestedSkillLabel?.trim() ? `skill: ${suggestedSkillLabel.trim()}` : null;
+    if (!bound && !offered) return bindMiss ? "Couldn't bind a skill — none available." : null;
+    return joinLines(added(bound), suggested(offered));
   }
   if (field === 'knowledge') {
-    if (knowledgeLabel?.trim()) return `Also suggested knowledge: ${knowledgeLabel.trim()}.`;
-    return bindMiss ? "Couldn't bind knowledge — no collections available." : null;
+    const bound = knowledgeLabel?.trim() ? `knowledge: ${knowledgeLabel.trim()}` : null;
+    const offered = suggestedKnowledgeLabel?.trim()
+      ? `knowledge: ${suggestedKnowledgeLabel.trim()}`
+      : null;
+    if (!bound && !offered) {
+      return bindMiss ? "Couldn't bind knowledge — no collections available." : null;
+    }
+    return joinLines(added(bound), suggested(offered));
   }
   return null;
+}
+
+/** "MCP: Slack; subagent: web-research; built-in: Web search" — null when empty. */
+function describeToolLabels(raw: readonly string[] | null | undefined): string | null {
+  const labels = (raw ?? []).map(label => label.trim()).filter(Boolean);
+  if (labels.length === 0) return null;
+  const subagent = labels
+    .filter(label => label.startsWith('subagent:'))
+    .map(label => label.slice('subagent:'.length));
+  const builtin = labels
+    .filter(label => label.startsWith('builtin:'))
+    .map(label => label.slice('builtin:'.length));
+  const mcp = labels.filter(
+    label => !label.startsWith('subagent:') && !label.startsWith('builtin:'),
+  );
+  const parts: string[] = [];
+  if (mcp.length > 0) parts.push(`MCP: ${mcp.join(', ')}`);
+  if (subagent.length > 0) parts.push(`subagent: ${subagent.join(', ')}`);
+  if (builtin.length > 0) parts.push(`built-in: ${builtin.join(', ')}`);
+  return parts.length > 0 ? parts.join('; ') : null;
 }
 
 export function stripCreateMarkers(text: string, streaming = false): string {
@@ -655,6 +697,27 @@ export function decideCreateCanvasAction(args: {
   };
 }
 
+/**
+ * How long past the identity prelude the hub plan may still take before the
+ * regex binds go on the canvas and the late picks arrive as chips only.
+ */
+export const HUB_PLAN_SOFT_DEADLINE_MS = 2_500;
+
+const HUB_FIELDS: readonly HubPlanField[] = ['tools', 'skills', 'knowledge'];
+
+interface HubPlanOutcome {
+  plan: HubPlanResult;
+  resolved: HubPlanPatch;
+}
+
+const PLAN_PENDING = Symbol('hub-plan-pending');
+
+function planPromptIntent(intent: string, summary: string): string {
+  return summary
+    ? `${intent}\n\nSelected capabilities:\n${summary}\nWrite operating instructions that use these tools when relevant.`
+    : intent;
+}
+
 /** Hub canvas write: model draft identity first, then reveal fields with writingField held at caret. */
 export async function applyCreateHubDraft(args: {
   action: Extract<CreateCanvasAction, { type: 'draft' }>;
@@ -672,19 +735,39 @@ export async function applyCreateHubDraft(args: {
     options: { highlight: boolean },
   ) => AgentCreateField[];
   sleep: (ms: number) => Promise<void>;
+  /** Fallbacks: used when there is no hub plan or the plan is not an XOR one. */
   fillTools?: (incoming: AgentCreateChatPatch) => Promise<string[] | void>;
   fillSkills?: (incoming: AgentCreateChatPatch) => Promise<string | void>;
   fillKnowledge?: (incoming: AgentCreateChatPatch) => Promise<string | void>;
+  /**
+   * Started by the caller at the top of the turn so the ~1s call hides behind
+   * the identity animation. Needs `resolveHubPlan` to take effect.
+   */
+  hubPlan?: Promise<HubPlanResult | null> | undefined;
+  /** Resolves a plan against the catalog / skills / KB into a canvas patch. */
+  resolveHubPlan?: ((plan: HubPlanResult) => Promise<HubPlanPatch | null>) | undefined;
+  /** Regex-only tool binds, applied when the plan misses the soft deadline. */
+  fillToolsLocal?: ((incoming: AgentCreateChatPatch) => Promise<string[] | void>) | undefined;
+  /** Dashed chips for the given hubs (also called for a plan that lands late). */
+  onHubSuggestions?:
+    | ((suggestions: CreateHubSuggestions, hubs: readonly HubPlanField[]) => void)
+    | undefined;
+  /** Dev-only timing hook. */
+  onPerfMark?: ((mark: 'tools-filled' | 'prompt-done') => void) | undefined;
   toolsHubRow?: AgentCreateHubRow;
   /** Chat announces after each section write settles (canvas-first). */
   onSectionComplete?: (line: string) => void;
 }): Promise<void> {
   const { action, canvasEmpty } = args;
   let toolsHubRow = args.toolsHubRow ?? 'mcp';
-  const generateInstructions = action.fields.includes('systemPrompt') || canvasEmpty;
+  let fields: readonly CreateTurnField[] = action.fields;
+  const generateInstructions = fields.includes('systemPrompt') || canvasEmpty;
   let toolLabels: string[] = [];
+  let suggestedToolLabels: string[] = [];
   let skillLabel: string | null = null;
+  let suggestedSkillLabel: string | null = null;
   let knowledgeLabel: string | null = null;
+  let suggestedKnowledgeLabel: string | null = null;
   let toolsMiss = false;
   let skillsMiss = false;
   let knowledgeMiss = false;
@@ -696,6 +779,41 @@ export async function applyCreateHubDraft(args: {
       field !== 'skills' &&
       field !== 'knowledge',
   );
+  // Closure-mutated state lives on an object so control-flow narrowing stays honest.
+  const state: { prompt: Promise<string> | null; deadlinePassed: boolean } = {
+    prompt: null,
+    deadlinePassed: false,
+  };
+  const existingPrompt = args.existingSystemPrompt.trim() || undefined;
+  const startPrompt = (promptIntent: string): Promise<string> =>
+    Promise.resolve()
+      .then(() => args.generateAgentPrompt(promptIntent, existingPrompt))
+      // Keep drafting from chat-stated Instructions/Rules or an intent fallback.
+      .catch(() => '')
+      .then(text => {
+        args.onPerfMark?.('prompt-done');
+        return text;
+      });
+
+  // Resolve the plan into a patch the moment it lands (overlaps the identity
+  // prelude) and start the instructions prompt from its richer summary.
+  const { hubPlan, resolveHubPlan } = args;
+  const planOutcome: Promise<HubPlanOutcome | null> =
+    hubPlan && resolveHubPlan
+      ? hubPlan
+          .then(async (plan): Promise<HubPlanOutcome | null> => {
+            if (!plan || plan.source !== 'xor') return null;
+            const resolved = await resolveHubPlan(plan);
+            return resolved ? { plan, resolved } : null;
+          })
+          .catch(() => null)
+          .then(outcome => {
+            if (outcome && !state.deadlinePassed && generateInstructions) {
+              state.prompt = startPrompt(planPromptIntent(action.intent, outcome.resolved.summary));
+            }
+            return outcome;
+          })
+      : Promise.resolve(null);
 
   args.setProgressLabel?.(PROGRESS_THINKING);
 
@@ -720,22 +838,11 @@ export async function applyCreateHubDraft(args: {
     if (args.setAttentionField) revealArgs.setAttentionField = args.setAttentionField;
     if (args.setProgressLabel) revealArgs.setProgressLabel = args.setProgressLabel;
     const announceField = (field: CreateTurnField, hubRow: AgentCreateHubRow | null): void => {
-      if (
-        field !== 'name' &&
-        field !== 'systemPrompt' &&
-        field !== 'tools' &&
-        field !== 'skills' &&
-        field !== 'knowledge'
-      ) {
-        return;
-      }
+      if (field !== 'name') return;
       const line = sectionCompleteChatLine({
         field,
         hubRow,
         name: typeof preludePatch.name === 'string' ? preludePatch.name : null,
-        toolLabels,
-        skillLabel,
-        knowledgeLabel,
       });
       if (line) args.onSectionComplete?.(line);
     };
@@ -757,81 +864,163 @@ export async function applyCreateHubDraft(args: {
   }
 
   const incoming: AgentCreateChatPatch = {};
+  const beginHubFill = async (
+    field: 'tools' | 'skills' | 'knowledge',
+    row: AgentCreateHubRow,
+  ): Promise<void> => {
+    await beginFieldAttention({
+      field,
+      hubRow: row,
+      ...(args.setAttentionField ? { setAttentionField: args.setAttentionField } : {}),
+      ...(args.setProgressLabel ? { setProgressLabel: args.setProgressLabel } : {}),
+      sleep: args.sleep,
+    });
+    args.setWritingField(field, row);
+    await args.sleep(Math.max(48, Math.min(args.writeMs, 120)));
+  };
+  // Hubs whose chips the plan may decide; edits only touch what the user asked for.
+  const suggestionHubs = (): HubPlanField[] =>
+    canvasEmpty ? [...HUB_FIELDS] : HUB_FIELDS.filter(field => action.fields.includes(field));
 
   // Hubs first (channel/DM order): bind real catalog ids before instructions.
-  if (action.fields.includes('tools') && args.fillTools) {
-    await beginFieldAttention({
-      field: 'tools',
-      hubRow: toolsHubRow,
-      ...(args.setAttentionField ? { setAttentionField: args.setAttentionField } : {}),
-      ...(args.setProgressLabel ? { setProgressLabel: args.setProgressLabel } : {}),
-      sleep: args.sleep,
-    });
-    args.setWritingField('tools', toolsHubRow);
-    await args.sleep(Math.max(48, Math.min(args.writeMs, 120)));
-    const labels = await args.fillTools(incoming);
-    if (Array.isArray(labels)) {
-      toolLabels = labels.map(label => label.trim()).filter(Boolean);
+  let planned: HubPlanOutcome | null = null;
+  let localBindsOnly = false;
+  if (hubPlan && resolveHubPlan) {
+    const settled = await Promise.race([
+      planOutcome,
+      args.sleep(HUB_PLAN_SOFT_DEADLINE_MS).then((): typeof PLAN_PENDING => PLAN_PENDING),
+    ]);
+    if (settled === PLAN_PENDING) {
+      // Too slow: regex binds now, whatever the plan finds later becomes chips only.
+      state.deadlinePassed = true;
+      localBindsOnly = true;
+      void planOutcome.then(outcome => {
+        if (outcome) args.onHubSuggestions?.(outcome.resolved.allSuggestions, suggestionHubs());
+      });
+    } else {
+      planned = settled;
     }
-    toolsMiss = toolLabels.length === 0;
-    // Point attention at a row that actually received chips.
-    if (toolLabels.some(label => label.startsWith('subagent:'))) toolsHubRow = 'subagent';
-    else if (toolLabels.some(label => label.startsWith('builtin:'))) toolsHubRow = 'builtin';
-    else if (toolLabels.length > 0) toolsHubRow = 'mcp';
   }
 
-  if (action.fields.includes('skills') && args.fillSkills) {
-    await beginFieldAttention({
-      field: 'skills',
-      hubRow: 'skills',
-      ...(args.setAttentionField ? { setAttentionField: args.setAttentionField } : {}),
-      ...(args.setProgressLabel ? { setProgressLabel: args.setProgressLabel } : {}),
-      sleep: args.sleep,
-    });
-    args.setWritingField('skills', 'skills');
-    await args.sleep(Math.max(48, Math.min(args.writeMs, 120)));
-    const bound = await args.fillSkills(incoming);
-    skillLabel = typeof bound === 'string' && bound.trim() ? bound.trim() : null;
-    skillsMiss = !skillLabel;
-  }
+  if (planned) {
+    // The plan already decided every hub: no fill stage, straight to the reveal.
+    const { resolved } = planned;
+    Object.assign(incoming, resolved.patch);
+    if (canvasEmpty) {
+      // First draft: a hub the regexes missed still gets filled when the plan has picks.
+      const current = fields;
+      fields = [...current, ...resolved.fields.filter(field => !current.includes(field))];
+    }
+    toolsHubRow = resolved.preferredHubRow;
+    toolLabels = resolved.labels;
+    suggestedToolLabels = resolved.suggestedLabels;
+    skillLabel = resolved.skillLabels.join(', ') || null;
+    suggestedSkillLabel = resolved.suggestedSkillLabels.join(', ') || null;
+    knowledgeLabel = resolved.knowledgeLabels.join(', ') || null;
+    suggestedKnowledgeLabel = resolved.suggestedKnowledgeLabels.join(', ') || null;
+  } else {
+    const fillTools = localBindsOnly ? args.fillToolsLocal : args.fillTools;
+    if (fields.includes('tools') && fillTools) {
+      await beginHubFill('tools', toolsHubRow);
+      const labels = await fillTools(incoming);
+      if (Array.isArray(labels)) {
+        toolLabels = labels.map(label => label.trim()).filter(Boolean);
+      }
+      toolsMiss = toolLabels.length === 0;
+      // Point attention at a row that actually received chips.
+      if (toolLabels.some(label => label.startsWith('subagent:'))) toolsHubRow = 'subagent';
+      else if (toolLabels.some(label => label.startsWith('builtin:'))) toolsHubRow = 'builtin';
+      else if (toolLabels.length > 0) toolsHubRow = 'mcp';
+    }
 
-  if (action.fields.includes('knowledge') && args.fillKnowledge) {
-    await beginFieldAttention({
-      field: 'knowledge',
-      hubRow: 'knowledge',
-      ...(args.setAttentionField ? { setAttentionField: args.setAttentionField } : {}),
-      ...(args.setProgressLabel ? { setProgressLabel: args.setProgressLabel } : {}),
-      sleep: args.sleep,
-    });
-    args.setWritingField('knowledge', 'knowledge');
-    await args.sleep(Math.max(48, Math.min(args.writeMs, 120)));
-    const bound = await args.fillKnowledge(incoming);
-    knowledgeLabel = typeof bound === 'string' && bound.trim() ? bound.trim() : null;
-    knowledgeMiss = !knowledgeLabel;
-  }
+    if (!localBindsOnly && fields.includes('skills') && args.fillSkills) {
+      await beginHubFill('skills', 'skills');
+      const bound = await args.fillSkills(incoming);
+      skillLabel = typeof bound === 'string' && bound.trim() ? bound.trim() : null;
+      skillsMiss = !skillLabel;
+    }
 
-  if (generateInstructions) {
-    await beginFieldAttention({
-      field: 'systemPrompt',
-      hubRow: null,
-      ...(args.setAttentionField ? { setAttentionField: args.setAttentionField } : {}),
-      ...(args.setProgressLabel ? { setProgressLabel: args.setProgressLabel } : {}),
-      sleep: args.sleep,
-    });
-    const selectedSummary = summarizeSelectedCapabilities(incoming);
-    const promptIntent = selectedSummary
-      ? `${action.intent}\n\nSelected capabilities: ${selectedSummary}. Write operating instructions that use these tools when relevant.`
-      : action.intent;
-    let generatedPrompt = '';
-    try {
-      generatedPrompt = await args.generateAgentPrompt(
-        promptIntent,
-        args.existingSystemPrompt.trim() ? args.existingSystemPrompt.trim() : undefined,
+    if (!localBindsOnly && fields.includes('knowledge') && args.fillKnowledge) {
+      await beginHubFill('knowledge', 'knowledge');
+      const bound = await args.fillKnowledge(incoming);
+      knowledgeLabel = typeof bound === 'string' && bound.trim() ? bound.trim() : null;
+      knowledgeMiss = !knowledgeLabel;
+    }
+
+    // Start the prompt now so it overlaps the hub reveal instead of following it.
+    if (generateInstructions && !state.prompt) {
+      const selectedSummary = summarizeSelectedCapabilities(incoming);
+      state.prompt = startPrompt(
+        selectedSummary
+          ? `${action.intent}\n\nSelected capabilities: ${selectedSummary}. Write operating instructions that use these tools when relevant.`
+          : action.intent,
       );
-    } catch {
-      // Keep drafting from chat-stated Instructions/Rules or an intent fallback.
-      generatedPrompt = '';
     }
+  }
+
+  // --- Reveal hub chips -------------------------------------------------------
+  let toolsMarked = false;
+  const markToolsFilled = (): void => {
+    if (toolsMarked) return;
+    toolsMarked = true;
+    args.onPerfMark?.('tools-filled');
+  };
+  const announced = new Set<CreateTurnField>();
+  const hubLine = (field: CreateTurnField, hubRow: AgentCreateHubRow | null): string | null =>
+    sectionCompleteChatLine({
+      field,
+      hubRow,
+      toolLabels,
+      suggestedToolLabels,
+      skillLabel,
+      suggestedSkillLabel,
+      knowledgeLabel,
+      suggestedKnowledgeLabel,
+    });
+  const hubTailFields = CREATE_REVEAL_FIELD_ORDER.filter(
+    field => fields.includes(field) && (HUB_FIELDS as readonly CreateTurnField[]).includes(field),
+  );
+  const hubTailArgs: Parameters<typeof revealCreatePatchFields>[0] = {
+    fields: hubTailFields,
+    incoming,
+    sourceId: args.sourceId,
+    writeMs: args.writeMs,
+    toolsHubRow,
+    setWritingField: args.setWritingField,
+    applyChatPatch: args.applyChatPatch,
+    sleep: args.sleep,
+    onFieldApplied: field => {
+      if (field === 'tools') markToolsFilled();
+    },
+  };
+  if (args.setAttentionField) hubTailArgs.setAttentionField = args.setAttentionField;
+  if (args.setProgressLabel) hubTailArgs.setProgressLabel = args.setProgressLabel;
+  if (args.onSectionComplete) {
+    hubTailArgs.onFieldComplete = (field, hubRow): void => {
+      if (field !== 'tools' && field !== 'skills' && field !== 'knowledge') return;
+      announced.add(field);
+      const line = hubLine(field, hubRow);
+      if (line) args.onSectionComplete?.(line);
+    };
+  }
+  await revealCreatePatchFields(hubTailArgs);
+
+  if (planned) {
+    args.onHubSuggestions?.(planned.resolved.suggestions, suggestionHubs());
+    // Hubs with only suggested chips have no canvas write to announce; say so in chat.
+    for (const field of hubTailFields) {
+      if (announced.has(field)) continue;
+      const line = hubLine(field, null);
+      if (line) args.onSectionComplete?.(line);
+    }
+  }
+  markToolsFilled();
+
+  // --- Instructions -----------------------------------------------------------
+  if (generateInstructions) {
+    args.setAttentionField?.('systemPrompt', null);
+    args.setProgressLabel?.(progressLabelForField('systemPrompt'));
+    const generatedPrompt = state.prompt ? await state.prompt : '';
     Object.assign(
       incoming,
       incomingPatchForCreateDraft({
@@ -844,17 +1033,8 @@ export async function applyCreateHubDraft(args: {
     );
   }
 
-  const tailFields = CREATE_REVEAL_FIELD_ORDER.filter(
-    field =>
-      action.fields.includes(field) &&
-      (field === 'systemPrompt' ||
-        field === 'tools' ||
-        field === 'skills' ||
-        field === 'knowledge'),
-  );
-
-  const tailArgs: Parameters<typeof revealCreatePatchFields>[0] = {
-    fields: tailFields,
+  const instructionArgs: Parameters<typeof revealCreatePatchFields>[0] = {
+    fields: fields.includes('systemPrompt') ? ['systemPrompt'] : [],
     incoming,
     sourceId: args.sourceId,
     writeMs: args.writeMs,
@@ -863,42 +1043,29 @@ export async function applyCreateHubDraft(args: {
     applyChatPatch: args.applyChatPatch,
     sleep: args.sleep,
   };
-  if (args.setAttentionField) tailArgs.setAttentionField = args.setAttentionField;
-  if (args.setProgressLabel) tailArgs.setProgressLabel = args.setProgressLabel;
+  if (args.setAttentionField) instructionArgs.setAttentionField = args.setAttentionField;
+  if (args.setProgressLabel) instructionArgs.setProgressLabel = args.setProgressLabel;
   if (args.onSectionComplete) {
-    tailArgs.onFieldComplete = (field, hubRow) => {
-      if (
-        field !== 'systemPrompt' &&
-        field !== 'tools' &&
-        field !== 'skills' &&
-        field !== 'knowledge'
-      ) {
-        return;
-      }
-      const line = sectionCompleteChatLine({
-        field,
-        hubRow,
-        name: typeof incoming.name === 'string' ? incoming.name : null,
-        toolLabels,
-        skillLabel,
-        knowledgeLabel,
-      });
+    instructionArgs.onFieldComplete = (field): void => {
+      if (field !== 'systemPrompt') return;
+      const line = sectionCompleteChatLine({ field });
       if (line) args.onSectionComplete?.(line);
     };
   }
-  await revealCreatePatchFields(tailArgs);
+  await revealCreatePatchFields(instructionArgs);
 
   // Honest misses when the field was requested but nothing landed on the canvas.
-  if (args.onSectionComplete) {
-    if (action.fields.includes('tools') && toolsMiss) {
+  // A plan (or a plan still in flight) decides hubs itself: no false "couldn't bind".
+  if (args.onSectionComplete && !planned && !localBindsOnly) {
+    if (fields.includes('tools') && toolsMiss) {
       const line = sectionCompleteChatLine({ field: 'tools', toolLabels: [], bindMiss: true });
       if (line) args.onSectionComplete(line);
     }
-    if (action.fields.includes('skills') && skillsMiss) {
+    if (fields.includes('skills') && skillsMiss) {
       const line = sectionCompleteChatLine({ field: 'skills', bindMiss: true });
       if (line) args.onSectionComplete(line);
     }
-    if (action.fields.includes('knowledge') && knowledgeMiss) {
+    if (fields.includes('knowledge') && knowledgeMiss) {
       const line = sectionCompleteChatLine({ field: 'knowledge', bindMiss: true });
       if (line) args.onSectionComplete(line);
     }

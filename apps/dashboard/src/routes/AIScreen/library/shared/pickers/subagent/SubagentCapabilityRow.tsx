@@ -1,6 +1,7 @@
 import { useMemo, useState, type ReactElement } from 'react';
 import { Ai01, InformationCircle, PlusDefault } from '@xyne/icons';
 import { PropertyAddButton } from '@/components/flowUI/nodes/agent/create/PropertyAddButton';
+import type { CreateHubSuggestions } from '@/components/flowUI/nodes/agent/create/types';
 import { Tooltip } from '@/components/ui/Tooltip/Tooltip';
 import { DotGridLoader } from '../mcp/DotGridLoader';
 import { BrowseSubagentsDialog } from './BrowseSubagentsDialog';
@@ -21,6 +22,11 @@ interface SubagentCapabilityRowProps {
   onSelectionChange: (next: SubagentSelection) => void;
   suggestContext: { systemPrompt: string; description: string };
   layout?: 'profile';
+  /** Create page: mid-confidence picks shown as dashed chips (profile layout). */
+  hubSuggestions?: CreateHubSuggestions | undefined;
+  onSuggestionAccepted?: ((name: string) => void) | undefined;
+  /** A chip was removed: the caller never re-adds it this session. */
+  onPickDismissed?: ((name: string) => void) | undefined;
 }
 
 export function SubagentCapabilityRow({
@@ -28,6 +34,9 @@ export function SubagentCapabilityRow({
   onSelectionChange,
   suggestContext,
   layout,
+  hubSuggestions,
+  onSuggestionAccepted,
+  onPickDismissed,
 }: SubagentCapabilityRowProps): ReactElement {
   const [browseOpen, setBrowseOpen] = useState(false);
   const [browseName, setBrowseName] = useState<string | null>(null);
@@ -42,6 +51,12 @@ export function SubagentCapabilityRow({
     () => suggestions.suggested.filter(entry => !isSubagentSelected(selection, entry)),
     [suggestions.suggested, selection],
   );
+
+  const planChips = useMemo(() => {
+    const names = new Set((hubSuggestions?.subagents ?? []).map(pick => pick.name));
+    if (names.size === 0) return [];
+    return entries.filter(entry => names.has(entry.name) && !isSubagentSelected(selection, entry));
+  }, [hubSuggestions, entries, selection]);
 
   const renderSuggestAction = (): ReactElement => {
     if (suggestions.status === 'loading') {
@@ -98,7 +113,7 @@ export function SubagentCapabilityRow({
   if (layout === 'profile') {
     return (
       <>
-        {selectedEntries.length === 0 ? (
+        {selectedEntries.length === 0 && planChips.length === 0 ? (
           <PropertyAddButton
             label='Add subagent'
             trackName='Create agent v2: browse subagents'
@@ -118,7 +133,21 @@ export function SubagentCapabilityRow({
                   setBrowseName(entry.name);
                   setBrowseOpen(true);
                 }}
-                onToggle={() => onSelectionChange(disableSubagent(selection, entry))}
+                onToggle={() => {
+                  onSelectionChange(disableSubagent(selection, entry));
+                  onPickDismissed?.(entry.name);
+                }}
+              />
+            ))}
+            {planChips.map(entry => (
+              <SubagentChip
+                key={`suggested-${entry.name}`}
+                label={entry.name}
+                selected={false}
+                onToggle={() => {
+                  onSelectionChange(enableSubagent(selection, entry));
+                  onSuggestionAccepted?.(entry.name);
+                }}
               />
             ))}
           </div>

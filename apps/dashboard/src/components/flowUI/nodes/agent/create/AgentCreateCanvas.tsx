@@ -25,6 +25,8 @@ import type {
   AgentCreateFormState,
   AgentCreateHubRow,
   AgentCreatePhase,
+  CreateHubSuggestions,
+  HubPickKind,
 } from './types';
 
 function inlineWidth(value: string, placeholder: string): string {
@@ -62,6 +64,12 @@ interface AgentCreateCanvasProps {
   /** Upcoming or active section (anticipating shimmer when writingField is empty). */
   attentionField?: AgentCreateField | null;
   attentionHubRow?: AgentCreateHubRow | null;
+  /** Mid-confidence picks rendered as dashed one-click chips (profile layout). */
+  hubSuggestions?: CreateHubSuggestions | undefined;
+  /** A suggested chip was clicked (+): drop it from the suggestions. */
+  onHubSuggestionAccepted?: ((kind: HubPickKind, id: string) => void) | undefined;
+  /** The user removed a chip: never suggest or auto-add it again this session. */
+  onHubPickDismissed?: ((kind: HubPickKind, id: string) => void) | undefined;
 }
 
 function ConflictChooser({
@@ -152,6 +160,9 @@ export function AgentCreateCanvas({
   writingHubRow = null,
   attentionField = null,
   attentionHubRow = null,
+  hubSuggestions,
+  onHubSuggestionAccepted,
+  onHubPickDismissed,
 }: AgentCreateCanvasProps): ReactElement {
   const conflictByField = useMemo(
     () => new Map(conflicts.map(conflict => [conflict.field, conflict])),
@@ -194,9 +205,9 @@ export function AgentCreateCanvas({
   const rowHasContent = (row: AgentCreateHubRow): boolean => {
     switch (row) {
       case 'mcp':
-        return form.tools.gateway.length > 0 || form.tools.custom.length > 0;
+        return form.tools.gateway.length > 0 || form.tools.direct.length > 0;
       case 'builtin':
-        return form.tools.direct.length > 0;
+        return form.tools.custom.length > 0;
       case 'subagent':
         return form.tools.subagents.length > 0 || form.tools.callableAgents.length > 0;
       case 'skills':
@@ -226,8 +237,25 @@ export function AgentCreateCanvas({
     });
   }, [attentionHubRow, writingHubRow]);
 
+  const rowHasSuggestions = (row: AgentCreateHubRow): boolean => {
+    if (!hubSuggestions) return false;
+    switch (row) {
+      case 'mcp':
+        return hubSuggestions.mcp.length > 0;
+      case 'builtin':
+        return hubSuggestions.builtin.length > 0;
+      case 'subagent':
+        return hubSuggestions.subagents.length > 0;
+      case 'skills':
+        return hubSuggestions.skills.length > 0;
+      case 'knowledge':
+        return hubSuggestions.knowledge.length > 0;
+      default:
+        return false;
+    }
+  };
   const showHubRow = (row: AgentCreateHubRow): boolean =>
-    !isProfile || addedRows.has(row) || rowHasContent(row);
+    !isProfile || addedRows.has(row) || rowHasContent(row) || rowHasSuggestions(row);
   const isAnticipating = (field: AgentCreateField): boolean =>
     attentionField === field && writingField !== field;
   const isWriting = (field: AgentCreateField): boolean =>
@@ -490,16 +518,27 @@ export function AgentCreateCanvas({
                         label={<span data-testid='property-label-mcp'>MCP</span>}
                         align='start'
                       >
-                        <McpCapabilityRow
-                          layout='profile'
-                          selection={form.tools}
-                          onSelectionChange={tools =>
-                            onFormChange({
-                              tools: { ...tools, callableAgents: form.tools.callableAgents },
-                            })
-                          }
-                          suggestContext={suggestContext}
-                        />
+                        <ChatFillHighlight
+                          active={isHubShimmering('mcp')}
+                          anticipating={attentionHubRow === 'mcp' && writingHubRow !== 'mcp'}
+                          field='tools'
+                        >
+                          <div data-create-hub-row='mcp'>
+                            <McpCapabilityRow
+                              layout='profile'
+                              selection={form.tools}
+                              onSelectionChange={tools =>
+                                onFormChange({
+                                  tools: { ...tools, callableAgents: form.tools.callableAgents },
+                                })
+                              }
+                              suggestContext={suggestContext}
+                              hubSuggestions={hubSuggestions}
+                              onSuggestionAccepted={id => onHubSuggestionAccepted?.('mcp', id)}
+                              onPickDismissed={id => onHubPickDismissed?.('mcp', id)}
+                            />
+                          </div>
+                        </ChatFillHighlight>
                       </PropertyRow>
                     ) : null}
                     {showHubRow('subagent') ? (
@@ -507,39 +546,76 @@ export function AgentCreateCanvas({
                         label={<span data-testid='property-label-subagent'>Subagent</span>}
                         align='start'
                       >
-                        <SubagentCapabilityRow
-                          layout='profile'
-                          selection={form.tools}
-                          onSelectionChange={tools =>
-                            onFormChange({
-                              tools: { ...tools, callableAgents: form.tools.callableAgents },
-                            })
+                        <ChatFillHighlight
+                          active={isHubShimmering('subagent')}
+                          anticipating={
+                            attentionHubRow === 'subagent' && writingHubRow !== 'subagent'
                           }
-                          suggestContext={suggestContext}
-                        />
+                          field='tools'
+                        >
+                          <div data-create-hub-row='subagent'>
+                            <SubagentCapabilityRow
+                              layout='profile'
+                              selection={form.tools}
+                              onSelectionChange={tools =>
+                                onFormChange({
+                                  tools: { ...tools, callableAgents: form.tools.callableAgents },
+                                })
+                              }
+                              suggestContext={suggestContext}
+                              hubSuggestions={hubSuggestions}
+                              onSuggestionAccepted={id => onHubSuggestionAccepted?.('subagent', id)}
+                              onPickDismissed={id => onHubPickDismissed?.('subagent', id)}
+                            />
+                          </div>
+                        </ChatFillHighlight>
                       </PropertyRow>
                     ) : null}
                     {showHubRow('builtin') ? (
                       <PropertyRow label={propertyLabel('builtin')} align='start'>
-                        <BuiltinCapabilityRow
-                          layout='profile'
-                          selection={form.tools}
-                          onSelectionChange={tools =>
-                            onFormChange({
-                              tools: { ...tools, callableAgents: form.tools.callableAgents },
-                            })
+                        <ChatFillHighlight
+                          active={isHubShimmering('builtin')}
+                          anticipating={
+                            attentionHubRow === 'builtin' && writingHubRow !== 'builtin'
                           }
-                          suggestContext={suggestContext}
-                        />
+                          field='tools'
+                        >
+                          <div data-create-hub-row='builtin'>
+                            <BuiltinCapabilityRow
+                              layout='profile'
+                              selection={form.tools}
+                              onSelectionChange={tools =>
+                                onFormChange({
+                                  tools: { ...tools, callableAgents: form.tools.callableAgents },
+                                })
+                              }
+                              suggestContext={suggestContext}
+                              hubSuggestions={hubSuggestions}
+                              onSuggestionAccepted={id => onHubSuggestionAccepted?.('builtin', id)}
+                              onPickDismissed={id => onHubPickDismissed?.('builtin', id)}
+                            />
+                          </div>
+                        </ChatFillHighlight>
                       </PropertyRow>
                     ) : null}
                     {showHubRow('skills') ? (
                       <PropertyRow label={<span data-testid='property-label-skills'>Skills</span>}>
-                        <SkillsCapabilityRow
-                          layout='profile'
-                          selectedIds={form.selectedSkillIds}
-                          onChange={selectedSkillIds => onFormChange({ selectedSkillIds })}
-                        />
+                        <ChatFillHighlight
+                          active={isShimmering('skills') || isHubShimmering('skills')}
+                          anticipating={isAnticipating('skills')}
+                          field='skills'
+                        >
+                          <div data-create-hub-row='skills'>
+                            <SkillsCapabilityRow
+                              layout='profile'
+                              selectedIds={form.selectedSkillIds}
+                              onChange={selectedSkillIds => onFormChange({ selectedSkillIds })}
+                              hubSuggestions={hubSuggestions}
+                              onSuggestionAccepted={id => onHubSuggestionAccepted?.('skill', id)}
+                              onPickDismissed={id => onHubPickDismissed?.('skill', id)}
+                            />
+                          </div>
+                        </ChatFillHighlight>
                       </PropertyRow>
                     ) : null}
                     {showHubRow('knowledge') ? (
@@ -547,15 +623,28 @@ export function AgentCreateCanvas({
                         label={<span data-testid='property-label-knowledge'>Knowledge</span>}
                         align='start'
                       >
-                        <KnowledgeCapabilityRow
-                          layout='profile'
-                          scope={form.selectedKbScope}
-                          onScopeChange={selectedKbScope => onFormChange({ selectedKbScope })}
-                          grants={form.selectedKbResources}
-                          onGrantsChange={selectedKbResources =>
-                            onFormChange({ selectedKbResources })
-                          }
-                        />
+                        <ChatFillHighlight
+                          active={isShimmering('knowledge') || isHubShimmering('knowledge')}
+                          anticipating={isAnticipating('knowledge')}
+                          field='knowledge'
+                        >
+                          <div data-create-hub-row='knowledge'>
+                            <KnowledgeCapabilityRow
+                              layout='profile'
+                              scope={form.selectedKbScope}
+                              onScopeChange={selectedKbScope => onFormChange({ selectedKbScope })}
+                              grants={form.selectedKbResources}
+                              onGrantsChange={selectedKbResources =>
+                                onFormChange({ selectedKbResources })
+                              }
+                              hubSuggestions={hubSuggestions}
+                              onSuggestionAccepted={id =>
+                                onHubSuggestionAccepted?.('knowledge', id)
+                              }
+                              onPickDismissed={id => onHubPickDismissed?.('knowledge', id)}
+                            />
+                          </div>
+                        </ChatFillHighlight>
                       </PropertyRow>
                     ) : null}
                     {customProperties.map(property => (
@@ -577,7 +666,7 @@ export function AgentCreateCanvas({
                       added={
                         new Set(
                           (['mcp', 'builtin', 'subagent', 'skills', 'knowledge'] as const).filter(
-                            row => addedRows.has(row) || rowHasContent(row),
+                            row => showHubRow(row),
                           ),
                         )
                       }

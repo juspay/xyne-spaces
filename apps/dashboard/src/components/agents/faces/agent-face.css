@@ -1,0 +1,186 @@
+/* Agent face: rest, hover hello, working (Scan).
+   Source of truth for the look and the numbers: the Agent Faces page.
+
+   Layers, outside in:
+     body  .af-bdf (follows the eyes, a beat late) > .af-bdp (breathes)
+     eyes  .af-ef (follows, same as the body, so the two stay tied)
+             > .af-ebr (breathes with the body) > .af-eg (gaze) > .af-eb (blink)
+   The body moves INSIDE its inner-shadow filter, so the light stays put. */
+
+.af {
+  --af-ex: 2.4px; /* eyes left-right, in face units (the face is 30 wide) */
+  --af-ey: 1.3px; /* eyes up-down */
+  --af-bf: 0.3; /* body follows this fraction of the eye travel */
+  --af-bt: 5deg; /* body lean */
+  --af-br: 0.08; /* breathing, 8% bigger at the top of the breath */
+  --af-dur: 4.2s; /* one loop */
+  --af-lag: 0.12s; /* body arrives this long after the eyes */
+  display: inline-block;
+  flex: none;
+  line-height: 0;
+}
+.af svg {
+  display: block;
+  overflow: visible;
+  width: 100%;
+  height: 100%;
+}
+.af .af-bdf,
+.af .af-bdp,
+.af .af-ef,
+.af .af-ebr,
+.af .af-eg {
+  transform-box: view-box;
+  transform-origin: var(--af-ox) var(--af-oy);
+}
+.af .af-eb {
+  transform-box: fill-box;
+  transform-origin: 50% 50%;
+}
+
+/* ---- Working: Scan ---- */
+.af--working .af-eg {
+  animation: af-gaze var(--af-dur) cubic-bezier(0.2, 0.75, 0.25, 1) infinite;
+}
+.af--working .af-bdf,
+.af--working .af-ef {
+  animation: af-follow var(--af-dur) cubic-bezier(0.45, 0, 0.3, 1) var(--af-lag) infinite both;
+}
+.af--working .af-bdp,
+.af--working .af-ebr {
+  animation: af-breathe calc(var(--af-dur) / 2) ease-in-out infinite;
+}
+.af--working .af-eb {
+  animation: af-blink var(--af-dur) ease-in-out infinite;
+}
+
+/* Eyes jump, then hold (saccades and fixations): left, up-right, down-right, down-left, home. */
+@keyframes af-gaze {
+  0% {
+    transform: translate(0, 0);
+  }
+  7%,
+  22% {
+    transform: translate(calc(var(--af-ex) * -1), 0);
+  }
+  29%,
+  43% {
+    transform: translate(var(--af-ex), calc(var(--af-ey) * -1));
+  }
+  50%,
+  61% {
+    transform: translate(calc(var(--af-ex) * 0.55), var(--af-ey));
+  }
+  68%,
+  80% {
+    transform: translate(calc(var(--af-ex) * -0.8), calc(var(--af-ey) * 0.6));
+  }
+  88%,
+  100% {
+    transform: translate(0, 0);
+  }
+}
+/* Same path as the gaze, scaled down, plus a lean toward it. */
+@keyframes af-follow {
+  0% {
+    transform: translate(0, 0) rotate(0);
+  }
+  7%,
+  22% {
+    transform: translate(calc(var(--af-ex) * -1 * var(--af-bf)), 0) rotate(calc(var(--af-bt) * -1));
+  }
+  29%,
+  43% {
+    transform: translate(calc(var(--af-ex) * var(--af-bf)), calc(var(--af-ey) * -1 * var(--af-bf)))
+      rotate(var(--af-bt));
+  }
+  50%,
+  61% {
+    transform: translate(
+        calc(var(--af-ex) * 0.55 * var(--af-bf)),
+        calc(var(--af-ey) * var(--af-bf))
+      )
+      rotate(calc(var(--af-bt) * 0.55));
+  }
+  68%,
+  80% {
+    transform: translate(
+        calc(var(--af-ex) * -0.8 * var(--af-bf)),
+        calc(var(--af-ey) * 0.6 * var(--af-bf))
+      )
+      rotate(calc(var(--af-bt) * -0.8));
+  }
+  88%,
+  100% {
+    transform: translate(0, 0) rotate(0);
+  }
+}
+@keyframes af-breathe {
+  0%,
+  100% {
+    transform: scale(1, 1);
+  }
+  50% {
+    transform: scale(calc(1 + var(--af-br) * 0.7), calc(1 + var(--af-br)));
+  }
+}
+@keyframes af-blink {
+  0%,
+  84%,
+  92%,
+  100% {
+    transform: scaleY(1);
+  }
+  88% {
+    transform: scaleY(0.1);
+  }
+}
+
+/* ---- Hover: one hello. Plays once; not while working. ---- */
+.af--hello:not(.af--working):hover svg {
+  animation: af-hop 0.62s cubic-bezier(0.3, 0.7, 0.4, 1);
+}
+.af--hello:not(.af--working):hover .af-eb {
+  animation: af-blink-once 0.62s ease-in-out;
+}
+@keyframes af-hop {
+  0% {
+    transform: translateY(0) scale(1);
+  }
+  35% {
+    transform: translateY(-9%) scale(1.07);
+  }
+  65% {
+    transform: translateY(0) scale(0.97, 1.03);
+  }
+  100% {
+    transform: translateY(0) scale(1);
+  }
+}
+@keyframes af-blink-once {
+  0%,
+  40%,
+  100% {
+    transform: scaleY(1);
+  }
+  55% {
+    transform: scaleY(0.1);
+  }
+}
+
+/* ---- Asleep: a disabled agent. Eyes held shut, the face dimmed. ---- */
+.af--asleep {
+  opacity: 0.55;
+  filter: saturate(0.6);
+}
+.af--asleep .af-eb {
+  transform: scaleY(0.12);
+}
+
+/* ---- Reduced motion: no loop, no hop. Show "is working" as text next to the name instead. ---- */
+@media (prefers-reduced-motion: reduce) {
+  .af svg,
+  .af * {
+    animation: none !important;
+  }
+}

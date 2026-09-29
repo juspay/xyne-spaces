@@ -1,5 +1,9 @@
 import type { KbSelection } from '@/services/claw/clawKnowledgeBaseTypes';
-import type { AgentToolboxSelection } from '@/services/claw/clawToolsTypes';
+import type {
+  AgentToolboxSelection,
+  SuggestedIntegration,
+  SuggestHub,
+} from '@/services/claw/clawToolsTypes';
 import { COLORS, INITIAL_WIZARD_STATE } from '@/routes/ClawAgentsScreen/create/wizardState';
 
 export type AgentCreateField =
@@ -14,6 +18,25 @@ export type AgentCreateField =
 
 /** Hub capability row the write pointer should rest on during scripted fills. */
 export type AgentCreateHubRow = 'mcp' | 'builtin' | 'subagent' | 'skills' | 'knowledge';
+
+/** Which hub a suggested / dismissed pick belongs to (the suggest-tools hub names). */
+export type HubPickKind = SuggestHub;
+
+/**
+ * Mid-confidence picks shown as dashed one-click chips. Lives in split-page
+ * state, not the form, so it never feeds dirty checks or conflicts.
+ */
+export interface CreateHubSuggestions {
+  /** MCP / gateway integrations, resolved to catalog slugs with tool names. */
+  mcp: SuggestedIntegration[];
+  /** Built-in tool groups (custom:* sources). */
+  builtin: SuggestedIntegration[];
+  subagents: Array<{ name: string; confidence: number }>;
+  /** Resolved to skill ids. */
+  skills: Array<{ id: string; label: string; confidence: number }>;
+  /** Resolved to KB collection ids. */
+  knowledge: Array<{ id: string; name: string; confidence: number }>;
+}
 
 export type AgentCreatePhase = 'empty' | 'loading' | 'draft' | 'created' | 'rejected';
 
