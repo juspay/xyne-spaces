@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import {
   getKanbanCounts,
   type KanbanCountGroup,
+  type KanbanCountsDeskFilters,
   type KanbanCountsFilters,
   type KanbanCountsGroupBy,
   type KanbanCountsRequest,
@@ -25,6 +26,8 @@ interface UseKanbanCountsOptions extends FlowStepVisibilityOptions {
   projectId?: string;
   boardId?: string;
   boardIds?: string[];
+  channelId?: string;
+  deskFilters?: KanbanCountsDeskFilters;
   filters?: TicketFilters;
   groupBy?: KanbanCountsGroupBy;
   showOverdueOnly?: boolean;
@@ -113,6 +116,10 @@ const getTicketCountsRoom = (
 
   if (request.viewMode === 'my-tickets' && currentUserId) {
     return `ticket-counts:user:${currentUserId}`;
+  }
+
+  if (request.viewMode === 'desk' && request.boardId) {
+    return `ticket-counts:board:${request.boardId}`;
   }
 
   return null;
@@ -205,12 +212,50 @@ const matchesIdentity = (
   return normalizeIdentity(value) === normalizeIdentity(expected);
 };
 
+// Count events carry no aiCategory, lastEmailAt, conversation, draft, sub-ticket or label
+// data, so a desk filtered on any of these has to refetch instead of applying the delta.
+const hasUnmatchableDeskFilter = (filters: KanbanCountsDeskFilters | undefined): boolean =>
+  !!filters &&
+  (!!filters.aiCategory?.length ||
+    filters.conversationIds !== undefined ||
+    !!filters.hasAiDraft ||
+    !!filters.hasSubTickets ||
+    filters.lastEmailAtStart !== undefined ||
+    filters.lastEmailAtEnd !== undefined ||
+    !!filters.conversationLabelId);
+
+const matchesDeskFilters = (
+  snapshot: TicketCountsSnapshot,
+  filters: KanbanCountsDeskFilters | undefined,
+): boolean => {
+  if (!filters) return true;
+  if (filters.assignedTo?.length && !matchesAssigneeList(snapshot.assignedTo, filters.assignedTo))
+    return false;
+  if (filters.createdBy?.length && !filters.createdBy.includes(snapshot.createdBy ?? ''))
+    return false;
+  if (filters.priority?.length && !filters.priority.includes(snapshot.priority as never))
+    return false;
+  if (filters.stageName?.length && !filters.stageName.includes(snapshot.stageName ?? ''))
+    return false;
+  if (filters.userGroups?.length && !filters.userGroups.includes(snapshot.userGroupId ?? ''))
+    return false;
+  if (filters.createdAtStart !== undefined && snapshot.createdAt < filters.createdAtStart)
+    return false;
+  if (filters.createdAtEnd !== undefined && snapshot.createdAt > filters.createdAtEnd) return false;
+  return true;
+};
+
 const matchesRequest = (
   snapshot: TicketCountsSnapshot,
   request: KanbanCountsRequest,
   currentUserId?: string,
 ): boolean => {
-  if (isSupportTicket(snapshot)) return false;
+  if (request.viewMode === 'desk') {
+    if (snapshot.channelId !== request.channelId) return false;
+    if (!matchesDeskFilters(snapshot, request.deskFilters)) return false;
+  } else if (isSupportTicket(snapshot)) {
+    return false;
+  }
 
   if (request.boardId && snapshot.boardId !== request.boardId) return false;
   if (request.projectId && !request.boardId && snapshot.projectId !== request.projectId)
@@ -553,6 +598,8 @@ const toRequest = (options: UseKanbanCountsOptions): KanbanCountsRequest => {
   if (options.projectId !== undefined) request.projectId = options.projectId;
   if (options.boardId !== undefined) request.boardId = options.boardId;
   if (options.boardIds !== undefined) request.boardIds = options.boardIds;
+  if (options.channelId !== undefined) request.channelId = options.channelId;
+  if (options.deskFilters !== undefined) request.deskFilters = options.deskFilters;
   if (options.excludeFlowSteps !== undefined) request.excludeFlowSteps = options.excludeFlowSteps;
 
   const normalizedFilters = normalizeFilters(options.filters);
@@ -597,7 +644,7 @@ export const useKanbanCounts = (options: UseKanbanCountsOptions): UseKanbanCount
 
       // Live count snapshots do not carry rootId. Refetch aggregate-board
       // counts so materialized flow steps cannot leak into the total.
-      if (request.excludeFlowSteps) {
+      if (request.excludeFlowSteps || hasUnmatchableDeskFilter(request.deskFilters)) {
         void queryClient.invalidateQueries({ queryKey: ['tickets', 'kanban-counts', request] });
         return;
       }

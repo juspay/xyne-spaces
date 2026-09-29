@@ -33,6 +33,11 @@ export type RecordingSharingCommand =
       access?: GrantableEntityUserAccess;
       /** Optional share message. */
       messageContent?: string;
+      /**
+       * Internal only — not in the controller's schema. Pass false to grant
+       * access without creating the share post (defaults to true).
+       */
+      post?: boolean;
     }
   | { action: 'revoke'; targets: RecordingShareTarget[] }
   | { action: 'link_ticket'; ticketId: string }
@@ -160,6 +165,7 @@ export class RecordingSharingService {
           command.targets,
           command.access ?? EntityUserAccess.VIEW,
           command.messageContent,
+          command.post ?? true,
         );
       case 'revoke':
         return this.revoke(callId, actor, command.targets);
@@ -187,11 +193,12 @@ export class RecordingSharingService {
     targets: RecordingShareTarget[],
     access: GrantableEntityUserAccess,
     messageContent?: string,
+    post = true,
   ): Promise<RecordingSharingResult> {
     await validateGrantTargetsTx(this, callId, actor, targets);
 
     const dmChannelIds = new Map<string, string>();
-    const { shares, activities } = await grantTx2(this, callId, actor, targets, access, dmChannelIds, messageContent);
+    const { shares, activities } = await grantTx2(this, callId, actor, targets, access, dmChannelIds, messageContent, post);
 
     await recordingSharingNotificationService.publish(actor.userId, activities);
     return { action: 'grant', shares };

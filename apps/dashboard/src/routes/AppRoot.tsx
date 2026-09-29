@@ -13,6 +13,8 @@ import HomeScreen from './HomeScreen';
 import SlackMigration from '../pages/SlackMigration';
 import AuthScreen from './AuthScreen/AuthScreen';
 import CommunityWorkspaceSelectionRoute from './AuthScreen/CommunityWorkspaceSelectionRoute';
+import TermsOfServiceScreen from './TermsOfServiceScreen/TermsOfServiceScreen';
+import PrivacyPolicyScreen from './PrivacyPolicyScreen/PrivacyPolicyScreen';
 import WorkspaceSelectionScreen from './WorkspaceSelectionScreen';
 import QuestionnaireScreen from './QuestionnaireScreen/QuestionnaireScreen';
 import IntentPlaygroundScreen from './IntentPlaygroundScreen';
@@ -108,7 +110,7 @@ import { RouterErrorFallback } from '../components/ErrorBoundary';
 import NotFoundScreen from './NotFoundScreen/NotFoundScreen';
 import ChatRedirect from '../components/Chat/ChatRedirect/ChatRedirect';
 import DirectoryRedirect from '../components/Chat/DirectoryRedirect/DirectoryRedirect';
-import CallHistoryScreen from './CallHistoryScreen/CallHistoryScreen';
+import CallsRoute from './CallsRoute/CallsRoute';
 import CallDetailScreen from './CallDetailScreen/CallDetailScreen';
 import RecordingsRoute from './RecordingsRoute/RecordingsRoute';
 import RecordingDetailRoute from './RecordingDetailRoute/RecordingDetailRoute';
@@ -1695,7 +1697,7 @@ export const router = createBrowserRouter(
                   path: 'calls',
                   element: (
                     <ToolbarProtectedRoute path='/calls'>
-                      <CallHistoryScreen />
+                      <CallsRoute />
                     </ToolbarProtectedRoute>
                   ),
                   children: [
@@ -2072,6 +2074,14 @@ export const router = createBrowserRouter(
         {
           path: '/auth',
           element: <AuthScreen />,
+        },
+        {
+          path: '/terms',
+          element: <TermsOfServiceScreen />,
+        },
+        {
+          path: '/privacy',
+          element: <PrivacyPolicyScreen />,
         },
         {
           path: '/workspaces',

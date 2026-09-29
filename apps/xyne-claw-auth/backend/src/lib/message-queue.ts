@@ -130,11 +130,11 @@ export interface QueuedMessage {
    */
   twinUserScopeId?: string;
   /**
-   * Twin-only byte-identical replay blobs. Unlike conversation-mode messages —
-   * which carry a thin task and re-derive context on drain — a twin tag is
-   * enqueued BEFORE it ever dispatches, so the full /internal/run body and the
-   * SessionContext (approval mode preserved) are stored here and replayed
-   * verbatim by the twin drain. Present ONLY for twin FIFO entries. NOTE: the
+   * Byte-identical replay blobs for twin tags and messaging-channel messages.
+   * Unlike conversation-mode messages — which carry a thin task and re-derive
+   * context on drain — these are enqueued BEFORE they ever dispatch, so the
+   * full /internal/run body and the SessionContext (approval mode / channel
+   * delivery preserved) are stored here and replayed verbatim on drain. NOTE: the
    * sessionContext carries a decrypted appToken (parity with RunRecoveryState,
    * which already persists the same in Redis) — never log this blob.
    */

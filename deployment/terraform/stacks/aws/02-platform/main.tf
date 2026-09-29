@@ -59,6 +59,7 @@ module "platform" {
   ingress             = local.infra.ingress
   livekit             = local.infra.livekit
   livekit_keys        = local.infra.livekit_keys
+  zero_backup_url     = try(local.infra.zero_backup_url, "")
 
   namespace                 = var.namespace
   domain                    = var.domain
@@ -72,6 +73,8 @@ module "platform" {
   argocd_apps_chart_version = var.argocd_apps_chart_version
   argocd_namespace          = var.argocd_namespace
   argocd_values             = local.argocd_values
+  argocd_expose             = var.argocd_expose
+  argocd_host               = var.argocd_host
   enable_vespa              = var.enable_vespa
   enable_monitoring         = var.enable_monitoring
   enable_sandbox            = var.enable_sandbox

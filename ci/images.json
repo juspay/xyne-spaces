@@ -68,5 +68,19 @@
     "dockerfile": "claw-deployments/kata-infra/sandbox-router-ws/Dockerfile",
     "context": "claw-deployments/kata-infra/sandbox-router-ws",
     "charts": ["xyne-sandbox-router"]
+  },
+  {
+    "name": "tei-batch-proxy",
+    "image": "xyne-spaces-tei-batch-proxy",
+    "dockerfile": "tei-batch-proxy/Dockerfile",
+    "context": "tei-batch-proxy",
+    "charts": ["xyne-tei-batch-proxy"]
+  },
+  {
+    "name": "agent-workspace",
+    "image": "xyne-spaces-agent-workspace",
+    "dockerfile": "claw-deployments/kata-infra/agent-workspace/Dockerfile",
+    "context": "claw-deployments/kata-infra/agent-workspace",
+    "charts": []
   }
 ]

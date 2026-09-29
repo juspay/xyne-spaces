@@ -22,7 +22,7 @@ import { esc, queryDirect, type DirectSearchResponse } from "./vespa-direct.js";
 import { buildYqlFromParams, AREA_NAMES, AREA_ALIASES, describeAreasForPrompt } from "./vespa-search-areas.js";
 import { validateCorpusScan, buildCorpusScanYql, parseBucketKey, termToQuery, MAX_SCAN_TERMS, type CorpusScanScope } from "./vespa-corpus-scan.js";
 import { validateEvidencePack, bucketRange, buildPackFetchYql, formatIstDate, toSnippet, MAX_PACK_PER_BUCKET, DEFAULT_PACK_PER_BUCKET, MAX_BUCKET_FETCHES } from "./vespa-evidence-pack.js";
-import { getWorkspaceIdForUser } from "../../lib/spaces-db.js";
+import { getWorkspaceIdForUser, spacesDbAvailable } from "../../lib/spaces-db.js";
 import {
   extractCleanTextFromFlowJson,
   isFlowJsonContent,
@@ -38,6 +38,18 @@ const RAW_ATTACHMENT_INLINE_LIMIT_BYTES = Number(
   process.env["SPACES_FETCH_ATTACHMENT_INLINE_LIMIT_BYTES"] ?? 5 * 1024 * 1024,
 );
 const isOnyxBenchLane = (): boolean => (process.env["ONYX_BENCH_VESPA"] ?? "").trim() === "true";
+
+// `spaces-search` used to cover the DIRECT_VESPA_SEARCH=off case. It is gone
+// (2026-09-26), so that flag now decides whether this deployment ships a
+// general search tool AT ALL. Silence there would look like "the agent chose
+// not to search" rather than "the agent had nothing to search with".
+if (!CONFIG.directVespaSearch) {
+  log.error(
+    "[xyne-spaces-tools] DIRECT_VESPA_SEARCH is off — NO general search tool is registered " +
+    "(spaces-vespa-search/-corpus-scan/-evidence-pack are all gated on it, and spaces-search was removed). " +
+    "Set DIRECT_VESPA_SEARCH=true plus VESPA_QUERY_ENDPOINT / VESPA_NAMESPACE / VESPA_CLUSTER.",
+  );
+}
 const ATTACHMENT_INGEST_TIMEOUT_MS = Number(
   process.env["SPACES_FETCH_ATTACHMENT_INGEST_TIMEOUT_MS"] ?? 120_000,
 );
@@ -3251,8 +3263,20 @@ function userDetailLines(u: UserRow): string[] {
   if (u.lastActiveAt) times.push(`Last seen: ${toIST(u.lastActiveAt)} IST`);
   if (times.length > 0) out.push(`  ${times.join(" · ")}`);
   if (u.statusContent) out.push(`  Status: ${u.statusEmoji ? `${u.statusEmoji} ` : ""}${u.statusContent}`);
-  if (u.picture) out.push(`  Avatar: ${u.picture}`);
+  if (u.picture) out.push(`  Avatar: ${buildAvatarUrl(u.id, u.picture)}`);
   return out;
+}
+
+/** Build a READY-MADE, absolute avatar URL the agent can drop into HTML
+ *  verbatim. We emit the full URL (never the bare id + storage path) so the
+ *  desk/report agent never re-types — and truncates — the 25-char user id.
+ *  If `picture` is already an absolute http(s) URL it's passed through
+ *  unchanged; otherwise it's treated as a storage path and encoded into the
+ *  authenticated `/api/users/<id>/picture?v=<path>` endpoint. */
+function buildAvatarUrl(userId: string, picture: string): string {
+  if (/^https?:\/\//i.test(picture)) return picture;
+  const base = CONFIG.spacesAppUrl.replace(/\/+$/, "");
+  return `${base}/api/users/${userId}/picture?v=${encodeURIComponent(picture)}`;
 }
 
 // ── spaces-activity ──────────────────────────────────────────────────
@@ -7035,7 +7059,7 @@ const userSendMessage: ToolDef = {
       { required: ["channelId"], not: { required: ["conversationId"] } },
     ],
   },
-  async handler(args) {
+  async handler(args, ctx) {
     try {
       const conversationId = String(args["conversationId"] ?? "").trim();
       const channelId = String(args["channelId"] ?? "").trim();
@@ -7049,8 +7073,16 @@ const userSendMessage: ToolDef = {
 
       // Same mention-expansion the app-tools version uses, so @Name[userId]
       // shorthand works consistently across both tools.
-      const { expandSpacesMentions } = await import("../../lib/mention-transform.js");
-      const content = expandSpacesMentions(rawContent);
+      const { expandSpacesMentions, resolveUnboundMentions } = await import("../../lib/mention-transform.js");
+      const { buildSpacesMentionLookupsDb } = await import("../../lib/mention-lookups.js");
+      const workspaceId =
+        (process.env["XYNE_SPACES_WORKSPACE_ID"] ?? "").trim() ||
+        (ctx?.userId ? await getWorkspaceIdForUser(ctx.userId).catch(() => null) : null) ||
+        undefined;
+      const resolved = spacesDbAvailable()
+        ? await resolveUnboundMentions(rawContent, buildSpacesMentionLookupsDb(workspaceId)).catch(() => rawContent)
+        : rawContent;
+      const content = expandSpacesMentions(resolved);
 
       if (conversationId) {
         const result = (await spacesFetch(
@@ -10258,10 +10290,19 @@ const spacesAutomationAgents: ToolDef = {
 
 export const tools: ToolDef[] = [
   spacesWhoami,
+  // `spaces-vespa-search` is the general search tool (2026-09-26). The older
+  // `spaces-search` and its `spaces-search-v2` fork are no longer listed: three
+  // overlapping search tools made the model pick badly, and v2 was a partial
+  // fork of v1 that no prompt or skill pointed at.
+  //
+  // NOTE: DIRECT_VESPA_SEARCH is now LOAD-BEARING. With it off there is no
+  // general search tool at all, where previously `spaces-search` covered that
+  // case — see the startup guard in this module.
   ...(CONFIG.directVespaSearch ? [spacesVespaSearch, spacesCorpusScan, spacesEvidencePack] : []),
-  onyxBenchSearch,
-  spacesSearch,
-  spacesSearchV2,
+  // Benchmark-only (EnterpriseRAG-Bench). Catalogued ONLY on the bench lane —
+  // its handler already refused elsewhere, but listing it put a fictional-corpus
+  // search tool in every real agent's palette.
+  ...(isOnyxBenchLane() ? [onyxBenchSearch] : []),
   spacesMyItems,
   spacesSavedViews,
   spacesWorkflowStats,

@@ -1480,6 +1480,23 @@ export function pushInvocation(progressUrl: ProgressDest, sessionId: string, inv
   });
 }
 
+const INTERIM_MESSAGE_MAX_CHARS = 1_500;
+
+export function pushInterimMessage(progressUrl: ProgressDest, sessionId: string, text: string): void {
+  if (!progressUrl || typeof progressUrl !== "string") return;
+  fetch(progressUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(SERVER.s2sKey ? { "x-s2s-key": SERVER.s2sKey } : {}),
+    },
+    body: JSON.stringify({ sessionId, kind: "interim", text: text.slice(0, INTERIM_MESSAGE_MAX_CHARS) }),
+    signal: AbortSignal.timeout(5_000),
+  }).catch((err) => {
+    log.warn(`[agent] Interim message push failed session=${sessionId} err=${err instanceof Error ? err.message : String(err)}`);
+  });
+}
+
 // Stream a single attachment (e.g. a PPTX produced by create-ppt) to the progress endpoint
 // the moment it's captured — so the UI can render it mid-session instead of waiting for finalize.
 export function pushAttachment(
@@ -3285,6 +3302,10 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
         }
         if (stopReason !== "tool_use" && stopReason !== "aborted" && stopReason !== "error") {
           recordHandoffBoundary(latency.llmTurns);
+        }
+        if (stopReason === "tool_use" && optEnabled("interim_messages")) {
+          const interim = piAssistantText(msg as PiMsg);
+          if (interim && sessionId) pushInterimMessage(progressUrl, sessionId, interim);
         }
         // Emit the turn's thinking as its OWN timeline event, before
         // assistant_turn_end, so the debugger shows the reasoning block exactly

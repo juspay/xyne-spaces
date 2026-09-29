@@ -29,7 +29,7 @@ export const CommunityWorkspaceSelectionRoute = (): ReactElement => {
         startEnterpriseLogin={startEnterpriseLogin}
         communityJoinRequest={communityJoinRequest}
         onContinueToAuth={() => {
-          void navigate('/auth');
+          void navigate('/auth', { state: { enterpriseLoginEntry: true } });
         }}
       />
     </ThemeProvider>

@@ -22,7 +22,7 @@ import {
 import { enqueueOutbound, typingCancelled, typingFinished, typingStarted } from "./delivery.js";
 import { pickAckReaction } from "./ack.js";
 import { agentActionGatesOf } from "./agent-tools.js";
-import { dispatchChannelRun } from "./dispatch.js";
+import { dispatchOrQueueChannelRun } from "./busy.js";
 import { channelConversationId } from "./ids.js";
 import { consumeGroupContext, readGroupContext, rememberGroupMessage, renderGroupContext } from "./group-context.js";
 import { resolveIdentity } from "./identity.js";
@@ -32,6 +32,7 @@ import { formatAgentList, namesAnAgent, parseAgentRoute } from "./routing.js";
 import { policyOf } from "./schema.js";
 import { handleControlCommand, parseControlCommand, rememberActiveRun } from "./commands.js";
 import { runSerialized } from "./serialize.js";
+import { accountForSender } from "./shared-number.js";
 import { isAudio, transcribeAudio, transcriptionEnabled } from "./transcribe.js";
 import { findDefaultAgent, findOrgAgentBySlug, listOrgAgents, type BoundAgent } from "./store.js";
 
@@ -106,12 +107,11 @@ async function overRateLimit(accountId: string, senderId: string, limit: number)
  * were sent (serialize.ts) — a slow photo cannot be overtaken by the text
  * sent straight after it.
  *
- * The remaining gap, named here because the comment used to overclaim: the
- * chat's queue releases once a turn has been ACCEPTED, not once the agent has
- * answered. A message arriving while a run is still working starts a second
- * run on the same conversation, blind to the first. Closing
- * that means either steering the live run or waiting on /webhook/result, both
- * of which are larger changes than this one.
+ * The chat's in-memory queue releases once a turn has been ACCEPTED, not once
+ * the agent has answered. A message arriving while a run is still working goes
+ * through the same busy slot and FIFO as a Spaces thread mention
+ * (lib/conversation-gate.ts): the live run is asked to wrap up, and the new
+ * message is dispatched from /webhook/result once it has answered.
  */
 export async function handleInbound(ctx: InboundContext, msg: InboundMessage): Promise<void> {
   const { account } = ctx;
@@ -149,21 +149,29 @@ export async function handleInbound(ctx: InboundContext, msg: InboundMessage): P
 }
 
 async function handleOne(ctx: InboundContext, msg: InboundMessage): Promise<void> {
-  const { account, plugin } = ctx;
+  const { plugin } = ctx;
   let text = msg.text.trim();
-
-  const policy = policyOf(account.config);
 
   // Who sent this, properly. Inside the queue so two quick messages cannot
   // swap places while one of them looks the sender up, and behind the
   // chat-level gate so a group the account ignores never pays for it.
-  if (msg.resolveSenderId && chatIsAnswerable(policy, { isGroup: msg.isGroup, chatId: msg.chatId, selfChat: msg.selfChat === true })) {
+  if (
+    msg.resolveSenderId &&
+    chatIsAnswerable(policyOf(ctx.account.config), { isGroup: msg.isGroup, chatId: msg.chatId, selfChat: msg.selfChat === true })
+  ) {
     const resolved = await msg.resolveSenderId().catch((err) => {
-      log.warn(`[inbound] sender lookup failed account=${account.id}: ${errMsg(err)}`);
+      log.warn(`[inbound] sender lookup failed account=${ctx.account.id}: ${errMsg(err)}`);
       return null;
     });
     if (resolved) msg.senderId = resolved;
   }
+
+  // Before cards: an approval is parked under the account that sent it.
+  const account = await accountForSender(ctx, msg.senderId);
+  if (account.id !== ctx.account.id) {
+    log.info(`[inbound] shared number routed account=${ctx.account.id} → ${account.id} sender=${msg.senderId}`);
+  }
+  const policy = policyOf(account.config);
 
   // Tapping a card we sent is an ANSWER, not a new request, so it resolves
   // before policy and routing: the token is single-use and bound to this chat
@@ -422,7 +430,7 @@ async function handleOne(ctx: InboundContext, msg: InboundMessage): Promise<void
   const contextBlock = renderGroupContext(overheard);
 
   try {
-    const sessionId = await dispatchChannelRun({
+    const outcome = await dispatchOrQueueChannelRun({
       agent,
       userId,
       task: contextBlock ? `${contextBlock}${task}` : task,
@@ -433,6 +441,17 @@ async function handleOne(ctx: InboundContext, msg: InboundMessage): Promise<void
       ...(msg.attachments?.length ? { attachments: msg.attachments } : {}),
       target,
     });
+    if (outcome.kind === "queued") {
+      if (outcome.accepted) {
+        await consumeGroupContext(account.id, msg.chatId, overheard.length);
+      } else if (plugin.capabilities.typing && (await typingFinished(account.id, msg.chatId))) {
+        await enqueueOutbound(account.id, { kind: "typing", chatId: msg.chatId, on: false });
+      }
+      await reply(outcome.notice);
+      log.info(`[inbound] queued behind the active run agent=${agent.slug} account=${account.id} chat=${msg.chatId} accepted=${outcome.accepted}`);
+      return;
+    }
+    const { sessionId } = outcome;
     // Quoted and accepted, so these lines must not reach a second run.
     await consumeGroupContext(account.id, msg.chatId, overheard.length);
     await rememberActiveRun(account.id, msg.chatId, { sessionId, agentSlug: agent.slug, startedAt: Date.now() });

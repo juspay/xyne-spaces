@@ -21,16 +21,7 @@ import { useLocation, useNavigate, useOutlet } from 'react-router-dom';
 import { Virtuoso } from 'react-virtuoso';
 import { useAuth } from '../../hooks/useAuth';
 import { useCallHistory } from './useCallHistory';
-import {
-  CallOrigin,
-  CallStatus,
-  CallType,
-  CallVisibility,
-  ChannelScopeType,
-  InvitationResponse,
-  MeetingStatus,
-  TagMethod,
-} from '@xyne/shared';
+import { CallStatus, TagMethod } from '@xyne/shared';
 import { logger, Event } from '../../utils/logger';
 import { dataLoadDuration, safeRecordMetric } from '../../services/otel';
 import AppNavigator from '../../components/AppNavigator/AppNavigator';
@@ -52,9 +43,12 @@ import { isSameDay } from '../../utils/dateUtils';
 import { mutators } from '../../zero/mutators';
 import { CallCard } from './CallCard';
 import {
-  Call,
+  hasExternalChatAccess,
+  isDmScope,
   isMissedCallForUser,
   isExternalCalendarEvent,
+  isVisibleInCallList,
+  mapVespaCallResultToCall,
   isScheduledCallJoinable,
   RecentCallFilter,
   FILTER_LABELS,
@@ -72,8 +66,8 @@ import { usePlatform } from '../../hooks/usePlatform';
 import MeetWithPanel from './MeetWithPanel';
 import { useOtherUserCalls } from '../../hooks/useOtherUserCalls';
 import { UpcomingCallsList } from '../../components/Call/UpcomingCallsList';
+import { CallListSkeleton } from './CallListSkeleton';
 import { useSearchMetrics } from '../../hooks/useSearchMetrics';
-import type { DisplaySearchResult } from '../../types/search';
 import { getUserDisplayName } from '../../utils/userDisplayName';
 import { ChipType, TabType } from '../../components/Chat/ChatDirectory/ChannelCommandMenu.types';
 import { type InitialQueryData } from '../../components/Chat/ChatDirectory/LexicalSearchInput';
@@ -91,138 +85,6 @@ interface EmptyStateProps {
 
 function isSameMonth(a: Date, b: Date): boolean {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth();
-}
-
-function hasExternalChatAccess(call: Call): boolean {
-  return (
-    call.participants?.some(p => p.isExternal && p.response !== InvitationResponse.INVITED) ?? false
-  );
-}
-
-function isDmScope(scopeType: ChannelScopeType | string | null | undefined): boolean {
-  return scopeType === ChannelScopeType.DM || scopeType === ChannelScopeType.GROUP_DM;
-}
-
-function isVisibleInCallList(
-  call: Call,
-  currentUserId: string | undefined,
-  showChannelCalls: boolean,
-): boolean {
-  if (isExternalCalendarEvent(call)) return true;
-  if (showChannelCalls) return true;
-  return call.participants?.some(p => p.userId === currentUserId) ?? false;
-}
-
-function stripSearchHighlight(value: string | undefined): string {
-  return (value || '').replace(/<\/?hi>/g, '');
-}
-
-function timestampOrUndefined(value: number | undefined): number | undefined {
-  return value && value > 0 ? value : undefined;
-}
-
-function isJoinedInvitationResponse(response: string): boolean {
-  return (
-    response === String(InvitationResponse.ACCEPTED) || response === String(InvitationResponse.LEFT)
-  );
-}
-
-function mapVespaCallResultToCall(result: DisplaySearchResult, workspaceId: string): Call {
-  const context = result.searchContext;
-  const callId = context?.callId || result.id;
-  const startedAt =
-    timestampOrUndefined(context?.startedAt) ||
-    timestampOrUndefined(context?.startsAt) ||
-    Date.now();
-  const now = Date.now();
-  const participantResponses = context?.participantResponses || [];
-  const participantUserIds = context?.userIds || [];
-  const participantNames = context?.participantNames || [];
-  const participantEmails = context?.participantEmails || [];
-  const participantCount = Math.max(
-    participantUserIds.length,
-    participantResponses.length,
-    participantNames.length,
-    participantEmails.length,
-  );
-
-  return {
-    workspaceId,
-    id: callId,
-    externalId: context?.externalId || callId,
-    title: stripSearchHighlight(context?.title || result.title) || null,
-    createdByUserId: context?.createdByUserId || '',
-    organizerId: null,
-    channelId: context?.channelId || null,
-    orgName: null,
-    description: null,
-    callType: CallType.VIDEO,
-    callOrigin: (context?.callOrigin as CallOrigin | undefined) ?? CallOrigin.CHANNEL,
-    status: (context?.status as CallStatus | undefined) ?? CallStatus.ENDED,
-    roomLink: context?.roomLink || null,
-    startsAt: timestampOrUndefined(context?.startsAt) ?? null,
-    endsAt: timestampOrUndefined(context?.endsAt) ?? null,
-    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-    isRecurring: Boolean(context?.recurringSeriesId),
-    recurringSeriesId: context?.recurringSeriesId || null,
-    recurrenceRule: null,
-    instanceDate: null,
-    recordingEnabled: false,
-    recordingUrl: null,
-    recordingParticipants: '[]',
-    transcript: context?.hasTranscript ? 'available' : undefined,
-    aiSummary: null,
-    startedAt,
-    endedAt: timestampOrUndefined(context?.endedAt) ?? null,
-    lastActivityAt: timestampOrUndefined(context?.endedAt) || startedAt,
-    createdAt: startedAt,
-    updatedAt: now,
-    metadata: null,
-    callUpdatesChannel: null,
-    participantCount,
-    participantPreviewUserIds: JSON.stringify(
-      participantUserIds
-        .map((userId, index) =>
-          userId
-            ? {
-                userId,
-                hasJoined: isJoinedInvitationResponse(participantResponses[index] || ''),
-              }
-            : null,
-        )
-        .filter((entry): entry is { userId: string; hasJoined: boolean } => entry !== null),
-    ),
-    summaryTemplateId: null,
-    labels: [],
-    markedItems: [],
-    xyneManaged: false,
-    visibility: CallVisibility.PRIVATE,
-    participants: Array.from({ length: participantCount }, (_, index) => {
-      const userId = participantUserIds[index] || '';
-      const displayName = stripSearchHighlight(participantNames[index]);
-      const email = stripSearchHighlight(participantEmails[index]);
-      const isExternal = !userId;
-
-      return {
-        workspaceId,
-        id: `${callId}:${userId || `external-${index}`}`,
-        callId,
-        userId,
-        invitedBy: context?.createdByUserId || '',
-        invitedAt: startedAt,
-        response: (participantResponses[index] as InvitationResponse | undefined) || null,
-        meetingStatus: MeetingStatus.PENDING,
-        respondedAt: null,
-        joinedAt: null,
-        leftAt: null,
-        metadata: null,
-        displayName: displayName || null,
-        email: email || null,
-        isExternal,
-        ringStatus: null,
-      };
-    }),
-  } as Call;
 }
 
 const CallHistoryScreen = (): ReactElement => {
@@ -1229,8 +1091,8 @@ const CallHistoryScreen = (): ReactElement => {
             {viewMode === 'list' ? (
               (!hasCallSearch && isScheduledCallsLoading) ||
               (hasCallSearch && isVespaCallSearching) ? (
-                <div className='py-10 flex items-center justify-center'>
-                  <Loader2 className='w-6 h-6 animate-spin text-muted-foreground' />
+                <div className='border border-border rounded-xl px-5 py-4'>
+                  <CallListSkeleton count={2} />
                 </div>
               ) : (
                 <UpcomingCallsList
@@ -1347,8 +1209,8 @@ const CallHistoryScreen = (): ReactElement => {
               {displayRecentCalls.length === 0 ? (
                 (!hasCallSearch && showRecentCallsLoader) ||
                 (hasCallSearch && isVespaCallSearching) ? (
-                  <div className='py-10 flex items-center justify-center'>
-                    <Loader2 className='w-6 h-6 animate-spin text-muted-foreground' />
+                  <div className='-mx-3'>
+                    <CallListSkeleton />
                   </div>
                 ) : hasCallSearch ? (
                   <NoFiltredCalls
@@ -1376,12 +1238,11 @@ const CallHistoryScreen = (): ReactElement => {
                       }
                     }}
                     computeItemKey={(_, call) => call.id}
-                    itemContent={(i, call) => (
+                    itemContent={(_, call) => (
                       <div className='pb-3'>
                         <CallCard
                           call={call}
                           currentUserId={user?.id}
-                          isLastItem={i === displayRecentCalls.length - 1}
                           onCallClick={() => handleCallRowClick(call)}
                           onParticipantsClick={() => handleParticipantsClick(call)}
                           handleGotoTranscript={getGotoTranscriptHandler(call)}

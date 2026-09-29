@@ -33,10 +33,7 @@ import { ExpandedTicketView } from '../../Tickets/ExpandedTicketView/ExpandedTic
 import ChatListV4 from '../ChatList/ChatListV4';
 import LinksTab from '../LinksTab/LinksTab';
 import { Archive } from 'lucide-react';
-import { useUser } from '../../../hooks/useUsers';
-import { useAuthContextValues } from '../../../hooks/useAuth';
-import { isUserDeactivated } from '../../../utils/userDisplayName';
-import { parseDMParticipantIds } from '../ChatDirectory/ChatDirectory.utils';
+import { useIsDmReadOnly } from '../../../hooks/useIsDmReadOnly';
 
 // Stable empty array — an inline `[]` here would be a new reference on every
 // render, causing useChannelSubscription's effect to unsubscribe/resubscribe
@@ -251,12 +248,7 @@ const ConversationPanelV2 = ({
   const shouldShowJoinChannel =
     channel?.visibility === ChannelVisibility.PUBLIC && !isUserMember && !channel?.isArchived;
 
-  const { userID: currentUserId } = useAuthContextValues();
-  const dmPartnerId =
-    channel?.scopeType === ChannelScopeType.DM
-      ? parseDMParticipantIds(channel).find(id => id !== currentUserId)
-      : undefined;
-  const isDeactivatedDmArchive = isUserDeactivated(useUser(dmPartnerId ?? ''));
+  const isDeactivatedDmArchive = useIsDmReadOnly(channelId);
 
   // Safe tab setter with validation. Memoized because it feeds the context
   // value below — an unstable reference re-rendered every visible ChatBubble

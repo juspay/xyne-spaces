@@ -51,7 +51,7 @@ import { isStatusExpired } from '../../../utils/statusUtils';
 import { renderEmoji } from '../../../utils/customEmojiUtils';
 import Popover from '../../ui/Popover';
 import { useLocation, useNavigate } from 'react-router-dom';
-import HuddleIcon from '../../icons/HuddleIcon';
+import { PhoneDefault } from '@xyne/icons';
 import { useCallActions } from '../../../hooks/useCallActions';
 import Tooltip from '../../ui/Tooltip';
 import { useCallConfirmation } from '../../../hooks/useCallConfirmation';
@@ -382,9 +382,9 @@ const Info = ({
           {isUserInCurrentChannelCall ? (
             <PhoneOff className='w-4 h-4 text-status-failure' />
           ) : hasActiveCallInChannel && !isUserInCurrentChannelCall ? (
-            <HuddleIcon color='currentColor' />
+            <PhoneDefault size={16} color='currentColor' />
           ) : (
-            <HuddleIcon color='currentColor' />
+            <PhoneDefault size={16} color='currentColor' />
           )}
           <div
             className={`${isUserInCurrentChannelCall ? 'text-status-failure' : 'text-muted-foreground'} text-[13px]`}

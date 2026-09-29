@@ -9,6 +9,7 @@ gateway:
     istio: ingressgateway
   tlsSecret: xyne-gateway-tls
   httpsRedirect: true
+  edgeTerminated: false
   tls: acme
   extraHosts: []
 
@@ -38,9 +39,18 @@ storageClass:
   allowVolumeExpansion: true
   reclaimPolicy: Delete
 
+argocd:
+  enabled: false
+  host: ""
+  namespace: argocd
+  service: argocd-server
+  port: 80
+
 routes:
   externalDashboard: false
+  clawAuth: false
   clawAuthFrontend: false
+  clawPreview: false
   apiTimeout: 50s
   health: false
   healthPath: /healthz/ready
@@ -59,9 +69,15 @@ services:
   externalDashboard:
     host: xyne-dashboard-external
     port: 80
+  clawAuth:
+    host: xyne-claw-auth
+    port: 3003
   clawAuthFrontend:
     host: xyne-claw-auth-frontend
     port: 80
+  sandboxRouter:
+    host: xyne-sandbox-router
+    port: 8080
   dashboard:
     host: xyne-dashboard
     port: 80

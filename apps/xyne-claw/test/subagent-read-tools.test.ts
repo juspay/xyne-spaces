@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { buildToolCatalog, renderToolCatalogForPrompt } from "../src/tool-catalog.js";
 import { OPTIMIZATIONS, pinRunOptimizations } from "../src/optimizations.js";
-import { buildSubagentTools } from "../src/subagent-tools.js";
+import { buildSubagentTools, withoutBuiltinSubagents } from "../src/subagent-tools.js";
 import type { McpToolGroup } from "../src/mcp.js";
 
 function tool(name: string): ToolDefinition {
@@ -118,5 +118,16 @@ describe("subagent tool description", () => {
     const d = await description(false);
     expect(d.startsWith("[Subagent — nested LLM run, expensive] Search and read Xyne Spaces data")).toBe(true);
     expect(d).not.toContain("call them yourself first");
+  });
+});
+
+describe("subagent_direct_only", () => {
+  it("drops built-in subagent wrappers and keeps everything else", () => {
+    const tools = [{ name: "spaces" }, { name: "bitbucket" }, { name: "my-custom-researcher" }] as never[];
+    expect(withoutBuiltinSubagents(tools).map((t: { name: string }) => t.name)).toEqual(["my-custom-researcher"]);
+  });
+
+  it("is off unless a run asks for it", () => {
+    expect(OPTIMIZATIONS.subagent_direct_only.defaultOn).toBe(false);
   });
 });

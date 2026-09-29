@@ -37,6 +37,11 @@ locals {
       ksa_names = ["xyne-transcription-agent"]
       buckets   = { transcription = "rw" }
     }
+    zero = {
+      role_name = "${var.name}-zero"
+      ksa_names = ["xyne-zero", "xyne-zero-replication"]
+      buckets   = { zero = "rw" }
+    }
   }
 
   bucket_grants = {
@@ -218,6 +223,84 @@ resource "aws_iam_role_policy" "lb_controller" {
   name   = "lb-controller"
   role   = aws_iam_role.lb_controller[0].id
   policy = file("${path.module}/policies/lb-controller.json")
+}
+
+data "aws_iam_policy_document" "cluster_autoscaler_trust" {
+  count = var.cluster_autoscaler_enabled ? 1 : 0
+
+  statement {
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+
+    principals {
+      type        = "Federated"
+      identifiers = [var.oidc_provider_arn]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "${var.oidc_provider_url}:sub"
+      values   = ["system:serviceaccount:${var.cluster_autoscaler_namespace}:${var.cluster_autoscaler_service_account}"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "${var.oidc_provider_url}:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+  }
+}
+
+data "aws_iam_policy_document" "cluster_autoscaler" {
+  count = var.cluster_autoscaler_enabled ? 1 : 0
+
+  statement {
+    sid = "Describe"
+    actions = [
+      "autoscaling:DescribeAutoScalingGroups",
+      "autoscaling:DescribeAutoScalingInstances",
+      "autoscaling:DescribeLaunchConfigurations",
+      "autoscaling:DescribeScalingActivities",
+      "autoscaling:DescribeTags",
+      "ec2:DescribeImages",
+      "ec2:DescribeInstanceTypes",
+      "ec2:DescribeLaunchTemplateVersions",
+      "ec2:GetInstanceTypesFromInstanceRequirements",
+      "eks:DescribeNodegroup",
+    ]
+    resources = ["*"]
+  }
+
+  statement {
+    sid = "ScaleOwnNodeGroups"
+    actions = [
+      "autoscaling:SetDesiredCapacity",
+      "autoscaling:TerminateInstanceInAutoScalingGroup",
+    ]
+    resources = ["*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:ResourceTag/k8s.io/cluster-autoscaler/${var.cluster_name}"
+      values   = ["owned"]
+    }
+  }
+}
+
+resource "aws_iam_role" "cluster_autoscaler" {
+  count = var.cluster_autoscaler_enabled ? 1 : 0
+
+  name               = "${var.name}-cluster-autoscaler"
+  assume_role_policy = data.aws_iam_policy_document.cluster_autoscaler_trust[0].json
+
+  tags = var.tags
+}
+
+resource "aws_iam_role_policy" "cluster_autoscaler" {
+  count = var.cluster_autoscaler_enabled ? 1 : 0
+
+  name   = "cluster-autoscaler"
+  role   = aws_iam_role.cluster_autoscaler[0].id
+  policy = data.aws_iam_policy_document.cluster_autoscaler[0].json
 }
 
 data "aws_iam_policy_document" "external_dns_trust" {

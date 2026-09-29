@@ -28,7 +28,7 @@ import {
   TicketToken,
   UserPlus,
 } from '@xyne/icons';
-import { WorkspaceType } from '@xyne/shared';
+import { WorkspaceRole } from '@xyne/shared';
 
 import Avatar from '../ui/Avatar/Avatar';
 import { Popover } from '../ui/Popover/Popover';
@@ -47,10 +47,9 @@ import { useRecapUnreadCount } from '../../hooks/useRecapData';
 import { usePlatform } from '../../hooks/usePlatform';
 import { reactNativeBridge } from '../../utils/reactNativeBridge';
 import { useVisibleNavigationItems } from '../../hooks/useVisibleNavigationItems';
+import { useIsCommunityWorkspace } from '../../hooks/useIsCommunityWorkspace';
 import { AppIcon } from '../AppIcon/AppIcon';
 import { toolbarItemsStore, useAppSnapshots, appIdOf } from '../../hooks/barItems';
-import { useCachedQuery } from '../../hooks/useCachedQuery';
-import { queries } from '../../zero/queries';
 import type { NavigationItem } from './navigationConfig';
 
 /** One slot in the rail: a built-in destination or an artifact app. */
@@ -178,6 +177,11 @@ const AppSidebar = (): ReactElement => {
   const prefixWs = (path: string): string => (workspaceId ? `/${workspaceId}${path}` : path);
   const { user } = useAuth();
   const currentUser = useSelf();
+  const isCommunityWorkspace = useIsCommunityWorkspace();
+  const canInvitePeople =
+    isCommunityWorkspace ||
+    currentUser?.role === WorkspaceRole.ADMIN ||
+    currentUser?.role === WorkspaceRole.OWNER;
   const visibleNavigationItems = useVisibleNavigationItems();
   const toolbarIds = toolbarItemsStore.useItems();
   const appSnapshots = useAppSnapshots();
@@ -189,10 +193,6 @@ const AppSidebar = (): ReactElement => {
   const hasUnreadBellReactions = useHasUnreadBellReactions();
   const { unreadCount: recapUnreadCount } = useRecapUnreadCount();
   const { isMobile } = usePlatform();
-  const [workspace] = useCachedQuery(queries.getWorkspaceById({ workspaceId: workspaceId || '' }), {
-    enabled: !!workspaceId,
-  });
-  const isCommunityWorkspace = workspace?.workspaceType === WorkspaceType.COMMUNITY;
 
   const [windowWidth, setWindowWidth] = useState(window.innerWidth);
 
@@ -639,7 +639,7 @@ const AppSidebar = (): ReactElement => {
         >
           <ZeroConnectionStatus className='mb-2' />
 
-          {isCommunityWorkspace && (
+          {canInvitePeople && (
             <Tooltip content='Invite people' side='right' delayDuration={0}>
               <button
                 type='button'
@@ -790,6 +790,7 @@ const AppSidebar = (): ReactElement => {
           open={isInviteDialogOpen}
           onOpenChange={setIsInviteDialogOpen}
           workspaceId={workspaceId}
+          isCommunityWorkspace={isCommunityWorkspace}
         />
 
         {/* Status Update Modal */}

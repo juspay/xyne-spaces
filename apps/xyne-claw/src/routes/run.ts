@@ -97,6 +97,7 @@ import {
 } from "../follow-up-generator.js";
 import {
   buildSubagentTools,
+  withoutBuiltinSubagents,
   loadDeepwikiTools,
   loadContext7Tools,
   type SkillTrigger,
@@ -2229,7 +2230,7 @@ export async function processTask(
       // here the palette has nothing to admit and load-tools nothing to load.
       // The palette itself still refuses wrappers (a wrapper grants a whole
       // server, not one tool).
-      includeSubagentTools: fastModeEnabled || paletteMode !== "off" || optEnabled("subagent_read_tools"),
+      includeSubagentTools: fastModeEnabled || paletteMode !== "off" || optEnabled("subagent_read_tools") || optEnabled("subagent_direct_only"),
       // Without this, def-less servers' tools and in-process custom tools are
       // admitted straight into the always-active set instead of the catalog —
       // bigger prompt, not wider reach.
@@ -2243,7 +2244,7 @@ export async function processTask(
      *  loadable on demand and must never be always-active. */
     const paletteAdmittedNames = new Set<string>();
 
-    const { subagentTools, directTools, remainingCustomTools } = fastModeEnabled
+    const { subagentTools: builtSubagentTools, directTools, remainingCustomTools } = fastModeEnabled
       ? {
           subagentTools: [] as ToolDefinition[],
           ...buildFastModeDirectTools({
@@ -2286,6 +2287,10 @@ export async function processTask(
           customSubagents,
           directPickSuffixes,
         );
+
+    const subagentTools = optEnabled("subagent_direct_only")
+      ? withoutBuiltinSubagents(builtSubagentTools)
+      : builtSubagentTools;
 
     directTools.push(buildPublishReviewRoomTool(sessionId));
 
@@ -3385,7 +3390,7 @@ export async function processTask(
       fastCatalogNames = fastCatalogItems.map((item) => item.entry.name);
       const finalFastCatalogNameSet = new Set(fastCatalogNames);
       const activeToolEntries: ToolCatalogEntry[] | undefined =
-        optEnabled("catalog_full_index") || optEnabled("subagent_read_tools") || optEnabled("active_tool_cap")
+        optEnabled("catalog_full_index") || optEnabled("subagent_read_tools") || optEnabled("subagent_direct_only") || optEnabled("active_tool_cap")
           ? allTools
               .filter((tool) =>
                 !duplicatesMetaTool(tool.name) &&
@@ -4000,8 +4005,8 @@ export async function processTask(
           // Only fast mode actually turns delegation off; asserting it on a
           // normal run would be a lie the model acts on.
           subagentDelegationDisabled: fastModeEnabled,
-          fullIndex: optEnabled("catalog_full_index") || optEnabled("subagent_read_tools") || optEnabled("active_tool_cap"),
-          preferDirect: optEnabled("subagent_read_tools"),
+          fullIndex: optEnabled("catalog_full_index") || optEnabled("subagent_read_tools") || optEnabled("subagent_direct_only") || optEnabled("active_tool_cap"),
+          preferDirect: optEnabled("subagent_read_tools") && !optEnabled("subagent_direct_only"),
         })
       : "";
     if (fastModeCatalogPrompt) {
@@ -4166,7 +4171,7 @@ export async function processTask(
         // Thread invocations (Spaces/Slack replies — channelId present) keep a
         // clean posted reply = the last 2 assistant turns; ask-ai and every other
         // surface keep ALL turns so the stored answer matches the streamed one.
-        finalAnswerMaxTurns: channelId ? 2 : undefined,
+        finalAnswerMaxTurns: channelId ? (optEnabled("interim_messages") ? 1 : 2) : undefined,
         ...(isRegenerate ? { isRegenerate: true } : {}),
         backgroundRegistry: childTaskRegistry,
         parentDebug: parentDebugHandle,

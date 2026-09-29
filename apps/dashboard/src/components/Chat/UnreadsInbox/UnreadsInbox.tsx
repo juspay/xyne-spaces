@@ -63,7 +63,11 @@ const UnreadsInbox = (): ReactElement => {
   // Read by estimateSize, which runs inside useVirtualizer before openChannelIds
   // (derived from its own output below) exists for this render — one render
   // stale is fine, measureElement corrects the real height immediately after.
-  const openChannelIdsRef = useRef<Set<string>>(new Set());
+  // null (not an empty Set) until the first real computation: rows are
+  // open-by-default, so treating "not computed yet" as "everything closed"
+  // undercounts height and lets the virtualizer pull far more rows into range
+  // than actually fit once they're really open.
+  const openChannelIdsRef = useRef<Set<string> | null>(null);
   // Real content height per open channel, reported via onTotalHeightChange.
   const [contentHeights, setContentHeights] = useState<Record<string, number>>({});
   const handleTotalHeightChange = useCallback((channelId: string, height: number) => {
@@ -130,8 +134,11 @@ const UnreadsInbox = (): ReactElement => {
     estimateSize: useCallback(
       (index: number) => {
         const item = unreadItems[index];
-        const isOpen = !!item && openChannelIdsRef.current.has(item.id);
-        return isOpen ? OPEN_ROW_ESTIMATE(item && contentHeights[item.id]) : COLLAPSED_ROW_ESTIMATE;
+        if (!item) return COLLAPSED_ROW_ESTIMATE;
+        const isOpen = openChannelIdsRef.current
+          ? openChannelIdsRef.current.has(item.id)
+          : manualTogglesRef.current[item.id] !== false;
+        return isOpen ? OPEN_ROW_ESTIMATE(contentHeights[item.id]) : COLLAPSED_ROW_ESTIMATE;
       },
       [unreadItems, contentHeights],
     ),
@@ -140,6 +147,25 @@ const UnreadsInbox = (): ReactElement => {
   });
 
   const virtualItems = rowVirtualizer.getVirtualItems();
+
+  // Drop manual-open state once a channel scrolls out of the virtualizer's
+  // rendered range, so it doesn't stay subscribed (mounted) indefinitely.
+  // Manual-close state is untouched here — it's meant to persist regardless
+  // of scroll position, same as today, and is only cleared when the channel
+  // leaves the unread list (effect above).
+  useEffect(() => {
+    const visibleIds = new Set(
+      virtualItems.map(vi => unreadItems[vi.index]?.id).filter((id): id is string => !!id),
+    );
+    let changed = false;
+    for (const [id, value] of Object.entries(manualTogglesRef.current)) {
+      if (value === true && !visibleIds.has(id)) {
+        delete manualTogglesRef.current[id];
+        changed = true;
+      }
+    }
+    if (changed) setManualTogglesVersion(v => v + 1);
+  }, [virtualItems, unreadItems]);
 
   // Open = currently rendered by the virtualizer (near-visible) and not manually
   // closed, OR manually opened regardless of visibility — mirrors the previous
@@ -161,7 +187,7 @@ const UnreadsInbox = (): ReactElement => {
   const handleItemClick = (e: React.MouseEvent | React.KeyboardEvent, channelId: string) => {
     e.preventDefault();
     e.stopPropagation();
-    const isCurrentlyOpen = openChannelIdsRef.current.has(channelId);
+    const isCurrentlyOpen = openChannelIdsRef.current?.has(channelId) ?? false;
     manualTogglesRef.current[channelId] = !isCurrentlyOpen;
     setManualTogglesVersion(v => v + 1);
   };

@@ -237,8 +237,11 @@ export const ChannelCommandItem = ({
     ? (parseDMParticipantIds(channel).find(id => id !== currentUserID) ?? '')
     : '';
   const targetUser = useUser(otherUserId);
+  const isDeactivated = isUserDeactivated(targetUser);
   const hasStatus =
-    targetUser && (targetUser.activityStatus || targetUser.statusEmoji || targetUser.statusContent);
+    !isDeactivated &&
+    targetUser &&
+    (targetUser.activityStatus || targetUser.statusEmoji || targetUser.statusContent);
 
   return (
     <Command.Item
@@ -256,7 +259,9 @@ export const ChannelCommandItem = ({
         {getChannelIcon(channel)}
       </div>
       <div className='flex-1 min-w-0 flex items-center gap-1'>
-        <span className='text-left text-[15px] leading-[1.2] tracking-[-0.1px] text-foreground truncate'>
+        <span
+          className={`text-left text-[15px] leading-[1.2] tracking-[-0.1px] truncate ${isDeactivated ? 'text-muted-foreground' : 'text-foreground'}`}
+        >
           {displayName}
         </span>
         {hasStatus && (
@@ -267,6 +272,11 @@ export const ChannelCommandItem = ({
             activityStatus={targetUser.activityStatus}
             size='sm'
           />
+        )}
+        {isDeactivated && (
+          <span className='shrink-0 text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded'>
+            Deactivated
+          </span>
         )}
       </div>
       {isSelected ? (

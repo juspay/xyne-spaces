@@ -1,0 +1,31 @@
+{{- if .Values.argocd.enabled }}
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: argocd
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "platform-config.labels" . | nindent 4 }}
+spec:
+  hosts:
+    - {{ .Values.argocd.host | default (printf "argocd.%s" .Values.domain) }}
+  gateways:
+    - {{ .Values.gateway.namespace }}/{{ .Values.gateway.name }}
+  http:
+    {{- if .Values.routes.health }}
+    - name: health
+      match:
+        - uri:
+            exact: {{ .Values.routes.healthPath }}
+      directResponse:
+        status: 200
+        body:
+          string: "ok"
+    {{- end }}
+    - name: argocd
+      route:
+        - destination:
+            host: {{ printf "%s.%s.svc.cluster.local" .Values.argocd.service .Values.argocd.namespace }}
+            port:
+              number: {{ .Values.argocd.port }}
+{{- end }}

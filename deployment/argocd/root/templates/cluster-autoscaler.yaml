@@ -1,0 +1,17 @@
+{{- $ca := .Values.addons.clusterAutoscaler }}
+{{- if include "xyne-root.awsDefault" (dict "root" $ "value" $ca.enabled) }}
+{{- $cluster := .Values.infra.cluster | default dict }}
+{{- $identity := (.Values.infra.identities | default dict).clusterAutoscaler | default dict }}
+{{- $base := dict
+  "cloudProvider" "aws"
+  "awsRegion" $cluster.region
+  "autoDiscovery" (dict "clusterName" $cluster.name)
+  "rbac" (dict "serviceAccount" (dict "create" true "name" $ca.serviceAccountName "annotations" ($identity.annotations | default dict)))
+  "extraArgs" (dict "balance-similar-node-groups" true "skip-nodes-with-system-pods" false "expander" "least-waste")
+}}
+{{- with $identity.labels }}
+{{- $_ := set $base "podLabels" . }}
+{{- end }}
+{{- $values := include "xyne-root.merge" (dict "base" $base "layers" (list $ca.values)) | fromYaml }}
+{{- include "xyne-root.application" (dict "root" $ "name" "cluster-autoscaler" "namespace" $ca.namespace "wave" -4 "source" (include "xyne-root.helmSource" (dict "root" $ "repoURL" "https://kubernetes.github.io/autoscaler" "chart" "cluster-autoscaler" "targetRevision" $ca.version "releaseName" "cluster-autoscaler" "values" $values) | fromYaml) "ignoreDifferences" (include "xyne-root.deploymentIgnore" . | fromYamlArray)) }}
+{{- end }}

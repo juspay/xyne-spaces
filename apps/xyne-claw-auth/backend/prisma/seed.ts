@@ -44,24 +44,20 @@ function readSkillFile(name: string): string | null {
 }
 
 const SERVERS = [
+  // URL construction stays in adapters/kibana.ts, not here.
   {
     type: "kibana",
     name: "Kibana",
     url: "",
-    description: "Elasticsearch Kibana instance for log search and dashboards",
-    transport: "stdio",
+    description: "Kibana's built-in Agent Builder MCP server — search, dashboards, and knowledge base queries",
+    transport: "http",
     credentialForm: {
       fields: [
-        { name: "url", label: "Elasticsearch URL", type: "text", placeholder: "https://your-elasticsearch.example.com" },
-        { name: "apiKey", label: "API Key", type: "password", placeholder: "Enter your Elasticsearch API key" },
+        { name: "url", label: "Kibana URL", type: "text", placeholder: "https://your-kibana.example.com" },
+        { name: "apiKey", label: "API Key", type: "password", placeholder: "Needs feature_agentBuilder.read privilege" },
       ],
     },
-    launchConfigTemplate: {
-      cmd: "docker",
-      args: ["run", "--rm", "-i", "-e", "ES_URL", "-e", "ES_API_KEY", "docker.elastic.co/mcp/elasticsearch", "stdio"],
-      env: { ES_URL: "{{url}}", ES_API_KEY: "{{apiKey}}" },
-    },
-    healthcheckSpec: { name: "list_indices", params: {} },
+    healthcheckSpec: { name: "__list_tools__", params: {} },
     writeToolPolicy: { mode: "allowlist", tools: [] },
   },
   {
@@ -958,7 +954,7 @@ You:
             // subagent round-trip. The `spaces` subagent is still in scope for
             // multi-step / fuzzy / cross-source questions.
             "spaces-whoami",
-            "spaces-search",
+            "spaces-vespa-search",
             "spaces-tickets",
             "spaces-messages",
             "spaces-message-detail",
@@ -1018,7 +1014,7 @@ You:
         //     via skills.find(s => s.name === skillSlug)), and `when` must be
         //     "after" (the only branch implemented).
         skillTriggers: [
-          { toolName: "spaces-search", skillSlug: "Spaces Citations", when: "after", prompt: "These results carry [clf-…#n] citation tokens. Cite every claim you draw from them, verbatim." },
+          { toolName: "spaces-vespa-search", skillSlug: "Spaces Citations", when: "after", prompt: "These results carry [clf-…#n] citation tokens. Cite every claim you draw from them, verbatim." },
           { toolName: "kb-search", skillSlug: "Spaces Citations", when: "after", prompt: "These KB chunks carry [clf-…#n] citation tokens. Cite every claim you draw from them, verbatim." }
         ]
       }
@@ -1044,7 +1040,7 @@ You:
             // subagent round-trip. The `spaces` subagent is still in scope for
             // multi-step / fuzzy / cross-source questions.
             "spaces-whoami",
-            "spaces-search",
+            "spaces-vespa-search",
             "spaces-tickets",
             "spaces-messages",
             "spaces-message-detail",
@@ -1090,7 +1086,7 @@ You:
         // for the full rationale and the toolName/skillSlug/when conventions.
         // The `update` block governs already-seeded DBs, so it must mirror it.
         skillTriggers: [
-          { toolName: "spaces-search", skillSlug: "Spaces Citations", when: "after", prompt: "These results carry [clf-…#n] citation tokens. Cite every claim you draw from them, verbatim." },
+          { toolName: "spaces-vespa-search", skillSlug: "Spaces Citations", when: "after", prompt: "These results carry [clf-…#n] citation tokens. Cite every claim you draw from them, verbatim." },
           { toolName: "kb-search", skillSlug: "Spaces Citations", when: "after", prompt: "These KB chunks carry [clf-…#n] citation tokens. Cite every claim you draw from them, verbatim." }
         ]
       }
