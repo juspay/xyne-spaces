@@ -674,7 +674,9 @@ const EMPTY_CHANNEL_DRAFT: ChannelDraft = {
 const readChannelDraft = (key: string | null): ChannelDraft => {
   try {
     const raw = key ? window.localStorage.getItem(key) : null;
-    return raw ? { ...EMPTY_CHANNEL_DRAFT, ...JSON.parse(raw) } : EMPTY_CHANNEL_DRAFT;
+    if (!raw) return EMPTY_CHANNEL_DRAFT;
+    const parsed = JSON.parse(raw) as Partial<ChannelDraft>;
+    return { ...EMPTY_CHANNEL_DRAFT, ...parsed };
   } catch {
     return EMPTY_CHANNEL_DRAFT;
   }
