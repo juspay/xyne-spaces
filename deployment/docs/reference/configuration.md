@@ -593,6 +593,7 @@ identical on the three clouds; only the state and provider variables differ.
 | `argocd_host` | string | `argocd.<domain>` | host name for `argocd_expose` |
 | `enable_vespa` | bool | `false` | `addons.vespa.enabled` |
 | `enable_hindsight` | bool | `false` | `addons.hindsight.enabled`; deploys the upstream Hindsight chart and points claw's long-term memory at it |
+| `enable_workflows` | bool | `false` | `addons.workflows.enabled`; deploys Argo Workflows and the `xyne-upgrade` workflow, see [upgrading with the workflow](../operate/operations.md#upgrading-with-the-workflow) |
 | `hindsight` | object{url, tenant} | `{}` | point claw at a Hindsight you run elsewhere instead. `url` wins over the deployed addon; empty with the addon off disables memory entirely |
 | `enable_monitoring` | bool | `false` | `addons.monitoring.enabled` |
 | `enable_sandbox` | bool | `false` | `addons.sandbox.enabled`; also registers the `quay.io/kata-containers/kata-deploy-charts` OCI repository in Argo CD |
@@ -670,7 +671,7 @@ worker needs both stages (`setup.sh --env <env>`), because its identity is bound
 
 Keys are the addon names of the root values: `lbController`, `clusterAutoscaler`,
 `nvidiaDevicePlugin`, `externalDns`, `istio`, `platformConfig`, `certManager`, `cnpg`, `redis`,
-`minio`, `hindsight`, `vespa`, `monitoring`, `sandbox`. The YAML string is merged into that
+`minio`, `hindsight`, `vespa`, `monitoring`, `sandbox`, `workflows`. The YAML string is merged into that
 addon's block, so both the addon's own switches and its chart `values` are reachable:
 
 | Addon | Block keys (root `values.yaml`) |
@@ -689,6 +690,7 @@ addon's block, so both the addon's own switches and its chart `values` are reach
 | `vespa` | `enabled`, `image.{registry, repository vespaengine/vespa, tag 8.754.14}`, `proxyImage.{registry, repository, tag}` (default: the published image at `image_tag`), `storageClass`, `configserverStorage` 50Gi, `contentStorage` 200Gi, `embedder.{enabled true, model BAAI/bge-base-en-v1.5, dimensions 768}`, `values.{configserver, content, feed, search, embedder, proxy, app}` |
 | `monitoring` | `enabled`, `namespace` monitoring, `metricsEndpoint`, `victoriaMetrics.version` 0.93.0, `otelCollector.version` 0.173.1, `values.{victoriaMetrics, otelCollector}` |
 | `sandbox` | `enabled`, `kata.{version 4.1.0, imageTag 4.1.0, namespace kube-system, shim qemu, shims [qemu, qemu-runtime-rs], hypervisorAnnotations}`, `controller.{repoURL, targetRevision v0.4.5, path helm, namespace, image, tag, values}`, `template.{name, image, vcpus, memory, resources}`, `warmPool.replicas`, `policy.{allowedEgress, dns.cidrs}`, `values.{kata, policy, router, egressProxy}` |
+| `workflows` | `enabled`, `version` 2.0.8 (argo-helm `argo-workflows`), `namespace` argo-workflows, `toolsImage` alpine/k8s:1.35.9, `expose.{enabled false, host workflows.<domain>}`, `values.{argoWorkflows, upgrade}` (`upgrade.targets.<app>` sets the image, working directory, schemas and database secrets the plan step uses; `upgrade.timeouts.{plan 900, rollout 3600}`) |
 
 `cnpg`, `redis` and `minio` are switched on by the component modes, not by hand. `externalDns`
 follows `dns_zone` and `external_dns_enabled` in `01-infra`, which today means AWS only; the same
