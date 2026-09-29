@@ -5103,3 +5103,52 @@ model RadarRule {
   @@schema("non_zero")
 }
 
+// An outside system that manages its own guest users over /api/s2s and gets Spaces tokens for
+// them. Users belong to the account, not a key, so keys rotate freely.
+model ServiceAccount {
+  workspaceId         String
+  id                  String   @id @default(cuid())
+  name                String
+  status              String   @default("ACTIVE") // ServiceAccountStatus
+  createdBy           String
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@index([workspaceId])
+  @@map("service_accounts")
+  @@schema("non_zero")
+}
+
+// S2S keys; only the SHA-256 is stored.
+model ServiceAccountKey {
+  workspaceId      String
+  id               String    @id @default(cuid())
+  serviceAccountId String
+  keyHash          String    @unique
+  status           String    @default("ACTIVE") // ServiceAccountKeyStatus
+  expiresAt        DateTime
+  lastUsedAt       DateTime?
+  createdBy        String
+  createdAt        DateTime  @default(now())
+  revokedBy        String?
+  revokedAt        DateTime?
+
+  @@index([serviceAccountId])
+  @@map("service_account_keys")
+  @@schema("non_zero")
+}
+
+// What a service account may give its users (today only CHANNEL), like guest_access.
+model ServiceAccountResource {
+  workspaceId      String
+  serviceAccountId String
+  resourceType     String // ServiceAccountResourceType
+  resourceId       String
+  addedBy          String
+  createdAt        DateTime @default(now())
+
+  @@id([serviceAccountId, resourceType, resourceId])
+  @@index([resourceType, resourceId])
+  @@map("service_account_resources")
+  @@schema("non_zero")
+}

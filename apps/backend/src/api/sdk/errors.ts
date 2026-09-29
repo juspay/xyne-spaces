@@ -91,6 +91,7 @@ export type ErrorDetails = readonly ErrorDetail[] | Readonly<Record<string, unkn
 export interface ApiErrorBody {
   readonly error: {
     readonly code: ErrorCode;
+    readonly reason?: string;
     readonly message: string;
     readonly details?: ErrorDetails;
     readonly request_id: string;
@@ -110,6 +111,7 @@ export class SdkApiError extends Error {
   public readonly status: number;
   public readonly retryable: boolean;
   public readonly details?: ErrorDetails;
+  public readonly reason?: string;
   /** Set when the underlying cause should be logged but never returned to the caller. */
   public readonly cause?: unknown;
 
@@ -118,6 +120,7 @@ export class SdkApiError extends Error {
     message?: string,
     opts: {
       details?: ErrorDetails;
+      reason?: string;
       cause?: unknown;
     } = {},
   ) {
@@ -128,6 +131,7 @@ export class SdkApiError extends Error {
     this.status = definition.status;
     this.retryable = definition.retryable;
     if (opts.details !== undefined) this.details = opts.details;
+    if (opts.reason !== undefined) this.reason = opts.reason;
     if (opts.cause !== undefined) this.cause = opts.cause;
     Error.captureStackTrace(this, SdkApiError);
   }

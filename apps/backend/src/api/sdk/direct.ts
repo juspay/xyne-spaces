@@ -50,6 +50,8 @@ import { uploadMultiple } from '@/middleware/upload';
 import { config } from '@/config/env';
 import { SdkApiError } from './errors';
 import { handle } from './handler';
+import { connectCreatedChannel } from '@/serviceAccounts/connect';
+import { TokenSubjectKind } from '@/serviceAccounts/tokens/types';
 
 const channelController = new ChannelController();
 const conversationController = new ConversationController();
@@ -132,6 +134,8 @@ interface BaseRoute {
   readonly mapBody?: (body: unknown) => unknown;
   /** Unwrap the controller's envelope into the SDK's response shape. */
   readonly unwrap?: (body: unknown) => unknown;
+  /** Runs after the controller succeeds, with its response body. */
+  readonly after?: (req: Request, body: unknown) => Promise<void>;
 }
 
 /**
@@ -201,6 +205,15 @@ const ROUTES: readonly DirectRoute[] = [
     method: 'post',
     path: '/channels',
     controller: channelController.createChannel,
+    after: async (req, body) => {
+      if (req.spacesToken?.kind !== TokenSubjectKind.MEMBER) return;
+      await connectCreatedChannel({
+        serviceAccountId: req.spacesToken.serviceAccountId,
+        workspaceId: req.user!.workspaceId,
+        channelId: (body as { id: string }).id,
+        createdBy: req.user!.id,
+      });
+    },
   },
   {
     method: 'post',
@@ -429,6 +442,7 @@ export function createDirectRouter(): Router {
         }
 
         const result = await callController(route, req);
+        if (route.after && result.status >= 200 && result.status < 300) await route.after(req, result.body);
         for (const [name, value] of Object.entries(result.headers)) {
           res.setHeader(name, value);
         }

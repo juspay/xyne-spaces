@@ -126,6 +126,7 @@ import {
   WorkspaceRole,
   WorkspaceType,
 } from '@xyne/shared';
+import { ServiceAccountKeyStatus, ServiceAccountResourceType, ServiceAccountStatus } from '@/serviceAccounts/constants';
 
 export interface EnumTextField {
     prismaModel: string;
@@ -147,6 +148,9 @@ export const ENUM_TEXT_FIELDS: readonly EnumTextField[] = [
   { prismaModel: 'UserGroup', field: 'rotationInterval', values: Object.values(RotationInterval) },
   { prismaModel: 'UserSession', field: 'status', values: Object.values(SessionStatus) },
   { prismaModel: 'User', field: 'authProvider', values: Object.values(AuthProvider) },
+  { prismaModel: 'ServiceAccount', field: 'status', values: Object.values(ServiceAccountStatus) },
+  { prismaModel: 'ServiceAccountKey', field: 'status', values: Object.values(ServiceAccountKeyStatus) },
+  { prismaModel: 'ServiceAccountResource', field: 'resourceType', values: Object.values(ServiceAccountResourceType) },
   { prismaModel: 'User', field: 'status', values: Object.values(UserStatus) },
   { prismaModel: 'User', field: 'userType', values: Object.values(UserType) },
   { prismaModel: 'User', field: 'role', values: Object.values(WorkspaceRole) },
