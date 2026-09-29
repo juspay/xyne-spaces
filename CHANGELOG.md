@@ -1,3 +1,16 @@
+## [1.424.0](https://github.com/juspay/xyne-spaces/compare/v1.423.1...v1.424.0) (2026-09-29)
+
+
+### Features
+
+* auto-arrange the transition graph and remember stage positions ([#2397](https://github.com/juspay/xyne-spaces/issues/2397)) ([a6753cd](https://github.com/juspay/xyne-spaces/commit/a6753cdd1af6872dd7c235ddb4246351fe3e63ce))
+
+
+### Bug Fixes
+
+* run automation step validation retries instead of absorbing them as duplicates ([#2432](https://github.com/juspay/xyne-spaces/issues/2432)) ([abdd06f](https://github.com/juspay/xyne-spaces/commit/abdd06fc2ffd66fcb69868c0c2bcbf5bffefacc9))
+* search all project labels in the create ticket form ([#2426](https://github.com/juspay/xyne-spaces/issues/2426)) ([9d9508e](https://github.com/juspay/xyne-spaces/commit/9d9508eb52d3bcec34226b580f0362272ddac6cf)), closes [#2344](https://github.com/juspay/xyne-spaces/issues/2344)
+
 ## [1.423.1](https://github.com/juspay/xyne-spaces/compare/v1.423.0...v1.423.1) (2026-09-29)
 
 
