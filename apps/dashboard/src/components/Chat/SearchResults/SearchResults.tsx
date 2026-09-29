@@ -8,6 +8,7 @@ import {
   Loader2,
   Mail,
   MessageCircle,
+  MessageSquare,
   Mic,
   Paperclip,
   X,
@@ -50,7 +51,7 @@ import { SearchResultMessageCard } from './SearchResultMessageCard';
 import { RenderMessageWithHTML } from '../RenderMessageWithHTML/RenderMessageWithHTML';
 import { SearchSnippetRenderer } from '../RenderMessageWithHTML/searchSnippetRender';
 import { SearchResultsContext, SearchResultsThread } from './SearchResultsContext';
-import { SearchFilterBar } from './SearchFilterBar';
+import { SearchFilterBar, buildFilterSummary, sortSummary } from './SearchFilterBar';
 import { SearchQueryInput, type QueryToken } from './SearchQueryInput';
 import { parseSearchFilters } from '../../../utils/searchFilterParser';
 import {
@@ -86,6 +87,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { cn } from '../../../utils/classNames';
 import { CompareSelectRow } from './compare/CompareSelectRow';
 import { SearchCompareDialog } from './compare/SearchCompareDialog';
+import { SearchFeedbackPopover } from '../SearchFeedback';
 import { hasRankingData } from './compare/rankingFeatures';
 import {
   TicketSearchHighlightContext,
@@ -205,6 +207,9 @@ const SearchResults = (): ReactElement => {
   const [filters, setFilters] = useState<SearchResultsFilters>(() =>
     parseFiltersFromParams(searchParams),
   );
+
+  // —— Search feedback popover ——
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
 
   // —— Compare mode (ranking comparison) ——
   const [compareMode, setCompareMode] = useState(false);
@@ -843,6 +848,15 @@ const SearchResults = (): ReactElement => {
     return map;
   }, [results]);
 
+  /** True when the search returned results. Controls the result count and Compare button. */
+  const hasResultsRow = results.length > 0 || (!!query && totalCount > 0);
+
+  // Filter labels sent with feedback.
+  const feedbackFilters = useMemo(
+    () => buildFilterSummary(filters, filterResolvers, query),
+    [filters, filterResolvers, query],
+  );
+
   const resultsColumn = (
     <div className='relative flex flex-col h-full min-h-0'>
       <div className='shrink-0 px-4'>
@@ -895,26 +909,56 @@ const SearchResults = (): ReactElement => {
             onQueryChange={handleQuerySubmit}
           />
         </div>
-        {(results.length > 0 || (query && totalCount > 0)) && (
+        {/* Shown for any query so Feedback is available even with no results.
+            The result count and Compare still need results. */}
+        {(hasResultsRow || !!displayQuery) && (
           <div className='flex items-center justify-between gap-3 pb-2'>
-            <p className='text-xs text-muted-foreground tabular-nums'>
-              {(totalCount || results.length).toLocaleString()} results
-            </p>
-            <button
-              onClick={() => setCompareMode(v => !v)}
-              title='Compare how results ranked'
-              data-track-category='SEARCH_RESULTS'
-              data-track-name='TOGGLE_COMPARE'
-              className={cn(
-                'inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md active:scale-[0.96] transition',
-                compareMode
-                  ? 'bg-primary text-primary-foreground shadow-sm'
-                  : 'text-muted-foreground hover:text-foreground hover:bg-muted/60 border border-border',
+            {hasResultsRow && (
+              <p className='text-xs text-muted-foreground tabular-nums'>
+                {(totalCount || results.length).toLocaleString()} results
+              </p>
+            )}
+            <div className='flex items-center gap-2 ml-auto'>
+              <SearchFeedbackPopover
+                open={feedbackOpen}
+                onOpenChange={setFeedbackOpen}
+                query={displayQuery}
+                filters={feedbackFilters}
+                sort={sortSummary(filters)}
+              >
+                <button
+                  title='Tell the search team about these results'
+                  data-track-category='SEARCH_RESULTS'
+                  data-track-name='OPEN_FEEDBACK'
+                  className={cn(
+                    'inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md active:scale-[0.96] transition',
+                    feedbackOpen
+                      ? 'bg-primary text-primary-foreground shadow-sm'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-muted/60 border border-border',
+                  )}
+                >
+                  <MessageSquare size={13} />
+                  Feedback
+                </button>
+              </SearchFeedbackPopover>
+              {hasResultsRow && (
+                <button
+                  onClick={() => setCompareMode(v => !v)}
+                  title='Compare how results ranked'
+                  data-track-category='SEARCH_RESULTS'
+                  data-track-name='TOGGLE_COMPARE'
+                  className={cn(
+                    'inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md active:scale-[0.96] transition',
+                    compareMode
+                      ? 'bg-primary text-primary-foreground shadow-sm'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-muted/60 border border-border',
+                  )}
+                >
+                  <GitCompare size={13} />
+                  Compare
+                </button>
               )}
-            >
-              <GitCompare size={13} />
-              Compare
-            </button>
+            </div>
           </div>
         )}
       </div>
