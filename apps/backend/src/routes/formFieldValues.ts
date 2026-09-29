@@ -11,12 +11,12 @@ const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
 
 /**
- * Rows read before distinct values are taken. The table holds a row per (ticket, field), so
- * this keeps the dropdown's cost flat. `q` is matched in the same window rather than pushed
- * down: the value is a Json column the query builder can't filter case-insensitively, and
- * raw SQL is barred (scripts/validate-no-raw-sql.sh). Older values can still be typed in.
+ * Distinct value groups read per request — a backstop for a field used as free text, not the
+ * normal path. Groups arrive by count, so the cap only drops the rarest values. `q` is matched
+ * over the same window rather than pushed down: the value is a Json column the query builder
+ * can't filter case-insensitively, and raw SQL is barred (scripts/validate-no-raw-sql.sh).
  */
-const SCAN_LIMIT = 5000;
+const GROUP_LIMIT = 1000;
 
 const ListFieldValuesQuerySchema = z.object({
   fieldId: z.string().trim().min(1).max(200),
@@ -73,30 +73,43 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
 
     const { fieldId, q, limit } = parsed.data;
 
-    // Workspace-scoped by the tenant ACL extension (see database/tenant/acl-extension.ts).
-    const rows = await db.formEntityValues.findMany({
+    // Grouped in the database so only distinct values cross the wire. Both columns are grouped
+    // because `fieldValue` is the fallback for rows without `actualFieldValue`. Workspace-scoped
+    // by the tenant ACL extension (see database/tenant/acl-extension.ts).
+    const groups = await db.formEntityValues.groupBy({
+      by: ['actualFieldValue', 'fieldValue'],
       where: { fieldId, entityType: FormEntityType.TICKET },
-      select: { fieldValue: true, actualFieldValue: true },
-      orderBy: { updatedAt: 'desc' },
-      take: SCAN_LIMIT,
+      _count: { fieldValue: true },
+      orderBy: { _count: { fieldValue: 'desc' } },
+      take: GROUP_LIMIT,
     });
 
     const search = q?.toLowerCase();
-    const countByValue = new Map<string, number>();
-    for (const row of rows) {
-      for (const value of extractStoredValues(row)) {
+    // Keyed case-insensitively so "MID 1" and "mid 1" are one option. Groups arrive by count,
+    // so the spelling kept is the most common one.
+    const tallyByKey = new Map<string, { value: string; count: number }>();
+    for (const group of groups) {
+      for (const value of extractStoredValues(group)) {
         const trimmed = value.trim();
         if (!trimmed) continue;
-        if (search && !trimmed.toLowerCase().includes(search)) continue;
-        countByValue.set(trimmed, (countByValue.get(trimmed) ?? 0) + 1);
+        const key = trimmed.toLowerCase();
+        if (search && !key.includes(search)) continue;
+        const tally = tallyByKey.get(key);
+        if (tally) {
+          tally.count += group._count.fieldValue;
+        } else {
+          tallyByKey.set(key, { value: trimmed, count: group._count.fieldValue });
+        }
       }
     }
 
-    const ranked = [...countByValue.entries()]
-      .sort(([leftValue, leftCount], [rightValue, rightCount]) =>
-        leftCount === rightCount ? leftValue.localeCompare(rightValue) : rightCount - leftCount,
+    const ranked = [...tallyByKey.values()]
+      .sort((left, right) =>
+        left.count === right.count
+          ? left.value.localeCompare(right.value)
+          : right.count - left.count,
       )
-      .map(([value]) => value);
+      .map(tally => tally.value);
 
     res.status(200).json({
       success: true,
