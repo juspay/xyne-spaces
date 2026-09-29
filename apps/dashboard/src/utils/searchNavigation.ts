@@ -61,7 +61,7 @@ export const navigateToSearchResult = async (
   result: DisplaySearchResult,
   navigate: NavigateFunction,
   channelData?: Channel[],
-  options?: { deactivatedUserFallbackEnabled?: boolean; callerUserId?: string },
+  options?: { profileFallbackAnchorChannelId?: string; callerUserId?: string },
 ): Promise<void> => {
   switch (result.type) {
     case 'user':
@@ -133,19 +133,18 @@ export const resolveOrCreateDmChannelId = async (
 /**
  * Open (or create) the user's 1:1 DM and navigate to it.
  *
- * `deactivatedUserFallbackEnabled` handles the deactivated-user edge case:
+ * `profileFallbackAnchorChannelId` handles the deactivated-user edge case:
  * the backend refuses to create a DM with a deactivated user, so a click
- * from Cmd+K that has no prior DM would otherwise land nowhere. When true,
- * a failed DM creation redirects to the synthetic "deactivated user preview"
- * page (`/chat/dir/deactivated-user/{userId}`) — a Slack-style informational
- * view that names the user, offers a View Profile CTA, and carries the same
- * "archives of a deactivated account" banner the real DM view uses.
+ * from Cmd+K that has no prior DM would otherwise land nowhere. When set,
+ * a failed DM creation redirects to the existing profile route
+ * (`/chat/dir/{anchor}/profile/{userId}`) so the caller lands on the user's
+ * read-only profile instead of getting silent nothing.
  */
 export const navigateToUser = async (
   result: DisplaySearchResult,
   navigate: NavigateFunction,
   channelData?: Channel[],
-  options?: { deactivatedUserFallbackEnabled?: boolean; callerUserId?: string },
+  options?: { profileFallbackAnchorChannelId?: string; callerUserId?: string },
 ): Promise<void> => {
   if (!channelData) {
     logger.warn(LogEvent.FRONTEND_ERROR, {
@@ -163,10 +162,12 @@ export const navigateToUser = async (
     );
     void navigate(`/chat/dir/${channelId}`);
   } catch (error) {
-    if (options?.deactivatedUserFallbackEnabled) {
-      // Most common cause: target is deactivated so createDm 404s. Route to the
-      // synthetic preview page so the click produces a visible result.
-      void navigate(`/chat/dir/deactivated-user/${result.id}`);
+    if (options?.profileFallbackAnchorChannelId) {
+      // Most common cause: target is deactivated so createDm 404s. Fall back to
+      // the existing profile route so the click produces a visible result.
+      void navigate(
+        `/chat/dir/${options.profileFallbackAnchorChannelId}/profile/${result.id}`,
+      );
       return;
     }
     logger.error(LogEvent.FRONTEND_ERROR, {
@@ -541,7 +542,7 @@ export const openSearchResult = async (
   options: { modifier: boolean; isElectron: boolean; isMobile: boolean },
   navigate: NavigateFunction,
   channelData?: Channel[],
-  navOptions?: { callerUserId?: string; deactivatedUserFallbackEnabled?: boolean },
+  navOptions?: { callerUserId?: string; profileFallbackAnchorChannelId?: string },
 ): Promise<void> => {
   const { modifier, isElectron, isMobile } = options;
 
