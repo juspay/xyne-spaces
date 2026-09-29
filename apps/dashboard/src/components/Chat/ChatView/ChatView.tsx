@@ -303,8 +303,6 @@ const ChatView = (): ReactElement => {
     void navigate(newUrl, { replace: true });
   };
 
-  // Closes the canvas pane by dropping the `#canvas=` hash (and any fullscreen
-  // flag), so back/forward stay consistent with what is on screen.
   const handleCloseCanvas = (): void => {
     const newSearchParams = new URLSearchParams(searchParams);
     newSearchParams.delete('canvasFullscreen');
