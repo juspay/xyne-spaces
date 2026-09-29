@@ -1,5 +1,6 @@
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
+import { resolveSecret } from '@/config/secretResolver';
 import { ChangeEntry, PullRequestInfo } from '../types/bitbucket';
 import { VcsClient } from '../types/vcs';
 
@@ -511,11 +512,11 @@ export class GitHubService implements VcsClient {
   }
 }
 
-export const createGitHubService = (owner: string, repo: string): GitHubService => {
+export const createGitHubService = async (owner: string, repo: string): Promise<GitHubService> => {
   return new GitHubService({
     owner,
     repo,
-    token: config.github?.token,
+    token: await resolveSecret('github-token', config.github?.token),
     apiUrl: config.github?.apiUrl,
   });
 };
