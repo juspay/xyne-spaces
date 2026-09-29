@@ -66,6 +66,7 @@ import {
   usePersistedRadarTeams,
   type RadarTeam,
 } from '../../hooks/usePersistedRadarTeams';
+import { usePersistedRadarViewMode } from '../../hooks/usePersistedRadarViewMode';
 import {
   MAX_RULES,
   MAX_RULE_VALUES,
@@ -228,9 +229,9 @@ const RadarPanel = (): ReactElement => {
   const [pending, setPending] = useState<RadarThreadCard[]>([]);
   const [waiting, setWaiting] = useState<RadarThreadCard[]>([]);
   const [loading, setLoading] = useState(true);
-  // Which layout draws the feed — a view preference, not part of what's
-  // fetched or filtered, so it doesn't need to survive a reload.
-  const [viewMode, setViewMode] = useState<'cards' | 'table'>('table');
+  // Which layout draws the feed. A per-browser view preference: persisted so
+  // leaving Radar doesn't reset it.
+  const [viewMode, setViewMode] = usePersistedRadarViewMode();
   const [busyKey, setBusyKey] = useState<string | null>(null);
   // One debug surface: the card's Debug button opens this thread-scoped view
   // (watermark position, per-item trails with the model's reasoning, runs).
