@@ -10,6 +10,7 @@ import { errMsg } from "../lib/errors.js";
 import { ingestDeliveredArtifact } from "../lib/conversation-artifact-signals.js";
 import { deliveredDesignCommand, recordDeliveredArtifacts } from "../lib/delivered-artifacts.js";
 import crypto from "node:crypto";
+import { claimAutomationStep } from "../lib/automation-step-dedup.js";
 import { CONFIG } from "../config.js";
 import {
   agentRepository,
@@ -2756,33 +2757,35 @@ export async function handleAutomationWebhook(
   // Workflow-step idempotency. The automation engine retries a step whose
   // async result hasn't arrived within its (~20s) ack window, re-sending the
   // SAME dispatch id suffixed `:retry-N` (observed prod 2026-07-08: a 24s run
-  // executed 4x — original + retry-1..3). Every retry of one step must map to
+  // executed 4x — original + retry-1..3). Every re-send of one step must map to
   // the ONE already-running run: dedupe on the retry-stripped step id for the
   // lifetime of a plausible run. Deliberately conversation-INDEPENDENT —
   // workflow steps are usually conversation-less, which skips the
   // (conversation, agent) key below — and the reply is a 200 ack (not 409) so
   // the engine keeps waiting for the original run's result instead of
-  // error-retrying. No release needed: retries share the base id only within
-  // one firing; a future re-fire mints a fresh step id.
+  // error-retrying. The engine ALSO uses `:retry-N` for its output-validation
+  // retry (run-agent.step.ts handleValidationFailure), which re-asks the agent
+  // after the previous attempt finished and failed its output check. A higher
+  // retry number is therefore a new attempt and runs; only a same-or-older
+  // attempt is absorbed (lib/automation-step-dedup.ts).
   if (typeof sessionId === "string" && sessionId.length > 0) {
-    const stepBaseId = sessionId.replace(/:retry-\d+$/, "");
-    const stepKey = `automation-step-dedup:${agentSlug}:${stepBaseId}`;
     try {
-      const redis = redisService.getConnection();
-      const acquiredStep = await redis.set(stepKey, sessionId, "EX", 900, "NX");
-      if (acquiredStep !== "OK") {
-        const holder = await redis.get(stepKey);
-        if (holder && holder !== sessionId) {
-          clog.info(
-            `[webhook/automation-run] step retry absorbed step=${stepBaseId} incoming=${sessionId} holder=${holder} agent=${agentSlug}`,
-          );
-          res.status(200).json({ success: true, sessionId: holder, deduplicated: true });
-          return;
-        }
+      const step = await claimAutomationStep(redisService.getConnection(), agentSlug, sessionId);
+      if (step.kind === "absorb") {
+        clog.info(
+          `[webhook/automation-run] step retry absorbed step=${step.stepBaseId} incoming=${sessionId} holder=${step.holder} agent=${agentSlug}`,
+        );
+        res.status(200).json({ success: true, sessionId: step.holder, deduplicated: true });
+        return;
+      }
+      if (step.kind === "run-new-attempt") {
+        clog.info(
+          `[webhook/automation-run] step retry accepted as a new attempt step=${step.stepBaseId} incoming=${sessionId} previous=${step.previous} agent=${agentSlug}`,
+        );
       }
     } catch (err) {
       clog.warn(
-        `[webhook/automation-run] step dedup check failed step=${stepBaseId} agent=${agentSlug}: ${errMsg(err)}`,
+        `[webhook/automation-run] step dedup check failed session=${sessionId} agent=${agentSlug}: ${errMsg(err)}`,
       );
     }
   }
