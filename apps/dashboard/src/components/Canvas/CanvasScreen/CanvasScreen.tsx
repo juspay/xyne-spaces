@@ -40,6 +40,7 @@ import {
   Loader2,
   MessageSquare,
   RotateCcw,
+  X,
 } from 'lucide-react';
 import {
   CheckTickSingle,
@@ -128,6 +129,7 @@ interface CanvasScreenProps {
   canvasId?: string;
   isFullscreen?: boolean;
   onToggleFullscreen?: () => void;
+  onClose?: () => void;
   showAskAiAction?: boolean;
   /** Off where the document opens with its own title, as SDLC pages do. */
 }
@@ -167,6 +169,7 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
   canvasId: propCanvasId,
   isFullscreen = false,
   onToggleFullscreen,
+  onClose,
   showAskAiAction = true,
 }): ReactElement => {
   const { canvasId: paramsCanvasId } = useParams<{ canvasId?: string }>();
@@ -1658,6 +1661,22 @@ const CanvasScreen: React.FC<CanvasScreenProps> = ({
                       >
                         Done
                       </Button>
+                    )}
+
+                    {onClose && (
+                      <button
+                        type='button'
+                        onClick={onClose}
+                        className={headerIconButtonClass}
+                        title='Close canvas'
+                        aria-label='Close canvas'
+                        data-testid='canvas-close-button'
+                        data-track-category='CANVAS'
+                        data-track-name='CLOSE_CANVAS_PANEL'
+                        data-track-metadata={JSON.stringify({ canvasId: selectedCanvas?.id })}
+                      >
+                        <X size={16} className='shrink-0 opacity-60' />
+                      </button>
                     )}
                   </div>
                 </div>
