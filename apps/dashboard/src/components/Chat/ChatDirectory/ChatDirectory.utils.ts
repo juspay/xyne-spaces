@@ -241,7 +241,7 @@ export const formatChannelLabel = (ch: {
 export const getDMNames = (
   channel: { name: string; scopeType: ChannelScopeType },
   currentUserId: string,
-  usersById: Map<string, { name: string; displayName?: string | null }>,
+  usersById: ReadonlyMap<string, { name: string; displayName?: string | null }>,
 ): { display: string[]; search: string[] } => {
   if (!isDMChannel(channel.scopeType)) {
     return { display: [channel.name], search: [channel.name] };
@@ -338,7 +338,7 @@ export const getDMSearchableName = (
 };
 
 type SortableChannel = { id: string; name: string | null; scopeType: ChannelScopeType };
-type SortUserLookup = ReadonlyMap<string, { name?: string | null; displayName?: string | null }>;
+type SortUserLookup = ReadonlyMap<string, { name: string; displayName?: string | null }>;
 
 /** True for the current user's own DM ("notes to self") — a DM whose only participant is them. */
 export const isSelfDMChannel = (
@@ -362,18 +362,13 @@ export const getChannelSortName = (
 ): string => {
   const raw = channel.name ?? '';
   if (!isDMChannel(channel.scopeType)) return raw;
-  if (isSelfDMChannel(channel, currentUserId)) {
-    const self = usersById.get(currentUserId);
-    return (self && (self.displayName || self.name)) || raw;
-  }
-  const names = parseDMParticipantIds({ name: raw, scopeType: channel.scopeType })
-    .filter(id => id !== currentUserId)
-    .map(id => {
-      const user = usersById.get(id);
-      return user ? user.displayName || user.name || null : null;
-    })
-    .filter((n): n is string => Boolean(n));
-  return names.length > 0 ? names.join(', ') : raw;
+  // Derive from the canonical resolver so the sort key can't drift from the rendered names.
+  const { display } = getDMNames(
+    { name: raw, scopeType: channel.scopeType },
+    currentUserId,
+    usersById,
+  );
+  return display.length > 0 ? display.join(', ') : raw;
 };
 
 /**
