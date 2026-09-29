@@ -27,6 +27,7 @@ import { decrypt } from '@/services/encryptionService';
 import { logger } from '@/utils/logger';
 import { microsoftDeskService } from '@/services/microsoftDeskService';
 import { ExternalSourcePlatform } from '../core/types';
+import { MAILBOX_SOURCE_TYPES } from '@/database/repositories/externalSourceRepository';
 import { stopGmailWatchBeforeDeactivation } from '@/services/gmailWatchStopService';
 import { extractEmailAddress } from '@/utils/email';
 // Reuse the OAuth primitives from the route files that own them — keeps
@@ -88,10 +89,8 @@ async function findActiveSourceForChannel(
     where: {
       channelId,
       isActive: true,
-      sourceType: {
-        in: [ExternalSourcePlatform.GOOGLE, ExternalSourcePlatform.MICROSOFT, ExternalSourcePlatform.ZOHO],
-      },
-      NOT: { name: { startsWith: 'google-dl-sync' } },
+      sourceType: { in: [...MAILBOX_SOURCE_TYPES] },
+      NOT: { OR: [{ name: { startsWith: 'google-dl-sync--' } }, { name: { startsWith: 'microsoft-dl-sync--' } }] },
     },
     select: { id: true, sourceType: true, displayName: true, credentials: true },
     orderBy: { createdAt: 'desc' },
@@ -239,15 +238,15 @@ router.post(
     try {
       await assertChannelOwner(channelId, userId);
 
-      // Reconnect should work even when the source is currently inactive
-      // (post-disconnect), but it must target the email integration itself.
-      // A channel can hold other source types (app-desk, slack, DL member
-      // sync); picking the newest unfiltered source would try to reconnect
-      // using a non-mailbox displayName and fail with "no recorded email".
+      // Use findFirst (not findActiveSourceForChannel) — reconnect should
+      // also work when the source is currently inactive (post-disconnect).
+      // Scoped to email-family types: app-desk bindings share the channel and
+      // are newer, which would be picked instead and carry no email.
       const source = await db.externalSource.findFirst({
         where: {
           channelId,
-          sourceType: { in: [ExternalSourcePlatform.GOOGLE, ExternalSourcePlatform.MICROSOFT] },
+          sourceType: { in: [...MAILBOX_SOURCE_TYPES] },
+          NOT: { OR: [{ name: { startsWith: 'google-dl-sync--' } }, { name: { startsWith: 'microsoft-dl-sync--' } }] },
         },
         select: { id: true, sourceType: true, displayName: true },
         orderBy: { createdAt: 'desc' },
