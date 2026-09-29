@@ -1,9 +1,11 @@
+import { RotateCw } from 'lucide-react';
 import { useState } from 'react';
 import { HEALTH, RANK, fmtDays } from '../lib/flags';
 import { BUCKETS, sameFocus, type MFocus, type MerchantView, type Nudge, type Thread, type ThreadRow, type ThreadStatus } from '../lib/merchantView';
 import { STATUS_LABEL, PRI_LABEL } from '../lib/drawer';
 import { RANGES, SyncPill, type SyncStatus } from './Portfolio';
 import { CleanupStrip } from './CleanupDialog';
+import { AgentText, XyneAIStar, type AskState } from './AgentText';
 import type { FTicket } from '../lib/portfolio';
 import { threadLines } from '../lib/ui';
 import { Avatar, BUCKET_COLOR, ChevronDown, ChevronLeft, Close, DONE_COLOR, HealthPill, Menu, PAL, PriorityIcon, StatusGlyph, pressable, ageColor, toneColor } from './primitives';
@@ -53,30 +55,43 @@ function Connectors({ row, cy }: { row: ThreadRow; cy: number }) {
 
 export const nudgeKey = (n: Nudge): string => `${n.kind}:${n.from.id}`;
 
+/** What a nudge says. */
+function nudgeText(n: Nudge): string {
+  const count = n.targets.length;
+  return n.kind === 'closeKids'
+    ? `${n.from.key} is done, but ${count} sub-ticket${count === 1 ? ' is' : 's are'} still open`
+    : `Every sub-ticket of ${n.from.key} is finished`;
+}
+
+
+const SMALL_BTN = { all: 'unset', flex: 'none', height: 26, boxSizing: 'border-box', padding: '0 10px', borderRadius: 6, border: '1px solid var(--bd)', background: 'var(--bg)', fontSize: 12.5, fontWeight: 500, whiteSpace: 'nowrap' } as const;
+
 function NudgeStrip({ n, busy, onRun }: { n: Nudge; busy: boolean; onRun: (n: Nudge) => void }) {
   const count = n.targets.length;
-  const text =
-    n.kind === 'closeKids'
-      ? `${n.from.key} is done, but ${count} sub-ticket${count === 1 ? ' is' : 's are'} still open`
-      : `Every sub-ticket of ${n.from.key} is finished`;
   const action = n.kind === 'closeParent' || count === 1 ? `Mark ${n.targets[0].key} as done` : `Mark all ${count} as done`;
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 14px', fontSize: 12.5, color: 'var(--t2)', background: 'var(--bg2)', borderBottom: '1px solid var(--bd2)' }}>
-      <span style={{ flex: 1, minWidth: 0 }}>{text}</span>
-      <button
-        type="button"
-        className="outline"
-        disabled={busy}
-        onClick={() => onRun(n)}
-        style={{ all: 'unset', flex: 'none', cursor: busy ? 'default' : 'pointer', height: 26, boxSizing: 'border-box', padding: '0 10px', borderRadius: 6, border: '1px solid var(--bd)', background: 'var(--bg)', fontSize: 12.5, fontWeight: 500, color: busy ? 'var(--t4)' : 'var(--t1)', whiteSpace: 'nowrap' }}
-      >
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 14px', fontSize: 12.5, color: 'var(--t2)', background: 'var(--bg2)', borderBottom: '1px solid var(--bd2)' }}>
+      <span style={{ flex: 1, minWidth: 0 }}>{nudgeText(n)}</span>
+      <button type="button" className="outline" disabled={busy} onClick={() => onRun(n)} style={{ ...SMALL_BTN, cursor: busy ? 'default' : 'pointer', color: busy ? 'var(--t4)' : 'var(--t1)' }}>
         {busy ? 'Saving…' : action}
       </button>
     </div>
   );
 }
 
-function ThreadCard({ th, selected, onOpen, nudging, onNudge }: { th: Thread; selected: string | null; onOpen: (id: string) => void; nudging: string | null; onNudge: (n: Nudge) => void }) {
+function ThreadCard({
+  th,
+  selected,
+  onOpen,
+  nudging,
+  onNudge,
+}: {
+  th: Thread;
+  selected: string | null;
+  onOpen: (id: string) => void;
+  nudging: string | null;
+  onNudge: (n: Nudge) => void;
+}) {
   const hl = selected !== null && th.rows.some(r => r.kind === 'ticket' && r.t.id === selected);
   return (
     <div
@@ -154,6 +169,57 @@ function ThreadCard({ th, selected, onOpen, nudging, onNudge }: { th: Thread; se
 }
 
 const CARD = { border: '1px solid var(--bd)', borderRadius: 8 } as const;
+
+/** The merchant's summary from the agent: generating, written (with when), or failed. */
+export type TldrState = AskState;
+
+function MerchantTldr({ state, count, onRefresh }: { state: TldrState | undefined; count: number; onRefresh: () => void }) {
+  const running = !state || state.status === 'running';
+  return (
+    <div
+      style={{
+        borderRadius: 12,
+        padding: '18px 18px 20px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 14,
+        border: '1px solid color-mix(in srgb, #FF6B9D 22%, var(--bd))',
+        background: 'linear-gradient(180deg, color-mix(in srgb, #FF6B9D 7%, var(--bg)) 0%, color-mix(in srgb, #FFA06B 3%, var(--bg)) 50%, var(--bg) 100%)',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <XyneAIStar size={16} />
+        <span style={{ fontSize: 15, fontWeight: 600, color: 'var(--t1)' }}>Summary</span>
+        <span style={{ marginLeft: 'auto', fontSize: 11.5, color: 'var(--t4)' }}>
+          {state?.status === 'done' && state.at ? `Updated ${ago((Date.now() - state.at) / 86_400_000)}` : ''}
+        </span>
+        <button
+          type="button"
+          className="hov"
+          aria-label="Write a new summary"
+          data-tip={running ? undefined : 'Write a new summary'}
+          disabled={running}
+          onClick={onRefresh}
+          style={{ all: 'unset', cursor: running ? 'default' : 'pointer', width: 26, height: 26, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--t4)' }}
+        >
+          <RotateCw size={13} style={{ animation: running ? 'mpvSpin 1s linear infinite' : undefined }} />
+        </button>
+      </div>
+      <div style={{ minHeight: 168, fontSize: 13.5, lineHeight: 1.6, color: 'var(--t2)' }}>
+        {running && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, paddingTop: 4 }}>
+            {[96, 82, 90, 70, 86].map((w, i) => (
+              <span key={i} className="sk" style={{ height: 10, width: `${w}%`, borderRadius: 5, background: 'color-mix(in srgb, #FF6B9D 12%, var(--bg3))' }} />
+            ))}
+            <span style={{ fontSize: 12, color: 'var(--t4)', marginTop: 2 }}>Reading {count} tickets… this takes about a minute.</span>
+          </div>
+        )}
+        {state?.status === 'done' && <AgentText text={state.text} />}
+        {state?.status === 'error' && <span style={{ color: 'var(--redT)' }}>Couldn't write the summary: {state.text}</span>}
+      </div>
+    </div>
+  );
+}
 
 const AGE_SPAN = ['0–3 days', '4–7 days', '8–14 days', '15–30 days', 'over 30 days'];
 
@@ -271,6 +337,8 @@ export function MerchantPage({
   abandoned,
   onCleanup,
   onRange,
+  tldr,
+  onTldr,
 }: {
   v: MerchantView;
   status: ThreadStatus;
@@ -292,6 +360,9 @@ export function MerchantPage({
   onCleanup: (tickets: FTicket[]) => void;
   /** The Created range, shared with the portfolio. */
   onRange: (r: 'all' | number) => void;
+  /** The agent's summary of this merchant, and writing a fresh one. */
+  tldr: TldrState | undefined;
+  onTldr: () => void;
 }) {
   const statusOpts = [
     { value: 'open' as const, label: 'Open tickets', count: v.threadCounts.open },
@@ -395,6 +466,7 @@ export function MerchantPage({
           )}
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <MerchantTldr state={tldr} count={v.row.tickets.length} onRefresh={onTldr} />
           <AgeHistogram hist={v.hist} focus={v.focus} onFocus={onFocus} />
           <WaitingOn court={v.court} focus={v.focus} onFocus={onFocus} />
           <RecentlyClosed closed={v.closed} onOpen={onOpen} />

@@ -1,5 +1,7 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { MerchantPage, nudgeKey } from './components/MerchantPage';
+import type { AskState } from './components/AgentText';
+import { summarizeMerchant } from './lib/askAgent';
 import { CleanupDialog, CleanupStrip } from './components/CleanupDialog';
 import { markDone } from './lib/markDone';
 import { ActiveChips, AgeBar, FilterPills, KpiCards, MerchantsTable, PortfolioHeader, SourcePills, Tabs, TicketsTable, type SyncStatus } from './components/Portfolio';
@@ -13,7 +15,7 @@ import { formatClock, updateBarText } from './lib/format';
 import { merchantView, sameFocus, type MFocus, type Nudge, type ThreadStatus } from './lib/merchantView';
 import { buildModel } from './lib/model';
 import { DEFAULT_PSTATE, defaultMidSuggestions, midSuggestions, portfolio, type FTicket, type Kpi, type PState } from './lib/portfolio';
-import { browserStorage, loadFilters, loadMidPicks, loadRange, recordMidPick, saveFilters, saveRange } from './lib/prefs';
+import { browserStorage, loadAnswer, loadFilters, loadMidPicks, loadRange, recordMidPick, saveAnswer, saveFilters, saveRange } from './lib/prefs';
 import { M_FIRST, T_FIRST, nextSort, sortMerchantRows, sortTicketRows, type MKey, type Sort, type TKey } from './lib/sort';
 import { THEME_CSS } from './lib/theme';
 import { useMerchantData } from './lib/useMerchantData';
@@ -41,6 +43,29 @@ export default function App() {
   const [threadStatus, setThreadStatus] = useState<ThreadStatus>('open');
   const [mFocus, setMFocus] = useState<MFocus | null>(null);
   const [nudging, setNudging] = useState<string | null>(null);
+  // Agent answers by key ('tldr|<range>|<merchant>'): a live run, else the answer saved last time,
+  // so nothing generated disappears.
+  const [answers, setAnswers] = useState<Map<string, AskState>>(() => new Map());
+  const answerFor = useCallback(
+    (key: string): AskState | undefined => {
+      const live = answers.get(key);
+      if (live) return live;
+      const saved = loadAnswer(browserStorage(), key);
+      return saved ? { status: 'done', text: saved.text, at: saved.at } : undefined;
+    },
+    [answers],
+  );
+  const runAnswer = useCallback((key: string, job: () => Promise<string>) => {
+    const put = (st: AskState): void => setAnswers(prev => new Map(prev).set(key, st));
+    put({ status: 'running' });
+    job()
+      .then(text => {
+        const at = Date.now();
+        saveAnswer(browserStorage(), key, text, at);
+        put({ status: 'done', text, at });
+      })
+      .catch((e: unknown) => put({ status: 'error', text: e instanceof Error ? e.message : String(e) }));
+  }, []);
   // The clean-up review being shown, and tickets just closed (hidden until a sync sees them closed).
   const [cleanup, setCleanup] = useState<FTicket[] | null>(null);
   const [closedIds, setClosedIds] = useState<Set<string>>(() => new Set());
@@ -163,6 +188,13 @@ export default function App() {
     [view, model, pf.byId, threadStatus, mFocus, ps.range],
   );
 
+  // A merchant's summary is written the first time it's opened (per Created range), then kept.
+  const tldrKey = mv ? `tldr|${ps.range}|${mv.mid}` : null;
+  useEffect(() => {
+    if (!mv || !tldrKey || mv.row.tickets.length === 0 || answerFor(tldrKey)) return;
+    runAnswer(tldrKey, () => summarizeMerchant(mv.mid, mv.row.tickets));
+  }, [mv, tldrKey, answerFor, runAnswer]);
+
   const dt = useMemo(() => {
     if (drawerId === null || !pf.byId.has(drawerId)) return null;
     const rows = act?.id !== drawerId ? null : act.error ? 'failed' : act.rows;
@@ -267,6 +299,9 @@ export default function App() {
           onClearFocus={() => setMFocus(null)}
           abandoned={mv.abandoned.filter(t => !closedIds.has(t.id))}
           onRange={onRange}
+
+          tldr={tldrKey ? answerFor(tldrKey) : undefined}
+          onTldr={() => tldrKey && runAnswer(tldrKey, () => summarizeMerchant(mv.mid, mv.row.tickets))}
           onCleanup={setCleanup}
           nudging={nudging}
           onNudge={runNudge}

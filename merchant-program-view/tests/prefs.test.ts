@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { loadFilters, loadRange, loadMidPicks, recordMidPick, saveFilters, saveRange } from '../lib/prefs';
+import { loadAnswer, loadFilters, loadRange, loadMidPicks, recordMidPick, saveAnswer, saveFilters, saveRange } from '../lib/prefs';
 
 function mem(): Storage {
   const m = new Map<string, string>();
@@ -86,5 +86,29 @@ describe('saved filters', () => {
     expect(loadFilters(blocked)).toEqual(EMPTY);
     expect(() => saveFilters(blocked, EMPTY as never)).not.toThrow();
     expect(loadFilters(null)).toEqual(EMPTY);
+  });
+});
+
+describe('saved agent answers', () => {
+  it('remembers each answer by key, with when it was written, until replaced', () => {
+    const s = mem();
+    expect(loadAnswer(s, 'why|t1')).toBeNull();
+    saveAnswer(s, 'why|t1', 'first', 1000);
+    saveAnswer(s, 'tldr|30|savana', 'summary', 2000);
+    expect(loadAnswer(s, 'why|t1')).toEqual({ text: 'first', at: 1000 });
+    saveAnswer(s, 'why|t1', 'second', 3000);
+    expect(loadAnswer(s, 'why|t1')).toEqual({ text: 'second', at: 3000 });
+    expect(loadAnswer(s, 'tldr|30|savana')).toEqual({ text: 'summary', at: 2000 });
+  });
+
+  it('keeps the newest 300 and survives bad or blocked storage', () => {
+    const s = mem();
+    for (let i = 0; i < 305; i++) saveAnswer(s, `k${i}`, 'x', i);
+    expect(loadAnswer(s, 'k0')).toBeNull();
+    expect(loadAnswer(s, 'k304')).toEqual({ text: 'x', at: 304 });
+    s.setItem('mpv.answers', '{nope');
+    expect(loadAnswer(s, 'k304')).toBeNull();
+    expect(loadAnswer(null, 'a')).toBeNull();
+    expect(() => saveAnswer(null, 'a', 'b')).not.toThrow();
   });
 });

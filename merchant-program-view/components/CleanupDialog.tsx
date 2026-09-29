@@ -43,7 +43,7 @@ export function CleanupStrip({ count, onReview }: { count: number; onReview: () 
         type="button"
         className="solid"
         onClick={onReview}
-        style={{ all: 'unset', flex: 'none', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6, height: 34, boxSizing: 'border-box', padding: '0 14px', borderRadius: 8, background: 'var(--primary)', color: 'var(--primaryT)', fontSize: 13.5, fontWeight: 600, whiteSpace: 'nowrap' }}
+        style={{ all: 'unset', flex: 'none', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6, height: 34, boxSizing: 'border-box', padding: '0 14px', borderRadius: 8, background: 'var(--inv)', color: 'var(--invT)', fontSize: 13.5, fontWeight: 600, whiteSpace: 'nowrap' }}
       >
         Review and close
         <ArrowRight size={15} />

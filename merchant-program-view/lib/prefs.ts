@@ -110,3 +110,34 @@ export function recordMidPick(store: Storage | null, mid: string, now: number = 
     // Blocked storage: history just isn't kept.
   }
 }
+
+const ANSWERS_KEY = 'mpv.answers';
+const ANSWERS_MAX = 300;
+type Answers = Record<string, { text: string; at: number }>;
+
+function readAnswers(store: Storage | null): Answers {
+  try {
+    const raw = store?.getItem(ANSWERS_KEY);
+    const v: unknown = raw ? JSON.parse(raw) : {};
+    return v && typeof v === 'object' && !Array.isArray(v) ? (v as Answers) : {};
+  } catch {
+    return {};
+  }
+}
+
+/** An agent answer saved earlier (a ticket's "what happened", a merchant's TL;DR…), shown until replaced. */
+export function loadAnswer(store: Storage | null, key: string): { text: string; at: number } | null {
+  const hit = readAnswers(store)[key];
+  return hit && typeof hit.text === 'string' && typeof hit.at === 'number' ? { text: hit.text, at: hit.at } : null;
+}
+
+export function saveAnswer(store: Storage | null, key: string, text: string, now = Date.now()): void {
+  try {
+    const all = { ...readAnswers(store), [key]: { text, at: now } };
+    // Keep only the newest so storage stays small.
+    const kept = Object.entries(all).sort((a, b) => b[1].at - a[1].at).slice(0, ANSWERS_MAX);
+    store?.setItem(ANSWERS_KEY, JSON.stringify(Object.fromEntries(kept)));
+  } catch {
+    // Blocked storage: the answer just isn't remembered.
+  }
+}
