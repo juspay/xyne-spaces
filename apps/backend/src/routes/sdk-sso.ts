@@ -1,9 +1,11 @@
 /**
  * SDK SSO Routes - Device flow endpoints for SDK authentication.
  *
- * On approval the SDK receives the user's session — the same
+ * On approval the SDK receives the user's session — the value of the
  * `xyne_ws_<workspaceId>_token` cookie the dashboard sets on login — which
- * `/api/sdk` then authenticates with the ordinary `authMiddleware`.
+ * `/api/sdk` then authenticates with the ordinary `authMiddleware`. The
+ * session is returned in the poll body only; no cookie is set, so a poll made
+ * from the Spaces origin never disturbs the dashboard's own cookies.
  *
  * Endpoints:
  * - POST /api/sdk/auth/sso/init     - Initiate device flow (no auth required)
@@ -15,9 +17,11 @@
 
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
+import { UserStatus } from '@xyne/shared';
 import { sdkSsoService } from '@/services/sdkSsoService';
 import { jwtService } from '@/services/jwtService';
 import { authV2Middleware } from '@/middleware/authV2Middleware';
+import { sdkSsoInitLimiter, sdkSsoPollLimiter } from '@/middleware/rateLimiters';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
@@ -35,7 +39,6 @@ const statusRequestSchema = z.object({
 const approveRequestSchema = z.object({
   userCode: z.string().min(1, 'userCode is required'),
   approved: z.boolean(),
-  workspaceId: z.string().optional(), // Optional: user can select workspace
 });
 
 /** Name of the per-workspace session cookie `authMiddleware` reads. */
@@ -65,10 +68,15 @@ router.get('/consent', (req: Request, res: Response) => {
  * Initiate the device authorization flow.
  * No authentication required - this is called by the SDK before user logs in.
  */
-router.post('/init', async (_req: Request, res: Response) => {
+router.post('/init', sdkSsoInitLimiter, async (req: Request, res: Response) => {
   try {
-    // The consent URL is served by the backend, so it is built on backendUrl
-    const result = await sdkSsoService.initiateDeviceFlow(config.backendUrl);
+    // The consent URL is served by the backend, so it is built on backendUrl.
+    // Where the request came from is shown on the consent page, so the person
+    // approving can tell a request of their own from one sent to them.
+    const result = await sdkSsoService.initiateDeviceFlow(config.backendUrl, {
+      ip: req.ip ?? null,
+      userAgent: req.get('user-agent') ?? null,
+    });
 
     return res.status(200).json({
       device_code: result.deviceCode,
@@ -92,7 +100,7 @@ router.post('/init', async (_req: Request, res: Response) => {
  * Poll for the authorization result.
  * No authentication required - SDK polls with the device_code.
  */
-router.post('/poll', async (req: Request, res: Response) => {
+router.post('/poll', sdkSsoPollLimiter, async (req: Request, res: Response) => {
   try {
     const { deviceCode } = pollRequestSchema.parse(req.body);
 
@@ -116,27 +124,9 @@ router.post('/poll', async (req: Request, res: Response) => {
           });
         }
 
-        // Set the same session cookies login sets, so a browser client is
-        // signed in without handling the token itself.
-        const cookieOptions = {
-          httpOnly: true,
-          secure: process.env.NODE_ENV === 'production',
-          sameSite: 'lax' as const,
-          path: '/',
-        };
-        const cookieName = sessionCookieName(session.workspaceId);
-        res.cookie(cookieName, session.token, {
-          ...cookieOptions,
-          expires: new Date(session.expiresAt),
-        });
-        res.cookie('xyne_last_workspace', session.workspaceId, {
-          ...cookieOptions,
-          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
-        });
-
         return res.status(200).json({
           status: 'approved',
-          cookie: { name: cookieName, value: session.token },
+          cookie: { name: sessionCookieName(session.workspaceId), value: session.token },
           expires_at: session.expiresAt,
           user_id: session.userId,
           workspace_id: session.workspaceId,
@@ -198,6 +188,12 @@ router.get('/status', authV2Middleware.authenticate, async (req: Request, res: R
       status: authRequest.status,
       user_code: authRequest.userCode,
       created_at: authRequest.createdAt,
+      requested_from: {
+        ip: authRequest.origin?.ip ?? null,
+        user_agent: authRequest.origin?.userAgent ?? null,
+      },
+      // How long an approved session lasts, so the consent page need not guess
+      session_expires_in: config.jwt.expirationSeconds,
     });
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -221,7 +217,7 @@ router.get('/status', authV2Middleware.authenticate, async (req: Request, res: R
  */
 router.post('/approve', authV2Middleware.authenticate, async (req: Request, res: Response) => {
   try {
-    const { userCode, approved, workspaceId } = approveRequestSchema.parse(req.body);
+    const { userCode, approved } = approveRequestSchema.parse(req.body);
     const user = req.user!;
 
     const authRequest = await sdkSsoService.getDeviceAuthByUserCode(userCode);
@@ -242,13 +238,11 @@ router.post('/approve', authV2Middleware.authenticate, async (req: Request, res:
     let session = null;
 
     if (approved) {
-      // A User row is scoped to one workspace. The session's own row by
-      // default; for another workspace, the caller's row in that workspace.
+      // The approving user's own row, in the workspace they are signed in
+      // to. Re-read so a user who has left or been deactivated is refused
+      // here, rather than issued a session `authMiddleware` would reject.
       const targetUser = await db.user.findFirst({
-        where:
-          workspaceId && workspaceId !== user.workspaceId
-            ? { orgMemberId: user.memberId, workspaceId }
-            : { id: user.id },
+        where: { id: user.id, leftAt: null, status: UserStatus.ACTIVE },
         select: {
           id: true,
           email: true,
@@ -262,7 +256,7 @@ router.post('/approve', authV2Middleware.authenticate, async (req: Request, res:
       if (!targetUser?.workspaceId) {
         return res.status(403).json({
           error: 'access_denied',
-          message: 'You do not have access to the selected workspace.',
+          message: 'Your account is not active in this workspace.',
         });
       }
 

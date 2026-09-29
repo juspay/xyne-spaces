@@ -46,6 +46,7 @@ import { stateMachineActor } from './stateMachine';
 import { decryptionCache } from '@xyne/shared';
 import { resetGlobalEncryptionBootstrap } from '@xyne/shared/hooks';
 import { dropAllZeroDatabases, dropZeroDatabases } from '../zero/dropZeroDatabases';
+import { getPendingSdkSso, takePendingSdkSso } from '../utils/pendingSdkSso';
 
 export interface User {
   id: string;
@@ -468,9 +469,8 @@ export const authMachine = createMachine(
       redirectingToSdkSso: {
         // Entry action that redirects to SDK SSO authorize page
         entry: () => {
-          const pendingUserCode = localStorage.getItem('pending_sdk_sso_user_code');
+          const pendingUserCode = takePendingSdkSso();
           if (pendingUserCode) {
-            localStorage.removeItem('pending_sdk_sso_user_code');
             window.location.href = `/sdk-sso/authorize?user_code=${encodeURIComponent(pendingUserCode)}`;
           }
         },
@@ -1259,7 +1259,7 @@ export const authMachine = createMachine(
         return status !== 401 && !!context.user?.id;
       },
       hasPendingSdkSso: () => {
-        return !!localStorage.getItem('pending_sdk_sso_user_code');
+        return !!getPendingSdkSso();
       },
     },
     actions: {

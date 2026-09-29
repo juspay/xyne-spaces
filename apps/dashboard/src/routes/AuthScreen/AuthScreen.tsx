@@ -19,7 +19,7 @@ import {
   clearEnterpriseLoginIntent,
 } from '../../machines/authMachine';
 import { WorkspaceType } from '@xyne/shared';
-import { getPendingSdkSso, clearPendingSdkSso } from '../SdkSsoAuthorizeScreen';
+import { getPendingSdkSso, clearPendingSdkSso } from '../../utils/pendingSdkSso';
 
 interface CommunityWorkspaceListItem {
   id: string;

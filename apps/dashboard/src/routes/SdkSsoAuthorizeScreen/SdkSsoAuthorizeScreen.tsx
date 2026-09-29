@@ -2,32 +2,38 @@ import { ReactElement, useEffect, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 import { Button } from '../../components/ui/Button';
+import { Checkbox } from '../../components/ui/Checkbox/Checkbox';
 import { apiInstance } from '../../services/clients/apiClient';
 import { logger, Event } from '../../utils/logger';
-
-const SDK_SSO_PENDING_KEY = 'pending_sdk_sso_user_code';
+import { storePendingSdkSso } from '../../utils/pendingSdkSso';
 
 interface AuthRequestInfo {
   status: string;
   user_code: string;
   created_at: number;
+  session_expires_in: number;
+  requested_from: { ip: string | null; user_agent: string | null };
 }
 
 type ScreenState = 'loading' | 'consent' | 'success' | 'denied' | 'expired' | 'error';
 
-/** Store SDK SSO user code before OAuth redirect */
-export function storePendingSdkSso(userCode: string): void {
-  localStorage.setItem(SDK_SSO_PENDING_KEY, userCode);
-}
-
-/** Get pending SDK SSO user code after OAuth redirect */
-export function getPendingSdkSso(): string | null {
-  return localStorage.getItem(SDK_SSO_PENDING_KEY);
-}
-
-/** Clear pending SDK SSO user code */
-export function clearPendingSdkSso(): void {
-  localStorage.removeItem(SDK_SSO_PENDING_KEY);
+/** "24 hours", "7 days", "90 minutes" — how long an approved session lasts. */
+function formatDuration(seconds: number): string {
+  const units: [number, string][] = [
+    [86400, 'day'],
+    [3600, 'hour'],
+    [60, 'minute'],
+  ];
+  for (const [size, name] of units) {
+    if (seconds >= size && seconds % size === 0) {
+      const count = seconds / size;
+      return `${count} ${name}${count === 1 ? '' : 's'}`;
+    }
+  }
+  const hours = Math.round(seconds / 3600);
+  return hours >= 1
+    ? `${hours} hour${hours === 1 ? '' : 's'}`
+    : `${Math.round(seconds / 60)} minutes`;
 }
 
 export default function SdkSsoAuthorizeScreen(): ReactElement {
@@ -38,6 +44,11 @@ export default function SdkSsoAuthorizeScreen(): ReactElement {
   const [screenState, setScreenState] = useState<ScreenState>('loading');
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [sessionExpiresIn, setSessionExpiresIn] = useState<number | null>(null);
+  const [requestInfo, setRequestInfo] = useState<AuthRequestInfo | null>(null);
+  // The one check that stops a phished link: the approver confirms the code
+  // on this page is the one their own terminal is showing.
+  const [codeConfirmed, setCodeConfirmed] = useState(false);
 
   const userCode = searchParams.get('user_code');
 
@@ -67,6 +78,8 @@ export default function SdkSsoAuthorizeScreen(): ReactElement {
       const response = await apiInstance.get<AuthRequestInfo>('/sdk/auth/sso/status', {
         params: { userCode: code },
       });
+      setSessionExpiresIn(response.data.session_expires_in);
+      setRequestInfo(response.data);
       if (response.data.status === 'pending') {
         setScreenState('consent');
       } else if (response.data.status === 'approved') {
@@ -139,7 +152,17 @@ export default function SdkSsoAuthorizeScreen(): ReactElement {
             <div className='text-center'>
               <h1 className='text-2xl font-semibold mb-2'>Authorize SDK Access</h1>
               <p className='text-muted-foreground'>
-                An application is requesting access to your Xyne Spaces account.
+                A sign-in was started from a terminal or app and is asking for access to your Xyne
+                Spaces account.
+              </p>
+            </div>
+
+            <div className='w-full p-4 rounded-lg border border-border text-center space-y-2'>
+              <p className='text-sm text-muted-foreground'>
+                Check that your terminal shows this exact code
+              </p>
+              <p className='font-mono text-3xl font-semibold tracking-widest'>
+                {requestInfo?.user_code ?? userCode}
               </p>
             </div>
 
@@ -150,19 +173,45 @@ export default function SdkSsoAuthorizeScreen(): ReactElement {
               </div>
               <div className='flex justify-between'>
                 <span className='text-muted-foreground'>Session validity</span>
-                <span className='font-medium'>1 day</span>
+                <span className='font-medium'>
+                  {sessionExpiresIn ? formatDuration(sessionExpiresIn) : '—'}
+                </span>
+              </div>
+              <div className='flex justify-between gap-4'>
+                <span className='text-muted-foreground shrink-0'>Requested from</span>
+                <span className='font-medium text-right break-all'>
+                  {requestInfo?.requested_from.ip ?? 'Unknown'}
+                </span>
+              </div>
+              <div className='flex justify-between gap-4'>
+                <span className='text-muted-foreground shrink-0'>App</span>
+                <span className='text-sm text-right break-all'>
+                  {requestInfo?.requested_from.user_agent ?? 'Unknown'}
+                </span>
               </div>
               <div className='flex justify-between'>
-                <span className='text-muted-foreground'>Code</span>
-                <span className='font-mono text-sm'>{userCode}</span>
+                <span className='text-muted-foreground'>Started</span>
+                <span className='font-medium'>
+                  {requestInfo ? new Date(requestInfo.created_at).toLocaleTimeString() : '—'}
+                </span>
               </div>
             </div>
 
             <div className='w-full p-4 rounded-lg border border-amber-500/30 bg-amber-500/10'>
               <p className='text-sm text-amber-700 dark:text-amber-300'>
-                This will grant the SDK full access to your account. Only approve if you initiated
-                this request.
+                Approving gives whoever started this sign-in full access to your account. Only
+                approve a sign-in you started yourself, just now, from your own terminal. If someone
+                sent you this link, or the code does not match your terminal, click Deny.
               </p>
+            </div>
+
+            <div className='w-full'>
+              <Checkbox
+                checked={codeConfirmed}
+                onChange={setCodeConfirmed}
+                label='This code matches my terminal, and I started this sign-in'
+                disabled={isSubmitting}
+              />
             </div>
 
             {error && (
@@ -183,7 +232,7 @@ export default function SdkSsoAuthorizeScreen(): ReactElement {
               <Button
                 className='flex-1'
                 onClick={() => void handleDecision(true)}
-                disabled={isSubmitting}
+                disabled={isSubmitting || !codeConfirmed}
               >
                 {isSubmitting ? 'Processing...' : 'Approve'}
               </Button>

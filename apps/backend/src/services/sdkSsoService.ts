@@ -10,6 +10,12 @@
  * dashboard runs on, so `/api/sdk` authenticates it with the ordinary
  * `authMiddleware` — there is no SDK-specific credential.
  *
+ * The weakness of this flow is phishing (RFC 8628 §5.4): anyone can start a
+ * request and send the approval link to someone else. The defence is the user
+ * code — short enough to read, shown in the requester's terminal, and on the
+ * consent page next to where the request came from — so the person approving
+ * can check the request is their own.
+ *
  * All state is stored in Redis with a 5-minute TTL. No database tables.
  */
 
@@ -26,6 +32,46 @@ const DEVICE_KEY_PREFIX = 'sdk:sso:device:';
 /** Prefix for user code lookup keys */
 const USER_CODE_KEY_PREFIX = 'sdk:sso:usercode:';
 
+/**
+ * User-code alphabet: consonants only, per RFC 8628 §6.1 — no vowels (so no
+ * words), and none of the easily confused 0/O, 1/I/L. Eight of the 19 give
+ * 19^8 ≈ 1.7×10^10 codes, far beyond what can be guessed in 5 minutes.
+ */
+const USER_CODE_ALPHABET = 'BCDFGHJKMNPQRSTVWXZ';
+const USER_CODE_LENGTH = 8;
+
+/** Longest user-agent kept for display on the consent page. */
+const MAX_USER_AGENT_LENGTH = 300;
+
+/**
+ * Decide a pending request: compare-and-set on the device key. Only a request
+ * still `pending` is replaced, keeping its remaining TTL, so of two approvers
+ * racing on the same link exactly one wins. Returns 1 if this call decided it.
+ */
+const DECIDE_LUA = `
+  local value = redis.call('GET', KEYS[1])
+  if not value then return 0 end
+  local ok, request = pcall(cjson.decode, value)
+  if not ok or request.status ~= 'pending' then return 0 end
+  local ttl = redis.call('PTTL', KEYS[1])
+  if ttl <= 0 then return 0 end
+  redis.call('SET', KEYS[1], ARGV[1], 'PX', ttl)
+  return 1
+`;
+
+/**
+ * Read a request for polling, deleting it in the same step once it is decided,
+ * so two concurrent polls cannot both receive the session. A pending request is
+ * left in place.
+ */
+const TAKE_LUA = `
+  local value = redis.call('GET', KEYS[1])
+  if not value then return nil end
+  local ok, request = pcall(cjson.decode, value)
+  if ok and request.status ~= 'pending' then redis.call('DEL', KEYS[1]) end
+  return value
+`;
+
 /** Status of a device authorization request */
 export type DeviceAuthStatus = 'pending' | 'approved' | 'denied';
 
@@ -39,11 +85,18 @@ export interface SdkSsoSession {
   expiresAt: number;
 }
 
+/** Where a request was started from, shown on the consent page. */
+export interface DeviceAuthOrigin {
+  ip: string | null;
+  userAgent: string | null;
+}
+
 /** Data stored for a device authorization request */
 export interface DeviceAuthRequest {
   userCode: string;
   status: DeviceAuthStatus;
   createdAt: number;
+  origin: DeviceAuthOrigin;
   /** Populated on approval */
   session?: SdkSsoSession;
 }
@@ -64,6 +117,26 @@ export interface DeviceFlowPollResult {
   session?: SdkSsoSession;
 }
 
+/**
+ * `ABCD-EFGH` form of a user code, from anything a person might type or a URL
+ * might carry: case and separators are ignored. Null if it cannot be one.
+ */
+export function normalizeUserCode(raw: string): string | null {
+  const chars = raw.toUpperCase().replace(/[^A-Z]/g, '');
+  if (chars.length !== USER_CODE_LENGTH || [...chars].some((c) => !USER_CODE_ALPHABET.includes(c))) {
+    return null;
+  }
+  return `${chars.slice(0, 4)}-${chars.slice(4)}`;
+}
+
+function generateUserCode(): string {
+  const chars = Array.from(
+    { length: USER_CODE_LENGTH },
+    () => USER_CODE_ALPHABET[crypto.randomInt(USER_CODE_ALPHABET.length)],
+  ).join('');
+  return `${chars.slice(0, 4)}-${chars.slice(4)}`;
+}
+
 class SdkSsoService {
   /**
    * Hash a device code for storage (we store hash, return original to SDK)
@@ -76,15 +149,36 @@ class SdkSsoService {
    * Initiate the device authorization flow.
    * Returns codes for the SDK to display to the user.
    */
-  async initiateDeviceFlow(baseUrl: string): Promise<DeviceFlowInitResult> {
+  async initiateDeviceFlow(baseUrl: string, origin: DeviceAuthOrigin): Promise<DeviceFlowInitResult> {
     const deviceCode = crypto.randomUUID();
     const deviceCodeHash = this.hashDeviceCode(deviceCode);
-    const userCode = crypto.randomUUID();
+
+    // Claim a user code (user code → device code hash). The code space is
+    // small enough that a live collision is possible, so claim with NX and
+    // draw again rather than overwrite someone else's pending request.
+    let userCode: string | null = null;
+    for (let attempt = 0; attempt < 5 && !userCode; attempt++) {
+      const candidate = generateUserCode();
+      const claimed = await redisService.set(
+        `${USER_CODE_KEY_PREFIX}${candidate}`,
+        deviceCodeHash,
+        DEVICE_AUTH_TTL_SECONDS,
+        true
+      );
+      if (claimed) userCode = candidate;
+    }
+    if (!userCode) {
+      throw new Error('Could not allocate an SDK SSO user code');
+    }
 
     const authRequest: DeviceAuthRequest = {
       userCode,
       status: 'pending',
       createdAt: Date.now(),
+      origin: {
+        ip: origin.ip,
+        userAgent: origin.userAgent?.slice(0, MAX_USER_AGENT_LENGTH) ?? null,
+      },
     };
 
     // Store device auth request (keyed by device code hash)
@@ -94,16 +188,9 @@ class SdkSsoService {
       DEVICE_AUTH_TTL_SECONDS
     );
 
-    // Store user code → device code hash mapping for reverse lookup
-    await redisService.set(
-      `${USER_CODE_KEY_PREFIX}${userCode}`,
-      deviceCodeHash,
-      DEVICE_AUTH_TTL_SECONDS
-    );
-
     // The consent URL is served by the backend and redirects to the dashboard
     const verificationUrl = `${baseUrl}/api/sdk/auth/sso/consent`;
-    const verificationUrlComplete = `${verificationUrl}?user_code=${userCode}`;
+    const verificationUrlComplete = `${verificationUrl}?user_code=${encodeURIComponent(userCode)}`;
 
     logger.info(`[SDK-SSO] Device flow initiated`, {
       userCode,
@@ -124,7 +211,9 @@ class SdkSsoService {
    * Get a device authorization request by user code.
    * Used by the consent page to display request info.
    */
-  async getDeviceAuthByUserCode(userCode: string): Promise<DeviceAuthRequest | null> {
+  async getDeviceAuthByUserCode(rawUserCode: string): Promise<DeviceAuthRequest | null> {
+    const userCode = normalizeUserCode(rawUserCode);
+    if (!userCode) return null;
     const deviceCodeHash = await redisService.get(`${USER_CODE_KEY_PREFIX}${userCode}`);
     if (!deviceCodeHash) {
       return null;
@@ -147,46 +236,33 @@ class SdkSsoService {
    * Approve (with the session to hand out) or deny a pending request.
    * Returns false if the request is missing, expired or already decided.
    */
-  async approveOrDeny(userCode: string, session: SdkSsoSession | null): Promise<boolean> {
+  async approveOrDeny(rawUserCode: string, session: SdkSsoSession | null): Promise<boolean> {
+    const userCode = normalizeUserCode(rawUserCode);
+    if (!userCode) return false;
     const deviceCodeHash = await redisService.get(`${USER_CODE_KEY_PREFIX}${userCode}`);
     if (!deviceCodeHash) {
       logger.warn(`[SDK-SSO] User code not found for approval: ${userCode}`);
       return false;
     }
 
-    const key = `${DEVICE_KEY_PREFIX}${deviceCodeHash}`;
-    const data = await redisService.get(key);
-    if (!data) {
-      logger.warn(`[SDK-SSO] Device auth request not found for user code: ${userCode}`);
+    const request = await this.getDeviceAuthByUserCode(userCode);
+    if (!request || request.status !== 'pending') {
+      logger.warn(`[SDK-SSO] Device auth request missing or already processed: ${userCode}`);
       return false;
     }
 
-    let authRequest: DeviceAuthRequest;
-    try {
-      authRequest = JSON.parse(data) as DeviceAuthRequest;
-    } catch {
-      logger.error(`[SDK-SSO] Failed to parse device auth request for approval: ${userCode}`);
+    const decided: DeviceAuthRequest = session
+      ? { ...request, status: 'approved', session }
+      : { ...request, status: 'denied' };
+
+    // The pending check above is advisory; this is the one that counts.
+    const won = await redisService
+      .getClient()
+      .eval(DECIDE_LUA, 1, `${DEVICE_KEY_PREFIX}${deviceCodeHash}`, JSON.stringify(decided));
+    if (won !== 1) {
+      logger.warn(`[SDK-SSO] Device auth request was decided concurrently: ${userCode}`);
       return false;
     }
-
-    if (authRequest.status !== 'pending') {
-      logger.warn(`[SDK-SSO] Device auth request already processed: ${userCode}, status: ${authRequest.status}`);
-      return false;
-    }
-
-    if (session) {
-      authRequest.status = 'approved';
-      authRequest.session = session;
-    } else {
-      authRequest.status = 'denied';
-    }
-
-    // Update the auth request, keeping its remaining TTL
-    const ttl = await redisService.getClient().ttl(key);
-    if (ttl <= 0) {
-      return false;
-    }
-    await redisService.set(key, JSON.stringify(authRequest), ttl);
 
     logger.info(`[SDK-SSO] Device auth ${session ? 'approved' : 'denied'}`, {
       userCode,
@@ -199,14 +275,16 @@ class SdkSsoService {
 
   /**
    * Poll for the authorization result.
-   * A decided request is deleted once read, so a session is handed out once.
+   * A decided request is deleted in the same step it is read, so a session is
+   * handed out once even to concurrent polls.
    */
   async pollForAuthorization(deviceCode: string): Promise<DeviceFlowPollResult> {
-    const deviceCodeHash = this.hashDeviceCode(deviceCode);
-    const data = await redisService.get(`${DEVICE_KEY_PREFIX}${deviceCodeHash}`);
+    const data = (await redisService
+      .getClient()
+      .eval(TAKE_LUA, 1, `${DEVICE_KEY_PREFIX}${this.hashDeviceCode(deviceCode)}`)) as string | null;
 
     if (!data) {
-      // Key expired or never existed
+      // Key expired, never existed, or already collected
       return { status: 'expired' };
     }
 
@@ -218,30 +296,17 @@ class SdkSsoService {
       return { status: 'expired' };
     }
 
-    switch (authRequest.status) {
-      case 'pending':
-        return { status: 'pending' };
-
-      case 'approved':
-        await this.cleanup(deviceCodeHash, authRequest.userCode);
-        return { status: 'approved', session: authRequest.session };
-
-      case 'denied':
-        await this.cleanup(deviceCodeHash, authRequest.userCode);
-        return { status: 'denied' };
-
-      default:
-        return { status: 'expired' };
+    if (authRequest.status === 'pending') {
+      return { status: 'pending' };
     }
-  }
 
-  /**
-   * Clean up Redis keys after authorization is complete
-   */
-  private async cleanup(deviceCodeHash: string, userCode: string): Promise<void> {
-    await redisService.del(`${DEVICE_KEY_PREFIX}${deviceCodeHash}`);
-    await redisService.del(`${USER_CODE_KEY_PREFIX}${userCode}`);
-    logger.info(`[SDK-SSO] Cleaned up device auth keys`, { userCode });
+    // The device key is gone; the user-code pointer now leads nowhere, so
+    // removing it is housekeeping and need not be atomic with the take.
+    await redisService.del(`${USER_CODE_KEY_PREFIX}${authRequest.userCode}`);
+
+    return authRequest.status === 'approved'
+      ? { status: 'approved', session: authRequest.session }
+      : { status: 'denied' };
   }
 }
 
