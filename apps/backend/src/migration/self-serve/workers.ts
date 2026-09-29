@@ -264,15 +264,15 @@ export class MigrationWorkers {
   }
 
   /**
-   * PLANNER (runs on the INGESTION queue, instance-0 only, one migration at a time): fan the conversations out
-   * as CONV_INGEST jobs that every worker process drains in parallel. Idempotent — re-running on resume/restart
-   * re-enqueues only conversations not yet in the done-set. Does NOT ingest anything itself.
+   * PLANNER (INGESTION queue, instance-0, one migration at a time): fan conversations out as CONV_INGEST jobs
+   * (drained in parallel), then hold the slot until they finish so migrations ingest one-at-a-time end-to-end.
+   * Idempotent on resume. Does NOT ingest anything itself.
    */
   private async ingest(job: MigrationJob): Promise<void> {
     // Idempotency: never re-plan a completed job (its GCS data is already deleted).
     if ([MigrationStatus.SUBMITTED, MigrationStatus.COLLECTING, MigrationStatus.COMPLETED].includes(job.status)) return;
-    // Stamp the ingest start once (kept across resume). Drop the token now — no collection/refresh happens after ingest begins.
-    await this.store.update(job.id, { status: MigrationStatus.INGESTING, encryptedToken: undefined, ...(job.ingestStartedAt ? {} : { ingestStartedAt: Date.now() }) });
+    // ingestStartedAt is stamped at the first conversation, not here.
+    await this.store.update(job.id, { status: MigrationStatus.INGESTING, encryptedToken: undefined });
     let conversations;
     try {
       conversations = await this.engine.readManifest(job.gcsPrefix);
@@ -300,7 +300,27 @@ export class MigrationWorkers {
     }
     logger.info('[SlackMigration] ingestion fanned out', { id: job.id, enqueued, total: conversations.length, concurrency: config.slackMigration.ingestConcurrency });
     // Nothing left to enqueue (all already done, or empty manifest) → no processor will fire, so finalize here.
-    if (enqueued === 0) await this.maybeFinalize(job.id);
+    if (enqueued === 0) {
+      await this.maybeFinalize(job.id);
+      return;
+    }
+    // One migration at a time: hold the slot until this job's conversations finish.
+    await this.awaitIngestionComplete(job.id, uniqueConversations.length);
+  }
+
+  /** Hold the INGESTION slot until this migration's conversations finish, or it's stopped/finalized. */
+  private async awaitIngestionComplete(migrationId: string, total: number): Promise<void> {
+    const POLL_MS = 2000;
+    for (;;) {
+      const job = await this.store.findById(migrationId);
+      if (!job || job.status !== MigrationStatus.INGESTING) return;
+      if (await this.store.isStopRequested(migrationId)) return;
+      if (await this.store.doneCount(migrationId) >= total) {
+        await this.maybeFinalize(migrationId);
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, POLL_MS));
+    }
   }
 
   /**
@@ -315,6 +335,11 @@ export class MigrationWorkers {
       return;
     }
     if (await this.store.isConversationDone(migrationId, conversationId)) return; // already done (stale re-delivery) → idempotent skip
+
+    // Stamp ingest start on the first conversation to run.
+    if (!job.ingestStartedAt) {
+      await this.store.update(migrationId, { ingestStartedAt: Date.now() }).catch(() => undefined);
+    }
 
     const heartbeat = setInterval(() => void this.store.heartbeat(migrationId).catch(() => undefined), HEARTBEAT_MS);
     heartbeat.unref?.();
