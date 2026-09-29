@@ -25,7 +25,7 @@
 
 import { marked } from "marked";
 import type { ToolDefinition } from "../types.js";
-import { buildHtmlDocument, sanitizeHtmlBody } from "./template.js";
+import { buildHtmlDocument, extractThemeStyles, sanitizeHtmlBody, sanitizeThemeCss } from "./template.js";
 
 import { createLogger } from "../../logger.js";
 const log = createLogger("tools");
@@ -202,9 +202,11 @@ export const createHtmlReportTool: ToolDefinition = {
         type: "string",
         description:
           "Full report content in markdown. Headings, tables, lists, code blocks, " +
-          "and links all render natively. Plain text and inline HTML also work but " +
-          "<script>, <style>, <iframe> and inline event handlers are stripped for " +
-          "safety. Soft limit: 500,000 chars.",
+          "and links all render natively. Plain text and inline HTML also work; " +
+          "<script>, <iframe>, inline style= attributes and event handlers are stripped for " +
+          "safety. To apply a theme (e.g. from a skill), put its <style> block at the top " +
+          "and use its class names on your HTML elements: the stylesheet is kept and applied " +
+          "on top of the default one (no @import or external url()). Soft limit: 500,000 chars.",
       },
     },
     required: ["title", "summary", "detailsMarkdown"],
@@ -233,7 +235,9 @@ export const createHtmlReportTool: ToolDefinition = {
     try {
       // Pre-render chart blocks to inline SVG/HTML before markdown parsing
       // so charts display in JS-disabled viewers (Spaces file viewer, etc.)
-      const processedMarkdown = preRenderCharts(detailsMarkdown);
+      const theme = extractThemeStyles(detailsMarkdown);
+      const themeCss = sanitizeThemeCss(theme.css);
+      const processedMarkdown = preRenderCharts(theme.markdown);
       const rawHtml = await Promise.resolve(marked.parse(processedMarkdown));
       const safeBodyHtml = sanitizeHtmlBody(
         typeof rawHtml === "string" ? rawHtml : String(rawHtml),
@@ -243,6 +247,7 @@ export const createHtmlReportTool: ToolDefinition = {
         title,
         subtitle: `Length: ${detailsMarkdown.length.toLocaleString()} chars · Generated: ${new Date().toISOString()}`,
         body: safeBodyHtml,
+        ...(themeCss ? { themeCss } : {}),
       });
 
       const fileName = safeFileName(title);

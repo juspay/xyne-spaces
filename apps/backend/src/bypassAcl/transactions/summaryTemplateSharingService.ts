@@ -30,14 +30,14 @@ async function runTransaction<T>(
 }
 
 export function executeTx(self: SummaryTemplateSharingService, templateId: string, actor: SummaryTemplateSharingActor, command: SummaryTemplateSharingCommand) {
-  return runTransaction(['Channel', 'EntityAccess', 'SummaryTemplate', 'User', 'UserGroup'], 'execute: summary-template share grants/revokes with template and target validation reads must commit atomically; tx is not ACL-wrapped', async (tx) => {
+  return runTransaction(['Channel', 'ChannelParticipant', 'EntityAccess', 'SummaryTemplate', 'User', 'UserGroup'], 'execute: summary-template share grants/revokes with template and target validation reads must commit atomically; tx is not ACL-wrapped', async (tx) => {
     const template = await self.loadManageableTemplate(tx, templateId, actor);
     const targets = [
       ...new Map(
         command.targets.map((target) => [`${target.type}:${target.id}`, target])
       ).values(),
     ];
-    await self.validateTargets(tx, template, actor.workspaceId, targets);
+    await self.validateTargets(tx, template, actor, targets, command.action);
 
     const changes: SummaryTemplateAccessActivity[] = [];
     for (const target of targets) {
@@ -47,7 +47,7 @@ export function executeTx(self: SummaryTemplateSharingService, templateId: strin
         const share = existing
           ? await tx.entityAccess.update({
               where: { id: existing.id },
-              data: { entityUserAccess: EntityUserAccess.VIEW, updatedAt: new Date() },
+              data: { entityUserAccess: EntityUserAccess.EDIT, updatedAt: new Date() },
             })
           : await tx.entityAccess.create({
               data: {
@@ -55,7 +55,7 @@ export function executeTx(self: SummaryTemplateSharingService, templateId: strin
                 workspaceId: actor.workspaceId,
                 shareableEntityType: ShareableEntityType.SUMMARY_TEMPLATE,
                 entityId: template.id,
-                entityUserAccess: EntityUserAccess.VIEW,
+                entityUserAccess: EntityUserAccess.EDIT,
                 updatedAt: new Date(),
                 ...targetData(target),
               },

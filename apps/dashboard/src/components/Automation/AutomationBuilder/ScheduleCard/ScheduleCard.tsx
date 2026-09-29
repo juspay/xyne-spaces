@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { Clock, Zap } from 'lucide-react';
 import { cn } from '../../../../utils/classNames';
 import Input from '../../../ui/Input/Input';
+import { BusinessHoursFields } from '../BusinessHoursFields/BusinessHoursFields';
 import {
   Select,
   SelectContent,
@@ -77,6 +78,7 @@ function findDateFields(
 }
 
 const MAX_BY_UNIT: Record<ScheduleOffsetUnit, number> = {
+  seconds: MAX_SCHEDULE_OFFSET_MINUTES * 60,
   minutes: MAX_SCHEDULE_OFFSET_MINUTES,
   hours: Math.floor(MAX_SCHEDULE_OFFSET_MINUTES / 60),
   days: Math.floor(MAX_SCHEDULE_OFFSET_MINUTES / 60 / 24),
@@ -180,6 +182,7 @@ export function ScheduleCard({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value='seconds'>Seconds</SelectItem>
                     <SelectItem value='minutes'>Minutes</SelectItem>
                     <SelectItem value='hours'>Hours</SelectItem>
                     <SelectItem value='days'>Days</SelectItem>
@@ -207,6 +210,11 @@ export function ScheduleCard({
                 </Select>
               </FieldGroup>
             </div>
+
+            <BusinessHoursFields
+              value={sched}
+              onChange={patch => onChange({ ...sched, ...patch })}
+            />
 
             {overMax && (
               <p className='text-[11px] text-destructive'>

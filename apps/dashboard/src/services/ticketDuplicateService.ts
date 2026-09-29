@@ -58,3 +58,32 @@ export const checkTicketDuplicates = async (
 
   return responseData.data;
 };
+
+export interface TicketDuplicateRecheckResult {
+  isDuplicate: boolean;
+  linkedTicketId: string | null;
+  candidateCount: number;
+  confidence: number;
+}
+
+interface TicketDuplicateRecheckApiResponse {
+  success: boolean;
+  data?: TicketDuplicateRecheckResult;
+  error?: string;
+}
+
+/** Re-runs duplicate detection for an existing ticket; a new match is linked server-side. */
+export const recheckTicketDuplicates = async (
+  ticketId: string,
+): Promise<TicketDuplicateRecheckResult> => {
+  const response = await apiInstance.post<TicketDuplicateRecheckApiResponse>(
+    `/tickets/${ticketId}/duplicates/recheck`,
+  );
+  const responseData: TicketDuplicateRecheckApiResponse = response.data;
+
+  if (!responseData.success || !responseData.data) {
+    throw new Error(responseData.error || 'Duplicate check failed');
+  }
+
+  return responseData.data;
+};

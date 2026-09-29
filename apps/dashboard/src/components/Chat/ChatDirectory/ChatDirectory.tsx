@@ -302,6 +302,7 @@ const ChatDirectory = ({
     unreadCounts,
     mentionCounts,
     activeChannelId,
+    currentUserId: context.userID,
   });
 
   // Flattened, de-duplicated sidebar conversation order — mirrors exactly what

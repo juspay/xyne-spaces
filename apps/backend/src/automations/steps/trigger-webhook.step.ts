@@ -4,7 +4,8 @@ import { BaseActionStep } from './base-step';
 import { StepCategory } from '../types/categories';
 import { variableRef } from '../engine/variable-ref';
 import { OutputSchemaSchema } from '../engine/declared-schema';
-import { decryptHeaderValue, isSensitiveHeader } from '../engine/webhook-step-encryption';
+import { isSensitiveHeader } from '../engine/webhook-step-encryption';
+import { buildWebhookHeaders, toWebhookFormBody } from '../engine/webhook-request';
 import { safeWebhookFetch } from '@/utils/ssrfGuard';
 import { logger } from '@/utils/logger';
 
@@ -90,12 +91,12 @@ export class TriggerWebhookStep extends BaseActionStep<
 
     const init: RequestInit = {
       method,
-      headers: this.buildHeaders(headers, encoding),
+      headers: buildWebhookHeaders(headers, encoding),
       redirect: 'manual',
     };
 
     if (method !== 'GET' && body !== undefined) {
-      init.body = encoding === 'FORM' ? this.toFormBody(body) : (body as string);
+      init.body = encoding === 'FORM' ? toWebhookFormBody(body) : (body as string);
     }
 
     const controller = new AbortController();
@@ -152,39 +153,6 @@ export class TriggerWebhookStep extends BaseActionStep<
       throw err;
     } finally {
       clearTimeout(timer);
-    }
-  }
-
-  private buildHeaders(
-    headers: Record<string, string> | undefined,
-    encoding: 'JSON' | 'FORM' | 'RAW',
-  ): Record<string, string> {
-    const out: Record<string, string> = {};
-    for (const [k, v] of Object.entries(headers ?? {})) {
-      out[k] = decryptHeaderValue(v);
-    }
-    const hasContentType = Object.keys(out).some(k => k.toLowerCase() === 'content-type');
-    if (!hasContentType) {
-      if (encoding === 'JSON') out['Content-Type'] = 'application/json';
-      else if (encoding === 'FORM') out['Content-Type'] = 'application/x-www-form-urlencoded';
-    }
-    return out;
-  }
-
-  private toFormBody(body: unknown): string {
-    if (typeof body !== 'string') return '';
-    try {
-      const parsed = JSON.parse(body) as unknown;
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        const usp = new URLSearchParams();
-        for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
-          usp.append(k, typeof v === 'string' ? v : JSON.stringify(v));
-        }
-        return usp.toString();
-      }
-      return body;
-    } catch {
-      return body;
     }
   }
 

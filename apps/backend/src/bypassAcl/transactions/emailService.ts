@@ -45,7 +45,7 @@ export function updateExternalInteractionTx(self: EmailService, emailChanged: bo
     return { email, ticket };
   });
 }
-export function createConversationWithEmailTx(self: EmailService, channelId: string, userId: string, channel: any, receivedAt: Date | undefined, emailType: EmailType, emailSubject: string, emailBody: string, emailTo: string[], emailFrom: string, emailCc: string[], emailBcc: string[], emailReplyTo: string[], externalThreadId: string, externalMessageId: string, sentByUserId: string | undefined, normalizedRfcMessageId: string | undefined, rating: number | undefined, clientVersionName: string | undefined, clientVersionCode: string | undefined, externalSourceId: string | undefined, projectId: any, boardId: any, firstStage: any, slaResolutionDue: Date | null, userGroup: any, groupId: any, ticketMetadata: Record<string, unknown> | undefined) {
+export function createConversationWithEmailTx(self: EmailService, channelId: string, userId: string, channel: any, receivedAt: Date | undefined, emailType: EmailType, emailSubject: string, emailBody: string, emailTo: string[], emailFrom: string, emailCc: string[], emailBcc: string[], emailReplyTo: string[], externalThreadId: string, externalMessageId: string, sentByUserId: string | undefined, normalizedRfcMessageId: string | undefined, rating: number | undefined, clientVersionName: string | undefined, clientVersionCode: string | undefined, externalSourceId: string | undefined, projectId: any, boardId: any, firstStage: any, slaResolutionDue: Date | null, userGroup: any, groupId: any, ticketMetadata: Record<string, unknown> | undefined, deferChannelSideEffects = false) {
   return transaction(['ChannelUserStatus', 'Conversation', 'Email', 'ExternalMessage', 'Project', 'Ticket'], 'createConversationWithEmail: conversation, email, ticket and unread-count writes must commit atomically; tx is not ACL-wrapped', self.prisma, async (tx) => {
     // Create conversation
     const conv = await tx.conversation.create({
@@ -119,10 +119,14 @@ export function createConversationWithEmailTx(self: EmailService, channelId: str
 
     await syncConversationTicketMdFromPrismaTicket(tx, createdTicket);
 
-    await tx.channelUserStatus.updateMany({
-      where: { channelId, isDeleted: false },
-      data: { unreadCount: { increment: 1 }, updatedAt: new Date() },
-    });
+    // Backfill callers replay this once per run with the ticket count — see
+    // CreateConversationWithEmailParams.deferChannelSideEffects.
+    if (!deferChannelSideEffects) {
+      await tx.channelUserStatus.updateMany({
+        where: { channelId, isDeleted: false },
+        data: { unreadCount: { increment: 1 }, updatedAt: new Date() },
+      });
+    }
 
     return { conversation: conv, ticket: createdTicket, email: createdEmail };
   });

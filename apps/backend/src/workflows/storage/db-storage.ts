@@ -236,6 +236,7 @@ export class DBWorkflowStorage implements WorkflowStorage {
           uploadedByUserId: 'system',
           createdBy: 'system',
           conversationId: null,
+          channelId: null,
           workspaceId: config.defaultWorkspaceId,
           metadata: {
             workflowExecutionId,

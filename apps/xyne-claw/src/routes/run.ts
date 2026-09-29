@@ -3038,15 +3038,17 @@ export async function processTask(
     // mode's read-only filter passes it through untouched), and an agent
     // configured to plan first should still be able to say what it is. Twin is
     // excluded because that flow delivers through its own approval surface.
-    const describeAgentAvailable =
-      (!!channelId || (progressUrl && typeof progressUrl !== "string")) &&
+    const interactiveCardRun =
       !isScheduledOrAutomationRun(eventType, conversationId) &&
       !isTwinMentionFlow &&
       !isDailyBrief;
+    const hasSpacesCardSurface = !!channelId || (progressUrl && typeof progressUrl !== "string");
+    const isChatSurfaceRun = !channelId && !eventType;
+    const describeAgentAvailable = interactiveCardRun && (hasSpacesCardSurface || isChatSurfaceRun);
     if (describeAgentAvailable) {
       allTools.push(buildDescribeAgentTool(describeAgentRef));
-      // Same gate as describe-agent: a connector card is only worth posting
-      // where a human is watching and can press Connect.
+    }
+    if (interactiveCardRun && hasSpacesCardSurface) {
       allTools.push(buildSuggestConnectorsTool(suggestConnectorsRef, userId));
     }
 

@@ -99,8 +99,10 @@ import { QueryResultType } from '@rocicorp/zero';
 import ThreadMessages from '../../components/Chat/ThreadPannel';
 import { useChannel, useEmailChannels, useUserChannelStatuses } from '../../hooks/useChannels';
 import { useRefetchExternalSource } from '../../hooks/useRefetchExternalSource';
+import { useChannelFetchSources } from '../../hooks/useChannelFetchSources';
 import { useDlMemberSyncStatus } from '../../hooks/useDlMemberSyncStatus';
 import { RefetchRangeDialog } from '../../components/Chat/EmailRefetch/RefetchRangeDialog';
+import { FetchSourcePicker } from '../../components/Chat/EmailRefetch/FetchSourcePicker';
 import { DlMemberSyncDialog } from '../../components/Chat/EmailRefetch/DlMemberSyncDialog';
 import { useMarkTicketsAsRead } from '../../hooks/useMarkTicketsAsRead';
 import * as Popover from '@radix-ui/react-popover';
@@ -136,6 +138,7 @@ import {
   TICKET_LIST_COLUMNS,
 } from '../../components/Tickets/TicketListView/ticketListColumns';
 import DuplicateTicketsBanner from './DuplicateTicketsBanner';
+import { useRecheckTicketDuplicates } from '../../hooks/useRecheckTicketDuplicates';
 import type { LabelUnreadFilters } from '../../api/conversationLabelsApi';
 import { tagsConfigApi } from '../../api/tagsConfigApi';
 import { classificationApi } from '../../api/classificationApi';
@@ -1584,6 +1587,9 @@ const SupportScreen = (): ReactElement => {
       searchParams.get('workspaceMailboxConnected') === 'true',
   );
   const [showRefetchDialog, setShowRefetchDialog] = useState(false);
+  const [fetchTarget, setFetchTarget] = useState<
+    { sourceId?: string | undefined; sourceName?: string | undefined } | undefined
+  >(undefined);
   const [showDlMemberSyncDialog, setShowDlMemberSyncDialog] = useState(false);
 
   // ---------------------------------------------------------------------------
@@ -2108,12 +2114,23 @@ const SupportScreen = (): ReactElement => {
     isSocialMediaDesk,
   );
   const canRefetch = !!refetchChannelId;
+  const {
+    data: fetchSources,
+    isLoading: isFetchSourcesLoading,
+    isError: isFetchSourcesError,
+  } = useChannelFetchSources(refetchChannelId, canRefetch);
+  const anyFetchSource = (fetchSources?.length ?? 0) > 0;
+  const hasMultipleFetchSources = (fetchSources?.length ?? 0) > 1;
+  const dlHasApps = (fetchSources ?? []).some(source => source.sourceType === 'app-desk');
   const isDlDesk = channelPreference?.deskType === DeskType.DL;
   useEffect(() => {
     if (channelPreference?.boardId) {
       handleChannelBoardIdResolved(channelPreference.boardId);
     }
   }, [channelPreference?.boardId, handleChannelBoardIdResolved]);
+  useEffect(() => {
+    setFetchTarget(undefined);
+  }, [refetchChannelId]);
   const { data: dlMemberSyncStatus } = useDlMemberSyncStatus(refetchChannelId, isDlDesk);
   const isDlMemberSyncing = dlMemberSyncStatus?.active === true;
   const dlMemberSyncTooltip = isDlMemberSyncing
@@ -3307,6 +3324,11 @@ const SupportScreen = (): ReactElement => {
                         )}
                       {canRefetch &&
                         isSelectedChannelJoined &&
+                        (isDlDesk ||
+                          isSocialMediaDesk ||
+                          isFetchSourcesLoading ||
+                          isFetchSourcesError ||
+                          anyFetchSource) &&
                         (isDlDesk ? (
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
@@ -3333,15 +3355,26 @@ const SupportScreen = (): ReactElement => {
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align='end' className='w-80'>
                               <DropdownMenuItem
-                                onClick={() => setShowRefetchDialog(true)}
+                                onClick={() => {
+                                  setFetchTarget(undefined);
+                                  setShowRefetchDialog(true);
+                                }}
                                 data-track-category='Support'
                                 data-track-name='OPEN_EMAIL_REFETCH_DIALOG'
                               >
                                 <RefreshCw size={14} className='mr-2 shrink-0' />
                                 <span className='flex min-w-0 flex-1 items-center justify-between gap-3'>
-                                  <span className='truncate'>Fetch latest emails</span>
+                                  <span className='truncate'>
+                                    {dlHasApps
+                                      ? 'Fetch latest emails & app data'
+                                      : 'Fetch latest emails'}
+                                  </span>
                                   <Tooltip
-                                    content='Fetch recent emails from the connected shared mailbox for this desk.'
+                                    content={
+                                      dlHasApps
+                                        ? 'Fetch recent emails from the connected shared mailbox and history from the connected apps for this desk.'
+                                        : 'Fetch recent emails from the connected shared mailbox for this desk.'
+                                    }
                                     side='left'
                                     className='max-w-72'
                                   >
@@ -3383,6 +3416,43 @@ const SupportScreen = (): ReactElement => {
                               </DropdownMenuItem>
                             </DropdownMenuContent>
                           </DropdownMenu>
+                        ) : hasMultipleFetchSources || (isSocialMediaDesk && anyFetchSource) ? (
+                          <FetchSourcePicker
+                            sources={fetchSources ?? []}
+                            leadingAction={
+                              isSocialMediaDesk
+                                ? {
+                                    label: 'Fetch reviews',
+                                    // No sourceId => the hook routes to the
+                                    // review sync; the dialog supplies the range.
+                                    onSelect: () => {
+                                      setFetchTarget(undefined);
+                                      setShowRefetchDialog(true);
+                                    },
+                                  }
+                                : undefined
+                            }
+                            onSelect={(sourceId, sourceName) => {
+                              setFetchTarget(sourceId ? { sourceId, sourceName } : undefined);
+                              setShowRefetchDialog(true);
+                            }}
+                          >
+                            <button
+                              disabled={isRefetching || isFetchSourcesLoading}
+                              aria-label='Fetch data'
+                              className={cn(
+                                'p-1.5 rounded transition-colors text-muted-foreground hover:text-foreground hover:bg-muted',
+                                isRefetching && 'opacity-60 cursor-not-allowed',
+                              )}
+                              data-track-category='Support'
+                              data-track-name='RefetchExternalSource'
+                              data-track-metadata={JSON.stringify({
+                                channelId: refetchChannelId,
+                              })}
+                            >
+                              <RefreshCw size={16} className={cn(isRefetching && 'animate-spin')} />
+                            </button>
+                          </FetchSourcePicker>
                         ) : (
                           <Tooltip
                             content={
@@ -3395,8 +3465,21 @@ const SupportScreen = (): ReactElement => {
                             side='bottom'
                           >
                             <button
-                              onClick={() => setShowRefetchDialog(true)}
-                              disabled={isRefetching}
+                              onClick={() => {
+                                // Single-source desks skip the picker but still
+                                // get a titled dialog (and exact-source fetch).
+                                // Review desks land here with no listed source
+                                // and fall through to the review sync, which
+                                // now takes a range like every other fetch.
+                                const only = fetchSources?.[0];
+                                setFetchTarget(
+                                  fetchSources?.length === 1 && only
+                                    ? { sourceId: only.sourceId, sourceName: only.displayName }
+                                    : undefined,
+                                );
+                                setShowRefetchDialog(true);
+                              }}
+                              disabled={isRefetching || isFetchSourcesLoading}
                               className={cn(
                                 'p-1.5 rounded transition-colors text-muted-foreground hover:text-foreground hover:bg-muted',
                                 isRefetching && 'opacity-60 cursor-not-allowed',
@@ -4579,14 +4662,25 @@ const SupportScreen = (): ReactElement => {
           open={showRefetchDialog}
           onOpenChange={setShowRefetchDialog}
           isPending={isRefetching}
-          {...(isSocialMediaDesk && {
-            title: 'Fetch reviews',
-            subtitle: 'Pull new reviews or backfill a specific time range from the connected apps.',
-            summaryLabel: 'Will fetch reviews posted',
-          })}
+          {...(fetchTarget?.sourceName
+            ? {
+                // A named source wins over the desk-type wording: on a review
+                // desk the picker can target an app binding, and that fetch is
+                // not a review sync.
+                title: `Fetch from ${fetchTarget.sourceName}`,
+                subtitle: 'Choose how much history to pull from this source.',
+              }
+            : isSocialMediaDesk
+              ? {
+                  title: 'Fetch reviews',
+                  subtitle:
+                    'Pull new reviews or backfill a specific time range from the connected apps.',
+                  summaryLabel: 'Will fetch reviews posted',
+                }
+              : {})}
           onConfirm={range => {
             setShowRefetchDialog(false);
-            handleRefetch(range);
+            handleRefetch(range, fetchTarget);
           }}
         />
       )}
@@ -4771,7 +4865,7 @@ type SupportTicketDetailProps = {
   host?: 'support' | 'activity' | 'search_panel';
 };
 
-type TicketReplyKind = 'app' | 'channel';
+type TicketReplyKind = 'app' | 'slack' | 'channel';
 
 /**
  * Reply routing is per-ticket, not per-channel: an app-sourced ticket can live in ANY
@@ -4779,9 +4873,13 @@ type TicketReplyKind = 'app' | 'channel';
  * longer pick the thread/composer. 'channel' = the channel-type chain, unchanged.
  */
 const getTicketReplyKind = (ticketMetadata: unknown): TicketReplyKind => {
-  const deskSource = (ticketMetadata as { deskSource?: { type?: string } } | null | undefined)
-    ?.deskSource;
-  return deskSource?.type === 'app' ? 'app' : 'channel';
+  const metadata = ticketMetadata as
+    | { deskSource?: { type?: string }; source?: string }
+    | null
+    | undefined;
+  if (metadata?.deskSource?.type === 'app') return 'app';
+  if (metadata?.source === 'slack') return 'slack';
+  return 'channel';
 };
 
 export const SupportTicketDetail = ({
@@ -4903,6 +5001,8 @@ export const SupportTicketDetail = ({
 
   const detailConversationId = ticket?.conversationId ?? stateConversationId;
   const isAppSourcedTicket = getTicketReplyKind(ticket?.metadata) === 'app';
+  // Without this a Slack ticket on an EMAIL desk falls through to EmailComposer below.
+  const isSlackSourcedTicket = getTicketReplyKind(ticket?.metadata) === 'slack';
   const ticketEmailDrafts = useEmailDrafts(detailConversationId, routeChannelId, isMember);
 
   // Start the primary email query from router state while ticket metadata loads,
@@ -5555,6 +5655,8 @@ export const SupportTicketDetail = ({
   const [isScheduleCallModalOpen, setIsScheduleCallModalOpen] = useState(false);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [labelPickerOpen, setLabelPickerOpen] = useState(false);
+  const { isRechecking: isRecheckingDuplicates, recheck: recheckDuplicates } =
+    useRecheckTicketDuplicates(ticket?.id);
   if (!ticketIdParam) {
     return (
       <div className='h-full flex items-center justify-center'>
@@ -5834,6 +5936,22 @@ export const SupportTicketDetail = ({
                         <LinkIcon size={14} className='shrink-0' />
                         Copy link
                       </DropdownMenuItem>
+                      {ticket?.id && !ticket.isArchived && (
+                        <DropdownMenuItem
+                          onSelect={recheckDuplicates}
+                          disabled={isRecheckingDuplicates}
+                          data-track-category='Support'
+                          data-track-name='RecheckDuplicates'
+                          data-track-metadata={JSON.stringify({ surface: 'more_menu' })}
+                        >
+                          {isRecheckingDuplicates ? (
+                            <Loader2 size={14} className='animate-spin shrink-0' />
+                          ) : (
+                            <RefreshCw size={14} className='shrink-0' />
+                          )}
+                          Check for duplicates
+                        </DropdownMenuItem>
+                      )}
                       {emails.length > 0 &&
                         channel?.type !== ChannelType.SLACK &&
                         channel?.type !== ChannelType.APP && (
@@ -6236,6 +6354,7 @@ export const SupportTicketDetail = ({
               {emails && emails.length > 0 && (
                 <div className='mb-6'>
                   {isAppSourcedTicket ||
+                  isSlackSourcedTicket ||
                   channel?.type === ChannelType.SLACK ||
                   channel?.type === ChannelType.APP ||
                   channel?.type === ChannelType.SOCIAL_MEDIA ? (
@@ -6280,7 +6399,7 @@ export const SupportTicketDetail = ({
                     recordOnly={channelPreference?.appWebhookDeliveryEnabled === false}
                   />
                 ) : null
-              ) : channel?.type === ChannelType.SOCIAL_MEDIA ? (
+              ) : !isSlackSourcedTicket && channel?.type === ChannelType.SOCIAL_MEDIA ? (
                 conversationId ? (
                   <SocialMediaReplyComposer
                     conversationId={conversationId}
@@ -6295,15 +6414,20 @@ export const SupportTicketDetail = ({
                     trackingCategory='social-media-composer'
                   />
                 ) : null
-              ) : channel?.type === ChannelType.SLACK || channel?.type === ChannelType.APP ? (
+              ) : isSlackSourcedTicket ||
+                channel?.type === ChannelType.SLACK ||
+                channel?.type === ChannelType.APP ? (
                 conversationId ? (
                   <SlackComposer
                     conversationId={conversationId}
                     channelId={channel?.id ?? null}
                     drafts={ticketEmailDrafts}
-                    variant={channel?.type === ChannelType.APP ? 'app' : 'slack'}
+                    variant={
+                      !isSlackSourcedTicket && channel?.type === ChannelType.APP ? 'app' : 'slack'
+                    }
                     recordOnly={
-                      channel.type === ChannelType.APP &&
+                      !isSlackSourcedTicket &&
+                      channel?.type === ChannelType.APP &&
                       channelPreference?.appWebhookDeliveryEnabled === false
                     }
                   />

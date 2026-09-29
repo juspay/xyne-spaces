@@ -19,6 +19,7 @@ import {
   clearEnterpriseLoginIntent,
 } from '../../machines/authMachine';
 import { WorkspaceType } from '@xyne/shared';
+import { getPendingSdkSso, clearPendingSdkSso } from '../../utils/pendingSdkSso';
 
 interface CommunityWorkspaceListItem {
   id: string;
@@ -555,6 +556,18 @@ const AuthScreen = (): ReactElement | null => {
     setRegPasswordError('');
     setRegConfirmPasswordError('');
   };
+
+  // SDK SSO flow - back to the authorize page after login (before the workspace redirect)
+  const pendingSdkSsoUserCode = getPendingSdkSso();
+  if (isAuthenticated && pendingSdkSsoUserCode) {
+    clearPendingSdkSso();
+    return (
+      <Navigate
+        to={`/sdk-sso/authorize?user_code=${encodeURIComponent(pendingSdkSsoUserCode)}`}
+        replace={true}
+      />
+    );
+  }
 
   if (isAuthenticated) {
     const dest = user?.workspaceId ? `/${user.workspaceId}` : '/';

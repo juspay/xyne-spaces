@@ -1,6 +1,7 @@
 import type { SummaryTemplate } from '@prisma/client';
 import { AccessType, SummaryTemplateVisibility } from '@xyne/shared';
 import { db } from '@/database/client';
+import { summaryTemplateSharingService } from './summaryTemplateSharingService';
 
 export type SummaryTemplatePublicationAction =
   | 'request'
@@ -111,7 +112,17 @@ export class SummaryTemplatePublicationService {
       where: { id: template.id },
       data: { visibility },
     });
-    return { ...updated, canEdit: updated.createdBy === actor.userId, isSystem: false };
+    // A reviewing admin may also hold an EDIT share on the template.
+    const canEdit =
+      isOwner ||
+      (
+        await summaryTemplateSharingService.findSharedTemplateLevels(
+          actor.workspaceId,
+          actor.userId,
+          updated.id
+        )
+      ).get(updated.id) === 'edit';
+    return { ...updated, canEdit, isSystem: false };
   }
 
   async isAdmin(workspaceId: string, userId: string): Promise<boolean> {

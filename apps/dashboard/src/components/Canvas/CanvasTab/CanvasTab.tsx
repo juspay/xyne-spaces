@@ -38,6 +38,7 @@ import {
   History,
   Loader2,
   MessageSquare,
+  PhoneCall,
   Plus,
   RotateCcw,
   Star,
@@ -50,12 +51,14 @@ import { PresentToolbar } from 'blocknote-layout-extensions';
 import { mutators } from '../../../zero/mutators';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useChannel } from '../../../hooks/useChannels';
+import { useIsDmReadOnly } from '../../../hooks/useIsDmReadOnly';
 import { useCurrentUserGroupIds } from '../../../hooks/useUserGroup';
 import {
   filterExcludedCallGeneratedCanvases,
   filterExcludedRecordingGeneratedCanvases,
-  getRecordingCanvasCallId,
+  getCanvasCallId,
   isExcludedRecordingGeneratedCanvas,
+  isRecordingCanvas,
 } from '../canvasFilters';
 import { usePersistedCanvasPreferences } from '../../../hooks/usePersistedCanvasPreferences';
 import { Switch } from '@/components/ui/Switch';
@@ -134,6 +137,8 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
   const [onlyArchivedCanvases, setOnlyArchivedCanvases] = useState(false);
   const [view, setView] = useState<'list' | 'editor'>('list');
   const channel = useChannel(channelId);
+  // Deactivated 1:1 DM archive → no canvas creation (folder or file).
+  const isDmReadOnly = useIsDmReadOnly(channelId);
   const currentUserGroupIds = useCurrentUserGroupIds();
   const [adminParticipations] = useCachedQuery(queries.myChannelParticipations({}));
   const isChannelAdmin = useMemo(
@@ -294,15 +299,19 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
 
   const isCanvasOwner = canvas?.createdBy === user?.id || effectiveAccessLevel === CanvasRole.OWNER;
   const isChannelArchived = !!channel?.isArchived;
-  const recordingCallId = canvas ? getRecordingCanvasCallId(canvas) : null;
+  const canvasIsRecording = canvas ? isRecordingCanvas(canvas) : false;
+  const canvasCallId = canvas ? getCanvasCallId(canvas) : null;
 
   const handleOpenRecordingNotes = useCallback((): void => {
-    if (!recordingCallId) return;
+    if (!canvasCallId) return;
+    const destination = canvasIsRecording
+      ? `/recordings/${encodeURIComponent(canvasCallId)}?tab=notes`
+      : `/calls/${encodeURIComponent(canvasCallId)}/detail`;
 
-    void navigate(`/recordings/${encodeURIComponent(recordingCallId)}?tab=notes`, {
+    void navigate(destination, {
       state: { from: `${location.pathname}${location.search}` },
     });
-  }, [location.pathname, location.search, navigate, recordingCallId]);
+  }, [canvasCallId, canvasIsRecording, location.pathname, location.search, navigate]);
 
   useEffect(() => {
     previewVersionRef.current = null;
@@ -901,38 +910,42 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
                   />
                 </div>
               </Tooltip>
-              <Button
-                variant='outline'
-                size='sm'
-                onClick={openCreateFolderDialog}
-                disabled={isCreatingFolder || isChannelArchived}
-                data-track-category='CANVAS'
-                data-track-name='Create_Channel_Folder'
-                data-track-metadata={JSON.stringify({ channelId })}
-              >
-                {isCreatingFolder ? (
-                  <Loader2 size={16} className='animate-spin' />
-                ) : (
-                  <Plus size={16} />
-                )}
-                {isCreatingFolder ? 'Creating...' : 'New Folder'}
-              </Button>
-              <Button
-                variant='default'
-                size='sm'
-                onClick={() => void handleCreateCanvas()}
-                disabled={isCreatingCanvas || isChannelArchived}
-                data-track-category='CANVAS'
-                data-track-name='Create_Canvas'
-                data-track-metadata={JSON.stringify({ channelId })}
-              >
-                {isCreatingCanvas ? (
-                  <Loader2 size={16} className='animate-spin' />
-                ) : (
-                  <Plus size={16} />
-                )}
-                {isCreatingCanvas ? 'Creating...' : 'New Canvas'}
-              </Button>
+              {!isDmReadOnly && (
+                <>
+                  <Button
+                    variant='outline'
+                    size='sm'
+                    onClick={openCreateFolderDialog}
+                    disabled={isCreatingFolder || isChannelArchived}
+                    data-track-category='CANVAS'
+                    data-track-name='Create_Channel_Folder'
+                    data-track-metadata={JSON.stringify({ channelId })}
+                  >
+                    {isCreatingFolder ? (
+                      <Loader2 size={16} className='animate-spin' />
+                    ) : (
+                      <Plus size={16} />
+                    )}
+                    {isCreatingFolder ? 'Creating...' : 'New Folder'}
+                  </Button>
+                  <Button
+                    variant='default'
+                    size='sm'
+                    onClick={() => void handleCreateCanvas()}
+                    disabled={isCreatingCanvas || isChannelArchived}
+                    data-track-category='CANVAS'
+                    data-track-name='Create_Canvas'
+                    data-track-metadata={JSON.stringify({ channelId })}
+                  >
+                    {isCreatingCanvas ? (
+                      <Loader2 size={16} className='animate-spin' />
+                    ) : (
+                      <Plus size={16} />
+                    )}
+                    {isCreatingCanvas ? 'Creating...' : 'New Canvas'}
+                  </Button>
+                </>
+              )}
             </div>
           </div>
           <div className='flex-1 overflow-hidden'>
@@ -957,9 +970,11 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
               activeFilter={activeFilter}
               onFilterChange={setActiveFilter}
               selectedCanvasId={canvas?.id}
-              onCreateCanvasInFolder={folder => {
-                void handleCreateCanvasInFolder(folder);
-              }}
+              {...(!isDmReadOnly && {
+                onCreateCanvasInFolder: (folder: CanvasFolder) => {
+                  void handleCreateCanvasInFolder(folder);
+                },
+              })}
               onDeleteFolder={handleDeleteFolder}
               canManageAllFolders={isChannelAdmin}
               isCreatingCanvas={isCreatingCanvas}
@@ -1160,22 +1175,26 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
           {/* Share Button */}
           {canvas?.id && (
             <div className='ml-2 flex items-center gap-2'>
-              {recordingCallId && (
+              {canvasCallId && (
                 <Button
                   variant='secondary'
                   size='iconSm'
                   onClick={handleOpenRecordingNotes}
-                  title='Open recording notes'
-                  aria-label='Open recording notes'
+                  title={canvasIsRecording ? 'Open recording notes' : 'Open call notes'}
+                  aria-label={canvasIsRecording ? 'Open recording notes' : 'Open call notes'}
                   data-track-category='CANVAS'
                   data-track-name='Open_Recording_Notes_From_Channel_Canvas'
                   data-track-metadata={JSON.stringify({
                     canvasId: canvas.id,
-                    recordingId: recordingCallId,
+                    recordingId: canvasIsRecording ? canvasCallId : null,
                     channelId,
                   })}
                 >
-                  <AudioLines size={16} strokeWidth={2.2} />
+                  {canvasIsRecording ? (
+                    <AudioLines size={16} strokeWidth={2.2} />
+                  ) : (
+                    <PhoneCall size={16} strokeWidth={2.2} />
+                  )}
                 </Button>
               )}
               <Button

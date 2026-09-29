@@ -235,6 +235,17 @@ addons:
       requests:
         memory: 2Gi
     values: {}
+  workflows:
+    enabled: false
+    version: 2.0.8
+    namespace: argo-workflows
+    toolsImage: alpine/k8s:1.35.9
+    expose:
+      enabled: false
+      host: ""
+    values:
+      argoWorkflows: {}
+      upgrade: {}
   hindsight:
     enabled: false
     repoURL: https://github.com/vectorize-io/hindsight
