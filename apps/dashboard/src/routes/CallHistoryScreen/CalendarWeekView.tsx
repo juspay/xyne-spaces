@@ -199,7 +199,7 @@ function WeekViewCallCard({
                 )}
                 <span
                   className={cn(
-                    'min-w-0 flex-1 truncate text-xs font-semibold leading-tight max-sm:whitespace-normal max-sm:overflow-visible max-sm:break-words',
+                    'min-w-0 flex-1 truncate text-[11px] font-semibold leading-tight max-sm:whitespace-normal max-sm:overflow-visible max-sm:break-words',
                     isDeclined && 'line-through',
                   )}
                 >
@@ -217,7 +217,7 @@ function WeekViewCallCard({
                 </span>
               </span>
               {showSecondaryInformation && (
-                <span className='mt-0.5 flex min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap'>
+                <span className='flex min-w-0 items-center gap-1.5 overflow-hidden whitespace-nowrap'>
                   <span
                     className={cn('shrink-0 text-xs font-normal leading-tight', secondaryTextClass)}
                   >
