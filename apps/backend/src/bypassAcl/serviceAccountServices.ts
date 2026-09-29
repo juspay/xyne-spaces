@@ -33,9 +33,14 @@ export function recordServiceAccountKeyUse(keyId: string, at: Date): Promise<unk
  */
 export function loadSpacesTokenRows(
   claims: SpacesTokenClaims,
-): Promise<{ user: User | null; orgMember: OrgMember | null; serviceAccount: ServiceAccount | null }> {
+): Promise<{
+  user: User | null;
+  orgMember: OrgMember | null;
+  serviceAccount: ServiceAccount | null;
+  key: ServiceAccountKey | null;
+}> {
   return asService(
-    ['User', 'OrgMember', 'ServiceAccount'],
+    ['User', 'OrgMember', 'ServiceAccount', 'ServiceAccountKey'],
     'Spaces token auth: no request user yet; scoped to the workspace in the verified token',
     claims.sub,
     claims.workspaceId,
@@ -43,6 +48,7 @@ export function loadSpacesTokenRows(
       user: await db.user.findUnique({ where: { id: claims.sub } }),
       orgMember: await db.orgMember.findUnique({ where: { memberId: claims.memberId } }),
       serviceAccount: await db.serviceAccount.findUnique({ where: { id: claims.sa } }),
+      key: await db.serviceAccountKey.findUnique({ where: { id: claims.kid } }),
     }),
   );
 }
@@ -51,7 +57,6 @@ export function loadSpacesTokenRows(
 export function insertServiceAccountUser<P>(args: {
   workspaceId: string;
   orgId: string;
-  orgMember: OrgMember | null;
   email: string;
   displayName: string;
   providerUserId: string;
@@ -65,9 +70,7 @@ export function insertServiceAccountUser<P>(args: {
     'service account creates a guest: user, membership and channel grants must commit together',
     db,
     async (tx) => {
-      const member =
-        args.orgMember ??
-        (await tx.orgMember.create({ data: { orgId: args.orgId, email: args.email, role: OrgRole.GUEST } }));
+      const member = await tx.orgMember.create({ data: { orgId: args.orgId, email: args.email, role: OrgRole.GUEST } });
       const user = await tx.user.create({
         data: {
           email: args.email,

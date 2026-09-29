@@ -1,6 +1,6 @@
 // S2S keys: `xyne_s2s_` + 256 random bits. Only the SHA-256 is stored and looked up.
 import { createHash, randomBytes } from 'node:crypto';
-import type { ServiceAccount } from '@prisma/client';
+import type { ServiceAccount, ServiceAccountKey } from '@prisma/client';
 import { findServiceAccountKey, recordServiceAccountKeyUse } from '@/bypassAcl/serviceAccountServices';
 import { logger } from '@/utils/logger';
 import { ServiceAccountKeyStatus, ServiceAccountStatus } from './constants';
@@ -27,7 +27,7 @@ function refused(reason: 'key_invalid' | 'key_expired' | 'key_revoked', message:
 }
 
 /** The key's service account, or `unauthenticated` if the key or account isn't usable. */
-export async function authenticateKey(key: string): Promise<ServiceAccount> {
+export async function authenticateKey(key: string): Promise<{ serviceAccount: ServiceAccount; keyId: string }> {
   if (!looksLikeKey(key)) throw refused('key_invalid', 'The S2S key is missing or malformed.');
 
   const found = await findServiceAccountKey(hashKey(key));
@@ -51,5 +51,15 @@ export async function authenticateKey(key: string): Promise<ServiceAccount> {
     void recordServiceAccountKeyUse(row.id, new Date(now)).catch((err) => logger.warn('[service-account] failed to record key use', { keyId: row.id, err }));
   }
 
-  return serviceAccount;
+  return { serviceAccount, keyId: row.id };
+}
+
+/** Tokens die with the key they were issued with: revoked or expired keys end them too. */
+export function isKeyUsable(key: ServiceAccountKey | null, serviceAccountId: string): boolean {
+  return (
+    !!key &&
+    key.serviceAccountId === serviceAccountId &&
+    key.status === ServiceAccountKeyStatus.ACTIVE &&
+    key.expiresAt.getTime() > Date.now()
+  );
 }

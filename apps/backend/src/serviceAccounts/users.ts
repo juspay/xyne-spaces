@@ -2,7 +2,7 @@
 // the resource types, marked with the service account as the granter.
 import { randomUUID } from 'node:crypto';
 import { Prisma, type ServiceAccount, type User } from '@prisma/client';
-import { GuestEntity, OrgRole, UserStatus, WorkspaceRole } from '@xyne/shared';
+import { GuestEntity, UserStatus, WorkspaceRole } from '@xyne/shared';
 import { db } from '@/database/client';
 import { applyServiceAccountUserChanges, insertServiceAccountUser } from '@/bypassAcl/serviceAccountServices';
 import { grantPermissionsForRole } from '@/services/permissionMatrix';
@@ -74,30 +74,32 @@ export async function createUser(
   await policy.assertCanGrant(channels.type, channelIds);
   await channels.assertUsable(workspaceId, channelIds);
 
-  if (await findUserByEmail(workspaceId, email)) {
+  const existing = await findUserByEmail(workspaceId, email);
+  if (existing) {
+    // grantPermissionsForRole only logs failures; a retry of the create finishes it (it is add-only).
+    if (policy.canManageUser(existing)) {
+      await grantPermissionsForRole(existing.id, existing.email, WorkspaceRole.GUEST, workspaceId);
+    }
     throw new ServiceAccountError('conflict', 'A user with this email already exists.', { reason: 'user_exists' });
   }
 
   const workspace = await db.workspace.findUnique({ where: { id: workspaceId }, select: { orgId: true } });
   if (!workspace) throw new Error(`Workspace ${workspaceId} not found`);
 
-  // org_members.email is globally unique. Only a guest membership of this workspace's org may be
-  // reused: an external system must never claim a member's identity (and role) by asserting an email.
-  const orgMember = await db.orgMember.findUnique({ where: { email } });
-  if (orgMember && (orgMember.leftAt || orgMember.orgId !== workspace.orgId || orgMember.role !== OrgRole.GUEST)) {
-    throw new ServiceAccountError('conflict', 'This email belongs to an existing member and cannot be added.', {
+  // org_members.email is globally unique. An existing membership is never reused: a partner's
+  // assertion of an email must not attach it to a real person's identity.
+  if (await db.orgMember.findUnique({ where: { email } })) {
+    throw new ServiceAccountError('conflict', 'This email already belongs to a Spaces account.', {
       reason: 'email_unavailable',
     });
   }
-  if (!orgMember) {
-    try {
-      await organizationDomainService.assertOrgMemberLimit(workspace.orgId, email);
-    } catch (err) {
-      if (err instanceof OrgMemberLimitError) {
-        throw new ServiceAccountError('forbidden', 'The organization has no seats left.', { reason: 'seat_limit_reached' });
-      }
-      throw err;
+  try {
+    await organizationDomainService.assertOrgMemberLimit(workspace.orgId, email);
+  } catch (err) {
+    if (err instanceof OrgMemberLimitError) {
+      throw new ServiceAccountError('forbidden', 'The organization has no seats left.', { reason: 'seat_limit_reached' });
     }
+    throw err;
   }
 
   const prepared = await channels.prepare(channelIds);
@@ -107,7 +109,6 @@ export async function createUser(
     user = await insertServiceAccountUser({
       workspaceId,
       orgId: workspace.orgId,
-      orgMember,
       email,
       displayName,
       providerUserId: `${ownedUserPrefix(account.id)}${randomUUID()}`,
@@ -157,6 +158,7 @@ export async function listUsers(
   };
   const idFilter: Prisma.StringFilter = afterId ? { gt: afterId } : {};
   if (input.channelId) {
+    await policy.assertCanGrant(channels.type, [input.channelId]);
     // guest_access has no Prisma relation to users, so find the channel's members first.
     const members = await db.guestAccess.findMany({
       where: { workspaceId, accessibleEntityType: GuestEntity.CHANNEL, accessibleEntityId: input.channelId },
@@ -171,9 +173,11 @@ export async function listUsers(
   const users = page.slice(0, input.limit);
   const ids = users.map((user) => user.id);
   const held = ids.length ? await channels.heldBy(workspaceId, ids) : new Map<string, string[]>();
+  // Only the account's own channels: a channel a person gave the user is not the partner's to see.
+  const connected = await policy.connectedIds(channels.type);
 
   const result: { users: ServiceAccountUserView[]; notFound?: string[]; nextCursor: string | null } = {
-    users: users.map((user) => toView(user, held.get(user.id) ?? [])),
+    users: users.map((user) => toView(user, (held.get(user.id) ?? []).filter((id) => connected.has(id)))),
     nextCursor: hasMore ? encodeCursor(ids[ids.length - 1]) : null,
   };
   if (emails) {
@@ -262,5 +266,6 @@ export async function updateUser(account: ServiceAccount, input: UpdateUserInput
     removed: toRemove,
     status: input.status,
   });
-  return toView(updated, after);
+  const connected = await policy.connectedIds(channels.type);
+  return toView(updated, after.filter((id) => connected.has(id)));
 }

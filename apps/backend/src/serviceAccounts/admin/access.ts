@@ -1,5 +1,5 @@
 // Who may manage service accounts from Spaces: connecting a resource needs admin of it; managing an
-// account needs being its creator or admin of all its resources. Guests can do neither.
+// account needs being a workspace owner/admin, its creator, or admin of all its resources. Guests can do neither.
 import type { ServiceAccount } from '@prisma/client';
 import { WorkspaceRole } from '@xyne/shared';
 import { db } from '@/database/client';
@@ -68,6 +68,7 @@ export class ServiceAccountAdminPolicy {
   }
 
   async canManage(account: ServiceAccount, resources: AccountResource[]): Promise<boolean> {
+    if (this.caller.role === WorkspaceRole.OWNER || this.caller.role === WorkspaceRole.ADMIN) return true;
     if (account.createdBy === this.caller.id) return true;
     if (resources.length === 0) return false;
     for (const [type, ids] of byType(resources)) {

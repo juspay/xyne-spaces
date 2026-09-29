@@ -12,6 +12,7 @@ export interface SpacesTokenClaims {
   workspaceId: string;
   memberId: string;
   sa: string;
+  kid: string;
 }
 
 export interface TokenSubject {

@@ -8,7 +8,7 @@ import { ownedUserPrefix } from '../ownership';
 import { resourceType } from '../resources';
 import { ServiceAccountAdminPolicy, resourcesOf, toView, type Caller, type ServiceAccountView } from './access';
 
-/** Needs admin of each resource, not of the account: anyone can hand their channel to an account. */
+/** Needs to manage the account and be admin of each resource. */
 export function connectResources(
   caller: Caller,
   id: string,
@@ -17,7 +17,7 @@ export function connectResources(
 ): Promise<ServiceAccountView> {
   return withWorkspaceScope(async () => {
     const policy = new ServiceAccountAdminPolicy(caller);
-    const { account } = await policy.load(id);
+    const { account } = await policy.loadManaged(id);
     const unique = [...new Set(ids)];
     await policy.assertCanConnect(type, unique);
     await db.serviceAccountResource.createMany({

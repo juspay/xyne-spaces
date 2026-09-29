@@ -49,8 +49,8 @@ export function s2sUpdateUser(account: ServiceAccount, input: UpdateUserInput) {
   );
 }
 
-export function s2sIssueSpacesToken(account: ServiceAccount, email: string) {
+export function s2sIssueSpacesToken(account: ServiceAccount, keyId: string, email: string) {
   return asServiceAccount(account, ['User', 'OrgMember'], 'S2S token: key-authenticated, no req.user', () =>
-    issueSpacesToken(account, 'email', { email }),
+    issueSpacesToken(account, keyId, 'email', { email }),
   );
 }

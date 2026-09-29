@@ -30,6 +30,15 @@ export class ServiceAccountPolicy {
     }
   }
 
+  /** The ids of this type the account was given. */
+  async connectedIds(type: ServiceAccountResourceType): Promise<Set<string>> {
+    const rows = await db.serviceAccountResource.findMany({
+      where: { serviceAccountId: this.account.id, resourceType: type },
+      select: { resourceId: true },
+    });
+    return new Set(rows.map((row) => row.resourceId));
+  }
+
   canManageUser(user: Pick<User, 'providerUserId'>): boolean {
     return isOwnedBy(user, this.account.id);
   }

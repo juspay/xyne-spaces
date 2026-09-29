@@ -8,7 +8,7 @@ export class S2sAuthController {
   token = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const input = TokenSchema.parse(req.body);
-      res.status(200).json(await s2sIssueSpacesToken(req.serviceAccount!, input.email));
+      res.status(200).json(await s2sIssueSpacesToken(req.serviceAccount!, req.serviceAccountKeyId!, input.email));
     } catch (err) {
       next(err);
     }

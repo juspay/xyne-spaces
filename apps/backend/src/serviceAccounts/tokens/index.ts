@@ -60,7 +60,8 @@ function verify(token: string): SpacesTokenClaims {
     typeof decoded.sub !== 'string' ||
     typeof decoded.workspaceId !== 'string' ||
     typeof decoded.memberId !== 'string' ||
-    typeof decoded.sa !== 'string'
+    typeof decoded.sa !== 'string' ||
+    typeof decoded.kid !== 'string'
   ) {
     throw invalid();
   }
@@ -70,6 +71,7 @@ function verify(token: string): SpacesTokenClaims {
     workspaceId: decoded.workspaceId,
     memberId: decoded.memberId,
     sa: decoded.sa,
+    kid: decoded.kid,
   };
 }
 

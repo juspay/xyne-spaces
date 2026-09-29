@@ -23,6 +23,7 @@ const METHODS: { [N in LoginMethodName]: LoginMethod<LoginInputs[N]> } = {
 /** Every login method ends here: the user must be active, then gets a Spaces token. */
 export async function issueSpacesToken<N extends LoginMethodName>(
   account: ServiceAccount,
+  keyId: string,
   method: N,
   input: LoginInputs[N],
 ): Promise<{ accessToken: string; expiresAt: string; userId: string }> {
@@ -40,6 +41,7 @@ export async function issueSpacesToken<N extends LoginMethodName>(
     workspaceId: user.workspaceId,
     memberId: user.orgMemberId,
     sa: account.id,
+    kid: keyId,
   });
   return { accessToken: token, expiresAt: expiresAt.toISOString(), userId: user.id };
 }

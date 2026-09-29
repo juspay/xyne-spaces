@@ -64,6 +64,7 @@ declare global {
       user?: AuthenticatedUser;
       authenticatedSessionId?: string;
       serviceAccount?: ServiceAccount;
+      serviceAccountKeyId?: string;
       spacesToken?: { kind: TokenSubjectKind; serviceAccountId: string };
     }
   }

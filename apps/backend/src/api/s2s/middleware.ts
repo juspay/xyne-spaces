@@ -5,7 +5,9 @@ export async function s2sKeyAuth(req: Request, _res: Response, next: NextFunctio
   try {
     const header = req.headers.authorization;
     const key = header?.startsWith('Bearer ') ? header.slice('Bearer '.length).trim() : '';
-    req.serviceAccount = await authenticateKey(key);
+    const { serviceAccount, keyId } = await authenticateKey(key);
+    req.serviceAccount = serviceAccount;
+    req.serviceAccountKeyId = keyId;
     next();
   } catch (err) {
     next(err);
