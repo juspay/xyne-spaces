@@ -2,9 +2,24 @@ import { UserSessionService } from '@/services/userSessionService';
 import { fcmPushService } from '@/services/fcmService';
 import { mtlsCertificateService } from '@/services/mtlsCertificateService';
 import { logger } from '@/utils/logger';
+import { db } from '@/database/client';
+
 interface DeactivatedUser {
   userId: string;
   email: string;
+}
+
+export interface DeactivationStepResult {
+  name: string;
+  ok: boolean;
+}
+
+export interface UserDeactivationResult {
+  userId: string;
+  email: string;
+  /** False when any step failed, i.e. some access may still be live. */
+  ok: boolean;
+  steps: DeactivationStepResult[];
 }
 
 /**
@@ -18,7 +33,27 @@ interface DeactivatedUser {
 class AccountDeactivationService {
   private userSessionService = new UserSessionService();
 
-  async handleDeactivatedUser({ userId, email }: DeactivatedUser): Promise<void> {
+  /**
+   * Resolve every user row owning `email` and clean each one up.
+   *
+   * A user row is unique per (email, workspace), so one email can own a row in
+   * several workspaces: a provider revoking the identity revokes all of them.
+   * Returns one result per row, empty when no user has that email.
+   */
+  async handleDeactivatedEmail(email: string): Promise<UserDeactivationResult[]> {
+    const users = await db.user.findMany({
+      where: { email: { equals: email, mode: 'insensitive' } },
+      select: { id: true, email: true },
+    });
+
+    const results: UserDeactivationResult[] = [];
+    for (const user of users) {
+      results.push(await this.handleDeactivatedUser({ userId: user.id, email: user.email }));
+    }
+    return results;
+  }
+
+  async handleDeactivatedUser({ userId, email }: DeactivatedUser): Promise<UserDeactivationResult> {
     logger.warn('[Deactivation] Cleaning up deactivated user', { userId });
 
     const steps: Array<{ name: string; run: () => Promise<unknown> }> = [
@@ -32,16 +67,22 @@ class AccountDeactivationService {
 
     const results = await Promise.allSettled(steps.map((step) => step.run()));
 
-    results.forEach((result, index) => {
+    const stepResults: DeactivationStepResult[] = results.map((result, index) => {
       if (result.status === 'rejected') {
         logger.error(`[Deactivation] Step failed: ${steps[index].name}`, {
           userId,
           error: result.reason instanceof Error ? result.reason.message : String(result.reason),
         });
       }
+      return { name: steps[index].name, ok: result.status === 'fulfilled' };
     });
 
-    logger.info('[Deactivation] Cleanup complete', { userId });
+    const ok = stepResults.every((step) => step.ok);
+    logger.info('[Deactivation] Cleanup complete', { userId, ok });
+
+    // Steps stay best-effort — this never throws — but the outcome is reported
+    // so a caller that can retry (the internal endpoint) knows to.
+    return { userId, email, ok, steps: stepResults };
   }
 }
 
