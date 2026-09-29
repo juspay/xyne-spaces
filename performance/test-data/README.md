@@ -59,6 +59,20 @@ realistic contention.
 
 ## Token lifetime
 
-`JWT_EXPIRATION_SECONDS` defaults to 86400 (24h), so a 4h `soak` is fine with freshly minted
-tokens. A stale fixture produces 401s part-way through a run. The `zero-query-transform` scenario makes one authenticated request in `setup()` and fails fast as an `ENVIRONMENT_FAILURE` rather than letting the
+**Do not assume 24 hours.** `JWT_EXPIRATION_SECONDS` defaults to 86400, but a deployment can
+issue far shorter tokens — sandbox was observed issuing **600-second** tokens on 2026-09-29.
+
+Worse, the two auth paths disagree about what "expired" means:
+
+| Path | Scenarios | Behaviour |
+| --- | --- | --- |
+| `authMiddleware.authenticate` | `search`, `attachments`, `rest-messaging` | Treats a token as expired when **under 5 minutes remain** (`auth.ts:346`) and 401s unless a `user_session_id` cookie is present to refresh it. |
+| `authMiddleware.authenticateZero` | `zero-query-transform`, `zero-push` | Verifies the token directly, with no refresh window. |
+
+So with a 600-second token the first group is usable for roughly five minutes. Any profile
+longer than that — `release` at ~10m, `load` at ~40m, `soak` at ~4h — will start returning
+401s part-way through and report them as failures.
+
+**Before running those scenarios, confirm the identity's token lifetime comfortably exceeds
+the profile duration**, or provision long-lived tokens or API keys for performance identities. The `zero-query-transform` scenario makes one authenticated request in `setup()` and fails fast as an `ENVIRONMENT_FAILURE` rather than letting the
 run report a product regression.
