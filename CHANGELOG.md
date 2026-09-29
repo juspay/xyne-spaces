@@ -1,3 +1,10 @@
+## [1.423.1](https://github.com/juspay/xyne-spaces/compare/v1.423.0...v1.423.1) (2026-09-29)
+
+
+### Bug Fixes
+
+* carry the user's original request and files through every workflow hand-off ([#2436](https://github.com/juspay/xyne-spaces/issues/2436)) ([06aba17](https://github.com/juspay/xyne-spaces/commit/06aba17b3d18b0384f4ab1bd1ece42bb6d40e6e0))
+
 ## [1.423.0](https://github.com/juspay/xyne-spaces/compare/v1.422.4...v1.423.0) (2026-09-29)
 
 
