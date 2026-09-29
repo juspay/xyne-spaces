@@ -20,6 +20,7 @@ import { newCardToken, parkOptions, type ParkedOption } from "./cards.js";
 import { enqueueOutbound } from "./delivery.js";
 import { chatMessageRepository } from "../../repositories/index.js";
 import { resolveIdentity } from "./identity.js";
+import { resolveUserSendMessageTarget } from "../../mcp/user-send-message-target.js";
 import type { ChannelAccount, ChannelDeliveryTarget, InteractiveCard } from "./plugin.js";
 
 const log = createLogger("channel-approvals");
@@ -41,14 +42,17 @@ function clamp(value: string, max: number): string {
  * headings into a card that scrolls, this one has 1024 characters and only
  * *bold* to work with.
  */
-function describeWriteAction(tool: string, params: Record<string, unknown>): string {
+export function describeWriteAction(tool: string, params: Record<string, unknown>): string {
   switch (tool) {
     case "user-send-message": {
-      const where = str(params["channelId"])
-        ? `#${str(params["channelId"])}`
-        : str(params["conversationId"])
+      const target = resolveUserSendMessageTarget(params);
+      const where = target.kind === "channel"
+        ? `#${target.id}`
+        : target.kind === "conversation"
           ? "an existing thread"
-          : "Xyne Spaces";
+          : target.kind === "recipient"
+            ? `DM user ${target.id}`
+            : "Xyne Spaces";
       const content = clamp(str(params["content"]), MAX_DETAIL_CHARS);
       return `Send this message as you to ${where}:\n\n"${content}"`;
     }

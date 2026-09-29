@@ -14,8 +14,9 @@ import { MessageAttachmentRepository } from '../database/repositories/messageAtt
 import { UserRepository } from '../database/repositories/users';
 import { UserGroupRepository } from '../database/repositories/userGroups';
 import { ProjectRepository } from '../database/repositories/projectRepository';
-import { Prisma, type User } from '@prisma/client';
+import { Prisma, type Conversation, type Message, type User } from '@prisma/client';
 import { v4 as uuidv4 } from 'uuid';
+import { createId } from '@paralleldrive/cuid2';
 import { dlAddressesFor } from '@/services/dlResolver';
 import {
   createForwardedMessageXml,
@@ -256,78 +257,101 @@ export class ChannelController {
       sender: any;
     };
   } | null> {
+    const conversationId = createId();
+    const messageId = createId();
+    const workspaceId = await this.channelRepository.getWorkspaceId(channelId);
+
+    let conversation: Conversation;
+    let createdMessage: Message;
     try {
-      // Create conversation
-      const conversationData: CreateConversationInput = {
-        channelId: channelId,
-        createdBy: senderId,
-        initialMessageId: 'temp', // Will be updated after message creation
-      };
+      ({ conversation, createdMessage } = await db.$transaction(async (tx) => {
+        const createdConversation = await this.conversationRepository.createInTransaction(
+          tx,
+          {
+            conversationId,
+            channelId,
+            createdBy: senderId,
+            initialMessageId: messageId,
+          },
+          workspaceId,
+        );
+        const message = await this.messageRepository.createInTransaction(
+          tx,
+          {
+            messageId,
+            conversationId,
+            senderId,
+            content: messageContent.trim(),
+            msgType: MessageType.USER,
+            hasAttachment: false,
+            workspaceId,
+          },
+          workspaceId,
+        );
+        return { conversation: createdConversation, createdMessage: message };
+      }));
+    } catch (error) {
+      logger.error('Error persisting initial message:', error);
+      return null;
+    }
 
-      const conversation = await this.conversationRepository.create(conversationData);
-
-      // Create initial message
-      const messageData: CreateMessageInput = {
-        conversationId: conversation.conversationId,
-        senderId: senderId,
-        content: messageContent.trim(),
-        msgType: MessageType.USER,
-        hasAttachment: false
-      };
-
-      const createdMessage = await this.messageRepository.create(messageData);
-
-      // Update conversation with real initial message ID
-      await this.conversationRepository.update(conversation.conversationId, {
-        initialMessageId: createdMessage.messageId,
-      });
-      const targetChannel = await this.channelRepository.findById(channelId);
-      if (targetChannel) {
-        await ensureDmConversationAuthorParticipant({
+    const runPostCommitStep = async (name: string, step: () => Promise<unknown>): Promise<void> => {
+      try {
+        await step();
+      } catch (error) {
+        logger.error(`Initial message persisted but ${name} failed`, {
           channelId,
-          conversationId: conversation.conversationId,
-          senderId,
-          scopeType: targetChannel.scopeType as ChannelScopeType,
+          conversationId,
+          messageId,
+          error,
         });
       }
-      await messageMetadataService.syncInitialMessageMd(conversation.conversationId);
+    };
 
-      // Update channel last activity
-      await this.channelRepository.updateLastActivity(channelId);
+    const senderInfo = await this.getUserInfo(senderId);
+    const targetChannel = await this.channelRepository.findById(channelId).catch(() => null);
+    if (targetChannel) {
+      await runPostCommitStep('conversation author participant sync', () =>
+        ensureDmConversationAuthorParticipant({
+          channelId,
+          conversationId,
+          senderId,
+          scopeType: targetChannel.scopeType as ChannelScopeType,
+        }),
+      );
+    }
+    await runPostCommitStep('initial message metadata sync', () =>
+      messageMetadataService.syncInitialMessageMd(conversationId),
+    );
+    await runPostCommitStep('channel activity update', () =>
+      this.channelRepository.updateLastActivity(channelId),
+    );
+    await runPostCommitStep('DM reopen', () =>
+      this.channelUserStatusRepository.reopenForAllParticipants(channelId),
+    );
 
-      // Reopen DM for all participants so they can see the message
-      await this.channelUserStatusRepository.reopenForAllParticipants(channelId);
+    const channelParticipants = await this.channelParticipantRepository
+      .getChannelParticipants(channelId)
+      .catch((error) => {
+        logger.error('Initial message persisted but participant lookup failed', {
+          channelId,
+          conversationId,
+          messageId,
+          error,
+        });
+        return [];
+      });
+    const recipientIds = channelParticipants
+      .map(p => p.userId)
+      .filter(userId => userId !== senderId);
+    const cleanContent = messageContent.replace(/<[^>]*>/g, '').trim() || 'Sent a message';
 
-      // Get sender info
-      const senderInfo = await this.getUserInfo(senderId);
+    if (recipientIds.length > 0) {
+      const isGroupDm = channelParticipants.length > 2;
+      const { hasChannel, hasHere } = extractSpecialMentions(messageContent);
+      const mentionType = hasChannel ? '@channel' : hasHere ? '@here' : undefined;
 
-      // Get channel participants for notifications and unread count
-      const channelParticipants =
-        await this.channelParticipantRepository.getChannelParticipants(channelId);
-
-      // Get recipient IDs (all participants except sender)
-      const recipientIds = channelParticipants
-        .map(p => p.userId)
-        .filter(userId => userId !== senderId);
-
-      // Extract clean content for notification
-      const cleanContent =
-        messageContent.replace(/<[^>]*>/g, '').trim() || 'Sent a message';
-
-      // Fetch workspaceId for notification URL
-      const workspaceId = await this.channelRepository.getWorkspaceId(channelId);
-
-      // Send notifications to recipients (skip for self-DMs)
-      if (recipientIds.length > 0) {
-        const isGroupDm = channelParticipants.length > 2;
-
-        // @channel / @here in a group DM's first message must fire the explicit
-        // channel-wide mention notification. This REST path bypasses the Zero
-        // mutator pipeline, so the MessagesSideEffectHandler (which normally
-        // handles special mentions) never runs — replicate its GROUP_DM branch here.
-        const { hasChannel, hasHere } = extractSpecialMentions(messageContent);
-        const mentionType = hasChannel ? '@channel' : hasHere ? '@here' : undefined;
-
+      await runPostCommitStep('notification delivery', async () => {
         if (isGroupDm && mentionType) {
           const channel = await this.channelRepository.findById(channelId);
           await notificationService.createMentionNotifications(
@@ -341,20 +365,16 @@ export class ChannelController {
             cleanContent,
             workspaceId,
             mentionType,
-            false, // isDMChannel
-            false, // isThreadMessage
+            false,
+            false,
             senderInfo.picture ?? '',
-            undefined, // prefetchedData
-            true, // isGroupDM
+            undefined,
+            true,
           );
 
-          // Mirror MessagesSideEffectHandler.handleSpecialMentionActivities: create
-          // the activity-feed records for the @channel/@here audience so the mention
-          // shows up in recipients' Activity, not just as a push notification.
-          const audience =
-            mentionType === '@channel'
-              ? await getChannelParticipantsForMention(channelId)
-              : await getOnlineChannelParticipants(channelId);
+          const audience = mentionType === '@channel'
+            ? await getChannelParticipantsForMention(channelId)
+            : await getOnlineChannelParticipants(channelId);
           const audienceUserIds = [
             ...new Set(audience.map(u => u.userId).filter(id => id && id !== senderId)),
           ];
@@ -385,54 +405,53 @@ export class ChannelController {
             senderInfo.name,
             cleanContent,
             workspaceId,
-            channelParticipants.length === 2 ? ChannelScopeType.DM : ChannelScopeType.GROUP_DM
+            channelParticipants.length === 2 ? ChannelScopeType.DM : ChannelScopeType.GROUP_DM,
           );
         }
+      });
 
-        // Update unread counts for recipients (skip for self-DMs)
-        await handleUnreadCount(
+      await runPostCommitStep('unread count update', () =>
+        handleUnreadCount(
           channelId,
-          true, // isDMChannel
+          true,
           channelParticipants.map(p => ({ userId: p.userId })),
-          senderId
-        );
-      }
+          senderId,
+        ),
+      );
+    }
 
-      // Broadcast new conversation via WebSocket
-      const conversationMessage = {
-        conversationId: conversation.conversationId,
-        channelId: channelId,
+    const conversationMessage = {
+      conversationId: conversation.conversationId,
+      channelId,
+      messageId: createdMessage.messageId,
+      senderId: createdMessage.senderId,
+      senderName: senderInfo.name,
+      senderPicture: senderInfo.picture,
+      content: createdMessage.content,
+      msgType: createdMessage.msgType,
+      hasAttachment: createdMessage.hasAttachment,
+      attachments: [],
+      createdAt: createdMessage.createdAt,
+    };
+    await runPostCommitStep('WebSocket broadcast', () =>
+      websocketService.broadcastToSession(channelId, 'new_conversation', conversationMessage),
+    );
+    await runPostCommitStep('Redis broadcast', () =>
+      redisService.broadcastMessageToSession(channelId, conversationMessage),
+    );
+
+    return {
+      conversationId: conversation.conversationId,
+      initialMessage: {
         messageId: createdMessage.messageId,
-        senderId: createdMessage.senderId,
-        senderName: senderInfo.name,
-        senderPicture: senderInfo.picture,
         content: createdMessage.content,
-        msgType: createdMessage.msgType,
+        msgType: createdMessage.msgType as MessageType,
         hasAttachment: createdMessage.hasAttachment,
         attachments: [],
         createdAt: createdMessage.createdAt,
-      };
-
-      await websocketService.broadcastToSession(channelId, 'new_conversation', conversationMessage);
-      await redisService.broadcastMessageToSession(channelId, conversationMessage);
-
-      return {
-        conversationId: conversation.conversationId,
-        initialMessage: {
-          messageId: createdMessage.messageId,
-          content: createdMessage.content,
-          msgType: createdMessage.msgType as MessageType,
-          hasAttachment: createdMessage.hasAttachment,
-          attachments: [],
-          createdAt: createdMessage.createdAt,
-          sender: senderInfo,
-        }
-      };
-    } catch (error) {
-      logger.error('Error sending initial message:', error);
-      // Don't fail the entire operation if message creation fails
-      return null;
-    }
+        sender: senderInfo,
+      },
+    };
   }
 
   // Helper method to send a forwarded message to a channel

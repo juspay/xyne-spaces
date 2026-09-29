@@ -162,6 +162,7 @@ import { isAgentInvocableBy } from "xyne-claw-shared";
 import { isSupportedInboundAttachment } from "xyne-claw-shared";
 import type { Todo } from "xyne-claw-shared";
 import { tools as xyneSpacesTools } from "../mcp/servers/xyne-spaces-tools.js";
+import { resolveUserSendMessageTarget } from "../mcp/user-send-message-target.js";
 import { connectorTypesFromText, connectorTypesUserAskedFor, wantsConnectorRoster } from "../lib/connector-hints.js";
 import {
   SUPPORTED_PROVIDERS,
@@ -1120,13 +1121,14 @@ const TICKET_CARD_PRIORITIES: TicketCardPriority[] = ["LOW", "MEDIUM", "HIGH", "
 function formatActionDescription(tool: string, params: Record<string, unknown>, options?: { channelName?: string }): string {
   if (tool === "user-send-message") {
     const content = (params["content"] as string ?? "").slice(0, 300);
-    const conversationId = params["conversationId"] as string | undefined;
-    const channelId = params["channelId"] as string | undefined;
+    const target = resolveUserSendMessageTarget(params);
     const lines = [`**Send Message as You**`, ``];
-    if (channelId) {
-      lines.push(`**Destination:** post NEW message to #${options?.channelName ?? channelId}`);
-    } else if (conversationId) {
-      lines.push(`**Destination:** reply in existing thread ${conversationId}`);
+    if (target.kind === "channel") {
+      lines.push(`**Destination:** post NEW message to #${options?.channelName ?? target.id}`);
+    } else if (target.kind === "conversation") {
+      lines.push(`**Destination:** reply in existing thread ${target.id}`);
+    } else if (target.kind === "recipient") {
+      lines.push(`**Destination:** direct message to user ${target.id}`);
     }
     if (content) lines.push(``, `**Message:** ${content}${(params["content"] as string ?? "").length > 300 ? "..." : ""}`);
     return lines.join("\n");

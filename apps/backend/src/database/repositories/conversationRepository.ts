@@ -56,28 +56,26 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
     super('conversation');
   }
 
-  async create(data: CreateConversationInput): Promise<Conversation> {
+  private async validateCreateInput(data: CreateConversationInput): Promise<void> {
     if (data.conversationId) {
       await this.validateString(data.conversationId, 'conversationId');
     }
     await this.validateString(data.channelId, 'channelId');
     await this.validateString(data.createdBy, 'createdBy');
     await this.validateString(data.initialMessageId, 'initialMessageId');
+  }
 
-    // Stamp the denormalized tenant key from the owning channel.
-    const channel = await this.db.channel.findUnique({
-      where: { id: data.channelId },
-      select: { workspaceId: true },
-    });
-    if (!channel) {
-      throw new Error(`Channel not found: ${data.channelId}`);
-    }
-
-    return await this.db.conversation.create({
+  async createInTransaction(
+    tx: Parameters<Parameters<typeof this.db.$transaction>[0]>[0],
+    data: CreateConversationInput,
+    workspaceId: string,
+  ): Promise<Conversation> {
+    await this.validateCreateInput(data);
+    return tx.conversation.create({
       data: {
         ...(data.conversationId && { conversationId: data.conversationId }),
         channelId: data.channelId,
-        workspaceId: channel.workspaceId,
+        workspaceId,
         createdBy: data.createdBy,
         initialMessageId: data.initialMessageId,
         ...(data.initial_message_md !== undefined && {
@@ -90,8 +88,23 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
         }),
         metadata: data.metadata,
         ...(data.createdAt && { createdAt: data.createdAt }),
-      }
+      },
     });
+  }
+
+  async create(data: CreateConversationInput): Promise<Conversation> {
+    await this.validateCreateInput(data);
+
+    // Stamp the denormalized tenant key from the owning channel.
+    const channel = await this.db.channel.findUnique({
+      where: { id: data.channelId },
+      select: { workspaceId: true },
+    });
+    if (!channel) {
+      throw new Error(`Channel not found: ${data.channelId}`);
+    }
+
+    return this.createInTransaction(this.db, data, channel.workspaceId);
   }
 
   async findById(id: string): Promise<Conversation | null> {
