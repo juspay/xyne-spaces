@@ -51,7 +51,12 @@ vi.mock("./delivery.js", () => ({
 vi.mock("./busy.js", () => ({ dispatchOrQueueChannelRun: dispatchChannelRun }));
 vi.mock("./approvals.js", () => ({ redeemApproval: vi.fn() }));
 vi.mock("./agent-tools.js", () => ({ agentActionGatesOf: () => ({ sendToOtherChats: false, reactions: true, listGroups: true }) }));
-vi.mock("./identity.js", () => ({ resolveIdentity }));
+const redeemLinkCode = vi.fn(async (_input: Record<string, unknown>) => ({ ok: true, linked: 1 }) as { ok: true; linked: number } | { ok: false; reason: "invalid" | "taken" });
+vi.mock("./identity.js", () => ({
+  resolveIdentity,
+  redeemLinkCode,
+  parseLinkCode: (text: string) => /^\s*link\s+(\d{6})\s*$/i.exec(text)?.[1] ?? null,
+}));
 vi.mock("./store.js", () => ({
   findDefaultAgent: async () => ({ agent: { id: "a1", slug: "assistant", name: "Assistant", enabled: true, config: null } }),
   findOrgAgentBySlug: async () => null,
@@ -106,6 +111,8 @@ describe("handleInbound", () => {
     dispatchChannelRun.mockClear();
     resolveIdentity.mockClear();
     resolveIdentity.mockResolvedValue("user-1");
+    redeemLinkCode.mockClear();
+    redeemLinkCode.mockResolvedValue({ ok: true, linked: 1 });
   });
 
   it("dispatches without waiting", async () => {
@@ -141,6 +148,31 @@ describe("handleInbound", () => {
     await settle();
     expect(enqueueOutbound.mock.calls.some((c) => c[1]["kind"] === "typing" && c[1]["on"] === false)).toBe(true);
     expect(enqueueOutbound.mock.calls.some((c) => c[1]["kind"] === "text" && c[1]["text"] === "queue full")).toBe(true);
+  });
+
+  it("links a number when its code arrives from that number, without running the agent", async () => {
+    resolveIdentity.mockResolvedValue(null);
+    await handleInbound(ctx, msg({ text: "LINK 482913" }));
+    await settle();
+    expect(redeemLinkCode).toHaveBeenCalledWith({ surfaceId: "whatsapp", orgId: "org-1", senderId: "919", code: "482913" });
+    expect(dispatchChannelRun).not.toHaveBeenCalled();
+    expect(enqueueOutbound.mock.calls.some((c) => c[1]["kind"] === "text" && String(c[1]["text"]).startsWith("✅ Verified"))).toBe(true);
+  });
+
+  it("stays silent on a personal number when the code does not verify", async () => {
+    resolveIdentity.mockResolvedValue(null);
+    redeemLinkCode.mockResolvedValue({ ok: false, reason: "invalid" });
+    await handleInbound(ctx, msg({ text: "link 000000" }));
+    await settle();
+    expect(redeemLinkCode).toHaveBeenCalledTimes(1);
+    expect(enqueueOutbound.mock.calls.some((c) => c[1]["kind"] === "text")).toBe(false);
+    expect(dispatchChannelRun).not.toHaveBeenCalled();
+  });
+
+  it("does not treat a code posted in a group as a link attempt", async () => {
+    await handleInbound(ctx, msg({ text: "LINK 482913", isGroup: true, mentionedSelf: true }));
+    await settle();
+    expect(redeemLinkCode).not.toHaveBeenCalled();
   });
 
   it("answers three quick lines as three turns, in order", async () => {

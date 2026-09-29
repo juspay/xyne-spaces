@@ -1,10 +1,9 @@
 /**
  * Self-service number linking: "here is my WhatsApp number, make it me."
  *
- * One step. The signed-in session says who the person is, and the number they
- * type says which sender id that identity answers to — so the link exists the
- * moment they submit, and the very next message they send is answered as them.
- * Nothing is asked of the phone.
+ * Two steps. The signed-in session says who the person is and the number they
+ * type is claimed; the link only exists once they send the code shown here from
+ * that phone, which proves the number is theirs.
  *
  * The number belongs to the person, not to one assistant, so there is nothing
  * to pick: it is linked on every channel passed in, and any assistant in the
@@ -47,7 +46,8 @@ export function LinkNumberPanel({
   const channelKey = channels.join(",");
   const [linked, setLinked] = useState<Mine[]>([]);
   const [phone, setPhone] = useState("");
-  const [justLinked, setJustLinked] = useState<ChannelNumberLink | null>(null);
+  const [pending, setPending] = useState<ChannelNumberLink | null>(null);
+  const [verified, setVerified] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -71,12 +71,35 @@ export function LinkNumberPanel({
     }
     setLinked([...byDisplay.values()]);
     setLoaded(true);
+    return [...byDisplay.keys()];
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [channelKey]);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    if (!pending) return;
+    const target = formatNumber(pending.senderId);
+    const expiresAt = new Date(pending.expiresAt).getTime();
+    const timer = window.setInterval(() => {
+      if (Date.now() > expiresAt) {
+        window.clearInterval(timer);
+        setPending(null);
+        setError("The code expired before it was sent. Connect the number again to get a new one.");
+        return;
+      }
+      void refresh().then((numbers) => {
+        if (numbers.includes(target)) {
+          window.clearInterval(timer);
+          setPending(null);
+          setVerified(target);
+        }
+      });
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [pending, refresh]);
 
   const submit = useCallback(async () => {
     setBusy(true);
@@ -90,9 +113,9 @@ export function LinkNumberPanel({
         const first = results.find((r): r is PromiseRejectedResult => r.status === "rejected");
         throw first?.reason ?? new Error("Could not link this number. Please try again.");
       }
-      setJustLinked(ok.find((link) => link.sendTo) ?? ok[0]!);
+      setVerified(null);
+      setPending(ok.find((link) => link.sendTo) ?? ok[0]!);
       setPhone("");
-      await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not link this number. Please try again.");
     } finally {
@@ -105,25 +128,44 @@ export function LinkNumberPanel({
       await Promise.all(
         mine.entries.map((entry) => unlinkMyChannelNumber(entry.channel, entry.senderId).catch(() => undefined)),
       );
-      setJustLinked((current) => (current && formatNumber(current.senderId) === mine.display ? null : current));
+      setVerified((current) => (current === mine.display ? null : current));
       await refresh();
     },
     [refresh],
   );
 
-  if (justLinked) {
+  if (pending) {
+    return (
+      <div className="space-y-1.5 text-[12px] text-xyne-fg-secondary">
+        <p>
+          To confirm <span className="font-mono text-xyne-fg-primary">{formatNumber(pending.senderId)}</span> is yours, send this
+          message from it on {channelName}
+          {pending.sendTo ? (
+            <>
+              {" "}to <span className="font-mono text-xyne-fg-primary">{pending.sendTo}</span>
+            </>
+          ) : (
+            <> to the assistant</>
+          )}
+          :
+        </p>
+        <p className="font-mono text-[16px] font-semibold tracking-wider text-xyne-fg-primary">LINK {pending.code}</p>
+        <p className="text-[11px] text-xyne-fg-muted">
+          Waiting for it… the code expires at {new Date(pending.expiresAt).toLocaleTimeString()}.
+          <button onClick={() => setPending(null)} className="ml-2 underline-offset-2 hover:underline">
+            Cancel
+          </button>
+        </p>
+      </div>
+    );
+  }
+
+  if (verified) {
     return (
       <div className="text-[12px] text-xyne-fg-secondary">
-        <span className="font-mono text-xyne-fg-primary">{formatNumber(justLinked.senderId)}</span> now runs as {userEmail}.{" "}
-        {justLinked.sendTo ? (
-          <>
-            Message <span className="font-mono text-xyne-fg-primary">{justLinked.sendTo}</span> on {channelName} and it answers as
-            you.
-          </>
-        ) : (
-          <>Message the assistant on {channelName} and it answers as you.</>
-        )}
-        <button onClick={() => setJustLinked(null)} className="ml-2 text-xyne-fg-muted underline-offset-2 hover:underline">
+        <span className="font-mono text-xyne-fg-primary">{verified}</span> is verified and now runs as {userEmail}. Message the
+        assistant on {channelName} and it answers as you.
+        <button onClick={() => setVerified(null)} className="ml-2 text-xyne-fg-muted underline-offset-2 hover:underline">
           Add another
         </button>
       </div>
