@@ -49,6 +49,8 @@ const RESERVED_HEADERS: ReadonlySet<string> = new Set([
   'x-xyne-timestamp',
   'x-xyne-request-signature',
   'x-xyne-signature',
+  'x-xyne-installed-app-id',
+  'x-xyne-channel-id',
   'x-source',
   'content-type',
   'content-length',
@@ -720,7 +722,10 @@ export function buildSignedFetchRequest(params: {
     buildSignedAppRequestHeaders({
       signingSecret,
       method: config.method,
+      host: url.host,
       pathWithQuery: `${url.pathname}${url.search}`,
+      installedAppId: vars.installedApp.id,
+      channelId: vars.channel.id,
       bodyHash: sha256Hex(body ?? ''),
     }),
   );

@@ -302,15 +302,23 @@ Headers may also contain references. Values of sensitive headers (`Authorization
 
 #### Authentication
 
-Headers on every request: `X-Xyne-Timestamp` (epoch seconds), `X-Xyne-Request-Signature` (hex HMAC-SHA256), `X-Source: XyneSpaces`.
+Headers on every request: `X-Xyne-Timestamp` (epoch seconds), `X-Xyne-Request-Signature` (hex HMAC-SHA256), `X-Source: XyneSpaces`, `X-Xyne-Installed-App-Id` and `X-Xyne-Channel-Id`.
 
 The signed string is:
 
 ```
-`${timestamp}\n${METHOD}\n${pathWithQuery}\n${sha256Hex(rawBody)}`
+`${timestamp}\n${METHOD}\n${host}\n${pathWithQuery}\n${installedAppId}\n${channelId}\n${sha256Hex(rawBody)}`
 ```
 
 **The body hash is part of the canonical string** — the last line, and the SHA-256 of the empty string for a bodyless request (every `GET`). It binds the payload to the signature: the body carries the channel id and the date window, so signing only the path would let a captured request be replayed against a different channel inside the skew window. `pathWithQuery` is signed exactly as sent, so a `GET` must be verified against the query string as received. This scheme is separate from the body-only `X-Xyne-Signature` webhook scheme; the shared secret is the same. Verify with a ±5 min skew window.
+
+##### Scope the export to the signed identity, not to the body
+
+> **Your signing secret is per APP, not per install.** Every workspace that installs your app is verified with the same key, and the request's URL and body are written by whichever workspace admin configured the fetch. A signature therefore proves *"Xyne sent this"* — on its own it does **not** prove which tenant asked for it.
+>
+> `X-Xyne-Installed-App-Id` and `X-Xyne-Channel-Id` are what carry that. Xyne sets both from its own record of the install; a fetch config cannot set or template them, and both are covered by the signature. **Scope every export to the install and channel in those headers, and ignore any ids the body names** — otherwise an admin in one workspace can hardcode another workspace's channel id in the body template and receive that tenant's history.
+>
+> `host` is signed for the same reason: without it, a config pointed at an attacker-controlled server yields a signature that still verifies when replayed against your real endpoint inside the skew window. Reject a request whose `Host` does not match the host you serve.
 
 Xyne applies its own headers **last**, so a stored header can never shadow the signature, `X-Source` or the content type. The signing secret itself is never part of the config: it is read from the app server-side at request time.
 

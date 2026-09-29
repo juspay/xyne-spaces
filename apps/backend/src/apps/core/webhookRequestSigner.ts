@@ -7,7 +7,7 @@ import crypto from 'crypto';
  * scheme of signWebhookPayload (eventSubscriptionUtils.ts), which stays
  * untouched and keeps using X-Xyne-Signature. The signed string is:
  *
- *   `${timestamp}\n${METHOD}\n${pathWithQuery}\n${sha256Hex(body)}`
+ *   `${timestamp}\n${METHOD}\n${host}\n${pathWithQuery}\n${installedAppId}\n${channelId}\n${sha256Hex(body)}`
  *
  * The body hash is the last line and is the hash of the empty string for a
  * bodyless request. It binds the payload to the signature: an export request's
@@ -26,6 +26,8 @@ export const XYNE_TIMESTAMP_HEADER = 'X-Xyne-Timestamp';
 export const XYNE_REQUEST_SIGNATURE_HEADER = 'X-Xyne-Request-Signature';
 export const XYNE_SOURCE_HEADER = 'X-Source';
 export const XYNE_SOURCE_VALUE = 'XyneSpaces';
+export const XYNE_INSTALLED_APP_HEADER = 'X-Xyne-Installed-App-Id';
+export const XYNE_CHANNEL_HEADER = 'X-Xyne-Channel-Id';
 
 export interface SignedAppRequestParams {
   /** Plaintext signing secret (decrypt(Apps.signingSecret)). */
@@ -36,6 +38,12 @@ export interface SignedAppRequestParams {
   pathWithQuery: string;
   /** Hex SHA-256 of the raw request body; the empty-string hash when bodyless. */
   bodyHash: string;
+  /** Destination host (with port), as `URL.host`. Binds the signature to where it was sent. */
+  host: string;
+  /** The install Xyne is acting for. Server-derived; never read from the config. */
+  installedAppId: string;
+  /** The desk channel the export is for. Server-derived; never read from the config. */
+  channelId: string;
   /** Epoch seconds. Defaults to now. */
   timestamp?: number;
 }
@@ -45,7 +53,15 @@ export function signAppRequest(params: SignedAppRequestParams): {
   signature: string;
 } {
   const timestamp = params.timestamp ?? Math.floor(Date.now() / 1000);
-  const payload = `${timestamp}\n${params.method.toUpperCase()}\n${params.pathWithQuery}\n${params.bodyHash}`;
+  const payload = [
+    timestamp,
+    params.method.toUpperCase(),
+    params.host,
+    params.pathWithQuery,
+    params.installedAppId,
+    params.channelId,
+    params.bodyHash,
+  ].join('\n');
   const signature = crypto
     .createHmac('sha256', params.signingSecret)
     .update(payload)
@@ -61,5 +77,7 @@ export function buildSignedAppRequestHeaders(
     [XYNE_TIMESTAMP_HEADER]: String(timestamp),
     [XYNE_REQUEST_SIGNATURE_HEADER]: signature,
     [XYNE_SOURCE_HEADER]: XYNE_SOURCE_VALUE,
+    [XYNE_INSTALLED_APP_HEADER]: params.installedAppId,
+    [XYNE_CHANNEL_HEADER]: params.channelId,
   };
 }
