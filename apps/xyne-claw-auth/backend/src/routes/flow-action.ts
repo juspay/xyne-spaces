@@ -18,6 +18,7 @@ import { errMsg } from "../lib/errors.js";
 import { CONFIG } from "../config.js";
 import { prisma } from "../db.js";
 import { decrypt } from "../crypto.js";
+import { isOAuthProvider, prepareOAuthCustomTool } from "../lib/oauth-custom-tool.js";
 import { executeTwinApprovalDelivery } from "../lib/twin-delivery.js";
 import { fetchTicketForCard, parseXyneIdFromToolResult } from "../lib/ticket-card.js";
 import { verifySpacesSignature } from "../middleware/verify-spaces-signature.js";
@@ -861,104 +862,16 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         return;
       }
 
-      if (serverType === "google") {
-        const { getAllCustomTools } = await import("xyne-claw-shared");
-        const toolDef = getAllCustomTools().find((t) => t.slug === tool);
-        if (!toolDef) {
-          res.json({ type: "error", message: `Unknown Google tool: ${tool}` } satisfies AppActionResponse);
+      if (isOAuthProvider(serverType)) {
+        const prepared = await prepareOAuthCustomTool({ provider: serverType, tool, userId: writeUserId });
+        if (!prepared.ok) {
+          res.json({ type: "error", message: prepared.message } satisfies AppActionResponse);
           return;
         }
-        const connection = await prisma.userMcpConnection.findFirst({ where: { userId: writeUserId, mcpServer: { type: "google" } } });
-        if (!connection) {
-          res.json({ type: "error", message: `No Google connection for user ${writeUserId}` } satisfies AppActionResponse);
-          return;
-        }
-        const decCreds = decrypt(connection.encryptedCreds, connection.iv, connection.authTag, CONFIG.encryptionKey);
-        const creds = JSON.parse(decCreds) as { accessToken: string; refreshToken: string; expires: number };
-        let accessToken = creds.accessToken;
-
-        if (Date.now() > creds.expires - 60_000) {
-          const refreshRes = await fetch("https://oauth2.googleapis.com/token", {
-            method: "POST",
-            headers: { "Content-Type": "application/x-www-form-urlencoded" },
-            body: new URLSearchParams({
-              client_id: process.env["GOOGLE_CLIENT_ID"]!,
-              client_secret: process.env["GOOGLE_CLIENT_SECRET"]!,
-              refresh_token: creds.refreshToken,
-              grant_type: "refresh_token",
-            }),
-          });
-          if (refreshRes.ok) {
-            const tokens = (await refreshRes.json()) as { access_token: string; expires_in: number };
-            accessToken = tokens.access_token;
-            const { encrypt } = await import("../crypto.js");
-            const newCreds = { accessToken, refreshToken: creds.refreshToken, expires: Date.now() + tokens.expires_in * 1000 };
-            const enc = encrypt(JSON.stringify(newCreds), CONFIG.encryptionKey);
-            await prisma.userMcpConnection.update({ where: { id: connection.id }, data: { encryptedCreds: enc.ciphertext, iv: enc.iv, authTag: enc.authTag } });
-          } else {
-            res.json({ type: "error", message: "Google token refresh failed" } satisfies AppActionResponse);
-            return;
-          }
-        }
-
-        // Executes the user's personal Google OAuth token → ACL-flag the run.
+        // Executes the user's personal OAuth token → ACL-flag the run.
         flagUserTokenRun(conversationId, agentSlug);
-        const result = await toolDef.execute(params, { config: { GOOGLE_ACCESS_TOKEN: accessToken } });
-        log.info(`[flow-action] Google write action approved: ${tool} → ${result.slice(0, 100)}`);
-        resp = { type: "close_screen", finalMessage: `✅ ${tool} executed successfully.` };
-        res.json(resp);
-        await finishWriteSuccess({
-          actionId, tool, serverType, params, writeUserId, signature, agentSlug, spacesAppId,
-          messageId, conversationId, channelId: continueChannelId, resultText: safeResultString(result),
-        });
-        return;
-      }
-
-      if (serverType === "microsoft") {
-        const { getAllCustomTools } = await import("xyne-claw-shared");
-        const toolDef = getAllCustomTools().find((t) => t.slug === tool);
-        if (!toolDef) {
-          res.json({ type: "error", message: `Unknown Microsoft tool: ${tool}` } satisfies AppActionResponse);
-          return;
-        }
-        const connection = await prisma.userMcpConnection.findFirst({ where: { userId: writeUserId, mcpServer: { type: "microsoft" } } });
-        if (!connection) {
-          res.json({ type: "error", message: `No Microsoft connection for user ${writeUserId}` } satisfies AppActionResponse);
-          return;
-        }
-        const decCreds = decrypt(connection.encryptedCreds, connection.iv, connection.authTag, CONFIG.encryptionKey);
-        const creds = JSON.parse(decCreds) as { accessToken: string; refreshToken: string; expires: number };
-        let accessToken = creds.accessToken;
-
-        if (Date.now() > creds.expires - 60_000) {
-          const tenantId = process.env["MICROSOFT_TENANT_ID"] ?? "common";
-          const refreshRes = await fetch(`https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`, {
-            method: "POST",
-            headers: { "Content-Type": "application/x-www-form-urlencoded" },
-            body: new URLSearchParams({
-              client_id: process.env["MICROSOFT_CLIENT_ID"]!,
-              client_secret: process.env["MICROSOFT_CLIENT_SECRET"]!,
-              refresh_token: creds.refreshToken,
-              grant_type: "refresh_token",
-            }),
-          });
-          if (refreshRes.ok) {
-            const tokens = (await refreshRes.json()) as { access_token: string; refresh_token: string; expires_in: number };
-            accessToken = tokens.access_token;
-            const { encrypt } = await import("../crypto.js");
-            const newCreds = { accessToken, refreshToken: tokens.refresh_token, expires: Date.now() + tokens.expires_in * 1000 };
-            const enc = encrypt(JSON.stringify(newCreds), CONFIG.encryptionKey);
-            await prisma.userMcpConnection.update({ where: { id: connection.id }, data: { encryptedCreds: enc.ciphertext, iv: enc.iv, authTag: enc.authTag } });
-          } else {
-            res.json({ type: "error", message: "Microsoft token refresh failed" } satisfies AppActionResponse);
-            return;
-          }
-        }
-
-        // Executes the user's personal Microsoft OAuth token → ACL-flag the run.
-        flagUserTokenRun(conversationId, agentSlug);
-        const result = await toolDef.execute(params, { config: { MICROSOFT_ACCESS_TOKEN: accessToken } });
-        log.info(`[flow-action] Microsoft write action approved: ${tool} → ${result.slice(0, 100)}`);
+        const result = await prepared.run(params);
+        log.info(`[flow-action] ${prepared.label} write action approved: ${tool} → ${result.slice(0, 100)}`);
         resp = { type: "close_screen", finalMessage: `✅ ${tool} executed successfully.` };
         res.json(resp);
         await finishWriteSuccess({

@@ -8,10 +8,10 @@
  * messaging channel (WhatsApp) can now render the same approval as a native
  * card, so the tap needs somewhere to land — this module.
  *
- * It deliberately covers ONLY the generic MCP-connector path, the last branch
- * of flow-action's approve-write handler. Every branch flow-action special-
- * cases (Spaces app-token sends, gateway services, Google, Microsoft, skill
- * and agent-tool mutations) carries setup that the Spaces card has and a
+ * It covers the generic MCP-connector path and the Google/Microsoft tools
+ * (lib/oauth-custom-tool.ts, shared with flow-action). The other branches
+ * flow-action special-cases (Spaces app-token sends, gateway services, skill
+ * and agent-tool mutations) carry setup that the Spaces card has and a
  * messenger does not, so those are refused here and pointed back at Spaces
  * rather than half-implemented. Widening this set means porting a branch
  * properly, not deleting a check.
@@ -21,6 +21,8 @@ import { errMsg } from "./errors.js";
 import type { SignedWriteAction as BaseWriteAction } from "./write-actions.js";
 import { AGENT_TOOL_SLUGS } from "./agent-tools-apply.js";
 import { GATEWAY_KEY_PREFIX, parseGatewayCatalogSource } from "../mcpgateway/key-format.js";
+import { agentRunRepository } from "../repositories/index.js";
+import { isOAuthProvider, prepareOAuthCustomTool } from "./oauth-custom-tool.js";
 
 const log = createLogger("approved-write");
 
@@ -39,7 +41,6 @@ export type ApprovedWriteOutcome =
 /** True when flow-action would take a branch this module does not implement. */
 export function needsSpacesApproval(serverType: string, tool: string): boolean {
   if (parseGatewayCatalogSource(serverType) || serverType.startsWith(GATEWAY_KEY_PREFIX)) return true;
-  if (serverType === "google" || serverType === "microsoft") return true;
   if (serverType === "skill") return true;
   if (serverType === "agent-tools" && (AGENT_TOOL_SLUGS.has(tool) || tool === "create-skill")) return true;
   // Posting AS the user through the Spaces app token needs an agent's
@@ -77,6 +78,24 @@ export async function executeApprovedWrite(input: {
   if (!verifyActionSignatureAny([bare, bound], signature)) {
     log.error(`[approved-write] HMAC verification failed tool=${tool} user=${userId}`);
     return { ok: false, reason: "signature", message: "This action could not be verified. Please approve it in Xyne Spaces." };
+  }
+
+  if (isOAuthProvider(serverType)) {
+    const prepared = await prepareOAuthCustomTool({ provider: serverType, tool, userId });
+    if (!prepared.ok) return { ok: false, reason: "no-connection", message: prepared.message };
+    if (input.conversationId) {
+      agentRunRepository
+        .markUsedUserTokenByConversation(input.conversationId, action.agentSlug)
+        .catch((err) => log.warn(`[approved-write] markUsedUserToken failed for ${input.conversationId}: ${errMsg(err)}`));
+    }
+    try {
+      const result = await prepared.run(params);
+      log.info(`[approved-write] executed tool=${tool} user=${userId} → ${result.slice(0, 100)}`);
+      return { ok: true, message: `Done — ${tool} ran.`, resultText: result };
+    } catch (err) {
+      log.error(`[approved-write] tool failed tool=${tool} user=${userId}: ${errMsg(err)}`);
+      return { ok: false, reason: "failed", message: `${tool} failed to run. Please try again from Xyne Spaces.` };
+    }
   }
 
   if (needsSpacesApproval(serverType, tool)) {
