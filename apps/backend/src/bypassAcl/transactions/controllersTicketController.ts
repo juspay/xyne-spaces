@@ -582,6 +582,7 @@ export function createTicketTx(projectId: string, sourceConversationId: string |
         createdBy: userId,
         storageProvider: config.fileStorage.provider,
         conversationId: conversationId,
+        channelId: channelId ?? null,
         workspaceId: ticketChannelWorkspaceId,
         metadata: file.metadata || {},
       }));
@@ -643,6 +644,7 @@ export function createTicketTx(projectId: string, sourceConversationId: string |
           },
           data: {
             conversationId: conversationId,
+            channelId: channelId ?? null,
           },
         });
 
