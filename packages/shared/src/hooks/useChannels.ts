@@ -25,8 +25,13 @@ export function searchChannels(channels: Channel[], query: string, limit = 10): 
   return _searchChannels(channels, query, limit);
 }
 
-export function searchChannelsWithScores(channels: Channel[], query: string, limit = 10): { item: Channel; score: number }[] {
-  return _searchChannelsWithScores(channels, query, limit);
+export function searchChannelsWithScores(
+  channels: Channel[],
+  query: string,
+  limit = 10,
+  fuseMatches?: ReadonlyArray<{ item: Channel; score?: number | undefined }>,
+): { item: Channel; score: number }[] {
+  return _searchChannelsWithScores(channels, query, limit, fuseMatches);
 }
 
 /** All channels, plus the visible ones not among them. */

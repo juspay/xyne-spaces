@@ -1,5 +1,5 @@
 import { logger, Event as LogEvent } from '../utils/logger';
-import { useState, useCallback, useRef, useEffect, useMemo, useDeferredValue } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { searchMetricsService } from '../services/searchMetricsService';
 import { useAuthContextValues } from './useAuth';
 import { searchService, clearVespaSearchCache } from '../services/searchService';
@@ -18,10 +18,10 @@ import {
 } from '../components/Chat/ChatDirectory/ChannelCommandMenu.types';
 import { User } from '../machines/stateMachine';
 import { Channel } from '@xyne/shared';
-import { useUserSearch } from './useUsers';
+import { useWorkerUserSearch } from './useWorkerUserSearch';
+import { useWorkerChannelSearch } from './useWorkerChannelSearch';
 import type { MentionHighlightsBuilder } from '../search/mentionHighlights';
 import { ChannelCategory } from '../components/Chat/ChatDirectory/ChatDirectory.types';
-import { filterChannelsBySearchableNames } from '../utils/rankingUtils';
 import {
   parseSearchFilters,
   parseTypeFilter,
@@ -118,7 +118,11 @@ interface UseSearchMetricsOptions {
   // search/mentionHighlights). Injected by the surfaces that highlight results (full-screen +
   // cmd+K) so this hook stays decoupled from user/group data; when absent, the chip's name is used.
   buildMentionHighlights?: MentionHighlightsBuilder;
+  // Cmd-K only: skip the people/channel search on tabs that don't show those results.
+  searchLocalOnlyOnShownTabs?: boolean;
 }
+
+const NO_CHANNELS: NonNullable<UseSearchMetricsOptions['allChannels']> = [];
 
 const BACKEND_RESULTS_LIMIT = 25;
 const INTENT_DEBOUNCE_MS = 300;
@@ -283,25 +287,18 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
   // Load More Ref
   const loadMoreRef = useRef<HTMLDivElement>(null);
 
-  // Filter local users using the search hook - use cleaned searchText
-  const filteredLocalUsers = useUserSearch(cleanedSearchText, CMDK_USER_LIMIT);
+  const shownOnTab = (tabs: TabType[]): boolean =>
+    !options.searchLocalOnlyOnShownTabs || tabs.includes(activeTab);
+  const peopleQuery = shownOnTab([TabType.ALL, TabType.USERS]) ? cleanedSearchText : '';
+  const channelQuery = shownOnTab([TabType.ALL, TabType.CHANNELS]) ? cleanedSearchText : '';
 
-  // Decouple the (potentially expensive) local channel filter from the keystroke
-  // that triggered it. The input value is bound to `text`, so it always echoes
-  // instantly; deferring the value fed to the filter lets React keep the input
-  // responsive and render the previous channel results until the new filter pass
-  // is ready, instead of blocking each keystroke on the full DM Fuse pass.
-  const deferredCleanedSearchText = useDeferredValue(cleanedSearchText);
-
-  // Filter local channels - use the deferred cleaned searchText
+  // Fuzzy matching runs in web workers so typing stays responsive in large workspaces.
+  const filteredLocalUsers = useWorkerUserSearch(peopleQuery, CMDK_USER_LIMIT);
   const filteredLocalChannels: Array<{
     channel: Channel;
     category: ChannelCategory;
     searchableNames?: string[];
-  }> = useMemo(
-    () => filterChannelsBySearchableNames(options.allChannels ?? [], deferredCleanedSearchText),
-    [options.allChannels, deferredCleanedSearchText],
-  );
+  }> = useWorkerChannelSearch(options.allChannels ?? NO_CHANNELS, channelQuery);
 
   const [currentSearchContext, setCurrentSearchContext] = useState<{
     query: string;

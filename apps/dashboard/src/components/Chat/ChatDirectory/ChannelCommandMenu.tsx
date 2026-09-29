@@ -885,6 +885,7 @@ const ChannelCommandMenu = ({
     // active tab). There is no toggle here to opt back in.
     defaultExcludeArchived: true,
     buildMentionHighlights,
+    searchLocalOnlyOnShownTabs: true,
   });
 
   // Aliases to match old usage if needed or just use new names
