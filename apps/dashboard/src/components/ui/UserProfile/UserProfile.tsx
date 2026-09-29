@@ -41,6 +41,7 @@ import type { User } from '@xyne/shared';
 import { CommonChannelsSection } from '../../UserProfile/CommonChannelsSection';
 import { useUserPresence } from '../../../hooks/usePresence';
 import { uploadProfilePicture } from '../../../services/userProfile/userProfileService';
+import { RemoveProfilePictureButton } from './RemoveProfilePictureButton';
 import { queryClient } from '../../../services/clients/queryClient';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useMettleEmployeeDetails } from '../../../hooks/useMettleEmployeeDetails';
@@ -383,6 +384,12 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                 className='hidden'
                 disabled={isUploadingPicture}
               />
+              <RemoveProfilePictureButton
+                disabled={isUploadingPicture}
+                {...(isInlineHeader && {
+                  className: 'top-0.5 right-0.5 size-4 [&_svg]:size-2.5',
+                })}
+              />
             </div>
           ) : (
             <Avatar
@@ -501,8 +508,9 @@ export const UserProfile: React.FC<UserProfileProps> = ({
             </div>
           )}
 
-          {/* Action Buttons - Message and Huddle */}
-          {!isOwnProfile && (
+          {/* Action Buttons - Message and Huddle. Hidden for deactivated users: both
+              would hit /users/me/dms → 404 and surface a toast on click. */}
+          {!isOwnProfile && !isUserDeactivated(user) && (
             <div className='flex items-center gap-2 mt-4'>
               <Button
                 onClick={handleMessageClick}

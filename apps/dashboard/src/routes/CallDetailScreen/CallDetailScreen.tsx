@@ -88,7 +88,7 @@ export default function CallDetailScreen(): ReactElement {
   // resolving it by the id in the route.
   const navigationCall = navState?.call;
   const [fetchedCall, fetchedCallDetails] = useCachedQuery(
-    queries.callById({ callId: callIdParam ?? '' }),
+    queries.callByExternalId({ callId: callIdParam ?? '' }),
     { enabled: Boolean(callIdParam) },
   );
   const call: Call | undefined = navigationCall ?? fetchedCall ?? undefined;
@@ -867,7 +867,6 @@ export default function CallDetailScreen(): ReactElement {
           onOpenAutoFocus={event => event.preventDefault()}
         >
           <CallShareModal
-            callId={call.id}
             externalId={call.externalId}
             createdByUserId={call.createdByUserId}
             onClose={() => setShowShareModal(false)}

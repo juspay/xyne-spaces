@@ -88,3 +88,29 @@ export const relatedContextLimiter: RateLimitRequestHandler = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
 });
+
+/** Per-IP limiter for starting an SDK SSO sign-in: unauthenticated, and each call writes two Redis keys. */
+export const sdkSsoInitLimiter: RateLimitRequestHandler = rateLimit({
+  windowMs: 5 * 60 * 1000, // 5 minutes
+  max: 20,
+  keyGenerator: (req): string => ipKeyGenerator(req.ip ?? 'unknown'),
+  message: () => ({
+    error: 'rate_limited',
+    message: 'Too many sign-in requests. Please try again later.',
+  }),
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+/** Per-IP limiter for SDK SSO polling: the SDK polls every 2s, so this allows a few flows at once and stops a loop. */
+export const sdkSsoPollLimiter: RateLimitRequestHandler = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 120,
+  keyGenerator: (req): string => ipKeyGenerator(req.ip ?? 'unknown'),
+  message: () => ({
+    error: 'slow_down',
+    message: 'Polling too fast. Please slow down.',
+  }),
+  standardHeaders: true,
+  legacyHeaders: false,
+});

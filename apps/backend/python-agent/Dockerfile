@@ -54,4 +54,6 @@ USER appuser
 # Using dedicated script to avoid heavy main.py imports that need env vars
 RUN python download_models.py
 
+EXPOSE 8080
+
 CMD ["python", "main.py", "start"]

@@ -1,3 +1,60 @@
+## [1.422.3](https://github.com/juspay/xyne-spaces/compare/v1.422.2...v1.422.3) (2026-09-29)
+
+
+### Bug Fixes
+
+* persist Radar cards/table view preference in localStorage ([#2406](https://github.com/juspay/xyne-spaces/issues/2406)) ([609566c](https://github.com/juspay/xyne-spaces/commit/609566c9b673085eaad570835bd269338377cdfd))
+
+## [1.422.2](https://github.com/juspay/xyne-spaces/compare/v1.422.1...v1.422.2) (2026-09-29)
+
+
+### Bug Fixes
+
+* keep search typing responsive on long queries ([#2388](https://github.com/juspay/xyne-spaces/issues/2388)) ([1187743](https://github.com/juspay/xyne-spaces/commit/1187743f7a6d72a325a4f7919e8601ead71ba2b4))
+
+## [1.422.1](https://github.com/juspay/xyne-spaces/compare/v1.422.0...v1.422.1) (2026-09-29)
+
+
+### Bug Fixes
+
+* tighten calendar pill layout to stop title/time clipping on short calls ([#2421](https://github.com/juspay/xyne-spaces/issues/2421)) ([1fa8277](https://github.com/juspay/xyne-spaces/commit/1fa82773b829599a04bbb642636a7c9ab0f7875a))
+
+## [1.422.0](https://github.com/juspay/xyne-spaces/compare/v1.421.0...v1.422.0) (2026-09-29)
+
+
+### Features
+
+* Add Xyne SSO Auth ([#2351](https://github.com/juspay/xyne-spaces/issues/2351)) ([a88ccfc](https://github.com/juspay/xyne-spaces/commit/a88ccfcec0bb8ad857cac18c7323f6800333f865))
+* allow users to remove their profile picture ([#2412](https://github.com/juspay/xyne-spaces/issues/2412)) ([7e7ed64](https://github.com/juspay/xyne-spaces/commit/7e7ed6445f2bec63f4ef8bdaa87c4e192a4bc065))
+* canvas close, radar thread titles, cmd+K search flicker ([#2415](https://github.com/juspay/xyne-spaces/issues/2415)) ([997ce9f](https://github.com/juspay/xyne-spaces/commit/997ce9f22187c69b57026b9489ce0895ed8b28c1))
+* summary templates hiringg ([#2378](https://github.com/juspay/xyne-spaces/issues/2378)) ([642a9d9](https://github.com/juspay/xyne-spaces/commit/642a9d9eac6170ca2e71279196ec7fb16a45c165))
+
+
+### Bug Fixes
+
+* Fix UI shifts in channel tabs ([#2401](https://github.com/juspay/xyne-spaces/issues/2401)) ([e47e682](https://github.com/juspay/xyne-spaces/commit/e47e68298f6398bab5ec02f5d8acdfb739a05d63))
+
+## [1.421.0](https://github.com/juspay/xyne-spaces/compare/v1.420.1...v1.421.0) (2026-09-29)
+
+
+### Features
+
+* deactivated user hide actions ([#2413](https://github.com/juspay/xyne-spaces/issues/2413)) ([b2c6634](https://github.com/juspay/xyne-spaces/commit/b2c6634a658e22d4ed5b59b39fc1f7c040c438c7))
+
+## [1.420.1](https://github.com/juspay/xyne-spaces/compare/v1.420.0...v1.420.1) (2026-09-29)
+
+
+### Bug Fixes
+
+* calendar sync back fix ([#2411](https://github.com/juspay/xyne-spaces/issues/2411)) ([7a7a2dc](https://github.com/juspay/xyne-spaces/commit/7a7a2dcc3491c1de6a1833256f5932b5dda01595))
+
+## [1.420.0](https://github.com/juspay/xyne-spaces/compare/v1.419.0...v1.420.0) (2026-09-29)
+
+
+### Features
+
+* added-deactivated-user-chat-read-only ([#2408](https://github.com/juspay/xyne-spaces/issues/2408)) ([5567a8c](https://github.com/juspay/xyne-spaces/commit/5567a8c6c234791a493922377b1d155d5833dd98))
+
 ## [1.419.0](https://github.com/juspay/xyne-spaces/compare/v1.418.1...v1.419.0) (2026-09-29)
 
 

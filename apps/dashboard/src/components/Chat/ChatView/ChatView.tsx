@@ -303,6 +303,13 @@ const ChatView = (): ReactElement => {
     void navigate(newUrl, { replace: true });
   };
 
+  const handleCloseCanvas = (): void => {
+    const newSearchParams = new URLSearchParams(searchParams);
+    newSearchParams.delete('canvasFullscreen');
+    const searchString = newSearchParams.toString();
+    void navigate(`${location.pathname}${searchString ? `?${searchString}` : ''}`);
+  };
+
   // Secondary panel content — defined once, reused for both overlay and
   // side-by-side layouts so there is no JSX duplication.
   const secondaryPanelContent = isExternalChatActive ? (
@@ -312,6 +319,7 @@ const ChatView = (): ReactElement => {
       canvasId={canvasId}
       isFullscreen={isCanvasFullscreen}
       onToggleFullscreen={toggleCanvasFullscreen}
+      onClose={handleCloseCanvas}
     />
   ) : isChannelSummaryActive ? (
     <ChannelSummary

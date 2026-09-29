@@ -3478,17 +3478,27 @@ export const queries: AnyQueryRegistry = defineQueries({
     },
   ),
 
-  /**
-   * A single non-HEADLESS call (+ its shares) by row id — what the detail route
-   * carries. Used both to resolve a call reached by link, with no navigation state
-   * to read it from, and to list who a call is shared with.
-   */
+  /** Legacy row-id lookup retained for older dashboard bundles. */
   callById: defineQuery(
     z.object({ callId: z.string() }),
     ({ ctx, args: { callId } }) =>
       zql.calls
         .where('callType', '!=', CallType.HEADLESS)
         .where('id', callId)
+        .related('participants', p => p.where('userId', ctx.userID))
+        .related('shares', shares =>
+          shares.where('entityUserAccess', '!=', EntityUserAccess.REVOKED),
+        )
+        .one(),
+  ),
+
+  /** A single non-HEADLESS call (+ its shares) by its public route id. */
+  callByExternalId: defineQuery(
+    z.object({ callId: z.string() }),
+    ({ ctx, args: { callId } }) =>
+      zql.calls
+        .where('callType', '!=', CallType.HEADLESS)
+        .where('externalId', callId)
         .related('participants', p => p.where('userId', ctx.userID))
         .related('shares', shares =>
           shares.where('entityUserAccess', '!=', EntityUserAccess.REVOKED),
@@ -3564,6 +3574,22 @@ export const queries: AnyQueryRegistry = defineQueries({
                 ),
             ),
           ),
+        )
+        // Only the viewer's own shares: Zero does not ACL-filter `related()`.
+        .related('shares', shares =>
+          shares
+            .where('workspaceId', ctx.workspaceId)
+            .where('shareableEntityType', ShareableEntityType.SUMMARY_TEMPLATE)
+            .where('entityUserAccess', '!=', EntityUserAccess.REVOKED)
+            .where(({ or, cmp, exists }) =>
+              or(
+                cmp('userId', ctx.userID),
+                exists('userGroupMemberships', membership =>
+                  membership.where('userId', ctx.userID),
+                ),
+                exists('channelMembers', member => member.where('userId', ctx.userID)),
+              ),
+            ),
         )
         .orderBy('name', 'asc')
         .orderBy('version', 'desc'),
