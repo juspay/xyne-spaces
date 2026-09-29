@@ -16,6 +16,7 @@ import { MigrationStore } from './store';
 import { MigrationQueues } from './queues';
 import { SlackMigrationEngine } from './engine';
 import { MigrationWorkers } from './workers';
+import { registerMigrationMetrics } from './migrationMetrics';
 
 // Log the ORIGINAL rejection's stack (not this handler's frame) so an unawaited failure is actually diagnosable.
 process.on('unhandledRejection', (reason: unknown) => {
@@ -65,6 +66,7 @@ async function boot(): Promise<void> {
       const paused = await queues.pauseIngestionIfRunning().catch(() => false);
       if (paused) logger.warn('[SlackMigration] ingestion paused on boot — MIGRATION_INGEST_CONTROL is off');
     }
+    registerMigrationMetrics(queues, store); // dashboard gauges (queue depth + jobs by status)
   }
 
   new MigrationWorkers(queues, store, engine).register();

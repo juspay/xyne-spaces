@@ -9,6 +9,7 @@ import { MigrationQueues } from './queues';
 import { SlackMigrationEngine } from './engine';
 import { SlackMigrationService } from './service';
 import { MigrationWorkers } from './workers';
+import { registerMigrationMetrics } from './migrationMetrics';
 import { buildRouter } from './routes';
 
 /**
@@ -88,6 +89,7 @@ if (config.runSlackMigrationWorkers) {
         .catch((e: unknown) => logger.error('[SlackMigration] failed to pause ingestion (control disabled)', { error: e instanceof Error ? e.message : String(e) }));
     }
     new MigrationWorkers(queues, store, engine).register();
+    registerMigrationMetrics(queues, store); // dashboard gauges (queue depth + jobs by status)
   }
 }
 

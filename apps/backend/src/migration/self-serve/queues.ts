@@ -85,6 +85,16 @@ export class MigrationQueues {
   resume(name: QueueName): Promise<void> { return this.queue(name).resume(); }
   isPaused(name: QueueName): Promise<boolean> { return this.queue(name).isPaused(); }
 
+  /** Live Bull counts for one queue — drives the dashboard queue-depth gauges. (completed/failed read ~0 here
+   *  because the queues use removeOnComplete/removeOnFail; waiting/active/delayed are the meaningful ones.) */
+  async getStats(name: QueueName): Promise<{ waiting: number; active: number; completed: number; failed: number; delayed: number; total: number }> {
+    const q = this.queue(name);
+    const [waiting, active, completed, failed, delayed] = await Promise.all([
+      q.getWaitingCount(), q.getActiveCount(), q.getCompletedCount(), q.getFailedCount(), q.getDelayedCount(),
+    ]);
+    return { waiting, active, completed, failed, delayed, total: waiting + active + completed + failed + delayed };
+  }
+
   /** On first-ever init, pause ingestion so approved jobs only stage until someone with SLACK-MIGRATION-INGEST starts it. NX marker keeps restarts from re-pausing in-progress ingestion. */
   async pauseIngestionOnFirstInit(): Promise<void> {
     const q = this.queue(QueueName.INGESTION);
