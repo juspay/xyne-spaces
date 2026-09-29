@@ -5,6 +5,7 @@ import { logger } from '@/utils/logger';
 import { extractGroupMentions, extractUserMentions } from '@/utils/mentionParser';
 import { AttachmentEntityType } from '@xyne/shared';
 import {
+  buildParserInput,
   radarParser,
   type ParserOpenItem,
   type ParserWindowMessage,
@@ -385,11 +386,11 @@ class RadarExecutionService {
           const parserMessages = this.toParserMessages(window, mentionsByMessage, nameById, attachmentsByMessage, threadLabels);
           const parserContext = this.toParserMessages(context, contextMentions, nameById, attachmentsByMessage, threadLabels);
 
-          // Jev's read of the same input: is anything here trackable? Started before the
-          // parse so it costs no time in shadow mode; in replace mode a confident "no"
-          // consumes the window without a parse.
+          // Jev's read of the very input the parser gets: is anything here trackable?
+          // Started before the parse so it costs no time in shadow mode; in replace mode a
+          // confident "no" consumes the window without a parse.
           const jevCheck = isRadarJevActive()
-            ? checkWindow({ openItems: parserOpenItems, newMessages: parserMessages, contextMessages: parserContext })
+            ? checkWindow(buildParserInput(parserOpenItems, parserMessages, knownUsers, parserContext))
             : null;
           const jevMeta = { conversationId: scope.key, windowSize: window.length };
           if (jevCheck && config.radar.jev.replace) {

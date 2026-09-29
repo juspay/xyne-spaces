@@ -78,6 +78,41 @@ export interface ParsedTransitions {
   repair?: { feedback: string; firstAttempt: ParserOperation[] };
 }
 
+/** Exactly what the parser is sent as the user message. */
+export interface ParserInput {
+  open_items: ParserOpenItem[];
+  new_messages: ParserWindowMessage[];
+  context_messages: ParserWindowMessage[];
+  known_users: Record<string, string>;
+  reaction?: { by: string; emoji: string };
+}
+
+/**
+ * The parser's input, built in one place so anything else judging the same pass — Jev —
+ * is handed the very object the model sees rather than a copy that can drift from it.
+ */
+export function buildParserInput(
+  openItems: ParserOpenItem[],
+  newMessages: ParserWindowMessage[],
+  knownUsers: Record<string, string> = {},
+  contextMessages: ParserWindowMessage[] = [],
+  reaction?: { by: string; emoji: string },
+): ParserInput {
+  return {
+    open_items: openItems,
+    new_messages: newMessages.map(m => ({
+      ...m,
+      text: m.text.slice(0, MAX_MESSAGE_TEXT_CHARS),
+    })),
+    context_messages: contextMessages.map(m => ({
+      ...m,
+      text: m.text.slice(0, MAX_MESSAGE_TEXT_CHARS),
+    })),
+    known_users: knownUsers,
+    ...(reaction ? { reaction } : {}),
+  };
+}
+
 /**
  * A caller-side judgment on a schema-valid response — the validator's rejects
  * and the duplicate scorer's flags. A string is sent back to the model for ONE
@@ -331,19 +366,7 @@ class RadarParser {
       throw new Error('No model configured: set RADAR_PARSER_MODEL');
     }
 
-    const input = {
-      open_items: openItems,
-      new_messages: newMessages.map(m => ({
-        ...m,
-        text: m.text.slice(0, MAX_MESSAGE_TEXT_CHARS),
-      })),
-      context_messages: contextMessages.map(m => ({
-        ...m,
-        text: m.text.slice(0, MAX_MESSAGE_TEXT_CHARS),
-      })),
-      known_users: knownUsers,
-      ...(reaction ? { reaction } : {}),
-    };
+    const input = buildParserInput(openItems, newMessages, knownUsers, contextMessages, reaction);
 
     const messages = [
       {

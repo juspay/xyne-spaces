@@ -7,11 +7,7 @@ import {
   type JevFailure,
   type JevNoulQuestion,
 } from '@/services/queryIntent/jevClient';
-import type {
-  ParserOpenItem,
-  ParserOperation,
-  ParserWindowMessage,
-} from '@/services/radar/radarParser';
+import type { ParserInput, ParserOperation } from '@/services/radar/radarParser';
 
 /**
  * Jev for Radar's two parser calls, behind RADAR_JEV_* (run / log / replace).
@@ -26,6 +22,10 @@ import type {
  *  - A REACTION pass may only resolve, and only one of a short list of open items. That is
  *    a closed choice, so Jev answers it whole and replacing means no parser call at all.
  *
+ * Jev's state is always the parser's own input (buildParserInput), so both judge the same
+ * pass from the same facts.
+ *
+ * Jev's yes/no answers are probabilities, so every decision below is a threshold on one.
  * Thresholds are tuned per JEV_MODEL — re-tune them against the logs when it changes.
  */
 
@@ -63,8 +63,6 @@ export const isRadarJevActive = (): boolean =>
 const failureReason = (failure: JevFailure | undefined): string =>
   failure?.kind === 'status' ? `status ${failure.status}` : (failure?.kind ?? 'unknown');
 
-const clip = (text: string): string => text.slice(0, config.radar.maxMessageTextChars);
-
 // ─── Window: is anything trackable? ─────────────────────────────────────────────
 
 export type WindowCheck =
@@ -87,20 +85,11 @@ const WINDOW_QUESTION: JevNoulQuestion = {
   },
 };
 
-/** Never throws. */
-export async function checkWindow(input: {
-  openItems: ParserOpenItem[];
-  newMessages: ParserWindowMessage[];
-  contextMessages: ParserWindowMessage[];
-}): Promise<WindowCheck> {
+/** Never throws. `input` is exactly what the parser is sent for this window. */
+export async function checkWindow(input: ParserInput): Promise<WindowCheck> {
   try {
-    const state = {
-      open_items: input.openItems,
-      new_messages: input.newMessages.map(m => ({ ...m, text: clip(m.text) })),
-      context_messages: input.contextMessages.map(m => ({ ...m, text: clip(m.text) })),
-    };
     let failure: JevFailure | undefined;
-    const answers = await askJev(state, { trackable: WINDOW_QUESTION }, JEV_TIMEOUT_MS, undefined, {
+    const answers = await askJev({ ...input }, { trackable: WINDOW_QUESTION }, JEV_TIMEOUT_MS, undefined, {
       onFailure: f => {
         failure = f;
       },
@@ -164,13 +153,6 @@ export function logWindowCheck(
 
 // ─── Reaction: which item, if any, does it settle? ──────────────────────────────
 
-export interface ReactionItem {
-  id: string;
-  title: string;
-  context: string | null;
-  source_message_id: string;
-}
-
 export type ReactionCheck =
   | {
       ok: true;
@@ -183,19 +165,18 @@ export type ReactionCheck =
     }
   | { ok: false; reason: string };
 
-/** Never throws. */
-export async function checkReaction(input: {
-  emoji: string;
-  message: { id: string; text: string };
-  items: ReactionItem[];
-}): Promise<ReactionCheck> {
+/**
+ * Never throws. `input` is exactly what the parser is sent for this reaction pass: the
+ * reacted message as the one entry in new_messages, the items the reactor is party to,
+ * and who reacted with what.
+ */
+export async function checkReaction(input: ParserInput): Promise<ReactionCheck> {
   try {
-    const items = input.items.slice(0, MAX_ITEM_OPTIONS);
-    const state = {
-      reaction: { emoji: input.emoji },
-      message: { id: input.message.id, text: clip(input.message.text) },
-      open_items: items,
-    };
+    const message = input.new_messages[0];
+    const emoji = input.reaction?.emoji;
+    if (!message || !emoji) return { ok: false, reason: 'not a reaction pass' };
+    const items = input.open_items.slice(0, MAX_ITEM_OPTIONS);
+    const name = (id: string) => input.known_users[id] ?? id;
 
     const completion: JevNoulQuestion = {
       type: 'noul',
@@ -210,17 +191,22 @@ export async function checkReaction(input: {
     const settles: JevChoiceQuestion = {
       type: 'choice',
       instructions:
-        'Someone reacted to `message`. Which item in `open_items` does that message settle ' +
-        '— the thing asked for delivered, the outcome confirmed, or the ask withdrawn? An ' +
-        'item whose source_message_id equals the message id was RAISED by that message, ' +
-        'and a completion reaction on it finishes that item. Topical overlap is not ' +
-        `settlement. Answer "${NONE}" when no item is settled.`,
+        '`reaction.by` reacted to the one message in `new_messages`. Which item in ' +
+        '`open_items` does that message settle — the thing asked for delivered, the outcome ' +
+        'confirmed, or the ask withdrawn? `requested_by` is who is waiting on an item and ' +
+        '`pending_on` who must act; `known_users` names them. The requester ticking an ' +
+        'answer is the strongest confirmation there is. An item whose source_message_id ' +
+        'equals the message id was RAISED by that message, and a completion reaction on it ' +
+        'finishes that item. Topical overlap is not settlement. Answer ' +
+        `"${NONE}" when no item is settled.`,
       criteria: {
         ...Object.fromEntries(
           items.map(item => [
             item.id,
             `${item.title}${item.context ? ` — ${item.context}` : ''}` +
-              (item.source_message_id === input.message.id ? ' (raised by this message)' : ''),
+              ` (requested by ${item.requested_by.map(name).join(', ') || 'nobody'}; ` +
+              `pending on ${item.pending_on.map(name).join(', ') || 'nobody'})` +
+              (item.source_message_id === message.id ? ' (raised by this message)' : ''),
           ]),
         ),
         [NONE]: 'the message settles none of these items',
@@ -228,7 +214,7 @@ export async function checkReaction(input: {
     };
 
     let failure: JevFailure | undefined;
-    const answers = await askJev(state, { completion, settles }, JEV_TIMEOUT_MS, undefined, {
+    const answers = await askJev({ ...input }, { completion, settles }, JEV_TIMEOUT_MS, undefined, {
       onFailure: f => {
         failure = f;
       },
@@ -254,8 +240,8 @@ export async function checkReaction(input: {
             {
               op: 'resolve',
               itemId: s.choice,
-              sourceMessageId: input.message.id,
-              reason: `Jev: ${input.emoji} asserts completion of this item (${scores}).`,
+              sourceMessageId: message.id,
+              reason: `Jev: ${emoji} asserts completion of this item (${scores}).`,
             },
           ]
         : [],
@@ -265,8 +251,8 @@ export async function checkReaction(input: {
       // The run log's one-line read, so "I reacted and nothing happened" stays answerable
       // in the debug panel when Jev decided it.
       assessment: resolves
-        ? `Jev: ${input.emoji} settles an item (${scores}).`
-        : `Jev: ${input.emoji} settles nothing (${scores}).`,
+        ? `Jev: ${emoji} settles an item (${scores}).`
+        : `Jev: ${emoji} settles nothing (${scores}).`,
     };
   } catch (error) {
     return { ok: false, reason: error instanceof Error ? error.name : 'unknown' };

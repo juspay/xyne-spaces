@@ -3,6 +3,7 @@ import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { extractUserMentions } from '@/utils/mentionParser';
 import {
+  buildParserInput,
   radarParser,
   type ParsedTransitions,
   type ParserOperation,
@@ -160,19 +161,35 @@ class RadarReactionResolver {
       ]);
       const reactorName = nameById.get(reaction.userId) ?? reaction.userId;
 
+      // The pass exactly as the parser receives it. Jev is handed the same object, so both
+      // judge the reaction from the same facts: who reacted, who asked, who holds what.
+      const parserItems = eligible.map(c => ({
+        id: c.id,
+        title: c.title,
+        context: c.contextSummary,
+        requested_by: c.requestedBy,
+        pending_on: c.pendingOn,
+        source_message_id: c.sourceMessageId,
+      }));
+      const parserMessages = [
+        {
+          id: message.messageId,
+          author: { id: reaction.userId, name: reactorName },
+          text: message.content,
+          mentions: extractUserMentions(message.content).map(id => ({
+            id,
+            name: nameById.get(id) ?? id,
+          })),
+          timestamp_iso: message.createdAt.toISOString(),
+        },
+      ];
+      const knownUsers = Object.fromEntries(nameById);
+      const reactionInfo = { by: reactorName, emoji: reaction.emojiName };
+
       // Jev can answer a reaction whole: the only legal move is resolving one of these
       // items. Started before the parser so shadow mode costs no time.
       const jevCheck = isRadarJevActive()
-        ? checkReaction({
-            emoji: reaction.emojiName,
-            message: { id: message.messageId, text: message.content },
-            items: eligible.map(c => ({
-              id: c.id,
-              title: c.title,
-              context: c.contextSummary,
-              source_message_id: c.sourceMessageId,
-            })),
-          })
+        ? checkReaction(buildParserInput(parserItems, parserMessages, knownUsers, [], reactionInfo))
         : null;
       const jevMeta = { conversationId: scope.key, emoji: reaction.emojiName, candidates: eligible.length };
       const replaced = jevCheck && config.radar.jev.replace ? await jevCheck : null;
@@ -187,29 +204,11 @@ class RadarReactionResolver {
       } else {
         run.parserRan = true;
         transitions = await radarParser.parseWindow(
-          eligible.map(c => ({
-            id: c.id,
-            title: c.title,
-            context: c.contextSummary,
-            requested_by: c.requestedBy,
-            pending_on: c.pendingOn,
-            source_message_id: c.sourceMessageId,
-          })),
-          [
-            {
-              id: message.messageId,
-              author: { id: reaction.userId, name: reactorName },
-              text: message.content,
-              mentions: extractUserMentions(message.content).map(id => ({
-                id,
-                name: nameById.get(id) ?? id,
-              })),
-              timestamp_iso: message.createdAt.toISOString(),
-            },
-          ],
-          Object.fromEntries(nameById),
+          parserItems,
+          parserMessages,
+          knownUsers,
           [],
-          { by: reactorName, emoji: reaction.emojiName },
+          reactionInfo,
         );
         if (jevCheck && !replaced && config.radar.jev.logEnabled) {
           const parserResolved = transitions.operations
