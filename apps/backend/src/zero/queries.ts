@@ -3312,6 +3312,20 @@ export const queries: AnyQueryRegistry = defineQueries({
     },
   ),
 
+  /** Legacy row-id lookup retained for older dashboard bundles. */
+  callById: defineQuery(
+    z.object({ callId: z.string() }),
+    ({ ctx, args: { callId } }) =>
+      zql.calls
+        .where('callType', '!=', CallType.HEADLESS)
+        .where('id', callId)
+        .related('participants', p => p.where('userId', ctx.userID))
+        .related('shares', shares =>
+          shares.where('entityUserAccess', '!=', EntityUserAccess.REVOKED),
+        )
+        .one(),
+  ),
+
   /** A single non-HEADLESS call (+ its shares) by its public route id. */
   callByExternalId: defineQuery(
     z.object({ callId: z.string() }),
