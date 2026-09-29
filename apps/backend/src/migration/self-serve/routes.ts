@@ -48,6 +48,8 @@ export function buildRouter(service: SlackMigrationService): Router {
     })));
   }));
   router.get('/mine', wrap(async (req, res) => { res.json(ok(await service.getMineList(actorOf(req)))); }));
+  // Dashboard announcement banner — per-workspace free text from Superposition; any member may read it.
+  router.get('/announcement', wrap(async (req, res) => { res.json(ok(await service.getAnnouncement(actorOf(req)))); }));
   // Owner self-service: the submitter can resume/delete their OWN jobs (service asserts ownership) — no admin needed.
   router.post('/mine/:id/resume', wrap(async (req, res) => { res.json(ok(await service.resume(req.params.id, actorOf(req), true))); }));
   router.delete('/mine/:id', wrap(async (req, res) => { await service.remove(req.params.id, actorOf(req), true); res.json(ok({ deleted: true })); }));

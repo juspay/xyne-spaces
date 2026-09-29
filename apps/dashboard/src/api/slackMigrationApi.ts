@@ -85,6 +85,10 @@ export const slackMigrationApi = {
   listMine: async (): Promise<MigrationJobView[]> =>
     unwrap((await apiInstance.get<Envelope<MigrationJobView[]>>(`${BASE}/mine`)).data),
 
+  // Per-workspace announcement banner shown atop the page ('' when none is configured).
+  getAnnouncement: async (): Promise<{ text: string }> =>
+    unwrap((await apiInstance.get<Envelope<{ text: string }>>(`${BASE}/announcement`)).data),
+
   listAdmin: async (): Promise<MigrationJobView[]> =>
     unwrap((await apiInstance.get<Envelope<MigrationJobView[]>>(`${BASE}/migration-jobs`)).data),
 

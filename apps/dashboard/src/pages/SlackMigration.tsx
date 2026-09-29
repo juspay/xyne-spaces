@@ -18,6 +18,7 @@ import {
   Megaphone,
 } from 'lucide-react';
 import { MigrationJobView, MigrationStatus, slackMigrationApi } from '../api/slackMigrationApi';
+import { useAuth } from '../hooks/useAuth';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
 import { Checkbox } from '../components/ui/Checkbox/Checkbox';
@@ -32,6 +33,8 @@ const POLL_ACTIVE_MS = 4000;
 const POLL_IDLE_MS = 15000;
 const POLL_HIDDEN_MS = 10000;
 const POLL_DOWN_MS = 5000;
+// Announcement banner: own cadence, ~1min to match Superposition's refresh interval.
+const ANNOUNCEMENT_POLL_MS = 60000;
 const POLL_MAX_MS = 60000;
 
 /** No response (network error) or 5xx means the migration pod is down/starting: treat
@@ -650,6 +653,42 @@ function GuideRail({
 const inputCls =
   'h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm text-foreground shadow-xs placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-[2px] focus-visible:ring-ring/10 outline-none';
 
+// Channel-migration draft: persisted per workspace in localStorage so the form survives
+// navigating away, and one workspace's draft never leaks into another's. Cleared on submit.
+const CHANNEL_DRAFT_STORAGE_PREFIX = 'xyne:slack-migration:channel-draft';
+
+interface ChannelDraft {
+  slackChannelId: string;
+  xyneChannelId: string;
+  startDate: string;
+  announceInSlack: boolean;
+}
+
+const EMPTY_CHANNEL_DRAFT: ChannelDraft = {
+  slackChannelId: '',
+  xyneChannelId: '',
+  startDate: '',
+  announceInSlack: false,
+};
+
+const readChannelDraft = (key: string | null): ChannelDraft => {
+  try {
+    const raw = key ? window.localStorage.getItem(key) : null;
+    return raw ? { ...EMPTY_CHANNEL_DRAFT, ...JSON.parse(raw) } : EMPTY_CHANNEL_DRAFT;
+  } catch {
+    return EMPTY_CHANNEL_DRAFT;
+  }
+};
+
+const writeChannelDraft = (key: string | null, draft: ChannelDraft): void => {
+  if (!key) return;
+  try {
+    window.localStorage.setItem(key, JSON.stringify(draft));
+  } catch {
+    // Quota or private mode — the draft still holds for this tab's lifetime.
+  }
+};
+
 // ── page ─────────────────────────────────────────────────────────────────────
 export default function SlackMigration(): React.JSX.Element {
   const [mine, setMine] = useState<MigrationJobView[]>([]);
@@ -658,15 +697,21 @@ export default function SlackMigration(): React.JSX.Element {
   const [ingest, setIngest] = useState<{ canIngest: boolean; running: boolean } | null>(null);
   const [tab, setTab] = useState<'dm' | 'channel'>('dm');
   const [token, setToken] = useState('');
-  const [channel, setChannel] = useState({
-    slackChannelId: '',
-    xyneChannelId: '',
-    startDate: '',
-    announceInSlack: false,
-  });
+  const { user } = useAuth();
+  const channelDraftKey = user?.workspaceId
+    ? `${CHANNEL_DRAFT_STORAGE_PREFIX}:${user.workspaceId}`
+    : null;
+  const [channel, setChannel] = useState<ChannelDraft>(() => readChannelDraft(channelDraftKey));
+
+  // Persist on every change; the workspaceId-scoped key keeps one workspace's in-progress
+  // draft from ever showing up in another's form.
+  useEffect(() => {
+    writeChannelDraft(channelDraftKey, channel);
+  }, [channelDraftKey, channel]);
   const [error, setError] = useState<string | null>(null);
   const [unreachable, setUnreachable] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [announcement, setAnnouncement] = useState('');
 
   const refresh = useCallback(async (): Promise<boolean> => {
     try {
@@ -740,6 +785,42 @@ export default function SlackMigration(): React.JSX.Element {
     };
   }, [refresh]);
 
+  // Announcement banner: own poll loop (not tied to the jobs poll's cadence) so an
+  // already-open tab picks up a Superposition edit within ANNOUNCEMENT_POLL_MS instead of
+  // waiting for a remount. Scoped to this component — stops as soon as the page unmounts,
+  // and pauses while the tab is hidden, same as the jobs poll loop above.
+  useEffect(() => {
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const loop = async () => {
+      if (stopped) return;
+      if (document.hidden) {
+        timer = setTimeout(() => void loop(), ANNOUNCEMENT_POLL_MS);
+        return;
+      }
+      try {
+        const a = await slackMigrationApi.getAnnouncement();
+        if (!stopped) setAnnouncement(a.text);
+      } catch {
+        /* non-critical: keep showing the last known banner on a transient failure */
+      }
+      if (!stopped) timer = setTimeout(() => void loop(), ANNOUNCEMENT_POLL_MS);
+    };
+    void loop();
+    const onVisible = () => {
+      if (!document.hidden) {
+        clearTimeout(timer);
+        void loop();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, []);
+
   const run = useCallback(
     async (fn: () => Promise<unknown>): Promise<boolean> => {
       setBusy(true);
@@ -806,6 +887,13 @@ export default function SlackMigration(): React.JSX.Element {
 
             {/* RIGHT — actions */}
             <div className='min-w-0 space-y-8'>
+              {announcement && (
+                <div className='flex items-start gap-2.5 rounded-xl border border-blue-500/30 bg-blue-500/10 px-4 py-3 text-sm text-blue-700 dark:text-blue-300'>
+                  <Megaphone className='mt-0.5 size-4 shrink-0' />
+                  <p className='whitespace-pre-line break-words leading-relaxed'>{announcement}</p>
+                </div>
+              )}
+
               {unreachable && (
                 <div className='flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3.5 py-2.5 text-sm text-amber-600 dark:text-amber-400'>
                   <CloudOff className='mt-0.5 size-4 shrink-0' />

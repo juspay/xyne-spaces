@@ -8,6 +8,7 @@ import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { isMigrationEncryptionConfigured } from './migrationCrypto';
 import { config } from '@/config/env';
 import { getWorkspaceIdByTeamId, getBotConfigByWorkspaceId } from '@/migration/slack/slackMigrationBotConfig';
+import { getMigrationAnnouncement } from './migrationAnnouncementConfig';
 import { SlackMigrationEngine } from './engine';
 import { MigrationStore } from './store';
 import { MigrationQueues } from './queues';
@@ -261,6 +262,14 @@ export class SlackMigrationService {
 
   async getMineList(actor: Actor): Promise<MigrationJobView[]> {
     return (await this.store.list(500, 0)).filter((j) => j.submittedByUserId === actor.userId).map(toView);
+  }
+
+  /** Free-text notice shown atop the dashboard Slack-migration page, resolved per workspace from
+   *  Superposition (SlackMigrationAnnouncements[ws].dashboard_announcement). Any member may read it;
+   *  empty string means "no banner". */
+  async getAnnouncement(actor: Actor): Promise<{ text: string }> {
+    const { dashboard_announcement } = await getMigrationAnnouncement(actor.workspaceId);
+    return { text: dashboard_announcement?.trim() ? dashboard_announcement : '' };
   }
 
   // Generic queue controls are COLLECTION-only; ingestion must use the gated

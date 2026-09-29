@@ -36,6 +36,7 @@ import { fetchChannelLinks, ingestChannelLinks, type ChannelLink } from '@/migra
 import { fetchChannelCanvases, ingestChannelCanvases, type ChannelCanvas } from '@/migration/slack/channelCanvases';
 import { encryptStream, decryptStream, encryptBuffer, decryptBuffer } from './migrationCrypto';
 import { getMigrationRuntimeConfig, MIGRATION_DEFAULTS } from './migrationRuntimeConfig';
+import { getMigrationAnnouncement, FINAL_MESSAGE_LINK_PLACEHOLDER } from './migrationAnnouncementConfig';
 import { ChannelInput, MigrationJob, MigrationType } from './types';
 
 const PAGE = 1000;
@@ -755,8 +756,16 @@ export class SlackMigrationEngine {
     const wsConfig = getBotConfigByWorkspaceId(job.workspaceId);
     if (!wsConfig.notificationsEnabled) return;
     const link = `<https://spaces.xyne.juspay.net/${job.workspaceId}/chat/dir/${job.channelInput.xyneChannelId}|Xyne Spaces>`;
-    let text = `<!channel> This Channel has been migrated to ${link}. Please move your conversations there only this channel will be soon archived.`;
-    if (wsConfig.migrationFinalMessage) text += `\n${wsConfig.migrationFinalMessage}`;
+    // Prefer the full body authored in Superposition ({link} → the Xyne Spaces link). Fall back to the
+    // hardcoded line + the MIGRATION_SLACK_BOT_CONFIGS suffix when no final_message is configured.
+    const { final_message } = await getMigrationAnnouncement(job.workspaceId);
+    let text: string;
+    if (final_message?.trim()) {
+      text = final_message.split(FINAL_MESSAGE_LINK_PLACEHOLDER).join(link);
+    } else {
+      text = `<!channel> This Channel has been migrated to ${link}. Please move your conversations there only this channel will be soon archived.`;
+      if (wsConfig.migrationFinalMessage) text += `\n${wsConfig.migrationFinalMessage}`;
+    }
     await postMessage({
       channelId: job.channelInput.slackChannelId,
       text,
