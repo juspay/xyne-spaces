@@ -99,11 +99,12 @@ import ticketReportRoutes from '@/routes/ticketReports';
 import boardRoutes from '@/routes/boards';
 import subTicketRoutes from '@/routes/subTickets';
 import boardConfigCopyRoutes from '@/routes/boardConfigCopy';
+import auditLogRoutes from '@/routes/auditLogs';
 import recordingPointerBackfillRoutes from '@/routes/recordingPointerBackfill';
 import sdlcRepoCredentialBackfillRoutes from '@/routes/sdlcRepoCredentialBackfill';
 import searchMetricsRoutes from '@/routes/searchMetrics';
 import knowledgeRoutes from '@/routes/knowledge';
-import vespaSearchRoutes from '@/routes/vespaSearch';
+import vespaSearchRoutes, { relatedContextRouter } from '@/routes/vespaSearch';
 import { dashboardClawRouter } from '@/routes/dashboardClaw';
 import summarizeRoutes from '@/routes/summarize';
 import xyneAIRoutes from '@/routes/xyneAI';
@@ -207,7 +208,7 @@ import sdlcVcsInternalRoutes from '@/routes/sdlcVcsInternal';
 import sdlcAgentInternalRoutes from '@/routes/sdlcAgentInternal';
 import { createSdkPublicRouter, createSdkRouter } from '@/api/sdk';
 import { errorHandler as sdkErrorHandler } from '@/api/sdk/handler';
-import { encryptedFieldsConfig } from '@xyne/shared';
+import sdkSsoRoutes from '@/routes/sdk-sso';
 
 
 export class App {
@@ -370,6 +371,9 @@ export class App {
     // everything else. The trailing `sdkErrorHandler` gives auth failures the
     // SDK's own error envelope.
     if (config.sdk.enabled) {
+      // Xyne SSO device flow, mounted before authMiddleware: init/poll/consent
+      // are public, status/approve authenticate the dashboard session themselves.
+      this.app.use('/api/sdk/auth/sso', sdkSsoRoutes);
       this.app.use('/api/sdk', createSdkPublicRouter());
       this.app.use('/api/sdk', authMiddleware.authenticate, createSdkRouter(), sdkErrorHandler);
       logger.info('Public SDK API mounted at /api/sdk');
@@ -443,6 +447,7 @@ export class App {
     this.app.use('/api/admin/migrate-tickets-xyneid', workspaceScopedRoute, ticketMigrationRoutes);
     this.app.use('/api/admin/gmail-watch-renewal', workspaceScopedRoute, gmailWatchRenewalRoutes);
     this.app.use('/api/admin/board-config-copy', workspaceScopedRoute, boardConfigCopyRoutes);
+    this.app.use('/api/audit-logs', workspaceScopedRoute, auditLogRoutes);
     // No workspaceScopedRoute: the controller opens its own runAsSystem scope, since
     // this one-off repair links summary canvases across every workspace. The
     // '-backfill' path suffix also puts it behind backfillMountGuard above.
@@ -624,19 +629,6 @@ export class App {
     );
     this.app.use('/api/internal/sdlc/vcs', validateS2SKey, sdlcVcsInternalRoutes);
     this.app.use('/api/internal/sdlc/agent', validateS2SKey, sdlcAgentInternalRoutes);
-
-    // Encrypted-fields config (S2S-only). Backend is the source of truth; the
-    // encryption service fetches this and caches it instead of importing @xyne/shared.
-    this.app.get('/api/internal/encryption/fields-config', validateS2SKey, (_req: Request, res: Response) => {
-      const encryptedFields = Object.fromEntries(
-        Object.entries(encryptedFieldsConfig).map(([table, tableConfig]) => [
-          table,
-          { fields: [...tableConfig.fields], enforceClientEncryption: tableConfig.enforceClientEncryption },
-        ]),
-      );
-      res.json({ encryptedFields });
-    });
-
     this.app.use('/api/internal/sdlc/wiki', validateS2SKey, sdlcWikiInternalRoutes);
     this.app.use(
       '/api/internal/sdlc/artifact-versions',
@@ -772,6 +764,8 @@ export class App {
     this.app.use('/api/drafts', authMiddleware.authenticate, draftRoutes);
 
     // Vespa search routes (auth required)
+    // Ahead of the general mount, so a lookup is answered here and nothing else runs.
+    this.app.use('/api/vespaSearch/related', authMiddleware.authenticate, relatedContextRouter);
     this.app.use('/api/vespaSearch', authMiddleware.authenticate, vespaSearchRoutes);
 
     // Product Insights routes (auth and ACL required)

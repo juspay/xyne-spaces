@@ -109,6 +109,14 @@ function applyOperator(
       if (Array.isArray(resolved)) return resolved.includes(refValue);
       return false;
 
+    // Case-sensitive, like CONTAINS — lets `ALARM |` match an alert header
+    // without also matching `Cloudwatch Alarm |` further in the body.
+    case ConditionOperator.STARTS_WITH:
+      if (typeof resolved === 'string' && typeof refValue === 'string') {
+        return resolved.startsWith(refValue);
+      }
+      return false;
+
     case ConditionOperator.GT:
     case ConditionOperator.GTE:
     case ConditionOperator.LT:

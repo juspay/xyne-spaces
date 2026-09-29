@@ -835,8 +835,10 @@ export const mapCollection = async (
   // Future scope types add branches here — no schema change needed.
   let projectId: string | undefined;
   let channelRef: string | undefined;
-  let workspaceId: string | undefined;
-  let orgId: string | undefined;
+  // WORKSPACE-scoped (and any other non-channel) collections use the
+  // collection's own tenant key. Without it the search permission guard
+  // (`workspaceId contains`) hides these files from kb-search / spaces search.
+  let scopeWorkspaceId: string | null | undefined = rootCollection.workspaceId;
   if (rootCollection.scopeType === 'CHANNEL') {
     const channel = await db.channel.findUnique({
       where: { id: rootCollection.scopeId },
@@ -845,10 +847,9 @@ export const mapCollection = async (
     // projectId left undefined — channel collections no longer derive a project from
     // channel.projectId (decoupled); the file doc's projectId is simply omitted.
     channelRef = getRef(channelSchema, rootCollection.scopeId);
-    const resolved = await resolveOrgAndWorkspace(channel?.workspaceId);
-    workspaceId = resolved.workspaceId;
-    orgId = resolved.orgId;
+    scopeWorkspaceId = channel?.workspaceId;
   }
+  const { workspaceId, orgId } = await resolveOrgAndWorkspace(scopeWorkspaceId);
 
   return {
     docId: collectionItem.fileId,

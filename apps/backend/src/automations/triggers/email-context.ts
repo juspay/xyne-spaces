@@ -73,6 +73,7 @@ interface EmailRow {
   channelId: string;
   externalThreadId: string;
   externalMessageId: string;
+  rating: number | null;
   createdAt: Date;
   hasAttachments?: boolean;
 }
@@ -130,6 +131,7 @@ function emailRowToOutput(email: EmailRow): EmailRow {
     channelId: email.channelId,
     externalThreadId: email.externalThreadId,
     externalMessageId: email.externalMessageId,
+    rating: email.rating,
     createdAt: email.createdAt,
     hasAttachments: email.hasAttachments,
   };

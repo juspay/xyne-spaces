@@ -20,6 +20,9 @@ import { newCardToken, parkOptions, type ParkedOption } from "./cards.js";
 import { enqueueOutbound } from "./delivery.js";
 import { chatMessageRepository } from "../../repositories/index.js";
 import { resolveIdentity } from "./identity.js";
+import { getSpacesPostTarget, looksLikeMemberIdList, type SpacesPostTarget } from "../../lib/spaces-post-target.js";
+import { mentionShorthandToText } from "../../lib/mention-transform.js";
+import { getSpacesAuthForUser } from "../../lib/spaces-db.js";
 import type { ChannelAccount, ChannelDeliveryTarget, InteractiveCard } from "./plugin.js";
 
 const log = createLogger("channel-approvals");
@@ -35,22 +38,67 @@ function clamp(value: string, max: number): string {
   return value.length <= max ? value : `${value.slice(0, max)}…`;
 }
 
+const THREAD_PREVIEW_CHARS = 160;
+
+export function htmlToCardText(html: string): string {
+  let current = html;
+  let previous: string;
+  do {
+    previous = current;
+    current = current
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<\/(p|div|li)>/gi, "\n")
+      .replace(/<(b|strong)>([\s\S]*?)<\/\1>/gi, "*$2*")
+      .replace(/<(i|em)>([\s\S]*?)<\/\1>/gi, "_$2_")
+      .replace(/<[^>]+>/g, "")
+      .replace(/&nbsp;/g, " ")
+      .replace(/&lt;/g, "‹")
+      .replace(/&gt;/g, "›")
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&amp;/g, "&")
+      .replace(/[ \t]+/g, " ")
+      .replace(/\n\s*\n+/g, "\n")
+      .trim();
+  } while (current !== previous);
+  return current;
+}
+
+function describePostTarget(params: Record<string, unknown>, target: SpacesPostTarget | null): string {
+  const dm = target?.directMessage;
+  const dmWith = dm?.with.length ? ` with *${dm.with.join(", ")}*` : "";
+  const channel = !dm && target?.channelName && !looksLikeMemberIdList(target.channelName) ? `*#${target.channelName}*` : "";
+  if (str(params["conversationId"])) {
+    const thread = target?.thread;
+    const preview = thread ? clamp(cardText(thread.html).replace(/\n+/g, " "), THREAD_PREVIEW_CHARS) : "";
+    const inChannel = dm ? ` in your direct message${dmWith}` : channel ? ` in ${channel}` : "";
+    const by = thread?.author ? ` by *${thread.author}*` : "";
+    return preview
+      ? `Reply as you in the thread${inChannel} started${by}:\n> ${preview}\n\nYour reply`
+      : `Reply as you in an existing thread${inChannel}`;
+  }
+  if (str(params["channelId"])) {
+    if (dm) return `Send this message as you in a direct message${dmWith ? dmWith.replace(" with ", " to ") : ""}`;
+    return `Send this message as you to ${channel || "a Spaces channel"}`;
+  }
+  return "Send this message as you to Xyne Spaces";
+}
+
+function cardText(html: string): string {
+  return mentionShorthandToText(htmlToCardText(html));
+}
+
 /**
  * What the person is being asked to allow, in WhatsApp's dialect. Kept
  * separate from webhook.ts's Spaces version: that one writes markdown
  * headings into a card that scrolls, this one has 1024 characters and only
  * *bold* to work with.
  */
-function describeWriteAction(tool: string, params: Record<string, unknown>): string {
+export function describeWriteAction(tool: string, params: Record<string, unknown>, postTarget: SpacesPostTarget | null = null): string {
   switch (tool) {
     case "user-send-message": {
-      const where = str(params["channelId"])
-        ? `#${str(params["channelId"])}`
-        : str(params["conversationId"])
-          ? "an existing thread"
-          : "Xyne Spaces";
-      const content = clamp(str(params["content"]), MAX_DETAIL_CHARS);
-      return `Send this message as you to ${where}:\n\n"${content}"`;
+      const content = clamp(cardText(str(params["content"])), MAX_DETAIL_CHARS);
+      return `${describePostTarget(params, postTarget)}:\n\n"${content}"`;
     }
     case "spaces-create-ticket": {
       const title = str(params["title"]) || "(untitled)";
@@ -104,6 +152,19 @@ function parseSignedAction(raw: unknown): SignedWriteAction | null {
   };
 }
 
+async function lookupPostTarget(action: SignedWriteAction): Promise<SpacesPostTarget | null> {
+  const auth = await getSpacesAuthForUser(action.userId, "write-action").catch(() => null);
+  if (!auth) return null;
+  return getSpacesPostTarget(
+    {
+      ...(str(action.params["channelId"]) ? { channelId: str(action.params["channelId"]) } : {}),
+      ...(str(action.params["conversationId"]) ? { conversationId: str(action.params["conversationId"]) } : {}),
+    },
+    auth,
+    action.userId,
+  ).catch(() => null);
+}
+
 /**
  * Turn the run's pending actions into cards and queue them behind the reply.
  * Called from /webhook/result, which may be any pod — parking is in Redis and
@@ -138,10 +199,11 @@ export async function enqueueApprovalCards(input: {
     ];
     await parkOptions(input.target.connectedSurfaceId, parked);
 
+    const postTarget = action.tool === "user-send-message" ? await lookupPostTarget(action) : null;
     const card: InteractiveCard = {
       kind: "buttons",
       header: "Approval needed",
-      body: describeWriteAction(action.tool, action.params),
+      body: describeWriteAction(action.tool, action.params, postTarget),
       footer: "Nothing happens until you choose.",
       buttons: [
         { id: approveToken, title: "Approve" },

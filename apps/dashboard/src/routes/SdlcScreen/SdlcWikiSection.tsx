@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactElement, type ReactNode } from 'react';
+import { useMemo, useState, type ReactElement, type ReactNode } from 'react';
 import {
   ArrowRight,
   BookOpen,
@@ -12,6 +12,8 @@ import {
   Plus,
   Search,
 } from 'lucide-react';
+import { Button } from '../../components/ui/Button';
+import { Checkbox } from '../../components/ui/Checkbox/Checkbox';
 import {
   Select,
   SelectContent,
@@ -20,6 +22,7 @@ import {
   SelectValue,
 } from '../../components/ui/Select';
 import { cn } from '../../utils/classNames';
+import { SdlcArchiveMenu } from './SdlcArchiveMenu';
 import type { SdlcWikiPage, WikiScope } from './sdlcWikiTree';
 
 interface WikiTreeNode {
@@ -59,7 +62,8 @@ export function buildWikiTree(pages: SdlcWikiPage[]): WikiTreeNode {
     node.pages.sort((left, right) => left.title.localeCompare(right.title));
     node.folders.forEach(sortNode);
     node.pageCount =
-      node.pages.length + node.folders.reduce((total, folder) => total + folder.pageCount, 0);
+      node.pages.filter(page => !page.archived).length +
+      node.folders.reduce((total, folder) => total + folder.pageCount, 0);
   };
   sortNode(root);
   return root;
@@ -75,217 +79,6 @@ function filterWikiPages(pages: SdlcWikiPage[], query: string): SdlcWikiPage[] {
   );
 }
 
-function wikiFolderPaths(folderPath: string): string[] {
-  const segments = folderPath.split('/').filter(Boolean);
-  return segments.map((_, index) => segments.slice(0, index + 1).join('/'));
-}
-
-function SidebarWikiPageRow(props: {
-  page: SdlcWikiPage;
-  depth: number;
-  selected: boolean;
-  trackingScope: 'Wiki' | 'HubKnowledge';
-  onOpen: (page: SdlcWikiPage) => void;
-}): ReactElement {
-  return (
-    <button
-      type='button'
-      onClick={() => props.onOpen(props.page)}
-      className={cn(
-        'group flex h-8 w-full items-center gap-2 rounded-md pr-2 text-left text-[13px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-accent-ring',
-        props.selected
-          ? 'bg-sidebar-accent font-medium text-sidebar-accent-foreground'
-          : 'text-sidebar-foreground/80 hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground',
-        props.page.archived && 'opacity-60',
-      )}
-      style={{ paddingLeft: `${10 + props.depth * 14}px` }}
-      title={props.page.folderPath || props.page.title}
-      aria-current={props.selected ? 'page' : undefined}
-      data-track-category='SdlcHub'
-      data-track-name={`${props.trackingScope}SidebarCanvasOpened`}
-      data-track-metadata={JSON.stringify({ canvasId: props.page.canvasId })}
-    >
-      <FileText
-        size={14}
-        className={cn(
-          'shrink-0 text-sidebar-foreground/50 group-hover:text-sidebar-accent-foreground',
-          props.selected && 'text-sidebar-accent-foreground',
-        )}
-      />
-      <span className='truncate'>{props.page.title}</span>
-    </button>
-  );
-}
-
-function SidebarWikiFolderNode(props: {
-  node: WikiTreeNode;
-  depth: number;
-  expanded: Set<string>;
-  forceExpanded: boolean;
-  selectedCanvasId: string | null;
-  trackingScope: 'Wiki' | 'HubKnowledge';
-  onToggle: (path: string) => void;
-  onOpen: (page: SdlcWikiPage) => void;
-}): ReactElement {
-  const open = props.forceExpanded || props.expanded.has(props.node.path);
-
-  return (
-    <div className='[content-visibility:auto]'>
-      <button
-        type='button'
-        onClick={() => props.onToggle(props.node.path)}
-        className='flex h-8 w-full items-center gap-1.5 rounded-md pr-2 text-left text-[12px] font-semibold text-sidebar-foreground/85 transition-colors hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-accent-ring'
-        style={{ paddingLeft: `${8 + props.depth * 14}px` }}
-        aria-expanded={open}
-        title={props.node.path}
-        data-track-category='SdlcHub'
-        data-track-name={`${props.trackingScope}SidebarFolderToggled`}
-        data-track-metadata={JSON.stringify({ path: props.node.path, open: !open })}
-      >
-        {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-        {open ? <FolderOpen size={14} /> : <Folder size={14} />}
-        <span className='truncate font-mono'>{props.node.name}</span>
-        <span className='ml-auto font-mono text-[10px] font-normal tabular-nums text-sidebar-foreground/45'>
-          {props.node.pageCount}
-        </span>
-      </button>
-      {open ? (
-        <div>
-          {props.node.folders.map(folder => (
-            <SidebarWikiFolderNode
-              key={folder.path}
-              node={folder}
-              depth={props.depth + 1}
-              expanded={props.expanded}
-              forceExpanded={props.forceExpanded}
-              selectedCanvasId={props.selectedCanvasId}
-              trackingScope={props.trackingScope}
-              onToggle={props.onToggle}
-              onOpen={props.onOpen}
-            />
-          ))}
-          {props.node.pages.map(page => (
-            <SidebarWikiPageRow
-              key={page.canvasId}
-              page={page}
-              depth={props.depth + 1}
-              selected={page.canvasId === props.selectedCanvasId}
-              trackingScope={props.trackingScope}
-              onOpen={props.onOpen}
-            />
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-export function SdlcWikiSidebarTree(props: {
-  pages: SdlcWikiPage[];
-  selectedCanvasId: string | null;
-  variant?: 'wiki' | 'hub-knowledge';
-  onOpen: (page: SdlcWikiPage) => void;
-}): ReactElement {
-  const [query, setQuery] = useState('');
-  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
-  const visiblePages = useMemo(() => filterWikiPages(props.pages, query), [props.pages, query]);
-  const tree = useMemo(() => buildWikiTree(visiblePages), [visiblePages]);
-  const hubKnowledge = props.variant === 'hub-knowledge';
-  const trackingScope = hubKnowledge ? 'HubKnowledge' : 'Wiki';
-
-  useEffect(() => {
-    const selectedPage = props.pages.find(page => page.canvasId === props.selectedCanvasId);
-    if (!selectedPage) return;
-    setExpanded(current => {
-      const next = new Set(current);
-      wikiFolderPaths(selectedPage.folderPath).forEach(path => next.add(path));
-      return next;
-    });
-  }, [props.pages, props.selectedCanvasId]);
-
-  const toggle = (path: string): void => {
-    setExpanded(current => {
-      const next = new Set(current);
-      if (next.has(path)) next.delete(path);
-      else next.add(path);
-      return next;
-    });
-  };
-
-  return (
-    <section
-      className='flex h-full min-h-0 flex-col'
-      aria-label={hubKnowledge ? 'Hub Knowledge documents' : 'Wiki pages'}
-    >
-      <div className='shrink-0 px-3 pb-2 pt-3'>
-        <div className='flex items-center justify-between gap-2 px-1'>
-          <span className='text-[11px] font-semibold uppercase tracking-[0.14em] text-sidebar-foreground/70'>
-            {hubKnowledge ? 'Hub Knowledge' : 'Pages'}
-          </span>
-          <span className='font-mono text-[11px] tabular-nums text-sidebar-foreground/60'>
-            {props.pages.length}
-          </span>
-        </div>
-        <div className='relative mt-2'>
-          <Search
-            size={14}
-            className='pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sidebar-foreground/55'
-          />
-          <input
-            value={query}
-            onChange={event => setQuery(event.target.value)}
-            placeholder={hubKnowledge ? 'Filter documents' : 'Filter pages'}
-            aria-label={hubKnowledge ? 'Filter Hub Knowledge documents' : 'Filter Wiki pages'}
-            className='h-9 w-full rounded-md border border-sidebar-border-muted bg-background/80 pl-9 pr-2 text-[13px] text-foreground outline-none placeholder:text-muted-foreground focus:ring-2 focus:ring-sidebar-accent-ring dark:bg-sidebar-accent/30 dark:text-sidebar-accent-foreground dark:placeholder:text-sidebar-foreground/55'
-            data-track-category='SdlcHub'
-            data-track-name={`${trackingScope}SidebarSearched`}
-          />
-        </div>
-      </div>
-
-      <div className='min-h-0 flex-1 overflow-y-auto px-2 pb-2'>
-        {visiblePages.length === 0 ? (
-          <div className='px-2 py-3 text-xs text-sidebar-foreground/55'>
-            {props.pages.length === 0
-              ? hubKnowledge
-                ? 'No Hub Knowledge yet'
-                : 'No pages yet'
-              : hubKnowledge
-                ? 'No matching documents'
-                : 'No matching pages'}
-          </div>
-        ) : (
-          <>
-            {tree.folders.map(folder => (
-              <SidebarWikiFolderNode
-                key={folder.path}
-                node={folder}
-                depth={0}
-                expanded={expanded}
-                forceExpanded={Boolean(query.trim())}
-                selectedCanvasId={props.selectedCanvasId}
-                trackingScope={trackingScope}
-                onToggle={toggle}
-                onOpen={props.onOpen}
-              />
-            ))}
-            {tree.pages.map(page => (
-              <SidebarWikiPageRow
-                key={page.canvasId}
-                page={page}
-                depth={0}
-                selected={page.canvasId === props.selectedCanvasId}
-                trackingScope={trackingScope}
-                onOpen={props.onOpen}
-              />
-            ))}
-          </>
-        )}
-      </div>
-    </section>
-  );
-}
-
 function WikiFolderNode(props: {
   node: WikiTreeNode;
   depth: number;
@@ -293,6 +86,8 @@ function WikiFolderNode(props: {
   forceExpanded: boolean;
   onToggle: (path: string) => void;
   onOpen: (page: SdlcWikiPage) => void;
+  /** Undefined for everyone but hub admins. */
+  onArchivePage: ((page: SdlcWikiPage, archived: boolean) => void) | undefined;
 }): ReactElement {
   const open = props.forceExpanded || props.expanded.has(props.node.path);
   const FolderIcon = open ? FolderOpen : Folder;
@@ -329,34 +124,47 @@ function WikiFolderNode(props: {
               forceExpanded={props.forceExpanded}
               onToggle={props.onToggle}
               onOpen={props.onOpen}
+              onArchivePage={props.onArchivePage}
             />
           ))}
           {props.node.pages.map(page => (
-            <button
+            <div
               key={page.canvasId}
-              type='button'
-              onClick={() => props.onOpen(page)}
               className={cn(
-                'group flex min-h-12 w-full items-center gap-2.5 rounded-lg py-2.5 pr-3 text-left transition-colors hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                'group flex items-center rounded-lg pr-2 transition-colors hover:bg-primary/5',
                 page.archived && 'opacity-60',
               )}
-              style={{ paddingLeft: `${14 + props.depth * 20}px` }}
-              data-track-category='SdlcHub'
-              data-track-name='WikiCanvasOpened'
-              data-track-metadata={JSON.stringify({ canvasId: page.canvasId })}
             >
-              <FileText
-                size={16}
-                className='shrink-0 text-muted-foreground group-hover:text-primary'
-              />
-              <span className='min-w-0 flex-1'>
-                <span className='block truncate text-[15px] font-medium'>{page.title}</span>
-                <span className='mt-0.5 block truncate text-xs text-muted-foreground'>
-                  {page.archived ? 'Archived · ' : ''}
-                  Updated {new Date(page.updatedAt).toLocaleString()}
+              <button
+                type='button'
+                onClick={() => props.onOpen(page)}
+                className='flex min-h-12 min-w-0 flex-1 items-center gap-2.5 rounded-lg py-2.5 pr-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+                style={{ paddingLeft: `${14 + props.depth * 20}px` }}
+                data-track-category='SdlcHub'
+                data-track-name='WikiCanvasOpened'
+                data-track-metadata={JSON.stringify({ canvasId: page.canvasId })}
+              >
+                <FileText
+                  size={16}
+                  className='shrink-0 text-muted-foreground group-hover:text-primary'
+                />
+                <span className='min-w-0 flex-1'>
+                  <span className='block truncate text-[15px] font-medium'>{page.title}</span>
+                  <span className='mt-0.5 block truncate text-xs text-muted-foreground'>
+                    {page.archived ? 'Archived · ' : ''}
+                    Updated {new Date(page.updatedAt).toLocaleString()}
+                  </span>
                 </span>
-              </span>
-            </button>
+              </button>
+              {props.onArchivePage && (
+                <SdlcArchiveMenu
+                  title={page.title}
+                  archived={page.archived}
+                  trackingScope='Wiki'
+                  onToggle={archived => props.onArchivePage?.(page, archived)}
+                />
+              )}
+            </div>
           ))}
         </div>
       ) : null}
@@ -457,15 +265,20 @@ export function SdlcWikiSection(props: {
   pageCounts: ReadonlyMap<string, number>;
   pages: SdlcWikiPage[];
   showArchived: boolean;
+  /** Hub admins only; hides the add and archive controls when false. */
+  canManage: boolean;
   onSelectScope: (folderId: string) => void;
   onAddRepository: () => void;
   onShowArchivedChange: (next: boolean) => void;
   onOpen: (page: SdlcWikiPage) => void;
+  onCreatePage: () => void;
+  onArchivePage: (page: SdlcWikiPage, archived: boolean) => void;
 }): ReactElement {
   const [query, setQuery] = useState('');
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const visiblePages = useMemo(() => filterWikiPages(props.pages, query), [props.pages, query]);
   const tree = useMemo(() => buildWikiTree(visiblePages), [visiblePages]);
+  const activePageCount = props.pages.filter(page => !page.archived).length;
   const toggle = (path: string): void => {
     setExpanded(current => {
       const next = new Set(current);
@@ -501,7 +314,7 @@ export function SdlcWikiSection(props: {
               </SelectContent>
             </Select>
             <span className='text-sm tabular-nums text-muted-foreground'>
-              {props.pages.length} page{props.pages.length === 1 ? '' : 's'}
+              {activePageCount} page{activePageCount === 1 ? '' : 's'}
             </span>
           </div>
 
@@ -522,16 +335,26 @@ export function SdlcWikiSection(props: {
                   data-track-name='WikiSearched'
                 />
               </div>
-              <label className='flex items-center gap-2 text-xs text-muted-foreground'>
-                <input
-                  type='checkbox'
-                  checked={props.showArchived}
-                  onChange={event => props.onShowArchivedChange(event.target.checked)}
+              <Checkbox
+                size='sm'
+                label='Show archived'
+                checked={props.showArchived}
+                onChange={props.onShowArchivedChange}
+                data-track-category='SdlcHub'
+                data-track-name='WikiArchivedToggled'
+              />
+              {props.canManage && (
+                <Button
+                  type='button'
+                  size='sm'
+                  onClick={props.onCreatePage}
                   data-track-category='SdlcHub'
-                  data-track-name='WikiArchivedToggled'
-                />
-                Show archived
-              </label>
+                  data-track-name='WikiPageCreateOpened'
+                >
+                  <Plus size={15} />
+                  New page
+                </Button>
+              )}
             </div>
 
             <div className='min-h-72 p-3'>
@@ -557,6 +380,7 @@ export function SdlcWikiSection(props: {
                   forceExpanded={Boolean(query.trim())}
                   onToggle={toggle}
                   onOpen={props.onOpen}
+                  onArchivePage={props.canManage ? props.onArchivePage : undefined}
                 />
               )}
             </div>

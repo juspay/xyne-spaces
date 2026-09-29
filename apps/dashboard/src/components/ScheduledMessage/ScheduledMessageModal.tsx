@@ -7,10 +7,10 @@ import Input from '../ui/Input/Input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/Select/Select';
 import { SegmentedToggle } from '../ui/SegmentedToggle';
 import { cn } from '../../utils/classNames';
-import { ChannelScopeType, ChannelVisibility } from '@xyne/shared';
+import { ChannelVisibility } from '@xyne/shared';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { queries } from '../../zero/queries';
-import { useBrowsableChannels, useChannelSearch } from '../../hooks/useChannels';
+import { useBrowsableChannels, useChannelMentionSearch } from '../../hooks/useChannels';
 import { toast } from 'sonner';
 import { InputBox } from '../ui/InputBox';
 import type { InputBoxHandle } from '../../hooks/useDragAndDropAreaRef';
@@ -77,7 +77,7 @@ const ScheduledMessageModal = ({
 
   // Channel mention search for # mentions in message content
   const [channelMentionQuery, setChannelMentionQuery] = useState('');
-  const channelMentionResults = useChannelSearch(channelMentionQuery, 10);
+  const channelMentionResults = useChannelMentionSearch(channelMentionQuery, 10);
 
   // Fetch my admin participations (query already filters by ADMIN role)
   const [myAdminParticipations] = useCachedQuery(queries.myChannelParticipations({}), {
@@ -131,15 +131,13 @@ const ScheduledMessageModal = ({
   const channelMentionItems = useMemo(() => {
     if (!channelMentionResults || channelMentionResults.length === 0) return [];
 
-    return channelMentionResults
-      .filter(channel => channel.scopeType === ChannelScopeType.DEFAULT)
-      .map(channel => ({
-        id: channel.id,
-        name: channel.name,
-        isPrivate: channel.visibility === ChannelVisibility.PRIVATE,
-        ...(channel.description && { description: channel.description }),
-        hasAccess: true,
-      }));
+    return channelMentionResults.map(channel => ({
+      id: channel.id,
+      name: channel.name,
+      isPrivate: channel.visibility === ChannelVisibility.PRIVATE,
+      ...(channel.description && { description: channel.description }),
+      hasAccess: true,
+    }));
   }, [channelMentionResults]);
 
   const handleChannelMentionSearch = (query: string): void => {

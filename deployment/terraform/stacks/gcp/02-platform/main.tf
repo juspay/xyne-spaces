@@ -66,10 +66,13 @@ module "platform" {
   argocd_apps_chart_version = var.argocd_apps_chart_version
   argocd_namespace          = var.argocd_namespace
   argocd_values             = local.argocd_values
+  argocd_expose             = var.argocd_expose
+  argocd_host               = var.argocd_host
   enable_vespa              = var.enable_vespa
   enable_monitoring         = var.enable_monitoring
   enable_sandbox            = var.enable_sandbox
   enable_hindsight          = var.enable_hindsight
+  enable_workflows          = var.enable_workflows
   hindsight                 = var.hindsight
   apps                      = var.apps
   workers                   = var.workers

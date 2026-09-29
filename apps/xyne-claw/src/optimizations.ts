@@ -26,12 +26,24 @@ export const OPTIMIZATIONS = {
     summary: "large list-shaped results from retrieval tools are relevance-filtered against the user's request before reaching the model; the full result is always saved to a file first",
     defaultOn: false,
   },
+  jev_verify_prefilter: {
+    summary: "Verify Responses asks Jev first: drafts Jev is confident are fine are delivered without the LLM verifier, the rest go to the LLM as before, and when the LLM verifier is unavailable a high-risk draft is sent back instead of passing unchecked",
+    defaultOn: false,
+  },
   catalog_full_index: {
     summary: "the system-prompt tool index names every loadable tool, fitted to a size budget, instead of collapsing catalogs over 15 tools to a single line — so the model loads by exact name rather than guessing search terms",
     defaultOn: false,
   },
   subagent_read_tools: {
     summary: "the tools inside an agent's own subagents, writes included, are also loadable directly through search-tools/load-tools, so it can skip the subagent round trip; each tool keeps its permission and approval, and nothing outside the agent's grant is added",
+    defaultOn: false,
+  },
+  subagent_direct_only: {
+    summary: "built-in server subagents (spaces, bitbucket, …) are not offered at all: their tools, writes included, are catalogued and the agent loads and calls them itself, so no run waits on a nested subagent; custom subagents are kept",
+    defaultOn: false,
+  },
+  interim_messages: {
+    summary: "text the model writes alongside a tool call is sent to the person as soon as that turn ends, and only the last turn is kept as the final answer — for messaging channels, where nothing else shows progress",
     defaultOn: false,
   },
   lean_palette: {

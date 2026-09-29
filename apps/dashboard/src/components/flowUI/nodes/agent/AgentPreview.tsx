@@ -12,6 +12,8 @@ import type { useAgentCreateForm } from './create/useAgentCreateForm';
 import type { AgentCreatePhase } from './create/types';
 import type { DraftAgentEditor } from './useDraftAgentEditor';
 import { AgentPreviewTabs } from './preview/AgentPreviewTabs';
+import { IdentityEditControls } from './preview/AgentIdentityEditor';
+import { AutoWidthInput } from '../../../../routes/AIScreen/library/shared/primitives/AutoWidthInput';
 
 /**
  * True inside AgentPreview's thread panel. The thread re-renders the SAME agent
@@ -20,6 +22,29 @@ import { AgentPreviewTabs } from './preview/AgentPreviewTabs';
  */
 export const InsideAgentPreviewContext = createContext(false);
 
+// Borderless: the field reads as text until it has focus, so clicking a name
+// never boxes it or nudges the line. Same treatment as the agent detail header.
+const NAME_TEXT = 'text-2xl font-medium leading-[1.2] text-foreground';
+const SLUG_TEXT = 'text-sm leading-[22px] text-blue-500 dark:text-blue-400';
+
+/**
+ * AgentPreview — the EXPANDED agent view.
+ *
+ * The compact card only BRIEFS the agent (name, description, capability chips).
+ * Expanding opens this split screen on the same shell the plan preview and the
+ * attachment viewer use:
+ *
+ *   LEFT  → the whole agent: name, @slug, description, details, capabilities
+ *           (the SAME selection state as the card — toggling here is the same
+ *           edit), and the full system prompt rendered with the canonical
+ *           MarkdownMessageRenderer chat uses.
+ *   RIGHT → the live thread the card sits in.
+ *
+ * Rendered INSIDE the card, so it shares live flow props and the flow-action
+ * round-trip; `footer` carries the phase-specific controls (pending →
+ * Approve/Decline, decided → audit). On a decision the card closes this view so
+ * the user drops back to the thread. On mobile the thread panel is dropped.
+ */
 interface AgentPreviewProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -72,29 +97,80 @@ const DetailPanel: React.FC<{
   onClose?: () => void;
 }> = ({ agent, editor, note, statePill, footer, onClose }) => {
   const details = agent.details ?? [];
+  const editing = editor?.editingIdentity ? editor : null;
 
   return (
     <div className='flex h-full flex-col bg-background'>
       <PanelHeader label='Agent' onClose={onClose} />
       <div className='flex-1 overflow-y-auto px-6 py-5'>
         <div className='mx-auto flex max-w-3xl flex-col gap-5'>
-          <div className='flex min-w-0 flex-col gap-1'>
-            <div className='flex items-center gap-2'>
-              <h1 className='text-2xl font-medium leading-[1.2] text-foreground'>{agent.name}</h1>
-              {statePill}
-            </div>
-            <p className='flex min-w-0 items-center gap-2 text-sm leading-[22px]'>
-              <span className='truncate font-medium text-foreground'>@{agent.slug}</span>
-              {agent.modelId && (
-                <>
-                  <span aria-hidden className='shrink-0 text-foreground/30'>
-                    ·
+          <div className='flex items-start gap-3'>
+            <div className='flex min-w-0 flex-1 flex-col gap-1'>
+              <div className='flex min-w-0 items-center gap-2'>
+                {editing ? (
+                  <AutoWidthInput
+                    value={editing.identityDraft.name}
+                    onChange={next => editing.setIdentityField('name', next)}
+                    aria-label='Agent name'
+                    placeholder='Agent name'
+                    autoFocus={editing.identityFocus === 'name'}
+                    className={NAME_TEXT}
+                    data-track-category='AGENT_ARTIFACT'
+                    data-track-name='EDIT_DRAFT_NAME'
+                  />
+                ) : (
+                  <span
+                    {...(editor?.editable
+                      ? { onClick: (): void => editor.startIdentityEdit('name') }
+                      : {})}
+                    className={`truncate ${NAME_TEXT}${editor?.editable ? ' cursor-text' : ''}`}
+                  >
+                    {agent.name}
                   </span>
-                  <span className='truncate text-foreground/70'>{agent.modelId}</span>
-                </>
-              )}
-            </p>
+                )}
+                {statePill}
+              </div>
+              {/* Slug + model, matching the card's sub-line. */}
+              <p className='flex min-w-0 items-center gap-2 text-sm leading-[22px]'>
+                {editing ? (
+                  <span className='inline-flex min-w-0 items-center text-blue-500 dark:text-blue-400'>
+                    <span aria-hidden>@</span>
+                    <AutoWidthInput
+                      value={editing.identityDraft.slug}
+                      onChange={next => editing.setIdentityField('slug', next)}
+                      aria-label='Agent identifier'
+                      placeholder='agent-identifier'
+                      autoFocus={editing.identityFocus === 'slug'}
+                      className={SLUG_TEXT}
+                      data-track-category='AGENT_ARTIFACT'
+                      data-track-name='EDIT_DRAFT_SLUG'
+                    />
+                  </span>
+                ) : (
+                  <span
+                    {...(editor?.editable
+                      ? { onClick: (): void => editor.startIdentityEdit('slug') }
+                      : {})}
+                    className={`truncate ${SLUG_TEXT}${editor?.editable ? ' cursor-text' : ''}`}
+                  >
+                    @{agent.slug}
+                  </span>
+                )}
+                {agent.modelId && (
+                  <>
+                    <span aria-hidden className='shrink-0 text-foreground/30'>
+                      ·
+                    </span>
+                    <span className='truncate text-foreground/70'>{agent.modelId}</span>
+                  </>
+                )}
+              </p>
+            </div>
+            {editor?.editable && <IdentityEditControls editor={editor} />}
           </div>
+          {editor?.identityError && (
+            <p className='text-xs leading-4 text-status-failure'>{editor.identityError}</p>
+          )}
 
           {details.length > 0 && (
             <div className='flex flex-col gap-1.5 rounded-lg border border-border bg-muted/30 p-3'>

@@ -1163,6 +1163,25 @@ export class UserManagementController {
   };
 
   /**
+   * Remove profile picture for the current user.
+   * DELETE /api/users/me/picture
+   */
+  removeProfilePicture = async (req: Request & { user?: { id: string } }, res: Response): Promise<void> => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+      await userManagementService.removeProfilePicture(userId);
+      res.status(200).json({ success: true });
+    } catch (error) {
+      logger.error('Error removing profile picture:', error);
+      res.status(500).json({ error: 'Failed to remove profile picture' });
+    }
+  };
+
+  /**
    * Stream profile picture for a user
    * GET /api/users/:id/picture
    * 

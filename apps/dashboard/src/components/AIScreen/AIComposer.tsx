@@ -23,7 +23,6 @@ import {
   FolderGit2,
   BookOpen,
   Ticket,
-  Phone,
   Mic,
   Hash,
   Lock,
@@ -32,10 +31,17 @@ import {
   Sparkles,
   MousePointerClick,
 } from 'lucide-react';
-import { ArrowUp as ArrowUpIcon, AtMark, MicOn, PlusDefault, SquareSlash } from '@xyne/icons';
+import {
+  ArrowUp as ArrowUpIcon,
+  AtMark,
+  MicOn,
+  PhoneDefault,
+  PlusDefault,
+  SquareSlash,
+} from '@xyne/icons';
 import { toast } from 'sonner';
 import { posthogService } from '../../services/Analytics/posthogService';
-import { useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { DANGEROUS_EXTENSIONS } from '@xyne/shared';
 import { AIAgentSelector } from './AIAgentSelector';
 import { ModelThinkingSelector, formatModelLabel } from './ModelThinkingSelector';
@@ -335,20 +341,25 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
   const instant = selectedAgent?.instantAgent === true;
 
   const modelAgentSlug = selectedAgentSlug ?? 'ask-ai';
-  const { data: agentModelsData } = useQuery({
+  const { data: agentModelsData, isPlaceholderData: modelsArePreviousAgent } = useQuery({
     queryKey: ['claw-agent-models', modelAgentSlug],
     queryFn: () => fetchClawAgentModels(modelAgentSlug),
     staleTime: 60_000,
+    placeholderData: keepPreviousData,
   });
   // Reset the pin/thinking picks when the AGENT changes — but not on mount,
   // where they may be seeded from initialExtras (landing → chat handoff).
   const prevModelAgentSlug = useRef(modelAgentSlug);
   useEffect(() => {
     if (prevModelAgentSlug.current === modelAgentSlug) return;
+    if (modelsArePreviousAgent) return;
     prevModelAgentSlug.current = modelAgentSlug;
     setSelectedModel(null);
     setThinkingLevel(null);
-  }, [modelAgentSlug]);
+  }, [modelAgentSlug, modelsArePreviousAgent]);
+
+  const effectiveModel = modelsArePreviousAgent ? null : selectedModel;
+  const effectiveThinkingLevel = modelsArePreviousAgent ? null : thinkingLevel;
 
   const { data: configData } = useQuery<XyneAIConfigResponse>({
     queryKey: ['xyne-ai-config'],
@@ -381,13 +392,13 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
       voiceMode,
       voiceStudioMode,
       instant,
-      model: selectedModel,
-      modelProvider: !selectedModel
+      model: effectiveModel,
+      modelProvider: !effectiveModel
         ? null
-        : selectedModel.startsWith('local-harness:')
+        : effectiveModel.startsWith('local-harness:')
           ? 'local-harness'
           : modelPinProvider,
-      thinkingLevel,
+      thinkingLevel: effectiveThinkingLevel,
       sandboxMode,
     }),
     [
@@ -401,10 +412,10 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
       voiceMode,
       voiceStudioMode,
       instant,
-      selectedModel,
+      effectiveModel,
       sandboxMode,
       modelPinProvider,
-      thinkingLevel,
+      effectiveThinkingLevel,
       webSearchAccessible,
       deepResearchAccessible,
     ],
@@ -929,7 +940,10 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
                 <ContextPill
                   key={`ts-${transcript.id}`}
                   icon={
-                    <Phone className='h-3.5 w-3.5 shrink-0 text-muted-foreground' aria-hidden />
+                    <PhoneDefault
+                      className='h-3.5 w-3.5 shrink-0 text-muted-foreground'
+                      aria-hidden
+                    />
                   }
                   label={transcript.title}
                   onRemove={() => removeTranscript(transcript.id)}
@@ -1293,8 +1307,8 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
                   data-track-metadata={JSON.stringify(
                     aiSendButtonTrackingMetadata({
                       surface: 'page',
-                      model: selectedModel,
-                      thinkingLevel,
+                      model: effectiveModel,
+                      thinkingLevel: effectiveThinkingLevel,
                       webSearchEnabled: webSearchAccessible ? webSearchEnabled : false,
                       deepResearchEnabled: deepResearchAccessible ? deepResearchEnabled : false,
                       createCanvasEnabled,
@@ -1304,7 +1318,12 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
                   className={cn(
                     createChrome
                       ? 'inline-flex size-9 items-center justify-center rounded-[8px] bg-muted text-muted-foreground transition enabled:hover:bg-accent disabled:cursor-not-allowed disabled:opacity-40'
-                      : 'ai-send-btn inline-flex h-8 w-8 items-center justify-center rounded-full bg-[#e8e4dd] text-foreground transition enabled:hover:bg-[#ddd9d2] disabled:cursor-not-allowed disabled:bg-[#e8e4dd]/50 disabled:text-muted-foreground',
+                      : cn(
+                          'inline-flex h-8 w-8 items-center justify-center rounded-full transition disabled:cursor-not-allowed',
+                          canSend
+                            ? 'bg-primary text-primary-foreground hover:bg-primary/90'
+                            : 'ai-send-btn bg-[#e8e4dd]/50 text-muted-foreground',
+                        ),
                   )}
                 >
                   {createChrome ? (

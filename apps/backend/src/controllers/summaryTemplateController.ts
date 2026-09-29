@@ -1,7 +1,11 @@
 import type { Request, Response } from 'express';
 import type { Prisma } from '@prisma/client';
 import z from 'zod';
-import { summaryTemplateService, SummaryTemplateError } from '@/services/summaryTemplateService';
+import {
+  summaryTemplateService,
+  SummaryTemplateError,
+  SummaryTemplateNamesTakenError,
+} from '@/services/summaryTemplateService';
 import { summaryTemplateAiService } from '@/services/summaryTemplateAiService';
 import {
   DefaultOutlet,
@@ -46,6 +50,19 @@ const SummaryTemplateCreateSchema = z.object({
   systemPrompt: z.string().trim().max(LIMITS.systemPrompt).optional(),
   version: z.number().int().positive().default(1),
   defaultOutlet: z.enum([DefaultOutlet.EMAIL, DefaultOutlet.MESSAGE]).default(DefaultOutlet.EMAIL),
+});
+
+const SUMMARY_TEMPLATE_BULK_LIMIT = 50;
+
+const SummaryTemplateBulkCreateSchema = z.object({
+  templates: z
+    .array(
+      SummaryTemplateCreateSchema.extend({
+        autoTriggerPrompt: z.string().trim().min(1).max(LIMITS.meetingContext),
+      })
+    )
+    .min(1)
+    .max(SUMMARY_TEMPLATE_BULK_LIMIT),
 });
 
 const SummaryTemplateUpdateSchema = SummaryTemplateCreateSchema.partial().refine(
@@ -171,6 +188,37 @@ export class SummaryTemplateController {
       });
       res.status(201).json({ success: true, template });
     } catch (error) {
+      sendError(res, error);
+    }
+  };
+
+  bulkCreate = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const parsed = SummaryTemplateBulkCreateSchema.safeParse(req.body);
+      if (!parsed.success) {
+        const issue = parsed.error.errors[0];
+        const index = issue?.path[0] === 'templates' ? issue.path[1] : undefined;
+        const prefix = typeof index === 'number' ? `Template ${index + 1}: ` : '';
+        res.status(400).json({ success: false, error: `${prefix}${issue?.message ?? 'Invalid'}` });
+        return;
+      }
+
+      const templates = await summaryTemplateService.bulkCreate(
+        req.user!.workspaceId,
+        req.user!.id,
+        parsed.data.templates.map((template) => ({
+          ...template,
+          sections: template.sections as Prisma.InputJsonValue,
+        }))
+      );
+      res.status(201).json({ success: true, templates });
+    } catch (error) {
+      if (error instanceof SummaryTemplateNamesTakenError) {
+        res
+          .status(error.statusCode)
+          .json({ success: false, error: error.message, takenNames: error.names });
+        return;
+      }
       sendError(res, error);
     }
   };

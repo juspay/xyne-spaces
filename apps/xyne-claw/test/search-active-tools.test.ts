@@ -83,3 +83,38 @@ describe("search-tools and tools the run already has", () => {
     expect(out).not.toContain("Already active");
   });
 });
+
+describe("load-tools resolves the names models actually send", () => {
+  const load = (activeTools: ToolCatalogEntry[], names: string[]) => {
+    const tools = buildFastModeMetaTools({
+      catalog: [...catalog, entry("create-video-explainer", "Make a video explainer", "agent-tools", "agent:agent-tools")],
+      activeTools,
+      controller: { getActiveToolSet: () => [], loadTools: async (n: string[]) => ({ loaded: n, alreadyLoaded: [], unknown: [], activeToolSet: n, maxActiveTools: 26 }) },
+    });
+    const def = tools.find((t) => t.name === "load-tools")! as unknown as { execute: (id: string, p: unknown) => Promise<{ content: Array<{ text: string }> }> };
+    return def.execute("t", { names }).then((r) => r.content[0]!.text);
+  };
+  const scheduleTask = entry("schedule-task", "Schedule a task", "active", "active");
+
+  it("maps a display label to the active tool it names", async () => {
+    const out = await load([...active, scheduleTask], ["Schedule Task"]);
+    expect(out).toContain("Already active — nothing to load, call directly: schedule-task");
+    expect(out).not.toMatch(/Unknown[^\n]*Schedule Task/);
+  });
+
+  it("maps a display label to a loadable catalog tool", async () => {
+    const out = await load(active, ["Create Video Explainer"]);
+    expect(out).toContain("Loaded: create-video-explainer");
+  });
+
+  it("maps underscores and case to the catalog name", async () => {
+    const out = await load(active, ["XYNE_SPACES__SPACES_MESSAGES"]);
+    expect(out).toContain("Loaded: Xyne_Spaces__spaces-messages");
+  });
+
+  it("still reports a name that matches nothing", async () => {
+    const out = await load(active, ["Totally Made Up"]);
+    expect(out).toMatch(/Totally Made Up/);
+    expect(out).not.toContain("Loaded: ");
+  });
+});

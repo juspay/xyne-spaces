@@ -279,6 +279,10 @@ export const buildPartialCustomFieldWritePayload = async (
         error: `No form configured for board ${boardId}`,
         code: 'VALIDATION_ERROR',
       });
+      logger.warn('[TicketCustomField] rejecting all fields: no form configured for board', {
+        boardId,
+        receivedFieldNames: Object.keys(normalizedInput).slice(0, 50),
+      });
     }
     return { validationErrors };
   }
@@ -298,6 +302,11 @@ export const buildPartialCustomFieldWritePayload = async (
         error: `Missing required custom fields: ${requiredFields.join(', ')}`,
         code: 'VALIDATION_ERROR',
       });
+      logger.warn('[TicketCustomField] required fields not sent', {
+        boardId,
+        missingRequiredFields: requiredFields.slice(0, 50),
+        receivedFieldNames: Object.keys(normalizedInput).slice(0, 50),
+      });
     }
   }
 
@@ -309,6 +318,15 @@ export const buildPartialCustomFieldWritePayload = async (
       validationErrors.push({
         error: `Unknown custom field: ${fieldName}`,
         code: 'VALIDATION_ERROR',
+      });
+      const lowered = fieldName.trim().toLowerCase();
+      logger.warn('[TicketCustomField] rejecting field: not defined on this board form', {
+        boardId,
+        fieldName,
+        receivedType: Array.isArray(rawValue) ? 'array' : typeof rawValue,
+        receivedValue: rawValue,
+        caseVariantOnForm: formFields.map(f => f.fieldName).find(n => n !== fieldName && n.trim().toLowerCase() === lowered),
+        formFieldNames: formFields.map(f => f.fieldName).slice(0, 50),
       });
       continue;
     }
@@ -332,10 +350,27 @@ export const buildPartialCustomFieldWritePayload = async (
       );
 
       fieldValues.push(fieldValue);
+      logger.info('[TicketCustomField] accepting field', {
+        boardId,
+        fieldName,
+        fieldType: field.fieldType,
+        receivedType: Array.isArray(rawValue) ? 'array' : typeof rawValue,
+        receivedValue: rawValue,
+        storedValue: fieldValue.fieldValue,
+      });
     } catch (error) {
+      const reason = error instanceof Error ? error.message : `Invalid value for field "${fieldName}"`;
       validationErrors.push({
-        error: error instanceof Error ? error.message : `Invalid value for field "${fieldName}"`,
+        error: reason,
         code: 'VALIDATION_ERROR',
+      });
+      logger.warn('[TicketCustomField] rejecting field: invalid value', {
+        boardId,
+        fieldName,
+        expectedType: field.fieldType,
+        receivedType: Array.isArray(rawValue) ? 'array' : typeof rawValue,
+        receivedValue: rawValue,
+        reason,
       });
     }
   }

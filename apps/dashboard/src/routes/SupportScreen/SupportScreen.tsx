@@ -99,8 +99,10 @@ import { QueryResultType } from '@rocicorp/zero';
 import ThreadMessages from '../../components/Chat/ThreadPannel';
 import { useChannel, useEmailChannels, useUserChannelStatuses } from '../../hooks/useChannels';
 import { useRefetchExternalSource } from '../../hooks/useRefetchExternalSource';
+import { useChannelFetchSources } from '../../hooks/useChannelFetchSources';
 import { useDlMemberSyncStatus } from '../../hooks/useDlMemberSyncStatus';
 import { RefetchRangeDialog } from '../../components/Chat/EmailRefetch/RefetchRangeDialog';
+import { FetchSourcePicker } from '../../components/Chat/EmailRefetch/FetchSourcePicker';
 import { DlMemberSyncDialog } from '../../components/Chat/EmailRefetch/DlMemberSyncDialog';
 import { useMarkTicketsAsRead } from '../../hooks/useMarkTicketsAsRead';
 import * as Popover from '@radix-ui/react-popover';
@@ -126,7 +128,17 @@ import {
 } from '../../utils/board/dynamicFieldFilters';
 import { dynamicColumnKey } from '../../components/Tickets/TicketTable/TicketTableTypes';
 import { useDeskTableColumns, DESK_TABLE_BUILTIN_COLUMNS } from './useDeskTableColumns';
+import { useDeskListColumns } from './useDeskListColumns';
+import { useDeskListColumnOrder } from './useDeskListColumnOrder';
+import { DeskListColumnsMenu } from './DeskListColumnsMenu';
+import {
+  DESK_LIST_TOGGLEABLE_COLUMNS,
+  dynamicFieldListColumn,
+  orderTicketListColumns,
+  TICKET_LIST_COLUMNS,
+} from '../../components/Tickets/TicketListView/ticketListColumns';
 import DuplicateTicketsBanner from './DuplicateTicketsBanner';
+import { useRecheckTicketDuplicates } from '../../hooks/useRecheckTicketDuplicates';
 import type { LabelUnreadFilters } from '../../api/conversationLabelsApi';
 import { tagsConfigApi } from '../../api/tagsConfigApi';
 import { classificationApi } from '../../api/classificationApi';
@@ -153,7 +165,7 @@ import { Button } from '../../components/ui/Button/Button';
 import { Badge } from '../../components/ui/Badge/Badge';
 import { useAuth, useAuthContextValues } from '../../hooks/useAuth';
 import { usePlatform } from '../../hooks/usePlatform';
-import { TicketListView } from '../../components/Tickets/TicketListView';
+import { TicketListView, type PageCursor } from '../../components/Tickets/TicketListView';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { useRacedQuery } from '../../hooks/useRacedQuery';
 import { SupportKanbanBoard } from './SupportKanbanBoard';
@@ -230,7 +242,7 @@ import {
 } from '../../components/xyne-desk/DeskInsights/DeskInsightsPanel';
 import { DeskSavedViewsControls } from '../../components/xyne-desk/DeskSavedViewsControls';
 import { useDeskTicketSavedViews } from '../../hooks/useDeskTicketSavedViews';
-import { valuesToFilters } from '../../utils/savedViewSerialization';
+import { columnKeysFromValues, valuesToFilters } from '../../utils/savedViewSerialization';
 import {
   useChannelIntegrationInfo,
   clearChannelConnectedEmailCache,
@@ -785,14 +797,88 @@ const SupportScreen = (): ReactElement => {
     [filters.dynamicFields, dynamicFieldTypesById],
   );
 
-  const { selectedColumnKeys, toggleColumn } = useDeskTableColumns(selectedChannelId);
+  const {
+    selectedColumnKeys,
+    toggleColumn,
+    setColumns: setTableColumns,
+  } = useDeskTableColumns(selectedChannelId);
+  const {
+    selectedColumnKeys: listColumnKeys,
+    toggleColumn: toggleListColumn,
+    setColumns: setListColumns,
+  } = useDeskListColumns(selectedChannelId);
+  const validListColumnKeys = useMemo(
+    () =>
+      new Set([
+        ...DESK_LIST_TOGGLEABLE_COLUMNS.map(c => c.key),
+        ...deskDynamicFields.map(field => dynamicColumnKey(field.id)),
+      ]),
+    [deskDynamicFields],
+  );
   const tableVisibleColumns = useMemo(
     () => new Set([...selectedColumnKeys].filter(key => !key.startsWith('df:'))),
     [selectedColumnKeys],
   );
+
+  // Snapshot of the active mode's columns. Intersection logic on apply handles
+  // cross-mode restoration by filtering to keys valid for the target mode.
+  const currentColumnSnapshot = useMemo((): ReadonlySet<string> => {
+    return viewMode === 'list' ? listColumnKeys : selectedColumnKeys;
+  }, [viewMode, listColumnKeys, selectedColumnKeys]);
+
+  const applyViewColumns = useCallback(
+    (columns: Set<string> | null): void => {
+      if (!columns) return;
+      const validTableKeys = new Set(DESK_TABLE_BUILTIN_COLUMNS.map(c => c.key as string));
+      const tableKeys = new Set(
+        [...columns].filter(k => validTableKeys.has(k) || k.startsWith('df:')),
+      );
+      if (tableKeys.size > 0) setTableColumns(tableKeys);
+      const validListKeys = new Set(DESK_LIST_TOGGLEABLE_COLUMNS.map(c => c.key));
+      const listKeys = new Set(
+        [...columns].filter(k => validListKeys.has(k) || k.startsWith('df:')),
+      );
+      if (listKeys.size > 0) setListColumns(listKeys);
+    },
+    [setTableColumns, setListColumns],
+  );
+
+  // Persists list-view pagination across ticket-detail navigation (TicketListView unmounts
+  // when ticketId is set, so its local state is lost). Keyed to channel+filter+folder so
+  // a filter change while on the detail view doesn't restore a stale page.
+  const listPaginationCacheRef = useRef<{
+    key: string;
+    pageIndex: number;
+    pageCursors: Array<PageCursor | null>;
+    fetchLimit: number;
+  } | null>(null);
+
   const tableDynamicFieldColumns = useMemo(
     () => deskDynamicFields.filter(field => selectedColumnKeys.has(dynamicColumnKey(field.id))),
     [deskDynamicFields, selectedColumnKeys],
+  );
+  const listDynamicFieldColumns = useMemo(
+    () => deskDynamicFields.filter(field => listColumnKeys.has(dynamicColumnKey(field.id))),
+    [deskDynamicFields, listColumnKeys],
+  );
+  const { columnOrder: listColumnOrder, moveColumn: moveListColumn } =
+    useDeskListColumnOrder(selectedChannelId);
+  const deskDynamicFieldByKey = useMemo(
+    () => new Map(deskDynamicFields.map(field => [dynamicColumnKey(field.id), field])),
+    [deskDynamicFields],
+  );
+  const listMenuColumns = useMemo(
+    () =>
+      orderTicketListColumns(
+        [
+          ...TICKET_LIST_COLUMNS,
+          ...Array.from(deskDynamicFieldByKey, ([key, field]) =>
+            dynamicFieldListColumn(key, field.fieldName),
+          ),
+        ],
+        listColumnOrder,
+      ),
+    [deskDynamicFieldByKey, listColumnOrder],
   );
 
   const [tagFilterConversationIds, setTagFilterConversationIds] = useState<string[] | null>(null);
@@ -849,6 +935,38 @@ const SupportScreen = (): ReactElement => {
       conversationLabelId: selectedLabel?.id ?? filters.conversationLabelId,
     }),
     [filters, userID, dynamicFieldEntries, tagFilterConversationIds, selectedLabel?.id],
+  );
+
+  // Stable key that identifies the current list-view data context. When this changes
+  // while the user is on a ticket detail page, the stored page is stale and must not
+  // be restored.
+  const listFilterKey = useMemo(
+    () =>
+      JSON.stringify({
+        c: selectedChannelId,
+        f: ticketFilter,
+        m: selectedFolder?.key ?? null,
+      }),
+    [selectedChannelId, ticketFilter, selectedFolder],
+  );
+
+  const cachedListPagination =
+    listPaginationCacheRef.current?.key === listFilterKey ? listPaginationCacheRef.current : null;
+
+  const handleListPaginationChange = useCallback(
+    (
+      pageIndex: number,
+      pageCursors: ReadonlyArray<PageCursor | null>,
+      fetchLimit: number,
+    ): void => {
+      listPaginationCacheRef.current = {
+        key: listFilterKey,
+        pageIndex,
+        pageCursors: [...pageCursors],
+        fetchLimit,
+      };
+    },
+    [listFilterKey],
   );
 
   // Mode-B label counts drop the label scoping from the shared filter surface.
@@ -1003,7 +1121,7 @@ const SupportScreen = (): ReactElement => {
     updateView: updateDeskView,
     deleteView: deleteDeskView,
     applySavedView: applyDeskSavedView,
-  } = useDeskTicketSavedViews(ticketViewsChannelId, setFilters);
+  } = useDeskTicketSavedViews(ticketViewsChannelId, setFilters, applyViewColumns);
 
   // Self-heal: clear a stale activeViewId that no longer exists in the list.
   // Guard on savedViewsLoaded so we don't clear before the query returns data.
@@ -1021,11 +1139,11 @@ const SupportScreen = (): ReactElement => {
     name: string,
     visibility: SavedConfigVisibility,
   ): Promise<string | undefined> => {
-    return saveDeskView(name, filters, visibility);
+    return saveDeskView(name, filters, visibility, currentColumnSnapshot);
   };
 
   const handleUpdateDeskView = async (viewId: string): Promise<void> => {
-    await updateDeskView(viewId, filters);
+    await updateDeskView(viewId, filters, currentColumnSnapshot);
   };
 
   const isDeskViewDirty = useMemo(() => {
@@ -1051,8 +1169,28 @@ const SupportScreen = (): ReactElement => {
       }
       return v;
     };
-    return JSON.stringify(sortDeep(filters)) !== JSON.stringify(sortDeep(viewFilters));
-  }, [activeTicketViewId, deskSavedViews, filters]);
+    if (JSON.stringify(sortDeep(filters)) !== JSON.stringify(sortDeep(viewFilters))) return true;
+    // Also dirty when column selections differ from what was saved
+    // Only check column dirty state when the view actually saved column data; legacy views have no opinion.
+    const savedColumnKeys = columnKeysFromValues(activeView.values);
+    if (!savedColumnKeys) return false;
+    const modeColumnKeys = viewMode === 'list' ? listColumnKeys : selectedColumnKeys;
+    const validKeys =
+      viewMode === 'list'
+        ? validListColumnKeys
+        : new Set(DESK_TABLE_BUILTIN_COLUMNS.map(c => c.key as string));
+    const savedForMode = new Set([...savedColumnKeys].filter(k => validKeys.has(k)));
+    const currentForMode = new Set([...modeColumnKeys].filter(k => validKeys.has(k)));
+    return [...savedForMode].sort().join(',') !== [...currentForMode].sort().join(',');
+  }, [
+    activeTicketViewId,
+    deskSavedViews,
+    filters,
+    viewMode,
+    listColumnKeys,
+    selectedColumnKeys,
+    validListColumnKeys,
+  ]);
 
   const {
     rowRef: filterRowRef,
@@ -1065,7 +1203,7 @@ const SupportScreen = (): ReactElement => {
     collapsedFilterIds,
     hasCollapsedFilters,
     isFilterVisibleOnBar,
-  } = useDeskToolbarOverflow({ showColumnsPicker: viewMode === 'table' });
+  } = useDeskToolbarOverflow({ showColumnsPicker: viewMode === 'table' || viewMode === 'list' });
 
   // Shown on the "Filters" trigger once anything is folded, so an active-but-hidden filter
   // still announces itself instead of silently disappearing.
@@ -1449,6 +1587,9 @@ const SupportScreen = (): ReactElement => {
       searchParams.get('workspaceMailboxConnected') === 'true',
   );
   const [showRefetchDialog, setShowRefetchDialog] = useState(false);
+  const [fetchTarget, setFetchTarget] = useState<
+    { sourceId?: string | undefined; sourceName?: string | undefined } | undefined
+  >(undefined);
   const [showDlMemberSyncDialog, setShowDlMemberSyncDialog] = useState(false);
 
   // ---------------------------------------------------------------------------
@@ -1973,12 +2114,23 @@ const SupportScreen = (): ReactElement => {
     isSocialMediaDesk,
   );
   const canRefetch = !!refetchChannelId;
+  const {
+    data: fetchSources,
+    isLoading: isFetchSourcesLoading,
+    isError: isFetchSourcesError,
+  } = useChannelFetchSources(refetchChannelId, canRefetch);
+  const anyFetchSource = (fetchSources?.length ?? 0) > 0;
+  const hasMultipleFetchSources = (fetchSources?.length ?? 0) > 1;
+  const dlHasApps = (fetchSources ?? []).some(source => source.sourceType === 'app-desk');
   const isDlDesk = channelPreference?.deskType === DeskType.DL;
   useEffect(() => {
     if (channelPreference?.boardId) {
       handleChannelBoardIdResolved(channelPreference.boardId);
     }
   }, [channelPreference?.boardId, handleChannelBoardIdResolved]);
+  useEffect(() => {
+    setFetchTarget(undefined);
+  }, [refetchChannelId]);
   const { data: dlMemberSyncStatus } = useDlMemberSyncStatus(refetchChannelId, isDlDesk);
   const isDlMemberSyncing = dlMemberSyncStatus?.active === true;
   const dlMemberSyncTooltip = isDlMemberSyncing
@@ -3172,6 +3324,11 @@ const SupportScreen = (): ReactElement => {
                         )}
                       {canRefetch &&
                         isSelectedChannelJoined &&
+                        (isDlDesk ||
+                          isSocialMediaDesk ||
+                          isFetchSourcesLoading ||
+                          isFetchSourcesError ||
+                          anyFetchSource) &&
                         (isDlDesk ? (
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
@@ -3198,15 +3355,26 @@ const SupportScreen = (): ReactElement => {
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align='end' className='w-80'>
                               <DropdownMenuItem
-                                onClick={() => setShowRefetchDialog(true)}
+                                onClick={() => {
+                                  setFetchTarget(undefined);
+                                  setShowRefetchDialog(true);
+                                }}
                                 data-track-category='Support'
                                 data-track-name='OPEN_EMAIL_REFETCH_DIALOG'
                               >
                                 <RefreshCw size={14} className='mr-2 shrink-0' />
                                 <span className='flex min-w-0 flex-1 items-center justify-between gap-3'>
-                                  <span className='truncate'>Fetch latest emails</span>
+                                  <span className='truncate'>
+                                    {dlHasApps
+                                      ? 'Fetch latest emails & app data'
+                                      : 'Fetch latest emails'}
+                                  </span>
                                   <Tooltip
-                                    content='Fetch recent emails from the connected shared mailbox for this desk.'
+                                    content={
+                                      dlHasApps
+                                        ? 'Fetch recent emails from the connected shared mailbox and history from the connected apps for this desk.'
+                                        : 'Fetch recent emails from the connected shared mailbox for this desk.'
+                                    }
                                     side='left'
                                     className='max-w-72'
                                   >
@@ -3248,6 +3416,43 @@ const SupportScreen = (): ReactElement => {
                               </DropdownMenuItem>
                             </DropdownMenuContent>
                           </DropdownMenu>
+                        ) : hasMultipleFetchSources || (isSocialMediaDesk && anyFetchSource) ? (
+                          <FetchSourcePicker
+                            sources={fetchSources ?? []}
+                            leadingAction={
+                              isSocialMediaDesk
+                                ? {
+                                    label: 'Fetch reviews',
+                                    // No sourceId => the hook routes to the
+                                    // review sync; the dialog supplies the range.
+                                    onSelect: () => {
+                                      setFetchTarget(undefined);
+                                      setShowRefetchDialog(true);
+                                    },
+                                  }
+                                : undefined
+                            }
+                            onSelect={(sourceId, sourceName) => {
+                              setFetchTarget(sourceId ? { sourceId, sourceName } : undefined);
+                              setShowRefetchDialog(true);
+                            }}
+                          >
+                            <button
+                              disabled={isRefetching || isFetchSourcesLoading}
+                              aria-label='Fetch data'
+                              className={cn(
+                                'p-1.5 rounded transition-colors text-muted-foreground hover:text-foreground hover:bg-muted',
+                                isRefetching && 'opacity-60 cursor-not-allowed',
+                              )}
+                              data-track-category='Support'
+                              data-track-name='RefetchExternalSource'
+                              data-track-metadata={JSON.stringify({
+                                channelId: refetchChannelId,
+                              })}
+                            >
+                              <RefreshCw size={16} className={cn(isRefetching && 'animate-spin')} />
+                            </button>
+                          </FetchSourcePicker>
                         ) : (
                           <Tooltip
                             content={
@@ -3260,8 +3465,21 @@ const SupportScreen = (): ReactElement => {
                             side='bottom'
                           >
                             <button
-                              onClick={() => setShowRefetchDialog(true)}
-                              disabled={isRefetching}
+                              onClick={() => {
+                                // Single-source desks skip the picker but still
+                                // get a titled dialog (and exact-source fetch).
+                                // Review desks land here with no listed source
+                                // and fall through to the review sync, which
+                                // now takes a range like every other fetch.
+                                const only = fetchSources?.[0];
+                                setFetchTarget(
+                                  fetchSources?.length === 1 && only
+                                    ? { sourceId: only.sourceId, sourceName: only.displayName }
+                                    : undefined,
+                                );
+                                setShowRefetchDialog(true);
+                              }}
+                              disabled={isRefetching || isFetchSourcesLoading}
                               className={cn(
                                 'p-1.5 rounded transition-colors text-muted-foreground hover:text-foreground hover:bg-muted',
                                 isRefetching && 'opacity-60 cursor-not-allowed',
@@ -3357,7 +3575,7 @@ const SupportScreen = (): ReactElement => {
                           <DeskFilterTrigger id='priority' active={hasPriorityFilter} />
                           <DeskFilterTrigger id='stages' active={hasStagesFilter} />
                         </div>
-                        {viewMode === 'table' && (
+                        {(viewMode === 'table' || viewMode === 'list') && (
                           <>
                             <div ref={columnsWideTwinRef} className='flex items-center'>
                               <Button
@@ -3759,7 +3977,7 @@ const SupportScreen = (): ReactElement => {
                       )}
                     </div>
                     <div className='flex items-center gap-2 shrink-0'>
-                      {viewMode === 'table' && (
+                      {(viewMode === 'table' || viewMode === 'list') && (
                         <Popover.Root open={columnsOpen} onOpenChange={setColumnsOpen}>
                           <Popover.Trigger asChild>
                             <Button
@@ -3771,8 +3989,6 @@ const SupportScreen = (): ReactElement => {
                             >
                               <div className='flex items-center gap-1.5'>
                                 <Columns3 className='w-3.5 h-3.5' />
-                                {/* Label yields before any filter folds — this is secondary
-                                    chrome, and the icon plus tooltip carries it fine. */}
                                 {isColumnsLabelled && <span className='font-medium'>Columns</span>}
                               </div>
                             </Button>
@@ -3783,74 +3999,92 @@ const SupportScreen = (): ReactElement => {
                             sideOffset={6}
                             className='z-[60] w-56 bg-background border border-border rounded-lg shadow-lg py-1 max-h-[400px] overflow-y-auto'
                           >
-                            {DESK_TABLE_BUILTIN_COLUMNS.map(column => {
-                              const Icon =
-                                column.key === 'assignee'
-                                  ? User
-                                  : column.key === 'dueDate' || column.key === 'createdAt'
-                                    ? CalendarDays
-                                    : column.key === 'priority'
-                                      ? BarChart4Icon
-                                      : column.key === 'tags'
-                                        ? Tag
-                                        : Circle;
-                              const isSelected = selectedColumnKeys.has(column.key);
-                              return (
-                                <button
-                                  key={column.key}
-                                  type='button'
-                                  onClick={() => toggleColumn(column.key, !isSelected)}
-                                  className='w-full flex items-center justify-between px-4 py-2 text-sm hover:bg-muted'
-                                  data-track-category='Support'
-                                  data-track-name='ToggleTableColumn'
-                                  data-track-metadata={JSON.stringify({
-                                    column: column.key,
-                                    visible: !isSelected,
-                                  })}
-                                >
-                                  <div className='flex items-center gap-3'>
-                                    <Icon className='w-4 h-4' />
-                                    <span>{column.label}</span>
-                                  </div>
-                                  {isSelected && <Check className='w-4 h-4 text-primary' />}
-                                </button>
-                              );
-                            })}
-                            {SHOW_DESK_CUSTOM_FIELD_COLUMNS && deskDynamicFields.length > 0 && (
+                            {viewMode === 'table' ? (
                               <>
-                                <div className='my-1 border-t border-border' />
-                                <div className='px-4 py-1 text-xs font-medium text-muted-foreground'>
-                                  Custom fields
-                                </div>
-                                {deskDynamicFields.map(field => {
-                                  const key = dynamicColumnKey(field.id);
-                                  const Icon = getIconForFieldType(field.fieldType);
-                                  const isSelected = selectedColumnKeys.has(key);
+                                {DESK_TABLE_BUILTIN_COLUMNS.map(column => {
+                                  const Icon =
+                                    column.key === 'assignee'
+                                      ? User
+                                      : column.key === 'dueDate' || column.key === 'createdAt'
+                                        ? CalendarDays
+                                        : column.key === 'priority'
+                                          ? BarChart4Icon
+                                          : column.key === 'tags'
+                                            ? Tag
+                                            : Circle;
+                                  const isSelected = selectedColumnKeys.has(column.key);
                                   return (
                                     <button
-                                      key={key}
+                                      key={column.key}
                                       type='button'
-                                      onClick={() => toggleColumn(key, !isSelected)}
+                                      onClick={() => toggleColumn(column.key, !isSelected)}
                                       className='w-full flex items-center justify-between px-4 py-2 text-sm hover:bg-muted'
                                       data-track-category='Support'
                                       data-track-name='ToggleTableColumn'
                                       data-track-metadata={JSON.stringify({
-                                        column: key,
-                                        fieldName: field.fieldName,
+                                        column: column.key,
                                         visible: !isSelected,
                                       })}
                                     >
                                       <div className='flex items-center gap-3'>
                                         <Icon className='w-4 h-4' />
-                                        <span className='truncate'>{field.fieldName}</span>
+                                        <span>{column.label}</span>
                                       </div>
-                                      {isSelected && (
-                                        <Check className='w-4 h-4 text-primary shrink-0' />
-                                      )}
+                                      {isSelected && <Check className='w-4 h-4 text-primary' />}
                                     </button>
                                   );
                                 })}
+                                {SHOW_DESK_CUSTOM_FIELD_COLUMNS && deskDynamicFields.length > 0 && (
+                                  <>
+                                    <div className='my-1 border-t border-border' />
+                                    <div className='px-4 py-1 text-xs font-medium text-muted-foreground'>
+                                      Custom fields
+                                    </div>
+                                    {deskDynamicFields.map(field => {
+                                      const key = dynamicColumnKey(field.id);
+                                      const Icon = getIconForFieldType(field.fieldType);
+                                      const isSelected = selectedColumnKeys.has(key);
+                                      return (
+                                        <button
+                                          key={key}
+                                          type='button'
+                                          onClick={() => toggleColumn(key, !isSelected)}
+                                          className='w-full flex items-center justify-between px-4 py-2 text-sm hover:bg-muted'
+                                          data-track-category='Support'
+                                          data-track-name='ToggleTableColumn'
+                                          data-track-metadata={JSON.stringify({
+                                            column: key,
+                                            fieldName: field.fieldName,
+                                            visible: !isSelected,
+                                          })}
+                                        >
+                                          <div className='flex items-center gap-3'>
+                                            <Icon className='w-4 h-4' />
+                                            <span className='truncate'>{field.fieldName}</span>
+                                          </div>
+                                          {isSelected && (
+                                            <Check className='w-4 h-4 text-primary shrink-0' />
+                                          )}
+                                        </button>
+                                      );
+                                    })}
+                                  </>
+                                )}
                               </>
+                            ) : (
+                              <DeskListColumnsMenu
+                                columns={listMenuColumns}
+                                dynamicFieldByKey={deskDynamicFieldByKey}
+                                selectedKeys={listColumnKeys}
+                                onToggle={toggleListColumn}
+                                onMove={(fromKey, toKey) =>
+                                  moveListColumn(
+                                    listMenuColumns.map(column => column.key),
+                                    fromKey,
+                                    toKey,
+                                  )
+                                }
+                              />
                             )}
                           </Popover.Content>
                         </Popover.Root>
@@ -3869,6 +4103,14 @@ const SupportScreen = (): ReactElement => {
                             onUpdate={handleUpdateDeskView}
                             onDelete={deleteDeskView}
                             currentFilters={filters}
+                            currentColumnKeys={
+                              viewMode === 'list' ? listColumnKeys : selectedColumnKeys
+                            }
+                            validColumnKeysForMode={
+                              viewMode === 'list'
+                                ? validListColumnKeys
+                                : new Set(DESK_TABLE_BUILTIN_COLUMNS.map(c => c.key as string))
+                            }
                             dynamicFieldDefs={deskDynamicFields}
                             trackCategory='Support'
                           />
@@ -4267,6 +4509,13 @@ const SupportScreen = (): ReactElement => {
                         onPageChange={clearTicketSelection}
                         onToggleSelectAll={handleToggleSelectAll}
                         onTicketsLoaded={handleTicketsLoaded}
+                        visibleColumnKeys={listColumnKeys}
+                        dynamicFieldColumns={listDynamicFieldColumns}
+                        columnOrder={listColumnOrder}
+                        initialPageIndex={cachedListPagination?.pageIndex}
+                        initialPageCursors={cachedListPagination?.pageCursors}
+                        initialFetchLimit={cachedListPagination?.fetchLimit}
+                        onPaginationChange={handleListPaginationChange}
                         onTicketClick={ticket => {
                           void navigate(`${supportBase}/${ticket.channelId}/${ticket.xyneId}`, {
                             state: {
@@ -4413,14 +4662,25 @@ const SupportScreen = (): ReactElement => {
           open={showRefetchDialog}
           onOpenChange={setShowRefetchDialog}
           isPending={isRefetching}
-          {...(isSocialMediaDesk && {
-            title: 'Fetch reviews',
-            subtitle: 'Pull new reviews or backfill a specific time range from the connected apps.',
-            summaryLabel: 'Will fetch reviews posted',
-          })}
+          {...(fetchTarget?.sourceName
+            ? {
+                // A named source wins over the desk-type wording: on a review
+                // desk the picker can target an app binding, and that fetch is
+                // not a review sync.
+                title: `Fetch from ${fetchTarget.sourceName}`,
+                subtitle: 'Choose how much history to pull from this source.',
+              }
+            : isSocialMediaDesk
+              ? {
+                  title: 'Fetch reviews',
+                  subtitle:
+                    'Pull new reviews or backfill a specific time range from the connected apps.',
+                  summaryLabel: 'Will fetch reviews posted',
+                }
+              : {})}
           onConfirm={range => {
             setShowRefetchDialog(false);
-            handleRefetch(range);
+            handleRefetch(range, fetchTarget);
           }}
         />
       )}
@@ -4605,7 +4865,7 @@ type SupportTicketDetailProps = {
   host?: 'support' | 'activity' | 'search_panel';
 };
 
-type TicketReplyKind = 'app' | 'channel';
+type TicketReplyKind = 'app' | 'slack' | 'channel';
 
 /**
  * Reply routing is per-ticket, not per-channel: an app-sourced ticket can live in ANY
@@ -4613,9 +4873,13 @@ type TicketReplyKind = 'app' | 'channel';
  * longer pick the thread/composer. 'channel' = the channel-type chain, unchanged.
  */
 const getTicketReplyKind = (ticketMetadata: unknown): TicketReplyKind => {
-  const deskSource = (ticketMetadata as { deskSource?: { type?: string } } | null | undefined)
-    ?.deskSource;
-  return deskSource?.type === 'app' ? 'app' : 'channel';
+  const metadata = ticketMetadata as
+    | { deskSource?: { type?: string }; source?: string }
+    | null
+    | undefined;
+  if (metadata?.deskSource?.type === 'app') return 'app';
+  if (metadata?.source === 'slack') return 'slack';
+  return 'channel';
 };
 
 export const SupportTicketDetail = ({
@@ -4737,6 +5001,8 @@ export const SupportTicketDetail = ({
 
   const detailConversationId = ticket?.conversationId ?? stateConversationId;
   const isAppSourcedTicket = getTicketReplyKind(ticket?.metadata) === 'app';
+  // Without this a Slack ticket on an EMAIL desk falls through to EmailComposer below.
+  const isSlackSourcedTicket = getTicketReplyKind(ticket?.metadata) === 'slack';
   const ticketEmailDrafts = useEmailDrafts(detailConversationId, routeChannelId, isMember);
 
   // Start the primary email query from router state while ticket metadata loads,
@@ -5389,6 +5655,8 @@ export const SupportTicketDetail = ({
   const [isScheduleCallModalOpen, setIsScheduleCallModalOpen] = useState(false);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [labelPickerOpen, setLabelPickerOpen] = useState(false);
+  const { isRechecking: isRecheckingDuplicates, recheck: recheckDuplicates } =
+    useRecheckTicketDuplicates(ticket?.id);
   if (!ticketIdParam) {
     return (
       <div className='h-full flex items-center justify-center'>
@@ -5419,13 +5687,7 @@ export const SupportTicketDetail = ({
                 {showAdjacentNav && (
                   <button
                     type='button'
-                    onClick={() => {
-                      if (onBack) {
-                        onBack();
-                        return;
-                      }
-                      goBackToTicketList();
-                    }}
+                    onClick={() => void navigate(-1)}
                     className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0'
                     aria-label='Back to ticket list'
                     data-track-category='Support'
@@ -5674,6 +5936,22 @@ export const SupportTicketDetail = ({
                         <LinkIcon size={14} className='shrink-0' />
                         Copy link
                       </DropdownMenuItem>
+                      {ticket?.id && !ticket.isArchived && (
+                        <DropdownMenuItem
+                          onSelect={recheckDuplicates}
+                          disabled={isRecheckingDuplicates}
+                          data-track-category='Support'
+                          data-track-name='RecheckDuplicates'
+                          data-track-metadata={JSON.stringify({ surface: 'more_menu' })}
+                        >
+                          {isRecheckingDuplicates ? (
+                            <Loader2 size={14} className='animate-spin shrink-0' />
+                          ) : (
+                            <RefreshCw size={14} className='shrink-0' />
+                          )}
+                          Check for duplicates
+                        </DropdownMenuItem>
+                      )}
                       {emails.length > 0 &&
                         channel?.type !== ChannelType.SLACK &&
                         channel?.type !== ChannelType.APP && (
@@ -6076,6 +6354,7 @@ export const SupportTicketDetail = ({
               {emails && emails.length > 0 && (
                 <div className='mb-6'>
                   {isAppSourcedTicket ||
+                  isSlackSourcedTicket ||
                   channel?.type === ChannelType.SLACK ||
                   channel?.type === ChannelType.APP ||
                   channel?.type === ChannelType.SOCIAL_MEDIA ? (
@@ -6120,7 +6399,7 @@ export const SupportTicketDetail = ({
                     recordOnly={channelPreference?.appWebhookDeliveryEnabled === false}
                   />
                 ) : null
-              ) : channel?.type === ChannelType.SOCIAL_MEDIA ? (
+              ) : !isSlackSourcedTicket && channel?.type === ChannelType.SOCIAL_MEDIA ? (
                 conversationId ? (
                   <SocialMediaReplyComposer
                     conversationId={conversationId}
@@ -6135,15 +6414,20 @@ export const SupportTicketDetail = ({
                     trackingCategory='social-media-composer'
                   />
                 ) : null
-              ) : channel?.type === ChannelType.SLACK || channel?.type === ChannelType.APP ? (
+              ) : isSlackSourcedTicket ||
+                channel?.type === ChannelType.SLACK ||
+                channel?.type === ChannelType.APP ? (
                 conversationId ? (
                   <SlackComposer
                     conversationId={conversationId}
                     channelId={channel?.id ?? null}
                     drafts={ticketEmailDrafts}
-                    variant={channel?.type === ChannelType.APP ? 'app' : 'slack'}
+                    variant={
+                      !isSlackSourcedTicket && channel?.type === ChannelType.APP ? 'app' : 'slack'
+                    }
                     recordOnly={
-                      channel.type === ChannelType.APP &&
+                      !isSlackSourcedTicket &&
+                      channel?.type === ChannelType.APP &&
                       channelPreference?.appWebhookDeliveryEnabled === false
                     }
                   />

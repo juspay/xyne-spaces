@@ -8,6 +8,7 @@ import { logger, Event as LogEvent } from '../../utils/logger';
  * Allows streams to persist across sidebar open/close cycles
  * Uses Web Worker for streaming to run on a separate thread
  */
+import type { FlowDefinition } from '@xyne/shared';
 import { apiInstance, BASE_URL } from '../clients/apiClient';
 import { consumeConversationLiveStream } from './liveConversationStream';
 import { trackCitationsGenerated } from '../otel/xyneAIMetrics';
@@ -31,6 +32,7 @@ import type {
   PendingActionResolution,
   ToolInvocation,
 } from '../../components/Chat/XyneAISidebar/utils/XyneAITypes';
+import { mergeUiFlows } from '../../components/Chat/XyneAISidebar/utils/XyneAITypes';
 import type { ToolOutput as GeniusToolOutput } from '../../types/toolOutput';
 import type { ResearchContext } from '@xyne/shared';
 import type { AttachedContextItem } from '../../components/Chat/XyneAISidebar/components/ContextPickerPanel';
@@ -851,6 +853,25 @@ class XyneAIStreamManager {
     }
   }
 
+  /** Local component state is not enough: while a stream owns the thread its
+   *  next notify overwrites the caller's list, reverting an answered card to
+   *  pending (and submittable). */
+  public patchMessageUiFlows(messageId: string, uiFlows: FlowDefinition[]): void {
+    for (const state of this.activeStreams.values()) {
+      const idx = state.messages.findIndex(m => m.id === messageId);
+      if (idx < 0) continue;
+      const existing = state.messages[idx]!;
+      state.messages = [
+        ...state.messages.slice(0, idx),
+        { ...existing, uiFlows },
+        ...state.messages.slice(idx + 1),
+      ];
+      this.notifySubscribers({ ...state });
+      void xyneAIStreamStorage.updateMessages(state.streamId, state.messages);
+      return;
+    }
+  }
+
   /**
    * Get all active streams
    */
@@ -1354,6 +1375,18 @@ class XyneAIStreamManager {
               msg.id === botMessageId
                 ? { ...msg, planTodos: todos, ...(planTitle ? { planTitle } : {}) }
                 : msg,
+            ),
+          );
+        }
+        break;
+      }
+
+      case 'ui_flow': {
+        const flow = data['flow'] as FlowDefinition | undefined;
+        if (flow && typeof flow === 'object' && flow.screenId) {
+          updateMessages(prev =>
+            prev.map(msg =>
+              msg.id === botMessageId ? { ...msg, uiFlows: mergeUiFlows(msg.uiFlows, flow) } : msg,
             ),
           );
         }
@@ -2116,7 +2149,9 @@ class XyneAIStreamManager {
       if (closed) return;
       switch (type) {
         case 'snapshot': {
-          const partial = data['partial'] as { content?: string; reasoning?: string } | undefined;
+          const partial = data['partial'] as
+            | { msgId?: string; content?: string; reasoning?: string }
+            | undefined;
           const inProgress = (data['inProgress'] as ToolInvocation[] | undefined) ?? [];
           if (!started) {
             if (!partial && inProgress.length === 0) {
@@ -2161,6 +2196,22 @@ class XyneAIStreamManager {
           for (const inv of inProgress) {
             this.processStreamEvent(
               { type: 'tool_invocation', toolInvocation: inv },
+              botMessageId,
+              '',
+              [],
+              streamId,
+              threadId,
+            );
+          }
+          // Only the still-running message's cards need replaying onto the
+          // placeholder; completed ones ride in the fetched transcript.
+          const uiFlowsByMsgId = data['uiFlowsByMsgId'] as
+            | Record<string, FlowDefinition[]>
+            | undefined;
+          const runningFlows = partial?.msgId ? uiFlowsByMsgId?.[partial.msgId] : undefined;
+          for (const flow of runningFlows ?? []) {
+            this.processStreamEvent(
+              { type: 'ui_flow', flow },
               botMessageId,
               '',
               [],
@@ -2230,6 +2281,21 @@ class XyneAIStreamManager {
             streamId,
             threadId,
           );
+          break;
+        }
+
+        case 'ui-flow': {
+          if (!started) ensureViewerStream();
+          const flow = data['flow'];
+          if (flow)
+            this.processStreamEvent(
+              { type: 'ui_flow', flow },
+              botMessageId,
+              '',
+              [],
+              streamId,
+              threadId,
+            );
           break;
         }
 

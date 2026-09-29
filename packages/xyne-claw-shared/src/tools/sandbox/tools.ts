@@ -3,11 +3,12 @@ import type { Session } from "@xyne/kata-sdk";
 import type { ToolDefinition, ToolExecutionContext } from "../types.js";
 import { SDLC_META_KEYS } from "../../sdlc/meta.js";
 import { redactSecrets, redactAndStringify } from "./redact.js";
-import { rotateTemplate, isSameTemplateFamily } from "./template-rotation.js";
+import { rotateTemplate, isSameTemplateFamily, rotatedTemplateNames } from "./template-rotation.js";
 import { formatSandboxUnavailable, isSandboxUnavailableDeferEnabled } from "./unavailable-signal.js";
 import { createLogger } from "../../logger.js";
 import { createReadStream } from "node:fs";
 import { resolve, join, sep } from "node:path";
+import { hasRange, sliceLines } from "./read-range.js";
 import {
   cleanupSdlcGitCredentialMaterial,
   installSdlcRepositoryAccess,
@@ -645,6 +646,18 @@ async function pinnedTemplateForContext(context: ToolExecutionContext): Promise<
   return REPO_CONFIGS[pinnedRepo]?.template;
 }
 
+/** An unknown template name from the LLM falls back to the agent's or default template instead of failing the claim. */
+async function knownTemplate(value: unknown): Promise<string | undefined> {
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  const { REPO_CONFIGS } = await import("./repo-configs.js");
+  const known = new Set([
+    "kata-workspace-template",
+    ...Object.values(REPO_CONFIGS).map((config) => config.template),
+    ...rotatedTemplateNames(),
+  ]);
+  return known.has(value.trim()) ? value.trim() : undefined;
+}
+
 /**
  * Create a persistent sandbox session. Returns a sessionId for follow-up tool calls.
  */
@@ -690,7 +703,7 @@ export const sandboxCreate: ToolDefinition = {
     // A UI-pinned sandbox repo wins over whatever template the LLM passed —
     // a pinned agent must always get its own sandbox, never the legacy kata one.
     const pinnedTemplate = await pinnedTemplateForContext(context);
-    const requestedTemplate = pinnedTemplate ?? (params["template"] as string | undefined);
+    const requestedTemplate = pinnedTemplate ?? (await knownTemplate(params["template"]));
     // ROTATE, exactly as the repo-setup path does. Without this, every
     // sandbox-create on a pinned agent clones the BASE template's single
     // snapshot: pinnedTemplateForContext returns REPO_CONFIGS[repo].template,
@@ -1257,12 +1270,83 @@ export const sandboxCopyIn: ToolDefinition = {
   },
 };
 
+/**
+ * Extension → content type for files leaving the sandbox.
+ *
+ * This LABELS, it never gates: `sandbox-deliver-files` sends whatever the agent
+ * produced, and Spaces' upload filter is extension-primary (see
+ * apps/backend/src/middleware/upload.ts — MIME is consulted only for the
+ * executable block-list). But the label is what GCS stores as the object's
+ * content type and what every consumer reads, so an unmapped extension used to
+ * mean a real .xlsx / .docx / .pptx arrived as `application/octet-stream`:
+ * downloads with the wrong type, no inline preview, and the wrong app on open.
+ *
+ * Deliberately wider than "binary" now — a delivered .py or .json is just as
+ * much a deliverable as a PDF. Kept in step with ALLOWED_UPLOAD_EXTENSIONS in
+ * apps/backend/src/middleware/upload.ts so nothing is labelled that Spaces
+ * would then refuse. `sandbox-read-file` still decides text-vs-binary by
+ * null-byte sniffing, NOT by membership here, so adding text types does not
+ * turn a readable file into a base64 blob.
+ */
 const BINARY_MIME: Record<string, string> = {
+  // images
   png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg",
   gif: "image/gif", webp: "image/webp", svg: "image/svg+xml",
-  mp4: "video/mp4",
-  pdf: "application/pdf", zip: "application/zip",
+  bmp: "image/bmp", tiff: "image/tiff", tif: "image/tiff",
+  ico: "image/x-icon", avif: "image/avif", heic: "image/heic",
+  // video / audio
+  mp4: "video/mp4", mov: "video/quicktime", webm: "video/webm", avi: "video/x-msvideo",
+  mp3: "audio/mpeg", wav: "audio/wav", m4a: "audio/mp4", ogg: "audio/ogg",
+  // documents
+  pdf: "application/pdf",
+  doc: "application/msword",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  xls: "application/vnd.ms-excel",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  xlsm: "application/vnd.ms-excel.sheet.macroEnabled.12",
+  ppt: "application/vnd.ms-powerpoint",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  odt: "application/vnd.oasis.opendocument.text",
+  ods: "application/vnd.oasis.opendocument.spreadsheet",
+  odp: "application/vnd.oasis.opendocument.presentation",
+  rtf: "application/rtf",
+  // text / data
+  txt: "text/plain", md: "text/markdown", log: "text/plain",
+  csv: "text/csv", tsv: "text/tab-separated-values",
+  json: "application/json", jsonl: "application/x-ndjson",
+  xml: "application/xml", yaml: "application/yaml", yml: "application/yaml",
+  toml: "application/toml", ini: "text/plain", conf: "text/plain",
+  sql: "application/sql", har: "application/json",
+  html: "text/html", htm: "text/html",
+  // source / dev
+  ts: "text/x-typescript", tsx: "text/x-typescript",
+  js: "text/javascript", mjs: "text/javascript", cjs: "text/javascript",
+  jsx: "text/jsx",
+  py: "text/x-python", sh: "application/x-sh", bash: "application/x-sh",
+  java: "text/x-java-source", go: "text/x-go", rs: "text/x-rust", rb: "text/x-ruby",
+  c: "text/x-c", h: "text/x-c", cpp: "text/x-c++", hpp: "text/x-c++",
+  patch: "text/x-patch", diff: "text/x-patch",
+  ipynb: "application/x-ipynb+json",
+  // archives
+  zip: "application/zip", tar: "application/x-tar", gz: "application/gzip",
+  tgz: "application/gzip", bz2: "application/x-bzip2", xz: "application/x-xz",
+  "7z": "application/x-7z-compressed", rar: "application/vnd.rar",
+  // fonts / misc with real traffic
+  ttf: "font/ttf", otf: "font/otf", stl: "model/stl",
 };
+
+/**
+ * Content type for a file leaving the sandbox, by extension.
+ *
+ * Shared by `sandbox-read-file`'s INSPECT marker and `sandbox-deliver-files`'
+ * ATTACHMENT marker so the two cannot disagree about the same file. Unknown
+ * extensions stay `application/octet-stream`: a wrong specific type is worse
+ * than an honest generic one, and nothing downstream gates on it.
+ */
+export function sandboxContentType(fileName: string): string {
+  const ext = fileName.includes(".") ? fileName.split(".").pop()!.toLowerCase() : "";
+  return BINARY_MIME[ext] ?? "application/octet-stream";
+}
 
 /**
  * Read a file from the sandbox.
@@ -1277,7 +1361,8 @@ export const sandboxReadFile: ToolDefinition = {
   name: "Sandbox Read File",
   description:
     "Read a file from a sandbox session. " +
-    "Text files are returned inline. Binary files (images, PDFs, etc.) are loaded into your context for self-inspection ONLY — the user does NOT see them. " +
+    "Text files are returned inline with totalLines; for a large file pass offset (1-based first line) and limit (number of lines) to read just the part you need. " +
+    "Binary files (images, PDFs, etc.) are loaded into your context for self-inspection ONLY — the user does NOT see them. " +
     "If you want to actually send files to the user, call `sandbox-deliver-files` (it accepts multiple paths in one call).",
   source: "custom:sandbox",
   configSchema: SANDBOX_CONFIG_SCHEMA,
@@ -1291,6 +1376,14 @@ export const sandboxReadFile: ToolDefinition = {
       path: {
         type: "string",
         description: "Absolute path inside the sandbox to read",
+      },
+      offset: {
+        type: "number",
+        description: "Optional 1-based line number to start reading from (text files only).",
+      },
+      limit: {
+        type: "number",
+        description: "Optional maximum number of lines to return (text files only).",
       },
     },
     required: ["sessionId", "path"],
@@ -1320,11 +1413,13 @@ export const sandboxReadFile: ToolDefinition = {
         // redactor exists — defence-in-depth against accidental / unsophisticated
         // leaks; ephemeral creds are the real fix against determined attackers.
         const content = redactSecrets(buf.toString("utf8"));
-        return JSON.stringify({ path, content, encoding: "utf8" });
+        if (hasRange(params["offset"], params["limit"])) {
+          return JSON.stringify({ path, ...sliceLines(content, params["offset"], params["limit"]), encoding: "utf8" });
+        }
+        return JSON.stringify({ path, content, encoding: "utf8", totalLines: content.split("\n").length });
       }
       const fileName = path.split("/").pop() ?? "file";
-      const ext = fileName.includes(".") ? fileName.split(".").pop()!.toLowerCase() : "";
-      const mimeType = BINARY_MIME[ext] ?? "application/octet-stream";
+      const mimeType = sandboxContentType(fileName);
       // INSPECT marker (not ATTACHMENT) — xyne-claw routes the bytes into the
       // agent's tool-result content for visual self-check but does NOT push
       // to user-facing attachments. This stops the "agent took 12 screenshots
@@ -1351,8 +1446,12 @@ export const sandboxDeliverFiles: ToolDefinition = {
   slug: "sandbox-deliver-files",
   name: "Sandbox Deliver Files",
   description:
-    "Send one or more files from the sandbox to the user as message attachments. " +
-    "Pass the exact paths you want delivered. Use this after inspecting screenshots/PDFs via `sandbox-read-file` to send the relevant subset — the user does NOT see anything you only `sandbox-read-file`.",
+    "THE way to give the user a file built in the server sandbox — any type (PDF, xlsx, pptx, docx, csv, " +
+    "json, source, archives, images). Pass the exact absolute paths; order is preserved.\n\n" +
+    "Nothing you write, run or read in the sandbox reaches the user until this call: `sandbox-read-file` on a " +
+    "binary is self-inspection ONLY. Generate → read-file to verify → deliver-files the subset worth sending.\n\n" +
+    "Sibling tools for files that are NOT in the sandbox: `deliver-files` (local harness workspace) and " +
+    "`send-attachment` (bytes you already hold in this turn).",
   source: "custom:sandbox",
   configSchema: SANDBOX_CONFIG_SCHEMA,
   inputSchema: {
@@ -1397,8 +1496,7 @@ export const sandboxDeliverFiles: ToolDefinition = {
         const buf = await session.files.read(p);
         const fileName = p.split("/").pop() ?? "file";
         deliveredNames.push(fileName);
-        const ext = fileName.includes(".") ? fileName.split(".").pop()!.toLowerCase() : "";
-        const mimeType = BINARY_MIME[ext] ?? "application/octet-stream";
+        const mimeType = sandboxContentType(fileName);
         blocks.push(`[ATTACHMENT:${fileName}:${mimeType}]\n${buf.toString("base64")}`);
       } catch (err) {
         if (isStaleSessionError(err)) {

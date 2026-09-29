@@ -25,6 +25,7 @@ import { runWithSubagentMcpId } from "./subagent-mcp-context.js";
 import { ensureSessionDebugDir, sessionDir } from "./session-store.js";
 import { SUBAGENT_DEFINITIONS, findSubagentDefinitionForServer, isPresentationToolSource, getSandboxSession, probeSession, REPO_CONFIGS, buildSandboxStoreKey, type SubagentDefinition, type SetupStep } from "xyne-claw-shared";
 import { acquireFollowUpLock, isValidFollowUpHandle } from "./subagent-followup.js";
+import { matchesDirectPick } from "./tool-resolution.js";
 import { optEnabled } from "./optimizations.js";
 import type { McpToolGroup } from "./mcp.js";
 import { resolveModel, applyCopilotProxyIfNeeded, capCustomToolOutput, pushDebugProgress, pushInvocation, type CopilotConfig, type ClaudeConfig, type CodexConfig, type DebugEventRecord, type ProgressDest, type ToolInvocation } from "./agent.js";
@@ -54,6 +55,8 @@ import type { ClawStreamMeta } from "xyne-claw-shared";
 import { takeCitations, recordCitations } from "./citations.js";
 import { writeSessionSkills, deleteSessionSkills } from "./session-skills.js";
 import { installLlmCallMetrics } from "./llm-call-metrics.js";
+import { installStreamModelFallback } from "./stream-model-fallback.js";
+import { pickSubagentLitellmModel } from "./subagent-model-split.js";
 import { installToolBudget, type ToolBudgetTracker } from "./tool-budget.js";
 import { metric } from "./metrics.js";
 import { track, type ChildTaskRegistry } from "./child-tasks.js";
@@ -787,8 +790,16 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
         envelope: { parentToolCallId: _toolCallId, subagentName: def.name, childRunId },
       });
       const childStartedIso = new Date(execStartedAt).toISOString();
+      const litellmPick = resolvedProvider
+        ? undefined
+        : pickSubagentLitellmModel({
+            key: progressCtx?.parentSessionId,
+            fastModel: LITELLM.subagentFastModel,
+            standardModel: LITELLM.model,
+            fastPercent: LITELLM.subagentFastModelPercent,
+          });
       const childProvider = resolvedProvider?.provider ?? "litellm";
-      const childModelId = resolvedProvider?.config.model ?? "shared";
+      const childModelId = resolvedProvider?.config.model ?? litellmPick?.model ?? LITELLM.model;
       const childTokenUsage: TokenUsage = emptyTokenUsage();
       let childTurns = 0;
       let childToolMs = 0;
@@ -997,17 +1008,16 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
 
         // Apply copilot proxy (no-op for other providers) then register model via the same helper the parent uses
         const effectiveConfig = await applyCopilotProxyIfNeeded(resolvedProvider?.provider, resolvedProvider?.config);
-        // fast-model is EXPLICIT opt-in (no faster grid model exists yet —
-        // fast-mode-plan.md Slice A deferred 2026-07-15). Default/undefined/
-        // "spaces" all keep today's LITELLM.model routing.
-        const litellmFallbackModel =
-          providerResolution?.subagentProviderMode === "fast-model"
-            ? LITELLM.fastModel
-            : LITELLM.model;
+        const useFastModel = litellmPick?.arm === "fast";
+        const litellmFallbackModel = litellmPick?.model ?? LITELLM.model;
         const model = resolveModel(modelRegistry, resolvedProvider?.provider, effectiveConfig, {
           model: resolvedProvider ? undefined : litellmFallbackModel,
         });
-        log.info(`[${def.name}] Using provider=${resolvedProvider?.provider ?? "litellm"} model=${resolvedProvider?.config.model ?? litellmFallbackModel}`);
+        const slowModelFallback =
+          useFastModel && litellmFallbackModel !== LITELLM.model
+            ? resolveModel(ModelRegistry.create(AuthStorage.create()), undefined, undefined, { model: LITELLM.model })
+            : undefined;
+        log.info(`[${def.name}] Using provider=${resolvedProvider?.provider ?? "litellm"} model=${resolvedProvider?.config.model ?? litellmFallbackModel}${litellmPick ? ` arm=${litellmPick.arm}` : ""}`);
 
         // Materialize skills onto disk so the child session loads them as
         // proper pi resources (same path the parent takes in agent.ts),
@@ -1146,6 +1156,12 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
         });
         sessionRef = session;
         installLlmCallMetrics(session.agent, parentSessionId ?? `subagent-${def.name}`);
+        if (slowModelFallback) {
+          installStreamModelFallback(session.agent, model, slowModelFallback, {
+            label: def.name,
+            onFallback: (reason) => pushDebugEvent("model_fallback", { from: model.id, to: slowModelFallback.id, reason }),
+          });
+        }
         toolBudget = installToolBudget(session.agent, {
           sessionId: parentSessionId ?? `subagent-${def.name}`,
           budgetScale: 0.5,
@@ -1693,18 +1709,17 @@ function resolveCustomSubagentTools(
   groups: McpToolGroup[],
   customTools: ToolDefinition[] | undefined,
 ): ToolDefinition[] {
-  const directNames = new Set(toolsConfig.direct ?? []);
+  const directPicks = toolsConfig.direct ?? [];
   const customSlugs = new Set(toolsConfig.custom ?? []);
   const out: ToolDefinition[] = [];
 
-  if (directNames.size > 0) {
+  if (directPicks.length > 0) {
     for (const group of groups) {
       for (const t of group.tools) {
-        const name = extractToolName(t);
         // Include write tools too. Their ToolDefinition still queues a signed
         // pendingAction via the parent run's MCP wrapper; it does not execute
         // until the human approval card is approved in claw-auth.
-        if (directNames.has(name)) out.push(t);
+        if (matchesDirectPick(t, directPicks)) out.push(t);
       }
     }
   }
@@ -1718,6 +1733,11 @@ function resolveCustomSubagentTools(
     }
   }
   return out;
+}
+
+export function withoutBuiltinSubagents(tools: ToolDefinition[]): ToolDefinition[] {
+  const builtin = new Set(SUBAGENT_DEFINITIONS.map((d) => d.name));
+  return tools.filter((tool) => !builtin.has(tool.name));
 }
 
 /**
@@ -1760,9 +1780,9 @@ export function buildSubagentTools(
   const subagentTools: ToolDefinition[] = [];
   const directTools: ToolDefinition[] = [];
 
-  const isDirectPick = (toolName: string): boolean => {
+  const isDirectPick = (tool: ToolDefinition): boolean => {
     if (!directPickSuffixes || directPickSuffixes.length === 0) return false;
-    return directPickSuffixes.some((s) => toolName.endsWith(s));
+    return matchesDirectPick(tool, directPickSuffixes);
   };
 
   for (const group of groups) {
@@ -1788,7 +1808,7 @@ export function buildSubagentTools(
         // without going through the `bitbucket` subagent. Picked-as-direct +
         // picked-as-subagent both work; the parent-level filter in run.ts
         // decides which path actually surfaces to the model.
-        const hoisted = group.tools.filter((t) => isDirectPick(t.name));
+        const hoisted = group.tools.filter((t) => isDirectPick(t));
         if (hoisted.length > 0) directTools.push(...hoisted);
       }
       // Writes live in the subagent wrapper above and still queue a signed
@@ -1854,7 +1874,7 @@ export function buildSubagentTools(
         // check that bitbucket/spaces direct picks use — one config knob,
         // one mental model. The tool stays accessible inside the subagent
         // wrapper too.
-        const hoisted = filteredTools.filter((t) => isDirectPick(t.name));
+        const hoisted = filteredTools.filter((t) => isDirectPick(t));
         if (hoisted.length > 0) directTools.push(...hoisted);
         // Backwards compatibility for existing prompts that expect custom write
         // tools to be parent-level approval tools.

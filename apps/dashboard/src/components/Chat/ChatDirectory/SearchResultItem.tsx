@@ -474,6 +474,13 @@ const SearchResultItem = ({
                     {utcToIst(result.metadata.timestamp)}
                   </span>
                 </div>
+                {/* Line 4: assignee of the linked desk ticket, when one is set.
+                    Same muted style as the sender/channel line above. */}
+                {result.searchContext?.assigneeName && (
+                  <div className='text-xs text-muted-foreground truncate'>
+                    {`Assigned to ${result.searchContext.assigneeName}`}
+                  </div>
+                )}
               </div>
               {!mergeMode && isSelected && <SelectedBadge />}
             </div>

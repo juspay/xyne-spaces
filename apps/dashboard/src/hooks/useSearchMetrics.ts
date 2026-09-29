@@ -1,5 +1,5 @@
 import { logger, Event as LogEvent } from '../utils/logger';
-import { useState, useCallback, useRef, useEffect, useMemo, useDeferredValue } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { searchMetricsService } from '../services/searchMetricsService';
 import { useAuthContextValues } from './useAuth';
 import { searchService, clearVespaSearchCache } from '../services/searchService';
@@ -18,10 +18,10 @@ import {
 } from '../components/Chat/ChatDirectory/ChannelCommandMenu.types';
 import { User } from '../machines/stateMachine';
 import { Channel } from '@xyne/shared';
-import { useUserSearch } from './useUsers';
+import { useWorkerUserSearch } from './useWorkerUserSearch';
+import { useWorkerChannelSearch } from './useWorkerChannelSearch';
 import type { MentionHighlightsBuilder } from '../search/mentionHighlights';
 import { ChannelCategory } from '../components/Chat/ChatDirectory/ChatDirectory.types';
-import { filterChannelsBySearchableNames } from '../utils/rankingUtils';
 import {
   parseSearchFilters,
   parseTypeFilter,
@@ -99,6 +99,10 @@ interface UseSearchMetricsOptions {
   // Initial value for the "Include my channels" toggle. Defaults to false so the
   // full-page search is unaffected; the Cmd-K modal opts in with `true`.
   defaultOnlyMyChannels?: boolean;
+  // When true, the backend drops results resolving to an archived ticket. cmd+k passes
+  // `true` (always hide archived); the full-page Desk tab supplies it from its
+  // "Show archived" toggle. Other consumers default OFF, so their behavior is unchanged.
+  defaultExcludeArchived?: boolean;
   // Initial value for the "Include automations" toggle. Set when reopening the palette
   // from a search whose scope had it on, so the restored search matches what was run.
   defaultIncludeBotMessages?: boolean;
@@ -114,7 +118,11 @@ interface UseSearchMetricsOptions {
   // search/mentionHighlights). Injected by the surfaces that highlight results (full-screen +
   // cmd+K) so this hook stays decoupled from user/group data; when absent, the chip's name is used.
   buildMentionHighlights?: MentionHighlightsBuilder;
+  // Cmd-K only: skip the people/channel search on tabs that don't show those results.
+  searchLocalOnlyOnShownTabs?: boolean;
 }
+
+const NO_CHANNELS: NonNullable<UseSearchMetricsOptions['allChannels']> = [];
 
 const BACKEND_RESULTS_LIMIT = 25;
 const INTENT_DEBOUNCE_MS = 300;
@@ -261,6 +269,9 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
   // Cmd-K "Include my channels" toggle. Modal opts in via `defaultOnlyMyChannels`;
   // other consumers (full-page search) default OFF so their behavior is unchanged.
   const [onlyMyChannels, setOnlyMyChannels] = useState(options.defaultOnlyMyChannels ?? false);
+  // When on, the backend hides results tied to an archived ticket. cmd+k sets this true;
+  // the full-page Desk tab drives it from its "Show archived" toggle. Off elsewhere.
+  const [excludeArchived, setExcludeArchived] = useState(options.defaultExcludeArchived ?? false);
   // Exact-match mode. Not derived from the query text: the quotes are added when the
   // request is built, so the box stays clean.
   const [exactMatch, setExactMatch] = useState(false);
@@ -276,25 +287,18 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
   // Load More Ref
   const loadMoreRef = useRef<HTMLDivElement>(null);
 
-  // Filter local users using the search hook - use cleaned searchText
-  const filteredLocalUsers = useUserSearch(cleanedSearchText, CMDK_USER_LIMIT);
+  const shownOnTab = (tabs: TabType[]): boolean =>
+    !options.searchLocalOnlyOnShownTabs || tabs.includes(activeTab);
+  const peopleQuery = shownOnTab([TabType.ALL, TabType.USERS]) ? cleanedSearchText : '';
+  const channelQuery = shownOnTab([TabType.ALL, TabType.CHANNELS]) ? cleanedSearchText : '';
 
-  // Decouple the (potentially expensive) local channel filter from the keystroke
-  // that triggered it. The input value is bound to `text`, so it always echoes
-  // instantly; deferring the value fed to the filter lets React keep the input
-  // responsive and render the previous channel results until the new filter pass
-  // is ready, instead of blocking each keystroke on the full DM Fuse pass.
-  const deferredCleanedSearchText = useDeferredValue(cleanedSearchText);
-
-  // Filter local channels - use the deferred cleaned searchText
+  // Fuzzy matching runs in web workers so typing stays responsive in large workspaces.
+  const filteredLocalUsers = useWorkerUserSearch(peopleQuery, CMDK_USER_LIMIT);
   const filteredLocalChannels: Array<{
     channel: Channel;
     category: ChannelCategory;
     searchableNames?: string[];
-  }> = useMemo(
-    () => filterChannelsBySearchableNames(options.allChannels ?? [], deferredCleanedSearchText),
-    [options.allChannels, deferredCleanedSearchText],
-  );
+  }> = useWorkerChannelSearch(options.allChannels ?? NO_CHANNELS, channelQuery);
 
   const [currentSearchContext, setCurrentSearchContext] = useState<{
     query: string;
@@ -827,6 +831,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     // Clear the dedup guard's text so reopening the palette and re-entering the same query
     // (notably a paste of the last search) isn't skipped as a duplicate and re-runs the search.
     lastSearchedParamsRef.current.text = '';
+    lastSearchedParamsRef.current.mentionsKey = '';
     // Re-arm the loader latch: after a clear/close, re-entering a query must show the
     // spinner again rather than a stale "No results".
     setIsSearchPending(false);
@@ -996,6 +1001,10 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
               filterOnly: !searchText && !!hasFilters,
               includeBotMessages,
               onlyMyChannels,
+              // The Desk and Tickets tabs hide archived tickets; every other tab (All,
+              // Messages, …) shows them, in both cmd+k and full-page search.
+              excludeArchived:
+                excludeArchived && (activeTab === TabType.DESK || activeTab === TabType.TICKETS),
               exactMatch,
               ...(effectiveRankProfile && { rankProfile: effectiveRankProfile }),
               ...(includeDebugInfo && { includeDebugInfo: true }),
@@ -1323,6 +1332,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       options.isCallSearchPage,
       includeBotMessages,
       onlyMyChannels,
+      excludeArchived,
       exactMatch,
       rankProfile,
       allDefaultRankProfile,
@@ -1340,6 +1350,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     mentionsKey: string;
     includeBotMessages: boolean;
     onlyMyChannels: boolean;
+    excludeArchived: boolean;
     exactMatch: boolean;
     rankProfile: string;
     allDefaultRankProfile: string;
@@ -1352,6 +1363,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     mentionsKey: '',
     includeBotMessages: false,
     onlyMyChannels: options.defaultOnlyMyChannels ?? false,
+    excludeArchived: options.defaultExcludeArchived ?? false,
     exactMatch: false,
     rankProfile: '',
     allDefaultRankProfile,
@@ -1388,13 +1400,13 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       activeTab === lastSearchedParamsRef.current.activeTab &&
       includeBotMessages === lastSearchedParamsRef.current.includeBotMessages &&
       onlyMyChannels === lastSearchedParamsRef.current.onlyMyChannels &&
+      excludeArchived === lastSearchedParamsRef.current.excludeArchived &&
       currentMentionsKey === lastSearchedParamsRef.current.mentionsKey &&
       rankProfile === lastSearchedParamsRef.current.rankProfile &&
       allDefaultRankProfile === lastSearchedParamsRef.current.allDefaultRankProfile &&
       flatAllRankProfilesKey === lastSearchedParamsRef.current.flatAllRankProfilesKey &&
       includeDebugInfo === lastSearchedParamsRef.current.includeDebugInfo &&
-      structuredFiltersKey === lastSearchedParamsRef.current.structuredFiltersKey &&
-      normalizedText !== ''
+      structuredFiltersKey === lastSearchedParamsRef.current.structuredFiltersKey
     ) {
       // Terminal exit with no dispatch — no performSearch().finally runs to disarm the loader.
       // Reconcile to the real in-flight state so a cancelled arm can't strand the spinner true.
@@ -1411,6 +1423,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         activeTab,
         includeBotMessages,
         onlyMyChannels,
+        excludeArchived,
         exactMatch,
         rankProfile,
         allDefaultRankProfile,
@@ -1456,6 +1469,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     performSearch,
     includeBotMessages,
     onlyMyChannels,
+    excludeArchived,
     exactMatch,
     rankProfile,
     allDefaultRankProfile,
@@ -1568,6 +1582,9 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
           filterOnly: !searchText && !!hasFilters,
           includeBotMessages,
           onlyMyChannels,
+          // The Desk and Tickets tabs hide archived tickets; every other tab shows them.
+          excludeArchived:
+            excludeArchived && (activeTab === TabType.DESK || activeTab === TabType.TICKETS),
           exactMatch,
           ...(effectiveRankProfile && { rankProfile: effectiveRankProfile }),
           ...(includeDebugInfo && { includeDebugInfo: true }),
@@ -1734,6 +1751,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     selectedMentions,
     includeBotMessages,
     onlyMyChannels,
+    excludeArchived,
     exactMatch,
     rankProfile,
     allDefaultRankProfile,
@@ -1839,6 +1857,8 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     setIncludeBotMessages,
     onlyMyChannels,
     setOnlyMyChannels,
+    excludeArchived,
+    setExcludeArchived,
     exactMatch,
     setExactMatch,
     rankProfile,

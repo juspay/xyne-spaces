@@ -11,7 +11,7 @@ import {
   Share01,
   ThreeDotsMenuHorizontal,
 } from '@xyne/icons';
-import { AudioLines } from 'lucide-react';
+import { AudioLines, LogOut } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '../../../components/ui/Button/Button';
 import Avatar from '../../../components/ui/Avatar/Avatar';
@@ -26,6 +26,7 @@ import {
   patchOatsRecordingLabels,
   type OatsRecordingEntry,
 } from '../../../hooks/usePaginatedOatsRecordings';
+import { useRecordingListAccessLevel } from '../../../hooks/useRecordingAccessLevel';
 import {
   recordingService,
   type RecordingDetail,
@@ -64,6 +65,8 @@ export interface RecordingsV2PillProps {
     | 'createdByUserId'
     | 'labels'
     | 'channelId'
+    | 'visibility'
+    | 'shares'
   >;
   creator: User | null;
   participantsLabel: string;
@@ -73,9 +76,10 @@ export interface RecordingsV2PillProps {
   pendingLabelCount?: number;
   /** Resolves a tag value (Tag id) to its display text. Defaults to identity. */
   resolveLabel?: (label: string) => string;
-  currentUserId?: string | undefined;
   onOpen: (recordingId: string) => void;
   onShare: (recording: RecordingsV2PillProps['recording']) => void;
+  /** Give up your own access. Only offered to non-owners. */
+  onLeave: (recording: RecordingsV2PillProps['recording']) => void;
   onDelete: (recording: RecordingsV2PillProps['recording']) => void;
 }
 
@@ -167,16 +171,16 @@ const RecordingsV2Pill = ({
   suggestedTags = [],
   pendingLabelCount = 0,
   resolveLabel = (label: string) => label,
-  currentUserId,
   onOpen,
   onShare,
+  onLeave,
   onDelete,
 }: RecordingsV2PillProps): ReactElement => {
   const titleState = useRecordingTitleState(toRecordingTitleInput(recording));
   const durationMs = recording.endedAt
     ? Math.max(0, recording.endedAt - recording.startedAt)
     : null;
-  const isOwner = currentUserId !== undefined && currentUserId === recording.createdByUserId;
+  const { isOwner, canEdit, canLeave } = useRecordingListAccessLevel(recording);
   const visibleTags = normalizeRecordingTags(tags);
   const visibleSuggestedTags = isOwner ? normalizeRecordingTags(suggestedTags) : [];
 
@@ -383,7 +387,7 @@ const RecordingsV2Pill = ({
                 className='w-48 rounded-xl'
                 onClick={event => event.stopPropagation()}
               >
-                {isOwner && (
+                {canEdit && (
                   <DropdownMenuItem
                     className='gap-2 rounded-lg'
                     onClick={() => onShare(recording)}
@@ -414,6 +418,20 @@ const RecordingsV2Pill = ({
                   <MusicQuaverNote size={16} className='shrink-0' />
                   <span className='flex-1'>Download recording</span>
                 </DropdownMenuItem>
+                {canLeave && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      className='gap-2 text-destructive focus:text-destructive rounded-lg'
+                      onClick={() => onLeave(recording)}
+                      data-track-category='RecordingsV2'
+                      data-track-name='leave_recording'
+                    >
+                      <LogOut size={16} className='shrink-0' />
+                      <span className='flex-1'>Leave recording</span>
+                    </DropdownMenuItem>
+                  </>
+                )}
                 {isOwner && (
                   <>
                     <DropdownMenuSeparator />

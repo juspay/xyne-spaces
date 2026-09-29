@@ -12,6 +12,7 @@ import { MessageMetadata } from './MessageBubble.utils';
 import { QueryResultType } from '@rocicorp/zero';
 import { queries } from '../../../zero/queries';
 import { xyneAIActor } from '../../../machines/xyneAIMachine';
+import { useAskAIAvailable } from '../../../contexts/AskAIAvailabilityContext';
 import { ENABLE_SUMMARY_ACTION_BUTTON } from '../../../config';
 import { useSpeakerIdentificationEnabled } from '../../SpeakerIdentification/useSpeakerIdentificationEnabled';
 
@@ -203,6 +204,7 @@ export const CallBubble: React.FC<CallBubbleProps> = ({
 }) => {
   const metadata = message.metadata;
   const speakerIdentificationEnabled = useSpeakerIdentificationEnabled();
+  const askAIAvailable = useAskAIAvailable();
 
   // For headless recordings: show only the identified transcript (fall back to plain transcript
   // if identified is absent). For regular calls: hide the identified transcript attachment.
@@ -303,12 +305,14 @@ export const CallBubble: React.FC<CallBubbleProps> = ({
                                   isCanvasCreated={!!metadata?.detailedSummaryCanvasUrl}
                                 />
                               )}
-                              <ChatWithAskAIButton
-                                channelId={channelId}
-                                conversationId={conversationId}
-                                metadata={metadata}
-                                attachments={attachments}
-                              />
+                              {askAIAvailable && (
+                                <ChatWithAskAIButton
+                                  channelId={channelId}
+                                  conversationId={conversationId}
+                                  metadata={metadata}
+                                  attachments={attachments}
+                                />
+                              )}
                               {recordingAttachment && (
                                 <AudioPlayer
                                   onLoad={signal =>

@@ -25,7 +25,7 @@ DEFAULT_PROXY_TIMEOUT = 180.0
 # headers on a navigation). Header mode below is unchanged — Playwright/MCP
 # keeps using --cdp-header X-Sandbox-* exactly as before.
 CLAW_PREVIEW_PREFIX = "/claw-preview/"
-CLAW_PREVIEW_NAMESPACE = "xyne-apps"
+CLAW_PREVIEW_NAMESPACE = os.environ.get("CLAW_PREVIEW_NAMESPACE", "xyne-apps")
 CLAW_PREVIEW_DEFAULT_PORT = 6080
 
 

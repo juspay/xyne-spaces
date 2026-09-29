@@ -90,6 +90,7 @@ import {
 import { DatePicker } from '../../ui/DatePicker/DatePicker';
 import { TextShimmer } from '../../ui/ShimmerText';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
 import type { BoardMetadata } from '../../Board/BoardTicketFormConfig';
 import { isReleaseBoard, isMainReleaseBoard } from '../../../utils/boardUtils';
 import { useDraftAttachments } from '../../../hooks/useDraft';
@@ -753,8 +754,13 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
 
   // Project-level tags — lazy-loaded when the label dropdown is first opened
   const [tagsQueried, setTagsQueried] = useState(false);
+  const [tagSearch, setTagSearch] = useState('');
+  const debouncedTagSearch = useDebouncedValue(tagSearch.trim(), 200);
   const [projectTags] = useCachedQuery(
-    queries.projectTagsByProjectId({ projectId: selectedBoard?.projectId ?? '' }),
+    queries.projectTagsByProjectId({
+      projectId: selectedBoard?.projectId ?? '',
+      search: debouncedTagSearch,
+    }),
     { enabled: tagsQueried && !!selectedBoard?.projectId },
   );
 
@@ -2959,8 +2965,10 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                       setNewTags(prev => [...prev, value]);
                       field.handleChange([...field.state.value, value]);
                     }}
+                    onSearchChange={setTagSearch}
                     onOpenChange={open => {
                       if (open && !tagsQueried) setTagsQueried(true);
+                      if (!open) setTagSearch('');
                     }}
                     placeholder={`Label${mandatoryLabels ? ' *' : ''}`}
                     searchPlaceholder='Search labels'

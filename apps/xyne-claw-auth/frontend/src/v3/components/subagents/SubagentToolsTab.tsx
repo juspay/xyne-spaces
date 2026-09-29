@@ -11,8 +11,11 @@
  *   - MCP Server Tools      backend `availableTools.serverTools`, a record of
  *                           `source → [{slug, name}]`. We exclude any name
  *                           that's already a write tool so a tool only shows
- *                           up in one place. Selection is by name, also into
- *                           `tools.direct[]`.
+ *                           up in one place. Selection is by the SERVER-SCOPED
+ *                           key (`<serverType>__<toolName>`, see
+ *                           lib/toolSelectionKeys.ts) into `tools.direct[]` —
+ *                           a bare name is ambiguous, since `xyne-spaces` and
+ *                           `xyne-spaces-app-tools` publish 47 identical names.
  *   - System Tools          backend `availableTools.customGroups`, an array of
  *                           `{source, tools: [{slug, name}]}`. Selection is by
  *                           *slug* (not name — custom names aren't globally
@@ -27,6 +30,7 @@
 import { useMemo } from "react";
 import { CaretRightIcon } from "@phosphor-icons/react";
 import type { AvailableTools, SubagentDef } from "../../../lib/api";
+import { expandLegacyDirect, mcpSelectionKey } from "../../lib/toolSelectionKeys";
 
 interface SubagentToolsTabProps {
   subagent: SubagentDef;
@@ -182,6 +186,33 @@ export function SubagentToolsTab({
   const toggleDirect = (name: string) => {
     onDraftDirectToolsChange(formatSelection(toggleInSet(directSet, name)));
   };
+
+  /** Non-gateway catalog pairs, for rewriting legacy bare-name entries. */
+  const mcpPairs = useMemo(
+    () =>
+      Object.entries(availableTools?.serverTools ?? {}).filter(
+        ([source]) => !source.startsWith("custom:"),
+      ) as ReadonlyArray<readonly [string, ReadonlyArray<{ slug: string; name: string }>]>,
+    [availableTools],
+  );
+
+  /**
+   * Toggles one MCP tool by its server-scoped key. A legacy bare-name entry is
+   * first expanded into explicit per-server keys, so unticking the tool on one
+   * server does not silently revoke it on the other.
+   */
+  const toggleServerTool = (source: string, tool: { slug: string; name: string }) => {
+    const key = mcpSelectionKey(source, tool);
+    const expanded = expandLegacyDirect(mcpPairs, [...directSet], tool.name);
+    const next = new Set(expanded);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    onDraftDirectToolsChange(formatSelection(next));
+  };
+
+  /** A legacy bare name still grants the tool on every server publishing it. */
+  const isServerToolSelected = (source: string, tool: { slug: string; name: string }) =>
+    directSet.has(mcpSelectionKey(source, tool)) || directSet.has(tool.name);
   const toggleCustom = (slug: string) => {
     onDraftCustomToolsChange(formatSelection(toggleInSet(customSet, slug)));
   };
@@ -231,6 +262,9 @@ export function SubagentToolsTab({
   const serverToolNames = new Set(
     serverGroups.flatMap((g) => g.tools.map((t) => t.name)),
   );
+  /* Total distinct (server, tool) pairs — the same name on two servers is two
+     selectable chips, so counting by name alone under-reports the section. */
+  const serverToolCount = serverGroups.reduce((sum, g) => sum + g.tools.length, 0);
 
   /* System (custom) tools come pre-grouped from the backend. */
   const customGroups = availableTools.customGroups;
@@ -243,9 +277,10 @@ export function SubagentToolsTab({
   const selectedWriteCount = [...directSet].filter((n) =>
     writeToolNames.has(n),
   ).length;
-  const selectedServerCount = [...directSet].filter((n) =>
-    serverToolNames.has(n),
-  ).length;
+  const selectedServerCount = serverGroups.reduce(
+    (sum, g) => sum + g.tools.filter((t) => isServerToolSelected(g.source, t)).length,
+    0,
+  );
   const selectedCustomCount = customSet.size;
 
   return (
@@ -308,11 +343,11 @@ export function SubagentToolsTab({
       {serverGroups.length > 0 && (
         <ToolSection
           title="MCP Server Tools"
-          badge={`${selectedServerCount} / ${serverToolNames.size} selected`}
+          badge={`${selectedServerCount} / ${serverToolCount} selected`}
         >
           {serverGroups.map((g) => {
             const groupSelected = g.tools.filter((t) =>
-              directSet.has(t.name),
+              isServerToolSelected(g.source, t),
             ).length;
             return (
               <div key={g.source}>
@@ -326,9 +361,9 @@ export function SubagentToolsTab({
                     <ToolChip
                       key={`${g.source}-${t.slug}`}
                       label={t.name}
-                      selected={directSet.has(t.name)}
+                      selected={isServerToolSelected(g.source, t)}
                       disabled={disabled}
-                      onClick={() => toggleDirect(t.name)}
+                      onClick={() => toggleServerTool(g.source, t)}
                     />
                   ))}
                 </div>

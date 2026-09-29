@@ -59,6 +59,10 @@ export async function handleWebhookCommands(ctx: WebhookCommandCtx): Promise<Com
   }
 
   if (slash?.kind === "eval") {
+    if (ctx.isTwin) {
+      ctx.log.info("/eval ignored on digital-twin run — eval runs only on the agent itself");
+      return { kind: "handled" };
+    }
     await handleEval(ctx, slash.question, slash.providers, slash.judges, slash.opts);
     return { kind: "handled" };
   }

@@ -902,6 +902,7 @@ model User {
   workspace                 Workspace             @relation(fields: [workspaceId], references: [id])
   resourceAccess            ResourceAccess[]
   auditLogs                 ACLAuditLog[]
+  auditTrail                AuditLog[]
   sessions                  UserSession[]           // User can have multiple sessions (multi-device support)
   apiKeys                   ApiKey[]                // User can have multiple API keys
   presenceStatus            UserPresence?           // One-to-one relation with presence status
@@ -1290,6 +1291,45 @@ model ACLAuditLog {
   @@index([actorUserId])
   @@map("acl_audit_logs")
   @@schema("workflow")
+}
+
+model AuditLog {
+  id            String           @id @default(cuid())
+  actorUserId   String? // null when the actor is a system process, or after user deletion
+  entityType    String // logical context, e.g. USER_GROUP_ASSIGNMENT_CONFIG
+  entityId      String // context id, e.g. userGroupId
+  createdAt     DateTime         @default(now())
+  workspaceId   String // denormalized tenant key (stamped on insert)
+
+  // Relations
+  actorUser User?            @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+  changes   AuditLogChange[]
+
+  @@index([workspaceId, entityType, entityId, createdAt])
+  @@index([actorUserId])
+  @@map("audit_logs")
+  @@schema("non_zero")
+}
+
+model AuditLogChange {
+  id          String   @id @default(cuid())
+  auditLogId  String
+  action      String // INSERT / UPDATE / DELETE for this record // check UPSERT
+  tableName   String // table that was mutated, e.g. user_assignment_states
+  recordId    String // PK of the mutated row
+  targetName  String // human label of the changed row, snapshotted at write time (survives renames/deletes)
+  field       String
+  oldValue    String? // stringified previous value
+  newValue    String? // stringified new value
+  createdAt   DateTime @default(now())
+  workspaceId String // denormalized tenant key (stamped on insert)
+
+  // Relations
+  auditLog AuditLog @relation(fields: [auditLogId], references: [id], onDelete: Cascade)
+
+  @@index([auditLogId])
+  @@map("audit_log_changes")
+  @@schema("non_zero")
 }
 
 // PR Analytics models
@@ -2343,6 +2383,7 @@ model EmailChannelPreference {
   deskReportAgentSlug    String?
   deskReportRangeDays    Int?     @default(1) // 1 = "Last 1 day", 7 = "Last 1 week"
   duplicateScopeConfig   String?    // Scoped duplicate detection: JSON-serialized { enabled, scopeFieldGlobalIds }; stored as string for Zero compatibility, parsed at code level (null = project-wide legacy behavior)
+  slackDeskTriggerMode   String?  // ALL_MESSAGES | MENTION_ONLY; null == ALL_MESSAGES
   @@index([ownerUserId])
   @@index([assigneeUserGroupId])
   @@index([boardId])
@@ -2482,6 +2523,7 @@ model MessageAttachment {
   createdBy          String                // User who uploaded the attachment (no FK constraint)
   metadata           Json?                 // Width/height for images, duration for videos, etc.
   conversationId     String?                // Every message belongs to a conversation (no FK constraint)
+  channelId          String?               // Denormalized conversation.channelId, stamped on insert; NULL when not conversation-anchored
   thumbnailUrl       String?               // For images/videos
   isDeleted          Boolean               @default(false) // Soft-delete: true when attachment has been removed
   uploadStatus       String?                 // Tracks upload state
@@ -2495,6 +2537,7 @@ model MessageAttachment {
   @@index([entityId])
   @@index([entityId, id])
   @@index([entityId, position])
+  @@index([workspaceId, channelId, createdAt(sort: Desc), id])
   @@map("message_attachments")
   @@schema("public")
 }
@@ -2545,7 +2588,7 @@ model CustomEmoji {
   createdBy String   // User ID who created the emoji (no FK constraint)
   createdAt DateTime @default(now())
 
-  @@unique([name])
+  @@unique([workspaceId, name])
 
   @@index([createdAt(sort: Desc), id])
   @@map("custom_emojis")
@@ -4306,6 +4349,7 @@ model InstalledApps {
   appId String
   userId String
   webhookUrl String?
+  fetchConfig String?
 
   signingSecret String?   // @deprecated
   version Int
@@ -5028,6 +5072,7 @@ model ExecutionRunLog {
   droppedOps     Json? // validator rejects, with reasons
   applied        Json? // applier counts { created, resolved, reassigned }
   assessment     String? // model's one-sentence read of the window (why ops / why none)
+  dedupChecks    Json? // Jev duplicate-check verdict per create, and what the parser did after a recall
   error          String?
   durationMs     Int?
   createdAt      DateTime @default(now())

@@ -9,7 +9,7 @@ import {
 
 const log = createLogger("conversation-artifact-signals");
 
-const CANVAS_TOOLS = new Set(["spaces-create-canvas", "spaces-edit-canvas", "spaces-sdlc-mutate-artifact"]);
+const CANVAS_TOOLS = new Set(["spaces-create-canvas", "spaces-edit-canvas", "spaces-sdlc-write-artifact"]);
 
 export const LINK_TOOL_ALLOWLIST = new Set([
   "google-docs-create",

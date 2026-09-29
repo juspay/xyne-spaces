@@ -164,22 +164,41 @@ const SESSION_SWEEP_INTERVAL_MS = Number(process.env["MCP_SESSION_SWEEP_INTERVAL
  */
 const PER_AGENT_SERVER_TYPES = new Set<string>(["xyne-spaces-app-tools"]);
 
+/**
+ * Which caller family a session belongs to. `"app"` is a Spaces artifact app
+ * calling through routes/app-connectors-internal.ts with the VIEWER's own
+ * credential; everything else (agent runs, health, tool sync) is the default
+ * lane.
+ *
+ * The lanes never share a session. Keys are otherwise `${userId}:${serverType}`
+ * and a cached session is only replaced when token/accessToken/botToken/apiKey
+ * changes — so without this an app call could reuse a session an agent opened
+ * with its PINNED credential (e.g. a username/password connector, or the same
+ * token against a different url) and run as the agent. A suffix, not a
+ * prefix, so evictAllSessionsForUser's `${userId}:` sweep still covers it.
+ */
+export type SessionLane = "app";
+
+const APP_LANE_SUFFIX = "::app";
+
 function sessionKey(
   userId: string,
   serverType: string,
   agentSlug?: string,
   credentials?: Record<string, unknown>,
+  lane?: SessionLane,
 ): string {
+  const suffix = lane === "app" ? APP_LANE_SUFFIX : "";
   // Slack credentials can be supplied by the workspace that dispatched a
   // surface run. Keep each team's env-bound child process isolated.
   const slackTeamId = credentials?.["teamId"];
   if (serverType === "slack" && typeof slackTeamId === "string" && slackTeamId) {
-    return `${userId}:${serverType}:team:${slackTeamId}`;
+    return `${userId}:${serverType}:team:${slackTeamId}${suffix}`;
   }
   if (PER_AGENT_SERVER_TYPES.has(serverType) && agentSlug) {
-    return `${userId}:${serverType}:${agentSlug}`;
+    return `${userId}:${serverType}:${agentSlug}${suffix}`;
   }
-  return `${userId}:${serverType}`;
+  return `${userId}:${serverType}${suffix}`;
 }
 
 /** Close + drop sessions idle longer than the TTL. Best-effort; never throws. */
@@ -207,8 +226,9 @@ async function getOrCreateSession(
   serverType: string,
   credentials: Record<string, unknown>,
   agentSlug?: string,
+  lane?: SessionLane,
 ): Promise<Client> {
-  const key = sessionKey(userId, serverType, agentSlug, credentials);
+  const key = sessionKey(userId, serverType, agentSlug, credentials, lane);
 
   if (SPACES_SESSION_CREDENTIAL_SERVER_TYPES.has(serverType)) {
     // Benchmark lane: the onyx-ask-ai agent ALWAYS routes to the benchmark Vespa
@@ -398,14 +418,62 @@ async function spawnSession(
   return client;
 }
 
+const SHARED_TOOL_LIST_SERVER_TYPES = new Set<string>([
+  "xyne-spaces",
+  "xyne-spaces-app-tools",
+  "heisenberg",
+  "research-agent-mcp",
+]);
+const TOOL_LIST_CACHE_TTL_MS = Number(process.env["MCP_TOOL_LIST_CACHE_TTL_MS"] ?? 10 * 60 * 1000);
+const toolListCache = new Map<string, { tools: McpToolInfo[]; at: number }>();
+const toolListInflight = new Map<string, Promise<McpToolInfo[]>>();
+
+export function clearToolListCache(): void {
+  toolListCache.clear();
+  toolListInflight.clear();
+}
+
+async function sharedToolList(serverType: string, fetchTools: () => Promise<McpToolInfo[]>): Promise<McpToolInfo[]> {
+  const cached = toolListCache.get(serverType);
+  if (cached && Date.now() - cached.at < TOOL_LIST_CACHE_TTL_MS) return cached.tools;
+  const inflight = toolListInflight.get(serverType);
+  if (inflight) return inflight;
+  const started = fetchTools()
+    .then((tools) => {
+      if (tools.length > 0) toolListCache.set(serverType, { tools, at: Date.now() });
+      return tools;
+    })
+    .finally(() => toolListInflight.delete(serverType));
+  toolListInflight.set(serverType, started);
+  return started;
+}
+
 export async function listToolsForUser(
   userId: string,
   serverType: string,
   serverName: string,
   credentials: Record<string, unknown>,
   agentSlug?: string,
+  options: { fresh?: boolean; lane?: SessionLane } = {},
 ): Promise<McpServerTools> {
-  const client = await getOrCreateSession(userId, serverType, credentials, agentSlug);
+  const fetchTools = () => fetchToolsFromServer(userId, serverType, credentials, agentSlug, options.lane);
+  const useShared =
+    !options.fresh && TOOL_LIST_CACHE_TTL_MS > 0 && SHARED_TOOL_LIST_SERVER_TYPES.has(serverType);
+  const tools = useShared ? await sharedToolList(serverType, fetchTools) : await fetchTools();
+
+  const definition = await resolveConnectorDefinition(serverType);
+  const writeTools = definition?.writeTools ?? [];
+  return { serverType, serverName, tools, writeTools };
+}
+
+async function fetchToolsFromServer(
+  userId: string,
+  serverType: string,
+  credentials: Record<string, unknown>,
+  agentSlug?: string,
+  lane?: SessionLane,
+): Promise<McpToolInfo[]> {
+  const client = await getOrCreateSession(userId, serverType, credentials, agentSlug, lane);
   // Must pass BOTH `timeout` AND `signal`: the SDK runs an independent
   // internal timer initialised from `options.timeout ?? DEFAULT_REQUEST_TIMEOUT_MSEC`
   // (60s, see @modelcontextprotocol/sdk shared/protocol.js:712). Without
@@ -416,15 +484,11 @@ export async function listToolsForUser(
     signal: AbortSignal.timeout(MCP_REQUEST_TIMEOUT_MS),
   });
 
-  const tools: McpToolInfo[] = result.tools.map((t) => ({
+  return result.tools.map((t) => ({
     name: t.name,
     description: t.description ?? "",
     inputSchema: t.inputSchema as Record<string, unknown>,
   }));
-
-  const definition = await resolveConnectorDefinition(serverType);
-  const writeTools = definition?.writeTools ?? [];
-  return { serverType, serverName, tools, writeTools };
 }
 
 // Servers whose tools' binary output should be forwarded to the user as a file
@@ -535,8 +599,9 @@ export async function callTool(
   tool: string,
   params: Record<string, unknown>,
   agentSlug?: string,
+  lane?: SessionLane,
 ): Promise<McpCallResult> {
-  const client = await getOrCreateSession(userId, serverType, credentials, agentSlug);
+  const client = await getOrCreateSession(userId, serverType, credentials, agentSlug, lane);
 
   // Same pattern as listToolsForUser above: pass BOTH `timeout` and `signal`
   // to override the SDK's 60s default. See protocol.js:712 in the MCP SDK.
@@ -608,6 +673,15 @@ export async function callTool(
 
 export async function evictSession(userId: string, serverType: string, agentSlug?: string): Promise<void> {
   const key = sessionKey(userId, serverType, agentSlug);
+  // The app lane's twin goes too: this runs on reconnect/disconnect/OAuth
+  // events, and an app session must not outlive the credential it was built on.
+  const appKey = `${key}${APP_LANE_SUFFIX}`;
+  const appSession = sessions.get(appKey);
+  if (appSession) {
+    log.info(`[mcp/runner] evicting cached session for ${appKey}`);
+    sessions.delete(appKey);
+    await appSession.transport.close().catch(() => {});
+  }
   if (serverType === "slack") {
     const keys = [...sessions.keys()].filter((candidate) => candidate === key || candidate.startsWith(`${key}:team:`));
     for (const candidate of keys) {

@@ -1,9 +1,12 @@
 import type { Request, Response } from 'express';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
-import { runAsServiceActor } from '@/database/tenant/context';
+import {
+  findPendingDeskReportAttachment,
+  markDeskReportAttachmentFailed,
+  completeDeskReportAttachment,
+} from '@/bypassAcl/deskReportServices';
 import { uploadFiles } from '@/services/fileUploadService';
-import { AttachmentEntityType, AttachmentUploadStatus } from '@xyne/shared';
 
 const ATTACHMENT_MARKER_PREFIX = '[ATTACHMENT:';
 const ATTACHMENT_HEADER_END = ']\n';
@@ -85,21 +88,8 @@ export async function handleDeskReportCallback(
       throw new Error(`Desk report callback: channel ${channelId} not found or has no workspaceId`);
     }
     const workspaceId = channel.workspaceId;
-    const runScoped = <T>(fn: () => Promise<T>): Promise<T> =>
-      runAsServiceActor('desk-report-callback', workspaceId, fn);
-
     // Matched by the exact row id embedded in the callback URL at dispatch time
-    const pending = await runScoped(() =>
-      db.messageAttachment.findFirst({
-        where: {
-          id: attachmentId,
-          entityType: AttachmentEntityType.DESK_REPORT,
-          entityId: channelId,
-          isDeleted: false,
-          uploadStatus: AttachmentUploadStatus.PENDING,
-        },
-      }),
-    );
+    const pending = await findPendingDeskReportAttachment(workspaceId, channelId, attachmentId);
     if (!pending) {
       logger.warn('[DeskReport] callback: no matching pending row — dropping', { channelId, attachmentId, sessionId });
       res.json({ success: true, persisted: false });
@@ -117,15 +107,7 @@ export async function handleDeskReportCallback(
         status,
         error: errorMessage,
       });
-      await runScoped(() =>
-        db.messageAttachment.update({
-          where: { id: pending.id },
-          data: {
-            uploadStatus: AttachmentUploadStatus.FAILED,
-            metadata: { ...metadata, error: errorMessage ?? 'No report produced' },
-          },
-        }),
-      );
+      await markDeskReportAttachmentFailed(workspaceId, pending.id, metadata, errorMessage);
       res.json({ success: true, persisted: false });
       return;
     }
@@ -141,19 +123,7 @@ export async function handleDeskReportCallback(
     ]);
     if (!uploaded) throw new Error('Desk report upload produced no result');
 
-    await runScoped(() =>
-      db.messageAttachment.update({
-        where: { id: pending.id },
-        data: {
-          originalFilename: uploaded.originalName,
-          size: uploaded.fileSize,
-          mimetype: uploaded.mimeType,
-          url: uploaded.fileUrl,
-          uploadStatus: AttachmentUploadStatus.COMPLETED,
-          metadata: { ...metadata, generatedAt: new Date().toISOString() },
-        },
-      }),
-    );
+    await completeDeskReportAttachment(workspaceId, pending.id, uploaded, metadata);
 
     logger.info('[DeskReport] callback: report persisted', { channelId, sessionId, url: uploaded.fileUrl });
     res.json({ success: true, persisted: true });

@@ -33,6 +33,16 @@ locals {
     redis   = local.redis
     turn    = local.turn
     logging = local.logging
+    room = {
+      auto_create       = true
+      empty_timeout     = 120
+      departure_timeout = 10
+      max_participants  = 100
+    }
+    webhook = {
+      api_key = var.api_key
+      urls    = ["https://${var.domain}/api/livekit/webhook"]
+    }
   })
 
   server_config = join("\n", [

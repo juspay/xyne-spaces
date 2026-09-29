@@ -42,6 +42,11 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
   const createForm = useAgentCreateForm(formFromIdentity(props.agent));
   const editor = useDraftAgentEditor(props, node.id);
 
+  // The identity the user last saved in the preview. Equal to props while the
+  // draft is untouched (and always, once decided), so the card, the preview and
+  // what gets created can never show three different names.
+  const agent = { ...props.agent, ...editor.identity };
+
   useEffect(() => {
     if (createSession && props.phase === 'pending') {
       createSession.applyChatDraft(messageId, patchFromIdentity(props.agent));
@@ -71,19 +76,18 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
     setPending(actionId === 'agent-draft-approve' ? 'approve' : 'reject');
     try {
       updateFieldValue(node.id, toCanvasValue({ ...createForm.form, slug }));
-      const response = await executeAction({
-        type: 'submit',
-        actionId,
-      });
-      if (response?.type === 'error') {
+      // Only on a decision that landed. A rejected create (a taken identifier,
+      // say) leaves the card live, so the preview has to stay open, because
+      // that is where the fields it names are edited.
+      const landed = await executeAction({ type: 'submit', actionId });
+      if (landed) {
+        setExpanded(false);
+      } else if (actionId === 'agent-draft-approve') {
         setCreateError(
-          response.message ||
-            `Couldn't create @${slug}. Check the handle is unique and try Create Agent again. Your draft is still here.`,
+          `Couldn't create @${slug}. Check the handle is unique and try Create Agent again. Your draft is still here.`,
         );
         setExpanded(true);
-        return;
       }
-      setExpanded(false);
     } finally {
       setPending(null);
     }
@@ -236,20 +240,24 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
         <div className='flex flex-col gap-3'>
           <div className='flex min-w-0 flex-col pl-1 gap-1'>
             <p className='break-words text-sm font-semibold leading-5 text-foreground'>
-              {props.agent.name}
+              {agent.name}
             </p>
             <span className='block truncate text-sm font-normal leading-5 tracking-[-0.07px] text-foreground'>
-              @{props.agent.slug}
+              @{agent.slug}
             </span>
           </div>
 
-          {props.agent.description && (
+          {/* gap-1.5 is the frame's 6px. The body below is a <span>, not a second
+              <p>, for the same reason as the slug above: `.jp-message-html p + p`
+              (global.css) would add its own 8px on top of this gap and win, since
+              the card renders inside the message-content root. */}
+          {agent.description && (
             <div className='flex min-w-0 flex-col gap-1 px-1'>
               <p className='truncate text-sm font-semibold leading-5 text-foreground'>
                 Description
               </p>
               <span className='block break-words text-sm font-normal leading-5 tracking-[-0.07px] text-foreground'>
-                {props.agent.description}
+                {agent.description}
               </span>
             </div>
           )}
@@ -265,7 +273,7 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
           open={expanded}
           onOpenChange={setExpanded}
           messageId={messageId ?? ''}
-          agent={props.agent}
+          agent={agent}
           editor={editor}
           note={props.note}
           statePill={statePill}

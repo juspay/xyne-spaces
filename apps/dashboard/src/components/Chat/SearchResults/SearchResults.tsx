@@ -320,6 +320,7 @@ const SearchResults = (): ReactElement => {
     setSelectedMentions,
     setIncludeBotMessages,
     setOnlyMyChannels,
+    setExcludeArchived,
     setExactMatch,
     setRankProfile,
     setStructuredFilters,
@@ -332,6 +333,10 @@ const SearchResults = (): ReactElement => {
     allChannels: allChannelsWithCategory,
     mentionSearchType: null,
     defaultOnlyMyChannels: filters.onlyMyChannels,
+    // The Desk and Tickets tabs hide archived tickets by default; the "Show archived" toggle
+    // turns exclusion off. Every other tab leaves archived untouched (flag stays false).
+    defaultExcludeArchived:
+      filters.docType === 'desk' || filters.docType === 'tickets' ? !filters.showArchived : false,
     groupByDocType: true,
     buildMentionHighlights,
     // The URL follows the results: the hook hands back the query these were fetched for,
@@ -396,6 +401,15 @@ const SearchResults = (): ReactElement => {
     setOnlyMyChannels(filters.onlyMyChannels);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters.onlyMyChannels]);
+
+  // Sync archived scope → hook. The Desk and Tickets tabs hide archived (and their "Show
+  // archived" toggle opts back in); other tabs never exclude, matching pre-existing behavior.
+  useEffect(() => {
+    setExcludeArchived(
+      filters.docType === 'desk' || filters.docType === 'tickets' ? !filters.showArchived : false,
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filters.docType, filters.showArchived]);
 
   // Sync exact-match → hook; the hook quotes the query when the request is built.
   useEffect(() => {
@@ -1405,6 +1419,13 @@ function ResultsBody({
               {senderName}
               {recipientCount > 0 && ` +${recipientCount} more`}
             </span>
+            {/* Assignee of the linked desk ticket, when set — same muted style as the
+                sender line above (mirrors the cmdK desk row). */}
+            {result.searchContext?.assigneeName && (
+              <span className='block min-w-0 truncate text-xs text-muted-foreground'>
+                {`Assigned to ${result.searchContext.assigneeName}`}
+              </span>
+            )}
             {result.context && (
               <div className='mt-0.5 text-xs text-muted-foreground'>
                 <SearchSnippetRenderer message={result.context} wordLimit={40} />

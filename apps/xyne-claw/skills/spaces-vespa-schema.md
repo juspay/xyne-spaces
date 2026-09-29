@@ -1,11 +1,11 @@
 ---
 name: spaces-vespa-schema
-description: How spaces-search actually works under the hood — the Vespa search index behind Spaces. Covers the document schemas (messages, attachments, channels, tickets, files, canvases, transcripts, RCAs, emails, users), how the `type` arg selects which schema you search, which fields your query text is matched against, hybrid lexical+semantic ranking and the fuzzy fallback, the real (and surprising) behavior of `from`/`in`/date/ticket filters, permission gating, how to read the IDs each hit returns, and how to scope, count, and paginate correctly. Load before relying on spaces-search, when results look wrong/empty/over-broad, when counting "how many X", or when a search isn't returning what you expect.
+description: How spaces-vespa-search actually works under the hood — the Vespa search index behind Spaces. Covers the document schemas (messages, attachments, channels, tickets, files, canvases, transcripts, RCAs, emails, users), how `searchArea` selects which schema you search, which fields your query text is matched against, hybrid lexical+semantic ranking and the fuzzy fallback, the real (and surprising) behavior of sender/channel/date/ticket filters, permission gating, how to read the IDs each hit returns, and how to scope, count, and paginate correctly. Load before relying on spaces-vespa-search, when results look wrong/empty/over-broad, when counting "how many X", or when a search isn't returning what you expect.
 ---
 
-# The Vespa index behind `spaces-search`
+# The Vespa index behind `spaces-vespa-search`
 
-`spaces-search` is a thin wrapper over a **Vespa** search cluster. Everything Spaces can search lives there as **documents**, split into typed **schemas**. Understanding the schema and how your args turn into a query is the difference between a search that lands the answer and one that returns noise — or nothing.
+`spaces-vespa-search` builds YQL against a **Vespa** search cluster from the `searchArea` + `filters` you declare. Everything Spaces can search lives there as **documents**, split into typed **schemas**. Understanding the schema and how your args turn into a query is the difference between a search that lands the answer and one that returns noise — or nothing.
 
 This skill explains the engine. For the bare arg list see `spaces-tools-guide`; for where things live conceptually see `xyne-spaces-platform`. Three things are true of *every* search:
 
@@ -13,7 +13,7 @@ This skill explains the engine. For the bare arg list see `spaces-tools-guide`; 
 2. **It's permission-gated** to the asker — you only ever see what they see (full treatment in `xyne-spaces-platform`). So **empty results are a query/scope problem, never an access problem**: never tell the user you "need access". (Mechanically: a result must match `permissions contains <you>` OR `channelPermissions contains <you>` OR `ownerId contains <you>` OR a public channel/doc `isPrivate=false`.)
 3. **Hits are shallow.** Each hit is a ranked **snippet** (the best-matching chunk, with matched terms **bolded**) plus IDs — **not** the full message/thread/ticket/file. It tells you *where* the answer is; fetch the full source before you conclude.
 
-> **The single most counter-intuitive gotcha — burn it in:** `in=<channelId>` scopes **messages, attachments, tickets, and emails** to a channel, but it does **NOT** scope the `file` schema. So `type=files | canvas | transcript | rca` results **ignore `in` and come back workspace-wide**. To find a *doc* in a specific channel, use `spaces-canvases` with `channelId`, not `spaces-search` with `in`.
+> **The single most counter-intuitive gotcha — burn it in:** a `channelId` filter scopes **messages, attachments, tickets, and emails** to a channel, but the `file` schema has no channel relation. So `searchArea: "file" | "canvas" | "transcript"` comes back **workspace-wide regardless of the filter**. To find a *doc* in a specific channel, use `spaces-canvases` with `channelId`, not a channel filter on search.
 
 ---
 
@@ -114,7 +114,7 @@ Without `type`, results are **grouped by surface, and each surface is capped at 
 ### Paginate to exhaustion when you need the whole set
 In the flat/ungrouped mode (single `type`, or `offset > 0`), **`limit` is a real page size — 1–100, default 100.** A page that comes back **full** (`results == limit`) means **there's more**: loop with `offset += limit` until a page returns **fewer** than `limit`; what you paged through is then the complete set. (Setting `offset > 0` also drops grouping, which is exactly what you want for paging.) Don't try to paginate the default grouped view — its per-surface 10-cap can't be paged; switch to a single `type` first.
 
-> Note: the `spaces-search` tool's own description prose may quote different bounds (e.g. "1–50, default 10") — the **enforced** schema is 1–100, default 100. Trust 100.
+> Note: paging bounds come from the tool schema (`hits` / `offset`), not from prose in a description. When a description and the schema disagree, the schema wins.
 
 ### Don't trust a single empty filtered result
 An empty result under a filter — especially a `range`/`before`/`after` window or an `in=<channelId>` scope — is ambiguous: truly nothing, *or* the scope/filter is wrong. Before answering "none":
@@ -138,4 +138,4 @@ Never report a bare "none" off one empty filtered call.
 
 # In one line
 
-> `spaces-search` = hybrid lexical+semantic over permission-gated Vespa schemas. `type` picks the schema; `from` means authored-by (userId only); `in` scopes chat/tickets/emails but **not files**; dates skip emails; grouped results are capped — `type` to count and paginate to exhaustion; and **every hit is a shallow snippet — fetch the full source before you answer.**
+> `spaces-vespa-search` = hybrid lexical+semantic over permission-gated Vespa schemas. `searchArea` picks the schema; a `senderId` filter means authored-by (userId only, never a name or email); a `channelId` filter scopes chat/tickets/emails but **not files**; date filters take **dd/mm/yy** (IST) and skip emails; counts come from `groupBy` + `hits: 0` or paging to exhaustion, never from the visible rows; and **every hit is a shallow snippet — fetch the full source before you answer.**

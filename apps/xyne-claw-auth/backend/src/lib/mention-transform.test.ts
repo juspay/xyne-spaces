@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   expandSpacesMentions,
+  mentionShorthandToText,
   resolveUnboundMentions,
   type MentionLookups,
 } from "./mention-transform.js";
@@ -9,17 +10,17 @@ const USERS: Record<string, { id: string; name: string; email: string }> = {
   "bowmitha.c": {
     id: "usr_bowmitha00000000",
     name: "Bowmitha C",
-    email: "john.doe@gmail.com",
+    email: "bowmitha.c@example.com",
   },
   "utkarsh.kumar": {
     id: "usr_utkarsh000000000",
     name: "Utkarsh Kumar",
-    email: "john.doe@gmail.com",
+    email: "utkarsh.kumar@example.com",
   },
   "deepak.kushwaha": {
     id: "usr_deepak0000000000",
     name: "Deepak Kushwaha",
-    email: "john.doe@gmail.com",
+    email: "deepak.kushwaha@example.com",
   },
 };
 
@@ -33,6 +34,11 @@ const GROUPS: Record<string, { id: string; name: string; alias: string }> = {
     id: "grp_riskplatform000",
     name: "Risk Platform",
     alias: "risk-platform",
+  },
+  spaces: {
+    id: "grp_xynespaces00000",
+    name: "xyne-spaces",
+    alias: "spaces",
   },
 };
 
@@ -91,7 +97,7 @@ describe("resolveUnboundMentions — dotted handles", () => {
 
   it("treats a full email as an email, not a handle", async () => {
     const out = await resolveUnboundMentions(
-      "ping @john.doe@gmail.com please",
+      "ping @bowmitha.c@example.com please",
       lookups(),
     );
     expect(out).toBe(`ping @Bowmitha C[${USERS["bowmitha.c"]!.id}] please`);
@@ -166,6 +172,24 @@ describe("resolveUnboundMentions — group aliases", () => {
     );
   });
 
+  it("resolves a one-word alias and leaves other lowercase words alone", async () => {
+    const out = await resolveUnboundMentions(
+      "hello @spaces, cc @here and @nobody. See @spaces.",
+      lookups(),
+    );
+    expect(out).toBe(
+      `hello @spaces[group:${GROUPS["spaces"]!.id}:xyne-spaces], cc @here and @nobody. See @spaces[group:${GROUPS["spaces"]!.id}:xyne-spaces].`,
+    );
+  });
+
+  it("does not take a one-word alias out of a handle, an email or a longer alias", async () => {
+    const out = await resolveUnboundMentions(
+      "@spaces.team @spaces@example.com @spacesx @spaces-search",
+      lookups(),
+    );
+    expect(out).toBe("@spaces.team @spaces@example.com @spacesx @spaces-search");
+  });
+
   it("leaves unknown group aliases untouched", async () => {
     const out = await resolveUnboundMentions(
       "Looping in @unknown-group",
@@ -234,5 +258,13 @@ describe("resolveUnboundMentions — email workspace-scoping (prod bug: @email n
     const lk: MentionLookups = { ...lookups(), byEmail: async () => one };
     const out = await resolveUnboundMentions(`Looping in ${EMAIL} — review`, lk);
     expect(out).toBe("Looping in @Radheyshree Agrawal[usr_radheyshree0000] — review");
+  });
+});
+
+describe("mentionShorthandToText", () => {
+  it("turns user and group shorthand into plain @names and leaves other text alone", () => {
+    expect(
+      mentionShorthandToText("cc @xyne-Doctor[cmnnn2zdk1lmoma4flzkwh4k1], @Anurag Dwivedi[usr_anurag000000000] and @spaces[group:grp_x0000000:xyne-spaces]; mail a@b.com"),
+    ).toBe("cc @xyne-Doctor, @Anurag Dwivedi and @spaces; mail a@b.com");
   });
 });

@@ -1037,7 +1037,7 @@ class NotificationService {
       type: NotificationType.CHANNEL_MESSAGE,
       relatedEntityType: 'message' as const,
       relatedEntityId: messageId,
-      actionUrl: `/${workspaceId}/chat/${channelId}#origin=${conversationId}&messageId=${messageId}`,
+      actionUrl: `/${workspaceId}/chat/dir/${channelId}#origin=${conversationId}&messageId=${messageId}`,
       metadata: {
         channelId,
         conversationId,
@@ -1147,9 +1147,10 @@ class NotificationService {
       notificationContext,
     });
 
+    const mentionRouteBase = `/${workspaceId}/chat/${isDMChannel || isGroupDM ? 'dm' : 'dir'}/${channelId}`;
     const mentionActionUrl = isThreadMessage
-      ? `/${workspaceId}/chat/${channelId}/${conversationId}#origin=${conversationId}&messageId=${messageId}`
-      : `/${workspaceId}/chat/${channelId}#origin=${conversationId}&messageId=${messageId}`;
+      ? `${mentionRouteBase}/${conversationId}#origin=${conversationId}&messageId=${messageId}`
+      : `${mentionRouteBase}#origin=${conversationId}&messageId=${messageId}`;
 
     const conversationData = await fetchConversationForNotification(conversationId);
 
@@ -1249,8 +1250,8 @@ class NotificationService {
     });
 
     const actionUrl = isThreadMessage
-      ? `/${workspaceId}/chat/${channelId}/${conversationId}#origin=${conversationId}&messageId=${messageId}`
-      : `/${workspaceId}/chat/${channelId}#origin=${conversationId}&messageId=${messageId}`;
+      ? `/${workspaceId}/chat/dir/${channelId}/${conversationId}#origin=${conversationId}&messageId=${messageId}`
+      : `/${workspaceId}/chat/dir/${channelId}#origin=${conversationId}&messageId=${messageId}`;
 
     const conversationData = await fetchConversationForNotification(conversationId);
 
@@ -1486,8 +1487,9 @@ class NotificationService {
     recordingTitle: string,
     actorId: string,
     actorName: string,
-    actorAction: 'recording_shared' | 'recording_access_revoked',
+    actorAction: 'recording_shared' | 'recording_access_changed' | 'recording_access_revoked',
     subject: string = 'recording',
+    accessLabel?: string,
   ): Promise<{ deliveredUserIds: string[] }> {
     const recipientIds = recipientUserIds.filter(id => id !== actorId);
 
@@ -1501,12 +1503,21 @@ class NotificationService {
     });
 
     const isRevoked = actorAction === 'recording_access_revoked';
+    const isChanged = actorAction === 'recording_access_changed';
     const title = isRevoked
       ? `${actorName} removed your access to a ${subject}`
-      : `${actorName} shared a ${subject} with you`;
+      : isChanged
+        ? `${actorName} changed your access to a ${subject}`
+        : `${actorName} shared a ${subject} with you`;
     const message = isRevoked
       ? `${actorName} removed your access to "${recordingTitle}"`
-      : `${actorName} shared "${recordingTitle}" with you`;
+      : isChanged
+        ? accessLabel
+          ? `${actorName} made you ${accessLabel} on "${recordingTitle}"`
+          : `${actorName} changed your access to "${recordingTitle}"`
+        : accessLabel
+          ? `${actorName} shared "${recordingTitle}" with you as ${accessLabel}`
+          : `${actorName} shared "${recordingTitle}" with you`;
 
     const results = await Promise.allSettled(
       recipientIds.map(async userId => {
@@ -1521,6 +1532,7 @@ class NotificationService {
             actorId,
             actorName,
             actorAction,
+            ...(accessLabel ? { accessLabel } : {}),
           },
         });
         return userId;
@@ -1635,7 +1647,7 @@ class NotificationService {
       type: NotificationType.THREAD_REPLY,
       relatedEntityType: 'message' as const,
       relatedEntityId: replyMessageId,
-      actionUrl: `/${workspaceId}/chat/${channelId}/${conversationId}#origin=${conversationId}&messageId=${replyMessageId}`,
+      actionUrl: `/${workspaceId}/chat/${isDMChannel || isGroupDM ? 'dm' : 'dir'}/${channelId}/${conversationId}#origin=${conversationId}&messageId=${replyMessageId}`,
       metadata: {
         channelId,
         conversationId,

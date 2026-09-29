@@ -13,10 +13,8 @@ import {
   type EmailFetchQueueJobData,
   type CursorCatchupJobData,
 } from '@/queues/emailFetchQueue';
-import { runAsServiceActor } from '@/database/tenant/context';
-import { socialMediaService } from '@/integrations/social-media/socialMediaService';
+import { catchUpEmailSource, refetchEmailSource, syncSocialMediaSources } from '@/bypassAcl/emailFetchServices';
 import { getHttpStatus } from '@/services/googleService';
-import { catchUpFromCursor } from '@/integrations/adapters/google/refetch';
 import { seedSyncCursor } from '@/services/syncCursorRecovery';
 
 const externalSourceRepo = new ExternalSourceRepository();
@@ -90,11 +88,9 @@ class EmailFetchWorker {
       return;
     }
 
-    const adapter = adapterRegistry.getAdapter(source.name);
+    const adapter = adapterRegistry.getAdapter(source.sourceType);
     try {
-      const result = await runAsServiceActor('email-fetch-worker', workspaceId, () =>
-        catchUpFromCursor(source, adapter, cursor),
-      );
+      const result = await catchUpEmailSource(workspaceId, source, adapter, cursor);
 
       logger.info(
         `[EMAIL-FETCH-WORKER] Catchup done — source ${source.name}: processed=${result.processed} new=${result.newTickets} skipped=${result.skipped} errors=${result.errors?.length ?? 0}`,
@@ -139,7 +135,7 @@ class EmailFetchWorker {
       return;
     }
 
-    const adapter = adapterRegistry.getAdapter(source.name);
+    const adapter = adapterRegistry.getAdapter(source.sourceType);
     if (!adapter.refetch) {
       logger.warn(
         `[EMAIL-FETCH-WORKER] Adapter ${source.name} does not support fetch — skipping`,
@@ -160,9 +156,7 @@ class EmailFetchWorker {
     try {
       // Background job → open a tenant scope from the job's workspaceId so ingested
       // emails/drafts/assignments get workspaceId stamped instead of leaking NULL.
-      result = await runAsServiceActor('email-fetch-worker', job.data.workspaceId,
-        () => adapter.refetch!(source, options),
-      );
+      result = await refetchEmailSource(job.data.workspaceId, adapter, source, options);
     } catch (error) {
       if (job.data.isDlMemberSync && this.isFinalAttempt(job)) {
         await this.cleanupDlMemberSyncSource(sourceRepo, sourceId);
@@ -193,21 +187,7 @@ class EmailFetchWorker {
       `[EMAIL-FETCH-WORKER] Processing review sync job ${job.id} — channel ${channelId}`,
     );
 
-    const synced = await runAsServiceActor(
-      'social-media-fetch-worker',
-      workspaceId,
-      async () => {
-        let newInteractionCount = 0;
-        for (const sourceId of sourceIds) {
-          const result = await socialMediaService.syncSource(sourceId, {
-            ignoreSyncCursor: true,
-            ...(backfill && { backfill }),
-          });
-          newInteractionCount += result.synced;
-        }
-        return newInteractionCount;
-      },
-    );
+    const synced = await syncSocialMediaSources(workspaceId, sourceIds, backfill);
 
     logger.info(
       `[EMAIL-FETCH-WORKER] Review sync job ${job.id} done — new=${synced}`,
@@ -237,26 +217,38 @@ class EmailFetchWorker {
 
   private async notifySuccess(
     data: EmailFetchJobData,
-    result: { processed: number; newTickets: number; skipped: number; errors?: string[] },
+    result: { processed: number; newTickets: number; skipped: number; errors?: string[]; partial?: boolean },
   ): Promise<void> {
     try {
       const newCount = result.newTickets;
       const skipped = result.skipped;
       const isMemberSync = data.isDlMemberSync;
+      const errors = result.errors ?? [];
+      const nothingLanded = newCount === 0 && skipped === 0 && errors.length > 0;
       const title = isMemberSync
         ? (newCount > 0
           ? `Synced ${newCount} older ${newCount === 1 ? 'email' : 'emails'} from DL member`
           : 'No older emails found to sync')
-        : (newCount > 0
-          ? `Fetched ${newCount} new ${newCount === 1 ? 'email' : 'emails'}`
-          : 'Inbox is up to date');
+        : nothingLanded
+          ? 'Fetch completed but imported nothing — check the source configuration'
+          : result.partial
+            ? (newCount > 0
+              ? `Partially fetched ${newCount} new ${newCount === 1 ? 'email' : 'emails'} — rerun Fetch to continue`
+              : 'Partially fetched — rerun Fetch to continue')
+            : (newCount > 0
+              ? `Fetched ${newCount} new ${newCount === 1 ? 'email' : 'emails'}`
+              : 'Inbox is up to date');
       const message = isMemberSync
         ? (newCount > 0
           ? `${newCount} new, ${skipped} already existed.`
           : `All ${skipped} emails were already in the desk.`)
-        : (newCount > 0
-          ? `${newCount} new, ${skipped} already imported.`
-          : `${skipped} emails were already imported.`);
+        : nothingLanded
+          // The first error carries the offending field path, which is what an
+          // operator needs — a count alone sends them to the logs.
+          ? `${errors.length} ${errors.length === 1 ? 'problem' : 'problems'}: ${errors[0]}`
+          : (newCount > 0
+            ? `${newCount} new, ${skipped} already imported.${errors.length > 0 ? ` ${errors.length} skipped with errors.` : ''}`
+            : `${skipped} emails were already imported.${errors.length > 0 ? ` ${errors.length} skipped with errors.` : ''}`);
 
       await notificationService.sendNotification(
         data.requesterUserId,

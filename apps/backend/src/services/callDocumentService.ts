@@ -1,3 +1,5 @@
+import { createDetailedSummaryCanvasTx } from '@/bypassAcl/transactions/callDocumentService';
+import { createPRDCanvasTx } from '@/bypassAcl/transactions/callDocumentService';
 /**
  * Call Document Service - Generates documents from call transcripts
  * Handles both PRD (Product Requirements Documents) and Detailed Summaries
@@ -10,16 +12,16 @@ import { withWorkspaceScope } from '@/database/tenant/context';
 import { repositories } from '@/database/repositories';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import {
-  CallOrigin,
+  
   DEFAULT_SUMMARY_FIELDS,
   MessageType,
-  CanvasRole,
-  CanvasVisibility,
+  
+  
   SUMMARY_MAX_INPUT_CHARS,
 } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { formatToISTLocaleString } from '@/utils/dateUtils';
-import type { Prisma, SummaryTemplate } from '@prisma/client';
+import type { Call, Prisma, SummaryTemplate } from '@prisma/client';
 import { withServerEditor } from '@/utils/serverBlockNoteEditor';
 import { getCanvasUrl, findExistingDetailedSummaryCanvas } from '@/services/canvasService';
 import { logDetailedSummaryFailed } from '@/services/detailedSummaryFailureLog';
@@ -82,7 +84,7 @@ interface CanvasSideEffectContext {
 
 import { executeStreamingLlmRequest, type SummaryModelType } from './callLlmRetry';
 import { initializeYSweetDoc, syncToYSweet } from '@/utils/ysweetUtils.js';
-import { lockMessageMetadata } from '@/bypassAcl/rowLockServices';
+import { updateCallMessageMetadataTx } from '@/bypassAcl/transactions/callDocumentService';
 
 export interface RecordingSummaryTemplateSelection<T extends SummaryTemplateCandidate = SummaryTemplate> {
   template: T | null;
@@ -150,7 +152,7 @@ function renderPromptTemplate(template: string, values: Record<string, string>):
 // frontend chip can open the transcript at that moment.
 const CITATION_TOKEN_RE = /\[clf-(\d+)\]/g;
 const MAX_CITATION_SNIPPET = 300;
-const INITIAL_DETAILED_SUMMARY_CANVAS_VERSION = 1;
+export const INITIAL_DETAILED_SUMMARY_CANVAS_VERSION = 1;
 
 export interface CitationSegment {
   n: number;
@@ -1078,13 +1080,14 @@ export class CallDocumentService {
     defaultTemplate: T | null,
     callId: string,
     credentialUserId?: string,
+    meetingTitle?: string | null,
   ): Promise<RecordingSummaryTemplateSelection<T>> {
     if (templates.length === 0) {
       return { template: defaultTemplate, fellBack: true, reason: 'no_templates' };
     }
 
     const result = await executeStreamingLlmRequest({
-      userPrompt: buildSummaryTemplateSelectionPrompt(transcript, templates),
+      userPrompt: buildSummaryTemplateSelectionPrompt(transcript, templates, meetingTitle),
       operation: 'recording_summary_template_selection',
       callId,
       ...(credentialUserId ? { userId: credentialUserId } : {}),
@@ -1110,6 +1113,72 @@ export class CallDocumentService {
       reason,
     });
     return { template: defaultTemplate, fellBack: true, reason };
+  }
+
+  /** Template for a regular call's automatic summary, or null for the call default. */
+  private async selectCallSummaryTemplate(
+    transcript: string,
+    call: Pick<Call, 'createdByUserId' | 'title'>,
+    workspaceId: string,
+    callId: string,
+  ): Promise<SummaryTemplate | null> {
+    try {
+      const { templates, defaultTemplate } = await this.loadRecordingSummaryTemplateCandidates(
+        workspaceId,
+        call.createdByUserId,
+      );
+      const selection = await this.pickRecordingSummaryTemplate(
+        transcript,
+        templates,
+        defaultTemplate,
+        callId,
+        undefined,
+        call.title,
+      );
+      if (selection.fellBack || !selection.template) return null;
+      return await summaryTemplateService.ensureGeneratedSystemPrompt(selection.template);
+    } catch (error) {
+      logger.warn(`[${callId}] call_summary_template_selection_failed`, {
+        error: error instanceof Error ? error.message : String(error),
+        fallback: 'call_default',
+      });
+      return null;
+    }
+  }
+
+  /** One annotated summary run for a regular call, through its template when it has one. */
+  private async generateAnnotatedCallSummary(
+    transcript: string,
+    callId: string,
+    template: SummaryTemplate | null,
+    customPrompt: string | undefined,
+    channelSummaryFields: string | undefined,
+    onDelta?: (accumulatedContent: string) => void | Promise<void>,
+  ): Promise<string | null> {
+    if (!template) {
+      return this.generateDetailedSummary(
+        transcript,
+        callId,
+        customPrompt,
+        channelSummaryFields,
+        undefined,
+        DETAILED_SUMMARY_PROMPT,
+        DEFAULT_SUMMARY_FIELDS,
+        onDelta,
+      );
+    }
+
+    const rawSummary = await this.generateDetailedSummary(
+      transcript,
+      callId,
+      template.autoTriggerPrompt ?? undefined,
+      formatSummaryTemplateSections(template.sections),
+      template.systemPrompt,
+      buildRecordingDetailedSummaryPrompt(getMandatorySummarySectionState(template.sections)),
+      DEFAULT_RECORDING_SUMMARY_FIELDS,
+      onDelta ? accumulated => onDelta(normalizeDetailedSummaryMarkdown(accumulated)) : undefined,
+    );
+    return rawSummary ? normalizeDetailedSummaryMarkdown(rawSummary) : null;
   }
 
   /** Generate a headless-recording summary using a saved or code-backed template. */
@@ -1371,72 +1440,6 @@ MANDATORY OUTPUT CONTRACT:
   }
 
   /**
-   * Grant the standard access policy for a canvas generated from a call.
-   */
-  private async createCallCanvasAccess(
-    tx: Prisma.TransactionClient,
-    params: {
-      canvasId: string;
-      workspaceId: string;
-      callId: string;
-      createdByUserId: string;
-      callCreatorUserId: string;
-      channelId: string | null;
-      now: Date;
-    },
-  ): Promise<string> {
-    const { canvasId, workspaceId, callId, createdByUserId, callCreatorUserId, channelId, now } = params;
-    const call = await tx.call.findUnique({
-      where: { externalId: callId },
-      select: { id: true, callOrigin: true },
-    });
-    const isChannelThreadCall = call?.callOrigin === CallOrigin.CONVERSATION && channelId !== null;
-
-    await tx.canvasParticipant.create({
-      data: {
-        id: uuidv4(), canvasId, workspaceId, userId: createdByUserId, role: CanvasRole.OWNER,
-        joinedAt: now, updatedAt: now,
-      },
-    });
-    await tx.canvasParticipant.create({
-      data: {
-        id: uuidv4(), canvasId, workspaceId, userId: callCreatorUserId, role: CanvasRole.OWNER,
-        joinedAt: now, updatedAt: now,
-      },
-    });
-
-    if (isChannelThreadCall && call) {
-      const callParticipants = await tx.callParticipant.findMany({
-        where: { callId: call.id, isExternal: false },
-        select: { userId: true },
-      });
-      const editorUserIds = [...new Set(callParticipants.map(({ userId }) => userId))]
-        .filter((userId) => userId !== createdByUserId && userId !== callCreatorUserId);
-      if (editorUserIds.length > 0) {
-        await tx.canvasParticipant.createMany({
-          data: editorUserIds.map((userId) => ({
-            id: uuidv4(), canvasId, workspaceId, userId, role: CanvasRole.EDITOR,
-            joinedAt: now, updatedAt: now,
-          })),
-        });
-      }
-    }
-
-    if (channelId) {
-      await tx.canvasParticipant.create({
-        data: {
-          id: uuidv4(), canvasId, workspaceId, channelId,
-          role: isChannelThreadCall ? CanvasRole.VIEWER : CanvasRole.EDITOR,
-          joinedAt: now, updatedAt: now,
-        },
-      });
-    }
-
-    if (isChannelThreadCall) return 'thread participants as editors and channel as viewer';
-    return channelId ? 'channel as editor' : 'private access';
-  }
-
-  /**
    * Create PRD Canvas in database
    */
   async createPRDCanvas(
@@ -1458,42 +1461,7 @@ MANDATORY OUTPUT CONTRACT:
       const content = formatPRDToBlockNote(prd, callId);
 
       let accessMode = 'private access';
-      await prisma.$transaction(async (tx) => {
-        // Keep PRD canvases private and grant the same explicit access as
-        // detailed-summary canvases generated from this call.
-        await tx.canvas.create({
-          data: {
-            id: canvasId,
-            title,
-            content: [],
-            channelId,
-            workspaceId,
-            createdBy: createdByUserId,
-            visibility: CanvasVisibility.PRIVATE,
-            isTemplate: false,
-            isCollaborative: true,
-            lastEditedBy: createdByUserId,
-            lastEditedAt: now,
-            createdAt: now,
-            updatedAt: now,
-            metadata: {
-              source: 'call_prd',
-              callId,
-              conversationId,
-              generatedAt: now.toISOString(),
-            },
-          },
-        });
-        accessMode = await this.createCallCanvasAccess(tx, {
-          canvasId,
-          workspaceId,
-          callId,
-          createdByUserId,
-          callCreatorUserId,
-          channelId,
-          now,
-        });
-      });
+      ({ accessMode } = await createPRDCanvasTx(prisma, canvasId, title, channelId, workspaceId, createdByUserId, now, callId, conversationId, accessMode, callCreatorUserId));
 
       // Initialize Y-Sweet for collaborative editing
       const ysweetInitialized = await initializeYSweetDoc(canvasId, content, createdByUserId);
@@ -1533,6 +1501,7 @@ MANDATORY OUTPUT CONTRACT:
     options: {
       deferInsertSideEffects?: boolean;
       summaryModelPreference?: 'fast' | 'thinking';
+      isRecording?: boolean;
     } = {},
   ): Promise<string | null> {
     try {
@@ -1570,50 +1539,7 @@ MANDATORY OUTPUT CONTRACT:
       // otherwise deny the second insert since the requester isn't a
       // participant yet); regular canvas access after this stays ACL-gated.
       let accessMode = 'private access';
-      await prisma.$transaction(async (tx) => {
-        await tx.canvas.create({
-          data: {
-            id: canvasId,
-            title,
-            content: [],
-            channelId,
-            workspaceId,
-            createdBy: createdByUserId,
-            visibility: CanvasVisibility.PRIVATE,
-            isTemplate: false,
-            isCollaborative: true,
-            lastEditedBy: createdByUserId,
-            lastEditedAt: now,
-            createdAt: now,
-            updatedAt: now,
-            metadata: {
-              source: 'call_detailed_summary',
-              callId,
-              conversationId,
-              isAiGenerated: true,
-              generatedAt: now.toISOString(),
-              mentionedUserIds, // Store mentioned users for side effect handler
-              version: INITIAL_DETAILED_SUMMARY_CANVAS_VERSION,
-              // Recording summary LLM tier the client carried from its
-              // localStorage at recording start; read back on the headless
-              // call-end path (see noteTakerTranscriptService.getSummaryModelPreference).
-              ...(options.summaryModelPreference
-                ? { summaryModelPreference: options.summaryModelPreference }
-                : {}),
-            },
-          },
-        });
-
-        accessMode = await this.createCallCanvasAccess(tx, {
-          canvasId,
-          workspaceId,
-          callId,
-          createdByUserId,
-          callCreatorUserId,
-          channelId,
-          now,
-        });
-      });
+      ({ accessMode } = await createDetailedSummaryCanvasTx(prisma, canvasId, title, channelId, workspaceId, createdByUserId, now, callId, conversationId, mentionedUserIds, options, accessMode, callCreatorUserId));
 
       // Initialize Y-Sweet for collaborative editing
       const ysweetInitialized = await initializeYSweetDoc(canvasId, sanitizedContent as unknown as BlockNoteBlock[], createdByUserId);
@@ -1659,7 +1585,8 @@ MANDATORY OUTPUT CONTRACT:
     callId: string,
     callTitle?: string | null,
     citationCtx?: CitationContext,
-    callStartedAt?: Date
+    callStartedAt?: Date,
+    isRecording: boolean = false,
   ): Promise<string | null> {
     try {
       const prisma = DatabaseClient.getInstance();
@@ -1700,6 +1627,7 @@ MANDATORY OUTPUT CONTRACT:
           metadata: {
             source: 'call_detailed_summary',
             callId,
+            isRecording,
             isAiGenerated: true,
             generatedAt: now.toISOString(),
             mentionedUserIds,
@@ -1738,6 +1666,7 @@ MANDATORY OUTPUT CONTRACT:
     callTitle?: string | null,
     citationCtx?: CitationContext,
     sideEffectContextPromise?: Promise<CanvasSideEffectContext | null>,
+    isRecording: boolean = false,
   ): Promise<boolean> {
     try {
       const prisma = DatabaseClient.getInstance();
@@ -1771,6 +1700,7 @@ MANDATORY OUTPUT CONTRACT:
           metadata: {
             source: 'call_detailed_summary',
             callId,
+            isRecording,
             isAiGenerated: true,
             generatedAt: now.toISOString(),
             mentionedUserIds,
@@ -1854,7 +1784,8 @@ MANDATORY OUTPUT CONTRACT:
     callCreatorUserId: string,
     callTitle?: string | null,
     citationCtx?: CitationContext,
-    workspaceIdOverride?: string
+    workspaceIdOverride?: string,
+    isRecording: boolean = false,
   ): Promise<{ canvasId: string | null; version: number }> {
     // Check if an existing canvas exists for this call
     const existingCanvas = await findExistingDetailedSummaryCanvas(callId);
@@ -1870,7 +1801,8 @@ MANDATORY OUTPUT CONTRACT:
         callId,
         callTitle,
         citationCtx,
-        callStartedAt
+        callStartedAt,
+        isRecording,
       );
 
       await this.linkDetailedSummaryCanvasToCall(callId, updatedCanvasId);
@@ -1892,7 +1824,8 @@ MANDATORY OUTPUT CONTRACT:
       callCreatorUserId,
       callTitle,
       citationCtx,
-      workspaceIdOverride
+      workspaceIdOverride,
+      { isRecording },
     );
 
     await this.linkDetailedSummaryCanvasToCall(callId, canvasId);
@@ -2160,28 +2093,7 @@ A comprehensive detailed summary has been generated from this call.
       });
 
       if (callMessage) {
-        await prisma.$transaction(async (tx) => {
-          // Title generation and first-chunk Canvas publication can now update
-          // this message concurrently. Lock the row and merge from the latest
-          // metadata so neither write erases the other's key.
-          const lockedMessage = await lockMessageMetadata(tx, callMessage.messageId);
-          if (!lockedMessage) {
-            return;
-          }
-
-          // Set the canvas URL, or drop the key entirely when clearing (null).
-          const currentMetadata = (lockedMessage.metadata as Record<string, any>) || {};
-          const nextMetadata = { ...currentMetadata };
-          if (canvasUrl === null) {
-            delete nextMetadata[metadataKey];
-          } else {
-            nextMetadata[metadataKey] = canvasUrl;
-          }
-          await tx.message.update({
-            where: { messageId: callMessage.messageId },
-            data: { metadata: nextMetadata },
-          });
-        });
+        await updateCallMessageMetadataTx(prisma, callMessage, canvasUrl, metadataKey);
         logger.info(`[CallDocumentService] Updated call message ${callMessage.messageId} with ${metadataKey}`);
       } else {
         logger.warn(`[CallDocumentService] Call message not found for callId ${callId}`);
@@ -2350,9 +2262,17 @@ A comprehensive detailed summary has been generated from this call.
     callId: string,
     annotatedMarkdown: string,
     segments: CitationContext['segments'],
+    template: SummaryTemplate | null = null,
   ): Promise<void> {
     try {
-      const generated = extractMarkedItemsFromRecordingSummary(annotatedMarkdown, segments);
+      // A template may have Decisions or Action Items switched off.
+      const mandatorySections = template
+        ? getMandatorySummarySectionState(template.sections)
+        : { decisions: true, actionItems: true };
+      const generated = extractMarkedItemsFromRecordingSummary(annotatedMarkdown, segments).filter(
+        item =>
+          item.type === 'decision' ? mandatorySections.decisions : mandatorySections.actionItems,
+      );
       const call = await repositories.calls.findByExternalId(callId);
       if (!call) return;
 
@@ -2366,6 +2286,22 @@ A comprehensive detailed summary has been generated from this call.
       });
     } catch (error) {
       logger.warn(`[${callId}] call_marked_items_persist_failed`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  /** Records which template wrote the call's summary; null is the call default. */
+  private async persistCallSummaryTemplate(
+    call: Call,
+    template: SummaryTemplate | null,
+  ): Promise<void> {
+    // A recording's template is chosen and stored on the note-taker path.
+    if (isRecording(call)) return;
+    try {
+      await repositories.calls.update(call.id, { summaryTemplateId: template?.id ?? null });
+    } catch (error) {
+      logger.warn(`[${call.externalId}] call_summary_template_persist_failed`, {
         error: error instanceof Error ? error.message : String(error),
       });
     }
@@ -2410,6 +2346,11 @@ A comprehensive detailed summary has been generated from this call.
       // token→segment map used to turn `[clf-n]` tokens into canvas citation chips.
       // Both derive from the SAME transcript string, so segment ids always agree.
       const { numbered: numberedTranscript, segments } = numberTranscriptSegments(transcript);
+      // A custom prompt and a channel's own sections are deliberate overrides.
+      const summaryTemplatePromise =
+        customPrompt || channel.callSummaryPrompt || isRecording(call)
+          ? Promise.resolve(null)
+          : this.selectCallSummaryTemplate(numberedTranscript, call, channel.workspaceId, callId);
       // Best-effort: attach each speaker's participant userId (matched by name) so
       // the citation chip + hover can show the real user avatar. Unmatched speakers
       // fall back to initials on the frontend.
@@ -2464,11 +2405,13 @@ A comprehensive detailed summary has been generated from this call.
       // content untouched and is written exactly once at the end, so a
       // mid-generation failure can never leave a previously-good summary erased.
       const existingCanvas = await findExistingDetailedSummaryCanvas(callId);
+      const summaryTemplate = await summaryTemplatePromise;
 
       if (existingCanvas) {
-        const annotatedMarkdown = await this.generateDetailedSummary(
+        const annotatedMarkdown = await this.generateAnnotatedCallSummary(
           numberedTranscript,
           callId,
+          summaryTemplate,
           customPrompt,
           channel.callSummaryPrompt ?? undefined,
         );
@@ -2477,7 +2420,12 @@ A comprehensive detailed summary has been generated from this call.
           return { success: false, error: 'Failed to generate detailed summary' };
         }
 
-        await this.persistCallMarkedItems(callId, annotatedMarkdown, citationCtx.segments);
+        await this.persistCallMarkedItems(
+          callId,
+          annotatedMarkdown,
+          citationCtx.segments,
+          summaryTemplate,
+        );
         const detailedSummaryMarkdown =
           stripRecordingSummaryMarkedItemAnnotations(annotatedMarkdown);
 
@@ -2500,11 +2448,14 @@ A comprehensive detailed summary has been generated from this call.
           call.createdByUserId,
           resolvedCallTitle,
           citationCtx,
+          undefined,
+          false,
         );
         if (!canvasId) {
           logDetailedSummaryFailed(callId, 'canvas_update_failed');
           return { success: false, error: 'Failed to update detailed summary canvas' };
         }
+        await this.persistCallSummaryTemplate(call, summaryTemplate);
 
         const canvasUrl = getCanvasUrl(canvasId);
         await this.postDetailedSummaryToConversation(
@@ -2646,14 +2597,12 @@ A comprehensive detailed summary has been generated from this call.
 
       let detailedSummaryMarkdown: string | null;
       try {
-        detailedSummaryMarkdown = await this.generateDetailedSummary(
+        detailedSummaryMarkdown = await this.generateAnnotatedCallSummary(
           numberedTranscript,
           callId,
+          summaryTemplate,
           customPrompt,
           channel.callSummaryPrompt ?? undefined,
-          undefined,
-          DETAILED_SUMMARY_PROMPT,
-          DEFAULT_SUMMARY_FIELDS,
           async (accumulated: string) => {
             // Stripped from every delta, partial ones included, so `[xyne-action]`
             // is never briefly visible mid-stream.
@@ -2684,7 +2633,12 @@ A comprehensive detailed summary has been generated from this call.
       }
 
       // Markers come off the ANNOTATED copy; everything downstream renders stripped.
-      await this.persistCallMarkedItems(callId, detailedSummaryMarkdown, citationCtx.segments);
+      await this.persistCallMarkedItems(
+        callId,
+        detailedSummaryMarkdown,
+        citationCtx.segments,
+        summaryTemplate,
+      );
       detailedSummaryMarkdown = stripRecordingSummaryMarkedItemAnnotations(detailedSummaryMarkdown);
 
       // Defensive fallback for providers that return final content without any
@@ -2722,12 +2676,14 @@ A comprehensive detailed summary has been generated from this call.
         resolvedCallTitle,
         citationCtx,
         sideEffectContextPromise ?? undefined,
+        false,
       );
       if (!finalized) {
         logDetailedSummaryFailed(callId, 'canvas_finalize_failed');
         await this.cleanupFailedDetailedSummaryCanvas(finalizedCanvasId, conversationId, callId, xyneAutomaticBot.id);
         return { success: false, error: 'Failed to write final detailed summary content' };
       }
+      await this.persistCallSummaryTemplate(call, summaryTemplate);
 
       // If the title LLM completed after the first content delta, update the
       // already-posted link to match the finalized canvas title. This remains

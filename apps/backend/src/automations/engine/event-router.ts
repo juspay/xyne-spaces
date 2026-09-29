@@ -1,6 +1,6 @@
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
-import { runAsServiceActor } from '@/database/tenant/context';
+import { createAutomationExecutionForEvent, ticketScopeForAutomationEvent } from '@/bypassAcl/automationServices';
 import { currentUpstreamChain } from './automation-context-storage';
 import {
   AUTOMATION_WORKFLOW_TYPE,
@@ -11,7 +11,7 @@ import {
 } from '../types/workflow-adapter';
 import { triggerRegistry } from '../triggers/trigger-registry';
 import type { TriggerType } from '../types/trigger-types';
-import { AutomationStatus, AutomationRunStatus } from '../types/status';
+import { AutomationStatus } from '../types/status';
 import { automationQueue } from '../queue/automation.queue';
 import type { AutomationEvent } from '../types/automation-events';
 import { EMAIL_RECEIVED_EVENT } from '../triggers/email-received.trigger';
@@ -152,28 +152,12 @@ class EventRouter {
           __meta: { error: null, chain },
         };
 
-        const execution = await runAsServiceActor('automation', workspaceId,
-          () =>
-            db.$transaction(async tx => {
-              const created = await tx.workflowExecution.create({
-                data: {
-                  workflowId: workflow.id,
-                  workflowType: workflow.workflowType,
-                  status: AutomationRunStatus.PENDING,
-                  tag: 'root',
-                  workspaceId,
-                },
-              });
-              await tx.workflowExecutionState.create({
-                data: {
-                  workflowExecutionId: created.id,
-                  context: JSON.stringify(initialContext),
-                  workspaceId,
-                },
-              });
-              return created;
-            }),
-        );
+        const execution = await createAutomationExecutionForEvent({
+          workspaceId,
+          workflowId: workflow.id,
+          workflowType: workflow.workflowType,
+          initialContext,
+        });
 
         // Priority runs get put near the front of the queue. Normal runs pass no
         // priority, so they just join the back of the line like always.
@@ -227,14 +211,7 @@ class EventRouter {
       const ticketId = payload['ticketId'];
       if (typeof ticketId !== 'string' || !ticketId) return skip;
       // Same tenant scope the worker hydrates under, so both see the same rows.
-      const ticket = await runAsServiceActor('automation', workspaceId, () =>
-        db.ticket
-          .findUnique({
-            where: { id: ticketId },
-            select: { boardId: true, projectId: true, channelId: true },
-          })
-          .catch(() => null),
-      );
+      const ticket = await ticketScopeForAutomationEvent(workspaceId, ticketId);
       scope = eventScope(eventType, { ...payload, ticket: ticket ?? {} });
     }
     if (!scope) return skip;

@@ -1,12 +1,18 @@
 import { Request, Response } from 'express';
 import { db } from '@/database/client';
 import { verifyPassword } from '@/utils/passwordUtils';
+import { accountDeactivationService } from '@/services/accountDeactivationService';
+import { logger } from '@/utils/logger';
 
 export interface OrgMemberCheckResponse {
   isActiveMember: boolean;
   memberId?: string;
   orgId?: string;
   orgName?: string;
+}
+interface InternalDeactivateUserResponse {
+  success: boolean;
+  userId: string;
 }
 interface InternalEmailLoginResponse {
   success: boolean;
@@ -168,6 +174,53 @@ export class InternalController {
         },
       } as InternalEmailLoginResponse);
     } catch (error) {
+      res.status(503).json({ error: 'Service Unavailable' });
+    }
+  };
+
+  /**
+   * Run the deactivated-account cleanup for a user, the same flow the auth
+   * middleware triggers when an identity provider reports the account is
+   * revoked (mTLS certificate revocation, session revocation, push-token
+   * unregistration).
+   * POST /internal/users/:id/deactivate?email=:email
+   *
+   * Returns:
+   * - 200 { success: true, userId: "..." } once the cleanup ran
+   * - 400 { error: "Bad Request", message: "email required" } if email is missing
+   * - 401 { error: "Unauthorized" } if authentication fails
+   * - 503 { error: "Service Unavailable" } if the cleanup itself throws
+   */
+  deactivateUser = async (req: Request, res: Response): Promise<void> => {
+    const userId = req.params.id;
+    const email = req.query.email?.toString().toLowerCase().trim();
+
+    if (!userId) {
+      res.status(400).json({
+        error: 'Bad Request',
+        message: 'user id required',
+      });
+      return;
+    }
+
+    if (!email) {
+      res.status(400).json({
+        error: 'Bad Request',
+        message: 'email required',
+      });
+      return;
+    }
+
+    try {
+      // Awaited here (unlike the middleware, which fires it off in the
+      // background) so the caller learns whether the cleanup completed.
+      await accountDeactivationService.handleDeactivatedUser({ userId, email });
+      res.status(200).json({ success: true, userId } as InternalDeactivateUserResponse);
+    } catch (error) {
+      logger.error('[Internal] User deactivation failed', {
+        userId,
+        error: error instanceof Error ? error.message : String(error),
+      });
       res.status(503).json({ error: 'Service Unavailable' });
     }
   };

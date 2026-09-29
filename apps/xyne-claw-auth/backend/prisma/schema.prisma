@@ -1316,6 +1316,10 @@ model ChatMessage {
 
   pendingActions Json?
 
+  /// FlowUI artifact cards posted on this message, as a FlowDefinition[].
+  /// Stored without __xyneFlowToken — that is minted per fetch.
+  uiFlows Json?
+
   runProvider String?
 
   attachments ChatAttachment[]
@@ -1348,6 +1352,33 @@ model ChatAttachment {
   @@index([chatMessageId])
   @@index([uploaderUserId, createdAt])
   @@map("chat_attachments")
+}
+
+/// Per-conversation metadata for Ask AI chats. A conversation is otherwise just
+/// a grouping of chat_messages rows, so anything belonging to the conversation
+/// rather than to one message lives here — today the generated title the
+/// sidebar and chat header show instead of the truncated first user message.
+model ChatConversationMeta {
+  conversationId   String
+  userId           String
+  agentSlug        String
+  orgId            String
+  /// Null until generation succeeds; every reader falls back to the first user
+  /// message, so old conversations need no backfill.
+  title            String?
+  titleGeneratedAt DateTime?
+  /// Lifts the chat into the sidebar's Pinned section.
+  pinned           Boolean   @default(false)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  /// Per user, not per conversation: two people can hold messages in one
+  /// conversationId, and a shared row would let either rename or pin it for
+  /// the other.
+  @@id([conversationId, userId, agentSlug])
+  @@index([userId, agentSlug])
+  @@index([orgId])
+  @@map("chat_conversation_meta")
 }
 
 /// A chat artifact the user chose to keep: a generated React project promoted out

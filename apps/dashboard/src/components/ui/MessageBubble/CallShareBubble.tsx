@@ -1,9 +1,9 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Phone } from 'lucide-react';
 import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import { EntitySharePill } from './EntitySharePill';
 import { MessageMetadata } from './MessageBubble.utils';
+import { PhoneDefault } from '@xyne/icons';
 
 interface CallShareBubbleProps {
   message: {
@@ -30,9 +30,7 @@ export const CallShareBubble: React.FC<CallShareBubbleProps> = ({ message }) => 
   const durationMs = typeof metadata?.['durationMs'] === 'number' ? metadata['durationMs'] : null;
   const noteHtml =
     typeof metadata?.['messageContent'] === 'string' ? metadata['messageContent'] : null;
-  // The detail route keys on `calls.id`, not the externalId the rest of the
-  // metadata carries, so the share stamps it separately.
-  const callRowId = typeof metadata?.['callRowId'] === 'string' ? metadata['callRowId'] : null;
+  const callId = typeof metadata?.['callId'] === 'string' ? metadata['callId'] : null;
 
   return (
     <div className='flex w-full max-w-lg flex-col gap-1'>
@@ -44,12 +42,12 @@ export const CallShareBubble: React.FC<CallShareBubbleProps> = ({ message }) => 
       <EntitySharePill
         title={title}
         durationMs={durationMs}
-        icon={<Phone size={14} strokeWidth={2.5} />}
+        icon={<PhoneDefault size={14} strokeWidth={2.5} />}
         ariaLabel={`Open call ${title}`}
         onOpen={
-          callRowId
+          callId
             ? (): void => {
-                void navigate(`/calls/${callRowId}/detail`);
+                void navigate(`/calls/${callId}/detail`);
               }
             : undefined
         }

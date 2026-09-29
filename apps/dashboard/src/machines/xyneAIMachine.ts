@@ -84,6 +84,7 @@ export interface AskAIInitialContextSelections {
     conversationId?: string;
     externalId?: string;
   }>;
+  calls?: Array<{ id: string; title: string; channelId?: string; conversationId?: string }>;
 }
 
 export interface WorkflowContext {
@@ -489,6 +490,18 @@ export const clearOldMermaidDiagrams = async (): Promise<void> => {
   }
 };
 
+/**
+ * Screens that must not have the assistant open over them — the related-context
+ * popup, which is modal — hold it closed while they show. Returns the release.
+ */
+let askAIHolds = 0;
+export const holdAskAIClosed = (): (() => void) => {
+  askAIHolds += 1;
+  return () => {
+    askAIHolds -= 1;
+  };
+};
+
 export const xyneAIMachine = setup({
   types: {
     context: {} as XyneAIContext,
@@ -889,6 +902,7 @@ export const xyneAIMachine = setup({
     closed: {
       on: {
         OPEN: {
+          guard: () => askAIHolds === 0,
           target: 'open',
           actions: ['setOpen', 'closeCalendar'],
         },
@@ -915,6 +929,8 @@ export const xyneAIMachine = setup({
     open: {
       on: {
         OPEN: {
+          // Nor may an already-open assistant be pointed somewhere else behind it.
+          guard: () => askAIHolds === 0,
           actions: 'updateOpen',
         },
         CLOSE: {

@@ -823,7 +823,7 @@ export function ProviderTabV3({ agent, userId }: Props) {
                   <div className="text-[13px] font-medium text-xyne-fg-primary">Subagents</div>
                   <p className="mt-1 text-[12px] text-xyne-fg-secondary leading-relaxed">
                     {subagentMode === "spaces"
-                      ? "Spaces default — subagents run on the Spaces platform model (cheaper/faster), even when this agent is on a premium provider."
+                      ? "Spaces default — subagents run on the Spaces fast model (falling back to the standard Spaces model if it fails), even when this agent is on a premium provider."
                       : "Follow parent — subagents run on the same provider as this agent."}
                     {" "}A per-subagent override, when set, always wins.
                   </p>
