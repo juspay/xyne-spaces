@@ -30,7 +30,6 @@ export async function assertCanControlScheduledJob(
   row: { id: string; userId: string; agentSlug: string },
 ): Promise<ScheduledJobControlAuthResult> {
   const requesterId = getRequesterId(req);
-  // codeql[js/user-controlled-bypass] auth gate: a bypass here only produces a 4xx rejection; actual ownership is enforced on requireAuth-verified identity aliases
   if (requesterId) {
     // The job row may be keyed by either verified id form of the owner
     // (canonical Claw id or the workspace's raw Spaces id) — match both.

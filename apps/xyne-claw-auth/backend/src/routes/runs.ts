@@ -536,7 +536,6 @@ router.get("/session/export", async (req: Request, res: Response) => {
 router.get("/:sessionId", async (req: Request<{ sessionId: string }>, res: Response) => {
   try {
     const userId = getRequesterId(req);
-    // codeql[js/user-controlled-bypass] auth gate: a bypass here only produces a 4xx rejection; actual ownership is enforced on requireAuth-verified identity aliases
     if (!userId) {
       res.status(401).json({ success: false, error: "Unauthorized" });
       return;
@@ -563,7 +562,6 @@ router.post("/:sessionId/share", async (req: Request<{ sessionId: string }>, res
   const { sessionId } = req.params;
   try {
     const requesterId = getRequesterId(req);
-    // codeql[js/user-controlled-bypass] auth gate: a bypass here only produces a 4xx rejection; actual ownership is enforced on requireAuth-verified identity aliases
     if (!requesterId) {
       res.status(401).json({ success: false, error: "Unauthorized" });
       return;
@@ -741,7 +739,6 @@ router.post(
 router.post("/:sessionId/rate", async (req: Request<{ sessionId: string }>, res: Response) => {
   try {
     const userId = getRequesterId(req);
-    // codeql[js/user-controlled-bypass] auth gate: a bypass here only produces a 4xx rejection; actual ownership is enforced on requireAuth-verified identity aliases
     if (!userId) {
       res.status(401).json({ success: false, error: "Unauthorized" });
       return;
