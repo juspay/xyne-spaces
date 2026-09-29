@@ -13,6 +13,9 @@ import { redeemApproval } from "./approvals.js";
 import { consumeOption, parseMenuChoice, peekOption, tokenForMenuChoice } from "./cards.js";
 import {
   DEDUP_TTL_S,
+  LINK_INVALID_TEXT,
+  LINK_TAKEN_TEXT,
+  LINK_VERIFIED_TEXT,
   NOT_LINKED_TEXT,
   RATE_LIMITED_TEXT,
   RATE_LIMIT_NOTICE_TTL_S,
@@ -25,7 +28,7 @@ import { agentActionGatesOf } from "./agent-tools.js";
 import { dispatchOrQueueChannelRun } from "./busy.js";
 import { channelConversationId } from "./ids.js";
 import { consumeGroupContext, readGroupContext, rememberGroupMessage, renderGroupContext } from "./group-context.js";
-import { resolveIdentity } from "./identity.js";
+import { parseLinkCode, redeemLinkCode, resolveIdentity } from "./identity.js";
 import type { AnyChannelPlugin, ChannelAccount, ChannelDeliveryTarget, InboundMessage } from "./plugin.js";
 import { chatIsAnswerable, evaluatePolicy } from "./policy.js";
 import { formatAgentList, namesAnAgent, parseAgentRoute } from "./routing.js";
@@ -225,6 +228,20 @@ async function handleOne(ctx: InboundContext, msg: InboundMessage): Promise<void
     senderId: msg.senderId,
     orgId: account.orgId,
   });
+
+  const linkCode = msg.isGroup ? null : parseLinkCode(text);
+  if (linkCode) {
+    const outcome = await redeemLinkCode({ surfaceId: account.surfaceId, orgId: account.orgId, senderId: msg.senderId, code: linkCode });
+    const answer = outcome.ok
+      ? LINK_VERIFIED_TEXT
+      : plugin.accountScope === "org"
+        ? outcome.reason === "taken"
+          ? LINK_TAKEN_TEXT
+          : LINK_INVALID_TEXT
+        : null;
+    if (answer) await enqueueOutbound(account.id, { kind: "text", chatId: msg.chatId, text: answer, quoted: msg.ref });
+    return;
+  }
 
   // Did they actually address the agent? A native @mention, a reply to one of
   // its messages, or opening with "/slug" — the last being the only one a
