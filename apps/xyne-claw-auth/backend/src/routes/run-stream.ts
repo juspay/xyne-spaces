@@ -21,6 +21,7 @@ import {
   type LocalFolderContextItem,
 } from "../lib/local-folder-context.js";
 import { gcsService } from "../services/storageService.js";
+import { maybeGenerateConversationTitle } from "../services/chatTitleClient.js";
 import { appendCitations, hydrateInvocationIcons } from "../lib/citations.js";
 import { resolveAgentProviderConfigs, agentDefaultSpeed, parseFastModeProfile } from "../lib/agent-provider-config.js";
 import { resolveFastMode } from "../lib/fast-mode.js";
@@ -255,6 +256,7 @@ export async function persistRunStreamResult(args: {
   content: string;
   status: "completed" | "failed" | "cancelled";
   orgId: string;
+  generateTitle?: boolean;
   attachments?: StreamAttachment[];
   sessionId?: string;
   pendingActions?: Array<Record<string, unknown>>;
@@ -394,6 +396,17 @@ export async function persistRunStreamResult(args: {
     }
   }
 
+  if (args.status === "completed") {
+    void maybeGenerateConversationTitle({
+      conversationId: args.conversationId,
+      agentSlug: args.agentSlug,
+      userId: args.userId,
+      orgId: args.orgId,
+      assistantReply: args.content,
+      ...(args.generateTitle !== undefined ? { generateTitle: args.generateTitle } : {}),
+    }).catch((err) => log.warn("[run-stream] chat title generation failed:", errMsg(err)));
+  }
+
   return { messageId: assistantMsg.id, persistedAttachments };
 }
 
@@ -457,6 +470,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       agentConfig,
       additionalInstructions,
       generateFollowUpSuggestions,
+      generateTitle,
       // Branching: same semantics as the /agent-chat/:slug/chat route.
       isRegenerate,
       isEditUserMessage,
@@ -870,6 +884,16 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
           log.warn("[run-stream] Failed to persist user message:", errMsg(msgErr));
         }
       }
+    }
+
+    if (convId && userId && createdUserMessageId) {
+      void maybeGenerateConversationTitle({
+        conversationId: convId,
+        agentSlug: slug,
+        userId,
+        orgId,
+        ...(generateTitle !== undefined ? { generateTitle: Boolean(generateTitle) } : {}),
+      }).catch((err) => log.warn("[run-stream] chat title generation failed:", errMsg(err)));
     }
 
     // Pre-create the running assistant placeholder. Its id powers PI session

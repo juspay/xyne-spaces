@@ -104,6 +104,10 @@ export interface ClawRunRequest {
   /** Generate contextual next-question chips for this response. Ask AI v2
    *  enables this explicitly for every agent slug. */
   generateFollowUpSuggestions?: boolean;
+  /** Name the conversation from its opening exchange. False for asks that
+   *  never reach the chat list — cmd+K answers and the compose subject
+   *  helper — where the title is a completion nobody can ever see. */
+  generateTitle?: boolean;
   // Per-run schema/draft context for dashboard-ai — goes out via
   // additionalInstructions so it is fresh each run instead of accumulating
   // in the conversation history.
@@ -607,6 +611,7 @@ export async function runClawAgentStream(
     },
     ...(additionalInstructions && { additionalInstructions }),
     ...(request.generateFollowUpSuggestions === true && { generateFollowUpSuggestions: true }),
+    ...(request.generateTitle === false && { generateTitle: false }),
     ...(request.isRegenerate && { isRegenerate: true }),
     ...(request.isEditUserMessage && { isEditUserMessage: true }),
     ...(parentUserMessageId && { parentUserMessageId }),
@@ -1404,6 +1409,38 @@ export async function deleteClawConversation(
   }
 
   return (await response.json()) as { success: boolean; data: { deleted: number } };
+}
+
+export async function patchClawConversation(
+  req: { headers?: { cookie?: string }; userId: string },
+  convId: string,
+  patch: { title?: string; pinned?: boolean },
+  agentSlug?: string
+): Promise<{ success: boolean; data: { title: string | null; pinned: boolean } }> {
+  const slug = agentSlug || 'ask-ai';
+  const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/${encodeURIComponent(slug)}/chat/${encodeURIComponent(convId)}`;
+  const response = await fetch(url, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      ...extractUserIdHeader(req.userId),
+      ...extractCookieHeader(req),
+    },
+    body: JSON.stringify(patch),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    logger.error(`[ClawAgentService] patchConversation failed: ${response.status} ${errorText}`);
+    throw new Error(
+      response.status === 404 ? 'Conversation not found' : 'Failed to update conversation'
+    );
+  }
+
+  return (await response.json()) as {
+    success: boolean;
+    data: { title: string | null; pinned: boolean };
+  };
 }
 
 /**
