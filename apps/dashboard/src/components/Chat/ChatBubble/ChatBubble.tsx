@@ -22,7 +22,7 @@ import { ChatInput } from '../ChatInput';
 import { usePin } from '../../../hooks/usePin';
 import { useMessageEdit } from '../../../providers/EditProvider';
 import { toast } from 'sonner';
-import { useNavigate, useParams, useLocation } from 'react-router-dom';
+import { useRouterSelector, useStableNavigate } from '../../../hooks/useStableRouter';
 import {
   MessageType,
   BookmarkEntityType,
@@ -185,10 +185,16 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   const zero = useZero();
   const { onMessageChange } = useSummaryCache();
   const { togglePin } = usePin();
-  const navigate = useNavigate();
+  const navigate = useStableNavigate();
   const shareableOrigin = useShareableOrigin();
-  const location = useLocation();
-  const { conversationId } = useParams<{ conversationId?: string }>();
+  // Router state through narrow selectors: rendered once per message, this component
+  // otherwise re-rendered on every navigation anywhere in the app.
+  const locationHash = useRouterSelector(snapshot => snapshot.location.hash);
+  // A repeat navigation to the same hash has to re-flash the highlight.
+  const hashNavigationKey = useRouterSelector(snapshot =>
+    snapshot.location.hash ? snapshot.location.key : '',
+  );
+  const conversationId = useRouterSelector(snapshot => snapshot.params['conversationId']);
   const { isEditingMessage, requestEdit, stopEditing } = useMessageEdit();
   // channelHasBoards rides on the context rather than a per-bubble query: it is
   // constant per channel and this component renders once per message.
@@ -213,8 +219,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   const [isHighlighted, setIsHighlighted] = useState(false);
 
   useEffect(() => {
-    const highlightedConversationId = linkedConversationId ?? extractOriginFromHash(location.hash);
-    const highlightedMessageId = extractMessageIdFromHash(location.hash);
+    const highlightedConversationId = linkedConversationId ?? extractOriginFromHash(locationHash);
+    const highlightedMessageId = extractMessageIdFromHash(locationHash);
 
     let shouldHighlight = false;
     if (context === 'thread') {
@@ -238,8 +244,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       setIsHighlighted(false);
     }
   }, [
-    location.key,
-    location.hash,
+    hashNavigationKey,
+    locationHash,
     linkedConversationId,
     highlightMessageId,
     context,

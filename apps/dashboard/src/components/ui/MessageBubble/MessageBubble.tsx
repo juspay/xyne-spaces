@@ -1,6 +1,5 @@
 import React, { useContext, useEffect, useMemo, useState } from 'react';
 import { ConversationBadgeContext } from '../../Chat/ConversationPannel/ConversationBadgeContext';
-import { useLocation, useNavigate } from 'react-router-dom';
 import Tooltip from '../Tooltip/Tooltip';
 import { AvatarSize } from '../../UserAvatar/UserAvatar';
 import * as Popover from '@radix-ui/react-popover';
@@ -75,7 +74,8 @@ import { PendingIcon } from '../../../assets/icons/WorkflowIcons';
 import { useIsCallActive } from '../../../hooks/useCalls';
 import { useUsers, useUser } from '../../../hooks/useUsers';
 import { ThreadInfoIndicator, AlsoSentToChannelIndicator } from './ThreadMessageIndicators';
-import { useRouteContext } from '../../../hooks/useRouteContext';
+import { getBaseRoute } from '../../../hooks/useRouteContext';
+import { useStableRouter } from '../../../hooks/useStableRouter';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { StatusIndicator } from '../StatusIndicator';
 import DOMPurify from 'dompurify';
@@ -514,7 +514,10 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   onUserClick,
 }) => {
   const renderConversationBadge = useContext(ConversationBadgeContext);
-  const navigate = useNavigate();
+  // Route state is read at click time: rendered once per message, subscribing to the router
+  // re-rendered every bubble on every navigation.
+  const stableRouter = useStableRouter();
+  const navigate = stableRouter.navigate;
   const { toggleReaction } = useReactions();
   const attachments = message.attachments || [];
   const [showLinkPreview, setShowLinkPreview] = useState(true);
@@ -661,8 +664,6 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const sender = useUser(message.senderId);
   const originalSender = useUser(forwardedMessageData?.originalSenderId || '');
   const isMe = user?.id === message.senderId;
-  const { baseRoute } = useRouteContext();
-  const location = useLocation();
   const actionableCount = useMemo(
     () => (message.nudgeCounts ?? []).reduce((sum, row) => sum + row.nudgeCount, 0),
     [message.nudgeCounts],
@@ -677,6 +678,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
       onUserClick(userId);
       return;
     }
+    const { location } = stableRouter.getSnapshot();
+    const baseRoute = getBaseRoute(location.pathname);
     const isFocusThread = new URLSearchParams(location.search).get('focusThread') === '1';
     const messageConversationId = conversation?.conversationId || message.conversationId;
     const threadSegment =
@@ -696,6 +699,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     const isThreadReply = conversation?.initialMessageId
       ? conversation.initialMessageId !== message.messageId
       : context === 'thread' && !isFirstInThread;
+    const baseRoute = getBaseRoute(stableRouter.getSnapshot().location.pathname);
     if (window.location.pathname.includes('/chat/dir/threads')) {
       if (isThreadReply) {
         void navigate(

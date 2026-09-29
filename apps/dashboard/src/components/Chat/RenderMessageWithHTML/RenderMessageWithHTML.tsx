@@ -1,5 +1,10 @@
 import React, { JSX, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useLocation, useParams } from 'react-router-dom';
+import type { NavigateFunction } from 'react-router-dom';
+import {
+  useRouterSelector,
+  useStableNavigate,
+  useStableRouter,
+} from '../../../hooks/useStableRouter';
 import { usePlatform } from '../../../hooks/usePlatform';
 import {
   Check,
@@ -112,7 +117,7 @@ export const InternalXyneLink = ({
 }: React.AnchorHTMLAttributes<HTMLAnchorElement>): JSX.Element => {
   const resolvedHref = href ?? '';
   const parsedLink = parseInternalXyneLink(resolvedHref);
-  const { workspaceId } = useParams<{ workspaceId?: string }>();
+  const workspaceId = useRouterSelector(snapshot => snapshot.params['workspaceId']);
   const copyHref =
     parsedLink?.kind === 'call' ? resolvedHref : withWorkspacePrefix(resolvedHref, workspaceId);
   const channel = useChannel(parsedLink?.channelId ?? '');
@@ -257,13 +262,15 @@ const CanvasLink = ({
   linkWorkspaceId?: string | undefined;
 }): JSX.Element => {
   const resolvedHref = href ?? '';
-  const navigate = useNavigate();
-  const location = useLocation();
-  const { channelId, workspaceId } = useParams<{ channelId: string; workspaceId: string }>();
+  const stableRouter = useStableRouter();
   const { isMobile } = usePlatform();
 
   const handleClick = (event: React.MouseEvent<HTMLAnchorElement>): void => {
     if (!resolvedHref) return;
+    const { navigate } = stableRouter;
+    const { location, params } = stableRouter.getSnapshot();
+    const channelId = params['channelId'];
+    const workspaceId = params['workspaceId'];
     const url = new URL(resolvedHref, window.location.origin);
 
     // Check for Cmd/Ctrl+Click to open in new tab (desktop only)
@@ -360,7 +367,7 @@ export function ChannelMentionRenderer({
   channelId: string;
   channelName: string;
   isPrivate: boolean;
-  navigate: ReturnType<typeof useNavigate>;
+  navigate: NavigateFunction;
 }): JSX.Element {
   const channel = useChannel(channelId);
   const [lastActivityAt, setLastActivity] = useState<number | undefined>(undefined);
@@ -481,8 +488,7 @@ export function GroupMentionRenderer({
   groupName: string;
   alias: string;
 }): JSX.Element {
-  const navigate = useNavigate();
-  const { channelId } = useParams<{ channelId: string }>();
+  const stableRouter = useStableRouter();
   const userMemberships = useUserGroupMappings();
 
   const isCurrentUserInGroup = useMemo(
@@ -491,8 +497,9 @@ export function GroupMentionRenderer({
   );
 
   const handleClick = (): void => {
+    const channelId = stableRouter.getSnapshot().params['channelId'];
     if (channelId) {
-      void navigate(`/chat/dir/${channelId}/group/${groupId}`);
+      void stableRouter.navigate(`/chat/dir/${channelId}/group/${groupId}`);
     }
   };
 
@@ -879,7 +886,7 @@ const parseNode = (
   node: Node,
   keyPrefix: string,
   idx: number,
-  navigate: ReturnType<typeof useNavigate>,
+  navigate: NavigateFunction,
   insideSlackBlockquote = false,
   insideCodeBlock = false,
   skipEmojiWrapping = false,
@@ -1420,7 +1427,7 @@ export const RenderMessageWithHTML: React.FC<RenderMessageWithHTMLProps> = ({
   preserveThreadRoute = false,
   slashCommandArtifactContext,
 }): JSX.Element => {
-  const navigate = useNavigate();
+  const navigate = useStableNavigate();
   const keyPrefix = useMemo<string>(() => Math.random().toString(36).slice(2), []);
 
   // Callers build this object inline, so its identity changes on every render.

@@ -1,4 +1,12 @@
-import { ReactElement, ReactNode, useCallback, useMemo, useRef, useState } from 'react';
+import {
+  ReactElement,
+  ReactNode,
+  useCallback,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   createPath,
   NavigationType,
@@ -7,9 +15,15 @@ import {
   UNSAFE_NavigationContext,
   UNSAFE_RouteContext,
   type Location,
+  type NavigateFunction,
   type NavigateOptions,
   type To,
 } from 'react-router-dom';
+import {
+  StableRouterContext,
+  type RouterSnapshot,
+  type StableRouter,
+} from '../../../../hooks/useStableRouter';
 
 /**
  * Gives one Streams column a private URL.
@@ -145,10 +159,42 @@ const StreamRouterScope = ({
     [params, location.pathname],
   );
 
+  // The same column-local view for components that navigate through `useStableRouter`
+  // instead of React Router's hooks.
+  const paramsRef = useRef(params);
+  paramsRef.current = params;
+  const listenersRef = useRef(new Set<() => void>());
+  const stableRouter = useMemo<StableRouter>(() => {
+    let snapshot: RouterSnapshot | null = null;
+    return {
+      navigate: ((to: To | number, options?: NavigateOptions) => {
+        // A column has no history stack of its own; back/forward belong to the app.
+        if (typeof to !== 'number') go(to, options?.state);
+      }) as NavigateFunction,
+      getSnapshot: () => {
+        if (snapshot?.location !== locationRef.current || snapshot.params !== paramsRef.current) {
+          snapshot = { location: locationRef.current, params: paramsRef.current };
+        }
+        return snapshot;
+      },
+      subscribe: listener => {
+        listenersRef.current.add(listener);
+        return () => listenersRef.current.delete(listener);
+      },
+    };
+  }, [go]);
+  useLayoutEffect(() => {
+    listenersRef.current.forEach(listener => listener());
+  }, [location, params]);
+
   return (
     <UNSAFE_NavigationContext.Provider value={navigationValue}>
       <UNSAFE_LocationContext.Provider value={locationValue}>
-        <UNSAFE_RouteContext.Provider value={routeValue}>{children}</UNSAFE_RouteContext.Provider>
+        <UNSAFE_RouteContext.Provider value={routeValue}>
+          <StableRouterContext.Provider value={stableRouter}>
+            {children}
+          </StableRouterContext.Provider>
+        </UNSAFE_RouteContext.Provider>
       </UNSAFE_LocationContext.Provider>
     </UNSAFE_NavigationContext.Provider>
   );
