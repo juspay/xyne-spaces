@@ -773,8 +773,9 @@ const ChatDirectory = ({
                         chatNavStateClass(item.key),
                       )}
                       onClick={() => {
-                        const to = item.sidebarTo ?? item.to;
-                        void (item.replace ? navigate(to, { replace: true }) : navigate(to));
+                        void (item.replace
+                          ? navigate(item.to, { replace: true })
+                          : navigate(item.to));
                       }}
                       onMouseEnter={item.key === 'recap' ? prefetchRecap : undefined}
                       data-testid={CHAT_NAV_TEST_IDS[item.key]}

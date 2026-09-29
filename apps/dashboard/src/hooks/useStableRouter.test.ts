@@ -55,6 +55,17 @@ describe('createStableRouter', () => {
     expect(router.navigate).toHaveBeenNthCalledWith(2, -1);
   });
 
+  it('prefixes absolute paths with the workspace, like the app useNavigate', () => {
+    const router = fakeRouter();
+    const stable = createStableRouter(router);
+    void stable.navigate('/chat/dir/b', { replace: true });
+    void stable.navigate('/auth/login');
+    void stable.navigate('drafts-sent');
+    expect(router.navigate).toHaveBeenNthCalledWith(1, '/ws/chat/dir/b', { replace: true });
+    expect(router.navigate).toHaveBeenNthCalledWith(2, '/auth/login', undefined);
+    expect(router.navigate).toHaveBeenNthCalledWith(3, 'drafts-sent', undefined);
+  });
+
   it('notifies subscribers and unsubscribes', () => {
     const router = fakeRouter();
     const stable = createStableRouter(router);

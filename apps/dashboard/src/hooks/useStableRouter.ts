@@ -1,5 +1,6 @@
 import { createContext, useContext, useSyncExternalStore } from 'react';
 import type { Location, NavigateFunction, NavigateOptions, Params, To } from 'react-router-dom';
+import { prefixWorkspacePath } from '../lib/workspacePath';
 
 export interface RouterSnapshot {
   location: Location;
@@ -19,6 +20,8 @@ export interface RouterSnapshot {
  * `useRouterSelector`.
  */
 export interface StableRouter {
+  /** Like the app's `useNavigate`: absolute paths get the `/{workspaceId}` prefix. Relative paths
+   * resolve against the current page, not the caller's route, so pass absolute paths. */
   navigate: NavigateFunction;
   getSnapshot: () => RouterSnapshot;
   subscribe: (listener: () => void) => () => void;
@@ -55,19 +58,23 @@ interface DataRouterLike {
 
 export const createStableRouter = (router: DataRouterLike): StableRouter => {
   let snapshot: RouterSnapshot | null = null;
+  const getSnapshot = (): RouterSnapshot => {
+    const { location, matches } = router.state;
+    if (snapshot?.location !== location) {
+      snapshot = { location, params: matches[matches.length - 1]?.params ?? {} };
+    }
+    return snapshot;
+  };
   const navigate = ((to: To | number, options?: NavigateOptions) =>
     typeof to === 'number'
       ? router.navigate(to)
-      : router.navigate(to, options)) as NavigateFunction;
+      : router.navigate(
+          prefixWorkspacePath(to, getSnapshot().params['workspaceId']),
+          options,
+        )) as NavigateFunction;
   return {
     navigate,
-    getSnapshot: () => {
-      const { location, matches } = router.state;
-      if (snapshot?.location !== location) {
-        snapshot = { location, params: matches[matches.length - 1]?.params ?? {} };
-      }
-      return snapshot;
-    },
+    getSnapshot,
     subscribe: listener => router.subscribe(() => listener()),
   };
 };

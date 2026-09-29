@@ -24,6 +24,7 @@ import {
   type RouterSnapshot,
   type StableRouter,
 } from '../../../../hooks/useStableRouter';
+import { prefixWorkspacePath } from '../../../../lib/workspacePath';
 
 /**
  * Gives one Streams column a private URL.
@@ -169,7 +170,9 @@ const StreamRouterScope = ({
     return {
       navigate: ((to: To | number, options?: NavigateOptions) => {
         // A column has no history stack of its own; back/forward belong to the app.
-        if (typeof to !== 'number') go(to, options?.state);
+        if (typeof to !== 'number') {
+          go(prefixWorkspacePath(to, paramsRef.current['workspaceId']), options?.state);
+        }
       }) as NavigateFunction,
       getSnapshot: () => {
         if (snapshot?.location !== locationRef.current || snapshot.params !== paramsRef.current) {
