@@ -25,7 +25,7 @@
  *      the model re-checks rather than anchoring on it.
  */
 
-import { LITELLM } from "./config.js";
+import { LITELLM, litellmEndpoint } from "./config.js";
 import { createLogger } from "./logger.js";
 
 const log = createLogger("prefetch");
@@ -205,7 +205,7 @@ export function startPrefetchExtraction(task: string): Promise<PrefetchSpec | nu
 
   return (async (): Promise<PrefetchSpec | null> => {
     try {
-      const res = await fetch(`${LITELLM.url.replace(/\/$/, "")}/v1/chat/completions`, {
+      const res = await fetch(litellmEndpoint("/v1/chat/completions"), {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${LITELLM.apiKey}` },
         signal: controller.signal,

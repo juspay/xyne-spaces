@@ -11,7 +11,7 @@
  * — the relooper combines this with max-turn/cost guards so a judge outage
  * never strands a goal in an infinite loop.
  */
-import { LITELLM } from "./config.js";
+import { LITELLM, litellmEndpoint } from "./config.js";
 
 import { createLogger } from "./logger.js";
 const log = createLogger("goal-judge");
@@ -140,7 +140,7 @@ export async function judgeGoalProgress(input: GoalJudgeInput): Promise<GoalJudg
   ].join("\n");
 
   try {
-    const res = await fetch(`${LITELLM.url}/v1/chat/completions`, {
+    const res = await fetch(litellmEndpoint("/v1/chat/completions"), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
