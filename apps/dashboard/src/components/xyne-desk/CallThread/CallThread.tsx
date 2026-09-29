@@ -1,5 +1,5 @@
 import { ReactElement, useEffect, useMemo, useRef, useState } from 'react';
-import { PhoneIncoming, PhoneOutgoing } from 'lucide-react';
+import { Phone, PhoneIncoming, PhoneOutgoing } from 'lucide-react';
 import { useMarkEmailRead } from '../../../hooks/useMarkEmailRead';
 import { cn } from '../../../utils/classNames';
 import {
@@ -303,6 +303,42 @@ export function CallEntry({
       ) : (
         transcriptControls
       )}
+    </div>
+  );
+}
+
+/**
+ * A call record inside a non-call desk thread (email, Slack, app, social). These are
+ * outbound calls dialled from a customer ticket and linked to it, so the call email
+ * sits between ordinary messages: compact card, phone as the avatar.
+ */
+export function CallEmailRow({
+  emailId,
+  body,
+  ticketId,
+  attachments,
+  className,
+}: {
+  emailId: string;
+  body: string;
+  ticketId?: string | null | undefined;
+  attachments?: ReadonlyArray<CallThreadAttachment> | null | undefined;
+  className?: string | undefined;
+}): ReactElement {
+  return (
+    <div id={`mail-${emailId}`} className={cn('flex scroll-mt-20 gap-3', className)}>
+      <div className='flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'>
+        <Phone size={14} aria-hidden />
+      </div>
+      <div className='min-w-0 flex-1'>
+        <CallEntry
+          body={body}
+          variant='compact'
+          emailId={emailId}
+          ticketId={ticketId}
+          attachments={attachments ?? undefined}
+        />
+      </div>
     </div>
   );
 }

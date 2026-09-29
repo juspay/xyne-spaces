@@ -31,7 +31,8 @@ export interface CallTranscriptionState {
 /** Subset of the Zero `messageAttachments` row the call card needs. */
 export interface CallThreadAttachment {
   id: string;
-  originalFilename: string;
+  /** Nullable on the rows the Slack/App and email desk threads carry. */
+  originalFilename?: string | null | undefined;
   mimetype?: string | null;
   metadata?: unknown;
   isDeleted?: boolean | null;
@@ -87,6 +88,8 @@ export function findCallTranscriptAttachment(
       parseAttachmentMetadata(att.metadata)?.['type'] === 'call_transcript',
   );
 }
+
+const DEFAULT_TRANSCRIPT_FILENAME = 'call-transcript.txt';
 
 /** `call-transcript-TXR9dcf5ba965…20260925.txt` style: keep the start and the tail, cap at ~20 chars. */
 const shortFilename = (name: string, max = 20): string => {
@@ -291,6 +294,7 @@ function CallTranscriptViewer({
   const [requestedSummary, setRequestedSummary] = useState<string | null>(null);
   const [summarizing, setSummarizing] = useState(false);
   const effectiveSummary = summary ?? requestedSummary ?? undefined;
+  const filename = attachment.originalFilename?.trim() || DEFAULT_TRANSCRIPT_FILENAME;
 
   const requestSummary = useCallback(async (): Promise<void> => {
     setSummarizing(true);
@@ -310,18 +314,14 @@ function CallTranscriptViewer({
     setLoading(true);
     setLoadError(null);
     try {
-      const file = await fetchFile(
-        attachment.id,
-        attachment.originalFilename,
-        attachment.mimetype ?? 'text/plain',
-      );
+      const file = await fetchFile(attachment.id, filename, attachment.mimetype ?? 'text/plain');
       setText(await file.text());
     } catch {
       setLoadError('Failed to load transcript');
     } finally {
       setLoading(false);
     }
-  }, [attachment.id, attachment.originalFilename, attachment.mimetype]);
+  }, [attachment.id, filename, attachment.mimetype]);
 
   const toggleOpen = (): void => {
     const next = !open;
@@ -330,12 +330,10 @@ function CallTranscriptViewer({
   };
 
   const handleDownload = (): void => {
-    const toastId = toast.loading(`Downloading ${attachment.originalFilename}…`);
-    downloadFile(attachment.id, attachment.originalFilename)
-      .then(() => toast.success(`Downloaded ${attachment.originalFilename}`, { id: toastId }))
-      .catch(() =>
-        toast.error(`Failed to download ${attachment.originalFilename}`, { id: toastId }),
-      );
+    const toastId = toast.loading(`Downloading ${filename}…`);
+    downloadFile(attachment.id, filename)
+      .then(() => toast.success(`Downloaded ${filename}`, { id: toastId }))
+      .catch(() => toast.error(`Failed to download ${filename}`, { id: toastId }));
   };
 
   return (
@@ -344,8 +342,8 @@ function CallTranscriptViewer({
       <div className={cn(rowClass, 'mt-0 flex-nowrap')}>
         <span className='flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground'>
           <FileText className='size-3.5 shrink-0' />
-          <span className='whitespace-nowrap' title={attachment.originalFilename}>
-            {shortFilename(attachment.originalFilename)}
+          <span className='whitespace-nowrap' title={filename}>
+            {shortFilename(filename)}
           </span>
         </span>
         <div className='ml-auto flex shrink-0 items-center gap-2'>
@@ -355,7 +353,7 @@ function CallTranscriptViewer({
             size='inline'
             className={cn(buttonClass, 'px-2')}
             onClick={handleDownload}
-            aria-label={`Download ${attachment.originalFilename}`}
+            aria-label={`Download ${filename}`}
             title='Download transcript'
             data-track-category='Support'
             data-track-name='DownloadCallTranscript'

@@ -187,7 +187,10 @@ import { getOzonetelConfig } from '../../services/clients/telephonyApi';
 import { AnimatePresence, motion } from 'framer-motion';
 import { parseFromField, stripHtml } from '../../components/xyne-desk/EmailComposer/helpers';
 import { EmailBodyRenderer } from '../../components/xyne-desk/EmailBody/EmailBodyRenderer';
-import CallThread from '../../components/xyne-desk/CallThread/CallThread';
+import CallThread, {
+  CallEmailRow,
+  isCallEmailBody,
+} from '../../components/xyne-desk/CallThread/CallThread';
 import { SlackThread, SlackComposer } from '../../components/xyne-desk/SlackThread';
 import { SocialMediaReplyComposer } from '../../components/xyne-desk/DeskReplyComposer';
 import {
@@ -6477,6 +6480,20 @@ const EmailThread = ({
   return (
     <div className='divide-y divide-gray-200 relative'>
       {sortedEmails.map((email, emailIndex) => {
+        // A call dialled from this ticket is a JSON call record, not mail: show the
+        // call card (recording + transcript controls) instead of the raw body.
+        if (isCallEmailBody(email.body)) {
+          return (
+            <CallEmailRow
+              key={email.id}
+              emailId={email.id}
+              body={email.body}
+              ticketId={ticketId}
+              attachments={email.attachments}
+              className='py-4'
+            />
+          );
+        }
         const mergedSource = mergedRootEmailSource.get(email.id);
         return (
           <EmailThreadItem
