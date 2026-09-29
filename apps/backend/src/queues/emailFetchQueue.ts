@@ -30,21 +30,10 @@ export interface CursorCatchupJobData {
   requesterUserId?: string;
 }
 
-export interface OzonetelSyncJobData {
-  ozonetelSync: true;
-}
-
 export type EmailFetchQueueJobData =
   | EmailFetchJobData
   | SocialMediaFetchJobData
-  | CursorCatchupJobData
-  | OzonetelSyncJobData;
-
-export function describeJobSource(data: EmailFetchQueueJobData): string {
-  if ('sourceId' in data) return data.sourceId;
-  if ('sourceIds' in data) return data.sourceIds.join(',');
-  return 'all ozonetel sources';
-}
+  | CursorCatchupJobData;
 
 class EmailFetchQueue {
   private queue: Bull.Queue<EmailFetchQueueJobData> | null = null;
@@ -89,7 +78,7 @@ class EmailFetchQueue {
     if (!this.queue) return;
 
     this.queue.on('failed', (job, err) => {
-      const source = describeJobSource(job.data);
+      const source = 'sourceId' in job.data ? job.data.sourceId : job.data.sourceIds.join(',');
       logger.error(
         `[EMAIL-FETCH-QUEUE] Job ${job.id} failed — source ${source}:`,
         err,

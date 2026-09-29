@@ -18,6 +18,6 @@ export const ozonetelAdapter = AdapterFactory.create(
 export { OzonetelAuthenticator } from './authenticator';
 export { OzonetelFlow } from './flow';
 export { OzonetelPostprocessor } from './postprocessor';
-export { OzonetelRefetch, syncRecentOzonetelCalls } from './refetch';
+export { OzonetelRefetch } from './refetch';
 export { OzonetelTransformer } from './transformer';
 export * from './types';

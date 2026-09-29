@@ -13,7 +13,6 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 // Ozonetel serves CDRs for the last 15 days, one day per request, at most 2 requests a minute.
 const CDR_RETENTION_DAYS = 15;
 const CDR_REQUEST_GAP_MS = 31_000;
-const RECENT_SYNC_WINDOW_MS = 2 * 60 * 60 * 1000;
 
 interface CdrWindow {
   fromDate: string;
@@ -168,9 +167,4 @@ export class OzonetelRefetch extends BaseRefetch {
         : windows;
     return pullCalls(source, requests, routesToDesk);
   }
-}
-
-export function syncRecentOzonetelCalls(source: ExternalSource): Promise<RefetchResult> {
-  const now = Date.now();
-  return pullCalls(source, splitByIstDay(now - RECENT_SYNC_WINDOW_MS, now));
 }

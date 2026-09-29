@@ -2,7 +2,6 @@ import Bull from 'bull';
 import { ActivityClassification, NotificationType } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
-import { db } from '@/database/client';
 import { adapterRegistry } from '@/integrations/core/adapterRegistry';
 import '@/integrations';
 import { notificationService } from '@/notification-service';
@@ -13,14 +12,8 @@ import {
   type SocialMediaFetchJobData,
   type EmailFetchQueueJobData,
   type CursorCatchupJobData,
-  describeJobSource,
 } from '@/queues/emailFetchQueue';
-import {
-  catchUpEmailSource,
-  refetchEmailSource,
-  syncOzonetelSource,
-  syncSocialMediaSources,
-} from '@/bypassAcl/emailFetchServices';
+import { catchUpEmailSource, refetchEmailSource, syncSocialMediaSources } from '@/bypassAcl/emailFetchServices';
 import { getHttpStatus } from '@/services/googleService';
 import { seedSyncCursor } from '@/services/syncCursorRecovery';
 
@@ -51,15 +44,9 @@ class EmailFetchWorker {
     queue.process('ozonetel-refetch', 1, async (job) => {
       return this.processJob(job as Bull.Job<EmailFetchJobData>);
     });
-    queue.process('ozonetel-sync', 1, async () => this.processOzonetelSync());
-    await queue.add(
-      'ozonetel-sync',
-      { ozonetelSync: true },
-      { repeat: { cron: '5 * * * *' }, jobId: 'ozonetel-sync', attempts: 1 },
-    );
 
     queue.on('failed', (job, err) => {
-      const source = describeJobSource(job.data);
+      const source = 'sourceId' in job.data ? job.data.sourceId : job.data.sourceIds.join(',');
       logger.error(
         `[EMAIL-FETCH-WORKER] Job ${job.id} (${job.name}) failed — source ${source}:`,
         err,
@@ -135,25 +122,6 @@ class EmailFetchWorker {
         reason: 'cursor-expired',
         requesterUserId,
       });
-    }
-  }
-
-  private async processOzonetelSync(): Promise<void> {
-    // A manual call pull already holds Ozonetel's 2-requests-a-minute budget.
-    const active = await emailFetchQueue.getQueue().getActive();
-    if (active.some(job => job.name === 'ozonetel-refetch')) return;
-    const sources = await db.externalSource.findMany({
-      where: { sourceType: 'ozonetel', isActive: true },
-    });
-    for (const source of sources) {
-      try {
-        const result = await syncOzonetelSource(source.workspaceId, source);
-        logger.info(
-          `[EMAIL-FETCH-WORKER] Ozonetel sync done — source ${source.id}: processed=${result.processed} new=${result.newTickets} skipped=${result.skipped} errors=${result.errors.length}`,
-        );
-      } catch (error) {
-        logger.error('[EMAIL-FETCH-WORKER] Ozonetel sync failed', { sourceId: source.id, error });
-      }
     }
   }
 
