@@ -1,5 +1,5 @@
 import { createSecretHandler } from '../secretHandler.js';
-import type { SecretHandler } from '../secretHandler.js';
+import type { SecretHandler, VerifyResult } from '../secretHandler.js';
 
 const GITHUB_API_TIMEOUT_MS = 30_000;
 
@@ -11,7 +11,7 @@ const GITHUB_API_TIMEOUT_MS = 30_000;
  * classic/fine-grained PAT (a human must generate a new one), so there's no
  * rotate function — `rotate` stays createSecretHandler()'s default (null).
  */
-export async function verifyGithubToken(value: string): Promise<boolean> {
+export async function verifyGithubToken(value: string): Promise<VerifyResult> {
   const response = await fetch('https://api.github.com/user', {
     headers: {
       Accept: 'application/vnd.github+json',
@@ -21,12 +21,12 @@ export async function verifyGithubToken(value: string): Promise<boolean> {
   });
 
   if (!response.ok) {
-    console.warn(
-      `[secrets-vault] verifyGithubToken: GitHub rejected the candidate token (HTTP ${response.status})`,
-    );
+    const reason = `GitHub rejected the candidate token (HTTP ${response.status})`;
+    console.warn(`[secrets-vault] verifyGithubToken: ${reason}`);
+    return { ok: false, reason };
   }
 
-  return response.ok;
+  return { ok: true };
 }
 
 /** Ready-to-use handler — a consumer just imports this and drops it into their registry. */

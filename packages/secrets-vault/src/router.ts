@@ -194,7 +194,7 @@ export function createSecretsVaultRouter(deps: SecretsVaultRouterDeps): Router {
       if (result.status === SecretVersionStatus.FAILED) {
         res.status(422).json({
           error: 'Verification Failed',
-          message: `New value for "${name}" failed verification — the previous version is still active`,
+          message: `New value for "${name}" failed verification${result.reason ? `: ${result.reason}` : ''} — the previous version is still active`,
           version: result.version,
           status: result.status,
         });
@@ -242,7 +242,7 @@ export function createSecretsVaultRouter(deps: SecretsVaultRouterDeps): Router {
       if (result.status === SecretVersionStatus.FAILED) {
         res.status(422).json({
           error: 'Verification Failed',
-          message: `Version ${version}'s value for "${name}" failed verification — it may no longer be valid at the external service. The previously-active version is still active.`,
+          message: `Version ${version}'s value for "${name}" failed verification${result.reason ? `: ${result.reason}` : ''} — it may no longer be valid at the external service. The previously-active version is still active.`,
           version: result.version,
           status: result.status,
         });

@@ -1,6 +1,12 @@
+export interface VerifyResult {
+  ok: boolean;
+  /** Why verification failed — surfaced all the way to the HTTP response's `message`, so the UI can show it, not just the server logs. */
+  reason?: string;
+}
+
 export interface SecretHandler {
   rotate: () => Promise<string | null>;
-  verify: (value: string) => Promise<boolean>;
+  verify: (value: string) => Promise<VerifyResult>;
 }
 
 /**
@@ -14,6 +20,6 @@ export interface SecretHandler {
 export function createSecretHandler(overrides: Partial<SecretHandler> = {}): SecretHandler {
   return {
     rotate: overrides.rotate ?? (async () => null),
-    verify: overrides.verify ?? (async () => true),
+    verify: overrides.verify ?? (async () => ({ ok: true })),
   };
 }
