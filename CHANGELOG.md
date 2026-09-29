@@ -1,3 +1,10 @@
+## [1.422.2](https://github.com/juspay/xyne-spaces/compare/v1.422.1...v1.422.2) (2026-09-29)
+
+
+### Bug Fixes
+
+* keep search typing responsive on long queries ([#2388](https://github.com/juspay/xyne-spaces/issues/2388)) ([1187743](https://github.com/juspay/xyne-spaces/commit/1187743f7a6d72a325a4f7919e8601ead71ba2b4))
+
 ## [1.422.1](https://github.com/juspay/xyne-spaces/compare/v1.422.0...v1.422.1) (2026-09-29)
 
 
