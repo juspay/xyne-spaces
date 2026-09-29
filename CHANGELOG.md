@@ -1,3 +1,12 @@
+## [1.422.4](https://github.com/juspay/xyne-spaces/compare/v1.422.3...v1.422.4) (2026-09-29)
+
+
+### Bug Fixes
+
+* fixed routes and call recorded canvas ([#2366](https://github.com/juspay/xyne-spaces/issues/2366)) ([e106ca1](https://github.com/juspay/xyne-spaces/commit/e106ca1010de66bcd9be08a9858d697b60875c10))
+* keep a report's theme stylesheet in create-html-report ([#2428](https://github.com/juspay/xyne-spaces/issues/2428)) ([fef09c7](https://github.com/juspay/xyne-spaces/commit/fef09c7b82ef4db3634e8db59c970f8bdb1ea3f0))
+* match prefixed tools.direct entries on wrapper and catalog paths ([#2429](https://github.com/juspay/xyne-spaces/issues/2429)) ([2d8e5da](https://github.com/juspay/xyne-spaces/commit/2d8e5daa593f598d45874ab7e3f63cf0792e4cbb))
+
 ## [1.422.3](https://github.com/juspay/xyne-spaces/compare/v1.422.2...v1.422.3) (2026-09-29)
 
 
