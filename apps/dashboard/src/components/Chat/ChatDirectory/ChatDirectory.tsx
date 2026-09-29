@@ -8,7 +8,7 @@ import {
   useCallback,
   type ComponentType,
 } from 'react';
-import { useNavigate, useLocation, useParams } from 'react-router-dom';
+import { useRouterSelector, useStableNavigate } from '../../../hooks/useStableRouter';
 import { useRadarEnabled } from '../../../hooks/radarCacConfig';
 import { useLastVisitedChannel } from '../../../hooks/useLastVisitedChannel';
 import { usePlatform } from '../../../hooks/usePlatform';
@@ -234,12 +234,12 @@ const ChatDirectory = ({
   channelData,
   allChannelsUserStatus,
 }: ChatDirectoryProps): ReactElement | null => {
-  const navigate = useNavigate();
-  const location = useLocation();
-  const { workspaceId, channelId: activeChannelId } = useParams<{
-    workspaceId: string;
-    channelId: string;
-  }>();
+  const navigate = useStableNavigate();
+  // Only the pieces of the route the sidebar renders from: it re-renders when the path or the
+  // active channel changes, not on hash, search or history-state navigations.
+  const pathname = useRouterSelector(snapshot => snapshot.location.pathname);
+  const workspaceId = useRouterSelector(snapshot => snapshot.params['workspaceId']);
+  const activeChannelId = useRouterSelector(snapshot => snapshot.params['channelId']);
   const listContainerRef = useRef<HTMLDivElement>(null);
   const context = useAuthContextValues();
   const auth = useAuth();
@@ -503,8 +503,7 @@ const ChatDirectory = ({
   useEffect(() => {
     if (isMobile) return; // Don't redirect on mobile
     const isAtChatDirRoot =
-      location.pathname === '/chat/dir' ||
-      (workspaceId && location.pathname === `/${workspaceId}/chat/dir`);
+      pathname === '/chat/dir' || (workspaceId && pathname === `/${workspaceId}/chat/dir`);
     if (!isAtChatDirRoot) return;
 
     const targetChannelId =
@@ -519,7 +518,7 @@ const ChatDirectory = ({
       void navigate(`/chat/dir/${targetChannelId}`, { replace: true });
     }
   }, [
-    location.pathname,
+    pathname,
     lastVisitedChannelId,
     starred,
     channels,
@@ -646,7 +645,7 @@ const ChatDirectory = ({
   const chatNavStateClass = (key: InboxItemKey): string => {
     const appId = appIdOf(key);
     if (appId) {
-      return location.pathname.includes(`/chat/dir/app/${appId}`)
+      return pathname.includes(`/chat/dir/app/${appId}`)
         ? 'text-sidebar-accent-foreground font-medium bg-sidebar-accent'
         : CHAT_NAV_ROW_DEFAULT_CLASS;
     }
@@ -656,7 +655,7 @@ const ChatDirectory = ({
           ? 'text-sidebar-accent-foreground font-semibold'
           : CHAT_NAV_ROW_DEFAULT_CLASS;
       case 'unreads':
-        return location.pathname.includes('/chat/dir/unreads')
+        return pathname.includes('/chat/dir/unreads')
           ? 'text-sidebar-accent-foreground font-medium bg-sidebar-accent'
           : unreadActivityStats.hasUnread
             ? 'text-sidebar-accent-foreground font-semibold'
@@ -666,7 +665,7 @@ const ChatDirectory = ({
           ? 'text-sidebar-accent-foreground font-semibold'
           : CHAT_NAV_ROW_DEFAULT_CLASS;
       case 'drafts-sent':
-        return location.pathname.endsWith('/chat/drafts-sent')
+        return pathname.endsWith('/chat/drafts-sent')
           ? 'text-sidebar-accent-foreground'
           : CHAT_NAV_ROW_DEFAULT_CLASS;
       case 'recap':
@@ -674,7 +673,7 @@ const ChatDirectory = ({
           ? 'text-sidebar-accent-foreground font-semibold'
           : CHAT_NAV_ROW_DEFAULT_CLASS;
       case 'radar':
-        return location.pathname.includes('/chat/dir/radar')
+        return pathname.includes('/chat/dir/radar')
           ? 'text-sidebar-accent-foreground font-semibold bg-sidebar-accent'
           : CHAT_NAV_ROW_DEFAULT_CLASS;
       default:
