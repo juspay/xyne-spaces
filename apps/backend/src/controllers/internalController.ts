@@ -12,7 +12,8 @@ export interface OrgMemberCheckResponse {
 }
 interface InternalDeactivateUserResponse {
   success: boolean;
-  userId: string;
+  email: string;
+  userIds: string[];
 }
 interface InternalEmailLoginResponse {
   success: boolean;
@@ -183,25 +184,21 @@ export class InternalController {
    * middleware triggers when an identity provider reports the account is
    * revoked (mTLS certificate revocation, session revocation, push-token
    * unregistration).
-   * POST /internal/users/:id/deactivate?email=:email
+   * POST /internal/users/deactivate?email=:email
+   *
+   * A user row is unique per (email, workspace), so one email can own a row in
+   * several workspaces. All of them are cleaned up: the provider revoked the
+   * identity, not one workspace membership.
    *
    * Returns:
-   * - 200 { success: true, userId: "..." } once the cleanup ran
+   * - 200 { success: true, email, userIds: [...] } once the cleanup ran
    * - 400 { error: "Bad Request", message: "email required" } if email is missing
    * - 401 { error: "Unauthorized" } if authentication fails
-   * - 503 { error: "Service Unavailable" } if the cleanup itself throws
+   * - 404 { error: "Not Found", message: "user not found" } if no user has that email
+   * - 503 { error: "Service Unavailable" } if the lookup or cleanup throws
    */
   deactivateUser = async (req: Request, res: Response): Promise<void> => {
-    const userId = req.params.id;
     const email = req.query.email?.toString().toLowerCase().trim();
-
-    if (!userId) {
-      res.status(400).json({
-        error: 'Bad Request',
-        message: 'user id required',
-      });
-      return;
-    }
 
     if (!email) {
       res.status(400).json({
@@ -212,13 +209,35 @@ export class InternalController {
     }
 
     try {
+      const users = await db.user.findMany({
+        where: { email: { equals: email, mode: 'insensitive' } },
+        select: { id: true, email: true },
+      });
+
+      if (users.length === 0) {
+        res.status(404).json({ error: 'Not Found', message: 'user not found' });
+        return;
+      }
+
       // Awaited here (unlike the middleware, which fires it off in the
       // background) so the caller learns whether the cleanup completed.
-      await accountDeactivationService.handleDeactivatedUser({ userId, email });
-      res.status(200).json({ success: true, userId } as InternalDeactivateUserResponse);
+      // handleDeactivatedUser never rejects on a failed step — it logs each one
+      // — so a throw here is a bug, not a partially-failed cleanup.
+      for (const user of users) {
+        await accountDeactivationService.handleDeactivatedUser({
+          userId: user.id,
+          email: user.email,
+        });
+      }
+
+      res.status(200).json({
+        success: true,
+        email,
+        userIds: users.map((user) => user.id),
+      } as InternalDeactivateUserResponse);
     } catch (error) {
       logger.error('[Internal] User deactivation failed', {
-        userId,
+        email,
         error: error instanceof Error ? error.message : String(error),
       });
       res.status(503).json({ error: 'Service Unavailable' });
