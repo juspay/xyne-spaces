@@ -229,8 +229,14 @@ async function checkReaction(input: ParserInput): Promise<ReactionCheck> {
     if (!c || c.type !== 'noul' || !s || s.type !== 'choice') {
       return { ok: false, reason: failureReason(failure) };
     }
+    // A choice with no probability for what it chose cannot be held to the threshold.
+    // Scoring it 0 would quietly resolve nothing in replace mode; failing hands the
+    // reaction to the parser instead.
+    if (!Object.prototype.hasOwnProperty.call(s.probabilities, s.choice)) {
+      return { ok: false, reason: 'unusable' };
+    }
 
-    const itemProbability = s.probabilities[s.choice] ?? s.confidence ?? 0;
+    const itemProbability = s.probabilities[s.choice];
     const resolves =
       c.noul >= REACTION_COMPLETION_THRESHOLD &&
       s.choice !== NONE &&

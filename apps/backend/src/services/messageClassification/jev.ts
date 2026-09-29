@@ -4,6 +4,7 @@ import { logger } from '@/utils/logger';
 import {
   askJev,
   isJevConfigured,
+  type JevAnswer,
   type JevChoiceQuestion,
   type JevFailure,
   type JevNoulQuestion,
@@ -78,6 +79,32 @@ const SCOPE =
 const failureReason = (failure: JevFailure | undefined): string =>
   failure?.kind === 'status' ? `status ${failure.status}` : (failure?.kind ?? 'unknown');
 
+/**
+ * The keys of `questions` that did not come back as a usable answer of the type asked.
+ *
+ * Both batches are all-or-nothing. A classification built from part of a batch is not a
+ * smaller classification but a wrong one: a type whose question went unanswered silently
+ * drops out, and a type whose evidence went unanswered cites nothing — and the write path
+ * reconciles every message in the thread against what comes back, so either would strip
+ * tags the model had applied instead of falling back to it. askJev without `partial`
+ * already returns null in that case; this re-checks it here, where the write depends on it.
+ */
+const unanswered = (
+  questions: Record<string, JevNoulQuestion | JevChoiceQuestion>,
+  answers: Record<string, JevAnswer>,
+): string[] =>
+  Object.entries(questions)
+    .filter(([key, question]) => {
+      const answer = answers[key];
+      if (!answer || answer.type !== question.type) return true;
+      // A choice with no probability for what it chose cannot rank citations.
+      return (
+        answer.type === 'choice' &&
+        !Object.prototype.hasOwnProperty.call(answer.probabilities, answer.choice)
+      );
+    })
+    .map(([key]) => key);
+
 /** The thread as Jev's state: the same object the LLM is sent. */
 const toState = (input: ClassifierInput): Record<string, unknown> => ({ ...input });
 
@@ -106,19 +133,22 @@ async function classifyThreadWithJev(
 
     let typeFailure: JevFailure | undefined;
     const typeAnswers = await askJev(state, typeQuestions, JEV_TIMEOUT_MS, undefined, {
-      partial: true,
       onFailure: failure => {
         typeFailure = failure;
       },
     });
     if (!typeAnswers) return { ok: false, reason: `types: ${failureReason(typeFailure)}` };
+    const missingTypes = unanswered(typeQuestions, typeAnswers);
+    if (missingTypes.length > 0) {
+      return { ok: false, reason: `types: ${missingTypes.length} unanswered` };
+    }
 
     const typeScores: Record<string, number> = {};
     for (const [name, answer] of Object.entries(typeAnswers)) {
       if (answer.type === 'noul') typeScores[name] = answer.noul;
     }
     const ranked = Object.entries(typeScores).sort(([, a], [, b]) => b - a);
-    if (ranked.length === 0) return { ok: false, reason: 'types: unusable' };
+    if (ranked.length === 0) return { ok: false, reason: 'types: no vocabulary' };
 
     // Never empty, as the LLM is told: when nothing clears the bar, the likeliest type
     // stands. The vocabulary's own catch-all (DISCUSSION in the standard set) is worded to
@@ -160,24 +190,28 @@ async function classifyThreadWithJev(
 
     let evidenceFailure: JevFailure | undefined;
     const evidenceAnswers = await askJev(state, evidenceQuestions, JEV_TIMEOUT_MS, undefined, {
-      partial: true,
       onFailure: failure => {
         evidenceFailure = failure;
       },
     });
     // Types without their evidence would clear every message tag in the thread, so a
-    // failed second call fails the whole answer rather than writing half of one.
+    // failed or partial second call fails the whole answer rather than writing half of one.
     if (!evidenceAnswers) {
       return { ok: false, reason: `evidence: ${failureReason(evidenceFailure)}` };
+    }
+    const missingEvidence = unanswered(evidenceQuestions, evidenceAnswers);
+    if (missingEvidence.length > 0) {
+      return { ok: false, reason: `evidence: ${missingEvidence.length} unanswered` };
     }
 
     const threadTypes = chosen.map(name => {
       const answer = evidenceAnswers[name];
-      if (!answer || answer.type !== 'choice') return { name, sourceMessageIds: [] };
+      // Guaranteed by the check above; narrows the type.
+      if (answer.type !== 'choice') return { name, sourceMessageIds: [] };
       // No message clearing the bar means the type came from the ticket or the thread as a
       // whole — cite nothing rather than guess, as the LLM is told to.
       const sourceMessageIds = Object.entries(answer.probabilities)
-        .filter(([id, p]) => p >= CITATION_THRESHOLD && id in options)
+        .filter(([id, p]) => p >= CITATION_THRESHOLD && Object.prototype.hasOwnProperty.call(options, id))
         .sort(([, a], [, b]) => b - a)
         .slice(0, MAX_SOURCES_PER_TYPE)
         .map(([id]) => id);
