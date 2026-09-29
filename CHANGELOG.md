@@ -1,3 +1,10 @@
+## [1.421.0](https://github.com/juspay/xyne-spaces/compare/v1.420.1...v1.421.0) (2026-09-29)
+
+
+### Features
+
+* deactivated user hide actions ([#2413](https://github.com/juspay/xyne-spaces/issues/2413)) ([b2c6634](https://github.com/juspay/xyne-spaces/commit/b2c6634a658e22d4ed5b59b39fc1f7c040c438c7))
+
 ## [1.420.1](https://github.com/juspay/xyne-spaces/compare/v1.420.0...v1.420.1) (2026-09-29)
 
 
