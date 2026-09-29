@@ -138,6 +138,11 @@ variable "enable_hindsight" {
   default = false
 }
 
+variable "enable_workflows" {
+  type    = bool
+  default = false
+}
+
 variable "hindsight" {
   type = object({
     url    = optional(string, "")
