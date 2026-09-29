@@ -1,6 +1,5 @@
 import { ReactElement, useEffect, useRef, useCallback } from 'react';
 import { Outlet } from 'react-router-dom';
-import { KeepAliveOutlet } from '../../components/KeepAliveOutlet/KeepAliveOutlet';
 import ChatDirectory from '../../components/Chat/ChatDirectory/ChatDirectory';
 import ConversationPrefetcher from '../../components/Chat/ConversationPrefetcher';
 import MobileChatDirectory from '../../components/Chat/ChatDirectory/MobileChatDirectory';
@@ -184,7 +183,7 @@ const ChatScreen = ({ shouldStackThread = false }: ChatScreenProps): ReactElemen
                 )}
               >
                 <div className='flex-1 overflow-hidden relative'>
-                  <KeepAliveOutlet context={{ shouldStackThread }} />
+                  <Outlet context={{ shouldStackThread }} />
                 </div>
               </main>
             </Panel>
@@ -219,7 +218,7 @@ const ChatScreen = ({ shouldStackThread = false }: ChatScreenProps): ReactElemen
                     className='h-full overflow-hidden flex flex-col relative'
                   >
                     <div className='flex-1 overflow-hidden relative'>
-                      <KeepAliveOutlet context={{ shouldStackThread }} />
+                      <Outlet context={{ shouldStackThread }} />
                     </div>
                   </main>
                 </div>
