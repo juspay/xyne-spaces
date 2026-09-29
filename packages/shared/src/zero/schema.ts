@@ -941,6 +941,56 @@ export const messageTable = table('messages')
   })
   .primaryKey('messageId');
 
+export const pollTable = table('polls')
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    messageId: string(),
+    createdBy: string(),
+    allowComments: boolean(),
+    allowMultipleVotes: boolean(),
+    allowAudienceChoices: boolean(),
+    createdAt: number(),
+  })
+  .primaryKey('id');
+
+export const pollQuestionTable = table('poll_questions')
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    pollId: string(),
+    question: string(),
+    position: number(),
+    createdAt: number(),
+  })
+  .primaryKey('id');
+
+export const pollOptionTable = table('poll_options')
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    questionId: string(),
+    text: string(),
+    normalizedText: string(),
+    position: number(),
+    createdBy: string(),
+    createdAt: number(),
+  })
+  .primaryKey('id');
+
+export const pollVoteTable = table('poll_votes')
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    pollId: string(),
+    questionId: string(),
+    userId: string(),
+    optionIds: json<string[]>(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('id');
+
 // Deliberately self-contained: the global artifact subscription must not relate
 // to `messages`, or every message delta in the workspace would flow through its
 // IVM pipeline. Each column below is either lifecycle state or the minimum
@@ -3575,7 +3625,78 @@ export const messageTableRelationships = relationships(messageTable, ({ one, man
     destField: ['messageId'],
     destSchema: surfaceNudgeCountTable,
   }),
+  poll: one({
+    sourceField: ['messageId'],
+    destField: ['messageId'],
+    destSchema: pollTable,
+  }),
 }));
+
+export const pollTableRelationships = relationships(pollTable, ({ one, many }) => ({
+  message: one({
+    sourceField: ['messageId'],
+    destField: ['messageId'],
+    destSchema: messageTable,
+  }),
+  questions: many({
+    sourceField: ['id'],
+    destField: ['pollId'],
+    destSchema: pollQuestionTable,
+  }),
+  votes: many({
+    sourceField: ['id'],
+    destField: ['pollId'],
+    destSchema: pollVoteTable,
+  }),
+}));
+
+export const pollQuestionTableRelationships = relationships(
+  pollQuestionTable,
+  ({ one, many }) => ({
+    poll: one({
+      sourceField: ['pollId'],
+      destField: ['id'],
+      destSchema: pollTable,
+    }),
+    options: many({
+      sourceField: ['id'],
+      destField: ['questionId'],
+      destSchema: pollOptionTable,
+    }),
+    votes: many({
+      sourceField: ['id'],
+      destField: ['questionId'],
+      destSchema: pollVoteTable,
+    }),
+  }),
+);
+
+export const pollOptionTableRelationships = relationships(
+  pollOptionTable,
+  ({ one }) => ({
+    question: one({
+      sourceField: ['questionId'],
+      destField: ['id'],
+      destSchema: pollQuestionTable,
+    }),
+  }),
+);
+
+export const pollVoteTableRelationships = relationships(
+  pollVoteTable,
+  ({ one }) => ({
+    poll: one({
+      sourceField: ['pollId'],
+      destField: ['id'],
+      destSchema: pollTable,
+    }),
+    question: one({
+      sourceField: ['questionId'],
+      destField: ['id'],
+      destSchema: pollQuestionTable,
+    }),
+  }),
+);
 
 export const messageArtifactTableRelationships = relationships(
   messageArtifactTable,
@@ -4887,6 +5008,10 @@ export const schema = createSchema({
     conversationTable,
     conversationParticipantTable,
     messageTable,
+    pollTable,
+    pollQuestionTable,
+    pollOptionTable,
+    pollVoteTable,
     messageArtifactTable,
     messageAttachmentTable,
     draftMessageTable,
@@ -5024,6 +5149,10 @@ export const schema = createSchema({
     sdlcItemCommentTableRelationships,
     sdlcTrackTableRelationships,
     messageTableRelationships,
+    pollTableRelationships,
+    pollQuestionTableRelationships,
+    pollOptionTableRelationships,
+    pollVoteTableRelationships,
     messageArtifactTableRelationships,
     draftMessageTableRelationships,
     delayedMessageTableRelationships,
@@ -5163,6 +5292,10 @@ export type ChannelParticipant = Row<typeof schema.tables.channel_participants>;
 export type ChannelUserStatus = Row<typeof schema.tables.channel_user_status>;
 export type Conversation = Row<typeof schema.tables.conversations>;
 export type Message = Row<typeof schema.tables.messages>;
+export type Poll = Row<typeof schema.tables.polls>;
+export type PollQuestion = Row<typeof schema.tables.poll_questions>;
+export type PollOption = Row<typeof schema.tables.poll_options>;
+export type PollVote = Row<typeof schema.tables.poll_votes>;
 export type MessageAttachment = Row<typeof schema.tables.message_attachments>;
 export type DraftMessage = Row<typeof schema.tables.draft_messages>;
 export type DelayedMessage = Row<typeof schema.tables.delayed_messages>;

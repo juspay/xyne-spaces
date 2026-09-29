@@ -73,11 +73,11 @@ export interface PollDraft {
 - Produces Zero tables/row types `polls`, `poll_questions`, `poll_options`, and `poll_votes` plus message/poll and nested relationships.
 - `poll_votes.optionIds` is JSON and unique on `(questionId, userId)`.
 
-- [ ] **Step 1: Add a failing schema parity expectation** by adding the Prisma models first and running `bash scripts/validate-schema-migrations.sh`; expect missing Zero-model validation.
-- [ ] **Step 2: Add the SQL migration** with tenant keys, foreign keys/cascades, unique constraints, and indexes from the spec.
-- [ ] **Step 3: Mirror tables and relationships in shared Zero schema** and expose row types.
-- [ ] **Step 4: Run Prisma generation** with `pnpm --filter xyne-spaces-backend db:generate` and retain the generated Zero schema.
-- [ ] **Step 5: Run** `node scripts/validate-zero-column-parity.mjs`, shared build, and backend typecheck.
+- [x] **Step 1: Add a failing schema parity expectation** by adding the Prisma models first and running `bash scripts/validate-schema-migrations.sh`; expect missing Zero-model validation.
+- [x] **Step 2: Add the SQL migration** with tenant keys, foreign keys/cascades, unique constraints, and indexes from the spec.
+- [x] **Step 3: Mirror tables and relationships in shared Zero schema** and expose row types.
+- [x] **Step 4: Run Prisma generation** with `pnpm --filter xyne-spaces-backend db:generate` and retain the generated Zero schema.
+- [x] **Step 5: Run** `node scripts/validate-zero-column-parity.mjs`, shared build, and backend typecheck.
 - [ ] **Step 6: Commit** with `feat: XYNE-65120 add poll persistence schema`.
 
 ### Task 3: Poll Query and Mutation ACLs
@@ -103,11 +103,11 @@ export interface PollDraft {
 - Produces select ACLs that trace every row to an accessible owning channel.
 - Produces mutation ACLs that allow structure creation only through authorized send/add-option flows and restrict ballots to `ctx.userID`.
 
-- [ ] **Step 1: Write failing Jest ACL tests** for own vote, another user's vote, private-channel nonparticipant, guest access, and cross-workspace IDs.
-- [ ] **Step 2: Run the focused Jest test** and confirm missing ACL classes fail.
-- [ ] **Step 3: Implement query ACLs and register all four tables** in the shared factory.
-- [ ] **Step 4: Implement backend mutation ACLs and registrations**, following reaction ACL channel-access conventions without trusting client tenant fields.
-- [ ] **Step 5: Run focused ACL tests and backend typecheck** until passing.
+- [x] **Step 1: Write failing Jest ACL tests** for own vote, another user's vote, private-channel nonparticipant, guest access, and cross-workspace IDs.
+- [x] **Step 2: Run the focused Jest test** and confirm missing ACL classes fail.
+- [x] **Step 3: Implement query ACLs and register all four tables** in the shared factory.
+- [x] **Step 4: Implement backend mutation ACLs and registrations**, following reaction ACL channel-access conventions without trusting client tenant fields.
+- [x] **Step 5: Run focused ACL tests and backend typecheck** until passing.
 - [ ] **Step 6: Commit** with `feat: XYNE-65120 secure poll data access`.
 
 ### Task 4: Atomic Poll Publishing and Pending Replay

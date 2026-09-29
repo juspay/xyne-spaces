@@ -2462,6 +2462,7 @@ model Message {
   reactions      Reaction[]
   reactionCounts ReactionCount[]
   externalMessages   ExternalMessage[] @relation("ExternalMessageEntity")
+  poll           Poll?
 
   @@index([conversationId, createdAt]) // Fast conversation message lookup
   @@index([workspaceId]) // ACL workspace filtering
@@ -2476,6 +2477,85 @@ model Message {
   // messageId` — without this, every thread fetch pays a temp B-tree sort.
   @@index([conversationId, messageId])
   @@map("messages")
+  @@schema("public")
+}
+
+model Poll {
+  id                   String   @id
+  workspaceId          String
+  messageId            String   @unique
+  createdBy            String
+  allowComments        Boolean  @default(true)
+  allowMultipleVotes   Boolean  @default(false)
+  allowAudienceChoices Boolean  @default(false)
+  createdAt            DateTime @default(now())
+
+  message   Message        @relation(fields: [messageId], references: [messageId], onDelete: Cascade)
+  questions PollQuestion[]
+  votes     PollVote[]
+
+  @@index([workspaceId])
+  @@index([createdBy])
+  @@map("polls")
+  @@schema("public")
+}
+
+model PollQuestion {
+  id          String   @id
+  workspaceId String
+  pollId      String
+  question    String
+  position    Int
+  createdAt   DateTime @default(now())
+
+  poll    Poll         @relation(fields: [pollId], references: [id], onDelete: Cascade)
+  options PollOption[]
+  votes   PollVote[]
+
+  @@unique([pollId, position])
+  @@index([workspaceId])
+  @@index([pollId])
+  @@map("poll_questions")
+  @@schema("public")
+}
+
+model PollOption {
+  id             String   @id
+  workspaceId    String
+  questionId     String
+  text           String
+  normalizedText String
+  position       Int
+  createdBy      String
+  createdAt      DateTime @default(now())
+
+  question PollQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@unique([questionId, normalizedText])
+  @@index([workspaceId])
+  @@index([questionId, position, createdAt])
+  @@map("poll_options")
+  @@schema("public")
+}
+
+model PollVote {
+  id          String   @id
+  workspaceId String
+  pollId      String
+  questionId  String
+  userId      String
+  optionIds   Json
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  poll     Poll         @relation(fields: [pollId], references: [id], onDelete: Cascade)
+  question PollQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@unique([questionId, userId])
+  @@index([workspaceId])
+  @@index([pollId])
+  @@index([userId])
+  @@map("poll_votes")
   @@schema("public")
 }
 
@@ -5106,4 +5186,3 @@ model RadarRule {
   @@map("radar_rules")
   @@schema("non_zero")
 }
-
