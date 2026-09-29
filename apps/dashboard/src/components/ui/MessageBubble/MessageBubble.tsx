@@ -28,6 +28,8 @@ import UserAvatar from '../../UserAvatar/UserAvatar';
 import { UserHoverWrapper } from '../UserMentionPopover/UserMentionPopover';
 import MessageAttachment from '../../Chat/MessageAttachment/MessageAttachment';
 import { FilePill, HtmlPreviewCard } from '../files';
+import { InlineCsvFile } from '../../Chat/MessageAttachment/InlineCsvFile';
+import { isCsvFile } from '../../Chat/MessageAttachment/csvPreview';
 import { useReactions } from '../../../hooks/useReaction';
 import { MessageBubbleProps } from './MessageBubble.types';
 import { useAuth } from '../../../hooks/useAuth';
@@ -189,10 +191,20 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
   // every sibling attachment to a pill.
   const htmlAttachments = activeAttachments.filter(a => isHtmlAttachment(a));
 
+  // CSV files get an inline table preview on desktop (mobile keeps the pill).
+  // Pulled out before the pill split for the same reason as HTML above.
+  const csvAttachments = isMobile
+    ? []
+    : activeAttachments.filter(a => isCsvFile(a.mimetype, a.originalFilename));
+  const isInlineCsv = (a: AttachmentType): boolean => csvAttachments.includes(a);
+
   // Files - separate into those with thumbnails (PDFs, Office docs) and those without
   const fileAttachments = activeAttachments.filter(
     a =>
-      !a.mimetype.startsWith('image/') && !a.mimetype.startsWith('video/') && !isHtmlAttachment(a),
+      !a.mimetype.startsWith('image/') &&
+      !a.mimetype.startsWith('video/') &&
+      !isHtmlAttachment(a) &&
+      !isInlineCsv(a),
   );
 
   const previewableFiles = fileAttachments.filter(a => hasDocumentThumbnail(a));
@@ -352,6 +364,21 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
             <div className='flex flex-col gap-2'>
               {htmlAttachments.map(attachment => (
                 <HtmlPreviewCard
+                  key={attachment.id}
+                  attachmentId={attachment.id}
+                  fileName={attachment.originalFilename}
+                  fileSize={attachment.size}
+                  onOpen={() => handleFileClick(attachment)}
+                />
+              ))}
+            </div>
+          )}
+
+          {/* CSV files - inline table preview (first rows/columns) */}
+          {csvAttachments.length > 0 && (
+            <div className='flex flex-col gap-2'>
+              {csvAttachments.map(attachment => (
+                <InlineCsvFile
                   key={attachment.id}
                   attachmentId={attachment.id}
                   fileName={attachment.originalFilename}
