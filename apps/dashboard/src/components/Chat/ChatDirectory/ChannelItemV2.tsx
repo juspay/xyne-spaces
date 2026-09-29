@@ -15,11 +15,15 @@ import {
   ChannelVisibility,
   ChannelScopeType,
   ChannelType,
-  NotificationLevel,
   ChannelSection,
 } from '@xyne/shared';
 import { VisibleChannel } from '../../../machines/stateMachine';
-import { isDMChannel, isGroupDMChannel, parseDMParticipantIds } from './ChatDirectory.utils';
+import {
+  isChannelBold,
+  isDMChannel,
+  isGroupDMChannel,
+  parseDMParticipantIds,
+} from './ChatDirectory.utils';
 import { useDraft, useDraftFromDB } from '../../../hooks/useDraft';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import ChatLock from '../../icons/ChatLock';
@@ -96,15 +100,7 @@ const ChannelItemV2 = memo(
     const { displayName, avatarUserId } = useChannelDisplayName(channel, currentUserID);
 
     const status = useGetChannelUserStatus(channel.id);
-    const hasUnreadCount = unreadCount > 0;
-    const isMuted = status?.desktopNotificationLevel === NotificationLevel.NONE;
-    const shouldShowBold = isDM
-      ? hasUnreadCount
-      : !isMuted &&
-        (hasUnreadCount ||
-          (!!status?.lastViewedAt &&
-            !!channel.channelStats?.lastActivityAt &&
-            channel.channelStats.lastActivityAt > status.lastViewedAt));
+    const shouldShowBold = isChannelBold(channel, unreadCount, status);
 
     const shouldShowCloseButton = isDM && !isActive && unreadCount === 0 && !isMobile;
 

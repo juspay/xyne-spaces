@@ -6,6 +6,7 @@ import {
   ChannelUserStatus,
   ChannelSection,
   isDeskChannelType,
+  NotificationLevel,
 } from '@xyne/shared';
 import { generateKeyBetween } from 'fractional-indexing';
 import { VisibleChannel } from '../../../machines/stateMachine';
@@ -352,7 +353,7 @@ export const isSelfDMChannel = (
 /**
  * Key used by the "Alphabetical A-Z" sort. A DM's `name` column holds participant ids, so
  * sorting on it orders DMs by cuid — resolve to the names the sidebar renders instead.
- * Falls back to the raw `name` while users are still syncing so rows don't jump to the top.
+ * Falls back to the raw `name` if a participant isn't in the users list (e.g. deleted user).
  */
 export const getChannelSortName = (
   channel: SortableChannel,
@@ -375,18 +376,43 @@ export const getChannelSortName = (
   return names.length > 0 ? names.join(', ') : raw;
 };
 
-/** Case/accent-insensitive A-Z by display name; ties broken by id for a stable order. */
+/**
+ * True when the sidebar row renders bold. DMs: unread count only. Channels: unread count or
+ * activity since last view, unless muted.
+ */
+export const isChannelBold = (
+  channel: Pick<VisibleChannel, 'scopeType' | 'channelStats'>,
+  unreadCount: number,
+  status: Pick<ChannelUserStatus, 'lastViewedAt' | 'desktopNotificationLevel'> | undefined,
+): boolean => {
+  if (isDMChannel(channel.scopeType)) return unreadCount > 0;
+  if (status?.desktopNotificationLevel === NotificationLevel.NONE) return false;
+  const lastActivityAt = channel.channelStats?.lastActivityAt;
+  return (
+    unreadCount > 0 ||
+    (!!status?.lastViewedAt && !!lastActivityAt && lastActivityAt > status.lastViewedAt)
+  );
+};
+
+/**
+ * Slack-style A-Z: bold (unread) rows first, then the rest — each group case/accent-insensitive
+ * A-Z by display name, ties broken by id for a stable order.
+ */
 export const sortChannelsAlphabetically = <T extends SortableChannel>(
   list: readonly T[],
   currentUserId: string,
   usersById: SortUserLookup,
+  isBold: (channel: T) => boolean = () => false,
 ): T[] => {
   const keys = new Map(list.map(c => [c.id, getChannelSortName(c, currentUserId, usersById)]));
+  const bold = new Set(list.filter(isBold).map(c => c.id));
   return [...list].sort(
     (a, b) =>
+      Number(bold.has(b.id)) - Number(bold.has(a.id)) ||
       (keys.get(a.id) ?? '').localeCompare(keys.get(b.id) ?? '', undefined, {
         sensitivity: 'base',
-      }) || a.id.localeCompare(b.id),
+      }) ||
+      a.id.localeCompare(b.id),
   );
 };
 

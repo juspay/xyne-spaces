@@ -26,6 +26,7 @@ import {
   applyChannelFilter,
   bucketChannelsBySection,
   DEFAULT_FILTER_MODE,
+  isChannelBold,
   isDMChannel,
   keyBetween,
   pinSelfDMLast,
@@ -147,7 +148,9 @@ export const useChannelSectionDnd = ({
     if (!sortOrder) return chs;
     const sorted = [...chs];
     if (sortOrder === ChannelSortOrder.ALPHABETICAL) {
-      return sortChannelsAlphabetically(chs, currentUserId, usersById);
+      return sortChannelsAlphabetically(chs, currentUserId, usersById, c =>
+        isChannelBold(c, unreadCounts[c.id] ?? 0, statuses.get(c.id)),
+      );
     }
     const lastActivity = (c: VisibleChannel) => c.channelStats?.lastActivityAt ?? 0;
     const lastViewed = (c: VisibleChannel) => statuses.get(c.id)?.lastViewedAt ?? 0;

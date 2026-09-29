@@ -6,10 +6,12 @@ import { stateMachineActor } from '../machines/stateMachine';
 import { useZero } from './useZero';
 import { mutators } from '../zero/mutators';
 import { useUsersById } from './useUsers';
+import { useAllUnreadCount } from './useUnreadCount';
 import {
   groupChannelsByScope,
   DEFAULT_FILTER_MODE,
   DEFAULT_GROUP_SORT_ORDER,
+  isChannelBold,
   pinSelfDMLast,
   sortChannelsAlphabetically,
 } from '../components/Chat/ChatDirectory/ChatDirectory.utils';
@@ -38,6 +40,7 @@ export const useChannelSort = (
 ): UseChannelSortResult => {
   const zero = useZero();
   const usersById = useUsersById();
+  const unreadCounts = useAllUnreadCount();
   const userPreference = useSelector(stateMachineActor, state => state.context.userPreference);
   const channelSortOrder = userPreference?.channelSortOrder ?? ChannelSortOrder.RECENCY;
   const groupPreferences: Record<SidebarGroup, SidebarGroupPreference> = {
@@ -92,9 +95,16 @@ export const useChannelSort = (
         (a, b) => (b.channelStats?.lastActivityAt ?? 0) - (a.channelStats?.lastActivityAt ?? 0),
       );
 
+    const statusByChannelId = new Map(
+      allChannelsUserStatus.filter(s => s.userId === currentUserId).map(s => [s.channelId, s]),
+    );
+
     // DM `name` is a comma-joined participant-id list, so sort on the resolved display name.
+    // Bold (unread) rows go first, matching what the sidebar renders.
     const sortAlphabetical = (list: VisibleChannel[]): VisibleChannel[] =>
-      sortChannelsAlphabetically(list, currentUserId, usersById);
+      sortChannelsAlphabetically(list, currentUserId, usersById, c =>
+        isChannelBold(c, unreadCounts[c.id] ?? 0, statusByChannelId.get(c.id)),
+      );
 
     const sortByUnreadAndActivity = (list: VisibleChannel[]): VisibleChannel[] => {
       const withUnread: VisibleChannel[] = [];
@@ -143,6 +153,7 @@ export const useChannelSort = (
     allChannelsUserStatus,
     currentUserId,
     usersById,
+    unreadCounts,
     channelSortOrder,
     starredSortOrder,
     dmSortOrder,
