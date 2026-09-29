@@ -9,6 +9,10 @@ import { getMigrationRuntimeConfig } from './migrationRuntimeConfig';
 const HEARTBEAT_MS = 15_000;
 const RECONCILE_EVERY_MS = 60_000;
 const RECLAIM_STALE_MS = 90_000; // several missed heartbeats ⇒ the pod that owned the job is gone
+// Transient encryption-provider / DB-transaction blips during a heavy ingest — retry the conversation before failing it.
+const INGEST_MAX_ATTEMPTS = 4;
+const INGEST_RETRY_BASE_MS = 2_000;
+const RETRYABLE_INGEST_ERROR = /batch-encrypt (?:failed with status 5\d\d|timed out)|Transaction already closed|expired transaction/i;
 // stallLimitMs (live heartbeat but no forward progress ⇒ worker wedged) is now live-tunable via Superposition — read per reconcile tick.
 
 /** Human-readable ingest duration for the completion log, e.g. "7m 12s". */
@@ -323,6 +327,21 @@ export class MigrationWorkers {
     }
   }
 
+  /** Retry a conversation load on a transient encryption/DB error (re-ingest is idempotent); rethrow otherwise. */
+  private async loadWithRetry(migrationId: string, conversationId: string, run: () => Promise<{ ingested: number; failed: number }>): Promise<{ ingested: number; failed: number }> {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await run();
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (attempt >= INGEST_MAX_ATTEMPTS || !RETRYABLE_INGEST_ERROR.test(msg)) throw err;
+        const delay = INGEST_RETRY_BASE_MS * 2 ** (attempt - 1);
+        logger.warn('[SlackMigration] transient ingest error — retrying conversation', { migrationId, conversationId, attempt, delayMs: delay, error: msg });
+        await new Promise((r) => setTimeout(r, delay));
+      }
+    }
+  }
+
   /**
    * PROCESSOR (runs on the CONV_INGEST queue in EVERY worker process, `ingestConcurrency`-at-a-time): ingest one
    * conversation. Marks it done atomically afterwards and, when it closes the last one, claims the once-only finalize.
@@ -347,7 +366,8 @@ export class MigrationWorkers {
       const conv = await this.engine.getManifestConversation(migrationId, job.gcsPrefix, conversationId);
       if (conv) {
         const ref = await this.engine.getOfflineReference(migrationId, job.gcsPrefix);
-        const loaded = await this.engine.loadConversation(job, conv, ref, () => void this.store.markProgress(migrationId).catch(() => undefined));
+        const onProgress = () => void this.store.markProgress(migrationId).catch(() => undefined);
+        const loaded = await this.loadWithRetry(migrationId, conversationId, () => this.engine.loadConversation(job, conv, ref, onProgress));
         if (loaded.failed > 0) {
           await this.store.addIssue(migrationId, { conversationId, kind: 'ingest-error', reason: `${loaded.failed} message(s) couldn't be migrated (unresolved sender or attachment).` });
         }
@@ -355,8 +375,8 @@ export class MigrationWorkers {
         logger.warn('[SlackMigration] conversation missing from manifest — skipping', { migrationId, conversationId });
       }
     } catch (err) {
-      // Record and move on so the migration can still finalize (never stuck). A hard-failed conversation is surfaced as an issue, not auto-retried.
-      logger.error('[SlackMigration] conversation ingest failed (recorded, not retried)', { migrationId, conversationId, error: err instanceof Error ? err.message : String(err) });
+      // Record and move on so the migration can still finalize (never stuck). Transient errors were already retried above.
+      logger.error('[SlackMigration] conversation ingest failed (recorded)', { migrationId, conversationId, error: err instanceof Error ? err.message : String(err) });
       await this.store.addIssue(migrationId, { conversationId, kind: 'ingest-error', reason: err instanceof Error ? err.message : String(err) }).catch(() => undefined);
     } finally {
       clearInterval(heartbeat);
