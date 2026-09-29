@@ -2585,7 +2585,7 @@ model CustomEmoji {
   createdBy String   // User ID who created the emoji (no FK constraint)
   createdAt DateTime @default(now())
 
-  @@unique([name])
+  @@unique([workspaceId, name])
 
   @@index([createdAt(sort: Desc), id])
   @@map("custom_emojis")
