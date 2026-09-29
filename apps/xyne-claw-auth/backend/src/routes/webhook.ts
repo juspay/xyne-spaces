@@ -118,6 +118,7 @@ import { deliverSlackResult, type SlackDeliveryTarget } from "../surfaces/slack/
 import { deliverChannelResult } from "../surfaces/messaging/delivery.js";
 import { sendInterimMessage } from "../surfaces/messaging/interim.js";
 import { claimOrQueue } from "../lib/conversation-gate.js";
+import { buildHandoffContext, downloadRootAttachments, mergeHandoffAttachments, toRootAttachmentRefs } from "../lib/workflow-handoff.js";
 import { designShareUrl, upsertDesignShare } from "./design-shares.js";
 import {
   getActivePlanCard,
@@ -1942,6 +1943,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       ...(planModeEnabled && !immediateTaskCommand && eventType !== "USER_MENTIONED" ? { mode: "plan" as const } : {}),
     };
 
+    const rootAttachmentRefs = toRootAttachmentRefs(payload.attachments);
     // progressMessageId is assigned post-placeholder below; everything else is final here.
     const sessionContext: SessionContext = {
       mentionedUserId: eventType === "USER_MENTIONED" ? targetUserId : agent.spacesAppUserId,
@@ -1964,6 +1966,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       traceId,
       rootAgentSlug: agent.slug,
       triggerSource: "spaces",
+      ...(rootAttachmentRefs.length > 0 ? { rootAttachments: rootAttachmentRefs } : {}),
       ...(resolvedParentProvider ? { provider: resolvedParentProvider } : {}),
       ...(userSpacesWorkspaceId ? { workspaceId: userSpacesWorkspaceId } : {}),
       ...(twinWorkspaceId ? { workspaceId: twinWorkspaceId } : {}),
@@ -5721,10 +5724,28 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           // `context`, independent of whether the task template used {{result}}),
           // plus any attachments the previous agent produced — so artifacts (CSV,
           // PDF, screenshots, …) carry across the hop instead of being dropped.
-          const handoffContext =
-            `--- Final output from the previous agent ("${ctx.agentSlug}") ---\n` +
-            resultText.slice(0, 8000);
-          const forwardedAttachments = payload.attachments ?? [];
+          // The human's original request and the files on it are pinned on every
+          // hop too: they reach only the first agent through the @mention path,
+          // and a later agent otherwise never sees them.
+          const rootAttachmentRefs = ctx.rootAttachments ?? [];
+          const rootFiles = rootAttachmentRefs.length > 0
+            ? await downloadRootAttachments(rootAttachmentRefs, {
+                appToken: decryptStoredField(targetAgentRow.spacesAppToken),
+                scopeId: ctx.conversationId || ctx.channelId || "unscoped",
+              })
+            : { attachments: [], failed: [] };
+          if (rootFiles.failed.length > 0) {
+            log.warn(`Chain: could not carry original file(s) to ${targetAgentSlug}: ${rootFiles.failed.join(", ")}`);
+          }
+          const handoffContext = buildHandoffContext({
+            rootTask: originalTask,
+            senderName: ctx.senderName,
+            rootFileNames: rootFiles.attachments.map((att) => att.fileName),
+            failedFileNames: rootFiles.failed,
+            previousAgentSlug: ctx.agentSlug ?? "",
+            previousOutput: resultText,
+          });
+          const forwardedAttachments = mergeHandoffAttachments(rootFiles.attachments, payload.attachments ?? []);
 
           const runRes = await fetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run`, {
             method: "POST",
@@ -5736,8 +5757,10 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
               userId: ctx.senderId,
               task: interpolatedTask,
               context: handoffContext,
+              ...(ctx.conversationId ? { conversationId: ctx.conversationId } : {}),
               agentSlug: targetAgentSlug,
               orgId: targetAgentRow.orgId,
+              eventType: "APP_MENTIONED",
               channelId: ctx.channelId,
               ...(forwardedAttachments.length > 0 ? { attachments: forwardedAttachments } : {}),
               callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
@@ -5759,6 +5782,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
               conversationId: ctx.conversationId,
               task: interpolatedTask,
               rootTask: originalTask,
+              ...(rootAttachmentRefs.length > 0 ? { rootAttachments: rootAttachmentRefs } : {}),
               agentId: targetAgentRow.id,
               agentOrgId: targetAgentRow.orgId ?? null,
               agentSlug: targetAgentSlug,
