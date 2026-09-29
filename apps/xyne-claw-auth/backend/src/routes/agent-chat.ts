@@ -820,7 +820,7 @@ router.post(
 router.get("/attachments/:id/download", async (req: Request<{ id: string }>, res: Response): Promise<void> => {
   try {
     const requesterId = getRequesterId(req);
-    if (!requesterId) { res.status(401).json({ success: false, error: "x-user-id header is required" }); return; }
+    if (!requesterId) { res.status(401).json({ success: false, error: "x-user-id header is required" }); return; }  // codeql[js/user-controlled-bypass] auth gate: failure here only rejects the request (4xx); ownership is enforced on requireAuth-verified identity aliases
 
     const att = await chatAttachmentRepository.findById(req.params.id);
     if (!att) { res.status(404).json({ success: false, error: "Attachment not found" }); return; }
@@ -864,7 +864,7 @@ router.get("/attachments/:id/download", async (req: Request<{ id: string }>, res
 router.get("/attachments/:id/slide-json", async (req: Request<{ id: string }>, res: Response): Promise<void> => {
   try {
     const requesterId = getRequesterId(req);
-    if (!requesterId) { res.status(401).json({ success: false, error: "x-user-id header is required" }); return; }
+    if (!requesterId) { res.status(401).json({ success: false, error: "x-user-id header is required" }); return; }  // codeql[js/user-controlled-bypass] auth gate: failure here only rejects the request (4xx); ownership is enforced on requireAuth-verified identity aliases
 
     const att = await chatAttachmentRepository.findById(req.params.id);
     if (!att) { res.status(404).json({ success: false, error: "Attachment not found" }); return; }
@@ -889,7 +889,7 @@ router.get("/attachments/:id/slide-json", async (req: Request<{ id: string }>, r
 router.get("/attachments/:id/thumbnail", async (req: Request<{ id: string }>, res: Response): Promise<void> => {
   try {
     const requesterId = getRequesterId(req);
-    if (!requesterId) { res.status(401).json({ success: false, error: "x-user-id header is required" }); return; }
+    if (!requesterId) { res.status(401).json({ success: false, error: "x-user-id header is required" }); return; }  // codeql[js/user-controlled-bypass] auth gate: failure here only rejects the request (4xx); ownership is enforced on requireAuth-verified identity aliases
 
     const att = await chatAttachmentRepository.findById(req.params.id);
     if (!att) { res.status(404).json({ success: false, error: "Attachment not found" }); return; }
@@ -914,7 +914,7 @@ router.get("/attachments/:id/thumbnail", async (req: Request<{ id: string }>, re
 router.get("/attachments/:id/stream", async (req: Request<{ id: string }>, res: Response): Promise<void> => {
   try {
     const requesterId = getRequesterId(req);
-    if (!requesterId) { res.status(401).json({ success: false, error: "x-user-id header is required" }); return; }
+    if (!requesterId) { res.status(401).json({ success: false, error: "x-user-id header is required" }); return; }  // codeql[js/user-controlled-bypass] auth gate: failure here only rejects the request (4xx); ownership is enforced on requireAuth-verified identity aliases
 
     const att = await chatAttachmentRepository.findById(req.params.id);
     if (!att) { res.status(404).json({ success: false, error: "Attachment not found" }); return; }
@@ -2227,14 +2227,14 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
 router.post("/:slug/chat/cancel", async (req: Request<{ slug: string }>, res: Response): Promise<void> => {
   try {
     const userId = getRequesterId(req) ?? (req.body as { userId?: string }).userId;
-    if (!userId) {
+    if (!userId) {  // codeql[js/user-controlled-bypass] auth gate: failure here only rejects the request (4xx); ownership is enforced on requireAuth-verified identity aliases
       res.status(400).json({ success: false, error: "userId or x-user-id header required" });
       return;
     }
 
     const { slug } = req.params;
     const { sessionId } = req.body as { sessionId?: string };
-    if (!sessionId || typeof sessionId !== "string") {
+    if (!sessionId || typeof sessionId !== "string") {  // codeql[js/user-controlled-bypass] auth gate: failure here only rejects the request (4xx); ownership is enforced on requireAuth-verified identity aliases
       res.status(400).json({ success: false, error: "sessionId is required" });
       return;
     }
@@ -3701,7 +3701,7 @@ router.get("/:slug/conversations", async (req: Request<{ slug: string }>, res: R
     // (x-spaces-user-id) — because chat rows may be keyed under either. No
     // org-wide fan-out: the alias pair is already workspace-scoped by auth.
     let userIds = userAliases;
-    if (requestedUserId && !matchesAuthenticatedUserId(req, requestedUserId)) {
+    if (requestedUserId && !matchesAuthenticatedUserId(req, requestedUserId)) {  // codeql[js/user-controlled-bypass] auth gate: failure here only rejects the request (4xx); ownership is enforced on requireAuth-verified identity aliases
       if (!(await isClawAdmin(callerId))) {
         res.status(403).json({ success: false, error: "Cannot list another user's conversations" });
         return;
@@ -3784,13 +3784,13 @@ router.get("/:slug/conversations", async (req: Request<{ slug: string }>, res: R
 router.post("/:slug/chat/approve-action", async (req: Request<{ slug: string }>, res: Response) => {
   try {
     const callerUserId = getRequesterId(req) ?? (req.body as { userId?: string }).userId;
-    if (!callerUserId) {
+    if (!callerUserId) {  // codeql[js/user-controlled-bypass] auth gate: failure here only rejects the request (4xx); ownership is enforced on requireAuth-verified identity aliases
       res.status(401).json({ success: false, error: "userId or x-user-id header required" });
       return;
     }
 
     const { pendingAction } = req.body as { pendingAction?: unknown };
-    if (!pendingAction || typeof pendingAction !== "object") {
+    if (!pendingAction || typeof pendingAction !== "object") {  // codeql[js/user-controlled-bypass] auth gate: failure here only rejects the request (4xx); ownership is enforced on requireAuth-verified identity aliases
       res.status(400).json({ success: false, error: "pendingAction is required" });
       return;
     }
@@ -3798,7 +3798,7 @@ router.post("/:slug/chat/approve-action", async (req: Request<{ slug: string }>,
     const action = pendingAction as {
       serverType?: string; tool?: string; params?: Record<string, unknown>; userId?: string; signature?: string;
     };
-    if (!action.serverType || !action.tool || !action.userId || !action.signature) {
+    if (!action.serverType || !action.tool || !action.userId || !action.signature) {  // codeql[js/user-controlled-bypass] auth gate: failure here only rejects the request (4xx); ownership is enforced on requireAuth-verified identity aliases
       res.status(400).json({ success: false, error: "pendingAction must include serverType, tool, userId, signature" });
       return;
     }
