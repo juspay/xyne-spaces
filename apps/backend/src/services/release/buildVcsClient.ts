@@ -21,7 +21,7 @@ export function normalizeBitbucketApiBaseUrl(baseUrl: string | undefined): strin
 export async function buildVcsClient(provider: VCSProviderType | null | undefined): Promise<VcsClient> {
   if (provider === VCSProviderType.GITHUB) {
     const githubConfig = config.github;
-    const token = await resolveSecret('github-token', githubConfig?.token ?? '');
+    const token = await resolveSecret('github-token', githubConfig?.token);
     if (!token) {
       logger.warn(
         'GitHub VCS provider selected but no token is available (vault has no active version and ' +
