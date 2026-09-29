@@ -5,16 +5,19 @@ import type { ServiceAccount } from '@prisma/client';
 import { ServiceAccountPolicy } from '../policy';
 import { signSpacesToken } from '../tokens';
 import { email } from './methods/email';
+import { member } from './methods/member';
 import type { LoginMethod } from './types';
 
 interface LoginInputs {
   email: { email: string };
+  member: { userId: string };
 }
 
 export type LoginMethodName = keyof LoginInputs;
 
 const METHODS: { [N in LoginMethodName]: LoginMethod<LoginInputs[N]> } = {
   email,
+  member,
 };
 
 /** Every login method ends here: the user must be active, then gets a Spaces token. */

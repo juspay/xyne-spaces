@@ -2,8 +2,9 @@
 // the resource types, marked with the service account as the granter.
 import { randomUUID } from 'node:crypto';
 import { Prisma, type ServiceAccount, type User } from '@prisma/client';
-import { AuthProvider, GuestEntity, OrgRole, UserStatus, WorkspaceRole } from '@xyne/shared';
+import { GuestEntity, OrgRole, UserStatus, WorkspaceRole } from '@xyne/shared';
 import { db } from '@/database/client';
+import { applyServiceAccountUserChanges, insertServiceAccountUser } from '@/bypassAcl/serviceAccountServices';
 import { grantPermissionsForRole } from '@/services/permissionMatrix';
 import { OrgMemberLimitError, organizationDomainService } from '@/services/organizationDomainService';
 import { logger } from '@/utils/logger';
@@ -103,26 +104,17 @@ export async function createUser(
 
   let user: User;
   try {
-    user = await db.$transaction(async (tx) => {
-      const member =
-        orgMember ?? (await tx.orgMember.create({ data: { orgId: workspace.orgId, email, role: OrgRole.GUEST } }));
-      const created = await tx.user.create({
-        data: {
-          email,
-          name: displayName,
-          displayName,
-          providerUserId: `${ownedUserPrefix(account.id)}${randomUUID()}`,
-          authProvider: AuthProvider.API_KEY,
-          workspaceId,
-          role: WorkspaceRole.GUEST,
-          status: UserStatus.ACTIVE,
-          orgMemberId: member.memberId,
-        },
-      });
-      for (const id of channelIds) {
-        await channels.grant(tx, { workspaceId, userId: created.id, id, grantedBy: account.id }, prepared);
-      }
-      return created;
+    user = await insertServiceAccountUser({
+      workspaceId,
+      orgId: workspace.orgId,
+      orgMember,
+      email,
+      displayName,
+      providerUserId: `${ownedUserPrefix(account.id)}${randomUUID()}`,
+      grantedBy: account.id,
+      resource: channels,
+      resourceIds: channelIds,
+      prepared,
     });
   } catch (err) {
     if (isUniqueViolation(err)) {
@@ -252,15 +244,15 @@ export async function updateUser(account: ServiceAccount, input: UpdateUserInput
   }
 
   const prepared = await channels.prepare(toAdd);
-  const updated = await db.$transaction(async (tx) => {
-    const row = Object.keys(data).length > 0 ? await tx.user.update({ where: { id: user.id }, data }) : user;
-    for (const id of toAdd) {
-      await channels.grant(tx, { workspaceId, userId: user.id, id, grantedBy: account.id }, prepared);
-    }
-    for (const id of toRemove) {
-      await channels.revoke(tx, { workspaceId, userId: user.id, id });
-    }
-    return row;
+  const updated = await applyServiceAccountUserChanges({
+    workspaceId,
+    user,
+    data,
+    grantedBy: account.id,
+    resource: channels,
+    add: toAdd,
+    remove: toRemove,
+    prepared,
   });
 
   logger.info('[service-account] user updated', {

@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import type { ServiceAccount } from '@prisma/client';
+import type { TokenSubjectKind } from '@/serviceAccounts/tokens/types';
 
 export interface ApiResponse<T = any> {
   success: boolean;
@@ -63,6 +64,7 @@ declare global {
       user?: AuthenticatedUser;
       authenticatedSessionId?: string;
       serviceAccount?: ServiceAccount;
+      spacesToken?: { kind: TokenSubjectKind; serviceAccountId: string };
     }
   }
 }

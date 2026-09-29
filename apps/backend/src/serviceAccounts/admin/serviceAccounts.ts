@@ -7,7 +7,6 @@ import {
   ServiceAccountAdminPolicy,
   resourcesOf,
   toView,
-  type AccountResource,
   type Caller,
   type ServiceAccountView,
 } from './access';
@@ -23,41 +22,19 @@ export interface ServiceAccountKeyView {
   revokedAt: string | null;
 }
 
-export function createServiceAccount(
-  caller: Caller,
-  input: { name: string; resources: AccountResource[] },
-): Promise<ServiceAccountView> {
+export function createServiceAccount(caller: Caller, input: { name: string }): Promise<ServiceAccountView> {
   return withWorkspaceScope(async () => {
-    const policy = new ServiceAccountAdminPolicy(caller);
-    const resources = input.resources.filter(
-      (r, i, all) => all.findIndex((o) => o.type === r.type && o.id === r.id) === i,
-    );
-    for (const type of new Set(resources.map((r) => r.type))) {
-      await policy.assertCanConnect(type, resources.filter((r) => r.type === type).map((r) => r.id));
-    }
-
-    const account = await db.$transaction(async (tx) => {
-      const created = await tx.serviceAccount.create({
-        data: {
-          workspaceId: caller.workspaceId,
-          name: input.name,
-          status: ServiceAccountStatus.ACTIVE,
-          createdBy: caller.id,
-        },
-      });
-      await tx.serviceAccountResource.createMany({
-        data: resources.map((r) => ({
-          workspaceId: caller.workspaceId,
-          serviceAccountId: created.id,
-          resourceType: r.type,
-          resourceId: r.id,
-          addedBy: caller.id,
-        })),
-      });
-      return created;
+    new ServiceAccountAdminPolicy(caller); // refuses guests
+    const account = await db.serviceAccount.create({
+      data: {
+        workspaceId: caller.workspaceId,
+        name: input.name,
+        status: ServiceAccountStatus.ACTIVE,
+        createdBy: caller.id,
+      },
     });
-    logger.info('[service-account] created', { serviceAccountId: account.id, by: caller.id, resources });
-    return toView(account, resources);
+    logger.info('[service-account] created', { serviceAccountId: account.id, by: caller.id });
+    return toView(account, []);
   });
 }
 

@@ -19,7 +19,6 @@ const channelIdsSchema = z.array(z.string().min(1).max(64)).min(1).max(100);
 
 const CreateServiceAccountSchema = z.object({
   name: z.string().trim().min(1).max(80),
-  channelIds: channelIdsSchema,
 });
 
 const UpdateServiceAccountSchema = z.object({
@@ -60,9 +59,8 @@ export class ServiceAccountController {
 
   create = async (req: Request, res: Response): Promise<void> => {
     try {
-      const { name, channelIds } = CreateServiceAccountSchema.parse(req.body);
-      const resources = channelIds.map((id) => ({ type: ServiceAccountResourceType.CHANNEL, id }));
-      res.status(201).json(await createServiceAccount(this.caller(req), { name, resources }));
+      const { name } = CreateServiceAccountSchema.parse(req.body);
+      res.status(201).json(await createServiceAccount(this.caller(req), { name }));
     } catch (error) {
       this.handleError(req, res, error);
     }

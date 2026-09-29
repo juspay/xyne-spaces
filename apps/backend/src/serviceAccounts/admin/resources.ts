@@ -1,4 +1,5 @@
 import { db } from '@/database/client';
+import { removeServiceAccountResource } from '@/bypassAcl/serviceAccountServices';
 import { withWorkspaceScope } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 import type { ServiceAccountResourceType } from '../constants';
@@ -56,13 +57,13 @@ export function disconnectResource(
       select: { id: true },
     });
 
-    await db.$transaction(async (tx) => {
-      await tx.serviceAccountResource.delete({
-        where: { serviceAccountId_resourceType_resourceId: { serviceAccountId: id, resourceType: type, resourceId } },
-      });
-      for (const user of owned) {
-        await definition.revoke(tx, { workspaceId: caller.workspaceId, userId: user.id, id: resourceId });
-      }
+    await removeServiceAccountResource({
+      workspaceId: caller.workspaceId,
+      serviceAccountId: id,
+      type,
+      resourceId,
+      resource: definition,
+      userIds: owned.map((user) => user.id),
     });
     logger.info('[service-account] resource disconnected', {
       serviceAccountId: id,

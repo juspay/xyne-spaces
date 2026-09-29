@@ -1,6 +1,6 @@
 import type { NextFunction, Request, Response } from 'express';
 import { z } from 'zod';
-import { createUser, listUsers, updateUser } from '@/serviceAccounts/users';
+import { s2sCreateUser, s2sListUsers, s2sUpdateUser } from '@/bypassAcl/serviceAccountS2sServices';
 
 const email = z.string().trim().email().max(254);
 const displayName = z.string().trim().min(1).max(80);
@@ -41,7 +41,7 @@ export class S2sUserController {
   create = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const input = CreateUserSchema.parse(req.body);
-      res.status(201).json(await createUser(req.serviceAccount!, input));
+      res.status(201).json(await s2sCreateUser(req.serviceAccount!, input));
     } catch (err) {
       next(err);
     }
@@ -50,7 +50,7 @@ export class S2sUserController {
   list = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const input = ListUsersSchema.parse(req.body ?? {});
-      res.status(200).json(await listUsers(req.serviceAccount!, input));
+      res.status(200).json(await s2sListUsers(req.serviceAccount!, input));
     } catch (err) {
       next(err);
     }
@@ -59,7 +59,7 @@ export class S2sUserController {
   update = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const input = UpdateUserSchema.parse(req.body);
-      res.status(200).json(await updateUser(req.serviceAccount!, input));
+      res.status(200).json(await s2sUpdateUser(req.serviceAccount!, input));
     } catch (err) {
       next(err);
     }

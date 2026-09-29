@@ -1,15 +1,16 @@
-// Spaces token: a 1-hour JWT. Own audience, so it and a session token can't stand in for each
+// Spaces token: a short-lived JWT (lifetime per kind). Own audience, so it and a session token can't stand in for each
 // other; its `kind` picks the subject that resolves it.
 import jwt from 'jsonwebtoken';
 import { randomUUID } from 'node:crypto';
 import type { AuthenticatedUser } from '@/types/express';
-import { SPACES_TOKEN_TTL_SECONDS } from '../constants';
 import { ServiceAccountError } from '../errors';
+import { member } from './subjects/member';
 import { serviceAccountGuest } from './subjects/serviceAccountGuest';
 import { TokenSubjectKind, type SpacesTokenClaims, type TokenSubject } from './types';
 
 const SUBJECTS: Record<TokenSubjectKind, TokenSubject> = {
   [TokenSubjectKind.SERVICE_ACCOUNT_GUEST]: serviceAccountGuest,
+  [TokenSubjectKind.MEMBER]: member,
 };
 
 export const SPACES_TOKEN_AUDIENCE = 'xyne-spaces-token';
@@ -29,7 +30,7 @@ function invalid(): ServiceAccountError {
 
 export function signSpacesToken(claims: SpacesTokenClaims): { token: string; expiresAt: Date } {
   const token = jwt.sign(claims, secret(), {
-    expiresIn: SPACES_TOKEN_TTL_SECONDS,
+    expiresIn: SUBJECTS[claims.kind].ttlSeconds,
     audience: SPACES_TOKEN_AUDIENCE,
     issuer: ISSUER,
     jwtid: randomUUID(),
@@ -73,9 +74,9 @@ function verify(token: string): SpacesTokenClaims {
 }
 
 /** The user a Spaces token acts as, re-checked against the DB so deactivation applies at once. */
-export async function resolveSpacesToken(token: string): Promise<AuthenticatedUser> {
+export async function resolveSpacesToken(token: string): Promise<{ user: AuthenticatedUser; claims: SpacesTokenClaims }> {
   const claims = verify(token);
-  return SUBJECTS[claims.kind].resolve(claims);
+  return { user: await SUBJECTS[claims.kind].resolve(claims), claims };
 }
 
 export { TokenSubjectKind, type SpacesTokenClaims, type TokenSubject } from './types';

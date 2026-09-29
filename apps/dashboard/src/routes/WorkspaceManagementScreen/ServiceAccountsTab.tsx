@@ -118,7 +118,6 @@ export function ServiceAccountsTab({ isActive }: { isActive: boolean }): ReactEl
 
       {adding && (
         <CreateServiceAccountForm
-          adminChannels={channelOptions.adminChannels}
           onCancel={() => setAdding(false)}
           onSaved={() => {
             setAdding(false);
@@ -131,7 +130,7 @@ export function ServiceAccountsTab({ isActive }: { isActive: boolean }): ReactEl
         <p className='text-sm text-muted-foreground'>Loading service accounts…</p>
       ) : accounts.length === 0 ? (
         <div className='rounded-lg border border-dashed p-4 text-sm text-muted-foreground'>
-          No service accounts you can manage yet. Create one for the channels you administer.
+          No service accounts you can manage yet.
         </div>
       ) : (
         accounts.map(account => (
@@ -200,19 +199,17 @@ function ChannelPicker(props: {
 }
 
 function CreateServiceAccountForm(props: {
-  adminChannels: { id: string; name: string }[];
   onCancel: () => void;
   onSaved: () => void;
 }): ReactElement {
   const [name, setName] = useState('');
-  const [channelIds, setChannelIds] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const nameId = useId();
 
   const save = async (): Promise<void> => {
     setBusy(true);
     try {
-      await apiInstance.post('/service-accounts', { name: name.trim(), channelIds });
+      await apiInstance.post('/service-accounts', { name: name.trim() });
       toast.success('Service account created. Create a key to hand to the partner.');
       props.onSaved();
     } catch (error) {
@@ -242,23 +239,11 @@ function CreateServiceAccountForm(props: {
           required
         />
       </label>
-      <div className='text-sm font-medium'>
-        Channels
-        <p className='mb-2 font-normal text-muted-foreground'>
-          The only channels its users can be given. You can connect channels you&apos;re an admin
-          of.
-        </p>
-        <ChannelPicker
-          channels={props.adminChannels}
-          selected={channelIds}
-          onChange={setChannelIds}
-        />
-      </div>
       <div className='flex gap-2'>
         <Button
           type='submit'
           loading={busy}
-          disabled={!name.trim() || channelIds.length === 0}
+          disabled={!name.trim()}
           data-track-category='workspace-management'
           data-track-name='SAVE_SERVICE_ACCOUNT'
         >

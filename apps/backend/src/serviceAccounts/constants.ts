@@ -14,4 +14,3 @@ export enum ServiceAccountResourceType {
 
 export const KEY_MAX_TTL_DAYS = 365;
 
-export const SPACES_TOKEN_TTL_SECONDS = 60 * 60;

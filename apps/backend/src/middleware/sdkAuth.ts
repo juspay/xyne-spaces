@@ -13,7 +13,9 @@ export async function authenticateSdk(req: Request, res: Response, next: NextFun
   }
 
   try {
-    req.user = await resolveSpacesToken(token);
+    const { user, claims } = await resolveSpacesToken(token);
+    req.user = user;
+    req.spacesToken = { kind: claims.kind, serviceAccountId: claims.sa };
     next();
   } catch (err) {
     next(

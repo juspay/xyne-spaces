@@ -1,31 +1,30 @@
-import { OrgRole, WorkspaceRole } from '@xyne/shared';
+import { WorkspaceRole } from '@xyne/shared';
 import { loadSpacesTokenRows } from '@/bypassAcl/serviceAccountServices';
 import { ServiceAccountStatus } from '../../constants';
 import { ServiceAccountError } from '../../errors';
-import { isActive, isOwnedBy } from '../../ownership';
+import { isActive } from '../../ownership';
 import { TokenSubjectKind, type TokenSubject } from '../types';
 
-/** A guest the service account created: must still be its user, active, and the account enabled. */
-export const serviceAccountGuest: TokenSubject = {
-  kind: TokenSubjectKind.SERVICE_ACCOUNT_GUEST,
-  ttlSeconds: 60 * 60,
+/** A workspace member signed in through a service account's app: acts with their own rights. */
+export const member: TokenSubject = {
+  kind: TokenSubjectKind.MEMBER,
+  ttlSeconds: 24 * 60 * 60,
 
   async resolve(claims) {
-    const { user, orgMember: member, serviceAccount } = await loadSpacesTokenRows(claims);
+    const { user, orgMember, serviceAccount } = await loadSpacesTokenRows(claims);
 
     const valid =
       user &&
-      member &&
+      orgMember &&
       serviceAccount &&
       user.workspaceId === claims.workspaceId &&
       user.orgMemberId === claims.memberId &&
-      user.role === WorkspaceRole.GUEST &&
-      serviceAccount.workspaceId === claims.workspaceId &&
-      isOwnedBy(user, serviceAccount.id);
+      user.role !== WorkspaceRole.GUEST &&
+      serviceAccount.workspaceId === claims.workspaceId;
     if (!valid) {
       throw new ServiceAccountError('unauthenticated', 'The Spaces token is invalid.', { reason: 'token_invalid' });
     }
-    if (!isActive(user) || member.leftAt || serviceAccount.status !== ServiceAccountStatus.ACTIVE) {
+    if (!isActive(user) || orgMember.leftAt || serviceAccount.status !== ServiceAccountStatus.ACTIVE) {
       throw new ServiceAccountError('unauthenticated', 'This user is deactivated.', { reason: 'user_deactivated' });
     }
 
@@ -39,8 +38,8 @@ export const serviceAccountGuest: TokenSubject = {
       isApiKeyUser: false,
       scopes: [],
       role: user.role,
-      orgRole: OrgRole.GUEST,
-      memberId: member.memberId,
+      orgRole: orgMember.role,
+      memberId: orgMember.memberId,
       authProvider: user.authProvider,
     };
   },
