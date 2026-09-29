@@ -1,3 +1,19 @@
+## [1.428.0](https://github.com/juspay/xyne-spaces/compare/v1.427.0...v1.428.0) (2026-09-29)
+
+
+### Features
+
+* default recordings list to 'Created by me' tab ([#2454](https://github.com/juspay/xyne-spaces/issues/2454)) ([a38dd53](https://github.com/juspay/xyne-spaces/commit/a38dd53316bdf1823af19cbe9d8a1533f112700f))
+
+
+### Bug Fixes
+
+* A-Z sort- DMs by display name, unread first, self-DM last ([#2403](https://github.com/juspay/xyne-spaces/issues/2403)) ([6229596](https://github.com/juspay/xyne-spaces/commit/62295968c6e2d1594c48126b87bcb7bd10ce239e))
+* electron background gpu burn ([#2255](https://github.com/juspay/xyne-spaces/issues/2255)) ([a0ab089](https://github.com/juspay/xyne-spaces/commit/a0ab089479558eb04a8951344b0b1d71ff071a15))
+* never show raw ids on write approval cards (DMs and mention shorthand) ([#2456](https://github.com/juspay/xyne-spaces/issues/2456)) ([abc1c10](https://github.com/juspay/xyne-spaces/commit/abc1c10f48605bc0a0c7fcf18462d6c3dda9823d))
+* scope custom emoji name uniqueness to the workspace ([#2440](https://github.com/juspay/xyne-spaces/issues/2440)) ([5bd03fa](https://github.com/juspay/xyne-spaces/commit/5bd03faf0f74d4112f12b47d2600b8d955627b9f))
+* write channelId on message_attachments (1/2) ([#2430](https://github.com/juspay/xyne-spaces/issues/2430)) ([d41c897](https://github.com/juspay/xyne-spaces/commit/d41c897ff0920502cb38bd1d0ec7ee7e9882e0ab))
+
 ## [1.427.0](https://github.com/juspay/xyne-spaces/compare/v1.426.0...v1.427.0) (2026-09-29)
 
 
