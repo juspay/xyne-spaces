@@ -377,6 +377,7 @@ const XyneAISidebar = ({
     setSelectedCanvases(initialContextSelections.canvases);
     setSelectedTickets(initialContextSelections.tickets ?? []);
     setSelectedRecordings(initialContextSelections.recordings);
+    setSelectedTranscripts(initialContextSelections.calls ?? []);
   }, [initialContextSelections, contextOpenNonce]);
   // Track the original channel where the current conversation was started
   // This prevents duplicate history entries when user switches channels during a query

@@ -47,7 +47,6 @@ import { roomActor } from '../../machines/roomMachine';
 interface CallHistoryItemProps {
   call: Call;
   currentUserId: string | undefined;
-  isLastItem?: boolean;
   onCallClick: () => void;
   onParticipantsClick: () => void;
   handleGotoTranscript?: (() => void) | undefined;
