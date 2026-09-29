@@ -11,12 +11,7 @@ import {
   FolderRemove,
   PhoneDefault,
 } from '@xyne/icons';
-import {
-  ChannelVisibility,
-  ChannelScopeType,
-  ChannelType,
-  ChannelSection,
-} from '@xyne/shared';
+import { ChannelVisibility, ChannelScopeType, ChannelType, ChannelSection } from '@xyne/shared';
 import { VisibleChannel } from '../../../machines/stateMachine';
 import {
   isChannelBold,
