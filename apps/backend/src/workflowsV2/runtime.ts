@@ -7,6 +7,7 @@ import {
   type AnyStep,
   type ExecutorLogger,
 } from '@xyne/workflow-sdk';
+import { AwsS3Connector } from '@xyne/connector-sdk/aws-s3';
 import { BitbucketConnector } from '@xyne/connector-sdk/bitbucket';
 import { GitHubConnector } from '@xyne/connector-sdk/github';
 import { HostAgentStep } from '@xyne/workflow-sdk/agents/host';
@@ -45,6 +46,7 @@ const services = new ServiceRegistry();
 const connectors = new ConnectorRegistry();
 connectors.register(new GitHubConnector());
 connectors.register(new BitbucketConnector({ apiBaseUrl: config.bitbucket.baseUrl }));
+connectors.register(new AwsS3Connector());
 
 /**
  * RUN_AGENT — runs on xyne-claw. See docs/guidelines/workflows/AGENTS.md.
