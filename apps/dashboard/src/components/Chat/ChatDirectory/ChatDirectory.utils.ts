@@ -390,7 +390,7 @@ export const isChannelBold = (
 };
 
 /**
- * Slack-style A-Z: bold (unread) rows first, then the rest — each group case/accent-insensitive
+ * A-Z: bold (unread) rows first, then the rest — each group case/accent-insensitive
  * A-Z by display name, ties broken by id for a stable order.
  */
 export const sortChannelsAlphabetically = <T extends SortableChannel>(
@@ -411,7 +411,7 @@ export const sortChannelsAlphabetically = <T extends SortableChannel>(
   );
 };
 
-/** Moves the self-DM to the end of the list (Slack-style), preserving everyone else's order. */
+/** Moves the self-DM to the end of the list, preserving everyone else's order. */
 export const pinSelfDMLast = <T extends { name: string | null; scopeType: ChannelScopeType }>(
   list: readonly T[],
   currentUserId: string,

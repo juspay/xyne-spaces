@@ -145,7 +145,7 @@ export const useChannelSort = (
     return {
       starred: sortBy(grouped.starred, starredSortOrder),
       channels: sortBy(grouped.channels, channelSortOrder),
-      // Self-DM always sits at the bottom of the DM list, whatever the sort (Slack-style).
+      // Self-DM always sits at the bottom of the DM list, whatever the sort.
       directMessages: pinSelfDMLast(sortBy(grouped.directMessages, dmSortOrder), currentUserId),
     };
   }, [
