@@ -461,6 +461,19 @@ export const agentRepository = {
   deleteAllSkills: (agentId: string) =>
     prisma.agentSkill.deleteMany({ where: { agentId } }),
 
+  /** Swap the attached skill set atomically (a failed insert keeps the old set). */
+  replaceSkills: (agentId: string, skillIds: readonly string[]) =>
+    prisma.$transaction(async (tx) => {
+      await tx.agentSkill.deleteMany({ where: { agentId } });
+      const unique = [...new Set(skillIds)];
+      if (unique.length > 0) {
+        await tx.agentSkill.createMany({
+          data: unique.map((skillId) => ({ agentId, skillId })),
+          skipDuplicates: true,
+        });
+      }
+    }),
+
   listSkills: (agentId: string) =>
     prisma.agentSkill.findMany({ where: { agentId }, include: { skill: true } }),
 
