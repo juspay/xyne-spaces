@@ -36,7 +36,7 @@ import {
   requireRequester,
 } from "../middleware/agent-acl.js";
 import { getRequesterAliases, matchesAuthenticatedUserId, pinUserIdParam } from "../middleware/pin-user-id-param.js";
-import { findUserByAnyId } from "../lib/users-jit.js";
+import { findUserByAnyId, resolveCanonicalUserIdOrSelf, spacesUserIdForClawUser } from "../lib/users-jit.js";
 import { s2sKeyMatches } from "../middleware/require-auth.js";
 import { writeAuditLog } from "../lib/audit.js";
 import { buildAvailableToolsCatalog } from "./tools.js";
@@ -1038,8 +1038,11 @@ async function postDelegationDmWithCalleeIdentity(args: {
     return;
   }
 
+  // openDm is keyed by Spaces' workspace-scoped user id; targetUserId is the
+  // canonical Claw id — translate or the DM silently never opens.
+  const spacesTargetUserId = await spacesUserIdForClawUser(targetUserId, workspaceId).catch(() => targetUserId);
   const dm = (await spacesAppFetch("/channel/openDm", {
-    targetUserId,
+    targetUserId: spacesTargetUserId,
     workspaceId,
   }, token)) as { channelId: string };
 
@@ -1801,8 +1804,11 @@ async function notifyOwnerOfCloneRequestInSpaces(args: {
       return;
     }
 
+    // openDm is keyed by Spaces' workspace-scoped user id; ownerUserId is the
+    // canonical Claw id — translate or the DM silently never opens.
+    const spacesOwnerUserId = await spacesUserIdForClawUser(agent.ownerUserId, workspaceId).catch(() => agent.ownerUserId as string);
     const dm = (await spacesAppFetch("/channel/openDm", {
-      targetUserId: agent.ownerUserId,
+      targetUserId: spacesOwnerUserId,
       workspaceId,
     }, token)) as { channelId: string };
 

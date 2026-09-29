@@ -10,6 +10,7 @@ import { extForMime, fileNameFromResource } from "./attachment-filename.js";
 import { STATIC_ADAPTERS } from "./static-adapters.js";
 import { resolveConnectorDefinition } from "./connector-definitions.js";
 import { getSpacesAuthForUser, getWorkspaceIdForUser } from "../lib/spaces-db.js";
+import { spacesUserIdForClawUser } from "../lib/users-jit.js";
 import { SPACES_SESSION_CREDENTIAL_SERVER_TYPES } from "../lib/spaces-session-server-types.js";
 import { provisionStdioCommand } from "./provision.js";
 import { prisma } from "../db.js";
@@ -261,12 +262,19 @@ async function getOrCreateSession(
         : undefined;
       const live = await getSpacesAuthForUser(userId, "mcp-runner", credsWorkspaceId);
       if (live) {
+        // The child's ctx.userId powers Spaces-facing headers
+        // (x-user-id / x-xyne-acting-user-id), createdBy, whoami and every
+        // Vespa ACL filter — all keyed by the workspace-scoped Spaces id.
+        // A canonical Claw id is a guaranteed miss in Spaces' users table, so
+        // hand the child the Spaces id; the Claw-canonical `userId` argument
+        // still keys the session cache and every Claw-side lookup.
+        const spacesUserId = await spacesUserIdForClawUser(userId, live.workspaceId).catch(() => userId);
         credentials = {
           ...credentials,
           token: live.token,
           sessionId: live.sessionId,
           workspaceId: live.workspaceId,
-          userId,
+          userId: spacesUserId,
         };
       } else {
         // No login session for this userId. If it's an agent's app user, fall
@@ -278,7 +286,11 @@ async function getOrCreateSession(
           log.info(`[mcp/runner] xyne-spaces app-mode for app user ${userId} (no session, using app token)`);
           credentials = { ...credentials, token: appToken, authMode: "app", userId, ...(workspaceId ? { workspaceId } : {}) };
         } else {
-          credentials = { ...credentials, userId };
+          // Cached-credentials path (no live session): same Claw→Spaces id
+          // translation as the live branch so the child's Spaces-facing
+          // identity stays correct.
+          const spacesUserId = await spacesUserIdForClawUser(userId, credsWorkspaceId).catch(() => userId);
+          credentials = { ...credentials, userId: spacesUserId };
         }
       }
     }

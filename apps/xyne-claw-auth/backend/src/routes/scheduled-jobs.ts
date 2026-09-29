@@ -1305,7 +1305,7 @@ router.post("/:id/result", requireStrictS2S, async (req: Request<{ id: string }>
   try {
     // No request here (job-owner session at fire time): see the note above.
     const senderAuth = row.userId
-      ? await getSpacesAuthForUser(row.userId, "scheduled-job").catch(() => null)
+      ? await getSpacesAuthForUser(row.userId, "scheduled-job", row.workspaceId).catch(() => null)
       : null;
     if (senderAuth?.token) {
       resultText = await resolveUnboundMentions(

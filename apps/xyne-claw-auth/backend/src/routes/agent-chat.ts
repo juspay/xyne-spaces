@@ -476,6 +476,8 @@ async function persistAssistantResult(args: {
    *  time so its id can drive PI session branching and AgentRun linkage. */
   assistantMessageId?: string;
   runProvider?: string;
+  /** Verified workspace of the request — forwarded to artifact session-scoping. */
+  workspaceId?: string | undefined;
 }): Promise<{ messageId: string; persistedAttachments: PersistedAttachment[] } | null> {
   const runProviderField = args.runProvider ? { runProvider: args.runProvider } : {};
   if (args.sessionId) {
@@ -554,6 +556,7 @@ async function persistAssistantResult(args: {
             conversationId: args.conversationId,
             userId: args.userId,
             payload: buffer,
+            ...(args.workspaceId ? { workspaceId: args.workspaceId } : {}),
           });
           if (session) {
             attachmentMetadata = {
@@ -1355,7 +1358,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
     }
     const conversationId = existingConvId ?? `chat-${randomUUID()}`;
 
-    const sdlcResolution = await resolveSdlcRepositoryForUser(userId, researchContext, conversationId);
+    const sdlcResolution = await resolveSdlcRepositoryForUser(userId, researchContext, conversationId, extractSpacesWorkspaceId(req));
     if (!sdlcResolution.ok) {
       res.status(sdlcResolution.status).json({ success: false, error: sdlcResolution.error });
       return;
@@ -2600,6 +2603,7 @@ internalRouter.post("/:slug/chat/:convId/callback", async (req: Request<{ slug: 
         orgId: agent.orgId,
         content: finalContent,
         status: finalStatus,
+        ...(extractSpacesWorkspaceId(req) ? { workspaceId: extractSpacesWorkspaceId(req) } : {}),
         ...(attachments?.length ? { attachments } : {}),
         ...(toolInvocations !== undefined ? { toolInvocations } : {}),
         ...(sessionId ? { sessionId } : {}),

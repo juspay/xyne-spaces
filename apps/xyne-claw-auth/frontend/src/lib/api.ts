@@ -121,6 +121,30 @@ export async function getMe(): Promise<User> {
   return data.user;
 }
 
+/**
+ * The Claw-side identity for the logged-in user. `userId` is the canonical
+ * Claw id (what Claw-owned rows like Agent.ownerUserId store); `spacesUserId`
+ * is the raw workspace-scoped Spaces id (what `getMe().id` returns). A user's
+ * agent rows may be keyed by either, so ownership comparisons must accept both.
+ */
+export interface ClawIdentity {
+  userId: string;
+  spacesUserId?: string;
+  spacesWorkspaceId?: string;
+  spacesOrgMemberId?: string;
+}
+
+export async function getClawIdentity(): Promise<ClawIdentity | null> {
+  try {
+    const data = await request<{ success: boolean; data: ClawIdentity }>(
+      `${AUTH_API_URL}/api/v1/users/me`,
+    );
+    return data.data;
+  } catch {
+    return null;
+  }
+}
+
 export async function upsertUser(user: User): Promise<void> {
   const spacesToken = getGoogleToken();
   await request<{ success: boolean }>(

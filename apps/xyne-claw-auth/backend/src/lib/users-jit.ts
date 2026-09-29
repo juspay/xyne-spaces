@@ -94,6 +94,57 @@ export async function resolveClawUserIdForSpacesIdentity(
 }
 
 /**
+ * Inverse of `resolveClawUserIdForSpacesIdentity`: canonical Claw user id →
+ * the raw (workspace-scoped) Spaces user id. Needed when a Claw-owned id must
+ * be handed BACK to Spaces APIs (openDm, postAsUser, …) — Spaces keys its own
+ * users table by the workspace-scoped id and can't resolve a Claw-internal id.
+ * Falls back to the input when there is no identity row (legacy rows where the
+ * Claw user id IS the Spaces id).
+ */
+export async function spacesUserIdForClawUser(
+  clawUserId: string,
+  workspaceId?: string | null,
+): Promise<string> {
+  const id = clawUserId.trim();
+  if (!id) return id;
+  const identity = await prisma.userSurfaceIdentity.findFirst({
+    where: {
+      surfaceId: "spaces",
+      userId: id,
+      status: "ACTIVE",
+      ...(workspaceId ? { surfaceWorkspaceId: workspaceId } : {}),
+    },
+    select: { surfaceUserId: true },
+    orderBy: { updatedAt: "desc" },
+  });
+  return identity?.surfaceUserId ?? clawUserId;
+}
+
+/**
+ * Every id form a user's rows may be keyed by: the input id, the canonical
+ * Claw id it resolves to (identity ladder), and every ACTIVE workspace-scoped
+ * Spaces identity linked to that canonical user. Falls back to the input id
+ * alone on any DB hiccup (fail-open = narrower result set, never a 500).
+ *
+ * Use for admin/cross-user FILTERS (runs, scheduled jobs) — matching rows
+ * written before canonicalization requires the full form set, not one id.
+ */
+export async function userIdAliasesFor(userId: string): Promise<string[]> {
+  const id = userId.trim();
+  if (!id) return [];
+  try {
+    const canonical = (await resolveClawUserIdForSpacesIdentity(id)) ?? id;
+    const rows = await prisma.userSurfaceIdentity.findMany({
+      where: { surfaceId: "spaces", userId: canonical, status: "ACTIVE" },
+      select: { surfaceUserId: true },
+    });
+    return [...new Set([id, canonical, ...rows.map((row) => row.surfaceUserId)])];
+  } catch {
+    return [id];
+  }
+}
+
+/**
  * "Id-or-alias → canonical Claw user id, else the input unchanged": the shared
  * one-liner for admin routes that accept either Claw ids or Spaces workspace
  * aliases. Resolution failures degrade to the input id (fail-open) so a

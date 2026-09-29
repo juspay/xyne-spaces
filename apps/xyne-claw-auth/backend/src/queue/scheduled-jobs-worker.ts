@@ -191,7 +191,10 @@ async function processJob(job: Job<ScheduledJobData>): Promise<void> {
     const recoveryCtx: RecoverySessionContext = {
       mentionedUserId: agentRow?.spacesAppUserId ?? "",
       senderId: userId,
-      senderName: userId,
+      // Display name, not the canonical id — senderName is rendered to humans.
+      senderName: await prisma.user.findUnique({ where: { id: userId }, select: { name: true, email: true } })
+        .then((u) => (u?.name ?? "").trim() || u?.email || userId)
+        .catch(() => userId),
       channelId: channelId ?? "",
       channelName: channelId ?? "",
       conversationId: conversationId ?? runConversationId,
