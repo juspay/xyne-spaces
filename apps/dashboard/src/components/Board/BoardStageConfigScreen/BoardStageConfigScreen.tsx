@@ -11,6 +11,8 @@ import {
 import { ReactFlowProvider } from 'reactflow';
 import {
   NonLinearTransitionEditor,
+  type GraphPosition,
+  type TransitionGraphLayout,
   type TransitionMeta,
 } from '../NonLinearTransitionEditor/NonLinearTransitionEditor';
 import { Plus, X, Timer, ChevronDown, GitBranch, ChevronLeft, Clock, Pencil } from 'lucide-react';
@@ -99,6 +101,25 @@ const getBoardMetadata = (board: unknown): Record<string, unknown> =>
   board && typeof board === 'object' && 'metadata' in board
     ? ((board as { metadata?: Record<string, unknown> }).metadata ?? {})
     : {};
+
+const TRANSITION_GRAPH_LAYOUT_KEY = 'transitionGraphLayout';
+
+const isGraphPosition = (value: unknown): value is GraphPosition =>
+  typeof (value as GraphPosition | undefined)?.x === 'number' &&
+  typeof (value as GraphPosition | undefined)?.y === 'number';
+
+const readGraphPositions = (
+  value: unknown,
+  tempIdByStageId: Map<string, number>,
+): Map<number, GraphPosition> => {
+  const positions = new Map<number, GraphPosition>();
+  if (!value || typeof value !== 'object') return positions;
+  Object.entries(value).forEach(([stageId, position]) => {
+    const tempId = tempIdByStageId.get(stageId);
+    if (tempId !== undefined && isGraphPosition(position)) positions.set(tempId, position);
+  });
+  return positions;
+};
 
 const PREFILLABLE_NON_LINEAR_UNSUPPORTED_MESSAGE =
   'Non-linear boards do not support prefillable forms. Turn off prefillable forms before enabling non-linear board.';
@@ -749,6 +770,24 @@ const BoardStageConfigScreen = ({
   const [editingEtaId, setEditingEtaId] = useState<number | null>(null);
   const [etaValue, setEtaValue] = useState('');
   const etaInputRef = useRef<HTMLInputElement>(null);
+
+  const graphLayoutRef = useRef<TransitionGraphLayout | null | undefined>(undefined);
+  const handleGraphLayoutChange = useCallback((layout: TransitionGraphLayout | null) => {
+    graphLayoutRef.current = layout;
+  }, []);
+
+  const savedGraphLayout = useMemo((): TransitionGraphLayout | null => {
+    const saved = getBoardMetadata(board)[TRANSITION_GRAPH_LAYOUT_KEY] as
+      | { stages?: unknown; bubbles?: unknown }
+      | undefined;
+    if (!saved) return null;
+    const tempIdByStageId = new Map(stages.flatMap(s => (s.id ? [[s.id, s.tempId] as const] : [])));
+    const layout = {
+      stages: readGraphPositions(saved.stages, tempIdByStageId),
+      bubbles: readGraphPositions(saved.bubbles, tempIdByStageId),
+    };
+    return layout.stages.size > 0 ? layout : null;
+  }, [board, stages]);
 
   const getConditionTargetStage = useCallback(
     (condition: StageCondition): Stage | undefined => {
@@ -2136,11 +2175,35 @@ const BoardStageConfigScreen = ({
           approvers: stage.approvers,
         }));
 
+      const { [TRANSITION_GRAPH_LAYOUT_KEY]: previousGraphLayout, ...otherMetadata } =
+        existingMetadata;
+      const graphLayout = graphLayoutRef.current;
+      const stageIdByTempId = new Map(stages.map(s => [s.tempId, stageIds[s.sequenceNumber]]));
+      const toStoredPositions = (
+        positions: Map<number, GraphPosition>,
+      ): Record<string, GraphPosition> =>
+        Object.fromEntries(
+          [...positions].flatMap(([tempId, { x, y }]) => {
+            const stageId = stageIdByTempId.get(tempId);
+            return stageId ? [[stageId, { x: Math.round(x), y: Math.round(y) }]] : [];
+          }),
+        );
+      const transitionGraphLayout =
+        boardType !== BoardType.NON_LINEAR || graphLayout === undefined
+          ? previousGraphLayout
+          : graphLayout && {
+              stages: toStoredPositions(graphLayout.stages),
+              bubbles: toStoredPositions(graphLayout.bubbles),
+            };
+
       const mutatorArgs = {
         boardId,
         name: getBoardName(board),
         metadata: {
-          ...existingMetadata,
+          ...otherMetadata,
+          ...(transitionGraphLayout
+            ? { [TRANSITION_GRAPH_LAYOUT_KEY]: transitionGraphLayout }
+            : {}),
           fullRoleAssignment,
           slaPolicyType,
           ...(boardType !== BoardType.NON_LINEAR && { showNextStageFormInTicketDetails }),
@@ -2408,6 +2471,8 @@ const BoardStageConfigScreen = ({
                 <ReactFlowProvider>
                   <NonLinearTransitionEditor
                     stages={stages}
+                    savedLayout={savedGraphLayout}
+                    onLayoutChange={handleGraphLayoutChange}
                     transitionsByTempId={transitionsByTempId}
                     transitionsMeta={transitionsMeta}
                     toggleTransition={toggleTransition}

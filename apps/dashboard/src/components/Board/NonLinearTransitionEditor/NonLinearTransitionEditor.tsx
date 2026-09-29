@@ -7,6 +7,7 @@ import ReactFlow, {
   Position,
   useEdgesState,
   useNodesState,
+  useReactFlow,
   type Connection,
   type Edge,
   type EdgeProps,
@@ -66,8 +67,20 @@ export interface TransitionMeta {
   onReenter: string;
 }
 
+export interface GraphPosition {
+  x: number;
+  y: number;
+}
+
+export interface TransitionGraphLayout {
+  stages: Map<number, GraphPosition>;
+  bubbles: Map<number, GraphPosition>;
+}
+
 export interface NonLinearTransitionEditorProps {
   stages: StageNode[];
+  savedLayout: TransitionGraphLayout | null;
+  onLayoutChange: (layout: TransitionGraphLayout | null) => void;
   transitionsByTempId: Map<number, Set<number>>;
   transitionsMeta: Map<string, TransitionMeta>;
   toggleTransition: (from: number, to: number, enabled: boolean) => void;
@@ -276,6 +289,46 @@ function computeGraphLayout(
   });
 
   return positions;
+}
+
+const bubbleNextTo = (target: GraphPosition): GraphPosition => ({
+  x: target.x - 70,
+  y: target.y + 35,
+});
+
+function nextFreeSlot(placed: GraphPosition[]): GraphPosition {
+  if (placed.length === 0) return { x: 60, y: 60 };
+  return {
+    x: Math.min(...placed.map(p => p.x)),
+    y: Math.max(...placed.map(p => p.y)) + ROW_HEIGHT,
+  };
+}
+
+function applyGraphLayout<T extends Node>(nodes: T[], layout: TransitionGraphLayout): T[] {
+  const placed: GraphPosition[] = [];
+  const stagePositions = new Map<string, GraphPosition>();
+  nodes.forEach(n => {
+    const saved = n.type === 'stage' ? layout.stages.get(Number(n.id)) : undefined;
+    if (saved) {
+      stagePositions.set(n.id, saved);
+      placed.push(saved);
+    }
+  });
+  nodes.forEach(n => {
+    if (n.type !== 'stage' || stagePositions.has(n.id)) return;
+    const slot = nextFreeSlot(placed);
+    stagePositions.set(n.id, slot);
+    placed.push(slot);
+  });
+  return nodes.map(n => {
+    if (n.type === 'stage') return { ...n, position: stagePositions.get(n.id) ?? n.position };
+    if (n.type !== 'allBubble') return n;
+    const targetTempId = (n.data as AllBubbleNodeData).targetTempId;
+    const target = stagePositions.get(String(targetTempId));
+    const position =
+      layout.bubbles.get(targetTempId) ?? (target ? bubbleNextTo(target) : n.position);
+    return { ...n, position };
+  });
 }
 
 // ─── Merged "All" Incoming Edge Detection ────────────────────────────────────
@@ -1035,6 +1088,8 @@ const EDGE_TYPES = { transition: TransitionEdge };
 
 export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps> = ({
   stages,
+  savedLayout,
+  onLayoutChange,
   transitionsByTempId,
   transitionsMeta,
   toggleTransition,
@@ -1059,6 +1114,9 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [expandedTargets, setExpandedTargets] = useState<Set<number>>(new Set());
+  const { fitView } = useReactFlow();
+  const savedLayoutRef = useRef(savedLayout);
+  savedLayoutRef.current = savedLayout;
 
   const handleSelectEdge = useCallback((edgeId: string) => {
     setSelectedEdgeId(edgeId);
@@ -1191,7 +1249,9 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
           {
             id: String(tempId),
             type: 'stage',
-            position: layout.get(tempId) ?? { x: 60, y: 60 },
+            position: hasUserDraggedRef.current
+              ? nextFreeSlot(updated.filter(n => n.type === 'stage').map(n => n.position))
+              : (layout.get(tempId) ?? { x: 60, y: 60 }),
             data: { stage: s },
           },
         ];
@@ -1277,7 +1337,10 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
       // what the stage-position-sync effect places the stage at), so a
       // newly-created bubble aligns with where its target lands — not a
       // pre-layout position that may still be in `nodes` at effect-run time.
-      const targetPosition = layout.get(m.targetTempId) ?? { x: 60, y: 60 };
+      const arrangedTarget = hasUserDraggedRef.current
+        ? nodesRef.current.find(n => n.id === String(m.targetTempId))?.position
+        : undefined;
+      const targetPosition = arrangedTarget ?? layout.get(m.targetTempId) ?? { x: 60, y: 60 };
       const bId = `all-${m.targetTempId}`;
       const eId = `eAll-${m.targetTempId}`;
       // Preserve a bubble's existing position across re-runs (e.g. when the
@@ -1289,10 +1352,12 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
       bubbleNodes.push({
         id: bId,
         type: 'allBubble',
-        position: existingBubble?.position ?? {
-          x: targetPosition.x - 70,
-          y: targetPosition.y + 35,
-        },
+        position:
+          existingBubble?.position ??
+          (hasUserDraggedRef.current
+            ? savedLayoutRef.current?.bubbles.get(m.targetTempId)
+            : undefined) ??
+          bubbleNextTo(targetPosition),
         draggable: true,
         selectable: false,
         data: {
@@ -1341,6 +1406,30 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
     setNodes,
     setEdges,
   ]);
+
+  const hasAppliedSavedLayoutRef = useRef(false);
+  useEffect(() => {
+    if (!savedLayout || hasAppliedSavedLayoutRef.current || hasUserDraggedRef.current) return;
+    hasAppliedSavedLayoutRef.current = true;
+    hasUserDraggedRef.current = true;
+    setNodes(prev => applyGraphLayout(prev, savedLayout));
+    requestAnimationFrame(() => fitView({ padding: 0.35 }));
+  }, [savedLayout, setNodes, fitView]);
+
+  useEffect(() => {
+    if (!hasUserDraggedRef.current) {
+      onLayoutChange(null);
+      return;
+    }
+    const layout: TransitionGraphLayout = { stages: new Map(), bubbles: new Map() };
+    nodes.forEach(n => {
+      if (n.type === 'stage') layout.stages.set(Number(n.id), n.position);
+      if (n.type === 'allBubble') {
+        layout.bubbles.set((n.data as AllBubbleNodeData).targetTempId, n.position);
+      }
+    });
+    onLayoutChange(layout);
+  }, [nodes, onLayoutChange]);
 
   const onConnect = useCallback(
     (connection: Connection) => {
