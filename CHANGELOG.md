@@ -1,3 +1,10 @@
+## [1.422.1](https://github.com/juspay/xyne-spaces/compare/v1.422.0...v1.422.1) (2026-09-29)
+
+
+### Bug Fixes
+
+* tighten calendar pill layout to stop title/time clipping on short calls ([#2421](https://github.com/juspay/xyne-spaces/issues/2421)) ([1fa8277](https://github.com/juspay/xyne-spaces/commit/1fa82773b829599a04bbb642636a7c9ab0f7875a))
+
 ## [1.422.0](https://github.com/juspay/xyne-spaces/compare/v1.421.0...v1.422.0) (2026-09-29)
 
 
