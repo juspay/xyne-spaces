@@ -5,6 +5,7 @@ import { logger } from '@/utils/logger';
 import { redisService } from '@/services/redisService';
 import { tagRepository } from '@/database/repositories/tagRepository';
 import { generateLlmTags } from './generators/llm';
+import { runShadowTagGeneration } from './generators/xorShadow';
 import { TagsConfigShapeSchema } from './schema';
 import { tagService } from './service';
 import { DESK_EMAIL_SOURCE_TYPE, DEFAULT_DESK_EMAIL_CONFIG } from './deskEmail';
@@ -406,6 +407,9 @@ export class TagGenerationPipeline extends EventEmitter {
 
       generated.push(...(await generator(context, group, workspaceId)));
     }
+
+    // Log-only. Not awaited so a slow candidate cannot hold the job's Bull lock.
+    void runShadowTagGeneration(context, categories, generated, { jobId, sourceId, sourceType });
 
     // If an LLM generator returned a tag outside `tags` for a category with
     // is_new_tag_allowed=true, fold that new tag back into the config's vocabulary

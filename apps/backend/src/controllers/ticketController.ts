@@ -95,9 +95,12 @@ import { createTicketWithConversationTx } from '@/bypassAcl/transactions/control
 import { createTicketTx } from '@/bypassAcl/transactions/controllersTicketController';
 import { mergeTicketTx } from '@/bypassAcl/transactions/controllersTicketController';
 import { unmergeTicketTx } from '@/bypassAcl/transactions/controllersTicketController';
+import { acquireLock, releaseLock } from '@/utils/distributedLock';
 
 
 export const prisma = DatabaseClient.getInstance();
+
+const RECHECK_DUPLICATES_LOCK_TTL_SECONDS = 120;
 
 type MyTicketBoardOption = {
   id: string;
@@ -1360,6 +1363,81 @@ export class TicketController {
       res.json({ success: true, data: response });
     } catch (error) {
       logger.error('Error checking ticket duplicates:', error);
+      res.status(500).json({ error: 'Failed to check ticket duplicates' });
+    }
+  };
+
+  /**
+   * POST /api/tickets/:ticketId/duplicates/recheck
+   * Re-runs duplicate detection for an existing ticket on demand. Append-only: a newly
+   * found possible duplicate is linked, existing links are left alone.
+   */
+  recheckTicketDuplicates = async (req: Request, res: Response): Promise<void> => {
+    const { ticketId } = req.params;
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    try {
+      const ticket = await prisma.ticket.findUnique({
+        where: { id: ticketId },
+        select: { channelId: true, workspaceId: true, isArchived: true },
+      });
+      if (!ticket || ticket.workspaceId !== req.user?.workspaceId) {
+        res.status(404).json({ error: 'Ticket not found' });
+        return;
+      }
+      if (ticket.isArchived) {
+        res.status(400).json({ error: 'Cannot check duplicates on an archived ticket' });
+        return;
+      }
+
+      // ACL: Private channels require membership; public channels are open
+      const channel = await this.channelRepository.findById(ticket.channelId);
+      if (channel && channel.visibility === 'PRIVATE') {
+        const isParticipant = await this.channelParticipantRepository.isParticipant(ticket.channelId, userId);
+        if (!isParticipant) {
+          res.status(403).json({ error: 'Access denied - you do not have permission to access this conversation' });
+          return;
+        }
+      }
+
+      // One check per ticket at a time: each runs a Vespa search plus a Jev/LLM call.
+      // TTL covers a slow LLM fallback. Fails open when Redis is down, and release only
+      // drops the lock this request still holds and never throws.
+      const lock = await acquireLock(`ticket:duplicate-recheck:${ticketId}`, {
+        ttlSeconds: RECHECK_DUPLICATES_LOCK_TTL_SECONDS,
+      });
+      if (!lock) {
+        res.status(429).json({ error: 'A duplicate check is already running for this ticket.' });
+        return;
+      }
+
+      let outcome;
+      try {
+        outcome = await ticketDuplicateService.recheckDuplicatesForTicket(ticketId);
+      } finally {
+        await releaseLock(lock);
+      }
+      // Covers a failed search and a failed analysis alike: neither is "no duplicates".
+      if (!outcome || outcome.analysis.error) {
+        res.status(502).json({ error: 'Duplicate check failed. Please try again.' });
+        return;
+      }
+
+      res.json({
+        success: true,
+        data: {
+          isDuplicate: outcome.linkedTicketId !== null,
+          linkedTicketId: outcome.linkedTicketId,
+          candidateCount: outcome.candidateCount,
+          confidence: outcome.analysis.confidence ?? 0,
+        },
+      });
+    } catch (error) {
+      logger.error('[TicketController] recheckTicketDuplicates error:', error);
       res.status(500).json({ error: 'Failed to check ticket duplicates' });
     }
   };
