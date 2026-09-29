@@ -119,6 +119,9 @@ router.post('/:callId/invite', callController.inviteUsers);
 // Decline call endpoint
 router.post('/:callId/decline', callController.declineCall);
 
+// Callee reports ring delivery (RINGING | BUSY) — HTTP twin of the Zero mutator
+router.post('/:callId/ring-status', callController.updateRingStatus);
+
 // RSVP endpoint for scheduled calls
 router.post('/:callId/rsvp', callController.updateMeetingStatus);
 
