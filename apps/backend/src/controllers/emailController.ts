@@ -1077,7 +1077,10 @@ export class EmailController {
               }),
               db.messageAttachment.updateMany({
                 where: { id: { in: stagedAttachmentRowIds } },
-                data: { conversationId: conversation.conversationId },
+                data: {
+                  conversationId: conversation.conversationId,
+                  channelId: conversation.channelId,
+                },
               }),
             ]);
           } catch (error) {

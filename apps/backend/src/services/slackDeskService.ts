@@ -191,7 +191,12 @@ export class SlackDeskService {
     if (stagedAttachmentRowIds.length > 0) {
       await this.prisma.messageAttachment.updateMany({
         where: { id: { in: stagedAttachmentRowIds } },
-        data: { entityType: AttachmentEntityType.EMAIL, entityId: email.id, conversationId },
+        data: {
+          entityType: AttachmentEntityType.EMAIL,
+          entityId: email.id,
+          conversationId,
+          channelId: conversation.channelId,
+        },
       }).catch(err => logger.error(`${TAG} Failed to rebind attachments to reply email`, { err }));
     }
 
