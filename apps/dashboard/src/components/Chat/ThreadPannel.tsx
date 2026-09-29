@@ -13,6 +13,7 @@ import { Button } from '../ui/Button';
 import { queries } from '../../zero/queries';
 import { mutators } from '../../zero/mutators';
 import { useChannel, useChannelParticipation } from '../../hooks/useChannels';
+import { useIsDmReadOnly } from '../../hooks/useIsDmReadOnly';
 import { useRouteContext } from '../../hooks/useRouteContext';
 import { usePlatform } from '../../hooks/usePlatform';
 import { useIsInPanelWebview } from '../../hooks/useIsInPanelWebview';
@@ -641,6 +642,7 @@ export const ThreadMessages = ({
   }, [messagesDetails.type, derivedConversationId, messages]);
 
   const isUserMember = isMember;
+  const isDmReadOnly = useIsDmReadOnly(derivedChannelId);
 
   const zero = useZero();
 
@@ -1193,8 +1195,10 @@ export const ThreadMessages = ({
               conversationParticipant={conversationParticipant}
             />
 
-            {/* ChatInput at the bottom - only show if user is a member */}
-            {isUserMember || channel?.isArchived ? (
+            {/* ChatInput at the bottom - only show if user is a member.
+                Suppressed entirely in a deactivated 1:1 DM archive — the whole
+                thread is read-only there. */}
+            {isDmReadOnly ? null : isUserMember || channel?.isArchived ? (
               <div className='pb-3 bg-background shrink-0 px-[var(--composer-px)] [--composer-px:0.75rem]'>
                 <ChatInput
                   ref={inputRef}
@@ -1816,8 +1820,9 @@ export const ThreadMessages = ({
                     conversationParticipant={conversationParticipant}
                   />
 
-                  {/* ChatInput at the bottom - only show if user is a member */}
-                  {isUserMember || channel?.isArchived ? (
+                  {/* ChatInput at the bottom - only show if user is a member.
+                      Suppressed entirely in a deactivated 1:1 DM archive. */}
+                  {isDmReadOnly ? null : isUserMember || channel?.isArchived ? (
                     <div className='pb-3 bg-background shrink-0 px-[var(--composer-px)] [--composer-px:0.75rem]'>
                       <ChatInput
                         ref={inputRef}
@@ -1996,8 +2001,9 @@ export const ThreadMessages = ({
                   matchedMessageId={matchedMessageId ?? null}
                 />
 
-                {/* ChatInput at the bottom - only show if user is a member */}
-                {isUserMember || channel?.isArchived ? (
+                {/* ChatInput at the bottom - only show if user is a member.
+                    Suppressed entirely in a deactivated 1:1 DM archive. */}
+                {isDmReadOnly ? null : isUserMember || channel?.isArchived ? (
                   <div className='pb-3 bg-background shrink-0 px-[var(--composer-px)] [--composer-px:0.75rem]'>
                     <ChatInput
                       // eslint-disable-next-line jsx-a11y/no-autofocus
