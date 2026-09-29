@@ -38,6 +38,15 @@ function clamp(value: string, max: number): string {
   return value.length <= max ? value : `${value.slice(0, max)}…`;
 }
 
+function paramText(value: unknown): string {
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value) && value.every((v) => typeof v === "string" || typeof v === "number" || typeof v === "boolean")) {
+    return value.map(String).join(", ");
+  }
+  return "";
+}
+
 const THREAD_PREVIEW_CHARS = 160;
 
 export function htmlToCardText(html: string): string {
@@ -122,9 +131,10 @@ export function describeWriteAction(tool: string, params: Record<string, unknown
       // Unknown write tools still have to be describable — never show a card
       // whose body is only a tool name the person has no way to judge.
       const shown = Object.entries(params)
-        .filter(([, v]) => typeof v === "string" || typeof v === "number")
-        .slice(0, 4)
-        .map(([k, v]) => `${k}: ${clamp(String(v), 120)}`)
+        .map(([k, v]) => [k, paramText(v)] as const)
+        .filter(([, v]) => v !== "")
+        .slice(0, 6)
+        .map(([k, v]) => `${k}: ${clamp(v, 120)}`)
         .join("\n");
       return `Run *${tool}*${shown ? `\n\n${shown}` : ""}`;
     }
