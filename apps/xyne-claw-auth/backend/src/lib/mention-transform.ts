@@ -71,6 +71,12 @@ function transformSegment(s: string): string {
   return out;
 }
 
+export function mentionShorthandToText(input: string): string {
+  return input
+    .replace(GROUP_MENTION_RE, (_match, pre: string, alias: string) => `${pre}@${alias.trim()}`)
+    .replace(USER_MENTION_RE, (_match, pre: string, name: string) => `${pre}@${name.trim()}`);
+}
+
 /**
  * Expand all mention shorthand in `input`. Idempotent — re-running on an
  * already-expanded string returns the same string. Code fences are not

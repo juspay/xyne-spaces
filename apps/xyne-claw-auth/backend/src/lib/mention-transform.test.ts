@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   expandSpacesMentions,
+  mentionShorthandToText,
   resolveUnboundMentions,
   type MentionLookups,
 } from "./mention-transform.js";
@@ -257,5 +258,13 @@ describe("resolveUnboundMentions — email workspace-scoping (prod bug: @email n
     const lk: MentionLookups = { ...lookups(), byEmail: async () => one };
     const out = await resolveUnboundMentions(`Looping in ${EMAIL} — review`, lk);
     expect(out).toBe("Looping in @Radheyshree Agrawal[usr_radheyshree0000] — review");
+  });
+});
+
+describe("mentionShorthandToText", () => {
+  it("turns user and group shorthand into plain @names and leaves other text alone", () => {
+    expect(
+      mentionShorthandToText("cc @xyne-Doctor[cmnnn2zdk1lmoma4flzkwh4k1], @Anurag Dwivedi[usr_anurag000000000] and @spaces[group:grp_x0000000:xyne-spaces]; mail a@b.com"),
+    ).toBe("cc @xyne-Doctor, @Anurag Dwivedi and @spaces; mail a@b.com");
   });
 });

@@ -6,7 +6,23 @@ const log = createLogger("spaces-post-target");
 
 export interface SpacesPostTarget {
   channelName: string | null;
+  directMessage?: { with: string[] };
   thread?: { author: string | null; html: string };
+}
+
+const MEMBER_ID_LIST = /^[A-Za-z0-9_-]{8,64}(,[A-Za-z0-9_-]{8,64})+$/;
+
+export function looksLikeMemberIdList(name: string | null | undefined): boolean {
+  return !!name && MEMBER_ID_LIST.test(name.trim());
+}
+
+export function directMessageMemberIds(channel: { name?: string | null; scopeType?: string | null } | undefined): string[] | null {
+  if (!channel) return null;
+  const isDm = channel.scopeType === "DM" || channel.scopeType === "GROUP_DM" || looksLikeMemberIdList(channel.name);
+  if (!isDm) return null;
+  return looksLikeMemberIdList(channel.name) || /^[A-Za-z0-9_-]{8,64}$/.test(channel.name?.trim() ?? "")
+    ? (channel.name ?? "").split(",").map((id) => id.trim()).filter(Boolean)
+    : [];
 }
 
 async function first<T>(query: QueryAST, auth: SpacesAuthContext): Promise<T | undefined> {
@@ -30,6 +46,7 @@ export async function spacesConversationExists(conversationId: string, auth: Spa
 export async function getSpacesPostTarget(
   target: { channelId?: string; conversationId?: string },
   auth: SpacesAuthContext,
+  actingUserId?: string,
 ): Promise<SpacesPostTarget | null> {
   try {
     let channelId = target.channelId ?? "";
@@ -58,8 +75,17 @@ export async function getSpacesPostTarget(
       }
     }
     const channel = channelId
-      ? await first<{ name?: string }>({ model: "channel", operation: "findMany", where: { id: { equals: channelId } }, take: 1 }, auth)
+      ? await first<{ name?: string; scopeType?: string }>({ model: "channel", operation: "findMany", where: { id: { equals: channelId } }, take: 1 }, auth)
       : undefined;
+    const memberIds = directMessageMemberIds(channel);
+    if (memberIds) {
+      const others = memberIds.filter((id) => id !== actingUserId);
+      const users = others.length
+        ? ((await interact({ model: "user", operation: "findMany", where: { id: { in: others } }, take: others.length }, auth)) as Array<{ name?: string }> | undefined)
+        : [];
+      const names = (Array.isArray(users) ? users : []).map((u) => u.name?.trim() ?? "").filter(Boolean);
+      return { channelName: null, directMessage: { with: names }, ...(thread ? { thread } : {}) };
+    }
     return { channelName: channel?.name ?? null, ...(thread ? { thread } : {}) };
   } catch (err) {
     log.warn(`[post-target] channelId=${target.channelId ?? ""} conversationId=${target.conversationId ?? ""} err=${errMsg(err)}`);
