@@ -120,6 +120,8 @@ interface ExportResumeCursor {
   pageCount: number;
   /** Epoch ms when the cursor was parked — eviction ordering. */
   parkedAt: number;
+  /** Which pagination mode produced `cursor`. */
+  mode?: 'cursor' | 'offset';
 }
 
 type ResumeCursorMap = Record<string, ExportResumeCursor>;
@@ -314,7 +316,13 @@ export class AppDeskRefetch extends BaseRefetch {
 
     // A previous run stopped on one of the budgets below: resume THIS window
     // from its parked cursor. Other windows' parked cursors are left alone.
-    const resume = this.readResumeCursor(source, options.startDate, options.endDate);
+    const offsetMode = fetchConfig.pagination === 'offset';
+    const resume = this.readResumeCursor(
+      source,
+      options.startDate,
+      options.endDate,
+      offsetMode ? 'offset' : 'cursor',
+    );
     if (resume) {
       logger.info(`${TAG} resuming window export from parked cursor (${resume.pageCount} pages already ingested)`, {
         sourceId: source.id,
@@ -323,7 +331,6 @@ export class AppDeskRefetch extends BaseRefetch {
       });
     }
 
-    const offsetMode = fetchConfig.pagination === 'offset';
     // One parked value serves both modes: an opaque token in cursor mode, the
     // decimal offset in offset mode. A malformed parked offset restarts the
     // window rather than resuming somewhere arbitrary.
@@ -343,6 +350,7 @@ export class AppDeskRefetch extends BaseRefetch {
         cursor: parkedCursor,
         pageCount: (resume?.pageCount ?? 0) + pageCount,
         parkedAt: Date.now(),
+        mode: offsetMode ? 'offset' : 'cursor',
       });
     };
 
@@ -456,6 +464,8 @@ export class AppDeskRefetch extends BaseRefetch {
     } catch (error) {
       await parkProgress();
       throw error;
+    } finally {
+      await this.flushChannelSideEffects(channelId, newTickets, processed);
     }
 
     // Budget exhausted mid-window → park this window's cursor so its next
@@ -466,10 +476,6 @@ export class AppDeskRefetch extends BaseRefetch {
     } else {
       await this.clearResumeCursor(source.id, options.startDate, options.endDate);
     }
-
-    // End-of-run channel-level writes, replacing the per-message ones the
-    // persist calls skipped via deferChannelSideEffects.
-    await this.flushChannelSideEffects(channelId, newTickets, processed);
 
     logger.info(
       `${TAG} ${source.name}: processed=${processed} newTickets=${newTickets} skipped=${skipped} errors=${totalErrors} pages=${pageCount}${capped ? ' partial=true' : ''}`,
@@ -620,6 +626,7 @@ export class AppDeskRefetch extends BaseRefetch {
     source: ExternalSource,
     startDate: string,
     endDate: string,
+    expectedMode: 'cursor' | 'offset',
   ): ExportResumeCursor | null {
     const raw = source.lastSyncCursor;
     if (!raw) return null;
@@ -627,10 +634,19 @@ export class AppDeskRefetch extends BaseRefetch {
       const parsed = JSON.parse(raw) as ResumeCursorMap;
       const entry = parsed?.[windowKey(startDate, endDate)];
       if (!entry?.cursor) return null;
+      if (entry.mode !== expectedMode) {
+        logger.info(`${TAG} discarding a resume cursor parked under a different pagination mode`, {
+          sourceId: source.id,
+          parkedMode: entry.mode ?? 'unknown',
+          expectedMode,
+        });
+        return null;
+      }
       return {
         cursor: entry.cursor,
         pageCount: entry.pageCount ?? 0,
         parkedAt: entry.parkedAt ?? 0,
+        mode: entry.mode,
       };
     } catch {
       return null;

@@ -373,18 +373,18 @@ export function preserveRedactedSecrets(
   if (!incoming.headers || !storedRaw) return incoming;
   // The placeholder is only honoured when the destination is unchanged..
   let storedUrl: string | undefined;
-  let storedUrlHost: string | null = null;
-  let incomingUrlHost: string | null = null;
+  let storedUrlOrigin: string | null = null;
+  let incomingUrlOrigin: string | null = null;
   try {
     storedUrl = (JSON.parse(storedRaw) as { url?: string }).url;
-    storedUrlHost = new URL(storedUrl ?? '').host;
-    incomingUrlHost = new URL(incoming.url).host;
+    storedUrlOrigin = new URL(storedUrl ?? '').origin;
+    incomingUrlOrigin = new URL(incoming.url).origin;
   } catch {
     // A templated URL cannot be parsed; fall back to exact string equality.
   }
   const sameDestination =
-    storedUrlHost !== null && incomingUrlHost !== null
-      ? storedUrlHost === incomingUrlHost
+    storedUrlOrigin !== null && incomingUrlOrigin !== null
+      ? storedUrlOrigin === incomingUrlOrigin
       : storedUrl !== undefined && storedUrl === incoming.url;
   if (!sameDestination) {
     return {
