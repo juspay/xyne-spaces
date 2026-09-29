@@ -58,7 +58,7 @@ import { standaloneNavigate, APP_DRAG_STYLE, APP_NO_DRAG_STYLE } from '../../../
 import { usePlatform } from '../../../hooks/usePlatform';
 import { XyneAIStar } from '../../icons/xyne-ai';
 import { invokeShortcut } from '../../../shortcuts';
-import { CalendarEvent, PlusDefault } from '@xyne/icons';
+import { CalendarEvent, PencilEdit, PlusDefault } from '@xyne/icons';
 import { xyneCalendarActor } from '../../../machines/xyneCalendarMachine';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
@@ -81,7 +81,7 @@ import { channelTrackingMetadata } from '../../../services/Analytics/channelTrac
 interface ChannelTabTriggerProps {
   tab: ConversationTabListType;
   isActive: boolean;
-  /** Reserves room for the hover "×" the editable strip draws over the label. */
+  /** Reserves room for the "×" drawn over the label while the strip is in edit mode. */
   removable: boolean;
   onSelect: (tab: string, e?: React.MouseEvent) => void;
 }
@@ -103,7 +103,7 @@ const ChannelTabTrigger = ({
         onClick={e => onSelect(tab.value || '', e)}
         className={cn(
           'flex items-center justify-center gap-2 px-2.5 py-1.5 rounded-lg transition-colors duration-100 cursor-pointer',
-          removable && 'group-hover:pr-7',
+          removable && 'pr-7',
           isActive
             ? 'bg-muted text-foreground'
             : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
@@ -154,6 +154,30 @@ const ConversationHeader = ({
     ? getChannelTabsStore(channelId)
     : null;
   const channelTabIds = useMemo(() => (channelTabs ?? []).map(tab => tab.value), [channelTabs]);
+  const [editSnapshot, setEditSnapshot] = useState<readonly string[] | null>(null);
+  const isEditingTabs = !!tabsStore && editSnapshot !== null;
+  const startEditingTabs = useCallback(() => {
+    if (tabsStore) setEditSnapshot(tabsStore.get());
+  }, [tabsStore]);
+  const saveTabs = useCallback(() => setEditSnapshot(null), []);
+  const cancelTabs = useCallback(() => {
+    if (tabsStore && editSnapshot) tabsStore.set(editSnapshot);
+    setEditSnapshot(null);
+  }, [tabsStore, editSnapshot]);
+  // Every edit is already persisted, so leaving the channel mid-edit keeps it —
+  // the same as Save. Only the mode itself must not follow into the next channel.
+  useEffect(() => setEditSnapshot(null), [channelId]);
+  useEffect(() => {
+    if (!isEditingTabs) return undefined;
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== 'Escape' || e.defaultPrevented) return;
+      // Esc that closes the "+" menu or the app picker is theirs, not a cancel.
+      if (document.querySelector('[data-radix-popper-content-wrapper], [role="dialog"]')) return;
+      cancelTabs();
+    };
+    window.addEventListener('keydown', onKey);
+    return (): void => window.removeEventListener('keydown', onKey);
+  }, [isEditingTabs, cancelTabs]);
   const handleTabSelect = useCallback(
     (value: string, e?: React.MouseEvent) => setActiveTab?.(value, e),
     [setActiveTab],
@@ -628,19 +652,15 @@ const ConversationHeader = ({
           className='flex items-center justify-start gap-0.5 px-0.5 overflow-x-auto no-scrollbar'
           style={APP_NO_DRAG_STYLE}
         >
-          {tabsStore ? (
+          {tabsStore && isEditingTabs ? (
             <>
               <SortableBar store={tabsStore} ids={channelTabIds} direction='horizontal'>
                 {channelTabs?.map(tab => (
-                  // `group` wrapper so the "×" appears only while this tab is
-                  // pointed at. Kept inside the strip's box (not offset outside
-                  // it) because the list clips overflow for horizontal
-                  // scrolling.
                   <SortableBarItem
                     key={tab.value}
                     id={tab.value}
                     as='span'
-                    className='group relative inline-flex shrink-0'
+                    className='relative inline-flex shrink-0 cursor-grab'
                   >
                     <ChannelTabTrigger
                       tab={tab}
@@ -653,7 +673,7 @@ const ConversationHeader = ({
                       id={tab.value}
                       label={tab.label.trim()}
                       trackCategory='CHANNELS'
-                      className='right-1.5 top-1/2 size-4 -translate-y-1/2'
+                      className='right-1.5 top-1/2 size-4 -translate-y-1/2 opacity-100'
                     />
                   </SortableBarItem>
                 ))}
@@ -677,18 +697,58 @@ const ConversationHeader = ({
                   </button>
                 }
               />
+              <span className='ml-auto flex shrink-0 items-center gap-1 pl-2'>
+                <Button
+                  variant='ghost'
+                  size='sm'
+                  onClick={cancelTabs}
+                  data-testid='channel-tabs-cancel'
+                  data-track-category='CHANNELS'
+                  data-track-name='CANCEL_EDIT_TABS'
+                  className='h-7 rounded-lg px-2.5 text-xs'
+                >
+                  Cancel
+                </Button>
+                <Button
+                  size='sm'
+                  onClick={saveTabs}
+                  data-testid='channel-tabs-save'
+                  data-track-category='CHANNELS'
+                  data-track-name='SAVE_EDIT_TABS'
+                  className='h-7 rounded-lg px-3 text-xs'
+                >
+                  Save
+                </Button>
+              </span>
             </>
           ) : (
-            channelTabs?.map(tab => (
-              <span key={tab.value} className='inline-flex shrink-0'>
-                <ChannelTabTrigger
-                  tab={tab}
-                  isActive={activeTab === tab.value}
-                  removable={false}
-                  onSelect={handleTabSelect}
-                />
-              </span>
-            ))
+            <>
+              {channelTabs?.map(tab => (
+                <span key={tab.value} className='inline-flex shrink-0'>
+                  <ChannelTabTrigger
+                    tab={tab}
+                    isActive={activeTab === tab.value}
+                    removable={false}
+                    onSelect={handleTabSelect}
+                  />
+                </span>
+              ))}
+              {tabsStore && (
+                <Tooltip content='Edit tabs' side='bottom'>
+                  <button
+                    type='button'
+                    aria-label='Edit tabs'
+                    onClick={startEditingTabs}
+                    data-testid='channel-tabs-edit'
+                    data-track-category='CHANNELS'
+                    data-track-name='EDIT_TABS'
+                    className='flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground'
+                  >
+                    <PencilEdit size={14} />
+                  </button>
+                </Tooltip>
+              )}
+            </>
           )}
         </Tabs.List>
       </Tabs.Root>
