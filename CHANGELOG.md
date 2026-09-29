@@ -1,3 +1,10 @@
+## [1.419.0-release-20260929.2](https://github.com/juspay/xyne-spaces/compare/v1.419.0-release-20260929.1...v1.419.0-release-20260929.2) (2026-09-29)
+
+
+### Features
+
+* old-user-fix ([#2434](https://github.com/juspay/xyne-spaces/issues/2434)) ([4b51552](https://github.com/juspay/xyne-spaces/commit/4b515524247890ebf9229bab1afd155062ea118c))
+
 ## [1.419.0-release-20260929.1](https://github.com/juspay/xyne-spaces/compare/v1.418.0...v1.419.0-release-20260929.1) (2026-09-29)
 
 
