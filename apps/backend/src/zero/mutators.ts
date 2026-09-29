@@ -112,6 +112,7 @@ import {
   type EtaRiskAcknowledgedActivityValue,
   resolveTicketDescription,
 } from '@xyne/shared';
+import { sanitizeCanvasContent } from '@xyne/shared';
 import {
   normalizeThreadTypeName,
   parseAppliedTags,
@@ -221,6 +222,28 @@ import {
 } from '@/services/flowCascadeService';
 import { validateFlowDecisionFields } from '@/zero/utils/flowPlanValidation';
 import { getEncryptionProvider } from '@/services/encryption';
+
+/**
+ * Repair canvas content before a Zero mutator writes it (XYNE-65102).
+ *
+ * Zero mutators write straight to Postgres and never pass through the Prisma
+ * middleware, so every canvas and canvas-version write in this file calls
+ * this. A repair is logged, not rejected: the user keeps the text they typed
+ * and the stored row stays loadable by the editor.
+ */
+function sanitizeCanvasContentForWrite<T>(
+  content: T,
+  context: { mutator: string; canvasId: string; userId: string },
+): T {
+  const { content: sanitized, report } = sanitizeCanvasContent(content);
+  if (report.changed) {
+    logger.warn('[CanvasContentSanitize] Repaired canvas content in Zero mutator', {
+      ...context,
+      ...report,
+    });
+  }
+  return sanitized;
+}
 
 function sortCallParticipantsForPreview<T extends {
   id: string;
@@ -9533,7 +9556,11 @@ export function createMutators(
             workspaceId: authData.workspaceId,
             id,
             title,
-            content: content || [],
+            content: sanitizeCanvasContentForWrite(content || [], {
+              mutator: 'canvas.create',
+              canvasId: id,
+              userId: authData.sub,
+            }),
             channelId: resolvedChannelId,
             folderId,
             projectId: resolvedProjectId,
@@ -10246,7 +10273,13 @@ export function createMutators(
             lastEditedAt: params.timestamp,
             updatedAt: params.timestamp,
             ...(params.title !== undefined && { title: params.title }),
-            ...(params.content !== undefined && { content: params.content }),
+            ...(params.content !== undefined && {
+              content: sanitizeCanvasContentForWrite(params.content, {
+                mutator: 'canvas.update',
+                canvasId: canvas.id,
+                userId: authData.sub,
+              }),
+            }),
             ...(params.visibility !== undefined && { visibility: params.visibility }),
             ...(params.isCollaborative !== undefined && { isCollaborative: params.isCollaborative }),
             ...(params.folderId !== undefined && { folderId: params.folderId }),
@@ -10675,7 +10708,11 @@ export function createMutators(
             id,
             canvasId,
             name: name.trim(),
-            content,
+            content: sanitizeCanvasContentForWrite(content, {
+              mutator: 'canvasVersion.save',
+              canvasId,
+              userId: authData.sub,
+            }),
             contentHash,
             createdBy: authData.sub,
             createdAt: timestamp,
@@ -10738,7 +10775,14 @@ export function createMutators(
             lastEditedBy: authData.sub,
             lastEditedAt: timestamp,
             updatedAt: timestamp,
-            ...(!canvas.isCollaborative && { content: version.content }),
+            // Versions saved before XYNE-65102 may hold content the editor rejects.
+            ...(!canvas.isCollaborative && {
+              content: sanitizeCanvasContentForWrite(version.content, {
+                mutator: 'canvasVersion.restore',
+                canvasId: canvas.id,
+                userId: authData.sub,
+              }),
+            }),
           });
 
           await tx.mutate.canvas_versions.update({

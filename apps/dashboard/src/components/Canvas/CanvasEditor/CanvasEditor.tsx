@@ -56,6 +56,7 @@ import {
   scrollToHeading,
   removeUnknownBlocks,
 } from '../../../utils/canvasUtils';
+import { CanvasRenderBoundary } from '../CanvasRenderBoundary';
 import {
   exportCanvasAsMarkdown,
   exportCanvasAsPDF,
@@ -124,7 +125,7 @@ const deepCloneBlocks = (blocks: PartialBlock[]): PartialBlock[] => {
   return JSON.parse(JSON.stringify(blocks)) as PartialBlock[];
 };
 
-export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
+const CanvasEditorContent = forwardRef<CanvasEditorRef, CanvasEditorProps>(
   (
     {
       content,
@@ -174,7 +175,7 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
       >,
       ...(content && content.length > 0
         ? {
-            initialContent: removeUnknownBlocks(content, knownCanvasBlockTypes),
+            initialContent: removeUnknownBlocks(content, knownCanvasBlockTypes, canvasId),
           }
         : {}),
       ...(onFileUpload ? { uploadFile: onFileUpload } : {}),
@@ -446,7 +447,7 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
         replaceContent: (blocks: PartialBlock[]) => {
           const currentBlocks = editor.document;
           const nextBlocks = deepCloneBlocks(
-            removeUnknownBlocks(blocks, knownCanvasBlockTypes),
+            removeUnknownBlocks(blocks, knownCanvasBlockTypes, canvasId),
           ) as Parameters<typeof editor.replaceBlocks>[1];
           editor.replaceBlocks(currentBlocks, nextBlocks);
         },
@@ -461,7 +462,7 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
         toggleComments: () => setIsCommentsOpen(open => !open),
         selectedTheme,
       }),
-      [editor, handlePresent, handleThemeChange, selectedTheme, setIsCommentsOpen],
+      [editor, handlePresent, handleThemeChange, selectedTheme, setIsCommentsOpen, canvasId],
     );
 
     useScope('canvas', isFocused);
@@ -725,5 +726,19 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
     );
   },
 );
+
+CanvasEditorContent.displayName = 'CanvasEditorContent';
+
+/**
+ * Public canvas editor. The editor is created from stored content during
+ * render, so a document the schema rejects throws here; the boundary keeps
+ * that failure inside the canvas area instead of crashing the app
+ * (XYNE-65102).
+ */
+export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>((props, ref) => (
+  <CanvasRenderBoundary surface='canvas-editor' canvasId={props.canvasId}>
+    <CanvasEditorContent {...props} ref={ref} />
+  </CanvasRenderBoundary>
+));
 
 CanvasEditor.displayName = 'CanvasEditor';
