@@ -15,7 +15,6 @@ import ReactFlow, {
   type NodeChange,
   type NodeProps,
   EdgeLabelRenderer,
-  getBezierPath,
   MarkerType,
   Panel,
 } from 'reactflow';
@@ -50,6 +49,15 @@ import {
 } from '../../ui/dropdown-menu';
 import { TransitionFormPicker } from '../TransitionFormPicker/TransitionFormPicker';
 import { VisitSlaMode, ApproverType, ReenterMode } from '@xyne/shared';
+import {
+  bubbleNextTo,
+  layoutTransitionGraph,
+  ROW_PITCH,
+  type GraphPosition,
+  type TransitionGraphLayout,
+} from './transitionGraphLayout';
+
+export type { GraphPosition, TransitionGraphLayout } from './transitionGraphLayout';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -65,16 +73,6 @@ export interface TransitionMeta {
   visitSlaMode: VisitSlaMode;
   fixedEtaHours?: number | null;
   onReenter: string;
-}
-
-export interface GraphPosition {
-  x: number;
-  y: number;
-}
-
-export interface TransitionGraphLayout {
-  stages: Map<number, GraphPosition>;
-  bubbles: Map<number, GraphPosition>;
 }
 
 export interface NonLinearTransitionEditorProps {
@@ -168,10 +166,8 @@ interface TransitionEdgeData {
   toTempId: number;
   meta: TransitionMeta;
   onSelectEdge: (edgeId: string) => void;
-  selectedEdgeId: string | null;
-  isReciprocal?: boolean;
-  curveOffset?: number;
   highlightState?: HighlightState;
+  isRework?: boolean;
   isAllEdge?: boolean;
   sourceTempIds?: number[];
 }
@@ -211,96 +207,11 @@ const AllBubbleNodeComponent: React.FC<NodeProps<AllBubbleNodeData>> = ({ data }
 
 // ─── Graph Layout Helper ─────────────────────────────────────────────────────
 
-const COL_WIDTH = 320;
-const ROW_HEIGHT = 180;
-
-function computeGraphLayout(
-  stages: StageNode[],
-  transitionsByTempId: Map<number, Set<number>>,
-): Map<number, { x: number; y: number }> {
-  const positions = new Map<number, { x: number; y: number }>();
-  if (stages.length === 0) return positions;
-
-  // Build incoming adjacency and in-degree
-  const incoming = new Map<number, number[]>();
-  const inDegree = new Map<number, number>();
-  stages.forEach(s => {
-    incoming.set(s.tempId, []);
-    inDegree.set(s.tempId, 0);
-  });
-  transitionsByTempId.forEach((targets, from) => {
-    targets.forEach(to => {
-      if (incoming.has(to) && incoming.has(from)) {
-        incoming.get(to)!.push(from);
-        inDegree.set(to, (inDegree.get(to) ?? 0) + 1);
-      }
-    });
-  });
-
-  // BFS topological layering
-  const layerOf = new Map<number, number>();
-  const queue: number[] = [];
-  stages.forEach(s => {
-    if ((inDegree.get(s.tempId) ?? 0) === 0) {
-      layerOf.set(s.tempId, 0);
-      queue.push(s.tempId);
-    }
-  });
-
-  while (queue.length > 0) {
-    const node = queue.shift()!;
-    const layer = layerOf.get(node) ?? 0;
-    const targets = transitionsByTempId.get(node);
-    if (targets) {
-      targets.forEach(t => {
-        if (!layerOf.has(t)) {
-          layerOf.set(t, layer + 1);
-          queue.push(t);
-        }
-      });
-    }
-  }
-
-  // Any remaining (cyclic or disconnected) go to max layer + 1
-  const maxLayer = stages.length > 0 ? Math.max(0, ...Array.from(layerOf.values())) : 0;
-  stages.forEach(s => {
-    if (!layerOf.has(s.tempId)) {
-      layerOf.set(s.tempId, maxLayer + 1);
-    }
-  });
-
-  // Group stages by layer
-  const layers = new Map<number, number[]>();
-  layerOf.forEach((layer, tempId) => {
-    if (!layers.has(layer)) layers.set(layer, []);
-    layers.get(layer)!.push(tempId);
-  });
-
-  // Assign positions
-  const sortedLayers = Array.from(layers.keys()).sort((a, b) => a - b);
-  sortedLayers.forEach(layer => {
-    const ids = layers.get(layer)!;
-    ids.forEach((tempId, idx) => {
-      positions.set(tempId, {
-        x: layer * COL_WIDTH + 60,
-        y: idx * ROW_HEIGHT + 60,
-      });
-    });
-  });
-
-  return positions;
-}
-
-const bubbleNextTo = (target: GraphPosition): GraphPosition => ({
-  x: target.x - 70,
-  y: target.y + 35,
-});
-
 function nextFreeSlot(placed: GraphPosition[]): GraphPosition {
   if (placed.length === 0) return { x: 60, y: 60 };
   return {
     x: Math.min(...placed.map(p => p.x)),
-    y: Math.max(...placed.map(p => p.y)) + ROW_HEIGHT,
+    y: Math.max(...placed.map(p => p.y)) + ROW_PITCH,
   };
 }
 
@@ -425,44 +336,110 @@ function computeMergedTargets(
   return merged;
 }
 
+const NODE_HALF_HEIGHT = 23;
+const EDGE_CLEARANCE = 18;
+const EDGE_CHANNEL_GAP = 40;
+const EDGE_SPREAD_STEP = 10;
+const EDGE_CORNER_RADIUS = 12;
+const UPWARD_CHANNEL_SHIFT = 24;
+const LOCAL_EDGE_SPAN = 110;
+const SKIP_SPAN = 200;
+
+type Point = [number, number];
+
+const toward = (from: Point, to: Point, distance: number): Point => {
+  const length = Math.hypot(to[0] - from[0], to[1] - from[1]) || 1;
+  return [
+    from[0] + ((to[0] - from[0]) * distance) / length,
+    from[1] + ((to[1] - from[1]) * distance) / length,
+  ];
+};
+
+function roundedPath(points: Point[]): string {
+  return points.reduce((d, point, i) => {
+    const previous = points[i - 1];
+    const next = points[i + 1];
+    if (!previous) return `M ${point[0]} ${point[1]}`;
+    if (!next) return `${d} L ${point[0]} ${point[1]}`;
+    const radius = Math.min(
+      EDGE_CORNER_RADIUS,
+      Math.hypot(point[0] - previous[0], point[1] - previous[1]) / 2,
+      Math.hypot(next[0] - point[0], next[1] - point[1]) / 2,
+    );
+    const [bx, by] = toward(point, previous, radius);
+    const [ax, ay] = toward(point, next, radius);
+    return `${d} L ${bx} ${by} Q ${point[0]} ${point[1]} ${ax} ${ay}`;
+  }, '');
+}
+
+function edgeSpread(id: string): number {
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) | 0;
+  return ((Math.abs(hash) % 5) - 2) * EDGE_SPREAD_STEP;
+}
+
+function routeEdge(
+  id: string,
+  sx: number,
+  sy: number,
+  tx: number,
+  ty: number,
+): { path: string; labelX: number; labelY: number } {
+  const dx = tx - sx;
+  const dy = ty - sy;
+  if (dx >= 2 * EDGE_CLEARANCE && Math.abs(dy) <= LOCAL_EDGE_SPAN) {
+    const bow =
+      Math.abs(dy) < NODE_HALF_HEIGHT && dx > SKIP_SPAN ? -Math.min(110, 30 + dx * 0.06) : 0;
+    const c1: Point = [sx + dx / 2, sy + bow];
+    const c2: Point = [tx - dx / 2, ty + bow];
+    return {
+      path: `M ${sx} ${sy} C ${c1[0]} ${c1[1]} ${c2[0]} ${c2[1]} ${tx} ${ty}`,
+      labelX: (sx + 3 * c1[0] + 3 * c2[0] + tx) / 8,
+      labelY: (sy + 3 * c1[1] + 3 * c2[1] + ty) / 8,
+    };
+  }
+  const up = dy < -NODE_HALF_HEIGHT;
+  const down = dy > NODE_HALF_HEIGHT;
+  const clearance = EDGE_CLEARANCE + (up ? UPWARD_CHANNEL_SHIFT / 2 : 0);
+  const spread = edgeSpread(id);
+  const offset = spread + 2 * EDGE_SPREAD_STEP;
+  const exitX = sx + clearance + offset;
+  const entryX = tx - clearance - offset;
+  const channelY = down
+    ? ty - NODE_HALF_HEIGHT - EDGE_CHANNEL_GAP + spread
+    : up
+      ? sy - NODE_HALF_HEIGHT - EDGE_CHANNEL_GAP - UPWARD_CHANNEL_SHIFT + spread
+      : Math.max(sy, ty) + NODE_HALF_HEIGHT + EDGE_CHANNEL_GAP + spread;
+  return {
+    path: roundedPath([
+      [sx, sy],
+      [exitX, sy],
+      [exitX, channelY],
+      [entryX, channelY],
+      [entryX, ty],
+      [tx, ty],
+    ]),
+    labelX: exitX + (entryX - exitX) * ((up ? 0.7 : 0.3) + spread / 100),
+    labelY: channelY,
+  };
+}
+
 const TransitionEdge: React.FC<EdgeProps<TransitionEdgeData>> = ({
   id,
   sourceX,
   sourceY,
   targetX,
   targetY,
-  sourcePosition,
-  targetPosition,
   data,
   markerEnd,
 }) => {
-  const curveOffset = data?.curveOffset ?? 0;
-  const [edgePath, labelX, labelY] = getBezierPath({
-    sourceX,
-    sourceY,
-    sourcePosition,
-    targetX,
-    targetY: targetY + curveOffset,
-    targetPosition,
-  });
+  const { path: finalEdgePath, labelX, labelY } = routeEdge(id, sourceX, sourceY, targetX, targetY);
 
-  // For reciprocal edges, shift control points to create a distinct arc
-  let finalEdgePath = edgePath;
-  if (curveOffset !== 0) {
-    const dx = Math.abs(targetX - sourceX) * 0.5;
-    const cp1x = sourceX + dx;
-    const cp1y = sourceY + curveOffset;
-    const cp2x = targetX - dx;
-    const cp2y = targetY + curveOffset;
-    finalEdgePath = `M ${sourceX} ${sourceY} C ${cp1x} ${cp1y} ${cp2x} ${cp2y} ${targetX} ${targetY + curveOffset}`;
-  }
-
-  const isSelected = data?.selectedEdgeId === id;
   const meta = data?.meta;
   const hasBadge = !!meta?.formId || meta?.requiresApproval;
   const highlightState = data?.highlightState ?? 'normal';
   const isDulled = highlightState === 'dull';
-  const isHighlighted = isSelected || highlightState === 'connected';
+  const isHighlighted = highlightState === 'selected' || highlightState === 'connected';
   const strokeColor = isDulled ? '#cbd5e1' : isHighlighted ? '#6276be' : '#94a3b8';
   const strokeWidth = isHighlighted ? 2.5 : 1.5;
 
@@ -476,6 +453,7 @@ const TransitionEdge: React.FC<EdgeProps<TransitionEdgeData>> = ({
         style={{
           stroke: strokeColor,
           strokeWidth,
+          strokeDasharray: data?.isRework ? '5 4' : undefined,
           fill: 'none',
           opacity: isDulled ? 0.35 : 1,
         }}
@@ -505,7 +483,7 @@ const TransitionEdge: React.FC<EdgeProps<TransitionEdgeData>> = ({
             onClick={() => data?.onSelectEdge(id)}
             data-track-category='board_stage_config'
             data-track-name='open_transition_config'
-            className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium shadow-sm transition-all ${
+            className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium shadow-sm transition-colors ${
               isHighlighted
                 ? 'bg-[#6276be] border-[#6276be] text-white'
                 : 'bg-background border-border text-muted-foreground hover:border-[#6276be] hover:text-[#6276be]'
@@ -1082,6 +1060,19 @@ const EdgeSettingsPanel: React.FC<EdgeSettingsPanelProps> = props => {
 // ─── Stable node/edge type maps (outside component to avoid re-registration) ─
 
 const NODE_TYPES = { stage: StageNodeComponent, allBubble: AllBubbleNodeComponent };
+
+interface DisplayNodeCacheEntry {
+  source: Node<StageNodeData | AllBubbleNodeData>;
+  state: HighlightState;
+  out: Node<StageNodeData | AllBubbleNodeData>;
+}
+
+interface DisplayEdgeCacheEntry {
+  source: Edge<TransitionEdgeData>;
+  state: HighlightState;
+  rework: boolean;
+  out: Edge<TransitionEdgeData>;
+}
 const EDGE_TYPES = { transition: TransitionEdge };
 
 // ─── Main Editor ──────────────────────────────────────────────────────────────
@@ -1113,8 +1104,15 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
 }) => {
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
+  const [hoveredEdgeId, setHoveredEdgeId] = useState<string | null>(null);
   const [expandedTargets, setExpandedTargets] = useState<Set<number>>(new Set());
   const { fitView } = useReactFlow();
+  const fitAfterLayout = useCallback(() => {
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => fitView({ padding: 0.35, duration: 300 })),
+    );
+  }, [fitView]);
   const savedLayoutRef = useRef(savedLayout);
   savedLayoutRef.current = savedLayout;
 
@@ -1136,6 +1134,22 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
     setSelectedEdgeId(null);
     setSelectedNodeId(null);
   };
+
+  const handleNodeMouseEnter = useCallback((_event: React.MouseEvent, node: Node) => {
+    if (node.id.startsWith('all-')) setHoveredEdgeId(`eAll-${node.id.slice(4)}`);
+    else setHoveredNodeId(node.id);
+  }, []);
+
+  const handleNodeMouseLeave = useCallback(() => {
+    setHoveredNodeId(null);
+    setHoveredEdgeId(null);
+  }, []);
+
+  const handleEdgeMouseEnter = useCallback((_event: React.MouseEvent, edge: Edge) => {
+    setHoveredEdgeId(edge.id);
+  }, []);
+
+  const handleEdgeMouseLeave = useCallback(() => setHoveredEdgeId(null), []);
 
   // Wires up an incoming edge from every other stage not already connected to targetTempId.
   const handleAllowAllIncoming = useCallback(
@@ -1167,18 +1181,28 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
   // preserve their custom positions and don't auto-relayout on transition changes.
   const hasUserDraggedRef = useRef(false);
 
+  const layoutFor = useCallback(
+    (stageList: StageNode[]): TransitionGraphLayout =>
+      layoutTransitionGraph(
+        stageList,
+        transitionsByTempId,
+        computeMergedTargets(stageList, transitionsByTempId, transitionsMeta).keys(),
+      ),
+    [transitionsByTempId, transitionsMeta],
+  );
+
   // Build initial nodes using graph-aware layout
   const makeNodes = useCallback(
     (stageList: StageNode[]): Node<StageNodeData>[] => {
-      const layout = computeGraphLayout(stageList, transitionsByTempId);
+      const layout = layoutFor(stageList);
       return stageList.map(s => ({
         id: String(s.tempId),
         type: 'stage',
-        position: layout.get(s.tempId) ?? { x: 60, y: 60 },
+        position: layout.stages.get(s.tempId) ?? { x: 60, y: 60 },
         data: { stage: s },
       }));
     },
-    [transitionsByTempId],
+    [layoutFor],
   );
 
   const [nodes, setNodes, onNodesChange] = useNodesState<StageNodeData | AllBubbleNodeData>(
@@ -1192,6 +1216,17 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
   // fight ReactFlow's own node-state updates).
   const nodesRef = useRef(nodes);
   nodesRef.current = nodes;
+
+  const lastAutoLayoutRef = useRef<TransitionGraphLayout | null>(null);
+  const applyAutoLayout = useCallback(
+    (layout: TransitionGraphLayout) => {
+      setNodes(prev => applyGraphLayout(prev, layout));
+      if (layout === lastAutoLayoutRef.current) return;
+      lastAutoLayoutRef.current = layout;
+      fitAfterLayout();
+    },
+    [setNodes, fitAfterLayout],
+  );
 
   // Detect user-initiated node drags so we can preserve custom positions.
   // A position change with `dragging === false` indicates the drag just ended.
@@ -1215,14 +1250,8 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
   useEffect(() => {
     if (isTransitionsLoading) return;
     if (hasUserDraggedRef.current) return; // preserve user-dragged positions
-    const layout = computeGraphLayout(stagesRef.current, transitionsByTempId);
-    setNodes(prev =>
-      prev.map(n => {
-        const pos = layout.get(Number(n.id));
-        return pos ? { ...n, position: pos } : n;
-      }),
-    );
-  }, [transitionsByTempId, isTransitionsLoading, setNodes]);
+    applyAutoLayout(layoutFor(stagesRef.current));
+  }, [layoutFor, isTransitionsLoading, applyAutoLayout]);
 
   // Sync node count when stages added/removed; update data when stages change.
   // Seeded with the SAME stages used by useNodesState(makeNodes(stages)) above
@@ -1237,11 +1266,11 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
     const removed = prevIds.filter(id => !currIds.includes(id));
     prevStageTempIds.current = currIds;
 
+    const layout = layoutFor(stages);
     setNodes(prev => {
       // Remove deleted stages
       let updated = prev.filter(n => !removed.includes(Number(n.id)));
       // Add new stages with positions from graph layout
-      const layout = computeGraphLayout(stages, transitionsByTempId);
       added.forEach((tempId, _i) => {
         const s = stages.find(s => s.tempId === tempId)!;
         updated = [
@@ -1251,7 +1280,7 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
             type: 'stage',
             position: hasUserDraggedRef.current
               ? nextFreeSlot(updated.filter(n => n.type === 'stage').map(n => n.position))
-              : (layout.get(tempId) ?? { x: 60, y: 60 }),
+              : (layout.stages.get(tempId) ?? { x: 60, y: 60 }),
             data: { stage: s },
           },
         ];
@@ -1266,33 +1295,22 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
         };
       });
     });
-  }, [stages, transitionsByTempId, setNodes]);
+    if (!hasUserDraggedRef.current) applyAutoLayout(layout);
+  }, [stages, layoutFor, setNodes, applyAutoLayout]);
 
   // Sync edges from transition state
   useEffect(() => {
-    // Build set of all transition keys for reciprocal detection
-    const allKeys = new Set<string>();
-    transitionsByTempId.forEach((targets, from) => {
-      targets.forEach(to => allKeys.add(`${from}->${to}`));
-    });
-
     const newEdges: Edge<TransitionEdgeData>[] = [];
     transitionsByTempId.forEach((targets, fromTempId) => {
       targets.forEach(toTempId => {
         const edgeId = `e${fromTempId}-${toTempId}`;
         const metaKey = `${fromTempId}->${toTempId}`;
-        const reverseKey = `${toTempId}->${fromTempId}`;
         const meta: TransitionMeta = transitionsMeta.get(metaKey) ?? {
           requiresApproval: false,
           approvers: [],
           visitSlaMode: VisitSlaMode.STAGE_DEFAULT,
           onReenter: ReenterMode.RESET,
         };
-
-        // Detect reciprocal edge and assign alternating curve offset
-        const isReciprocal = allKeys.has(reverseKey);
-        // First edge in pair gets -28, second gets +28 (based on tempId comparison)
-        const curveOffset = isReciprocal ? (fromTempId < toTempId ? -28 : 28) : 0;
 
         newEdges.push({
           id: edgeId,
@@ -1305,15 +1323,12 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
             toTempId,
             meta,
             onSelectEdge: handleSelectEdge,
-            selectedEdgeId,
-            isReciprocal,
-            curveOffset,
           },
         });
       });
     });
     setEdges(newEdges);
-  }, [transitionsByTempId, transitionsMeta, selectedEdgeId, setEdges, handleSelectEdge]);
+  }, [transitionsByTempId, transitionsMeta, setEdges, handleSelectEdge]);
 
   // Commit merged "All" bubble nodes/edges into the real ReactFlow
   // node/edge state (mirroring the edge-sync effect above), so ReactFlow's
@@ -1327,7 +1342,7 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
     const active = new Map(merged);
     expandedTargets.forEach(tempId => active.delete(tempId));
 
-    const layout = computeGraphLayout(stages, transitionsByTempId);
+    const layout = layoutFor(stages);
 
     const bubbleNodes: Node<AllBubbleNodeData>[] = [];
     const bubbleEdges: Edge<TransitionEdgeData>[] = [];
@@ -1340,7 +1355,8 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
       const arrangedTarget = hasUserDraggedRef.current
         ? nodesRef.current.find(n => n.id === String(m.targetTempId))?.position
         : undefined;
-      const targetPosition = arrangedTarget ?? layout.get(m.targetTempId) ?? { x: 60, y: 60 };
+      const targetPosition = arrangedTarget ??
+        layout.stages.get(m.targetTempId) ?? { x: 60, y: 60 };
       const bId = `all-${m.targetTempId}`;
       const eId = `eAll-${m.targetTempId}`;
       // Preserve a bubble's existing position across re-runs (e.g. when the
@@ -1356,7 +1372,7 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
           existingBubble?.position ??
           (hasUserDraggedRef.current
             ? savedLayoutRef.current?.bubbles.get(m.targetTempId)
-            : undefined) ??
+            : layout.bubbles.get(m.targetTempId)) ??
           bubbleNextTo(targetPosition),
         draggable: true,
         selectable: false,
@@ -1384,7 +1400,6 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
             onReenter: ReenterMode.RESET,
           },
           onSelectEdge: handleSelectEdge,
-          selectedEdgeId,
           isAllEdge: true,
           sourceTempIds: m.sourceTempIds,
         },
@@ -1401,8 +1416,8 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
     transitionsByTempId,
     transitionsMeta,
     expandedTargets,
-    selectedEdgeId,
     handleSelectEdge,
+    layoutFor,
     setNodes,
     setEdges,
   ]);
@@ -1413,8 +1428,8 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
     hasAppliedSavedLayoutRef.current = true;
     hasUserDraggedRef.current = true;
     setNodes(prev => applyGraphLayout(prev, savedLayout));
-    requestAnimationFrame(() => fitView({ padding: 0.35 }));
-  }, [savedLayout, setNodes, fitView]);
+    fitAfterLayout();
+  }, [savedLayout, setNodes, fitAfterLayout]);
 
   useEffect(() => {
     if (!hasUserDraggedRef.current) {
@@ -1552,6 +1567,16 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
     setSelectedNodeId(null);
   }, [selectedEdge]);
 
+  const sequenceByTempId = useMemo(
+    () => new Map(stages.map(s => [s.tempId, s.sequenceNumber])),
+    [stages],
+  );
+
+  const displayCacheRef = useRef({
+    nodes: new Map<string, DisplayNodeCacheEntry>(),
+    edges: new Map<string, DisplayEdgeCacheEntry>(),
+  });
+
   // Highlight the selected node/edge and its direct connections; dull the rest.
   const { displayNodes, displayEdges } = useMemo(() => {
     const nodeState = new Map<string, HighlightState>();
@@ -1561,45 +1586,59 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
     const bubbleEdgeId = (targetTempId: number) => `eAll-${targetTempId}`;
 
     const hiddenEdgeIds = new Set<string>();
+    const hiddenEdgeTarget = new Map<string, number>();
     activeMergedTargets.forEach(merged => {
       merged.sourceTempIds.forEach(from => {
         hiddenEdgeIds.add(`e${from}-${merged.targetTempId}`);
+        hiddenEdgeTarget.set(`e${from}-${merged.targetTempId}`, merged.targetTempId);
       });
     });
 
-    if (selectedNodeId) {
-      nodeState.set(selectedNodeId, 'selected');
+    const isSelecting = !!selectedNodeId || !!selectedEdgeId;
+    const focusNodeId = isSelecting ? selectedNodeId : hoveredNodeId;
+    const focusEdgeId = isSelecting ? selectedEdgeId : hoveredNodeId ? null : hoveredEdgeId;
+    const focusState: HighlightState = isSelecting ? 'selected' : 'connected';
+
+    if (focusNodeId && nodes.some(n => n.id === focusNodeId)) {
+      nodeState.set(focusNodeId, focusState);
       edges.forEach(e => {
         if (hiddenEdgeIds.has(e.id)) return;
-        if (e.source === selectedNodeId || e.target === selectedNodeId) {
+        if (e.source === focusNodeId || e.target === focusNodeId) {
           edgeState.set(e.id, 'connected');
-          const other = e.source === selectedNodeId ? e.target : e.source;
+          const other = e.source === focusNodeId ? e.target : e.source;
           if (!nodeState.has(other)) nodeState.set(other, 'connected');
         }
       });
-      const mergedForSelected = activeMergedTargets.get(Number(selectedNodeId));
-      if (mergedForSelected) {
-        nodeState.set(bubbleNodeId(mergedForSelected.targetTempId), 'connected');
-        edgeState.set(bubbleEdgeId(mergedForSelected.targetTempId), 'connected');
+      const mergedForFocus = activeMergedTargets.get(Number(focusNodeId));
+      if (mergedForFocus) {
+        nodeState.set(bubbleNodeId(mergedForFocus.targetTempId), 'connected');
+        edgeState.set(bubbleEdgeId(mergedForFocus.targetTempId), 'connected');
       }
-    } else if (selectedEdgeId) {
-      if (selectedEdgeId.startsWith('eAll-')) {
-        const targetTempId = Number(selectedEdgeId.slice('eAll-'.length));
-        nodeState.set(bubbleNodeId(targetTempId), 'connected');
-        nodeState.set(String(targetTempId), 'connected');
-        edgeState.set(selectedEdgeId, 'connected');
+    } else if (focusEdgeId) {
+      if (focusEdgeId.startsWith('eAll-')) {
+        const targetTempId = Number(focusEdgeId.slice('eAll-'.length));
+        if (activeMergedTargets.has(targetTempId)) {
+          nodeState.set(bubbleNodeId(targetTempId), 'connected');
+          nodeState.set(String(targetTempId), 'connected');
+          edgeState.set(focusEdgeId, focusState);
+        }
       } else {
-        const edge = edges.find(e => e.id === selectedEdgeId);
+        const edge = edges.find(e => e.id === focusEdgeId);
         if (edge) {
           nodeState.set(edge.source, 'connected');
           nodeState.set(edge.target, 'connected');
-          edgeState.set(edge.id, 'connected');
+          edgeState.set(edge.id, focusState);
+          const bubbleTarget = hiddenEdgeTarget.get(edge.id);
+          if (bubbleTarget !== undefined) {
+            nodeState.set(bubbleNodeId(bubbleTarget), 'connected');
+            edgeState.set(bubbleEdgeId(bubbleTarget), 'connected');
+          }
         }
       }
     }
 
-    const hasSelection = nodeState.size > 0;
-    if (hasSelection) {
+    const hasFocus = nodeState.size > 0;
+    if (hasFocus) {
       nodes.forEach(n => {
         if (!nodeState.has(n.id)) nodeState.set(n.id, 'dull');
       });
@@ -1618,20 +1657,56 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
     // Bubble nodes/edges now live in the real `nodes`/`edges` state (synced by
     // the bubble-sync effect above), so the memo only needs to layer on
     // highlight state and drop the individually-merged edges.
-    const displayNodesOut = nodes.map(n => ({
-      ...n,
-      data: { ...n.data, highlightState: nodeState.get(n.id) ?? 'normal' },
-    }));
+    const cache = displayCacheRef.current;
+    const nextNodes = new Map<string, DisplayNodeCacheEntry>();
+    const displayNodesOut = nodes.map(n => {
+      const state = nodeState.get(n.id) ?? 'normal';
+      const hit = cache.nodes.get(n.id);
+      const out =
+        hit && hit.source === n && hit.state === state
+          ? hit.out
+          : { ...n, data: { ...n.data, highlightState: state } };
+      nextNodes.set(n.id, { source: n, state, out });
+      return out;
+    });
 
+    const nextEdges = new Map<string, DisplayEdgeCacheEntry>();
     const displayEdgesOut = edges
       .filter(e => !hiddenEdgeIds.has(e.id))
-      .map(e => ({
-        ...e,
-        data: { ...e.data, highlightState: edgeState.get(e.id) ?? 'normal' },
-      }));
+      .map(e => {
+        const state = edgeState.get(e.id) ?? 'normal';
+        const rework =
+          !e.data?.isAllEdge &&
+          (sequenceByTempId.get(e.data?.fromTempId ?? 0) ?? 0) >
+            (sequenceByTempId.get(e.data?.toTempId ?? 0) ?? 0);
+        const hit = cache.edges.get(e.id);
+        const out =
+          hit && hit.source === e && hit.state === state && hit.rework === rework
+            ? hit.out
+            : {
+                ...e,
+                data: {
+                  ...(e.data as TransitionEdgeData),
+                  highlightState: state,
+                  isRework: rework,
+                },
+              };
+        nextEdges.set(e.id, { source: e, state, rework, out });
+        return out;
+      });
+    displayCacheRef.current = { nodes: nextNodes, edges: nextEdges };
 
     return { displayNodes: displayNodesOut, displayEdges: displayEdgesOut };
-  }, [selectedNodeId, selectedEdgeId, nodes, edges, activeMergedTargets]);
+  }, [
+    selectedNodeId,
+    selectedEdgeId,
+    hoveredNodeId,
+    hoveredEdgeId,
+    nodes,
+    edges,
+    activeMergedTargets,
+    sequenceByTempId,
+  ]);
 
   return (
     <div className='relative w-full h-full' style={{ minHeight: 480 }}>
@@ -1652,6 +1727,10 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
         onConnect={onConnect}
         onEdgesDelete={onEdgesDelete}
         onNodeClick={handleNodeClick}
+        onNodeMouseEnter={handleNodeMouseEnter}
+        onNodeMouseLeave={handleNodeMouseLeave}
+        onEdgeMouseEnter={handleEdgeMouseEnter}
+        onEdgeMouseLeave={handleEdgeMouseLeave}
         nodeTypes={NODE_TYPES}
         edgeTypes={EDGE_TYPES}
         onPaneClick={handlePaneClick}
@@ -1672,13 +1751,10 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
             <button
               type='button'
               onClick={() => {
-                const layout = computeGraphLayout(stages, transitionsByTempId);
-                setNodes(prev =>
-                  prev.map(n => {
-                    const pos = layout.get(Number(n.id));
-                    return pos ? { ...n, position: pos } : n;
-                  }),
-                );
+                const layout = layoutFor(stages);
+                setNodes(prev => applyGraphLayout(prev, layout));
+                lastAutoLayoutRef.current = layout;
+                fitAfterLayout();
                 // Reset the flag so future transition changes can auto-layout again
                 // until the user drags once more.
                 hasUserDraggedRef.current = false;
@@ -1715,7 +1791,9 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
             <div className='flex items-center gap-1.5 bg-background/90 border border-border rounded-lg px-2.5 py-1.5 shadow text-[11px] text-muted-foreground'>
               <span>Drag handle → to connect</span>
               <span className='opacity-40'>·</span>
-              <span>Click edge to configure</span>
+              <span>Hover a stage to trace it</span>
+              <span className='opacity-40'>·</span>
+              <span>Dashed = moves back</span>
             </div>
             <button
               type='button'
