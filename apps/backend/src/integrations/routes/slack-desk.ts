@@ -8,10 +8,11 @@
  */
 
 import express, { Request, Response } from 'express';
-import { isDeskChannelType, SlackDeskTriggerMode } from '@xyne/shared';
+import { SlackDeskTriggerMode } from '@xyne/shared';
 import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
 import { authV2Middleware } from '@/middleware/authV2Middleware';
 import { db } from '@/database/client';
+import { findSlackDeskSourceWorkspace } from '@/bypassAcl/slackDeskServices';
 import { WebClient } from '@slack/web-api';
 import { logger } from '@/utils/logger';
 import { slackDeskService } from '@/services/slackDeskService';
@@ -164,36 +165,9 @@ router.post(
   async (req: Request, res: Response): Promise<void> => {
     try {
       const { channelId } = req.params;
-      const userId = req.user!.id;
 
-      // Verify ownership
-      const channel = await db.channel.findUnique({
-        where: { id: channelId },
-        select: { id: true, createdBy: true, type: true },
-      });
-
-      if (!channel) {
-        res.status(404).json({ error: 'Channel not found' });
+      if (!(await authorizeAppDeskManager(channelId, req.user!.id, req.user!.workspaceId!, res)))
         return;
-      }
-
-      if (!isDeskChannelType(channel.type)) {
-        res.status(400).json({ error: 'Channel is not a desk' });
-        return;
-      }
-
-      // Check if user is owner
-      const isOwner = channel.createdBy === userId;
-      if (!isOwner) {
-        const pref = await db.emailChannelPreference.findUnique({
-          where: { channelId },
-          select: { ownerUserId: true },
-        });
-        if (pref?.ownerUserId !== userId) {
-          res.status(403).json({ error: 'Only the desk owner can disconnect' });
-          return;
-        }
-      }
 
       // Deactivate ExternalSource
       const source = await db.externalSource.findFirst({
@@ -397,8 +371,14 @@ router.post(
         botOauthToken: creds.botOauthToken,
       }));
 
-      // One binding per desk (sendSlackReply picks by channel) and one desk per Slack channel (ingest resolves by name).
+      // One binding per desk and one desk per Slack channel (ingest resolves by name).
       const name = buildSlackDeskSourceName(slackChannelId);
+      // `name` is globally unique; the tenant ACL hides foreign rows, so check outside it to 409 instead of 500.
+      const existing = await findSlackDeskSourceWorkspace(name);
+      if (existing && existing.workspaceId !== workspaceId) {
+        res.status(409).json({ error: 'This Slack channel is already connected to another desk' });
+        return;
+      }
       const clash = await db.externalSource.findFirst({
         where: {
           workspaceId,

@@ -15,6 +15,9 @@ import { redisService } from '@/services/redisService';
 
 const BACKFILL_MAX_PAGES = 5;
 
+const backfillLockKey = (sourceId: string, triggerTs: string): string =>
+  `slack-desk-backfill:${sourceId}:${triggerTs}`;
+
 export class SlackDeskFlow extends BaseFlow {
   private externalMessageRepo = new ExternalMessageRepository();
 
@@ -54,7 +57,10 @@ export class SlackDeskFlow extends BaseFlow {
 
       if (triggerMode === SlackDeskTriggerMode.MENTION_ONLY) {
         const botUserId = await this.getBotUserId(source.id, creds.botOauthToken);
-        const isMention = !!botUserId && !!targetMessage.text?.includes(`<@${botUserId}>`);
+        // Without the bot id, fail open on any user mention rather than silently dropping (Slack won't retry a 200).
+        const isMention = botUserId
+          ? !!targetMessage.text?.includes(`<@${botUserId}>`)
+          : /<@[UW][A-Z0-9]+>/.test(targetMessage.text ?? '');
         const threadTs: string | undefined = targetMessage.thread_ts;
         const isThreadReply = !!threadTs && threadTs !== targetMessage.ts;
         const threadAlreadyTicketed =
@@ -64,8 +70,8 @@ export class SlackDeskFlow extends BaseFlow {
           return { __skipIngestion: true, __skipReason: 'mention_required' };
         }
         if (isMention && isThreadReply && !threadAlreadyTicketed) {
-          // Slack retries slow webhooks; only the first delivery may backfill this thread.
-          if (!(await redisService.set(`slack-desk-backfill:${source.id}:${threadTs}`, '1', 300, true))) {
+          // Slack retries slow webhooks (same event ts); only the first delivery may backfill.
+          if (!(await redisService.set(backfillLockKey(source.id, targetMessage.ts), '1', 300, true))) {
             return { __skipIngestion: true, __skipReason: 'backfill_in_progress' };
           }
           return await this.backfillThread(payload, creds.botOauthToken, threadTs!, workspaceId, creds.whiteListedBots ?? []);
@@ -77,6 +83,14 @@ export class SlackDeskFlow extends BaseFlow {
     } catch {
       return payload;
     }
+  }
+
+  /**
+   * Release the backfill lock when the triggering mention failed to sync, so Slack's retry can backfill
+   * again. The lock is only consulted while nothing in the thread is ticketed, which implies the trigger failed.
+   */
+  async onIngestFailures(source: ExternalSource, failedExternalIds: string[]): Promise<void> {
+    await Promise.all(failedExternalIds.map(ts => redisService.del(backfillLockKey(source.id, ts))));
   }
 
   // Not `authorizations[0].user_id`: that can be a user install of this app, not the bot.

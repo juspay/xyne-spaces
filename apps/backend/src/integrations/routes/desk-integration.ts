@@ -88,7 +88,9 @@ async function findActiveSourceForChannel(
     where: {
       channelId,
       isActive: true,
-      sourceType: { in: [ExternalSourcePlatform.GOOGLE, ExternalSourcePlatform.MICROSOFT] },
+      sourceType: {
+        in: [ExternalSourcePlatform.GOOGLE, ExternalSourcePlatform.MICROSOFT, ExternalSourcePlatform.ZOHO],
+      },
       NOT: { name: { startsWith: 'google-dl-sync' } },
     },
     select: { id: true, sourceType: true, displayName: true, credentials: true },
