@@ -182,10 +182,12 @@ export class InternalController {
   };
 
   /**
-   * Run the deactivated-account cleanup for every user row owning an email, the
-   * same flow the auth middleware triggers when an identity provider reports
-   * the account is revoked (mTLS certificate revocation, session revocation,
-   * push-token unregistration).
+   * Deactivate every user row owning an email: mark it INACTIVE through the
+   * user-management deactivation flow (status + leftAt, group / assignment /
+   * expertise teardown, ticket hand-off), then run the same access cleanup the
+   * auth middleware triggers when an identity provider reports the account is
+   * revoked (mTLS certificate revocation, session revocation, push-token
+   * unregistration).
    * POST /internal/users/deactivate?email=:email
    *
    * Returns:
