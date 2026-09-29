@@ -13,8 +13,7 @@ interface PropertyRowProps {
   align?: 'center' | 'start';
 }
 
-const LABEL_CLASS =
-  'w-[200px] text-sm font-normal leading-[1.3] tracking-[-0.1px] text-foreground';
+const LABEL_CLASS = 'w-[200px] text-sm font-normal leading-[1.3] tracking-[-0.1px] text-foreground';
 
 function isInFlowBox(el: HTMLElement): boolean {
   const style = getComputedStyle(el);

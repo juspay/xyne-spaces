@@ -34,10 +34,7 @@ export function toolboxFromSuggestion(
     }
     if (integration.kind === 'mcp') {
       // Only the named tools from the suggestion — never every tool on the integration.
-      const named = new Set([
-        ...(sugg.readTools ?? []),
-        ...(sugg.writeTools ?? []),
-      ]);
+      const named = new Set([...(sugg.readTools ?? []), ...(sugg.writeTools ?? [])]);
       if (named.size === 0) continue;
       for (const tool of [...integration.readTools, ...integration.writeTools]) {
         if (named.has(tool.name) || named.has(tool.slug)) {

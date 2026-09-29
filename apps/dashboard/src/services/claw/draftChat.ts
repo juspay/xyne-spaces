@@ -74,13 +74,17 @@ export async function streamDraftChat(input: {
     if (event === 'done') {
       const result = data['result'];
       const content =
-        result && typeof result === 'object' && typeof (result as { content?: unknown }).content === 'string'
+        result &&
+        typeof result === 'object' &&
+        typeof (result as { content?: unknown }).content === 'string'
           ? (result as { content: string }).content
           : null;
       const status =
         result && typeof result === 'object' ? (result as { status?: string }).status : undefined;
       const error =
-        result && typeof result === 'object' && typeof (result as { error?: unknown }).error === 'string'
+        result &&
+        typeof result === 'object' &&
+        typeof (result as { error?: unknown }).error === 'string'
           ? (result as { error: string }).error
           : null;
       if (status === 'failed' || status === 'cancelled') {

@@ -1031,7 +1031,9 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
             )}
           </div>
 
-          <div className={cn('flex items-center justify-between', createChrome ? 'gap-1' : 'gap-2')}>
+          <div
+            className={cn('flex items-center justify-between', createChrome ? 'gap-1' : 'gap-2')}
+          >
             {/* Left cluster. Attach, collections, canvas and the two search
               toggles all live behind the "+" menu — same consolidation the
               XyneAI sidebar uses — so the row stays two buttons wide however

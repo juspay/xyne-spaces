@@ -27,7 +27,10 @@ export const CUSTOM_PROPERTY_LABEL: Record<CustomPropertyType, string> = {
 };
 
 /** Empty-state copy for custom property values. Checkbox has no placeholder. */
-export const CUSTOM_PROPERTY_PLACEHOLDER: Record<Exclude<CustomPropertyType, 'checkbox'>, string> = {
+export const CUSTOM_PROPERTY_PLACEHOLDER: Record<
+  Exclude<CustomPropertyType, 'checkbox'>,
+  string
+> = {
   text: 'Give instructions to your agent',
   number: 'Add a number',
   tags: 'Add tags',

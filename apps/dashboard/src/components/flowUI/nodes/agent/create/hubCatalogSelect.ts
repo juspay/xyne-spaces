@@ -551,7 +551,9 @@ export async function selectHubToolsForIntent(args: {
     if (
       selection.direct.length === 0 &&
       (selection.gateway ?? []).length === 0 &&
-      (named.length > 0 || softProductNeedles(args.intent).length > 0 || !selectionHasTools(selection))
+      (named.length > 0 ||
+        softProductNeedles(args.intent).length > 0 ||
+        !selectionHasTools(selection))
     ) {
       emptyHubs.push('mcp');
     }

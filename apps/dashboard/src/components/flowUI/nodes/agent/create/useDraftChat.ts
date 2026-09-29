@@ -1,10 +1,6 @@
 import { useCallback, useRef, useState } from 'react';
 import type { AgentCreateFormState } from './types';
-import {
-  clearDraftChat,
-  snapshotFromForm,
-  streamDraftChat,
-} from '@/services/claw/draftChat';
+import { clearDraftChat, snapshotFromForm, streamDraftChat } from '@/services/claw/draftChat';
 import { clawErrorText } from '@/services/claw/clawRequest';
 
 export interface DraftChatMessage {
@@ -72,7 +68,8 @@ export function useDraftChat(getForm: () => AgentCreateFormState): {
                   ? {
                       ...message,
                       streaming: false,
-                      content: finalText && message.content.length === 0 ? finalText : message.content,
+                      content:
+                        finalText && message.content.length === 0 ? finalText : message.content,
                     }
                   : message,
               ),

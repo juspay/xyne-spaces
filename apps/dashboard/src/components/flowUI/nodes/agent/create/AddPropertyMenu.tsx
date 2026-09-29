@@ -20,7 +20,11 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/utils/classNames';
 import type { AgentCreateHubRow } from './types';
-import { CUSTOM_PROPERTY_LABEL, CUSTOM_PROPERTY_TYPES, type CustomPropertyType } from './customProperty';
+import {
+  CUSTOM_PROPERTY_LABEL,
+  CUSTOM_PROPERTY_TYPES,
+  type CustomPropertyType,
+} from './customProperty';
 
 const TYPE_ICON: Record<CustomPropertyType, typeof Text> = {
   text: Text,

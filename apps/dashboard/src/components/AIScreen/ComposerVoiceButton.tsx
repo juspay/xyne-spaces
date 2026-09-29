@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactElement } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactElement,
+} from 'react';
 import { Mic, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { voiceInputService } from '../../services/VoiceInput/voiceInputService';
@@ -159,7 +166,7 @@ export function ComposerVoiceButton({
       {isTranscribing ? (
         <Loader2 className='h-4 w-4 animate-spin' aria-hidden />
       ) : (
-        icon ?? <Mic className='h-4 w-4' aria-hidden strokeWidth={1.75} />
+        (icon ?? <Mic className='h-4 w-4' aria-hidden strokeWidth={1.75} />)
       )}
     </button>
   );

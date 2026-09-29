@@ -91,62 +91,69 @@ export function CustomPropertyRow({
             >
               <ThreeDotsMenuVertical className='size-4' aria-hidden />
             </DropdownMenuTrigger>
-          <DropdownMenuContent align='start' sideOffset={6} className={PROPERTY_MENU_PANEL}>
-            <DropdownMenuSub>
-              <DropdownMenuSubTrigger className={cn(PROPERTY_MENU_ITEM, 'justify-between')}>
-                Change type
-                <ChevronRight className='size-4 shrink-0 text-muted-foreground' aria-hidden />
-              </DropdownMenuSubTrigger>
-              <DropdownMenuSubContent className={PROPERTY_MENU_PANEL} sideOffset={6}>
-                {CUSTOM_PROPERTY_TYPES.map(type => {
-                  const Icon = TYPE_ICON[type];
-                  const selected = type === property.type;
-                  return (
-                    <DropdownMenuItem
-                      key={type}
-                      className={PROPERTY_MENU_ITEM}
-                      onSelect={() => setType(type)}
-                    >
-                      <Icon className='size-4 shrink-0 text-muted-foreground' aria-hidden />
-                      <span className='min-w-0 flex-1 truncate'>{CUSTOM_PROPERTY_LABEL[type]}</span>
-                      {selected ? (
-                        <CheckTickSingle className='size-4 shrink-0 text-foreground' aria-hidden />
-                      ) : null}
-                    </DropdownMenuItem>
+            <DropdownMenuContent align='start' sideOffset={6} className={PROPERTY_MENU_PANEL}>
+              <DropdownMenuSub>
+                <DropdownMenuSubTrigger className={cn(PROPERTY_MENU_ITEM, 'justify-between')}>
+                  Change type
+                  <ChevronRight className='size-4 shrink-0 text-muted-foreground' aria-hidden />
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent className={PROPERTY_MENU_PANEL} sideOffset={6}>
+                  {CUSTOM_PROPERTY_TYPES.map(type => {
+                    const Icon = TYPE_ICON[type];
+                    const selected = type === property.type;
+                    return (
+                      <DropdownMenuItem
+                        key={type}
+                        className={PROPERTY_MENU_ITEM}
+                        onSelect={() => setType(type)}
+                      >
+                        <Icon className='size-4 shrink-0 text-muted-foreground' aria-hidden />
+                        <span className='min-w-0 flex-1 truncate'>
+                          {CUSTOM_PROPERTY_LABEL[type]}
+                        </span>
+                        {selected ? (
+                          <CheckTickSingle
+                            className='size-4 shrink-0 text-foreground'
+                            aria-hidden
+                          />
+                        ) : null}
+                      </DropdownMenuItem>
+                    );
+                  })}
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                className={PROPERTY_MENU_ITEM}
+                onSelect={() => {
+                  void copyPropertyValue(property.value).then(() =>
+                    onChange({ ...property, value: '' }),
                   );
-                })}
-              </DropdownMenuSubContent>
-            </DropdownMenuSub>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              className={PROPERTY_MENU_ITEM}
-              onSelect={() => {
-                void copyPropertyValue(property.value).then(() => onChange({ ...property, value: '' }));
-              }}
-            >
-              Cut
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              className={PROPERTY_MENU_ITEM}
-              onSelect={() => {
-                void copyPropertyValue(property.value);
-              }}
-            >
-              Copy
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              className={PROPERTY_MENU_ITEM}
-              onSelect={() => {
-                void readPropertyValue().then(value => onChange({ ...property, value }));
-              }}
-            >
-              Paste
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem className={PROPERTY_MENU_ITEM} onSelect={onRemove}>
-              Remove
-            </DropdownMenuItem>
-          </DropdownMenuContent>
+                }}
+              >
+                Cut
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className={PROPERTY_MENU_ITEM}
+                onSelect={() => {
+                  void copyPropertyValue(property.value);
+                }}
+              >
+                Copy
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className={PROPERTY_MENU_ITEM}
+                onSelect={() => {
+                  void readPropertyValue().then(value => onChange({ ...property, value }));
+                }}
+              >
+                Paste
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem className={PROPERTY_MENU_ITEM} onSelect={onRemove}>
+                Remove
+              </DropdownMenuItem>
+            </DropdownMenuContent>
           </DropdownMenu>
           <EditablePropertyLabel
             value={titleValue}

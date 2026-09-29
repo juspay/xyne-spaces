@@ -19,8 +19,7 @@ const TABS = [
 /** Figma 1931:27010 — track 107×32 at x=12 y=12. Spring stays inside that track. */
 const PILL_SPRING = { type: 'spring' as const, duration: 0.24, bounce: 0 };
 
-const PILL_CLASS =
-  'absolute inset-0 rounded-[12px] border border-border bg-background';
+const PILL_CLASS = 'absolute inset-0 rounded-[12px] border border-border bg-background';
 
 export function BuildChatTabs({
   tab,
