@@ -2,8 +2,8 @@ apiVersion: v2
 name: xyne-tei-batch-proxy
 description: Batching proxy in front of the GPU embedder
 type: application
-version: 0.1.0-app.1.422.3
-appVersion: "1.422.3"
+version: 0.1.0-app.1.419.0-release-20260929.1
+appVersion: "1.419.0-release-20260929.1"
 keywords:
   - xyne
   - vespa

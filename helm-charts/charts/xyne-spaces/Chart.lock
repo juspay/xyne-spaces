@@ -1,69 +1,69 @@
 dependencies:
 - name: xyne-backend
   repository: file://../xyne-backend
-  version: 0.1.0-app.1.422.3
+  version: 0.1.0-app.1.419.0-release-20260929.1
 - name: xyne-worker
   repository: file://../xyne-worker
-  version: 0.1.0-app.1.422.3
+  version: 0.1.0-app.1.419.0-release-20260929.1
 - name: xyne-dashboard
   repository: file://../xyne-dashboard
-  version: 0.1.0-app.1.422.3
+  version: 0.1.0-app.1.419.0-release-20260929.1
 - name: xyne-dashboard-external
   repository: file://../xyne-dashboard-external
-  version: 0.1.0-app.1.422.3
+  version: 0.1.0-app.1.419.0-release-20260929.1
 - name: xyne-dashboard-edge
   repository: file://../xyne-dashboard-edge
-  version: 0.1.0-app.1.422.3
+  version: 0.1.0-app.1.419.0-release-20260929.1
 - name: xyne-zero
   repository: file://../xyne-zero
-  version: 0.1.0-app.1.422.3
+  version: 0.1.0-app.1.419.0-release-20260929.1
 - name: xyne-zero
   repository: file://../xyne-zero
-  version: 0.1.0-app.1.422.3
+  version: 0.1.0-app.1.419.0-release-20260929.1
 - name: xyne-ysweet
   repository: file://../xyne-ysweet
-  version: 0.1.0-app.1.422.3
+  version: 0.1.0-app.1.419.0-release-20260929.1
 - name: xyne-claw
   repository: file://../xyne-claw
-  version: 0.1.0-app.1.422.3
+  version: 0.1.0-app.1.419.0-release-20260929.1
 - name: xyne-claw-auth
   repository: file://../xyne-claw-auth
-  version: 0.1.0-app.1.422.3
+  version: 0.1.0-app.1.419.0-release-20260929.1
 - name: xyne-claw-auth-frontend
   repository: file://../xyne-claw-auth-frontend
-  version: 0.1.0-app.1.422.3
+  version: 0.1.0-app.1.419.0-release-20260929.1
 - name: xyne-transcription-agent
   repository: file://../xyne-transcription-agent
-  version: 0.1.0-app.1.422.3
+  version: 0.1.0-app.1.419.0-release-20260929.1
 - name: xyne-lighton-ocr
   repository: file://../xyne-lighton-ocr
-  version: 0.1.0-app.1.422.3
+  version: 0.1.0-app.1.419.0-release-20260929.1
 - name: xyne-vespa
   repository: file://../xyne-vespa
-  version: 0.1.0-app.1.422.3
+  version: 0.1.0-app.1.419.0-release-20260929.1
 - name: xyne-vespa
   repository: file://../xyne-vespa
-  version: 0.1.0-app.1.422.3
+  version: 0.1.0-app.1.419.0-release-20260929.1
 - name: xyne-vespa
   repository: file://../xyne-vespa
-  version: 0.1.0-app.1.422.3
+  version: 0.1.0-app.1.419.0-release-20260929.1
 - name: xyne-vespa
   repository: file://../xyne-vespa
-  version: 0.1.0-app.1.422.3
+  version: 0.1.0-app.1.419.0-release-20260929.1
 - name: xyne-vespa-embedder
   repository: file://../xyne-vespa-embedder
-  version: 0.1.0-app.1.422.3
+  version: 0.1.0-app.1.419.0-release-20260929.1
 - name: xyne-tei-batch-proxy
   repository: file://../xyne-tei-batch-proxy
-  version: 0.1.0-app.1.422.3
+  version: 0.1.0-app.1.419.0-release-20260929.1
 - name: xyne-redis
   repository: file://../xyne-redis
-  version: 0.1.0-app.1.422.3
+  version: 0.1.0-app.1.419.0-release-20260929.1
 - name: xyne-sandbox-router
   repository: file://../xyne-sandbox-router
-  version: 0.1.0-app.1.422.3
+  version: 0.1.0-app.1.419.0-release-20260929.1
 - name: xyne-egress-proxy
   repository: file://../xyne-egress-proxy
-  version: 0.1.0-app.1.422.3
-digest: sha256:5a314ccfdd3b198c0c1c6730d57a397845b7b8d4fc955e96a2da30385ac03b1a
-generated: "2026-09-29T13:00:59.072506963Z"
+  version: 0.1.0-app.1.419.0-release-20260929.1
+digest: sha256:ad9a3f20e2b4245fa865294a13a15725b89f4b5031105d334d91d7e301e43059
+generated: "2026-09-29T13:10:33.331555721Z"
