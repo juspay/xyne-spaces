@@ -144,13 +144,23 @@ export function loadEncryptionRuntimeConfig(): EncryptionRuntimeConfig {
   return cachedConfig;
 }
 
-class EncryptionServiceError extends Error {
+export class EncryptionServiceError extends Error {
   constructor(
     readonly reasonCode: string,
     message: string
   ) {
     super(message);
+    this.name = 'EncryptionServiceError';
   }
+}
+
+/**
+ * Key IDs come from stored ciphertext (untrusted) when
+ * decryption fails — bound + strip anything outside the
+ * ring-parser's ID alphabet before echoing in a message.
+ */
+function sanitizeKeyIdForMessage(raw: string): string {
+  return raw.replace(/[^\w.\-]/g, '_').slice(0, 64) || '?';
 }
 
 /**
@@ -231,13 +241,22 @@ function decryptLegacy(
     iv
   );
 
-  let decrypted = decipher.update(
-    encrypted,
-    'hex',
-    'utf8'
-  );
+  let decrypted: string;
 
-  decrypted += decipher.final('utf8');
+  try {
+    decrypted = decipher.update(
+      encrypted,
+      'hex',
+      'utf8'
+    );
+
+    decrypted += decipher.final('utf8');
+  } catch {
+    throw new EncryptionServiceError(
+      'decrypt_failed',
+      'Legacy decryption failed'
+    );
+  }
 
   return decrypted;
 }
@@ -318,7 +337,8 @@ function decryptVersioned(
   if (!key) {
     throw new EncryptionServiceError(
       'versioned_key_not_found',
-      `No encryption key is registered for "${keyId}"`
+      `No encryption key is registered for ` +
+        `"${sanitizeKeyIdForMessage(keyId)}"`
     );
   }
 
@@ -337,13 +357,22 @@ function decryptVersioned(
     iv
   );
 
-  let plaintext = decipher.update(
-    parts[3],
-    'hex',
-    'utf8'
-  );
+  let plaintext: string;
 
-  plaintext += decipher.final('utf8');
+  try {
+    plaintext = decipher.update(
+      parts[3],
+      'hex',
+      'utf8'
+    );
+
+    plaintext += decipher.final('utf8');
+  } catch {
+    throw new EncryptionServiceError(
+      'decrypt_failed',
+      'Versioned decryption failed'
+    );
+  }
 
   return plaintext;
 }

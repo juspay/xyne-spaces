@@ -3,6 +3,7 @@ import {
   EncryptionKeyRingConfigError,
   parseEncryptionKeyRing,
 } from "@xyne/shared/server/encryption-key-ring";
+import { createLogger } from "./logger.js";
 
 const ALGORITHM = "aes-256-gcm";
 const IV_LENGTH = 12;
@@ -72,7 +73,9 @@ const SPACES_CBC_ALGO = "aes-256-cbc";
 const SPACES_VERSION_TAG = "v2";
 const SPACES_CBC_IV_LENGTH = 16;
 
-class SpacesCbcDecryptionError extends Error {
+const logger = createLogger("spaces-crypto");
+
+export class SpacesCbcDecryptionError extends Error {
   constructor(
     readonly reasonCode: string,
     message: string,
@@ -93,12 +96,21 @@ function decryptSpacesCbcPayload(
     Buffer.from(ivHex, "hex"),
   );
 
-  const decrypted = Buffer.concat([
-    decipher.update(
-      Buffer.from(ciphertextHex, "hex"),
-    ),
-    decipher.final(),
-  ]);
+  let decrypted: Buffer;
+
+  try {
+    decrypted = Buffer.concat([
+      decipher.update(
+        Buffer.from(ciphertextHex, "hex"),
+      ),
+      decipher.final(),
+    ]);
+  } catch {
+    throw new SpacesCbcDecryptionError(
+      "decrypt_failed",
+      "Spaces CBC decryption failed",
+    );
+  }
 
   return decrypted.toString("utf8");
 }
@@ -130,6 +142,22 @@ interface SpacesEncryptionRuntimeConfig {
 
 let cachedConfig: SpacesEncryptionRuntimeConfig | null = null;
 
+/**
+ * One sanitized line per process when the mode is chosen —
+ * mode + reason only, never key material — mirroring the
+ * backend's `selected()` in encryptionService.ts.
+ */
+function selected(
+  config: SpacesEncryptionRuntimeConfig,
+  level: "info" | "warn",
+): SpacesEncryptionRuntimeConfig {
+  logger[level](
+    `[SpacesCrypto] mode=${config.mode} reason=${config.reason}`,
+  );
+
+  return config;
+}
+
 export function loadSpacesEncryptionRuntimeConfig(): SpacesEncryptionRuntimeConfig {
   if (cachedConfig) {
     return cachedConfig;
@@ -138,11 +166,14 @@ export function loadSpacesEncryptionRuntimeConfig(): SpacesEncryptionRuntimeConf
   const rawKeys = process.env.SPACES_ENCRYPTION_KEYS?.trim();
 
   if (!rawKeys) {
-    cachedConfig = {
-      mode: "legacy",
-      reason: "keyring_not_configured",
-      keys: new Map(),
-    };
+    cachedConfig = selected(
+      {
+        mode: "legacy",
+        reason: "keyring_not_configured",
+        keys: new Map(),
+      },
+      "info",
+    );
 
     return cachedConfig;
   }
@@ -150,22 +181,28 @@ export function loadSpacesEncryptionRuntimeConfig(): SpacesEncryptionRuntimeConf
   try {
     const { keys } = parseEncryptionKeyRing(rawKeys);
 
-    cachedConfig = {
-      mode: "keyring-read",
-      reason: "keyring_read_enabled",
-      keys,
-    };
+    cachedConfig = selected(
+      {
+        mode: "keyring-read",
+        reason: "keyring_read_enabled",
+        keys,
+      },
+      "info",
+    );
 
     return cachedConfig;
   } catch (error) {
-    cachedConfig = {
-      mode: "legacy",
-      reason:
-        error instanceof EncryptionKeyRingConfigError
-          ? error.reason
-          : "keyring_validation_failed",
-      keys: new Map(),
-    };
+    cachedConfig = selected(
+      {
+        mode: "legacy",
+        reason:
+          error instanceof EncryptionKeyRingConfigError
+            ? error.reason
+            : "keyring_validation_failed",
+        keys: new Map(),
+      },
+      "warn",
+    );
 
     return cachedConfig;
   }
