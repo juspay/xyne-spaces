@@ -12,7 +12,6 @@ import { SlackDeskTriggerMode } from '@xyne/shared';
 import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
 import { authV2Middleware } from '@/middleware/authV2Middleware';
 import { db } from '@/database/client';
-import { findSlackDeskSourceWorkspace } from '@/bypassAcl/slackDeskServices';
 import { WebClient } from '@slack/web-api';
 import { logger } from '@/utils/logger';
 import { slackDeskService } from '@/services/slackDeskService';
@@ -373,12 +372,6 @@ router.post(
 
       // One binding per desk and one desk per Slack channel (ingest resolves by name).
       const name = buildSlackDeskSourceName(slackChannelId);
-      // `name` is globally unique; the tenant ACL hides foreign rows, so check outside it to 409 instead of 500.
-      const existing = await findSlackDeskSourceWorkspace(name);
-      if (existing && existing.workspaceId !== workspaceId) {
-        res.status(409).json({ error: 'This Slack channel is already connected to another desk' });
-        return;
-      }
       const clash = await db.externalSource.findFirst({
         where: {
           workspaceId,
