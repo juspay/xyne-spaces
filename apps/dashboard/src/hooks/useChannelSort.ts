@@ -5,10 +5,13 @@ import { VisibleChannel } from '../machines/stateMachine';
 import { stateMachineActor } from '../machines/stateMachine';
 import { useZero } from './useZero';
 import { mutators } from '../zero/mutators';
+import { useUsersById } from './useUsers';
 import {
   groupChannelsByScope,
   DEFAULT_FILTER_MODE,
   DEFAULT_GROUP_SORT_ORDER,
+  pinSelfDMLast,
+  sortChannelsAlphabetically,
 } from '../components/Chat/ChatDirectory/ChatDirectory.utils';
 
 export type SidebarGroup = 'starred' | 'channels' | 'dms';
@@ -34,6 +37,7 @@ export const useChannelSort = (
   currentUserId: string,
 ): UseChannelSortResult => {
   const zero = useZero();
+  const usersById = useUsersById();
   const userPreference = useSelector(stateMachineActor, state => state.context.userPreference);
   const channelSortOrder = userPreference?.channelSortOrder ?? ChannelSortOrder.RECENCY;
   const groupPreferences: Record<SidebarGroup, SidebarGroupPreference> = {
@@ -88,10 +92,9 @@ export const useChannelSort = (
         (a, b) => (b.channelStats?.lastActivityAt ?? 0) - (a.channelStats?.lastActivityAt ?? 0),
       );
 
+    // DM `name` is a comma-joined participant-id list, so sort on the resolved display name.
     const sortAlphabetical = (list: VisibleChannel[]): VisibleChannel[] =>
-      [...list].sort((a, b) =>
-        (a.name ?? '').toLowerCase().localeCompare((b.name ?? '').toLowerCase()),
-      );
+      sortChannelsAlphabetically(list, currentUserId, usersById);
 
     const sortByUnreadAndActivity = (list: VisibleChannel[]): VisibleChannel[] => {
       const withUnread: VisibleChannel[] = [];
@@ -132,12 +135,14 @@ export const useChannelSort = (
     return {
       starred: sortBy(grouped.starred, starredSortOrder),
       channels: sortBy(grouped.channels, channelSortOrder),
-      directMessages: sortBy(grouped.directMessages, dmSortOrder),
+      // Self-DM always sits at the bottom of the DM list, whatever the sort (Slack-style).
+      directMessages: pinSelfDMLast(sortBy(grouped.directMessages, dmSortOrder), currentUserId),
     };
   }, [
     channelData,
     allChannelsUserStatus,
     currentUserId,
+    usersById,
     channelSortOrder,
     starredSortOrder,
     dmSortOrder,

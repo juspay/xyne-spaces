@@ -335,3 +335,68 @@ export const getDMSearchableName = (
   const names = participantIds.map(id => userMap.get(id)).filter(Boolean) as string[];
   return names.length > 0 ? names.join(', ') : (channel.name ?? '');
 };
+
+type SortableChannel = { id: string; name: string | null; scopeType: ChannelScopeType };
+type SortUserLookup = ReadonlyMap<string, { name?: string | null; displayName?: string | null }>;
+
+/** True for the current user's own DM ("notes to self") — a DM whose only participant is them. */
+export const isSelfDMChannel = (
+  channel: { name: string | null; scopeType: ChannelScopeType },
+  currentUserId: string,
+): boolean => {
+  if (!isDMChannel(channel.scopeType)) return false;
+  const ids = (channel.name ?? '').split(',').filter(Boolean);
+  return ids.length === 1 && ids[0] === currentUserId;
+};
+
+/**
+ * Key used by the "Alphabetical A-Z" sort. A DM's `name` column holds participant ids, so
+ * sorting on it orders DMs by cuid — resolve to the names the sidebar renders instead.
+ * Falls back to the raw `name` while users are still syncing so rows don't jump to the top.
+ */
+export const getChannelSortName = (
+  channel: SortableChannel,
+  currentUserId: string,
+  usersById: SortUserLookup,
+): string => {
+  const raw = channel.name ?? '';
+  if (!isDMChannel(channel.scopeType)) return raw;
+  if (isSelfDMChannel(channel, currentUserId)) {
+    const self = usersById.get(currentUserId);
+    return (self && (self.displayName || self.name)) || raw;
+  }
+  const names = parseDMParticipantIds({ name: raw, scopeType: channel.scopeType })
+    .filter(id => id !== currentUserId)
+    .map(id => {
+      const user = usersById.get(id);
+      return user ? user.displayName || user.name || null : null;
+    })
+    .filter((n): n is string => Boolean(n));
+  return names.length > 0 ? names.join(', ') : raw;
+};
+
+/** Case/accent-insensitive A-Z by display name; ties broken by id for a stable order. */
+export const sortChannelsAlphabetically = <T extends SortableChannel>(
+  list: readonly T[],
+  currentUserId: string,
+  usersById: SortUserLookup,
+): T[] => {
+  const keys = new Map(list.map(c => [c.id, getChannelSortName(c, currentUserId, usersById)]));
+  return [...list].sort(
+    (a, b) =>
+      (keys.get(a.id) ?? '').localeCompare(keys.get(b.id) ?? '', undefined, {
+        sensitivity: 'base',
+      }) || a.id.localeCompare(b.id),
+  );
+};
+
+/** Moves the self-DM to the end of the list (Slack-style), preserving everyone else's order. */
+export const pinSelfDMLast = <T extends { name: string | null; scopeType: ChannelScopeType }>(
+  list: readonly T[],
+  currentUserId: string,
+): T[] => {
+  const others: T[] = [];
+  const self: T[] = [];
+  for (const c of list) (isSelfDMChannel(c, currentUserId) ? self : others).push(c);
+  return self.length === 0 ? [...list] : [...others, ...self];
+};

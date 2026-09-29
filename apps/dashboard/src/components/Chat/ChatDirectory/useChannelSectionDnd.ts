@@ -18,6 +18,7 @@ import {
   type ChannelUserStatus,
 } from '@xyne/shared';
 import { useZero } from '../../../hooks/useZero';
+import { useUsersById } from '../../../hooks/useUsers';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
 import { mutators } from '../../../zero/mutators';
@@ -27,6 +28,8 @@ import {
   DEFAULT_FILTER_MODE,
   isDMChannel,
   keyBetween,
+  pinSelfDMLast,
+  sortChannelsAlphabetically,
   suppressNextClick,
   sumSectionUnread,
   type ChannelFilterContext,
@@ -49,6 +52,7 @@ interface UseChannelSectionDndParams {
   unreadCounts: Record<string, number>;
   mentionCounts: Record<string, number>;
   activeChannelId?: string | undefined;
+  currentUserId: string;
 }
 
 interface ChannelSectionDnd {
@@ -87,8 +91,10 @@ export const useChannelSectionDnd = ({
   unreadCounts,
   mentionCounts,
   activeChannelId,
+  currentUserId,
 }: UseChannelSectionDndParams): ChannelSectionDnd => {
   const zero = useZero();
+  const usersById = useUsersById();
   const [channelSections] = useCachedQuery(queries.userChannelSections({}));
   const allSectionable = useMemo(
     () => [...channels, ...directMessages],
@@ -141,9 +147,7 @@ export const useChannelSectionDnd = ({
     if (!sortOrder) return chs;
     const sorted = [...chs];
     if (sortOrder === ChannelSortOrder.ALPHABETICAL) {
-      return sorted.sort((a, b) =>
-        (a.name ?? '').toLowerCase().localeCompare((b.name ?? '').toLowerCase()),
-      );
+      return sortChannelsAlphabetically(chs, currentUserId, usersById);
     }
     const lastActivity = (c: VisibleChannel) => c.channelStats?.lastActivityAt ?? 0;
     const lastViewed = (c: VisibleChannel) => statuses.get(c.id)?.lastViewedAt ?? 0;
@@ -182,11 +186,16 @@ export const useChannelSectionDnd = ({
     ? sectioned.map(bucket => ({ section: bucket.section, channels: fromDrag(bucket.section.id) }))
     : sectioned.map(bucket => ({
         section: bucket.section,
-        channels: applySectionSort(
-          filterFor(bucket.channels, bucket.section.filterMode ?? DEFAULT_FILTER_MODE),
-          bucket.section.sortOrder,
-          statusByChannelId,
-        ),
+        channels: bucket.section.sortOrder
+          ? pinSelfDMLast(
+              applySectionSort(
+                filterFor(bucket.channels, bucket.section.filterMode ?? DEFAULT_FILTER_MODE),
+                bucket.section.sortOrder,
+                statusByChannelId,
+              ),
+              currentUserId,
+            )
+          : filterFor(bucket.channels, bucket.section.filterMode ?? DEFAULT_FILTER_MODE),
       }));
   const defaultDisplayChannels = dragItems
     ? fromDrag(DEFAULT_CONTAINER)
