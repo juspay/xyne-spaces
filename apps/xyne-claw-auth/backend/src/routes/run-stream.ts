@@ -2235,6 +2235,7 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
           } = await import("../lib/connector-card-render.js");
           const suggestIdentity = {
             agentSlug: suggestTarget.agentSlug,
+            agentOrgId: suggestTarget.orgId,
             userId: suggestTarget.userId,
             conversationId: suggestTarget.conversationId,
             channelId: "",
