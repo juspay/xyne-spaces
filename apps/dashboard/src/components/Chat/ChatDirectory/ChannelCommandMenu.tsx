@@ -1665,7 +1665,10 @@ const ChannelCommandMenu = ({
           relevanceScore: 1,
           metadata: {},
         };
-        await navigateToUser(result, navigate, channelData || []);
+        await navigateToUser(result, navigate, channelData || [], {
+          callerUserId: currentUserID,
+          deactivatedUserFallbackEnabled: true,
+        });
         return;
       }
 
@@ -2571,9 +2574,16 @@ const ChannelCommandMenu = ({
           { modifier: true, isElectron: isElectronApp(), isMobile },
           navigate,
           channelData || [],
+          {
+            callerUserId: currentUserID,
+            deactivatedUserFallbackEnabled: true,
+          },
         );
       } else {
-        await navigateToSearchResult(result, navigate, channelData || []);
+        await navigateToSearchResult(result, navigate, channelData || [], {
+          callerUserId: currentUserID,
+          deactivatedUserFallbackEnabled: true,
+        });
       }
       onOpenChange(false);
     } catch (err) {
