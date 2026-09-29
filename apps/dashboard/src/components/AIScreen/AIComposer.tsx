@@ -11,6 +11,7 @@ import {
   type KeyboardEvent,
   type ClipboardEvent,
   type ChangeEvent,
+  type CSSProperties,
   type ReactElement,
 } from 'react';
 import {
@@ -31,7 +32,7 @@ import {
   Sparkles,
   MousePointerClick,
 } from 'lucide-react';
-import { PlusDefault } from '@xyne/icons';
+import { ArrowUp as ArrowUpIcon, AtMark, MicOn, PlusDefault, SquareSlash } from '@xyne/icons';
 import { toast } from 'sonner';
 import { posthogService } from '../../services/Analytics/posthogService';
 import { useQuery } from '@tanstack/react-query';
@@ -118,6 +119,8 @@ interface AIComposerProps {
    *  the latest snapshot so selections survive switching to a recent chat,
    *  matching XyneAISidebar (where composer state lives in the parent). */
   onContextChange?: ((context: ComposerContext) => void) | undefined;
+  /** Agent-create side card: gray-track tabs sit above a flatter composer. */
+  appearance?: 'default' | 'create';
 }
 
 interface XyneAIConfigResponse {
@@ -198,12 +201,16 @@ function ToolbarButton({
   onClick,
   active,
   trackName,
+  className,
+  style,
 }: {
   icon: ReactElement;
   label: string;
   onClick: () => void;
   active?: boolean;
   trackName: string;
+  className?: string;
+  style?: CSSProperties;
 }): ReactElement {
   return (
     <button
@@ -212,11 +219,13 @@ function ToolbarButton({
       aria-label={label}
       title={label}
       aria-pressed={active}
+      style={style}
       className={cn(
         'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition',
         active
           ? 'bg-secondary text-foreground'
           : 'text-muted-foreground hover:bg-secondary hover:text-foreground',
+        className,
       )}
       data-track-category='XyneAI'
       data-track-name={trackName}
@@ -238,9 +247,11 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
     showAgentSelector = true,
     initialExtras,
     onContextChange,
+    appearance = 'default',
   },
   ref,
 ): ReactElement {
+  const createChrome = appearance === 'create';
   const [value, setValue] = useState('');
   const [attachments, setAttachments] = useState<AIComposerAttachment[]>([]);
   const [isVoiceRecording, setIsVoiceRecording] = useState(false);
@@ -869,7 +880,10 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
         <div
           ref={wrapperRef}
           className={cn(
-            'ai-composer-wrapper group flex flex-col gap-1 rounded-2xl border border-chat-composer-border-active bg-background px-3 pb-2 pt-3 transition shadow-[0_1px_0_rgba(0,0,0,0.05),0_8px_24px_-12px_rgba(0,0,0,0.08)] focus-within:shadow-[0_1px_0_rgba(0,0,0,0.1),0_12px_30px_-12px_rgba(0,0,0,0.12)]',
+            'ai-composer-wrapper group flex flex-col border bg-background transition',
+            createChrome
+              ? 'gap-3 rounded-[12px] border-chat-composer-border px-2 pb-2 pt-1 shadow-none focus-within:border-chat-composer-border-active'
+              : 'gap-1 rounded-2xl border-chat-composer-border-active px-3 pb-2 pt-3 shadow-[0_1px_0_rgba(0,0,0,0.05),0_8px_24px_-12px_rgba(0,0,0,0.08)] focus-within:shadow-[0_1px_0_rgba(0,0,0,0.1),0_12px_30px_-12px_rgba(0,0,0,0.12)]',
           )}
         >
           {hasPills && (
@@ -992,7 +1006,10 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
               placeholder={placeholder}
               rows={1}
               className={cn(
-                'block w-full min-h-[60px] resize-none bg-transparent px-2 py-1 text-sm leading-6 placeholder:text-muted-foreground/80 focus:outline-none',
+                'block w-full resize-none bg-transparent focus:outline-none',
+                createChrome
+                  ? 'min-h-9 px-2 py-2 text-[14px] font-[450] leading-5 text-foreground placeholder:text-fg-section'
+                  : 'min-h-[60px] px-2 py-1 text-sm leading-6 placeholder:text-muted-foreground/80',
                 isVoiceRecording && !value && 'invisible',
               )}
               data-track-category='XyneAI'
@@ -1014,13 +1031,18 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
             )}
           </div>
 
-          <div className='flex items-center justify-between gap-2'>
+          <div className={cn('flex items-center justify-between', createChrome ? 'gap-1' : 'gap-2')}>
             {/* Left cluster. Attach, collections, canvas and the two search
               toggles all live behind the "+" menu — same consolidation the
               XyneAI sidebar uses — so the row stays two buttons wide however
               many options exist. Not scroll-clipped, so the collection picker
               can overflow upward freely. */}
-            <div className='flex shrink-0 flex-nowrap items-center gap-0.5'>
+            <div
+              className={cn(
+                'flex shrink-0 flex-nowrap items-center',
+                createChrome ? 'gap-1' : 'gap-0.5',
+              )}
+            >
               <div className='relative flex items-center'>
                 <XyneAIPlusMenu
                   onAttachFiles={handleAttachClick}
@@ -1053,7 +1075,8 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
                     aria-label='Add to conversation'
                     title='Add to conversation'
                     className={cn(
-                      'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition',
+                      'inline-flex shrink-0 items-center justify-center rounded-full transition',
+                      createChrome ? 'size-7 opacity-60' : 'h-8 w-8',
                       // The menu hides which modes are on, so the trigger carries
                       // the "something is enabled" signal the flat row used to
                       // give through per-button active states.
@@ -1083,11 +1106,18 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
                 {compactToolbar && modelSelectorNode}
               </div>
               <ToolbarButton
-                icon={<span className='text-sm font-semibold leading-none'>@</span>}
+                icon={
+                  createChrome ? (
+                    <AtMark className='size-4' aria-hidden />
+                  ) : (
+                    <span className='text-sm font-semibold leading-none'>@</span>
+                  )
+                }
                 label='Mention a source'
                 onClick={() => setShowContextModal(v => !v)}
                 active={showContextModal}
                 trackName='OPEN_CONTEXT_MODAL'
+                {...(createChrome ? { className: 'order-2 size-7 opacity-60' } : {})}
               />
               {designMode?.active ? (
                 <button
@@ -1099,6 +1129,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
                   className={cn(
                     'inline-flex h-8 shrink-0 items-center gap-1 rounded-full px-2.5 text-sm font-semibold transition',
                     'bg-primary/10 text-primary hover:bg-primary/20',
+                    createChrome && 'order-1',
                   )}
                   data-track-category='XyneAI'
                   data-track-name='OPEN_COMMAND_MENU'
@@ -1108,11 +1139,18 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
                 </button>
               ) : (
                 <ToolbarButton
-                  icon={<span className='text-sm font-semibold leading-none'>/</span>}
+                  icon={
+                    createChrome ? (
+                      <SquareSlash className='size-4' aria-hidden />
+                    ) : (
+                      <span className='text-sm font-semibold leading-none'>/</span>
+                    )
+                  }
                   label='Commands'
                   onClick={() => setShowCommandMenu(v => !v)}
                   active={showCommandMenu}
                   trackName='OPEN_COMMAND_MENU'
+                  {...(createChrome ? { className: 'order-1 size-7 opacity-60' } : {})}
                 />
               )}
               {/* Locked indicator, not a toggle — only rendered when the
@@ -1127,7 +1165,10 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
                 <div
                   title='This agent always answers instantly from the Knowledge Base'
                   aria-label='Instant agent'
-                  className='inline-flex h-8 shrink-0 cursor-default items-center justify-center gap-1 rounded-full bg-secondary px-2.5 text-status-pending'
+                  className={cn(
+                    'inline-flex h-8 shrink-0 cursor-default items-center justify-center gap-1 rounded-full bg-secondary px-2.5 text-status-pending',
+                    createChrome && 'order-3',
+                  )}
                 >
                   <Zap className='h-4 w-4' aria-hidden strokeWidth={1.75} />
                   <span className='text-xs font-medium'>Instant</span>
@@ -1135,7 +1176,12 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
               )}
             </div>
 
-            <div className='flex min-w-0 flex-1 items-center justify-end gap-1.5'>
+            <div
+              className={cn(
+                'flex min-w-0 flex-1 items-center justify-end',
+                createChrome ? 'gap-1' : 'gap-1.5',
+              )}
+            >
               {!compactToolbar && agentSelectorNode}
               {!compactToolbar && modelSelectorNode}
               {pendingSelection && (
@@ -1197,18 +1243,26 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
                   </button>
                 </span>
               )}
-              {sandboxSwitchNode}
+              {createChrome ? null : sandboxSwitchNode}
               <ComposerVoiceButton
                 onTranscript={handleTranscript}
                 onStateChange={({ isRecording }) => setIsVoiceRecording(isRecording)}
                 disabled={pending}
+                {...(createChrome
+                  ? {
+                      className: 'size-9 opacity-70',
+                      icon: <MicOn className='size-4' aria-hidden />,
+                    }
+                  : {})}
               />
-              <ToolbarButton
-                icon={<AudioLines className='h-4 w-4' aria-hidden />}
-                label='Voice mode'
-                onClick={() => setVoiceMode(true)}
-                trackName='ENTER_VOICE_MODE'
-              />
+              {createChrome ? null : (
+                <ToolbarButton
+                  icon={<AudioLines className='h-4 w-4' aria-hidden />}
+                  label='Voice mode'
+                  onClick={() => setVoiceMode(true)}
+                  trackName='ENTER_VOICE_MODE'
+                />
+              )}
 
               {pending ? (
                 <button
@@ -1216,7 +1270,10 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
                   onClick={onStop}
                   aria-label='Stop generating'
                   title='Stop'
-                  className='inline-flex h-8 w-8 items-center justify-center rounded-full bg-primary text-primary-foreground transition hover:opacity-90'
+                  className={cn(
+                    'inline-flex items-center justify-center bg-primary text-primary-foreground transition hover:opacity-90',
+                    createChrome ? 'size-9 rounded-[8px]' : 'h-8 w-8 rounded-full',
+                  )}
                   data-track-category='XyneAI'
                   data-track-name='STOP_GENERATION'
                 >
@@ -1243,10 +1300,16 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
                     }),
                   )}
                   className={cn(
-                    'ai-send-btn inline-flex h-8 w-8 items-center justify-center rounded-full bg-[#e8e4dd] text-foreground transition enabled:hover:bg-[#ddd9d2] disabled:cursor-not-allowed disabled:bg-[#e8e4dd]/50 disabled:text-muted-foreground',
+                    createChrome
+                      ? 'inline-flex size-9 items-center justify-center rounded-[8px] bg-muted text-muted-foreground transition enabled:hover:bg-accent disabled:cursor-not-allowed disabled:opacity-40'
+                      : 'ai-send-btn inline-flex h-8 w-8 items-center justify-center rounded-full bg-[#e8e4dd] text-foreground transition enabled:hover:bg-[#ddd9d2] disabled:cursor-not-allowed disabled:bg-[#e8e4dd]/50 disabled:text-muted-foreground',
                   )}
                 >
-                  <ArrowUp className='h-4 w-4' aria-hidden strokeWidth={2.25} />
+                  {createChrome ? (
+                    <ArrowUpIcon className='size-4' aria-hidden />
+                  ) : (
+                    <ArrowUp className='h-4 w-4' aria-hidden strokeWidth={2.25} />
+                  )}
                 </button>
               )}
             </div>

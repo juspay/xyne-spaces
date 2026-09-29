@@ -15,11 +15,8 @@ import {
   type AIComposerHandle,
 } from '@/components/AIScreen/AIComposer';
 import { AIEmptyState } from '@/components/AIScreen/AIEmptyState';
-import {
-  AnimatedLabel,
-  BrailleLoader,
-  useStableLabel,
-} from '@/components/AIScreen/ReasoningLoader';
+import { AnimatedLabel, useStableLabel } from '@/components/AIScreen/ReasoningLoader';
+import { AgentBotAvatar } from '@/components/agents/AgentBotAvatar';
 import { ActivityBlock } from '@/components/Chat/XyneAISidebar/components/ActivityBlock';
 import { type ComposerContext, toStreamOverrides } from '@/components/AIScreen/composerContext';
 import type { Message, MessageAttachment } from '@/components/Chat/XyneAISidebar/utils/XyneAITypes';
@@ -50,7 +47,7 @@ function WorkingProgressRow({ label }: { label: string }): ReactElement {
       data-testid='agent-create-progress'
       data-progress-label={label}
     >
-      <BrailleLoader />
+      <AgentBotAvatar type='clover' busy size={22} />
       <span className='select-none'>
         <AnimatedLabel text={stable} />
       </span>
@@ -74,7 +71,7 @@ function ScriptedThinkLabel(): ReactElement {
       className='-ml-1 inline-flex items-center gap-1.5 rounded-md px-1.5 py-1 text-xs text-muted-foreground'
       data-testid='agent-create-chat-thinking'
     >
-      <BrailleLoader />
+      <AgentBotAvatar type='clover' busy size={22} />
       <span className='select-none'>
         <AnimatedLabel text={label} />
       </span>
@@ -371,6 +368,7 @@ function LiveAgentCreateChatPanel({
       bottomRef={bottomRef}
       pending={streaming || Boolean(disabled) || Boolean(progressLabel)}
       progressLabel={progressLabel}
+      pane
       {...(streaming ? { onStop: abortCurrentRequest } : {})}
       onSubmit={(text, attachments, context, trigger) => {
         void handleSubmit(text, attachments, context, trigger);
@@ -418,6 +416,7 @@ function ScriptedAgentCreateChatPanel({
       autoFocus={false}
       composerRef={composerRef}
       scripted
+      pane
       scriptedDone={scriptedDone && !scriptedPlaying}
       locked={scriptedPlaying}
       onEngage={engage}
@@ -446,6 +445,7 @@ function CreateChatLayout({
   onReplay,
   onEngage,
   progressLabel = null,
+  pane = false,
 }: {
   empty: boolean;
   canvasError: string | null;
@@ -467,6 +467,8 @@ function CreateChatLayout({
   onReplay?: () => void;
   onEngage?: () => void;
   progressLabel?: string | null;
+  /** Figma pane: no "Chat" bar and no empty-state illustration. */
+  pane?: boolean;
 }): ReactElement {
   return (
     <div
@@ -479,25 +481,31 @@ function CreateChatLayout({
           }
         : {})}
     >
-      <div className='flex h-11 flex-shrink-0 items-center justify-between gap-3 px-5'>
-        <span className='text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground'>
-          Chat
-        </span>
-        {scriptedDone ? (
-          <button
-            type='button'
-            onClick={onReplay}
-            className='text-[11px] font-medium text-foreground underline-offset-2 hover:underline'
-            data-testid='scripted-create-replay'
-            data-track-category='AGENT_ARTIFACT'
-            data-track-name='SCRIPTED_CREATE_REPLAY'
-          >
-            Replay
-          </button>
-        ) : null}
-      </div>
+      {pane && !scriptedDone ? null : (
+        <div className='flex h-11 flex-shrink-0 items-center justify-between gap-3 px-5'>
+          {pane ? (
+            <span />
+          ) : (
+            <span className='text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground'>
+              Chat
+            </span>
+          )}
+          {scriptedDone ? (
+            <button
+              type='button'
+              onClick={onReplay}
+              className='text-[11px] font-medium text-foreground underline-offset-2 hover:underline'
+              data-testid='scripted-create-replay'
+              data-track-category='AGENT_ARTIFACT'
+              data-track-name='SCRIPTED_CREATE_REPLAY'
+            >
+              Replay
+            </button>
+          ) : null}
+        </div>
+      )}
       <div className='flex-1 overflow-y-auto'>
-        {empty && !progressLabel ? (
+        {empty && !progressLabel && !pane ? (
           <div className='flex h-full min-h-[12rem] flex-col items-center justify-center px-6'>
             <AIEmptyState />
             <p
@@ -538,7 +546,7 @@ function CreateChatLayout({
                 >
                   {message.type === 'user' ? (
                     <div className='flex max-w-[78%] flex-col items-end'>
-                      <div className='ai-user-bubble max-w-full rounded-3xl bg-[#ececec] px-4 py-2.5 text-sm leading-relaxed text-gray-900'>
+                      <div className='ai-user-bubble max-w-full rounded-3xl bg-muted px-4 py-2.5 text-sm leading-relaxed text-foreground'>
                         <p className='whitespace-pre-wrap'>{message.content}</p>
                       </div>
                     </div>
@@ -551,7 +559,7 @@ function CreateChatLayout({
                           className='-ml-1 inline-flex items-center gap-1.5 rounded-md px-1.5 py-1 text-xs text-muted-foreground'
                           data-testid='agent-create-chat-thinking'
                         >
-                          <BrailleLoader />
+                          <AgentBotAvatar type='clover' busy size={22} />
                           <span className='select-none'>
                             <AnimatedLabel text={thinkLabel} />
                           </span>
@@ -626,7 +634,7 @@ function CreateChatLayout({
         ) : null}
       </div>
       <div
-        className='flex-shrink-0 px-3 pb-3 pt-1'
+        className='flex-shrink-0 px-[11px] pb-[11px]'
         {...(scripted
           ? {
               onPointerDownCapture: onEngage,
@@ -649,8 +657,9 @@ function CreateChatLayout({
       >
         <AIComposer
           ref={composerRef}
+          appearance='create'
           autoFocus={autoFocus}
-          placeholder='Ask anything'
+          placeholder='Describe what agent you want to build...'
           hideDisclaimer
           showAgentSelector={false}
           pending={pending}

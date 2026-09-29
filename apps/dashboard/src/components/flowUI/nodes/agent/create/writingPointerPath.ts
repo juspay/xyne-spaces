@@ -7,37 +7,100 @@ export type TravelKind = 'entry' | 'field-down' | 'reduced';
 
 const CURVE_SAMPLES = 10;
 
+/** Clicky scale pulse peaks at 1.3× mid-flight. */
+export const FLIGHT_SCALE_PEAK = 1.3;
+
+/**
+ * SVG tip points roughly up-left (~−135°). Offset so tip faces travel
+ * direction: atan2(ty, tx)·180/π + this value.
+ */
+export const POINTER_TIP_OFFSET_DEG = 135;
+
 /** Hermite smoothstep 3t² − 2t³ — Clicky-style ease along the hop. */
 export function hermiteSmoothstep(t: number): number {
   const x = Math.min(1, Math.max(0, t));
   return x * x * (3 - 2 * x);
 }
 
+/** Quadratic bezier B(t) = (1−t)²·P0 + 2(1−t)t·P1 + t²·P2. */
+export function quadraticPoint(
+  from: PointerPoint,
+  control: PointerPoint,
+  to: PointerPoint,
+  t: number,
+): PointerPoint {
+  const u = 1 - t;
+  return {
+    x: u * u * from.x + 2 * u * t * control.x + t * t * to.x,
+    y: u * u * from.y + 2 * u * t * control.y + t * t * to.y,
+  };
+}
+
+/** Bezier tangent B′(t) = 2(1−t)(P1−P0) + 2t(P2−P1). */
+export function quadraticTangent(
+  from: PointerPoint,
+  control: PointerPoint,
+  to: PointerPoint,
+  t: number,
+): PointerPoint {
+  const u = 1 - t;
+  return {
+    x: 2 * u * (control.x - from.x) + 2 * t * (to.x - control.x),
+    y: 2 * u * (control.y - from.y) + 2 * t * (to.y - control.y),
+  };
+}
+
+/** Upward quadratic arc height — Clicky: min(0.2·distance, 80). */
+export function travelArcHeight(distance: number): number {
+  return Math.min(0.2 * distance, 80);
+}
+
+/** Midpoint control with upward swoop (screen Y grows downward). */
+export function flightControlPoint(
+  from: PointerPoint,
+  to: PointerPoint,
+  kind: TravelKind = 'entry',
+): PointerPoint {
+  const dist = Math.hypot(to.x - from.x, to.y - from.y);
+  const arc = travelArcHeight(dist);
+  return {
+    x: (from.x + to.x) / 2,
+    y: (from.y + to.y) / 2 - arc - (kind === 'entry' ? 4 : 0),
+  };
+}
+
+/**
+ * Mid-flight scale pulse — Clicky: 1 + sin(linearProgress · π) · 0.3.
+ * Uses linear progress (not Hermite-warped t).
+ */
+export function flightScale(linearProgress: number): number {
+  const p = Math.min(1, Math.max(0, linearProgress));
+  return 1 + Math.sin(p * Math.PI) * (FLIGHT_SCALE_PEAK - 1);
+}
+
+/** Degrees to rotate the pointer SVG so its tip faces the travel tangent. */
+export function headingDegrees(tangent: PointerPoint): number {
+  if (Math.abs(tangent.x) < 1e-6 && Math.abs(tangent.y) < 1e-6) {
+    return 0;
+  }
+  return (Math.atan2(tangent.y, tangent.x) * 180) / Math.PI + POINTER_TIP_OFFSET_DEG;
+}
+
 function sampleQuadratic(
   from: PointerPoint,
-  cx: number,
-  cy: number,
+  control: PointerPoint,
   to: PointerPoint,
   samples: number,
-  /** When true, sample at Hermite-warped t so linear Motion progress feels smoothstepped. */
+  /** When true, sample at Hermite-warped t so linear sampling feels smoothstepped. */
   hermiteSpace = false,
 ): PointerPoint[] {
   const points: PointerPoint[] = [];
   for (let i = 0; i <= samples; i += 1) {
     const raw = i / samples;
     const t = hermiteSpace ? hermiteSmoothstep(raw) : raw;
-    const u = 1 - t;
-    points.push({
-      x: u * u * from.x + 2 * u * t * cx + t * t * to.x,
-      y: u * u * from.y + 2 * u * t * cy + t * t * to.y,
-    });
+    points.push(quadraticPoint(from, control, to, t));
   }
   return points;
-}
-
-/** Upward quadratic arc height — Clicky: min(0.2·distance, 80). */
-export function travelArcHeight(distance: number): number {
-  return Math.min(0.2 * distance, 80);
 }
 
 /**
@@ -63,9 +126,7 @@ export function mouseTravelPath(
   to: PointerPoint,
   kind: TravelKind = 'entry',
 ): PointerPoint[] {
-  const dx = to.x - from.x;
-  const dy = to.y - from.y;
-  const dist = Math.hypot(dx, dy);
+  const dist = Math.hypot(to.x - from.x, to.y - from.y);
   if (dist < 1) {
     return [from, to];
   }
@@ -74,12 +135,8 @@ export function mouseTravelPath(
     return [from, to];
   }
 
-  const arc = travelArcHeight(dist);
-  const cx = (from.x + to.x) / 2;
-  // Screen Y grows downward — subtract for an upward swoop.
-  const cy = (from.y + to.y) / 2 - arc - (kind === 'entry' ? 4 : 0);
-  // Hermite-space samples + linear Motion times ≈ Clicky 3t²−2t³ along the hop.
-  return sampleQuadratic(from, cx, cy, to, CURVE_SAMPLES, true);
+  const control = flightControlPoint(from, to, kind);
+  return sampleQuadratic(from, control, to, CURVE_SAMPLES, true);
 }
 
 /** Field-to-field hop — same upward quadratic; kept as a named alias for callers/tests. */
@@ -95,7 +152,7 @@ export function pickTravelPath(
   return mouseTravelPath(from, to, kind);
 }
 
-/** Linear sample times; Hermite easing is applied by the Motion animate call. */
+/** Linear sample times; Hermite easing is applied by continuous flight or Motion. */
 export function mouseTravelTimes(pointCount: number): number[] {
   if (pointCount <= 1) return [0];
   if (pointCount === 2) return [0, 1];
@@ -106,8 +163,9 @@ export function mouseTravelTimes(pointCount: number): number[] {
   return times;
 }
 
+/** Enter from the chat card (right of the profile), slightly above the target. */
 export function pointerEntryPoint(target: PointerPoint): PointerPoint {
-  return { x: target.x - 56, y: target.y - 24 };
+  return { x: target.x + 56, y: target.y - 24 };
 }
 
 export interface FieldBox {
@@ -123,10 +181,10 @@ export function pointerParkPoint(box: FieldBox): PointerPoint {
   return pointerCaretPoint(null, box, '');
 }
 
-/** Rest on a Hub capability row (chips / toggles), not the section title. */
+/** Rest on a Hub capability row's value side, past the left label. */
 export function pointerHubRowPoint(box: FieldBox): PointerPoint {
   const y = box.top + Math.min(32, Math.max(22, box.height * 0.38));
-  const x = box.left + Math.min(Math.max(48, box.width * 0.28), box.width - 40);
+  const x = box.left + Math.min(Math.max(160, box.width * 0.55), box.width - 40);
   return { x, y };
 }
 
@@ -136,8 +194,8 @@ export function pointerCaretPoint(
   box: FieldBox,
   value: string,
 ): PointerPoint {
-  const lineY = box.top + (box.inline ? 4 : 22);
-  const startX = box.left + (box.inline ? 10 : 12);
+  const lineY = box.top + (box.inline ? 4 : 10);
+  const startX = box.left + (box.inline ? 10 : 4);
 
   if (value.length === 0 || !control || typeof window === 'undefined') {
     if (value.length === 0) {

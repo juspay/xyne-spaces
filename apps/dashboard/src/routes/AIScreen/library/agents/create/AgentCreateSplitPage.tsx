@@ -1,6 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+  type ReactElement,
+} from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { Panel, ResizableGroup, Separator } from '@/components/ui/Resizable/Resizable';
 import { useAuth } from '@/hooks/useAuth';
 import { useAgentNameCheck } from '@/hooks/useAgentNameCheck';
 import { usePlatform } from '@/hooks/usePlatform';
@@ -13,11 +20,15 @@ import {
 import { getAvailableTools } from '@/services/claw/clawToolsService';
 import { effectiveSlug, slugify } from '@/routes/ClawAgentsScreen/create/wizardState';
 import { AgentCreateCanvas } from '@/components/flowUI/nodes/agent/create/AgentCreateCanvas';
+import { AgentDraftChatPanel } from '@/components/flowUI/nodes/agent/create/AgentDraftChatPanel';
+import {
+  BuildChatTabs,
+  type CreateSideTab,
+} from '@/components/flowUI/nodes/agent/create/BuildChatTabs';
 import {
   AgentCreateChatPanel,
   type CreateChatTurn,
 } from '@/components/flowUI/nodes/agent/create/AgentCreateChatPanel';
-import { AgentCreateFooter } from '@/components/flowUI/nodes/agent/create/AgentCreateFooter';
 import { DiscardDraftDialog } from '@/components/flowUI/nodes/agent/create/DiscardDraftDialog';
 import {
   applyCreateHubDraft,
@@ -54,6 +65,12 @@ import {
   watchScriptedHubCatalog,
 } from '@/components/flowUI/nodes/agent/create/scriptedHubCatalog';
 import { useScriptedCreatePlayer } from '@/components/flowUI/nodes/agent/create/useScriptedCreatePlayer';
+import {
+  CHAT_OVERLAY_WIDTH_MAX,
+  CHAT_OVERLAY_WIDTH_MIN,
+  chatOverlayShadow,
+  useChatOverlayDial,
+} from '@/components/flowUI/nodes/agent/create/chatOverlayDial';
 
 const WRITE_MS = 1100;
 
@@ -67,14 +84,85 @@ function canvasIsEmpty(form: { name: string; systemPrompt: string }): boolean {
   return !form.name.trim() && !form.systemPrompt.trim();
 }
 
+/** Invisible left-edge target. Dragging left widens the card; no chrome. */
+function SideCardWidthEdge({
+  width,
+  onWidthChange,
+  onDraggingChange,
+}: {
+  width: number;
+  onWidthChange: (width: number) => void;
+  onDraggingChange: (dragging: boolean) => void;
+}): ReactElement {
+  const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
+
+  const endDrag = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>): void => {
+      if (!dragRef.current) return;
+      dragRef.current = null;
+      onDraggingChange(false);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+    },
+    [onDraggingChange],
+  );
+
+  useEffect(() => {
+    return (): void => {
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+  }, []);
+
+  return (
+    <div
+      role='separator'
+      aria-orientation='vertical'
+      aria-label='Resize side card'
+      aria-valuemin={CHAT_OVERLAY_WIDTH_MIN}
+      aria-valuemax={CHAT_OVERLAY_WIDTH_MAX}
+      aria-valuenow={Math.round(width)}
+      data-testid='create-agent-side-card-resize-edge'
+      className='absolute bottom-0 left-0 top-0 z-30 w-3 cursor-col-resize border-0 bg-transparent p-0'
+      style={{ touchAction: 'none' }}
+      onPointerDown={event => {
+        if (event.button !== 0) return;
+        event.preventDefault();
+        dragRef.current = { startX: event.clientX, startWidth: width };
+        onDraggingChange(true);
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+        try {
+          event.currentTarget.setPointerCapture(event.pointerId);
+        } catch {
+          // Capture needs an active pointer. Drag still tracks move events on this edge.
+        }
+      }}
+      onPointerMove={event => {
+        const drag = dragRef.current;
+        if (!drag) return;
+        onWidthChange(drag.startWidth + (drag.startX - event.clientX));
+      }}
+      onPointerUp={endDrag}
+      onPointerCancel={endDrag}
+    />
+  );
+}
+
 export function AgentCreateSplitPage({
   scripted = false,
 }: { scripted?: boolean } = {}): ReactElement {
   const { user } = useAuth();
   const { isMobile } = usePlatform();
+  const navigate = useNavigate();
+  const { workspaceId } = useParams<{ workspaceId?: string }>();
   const queryClient = useQueryClient();
   const createForm = useAgentCreateForm(EMPTY_CREATE_FORM);
   const [phase, setPhase] = useState<AgentCreatePhase>('empty');
+  const [sideTab, setSideTab] = useState<CreateSideTab>('build');
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [discardOpen, setDiscardOpen] = useState(false);
@@ -140,6 +228,7 @@ export function AgentCreateSplitPage({
     phase !== 'created' &&
     createForm.form.name.trim().length > 0 &&
     slug.length > 0 &&
+    createForm.form.description.trim().length > 0 &&
     createForm.form.systemPrompt.trim().length > 0 &&
     createForm.conflicts.length === 0 &&
     !capabilityBlock &&
@@ -452,8 +541,7 @@ export function AgentCreateSplitPage({
                         })
                         .sort((a, b) => b.score - a.score);
                       // Precision: never bind skills[0] when score is 0.
-                      const pick =
-                        ranked[0] && ranked[0].score > 0 ? ranked[0].skill : null;
+                      const pick = ranked[0] && ranked[0].score > 0 ? ranked[0].skill : null;
                       if (pick?.id) {
                         const ids = new Set(createForm.form.selectedSkillIds);
                         ids.add(pick.id);
@@ -488,8 +576,7 @@ export function AgentCreateSplitPage({
                         })
                         .sort((a, b) => b.score - a.score);
                       // Precision: never bind knowledge[0] when score is 0.
-                      const pick =
-                        ranked[0] && ranked[0].score > 0 ? ranked[0].collection : null;
+                      const pick = ranked[0] && ranked[0].score > 0 ? ranked[0].collection : null;
                       if (!pick?.id) return;
                       incoming.selectedKbScope = 'COLLECTIONS';
                       incoming.selectedKbResources = [{ collectionId: pick.id, fileId: null }];
@@ -628,39 +715,19 @@ export function AgentCreateSplitPage({
     user?.id,
   ]);
 
-  const canvasDirty = createForm.canvasDirty;
-  const resetFrom = createForm.resetFrom;
-  const requestDiscard = useCallback((): void => {
-    if (canvasDirty) {
+  const leaveCreate = useCallback((): void => {
+    const libraryPath = workspaceId ? `/${workspaceId}/ai/library` : '/ai/library';
+    void navigate(`${libraryPath}?tab=agents`);
+  }, [navigate, workspaceId]);
+
+  const requestCancel = useCallback((): void => {
+    if (creating) return;
+    if (createForm.canvasDirty) {
       setDiscardOpen(true);
       return;
     }
-    resetFrom(EMPTY_CREATE_FORM);
-    setPhase('empty');
-    setCreateError(null);
-    setCapabilityBlock(false);
-    setSkeletonIdentity(false);
-    lastJobIntentRef.current = '';
-  }, [canvasDirty, resetFrom]);
-
-  const footer = useMemo(
-    () => (
-      <AgentCreateFooter
-        phase={phase === 'created' ? 'created' : 'pending'}
-        canCreate={canCreate}
-        creating={creating}
-        discarding={false}
-        onCreate={() => {
-          if (scripted) return;
-          void persist();
-        }}
-        onDiscard={requestDiscard}
-        {...(createdSlug ? { createdSlug } : {})}
-        createError={createError}
-      />
-    ),
-    [canCreate, createError, createdSlug, creating, persist, phase, requestDiscard, scripted],
-  );
+    leaveCreate();
+  }, [createForm.canvasDirty, creating, leaveCreate]);
 
   const canvas = (
     <AgentCreateCanvas
@@ -682,15 +749,27 @@ export function AgentCreateSplitPage({
       builtBy={builtBy}
       handleError={handleError}
       checkingHandle={nameCheck.checking}
-      footer={footer}
+      layout='profile'
+      onSave={() => {
+        if (scripted) return;
+        void persist();
+      }}
+      onCancel={requestCancel}
+      canSave={canCreate}
+      saving={creating}
+      saveError={createError}
       readOnly={phase === 'created' || (scripted && scriptedPlayer.playing)}
     />
   );
+
+  const overlay = useChatOverlayDial();
+  const [sideCardDragging, setSideCardDragging] = useState(false);
 
   return (
     <div
       className='flex h-full min-h-0 w-full'
       data-component='AgentCreateSplitPage'
+      data-created-slug={createdSlug ?? ''}
       {...(scripted
         ? {
             'data-scripted': 'true',
@@ -700,41 +779,86 @@ export function AgentCreateSplitPage({
         : {})}
     >
       {isMobile ? (
-        canvas
+        <div className='flex h-full min-h-0 w-full flex-col'>
+          <div className='min-h-0 flex-1'>{canvas}</div>
+        </div>
       ) : (
-        <ResizableGroup
-          orientation='horizontal'
-          className='h-full w-full'
-          id='agent-create-hub-group'
-          panelIds={['agent-create-hub-chat', 'agent-create-hub-canvas']}
-        >
-          <Panel id='agent-create-hub-chat' defaultSize='50%' minSize='30%'>
-            <AgentCreateChatPanel
-              canvas={canvasSnapshot}
-              onTurnComplete={onTurnComplete}
-              disabled={phase === 'created'}
-              progressLabel={scripted ? null : progressLabel}
-              {...(scripted
+        <div className='flex h-full min-h-0 w-full bg-background'>
+          <div className='min-h-0 min-w-0 flex-1'>{canvas}</div>
+          <div
+            className='relative m-3 flex min-h-0 shrink-0 flex-col self-stretch overflow-hidden rounded-[20px] border border-border bg-background shadow-[0px_4px_4px_rgba(0,0,0,0.03),0px_14px_7px_rgba(0,0,0,0.03),0px_32px_9.5px_rgba(0,0,0,0.02)]'
+            data-testid='create-agent-side-card'
+            data-overlay-version={overlay.version}
+            style={
+              overlay.version === 'Figma'
                 ? {
-                    scripted: true,
-                    scriptedMessages: scriptedPlayer.messages,
-                    scriptedDraft: scriptedPlayer.draft,
-                    scriptedPlaying: scriptedPlayer.playing,
-                    scriptedTyping: scriptedPlayer.typing,
-                    scriptedDone: scriptedPlayer.step === 'done',
-                    onScriptedEngage: scriptedPlayer.engageComposer,
-                    onScriptedReplay: scriptedPlayer.replay,
+                    width: overlay.width,
+                    flexBasis: overlay.width,
+                    height: '100%',
+                    alignSelf: 'stretch',
+                    marginTop: 0,
+                    marginBottom: 0,
+                    marginLeft: overlay.margin,
+                    marginRight: overlay.margin,
+                    borderRadius: overlay.radius,
+                    borderStyle: 'solid',
+                    borderTopWidth: 0,
+                    borderRightWidth: 0,
+                    borderBottomWidth: 0,
+                    borderLeftWidth: 1,
+                    borderLeftColor: 'hsl(var(--border))',
+                    boxShadow: 'none',
+                    padding: overlay.inset === 12 ? undefined : overlay.inset,
+                    transition: sideCardDragging ? 'none' : undefined,
                   }
-                : {})}
+                : {
+                    width: overlay.width,
+                    flexBasis: overlay.width,
+                    margin: overlay.margin,
+                    borderRadius: overlay.radius,
+                    borderColor: 'hsl(var(--border))',
+                    boxShadow: chatOverlayShadow(overlay.shadow),
+                    padding: overlay.inset === 12 ? undefined : overlay.inset,
+                    transition: sideCardDragging ? 'none' : undefined,
+                  }
+            }
+          >
+            <SideCardWidthEdge
+              width={overlay.width}
+              onWidthChange={overlay.setWidth}
+              onDraggingChange={setSideCardDragging}
             />
-          </Panel>
-          <Separator className='w-[2px] cursor-col-resize'>
-            <div className='h-full w-[2px] bg-border' />
-          </Separator>
-          <Panel id='agent-create-hub-canvas' defaultSize='50%' minSize='30%' maxSize='70%'>
-            {canvas}
-          </Panel>
-        </ResizableGroup>
+            <BuildChatTabs
+              tab={sideTab}
+              onTabChange={setSideTab}
+              suspendLayout={sideCardDragging}
+            />
+            <div aria-hidden className='pointer-events-none mt-3 h-8 shrink-0' />
+            <div className={sideTab === 'build' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}>
+              <AgentCreateChatPanel
+                canvas={canvasSnapshot}
+                onTurnComplete={onTurnComplete}
+                disabled={phase === 'created'}
+                progressLabel={scripted ? null : progressLabel}
+                {...(scripted
+                  ? {
+                      scripted: true,
+                      scriptedMessages: scriptedPlayer.messages,
+                      scriptedDraft: scriptedPlayer.draft,
+                      scriptedPlaying: scriptedPlayer.playing,
+                      scriptedTyping: scriptedPlayer.typing,
+                      scriptedDone: scriptedPlayer.step === 'done',
+                      onScriptedEngage: scriptedPlayer.engageComposer,
+                      onScriptedReplay: scriptedPlayer.replay,
+                    }
+                  : {})}
+              />
+            </div>
+            <div className={sideTab === 'chat' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}>
+              <AgentDraftChatPanel getForm={createForm.getForm} disabled={phase === 'created'} />
+            </div>
+          </div>
+        </div>
       )}
       <DiscardDraftDialog
         open={discardOpen}
@@ -745,6 +869,7 @@ export function AgentCreateSplitPage({
           setPhase('empty');
           setCreateError(null);
           setSkeletonIdentity(false);
+          leaveCreate();
         }}
       />
     </div>

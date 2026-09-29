@@ -70,6 +70,19 @@ export const LITELLM = {
   // Boss decisions are short structured calls; running them on the same big
   // model as the worker would double the per-turn cost for marginal quality.
   fastModel: litellmFastModel,
+  // Hub /suggest-tools closed JSON pick. Prefer a fast local/proxy model —
+  // interactive Grid models often exceed the dashboard suggest budget.
+  suggestUrl: (process.env["LITELLM_SUGGEST_URL"]?.trim() || process.env["LITELLM_URL"] || "http://localhost:4000"),
+  suggestApiKey:
+    process.env["LITELLM_SUGGEST_API_KEY"]?.trim() ||
+    process.env["LITELLM_API_KEY"] ||
+    "",
+  suggestModel:
+    process.env["LITELLM_SUGGEST_MODEL"]?.trim() || litellmFastModel,
+  suggestTimeoutMs: Math.max(
+    5_000,
+    Number(process.env["LITELLM_SUGGEST_TIMEOUT_MS"] ?? 45_000) || 45_000,
+  ),
 } as const;
 
 export const AGENT = {

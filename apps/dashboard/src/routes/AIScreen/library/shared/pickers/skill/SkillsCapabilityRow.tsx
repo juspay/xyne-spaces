@@ -1,5 +1,6 @@
 import { useMemo, useState, type ReactElement } from 'react';
 import { InformationCircle, PlusDefault } from '@xyne/icons';
+import { PropertyAddButton } from '@/components/flowUI/nodes/agent/create/PropertyAddButton';
 import { Tooltip } from '@/components/ui/Tooltip/Tooltip';
 import { BrowseSkillsDialog } from './BrowseSkillsDialog';
 import { SkillChip } from './SkillChip';
@@ -11,11 +12,13 @@ const CAPTION = 'Add reusable instructions for specialized workflows.';
 interface SkillsCapabilityRowProps {
   selectedIds: readonly string[];
   onChange: (next: string[]) => void;
+  layout?: 'profile';
 }
 
 export function SkillsCapabilityRow({
   selectedIds,
   onChange,
+  layout,
 }: SkillsCapabilityRowProps): ReactElement {
   const [browseOpen, setBrowseOpen] = useState(false);
   const [browseId, setBrowseId] = useState<string | null>(null);
@@ -25,6 +28,52 @@ export function SkillsCapabilityRow({
     () => entries.filter(entry => isSkillSelected(selectedIds, entry)),
     [entries, selectedIds],
   );
+
+  if (layout === 'profile') {
+    return (
+      <>
+        {selectedEntries.length === 0 ? (
+          <PropertyAddButton
+            label='Add skill'
+            trackName='Create agent v2: browse skills'
+            onClick={() => {
+              setBrowseId(null);
+              setBrowseOpen(true);
+            }}
+          />
+        ) : (
+          <div className='flex flex-wrap items-start gap-2'>
+            {selectedEntries.map(entry => (
+              <SkillChip
+                key={entry.id}
+                label={entry.label}
+                selected
+                onOpen={() => {
+                  setBrowseId(entry.id);
+                  setBrowseOpen(true);
+                }}
+                onToggle={() => onChange(disableSkill(selectedIds, entry))}
+              />
+            ))}
+          </div>
+        )}
+        <BrowseSkillsDialog
+          open={browseOpen}
+          onOpenChange={next => {
+            setBrowseOpen(next);
+            if (!next) setBrowseId(null);
+          }}
+          initialId={browseId}
+          catalog={entries}
+          loading={loading}
+          isError={isError}
+          onRetry={refetch}
+          selectedIds={selectedIds}
+          onChange={onChange}
+        />
+      </>
+    );
+  }
 
   return (
     <div className='flex w-full flex-col gap-1.5'>

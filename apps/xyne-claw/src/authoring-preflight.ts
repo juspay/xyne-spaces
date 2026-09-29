@@ -58,7 +58,7 @@ export async function fetchAuthoringPreflight(args: {
   }
 
   try {
-    const res = await fetch(`${SERVER.authServiceUrl}/api/v1/agents/suggest-tools`, {
+    const res = await fetch(`${SERVER.authServiceUrl}/claw/api/v1/agents/suggest-tools`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

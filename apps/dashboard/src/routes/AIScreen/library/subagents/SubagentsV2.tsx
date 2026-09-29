@@ -1,10 +1,10 @@
 import { ReactElement, useMemo } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
-import { Network } from 'lucide-react';
+import { AgentBotAvatar } from '@/components/agents/AgentBotAvatar';
 import { searchByNameThenDescription } from '../shared/librarySearch';
 import { useClawSubagents } from '@/hooks/useClawSubagents';
 import type { SubagentDef, SubagentSource } from '@/services/claw/clawSubagentsTypes';
-import { LibraryCard, LibraryIconTile } from '../shared/components/LibraryCard';
+import { LibraryCard } from '../shared/components/LibraryCard';
 import { LibraryFilterMenu } from '../shared/components/LibraryFilterMenu';
 import {
   LibrarySections,
@@ -115,9 +115,7 @@ const SubagentsV2 = ({ query }: { query: string }): ReactElement => {
                 testId='claw-subagent-card'
                 dimmed={!subagent.enabled}
                 icon={
-                  <LibraryIconTile>
-                    <Network className='size-4' />
-                  </LibraryIconTile>
+                  <AgentBotAvatar agentKey={subagent.name} asleep={!subagent.enabled} size={36} />
                 }
                 name={subagent.name}
                 description={subagent.description}

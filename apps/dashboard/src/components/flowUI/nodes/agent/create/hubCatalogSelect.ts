@@ -489,7 +489,8 @@ export function describeSelectedTools(
 }
 
 const CATALOG_MS = 4_000;
-const SUGGEST_MS = 4_000;
+/** Must stay above claw-auth SUGGEST_BUDGET_MS so the closed JSON pick can finish. */
+const SUGGEST_MS = 22_000;
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise((resolve, reject) => {

@@ -5,7 +5,8 @@ import { useAuth } from '@/hooks/useAuth';
 import { useClawAuthAgents } from '@/hooks/useClawAuthAgents';
 import type { Agent } from '@/services/claw/clawAuthAgentTypes';
 import { groupAgentsByCategory } from '@/services/claw/agentCategory';
-import { LibraryCard, LibraryIconTile } from '../shared/components/LibraryCard';
+import { AgentBotAvatar } from '@/components/agents/AgentBotAvatar';
+import { LibraryCard } from '../shared/components/LibraryCard';
 import { LibraryFilterMenu } from '../shared/components/LibraryFilterMenu';
 import {
   LibrarySections,
@@ -95,7 +96,7 @@ const AgentsV2 = ({ query }: { query: string }): ReactElement => {
               key={agent.id}
               to={prefixWs(`/ai/library/agent/${agent.slug}?tab=persona`)}
               testId='claw-agent-card'
-              icon={<LibraryIconTile name={agent.name} color={agent.color || '#6366f1'} />}
+              icon={<AgentBotAvatar agentKey={agent.id} asleep={!agent.enabled} size={36} />}
               name={agent.name}
               description={agent.description}
             />

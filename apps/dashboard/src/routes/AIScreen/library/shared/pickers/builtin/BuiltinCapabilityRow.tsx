@@ -14,12 +14,14 @@ interface BuiltinCapabilityRowProps {
   selection: BuiltinSelection;
   onSelectionChange: (next: BuiltinSelection) => void;
   suggestContext: { systemPrompt: string; description: string };
+  layout?: 'profile';
 }
 
 export function BuiltinCapabilityRow({
   selection,
   onSelectionChange,
   suggestContext,
+  layout,
 }: BuiltinCapabilityRowProps): ReactElement {
   const [browseOpen, setBrowseOpen] = useState(false);
   const [browseSource, setBrowseSource] = useState<string | null>(null);
@@ -86,6 +88,57 @@ export function BuiltinCapabilityRow({
       </Tooltip>
     );
   };
+
+  if (layout === 'profile') {
+    return (
+      <>
+        {selectedEntries.length === 0 ? (
+          <button
+            type='button'
+            onClick={() => {
+              setBrowseSource(null);
+              setBrowseOpen(true);
+            }}
+            data-track-category='Claw Agents'
+            data-track-name='Create agent v2: browse built-in tools'
+            className='text-left text-sm font-normal leading-[1.3] tracking-[-0.1px] text-fg-placeholder'
+          >
+            Add a built-in tool for your agent
+          </button>
+        ) : (
+          <div className='flex flex-wrap items-start gap-2'>
+            {selectedEntries.map(entry => (
+              <BuiltinChip
+                key={`selected-${entry.source}`}
+                label={entry.label}
+                selected
+                onOpen={() => {
+                  setBrowseSource(entry.source);
+                  setBrowseOpen(true);
+                }}
+                onToggle={() => onSelectionChange(disableEntry(selection, entry))}
+              />
+            ))}
+          </div>
+        )}
+        <BrowseBuiltinToolsDialog
+          open={browseOpen}
+          onOpenChange={next => {
+            setBrowseOpen(next);
+            if (!next) setBrowseSource(null);
+          }}
+          initialSource={browseSource}
+          catalog={entries}
+          loading={loading}
+          isError={isError}
+          onRetry={refetch}
+          selection={selection}
+          onSelectionChange={onSelectionChange}
+          suggested={suggestions.suggested}
+        />
+      </>
+    );
+  }
 
   return (
     <div className='flex w-full flex-col gap-1.5'>
@@ -167,6 +220,8 @@ export function BuiltinCapabilityRow({
                 setBrowseSource(null);
                 setBrowseOpen(true);
               }}
+              data-track-category='Claw Agents'
+              data-track-name='Create agent v2: browse built-in tools'
               className='underline underline-offset-2 hover:text-foreground'
             >
               Browse
@@ -183,6 +238,8 @@ export function BuiltinCapabilityRow({
               setBrowseSource(null);
               setBrowseOpen(true);
             }}
+            data-track-category='Claw Agents'
+            data-track-name='Create agent v2: browse built-in tools'
             className='underline underline-offset-2 hover:text-foreground'
           >
             Browse

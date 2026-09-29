@@ -5,8 +5,8 @@
 
 export const SHORTLIST_TOP_K = 8;
 
-/** Whole suggest budget before dashboard 4s SUGGEST_MS. */
-export const SUGGEST_BUDGET_MS = 3_500;
+/** Whole suggest budget — must cover fast-model JSON pick (was 3.5s; Grid kimi often exceeds that). */
+export const SUGGEST_BUDGET_MS = 20_000;
 
 export const SELECTION_THRESHOLDS = {
   /** Skills / knowledge auto-bind floor. */

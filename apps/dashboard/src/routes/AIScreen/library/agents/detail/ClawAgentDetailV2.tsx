@@ -4,7 +4,7 @@ import { cn } from '@/utils/classNames';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { useClawAgentDetail } from '@/hooks/useClawAgentDetail';
 import { Pill } from '../../shared/primitives/Pill';
-import { LibraryIconTile } from '../../shared/components/LibraryCard';
+import { AgentBotAvatar } from '@/components/agents/AgentBotAvatar';
 import { AgentCreatedBanner } from './AgentCreatedBanner';
 import { isSpacesRegistered } from './agentRegistration';
 import { AgentDetailHeaderV2 } from './AgentDetailHeaderV2';
@@ -130,7 +130,7 @@ const ClawAgentDetailV2 = (): ReactElement => {
             )}
 
             <div className='flex w-full items-start gap-3'>
-              <LibraryIconTile name={agent.name} color={agent.color || '#6366f1'} size='md' />
+              <AgentBotAvatar agentKey={agent.id} asleep={!agent.enabled} size={40} />
 
               <div className='flex min-w-0 flex-1 flex-col gap-0.5 overflow-hidden'>
                 <div className='flex min-w-0 items-center gap-2'>

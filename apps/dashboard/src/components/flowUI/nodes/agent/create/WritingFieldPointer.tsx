@@ -4,14 +4,17 @@ import { useTheme } from '@/hooks/useTheme';
 import type { AgentCreateField, AgentCreateHubRow } from './types';
 import {
   caretTrackDurationMs,
+  flightControlPoint,
+  flightScale,
+  headingDegrees,
   hermiteSmoothstep,
   mouseTravelDurationMs,
-  mouseTravelTimes,
-  pickTravelPath,
   pointerCaretPoint,
   pointerEntryPoint,
   pointerHubRowPoint,
   pointerParkPoint,
+  quadraticPoint,
+  quadraticTangent,
   type FieldBox,
   type PointerPoint,
   type TravelKind,
@@ -21,7 +24,8 @@ const LIGHT_SRC = '/svgs/icons/pointer-cursor-light.svg';
 const DARK_SRC = '/svgs/icons/pointer-cursor-dark.svg';
 const SIZE = 20;
 const FADE_SECONDS = 0.16;
-const SCALE_PEAK = 1.15;
+/** Soft land — short spring settle on scale after snap (Clicky-ish). */
+const LAND_SCALE_SECONDS = 0.1;
 
 function measureBox(
   origin: HTMLElement,
@@ -51,18 +55,6 @@ function fieldControl(
   return host?.querySelector('input, textarea') ?? null;
 }
 
-function pathArrays(
-  from: PointerPoint,
-  to: PointerPoint,
-  kind: TravelKind,
-): { xs: number[]; ys: number[] } {
-  const path = pickTravelPath(from, to, kind);
-  return {
-    xs: path.map(p => p.x),
-    ys: path.map(p => p.y),
-  };
-}
-
 interface WritingFieldPointerProps {
   field: AgentCreateField | null;
   hubRow?: AgentCreateHubRow | null;
@@ -70,9 +62,9 @@ interface WritingFieldPointerProps {
 }
 
 /**
- * Figma write pointer (Codex-style + Clicky flight): travel once onto the
- * active field along a distance-scaled upward arc, lightly pulse mid-flight,
- * then hold at the caret while text fills. No wander loops.
+ * Figma write pointer (Codex-style + Clicky flight): 60fps quadratic bezier
+ * hop onto the active field, sin scale pulse + tangent heading mid-flight,
+ * then upright caret track while text fills. No wander loops.
  */
 export function WritingFieldPointer({
   field,
@@ -85,9 +77,11 @@ export function WritingFieldPointer({
   const y = useMotionValue(0);
   const opacity = useMotionValue(0);
   const scale = useMotionValue(1);
+  const rotate = useMotionValue(0);
   const lastPointRef = useRef<PointerPoint | null>(null);
   const activeFieldRef = useRef<AgentCreateField | null>(null);
   const activeHubRowRef = useRef<AgentCreateHubRow | null>(null);
+  const flightFrameRef = useRef(0);
   const [shown, setShown] = useState(false);
   const [settled, setSettled] = useState(false);
 
@@ -97,10 +91,15 @@ export function WritingFieldPointer({
     let frame = 0;
 
     const stopTravel = (): void => {
+      if (flightFrameRef.current !== 0) {
+        window.cancelAnimationFrame(flightFrameRef.current);
+        flightFrameRef.current = 0;
+      }
       x.stop();
       y.stop();
       opacity.stop();
       scale.stop();
+      rotate.stop();
     };
 
     if (!field || !origin) {
@@ -110,12 +109,14 @@ export function WritingFieldPointer({
       if (lastPointRef.current === null) {
         opacity.set(0);
         scale.set(1);
+        rotate.set(0);
         setShown(false);
         return;
       }
       if (reduceMotion) {
         opacity.set(0);
         scale.set(1);
+        rotate.set(0);
         setShown(false);
         return;
       }
@@ -126,6 +127,7 @@ export function WritingFieldPointer({
           if (!cancelled) {
             setShown(false);
             scale.set(1);
+            rotate.set(0);
           }
         },
       });
@@ -155,6 +157,7 @@ export function WritingFieldPointer({
         y.set(target.y);
         opacity.set(1);
         scale.set(1);
+        rotate.set(0);
         lastPointRef.current = target;
         setSettled(true);
         return (): void => {
@@ -179,38 +182,64 @@ export function WritingFieldPointer({
       return pointerCaretPoint(control, box, control?.value ?? '');
     };
 
+    const softLand = (onDone: () => void): void => {
+      scale.set(1);
+      rotate.set(0);
+      animate(scale, [1.04, 1], {
+        duration: LAND_SCALE_SECONDS,
+        ease: hermiteSmoothstep,
+        onComplete: (): void => {
+          if (!cancelled) onDone();
+        },
+      });
+    };
+
+    /** Clicky-style 60fps bezier flight: Hermite on path, sin pulse on scale, tangent heading. */
     const moveTo = (
       from: PointerPoint,
       to: PointerPoint,
       kind: TravelKind,
       onDone: () => void,
     ): void => {
-      const { xs, ys } = pathArrays(from, to, kind);
-      const times = mouseTravelTimes(xs.length);
-      const duration = mouseTravelDurationMs(from, to, kind) / 1000;
       lastPointRef.current = to;
-      // Path samples are already Hermite-spaced; keep Motion progress linear.
-      animate(x, xs, {
-        duration,
-        ease: 'linear',
-        times,
-        onComplete: (): void => {
-          if (!cancelled) {
-            scale.set(1);
-            onDone();
-          }
-        },
-      });
-      animate(y, ys, { duration, ease: 'linear', times });
-      if (kind !== 'reduced') {
-        animate(scale, [1, SCALE_PEAK, 1], {
-          duration,
-          ease: hermiteSmoothstep,
-          times: [0, 0.5, 1],
-        });
-      } else {
+
+      if (kind === 'reduced') {
+        x.set(to.x);
+        y.set(to.y);
         scale.set(1);
+        rotate.set(0);
+        onDone();
+        return;
       }
+
+      const control = flightControlPoint(from, to, kind);
+      const durationMs = mouseTravelDurationMs(from, to, kind);
+      const startTime = performance.now();
+
+      const tick = (now: number): void => {
+        if (cancelled) return;
+        const linear = Math.min(1, Math.max(0, (now - startTime) / durationMs));
+        const t = hermiteSmoothstep(linear);
+        const point = quadraticPoint(from, control, to, t);
+        const tangent = quadraticTangent(from, control, to, t);
+
+        x.set(point.x);
+        y.set(point.y);
+        scale.set(flightScale(linear));
+        rotate.set(headingDegrees(tangent));
+
+        if (linear < 1) {
+          flightFrameRef.current = window.requestAnimationFrame(tick);
+          return;
+        }
+
+        flightFrameRef.current = 0;
+        x.set(to.x);
+        y.set(to.y);
+        softLand(onDone);
+      };
+
+      flightFrameRef.current = window.requestAnimationFrame(tick);
     };
 
     const arrive = (): void => {
@@ -234,6 +263,7 @@ export function WritingFieldPointer({
         y.set(park.y);
         opacity.set(1);
         scale.set(1);
+        rotate.set(0);
         lastPointRef.current = park;
         activeFieldRef.current = field;
         activeHubRowRef.current = hubRow;
@@ -245,6 +275,7 @@ export function WritingFieldPointer({
         x.set(from.x);
         y.set(from.y);
         scale.set(1);
+        rotate.set(0);
       }
       animate(opacity, 1, { duration: FADE_SECONDS, ease: 'easeOut' });
       moveTo(from, target, kind, (): void => {
@@ -260,7 +291,7 @@ export function WritingFieldPointer({
       window.cancelAnimationFrame(frame);
       stopTravel();
     };
-  }, [field, hubRow, originRef, opacity, reduceMotion, scale, x, y]);
+  }, [field, hubRow, originRef, opacity, reduceMotion, rotate, scale, x, y]);
 
   useEffect(() => {
     if (!field || !settled || reduceMotion || hubRow) return;
@@ -284,6 +315,7 @@ export function WritingFieldPointer({
       const deltaX = next.x - prev.x;
       if (Math.abs(deltaX) < 0.5 && Math.abs(next.y - prev.y) < 0.5) return;
       lastPointRef.current = next;
+      rotate.set(0);
       if (Math.abs(deltaX) < 2) {
         x.set(next.x);
         y.set(next.y);
@@ -308,7 +340,7 @@ export function WritingFieldPointer({
       x.stop();
       y.stop();
     };
-  }, [field, settled, reduceMotion, originRef, x, y]);
+  }, [field, settled, reduceMotion, hubRow, originRef, rotate, x, y]);
 
   if (!field && !shown) return null;
 
@@ -331,6 +363,7 @@ export function WritingFieldPointer({
         y,
         opacity,
         scale,
+        rotate,
         willChange: field ? 'transform' : 'auto',
       }}
     />

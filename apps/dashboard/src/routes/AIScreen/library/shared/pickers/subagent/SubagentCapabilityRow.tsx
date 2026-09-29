@@ -1,5 +1,6 @@
 import { useMemo, useState, type ReactElement } from 'react';
 import { Ai01, InformationCircle, PlusDefault } from '@xyne/icons';
+import { PropertyAddButton } from '@/components/flowUI/nodes/agent/create/PropertyAddButton';
 import { Tooltip } from '@/components/ui/Tooltip/Tooltip';
 import { DotGridLoader } from '../mcp/DotGridLoader';
 import { BrowseSubagentsDialog } from './BrowseSubagentsDialog';
@@ -19,12 +20,14 @@ interface SubagentCapabilityRowProps {
   selection: SubagentSelection;
   onSelectionChange: (next: SubagentSelection) => void;
   suggestContext: { systemPrompt: string; description: string };
+  layout?: 'profile';
 }
 
 export function SubagentCapabilityRow({
   selection,
   onSelectionChange,
   suggestContext,
+  layout,
 }: SubagentCapabilityRowProps): ReactElement {
   const [browseOpen, setBrowseOpen] = useState(false);
   const [browseName, setBrowseName] = useState<string | null>(null);
@@ -91,6 +94,53 @@ export function SubagentCapabilityRow({
       </Tooltip>
     );
   };
+
+  if (layout === 'profile') {
+    return (
+      <>
+        {selectedEntries.length === 0 ? (
+          <PropertyAddButton
+            label='Add subagent'
+            trackName='Create agent v2: browse subagents'
+            onClick={() => {
+              setBrowseName(null);
+              setBrowseOpen(true);
+            }}
+          />
+        ) : (
+          <div className='flex flex-wrap items-center gap-3'>
+            {selectedEntries.map(entry => (
+              <SubagentChip
+                key={`selected-${entry.name}`}
+                label={entry.name}
+                selected
+                onOpen={() => {
+                  setBrowseName(entry.name);
+                  setBrowseOpen(true);
+                }}
+                onToggle={() => onSelectionChange(disableSubagent(selection, entry))}
+              />
+            ))}
+          </div>
+        )}
+        <BrowseSubagentsDialog
+          open={browseOpen}
+          onOpenChange={next => {
+            setBrowseOpen(next);
+            if (!next) setBrowseName(null);
+          }}
+          initialName={browseName}
+          catalog={entries}
+          loading={loading}
+          isError={isError}
+          onRetry={refetch}
+          selection={selection}
+          onSelectionChange={onSelectionChange}
+          suggested={suggestions.suggested}
+        />
+      </>
+    );
+  }
 
   return (
     <div className='flex w-full flex-col gap-1.5'>

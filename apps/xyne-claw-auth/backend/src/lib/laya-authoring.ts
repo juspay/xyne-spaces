@@ -519,3 +519,107 @@ export function defaultEmptyHubs(catalog: SuggestCatalog, hasSkills: boolean): E
   if (hasSkills) hubs.push("skill");
   return hubs;
 }
+
+/** Intent clearly wants a thin / chat-only agent. */
+export function intentPrefersNoTools(intent: string): boolean {
+  const t = intent.toLowerCase();
+  if (/\b(slack|github|jira|gmail|notion|linear|discord|mcp|web[- ]?search|spaces)\b/.test(t)) {
+    return false;
+  }
+  return /\b(chat only|no tools|no integrations|no skills|writing coach|brainstorm|roleplay|interview prep)\b/.test(
+    t,
+  );
+}
+
+/**
+ * Build a closed pick from the gap shortlist when the claw LLM judge fails or
+ * times out. Prefer none for chat-only intents; otherwise take top shortlist
+ * rows per hub (conservative caps).
+ */
+export function closedPickFromShortlist(args: {
+  intent: string;
+  gap: GapShortlistResult;
+}): Record<string, unknown> {
+  const empty = (reason: string) => ({
+    picks: [] as Array<{ id: string; confidence: number; reason: string }>,
+    none: true,
+    reason,
+  });
+
+  if (intentPrefersNoTools(args.intent)) {
+    return {
+      hubs: {
+        mcp: empty("Chat-only intent — no MCP"),
+        builtin: empty("Chat-only intent — no builtin"),
+        subagent: empty("Chat-only intent — no subagent"),
+        skill: empty("Chat-only intent — no skill"),
+      },
+      subagents: [],
+      integrations: [],
+      skillSlugs: [],
+      reasoning: { fallback: "shortlist-none" },
+    };
+  }
+
+  const mcp = args.gap.catalog.integrations.filter(
+    (i) => !i.slug.startsWith("custom:") && !i.slug.startsWith("builtin:"),
+  );
+  const builtin = args.gap.catalog.integrations.filter(
+    (i) => i.slug.startsWith("custom:") || i.slug.startsWith("builtin:"),
+  );
+  const subagents = args.gap.catalog.subagents.slice(0, 2);
+  const skillSlugs = args.gap.skillSlugs.slice(0, 3);
+
+  const mcpPicks = mcp.slice(0, 3).map((i) => ({
+    id: i.slug,
+    confidence: 0.7,
+    reason: "Shortlist fallback",
+  }));
+  const builtinPicks = builtin.slice(0, 2).map((i) => ({
+    id: i.slug,
+    confidence: 0.7,
+    reason: "Shortlist fallback",
+  }));
+  const subPicks = subagents.map((s) => ({
+    id: s.name,
+    confidence: 0.7,
+    reason: "Shortlist fallback",
+  }));
+  const skillPicks = skillSlugs.map((slug) => ({
+    id: slug,
+    confidence: 0.7,
+    reason: "Shortlist fallback",
+  }));
+
+  const toInteg = (rows: SuggestCatalog["integrations"]) => {
+    const wantsWrites = /\b(create|update|edit|send|post|schedule|upload|write|triage|reply|comment|draft)\b/i.test(
+      args.intent,
+    );
+    return rows.map((i) => ({
+      slug: i.slug,
+      readTools: i.readTools.map((t) => t.name).slice(0, 8),
+      writeTools: wantsWrites ? i.writeTools.map((t) => t.name).slice(0, 8) : [],
+    }));
+  };
+
+  return {
+    hubs: {
+      mcp: mcpPicks.length
+        ? { picks: mcpPicks, none: false }
+        : empty("No MCP shortlist"),
+      builtin: builtinPicks.length
+        ? { picks: builtinPicks, none: false }
+        : empty("No builtin shortlist"),
+      subagent: subPicks.length
+        ? { picks: subPicks, none: false }
+        : empty("No subagent shortlist"),
+      skill: skillPicks.length
+        ? { picks: skillPicks, none: false }
+        : empty("No skill shortlist"),
+    },
+    subagents: subagents.map((s) => s.name),
+    integrations: [...toInteg(mcp.slice(0, 3)), ...toInteg(builtin.slice(0, 2))],
+    skillSlugs,
+    reasoning: { fallback: "shortlist" },
+  };
+}

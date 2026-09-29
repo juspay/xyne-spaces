@@ -3,6 +3,10 @@ import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 import {
   fieldTransitionPath,
+  flightControlPoint,
+  flightScale,
+  FLIGHT_SCALE_PEAK,
+  headingDegrees,
   hermiteSmoothstep,
   mouseTravelDurationMs,
   mouseTravelPath,
@@ -10,6 +14,8 @@ import {
   pointerCaretPoint,
   pointerEntryPoint,
   pointerParkPoint,
+  quadraticPoint,
+  quadraticTangent,
   travelArcHeight,
 } from './writingPointerPath.ts';
 
@@ -65,10 +71,10 @@ void describe('mouseTravelPath', () => {
     assert.equal(travelArcHeight(1000), 80);
   });
 
-  void it('enters from above-left of the target', () => {
+  void it('enters from above-right of the target (chat side)', () => {
     const target = { x: 100, y: 80 };
     const from = pointerEntryPoint(target);
-    assert.ok(from.x < target.x);
+    assert.ok(from.x > target.x);
     assert.ok(from.y < target.y);
   });
 
@@ -101,17 +107,48 @@ void describe('mouseTravelPath', () => {
     assert.ok(park.x > box.left + 8);
   });
 
-  void it('drives the canvas pointer with Motion, not CSS or GSAP', () => {
+  void it('rests borderless block fields on the value line', () => {
+    const box = { left: 150, top: 20, width: 400, height: 28, inline: false };
+    const point = pointerCaretPoint(null, box, '');
+    assert.equal(point.x, box.left + 4);
+    assert.equal(point.y, box.top + 10);
+  });
+
+  void it('evaluates continuous Clicky flight helpers', () => {
+    const from = { x: 0, y: 0 };
+    const to = { x: 100, y: 0 };
+    const control = flightControlPoint(from, to, 'field-down');
+    assert.ok(control.y < 0, 'control sits above the chord');
+
+    const mid = quadraticPoint(from, control, to, 0.5);
+    assert.ok(mid.y < 0);
+    assert.ok(Math.abs(mid.x - 50) < 1);
+
+    const tangent = quadraticTangent(from, control, to, 0.5);
+    assert.ok(tangent.x > 0, 'mid tangent points toward target');
+    const heading = headingDegrees(tangent);
+    assert.ok(Number.isFinite(heading));
+
+    assert.equal(flightScale(0), 1);
+    assert.ok(Math.abs(flightScale(0.5) - FLIGHT_SCALE_PEAK) < 1e-9);
+    assert.equal(flightScale(1), 1);
+  });
+
+  void it('drives the canvas pointer with Motion + rAF flight, not CSS or GSAP', () => {
     const pointer = readFileSync(new URL('./WritingFieldPointer.tsx', import.meta.url), 'utf8');
     const highlight = readFileSync(new URL('./ChatFillHighlight.tsx', import.meta.url), 'utf8');
     const chat = readFileSync(new URL('./AgentCreateChatPanel.tsx', import.meta.url), 'utf8');
     assert.match(pointer, /from 'motion\/react'/);
     assert.match(pointer, /animate\(/);
     assert.match(pointer, /useMotionValue/);
+    assert.match(pointer, /requestAnimationFrame/);
+    assert.match(pointer, /quadraticPoint/);
+    assert.match(pointer, /flightScale/);
+    assert.match(pointer, /headingDegrees/);
     assert.match(pointer, /pointerCaretPoint/);
     assert.match(pointer, /field-down/);
     assert.match(pointer, /hermiteSmoothstep/);
-    assert.match(pointer, /SCALE_PEAK/);
+    assert.match(pointer, /FLIGHT_SCALE_PEAK|flightScale/);
     assert.match(pointer, /data-pointer-settled/);
     assert.equal(/pointerWanderStops/.test(pointer), false);
     assert.equal(/pointerSettlePath/.test(pointer), false);

@@ -48,16 +48,19 @@ import { validateKbGrants } from "../lib/spaces-kb.js";
 import { ORG_SCOPED_SLUGS } from "../lib/org-scoped-slugs.js";
 import { getAdminOrgScope, getOrgNameMap, withOrgLabel } from "../lib/admin-org-scope.js";
 import { asyncHandler, ok, badRequest, unauthorized, forbidden, notFound, conflict, HttpError } from "../lib/http.js";
+import { buildDraftRunBody, draftAgentSlug, parseDraftSnapshot } from "../lib/draft-chat.js";
 import { exportAgentToml, importAgentToml } from "../lib/agent-toml-sync.js";
 import { parseToolsConfig } from "xyne-claw-shared";
 
 import { createLogger } from "../logger.js";
 import {
   buildGapShortlist,
+  closedPickFromShortlist,
   defaultEmptyHubs,
   recordClosedPick,
 } from "../lib/laya-authoring.js";
 import { layaSuggestMode } from "../lib/laya-client.js";
+import { SUGGEST_BUDGET_MS } from "../lib/selection-thresholds.js";
 const log = createLogger("agents");
 
 const router = Router();
@@ -374,32 +377,57 @@ router.post("/suggest-tools", async (req: Request, res: Response) => {
       }
     }
 
-    // Keep whole suggest under ~3.5s before dashboard 4s SUGGEST_MS.
-    const remainingMs = Math.max(500, 3_500 - (Date.now() - started));
-    const clawRes = await fetch(`${CONFIG.xyneClawUrl}/suggest-tools`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
-      },
-      body: JSON.stringify({
-        intent,
-        catalog: catalogForClaw,
-        emptyHubs,
-        skillCandidates: skillCandidates.map((s) => ({
-          slug: s.slug,
-          name: s.name,
-          description: s.description,
-        })),
-      }),
-      signal: AbortSignal.timeout(remainingMs),
-    });
+    // Keep whole suggest under dashboard SUGGEST_MS (22s) with headroom for shortlist.
+    const remainingMs = Math.max(2_000, SUGGEST_BUDGET_MS - (Date.now() - started));
+    let clawRes: Response;
+    try {
+      clawRes = await fetch(`${CONFIG.xyneClawUrl}/suggest-tools`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+        },
+        body: JSON.stringify({
+          intent,
+          catalog: catalogForClaw,
+          emptyHubs,
+          skillCandidates: skillCandidates.map((s) => ({
+            slug: s.slug,
+            name: s.name,
+            description: s.description,
+          })),
+        }),
+        signal: AbortSignal.timeout(remainingMs),
+      });
+    } catch (fetchErr) {
+      log.warn(
+        `[agents/suggest-tools] claw fetch failed after ${Date.now() - started}ms: ${
+          fetchErr instanceof Error ? fetchErr.message : String(fetchErr)
+        }`,
+      );
+      if (gap) {
+        const fallbackPick = closedPickFromShortlist({ intent, gap });
+        recordClosedPick(gap, "hub", fallbackPick);
+        res.status(200).json({ success: true, data: fallbackPick });
+        return;
+      }
+      throw fetchErr;
+    }
 
     const data = (await clawRes.json()) as {
       success?: boolean;
       data?: Record<string, unknown>;
       error?: string;
     };
+    if ((!clawRes.ok || !data.success) && gap) {
+      log.warn(
+        `[agents/suggest-tools] claw judge failed status=${clawRes.status} err=${data.error ?? "-"} — shortlist fallback`,
+      );
+      const fallbackPick = closedPickFromShortlist({ intent, gap });
+      recordClosedPick(gap, "hub", fallbackPick);
+      res.status(200).json({ success: true, data: fallbackPick });
+      return;
+    }
     if (clawRes.ok && data.success && data.data && typeof data.data === "object") {
       if (skillSlugs.length > 0 && !Array.isArray(data.data["skillSlugs"])) {
         data.data = { ...data.data, skillSlugs };
@@ -5112,5 +5140,129 @@ router.delete(
     }
   },
 );
+
+router.post("/draft-chat", asyncHandler(async (req: Request, res: Response) => {
+  const userId = getRequesterId(req);
+  if (!userId) {
+    res.status(401).json({ success: false, error: "unauthorized" });
+    return;
+  }
+  const message = typeof req.body?.message === "string" ? req.body.message.trim() : "";
+  const draftConversationId = typeof req.body?.draftConversationId === "string"
+    ? req.body.draftConversationId.trim()
+    : "";
+  if (!message || !draftConversationId) {
+    res.status(400).json({ success: false, error: "message and draftConversationId are required" });
+    return;
+  }
+  const snapshot = parseDraftSnapshot(req.body?.snapshot);
+  if (!snapshot) {
+    res.status(400).json({ success: false, error: "snapshot is required" });
+    return;
+  }
+
+  const orgId = getOrgId(req);
+  const loaded = snapshot.skillIds.length > 0
+    ? await skillRepository.findByIds(snapshot.skillIds)
+    : [];
+  const skills = loaded
+    .filter(skill => !orgId || skill.orgId === orgId)
+    .map(skill => ({
+      slug: skill.slug,
+      name: skill.name,
+      description: skill.description,
+      content: skill.content,
+    }));
+  const user = await userRepository.findById(userId).catch(() => null);
+
+  const forwardBody = buildDraftRunBody({
+    userId,
+    userName: user?.name ?? undefined,
+    userEmail: user?.email ?? undefined,
+    orgId,
+    message,
+    draftConversationId,
+    snapshot,
+    skills,
+  });
+
+  const upstream = await fetch(`${CONFIG.xyneClawUrl}/run`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "text/event-stream",
+      ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+    },
+    body: JSON.stringify(forwardBody),
+  });
+
+  if (!upstream.ok || !upstream.body) {
+    const text = await upstream.text().catch(() => "");
+    res.status(upstream.status || 502).json({
+      success: false,
+      error: text.slice(0, 300) || "draft run failed",
+    });
+    return;
+  }
+
+  res.status(200);
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+
+  const reader = upstream.body.getReader();
+  const abortUpstream = (): void => {
+    reader.cancel().catch(() => {});
+  };
+  res.on("close", abortUpstream);
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!res.write(Buffer.from(value))) {
+        await new Promise<void>(resolve => res.once("drain", () => resolve()));
+      }
+    }
+  } catch (err) {
+    log.error("[agents] draft-chat stream error:", err);
+  } finally {
+    res.off("close", abortUpstream);
+    if (!res.writableEnded) res.end();
+  }
+}));
+
+router.post("/draft-chat/clear", asyncHandler(async (req: Request, res: Response) => {
+  const userId = getRequesterId(req);
+  if (!userId) {
+    res.status(401).json({ success: false, error: "unauthorized" });
+    return;
+  }
+  const draftConversationId = typeof req.body?.draftConversationId === "string"
+    ? req.body.draftConversationId.trim()
+    : "";
+  if (!draftConversationId) {
+    res.status(400).json({ success: false, error: "draftConversationId is required" });
+    return;
+  }
+  const clawRes = await fetch(`${CONFIG.xyneClawUrl}/clear-session`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+    },
+    body: JSON.stringify({
+      userId,
+      conversationId: draftConversationId,
+      agentSlug: draftAgentSlug(userId),
+    }),
+  });
+  const body = (await clawRes.json().catch(() => null)) as Record<string, unknown> | null;
+  if (!clawRes.ok) {
+    res.status(clawRes.status).json(body ?? { success: false, error: "clear-session failed" });
+    return;
+  }
+  res.json(body ?? { success: true });
+}));
 
 export { router as agentsRouter };

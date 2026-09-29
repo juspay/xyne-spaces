@@ -147,6 +147,14 @@ function isMissingFile(err: unknown): boolean {
   return (err as NodeJS.ErrnoException | null)?.code === "ENOENT";
 }
 
+/** Bucket or object is gone — there is no archive, not an unverified one. */
+function isMissingArchiveError(err: unknown): boolean {
+  const code = (err as { code?: unknown } | null)?.code;
+  if (code === 404 || code === "404") return true;
+  const msg = err instanceof Error ? err.message : String(err);
+  return /specified bucket does not exist|no such bucket|bucket.+does not exist/i.test(msg);
+}
+
 function objectName(conversationId: string, relPath: string): string {
   return `${SESSION_PREFIX}/${conversationId}/${relPath}`;
 }
@@ -643,48 +651,58 @@ export async function gcsDeleteSession(conversationId: string): Promise<"deleted
  * List + stream every session file directly from storage into `destDir`. Returns:
  *   - "restored" when at least one file was downloaded and size-verified
  *   - "missing" when storage is reachable and no archive exists
- *   - null on error/disabled — the caller falls back to claw-auth/PVC
+ *   - "unavailable" when storage could not be listed (no client, no creds,
+ *     emulator down). The caller must not treat this as proof an archive exists.
+ *   - null when objects were listed but the download failed — an archive
+ *     exists and could not be restored
  */
 export async function gcsRestoreSessionToDisk(
   conversationId: string,
   destDir: string,
-): Promise<"restored" | "missing" | null> {
+): Promise<"restored" | "missing" | "unavailable" | null> {
   const client = getStorage();
-  if (!client) return null;
+  if (!client) return "unavailable";
   const prefix = sessionPrefix(conversationId);
+  let sessionFiles: Awaited<ReturnType<typeof client.listFiles>>;
   try {
     const files = await client.listFiles(prefix);
-    const sessionFiles = files.filter((f) => f.name.slice(prefix.length));
-    if (sessionFiles.length === 0) return "missing";
-
-    const tmpDir = `${destDir}.restore-${Date.now()}`;
-    await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
-    await mkdir(tmpDir, { recursive: true });
-    try {
-      const queue = [...sessionFiles];
-      const worker = async (): Promise<void> => {
-        for (let f = queue.shift(); f; f = queue.shift()) {
-          const rel = f.name.slice(prefix.length);
-          if (!rel || rel.includes("..") || rel.startsWith("/")) continue;
-          const dest = path.join(tmpDir, rel);
-          await mkdir(path.dirname(dest), { recursive: true });
-          await pipeline(await client.createReadStream(f.name), createWriteStream(dest));
-          const actual = (await stat(dest)).size;
-          const expected = Number.isFinite(f.size) ? (f.size as number) : actual;
-          if (actual !== expected) {
-            throw new Error(`size mismatch for ${rel}: expected ${expected}, got ${actual}`);
-          }
-        }
-      };
-      await Promise.all(Array.from({ length: Math.min(UPLOAD_CONCURRENCY, sessionFiles.length) }, worker));
-      await rm(destDir, { recursive: true, force: true }).catch(() => {});
-      await rename(tmpDir, destDir);
-      return "restored";
-    } catch (err) {
-      await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
-      throw err;
-    }
+    sessionFiles = files.filter((f) => f.name.slice(prefix.length));
   } catch (err) {
+    if (isMissingArchiveError(err)) {
+      log.warn(`[gcs] no session archive for ${conversationId}:`, err instanceof Error ? err.message : String(err));
+      return "missing";
+    }
+    noteIfCredsError(err);
+    log.warn(`[gcs] direct restore unavailable for ${conversationId}:`, err instanceof Error ? err.message : String(err));
+    return "unavailable";
+  }
+  if (sessionFiles.length === 0) return "missing";
+
+  const tmpDir = `${destDir}.restore-${Date.now()}`;
+  await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  await mkdir(tmpDir, { recursive: true });
+  try {
+    const queue = [...sessionFiles];
+    const worker = async (): Promise<void> => {
+      for (let f = queue.shift(); f; f = queue.shift()) {
+        const rel = f.name.slice(prefix.length);
+        if (!rel || rel.includes("..") || rel.startsWith("/")) continue;
+        const dest = path.join(tmpDir, rel);
+        await mkdir(path.dirname(dest), { recursive: true });
+        await pipeline(await client.createReadStream(f.name), createWriteStream(dest));
+        const actual = (await stat(dest)).size;
+        const expected = Number.isFinite(f.size) ? (f.size as number) : actual;
+        if (actual !== expected) {
+          throw new Error(`size mismatch for ${rel}: expected ${expected}, got ${actual}`);
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(UPLOAD_CONCURRENCY, sessionFiles.length) }, worker));
+    await rm(destDir, { recursive: true, force: true }).catch(() => {});
+    await rename(tmpDir, destDir);
+    return "restored";
+  } catch (err) {
+    await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
     noteIfCredsError(err);
     log.warn(`[gcs] direct restore failed for ${conversationId}:`, err instanceof Error ? err.message : String(err));
     return null;

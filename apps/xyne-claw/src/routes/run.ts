@@ -5851,51 +5851,51 @@ router.post("/suggest-tools", validateS2SKey, async (req, res: Response) => {
     "- Be conservative. Prefer read-only tools. Only include write tools when intent demands them.",
     "- Cap subagents at 2. Cap skills at 3.",
     "- confidence is 0-1. Named catalog mentions should be 1.0.",
-    "- For each pick give a one-sentence reason.",
+    "- For each pick give a short reason (under 12 words).",
+    "- Keep the JSON compact. Prefer hubs picks; omit integrations/skillSlugs arrays if hubs cover them.",
     "",
     "Return a strict JSON object matching this shape (no prose, no markdown wrapping):",
     `{
   "hubs": {
-    "mcp": { "picks": [{"id":"integration-slug","confidence":0.0,"reason":"..."}], "none": false, "reason": "optional when none" },
-    "builtin": { "picks": [{"id":"custom:...","confidence":0.0,"reason":"..."}], "none": true, "reason": "No built-in tools needed" },
-    "subagent": { "picks": [{"id":"subagent-name","confidence":0.0,"reason":"..."}], "none": true, "reason": "..." },
-    "skill": { "picks": [{"id":"skill-slug","confidence":0.0,"reason":"..."}], "none": true, "reason": "..." }
+    "mcp": { "picks": [{"id":"integration-slug","confidence":0.0,"reason":"..."}], "none": false },
+    "builtin": { "picks": [{"id":"custom:...","confidence":0.0,"reason":"..."}], "none": true },
+    "subagent": { "picks": [{"id":"subagent-name","confidence":0.0,"reason":"..."}], "none": true },
+    "skill": { "picks": [{"id":"skill-slug","confidence":0.0,"reason":"..."}], "none": true }
   },
-  "subagents": ["subagent-name", ...],
-  "integrations": [
-    { "slug": "integration-slug", "readTools": ["tool_name", ...], "writeTools": ["tool_name", ...] }
-  ],
-  "skillSlugs": ["skill-slug", ...],
-  "reasoning": { "id": "one-sentence why", ... }
+  "reasoning": { "id": "short why", "...": "..." }
 }`,
   ].join("\n");
 
   try {
-    const llmRes = await fetch(`${LITELLM.url}/v1/chat/completions`, {
+    const llmRes = await fetch(`${LITELLM.suggestUrl}/v1/chat/completions`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${LITELLM.apiKey}`,
+        Authorization: `Bearer ${LITELLM.suggestApiKey}`,
       },
       body: JSON.stringify({
-        model: LITELLM.model,
+        model: LITELLM.suggestModel,
         messages: [
           {
             role: "system",
             content:
-              "You judge catalog picks for AI agents. Return ONLY JSON. Prefer none over guessing. Never invent catalog ids.",
+              "You judge catalog picks for AI agents. Return ONLY compact JSON. Prefer none over guessing. Never invent catalog ids.",
           },
           { role: "user", content: userMessage },
         ],
-        max_tokens: 2500,
+        max_tokens: 4096,
         temperature: 0.2,
         response_format: { type: "json_object" },
       }),
-      // Keep under dashboard SUGGEST_MS (4s) budget when possible; claw-auth wraps tighter.
-      signal: AbortSignal.timeout(12_000),
+      // Suggest uses a dedicated fast model/proxy; claw-auth still wraps a budget.
+      signal: AbortSignal.timeout(LITELLM.suggestTimeoutMs),
     });
 
     if (!llmRes.ok) {
+      const errBody = await llmRes.text().catch(() => "");
+      clog.error(
+        `[suggest-tools] LLM ${llmRes.status} model=${LITELLM.suggestModel} url=${LITELLM.suggestUrl} body=${errBody.slice(0, 200)}`,
+      );
       res
         .status(500)
         .json({ success: false, error: `LLM returned ${llmRes.status}` });
@@ -5905,11 +5905,22 @@ router.post("/suggest-tools", validateS2SKey, async (req, res: Response) => {
     const data = (await llmRes.json()) as {
       choices?: Array<{ message?: { content?: string } }>;
     };
-    const raw = data.choices?.[0]?.message?.content?.trim() ?? "";
+    let raw = data.choices?.[0]?.message?.content?.trim() ?? "";
+    // Fast models (gemini) often wrap JSON in ```json fences despite response_format.
+    if (raw.startsWith("```")) {
+      raw = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+    }
+    // Recover when the model adds prose around the object.
+    if (!raw.startsWith("{")) {
+      const start = raw.indexOf("{");
+      const end = raw.lastIndexOf("}");
+      if (start >= 0 && end > start) raw = raw.slice(start, end + 1);
+    }
     let parsed: Record<string, unknown>;
     try {
       parsed = JSON.parse(raw) as Record<string, unknown>;
     } catch {
+      clog.error(`[suggest-tools] non-JSON content preview=${raw.slice(0, 180)}`);
       res.status(502).json({ success: false, error: "LLM returned non-JSON" });
       return;
     }
@@ -5973,6 +5984,10 @@ router.post("/suggest-tools", validateS2SKey, async (req, res: Response) => {
         ? (parsed["reasoning"] as Record<string, string>)
         : {};
 
+    const wantsWrites = /\b(create|update|edit|send|post|schedule|upload|write|triage|reply|comment|draft)\b/i.test(
+      intent,
+    );
+
     res.json({
       success: true,
       data: {
@@ -5986,7 +6001,9 @@ router.post("/suggest-tools", validateS2SKey, async (req, res: Response) => {
                 return {
                   slug,
                   readTools: (integ?.readTools ?? []).map((t) => t.name),
-                  writeTools: [],
+                  writeTools: wantsWrites
+                    ? (integ?.writeTools ?? []).map((t) => t.name).slice(0, 8)
+                    : [],
                 };
               }),
         skillSlugs: skillSlugs.length > 0 ? skillSlugs : hubSkills,

@@ -1,5 +1,6 @@
 import { useMemo, useState, type ReactElement } from 'react';
 import { Ai01, InformationCircle, PlusDefault } from '@xyne/icons';
+import { PropertyAddButton } from '@/components/flowUI/nodes/agent/create/PropertyAddButton';
 import { Tooltip } from '@/components/ui/Tooltip/Tooltip';
 import { disableEntry, enableEntry, isEntryEnabled, type McpSelection } from './mcpCatalog';
 import { BrowseMcpsDialog } from './BrowseMcpsDialog';
@@ -14,12 +15,15 @@ interface McpCapabilityRowProps {
   selection: McpSelection;
   onSelectionChange: (next: McpSelection) => void;
   suggestContext: { systemPrompt: string; description: string };
+  /** Profile properties list: placeholder or chips, without the stacked header. */
+  layout?: 'profile';
 }
 
 export function McpCapabilityRow({
   selection,
   onSelectionChange,
   suggestContext,
+  layout,
 }: McpCapabilityRowProps): ReactElement {
   const [browseOpen, setBrowseOpen] = useState(false);
   const [browseSlug, setBrowseSlug] = useState<string | null>(null);
@@ -89,6 +93,56 @@ export function McpCapabilityRow({
       </Tooltip>
     );
   };
+
+  if (layout === 'profile') {
+    return (
+      <>
+        {selectedEntries.length === 0 ? (
+          <PropertyAddButton
+            label='Add MCP'
+            trackName='Create agent v2: browse MCPs'
+            onClick={() => {
+              setBrowseSlug(null);
+              setBrowseOpen(true);
+            }}
+          />
+        ) : (
+          <div className='flex flex-wrap items-center gap-2'>
+            {selectedEntries.map(entry => (
+              <McpChip
+                key={`selected-${entry.slug}`}
+                label={entry.label}
+                iconType={entry.iconType}
+                selected
+                onOpen={() => {
+                  setBrowseSlug(entry.slug);
+                  setBrowseOpen(true);
+                }}
+                onToggle={() => onSelectionChange(disableEntry(entries, selection, entry))}
+              />
+            ))}
+          </div>
+        )}
+        <BrowseMcpsDialog
+          open={browseOpen}
+          onOpenChange={next => {
+            setBrowseOpen(next);
+            if (!next) setBrowseSlug(null);
+          }}
+          initialSlug={browseSlug}
+          catalog={entries}
+          connectedServerIds={connectedServerIds}
+          orgCoveredServerIds={orgCoveredServerIds}
+          loading={loading}
+          isError={isError}
+          onRetry={refetch}
+          selection={selection}
+          onSelectionChange={onSelectionChange}
+          suggested={suggestions.suggested}
+        />
+      </>
+    );
+  }
 
   return (
     <div className='flex w-full flex-col gap-1.5'>
