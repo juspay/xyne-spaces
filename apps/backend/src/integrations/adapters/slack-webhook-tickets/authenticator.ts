@@ -22,7 +22,6 @@ import { AuthResult } from '../../core/types';
 import { ExternalSourceRepository } from '../../../database/repositories/externalSourceRepository';
 import { ExternalMessageRepository } from '../../../database/repositories/externalMessageRepository';
 import { DESK_SOURCE_PREFIXES } from '../../core/deskSources';
-import { extractBotUserId, textMentionsBot } from '../slack-desk/botMention';
 import { SlackWebhookPayload, SlackEventType } from './types';
 
 export class SlackAuthenticator extends BaseAuthenticator {
@@ -104,18 +103,13 @@ export class SlackAuthenticator extends BaseAuthenticator {
     if (!source) {
       return false;
     }
-    // On a MENTION_ONLY desk a mid-thread @mention isn't an orphan: SlackDeskFlow backfills the thread.
+    // MENTION_ONLY desks: SlackDeskFlow decides (a mid-thread @mention backfills the thread).
     if (sourceName.startsWith(DESK_SOURCE_PREFIXES.SLACK) && source.channelId) {
       const pref = await db.emailChannelPreference.findUnique({
         where: { channelId: source.channelId },
         select: { slackDeskTriggerMode: true },
       });
-      const targetMessage =
-        event.subtype === 'message_changed' && event.message ? event.message : event;
-      if (
-        pref?.slackDeskTriggerMode === SlackDeskTriggerMode.MENTION_ONLY &&
-        textMentionsBot(targetMessage?.text, extractBotUserId(payload))
-      ) {
+      if (pref?.slackDeskTriggerMode === SlackDeskTriggerMode.MENTION_ONLY) {
         return false;
       }
     }

@@ -15,6 +15,7 @@ import { db } from '@/database/client';
 import { WebClient } from '@slack/web-api';
 import { logger } from '@/utils/logger';
 import { slackDeskService } from '@/services/slackDeskService';
+import { authorizeAppDeskManager } from '@/integrations/routes/app-desk';
 import {
   DESK_SOURCE_PREFIXES,
   buildSlackDeskSourceName,
@@ -306,45 +307,13 @@ router.get(
   }
 );
 
-async function authorizeSlackDeskManager(
-  channelId: string,
-  userId: string,
-  workspaceId: string,
-  res: Response,
-): Promise<string | null> {
-  const channel = await db.channel.findUnique({
-    where: { id: channelId },
-    select: { name: true, createdBy: true, type: true, workspaceId: true },
-  });
-  // 404 on workspace mismatch too — don't leak cross-workspace channel existence.
-  if (!channel || channel.workspaceId !== workspaceId) {
-    res.status(404).json({ error: 'Channel not found' });
-    return null;
-  }
-  if (!isDeskChannelType(channel.type)) {
-    res.status(400).json({ error: 'Channel is not a desk' });
-    return null;
-  }
-  if (channel.createdBy !== userId) {
-    const pref = await db.emailChannelPreference.findUnique({
-      where: { channelId },
-      select: { ownerUserId: true },
-    });
-    if (pref?.ownerUserId !== userId) {
-      res.status(403).json({ error: 'Only the desk owner can manage this integration' });
-      return null;
-    }
-  }
-  return channel.name;
-}
-
 router.get(
   '/channels/:channelId/slack',
   authV2Middleware.authenticate,
   async (req: Request, res: Response): Promise<void> => {
     try {
       const { channelId } = req.params;
-      if (!(await authorizeSlackDeskManager(channelId, req.user!.id, req.user!.workspaceId!, res)))
+      if (!(await authorizeAppDeskManager(channelId, req.user!.id, req.user!.workspaceId!, res)))
         return;
 
       const [sources, pref] = await Promise.all([
@@ -383,7 +352,7 @@ router.patch(
       const { channelId } = req.params;
       const { triggerMode } = req.body as { triggerMode: SlackDeskTriggerMode };
 
-      if (!(await authorizeSlackDeskManager(channelId, req.user!.id, req.user!.workspaceId!, res)))
+      if (!(await authorizeAppDeskManager(channelId, req.user!.id, req.user!.workspaceId!, res)))
         return;
 
       await db.emailChannelPreference.update({
@@ -409,8 +378,8 @@ router.post(
       const { slackChannelId } = req.body as { slackChannelId: string };
       const workspaceId = req.user!.workspaceId!;
 
-      const deskName = await authorizeSlackDeskManager(channelId, req.user!.id, workspaceId, res);
-      if (!deskName) return;
+      const desk = await authorizeAppDeskManager(channelId, req.user!.id, workspaceId, res);
+      if (!desk) return;
 
       const workspaceSource = await db.externalSource.findFirst({
         where: { workspaceId, ...WORKSPACE_LEVEL, sourceType: 'slack', isActive: true },
@@ -450,11 +419,11 @@ router.post(
 
       const source = await db.externalSource.upsert({
         where: { name },
-        update: { isActive: true, credentials, channelId, displayName: deskName },
+        update: { isActive: true, credentials, channelId, displayName: desk.name },
         create: {
           name,
           sourceType: 'slack-desk',
-          displayName: deskName,
+          displayName: desk.name,
           channelId,
           credentials,
           isActive: true,

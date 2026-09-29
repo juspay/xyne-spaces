@@ -11,7 +11,7 @@ import { ExternalMessageRepository } from '../../../database/repositories/extern
 import { db } from '@/database/client';
 import { logger } from '../../../utils/logger';
 import { buildSlackDeskSourceName } from '../../core/deskSources';
-import { extractBotUserId, textMentionsBot } from './botMention';
+import { redisService } from '@/services/redisService';
 
 const BACKFILL_MAX_PAGES = 5;
 
@@ -30,7 +30,7 @@ export class SlackDeskFlow extends BaseFlow {
       }
 
       const decryptedCreds = decrypt(source.credentials);
-      const creds = JSON.parse(decryptedCreds) as { botOauthToken?: string };
+      const creds = JSON.parse(decryptedCreds) as { botOauthToken?: string; whiteListedBots?: string[] };
 
       if (!creds.botOauthToken) {
         return payload;
@@ -53,7 +53,8 @@ export class SlackDeskFlow extends BaseFlow {
       const triggerMode = source.channelId ? await this.getTriggerMode(source.channelId) : SlackDeskTriggerMode.ALL_MESSAGES;
 
       if (triggerMode === SlackDeskTriggerMode.MENTION_ONLY) {
-        const isMention = textMentionsBot(targetMessage.text, extractBotUserId(payload));
+        const botUserId = await this.getBotUserId(source.id, creds.botOauthToken);
+        const isMention = !!botUserId && !!targetMessage.text?.includes(`<@${botUserId}>`);
         const threadTs: string | undefined = targetMessage.thread_ts;
         const isThreadReply = !!threadTs && threadTs !== targetMessage.ts;
         const threadAlreadyTicketed =
@@ -63,7 +64,11 @@ export class SlackDeskFlow extends BaseFlow {
           return { __skipIngestion: true, __skipReason: 'mention_required' };
         }
         if (isMention && isThreadReply && !threadAlreadyTicketed) {
-          return await this.backfillThread(payload, creds.botOauthToken, threadTs!, workspaceId);
+          // Slack retries slow webhooks; only the first delivery may backfill this thread.
+          if (!(await redisService.set(`slack-desk-backfill:${source.id}:${threadTs}`, '1', 300, true))) {
+            return { __skipIngestion: true, __skipReason: 'backfill_in_progress' };
+          }
+          return await this.backfillThread(payload, creds.botOauthToken, threadTs!, workspaceId, creds.whiteListedBots ?? []);
         }
       }
 
@@ -71,6 +76,21 @@ export class SlackDeskFlow extends BaseFlow {
       return payload;
     } catch {
       return payload;
+    }
+  }
+
+  // Not `authorizations[0].user_id`: that can be a user install of this app, not the bot.
+  private async getBotUserId(sourceId: string, botOauthToken: string): Promise<string | undefined> {
+    const key = `slack-desk-bot-user:${sourceId}`;
+    try {
+      const cached = await redisService.get(key);
+      if (cached) return cached;
+      const { user_id } = await new WebClient(botOauthToken, { retryConfig: { retries: 0 } }).auth.test();
+      if (user_id) await redisService.set(key, user_id, 86400);
+      return user_id;
+    } catch (err) {
+      logger.warn('[SlackDeskFlow] Failed to resolve bot user id', { sourceId, error: err });
+      return undefined;
     }
   }
 
@@ -129,6 +149,7 @@ export class SlackDeskFlow extends BaseFlow {
     botOauthToken: string,
     threadTs: string,
     workspaceId: string | undefined,
+    whiteListedBots: string[],
   ): Promise<any[]> {
     const channel = triggerPayload.event.channel;
     // Runs inside Slack's synchronous webhook, so fail fast instead of the default ~30 min retry.
@@ -165,9 +186,11 @@ export class SlackDeskFlow extends BaseFlow {
       messages.push(triggerPayload.event);
     }
 
-    // Empty-content messages fail transform() downstream and would abort the whole batch.
+    // Empty-content messages fail transform() downstream and would abort the whole batch;
+    // bot messages follow SlackAuthenticator.validateBotSource, as they would live.
     const hasContent = (m: any): boolean =>
-      !!m.ts && !!(m.text?.trim() || (m.files && m.files.length > 0)) && !!(m.user || m.bot_id);
+      !!m.ts && !!(m.text?.trim() || (m.files && m.files.length > 0)) && !!(m.user || m.bot_id) &&
+      (!m.bot_id || whiteListedBots.includes(m.bot_id));
 
     // parseFloat loses precision on Slack's 16-digit ts; string comparison is exact.
     const ordered = messages.filter(hasContent).sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0));

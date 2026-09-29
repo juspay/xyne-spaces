@@ -31,7 +31,7 @@ export const SlackDeskIntegrationCard = ({
   const { data } = useQuery({
     queryKey: triggerModeKey,
     queryFn: () => listDeskSlackChannels(channelId),
-    enabled: isConnected && sourceType === 'slack-desk',
+    enabled: canManage && isConnected && sourceType === 'slack-desk',
   });
   const triggerModeMutation = useMutation({
     mutationFn: (mode: SlackDeskTriggerMode) => updateSlackDeskTriggerMode(channelId, mode),

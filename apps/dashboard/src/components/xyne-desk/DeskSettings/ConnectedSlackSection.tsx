@@ -29,11 +29,10 @@ export const ConnectedSlackSection: React.FC<ConnectedSlackSectionProps> = ({
   const [pendingDisconnect, setPendingDisconnect] = useState<string | null>(null);
 
   const connectedKey = ['desk-slack-channels', channelId];
-  // The route 403s non-owners; swallowing that would render "none connected" falsely.
   const { data, isLoading, isError } = useQuery({
     queryKey: connectedKey,
     queryFn: () => listDeskSlackChannels(channelId),
-    enabled: !!channelId,
+    enabled: canManage,
   });
   const connected = data?.slackChannels;
   const triggerMode = data?.triggerMode ?? SlackDeskTriggerMode.ALL_MESSAGES;
@@ -90,6 +89,9 @@ export const ConnectedSlackSection: React.FC<ConnectedSlackSectionProps> = ({
   // alreadyConnected is workspace-wide, so it already covers this desk's own bindings.
   const connectable = (available ?? []).filter(c => !c.alreadyConnected);
 
+  // Backend restricts these routes to desk managers, so hide the section for everyone else.
+  if (!canManage) return null;
+
   return (
     <div className='flex flex-col gap-[16px]'>
       <div className='flex flex-col gap-[4px]'>
@@ -107,7 +109,7 @@ export const ConnectedSlackSection: React.FC<ConnectedSlackSectionProps> = ({
         </div>
       ) : isError ? (
         <p className='text-[12px] leading-[120%] text-red-500'>
-          Couldn&apos;t load Slack channels for this desk. Only the desk owner can manage them.
+          Couldn&apos;t load Slack channels for this desk.
         </p>
       ) : !connected?.length ? (
         <p className='text-[13px] leading-[18px] text-desk-helper'>
@@ -124,7 +126,7 @@ export const ConnectedSlackSection: React.FC<ConnectedSlackSectionProps> = ({
                 <Hash size={16} className='shrink-0 text-muted-foreground' />
                 <span className='truncate text-desk-label'>{label(slack.slackChannelId)}</span>
               </div>
-              {canManage && slack.slackChannelId && (
+              {slack.slackChannelId && (
                 <button
                   type='button'
                   onClick={() => setPendingDisconnect(slack.slackChannelId)}
@@ -155,7 +157,7 @@ export const ConnectedSlackSection: React.FC<ConnectedSlackSectionProps> = ({
           <Switch
             variant='desk'
             checked={triggerMode === SlackDeskTriggerMode.MENTION_ONLY}
-            disabled={!canManage || triggerModeMutation.isPending}
+            disabled={triggerModeMutation.isPending}
             aria-label='Only create tickets when @-mentioned'
             onCheckedChange={checked =>
               triggerModeMutation.mutate(
@@ -169,8 +171,7 @@ export const ConnectedSlackSection: React.FC<ConnectedSlackSectionProps> = ({
       )}
 
       {/* One binding per desk — hide the picker rather than offer a rejected choice. */}
-      {canManage &&
-        !isLoading &&
+      {!isLoading &&
         !isError &&
         !pickerUnavailable &&
         !connected?.length &&
