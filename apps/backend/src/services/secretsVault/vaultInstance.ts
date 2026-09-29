@@ -1,6 +1,7 @@
 import { createCustomEncryptionAdapter, createSecretsVault, parseHexEncryptionKey } from '@xyne/secrets-vault';
 import { config } from '@/config/env';
 import { CommonDatabaseClient } from '@/database/commonClient';
+import { EntitySequenceService, SequenceEntityType } from '@/services/entitySequenceService';
 import { genericEncryptionAdapter } from './genericEncryptionAdapter';
 
 // SecretDefinition/SecretVersion live in the common DB, not the main one — see
@@ -23,4 +24,6 @@ export const secretsVault = createSecretsVault({
   },
   isGenericEncryptionEnabled: () => Boolean(config.enc.enableDbEncryption),
   cacheTtlMs: config.secretsVault.cacheTtlMs,
+  allocateVersion: (secretDefinitionId) =>
+    EntitySequenceService.getNextSequence(SequenceEntityType.SECRET_VERSION, secretDefinitionId),
 });

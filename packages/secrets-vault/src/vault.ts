@@ -6,7 +6,12 @@ export interface SecretsVaultDeps {
   encryptionAdapters: Record<EncryptionImpl, EncryptionAdapter>;
   isGenericEncryptionEnabled: () => boolean;
   cacheTtlMs?: number;
+  allocateVersion: (secretDefinitionId: string) => Promise<number>;
 }
+
+export type AddVersionResult =
+  | { status: SecretVersionStatus.ACTIVE; version: number }
+  | { status: SecretVersionStatus.FAILED; version: number };
 
 interface CacheEntry {
   value: string;
@@ -91,7 +96,7 @@ export function createSecretsVault(deps: SecretsVaultDeps) {
 
     const impl = activeEncryptionImpl();
     const adapter = adapterFor(impl);
-    const version = 1;
+    const version = await deps.allocateVersion(definition.id);
     const encrypted = await adapter.encrypt(input.value, aadFor(definition.id, version));
 
     await deps.prisma.secretVersion.create({
@@ -107,11 +112,84 @@ export function createSecretsVault(deps: SecretsVaultDeps) {
     cache.delete(input.name);
   }
 
+  /**
+   * Cutover primitive: retires whatever is currently active for this secret
+   * and activates `version` instead. Used both by addVersion's forward
+   * cutover and (in the future) by an explicit rollback to an older version —
+   * same mechanism, either direction.
+   */
+  async function setActiveVersion(secretDefinitionId: string, version: number): Promise<void> {
+    await deps.prisma.secretVersion.updateMany({
+      where: { secretDefinitionId, status: SecretVersionStatus.ACTIVE },
+      data: { status: SecretVersionStatus.RETIRED, retiredAt: new Date() },
+    });
+    await deps.prisma.secretVersion.updateMany({
+      where: { secretDefinitionId, version },
+      data: { status: SecretVersionStatus.ACTIVE, verifiedAt: new Date() },
+    });
+  }
+
+  /**
+   * Adds a new candidate version to an existing secret, verifies it, and
+   * cuts over on success. On failure the new version is marked "failed" and
+   * the currently-active version is left untouched — nothing to roll back
+   * because nothing changed. `verify` is supplied by the caller (looked up
+   * from their own secretConfig registry) — this package has no opinion on
+   * which secret maps to which check.
+   */
+  async function addVersion(input: {
+    name: string;
+    value: string;
+    updatedBy: string;
+    verify: (value: string) => Promise<boolean>;
+  }): Promise<AddVersionResult> {
+    const definition = await deps.prisma.secretDefinition.findUnique({
+      where: { name: input.name },
+    });
+    if (!definition) {
+      throw new Error(`Secret "${input.name}" does not exist`);
+    }
+
+    const impl = activeEncryptionImpl();
+    const adapter = adapterFor(impl);
+    const version = await deps.allocateVersion(definition.id);
+    const encrypted = await adapter.encrypt(input.value, aadFor(definition.id, version));
+
+    await deps.prisma.secretVersion.create({
+      data: {
+        secretDefinitionId: definition.id,
+        version,
+        value: encrypted,
+        encryptionImpl: impl,
+        status: SecretVersionStatus.PENDING,
+      },
+    });
+
+    const passed = await input.verify(input.value);
+
+    if (!passed) {
+      await deps.prisma.secretVersion.updateMany({
+        where: { secretDefinitionId: definition.id, version },
+        data: { status: SecretVersionStatus.FAILED },
+      });
+      return { status: SecretVersionStatus.FAILED, version };
+    }
+
+    await setActiveVersion(definition.id, version);
+    await deps.prisma.secretDefinition.update({
+      where: { id: definition.id },
+      data: { updatedBy: input.updatedBy },
+    });
+    cache.delete(input.name);
+
+    return { status: SecretVersionStatus.ACTIVE, version };
+  }
+
   function invalidateCache(name: string): void {
     cache.delete(name);
   }
 
-  return { getSecret, createSecret, invalidateCache };
+  return { getSecret, createSecret, addVersion, invalidateCache };
 }
 
 export type SecretsVault = ReturnType<typeof createSecretsVault>;
