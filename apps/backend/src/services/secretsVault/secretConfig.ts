@@ -1,4 +1,4 @@
-import { createSecretHandler, type SecretHandler } from '@xyne/secrets-vault';
+import { githubToken, type SecretHandler } from '@xyne/secrets-vault';
 
 /**
  * Registry of every secret this backend's vault knows how to handle, keyed by
@@ -6,10 +6,14 @@ import { createSecretHandler, type SecretHandler } from '@xyne/secrets-vault';
  * here before a secret can be created (see routes/secretsVault.ts) — this is
  * the static per-secret config the design doc calls "secretConfig."
  *
- * `github-token` uses createSecretHandler()'s defaults as-is: no self-service
- * rotation API for a classic/fine-grained PAT (a human must generate a new
- * one), and no automated verify yet — no overrides needed.
+ * Handlers with no dependency on this backend's internals (just `fetch` +
+ * the candidate value) live in the package itself and get imported
+ * ready-to-use here — see packages/secrets-vault/src/handlers/. Only a
+ * handler that has to call something private to this backend (e.g. an
+ * internal singleton, like the encryption provider glue in
+ * services/secretsVault/genericEncryptionAdapter.ts) would need its own file
+ * in this app instead — none of the current entries need that.
  */
 export const secretConfig: Record<string, SecretHandler> = {
-  'github-token': createSecretHandler(),
+  'github-token': githubToken,
 };

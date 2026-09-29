@@ -76,6 +76,10 @@ export interface VaultPrismaClient {
         rotationState: RotationState;
       };
     }): Promise<SecretDefinitionRow>;
+    update(args: {
+      where: { id: string };
+      data: { updatedBy: string };
+    }): Promise<SecretDefinitionRow>;
   };
   secretVersion: {
     findFirst(args: {
@@ -90,5 +94,9 @@ export interface VaultPrismaClient {
         status: SecretVersionStatus;
       };
     }): Promise<SecretVersionRow>;
+    updateMany(args: {
+      where: { secretDefinitionId: string; status?: SecretVersionStatus; version?: number };
+      data: { status: SecretVersionStatus; retiredAt?: Date; verifiedAt?: Date };
+    }): Promise<{ count: number }>;
   };
 }
