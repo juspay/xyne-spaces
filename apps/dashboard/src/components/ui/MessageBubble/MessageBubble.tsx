@@ -33,6 +33,7 @@ import { MessageBubbleProps } from './MessageBubble.types';
 import { useAuth } from '../../../hooks/useAuth';
 import { useTheme } from '../../../hooks/useTheme';
 import { useChannel } from '../../../hooks/useChannels';
+import { useIsDmReadOnly } from '../../../hooks/useIsDmReadOnly';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import { ChannelScopeType, ChannelVisibility } from '@xyne/shared';
 import { usePendingStatusByMessageId } from '@xyne/shared/messages';
@@ -515,6 +516,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const renderConversationBadge = useContext(ConversationBadgeContext);
   const navigate = useNavigate();
   const { toggleReaction } = useReactions();
+  // Deactivated 1:1 DM archives are strictly read-only: existing reactions render
+  // but neither their toggle nor the add-reaction picker are interactive.
+  const isDmReadOnly = useIsDmReadOnly(channelId);
   const attachments = message.attachments || [];
   const [showLinkPreview, setShowLinkPreview] = useState(true);
 
@@ -1688,6 +1692,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   reactionsMd={message.reactions_md}
                   toggleReaction={toggleReaction}
                   messageId={message.messageId}
+                  readOnly={isDmReadOnly}
                 />
               )}
             </div>
@@ -1750,10 +1755,13 @@ export const ReactionView = ({
   reactionsMd,
   toggleReaction,
   messageId,
+  readOnly = false,
 }: {
   reactionsMd: string | null | undefined;
   toggleReaction: (params: { messageId: string; emoji: string; hasReacted: boolean }) => void;
   messageId: string;
+  /** When true, existing reactions render but are non-interactive and the add-reaction picker is hidden. */
+  readOnly?: boolean;
 }): React.ReactNode => {
   const { user } = useAuth();
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
@@ -1874,12 +1882,19 @@ export const ReactionView = ({
               <button
                 type='button'
                 data-testid='message-reaction-chip'
-                className={`inline-flex items-center gap-1 h-6 px-2 rounded-full text-sm cursor-pointer transition-all duration-150 ${
+                disabled={readOnly}
+                className={`inline-flex items-center gap-1 h-6 px-2 rounded-full text-sm transition-all duration-150 ${
+                  readOnly ? 'cursor-default' : 'cursor-pointer'
+                } ${
                   reaction.userHasReacted
-                    ? 'bg-accent border border-action-primary hover:bg-accent/80'
-                    : 'bg-muted hover:bg-accent'
+                    ? `bg-accent border border-action-primary ${readOnly ? '' : 'hover:bg-accent/80'}`
+                    : `bg-muted ${readOnly ? '' : 'hover:bg-accent'}`
                 }`}
                 onClick={e => {
+                  if (readOnly) {
+                    e.stopPropagation();
+                    return;
+                  }
                   toggleReaction({
                     messageId: messageId,
                     emoji: reaction.emojiName,
@@ -1939,7 +1954,7 @@ export const ReactionView = ({
         })}
 
         {/* Add Reaction */}
-        {isMobile ? (
+        {readOnly ? null : isMobile ? (
           <AddReactionDrawerMobile
             messageId={messageId}
             user={user}

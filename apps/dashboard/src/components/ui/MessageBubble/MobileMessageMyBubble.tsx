@@ -12,6 +12,7 @@ import { CallMessageOverlay } from '../../Chat/CallMessageOverlay/CallMessageOve
 import { useIsCallActive } from '../../../hooks/useCalls';
 import { PinnedIcon } from '../../../assets/icons/PinnedIcon';
 import { ReactionView } from './MessageBubble';
+import { useIsDmReadOnly } from '../../../hooks/useIsDmReadOnly';
 import { ConversationWithTicket, MessageWithOptionalNudgeCounts } from './MessageBubble.types';
 import { ThreadInfoIndicator, AlsoSentToChannelIndicator } from './ThreadMessageIndicators';
 import { ChannelScopeType } from '@xyne/shared';
@@ -78,6 +79,7 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
   onClick,
 }) => {
   const { toggleReaction } = useReactions();
+  const isDmReadOnly = useIsDmReadOnly(channelId);
   const attachments = message.attachments || [];
 
   const isSystemMessage = message.msgType === MessageType.SYSTEM;
@@ -399,6 +401,7 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
               reactionsMd={message.reactions_md}
               toggleReaction={toggleReaction}
               messageId={message.messageId}
+              readOnly={isDmReadOnly}
             />
           </div>
         </div>
