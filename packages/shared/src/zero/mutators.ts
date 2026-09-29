@@ -7946,6 +7946,8 @@ export const mutators = defineMutators({
             boardId: z.string(),
             weight: z.number(),
             usePercentage: z.boolean(),
+            percentageWindowDays: z.number().int().min(1).max(90).optional(),
+            percentageShareBasis: z.enum(['ALL', 'OPEN']).optional(),
           })
           .optional(),
         expertiseMappings: z
@@ -8061,6 +8063,12 @@ export const mutators = defineMutators({
               id: existingScore.id,
               weight: boardWeight.weight,
               usePercentage: boardWeight.usePercentage,
+              ...(boardWeight.percentageWindowDays !== undefined && {
+                percentageWindowDays: boardWeight.percentageWindowDays,
+              }),
+              ...(boardWeight.percentageShareBasis !== undefined && {
+                percentageShareBasis: boardWeight.percentageShareBasis,
+              }),
               updatedAt: now,
             });
           } else {
@@ -8077,6 +8085,8 @@ export const mutators = defineMutators({
               boardId: boardWeight.boardId,
               weight: boardWeight.weight,
               usePercentage: boardWeight.usePercentage,
+              percentageWindowDays: boardWeight.percentageWindowDays ?? 7,
+              percentageShareBasis: boardWeight.percentageShareBasis ?? 'ALL',
               createdBy: ctx.userID,
               createdAt: now,
               updatedAt: now,

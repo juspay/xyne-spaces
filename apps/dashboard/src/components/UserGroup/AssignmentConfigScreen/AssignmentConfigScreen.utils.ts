@@ -26,6 +26,10 @@ export interface ComplexityScoreLike {
   weight: number | null;
   /** "Use percentage assignment" — when false/unset the percentDiff term is not applied. */
   usePercentage?: boolean | null;
+  /** Look-back window (days) for % share assignment; only meaningful when usePercentage is on. */
+  percentageWindowDays?: number | null;
+  /** 'ALL' | 'OPEN' — which tickets in the window count toward a member's % share. */
+  percentageShareBasis?: string | null;
 }
 
 export interface ExpertiseMappingLike {

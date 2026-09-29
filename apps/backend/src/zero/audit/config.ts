@@ -463,7 +463,7 @@ export const AUDIT_TABLE_CONFIG: Record<string, AuditTableConfig> = {
       return res.boardName(rowString(row, 'boardId'));
     },
     ignoreFields: ['boardId', 'userGroupId'],
-    createDefaults: { usePercentage: false },
+    createDefaults: { usePercentage: false, percentageWindowDays: 7, percentageShareBasis: 'ALL' },
     deleteSummary: { field: 'weight' },
   },
 
