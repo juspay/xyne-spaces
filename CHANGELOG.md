@@ -1,3 +1,10 @@
+## [1.418.1](https://github.com/juspay/xyne-spaces/compare/v1.418.0...v1.418.1) (2026-09-29)
+
+
+### Bug Fixes
+
+* moving findAuthIdentityByEmail, ensureSelfDmForUser, and GitHub webhook behind runAsSystem ([#2376](https://github.com/juspay/xyne-spaces/issues/2376)) ([f8900d5](https://github.com/juspay/xyne-spaces/commit/f8900d582adaadf698fc539c6c637d3595c6e8a0))
+
 ## [1.418.0](https://github.com/juspay/xyne-spaces/compare/v1.417.0...v1.418.0) (2026-09-29)
 
 
