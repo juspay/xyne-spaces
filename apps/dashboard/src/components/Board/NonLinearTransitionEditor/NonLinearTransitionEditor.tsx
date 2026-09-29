@@ -1177,8 +1177,9 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
     [stages, transitionsByTempId, toggleTransition],
   );
 
-  // Track whether the user has manually dragged any node — if so, we
-  // preserve their custom positions and don't auto-relayout on transition changes.
+  // Track whether the graph is hand-arranged — a node was moved, or a saved
+  // arrangement was restored. If so, we preserve positions and don't
+  // auto-relayout on transition changes.
   const hasUserDraggedRef = useRef(false);
 
   const layoutFor = useCallback(
@@ -1220,19 +1221,20 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
   const lastAutoLayoutRef = useRef<TransitionGraphLayout | null>(null);
   const applyAutoLayout = useCallback(
     (layout: TransitionGraphLayout) => {
-      setNodes(prev => applyGraphLayout(prev, layout));
       if (layout === lastAutoLayoutRef.current) return;
       lastAutoLayoutRef.current = layout;
+      setNodes(prev => applyGraphLayout(prev, layout));
       fitAfterLayout();
     },
     [setNodes, fitAfterLayout],
   );
 
-  // Detect user-initiated node drags so we can preserve custom positions.
-  // A position change with `dragging === false` indicates the drag just ended.
+  // Detect user-initiated node moves (drag or arrow keys) so we can preserve
+  // custom positions. Only a position change that carries a position means a
+  // node moved; a plain click emits a position-less `dragging: false` change.
   const handleNodesChange = useCallback(
     (changes: NodeChange[]) => {
-      if (changes.some(c => c.type === 'position' && c.dragging === false)) {
+      if (changes.some(c => c.type === 'position' && c.position !== undefined)) {
         hasUserDraggedRef.current = true;
       }
       onNodesChange(changes);
@@ -1577,7 +1579,7 @@ export const NonLinearTransitionEditor: React.FC<NonLinearTransitionEditorProps>
     edges: new Map<string, DisplayEdgeCacheEntry>(),
   });
 
-  // Highlight the selected node/edge and its direct connections; dull the rest.
+  // Highlight the selected (or hovered) node/edge and its direct connections; dull the rest.
   const { displayNodes, displayEdges } = useMemo(() => {
     const nodeState = new Map<string, HighlightState>();
     const edgeState = new Map<string, HighlightState>();
