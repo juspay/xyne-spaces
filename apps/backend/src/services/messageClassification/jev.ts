@@ -44,9 +44,6 @@ const OPTION_TEXT_CHARS = 400;
 /** Citations kept per type — the same cap the LLM is given (MAX_SOURCES_PER_TYPE). */
 const MAX_SOURCES_PER_TYPE = 3;
 
-/** Jev's limit on the options in one choice question. */
-const MAX_CHOICE_OPTIONS = 255;
-
 const TAG = '[MSG-TAG][JEV]';
 
 /**
@@ -159,7 +156,7 @@ async function classifyThreadWithJev(
     // ─── Call 2: which messages are the evidence ─────────────────────────────────
     // A thread opened from a ticket may have no messages at all: its types come from the
     // ticket and cite nothing, as the LLM is told to do.
-    const messages = input.thread_messages.slice(-MAX_CHOICE_OPTIONS);
+    const messages = input.thread_messages;
     if (messages.length === 0) {
       return {
         ok: true,

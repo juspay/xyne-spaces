@@ -51,9 +51,6 @@ const JEV_TIMEOUT_MS = 8_000;
 /** The option standing for "this reaction settles nothing". Not a possible item id. */
 const NONE = 'none';
 
-/** Jev's limit on the options in one choice question, one kept for NONE. */
-const MAX_ITEM_OPTIONS = 254;
-
 const TAG = '[RADAR-JEV]';
 
 /**
@@ -179,7 +176,7 @@ async function checkReaction(input: ParserInput): Promise<ReactionCheck> {
     const message = input.new_messages[0];
     const emoji = input.reaction?.emoji;
     if (!message || !emoji) return { ok: false, reason: 'not a reaction pass' };
-    const items = input.open_items.slice(0, MAX_ITEM_OPTIONS);
+    const items = input.open_items;
     const name = (id: string) => input.known_users[id] ?? id;
 
     const completion: JevNoulQuestion = {
