@@ -87,6 +87,12 @@ import type {
   ClawCitation,
 } from '../utils/XyneAITypes';
 import { ActivityBlock } from './ActivityBlock';
+import { FlowScreenManager } from '../../../flowUI/FlowScreenManager';
+import {
+  flowMessageId,
+  requirePendingActionIndex,
+  unpresentedPendingActions,
+} from '../utils/XyneAITypes';
 import { PendingActionBlock } from './PendingActionBlock';
 import { respondToPendingAction } from '../../../../services/XyneAI/XyneAIPendingActionService';
 import { Link2 } from 'lucide-react';
@@ -626,6 +632,8 @@ interface MessageContentProps {
   onSummarizerCitationClick: (citation: SummarizerCitation) => void;
   /** Run dimensions merged into tracked clicks (see MessageItemProps). */
   trackContext?: Record<string, unknown> | undefined;
+  /** See MessageItemProps.flowCards — absence means render no cards. */
+  flowCards?: { conversationId: string; onActionComplete: () => void } | undefined;
 }
 
 interface SingleStatObject {
@@ -718,6 +726,10 @@ interface MessageItemProps {
   /** Run dimensions (surface, conversationId, agentSlug, model) merged into
    *  every act-on-answer click so it joins back to the run that produced it. */
   trackContext?: Record<string, unknown> | undefined;
+  /** Render this message's FlowUI artifact cards. Opt-in on purpose: absence
+   *  is the off switch, so a surface that cannot service a flow action never
+   *  shows a card it would leave stuck. */
+  flowCards?: { conversationId: string; onActionComplete: () => void } | undefined;
 }
 
 // Image preview component that fetches with auth and creates blob URL
@@ -1149,6 +1161,7 @@ export const MessageItem = React.memo(
     onDebug,
     onFollowUpSuggestionClick,
     trackContext,
+    flowCards,
   }: MessageItemProps): ReactElement => {
     const [copied, setCopied] = useState(false);
     const [isEditing, setIsEditing] = useState(false);
@@ -1516,6 +1529,7 @@ export const MessageItem = React.memo(
                 onCitationClick={onCitationClick}
                 onSummarizerCitationClick={onSummarizerCitationClick}
                 onOpenToolDebug={onOpenToolDebug}
+                flowCards={flowCards}
               />
             )}
           </div>
@@ -1768,6 +1782,7 @@ const MessageContent = ({
   onSummarizerCitationClick,
   onOpenToolDebug,
   trackContext,
+  flowCards,
 }: MessageContentProps): ReactElement => {
   const resolveMention = useMentionResolver(message.userTags);
 
@@ -1783,6 +1798,11 @@ const MessageContent = ({
 
   // Memoize markdown components to prevent re-renders on parent updates
   const markdownComponents = useMemo(() => createMarkdownComponents(message.id), [message.id]);
+
+  const visiblePendingActions = useMemo(
+    () => unpresentedPendingActions(message.pendingActions, message.uiFlows),
+    [message.pendingActions, message.uiFlows],
+  );
 
   // Extend markdown components with image download button for sidebar
   const sidebarMarkdownComponents = useMemo<Components>(() => {
@@ -1973,15 +1993,37 @@ const MessageContent = ({
         messageAborted={!!message.isAborted}
       />
 
+      {flowCards &&
+        message.uiFlows?.map(flow => (
+          <div key={flow.screenId} className='mt-1.5'>
+            <FlowScreenManager
+              flow={flow}
+              messageId={flowMessageId(flow, message.id)}
+              conversationId={flowCards.conversationId}
+              onClose={flowCards.onActionComplete}
+            />
+          </div>
+        ))}
+
       {/* v2: Pending Actions (Human-in-the-loop) */}
-      {message.pendingActions && message.pendingActions.length > 0 && (
+      {visiblePendingActions.length > 0 && (
         <PendingActionBlock
-          actions={message.pendingActions}
-          onApprove={async (action, index) => {
-            await respondToPendingAction(message, action, index, true);
+          actions={visiblePendingActions}
+          onApprove={async action => {
+            await respondToPendingAction(
+              message,
+              action,
+              requirePendingActionIndex(message.pendingActions, action),
+              true,
+            );
           }}
-          onDecline={async (action, index) => {
-            await respondToPendingAction(message, action, index, false);
+          onDecline={async action => {
+            await respondToPendingAction(
+              message,
+              action,
+              requirePendingActionIndex(message.pendingActions, action),
+              false,
+            );
           }}
         />
       )}
