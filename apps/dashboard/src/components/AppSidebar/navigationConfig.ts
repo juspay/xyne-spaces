@@ -222,7 +222,6 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
     popout: true,
   },
   { path: '/team-intelligence', label: 'Team Intelligence', icon: Atom, popout: true },
-  { path: '/claw-agents', label: 'Claw Agents', icon: Bot, popout: true },
   { path: '/secrets', label: 'Secrets', icon: KeySlant, iconSize: 18, popout: true },
 ];
 
