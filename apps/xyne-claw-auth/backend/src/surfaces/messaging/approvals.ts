@@ -23,6 +23,7 @@ import { resolveIdentity } from "./identity.js";
 import { getSpacesPostTarget, looksLikeMemberIdList, type SpacesPostTarget } from "../../lib/spaces-post-target.js";
 import { mentionShorthandToText } from "../../lib/mention-transform.js";
 import { getSpacesAuthForUser } from "../../lib/spaces-db.js";
+import { resolveUserSendMessageTarget } from "../../mcp/user-send-message-target.js";
 import type { ChannelAccount, ChannelDeliveryTarget, InteractiveCard } from "./plugin.js";
 
 const log = createLogger("channel-approvals");
@@ -68,7 +69,8 @@ function describePostTarget(params: Record<string, unknown>, target: SpacesPostT
   const dm = target?.directMessage;
   const dmWith = dm?.with.length ? ` with *${dm.with.join(", ")}*` : "";
   const channel = !dm && target?.channelName && !looksLikeMemberIdList(target.channelName) ? `*#${target.channelName}*` : "";
-  if (str(params["conversationId"])) {
+  const destination = resolveUserSendMessageTarget(params);
+  if (destination.kind === "conversation") {
     const thread = target?.thread;
     const preview = thread ? clamp(cardText(thread.html).replace(/\n+/g, " "), THREAD_PREVIEW_CHARS) : "";
     const inChannel = dm ? ` in your direct message${dmWith}` : channel ? ` in ${channel}` : "";
@@ -77,9 +79,13 @@ function describePostTarget(params: Record<string, unknown>, target: SpacesPostT
       ? `Reply as you in the thread${inChannel} started${by}:\n> ${preview}\n\nYour reply`
       : `Reply as you in an existing thread${inChannel}`;
   }
-  if (str(params["channelId"])) {
+  if (destination.kind === "channel") {
     if (dm) return `Send this message as you in a direct message${dmWith ? dmWith.replace(" with ", " to ") : ""}`;
     return `Send this message as you to ${channel || "a Spaces channel"}`;
+  }
+  if (destination.kind === "recipient") {
+    // Never print the raw recipient id; fall back to a generic label.
+    return `Send this message as you in a direct message to ${dmWith ? dmWith.replace(" with ", "") : "a Spaces user"}`;
   }
   return "Send this message as you to Xyne Spaces";
 }
@@ -159,6 +165,7 @@ async function lookupPostTarget(action: SignedWriteAction): Promise<SpacesPostTa
     {
       ...(str(action.params["channelId"]) ? { channelId: str(action.params["channelId"]) } : {}),
       ...(str(action.params["conversationId"]) ? { conversationId: str(action.params["conversationId"]) } : {}),
+      ...(str(action.params["recipientUserId"]) ? { recipientUserId: str(action.params["recipientUserId"]) } : {}),
     },
     auth,
     action.userId,

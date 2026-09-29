@@ -28,6 +28,24 @@ const base = {
   agentSlug: "assistant",
 };
 
+describe("describeWriteAction", () => {
+  it("names the DM recipient on the approval card without leaking the id", () => {
+    const body = describeWriteAction(
+      "user-send-message",
+      { recipientUserId: "user_2", content: "hello" },
+      { channelName: null, directMessage: { with: ["Asha"] } },
+    );
+    expect(body).toContain("direct message to *Asha*");
+    expect(body).not.toContain("user_2");
+  });
+
+  it("falls back to a generic DM label when the recipient name is unknown", () => {
+    const body = describeWriteAction("user-send-message", { recipientUserId: "user_2", content: "hello" });
+    expect(body).toContain("direct message to a Spaces user");
+    expect(body).not.toContain("user_2");
+  });
+});
+
 describe("redeemApproval", () => {
   beforeEach(() => {
     created.mockReset();
