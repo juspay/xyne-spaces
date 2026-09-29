@@ -226,7 +226,7 @@ const UserHoverWrapperInner: React.FC<UserHoverWrapperProps> = ({
             )}
           </div>
         </div>
-        {!isCurrentUser && (
+        {!isCurrentUser && !isUserDeactivated(user) && (
           <div className='flex items-center justify-end p-4 gap-3 border-t border-muted-foreground/20'>
             <Button
               variant='secondary'

@@ -50,6 +50,7 @@ import { PresentToolbar } from 'blocknote-layout-extensions';
 import { mutators } from '../../../zero/mutators';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useChannel } from '../../../hooks/useChannels';
+import { useIsDmReadOnly } from '../../../hooks/useIsDmReadOnly';
 import { useCurrentUserGroupIds } from '../../../hooks/useUserGroup';
 import {
   filterExcludedCallGeneratedCanvases,
@@ -134,6 +135,8 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
   const [onlyArchivedCanvases, setOnlyArchivedCanvases] = useState(false);
   const [view, setView] = useState<'list' | 'editor'>('list');
   const channel = useChannel(channelId);
+  // Deactivated 1:1 DM archive → no canvas creation (folder or file).
+  const isDmReadOnly = useIsDmReadOnly(channelId);
   const currentUserGroupIds = useCurrentUserGroupIds();
   const [adminParticipations] = useCachedQuery(queries.myChannelParticipations({}));
   const isChannelAdmin = useMemo(
@@ -901,38 +904,42 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
                   />
                 </div>
               </Tooltip>
-              <Button
-                variant='outline'
-                size='sm'
-                onClick={openCreateFolderDialog}
-                disabled={isCreatingFolder || isChannelArchived}
-                data-track-category='CANVAS'
-                data-track-name='Create_Channel_Folder'
-                data-track-metadata={JSON.stringify({ channelId })}
-              >
-                {isCreatingFolder ? (
-                  <Loader2 size={16} className='animate-spin' />
-                ) : (
-                  <Plus size={16} />
-                )}
-                {isCreatingFolder ? 'Creating...' : 'New Folder'}
-              </Button>
-              <Button
-                variant='default'
-                size='sm'
-                onClick={() => void handleCreateCanvas()}
-                disabled={isCreatingCanvas || isChannelArchived}
-                data-track-category='CANVAS'
-                data-track-name='Create_Canvas'
-                data-track-metadata={JSON.stringify({ channelId })}
-              >
-                {isCreatingCanvas ? (
-                  <Loader2 size={16} className='animate-spin' />
-                ) : (
-                  <Plus size={16} />
-                )}
-                {isCreatingCanvas ? 'Creating...' : 'New Canvas'}
-              </Button>
+              {!isDmReadOnly && (
+                <>
+                  <Button
+                    variant='outline'
+                    size='sm'
+                    onClick={openCreateFolderDialog}
+                    disabled={isCreatingFolder || isChannelArchived}
+                    data-track-category='CANVAS'
+                    data-track-name='Create_Channel_Folder'
+                    data-track-metadata={JSON.stringify({ channelId })}
+                  >
+                    {isCreatingFolder ? (
+                      <Loader2 size={16} className='animate-spin' />
+                    ) : (
+                      <Plus size={16} />
+                    )}
+                    {isCreatingFolder ? 'Creating...' : 'New Folder'}
+                  </Button>
+                  <Button
+                    variant='default'
+                    size='sm'
+                    onClick={() => void handleCreateCanvas()}
+                    disabled={isCreatingCanvas || isChannelArchived}
+                    data-track-category='CANVAS'
+                    data-track-name='Create_Canvas'
+                    data-track-metadata={JSON.stringify({ channelId })}
+                  >
+                    {isCreatingCanvas ? (
+                      <Loader2 size={16} className='animate-spin' />
+                    ) : (
+                      <Plus size={16} />
+                    )}
+                    {isCreatingCanvas ? 'Creating...' : 'New Canvas'}
+                  </Button>
+                </>
+              )}
             </div>
           </div>
           <div className='flex-1 overflow-hidden'>
@@ -957,9 +964,11 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
               activeFilter={activeFilter}
               onFilterChange={setActiveFilter}
               selectedCanvasId={canvas?.id}
-              onCreateCanvasInFolder={folder => {
-                void handleCreateCanvasInFolder(folder);
-              }}
+              {...(!isDmReadOnly && {
+                onCreateCanvasInFolder: (folder: CanvasFolder) => {
+                  void handleCreateCanvasInFolder(folder);
+                },
+              })}
               onDeleteFolder={handleDeleteFolder}
               canManageAllFolders={isChannelAdmin}
               isCreatingCanvas={isCreatingCanvas}

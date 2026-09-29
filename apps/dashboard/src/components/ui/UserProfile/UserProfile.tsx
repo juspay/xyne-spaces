@@ -499,8 +499,9 @@ export const UserProfile: React.FC<UserProfileProps> = ({
             </div>
           )}
 
-          {/* Action Buttons - Message and Huddle */}
-          {!isOwnProfile && (
+          {/* Action Buttons - Message and Huddle. Hidden for deactivated users: both
+              would hit /users/me/dms → 404 and surface a toast on click. */}
+          {!isOwnProfile && !isUserDeactivated(user) && (
             <div className='flex items-center gap-2 mt-4'>
               <Button
                 onClick={handleMessageClick}
