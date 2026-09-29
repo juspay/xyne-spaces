@@ -14,7 +14,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const CDR_RETENTION_DAYS = 15;
 const CDR_REQUEST_GAP_MS = 31_000;
 // A large backfill writes its calls in chunks so it does not hammer the DB.
-const INGEST_CHUNK_SIZE = 50;
+const INGEST_CHUNK_SIZE = 20;
 const INGEST_CHUNK_PAUSE_MS = 1_000;
 
 function sleep(ms: number): Promise<void> {
