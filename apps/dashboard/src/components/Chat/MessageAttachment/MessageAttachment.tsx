@@ -1321,7 +1321,6 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
     }
   };
 
-  // Render inline table preview for CSV files on PC only (mobile shows as regular attachment)
   if (isCsv && !compact && !isMobile) {
     return (
       <InlineCsvFile

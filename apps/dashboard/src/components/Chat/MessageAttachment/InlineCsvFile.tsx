@@ -1,26 +1,9 @@
-/**
- * InlineCsvFile - renders a bounded, collapsible table preview of a CSV
- * attachment directly in the chat timeline (desktop only).
- *
- * Performance guards:
- * - The fetch is deferred until the card scrolls near the viewport
- *   (IntersectionObserver), so long channels full of daily CSV drops do not
- *   download every file on mount.
- * - Blob fetches go through `createPreviewUrl`, which is backed by React Query
- *   (`['preview-blob', url]`, 10 min staleTime), so scrolling away and back
- *   does not re-download.
- * - Only the first CSV_PREVIEW_BYTES of the file are decoded and PapaParse stops
- *   after CSV_PREVIEW_ROWS rows, so parse cost is bounded regardless of file size.
- * - Rendered DOM is capped at CSV_PREVIEW_ROWS x CSV_PREVIEW_COLS cells.
- */
-
 import React, { useEffect, useRef, useState } from 'react';
 import { Download, Maximize2, Sheet } from 'lucide-react';
 import { createPreviewUrl } from '../../../services/clients/fileFetchService';
 import { downloadAttachment, truncateFileName } from './utils';
 import { useWindowWidth } from '../../../hooks/useWindowWidth';
 import { CSV_PREVIEW_BYTES, CSV_PREVIEW_COLS, parseCsvPreview, type CsvPreview } from './csvPreview';
-
 
 const useNearViewport = <T extends Element>(): [React.RefObject<T | null>, boolean] => {
   const ref = useRef<T | null>(null);

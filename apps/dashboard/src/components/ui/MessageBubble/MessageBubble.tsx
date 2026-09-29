@@ -191,8 +191,6 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
   // every sibling attachment to a pill.
   const htmlAttachments = activeAttachments.filter(a => isHtmlAttachment(a));
 
-  // CSV files get an inline table preview on desktop (mobile keeps the pill).
-  // Pulled out before the pill split for the same reason as HTML above.
   const csvAttachments = isMobile
     ? []
     : activeAttachments.filter(a => isCsvFile(a.mimetype, a.originalFilename));
@@ -374,7 +372,6 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
             </div>
           )}
 
-          {/* CSV files - inline table preview (first rows/columns) */}
           {csvAttachments.length > 0 && (
             <div className='flex flex-col gap-2'>
               {csvAttachments.map(attachment => (
