@@ -71,7 +71,6 @@ export class DatabaseClient {
       }
 
       setupEnumTextValidation(DatabaseClient.instance);
-      // Repairs canvas content every backend writer produces (XYNE-65102).
       setupCanvasContentSanitize(DatabaseClient.instance);
       setupMessageMetadataSync(DatabaseClient.instance);
       setupTicketActivityChannelSync(DatabaseClient.instance);

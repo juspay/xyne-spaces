@@ -729,12 +729,6 @@ const CanvasEditorContent = forwardRef<CanvasEditorRef, CanvasEditorProps>(
 
 CanvasEditorContent.displayName = 'CanvasEditorContent';
 
-/**
- * Public canvas editor. The editor is created from stored content during
- * render, so a document the schema rejects throws here; the boundary keeps
- * that failure inside the canvas area instead of crashing the app
- * (XYNE-65102).
- */
 export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>((props, ref) => (
   <CanvasRenderBoundary surface='canvas-editor' canvasId={props.canvasId}>
     <CanvasEditorContent {...props} ref={ref} />

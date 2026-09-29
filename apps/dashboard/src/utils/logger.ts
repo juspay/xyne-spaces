@@ -197,7 +197,6 @@ export const Event = {
   CANVAS_CONNECTION_ESTABLISHED: 'canvas_connection_established',
   CANVAS_CONNECTION_ERROR: 'canvas_connection_error',
   CANVAS_CONTENT_REPAIRED: 'canvas_content_repaired',
-  CANVAS_CONTENT_SANITIZE_FAILED: 'canvas_content_sanitize_failed',
   CANVAS_RENDER_FAILED: 'canvas_render_failed',
   CANVAS_SYNC_COMPLETE: 'canvas_sync_complete',
   CANVAS_DELETED: 'canvas_deleted',

@@ -89,7 +89,6 @@ import {
   rethrowCanvasFolderNameConflict,
 } from '../utils/canvasFolderNameConflict.js';
 import { resolveCanvasHierarchy } from '../utils/canvasHierarchy.js';
-import { sanitizeCanvasContent } from '../utils/canvasContent.js';
 import {
   SDLC_MEMBERSHIP_RELATION,
   SDLC_CONTAINMENT_RELATION,
@@ -6040,9 +6039,8 @@ export const mutators = defineMutators({
           workspaceId: ctx.workspaceId,
           id,
           title,
-          // Same repair the server applies, so the optimistic row matches (XYNE-65102).
           // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-          content: sanitizeCanvasContent(content || []).content,
+          content: content || [],
           channelId: resolvedChannelId,
           folderId,
           projectId: resolvedProjectId,
@@ -6174,7 +6172,7 @@ export const mutators = defineMutators({
           updatedAt: timestamp,
           ...(title !== undefined && { title }),
           // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-          ...(content !== undefined && { content: sanitizeCanvasContent(content).content }),
+          ...(content !== undefined && { content }),
           ...(visibility !== undefined && { visibility }),
           ...(isCollaborative !== undefined && { isCollaborative }),
           ...(folderId !== undefined && { folderId }),
@@ -6947,8 +6945,7 @@ export const mutators = defineMutators({
           id,
           canvasId,
           name: name.trim(),
-          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-          content: sanitizeCanvasContent(content).content,
+          content,
           contentHash,
           createdBy: ctx.userID,
           createdAt: timestamp,
@@ -7017,10 +7014,7 @@ export const mutators = defineMutators({
           lastEditedBy: ctx.userID,
           lastEditedAt: timestamp,
           updatedAt: timestamp,
-          // Versions saved before XYNE-65102 may hold content the editor rejects.
-          ...(!canvas.isCollaborative && {
-            content: sanitizeCanvasContent(version.content).content,
-          }),
+          ...(!canvas.isCollaborative && { content: version.content }),
         });
 
         await tx.mutate.canvas_versions.update({

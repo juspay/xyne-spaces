@@ -544,8 +544,6 @@ const CollaborativeCanvasEditorContent = forwardRef<
             (Array.isArray(firstBlock.content) && firstBlock.content.length === 0)));
 
       if (isDocumentEmpty) {
-        // Legacy (pre-collaboration) content comes straight from Canvas.content,
-        // so it gets the same repair as the non-collaborative editor (XYNE-65102).
         editor.replaceBlocks(
           currentBlocks,
           removeUnknownBlocks(initialLegacyContent, knownCanvasBlockTypes, canvasId),
@@ -961,12 +959,6 @@ const CollaborativeCanvasEditorContent = forwardRef<
 
 CollaborativeCanvasEditorContent.displayName = 'CollaborativeCanvasEditorContent';
 
-/**
- * Public collaborative editor. Content arrives from Yjs and from legacy
- * `Canvas.content`; if either holds a node the schema rejects, the boundary
- * keeps the failure inside the canvas area instead of crashing the app
- * (XYNE-65102).
- */
 export const CollaborativeCanvasEditor = forwardRef<
   CollaborativeCanvasEditorRef,
   CollaborativeCanvasEditorProps

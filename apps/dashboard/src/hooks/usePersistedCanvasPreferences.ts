@@ -90,12 +90,6 @@ const updatePreferences = (updater: (prefs: CanvasPreferences) => CanvasPreferen
   subscribers.forEach(listener => listener());
 };
 
-/**
- * Forget the remembered canvas if it is the one given. Called outside React
- * (from the canvas render error boundary) so that a canvas which cannot be
- * rendered is not reopened automatically every time "My Canvas" is visited
- * (XYNE-65102). Returns true when the preference was cleared.
- */
 export const clearLastCanvasIdIfMatches = (canvasId: string): boolean => {
   if (!canvasId || preferences.lastCanvasId !== canvasId) return false;
   updatePreferences(prev => ({ ...prev, lastCanvasId: null }));

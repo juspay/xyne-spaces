@@ -271,11 +271,6 @@ const CanvasPreviewContent: React.FC<CanvasPreviewProps> = ({
   );
 };
 
-/**
- * Read-only canvas preview (chat bubbles, side panels). A canvas that cannot
- * be rendered shows a small notice in place of the preview instead of
- * breaking the surrounding conversation (XYNE-65102).
- */
 export const CanvasPreview: React.FC<CanvasPreviewProps> = props => {
   const { canvasId: paramsCanvasId } = useParams<{ canvasId: string }>();
   const canvasId = props.canvasId || paramsCanvasId;

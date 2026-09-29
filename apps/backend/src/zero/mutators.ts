@@ -223,24 +223,13 @@ import {
 import { validateFlowDecisionFields } from '@/zero/utils/flowPlanValidation';
 import { getEncryptionProvider } from '@/services/encryption';
 
-/**
- * Repair canvas content before a Zero mutator writes it (XYNE-65102).
- *
- * Zero mutators write straight to Postgres and never pass through the Prisma
- * middleware, so every canvas and canvas-version write in this file calls
- * this. A repair is logged, not rejected: the user keeps the text they typed
- * and the stored row stays loadable by the editor.
- */
 function sanitizeCanvasContentForWrite<T>(
   content: T,
   context: { mutator: string; canvasId: string; userId: string },
 ): T {
-  const { content: sanitized, report } = sanitizeCanvasContent(content);
-  if (report.changed) {
-    logger.warn('[CanvasContentSanitize] Repaired canvas content in Zero mutator', {
-      ...context,
-      ...report,
-    });
+  const { content: sanitized, changed } = sanitizeCanvasContent(content);
+  if (changed) {
+    logger.warn('[CanvasContentSanitize] Repaired canvas content in Zero mutator', context);
   }
   return sanitized;
 }
@@ -10775,7 +10764,6 @@ export function createMutators(
             lastEditedBy: authData.sub,
             lastEditedAt: timestamp,
             updatedAt: timestamp,
-            // Versions saved before XYNE-65102 may hold content the editor rejects.
             ...(!canvas.isCollaborative && {
               content: sanitizeCanvasContentForWrite(version.content, {
                 mutator: 'canvasVersion.restore',
