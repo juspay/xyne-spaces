@@ -165,3 +165,16 @@ describe("approval card never shows raw ids", () => {
     );
   });
 });
+
+describe("generic write card", () => {
+  it("shows list parameters so the person can see what changes", () => {
+    expect(
+      describeWriteAction("google-gmail-modify-labels", {
+        messageIds: ["18f2a", "18f2b"],
+        addLabelIds: ["STARRED"],
+        removeLabelIds: [],
+        options: { dryRun: false },
+      }),
+    ).toBe("Run *google-gmail-modify-labels*\n\nmessageIds: 18f2a, 18f2b\naddLabelIds: STARRED");
+  });
+});
