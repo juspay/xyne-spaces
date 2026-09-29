@@ -1,4 +1,4 @@
-import { ReactElement, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
+import { ReactElement, useEffect, useRef, useCallback } from 'react';
 import { Outlet } from 'react-router-dom';
 import { KeepAliveOutlet } from '../../components/KeepAliveOutlet/KeepAliveOutlet';
 import ChatDirectory from '../../components/Chat/ChatDirectory/ChatDirectory';
@@ -75,9 +75,7 @@ const ChatScreen = ({ shouldStackThread = false }: ChatScreenProps): ReactElemen
   }, [handleResizeEvent]);
 
   // Collapse (don't unmount) the sidebar on full-screen pages — keeps rows mounted.
-  // Before paint, so returning from a full-screen page doesn't show the old width
-  // for a frame and then re-lay out the conversation.
-  useLayoutEffect(() => {
+  useEffect(() => {
     const panel = chatSidebarPanelRef.current;
     if (!panel) return;
     if (isFullScreenPage) {

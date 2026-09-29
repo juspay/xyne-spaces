@@ -10,7 +10,7 @@ import type {
   KeepAliveOutletProps,
   KeepAlivePaneProps,
 } from './KeepAliveOutlet.types';
-import { isSameLocation, shallowEqual, upsertPane } from './KeepAliveOutlet.utils';
+import { upsertPane } from './KeepAliveOutlet.utils';
 
 /**
  * Restores scroll offsets after an `Activity` reveal.
@@ -95,48 +95,21 @@ export const KeepAliveOutlet = ({
   const matches = useMatches();
   const { matches: parentMatches } = useContext(RouteContext);
   const panesRef = useRef<Pane[]>([]);
-  const activeKeyRef = useRef<string | null>(null);
 
-  // Inside a hidden pane our RouteContext is frozen at capture time, but
-  // `useMatches()` follows the live router. Once the live route no longer runs
-  // through our parent, the child at our depth belongs to some other screen:
-  // hold still instead of adopting it as a new pane.
-  const depth = parentMatches.length;
-  const parentMatch = parentMatches[depth - 1];
-  const liveParent = matches[depth - 1];
-  const isLive =
-    parentMatch === undefined ||
-    (liveParent !== undefined &&
-      liveParent.id === parentMatch.route.id &&
-      liveParent.pathname === parentMatch.pathname);
+  // The match this outlet renders sits directly below our own depth. Keying on
+  // its route id rather than its pathname gives one live instance per screen:
+  // param changes within a screen reconcile as they always did, while sibling
+  // screens each keep their own instance.
+  const activeMatch = matches[parentMatches.length];
+  const activeKey = activeMatch ? (getKey?.(activeMatch) ?? activeMatch.id) : null;
 
-  if (isLive) {
-    // The match this outlet renders sits directly below our own depth. Keying on
-    // its route id rather than its pathname gives one live instance per screen:
-    // param changes within a screen reconcile as they always did, while sibling
-    // screens each keep their own instance.
-    const activeMatch = matches[depth];
-    const activeKey = activeMatch ? (getKey?.(activeMatch) ?? activeMatch.id) : null;
-
-    if (activeKey !== null && outlet !== null) {
-      // Returning to a pane at the URL it was left at keeps its element and
-      // location objects, so React skips the subtree and only effects re-run.
-      const previous = panesRef.current.find(pane => pane.key === activeKey);
-      const reusable =
-        previous !== undefined &&
-        isSameLocation(previous.locationContext.location, liveLocation.location) &&
-        shallowEqual(previous.context, context);
-      panesRef.current = upsertPane(
-        panesRef.current,
-        reusable
-          ? previous
-          : { key: activeKey, element: outlet, locationContext: liveLocation, context },
-        max,
-      );
-    }
-    activeKeyRef.current = activeKey;
+  if (activeKey !== null && outlet !== null) {
+    panesRef.current = upsertPane(
+      panesRef.current,
+      { key: activeKey, element: outlet, locationContext: liveLocation },
+      max,
+    );
   }
-  const activeKey = activeKeyRef.current;
 
   const panes = panesRef.current;
   if (panes.length === 0) return null;
@@ -150,7 +123,10 @@ export const KeepAliveOutlet = ({
         // navigation, which is a remount — the exact thing this component exists
         // to avoid.
         return (
-          <LocationContext.Provider key={pane.key} value={pane.locationContext}>
+          <LocationContext.Provider
+            key={pane.key}
+            value={isActive ? liveLocation : pane.locationContext}
+          >
             <KeepAlivePane mode={isActive ? 'visible' : 'hidden'}>
               <Activity mode={isActive ? 'visible' : 'hidden'} name={pane.key}>
                 {pane.element}
