@@ -6,7 +6,7 @@
 import express, { Router, Request, Response } from 'express';
 import crypto from 'crypto';
 import type { ExternalSource } from '@prisma/client';
-import { DeskType, isDeskChannelType } from '@xyne/shared';
+import { ChannelType, DeskType, isDeskChannelType } from '@xyne/shared';
 import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
 import { extractEmailAddress } from '@/utils/email';
 import { MAILBOX_SOURCE_TYPES } from '@/database/repositories/externalSourceRepository';
@@ -69,9 +69,15 @@ export async function resolveChannelMailbox(
   if (!mailbox) {
     const channel = await db.channel.findUnique({
       where: { id: channelId },
-      select: { workspaceId: true },
+      select: { workspaceId: true, type: true },
     });
-    if (channel?.workspaceId) {
+    if (channel?.type === ChannelType.CALL && channel.workspaceId) {
+      mailbox = await db.externalSource.findFirst({
+        where: { workspaceId: channel.workspaceId, sourceType: 'ozonetel', isActive: true },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (mailbox) targetChannelId = channelId;
+    } else if (channel?.workspaceId) {
       const channelEmailSource = await channelEmailAliasService.getWorkspaceChannelEmailSource(
         channel.workspaceId,
       );
@@ -559,7 +565,7 @@ router.post(
       const jobs: Array<{ sourceId: string; installedAppId: string | null; jobId: string }> = [];
       for (const { source, installedAppId, jobData } of actionable) {
         const job = await emailFetchQueue.getQueue().add(
-          'refetch',
+          source.sourceType === 'ozonetel' ? 'ozonetel-refetch' : 'refetch',
           {
             sourceId: source.id,
             channelId,

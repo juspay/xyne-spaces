@@ -3,6 +3,7 @@ import { ExternalSourcePlatform } from '../../core/types';
 import { OzonetelAuthenticator } from './authenticator';
 import { OzonetelFlow } from './flow';
 import { OzonetelPostprocessor } from './postprocessor';
+import { OzonetelRefetch } from './refetch';
 import { OzonetelTransformer } from './transformer';
 
 export const ozonetelAdapter = AdapterFactory.create(
@@ -11,10 +12,12 @@ export const ozonetelAdapter = AdapterFactory.create(
   new OzonetelTransformer(),
   new OzonetelFlow(),
   new OzonetelPostprocessor(),
+  new OzonetelRefetch(),
 );
 
 export { OzonetelAuthenticator } from './authenticator';
 export { OzonetelFlow } from './flow';
 export { OzonetelPostprocessor } from './postprocessor';
+export { OzonetelRefetch, syncRecentOzonetelCalls } from './refetch';
 export { OzonetelTransformer } from './transformer';
 export * from './types';

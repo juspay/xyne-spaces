@@ -1,5 +1,6 @@
 import { asService } from './base';
 import { catchUpFromCursor } from '@/integrations/adapters/google/refetch';
+import { syncRecentOzonetelCalls } from '@/integrations/adapters/ozonetel/refetch';
 import { socialMediaService } from '@/integrations/social-media/socialMediaService';
 import { emailService } from '@/services/emailService';
 import type { ExternalSource } from '@prisma/client';
@@ -43,6 +44,17 @@ export function refetchEmailSource(
     'email-fetch-worker',
     workspaceId,
     () => adapter.refetch!(source, options),
+  );
+}
+
+/** Hourly Ozonetel CDR sync is a background job with no request context, like refetchEmailSource. */
+export function syncOzonetelSource(workspaceId: string, source: ExternalSource) {
+  return asService(
+    [...EMAIL_FETCH_TABLES],
+    'ozonetel call sync: background job has no request context, ingested rows need workspaceId stamped',
+    'email-fetch-worker',
+    workspaceId,
+    () => syncRecentOzonetelCalls(source),
   );
 }
 

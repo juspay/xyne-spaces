@@ -2104,6 +2104,7 @@ const SupportScreen = (): ReactElement => {
   );
   const selectedChannelName = selectedChannelFull?.name?.trim() || 'Xyne Desk';
   const isSocialMediaDesk = selectedChannelFull?.type === ChannelType.SOCIAL_MEDIA;
+  const isCallDesk = selectedChannelFull?.type === ChannelType.CALL;
 
   // Manual fetch for the selected desk. Social-media desks fetch every review
   // currently available from Google; email desks open the range picker.
@@ -2112,6 +2113,7 @@ const SupportScreen = (): ReactElement => {
   const { refetch: handleRefetch, isPending: isRefetching } = useRefetchExternalSource(
     refetchChannelId,
     isSocialMediaDesk,
+    isCallDesk,
   );
   const canRefetch = !!refetchChannelId;
   const {
@@ -3460,7 +3462,9 @@ const SupportScreen = (): ReactElement => {
                                 ? 'Fetching latest…'
                                 : isSocialMediaDesk
                                   ? 'Fetch reviews'
-                                  : 'Fetch latest emails'
+                                  : isCallDesk
+                                    ? 'Fetch missed calls'
+                                    : 'Fetch latest emails'
                             }
                             side='bottom'
                           >
@@ -4678,6 +4682,15 @@ const SupportScreen = (): ReactElement => {
                   summaryLabel: 'Will fetch reviews posted',
                 }
               : {})}
+          {...(isCallDesk && {
+            ...(!fetchTarget?.sourceName && {
+              title: 'Fetch calls',
+              subtitle: 'Pull calls from Ozonetel that did not reach this workspace.',
+              summaryLabel: 'Will fetch calls made',
+            }),
+            maxDays: 15,
+            withTime: true,
+          })}
           onConfirm={range => {
             setShowRefetchDialog(false);
             handleRefetch(range, fetchTarget);

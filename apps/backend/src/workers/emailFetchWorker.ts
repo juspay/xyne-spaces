@@ -2,6 +2,7 @@ import Bull from 'bull';
 import { ActivityClassification, NotificationType } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
+import { db } from '@/database/client';
 import { adapterRegistry } from '@/integrations/core/adapterRegistry';
 import '@/integrations';
 import { notificationService } from '@/notification-service';
@@ -12,8 +13,14 @@ import {
   type SocialMediaFetchJobData,
   type EmailFetchQueueJobData,
   type CursorCatchupJobData,
+  describeJobSource,
 } from '@/queues/emailFetchQueue';
-import { catchUpEmailSource, refetchEmailSource, syncSocialMediaSources } from '@/bypassAcl/emailFetchServices';
+import {
+  catchUpEmailSource,
+  refetchEmailSource,
+  syncOzonetelSource,
+  syncSocialMediaSources,
+} from '@/bypassAcl/emailFetchServices';
 import { getHttpStatus } from '@/services/googleService';
 import { seedSyncCursor } from '@/services/syncCursorRecovery';
 
@@ -40,8 +47,19 @@ class EmailFetchWorker {
       return this.processCursorCatchup(job as Bull.Job<CursorCatchupJobData>);
     });
 
+    // Call pulls sleep 31s between Ozonetel requests, so they get their own slot instead of blocking email refetches.
+    queue.process('ozonetel-refetch', 1, async (job) => {
+      return this.processJob(job as Bull.Job<EmailFetchJobData>);
+    });
+    queue.process('ozonetel-sync', 1, async () => this.processOzonetelSync());
+    await queue.add(
+      'ozonetel-sync',
+      { ozonetelSync: true },
+      { repeat: { cron: '5 * * * *' }, jobId: 'ozonetel-sync', attempts: 1 },
+    );
+
     queue.on('failed', (job, err) => {
-      const source = 'sourceId' in job.data ? job.data.sourceId : job.data.sourceIds.join(',');
+      const source = describeJobSource(job.data);
       logger.error(
         `[EMAIL-FETCH-WORKER] Job ${job.id} (${job.name}) failed — source ${source}:`,
         err,
@@ -49,7 +67,7 @@ class EmailFetchWorker {
 
       if ('sourceIds' in job.data) {
         void this.notifySocialMediaFailure(job.data, err);
-      } else if (job.name === 'refetch') {
+      } else if (job.name === 'refetch' || job.name === 'ozonetel-refetch') {
         void this.notifyFailure(job.data as EmailFetchJobData, err);
       }
     });
@@ -120,6 +138,25 @@ class EmailFetchWorker {
     }
   }
 
+  private async processOzonetelSync(): Promise<void> {
+    // A manual call pull already holds Ozonetel's 2-requests-a-minute budget.
+    const active = await emailFetchQueue.getQueue().getActive();
+    if (active.some(job => job.name === 'ozonetel-refetch')) return;
+    const sources = await db.externalSource.findMany({
+      where: { sourceType: 'ozonetel', isActive: true },
+    });
+    for (const source of sources) {
+      try {
+        const result = await syncOzonetelSource(source.workspaceId, source);
+        logger.info(
+          `[EMAIL-FETCH-WORKER] Ozonetel sync done — source ${source.id}: processed=${result.processed} new=${result.newTickets} skipped=${result.skipped} errors=${result.errors.length}`,
+        );
+      } catch (error) {
+        logger.error('[EMAIL-FETCH-WORKER] Ozonetel sync failed', { sourceId: source.id, error });
+      }
+    }
+  }
+
   private async processJob(job: Bull.Job<EmailFetchJobData>): Promise<void> {
     const { sourceId, channelId, startDate, endDate, targetChannelId, dlEmail } = job.data;
     logger.info(
@@ -168,7 +205,7 @@ class EmailFetchWorker {
       `[EMAIL-FETCH-WORKER] Job ${job.id} done — processed=${result.processed} new=${result.newTickets} skipped=${result.skipped} errors=${result.errors?.length ?? 0}`,
     );
 
-    await this.notifySuccess(job.data, result);
+    await this.notifySuccess(job.data, result, source.sourceType === 'ozonetel' ? 'call' : 'email');
 
     if (job.data.isDlMemberSync) {
       await this.cleanupDlMemberSyncSource(sourceRepo, sourceId);
@@ -218,6 +255,7 @@ class EmailFetchWorker {
   private async notifySuccess(
     data: EmailFetchJobData,
     result: { processed: number; newTickets: number; skipped: number; errors?: string[]; partial?: boolean },
+    noun: 'email' | 'call' = 'email',
   ): Promise<void> {
     try {
       const newCount = result.newTickets;
@@ -233,11 +271,11 @@ class EmailFetchWorker {
           ? 'Fetch completed but imported nothing — check the source configuration'
           : result.partial
             ? (newCount > 0
-              ? `Partially fetched ${newCount} new ${newCount === 1 ? 'email' : 'emails'} — rerun Fetch to continue`
+              ? `Partially fetched ${newCount} new ${newCount === 1 ? noun : `${noun}s`} — rerun Fetch to continue`
               : 'Partially fetched — rerun Fetch to continue')
             : (newCount > 0
-              ? `Fetched ${newCount} new ${newCount === 1 ? 'email' : 'emails'}`
-              : 'Inbox is up to date');
+              ? `Fetched ${newCount} new ${newCount === 1 ? noun : `${noun}s`}`
+              : noun === 'call' ? 'Calls are up to date' : 'Inbox is up to date');
       const message = isMemberSync
         ? (newCount > 0
           ? `${newCount} new, ${skipped} already existed.`
@@ -248,7 +286,7 @@ class EmailFetchWorker {
           ? `${errors.length} ${errors.length === 1 ? 'problem' : 'problems'}: ${errors[0]}`
           : (newCount > 0
             ? `${newCount} new, ${skipped} already imported.${errors.length > 0 ? ` ${errors.length} skipped with errors.` : ''}`
-            : `${skipped} emails were already imported.${errors.length > 0 ? ` ${errors.length} skipped with errors.` : ''}`);
+            : `${skipped} ${noun}s were already imported.${errors.length > 0 ? ` ${errors.length} skipped with errors.` : ''}`);
 
       await notificationService.sendNotification(
         data.requesterUserId,

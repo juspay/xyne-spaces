@@ -45,7 +45,9 @@ async function sendJsonGetWithBody(
             return;
           }
           try {
-            resolve({ status: res.statusCode ?? 0, data: JSON.parse(text) });
+            // Call ids arrive as bare integers beyond 2^53; keep them as strings so they don't round.
+            const safeText = text.replace(/("(?:UCID|CallID|monitorUCID)"\s*:\s*)(\d+)/g, '$1"$2"');
+            resolve({ status: res.statusCode ?? 0, data: JSON.parse(safeText) });
           } catch {
             resolve({ status: res.statusCode ?? 0, data: text });
           }
@@ -151,6 +153,64 @@ export const ozonetelService = {
       data,
       campaigns,
     };
+  },
+
+  /** fromDate and toDate are IST "YYYY-MM-DD HH:MM:SS" on the same day, within the last 15 days. */
+  async fetchCallDetails({
+    workspaceId,
+    fromDate,
+    toDate,
+    campaignName,
+  }: {
+    workspaceId: string;
+    fromDate: string;
+    toDate: string;
+    campaignName?: string;
+  }): Promise<Record<string, unknown>[]> {
+    const cfg = await ozonetelConfigService.getConfig(workspaceId);
+    if (!cfg) throw new OzonetelError('Ozonetel not configured for workspace');
+
+    const result = await sendJsonGetWithBody(
+      `${cfg.baseUrl}/ca_reports/fetchCDRDetails`,
+      {
+        accept: 'application/json',
+        apiKey: cfg.apiKey,
+        'Content-Type': 'application/json',
+      },
+      { fromDate, toDate, userName: cfg.apiUser, ...(campaignName ? { campaignName } : {}) },
+    );
+    const data = result.data as { status?: unknown; message?: unknown; details?: unknown } | null;
+    if (
+      result.status < 200 ||
+      result.status >= 300 ||
+      !data ||
+      typeof data !== 'object' ||
+      data.status === 'error'
+    ) {
+      logger.error('[ozonetel] fetch_cdr_api_error', {
+        status: result.status,
+        data,
+        workspaceId,
+        fromDate,
+        toDate,
+        campaignName,
+      });
+      throw new OzonetelError(
+        `Ozonetel call details fetch failed: ${typeof data?.message === 'string' ? data.message : result.status}`,
+      );
+    }
+
+    const details = Array.isArray(data?.details) ? data.details : [];
+    logger.info('[ozonetel] fetch_cdr_api_success', {
+      workspaceId,
+      fromDate,
+      toDate,
+      campaignName,
+      count: details.length,
+    });
+    return details.filter(
+      (row): row is Record<string, unknown> => !!row && typeof row === 'object' && !Array.isArray(row),
+    );
   },
 };
 
