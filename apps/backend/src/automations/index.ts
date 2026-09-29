@@ -14,6 +14,7 @@ import { tagGeneratedTrigger } from './triggers/tag-generated.trigger';
 
 import { conditionalStep } from './steps/conditional.step';
 import { switchStep } from './steps/switch.step';
+import { isOutsideBusinessHoursStep } from './steps/is-outside-business-hours.step';
 import { delayStep } from './steps/delay.step';
 
 import { sendMessageStep } from './steps/send-message.step';
@@ -63,6 +64,7 @@ export async function initializeAutomations(): Promise<void> {
   stepRegistry.register(conditionalStep);
   stepRegistry.register(switchStep);
   stepRegistry.register(delayStep);
+  stepRegistry.register(isOutsideBusinessHoursStep);
 
   stepRegistry.register(sendMessageStep);
   stepRegistry.register(notifyUserStep);
