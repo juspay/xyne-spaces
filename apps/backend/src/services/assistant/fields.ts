@@ -1,4 +1,4 @@
-import type { ActionDefinition } from '@xyne/shared/assistant';
+import type { ActionDefinition, EntityKind } from '@xyne/shared/assistant';
 import type { JevAnswer, JevQuestion, JevState } from '@/services/queryIntent/jevClient';
 
 /**
@@ -29,7 +29,6 @@ export const MAX_VALUE_WORDS = 12;
 /** Keep candidate spans bounded: 51 value spans plus the "none" option. */
 const MAX_PIECES = 51;
 const NONE = 'none';
-const CURRENT_THREAD = 'current_thread';
 const EDGE_PUNCTUATION = /^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu;
 
 /**
@@ -67,7 +66,8 @@ function piecesFrom(text: string, preserveFraming: boolean): string[] {
 /**
  * One Jev question per field of `action`, answered from the pieces of `text`. When the same
  * request also asks about other actions, `key` keeps the question ids apart and `premise` says
- * which action the questions are about.
+ * which action the questions are about. A field that names a record kind in `onScreen` also
+ * offers the record of that kind open on screen.
  */
 export function readingFor(
   action: ActionDefinition,
@@ -75,8 +75,12 @@ export function readingFor(
   {
     key = (field: string) => field,
     premise = '',
-    threadOpen = false,
-  }: { key?: (field: string) => string; premise?: string; threadOpen?: boolean } = {}
+    onScreen = new Set<EntityKind>(),
+  }: {
+    key?: (field: string) => string;
+    premise?: string;
+    onScreen?: ReadonlySet<EntityKind>;
+  } = {}
 ): FieldReading {
   const pieces = sentencePieces(text);
   const questions: Record<string, JevQuestion> = {};
@@ -95,12 +99,10 @@ export function readingFor(
       const pieceOptions = Object.fromEntries(
         fieldPieces.map((piece, index) => [`p${index}`, `“${piece}”`])
       );
-      const includesCurrentThread = id === 'thread' && action.id === 'reply_in_thread' && threadOpen;
-      if (includesCurrentThread) {
-        pieceOptions[CURRENT_THREAD] =
-          'the thread already open on screen, when the user means “here” or asks an agent to act there without naming another thread';
-      }
-      if (fieldPieces.length === 0 && !includesCurrentThread) continue;
+      const onScreenText =
+        field.kind !== 'text' && onScreen.has(field.kind) ? field.onScreen : undefined;
+      if (onScreenText !== undefined) pieceOptions[currentOption(field.kind)] = onScreenText;
+      if (fieldPieces.length === 0 && onScreenText === undefined) continue;
       questions[key(id)] = {
         type: 'choice',
         instructions: `${premise}Which option is exactly ${field.describe}, in the user’s own words?`,
@@ -114,19 +116,18 @@ export function readingFor(
     questions,
     read(answers) {
       const words: FieldWords = {};
-      for (const id of Object.keys(action.fields)) {
+      for (const [id, field] of Object.entries(action.fields)) {
         const choice = stated(answers[key(id)]);
         if (!choice) continue;
-        const field = action.fields[id];
-        const fieldPieces = field?.preserveText ? piecesFrom(text, true) : pieces;
+        const fieldPieces = field.preserveText ? piecesFrom(text, true) : pieces;
         const value =
-          field?.kind === 'choice'
+          field.kind === 'choice'
             ? choice
-            : choice === CURRENT_THREAD
-              ? 'this thread'
+            : choice === currentOption(field.kind)
+              ? `this ${field.kind}`
               : fieldPieces[Number(choice.slice(1))];
         if (!value) continue;
-        words[id] = field?.many ? value.split(/\s*,\s*|\s+and\s+/).filter(Boolean) : value;
+        words[id] = field.many ? value.split(/\s*,\s*|\s+and\s+/).filter(Boolean) : value;
       }
       // Other text fields exclude record names, then earlier text fields.
       // This keeps a member out of a channel name and a channel name out of its first message.
@@ -155,6 +156,11 @@ export function readingFor(
       return words;
     },
   };
+}
+
+/** The option key for the record of `kind` that is open on screen: "current_thread". */
+function currentOption(kind: string): string {
+  return `current_${kind}`;
 }
 
 /**

@@ -1,4 +1,4 @@
-import { ACTIONS, type Draft } from '@xyne/shared/assistant';
+import { ACTIONS, type Draft, type EntityKind } from '@xyne/shared/assistant';
 import type { JevAnswer } from '@/services/queryIntent/jevClient';
 import { createBreaker } from './breaker';
 import { readingFor, sentencePieces, type FieldReading } from './fields';
@@ -272,6 +272,12 @@ describe('reading details from the sentence', () => {
     return Object.entries(criteria).find(([, text]) => text === `“${piece}”`)?.[0] ?? 'none';
   };
 
+  /** The options of the question for `field`, by option id. */
+  const criteriaOf = (reading: FieldReading, field: string): Record<string, string> => {
+    const question = reading.questions[field];
+    return question?.type === 'choice' ? question.criteria : {};
+  };
+
   it('offers only runs of words that do not start or end on a framing word', () => {
     const pieces = sentencePieces('Message Arjun, I will pick it up later');
     expect(pieces).toContain('Arjun');
@@ -336,11 +342,9 @@ describe('reading details from the sentence', () => {
   });
 
   it('offers the open thread as a destination without treating it as message text', () => {
-    const reading = readingFor(
-      ACTIONS.get('reply_in_thread')!,
-      'reply here saying looks good',
-      { threadOpen: true }
-    );
+    const reading = readingFor(ACTIONS.get('reply_in_thread')!, 'reply here saying looks good', {
+      onScreen: new Set<EntityKind>(['thread']),
+    });
     const threadQuestion = reading.questions.thread;
     const threadChoice =
       threadQuestion?.type === 'choice'
@@ -353,6 +357,33 @@ describe('reading details from the sentence', () => {
         message: picked(optionFor(reading, 'message', 'looks good')),
       })
     ).toEqual({ thread: 'this thread', message: 'looks good' });
+  });
+
+  it('offers the open thread to the thread field only, with the field’s own text', () => {
+    const reading = readingFor(ACTIONS.get('reply_in_thread')!, 'reply here saying looks good', {
+      onScreen: new Set<EntityKind>(['thread']),
+    });
+
+    expect(criteriaOf(reading, 'thread')).toMatchObject({
+      current_thread:
+        'the thread already open on screen, when the user means “here” or asks an agent to act there without naming another thread',
+    });
+    const threadOptions = Object.keys(criteriaOf(reading, 'thread'));
+    expect(threadOptions.slice(-2)).toEqual(['current_thread', 'none']);
+    expect(criteriaOf(reading, 'mentions')).not.toHaveProperty('current_thread');
+    expect(criteriaOf(reading, 'message')).not.toHaveProperty('current_thread');
+  });
+
+  it('offers nothing on screen to a field that does not ask for it', () => {
+    const reading = readingFor(ACTIONS.get('post_message')!, 'say hello here', {
+      onScreen: new Set<EntityKind>(['thread']),
+    });
+    const options = Object.keys(reading.questions).flatMap((field) =>
+      Object.keys(criteriaOf(reading, field))
+    );
+
+    expect(options.length).toBeGreaterThan(0);
+    expect(options.filter((option) => option.startsWith('current_'))).toEqual([]);
   });
 
   it.each([

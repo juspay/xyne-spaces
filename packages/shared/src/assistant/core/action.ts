@@ -34,6 +34,11 @@ const fieldShape = z
     preserveText: z.boolean().optional(),
     /** Use this person or channel to narrow a conversation search. */
     searchFilter: z.boolean().optional(),
+    /**
+     * When a record of this kind is open on screen, it is offered as an option, and this text
+     * tells Jev when to pick it.
+     */
+    onScreen: z.string().min(1).optional(),
     /** Required details are asked for until given; optional ones are offered once, if `offer` is set. */
     required: z.boolean(),
     /** The question. It may use earlier details: "What should I say[ to {recipient}]?" */
@@ -68,6 +73,10 @@ const FIELD_RULES: ReadonlyArray<[broken: (field: FieldShape) => boolean, messag
   [
     field => Boolean(field.searchFilter) && field.kind !== 'person' && field.kind !== 'channel',
     'only people and channels can filter a conversation search',
+  ],
+  [
+    field => Boolean(field.onScreen) && (field.kind === 'text' || field.kind === 'choice'),
+    'only record fields can use what is open on screen',
   ],
   [field => Boolean(field.offer) && field.required, 'only optional fields are offered'],
 ];

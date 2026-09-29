@@ -190,6 +190,8 @@ export const MESSAGING = {
           choose: 'Which thread do you mean by “{mention}”?',
           describe:
             'the destination thread topic, without wrapper words such as “thread about” or reply text (“reply to the thread about release notes draft saying it is done” → “release notes draft”). Use the thread open on screen when the user says “here” or “this thread”, or asks an agent to act without naming another thread.',
+          onScreen:
+            'the thread already open on screen, when the user means “here” or asks an agent to act there without naming another thread',
         },
         mentions: {
           kind: 'person',

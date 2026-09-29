@@ -140,7 +140,7 @@ async function understand(
   const reading = readSentence(text, catalog, {
     draft,
     ...(screen ? { screen } : {}),
-    threadOpen: onScreen.some((ref) => ref.kind === 'thread'),
+    onScreen: new Set(onScreen.map((ref) => ref.kind)),
   });
   const answers = await services.askJev(reading.state, reading.questions);
   if (!answers) {
@@ -336,9 +336,13 @@ async function startAction(
   const action = services.catalog.get(actionId);
   if (!action) return withReply(session, replyForError('I can’t do that yet.'));
   const words = text ? await wordsForAction(action, text, services, heard) : {};
-  if (actionId === 'reply_in_thread' && words.thread === undefined) {
-    const [openThread] = await services.records.find('thread', 'this thread');
-    if (openThread) words.thread = 'this thread';
+  // A record open on screen stands in for a detail the sentence left out ("reply saying thanks").
+  for (const [id, field] of Object.entries(action.fields)) {
+    if (!field.onScreen || field.kind === 'text' || field.kind === 'choice') continue;
+    if (words[id] !== undefined) continue;
+    const phrase = `this ${field.kind}`;
+    const [shown] = await services.records.find(field.kind, phrase);
+    if (shown) words[id] = phrase;
   }
   const updates = await toFieldUpdates(action, words, services.records, true);
   return applyEvent(

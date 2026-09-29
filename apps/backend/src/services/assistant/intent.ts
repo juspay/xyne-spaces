@@ -5,6 +5,7 @@ import {
   type ActionCatalog,
   type ActionDefinition,
   type Draft,
+  type EntityKind,
 } from '@xyne/shared/assistant';
 import type { JevAnswer, JevQuestion, JevState } from '@/services/queryIntent/jevClient';
 import { readingFor, type FieldReading, type FieldWords } from './fields';
@@ -24,8 +25,8 @@ export interface SentenceContext {
   draft: Draft | null;
   /** The name of the channel open on screen, which "here" means. */
   screen?: string;
-  /** Whether the user is looking at a thread; Jev uses this to understand contextual replies. */
-  threadOpen?: boolean;
+  /** The kinds of record open on screen; a field can offer the one that is (see `onScreen`). */
+  onScreen?: ReadonlySet<EntityKind>;
 }
 
 export interface RankedAction {
@@ -96,7 +97,10 @@ export function readSentence(
 ): SentenceReading {
   const actions = [...catalog.values()];
   const inProgress = context.draft ? catalog.get(context.draft.action) : undefined;
-  const fields = fieldReadings(text, actions, inProgress, context.threadOpen ?? false);
+  const onScreen = context.onScreen ?? new Set<EntityKind>();
+  // Jev uses an open thread to understand contextual replies.
+  const threadOpen = onScreen.has('thread');
+  const fields = fieldReadings(text, actions, inProgress, onScreen);
   const questions: Record<string, JevQuestion> = {
     kind: {
       type: 'choice',
@@ -117,11 +121,11 @@ export function readSentence(
   };
   const state = {
     request: text,
-    ...(context.screen || context.threadOpen
+    ...(context.screen || threadOpen
       ? {
           screen: {
             ...(context.screen ? { channel: context.screen } : {}),
-            ...(context.threadOpen ? { threadOpen: true } : {}),
+            ...(threadOpen ? { threadOpen: true } : {}),
           },
         }
       : {}),
@@ -158,7 +162,7 @@ function fieldReadings(
   text: string,
   actions: readonly ActionDefinition[],
   inProgress: ActionDefinition | undefined,
-  threadOpen: boolean
+  onScreen: ReadonlySet<EntityKind>
 ): Map<string, FieldReading> {
   const count = actions.reduce((sum, action) => sum + Object.keys(action.fields).length, 0);
   const asked = count <= MAX_FIELD_QUESTIONS ? actions : inProgress ? [inProgress] : [];
@@ -167,14 +171,7 @@ function fieldReadings(
       const answers = action === inProgress ? '`request` answers `inProgress` or ' : '`request` ';
       const premise = `If ${answers}asks to ${lowerFirst(action.title)}: `;
       const key = (field: string): string => `${action.id}.${field}`;
-      return [
-        action.id,
-        readingFor(action, text, {
-          key,
-          premise,
-          threadOpen: action.id === 'reply_in_thread' && threadOpen,
-        }),
-      ];
+      return [action.id, readingFor(action, text, { key, premise, onScreen })];
     })
   );
 }
