@@ -11,6 +11,7 @@ import { ingestDeliveredArtifact } from "../lib/conversation-artifact-signals.js
 import { deliveredDesignCommand, recordDeliveredArtifacts } from "../lib/delivered-artifacts.js";
 import crypto from "node:crypto";
 import { claimAutomationStep } from "../lib/automation-step-dedup.js";
+import { automationRunAllowsSandboxWrite } from "../lib/automation-write-policy.js";
 import { CONFIG } from "../config.js";
 import {
   agentRepository,
@@ -2755,18 +2756,25 @@ export async function handleAutomationWebhook(
   // so it can fix → build → push → PR), we merge it into the forwarded
   // agentConfig; claw already honors that flag on both gates (tool-palette strip
   // + sbx-git routing). Any caller that doesn't send it stays read-only, and no
-  // per-agent DB flag is needed.
+  // per-agent DB flag is needed. Workflow-engine steps (`wf-` session ids) get
+  // it too; Spaces automations (`<runId>:<step>`) never match and stay
+  // read-only (lib/automation-write-policy.ts).
   const sdlcProfile =
     payload.executionProfile === "sdlc" &&
     agentSlug === SDLC_AGENT_SLUG &&
     s2sKeyMatches(req.headers["x-s2s-key"]);
+  const allowSandboxWrite = automationRunAllowsSandboxWrite({
+    sessionId,
+    requested: payload.allowWriteInReadOnlyJob,
+    sdlcProfile,
+  });
   const baseAgentConfig = (agent.config as Record<string, unknown> | null) ?? {};
   // SDLC tools are merged in /internal/run (start-run) for any run carrying hub context.
   const forwardedAgentConfig: Record<string, unknown> | undefined =
-    agent.config || payload.allowWriteInReadOnlyJob || sdlcProfile
+    agent.config || allowSandboxWrite
       ? {
           ...baseAgentConfig,
-          ...(payload.allowWriteInReadOnlyJob || sdlcProfile ? { allowWriteInReadOnlyJob: true } : {}),
+          ...(allowSandboxWrite ? { allowWriteInReadOnlyJob: true } : {}),
           ...(sdlcProfile ? { sdlcContext: payload.sdlcContext } : {}),
         }
       : undefined;
