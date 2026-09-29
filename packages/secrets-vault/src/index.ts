@@ -1,4 +1,4 @@
-export { createSecretsVault } from './vault.js';
+export { createSecretsVault, RotationInProgressError, ActiveVersionMismatchError } from './vault.js';
 export type { SecretsVault, SecretsVaultDeps, AddVersionResult } from './vault.js';
 export { createCustomEncryptionAdapter, parseHexEncryptionKey } from './customEncryption.js';
 export { createSecretsVaultRouter } from './router.js';

@@ -80,10 +80,19 @@ export interface VaultPrismaClient {
       where: { id: string };
       data: { updatedBy: string };
     }): Promise<SecretDefinitionRow>;
+    /** CAS claim/release for the rotation lock — see RotationState. */
+    updateMany(args: {
+      where: { id: string; rotationState?: RotationState };
+      data: { rotationState: RotationState };
+    }): Promise<{ count: number }>;
   };
   secretVersion: {
     findFirst(args: {
-      where: { secretDefinitionId: string; status: SecretVersionStatus };
+      where: { secretDefinitionId: string; status?: SecretVersionStatus; version?: number };
+    }): Promise<SecretVersionRow | null>;
+    /** (secretDefinitionId, version) is a real @@unique — use findUnique, not findFirst. */
+    findUnique(args: {
+      where: { secretDefinitionId_version: { secretDefinitionId: string; version: number } };
     }): Promise<SecretVersionRow | null>;
     create(args: {
       data: {
