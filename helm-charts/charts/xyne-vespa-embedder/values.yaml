@@ -20,10 +20,7 @@ workloadKind: Deployment
 replicaCount: 1
 revisionHistoryLimit: 10
 strategy:
-  type: RollingUpdate
-  rollingUpdate:
-    maxSurge: 25%
-    maxUnavailable: 25%
+  type: Recreate
 
 command: []
 args:
@@ -53,16 +50,20 @@ service:
       port: 80
       targetPort: http
 
-env:
-  NVIDIA_VISIBLE_DEVICES: all
-  NVIDIA_DRIVER_CAPABILITIES: compute,utility
+env: {}
 
 secretEnv: {}
 envFromSecrets: []
 envFromConfigMaps: []
 extraEnv: []
 
-startupProbe: {}
+startupProbe:
+  httpGet:
+    path: /health
+    port: http
+  periodSeconds: 10
+  timeoutSeconds: 2
+  failureThreshold: 180
 livenessProbe:
   httpGet:
     path: /health

@@ -10,6 +10,9 @@ global:
 platformRevision: main
 
 argocd:
+  expose:
+    enabled: false
+    host: ""
   project: xyne
   sourceRepos:
     - "*"
@@ -87,9 +90,17 @@ infra:
     lbController:
       annotations: {}
       labels: {}
+    clusterAutoscaler:
+      annotations: {}
+      labels: {}
     externalDns:
       annotations: {}
       labels: {}
+    zero:
+      annotations: {}
+      labels: {}
+  zero:
+    backupUrl: ""
   nodePools:
     general:
       enabled: false
@@ -104,6 +115,10 @@ infra:
       nodeSelector: {}
       tolerations: []
     sandbox:
+      enabled: false
+      nodeSelector: {}
+      tolerations: []
+    gpu:
       enabled: false
       nodeSelector: {}
       tolerations: []
@@ -137,6 +152,17 @@ addons:
     version: 3.5.0
     namespace: kube-system
     serviceAccountName: aws-load-balancer-controller
+    values: {}
+  clusterAutoscaler:
+    enabled: null
+    version: 9.59.0
+    namespace: kube-system
+    serviceAccountName: cluster-autoscaler
+    values: {}
+  nvidiaDevicePlugin:
+    enabled: null
+    version: 0.20.1
+    namespace: kube-system
     values: {}
   externalDns:
     enabled: null
@@ -224,16 +250,18 @@ addons:
     image:
       registry: ""
       repository: vespaengine/vespa
-      tag: ""
+      tag: "8.754.14"
     proxyImage:
       registry: ""
-      repository: xyne-spaces-tei-batch-proxy
+      repository: ""
       tag: ""
     storageClass: ""
     configserverStorage: 50Gi
     contentStorage: 200Gi
     embedder:
       enabled: true
+      model: BAAI/bge-base-en-v1.5
+      dimensions: 768
     values:
       configserver: {}
       content: {}
@@ -241,6 +269,7 @@ addons:
       search: {}
       embedder: {}
       proxy: {}
+      app: {}
   monitoring:
     enabled: false
     namespace: monitoring
@@ -338,6 +367,9 @@ apps:
     enabled: false
     values: {}
   xyne-lighton-ocr:
+    enabled: false
+    values: {}
+  xyne-lighton-model:
     enabled: false
     values: {}
   workers: []

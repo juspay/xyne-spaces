@@ -9,17 +9,17 @@ const USERS: Record<string, { id: string; name: string; email: string }> = {
   "bowmitha.c": {
     id: "usr_bowmitha00000000",
     name: "Bowmitha C",
-    email: "john.doe@gmail.com",
+    email: "bowmitha.c@example.com",
   },
   "utkarsh.kumar": {
     id: "usr_utkarsh000000000",
     name: "Utkarsh Kumar",
-    email: "john.doe@gmail.com",
+    email: "utkarsh.kumar@example.com",
   },
   "deepak.kushwaha": {
     id: "usr_deepak0000000000",
     name: "Deepak Kushwaha",
-    email: "john.doe@gmail.com",
+    email: "deepak.kushwaha@example.com",
   },
 };
 
@@ -33,6 +33,11 @@ const GROUPS: Record<string, { id: string; name: string; alias: string }> = {
     id: "grp_riskplatform000",
     name: "Risk Platform",
     alias: "risk-platform",
+  },
+  spaces: {
+    id: "grp_xynespaces00000",
+    name: "xyne-spaces",
+    alias: "spaces",
   },
 };
 
@@ -91,7 +96,7 @@ describe("resolveUnboundMentions — dotted handles", () => {
 
   it("treats a full email as an email, not a handle", async () => {
     const out = await resolveUnboundMentions(
-      "ping @john.doe@gmail.com please",
+      "ping @bowmitha.c@example.com please",
       lookups(),
     );
     expect(out).toBe(`ping @Bowmitha C[${USERS["bowmitha.c"]!.id}] please`);
@@ -164,6 +169,24 @@ describe("resolveUnboundMentions — group aliases", () => {
     expect(html).toBe(
       `Looping in <span data-mention="" data-mention-type="group" data-group-id="${GROUPS["data-intelligence"]!.id}" data-group-name="Data Intelligence" data-group-alias="data-intelligence" class="chat-input-mention">@data-intelligence</span>`,
     );
+  });
+
+  it("resolves a one-word alias and leaves other lowercase words alone", async () => {
+    const out = await resolveUnboundMentions(
+      "hello @spaces, cc @here and @nobody. See @spaces.",
+      lookups(),
+    );
+    expect(out).toBe(
+      `hello @spaces[group:${GROUPS["spaces"]!.id}:xyne-spaces], cc @here and @nobody. See @spaces[group:${GROUPS["spaces"]!.id}:xyne-spaces].`,
+    );
+  });
+
+  it("does not take a one-word alias out of a handle, an email or a longer alias", async () => {
+    const out = await resolveUnboundMentions(
+      "@spaces.team @spaces@example.com @spacesx @spaces-search",
+      lookups(),
+    );
+    expect(out).toBe("@spaces.team @spaces@example.com @spacesx @spaces-search");
   });
 
   it("leaves unknown group aliases untouched", async () => {

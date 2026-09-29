@@ -1,3 +1,44 @@
+## [1.418.0](https://github.com/juspay/xyne-spaces/compare/v1.417.0...v1.418.0) (2026-09-29)
+
+
+### Features
+
+* Add multi-language transcript translation support on scribe and calls ([#1424](https://github.com/juspay/xyne-spaces/issues/1424)) ([d6220b6](https://github.com/juspay/xyne-spaces/commit/d6220b63079bd9abfd37c7bfd6144b2c01504eac))
+* Calls tab new version re ([#2102](https://github.com/juspay/xyne-spaces/issues/2102)) ([d2eeb3c](https://github.com/juspay/xyne-spaces/commit/d2eeb3c23e3f9d2e5dd689b08abebe4e69d379a7))
+
+## [1.417.0](https://github.com/juspay/xyne-spaces/compare/v1.416.4...v1.417.0) (2026-09-28)
+
+
+### Features
+
+* aws e2e helm config update ([#2387](https://github.com/juspay/xyne-spaces/issues/2387)) ([6ab1b81](https://github.com/juspay/xyne-spaces/commit/6ab1b81e008174c8978eb61584e1f99e2a350905))
+
+
+### Bug Fixes
+
+* user-send-message from WhatsApp: resolve [@mentions](https://github.com/mentions), reply into UUID threads, readable approval cards ([#2386](https://github.com/juspay/xyne-spaces/issues/2386)) ([ca7affb](https://github.com/juspay/xyne-spaces/commit/ca7affb9ce00510b1866627c79a0ad129f1abd93))
+
+## [1.416.4](https://github.com/juspay/xyne-spaces/compare/v1.416.3...v1.416.4) (2026-09-28)
+
+
+### Bug Fixes
+
+* route chat-approve Spaces writes to spacesInternalUrl ([#2379](https://github.com/juspay/xyne-spaces/issues/2379)) ([68b605a](https://github.com/juspay/xyne-spaces/commit/68b605a07c14b967289ce9b88e48ada174e155af))
+
+## [1.416.3](https://github.com/juspay/xyne-spaces/compare/v1.416.2...v1.416.3) (2026-09-28)
+
+
+### Bug Fixes
+
+* bump mcp-grafana to 1.6.1 (0.15.2 no longer on PyPI) ([#2389](https://github.com/juspay/xyne-spaces/issues/2389)) ([8ffbdd4](https://github.com/juspay/xyne-spaces/commit/8ffbdd4ea67b36add9b90a7aa67805e2acb17f58))
+
+## [1.416.2](https://github.com/juspay/xyne-spaces/compare/v1.416.1...v1.416.2) (2026-09-28)
+
+
+### Bug Fixes
+
+* make workspace-level KB files searchable and keep clId/clFd in lean summary ([#2359](https://github.com/juspay/xyne-spaces/issues/2359)) ([113b454](https://github.com/juspay/xyne-spaces/commit/113b454bb66314b506c70a21c0c992c6e33c7bf1)), closes [#1282](https://github.com/juspay/xyne-spaces/issues/1282)
+
 ## [1.416.1](https://github.com/juspay/xyne-spaces/compare/v1.416.0...v1.416.1) (2026-09-28)
 
 

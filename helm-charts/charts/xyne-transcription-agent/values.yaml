@@ -16,7 +16,7 @@ imagePullSecrets: []
 version: ""
 versionedName: false
 
-replicaCount: 2
+replicaCount: 1
 revisionHistoryLimit: 3
 strategy:
   type: RollingUpdate
@@ -217,8 +217,8 @@ persistence:
 
 autoscaling:
   enabled: true
-  minReplicas: 2
-  maxReplicas: 6
+  minReplicas: 1
+  maxReplicas: 1
   targetCPUUtilizationPercentage: 70
   targetMemoryUtilizationPercentage: 80
   metrics: []

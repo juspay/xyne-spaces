@@ -119,11 +119,12 @@ const UNBOUND_EMAIL_MENTION_RE =
 const UNBOUND_HANDLE_MENTION_RE =
   /(^|[^A-Za-z0-9_>@.])@([A-Za-z][A-Za-z0-9_\-]*(?:\.[A-Za-z0-9_\-]+)+)(?!\[|[A-Za-z0-9_.@_\-])/g;
 
-// Group alias shorthand — e.g. `@data-intelligence`. User handles use
-// dots and display-name mentions are capitalised, so hyphenated lowercase
-// aliases can be resolved without colliding with existing user paths.
+// Group alias shorthand — e.g. `@data-intelligence` or `@spaces`. User
+// handles use dots and display-name mentions are capitalised, so lowercase
+// aliases (hyphenated or one word) can be resolved without colliding with
+// existing user paths; a token is tagged only when exactly one group owns it.
 const UNBOUND_GROUP_MENTION_RE =
-  /(^|[^A-Za-z0-9_>])@([a-z][a-z0-9]*(?:-[a-z0-9]+)+)(?!\[|<\/|\.[A-Za-z0-9]|@)\b/g;
+  /(^|[^A-Za-z0-9_>])@([a-z][a-z0-9]*(?:-[a-z0-9]+)*)(?!\[|<\/|\.[A-Za-z0-9]|@|[A-Za-z0-9_-])/g;
 
 const SPECIAL_NAMES = new Set(["channel", "here"]);
 
@@ -198,7 +199,9 @@ export async function resolveUnboundMentions(
     }
     if (lookups.byGroupAlias) {
       for (const m of p.matchAll(UNBOUND_GROUP_MENTION_RE)) {
-        groupAliasesToResolve.add(m[2]!.trim().toLowerCase());
+        const alias = m[2]!.trim().toLowerCase();
+        if (SPECIAL_NAMES.has(alias)) continue;
+        groupAliasesToResolve.add(alias);
       }
     }
     if (lookups.byHandle) {

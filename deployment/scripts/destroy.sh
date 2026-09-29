@@ -62,6 +62,7 @@ tf_destroy "$PLATFORM_STACK" 02-platform "${PLATFORM_ARGS[@]}"
 
 log "stage 01-infra"
 write_backend "$INFRA_STACK" 01-infra
-tf_destroy "$INFRA_STACK" 01-infra -var-file "$INFRA_TFVARS"
+infra_var_args
+tf_destroy "$INFRA_STACK" 01-infra "${INFRA_ARGS[@]}"
 
 log "destroy: done; the state backend and the kubeconfig context were left in place"

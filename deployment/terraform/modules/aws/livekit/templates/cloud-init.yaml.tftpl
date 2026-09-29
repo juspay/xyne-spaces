@@ -2,7 +2,9 @@
 package_update: true
 packages:
   - docker.io
-  - awscli
+snap:
+  commands:
+    - snap install aws-cli --classic
 write_files:
   - path: /usr/local/bin/xyne-secret
     permissions: "0755"
@@ -11,7 +13,7 @@ write_files:
       secret="$1"
       out="$2"
       tmp=$(mktemp)
-      aws secretsmanager get-secret-value --region ${region} --secret-id "$secret" --query SecretString --output text > "$tmp"
+      /snap/bin/aws secretsmanager get-secret-value --region ${region} --secret-id "$secret" --query SecretString --output text > "$tmp"
       test -s "$tmp"
       install -m 0600 "$tmp" "$out"
       rm -f "$tmp"

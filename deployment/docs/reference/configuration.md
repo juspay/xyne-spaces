@@ -1,7 +1,8 @@
 # Configuration reference
 
 **Who this is for:** anyone editing an environment directory; read it when you need a variable's
-exact name, type, default or effect, or a recipe for a common change.
+exact name, type, default or effect. How to turn each feature on is in the feature guides
+([list](#where-each-feature-is-configured)).
 
 - [Environment directory](#environment-directory)
 - [`env.conf`](#envconf)
@@ -12,7 +13,8 @@ exact name, type, default or effect, or a recipe for a common change.
 - [`02-platform` (all clouds)](#02-platform-all-clouds)
 - [Root Argo CD values](#root-argo-cd-values)
 - [Node pool sizing](#node-pool-sizing)
-- [Recipes](#recipes)
+- [Images from your own registry](#images-from-your-own-registry)
+- [Where each feature is configured](#where-each-feature-is-configured)
 
 Every variable below exists in `deployment/terraform/stacks/<cloud>/<stack>/variables.tf`.
 **Required** means no default: the doctor fails when it is missing. Objects with `optional(...)`
@@ -45,7 +47,8 @@ scripts `source` the file and export every key.
 | `STATE_BUCKET` | gcp, aws | yes | state bucket, created if missing |
 | `STATE_LOCATION` | gcp | no (`region` from `01-infra.tfvars`) | location of the state bucket |
 | `STATE_REGION` | aws | yes | region of the state bucket |
-| `PROFILE` | aws | no | named profile; exported as `AWS_PROFILE`, written into `backend.tf`, passed as `-var profile=` to `02-platform` |
+| `PROFILE` | aws | no | named profile; exported as `AWS_PROFILE`, written into `backend.tf`, passed as `-var profile=` to `02-platform`. Empty uses the default credentials: confirm the account with `aws sts get-caller-identity` first |
+| `DNS_DOMAIN` | all | no (`domain`) | the zone `dns.sh` registers and creates; `domain` must be it or a name under it. See [dns.md](../install/dns.md) |
 | `SUBSCRIPTION_ID` | azure | yes | exported as `ARM_SUBSCRIPTION_ID`; `az account set` |
 | `LOCATION` | azure | yes | location of the state resource group and storage account |
 | `STATE_RESOURCE_GROUP` | azure | yes | created if missing |
@@ -65,17 +68,21 @@ scripts `source` the file and export every key.
 | `--auto-approve` | apply every plan without the `[yes/N]` prompt |
 | `--dry-run` | print every command; no cloud login, doctor reports missing tools as `WARN` |
 | `--skip-doctor` | do not run `doctor.sh` first |
+| `--skip-dns-gate` | do not stop after reserving the ingress address to wait for DNS |
 | `--argo-timeout <seconds>` | how long to wait for all Applications to be Synced and Healthy (default `1800`) |
 
 `DRY_RUN=1` and `AUTO_APPROVE=1` in the environment are equivalent to the flags.
 
-`deployment/scripts/doctor.sh`: `--env`, `--env-dir`, `--dry-run`. Checks terraform >= 1.6.0,
-helm >= 3.14.0, kubectl, jq, yq, the cloud CLI and its login, the three files, every required
-stack variable, and placeholders in `env.conf`, both `.tfvars` and `overlay.tfvars`.
+The other scripts all take `--env` and `--env-dir`:
 
-`deployment/scripts/destroy.sh`: `--env`, `--env-dir`, `--auto-approve` (skips the typed
-confirmation of the environment name), `--dry-run`. See
-[operations.md](operations.md#destroy).
+| Script | Flags | Does |
+|---|---|---|
+| `doctor.sh` | `--dry-run` | checks tools, cloud login, required variables, placeholders, the Google client, DNS delegation, pool instance types and each enabled feature's prerequisites |
+| `secrets.sh` | `--only infra\|platform`, `--force`, `--dry-run` | writes `01-infra.secrets.tfvars` and `02-platform.secrets.tfvars` ([secrets](secrets.md#generating-them)) |
+| `dns.sh` | `check`, `register`, `zone`, `status`; `--years`, `--auto-approve`, `--dry-run` | domain registration (AWS) and the DNS zone ([dns](../install/dns.md)) |
+| `lb-config.sh` | `--format`, `--node-address`, `--http-port`, `--https-port`, `--status-port` | prints the configuration for your own load balancer in `external` ingress mode |
+| `destroy.sh` | `--auto-approve`, `--dry-run` | tears the environment down ([destroy](../operate/operations.md#destroy)) |
+| `validate.sh` | `--terraform-only`, `--helm-only` | offline checks: `terraform fmt` and `validate`, `helm lint` and `template`, `bash -n` |
 
 ## GCP `01-infra`
 
@@ -116,7 +123,7 @@ confirmation of the environment name), `--dry-run`. See
 | `release_channel` | string | `REGULAR` | `RAPID`, `REGULAR`, `STABLE`, `EXTENDED` |
 | `kubernetes_version` | string | `""` | `min_master_version`; channel default when empty |
 | `master_ipv4_cidr_block` | string | `172.16.0.0/28` | control plane range |
-| `master_authorized_networks` | list(object{cidr_block, display_name}) | `[]` | networks allowed to reach the API server. Empty makes the control plane private, so `kubectl` then has to run from inside the VPC. See [security.md](security.md#reaching-the-kubernetes-api) |
+| `master_authorized_networks` | list(object{cidr_block, display_name}) | `[]` | networks allowed to reach the API server. Empty makes the control plane private, so `kubectl` then has to run from inside the VPC. See [security.md](../concepts/security.md#reaching-the-kubernetes-api) |
 | `enable_private_endpoint` | bool | `false` | remove the public API endpoint |
 | `node_locations` | list(string) | `[]` | zones for nodes; all zones of the region when empty |
 | `cluster_logging`, `cluster_monitoring` | bool | `true` | Cloud Logging / Monitoring for the cluster |
@@ -182,7 +189,7 @@ confirmation of the environment name), `--dry-run`. See
 
 ### Ingress
 
-These five are the same on all three clouds. See [ingress.md](ingress.md).
+These five are the same on all three clouds. See [ingress.md](../concepts/ingress.md).
 
 | Variable | Type | Default | Meaning |
 |---|---|---|---|
@@ -251,7 +258,7 @@ Exactly one certificate source must resolve in `cloud-lb` mode, checked by a pre
 | `services_cidr` | string | `""` | Kubernetes service range; EKS default when empty |
 | `single_nat_gateway` | bool | `false` | one NAT gateway instead of one per AZ |
 | `enable_vpc_endpoints` | bool | `true` | interface endpoints `ecr.api`, `ecr.dkr`, `sts`, `logs` |
-| `internet_egress_cidrs` | list(string) | `[]` | **required**: where the nodes, the bastion and the LiveKit instances may reach outbound. `["0.0.0.0/0"]` for ordinary egress through NAT, or your proxy's ranges. Empty fails the plan. See [security.md](security.md#outbound-internet) |
+| `internet_egress_cidrs` | list(string) | `[]` | **required**: where the nodes, the bastion and the LiveKit instances may reach outbound. `["0.0.0.0/0"]` for ordinary egress through NAT, or your proxy's ranges. Empty fails the plan. See [security.md](../concepts/security.md#outbound-internet) |
 | `enable_flow_logs` | bool | `false` | |
 | `bastion_enabled` | bool | `false` | SSM-only instance in a public subnet with `psql` and `redis-cli` |
 | `bastion_instance_type` | string | `t4g.micro` | |
@@ -261,9 +268,9 @@ Exactly one certificate source must resolve in `cloud-lb` mode, checked by a pre
 
 | Variable | Type | Default | Meaning |
 |---|---|---|---|
-| `kubernetes_version` | string | `1.31` | |
+| `kubernetes_version` | string | `1.35` | must be in EKS standard support unless `cluster_support_type = "EXTENDED"` (billed extra); `aws eks describe-cluster-versions` lists each version's status |
 | `enable_private_endpoint` | bool | `false` | disable the public API endpoint |
-| `eks_public_access_cidrs` | list(string) | `[]` | who may reach the public endpoint. Empty switches the public endpoint off, so `kubectl` then has to run from inside the VPC. See [security.md](security.md#reaching-the-kubernetes-api) |
+| `eks_public_access_cidrs` | list(string) | `[]` | who may reach the public endpoint. Empty switches the public endpoint off, so `kubectl` then has to run from inside the VPC. See [security.md](../concepts/security.md#reaching-the-kubernetes-api) |
 | `deployer_principal_arn` | string | `""` | extra principal given `AmazonEKSClusterAdminPolicy` through an access entry |
 | `cluster_log_types` | list(string) | `["api", "audit", "authenticator"]` | control plane logs |
 | `cluster_log_retention_days` | number | `30` | |
@@ -273,8 +280,14 @@ Exactly one certificate source must resolve in `cloud-lb` mode, checked by a pre
 | `sandbox_ami_ssm_parameter` | string | `""` | AMI for the sandbox pool; Canonical's EKS Ubuntu 24.04 for the cluster version when empty |
 | `node_pools` | object | `{}` | see [Node pool sizing](#node-pool-sizing) |
 | `zero_pool_enabled`, `vespa_enabled`, `sandbox_enabled` | bool | `false` | create those node groups; the sandbox group requires a `.metal` instance type |
+| `gpu_enabled` | bool | `false` | create the `gpu` node group (`AL2023_x86_64_NVIDIA`, taint `nvidia.com/gpu=present:NoSchedule`) for the OCR model server and the search embedder; the root chart then installs the NVIDIA device plugin |
 | `use_pod_identity` | bool | `false` | add EKS Pod Identity associations next to IRSA |
 | `lb_controller_enabled` | bool | `true` | create the IAM role for `aws-load-balancer-controller` (without it the gateway gets no NLB) |
+
+Each node group is placed only in the node subnets whose availability zone offers one of its
+instance types, so a type missing from one zone (for example `g6.xlarge` in ap-south-1c) still
+works; a pool whose types are offered in none of them fails the plan. The cluster's `vpc-cni`
+addon runs with `enableNetworkPolicy`, so NetworkPolicies are enforced.
 
 ### Postgres
 
@@ -418,7 +431,7 @@ the load balancer and writes the records itself.
 | `kubernetes_version` | string | `""` | latest when empty |
 | `cluster_sku_tier` | string | `Standard` | `Free`, `Standard`, `Premium` |
 | `enable_private_endpoint` | bool | `false` | private cluster |
-| `aks_authorized_ip_ranges` | list(string) | `[]` | API server authorized ranges. Empty makes the cluster private, so `kubectl` then has to run from inside the VNet. See [security.md](security.md#reaching-the-kubernetes-api) |
+| `aks_authorized_ip_ranges` | list(string) | `[]` | API server authorized ranges. Empty makes the cluster private, so `kubectl` then has to run from inside the VNet. See [security.md](../concepts/security.md#reaching-the-kubernetes-api) |
 | `deployer_principal_id` | string | `""` | object id given cluster user/admin roles; the current identity when empty |
 | `admin_group_object_ids` | list(string) | `[]` | Entra groups as AKS admins |
 | `azure_rbac_enabled` | bool | `true` | Azure RBAC for Kubernetes authorization |
@@ -489,7 +502,7 @@ the load balancer and writes the records itself.
 | `storage_delete_retention_days` | number | `7` | soft delete |
 | `storage_public_network_access` | bool | `true` | |
 | `storage_network_default_action` | string | `Deny` | the cluster, bastion and LiveKit subnets are allowed through automatically; set `Allow` to drop the firewall entirely |
-| `storage_allowed_ip_ranges` | list(string) | `[]` | addresses outside the VNet that may reach the blobs, such as a CI runner uploading dashboard bundles. See [security.md](security.md#object-storage) |
+| `storage_allowed_ip_ranges` | list(string) | `[]` | addresses outside the VNet that may reach the blobs, such as a CI runner uploading dashboard bundles. See [security.md](../concepts/security.md#object-storage) |
 | `storage_private_endpoint` | bool | `false` | private endpoint in `private_endpoints_subnet_cidr` |
 | `storage_lifecycle_rules` | list(object{name, enabled, prefixes, blob_types, tier_to_cool_after_days, tier_to_archive_after_days, delete_after_days, version_delete_after_days, version_tier_to_cool_after_days}) | `[]` | |
 | `storage_cors_origins`, `external_storage`, `storage_credentials` | | | as GCP |
@@ -562,7 +575,7 @@ identical on the three clouds; only the state and provider variables differ.
 
 | Variable | Type | Default | Meaning |
 |---|---|---|---|
-| `namespace` | string | `xyne` | application namespace |
+| `namespace` | string | `xyne` | application namespace; set the same value in `01-infra`. **Use `xyne-apps` with the published images**: the dashboard's nginx and the claw tools address `xyne-backend.xyne-apps` and `xyne-claw-auth.xyne-apps`, so in any other namespace the dashboard does not start |
 | `domain` | string | `""` | apex; `ingress.domain` from `01-infra` when empty |
 | `repo_url` | string | `https://github.com/juspay/xyne-spaces.git` | repository Argo CD reads charts from |
 | `chart_revision` | string | **required** | revision of `helm-charts/charts/*` (a `chart-<version>` tag) |
@@ -571,11 +584,13 @@ identical on the three clouds; only the state and provider variables differ.
 | `image_tag` | string | `""` | tag for images built from this repository (`xyneImage` charts); the chart `appVersion` when empty |
 | `acme_email` | string | `""` | Let's Encrypt account email; used when `ingress_tls` resolves to `acme` |
 | `gateway_namespace` | string | `istio-ingress` | namespace the ingress gateway and its TLS Secret live in |
-| `gateway_tls` | object{cert_pem, key_pem}, sensitive | `{}` | the gateway's certificate, required when `ingress_tls = "existing"` and rejected otherwise; Terraform writes it to `xyne-gateway-tls` instead of cert-manager. See [ingress.md](ingress.md#certificates) |
+| `gateway_tls` | object{cert_pem, key_pem}, sensitive | `{}` | the gateway's certificate, required when `ingress_tls = "existing"` and rejected otherwise; Terraform writes it to `xyne-gateway-tls` instead of cert-manager. See [ingress.md](../concepts/ingress.md#certificates) |
 | `argocd_chart_version` | string | `10.9.2` | `argo-cd` Helm chart version |
 | `argocd_apps_chart_version` | string | `2.0.5` | `argocd-apps` Helm chart version |
 | `argocd_namespace` | string | `argocd` | |
 | `argocd_values` | string (YAML) | `""` | extra values for the `argo-cd` chart (merged after `fullnameOverride: argocd`, `configs.params.server.insecure: true`) |
+| `argocd_expose` | bool | `false` | serve the Argo CD UI through the Istio gateway on `argocd_host`. It uses the install's DNS and certificate (`*.domain` is already covered; in `acme` mode the host is added to the certificate). This puts the Argo CD login on the internet: change the initial admin password, or configure SSO in `argocd_values` |
+| `argocd_host` | string | `argocd.<domain>` | host name for `argocd_expose` |
 | `enable_vespa` | bool | `false` | `addons.vespa.enabled` |
 | `enable_hindsight` | bool | `false` | `addons.hindsight.enabled`; deploys the upstream Hindsight chart and points claw's long-term memory at it |
 | `hindsight` | object{url, tenant} | `{}` | point claw at a Hindsight you run elsewhere instead. `url` wins over the deployed addon; empty with the addon off disables memory entirely |
@@ -590,8 +605,10 @@ identical on the three clouds; only the state and provider variables differ.
 
 ## Root Argo CD values
 
-`02-platform` turns its variables into the `valuesObject` of the `xyne-root` Application,
-merged over `deployment/argocd/root/values.yaml`. What you can influence from `.tfvars`:
+`02-platform` turns its variables into the values of the `xyne-root` Application, merged over
+`deployment/argocd/root/values.yaml`; the root chart then renders one Application per app and
+addon, each carrying its chart values as a `helm.values` string. What you can influence from
+`.tfvars`:
 
 ### `apps.<chart>`
 
@@ -606,37 +623,61 @@ merged over `deployment/argocd/root/values.yaml`. What you can influence from `.
 | `xyne-dashboard-edge` | off | bundle-serving edge, reads the `bundles` bucket |
 | `xyne-claw` | off | agent runtime; sets `XYNE_CLAW_URL` on the backend |
 | `xyne-claw-auth` | off | sets `XYNE_CLAW_AUTH_URL` on the backend |
-| `xyne-claw-auth-frontend` | off | adds the `/claw/` route; needs `xyne-claw-auth` |
-| `xyne-transcription-agent` | off | needs LiveKit |
-| `xyne-lighton-ocr` | off | sets `DOCLING_SERVICE_URL` on the backend |
+| `xyne-claw-auth-frontend` | off | adds the `/claw/` route; needs `xyne-claw-auth`, which adds `/claw/api/` and `/claw/health` |
+| `xyne-transcription-agent` | off | needs LiveKit ([calls](../features/calls.md)) |
+| `xyne-lighton-ocr` | off | sets `DOCLING_SERVICE_URL` on the backend ([OCR](../features/ocr.md)) |
+| `xyne-lighton-model` | off | the GPU model server for OCR; needs the `gpu` pool |
+
+With `enable_sandbox`, the root chart also installs `xyne-sandbox-router` and `xyne-egress-proxy`;
+with `enable_vespa`, the Vespa roles, `xyne-vespa-embedder`, `xyne-tei-batch-proxy` and
+`xyne-vespa-app`. They are configured through `addon_values`, not `apps`.
 
 `apps = { "<chart>" = { enabled = bool, values = "<YAML>", store_url = "<URL>" } }`. `values` is
 deep-merged over the values the root chart computes for that chart; any key of the service chart
 is allowed (`resources`, `autoscaling`, `env`, `secretEnv`, `replicaCount`, `image`, …).
 `store_url` reaches the chart as `storeUrl` and is left out of the values when empty, so the
 chart's own default stands; `xyne-ysweet` uses it to persist to an object store instead of a
-PVC. See [helm-charts/CHARTS.md](../../helm-charts/CHARTS.md) for what each chart expects.
+PVC. See [helm-charts/CHARTS.md](../../../helm-charts/CHARTS.md) for what each chart expects.
 
 ### `workers`
 
-Each entry becomes Application `xyne-worker-<name>` from chart `xyne-worker` with
-`fullnameOverride: <name>`, the backend's environment and Secret references, plus `env`
-(a map of strings, typically the `ENABLE_*_WORKER` flags) and `values` (YAML, merged last).
-The `worker` cloud identity is bound to ServiceAccount `xyne-worker-<name>` only when `<name>`
-is in `worker_names` of `01-infra`, and `02-platform` refuses to apply when it is not: the
-worker would otherwise start and fail on object storage. The bound names travel in
+Each entry becomes Application `xyne-worker-<name>` from chart `xyne-worker`, with its workloads
+and ServiceAccount named `xyne-worker-<name>`, the backend's environment and Secret references,
+plus `env` (a map of strings, typically the `ENABLE_*_WORKER` flags) and `values` (YAML, merged
+last). The `worker` cloud identity is bound to ServiceAccount `xyne-worker-<name>` only when
+`<name>` is in `worker_names` of `01-infra`, and `02-platform` refuses to apply when it is not:
+the worker would otherwise start and fail on object storage. The bound names travel in
 `identities.worker.ksa_names`; see [contract.md](contract.md#identities).
+
+```hcl
+workers = [
+  { name = "default", env = { ENABLE_NOTIFICATION_WORKER = "true", ENABLE_WORKER_SCHEDULER = "true", ENABLE_WORKFLOW_RECOVERY = "true" } },
+  {
+    name   = "vespa-ingestion"
+    env    = { ENABLE_VESPA_WORKER = "true", VESPA_WORKER_QUEUE_NAME = "vespa-ingestion" }
+    values = <<-YAML
+      replicaCount: 2
+    YAML
+  },
+]
+```
+
+`ENABLE_WORKER_SCHEDULER` and `ENABLE_WORKFLOW_RECOVERY` must be true on exactly one worker; the
+role flags are in [helm-charts/CHARTS.md](../../../helm-charts/CHARTS.md#xyne-worker). A new
+worker needs both stages (`setup.sh --env <env>`), because its identity is bound in `01-infra`.
 
 ### `addon_values`
 
-Keys are the addon names of the root values: `lbController`, `externalDns`, `istio`,
-`platformConfig`, `certManager`, `cnpg`, `redis`, `minio`, `vespa`, `monitoring`, `sandbox`. The YAML string is
-merged into that addon's block, so both the addon's own switches and its chart `values` are
-reachable:
+Keys are the addon names of the root values: `lbController`, `clusterAutoscaler`,
+`nvidiaDevicePlugin`, `externalDns`, `istio`, `platformConfig`, `certManager`, `cnpg`, `redis`,
+`minio`, `hindsight`, `vespa`, `monitoring`, `sandbox`. The YAML string is merged into that
+addon's block, so both the addon's own switches and its chart `values` are reachable:
 
 | Addon | Block keys (root `values.yaml`) |
 |---|---|
 | `lbController` | `enabled` (null = when cloud is aws), `version` 3.5.0, `namespace` kube-system, `serviceAccountName`, `values` |
+| `clusterAutoscaler` | `enabled` (null = when cloud is aws), `version` 9.59.0, `namespace` kube-system, `serviceAccountName`, `values` |
+| `nvidiaDevicePlugin` | `enabled` (null = when the `gpu` pool exists), `version` 0.20.1, `namespace` kube-system, `values` |
 | `externalDns` | `enabled` (null = when `infra.ingress.dnsZone` and `identities.externalDns.annotations` are both set), `version` 1.19.0, `namespace` external-dns, `serviceAccountName`, `provider` aws, `policy` sync, `sources` `[service]`, `values` |
 | `istio` | `enabled`, `version` 1.30.5, `namespace` istio-system, `gatewayNamespace` istio-ingress, `peerAuthentication` STRICT (`""` disables), `values.base`, `values.istiod`, `values.gateway` |
 | `platformConfig` | `storageClass.enabled` (null = when cloud is aws), `values` (any `platform-config` chart value: `gateway.extraHosts`, `routes.extra`, `routes.apiTimeout`, `certManager.server`, `storageClass.*`) |
@@ -645,7 +686,7 @@ reachable:
 | `redis` | `enabled`, `persistence.size` 10Gi, `persistence.storageClass`, `values` |
 | `minio` | `enabled`, `version` 5.4.0, `persistence.size` 200Gi, `persistence.storageClass`, `resources.requests.memory` 2Gi, `values` |
 | `hindsight` | `enabled`, `repoURL` github.com/vectorize-io/hindsight, `targetRevision` v0.10.1, `path` helm/hindsight, `namespace` hindsight, `service` hindsight-api, `port` 8888, `values` (any upstream chart value: `postgresql.*`, `worker.*`, `tei.*`, `api.env`, `existingSecret`) |
-| `vespa` | `enabled`, `image.{registry, repository vespaengine/vespa, tag}`, `proxyImage.{registry, repository, tag}`, `storageClass`, `configserverStorage` 50Gi, `contentStorage` 200Gi, `embedder.enabled` true, `values.{configserver, content, feed, search, embedder, proxy}` |
+| `vespa` | `enabled`, `image.{registry, repository vespaengine/vespa, tag 8.754.14}`, `proxyImage.{registry, repository, tag}` (default: the published image at `image_tag`), `storageClass`, `configserverStorage` 50Gi, `contentStorage` 200Gi, `embedder.{enabled true, model BAAI/bge-base-en-v1.5, dimensions 768}`, `values.{configserver, content, feed, search, embedder, proxy, app}` |
 | `monitoring` | `enabled`, `namespace` monitoring, `metricsEndpoint`, `victoriaMetrics.version` 0.93.0, `otelCollector.version` 0.173.1, `values.{victoriaMetrics, otelCollector}` |
 | `sandbox` | `enabled`, `kata.{version 4.1.0, imageTag 4.1.0, namespace kube-system, shim qemu, shims [qemu, qemu-runtime-rs], hypervisorAnnotations}`, `controller.{repoURL, targetRevision v0.4.5, path helm, namespace, image, tag, values}`, `template.{name, image, vcpus, memory, resources}`, `warmPool.replicas`, `policy.{allowedEgress, dns.cidrs}`, `values.{kata, policy, router, egressProxy}` |
 
@@ -672,18 +713,19 @@ overwritten. Referencing a new key from a chart is done with `secretEnv` in `app
 
 ## Node pool sizing
 
-`node_pools` in `01-infra.tfvars` is an object with keys `general`, `zero`, `vespa`, `sandbox`;
-every attribute is optional. Fixed per pool: the label `pool=<key>`, and the taints below on the
-three optional pools. The root chart schedules each app on `general` (or `zero` for the Zero
-pods, `vespa` for Vespa, the sandbox pool for Kata) and falls back to `general` when that pool is
-disabled.
+`node_pools` in `01-infra.tfvars` is an object with keys `general`, `zero`, `vespa`, `sandbox`
+and, on AWS, `gpu`; every attribute is optional. Fixed per pool: the label `pool=<key>`, and the
+taints below on the optional pools. The root chart schedules each app on `general` (or `zero` for
+the Zero pods, `vespa` for Vespa, `sandbox` for Kata, `gpu` for the OCR model server and the
+search embedder) and falls back to `general` when that pool is disabled.
 
 | Pool | Taint | GCP default | AWS default | Azure default |
 |---|---|---|---|---|
 | `general` | none | `e2-standard-4`, 1–5, 100 GB `pd-balanced` | `m6i.xlarge`, 1–5, 100 GB `gp3`, `AL2023_x86_64_STANDARD` | `Standard_D4s_v5`, 1–5, 128 GB `Managed`, `Ubuntu` |
 | `zero` | `storage-type=local-ssd:NoSchedule` | `e2-highmem-4`, 1–3, `local_ssd_count` 0 (needs N2/N2D/C2 when > 0) | `r6i.xlarge`, 1–3, `local_storage_raid0` false | `Standard_E4s_v5`, 1–3, `local_storage_temp_disk` false (needs a `d` size) |
 | `vespa` | `pool=vespa:NoSchedule` | `n2-standard-8`, 1–3, 200 GB `pd-ssd` | `m6i.2xlarge`, 1–3, 200 GB | `Standard_D8s_v5`, 1–3, 256 GB |
-| `sandbox` | `workload=sandbox:NoSchedule` | `n1-standard-4`, 1–5, `UBUNTU_CONTAINERD`, nested virtualization | `m5zn.metal`, 1–3, Ubuntu EKS AMI (must end in `.metal`) | `Standard_D4s_v3`, 1–3 (must be a v3/v4 D or E size) |
+| `sandbox` | `workload=sandbox:NoSchedule` | `n1-standard-4`, 1–5, `UBUNTU_CONTAINERD`, nested virtualization | `m5.metal`, 1–3, Ubuntu EKS AMI (must end in `.metal`, x86_64, and be offered in the region) | `Standard_D4s_v3`, 1–3 (must be a v3/v4 D or E size) |
+| `gpu` | `nvidia.com/gpu=present:NoSchedule` | not yet | `instance_types` `g6.xlarge`, `g5.xlarge`, `g6e.xlarge`, `g4dn.xlarge` (L4, A10G, L40S, T4), tried in that order when one is out of capacity; 1–2, `AL2023_x86_64_NVIDIA`, 100 GB | not yet |
 
 Common attributes: `min_count`, `max_count`, `disk_size_gb`, `disk_type`, `spot`, `labels`;
 plus `machine_type` (GCP), `instance_type`, `desired_count`, `ami_type` (AWS), `vm_size`,
@@ -697,64 +739,7 @@ node_pools = {
 zero_pool_enabled = true
 ```
 
-## Recipes
-
-### Enable claw (agents)
-
-`01-infra.tfvars` needs nothing new (the `claw` and `claw_auth` identities always exist).
-`02-platform.tfvars`:
-
-```hcl
-apps = {
-  xyne-claw               = { enabled = true }
-  xyne-claw-auth          = { enabled = true }
-  xyne-claw-auth-frontend = { enabled = true }
-}
-
-app_secrets = {
-  # … existing keys …
-  litellm_api_key      = "sk-…"                    # model access for claw
-  google_client_id     = "…apps.googleusercontent.com"   # claw-auth OAuth
-  google_client_secret = "GOCSPX-…"
-}
-```
-
-Then `setup.sh --env prod --only platform`. The backend gets `XYNE_CLAW_URL=http://xyne-claw:8081`
-and `XYNE_CLAW_AUTH_URL=http://xyne-claw-auth:3003`; the gateway gains the `/claw/` route.
-Sandboxed execution additionally needs the [sandbox addon](#turn-on-vespa-monitoring-or-the-sandbox).
-
-### Add a worker role
-
-`01-infra.tfvars`:
-
-```hcl
-worker_names = ["default", "vespa-ingestion"]
-```
-
-`02-platform.tfvars`:
-
-```hcl
-workers = [
-  { name = "default", env = { ENABLE_NOTIFICATION_WORKER = "true", ENABLE_WORKER_SCHEDULER = "true", ENABLE_WORKFLOW_RECOVERY = "true" } },
-  {
-    name = "vespa-ingestion"
-    env  = { ENABLE_VESPA_WORKER = "true", VESPA_WORKER_QUEUE_NAME = "vespa-ingestion" }
-    values = <<-YAML
-      replicaCount: 2
-      resources:
-        requests: {cpu: 500m, memory: 1Gi}
-    YAML
-  },
-]
-```
-
-Run `setup.sh --env prod` (both stages: the identity binding lives in `01-infra`). Applying
-`02-platform` alone fails on a precondition naming the worker that has no identity yet. The role
-flags and their exclusivity rules are in
-[helm-charts/CHARTS.md](../../helm-charts/CHARTS.md#xyne-worker); `ENABLE_WORKER_SCHEDULER`
-and `ENABLE_WORKFLOW_RECOVERY` must be true on exactly one worker.
-
-### Pin images to your own registry
+## Images from your own registry
 
 Mirror `ghcr.io/juspay/<image>:<tag>` for every image in `ci/images.json` plus
 `ghcr.io/juspay/y-sweet`, then:
@@ -767,168 +752,22 @@ image_tag      = "1.356.0"
 `image_registry` replaces the registry of every chart image (through `image.registry` and
 `global.imageRegistry`); `image_tag` applies to images built from this repository (backend,
 worker, dashboards, claw, claw-auth, transcription-agent, ocr) and must match a tag that
-`chart_revision`'s charts can run. Vespa and the batch proxy take their tags from
-`addon_values["vespa"]`. If the mirror needs a pull secret, create it in `namespace` yourself
-(`kubectl create secret docker-registry …` or an overlay; `extra_secret_data` only writes the
-nine known Secrets) and reference it with `imagePullSecrets` in `apps.<chart>.values`.
+`chart_revision`'s charts can run; the batch proxy follows it too. Vespa takes its tag from
+`addon_values["vespa"]` (`image.tag`, default `8.754.14`). If the mirror needs a pull secret,
+create it in `namespace` yourself (`kubectl create secret docker-registry …` or an overlay;
+`extra_secret_data` only writes the nine known Secrets) and reference it with
+`imagePullSecrets` in `apps.<chart>.values`.
 
-### Turn on Vespa, monitoring or the sandbox
+## Where each feature is configured
 
-```hcl
-# 01-infra.tfvars
-vespa_enabled   = true      # the vespa node pool (Vespa nodes are pinned to it)
-sandbox_enabled = true      # the sandbox node pool
-
-# 02-platform.tfvars
-enable_vespa      = true
-enable_monitoring = true
-enable_sandbox    = true
-
-addon_values = {
-  vespa = <<-YAML
-    image: {tag: "8.520.9"}
-    proxyImage: {registry: ghcr.io/juspay, tag: "1.356.0"}
-    storageClass: premium-rwo
-    embedder: {enabled: false}
-  YAML
-  monitoring = <<-YAML
-    values:
-      victoriaMetrics:
-        grafana: {enabled: true}
-  YAML
-  sandbox = <<-YAML
-    controller: {repoURL: https://github.com/example-org/agent-sandbox-manifests.git, targetRevision: main, path: config/default}
-    template: {image: registry.example.com/xyne/kata-workspace:1.0.0}
-    policy: {allowedEgress: []}
-  YAML
-}
-```
-
-- **Vespa** installs four `xyne-vespa` roles, and with `embedder.enabled` a GPU embedder plus
-  the batching proxy. `image.tag` is required (the chart's `appVersion` is a placeholder). The
-  backend receives `VESPA_FEED_URL`, `VESPA_QUERY_URL`, `VESPA_CONFIG_SERVER_URL`. Schemas are
-  deployed separately (`vespa-core/`).
-- **Monitoring** installs `victoria-metrics-k8s-stack` (release `vm`) and an OpenTelemetry
-  collector in `monitoring`; every app gets `ENABLE_OTEL_METRICS=true` and
-  `OTEL_BASE_URL=http://otel-collector.monitoring.svc:4318`.
-- **Sandbox** installs `kata-deploy` on the sandbox pool. `kata.shims` lists the shims to
-  install (`qemu` and `qemu-runtime-rs`) and `kata.shim` picks which one the workload runs,
-  defaulting to `qemu`, the Go runtime. That single value sets kata-deploy's `defaultShim` and
-  the `SandboxTemplate`'s `runtimeClassName` to `kata-<shim>` together, so the two cannot drift
-  and switching runtime is a one-field edit. The Rust runtime is installed but unused by
-  default: the sandbox image runs dockerd inside the microVM, and upstream tests Docker only
-  against QEMU. `kata.hypervisorAnnotations` is the allowlist of
-  `io.katacontainers.config.hypervisor.*` annotations a sandbox may set; an annotation missing
-  from it is silently rejected and the microVM boots at kata's own defaults rather than the
-  `template.vcpus` and `template.memory` you asked for. It also installs the agent-sandbox
-  controller and its four CRDs from the upstream chart at `controller.repoURL` (pinned to
-  `v0.4.5`, with `controller.extensions` on so the `SandboxTemplate`, `SandboxWarmPool` and
-  `SandboxClaim` workers run; clear `repoURL` if you install it yourself), the `SandboxTemplate`, warm pool,
-  NetworkPolicy and RBAC from `deployment/argocd/addons/sandbox`. `policy.dns.cidrs` is empty
-  by default and only matters when the cluster runs NodeLocal DNSCache: that DaemonSet binds
-  its addresses on every node, so a lookup never reaches a kube-dns pod and the pod selector
-  rule never matches. Put both addresses from its `-localip` flag in `policy.dns.cidrs`, the
-  link-local one and the kube-dns ClusterIP, or every name lookup inside a sandbox hangs. Read
-  them with
-  `kubectl -n kube-system get ds node-local-dns -o jsonpath='{.spec.template.spec.containers[0].args}'`.
-  It also installs `xyne-sandbox-router` and
-  `xyne-egress-proxy`. `xyne-claw` then gets `KATA_ROUTER_URL`, `KATA_NAMESPACE`,
-  `KATA_TEMPLATE` and a mounted ServiceAccount token. `template.image` is required.
-
-### Switch Postgres to in-cluster (CloudNativePG)
-
-```hcl
-# 01-infra.tfvars
-postgres_mode     = "incluster"
-postgres_password = "…"          # becomes xyne-pg-app
-
-# 02-platform.tfvars (optional)
-addon_values = {
-  cnpg = <<-YAML
-    cluster:
-      instances: 3
-      storage: {size: 100Gi, storageClass: premium-rwo}
-      backup:
-        enabled: true
-        destinationPath: s3://acme-spaces-prod-xyne-backups/pg
-        credentialsSecret: xyne-pg-backup
-        schedule: "0 0 2 * * *"
-        retentionPolicy: 30d
-  YAML
-}
-```
-
-`01-infra` creates no database; Argo CD installs the operator (wave -2) and `pg-cluster`
-(wave -1): a `Cluster xyne-pg` with `wal_level=logical`, the five databases, `ALTER ROLE xyne
-REPLICATION`, and `Pooler`s `xyne-pg-pooler-rw` / `xyne-pg-pooler-ro` (transaction mode). Apps
-use the poolers; Zero uses `xyne-pg-rw`. No one-time SQL is needed. Backups need a Secret
-`xyne-pg-backup` with `ACCESS_KEY_ID` / `ACCESS_SECRET_KEY` (create it yourself or through an
-overlay). Switching an existing install migrates no data.
-
-### Switch Postgres to an external server
-
-```hcl
-postgres_mode     = "external"
-postgres_password = "…"
-external_postgres = {
-  host     = "pg.internal.example.com"
-  ro_host  = "pg-ro.internal.example.com"   # optional
-  port     = 5432
-  username = "xyne"
-  sslmode  = "require"
-}
-```
-
-The server must have `wal_level=logical`, enough replication slots and WAL senders, the five
-databases, and the role with `REPLICATION`; it must be reachable from the cluster network.
-
-### Switch Redis to in-cluster
-
-```hcl
-redis_mode = "incluster"
-redis_auth = "…"     # required; becomes xyne-redis-auth and REDIS_PASSWORD
-```
-
-Argo CD installs `helm-charts/charts/xyne-redis` (single node, 10 GiB PVC by default) as
-`xyne-redis.<namespace>.svc:6379` without TLS. Not compatible with `livekit_enabled`.
-
-### MinIO instead of buckets
-
-```hcl
-storage_mode = "incluster"
-storage_credentials = {
-  access_key_id     = "xyne-minio"      # MinIO root user
-  secret_access_key = "…"               # MinIO root password
-}
-```
-
-`01-infra` creates no buckets and no bucket IAM; Argo CD installs the `minio` chart 5.4.0
-(standalone, one 200 GiB PVC, buckets `<prefix>-<key>` created at start) as
-`http://xyne-minio.<namespace>.svc:9000`. The apps see provider `s3`, `S3_ENDPOINT` set, and the
-credentials as `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` from their Secrets
-(`staticCredentials: true`). Size it with `addon_values["minio"]`
-(`persistence.size`, `persistence.storageClass`, `resources`).
-
-### External S3-compatible storage
-
-```hcl
-storage_mode = "external"
-external_storage = {
-  provider = "s3"
-  endpoint = "https://s3.internal.example.com"   # "" for the cloud's own S3
-  region   = "ap-south-1"
-  buckets = {
-    main = "acme-xyne-main", docs = "acme-xyne-docs", canvas = "acme-xyne-canvas",
-    recordings = "acme-xyne-recordings", workflows = "acme-xyne-workflows",
-    transcription = "acme-xyne-transcription", bundles = "acme-xyne-bundles", claw = "acme-xyne-claw"
-  }
-}
-storage_credentials = { access_key_id = "…", secret_access_key = "…" }
-```
-
-All eight names and both credentials are required. `provider = "gcs"` is accepted for an
-existing set of Cloud Storage buckets on GCP, in which case the identities still need bucket IAM
-you grant yourself. `provider = "azure"` is accepted for existing Blob containers; set `account`
-to the storage account name so the apps get `AZURE_STORAGE_ACCOUNT`, or `endpoint` to the blob
-endpoint, and grant the identities the container roles yourself. `storage_credentials` stay a
-required input in `external` mode, but the Azure adapter does not read them.
+| Feature | `01-infra.tfvars` | `02-platform.tfvars` | Guide |
+|---|---|---|---|
+| Agents | | `apps.xyne-claw`, `xyne-claw-auth`, `xyne-claw-auth-frontend`; `litellm_api_key` | [claw-and-sandbox](../features/claw-and-sandbox.md) |
+| Sandboxes | `sandbox_enabled` | `enable_sandbox`; `addon_values["sandbox"]` | [claw-and-sandbox](../features/claw-and-sandbox.md) |
+| Search | `vespa_enabled`, `gpu_enabled`, a `vespa-ingestion` worker name | `enable_vespa`; the worker; `addon_values["vespa"]` | [search](../features/search.md) |
+| Calls | `livekit_enabled` and `livekit_*` | `apps.xyne-transcription-agent` | [calls](../features/calls.md) |
+| OCR | `gpu_enabled` | `apps.xyne-lighton-ocr`, `apps.xyne-lighton-model` | [ocr](../features/ocr.md) |
+| Memory | | `enable_hindsight` or `hindsight.url`; `hindsight_llm_api_key` | [memory](../features/memory.md) |
+| Monitoring | | `enable_monitoring`; `addon_values["monitoring"]` | [monitoring](../features/monitoring.md) |
+| In-cluster or external data services | `postgres_mode`, `redis_mode`, `storage_mode`, `external_*` | `addon_values["cnpg"]`, `["redis"]`, `["minio"]` | [data-services](../features/data-services.md) |
+| Argo CD UI on the gateway | | `argocd_expose`, `argocd_host` | [operations](../operate/operations.md#argo-cd-access) |

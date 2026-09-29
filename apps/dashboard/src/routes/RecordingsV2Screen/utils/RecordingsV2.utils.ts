@@ -1,13 +1,11 @@
 import {
   format,
   formatDistanceToNow,
-  isSameDay,
   isToday,
   isYesterday,
   startOfDay,
   startOfMonth,
   startOfWeek,
-  subDays,
   subMonths,
   subWeeks,
 } from 'date-fns';
@@ -27,26 +25,6 @@ export type RecordingDatePreset =
 
 export type RecordingOwnershipTab = 'all' | 'created' | 'shared';
 
-type FixedRecordingDateGroupId = 'today' | 'yesterday' | 'this-week' | 'last-week' | 'this-month';
-
-export interface RecordingDateGroup {
-  id: FixedRecordingDateGroupId | `month-${string}`;
-  label: string;
-  recordings: OatsRecordingEntry[];
-}
-
-export type RecordingListRow =
-  | {
-      id: string;
-      type: 'group';
-      label: string;
-    }
-  | {
-      id: string;
-      type: 'recording';
-      recording: OatsRecordingEntry;
-    };
-
 export const LIST_TAB_CLASS_NAME =
   'flex h-8 flex-1 items-center justify-center whitespace-nowrap rounded-lg px-3 text-sm font-semibold leading-none transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-muted sm:flex-none';
 
@@ -60,17 +38,6 @@ export const RECORDING_DATE_PRESETS: ReadonlyArray<{
   { value: 'last-week', label: 'Last week' },
   { value: 'this-month', label: 'This month' },
   { value: 'last-month', label: 'Last month' },
-];
-
-const FIXED_GROUP_DEFINITIONS: ReadonlyArray<{
-  id: FixedRecordingDateGroupId;
-  label: string;
-}> = [
-  { id: 'today', label: 'Today' },
-  { id: 'yesterday', label: 'Yesterday' },
-  { id: 'this-week', label: 'This week' },
-  { id: 'last-week', label: 'Last week' },
-  { id: 'this-month', label: 'This month' },
 ];
 
 /**
@@ -109,103 +76,6 @@ export function isRecordingInDatePreset(
 
 export function getRecordingDatePresetLabel(preset: RecordingDatePreset): string {
   return RECORDING_DATE_PRESETS.find(option => option.value === preset)?.label ?? 'All time';
-}
-
-/**
- * Groups a newest-first recording list without sorting or discarding entries.
- * More specific calendar periods take precedence over broader ones.
- *
- * @example
- * groupRecordingsByDate(recordings, now).map(group => group.label);
- * // ['Today', 'This week', 'June 2026']
- */
-export function groupRecordingsByDate(
-  recordings: OatsRecordingEntry[],
-  now = new Date(),
-): RecordingDateGroup[] {
-  const todayStartedAt = startOfDay(now);
-  const yesterday = subDays(todayStartedAt, 1);
-  const thisWeekStartedAt = startOfWeek(todayStartedAt, { weekStartsOn: 1 }).getTime();
-  const lastWeekStartedAt = subWeeks(thisWeekStartedAt, 1).getTime();
-  const thisMonthStartedAt = startOfMonth(todayStartedAt).getTime();
-
-  const fixedGroups = new Map<FixedRecordingDateGroupId, OatsRecordingEntry[]>(
-    FIXED_GROUP_DEFINITIONS.map(({ id }) => [id, []]),
-  );
-  const previousMonthGroups = new Map<string, OatsRecordingEntry[]>();
-
-  for (const recording of recordings) {
-    const startedAt = new Date(recording.startedAt);
-    let fixedGroupId: FixedRecordingDateGroupId | null = null;
-
-    if (isSameDay(startedAt, todayStartedAt)) {
-      fixedGroupId = 'today';
-    } else if (isSameDay(startedAt, yesterday)) {
-      fixedGroupId = 'yesterday';
-    } else if (recording.startedAt >= thisWeekStartedAt) {
-      fixedGroupId = 'this-week';
-    } else if (recording.startedAt >= lastWeekStartedAt) {
-      fixedGroupId = 'last-week';
-    } else if (recording.startedAt >= thisMonthStartedAt) {
-      fixedGroupId = 'this-month';
-    }
-
-    if (fixedGroupId) {
-      fixedGroups.get(fixedGroupId)?.push(recording);
-      continue;
-    }
-
-    const monthKey = format(startedAt, 'yyyy-MM');
-    const monthRecordings = previousMonthGroups.get(monthKey);
-    if (monthRecordings) {
-      monthRecordings.push(recording);
-    } else {
-      previousMonthGroups.set(monthKey, [recording]);
-    }
-  }
-
-  const groups: RecordingDateGroup[] = FIXED_GROUP_DEFINITIONS.flatMap(({ id, label }) => {
-    const groupedRecordings = fixedGroups.get(id) ?? [];
-    return groupedRecordings.length > 0 ? [{ id, label, recordings: groupedRecordings }] : [];
-  });
-
-  for (const [monthKey, monthRecordings] of previousMonthGroups) {
-    groups.push({
-      id: `month-${monthKey}`,
-      label: format(new Date(monthRecordings[0]!.startedAt), 'MMMM yyyy'),
-      recordings: monthRecordings,
-    });
-  }
-
-  return groups;
-}
-
-/**
- * Interleaves each date heading with its recording rows for the virtualized list.
- *
- * @example
- * buildRecordingListRows(groups).map(row => row.type);
- * ['group', 'recording', 'recording', 'group', 'recording']
- */
-export function buildRecordingListRows(groups: RecordingDateGroup[]): RecordingListRow[] {
-  return groups.flatMap<RecordingListRow>(group => [
-    {
-      id: `group-${group.id}`,
-      type: 'group',
-      label: group.label,
-    },
-    ...group.recordings.map(
-      (recording): RecordingListRow => ({
-        id: `recording-${recording.id}`,
-        type: 'recording',
-        recording,
-      }),
-    ),
-  ]);
-}
-
-export function buildRecordingRows(recordings: OatsRecordingEntry[]): RecordingListRow[] {
-  return buildRecordingListRows(groupRecordingsByDate(recordings));
 }
 
 /**
@@ -269,26 +139,6 @@ export function filterRecordingsByLabels(
 
   const wanted = new Set(selectedLabels);
   return recordings.filter(recording => recording.labels.some(label => wanted.has(label)));
-}
-
-/**
- * Finds the closest recording row at or after a visible index, falling back to the row before it.
- *
- * @example
- * findNearestVisibleRecording(rows, 3); // Recording | undefined
- */
-export function findNearestVisibleRecording(
-  rows: RecordingListRow[],
-  startIndex: number,
-): OatsRecordingEntry | undefined {
-  const row =
-    rows.slice(startIndex).find(candidate => candidate.type === 'recording') ??
-    rows
-      .slice(0, startIndex)
-      .reverse()
-      .find(candidate => candidate.type === 'recording');
-
-  return row?.type === 'recording' ? row.recording : undefined;
 }
 
 export function toRecordingTitleInput(
