@@ -218,7 +218,7 @@ artifactAppsRouter.post("/upload", async (req: Request, res: Response): Promise<
   const meta = uploadCreateMeta.safeParse(req.body);
   if (!meta.success) return badRequest(res, meta);
 
-  const workspaceId = await getWorkspaceIdForUser(requesterId, "artifact-apps");
+  const workspaceId = await getWorkspaceIdForUser(requesterId, "artifact-apps", requestWorkspaceHint(req));
   if (!workspaceId) {
     res.status(409).json({ success: false, error: "No Spaces workspace for this user" });
     return;

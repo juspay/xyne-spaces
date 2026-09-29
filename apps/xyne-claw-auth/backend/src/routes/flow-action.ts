@@ -1327,7 +1327,9 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
 
       // Only the job's creator may arm a channel broadcast. Fail closed on a
       // missing caller identity so a stripped signature can't approve.
-      if (!callerUserId || callerUserId !== creatorUserId) {
+      // matchesCallerUserId accepts both card-baked id forms (raw Spaces id on
+      // legacy cards, canonical Claw id on current ones).
+      if (!matchesCallerUserId(creatorUserId)) {
         log.error(`[flow-action] Unauthorized schedule-approval: caller ${callerUserId ?? "(none)"} != creator ${creatorUserId}`);
         res.status(403).json({ type: "error", message: "Unauthorized" } satisfies AppActionResponse);
         return;

@@ -1,4 +1,5 @@
 import { useNavigate } from "react-router-dom";
+import { isCurrentUser } from "../../../lib/identity";
 import {
   CaretLeftIcon,
   ChatCircleIcon,
@@ -158,7 +159,7 @@ export function AgentDetailHeader({
   // so permissions.role is NOT a reliable check for the publish flow.
   // Publish submits a *request* (owner path); admins instead get the direct
   // Promote/Demote moderation actions below.
-  const isActualOwner = !!userId && agent.ownerUserId === userId;
+  const isActualOwner = !!userId && isCurrentUser(agent.ownerUserId);
   const canPublish = isActualOwner && agent.scope !== "global" && !!onPublish;
   const canModerate = isAdmin && !isActualOwner;
   const canPromote = canModerate && agent.scope !== "global" && !!onAdminPromote;

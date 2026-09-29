@@ -695,6 +695,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
         ? researchContext as { type?: unknown; id?: unknown }
         : undefined,
       convId,
+      requestWorkspaceHint(req),
     );
     if (!sdlcResolution.ok) {
       res.status(sdlcResolution.status).json({ success: false, error: sdlcResolution.error });
@@ -703,7 +704,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
     const sdlcContext =
       sdlcResolution.repository?.agentContext ??
       (typeof channelId === "string"
-        ? await resolveSdlcHubContextForUser(userId, channelId, convId)
+        ? await resolveSdlcHubContextForUser(userId, channelId, convId, requestWorkspaceHint(req))
         : undefined);
 
     // Resolve the agent's provider credentials so this SSE run uses the agent's
@@ -1483,7 +1484,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
           "../services/agentChatContextService.js"
         );
         const { getSpacesAuthForUser } = await import("../lib/spaces-db.js");
-        const auth = await getSpacesAuthForUser(userId);
+        const auth = await getSpacesAuthForUser(userId, "agent-chat", requestWorkspaceHint(req));
         const normalized = normalizeAttachedContext(forwardedAttachedContext);
         if (auth && normalized.items.length > 0) {
           const payload = await buildAttachedContextPayload(normalized.items, auth);

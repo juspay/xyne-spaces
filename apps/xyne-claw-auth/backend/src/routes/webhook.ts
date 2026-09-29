@@ -2523,6 +2523,11 @@ export async function handleAutomationWebhook(
     res.status(400).json({ success: false, error: "user identity could not be resolved" });
     return;
   }
+  // Display name for automation-run messages. senderId must stay the canonical
+  // id, but senderName is rendered to humans — the raw `claw-user-<uuid>` id
+  // must never be what a user reads.
+  const senderUser = await prisma.user.findUnique({ where: { id: clawUserId }, select: { name: true, email: true } });
+  const senderDisplayName = (senderUser?.name ?? "").trim() || senderUser?.email || clawUserId;
   const agent = await agentRepository.findBySlug(agentSlug, automationOrgId);
   if (!agent) {
     clog.warn(
@@ -2679,7 +2684,7 @@ export async function handleAutomationWebhook(
     const sessionContext: SessionContext = {
       mentionedUserId: agent.spacesAppUserId!,
       senderId: clawUserId,
-      senderName: clawUserId,
+      senderName: senderDisplayName,
       // conversationId/channelId may be absent for new-conversation automations.
       // The resolve-and-forward path doesn't read them; default to "" so the
       // typed context stays valid.
@@ -2924,7 +2929,7 @@ export async function handleAutomationWebhook(
     const recoveryCtx: RecoverySessionContext = {
       mentionedUserId: agent.spacesAppUserId!,
       senderId: clawUserId,
-      senderName: clawUserId,
+      senderName: senderDisplayName,
       channelId: payload.channelId ?? "",
       channelName: payload.channelName ?? payload.channelId ?? "",
       conversationId: payload.conversationId ?? "",
@@ -4985,7 +4990,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     // fall back to the agent's bot token. Fail-open — return the text unchanged
     // on any error so the reply still posts.
     const pendingSenderAuth = payload.pendingResponses?.length
-      ? await getSpacesAuthForUser(ctx.senderId, "webhook").catch(() => null)
+      ? await getSpacesAuthForUser(ctx.senderId, "webhook", ctx.workspaceId).catch(() => null)
       : null;
     const resolvePendingMentions = async (text: string): Promise<string> => {
       const lookupToken = pendingSenderAuth?.token ?? ctx.appToken;
@@ -5475,7 +5480,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       // can do name → userId lookups for plain `@Name` mentions the LLM emitted
       // without brackets. Falls back to null on lookup failure — the prepare
       // function gracefully skips resolution when senderSpacesToken is absent.
-      const senderAuth = await getSpacesAuthForUser(ctx.senderId, "webhook").catch(() => null);
+      const senderAuth = await getSpacesAuthForUser(ctx.senderId, "webhook", ctx.workspaceId).catch(() => null);
 
       // Apply the 10K-char + attachment-count guards. When the result is
       // too long, this swaps the body for a stub + a PDF attachment, which

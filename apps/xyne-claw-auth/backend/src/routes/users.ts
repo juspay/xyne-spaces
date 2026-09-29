@@ -15,7 +15,7 @@ import {
   resolveClawUserIdForSpacesIdentity,
 } from "../lib/users-jit.js";
 import { getOrgId, getRequesterId } from "../middleware/agent-acl.js";
-import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
+import { getWorkspaceIdForUser, requestWorkspaceHint } from "../lib/spaces-db.js";
 import { getCanonicalRequesterId, matchesAuthenticatedUserId } from "../middleware/pin-user-id-param.js";
 
 import { createLogger } from "../logger.js";
@@ -131,7 +131,9 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
   let user;
   const jitOk = await ensureUserExists(id.trim(), "require-auth");
   if (jitOk) {
-    const clawUserId = await resolveClawUserIdForSpacesIdentity(id.trim());
+    // Disambiguate users with memberships in two Spaces workspaces: requireAuth
+    // already verified and stamped the requesting workspace on this request.
+    const clawUserId = await resolveClawUserIdForSpacesIdentity(id.trim(), requestWorkspaceHint(req));
     if (!clawUserId) {
       log.error(`[users] JIT resolved Spaces user ${id.trim()} but no Claw identity exists`);
       throw new HttpError(503, "User identity is still being synchronized");
