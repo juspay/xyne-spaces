@@ -106,6 +106,13 @@ async function pullCalls(
       rows = await ozonetelService.fetchCallDetails({ workspaceId: source.workspaceId, ...window });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      logger.error(`${TAG} call details fetch failed`, {
+        sourceId: source.id,
+        fromDate: window.fromDate,
+        toDate: window.toDate,
+        campaignName: window.campaignName,
+        error: message,
+      });
       result.errors.push(`${window.fromDate}${window.campaignName ? ` ${window.campaignName}` : ''}: ${message}`);
       continue;
     }
@@ -147,6 +154,12 @@ async function pullCalls(
   }
 
   logger.info(`${TAG} pull done`, { sourceId: source.id, windows: windows.length, ...result, errors: result.errors.length });
+  if (result.errors.length > 0) {
+    logger.error(`${TAG} pull finished with ${result.errors.length} failure(s)`, {
+      sourceId: source.id,
+      errors: result.errors.slice(0, 20),
+    });
+  }
   return result;
 }
 

@@ -234,7 +234,7 @@ class EmailFetchWorker {
       // A failed Ozonetel request drops a whole day of calls, so the user must not read "up to date".
       const failedCount = noun === 'call' ? errors.length : 0;
       const failedNote = failedCount > 0
-        ? ` ${failedCount} part${failedCount === 1 ? '' : 's'} could not be fetched, so some calls may be missing. Fetch again later.`
+        ? ` ${failedCount} failed, so some calls may be missing. First error: ${errors[0]}`
         : '';
       const title = isMemberSync
         ? (newCount > 0
