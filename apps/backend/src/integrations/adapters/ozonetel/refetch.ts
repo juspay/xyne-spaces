@@ -13,6 +13,13 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 // Ozonetel serves CDRs for the last 15 days, one day per request, at most 2 requests a minute.
 const CDR_RETENTION_DAYS = 15;
 const CDR_REQUEST_GAP_MS = 31_000;
+// A large backfill writes its calls in chunks so it does not hammer the DB.
+const INGEST_CHUNK_SIZE = 50;
+const INGEST_CHUNK_PAUSE_MS = 1_000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
 
 interface CdrWindow {
   fromDate: string;
@@ -90,9 +97,10 @@ async function pullCalls(
 ): Promise<RefetchResult> {
   const adapter = adapterRegistry.getAdapter(source.name);
   const result: RefetchResult = { processed: 0, newTickets: 0, skipped: 0, errors: [] };
+  let written = 0;
 
   for (const [index, window] of windows.entries()) {
-    if (index > 0) await new Promise(resolve => setTimeout(resolve, CDR_REQUEST_GAP_MS));
+    if (index > 0) await sleep(CDR_REQUEST_GAP_MS);
     let rows: Record<string, unknown>[];
     try {
       rows = await ozonetelService.fetchCallDetails({ workspaceId: source.workspaceId, ...window });
@@ -118,6 +126,8 @@ async function pullCalls(
         result.skipped++;
         continue;
       }
+      if (written > 0 && written % INGEST_CHUNK_SIZE === 0) await sleep(INGEST_CHUNK_PAUSE_MS);
+      written++;
       try {
         const ingested = await externalSourceCore.ingest(adapter, source.name, body, source);
         for (const item of ingested) {
