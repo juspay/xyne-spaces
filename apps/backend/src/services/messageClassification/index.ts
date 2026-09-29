@@ -19,6 +19,7 @@ import { vespaQueue } from '@/queues/vespaQueue';
 import { messageSchema } from '@/vespa/src/types';
 import { buildClassifierPrompt } from './prompt';
 import { getThreadTypeVocabulary } from './vocabulary';
+import { classifyThreadWithJev, isJevClassificationActive, logJevClassification } from './jev';
 
 const TAG = '[MessageClassification]';
 
@@ -258,8 +259,8 @@ export async function classifyAndTagThread(conversationId: string): Promise<Clas
   });
   const rootIsBot = rootMessage?.msgType === 'BOT';
 
-  const modelName = config.messageClassification.model;
-  const { threadTypes } = await classifyThread(
+  const { threadTypes } = await classifyWithConfiguredModel(
+    conversationId,
     {
       thread_messages: threadMessages,
       root_is_bot: rootIsBot,
@@ -282,9 +283,7 @@ export async function classifyAndTagThread(conversationId: string): Promise<Clas
         },
       }),
     },
-    null,
     channel.workspaceId,
-    modelName,
     vocabulary,
   );
 
@@ -374,6 +373,50 @@ export async function classifyAndTagThread(conversationId: string): Promise<Clas
   }
 
   return { tagged, threadType: nextThreadType };
+}
+
+/**
+ * Which model classifies the thread, per the MESSAGE_CLASSIFICATION_JEV_* switches:
+ *
+ *  - Jev off: the LLM, as always.
+ *  - Jev on:  the LLM answers and is stored; Jev runs alongside for comparison only. Not
+ *             awaited, so a slow Jev cannot hold the job.
+ *  - Jev on + replace: Jev answers and is stored, and the LLM is not called. When Jev has
+ *             no answer the LLM is called instead, so the thread is still classified.
+ *
+ * Logging is its own switch in both Jev modes. Either way the answer goes through the same
+ * write path below, so a Jev answer lands as thread and message tags exactly as an LLM one.
+ */
+async function classifyWithConfiguredModel(
+  conversationId: string,
+  input: ClassifierInput,
+  workspaceId: string,
+  vocabulary: readonly ThreadTypeEntry[],
+): Promise<Classification> {
+  const modelName = config.messageClassification.model;
+  const callLlm = () => classifyThread(input, null, workspaceId, modelName, vocabulary);
+  if (!isJevClassificationActive()) return callLlm();
+
+  const { logEnabled, replace } = config.messageClassification.jev;
+  const meta = { conversationId, workspaceId };
+
+  if (replace) {
+    const jev = await classifyThreadWithJev(input, vocabulary);
+    if (logEnabled) logJevClassification(meta, jev, null, 'replace');
+    if (jev.ok) return jev.classification;
+    // Logged whatever the log switch says: that switch hides comparisons, not breakage.
+    logger.warn(`${TAG} Jev had no answer, falling back to the LLM`, {
+      ...meta,
+      reason: jev.reason,
+    });
+    return callLlm();
+  }
+
+  const llm = await callLlm();
+  void classifyThreadWithJev(input, vocabulary).then(jev => {
+    if (logEnabled) logJevClassification(meta, jev, llm, 'shadow');
+  });
+  return llm;
 }
 
 /**
@@ -521,7 +564,7 @@ interface ClassifierMessage {
   timestamp_iso: string;
 }
 
-interface ClassifierInput {
+export interface ClassifierInput {
   thread_messages: ClassifierMessage[];
   /** True when a bot or automated system opened the thread. Gates the ALERT type. */
   root_is_bot: boolean;
@@ -541,7 +584,7 @@ export interface ClassifiedType {
   sourceMessageIds: string[];
 }
 
-interface Classification {
+export interface Classification {
   /** The thread as a whole — a thread can be several things at once. */
   threadTypes: ClassifiedType[];
 }

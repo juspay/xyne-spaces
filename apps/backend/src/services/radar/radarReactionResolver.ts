@@ -2,7 +2,12 @@ import { config } from '@/config/env';
 import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { extractUserMentions } from '@/utils/mentionParser';
-import { radarParser, type ParserOperation } from '@/services/radar/radarParser';
+import {
+  radarParser,
+  type ParsedTransitions,
+  type ParserOperation,
+} from '@/services/radar/radarParser';
+import { checkReaction, isRadarJevActive, logReactionCheck } from '@/services/radar/radarJev';
 import { radarApplier } from '@/services/radar/radarApplier';
 import { radarScopeFor } from '@/services/radar/radarScope';
 
@@ -155,32 +160,64 @@ class RadarReactionResolver {
       ]);
       const reactorName = nameById.get(reaction.userId) ?? reaction.userId;
 
-      run.parserRan = true;
-      const transitions = await radarParser.parseWindow(
-        eligible.map(c => ({
-          id: c.id,
-          title: c.title,
-          context: c.contextSummary,
-          requested_by: c.requestedBy,
-          pending_on: c.pendingOn,
-          source_message_id: c.sourceMessageId,
-        })),
-        [
-          {
-            id: message.messageId,
-            author: { id: reaction.userId, name: reactorName },
-            text: message.content,
-            mentions: extractUserMentions(message.content).map(id => ({
-              id,
-              name: nameById.get(id) ?? id,
+      // Jev can answer a reaction whole: the only legal move is resolving one of these
+      // items. Started before the parser so shadow mode costs no time.
+      const jevCheck = isRadarJevActive()
+        ? checkReaction({
+            emoji: reaction.emojiName,
+            message: { id: message.messageId, text: message.content },
+            items: eligible.map(c => ({
+              id: c.id,
+              title: c.title,
+              context: c.contextSummary,
+              source_message_id: c.sourceMessageId,
             })),
-            timestamp_iso: message.createdAt.toISOString(),
-          },
-        ],
-        Object.fromEntries(nameById),
-        [],
-        { by: reactorName, emoji: reaction.emojiName },
-      );
+          })
+        : null;
+      const jevMeta = { conversationId: scope.key, emoji: reaction.emojiName, candidates: eligible.length };
+      const replaced = jevCheck && config.radar.jev.replace ? await jevCheck : null;
+      if (replaced && config.radar.jev.logEnabled) logReactionCheck(jevMeta, replaced, null);
+      if (replaced && !replaced.ok) {
+        logger.warn(`${TAG} Jev had no answer, falling back to the parser`, { reason: replaced.reason });
+      }
+
+      let transitions: ParsedTransitions;
+      if (replaced?.ok) {
+        transitions = { operations: replaced.operations, assessment: replaced.assessment };
+      } else {
+        run.parserRan = true;
+        transitions = await radarParser.parseWindow(
+          eligible.map(c => ({
+            id: c.id,
+            title: c.title,
+            context: c.contextSummary,
+            requested_by: c.requestedBy,
+            pending_on: c.pendingOn,
+            source_message_id: c.sourceMessageId,
+          })),
+          [
+            {
+              id: message.messageId,
+              author: { id: reaction.userId, name: reactorName },
+              text: message.content,
+              mentions: extractUserMentions(message.content).map(id => ({
+                id,
+                name: nameById.get(id) ?? id,
+              })),
+              timestamp_iso: message.createdAt.toISOString(),
+            },
+          ],
+          Object.fromEntries(nameById),
+          [],
+          { by: reactorName, emoji: reaction.emojiName },
+        );
+        if (jevCheck && !replaced && config.radar.jev.logEnabled) {
+          const parserResolved = transitions.operations
+            .filter(op => op.op === 'resolve' && op.itemId)
+            .map(op => op.itemId as string);
+          void jevCheck.then(check => logReactionCheck(jevMeta, check, parserResolved));
+        }
+      }
 
       run.proposedOps = transitions.operations;
       run.assessment = transitions.assessment;
