@@ -6,5 +6,5 @@ export type { SecretsVaultRouterDeps } from './router.js';
 export { EncryptionImpl, RotationState, SecretVersionStatus } from './types.js';
 export type { EncryptionAdapter, SecretDefinitionRow, SecretVersionRow, VaultPrismaClient } from './types.js';
 export { createSecretHandler } from './secretHandler.js';
-export type { SecretHandler } from './secretHandler.js';
+export type { SecretHandler, VerifyResult } from './secretHandler.js';
 export { githubToken, verifyGithubToken } from './handlers/githubToken.js';

@@ -204,7 +204,7 @@ export function SecretDetailDialog({ name }: { name: string }): ReactElement {
           Manage
         </Button>
       }
-      className='max-w-2xl'
+      className='max-w-2xl max-h-[85vh] overflow-y-auto'
     >
       <div className='flex flex-col gap-4 p-6'>
         <h2 className='text-base font-semibold'>{name}</h2>

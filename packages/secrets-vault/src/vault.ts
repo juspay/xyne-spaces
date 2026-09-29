@@ -1,5 +1,6 @@
 import { EncryptionImpl, SecretVersionStatus, RotationState } from './types.js';
 import type { EncryptionAdapter, VaultPrismaClient } from './types.js';
+import type { VerifyResult } from './secretHandler.js';
 
 export interface VaultLogger {
   info: (message: string) => void;
@@ -17,7 +18,7 @@ export interface SecretsVaultDeps {
 
 export type AddVersionResult =
   | { status: SecretVersionStatus.ACTIVE; version: number }
-  | { status: SecretVersionStatus.FAILED; version: number };
+  | { status: SecretVersionStatus.FAILED; version: number; reason?: string };
 
 /** Thrown when a claim on SecretDefinition.rotationState loses the race — someone else is already rotating this secret. */
 export class RotationInProgressError extends Error {
@@ -166,7 +167,7 @@ export function createSecretsVault(deps: SecretsVaultDeps) {
     name: string;
     value: string;
     updatedBy: string;
-    verify: (value: string) => Promise<boolean>;
+    verify: (value: string) => Promise<VerifyResult>;
   }): Promise<AddVersionResult> {
     const definition = await deps.prisma.secretDefinition.findUnique({
       where: { name: input.name },
@@ -202,17 +203,17 @@ export function createSecretsVault(deps: SecretsVaultDeps) {
         },
       });
 
-      const passed = await input.verify(input.value);
+      const result = await input.verify(input.value);
 
-      if (!passed) {
+      if (!result.ok) {
         await deps.prisma.secretVersion.updateMany({
           where: { secretDefinitionId: definition.id, version },
           data: { status: SecretVersionStatus.FAILED },
         });
         logger.warn(
-          `[secrets-vault] addVersion: "${input.name}" v${version} failed verification (updatedBy=${input.updatedBy}) — previous active version untouched`,
+          `[secrets-vault] addVersion: "${input.name}" v${version} failed verification (updatedBy=${input.updatedBy}) — previous active version untouched${result.reason ? ` — reason: ${result.reason}` : ''}`,
         );
-        return { status: SecretVersionStatus.FAILED, version };
+        return { status: SecretVersionStatus.FAILED, version, reason: result.reason };
       }
 
       await setActiveVersion(definition.id, version);
@@ -247,7 +248,7 @@ export function createSecretsVault(deps: SecretsVaultDeps) {
     name: string;
     version: number;
     updatedBy: string;
-    verify: (value: string) => Promise<boolean>;
+    verify: (value: string) => Promise<VerifyResult>;
   }): Promise<AddVersionResult> {
     const definition = await deps.prisma.secretDefinition.findUnique({
       where: { name: input.name },

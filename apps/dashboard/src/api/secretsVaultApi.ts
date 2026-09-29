@@ -28,11 +28,11 @@ export type MutateSecretResult = {
   status: string;
 };
 
-/** Backend error responses are always {error, message} — surface `message` as a plain Error. */
-function extractErrorMessage(error: unknown, fallback: string): string {
-  const data = (error as { response?: { data?: { message?: unknown } } })?.response?.data;
-  return typeof data?.message === 'string' ? data.message : fallback;
-}
+// apiClient's response interceptor already turns every non-2xx response into a
+// plain Error whose `.message` is the backend's real `message` field (see
+// createErrorWithStatus in services/clients/apiClient.ts) — no need to reach
+// into `.response.data` here ourselves, that data no longer exists on the
+// error by the time it reaches this file.
 
 export const secretsVaultApi = {
   listSecrets: async (): Promise<SecretSummary[]> => {
@@ -52,38 +52,26 @@ export const secretsVaultApi = {
   },
 
   rotateSecret: async (name: string, value: string): Promise<MutateSecretResult> => {
-    try {
-      const response = await apiInstance.post<MutateSecretResult>(
-        `/secrets-vault/${encodeURIComponent(name)}/rotate`,
-        { value },
-      );
-      return response.data;
-    } catch (error) {
-      throw new Error(extractErrorMessage(error, 'Failed to rotate secret'));
-    }
+    const response = await apiInstance.post<MutateSecretResult>(
+      `/secrets-vault/${encodeURIComponent(name)}/rotate`,
+      { value },
+    );
+    return response.data;
   },
 
   rollbackSecret: async (name: string, version: number): Promise<MutateSecretResult> => {
-    try {
-      const response = await apiInstance.post<MutateSecretResult>(
-        `/secrets-vault/${encodeURIComponent(name)}/rollback`,
-        { version },
-      );
-      return response.data;
-    } catch (error) {
-      throw new Error(extractErrorMessage(error, 'Failed to roll back secret'));
-    }
+    const response = await apiInstance.post<MutateSecretResult>(
+      `/secrets-vault/${encodeURIComponent(name)}/rollback`,
+      { version },
+    );
+    return response.data;
   },
 
   revokeSecret: async (name: string, expectedVersion: number): Promise<MutateSecretResult> => {
-    try {
-      const response = await apiInstance.post<MutateSecretResult>(
-        `/secrets-vault/${encodeURIComponent(name)}/revoke`,
-        { expectedVersion },
-      );
-      return response.data;
-    } catch (error) {
-      throw new Error(extractErrorMessage(error, 'Failed to revoke secret'));
-    }
+    const response = await apiInstance.post<MutateSecretResult>(
+      `/secrets-vault/${encodeURIComponent(name)}/revoke`,
+      { expectedVersion },
+    );
+    return response.data;
   },
 };
