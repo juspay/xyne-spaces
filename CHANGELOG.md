@@ -1,3 +1,10 @@
+## [1.419.0-release-20260929.1](https://github.com/juspay/xyne-spaces/compare/v1.418.0...v1.419.0-release-20260929.1) (2026-09-29)
+
+
+### Features
+
+* added-deactivated-user-chat-read-only ([#2414](https://github.com/juspay/xyne-spaces/issues/2414)) ([1d69dcb](https://github.com/juspay/xyne-spaces/commit/1d69dcbb4f3376c0c0dc26bba0dfdc7f8500b411))
+
 ## [1.418.0](https://github.com/juspay/xyne-spaces/compare/v1.417.0...v1.418.0) (2026-09-29)
 
 
