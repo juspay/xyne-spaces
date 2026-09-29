@@ -73,7 +73,7 @@ describe("redeemApproval", () => {
       senderId: base.senderId,
       chatId: base.chatId,
     });
-    expect(enqueueOutbound).toHaveBeenCalledWith("acc", expect.objectContaining({ text: "✅ Created ticket ENG-43" }));
+    expect(enqueueOutbound).toHaveBeenCalledWith("acc", expect.objectContaining({ text: "Created ticket ENG-43" }));
   });
 
   it("skips the record when the run had no conversation", async () => {

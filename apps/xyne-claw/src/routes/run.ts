@@ -1404,9 +1404,13 @@ function buildInterruptSummary(partialResult: string, fallback?: { toolsUsed?: s
   const fallbackText = details.length > 0
     ? details.join("\n")
     : "I had not produced a stable partial result yet.";
+  // Claw speaking about itself, not agent output — italic marks it as an aside
+  // so it reads as distinct from the summary below, which is the agent's own
+  // words. See systemNote() in xyne-claw-auth notice-format.ts for the rule.
+  const lead = "_Picked up your new message and I'm switching to it now._";
   return trimmed
-    ? `✅ Picked up your new message and I’m switching to it now.\n\n**Summary of the work so far:**\n\n${trimmed}`
-    : `✅ Picked up your new message and I’m switching to it now.\n\n**Summary of the work so far:** ${fallbackText}`;
+    ? `${lead}\n\n**Summary of the work so far:**\n\n${trimmed}`
+    : `${lead}\n\n**Summary of the work so far:** ${fallbackText}`;
 }
 
 export async function processTask(

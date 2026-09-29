@@ -138,6 +138,8 @@ import {
   clearPlanLastTodos,
 } from "../lib/session-context.js";
 import { emitAgentWorkingSignal } from "../surfaces/spaces/client.js";
+import { emitAgentProgressDone, emitAgentProgressWorking } from "../surfaces/spaces/agent-progress.js";
+import { systemNote } from "../lib/notice-format.js";
 import JSZip from "jszip";
 
 import {
@@ -1556,7 +1558,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
               {
                 channelId: payload.channelId,
                 conversationId: payload.conversationId,
-                markdownText: `⚠️ Recording **${att.fileName ?? att.attachmentId}** was skipped: ${reason}. The run will continue without it.`,
+                markdownText: systemNote(`Recording **${att.fileName ?? att.attachmentId}** was skipped: ${reason}. The run will continue without it.`),
                 metadata: { contentFormat: "markdown" },
               }
             ).catch(() => {});
@@ -1922,7 +1924,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     if (body.success && body.sessionId) {
       // Progress signal to the dashboard. Two paths, switched by flag:
       //   USE_EPHEMERAL_PROGRESS=true  → POST /chat/agentProgress (requires Spaces XYNE-12145)
-      //   USE_EPHEMERAL_PROGRESS=false → POST /chat/postMessage for a "⏳ Working on it..."
+      //   USE_EPHEMERAL_PROGRESS=false → POST /chat/postMessage for a "Working on it..."
       //                                  placeholder; we capture messageId and edit it later.
       // USER_MENTIONED (twin) skips this entirely, so progressMessageId stays
       // undefined on the twin path. `resultForwardUrl` was resolved pre-dispatch.
@@ -1930,27 +1932,27 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       if (eventType !== "USER_MENTIONED" && !resultForwardUrl) {
         const initialProgressLabel = body.queued
           ? body.queuePosition && body.queuePosition > 0
-            ? `🕒 Queued — waiting for a runner (position ~${body.queuePosition})`
-            : "🕒 Queued — waiting for a runner"
+            ? `Queued — about ${body.queuePosition} ahead of this one`
+            : "Queued — waiting for a runner"
           : "Working on it...";
         try {
           if (USE_EPHEMERAL_PROGRESS) {
-            await spacesAppFetch("/chat/agentProgress", {
+            await emitAgentProgressWorking({
+              sessionId: body.sessionId,
               conversationId: payload.conversationId,
               channelId: payload.channelId,
               agentSlug: agent.slug,
               agentName: agent.name,
-              userId: agent.spacesAppUserId,
-              toolLabel: initialProgressLabel,
-              status: "working",
-            }, agent.appToken);
+              spacesAppUserId: agent.spacesAppUserId,
+              appToken: agent.appToken,
+            }, initialProgressLabel);
           } else {
             const placeholderRes = await postAgentMessage(
               { spacesAppUserId: agent.spacesAppUserId, appToken: agent.appToken },
               {
                 channelId: payload.channelId,
                 conversationId: payload.conversationId,
-                markdownText: `⏳ ${initialProgressLabel}`,
+                markdownText: `${initialProgressLabel}`,
                 metadata: { contentFormat: "markdown" },
               }
             );
@@ -2016,8 +2018,8 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     if (!(body.success && body.sessionId) && eventType !== "USER_MENTIONED" && !resultForwardUrl && payload.conversationId) {
       const refusal = body.error ?? "the run could not be started";
       const notice = /disabled/i.test(refusal)
-        ? `🚫 **${agent.slug}** is currently disabled — an admin can re-enable it in the agent dashboard.`
-        : `⚠️ I couldn't start this request: ${refusal}`;
+        ? systemNote(`**${agent.slug}** is currently disabled — an admin can re-enable it in the agent dashboard.`)
+        : systemNote(`I couldn't start this request: ${refusal}`);
       await postAgentMessage(
         { spacesAppUserId: agent.spacesAppUserId, appToken: agent.appToken },
         {
@@ -2150,7 +2152,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
             {
               channelId: payload.channelId,
               conversationId: payload.conversationId,
-              markdownText: `🚫 **${agent.slug}** is restricted — you don't have access to it. Ask the agent's owner to add you.`,
+              markdownText: systemNote(`**${agent.slug}** is restricted — you don't have access to it. Ask the agent's owner to add you.`),
               metadata: { contentFormat: "markdown" },
             }
           ).catch((err) =>
@@ -2170,6 +2172,39 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       await drainNextQueued(payload.conversationId, agent.slug, slotToken).catch(() => {});
     }
   }
+}
+
+/**
+ * Clear the Spaces "agent is working" pill for one session.
+ *
+ * Every terminal path must call this — completed, failed, cancelled, stopped.
+ * It used to be inline in the `completed` branch of /webhook/result, which made
+ * it unreachable for `/stop` (prod 2026-09-28: the pill kept showing the last
+ * tool label after the stop confirmation had already posted, until the 10-minute
+ * Redis TTL). It is idempotent, so a path that is unsure whether another already
+ * cleared should just call it.
+ */
+async function clearSpacesAgentProgress(
+  sessionId: string,
+  ctx: {
+    conversationId?: string | undefined;
+    channelId?: string | undefined;
+    agentSlug?: string | undefined;
+    agentName?: string | undefined;
+    spacesAppUserId?: string | undefined;
+    appToken?: string | undefined;
+  } | null | undefined,
+): Promise<void> {
+  if (!ctx) return;
+  await emitAgentProgressDone({
+    sessionId,
+    conversationId: ctx.conversationId,
+    channelId: ctx.channelId,
+    agentSlug: ctx.agentSlug,
+    agentName: ctx.agentName,
+    spacesAppUserId: ctx.spacesAppUserId,
+    appToken: ctx.appToken,
+  });
 }
 
 interface StopReconcileSummary {
@@ -2222,14 +2257,24 @@ async function reconcileStoppedRuns(conversationId: string, targetAgentSlug: str
       }
 
       const body = (await res.json().catch(() => ({}))) as { status?: string; ownerPod?: string };
-      if (body.status === "cancelled") {
+      if (body.status === "cancelled" || body.status === "forwarded") {
         summary.stopped++;
-        clog.info(`[stop] cancelled run ${run.sessionId} for conv ${conversationId}`);
-        continue;
-      }
-      if (body.status === "forwarded") {
-        summary.stopped++;
-        clog.info(`[stop] run ${run.sessionId} cancel forwarded to pod ${body.ownerPod ?? "unknown"}`);
+        clog.info(
+          body.status === "cancelled"
+            ? `[stop] cancelled run ${run.sessionId} for conv ${conversationId}`
+            : `[stop] run ${run.sessionId} cancel forwarded to pod ${body.ownerPod ?? "unknown"}`,
+        );
+        // Drop the spinner here rather than waiting for the run's own terminal
+        // callback: we just called cancelRunRecovery above, so that callback
+        // will classify as "stale" and take an early return. Clearing at the
+        // source also covers a cancel that kills the run before it can post
+        // back at all. Idempotent, so the callback path clearing again is fine.
+        if (USE_EPHEMERAL_PROGRESS) {
+          await clearSpacesAgentProgress(
+            run.sessionId,
+            await resolveSessionContext(run.sessionId, conversationId, run.agentSlug).catch(() => null),
+          );
+        }
         continue;
       }
 
@@ -2366,6 +2411,7 @@ async function redispatchQueuedMessage(msg: QueuedMessage): Promise<void> {
   await setSession(body.sessionId, queuedContext);
   if (msg.queueReason === "interrupt_followup") {
     void emitAgentWorkingSignal({
+      sessionId: body.sessionId,
       conversationId: msg.conversationId,
       channelId: msg.channelId,
       agentSlug: msg.agentSlug,
@@ -3148,7 +3194,7 @@ async function publishThreadArtifactShare(
       {
         channelId: ctx.channelId,
         conversationId: ctx.conversationId,
-        markdownText: `🔗 **Live ${command}:** ${designShareLink}\nOpens the rendered snapshot in the browser — the same link updates with future revisions in this thread.`,
+        markdownText: `**Live ${command}:** ${designShareLink}\nOpens the rendered snapshot in the browser — the same link updates with future revisions in this thread.`,
         metadata: { contentFormat: "markdown" },
       }
     );
@@ -3276,7 +3322,7 @@ router.post("/review-room", requireStrictS2S, async (req: Request, res: Response
     const link = designShareUrl(share.sharePath);
 
     const markdownText =
-      `🧭 **Review room${prNumber ? ` for ${prNumber}` : ""}:** ${link}\n` +
+      `**Review room${prNumber ? ` for ${prNumber}` : ""}:** ${link}\n` +
       `Diff stats, per-file history and test coverage are computed from git; the findings are adversarial questions, not a verdict.`;
 
     // ONE message carries both the link and the HTML: `/files/filesUpload`
@@ -3671,12 +3717,12 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       const names = [...new Set(queued.map(toolOf))].slice(0, 6).map((t) => `\`${t}\``);
       const noun = queued.length === 1 ? "action is" : "actions are";
       lines.push(
-        `⏳ ${queued.length} write ${noun} queued and awaiting your approval — nothing has run yet: ${names.join(", ")}. Approve the card${queued.length === 1 ? "" : "s"} to execute.`,
+        `${queued.length} write ${noun} queued and awaiting your approval — nothing has run yet: ${names.join(", ")}. Approve the card${queued.length === 1 ? "" : "s"} to execute.`,
       );
     }
     for (const action of rejected) {
       const reason = pendingActionValidation.get(action)?.error ?? "target not accessible";
-      lines.push(`⚠️ \`${toolOf(action)}\` was NOT queued — nothing was created. ${reason}`);
+      lines.push(`\`${toolOf(action)}\` was NOT queued — nothing was created. ${reason}`);
     }
     if (lines.length > 0) {
       const body = lines.map((l) => `_${l}_`).join("\n\n");
@@ -3697,7 +3743,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       .findActiveByConversation(ctx.conversationId)
       .catch(() => null);
     if (goal) {
-      resultWithCitations = `🎯 **Goal · Turn ${goal.turnCount + 1}/${goal.maxTurns}**\n\n${resultWithCitations}`;
+      resultWithCitations = `**Goal · Turn ${goal.turnCount + 1}/${goal.maxTurns}**\n\n${resultWithCitations}`;
     }
   }
 
@@ -3707,6 +3753,12 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
   });
   if (recoveryCallbackDisposition === "stale") {
     clog.info(`[webhook/result] Ignoring callback from superseded or settled session=${sessionId}`);
+    // The callback is superseded, but the PILL is not: this is the path a
+    // /stop-cancelled run takes (reconcileStoppedRuns calls cancelRunRecovery
+    // first, which marks the recovery state exhausted, so the run's own
+    // terminal callback classifies as stale here). Dropping it silently left
+    // the spinner showing the last tool label until its 10-minute TTL.
+    if (USE_EPHEMERAL_PROGRESS) await clearSpacesAgentProgress(sessionId, ctx);
     return;
   }
 
@@ -3999,6 +4051,10 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
   );
 
   if (payload.status !== "completed") {
+    // Failed / cancelled / interrupted runs clear the pill too. The clear
+    // further down lives inside the completed branch, so without this every
+    // non-happy terminal state left the spinner running.
+    if (USE_EPHEMERAL_PROGRESS) await clearSpacesAgentProgress(sessionId, ctx);
     // Result-forward callers (Spaces auto-draft / automations) get the failure
     // via their callback and return BEFORE the bot-mention surfacing below —
     // they want the callback, not a message posted into a thread.
@@ -4048,7 +4104,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
             {
               channelId: ctx.channelId,
               conversationId: ctx.conversationId,
-              markdownText: `⚠️ **Agent chain escalation**: \`${ctx.agentSlug}\` failed. Error: ${payload.error ?? "unknown"}. Manual intervention needed.`,
+              markdownText: `**Agent chain escalation**: \`${ctx.agentSlug}\` failed. Error: ${payload.error ?? "unknown"}. Manual intervention needed.`,
               metadata: { contentFormat: "markdown" },
             }
           ).catch(() => {});
@@ -4164,10 +4220,10 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       const isQuota = /\b429\b|quota|rate.?limit|exceeded|out of credit/i.test(rawErr);
       const harnessLabel = payload.localHarnessProvider === "codex-cli" ? "Codex CLI" : "Claude Code";
       const notice = payload.localHarnessUnreachable
-        ? `⚠️ I couldn't reach **${harnessLabel}** on your machine, and running this on Xyne's servers instead didn't start either. Open the Xyne desktop app (or turn off the local harness for this agent) and try again.`
+        ? `I couldn't reach **${harnessLabel}** on your machine, and running this on Xyne's servers instead didn't start either. Open the Xyne desktop app (or turn off the local harness for this agent) and try again.`
         : isQuota
-          ? "⚠️ I couldn't respond — the provider configured for this agent is out of quota / rate-limited right now. Please retry shortly, or switch the agent's provider in its settings."
-          : "⚠️ I couldn't complete this request due to an internal error. Please try again.";
+          ? "I couldn't respond — the provider configured for this agent is out of quota / rate-limited right now. Please retry shortly, or switch the agent's provider in its settings."
+          : "I couldn't complete this request due to an internal error. Please try again.";
       await postAgentMessage(
         { spacesAppUserId: ctx.spacesAppUserId, appToken: ctx.appToken },
         {
@@ -4307,21 +4363,12 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
 
   // Clear the ephemeral agent progress signal — dashboard drops the spinner.
   // Only fires in the ephemeral path; the placeholder path clears naturally
-  // when we edit the "⏳" message with the final result below.
+  // when we edit the placeholder message with the final result below.
   // Same deliverability guard as the per-tool push in /progress: twin runs and
   // claw-only conversations (no Spaces channelId) never posted a spinner, so
   // clearing would only add another guaranteed-4xx call.
-  if (USE_EPHEMERAL_PROGRESS && ctx.agentSlug !== "digital-twin" && ctx.channelId) {
-    spacesAppFetch("/chat/agentProgress", {
-      conversationId: ctx.conversationId,
-      channelId: ctx.channelId,
-      agentSlug: ctx.agentSlug,
-      agentName: ctx.agentName,
-      userId: ctx.spacesAppUserId,
-      status: "done",
-    }, ctx.appToken).catch((err) =>
-      log.warn("Failed to clear agent progress signal", { error: errMsg(err) }),
-    );
+  if (USE_EPHEMERAL_PROGRESS) {
+    void clearSpacesAgentProgress(sessionId, ctx);
   }
 
   // Persist the assistant response as a ChatMessage (transcript) — fire-and-forget
@@ -4645,6 +4692,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           // /internal/run (bypassing the normal mention path that posts this), so
           // without it the indicator only appears on the first tool-call tick.
           void emitAgentWorkingSignal({
+            sessionId: runBody.sessionId,
             conversationId: ctx.conversationId,
             channelId: ctx.channelId,
             agentSlug: ctx.agentSlug,
@@ -4808,7 +4856,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           {
             channelId: ctx.channelId,
             conversationId: ctx.conversationId,
-            markdownText: `⚠️ I drafted an agent but \`${spec.slug}\` isn't a usable identifier. Ask me again with a simple name like "ticket triage".`,
+            markdownText: `I drafted an agent but \`${spec.slug}\` isn't a usable identifier. Ask me again with a simple name like "ticket triage".`,
             metadata: { contentFormat: "markdown" },
           }
         );
@@ -4826,7 +4874,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           {
             channelId: ctx.channelId,
             conversationId: ctx.conversationId,
-            markdownText: `⚠️ An agent called **${existing.name}** (\`${spec.slug}\`) already exists here, so I didn't create a draft. Ask me again with a different name, or edit the existing agent.`,
+            markdownText: `An agent called **${existing.name}** (\`${spec.slug}\`) already exists here, so I didn't create a draft. Ask me again with a different name, or edit the existing agent.`,
             metadata: { contentFormat: "markdown" },
           }
         );
@@ -4966,7 +5014,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           {
             channelId: ctx.channelId,
             conversationId: ctx.conversationId,
-            markdownText: "⚠️ I drafted the agent but couldn't post it for approval. Please try again.",
+            markdownText: "I drafted the agent but couldn't post it for approval. Please try again.",
             metadata: { contentFormat: "markdown" },
           }
         );
@@ -5058,7 +5106,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       // a transient provider issue to retry, not the agent having nothing to say.
       const usedTools = (payload.toolsUsed?.length ?? 0) > 0;
       const sorryText = payload.emptyReason === "provider_capacity"
-        ? `⚠️ The AI provider had a temporary problem and couldn't complete your request${payload.emptyReasonDetail ? ` — \`${payload.emptyReasonDetail}\`` : ""}. Please try again in a moment.`
+        ? `The AI provider had a temporary problem and couldn't complete your request${payload.emptyReasonDetail ? ` — \`${payload.emptyReasonDetail}\`` : ""}. Please try again in a moment.`
         : usedTools
           ? "Sorry — I completed some steps but didn't have a final answer to show. Please try rephrasing, or send your message again."
           : "Sorry, I wasn't able to produce a response. Please try sending your message again.";
@@ -5464,7 +5512,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
             `Copilot: attachment upload failed for ${ctx.agentSlug} — falling back to text-only reply`,
             { error: errMsg(err) },
           );
-          const fileNote = `⚠️ _Couldn't attach ${prepared.attachments.length} file(s) (upload failed)._`;
+          const fileNote = `_Couldn't attach ${prepared.attachments.length} file(s) (upload failed)._`;
           const fallbackText = prepared.text?.trim()
             ? `${prepared.text}\n\n${fileNote}`
             : `${fileNote} Please try again.`;
@@ -5637,7 +5685,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
             `Attachment upload failed for ${ctx.agentSlug} — falling back to text-only reply`,
             { error: errMsg(err) },
           );
-          const fileNote = `⚠️ _Couldn't attach ${prepared.attachments.length} file(s) (upload failed)._`;
+          const fileNote = `_Couldn't attach ${prepared.attachments.length} file(s) (upload failed)._`;
           const fallbackText = prepared.text?.trim()
             ? `${prepared.text}\n\n${fileNote}`
             : `${fileNote} Please try again.`;
@@ -5653,7 +5701,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           log.info(`Agent ${ctx.agentSlug}: posted text-only fallback after attachment upload failure in thread ${ctx.conversationId}`);
         }
       } else {
-        // Placeholder path: if we have the "⏳" messageId, edit it with the final
+        // Placeholder path: if we have the placeholder messageId, edit it with the final
         // result so the same message transitions from "working..." to the answer.
         // On any update failure, fall through to a fresh postMessage so the user
         // never goes without the final answer. (Long-result case never reaches
@@ -5749,7 +5797,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
             // (same surface as tool calls), not a new chat message — only the
             // terminal outcome above is posted permanently.
             await postGoalPhase(
-              { conversationId: ctx.conversationId, channelId: ctx.channelId, agentSlug: ctx.agentSlug, spacesAppUserId: ctx.spacesAppUserId, appToken: token },
+              { sessionId, conversationId: ctx.conversationId, channelId: ctx.channelId, agentSlug: ctx.agentSlug, spacesAppUserId: ctx.spacesAppUserId, appToken: token },
               decision.replyToUser,
             );
             // Refire claw's /run with the stashed dispatch payload, overriding
@@ -6869,7 +6917,14 @@ router.post("/progress", requireStrictS2S, async (req: Request, res: Response) =
         {
           channelId: ctx.channelId,
           conversationId: ctx.conversationId,
-          markdownText: `🖥️ **Live preview** — agent is working in this room. Anyone in this channel can watch (and drive) chromium over noVNC.\n\n👉 ${sandboxPreviewUrl}${sandboxCodePreviewUrl ? `\n\nCode Changes available at ${sandboxCodePreviewUrl}/` : ""}`,
+          markdownText: [
+            systemNote("**Live preview**"),
+            "",
+            systemNote("This agent is working in a browser you can watch — and take over — from this channel."),
+            "",
+            systemNote(`Browser: ${sandboxPreviewUrl}`),
+            ...(sandboxCodePreviewUrl ? [systemNote(`Code changes: ${sandboxCodePreviewUrl}/`)] : []),
+          ].join("\n"),
           metadata: { contentFormat: "markdown" },
         }
       );
@@ -6921,20 +6976,20 @@ router.post("/progress", requireStrictS2S, async (req: Request, res: Response) =
 
   try {
     if (USE_EPHEMERAL_PROGRESS) {
-      await spacesAppFetch("/chat/agentProgress", {
+      await emitAgentProgressWorking({
+        sessionId,
         conversationId: ctx.conversationId,
         channelId: ctx.channelId,
         agentSlug: ctx.agentSlug,
         agentName: ctx.agentName,
-        userId: ctx.spacesAppUserId,
-        toolLabel,
-        status: "working",
-      }, ctx.appToken);
+        spacesAppUserId: ctx.spacesAppUserId,
+        appToken: ctx.appToken,
+      }, toolLabel);
       log.info(`Progress (ephemeral): ${toolLabel} → conv=${ctx.conversationId}`);
     } else if (ctx.progressMessageId) {
       await spacesAppFetch("/chat/updateMessage", {
         messageId: ctx.progressMessageId,
-        markdownText: `⏳ ${toolLabel}`,
+        markdownText: `${toolLabel}`,
         userId: ctx.spacesAppUserId,
       }, ctx.appToken);
       log.info(`Progress (placeholder): ${toolLabel} → messageId=${ctx.progressMessageId}`);
