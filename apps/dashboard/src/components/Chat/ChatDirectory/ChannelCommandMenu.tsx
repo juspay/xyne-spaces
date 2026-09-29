@@ -538,7 +538,25 @@ function AtMentionRow({
   );
 }
 
-const ChannelCommandMenu = ({
+/** Owned by the always-mounted {@link ChannelCommandMenu} wrapper and handed to the palette. */
+interface ChannelCommandMenuShellState {
+  seedCommandMode: boolean;
+  setSeedCommandMode: (seed: boolean) => void;
+  restoredQuery: InitialQueryData | null;
+  setRestoredQuery: (query: InitialQueryData | null) => void;
+  restoredToggles: SearchScopeToggles | null;
+  markNavigating: () => void;
+  setPayload: (payload: PalettePayload) => void;
+  shortcutRequest: ShortcutRequest | null;
+}
+
+/** A shortcut press that opened the palette; `nonce` makes each press distinct. */
+interface ShortcutRequest {
+  nonce: number;
+  startSession: boolean;
+}
+
+const ChannelCommandMenuContent = ({
   channels,
   starred,
   directMessages,
@@ -554,7 +572,6 @@ const ChannelCommandMenu = ({
   initialMention,
   initialQuery,
   initialToggles,
-  restoreFromLastSearch,
   enabledTabs,
   aiOverview = false,
   inline = false,
@@ -563,7 +580,15 @@ const ChannelCommandMenu = ({
   initialTab,
   hideTabs = false,
   deskMergeEnabled = false,
-}: ChannelCommandMenuProps): ReactElement | null => {
+  seedCommandMode,
+  setSeedCommandMode,
+  restoredQuery,
+  setRestoredQuery,
+  restoredToggles,
+  markNavigating,
+  setPayload,
+  shortcutRequest,
+}: ChannelCommandMenuProps & ChannelCommandMenuShellState): ReactElement | null => {
   const navigate = useNavigate();
   const channelData = useAllChannels();
   const { workspaceId } = useAuthContextValues(); // Per-user, per-workspace key for recents
@@ -616,25 +641,8 @@ const ChannelCommandMenu = ({
     if (open) navigatingToResultsRef.current = false;
   }, [open]);
 
-  // When opened via the `mod+/` shortcut, seed the search box with `/` so it lands in command mode.
-  // The popup path flips this on in the shortcut handler; the screen overlay is mounted fresh with a
-  // `/` initialQuery, so seed from that here to render the palette on frame 1 (no normal-search flash).
-  const [seedCommandMode, setSeedCommandMode] = useState(
-    () => initialQuery?.text === '/' && initialQuery?.mentions.length === 0,
-  );
-  // A query to re-seed the palette with: its text + chips are replayed into the Lexical editor
-  // through the initial-query seed pipeline. Set when back-navigation restores the search the palette
-  // sent to the results page, and when replaying a recent; null when nothing is being restored.
-  const [restoredQuery, setRestoredQuery] = useState<InitialQueryData | null>(null);
   // Which of on:/after:/before: opened the date list — it decides what a pick means.
   const [dateTrigger, setDateTrigger] = useState<'on:' | 'after:' | 'before:'>('on:');
-  // Held in a ref so `onRestore` (registered once) always calls the current closure.
-  const restoreFromLastSearchRef = useRef(restoreFromLastSearch);
-  restoreFromLastSearchRef.current = restoreFromLastSearch;
-
-  // Toggles restored from the history entry; `initialToggles` (URL-derived) is the
-  // fallback for opens that aren't a back-navigation.
-  const [restoredToggles, setRestoredToggles] = useState<SearchScopeToggles | null>(null);
 
   // While seeding, feed the editor a `/` through the existing initial-query path; a restored
   // search goes down the same path. Otherwise pass the caller's query straight through.
@@ -644,34 +652,6 @@ const ChannelCommandMenu = ({
       seedCommandMode ? { mentions: [], text: '/' } : restoredQuery ? restoredQuery : initialQuery,
     [seedCommandMode, restoredQuery, initialQuery],
   );
-
-  // Cmd+K joins the URL history stack: opening pushes an entry, so the top-bar back arrow
-  // (and the browser back gesture) closes the palette instead of leaving the page. When a
-  // row sends the user to the results page, that entry keeps the search — so back from the
-  // results page reopens the palette with it rather than landing on a bare page.
-  const { markNavigating, setPayload } = useHistoryBackedOverlay<PalettePayload>({
-    open,
-    onClose: () => onOpenChange(false),
-    onRestore: restored => {
-      // Back restores the search as it was launched from here, not as the results page
-      // left it. Parked state is still dropped so it can't leak into a later restore.
-      if (restoreFromLastSearchRef.current?.()) clearLastSearchState();
-      const source = restored ?? null;
-      setRestoredQuery(source ? { text: source.text, mentions: source.mentions } : null);
-      setRestoredToggles(source?.toggles ?? null);
-      onOpenChange(true);
-    },
-    id: 'command-menu',
-    enabled: !inline && !contextSelectionMode,
-  });
-
-  // A restore only seeds the open it triggered — the next plain cmd+K starts empty.
-  useEffect(() => {
-    if (!open) {
-      setRestoredQuery(null);
-      setRestoredToggles(null);
-    }
-  }, [open]);
 
   // Apply the restored scope on open. The hook's defaults only cover a fresh mount, and the
   // palette stays mounted across open/close, so a restore has to push the toggles in.
@@ -683,34 +663,6 @@ const ChannelCommandMenu = ({
     // Runs once per open: re-running on every toggle change would fight the user.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
-
-  useShortcutById(
-    'global.search',
-    () => {
-      // Cmd+K opens this palette in both search modes. Screen-mode behavior (2-item previews +
-      // "See more" that routes to `/search-results`) comes from the `searchMode === 'screen'`
-      // checks below.
-      onOpenChange(!open);
-      if (!open && !searchSessionId) {
-        onOpen('keyboard_shortcut');
-      }
-    },
-    { enabled: !contextSelectionMode },
-  );
-
-  // `mod+/` opens the menu straight into command mode (seeds `/` for slash-command discovery)
-  // in both search modes.
-  useShortcutById(
-    'global.openCommandMode',
-    () => {
-      onOpenChange(true);
-      if (!open && !searchSessionId) {
-        onOpen('keyboard_shortcut');
-      }
-      setSeedCommandMode(true);
-    },
-    { enabled: !contextSelectionMode },
-  );
 
   useShortcutById(
     'command.close',
@@ -873,6 +825,15 @@ const ChannelCommandMenu = ({
     classifyIntent: aiOverview,
     buildMentionHighlights,
   });
+
+  // The wrapper registers the global shortcuts (they have to work before the palette has
+  // ever mounted) and hands each press over here, where the search session lives.
+  const handledShortcutRef = useRef(0);
+  useEffect(() => {
+    if (!shortcutRequest || shortcutRequest.nonce === handledShortcutRef.current) return;
+    handledShortcutRef.current = shortcutRequest.nonce;
+    if (shortcutRequest.startSession && !searchSessionId) onOpen('keyboard_shortcut');
+  }, [shortcutRequest, searchSessionId, onOpen]);
 
   // Aliases to match old usage if needed or just use new names
   const search = cleanedSearchText;
@@ -1270,7 +1231,7 @@ const ChannelCommandMenu = ({
     if (seedCommandMode && commandText.startsWith('/')) {
       setSeedCommandMode(false);
     }
-  }, [seedCommandMode, commandText]);
+  }, [seedCommandMode, commandText, setSeedCommandMode]);
 
   const syncEnterIntent = useCallback((): void => {
     const container = commandRef.current;
@@ -2462,7 +2423,16 @@ const ChannelCommandMenu = ({
       // Inline mode (screen-mode popup): start a search session so performSearch fires
       onOpen('click');
     }
-  }, [open, searchSessionId, onClose, onOpen, resetSearchState, inline, initialTab]);
+  }, [
+    open,
+    searchSessionId,
+    onClose,
+    onOpen,
+    resetSearchState,
+    inline,
+    initialTab,
+    setSeedCommandMode,
+  ]);
 
   const toggleCategoryExpansion = (category: ExpandableCategory): void => {
     setExpandedCategories(prev => {
@@ -5655,6 +5625,117 @@ const ChannelCommandMenu = ({
           dismissed, clear of z-[9999]. */}
       {commandConfirmations}
     </>
+  );
+};
+
+/**
+ * Always-mounted shell for the command palette. It keeps the parts that must work while the
+ * palette is closed — the global shortcuts that open it and the history entry that restores
+ * it on back-navigation — and mounts the palette itself on its first open (inline palettes
+ * mount immediately), keeping it mounted afterwards. The palette is rendered closed in the
+ * sidebar and the global command host; mounted eagerly, it subscribed to every channel and
+ * user and re-rendered on every navigation for a dialog that was rarely open.
+ */
+const ChannelCommandMenu = (props: ChannelCommandMenuProps): ReactElement | null => {
+  const {
+    open,
+    onOpenChange,
+    inline = false,
+    contextSelectionMode = false,
+    initialQuery,
+    restoreFromLastSearch,
+  } = props;
+
+  const [mounted, setMounted] = useState(open || inline);
+  if (!mounted && (open || inline)) setMounted(true);
+
+  // When opened via the `mod+/` shortcut, seed the search box with `/` so it lands in command
+  // mode. Set in the same update as the open so the palette renders in command mode on its
+  // first frame; the screen overlay is mounted fresh with a `/` initialQuery, so seed from that.
+  const [seedCommandMode, setSeedCommandMode] = useState(
+    () => initialQuery?.text === '/' && initialQuery?.mentions.length === 0,
+  );
+  // A query to re-seed the palette with: its text + chips are replayed into the Lexical editor
+  // through the initial-query seed pipeline. Set when back-navigation restores the search the
+  // palette sent to the results page, and when replaying a recent; null when nothing is being
+  // restored.
+  const [restoredQuery, setRestoredQuery] = useState<InitialQueryData | null>(null);
+  // Toggles restored from the history entry; `initialToggles` (URL-derived) is the fallback for
+  // opens that aren't a back-navigation.
+  const [restoredToggles, setRestoredToggles] = useState<SearchScopeToggles | null>(null);
+  // Held in a ref so `onRestore` (registered once) always calls the current closure.
+  const restoreFromLastSearchRef = useRef(restoreFromLastSearch);
+  restoreFromLastSearchRef.current = restoreFromLastSearch;
+
+  const [shortcutRequest, setShortcutRequest] = useState<ShortcutRequest | null>(null);
+  const requestShortcut = (): void =>
+    setShortcutRequest(prev => ({ nonce: (prev?.nonce ?? 0) + 1, startSession: !open }));
+
+  useShortcutById(
+    'global.search',
+    () => {
+      // Cmd+K opens this palette in both search modes. Screen-mode behavior (2-item previews +
+      // "See more" that routes to `/search-results`) comes from the `searchMode === 'screen'`
+      // checks in the palette.
+      if (!open) requestShortcut();
+      onOpenChange(!open);
+    },
+    { enabled: !contextSelectionMode },
+  );
+
+  // `mod+/` opens the menu straight into command mode (seeds `/` for slash-command discovery)
+  // in both search modes.
+  useShortcutById(
+    'global.openCommandMode',
+    () => {
+      requestShortcut();
+      setSeedCommandMode(true);
+      onOpenChange(true);
+    },
+    { enabled: !contextSelectionMode },
+  );
+
+  // Cmd+K joins the URL history stack: opening pushes an entry, so the top-bar back arrow
+  // (and the browser back gesture) closes the palette instead of leaving the page. When a
+  // row sends the user to the results page, that entry keeps the search — so back from the
+  // results page reopens the palette with it rather than landing on a bare page.
+  const { markNavigating, setPayload } = useHistoryBackedOverlay<PalettePayload>({
+    open,
+    onClose: () => onOpenChange(false),
+    onRestore: restored => {
+      // Back restores the search as it was launched from here, not as the results page
+      // left it. Parked state is still dropped so it can't leak into a later restore.
+      if (restoreFromLastSearchRef.current?.()) clearLastSearchState();
+      const source = restored ?? null;
+      setRestoredQuery(source ? { text: source.text, mentions: source.mentions } : null);
+      setRestoredToggles(source?.toggles ?? null);
+      onOpenChange(true);
+    },
+    id: 'command-menu',
+    enabled: !inline && !contextSelectionMode,
+  });
+
+  // A restore only seeds the open it triggered — the next plain cmd+K starts empty.
+  useEffect(() => {
+    if (!open) {
+      setRestoredQuery(null);
+      setRestoredToggles(null);
+    }
+  }, [open]);
+
+  if (!mounted) return null;
+  return (
+    <ChannelCommandMenuContent
+      {...props}
+      seedCommandMode={seedCommandMode}
+      setSeedCommandMode={setSeedCommandMode}
+      restoredQuery={restoredQuery}
+      setRestoredQuery={setRestoredQuery}
+      restoredToggles={restoredToggles}
+      markNavigating={markNavigating}
+      setPayload={setPayload}
+      shortcutRequest={shortcutRequest}
+    />
   );
 };
 
