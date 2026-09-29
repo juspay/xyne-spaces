@@ -455,10 +455,8 @@ const ChatListV4: React.FC<ChatListProps> = ({
       const scrollElement = parentRef.current;
       if (!scrollElement) return false;
 
-      const conversationElement = scrollElement.querySelector(
-        `#${CSS.escape(`conv-${conversationId}`)}`,
-      );
-      if (!conversationElement) return false;
+      const conversationElement = document.getElementById(`conv-${conversationId}`);
+      if (!conversationElement || !scrollElement.contains(conversationElement)) return false;
 
       const scrollRect = scrollElement.getBoundingClientRect();
       const conversationRect = conversationElement.getBoundingClientRect();
