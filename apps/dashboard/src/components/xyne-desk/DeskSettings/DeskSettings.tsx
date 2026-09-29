@@ -69,7 +69,8 @@ export const DeskSettings: React.FC<DeskSettingsProps> = ({ open, onClose, chann
   const [activeAIFeaturesSubTab, setActiveAIFeaturesSubTab] =
     useState<AIFeaturesSubTabId>('ai-draft');
   const [signatures] = useCachedQuery(queries.userEmailSignatures());
-  const hasAnalyticsAdmin = useCanViewAnalytics();
+  // The audit-log API is ANALYTICS-admin only; hide the tab rather than show a dead error.
+  const canViewHistory = useCanViewAnalytics();
 
   const form = useDeskSettingsForm(channelId, userID, open);
   const {
@@ -82,8 +83,6 @@ export const DeskSettings: React.FC<DeskSettingsProps> = ({ open, onClose, chann
     sendAsAliasError,
     classificationConfigError,
   } = form;
-  // Mirrors the audit-log API: ANALYTICS admin plus desk owner or channel admin.
-  const canViewHistory = hasAnalyticsAdmin && form.canManage;
   const saveBlockedReason = sendAsAliasError ?? classificationConfigError;
   const effectiveAIFeaturesSubTab =
     !form.autoAIDraft && activeAIFeaturesSubTab === 'knowledge'
