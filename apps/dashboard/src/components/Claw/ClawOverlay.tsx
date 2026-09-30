@@ -9,7 +9,6 @@ import {
 } from 'framer-motion';
 import { cn } from '../../utils/classNames';
 import {
-  CORNER_RADII,
   DEFAULT_PANEL_HEIGHT,
   MIN_PANEL_HEIGHT,
   PANEL,
@@ -17,14 +16,21 @@ import {
   PILL,
   PILL_THINKING,
   SHADOW_GUTTER,
+  SPOTLIGHT,
+  SPOTLIGHT_REST_HEIGHT,
 } from './claw.constants';
 import { isExternalHttpHref } from './claw.utils';
 import { CLOSE_SPRING, OPEN_SPRING } from './claw.motion';
-import { useClawOverlayBridge } from './useClawOverlayBridge';
-import { ClawConversationProvider, useClawTabStatus } from './ClawConversationContext';
+import { useClawOverlayBridge, type ClawMode } from './useClawOverlayBridge';
+import {
+  ClawConversationProvider,
+  useClawConversation,
+  useClawTabStatus,
+} from './ClawConversationContext';
 import { ClawPill } from './ClawPill';
 import { ClawPeekBubble } from './ClawPeekBubble';
 import { ClawChat } from './ClawChat/ClawChat';
+import { ClawSpotlight } from './ClawSpotlight';
 import { xyneAIStreamManager } from '../../services/XyneAI';
 import './claw.css';
 
@@ -33,6 +39,38 @@ function ClawThinkingProbe({ onChange }: { onChange: (thinking: boolean) => void
   useEffect(() => {
     onChange(isStreaming);
   }, [isStreaming, onChange]);
+  return null;
+}
+
+function ClawSessionReporter(): null {
+  const { messages, isStreaming, conversationId } = useClawConversation();
+  const { hasError } = useClawTabStatus();
+  const lastSentRef = useRef('');
+
+  useEffect(() => {
+    const api = window.electronAPI?.clawOverlay;
+    if (!api?.setSessionState) return;
+
+    const lastBot = [...messages].reverse().find(message => message.type === 'bot');
+    const needsInput =
+      !isStreaming && !!lastBot?.pendingActions?.some(action => !action.resolution);
+
+    const status = isStreaming
+      ? 'running'
+      : needsInput
+        ? 'needs-input'
+        : hasError
+          ? 'error'
+          : 'idle';
+
+    const preview = status === 'running' ? null : (lastBot?.content ?? null);
+    const key = `${status}|${conversationId}|${preview ?? ''}`;
+    if (key === lastSentRef.current) return;
+    lastSentRef.current = key;
+
+    api.setSessionState({ status, conversationId: conversationId || null, preview });
+  }, [messages, isStreaming, conversationId, hasError]);
+
   return null;
 }
 
@@ -51,6 +89,12 @@ export function ClawOverlay(): React.ReactElement {
   const [panelHeight, setPanelHeight] = useState<number>(DEFAULT_PANEL_HEIGHT);
   const [isResizing, setIsResizing] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
+  const [mode, setMode] = useState<ClawMode>('pill');
+  const [spotlightHeight, setSpotlightHeight] = useState<number>(SPOTLIGHT.height);
+  const [spotlightDesiredHeight, setSpotlightDesiredHeight] =
+    useState<number>(SPOTLIGHT_REST_HEIGHT);
+
+  const isSpotlight = mode === 'spotlight';
 
   const isOpenRef = useRef(isOpen);
   isOpenRef.current = isOpen;
@@ -63,6 +107,9 @@ export function ClawOverlay(): React.ReactElement {
   const pendingHeightRef = useRef<number | null>(null);
   const shellRef = useRef<HTMLDivElement>(null);
   const pointerEpochRef = useRef(0);
+  const isSpotlightRef = useRef(isSpotlight);
+  isSpotlightRef.current = isSpotlight;
+  const wasSpotlightRef = useRef(isSpotlight);
 
   useLayoutEffect(() => {
     const root = document.documentElement;
@@ -87,6 +134,41 @@ export function ClawOverlay(): React.ReactElement {
     xyneAIStreamManager.setHasClawOverlay(true);
     return () => xyneAIStreamManager.setHasClawOverlay(false);
   }, []);
+
+  useEffect(() => bridge.onMode(setMode), [bridge]);
+
+  useEffect(() => {
+    if (!isSpotlight) return;
+    const update = (): void =>
+      setSpotlightHeight(
+        Math.max(
+          SPOTLIGHT_REST_HEIGHT,
+          Math.min(SPOTLIGHT.height, window.screen.availHeight - SHADOW_GUTTER - 16),
+        ),
+      );
+    update();
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, [isSpotlight]);
+
+  useEffect(() => {
+    if (!isSpotlight) return;
+    isOpenRef.current = true;
+    setIsClosing(false);
+    bridge.setExpanded(true);
+    setIsOpen(true);
+  }, [isSpotlight, bridge]);
+
+  useEffect(() => {
+    const wasSpotlight = wasSpotlightRef.current;
+    wasSpotlightRef.current = isSpotlight;
+    if (!wasSpotlight || isSpotlight) return;
+    isOpenRef.current = false;
+    setIsOpen(false);
+    setIsClosing(false);
+    setSpotlightDesiredHeight(SPOTLIGHT_REST_HEIGHT);
+    bridge.setExpanded(false);
+  }, [isSpotlight, bridge]);
 
   useEffect(() => {
     bridge.setIgnoreMouse(true);
@@ -162,7 +244,19 @@ export function ClawOverlay(): React.ReactElement {
     setIsOpen(true);
   }, [bridge]);
 
+  const handleSpotlightHeight = useCallback(
+    (height: number) => {
+      setSpotlightDesiredHeight(height);
+      bridge.setSpotlightHeight(height);
+    },
+    [bridge],
+  );
+
   const handleClose = useCallback(() => {
+    if (isSpotlightRef.current) {
+      bridge.dismissSpotlight();
+      return;
+    }
     cancelResize();
     isOpenRef.current = false;
     setIsClosing(true);
@@ -171,17 +265,20 @@ export function ClawOverlay(): React.ReactElement {
   }, [bridge, reduceMotion, cancelResize]);
 
   const handlePointerEnter = useCallback(() => {
+    if (isSpotlightRef.current) return;
     pointerEpochRef.current += 1;
     bridge.setIgnoreMouse(false);
   }, [bridge]);
 
   const handlePointerLeave = useCallback(() => {
+    if (isSpotlightRef.current) return;
     if (isResizingRef.current) return;
     pointerEpochRef.current += 1;
     bridge.setIgnoreMouse(true);
   }, [bridge]);
 
   const reconcilePassthrough = useCallback(() => {
+    if (isSpotlightRef.current) return;
     if (isResizingRef.current) return;
     const el = shellRef.current;
     if (!el) return;
@@ -265,18 +362,22 @@ export function ClawOverlay(): React.ReactElement {
     [bridge],
   );
 
-  const dims = isOpen
-    ? { width: PANEL.width, height: panelHeight }
-    : isThinking
-      ? PILL_THINKING
-      : PILL;
+  const dims = isSpotlight
+    ? { width: SPOTLIGHT.width, height: Math.min(spotlightDesiredHeight, spotlightHeight) }
+    : isOpen
+      ? { width: PANEL.width, height: panelHeight }
+      : isThinking
+        ? PILL_THINKING
+        : PILL;
   const layoutTransition: Transition = reduceMotion
     ? { duration: 0 }
-    : isResizing
+    : isSpotlight
       ? { duration: 0 }
-      : isOpen
-        ? OPEN_SPRING
-        : CLOSE_SPRING;
+      : isResizing
+        ? { duration: 0 }
+        : isOpen
+          ? OPEN_SPRING
+          : CLOSE_SPRING;
 
   const panelContentVariants: Variants = {
     hidden: { opacity: 0, y: 8 },
@@ -306,11 +407,17 @@ export function ClawOverlay(): React.ReactElement {
     <MotionConfig reducedMotion='user'>
       <ClawConversationProvider isOpen={isOpen}>
         <ClawThinkingProbe onChange={setIsThinking} />
-        <div className='pointer-events-none fixed inset-0 flex items-end justify-end pl-8 pt-8'>
-          <ClawPeekBubble isOpen={isOpen} />
+        <ClawSessionReporter />
+        <div
+          className={cn(
+            'pointer-events-none fixed inset-0 flex',
+            isSpotlight ? 'items-start justify-center p-4' : 'items-end justify-end pl-8 pt-8',
+          )}
+        >
+          {!isSpotlight && <ClawPeekBubble isOpen={isOpen} />}
           <motion.div
             ref={shellRef}
-            layout
+            layout={!isSpotlight}
             onLayoutAnimationComplete={() => {
               if (!isOpenRef.current) {
                 bridge.setExpanded(false);
@@ -325,21 +432,24 @@ export function ClawOverlay(): React.ReactElement {
             transformTemplate={(_, generatedTransform) => `${generatedTransform} translateZ(0)`}
             {...pillGestureProps}
             style={{
-              width: dims.width,
-              height: dims.height,
-              ...CORNER_RADII,
+              ...(isSpotlight ? {} : { width: dims.width, height: dims.height }),
 
-              originX: 1,
-              originY: 1,
+              originX: isSpotlight ? 0.5 : 1,
+              originY: isSpotlight ? 0 : 1,
 
               willChange: 'transform',
             }}
-            className={cn('claw-shell pointer-events-auto relative', isOpen && 'claw-shell--open')}
+            className={cn(
+              'claw-shell pointer-events-auto relative',
+              isSpotlight ? 'rounded-[14px]' : 'rounded-l-[14px] rounded-r-none',
+              isSpotlight && 'h-full w-full',
+              isOpen && 'claw-shell--open',
+            )}
             data-popover-portal-container
             data-slot='claw-overlay'
             data-testid='claw-overlay'
           >
-            {isOpen && (
+            {isOpen && !isSpotlight && (
               <div
                 role='separator'
                 aria-orientation='horizontal'
@@ -361,21 +471,31 @@ export function ClawOverlay(): React.ReactElement {
                 'shadow-[inset_0_0_0_1px_hsl(var(--border)/0.7)]',
               )}
             >
-              <ClawPill isOpen={isOpen} onOpen={handleOpen} onClose={handleClose} />
-              <AnimatePresence mode='popLayout'>
-                {isOpen && (
-                  <motion.div
-                    key='claw-panel-content'
-                    variants={panelContentVariants}
-                    initial='hidden'
-                    animate='show'
-                    exit='exit'
-                    className='flex min-h-0 flex-1 flex-col'
-                  >
-                    <ClawChat onRequestClose={handleClose} />
-                  </motion.div>
-                )}
-              </AnimatePresence>
+              {isSpotlight ? (
+                <ClawSpotlight
+                  maxHeight={spotlightHeight}
+                  onDesiredHeight={handleSpotlightHeight}
+                  onRequestClose={handleClose}
+                />
+              ) : (
+                <>
+                  <ClawPill isOpen={isOpen} onOpen={handleOpen} onClose={handleClose} />
+                  <AnimatePresence mode='popLayout'>
+                    {isOpen && (
+                      <motion.div
+                        key='claw-panel-content'
+                        variants={panelContentVariants}
+                        initial='hidden'
+                        animate='show'
+                        exit='exit'
+                        className='flex min-h-0 flex-1 flex-col'
+                      >
+                        <ClawChat onRequestClose={handleClose} />
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </>
+              )}
             </div>
           </motion.div>
         </div>

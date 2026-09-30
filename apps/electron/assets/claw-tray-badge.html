@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: transparent;
+        overflow: hidden;
+      }
+
+      @keyframes xn-breathe {
+        0%,
+        100% {
+          opacity: 1;
+          transform: scale(1);
+        }
+        50% {
+          opacity: 0.45;
+          transform: scale(0.78);
+        }
+      }
+
+      #badge {
+        position: absolute;
+        top: 0;
+        left: 0;
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        height: 16px;
+        padding: 0 1px 0 0;
+      }
+
+      #glyph {
+        width: 16px;
+        height: 16px;
+        display: block;
+        flex: none;
+      }
+
+      body.dark #glyph {
+        filter: invert(1);
+      }
+
+      #dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: #14b8a6;
+        flex: none;
+        transform-origin: center;
+        animation: xn-breathe 1.6s ease-in-out infinite;
+      }
+
+      body.waiting #dot {
+        background: #f59e0b;
+        animation: none;
+        opacity: 1;
+        transform: scale(1);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="badge">
+      <img id="glyph" src="images/xyneMenubarTemplate@2x.png" alt="" />
+      <span id="dot"></span>
+    </div>
+    <script>
+      const badge = document.getElementById('badge');
+      const glyph = document.getElementById('glyph');
+
+      window.__setState = (waiting, dark) => {
+        document.body.classList.toggle('waiting', !!waiting);
+        document.body.classList.toggle('dark', !!dark);
+      };
+
+      window.__ready = async () => {
+        if (!glyph.complete) {
+          await Promise.race([
+            new Promise((resolve) => {
+              glyph.addEventListener('load', resolve, { once: true });
+              glyph.addEventListener('error', resolve, { once: true });
+            }),
+            new Promise((resolve) => setTimeout(resolve, 1500)),
+          ]);
+        }
+        return badge.getBoundingClientRect().width;
+      };
+    </script>
+  </body>
+</html>
