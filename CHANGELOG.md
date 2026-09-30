@@ -1,3 +1,10 @@
+## [1.442.3](https://github.com/juspay/xyne-spaces/compare/v1.442.2...v1.442.3) (2026-09-30)
+
+
+### Bug Fixes
+
+* added user detail in ticket fetch ([#2468](https://github.com/juspay/xyne-spaces/issues/2468)) ([3177873](https://github.com/juspay/xyne-spaces/commit/31778735a52269bb0f2f37baadab4b77b2b41bc2))
+
 ## [1.442.2](https://github.com/juspay/xyne-spaces/compare/v1.442.1...v1.442.2) (2026-09-30)
 
 
