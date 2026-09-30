@@ -26,7 +26,7 @@ async function viaDesktop(
   if (!context?.sessionId || !context.meta?.["userId"]) return null;
   const outcome = await requestSurfaceCall(slug, params, context);
   if ("error" in outcome || outcome.result.unavailable) return null;
-  return surfaceResultText(outcome.result);
+  return surfaceResultText(outcome.result, slug);
 }
 
 const ONLY_ON_DESKTOP =

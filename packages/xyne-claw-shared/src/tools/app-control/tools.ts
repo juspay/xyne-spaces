@@ -9,7 +9,7 @@ async function viaSurface(
   context: ToolExecutionContext | undefined,
 ): Promise<string> {
   const outcome = await requestSurfaceCall(toolName, params, context);
-  return "error" in outcome ? outcome.error : surfaceResultText(outcome.result);
+  return "error" in outcome ? outcome.error : surfaceResultText(outcome.result, toolName);
 }
 
 const DESKTOP_ONLY =

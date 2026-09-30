@@ -39,6 +39,11 @@ describe("browser panel tools on a server run", () => {
     expect(sandboxCalls).toHaveLength(0);
   });
 
+  it("returns a panel screenshot as an image attachment the model can see", async () => {
+    vi.stubGlobal("fetch", answer({ ok: true, content: "Title: Example", image: { data: "iVBORw0KGgo=", mimeType: "image/png" } }));
+    expect(await pageRead.execute({}, serverRun)).toBe("[ATTACHMENT:page-read.png:image/png]\niVBORw0KGgo=\nTitle: Example");
+  });
+
   it("falls back to the sandbox browser when the desktop panel is unavailable", async () => {
     vi.stubGlobal("fetch", answer({ ok: false, content: "not from the Xyne AI screen", unavailable: true }));
     expect(await pageClick.execute({ ref: "e3" }, serverRun)).toBe("sandbox:sandbox-pw-click");

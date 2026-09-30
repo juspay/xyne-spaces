@@ -47,9 +47,14 @@ export async function requestSurfaceCall(
   }
 }
 
-export function surfaceResultText(result: SurfaceResult): string {
-  if (result.image?.data) {
-    return `${result.content ?? ""}\n\ndata:${result.image.mimeType};base64,${result.image.data}`;
+const IMAGE_EXTENSIONS: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp" };
+
+export function surfaceResultText(result: SurfaceResult, toolName = "screenshot"): string {
+  const image = result.image;
+  if (image?.data && /^[A-Za-z0-9+/=]+$/.test(image.data)) {
+    const ext = IMAGE_EXTENSIONS[image.mimeType] ?? "png";
+    const text = result.content ?? "";
+    return `[ATTACHMENT:${toolName}.${ext}:${image.mimeType}]\n${image.data}${text ? `\n${text}` : ""}`;
   }
   return result.content ?? "";
 }
