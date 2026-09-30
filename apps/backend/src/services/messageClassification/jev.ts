@@ -64,6 +64,9 @@ const JEV_TIMEOUT_MS = 15_000;
 /** Each option carries its message's text, so a pasted log dump is cut to this. */
 const OPTION_TEXT_CHARS = 400;
 
+/** The evidence option meaning "no message". Message ids are uuids, so it cannot collide. */
+const NO_EVIDENCE = 'none';
+
 const SHADOW_TAG = '[MSG-TAG][SHADOW]';
 const REPLACE_TAG = '[MSG-TAG][REPLACE]';
 
@@ -179,9 +182,15 @@ async function classifyThreadWithJev(
       };
     }
 
-    const options = Object.fromEntries(
-      messages.map(m => [m.id, `${m.author_display_name}: ${m.text.slice(0, OPTION_TEXT_CHARS)}`]),
-    );
+    // "none" is always an option: Jev requires at least two, so a one-message thread would
+    // otherwise be rejected outright, and it lets Jev say no message is the evidence — a
+    // type that came from the ticket, which the LLM is told to cite nothing for.
+    const options = {
+      ...Object.fromEntries(
+        messages.map(m => [m.id, `${m.author_display_name}: ${m.text.slice(0, OPTION_TEXT_CHARS)}`]),
+      ),
+      [NO_EVIDENCE]: 'no single message is the evidence — it comes from the ticket or the thread as a whole',
+    };
     const byName = new Map(vocabulary.map(entry => [entry.name, entry]));
     const evidenceQuestions = Object.fromEntries(
       chosen.map((name): [string, JevChoiceQuestion] => [
@@ -193,7 +202,7 @@ async function classifyThreadWithJev(
             'Which message in `thread_messages` is the evidence for that? Pick the message ' +
             'that CAUSED it, not one that merely mentions the topic: for what the thread is ' +
             'for, usually the message that raised it; for what the thread teaches, the ' +
-            'message that contains the answer.',
+            `message that contains the answer. Answer "${NO_EVIDENCE}" when no message is.`,
           criteria: options,
         },
       ]),
@@ -226,7 +235,12 @@ async function classifyThreadWithJev(
       // No message clearing the bar means the type came from the ticket or the thread as a
       // whole — cite nothing rather than guess, as the LLM is told to.
       const sourceMessageIds = Object.entries(answer.probabilities)
-        .filter(([id, p]) => p >= thresholds.citation && Object.prototype.hasOwnProperty.call(options, id))
+        .filter(
+          ([id, p]) =>
+            p >= thresholds.citation &&
+            id !== NO_EVIDENCE &&
+            Object.prototype.hasOwnProperty.call(options, id),
+        )
         .sort(([, a], [, b]) => b - a)
         .slice(0, MAX_SOURCES_PER_TYPE)
         .map(([id]) => id);
