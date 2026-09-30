@@ -167,6 +167,7 @@ router.post(
 
 router.get(
   '/environments',
+  authorize('SDLC', AccessType.READ),
   route(async (req, res) => {
     const environments = await listEnvironments(prisma, actorFromRequest(req));
     res.status(200).json({ success: true, environments });

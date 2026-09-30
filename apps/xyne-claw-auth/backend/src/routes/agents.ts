@@ -477,7 +477,11 @@ router.get("/", asyncHandler(async (req: Request, res: Response) => {
   const view = req.query["view"] === "full" ? "full" : "light";
   const sanitized = agents.map((a: typeof agents[number]) => {
     if (view === "light") {
-      return lightAgentProjection(a as unknown as Record<string, unknown>, adminScope.allOrgs ? orgNames : undefined);
+      return {
+        ...lightAgentProjection(a as unknown as Record<string, unknown>, adminScope.allOrgs ? orgNames : undefined),
+        // ownerUserId is the canonical Claw id, which a Spaces caller cannot compare with its own id.
+        ...(scopeUserId ? { ownedByScopeUser: !!a.ownerUserId && visibilityUserIds.includes(a.ownerUserId) } : {}),
+      };
     }
     const row = sanitizeAgent(a as unknown as Record<string, unknown>);
     return adminScope.allOrgs ? { ...row, ...withOrgLabel({ orgId: a.orgId }, orgNames) } : row;

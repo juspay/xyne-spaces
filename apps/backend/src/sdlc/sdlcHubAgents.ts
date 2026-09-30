@@ -3,7 +3,7 @@ import { ChannelRole } from '@xyne/shared';
 import { SDLC_AGENT_PENDING_RELATION } from '@xyne/shared/sdlc';
 import { ChannelParticipantRepository } from '@/database/repositories/channelParticipantRepository';
 import { AppError } from '@/middleware/errorHandler';
-import { listS2SClawAgents } from '@/services/clawAgentService';
+import { listScopedClawAgents } from '@/services/clawAgentService';
 import { ensureLink } from './entityLinkService';
 import type { SdlcActor } from './types';
 
@@ -57,7 +57,10 @@ export async function listHubAgents(
   });
 
   // With the viewer, the list includes their personal agents; pending ones usually are.
-  const agents = await listS2SClawAgents(actor.userId);
+  const agents = await listScopedClawAgents({
+    userId: actor.userId,
+    workspaceId: actor.workspaceId,
+  });
   const byId = new Map(agents.map((agent) => [agent.id, agent]));
   const stillPending: string[] = [];
   for (const { targetId: agentId } of pendingLinks) {
@@ -104,10 +107,10 @@ export async function markHubAgentPending(
   });
   if (!member) throw new AppError('SDLC hub membership is required', 403);
   // Only the creator's own unregistered agent; anything else would skip the normal add-bot flow.
-  const agent = (await listS2SClawAgents(actor.userId)).find(
-    (candidate) => candidate.id === agentId
-  );
-  if (!agent || agent.ownerUserId !== actor.userId || agent.spacesAppUserId) {
+  const agent = (
+    await listScopedClawAgents({ userId: actor.userId, workspaceId: actor.workspaceId })
+  ).find((candidate) => candidate.id === agentId);
+  if (!agent || !agent.ownedByScopeUser || agent.spacesAppUserId) {
     throw new AppError('Only your own agent awaiting approval can be linked to a hub', 403);
   }
   await ensureLink(

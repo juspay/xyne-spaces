@@ -1,7 +1,7 @@
 import type { PrismaClient } from '@prisma/client';
 import type { SdlcEnvironmentRow } from '@xyne/shared';
 import { SDLC_MEMBERSHIP_RELATION } from '@xyne/shared/sdlc';
-import { hasSdlcProjectAccess } from './sdlcProjectAccess';
+import { sdlcAccessibleProjectIds } from './sdlcProjectAccess';
 import type { SdlcActor } from './types';
 
 /** repoId → ids of the hubs it belongs to that the actor may see (public, or a participant). */
@@ -44,13 +44,7 @@ export async function listEnvironments(
   const projectIds = [
     ...new Set(repos.flatMap((repo) => (repo.projectId ? [repo.projectId] : []))),
   ];
-  const allowed = new Set(
-    (
-      await Promise.all(
-        projectIds.map(async (id) => ((await hasSdlcProjectAccess(db, actor, id)) ? id : null))
-      )
-    ).filter(Boolean)
-  );
+  const allowed = await sdlcAccessibleProjectIds(db, actor, projectIds);
   const hubsByRepo = await repoHubs(db, actor);
   return repos
     .filter((repo) => repo.projectId && allowed.has(repo.projectId))
