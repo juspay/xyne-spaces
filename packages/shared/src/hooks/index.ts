@@ -63,6 +63,8 @@ export {
   useChannelSearch,
   useChannelMentionSearch,
   searchMentionableChannels,
+  rankMentionableChannels,
+  useChannelMentionSignals,
   useBrowsableChannels,
   useMigratedChannels,
   useEmailChannels,
@@ -74,7 +76,7 @@ export {
   getChannelConversationsSnapshot,
   useGetLatestConversation,
 } from "./useChannels.js";
-export type { VisibleChannel, VisibleProject } from "./useChannels.js";
+export type { VisibleChannel, VisibleProject, ChannelMentionSignals } from "./useChannels.js";
 
 export {
   usePermissions,

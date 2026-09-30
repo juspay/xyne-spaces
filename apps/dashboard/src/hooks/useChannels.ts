@@ -10,6 +10,8 @@ export {
   useChannelSearch,
   useChannelMentionSearch,
   searchMentionableChannels,
+  rankMentionableChannels,
+  useChannelMentionSignals,
   useBrowsableChannels,
   useMigratedChannels,
   useEmailChannels,
