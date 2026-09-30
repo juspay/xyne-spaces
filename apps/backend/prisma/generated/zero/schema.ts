@@ -1403,6 +1403,7 @@ export const emailChannelPreferenceTable = table("email_channel_preferences")
     deskReportAgentSlug: string().optional(),
     deskReportRangeDays: number().optional(),
     duplicateScopeConfig: string().optional(),
+    slackDeskTriggerMode: string().optional(),
   })
   .primaryKey("channelId");
 
@@ -1545,6 +1546,7 @@ export const messageAttachmentTable = table("message_attachments")
     createdBy: string(),
     metadata: json().optional(),
     conversationId: string().optional(),
+    channelId: string().optional(),
     thumbnailUrl: string().optional(),
     isDeleted: boolean(),
     uploadStatus: string().optional(),
@@ -2684,6 +2686,7 @@ export const installedAppsTable = table("installed_apps")
     appId: string(),
     userId: string(),
     webhookUrl: string().optional(),
+    fetchConfig: string().optional(),
     signingSecret: string().optional(),
     version: number(),
     createdAt: number(),
