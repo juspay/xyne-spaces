@@ -2,7 +2,8 @@ import { Router } from "express";
 import { asyncHandler, ok } from "../lib/http.js";
 import { SBX_GIT } from "xyne-claw-shared";
 import { loadEffectiveRepoConfigs } from "../lib/sandbox-repo-configs.js";
-import { requireClawAdmin } from "../middleware/agent-acl.js";
+import { getRequesterId, requireClawAdmin } from "../middleware/agent-acl.js";
+import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
 
 const router = Router();
 
@@ -15,8 +16,11 @@ const router = Router();
  *
  * GET /api/v1/sandbox/repos → { success, data: [{ key, name, description, repoUrl, defaultBranch, template, sessionTimeoutMs, idleTimeoutMs }] }
  */
-router.get("/repos", asyncHandler(async (_req, res) => {
-  const data = Object.entries(await loadEffectiveRepoConfigs()).map(([key, c]) => ({
+router.get("/repos", asyncHandler(async (req, res) => {
+  // Built-ins plus the caller's workspace's own profiles.
+  const requesterId = getRequesterId(req);
+  const workspaceId = requesterId ? await getWorkspaceIdForUser(requesterId, "require-auth").catch(() => null) : null;
+  const data = Object.entries(await loadEffectiveRepoConfigs(workspaceId)).map(([key, c]) => ({
     key,
     name: c.name,
     description: c.description,

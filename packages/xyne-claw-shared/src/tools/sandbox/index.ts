@@ -28,11 +28,14 @@ export {
 
 export { REPO_CONFIGS as DEFAULT_REPO_CONFIGS, SBX_GIT } from "./repo-configs.js";
 export { findSandboxKeys, normalizeRepoUrl } from "./repo-url.js";
+export { rotationVariantNames } from "./template-rotation.js";
 export {
   buildEffectiveRepoConfigs,
   getCachedRepoConfigs,
   getRepoConfig,
   getRepoConfigs,
+  getRepoConfigsFor,
+  repoConfigsForWorkspace,
   setRepoConfigLoader,
   type RepoConfigLoader,
   type RepoConfigMap,

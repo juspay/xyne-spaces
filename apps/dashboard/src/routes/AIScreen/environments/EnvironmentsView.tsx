@@ -7,6 +7,8 @@ import {
   type ReactNode,
 } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
+import { toast } from 'sonner';
 import {
   ArrowUpRight,
   BookMarked,
@@ -15,51 +17,35 @@ import {
   Copy,
   GitBranch,
   HelpCircle,
+  Pencil,
   Plus,
   Search,
   Server,
   X,
 } from 'lucide-react';
 import { Github } from '@xyne/icons';
-import { ChannelType, type SdlcEnvironmentRow } from '@xyne/shared';
+import {
+  ChannelType,
+  type SandboxProfileConfig,
+  type SdlcEnvironmentRow,
+  type SdlcSandboxProfile,
+} from '@xyne/shared';
 import { Button } from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import { Panel, ResizableGroup, Separator } from '@/components/ui/Resizable/Resizable';
 import { Tabs } from '@/components/ui/Tabs';
 import { Tooltip } from '@/components/ui/Tooltip/Tooltip';
+import { Switch } from '@/components/ui/Switch';
 import { apiInstance } from '@/services/clients/apiClient';
-import { clawApiRequest } from '@/services/claw/clawRequest';
-import { useAuth } from '@/hooks/useAuth';
 import { useAllVisibleChannels } from '@/hooks/useChannels';
-import { useClawAdminAccessQuery } from '@/hooks/useClawAdminAccess';
+import { getApiErrorMessage } from '@/utils/apiError';
 import { cn } from '@/utils/classNames';
-import {
-  useSandboxRepos,
-  type SandboxRepoOption,
-} from '../library/agents/detail/behaviour/sandboxConfig';
 import { repoUrlKey } from './repoUrlKey';
+import { useSandboxProfiles, useSetSandboxProfileEnabled } from './useSandboxProfiles';
 import { channelIcon } from '../library/shared/components/channelIcon';
 import { LibraryFilterMenu } from '../library/shared/components/LibraryFilterMenu';
 
-/** The subset of claw's RepoSetupConfig this page renders; the Raw config tab shows the rest. */
-interface ProfileConfig {
-  key: string;
-  repoUrl?: string;
-  defaultBranch?: string;
-  cloneDepth?: number;
-  workDir?: string;
-  template?: string;
-  sessionTimeoutMs?: number;
-  idleTimeoutMs?: number;
-  steps?: Array<{
-    type: string;
-    label?: string;
-    name?: string;
-    cmd?: string;
-    cwd?: string;
-    packages?: string[];
-  }>;
-}
+type ProfileConfig = SandboxProfileConfig;
 
 function shortUrl(url: string): string {
   return url.replace(/^https?:\/\//, '').replace(/\.git$/, '');
@@ -75,16 +61,16 @@ function duration(ms: number | undefined): string | null {
   return minutes >= 60 && minutes % 60 === 0 ? `${minutes / 60}h` : `${minutes}m`;
 }
 
-function stepTitle(step: NonNullable<ProfileConfig['steps']>[number]): string {
+function stepTitle(step: ProfileConfig['steps'][number]): string {
   switch (step.type) {
     case 'install':
       return 'Install packages';
     case 'services':
       return 'Start services';
     case 'devserver':
-      return `Launch ${step.name ?? 'dev server'}`;
+      return `Launch ${step.name}`;
     default:
-      return step.label ?? step.type;
+      return step.label;
   }
 }
 
@@ -166,13 +152,30 @@ function Mono({ children }: { children: ReactNode }): ReactElement {
   return <code className='font-mono text-[13px]'>{children}</code>;
 }
 
+function Card({ title, children }: { title: string; children: ReactNode }): ReactElement {
+  return (
+    <section className='rounded-xl border border-border'>
+      <h4 className='border-b border-border px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground'>
+        {title}
+      </h4>
+      <div className='px-4 py-2'>{children}</div>
+    </section>
+  );
+}
+
 function Overview({ config }: { config: ProfileConfig }): ReactElement {
   const session = duration(config.sessionTimeoutMs);
   const idle = duration(config.idleTimeoutMs);
+  const writeSession = duration(config.writeSessionTimeoutMs);
+  const writeIdle = duration(config.writeIdleTimeoutMs);
+  const flags = [
+    config.readFirst && 'Read first',
+    config.skipBakedCloneWait && 'Clone at start',
+  ].filter(Boolean);
+  const ports = Object.entries(config.ports ?? {});
   return (
-    <div className='flex flex-col gap-6'>
-      <section>
-        <h4 className='mb-1.5 text-sm font-semibold'>Source</h4>
+    <div className='flex flex-col gap-4'>
+      <Card title='Sandbox'>
         <Field label='Repository'>
           <Mono>{config.repoUrl ?? 'No repository (sandbox only)'}</Mono>
         </Field>
@@ -215,35 +218,97 @@ function Overview({ config }: { config: ProfileConfig }): ReactElement {
             {[session && `${session} session`, idle && `${idle} idle`].filter(Boolean).join(' · ')}
           </Field>
         )}
-      </section>
-      {config.steps && config.steps.length > 0 && (
-        <section>
-          <h4 className='mb-3 text-sm font-semibold'>Boot sequence</h4>
-          <ol className='flex flex-col gap-3'>
+        {(writeSession || writeIdle) && (
+          <Field label='Write lifetime'>
+            {[writeSession && `${writeSession} session`, writeIdle && `${writeIdle} idle`]
+              .filter(Boolean)
+              .join(' · ')}
+          </Field>
+        )}
+        {flags.length > 0 && (
+          <Field label='Behaviour'>
+            <span className='flex flex-wrap gap-1.5'>
+              {flags.map(flag => (
+                <Chip key={String(flag)}>{flag}</Chip>
+              ))}
+            </span>
+          </Field>
+        )}
+        {ports.length > 0 && (
+          <Field label='Ports'>
+            <span className='flex flex-wrap gap-1.5'>
+              {ports.map(([name, port]) => (
+                <code
+                  key={name}
+                  className='rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground'
+                >
+                  {name} :{port}
+                </code>
+              ))}
+            </span>
+          </Field>
+        )}
+      </Card>
+      {config.steps.length > 0 && (
+        <Card title='Boot sequence'>
+          <ol className='py-2'>
             {config.steps.map((step, index) => (
-              <li key={index} className='flex gap-3'>
+              <li key={index} className='relative flex gap-3 pb-5 last:pb-1'>
+                {index < config.steps.length - 1 && (
+                  <span className='absolute bottom-0 left-3 top-7 w-px bg-border' aria-hidden />
+                )}
                 <span className='flex size-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary'>
                   {index + 1}
                 </span>
                 <div className='min-w-0 flex-1 pt-0.5'>
-                  <div className='flex items-baseline justify-between gap-3'>
+                  <div className='flex flex-wrap items-center gap-2'>
                     <span className='text-sm font-medium'>{stepTitle(step)}</span>
-                    {step.cwd && (
-                      <code className='shrink-0 font-mono text-xs text-muted-foreground'>
-                        {step.cwd}
-                      </code>
-                    )}
+                    <Chip>{step.type}</Chip>
                   </div>
-                  {(step.packages?.length || step.cmd) && (
+                  {(('cwd' in step && step.cwd) || ('markerPath' in step && step.markerPath)) && (
+                    <div className='mt-1 flex flex-wrap gap-x-4 gap-y-0.5 font-mono text-xs text-muted-foreground'>
+                      {'cwd' in step && step.cwd && <span>in {step.cwd}</span>}
+                      {'markerPath' in step && step.markerPath && (
+                        <span>skips if {step.markerPath}</span>
+                      )}
+                    </div>
+                  )}
+                  {(step.type === 'install' ? step.packages.length > 0 : step.cmd) && (
                     <pre className='mt-2 whitespace-pre-wrap break-words rounded-lg bg-muted px-3 py-2.5 font-mono text-xs leading-5'>
-                      {step.packages?.join(' ') ?? step.cmd}
+                      {step.type === 'install' ? step.packages.join(' ') : step.cmd}
                     </pre>
+                  )}
+                  {step.type === 'services' && step.healthCheck && (
+                    <div className='mt-2 rounded-lg border border-dashed border-border px-3 py-2'>
+                      <div className='text-xs text-muted-foreground'>
+                        Health check · every {duration(step.healthCheck.intervalMs) ?? '—'} · up to{' '}
+                        {duration(step.healthCheck.timeoutMs) ?? '—'} · passes when{' '}
+                        {step.healthCheck.successCondition === 'all-up'
+                          ? 'it prints all-up'
+                          : 'every line is Up / healthy'}
+                      </div>
+                      <pre className='mt-1.5 whitespace-pre-wrap break-words font-mono text-xs leading-5'>
+                        {step.healthCheck.cmd}
+                      </pre>
+                    </div>
                   )}
                 </div>
               </li>
             ))}
           </ol>
-        </section>
+        </Card>
+      )}
+      {config.auxRepos && config.auxRepos.length > 0 && (
+        <Card title='Extra repositories'>
+          {config.auxRepos.map(aux => (
+            <Field key={aux.name} label={aux.name}>
+              <Mono>{aux.url}</Mono>
+              <span className='block text-xs text-muted-foreground'>
+                {aux.defaultBranch} · {aux.workDir}
+              </span>
+            </Field>
+          ))}
+        </Card>
       )}
     </div>
   );
@@ -278,23 +343,17 @@ function SandboxPanel({
   row,
   profile,
   onClose,
+  onEdit,
 }: {
   row: SdlcEnvironmentRow;
-  profile: SandboxRepoOption;
+  profile: SdlcSandboxProfile;
   onClose: () => void;
+  onEdit: () => void;
 }): ReactElement {
   const [tab, setTab] = useState('overview');
-  // Full config is claw-admin only; everyone else gets the list fields, without step commands.
-  const { user } = useAuth();
-  const admin = useClawAdminAccessQuery(user?.id);
-  const { data: config, isLoading } = useQuery({
-    queryKey: ['claw-sandbox-repo', profile.key],
-    queryFn: () =>
-      clawApiRequest<ProfileConfig>(`/sandbox/repos/${encodeURIComponent(profile.key)}`),
-    enabled: admin.isAdmin,
-    retry: false,
-  });
-  const isPending = admin.isLoading || isLoading;
+  const setEnabled = useSetSandboxProfileEnabled();
+  // Setup commands come back only for people who can edit the profile.
+  const { config } = profile;
 
   return (
     <div className='h-full overflow-y-auto bg-background [scrollbar-gutter:stable]'>
@@ -303,30 +362,76 @@ function SandboxPanel({
           <Server className='size-5' />
         </span>
         <div className='min-w-0 flex-1'>
-          <div className='flex min-w-0 items-center gap-2'>
-            <h2 className='truncate text-lg font-semibold'>{profile.name}</h2>
-            <code className='shrink-0 rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground'>
+          <h2 className='truncate text-lg font-semibold'>{config.name}</h2>
+          <div className='mt-1 flex flex-wrap items-center gap-1.5'>
+            <code className='rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground'>
               {profile.key}
             </code>
+            {profile.builtIn && <Chip>Built-in</Chip>}
+            {profile.overridden && <OverrideBadge />}
           </div>
           <a
             href={webUrl(row.url)}
             target='_blank'
             rel='noreferrer'
-            className='inline-flex max-w-full items-center gap-1 text-sm text-primary hover:underline'
+            className='mt-1.5 inline-flex max-w-full items-center gap-1 text-sm text-primary hover:underline'
           >
             <span className='truncate'>{shortUrl(row.url)}</span>
             <ArrowUpRight className='size-3.5 shrink-0' />
           </a>
         </div>
-        <Button variant='ghost' size='sm' aria-label='Close' onClick={onClose}>
-          <X className='size-4' />
-        </Button>
+        <div className='flex shrink-0 items-center gap-2'>
+          {profile.canEdit && (
+            <Tooltip
+              side='bottom'
+              content={
+                profile.enabled
+                  ? 'Enabled: agents can pick this profile.'
+                  : 'Disabled: hidden from agents.'
+              }
+              className='p-2 text-xs'
+            >
+              <span className='flex items-center'>
+                <Switch
+                  checked={profile.enabled}
+                  disabled={setEnabled.isPending}
+                  aria-label={profile.enabled ? 'Disable profile' : 'Enable profile'}
+                  onCheckedChange={enabled =>
+                    setEnabled.mutate(
+                      { key: profile.key, enabled },
+                      {
+                        onSuccess: () =>
+                          toast.success(enabled ? 'Profile enabled' : 'Profile disabled'),
+                        onError: err =>
+                          toast.error(getApiErrorMessage(err, 'Could not update the profile')),
+                      },
+                    )
+                  }
+                />
+              </span>
+            </Tooltip>
+          )}
+          {profile.canEdit && (
+            <Button
+              variant='outline'
+              size='sm'
+              onClick={onEdit}
+              data-track-category='Environments'
+              data-track-name='Edit sandbox profile'
+            >
+              <Pencil className='size-3.5' />
+              Edit
+            </Button>
+          )}
+          <Button variant='ghost' size='sm' aria-label='Close' onClick={onClose}>
+            <X className='size-4' />
+          </Button>
+        </div>
       </header>
-      {profile.description && (
+      {config.description && (
         <div className='px-6'>
           <ClampText
-            text={profile.description}
+            text={config.description}
             className='text-sm leading-6 text-muted-foreground'
             trackName='Toggle sandbox description'
           />
@@ -344,17 +449,44 @@ function SandboxPanel({
         />
       </div>
       <div className='px-6 pb-8 pt-3'>
-        {isPending ? (
-          <div className='h-40 animate-pulse rounded-xl bg-muted/40' />
-        ) : tab === 'overview' ? (
-          <Overview config={config ?? profile} />
-        ) : config ? (
+        {tab === 'overview' ? (
+          <Overview config={config} />
+        ) : profile.canEdit ? (
           <RawConfig config={config} />
         ) : (
-          <p className='text-sm text-muted-foreground'>Only claw admins can view the raw config.</p>
+          <p className='text-sm text-muted-foreground'>
+            Only people who can edit this profile can view its raw config.
+          </p>
         )}
       </div>
     </div>
+  );
+}
+
+function Chip({ children, className }: { children: ReactNode; className?: string }): ReactElement {
+  return (
+    <span
+      className={cn(
+        'shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground',
+        className,
+      )}
+    >
+      {children}
+    </span>
+  );
+}
+
+function OverrideBadge(): ReactElement {
+  return (
+    <Tooltip
+      side='bottom'
+      content='A saved copy replaces the built-in version, so code updates to this profile do not apply.'
+      className='max-w-xs p-3 text-xs'
+    >
+      <span className='shrink-0 rounded-full bg-amber-500/15 px-2 py-0.5 text-xs text-amber-500'>
+        Override
+      </span>
+    </Tooltip>
   );
 }
 
@@ -363,7 +495,7 @@ function SandboxRow({
   active,
   onSelect,
 }: {
-  profile: SandboxRepoOption;
+  profile: SdlcSandboxProfile;
   active: boolean;
   onSelect: () => void;
 }): ReactElement {
@@ -384,12 +516,26 @@ function SandboxRow({
         className={cn('size-4 shrink-0', active ? 'text-primary' : 'text-muted-foreground')}
       />
       <span className='min-w-0 flex-1'>
-        <span className='block truncate text-sm font-medium'>{profile.name}</span>
-        {profile.defaultBranch && (
-          <span className='flex items-center gap-1 truncate font-mono text-xs text-muted-foreground'>
-            <GitBranch className='size-3 shrink-0' />
-            {profile.defaultBranch}
-          </span>
+        <span className='block truncate text-sm font-medium'>{profile.config.name}</span>
+        <span className='flex items-center gap-1 truncate font-mono text-xs text-muted-foreground'>
+          {/* Names can repeat across a repo's profiles; the key is what agents pick. */}
+          <span className='truncate'>{profile.key}</span>
+          {profile.config.defaultBranch && (
+            <>
+              <span aria-hidden>·</span>
+              <GitBranch className='size-3 shrink-0' />
+              {profile.config.defaultBranch}
+            </>
+          )}
+        </span>
+      </span>
+      <span className='flex shrink-0 items-center gap-1.5'>
+        {profile.builtIn && <Chip>Built-in</Chip>}
+        {profile.overridden && <OverrideBadge />}
+        {profile.enabled ? (
+          <Chip className='bg-emerald-500/15 text-emerald-500'>Active</Chip>
+        ) : (
+          <Chip>Disabled</Chip>
         )}
       </span>
       <ChevronRight className='size-4 shrink-0 text-muted-foreground' />
@@ -417,11 +563,14 @@ function RepoGroup({
   linked,
   selectedKey,
   onSelect,
+  onAddProfile,
 }: {
   row: SdlcEnvironmentRow;
-  linked: SandboxRepoOption[];
+  linked: SdlcSandboxProfile[];
   selectedKey: string | null;
   onSelect: (key: string) => void;
+  /** Set when the viewer may add a profile to this repository. */
+  onAddProfile?: (() => void) | undefined;
 }): ReactElement {
   return (
     <section>
@@ -446,6 +595,18 @@ function RepoGroup({
             <ArrowUpRight className='size-3 shrink-0' />
           </a>
         </div>
+        {onAddProfile && (
+          <Button
+            variant='ghost'
+            size='sm'
+            onClick={onAddProfile}
+            data-track-category='Environments'
+            data-track-name='Add sandbox profile'
+          >
+            <Plus className='size-4' />
+            Add sandbox profile
+          </Button>
+        )}
       </header>
       <ul className='ml-7'>
         {linked.length === 0 ? (
@@ -523,18 +684,29 @@ export function EnvironmentsView({
         .environments,
   });
   const visibleChannels = useAllVisibleChannels();
-  const { data: profiles } = useSandboxRepos();
+  const { data: profileList } = useSandboxProfiles(hubRepoIds?.join(','));
   const linkedByUrl = useMemo(() => {
-    const byUrl = new Map<string, SandboxRepoOption[]>();
-    for (const profile of profiles ?? []) {
-      if (!profile.repoUrl) continue;
-      const key = repoUrlKey(profile.repoUrl);
+    const byUrl = new Map<string, SdlcSandboxProfile[]>();
+    for (const profile of profileList?.profiles ?? []) {
+      // A disabled profile is hidden from agents; only its editors still see it here.
+      if (!profile.config.repoUrl || (!profile.enabled && !profile.canEdit)) continue;
+      const key = repoUrlKey(profile.config.repoUrl);
       byUrl.set(key, [...(byUrl.get(key) ?? []), profile]);
     }
     return byUrl;
-  }, [profiles]);
-  const linkedFor = (row: SdlcEnvironmentRow): SandboxRepoOption[] =>
+  }, [profileList]);
+  const linkedFor = (row: SdlcEnvironmentRow): SdlcSandboxProfile[] =>
     linkedByUrl.get(repoUrlKey(row.url)) ?? [];
+  const canCreate = new Set(profileList?.canCreateRepoIds ?? []);
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { workspaceId } = useParams<{ workspaceId?: string }>();
+  // One form route for both the standalone page and the hub tab; Save returns here.
+  const profileFormPath = (path: string, params: Record<string, string> = {}): string =>
+    `${workspaceId ? `/${workspaceId}` : ''}/ai/environments/profile/${path}?${new URLSearchParams({
+      ...params,
+      returnTo: location.pathname,
+    }).toString()}`;
 
   const hubOptions = useMemo(
     () =>
@@ -550,7 +722,7 @@ export function EnvironmentsView({
     row =>
       (!hubFilter || row.hubChannelIds.includes(hubFilter)) &&
       (!q ||
-        [row.name, row.url, ...linkedFor(row).flatMap(p => [p.key, p.name])].some(value =>
+        [row.name, row.url, ...linkedFor(row).flatMap(p => [p.key, p.config.name])].some(value =>
           value.toLowerCase().includes(q),
         )),
   );
@@ -627,6 +799,11 @@ export function EnvironmentsView({
                   row={row}
                   linked={linkedFor(row)}
                   selectedKey={selection?.repoId === row.repoId ? selection.key : null}
+                  onAddProfile={
+                    canCreate.has(row.repoId)
+                      ? (): void => void navigate(profileFormPath('new', { repoId: row.repoId }))
+                      : undefined
+                  }
                   onSelect={key =>
                     setSelection(current =>
                       current?.repoId === row.repoId && current.key === key
@@ -653,6 +830,9 @@ export function EnvironmentsView({
               row={selectedRow}
               profile={selectedProfile}
               onClose={() => setSelection(null)}
+              onEdit={() =>
+                void navigate(profileFormPath(`${encodeURIComponent(selectedProfile.key)}/edit`))
+              }
             />
           </Panel>
         </>

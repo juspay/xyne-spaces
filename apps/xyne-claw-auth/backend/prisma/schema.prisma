@@ -2861,10 +2861,14 @@ model SandboxRepoConfig {
   key             String   @unique
   config          Json
   enabled         Boolean  @default(true)
+  // Spaces workspace that owns it. Null: shows nowhere until assigned, unless the key overrides a built-in.
+  workspaceId     String?
+  createdByUserId String?
   updatedByUserId String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
+  @@index([workspaceId])
   @@map("sandbox_repo_configs")
 }
 
