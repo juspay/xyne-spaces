@@ -16,6 +16,7 @@ import {
 export type SlackEmailMessage = {
   id: string;
   from: string | null;
+  to: string[] | null;
   body: string | null;
   createdAt: number | null;
   type: string | null;
@@ -58,6 +59,8 @@ const SlackMessage = ({ email }: { email: SlackEmailMessage }): ReactElement => 
       })
     : '';
   const isOutgoing = email.type === 'REPLY';
+  // For incoming DMs show which account received the message (e.g. "@xyne.spaces").
+  const recipientLabel = !isOutgoing && email.to?.length ? email.to[0] : null;
 
   const panelAttachments: PanelAttachmentRow[] = useMemo(
     () =>
@@ -109,6 +112,11 @@ const SlackMessage = ({ email }: { email: SlackEmailMessage }): ReactElement => 
             <span className='text-sm font-semibold text-foreground truncate'>{senderName}</span>
           )}
           <span className='text-[11px] text-muted-foreground whitespace-nowrap'>{timestamp}</span>
+          {recipientLabel && (
+            <span className='text-[11px] text-muted-foreground whitespace-nowrap'>
+              → {recipientLabel}
+            </span>
+          )}
         </div>
         {/* Body */}
         <div className='mt-1 text-sm text-foreground leading-relaxed'>
