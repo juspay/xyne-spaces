@@ -1,3 +1,11 @@
+## [1.443.0](https://github.com/juspay/xyne-spaces/compare/v1.442.5...v1.443.0) (2026-09-30)
+
+
+### Features
+
+* fork-to-conversation: hand an agent's context to another thread or channel ([#2512](https://github.com/juspay/xyne-spaces/issues/2512)) ([ae38fe6](https://github.com/juspay/xyne-spaces/commit/ae38fe680de13067efa0bc3f9968c1e936b0d120))
+* workflow conversation flow chat disabled + ai router scoping main ([#2521](https://github.com/juspay/xyne-spaces/issues/2521)) ([aa8b3b4](https://github.com/juspay/xyne-spaces/commit/aa8b3b45b16ba140c58122cf2199c0950b68a2b5))
+
 ## [1.442.5](https://github.com/juspay/xyne-spaces/compare/v1.442.4...v1.442.5) (2026-09-30)
 
 
