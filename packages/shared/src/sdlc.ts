@@ -52,6 +52,15 @@ export function sdlcHubKnowledgeFolderId(channelId: string): string {
   return `sdlc-knowledge-${channelId}`;
 }
 
+/**
+ * A folder's or a track's chosen icon: an @xyne/icons name, which is lowercase
+ * words joined by hyphens.
+ */
+export const sdlcIconNameSchema = z
+  .string()
+  .max(64)
+  .regex(/^[a-z0-9]+(-[a-z0-9]+)*$/);
+
 export const SDLC_WORKFLOW_RELATION = "WORKFLOW";
 export const SDLC_WIKI_WORKFLOW_RELATION = "WIKI_WORKFLOW";
 
@@ -118,6 +127,15 @@ export const SDLC_TREE_TARGET_TYPES = [
 export const SDLC_TRACK_FLAT_RELATION = "TRACK_ITEM_SECONDARY";
 
 /**
+ * A FOLDER -> item edge from every folder an item sits under, however deep, so
+ * "everything under this folder" and "the folders above this item" are each one
+ * indexed lookup. The folder-level twin of the flat track edge. Derived: kept in
+ * step with the containment edges in the same transaction as every write that
+ * files, moves or unfiles an item, never on its own.
+ */
+export const SDLC_FOLDER_FLAT_RELATION = "FOLDER_ITEM_SECONDARY";
+
+/**
  * Edges no user may write or delete through the generic link API. Derived or
  * structural: the app maintains them with the thing they describe.
  */
@@ -125,6 +143,7 @@ export const SDLC_STRUCTURAL_RELATIONS = [
   SDLC_MEMBERSHIP_RELATION,
   SDLC_TRACK_MEMBERSHIP_RELATION,
   SDLC_TRACK_FLAT_RELATION,
+  SDLC_FOLDER_FLAT_RELATION,
   SDLC_WORKFLOW_RELATION,
   SDLC_WIKI_WORKFLOW_RELATION,
   SDLC_HUB_ITEM_RELATION,
