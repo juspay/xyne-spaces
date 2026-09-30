@@ -1,11 +1,13 @@
 import { logger, Event as LogEvent } from '../../../utils/logger';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQueries, useQuery } from '@tanstack/react-query';
 import {
   Archive,
   ArrowLeft,
   Check,
+  ChevronsDownUp,
+  ChevronsUpDown,
   Copy,
   GitBranch,
   History,
@@ -49,6 +51,7 @@ import {
   fetchStepSchema,
   fetchTriggerCatalog,
   fetchTriggerSchema,
+  isLiveStatus,
   validateAutomation,
 } from '../../../api/automationsApi';
 import { useZero } from '../../../hooks/useZero';
@@ -69,14 +72,35 @@ import {
   buildVariableSources,
   collectStepTypes,
   emptyConfig,
+  issuesAtStep,
   issuesUnder,
+  makeConditionalStep,
   moveStep,
 } from './AutomationBuilder.utils';
 import type { AutomationBuilderProps } from './AutomationBuilder.types';
 import type { StepSchema } from '../Automation.types';
 import { FlowAutomationView } from './FlowAutomationView/FlowAutomationView';
 import type { ViewStepPath } from './FlowAutomationView/FlowAutomationView.types';
-import { ROOT_CONTAINER, insertStepAtPath } from './FlowAutomationView/FlowAutomationView.utils';
+import {
+  ROOT_CONTAINER,
+  TRIGGER_NODE_ID,
+  insertStepAtPath,
+  stepIdsForIssuePath,
+} from './FlowAutomationView/FlowAutomationView.utils';
+import { CollapseAllContext, type CollapseAllSignal } from './CollapseAll/CollapseAll';
+import { DiffBadge } from './DiffHighlight/DiffBadge';
+import {
+  DiffHighlightContext,
+  SCHEDULE_DIFF_KEY,
+  TRIGGER_CONFIG_DIFF_KEY,
+  TRIGGER_TYPE_DIFF_KEY,
+  diffHighlightClass,
+  useDiffMark,
+} from './DiffHighlight/DiffHighlight';
+import {
+  computeVersionDiff,
+  summarizeDiff,
+} from '../AutomationVersions/VersionDiffView/VersionDiffView.utils';
 
 const MAX_AUTOMATION_NAME_LENGTH = 80;
 
@@ -204,6 +228,10 @@ export function AutomationBuilder({
       // Preference is not persisted; the current session still works.
     }
   }, [builderView]);
+  const [collapseAll, setCollapseAll] = useState<CollapseAllSignal | null>(null);
+  const [flowFocus, setFlowFocus] = useState<{ id: string } | null>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const isFlowView = builderView === 'flow' && !readOnlyPreview;
 
   const [savedId, setSavedId] = useState<string | null>(automation?.id ?? null);
   const [savedStatus, setSavedStatus] = useState<string>(
@@ -320,6 +348,26 @@ export function AutomationBuilder({
     savedStatus === AutomationStatusValues.AUTO_REVOKED;
 
   const isLockedStatus = savedStatus === AutomationStatusValues.PENDING_APPROVAL;
+
+  // A pending proposal is highlighted against the live version it would replace, so
+  // review mode provides DiffHighlightContext itself (marked like the compare view's
+  // newer side). Without a live version (a first proposal) nothing is highlighted.
+  // The compare view passes its own highlights down, so it's left alone.
+  const outerDiffHighlight = useContext(DiffHighlightContext);
+  const reviewDiff = useMemo(() => {
+    if (!isLockedStatus || readOnlyPreview || !automation) return null;
+    const live = versionsQuery.data?.find(v => v.id !== automation.id && isLiveStatus(v.status));
+    if (!live) return null;
+    const diff = computeVersionDiff(live.config, automation.config);
+    const otherChanges = (['name', 'description', 'priority'] as const).filter(
+      key => (live[key] ?? null) !== (automation[key] ?? null),
+    );
+    return {
+      highlight: { tone: 'new' as const, marks: diff.newerMarks },
+      summary: summarizeDiff(diff.counts, otherChanges),
+      hasRemoved: diff.counts.removed > 0,
+    };
+  }, [isLockedStatus, readOnlyPreview, automation, versionsQuery.data]);
 
   const isLiveRow =
     automation?.status === AutomationStatusValues.ACTIVE ||
@@ -646,16 +694,7 @@ export function AutomationBuilder({
     (type: string, insertAt?: number, container: ViewStepPath = ROOT_CONTAINER): string => {
       let step: AutomationStepConfig;
       if (type === CONDITIONAL_STEP_TYPE) {
-        const cond: ConditionalStepConfig = {
-          id: makeStepId(),
-          type: CONDITIONAL_STEP_TYPE,
-          config: {
-            condition: { variable: '', operator: 'eq', value: '' },
-            if_true: [],
-            if_false: [],
-          },
-        };
-        step = cond;
+        step = makeConditionalStep();
       } else if (type === SWITCH_STEP_TYPE) {
         const sw: SwitchStepConfig = {
           id: makeStepId(),
@@ -794,9 +833,42 @@ export function AutomationBuilder({
     setFormFieldNameMap(map);
   }, []);
 
+  const handleRequestEdit = useCallback((): void => {
+    if (forksOnEdit) setProposeChangeConfirmOpen(true);
+    else setEditConfirmOpen(true);
+  }, [forksOnEdit]);
+
   const triggerIssues = issuesUnder(validation?.issues, 'trigger');
 
-  return (
+  // Validation banner → the step (or trigger/timing section) an issue belongs to.
+  const handleIssueClick = (path: string): void => {
+    const stepIds = stepIdsForIssuePath(config.steps, path);
+    // Trigger filters (and the scope issue on `trigger.config`) render in the conditions section.
+    const section = path.startsWith('steps')
+      ? 'action'
+      : path.startsWith('schedule')
+        ? 'timing'
+        : path.startsWith('trigger.config')
+          ? 'condition'
+          : 'event';
+    if (isFlowView) {
+      // Trigger and timing both live in the trigger node's panel.
+      const id = stepIds[stepIds.length - 1] ?? (section === 'action' ? null : TRIGGER_NODE_ID);
+      if (id) setFlowFocus({ id });
+      return;
+    }
+    // Innermost card that is rendered: a nested step is hidden while its parent is collapsed.
+    const selectors = [
+      ...stepIds.map(id => `[data-step-id="${CSS.escape(id)}"]`).reverse(),
+      `[data-section="${section}"]`,
+    ];
+    const target = selectors
+      .map(selector => listRef.current?.querySelector(selector))
+      .find(Boolean);
+    target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  };
+
+  const content = (
     <div className='flex h-full w-full flex-col bg-background'>
       <div className='flex flex-col gap-3 border-b border-border bg-background px-6 py-4'>
         <div className='flex items-center gap-3'>
@@ -1053,10 +1125,7 @@ export function AutomationBuilder({
                   — the body differs per case. */}
               {canEdit ? (
                 <Button
-                  onClick={() => {
-                    if (forksOnEdit) setProposeChangeConfirmOpen(true);
-                    else setEditConfirmOpen(true);
-                  }}
+                  onClick={handleRequestEdit}
                   data-track-category='automation-builder'
                   data-track-name={forksOnEdit ? 'header-propose-change' : 'header-edit'}
                   className='font-semibold'
@@ -1135,47 +1204,97 @@ export function AutomationBuilder({
         </div>
       </div>
 
-      <div className='flex items-center justify-end gap-2 border-b border-border bg-background px-6 py-2'>
-        <span className='text-xs text-muted-foreground'>View</span>
-        <div className='flex items-center rounded-md border border-border p-0.5'>
-          <button
-            type='button'
-            aria-label='List view'
-            data-track-category='automation-builder'
-            data-track-name='switch-to-list-view'
-            onClick={() => setBuilderView('list')}
-            className={cn(
-              'flex h-7 w-7 items-center justify-center rounded-sm text-muted-foreground transition-colors',
-              builderView === 'list' && 'bg-accent text-foreground',
-              'hover:text-foreground',
-            )}
-          >
-            <List className='size-4' />
-          </button>
-          <button
-            type='button'
-            aria-label='Flow view'
-            data-track-category='automation-builder'
-            data-track-name='switch-to-flow-view'
-            onClick={() => setBuilderView('flow')}
-            className={cn(
-              'flex h-7 w-7 items-center justify-center rounded-sm text-muted-foreground transition-colors',
-              builderView === 'flow' && 'bg-accent text-foreground',
-              'hover:text-foreground',
-            )}
-          >
-            <LayoutGrid className='size-4' />
-          </button>
+      {reviewDiff && (
+        <div className='flex flex-wrap items-center gap-3 border-b border-border bg-muted/30 px-6 py-2 text-xs text-muted-foreground'>
+          <span>
+            Compared with the live version:{' '}
+            <span className='font-medium text-foreground'>{reviewDiff.summary}</span>
+          </span>
+          <span className='flex items-center gap-1.5'>
+            <span className='size-2.5 rounded-sm bg-green-500/60' aria-hidden='true' />
+            Changed in this proposal
+          </span>
+          {reviewDiff.hasRemoved && (
+            <span>Removed steps aren&apos;t shown here — compare versions to see them.</span>
+          )}
         </div>
+      )}
+
+      {/* The compare view puts two builders side by side — too narrow for the canvas and its
+          side panel — so it always shows the list, without the view toggle. */}
+      <div className='flex items-center justify-end gap-2 border-b border-border bg-background px-6 py-2'>
+        {/* The list view shows this above its sections; the canvas has no such slot. */}
+        {isFlowView && (
+          <div className='mr-auto'>
+            <LockBanner status={savedStatus} isLiveRow={isLiveRow} />
+          </div>
+        )}
+        {!isFlowView && (
+          <button
+            type='button'
+            onClick={() => setCollapseAll({ collapsed: !collapseAll?.collapsed })}
+            data-track-category='automation-builder'
+            data-track-name={collapseAll?.collapsed ? 'expand-all-steps' : 'collapse-all-steps'}
+            className='flex h-7 items-center gap-1.5 rounded-md px-2 text-xs text-muted-foreground hover:bg-accent/40 hover:text-foreground'
+          >
+            {collapseAll?.collapsed ? (
+              <ChevronsUpDown className='size-3.5' aria-hidden='true' />
+            ) : (
+              <ChevronsDownUp className='size-3.5' aria-hidden='true' />
+            )}
+            {collapseAll?.collapsed ? 'Expand all' : 'Collapse all'}
+          </button>
+        )}
+        {!readOnlyPreview && (
+          <>
+            <span className='text-xs text-muted-foreground'>View</span>
+            <div className='flex items-center rounded-md border border-border p-0.5'>
+              <button
+                type='button'
+                aria-label='List view'
+                aria-pressed={builderView === 'list'}
+                data-track-category='automation-builder'
+                data-track-name='switch-to-list-view'
+                onClick={() => {
+                  // Cards remount expanded when the list comes back, so drop the last signal.
+                  if (builderView !== 'list') setCollapseAll(null);
+                  setBuilderView('list');
+                }}
+                className={cn(
+                  'flex h-7 w-7 items-center justify-center rounded-sm text-muted-foreground transition-colors',
+                  builderView === 'list' && 'bg-accent text-foreground',
+                  'hover:text-foreground',
+                )}
+              >
+                <List className='size-4' aria-hidden='true' />
+              </button>
+              <button
+                type='button'
+                aria-label='Flow view'
+                aria-pressed={builderView === 'flow'}
+                data-track-category='automation-builder'
+                data-track-name='switch-to-flow-view'
+                onClick={() => setBuilderView('flow')}
+                className={cn(
+                  'flex h-7 w-7 items-center justify-center rounded-sm text-muted-foreground transition-colors',
+                  builderView === 'flow' && 'bg-accent text-foreground',
+                  'hover:text-foreground',
+                )}
+              >
+                <LayoutGrid className='size-4' aria-hidden='true' />
+              </button>
+            </div>
+          </>
+        )}
       </div>
 
-      {builderView === 'flow' ? (
+      {isFlowView && (
         <FlowAutomationView
           config={config}
-          onConfigChange={next => {
-            setConfig(next);
-            setStepSchemaTypes(collectStepTypes(next.steps));
-          }}
+          onConfigChange={setConfig}
+          onTriggerTypeChange={handleTriggerTypeChange}
+          onTriggerConfigChange={handleTriggerConfigChange}
+          onScheduleChange={handleScheduleChange}
           triggerCatalog={triggerCatalog}
           triggerSchema={triggerSchema}
           stepCatalog={stepCatalog}
@@ -1185,225 +1304,218 @@ export function AutomationBuilder({
           ensureSchema={ensureSchema}
           operators={operators}
           validation={validation}
-          readOnly={!editMode || readOnlyPreview}
+          focusRequest={flowFocus}
+          readOnly={!editMode}
           editMode={editMode}
           onAddStep={handleAddStep}
           formFieldNameMap={formFieldNameMap}
           onFormFieldNamesResolved={handleFormFieldNamesResolved}
           renderConditionalCard={renderConditionalCard}
           renderSwitchCard={renderSwitchCard}
-          onRequestEdit={
-            !editMode && canEdit && !readOnlyPreview
-              ? (): void => {
-                  if (forksOnEdit) setProposeChangeConfirmOpen(true);
-                  else setEditConfirmOpen(true);
-                }
-              : undefined
-          }
+          onRequestEdit={!editMode && canEdit ? handleRequestEdit : undefined}
           triggerExtras={
             config.trigger.type === WEBHOOK_TRIGGER_TYPE ? (
               <WebhookEndpointPanel automationId={savedId} />
             ) : undefined
           }
         />
-      ) : (
+      )}
+
+      <ListPane
+        visible={!isFlowView}
+        ref={listRef}
+        className={cn(
+          'flex-1 overflow-y-auto bg-muted/30',
+          !editMode && canEdit && !readOnlyPreview && 'cursor-pointer',
+        )}
+        {...(!editMode && canEdit && !readOnlyPreview ? { onClick: handleRequestEdit } : {})}
+      >
         <div
           className={cn(
-            'flex-1 overflow-y-auto bg-muted/30',
-            !editMode && canEdit && !readOnlyPreview && 'cursor-pointer',
+            'mx-auto flex w-full max-w-6xl flex-col gap-6 px-6 py-6',
+            !editMode && 'pointer-events-none select-none opacity-90',
           )}
-          {...(!editMode && canEdit && !readOnlyPreview
-            ? {
-                onClick: (): void => {
-                  if (forksOnEdit) setProposeChangeConfirmOpen(true);
-                  else setEditConfirmOpen(true);
-                },
-              }
-            : {})}
+          aria-readonly={!editMode}
+          // pointer-events-none only blocks the mouse — it doesn't remove step/trigger
+          // form fields from the tab order, so they could still be focused and typed
+          // into via keyboard. `inert` fully removes this subtree from focus/interaction.
+          inert={readOnlyPreview}
         >
-          <div
-            className={cn(
-              'mx-auto flex w-full max-w-6xl flex-col gap-6 px-6 py-6',
-              !editMode && 'pointer-events-none select-none opacity-90',
-            )}
-            aria-readonly={!editMode}
-            // pointer-events-none only blocks the mouse — it doesn't remove step/trigger
-            // form fields from the tab order, so they could still be focused and typed
-            // into via keyboard. `inert` fully removes this subtree from focus/interaction.
-            inert={readOnlyPreview}
+          <LockBanner status={savedStatus} isLiveRow={isLiveRow} />
+          <RuleSummaryCard
+            config={config}
+            triggerSchema={triggerSchema}
+            stepCatalog={stepCatalog}
+          />
+          <BuilderSection
+            number={1}
+            kicker='event'
+            title='When this happens'
+            description='The event that fires this automation.'
+            diffKey={TRIGGER_TYPE_DIFF_KEY}
           >
-            <LockBanner status={savedStatus} isLiveRow={isLiveRow} />
-            <RuleSummaryCard
-              config={config}
-              triggerSchema={triggerSchema}
-              stepCatalog={stepCatalog}
+            <TriggerCard
+              view='event'
+              trigger={config.trigger}
+              catalog={triggerCatalog}
+              schema={triggerSchema}
+              schemaLoading={triggerSchemaQuery.isLoading && !!config.trigger.type}
+              onChangeType={handleTriggerTypeChange}
+              onConfigChange={handleTriggerConfigChange}
+              issues={triggerIssues}
             />
-            <BuilderSection
-              number={1}
-              kicker='event'
-              title='When this happens'
-              description='The event that fires this automation.'
-            >
-              <TriggerCard
-                view='event'
-                trigger={config.trigger}
-                catalog={triggerCatalog}
-                schema={triggerSchema}
-                schemaLoading={triggerSchemaQuery.isLoading && !!config.trigger.type}
-                onChangeType={handleTriggerTypeChange}
-                onConfigChange={handleTriggerConfigChange}
-                issues={triggerIssues}
-              />
-              {config.trigger.type === WEBHOOK_TRIGGER_TYPE && (
-                <div className='mt-4'>
-                  <WebhookEndpointPanel automationId={savedId} />
+            {config.trigger.type === WEBHOOK_TRIGGER_TYPE && (
+              <div className='mt-4'>
+                <WebhookEndpointPanel automationId={savedId} />
+              </div>
+            )}
+          </BuilderSection>
+
+          <BuilderSection
+            number={2}
+            kicker='timing'
+            title='Run timing'
+            description='Run now, or wait a fixed time after a date field on the trigger.'
+            diffKey={SCHEDULE_DIFF_KEY}
+          >
+            <ScheduleCard
+              schedule={config.schedule}
+              triggerSchema={triggerSchema}
+              onChange={handleScheduleChange}
+            />
+          </BuilderSection>
+
+          <BuilderSection
+            number={3}
+            kicker='condition'
+            title='With these conditions'
+            description='Evaluated against fresh state when the actions are about to run.'
+            diffKey={TRIGGER_CONFIG_DIFF_KEY}
+          >
+            <TriggerCard
+              view='condition'
+              trigger={config.trigger}
+              catalog={triggerCatalog}
+              schema={triggerSchema}
+              schemaLoading={triggerSchemaQuery.isLoading && !!config.trigger.type}
+              onChangeType={handleTriggerTypeChange}
+              onConfigChange={handleTriggerConfigChange}
+              issues={triggerIssues}
+              onFormFieldNamesResolved={handleFormFieldNamesResolved}
+            />
+          </BuilderSection>
+
+          <BuilderSection
+            number={4}
+            kicker='action'
+            isLast
+            title='Then do this'
+            description='One or more actions run in order. Conditionals can branch inside a step.'
+          >
+            <AddStepRow catalog={stepCatalog} onPick={type => handleAddStep(type, 0)} />
+
+            {config.steps.map((step, index) => {
+              const isLast = index === config.steps.length - 1;
+              const variableSources = buildVariableSources(
+                triggerSchema,
+                config.trigger.config,
+                config.steps,
+                stepSchemaCache,
+                index,
+                formFieldNameMap,
+              );
+              const stepIssues = issuesAtStep(validation?.issues, `steps[${index}]`);
+
+              const card =
+                step.type === CONDITIONAL_STEP_TYPE ? (
+                  <ConditionalCard
+                    step={step as ConditionalStepConfig}
+                    catalog={stepCatalog}
+                    schemaCache={stepSchemaCache}
+                    schemaLoadingFor={stepSchemaLoadingFor}
+                    operators={operators}
+                    variableSources={variableSources}
+                    index={index + 1}
+                    total={config.steps.length}
+                    onChange={next => updateStepAt(index, next)}
+                    onMoveUp={() => handleMoveStep(index, -1)}
+                    onMoveDown={() => handleMoveStep(index, 1)}
+                    onDelete={() => handleDeleteStep(index)}
+                    issues={stepIssues}
+                    pathPrefix={`steps[${index}]`}
+                    readOnly={!editMode}
+                    ensureSchema={ensureSchema}
+                    renderConditionalCard={renderConditionalCard}
+                    renderSwitchCard={renderSwitchCard}
+                  />
+                ) : step.type === SWITCH_STEP_TYPE ? (
+                  <SwitchCard
+                    step={step as SwitchStepConfig}
+                    catalog={stepCatalog}
+                    schemaCache={stepSchemaCache}
+                    schemaLoadingFor={stepSchemaLoadingFor}
+                    operators={operators}
+                    variableSources={variableSources}
+                    index={index + 1}
+                    total={config.steps.length}
+                    onChange={next => updateStepAt(index, next)}
+                    onMoveUp={() => handleMoveStep(index, -1)}
+                    onMoveDown={() => handleMoveStep(index, 1)}
+                    onDelete={() => handleDeleteStep(index)}
+                    issues={stepIssues}
+                    pathPrefix={`steps[${index}]`}
+                    readOnly={!editMode}
+                    ensureSchema={ensureSchema}
+                    renderConditionalCard={renderConditionalCard}
+                    renderSwitchCard={renderSwitchCard}
+                  />
+                ) : (
+                  <StepCard
+                    step={step as ActionStepConfig}
+                    catalogItem={
+                      stepCatalog.find(c => c.type === (step as ActionStepConfig).type) ?? null
+                    }
+                    schema={stepSchemaCache[(step as ActionStepConfig).type] ?? null}
+                    schemaLoading={stepSchemaLoadingFor((step as ActionStepConfig).type)}
+                    index={index + 1}
+                    total={config.steps.length}
+                    variableSources={variableSources}
+                    onConfigChange={cfg => handleStepConfigChange(index, cfg)}
+                    onMoveUp={() => handleMoveStep(index, -1)}
+                    onMoveDown={() => handleMoveStep(index, 1)}
+                    onDelete={() => handleDeleteStep(index)}
+                    issues={stepIssues}
+                    pathPrefix={`steps[${index}].config.`}
+                    readOnly={!editMode}
+                  />
+                );
+
+              return (
+                <div key={step.id} className='flex flex-col'>
+                  {card}
+                  {!isLast && (
+                    <AddStepRow
+                      catalog={stepCatalog}
+                      onPick={type => handleAddStep(type, index + 1)}
+                    />
+                  )}
                 </div>
-              )}
-            </BuilderSection>
+              );
+            })}
 
-            <BuilderSection
-              number={2}
-              kicker='timing'
-              title='Run timing'
-              description='Run now, or wait a fixed time after a date field on the trigger.'
-            >
-              <ScheduleCard
-                schedule={config.schedule}
-                triggerSchema={triggerSchema}
-                onChange={handleScheduleChange}
-              />
-            </BuilderSection>
-
-            <BuilderSection
-              number={3}
-              kicker='condition'
-              title='With these conditions'
-              description='Evaluated against fresh state when the actions are about to run.'
-            >
-              <TriggerCard
-                view='condition'
-                trigger={config.trigger}
-                catalog={triggerCatalog}
-                schema={triggerSchema}
-                schemaLoading={triggerSchemaQuery.isLoading && !!config.trigger.type}
-                onChangeType={handleTriggerTypeChange}
-                onConfigChange={handleTriggerConfigChange}
-                issues={triggerIssues}
-                onFormFieldNamesResolved={handleFormFieldNamesResolved}
-              />
-            </BuilderSection>
-
-            <BuilderSection
-              number={4}
-              kicker='action'
-              isLast
-              title='Then do this'
-              description='One or more actions run in order. Conditionals can branch inside a step.'
-            >
-              <AddStepRow catalog={stepCatalog} onPick={type => handleAddStep(type, 0)} />
-
-              {config.steps.map((step, index) => {
-                const isLast = index === config.steps.length - 1;
-                const variableSources = buildVariableSources(
-                  triggerSchema,
-                  config.trigger.config,
-                  config.steps,
-                  stepSchemaCache,
-                  index,
-                  formFieldNameMap,
-                );
-                const stepIssues = issuesUnder(validation?.issues, `steps[${index}]`);
-
-                const card =
-                  step.type === CONDITIONAL_STEP_TYPE ? (
-                    <ConditionalCard
-                      step={step as ConditionalStepConfig}
-                      catalog={stepCatalog}
-                      schemaCache={stepSchemaCache}
-                      schemaLoadingFor={stepSchemaLoadingFor}
-                      operators={operators}
-                      variableSources={variableSources}
-                      index={index + 1}
-                      total={config.steps.length}
-                      onChange={next => updateStepAt(index, next)}
-                      onMoveUp={() => handleMoveStep(index, -1)}
-                      onMoveDown={() => handleMoveStep(index, 1)}
-                      onDelete={() => handleDeleteStep(index)}
-                      issues={stepIssues}
-                      pathPrefix={`steps[${index}]`}
-                      readOnly={!editMode}
-                      ensureSchema={ensureSchema}
-                      renderConditionalCard={renderConditionalCard}
-                      renderSwitchCard={renderSwitchCard}
-                    />
-                  ) : step.type === SWITCH_STEP_TYPE ? (
-                    <SwitchCard
-                      step={step as SwitchStepConfig}
-                      catalog={stepCatalog}
-                      schemaCache={stepSchemaCache}
-                      schemaLoadingFor={stepSchemaLoadingFor}
-                      operators={operators}
-                      variableSources={variableSources}
-                      index={index + 1}
-                      total={config.steps.length}
-                      onChange={next => updateStepAt(index, next)}
-                      onMoveUp={() => handleMoveStep(index, -1)}
-                      onMoveDown={() => handleMoveStep(index, 1)}
-                      onDelete={() => handleDeleteStep(index)}
-                      issues={stepIssues}
-                      pathPrefix={`steps[${index}]`}
-                      readOnly={!editMode}
-                      ensureSchema={ensureSchema}
-                      renderConditionalCard={renderConditionalCard}
-                      renderSwitchCard={renderSwitchCard}
-                    />
-                  ) : (
-                    <StepCard
-                      step={step as ActionStepConfig}
-                      catalogItem={
-                        stepCatalog.find(c => c.type === (step as ActionStepConfig).type) ?? null
-                      }
-                      schema={stepSchemaCache[(step as ActionStepConfig).type] ?? null}
-                      schemaLoading={stepSchemaLoadingFor((step as ActionStepConfig).type)}
-                      index={index + 1}
-                      total={config.steps.length}
-                      variableSources={variableSources}
-                      onConfigChange={cfg => handleStepConfigChange(index, cfg)}
-                      onMoveUp={() => handleMoveStep(index, -1)}
-                      onMoveDown={() => handleMoveStep(index, 1)}
-                      onDelete={() => handleDeleteStep(index)}
-                      issues={stepIssues}
-                      pathPrefix={`steps[${index}].config.`}
-                      readOnly={!editMode}
-                    />
-                  );
-
-                return (
-                  <div key={step.id} className='flex flex-col'>
-                    {card}
-                    {!isLast && (
-                      <AddStepRow
-                        catalog={stepCatalog}
-                        onPick={type => handleAddStep(type, index + 1)}
-                      />
-                    )}
-                  </div>
-                );
-              })}
-
-              {config.steps.length > 0 && (
-                <AddStepRow catalog={stepCatalog} onPick={type => handleAddStep(type)} />
-              )}
-            </BuilderSection>
-          </div>
+            {config.steps.length > 0 && (
+              <AddStepRow catalog={stepCatalog} onPick={type => handleAddStep(type)} />
+            )}
+          </BuilderSection>
         </div>
-      )}
+      </ListPane>
 
       <div className='border-t border-border bg-background px-6 py-3'>
         <ValidationBanner
           result={validation}
           isSaving={saveMutation.isPending}
           errorMessage={errorMessage}
+          onIssueClick={handleIssueClick}
         />
       </div>
 
@@ -1631,6 +1743,20 @@ export function AutomationBuilder({
       </Dialog>
     </div>
   );
+
+  return (
+    <DiffHighlightContext.Provider value={reviewDiff?.highlight ?? outerDiffHighlight}>
+      <CollapseAllContext.Provider value={collapseAll}>{content}</CollapseAllContext.Provider>
+    </DiffHighlightContext.Provider>
+  );
+}
+
+/** The list view's scroll area — unmounted, not just hidden, while the canvas is shown. */
+function ListPane({
+  visible,
+  ...props
+}: React.ComponentProps<'div'> & { visible: boolean }): React.ReactElement | null {
+  return visible ? <div {...props} /> : null;
 }
 
 function LockBanner({
@@ -1845,6 +1971,7 @@ function BuilderSection({
   title,
   description,
   isLast,
+  diffKey,
   children,
 }: {
   number: number;
@@ -1852,11 +1979,14 @@ function BuilderSection({
   title: string;
   description: string;
   isLast?: boolean;
+  /** Version compare: the key this section is highlighted under (see DiffHighlight). */
+  diffKey?: string;
   children: React.ReactNode;
 }): React.ReactElement {
   const k = SECTION_KICKER[kicker];
+  const diff = useDiffMark(diffKey ?? '');
   return (
-    <section className='flex gap-4'>
+    <section data-section={kicker} className='flex gap-4'>
       <div className='flex flex-col items-center'>
         <span
           aria-hidden='true'
@@ -1882,8 +2012,17 @@ function BuilderSection({
           </span>
           <span className='text-sm font-semibold text-foreground'>{title}</span>
           <span className='text-xs text-muted-foreground'>· {description}</span>
+          {diff && <DiffBadge diff={diff} />}
         </div>
-        <div className='flex flex-col gap-3'>{children}</div>
+        <div
+          className={cn(
+            'flex flex-col gap-3',
+            diff && 'rounded-md p-2',
+            diff && diffHighlightClass(diff),
+          )}
+        >
+          {children}
+        </div>
       </div>
     </section>
   );

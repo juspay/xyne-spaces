@@ -266,7 +266,7 @@ function RunRow({
               STATUS_CLASSES[run.status],
             )}
           >
-            {run.status}
+            {STATUS_OPTIONS.find(o => o.value === run.status)?.label ?? run.status}
           </span>
         </div>
         {run.error && <span className='text-xs text-red-600 line-clamp-1'>{run.error}</span>}

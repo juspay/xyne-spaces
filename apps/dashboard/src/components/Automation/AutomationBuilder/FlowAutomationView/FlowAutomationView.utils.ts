@@ -14,14 +14,22 @@ import type { VariablePickerSource } from '../VariablePicker/VariablePicker.type
 import {
   buildVariableSources as buildRootVariableSources,
   formatStepSourceLabel,
+  issuesAtStep,
+  issuesUnder,
+  moveStep,
   pushStepVariableSources,
 } from '../AutomationBuilder.utils';
-import type { FlowInsertTarget, FlowItem, ViewStepPath } from './FlowAutomationView.types';
+import type {
+  FlowInsertTarget,
+  FlowItem,
+  FlowRunOverlay,
+  ViewStepPath,
+} from './FlowAutomationView.types';
 
 /** Analytics namespace for every data-track-* attribute the flow view renders. */
 export const TRACK_CATEGORY = 'automation-builder-flow';
 
-const TRIGGER_NODE_ID = 'trigger';
+export const TRIGGER_NODE_ID = 'trigger';
 export const ROOT_CONTAINER: ViewStepPath = ['root'];
 const NODE_WIDTH = 248;
 // Fixed heights: every text line inside a node is single-line + truncated, so
@@ -38,7 +46,7 @@ export function isStepItem(item: FlowItem): boolean {
 }
 
 /** The branch keys a control step owns, in canvas order. */
-function listBranchKeys(step: AutomationStepConfig): string[] {
+export function listBranchKeys(step: AutomationStepConfig): string[] {
   if (step.type === CONDITIONAL_STEP_TYPE) return ['if_true', 'if_false'];
   if (step.type === SWITCH_STEP_TYPE) {
     const sw = step as SwitchStepConfig;
@@ -47,17 +55,20 @@ function listBranchKeys(step: AutomationStepConfig): string[] {
   return [];
 }
 
+/** `case:2` → 2; undefined for the other branch keys. */
+function caseIndexOf(branchKey: string): number | undefined {
+  const match = /^case:(\d+)$/.exec(branchKey);
+  return match ? Number(match[1]) : undefined;
+}
+
 function branchLabel(owner: AutomationStepConfig | undefined, branchKey: string): string {
   if (branchKey === 'if_true') return 'True';
   if (branchKey === 'if_false') return 'False';
   if (branchKey === 'default') return 'Default';
-  const caseMatch = /^case:(\d+)$/.exec(branchKey);
-  if (caseMatch) {
-    const caseIndex = Number(caseMatch[1]);
-    const sw = owner?.type === SWITCH_STEP_TYPE ? (owner as SwitchStepConfig) : undefined;
-    return sw?.config.cases[caseIndex]?.label || `Case ${caseIndex + 1}`;
-  }
-  return branchKey;
+  const caseIndex = caseIndexOf(branchKey);
+  if (caseIndex === undefined) return branchKey;
+  const sw = owner?.type === SWITCH_STEP_TYPE ? (owner as SwitchStepConfig) : undefined;
+  return sw?.config.cases[caseIndex]?.label || `Case ${caseIndex + 1}`;
 }
 
 /**
@@ -210,16 +221,42 @@ export function getStepAtPath(
   path: ViewStepPath,
 ): AutomationStepConfig | undefined {
   if (path.length < 2) return undefined;
-  const rootIndex = path[1] as number;
-  let current: AutomationStepConfig | undefined = config.steps[rootIndex];
-  for (let i = 2; i < path.length; i += 2) {
-    if (!current) return undefined;
-    const branchKey = String(path[i]);
-    const index = path[i + 1] as number;
-    const branch = getBranchSteps(current, branchKey);
-    current = branch[index];
+  return getContainerSteps(config, path.slice(0, -1))[path[path.length - 1] as number];
+}
+
+/** The step list of a container: `['root']` or `[...ownerStepPath, branchKey]`. */
+export function getContainerSteps(
+  config: AutomationConfig,
+  container: ViewStepPath,
+): AutomationStepConfig[] {
+  if (container.length <= 1) return config.steps;
+  const owner = getStepAtPath(config, container.slice(0, -1));
+  return owner ? getBranchSteps(owner, String(container[container.length - 1])) : [];
+}
+
+/**
+ * Applies `update` to the step list of one container: `['root']` for the main
+ * list or `[...ownerStepPath, branchKey]` for a branch (`if_true`, `if_false`,
+ * `case:n`, `default`). Returns `config` unchanged if the container is gone or
+ * `update` returns the same list.
+ */
+function updateContainerAtPath(
+  config: AutomationConfig,
+  container: ViewStepPath,
+  update: (steps: AutomationStepConfig[]) => AutomationStepConfig[],
+): AutomationConfig {
+  if (container.length <= 1) {
+    const steps = update(config.steps);
+    return steps === config.steps ? config : { ...config, steps };
   }
-  return current;
+  const ownerPath = container.slice(0, -1);
+  const branchKey = String(container[container.length - 1]);
+  const owner = getStepAtPath(config, ownerPath);
+  if (!owner || !listBranchKeys(owner).includes(branchKey)) return config;
+  const branch = getBranchSteps(owner, branchKey);
+  const steps = update(branch);
+  if (steps === branch) return config;
+  return updateStepAtPath(config, ownerPath, setBranchSteps(owner, branchKey, steps));
 }
 
 export function updateStepAtPath(
@@ -228,59 +265,20 @@ export function updateStepAtPath(
   next: AutomationStepConfig,
 ): AutomationConfig {
   if (path.length < 2) return config;
-  const rootIndex = path[1] as number;
-  if (path.length === 2) {
-    const steps = config.steps.slice();
-    steps[rootIndex] = next;
-    return { ...config, steps };
-  }
-  const steps = config.steps.slice();
-  steps[rootIndex] = updateNestedStep(steps[rootIndex]!, path.slice(2), next);
-  return { ...config, steps };
-}
-
-function updateNestedStep(
-  step: AutomationStepConfig,
-  remaining: ViewStepPath,
-  next: AutomationStepConfig,
-): AutomationStepConfig {
-  const branchKey = String(remaining[0]);
-  const index = remaining[1] as number;
-  if (remaining.length === 2) {
-    const branch = getBranchSteps(step, branchKey).slice();
-    branch[index] = next;
-    return setBranchSteps(step, branchKey, branch);
-  }
-  const branch = getBranchSteps(step, branchKey).slice();
-  branch[index] = updateNestedStep(branch[index]!, remaining.slice(2), next);
-  return setBranchSteps(step, branchKey, branch);
+  const index = path[path.length - 1] as number;
+  return updateContainerAtPath(config, path.slice(0, -1), steps => {
+    const copy = steps.slice();
+    copy[index] = next;
+    return copy;
+  });
 }
 
 export function removeStepAtPath(config: AutomationConfig, path: ViewStepPath): AutomationConfig {
   if (path.length < 2) return config;
-  const rootIndex = path[1] as number;
-  if (path.length === 2) {
-    const steps = config.steps.filter((_, i) => i !== rootIndex);
-    return { ...config, steps };
-  }
-  const steps = config.steps.slice();
-  steps[rootIndex] = removeNestedStep(steps[rootIndex]!, path.slice(2));
-  return { ...config, steps };
-}
-
-function removeNestedStep(
-  step: AutomationStepConfig,
-  remaining: ViewStepPath,
-): AutomationStepConfig {
-  const branchKey = String(remaining[0]);
-  const index = remaining[1] as number;
-  if (remaining.length === 2) {
-    const branch = getBranchSteps(step, branchKey).filter((_, i) => i !== index);
-    return setBranchSteps(step, branchKey, branch);
-  }
-  const branch = getBranchSteps(step, branchKey).slice();
-  branch[index] = removeNestedStep(branch[index]!, remaining.slice(2));
-  return setBranchSteps(step, branchKey, branch);
+  const index = path[path.length - 1] as number;
+  return updateContainerAtPath(config, path.slice(0, -1), steps =>
+    steps.filter((_, i) => i !== index),
+  );
 }
 
 export function moveStepAtPath(
@@ -289,36 +287,10 @@ export function moveStepAtPath(
   direction: -1 | 1,
 ): AutomationConfig {
   if (path.length < 2) return config;
-  const rootIndex = path[1] as number;
-  if (path.length === 2) {
-    const steps = config.steps.slice();
-    const nextIndex = rootIndex + direction;
-    if (nextIndex < 0 || nextIndex >= steps.length) return config;
-    [steps[rootIndex], steps[nextIndex]] = [steps[nextIndex]!, steps[rootIndex]!];
-    return { ...config, steps };
-  }
-  const steps = config.steps.slice();
-  steps[rootIndex] = moveNestedStep(steps[rootIndex]!, path.slice(2), direction);
-  return { ...config, steps };
-}
-
-function moveNestedStep(
-  step: AutomationStepConfig,
-  remaining: ViewStepPath,
-  direction: -1 | 1,
-): AutomationStepConfig {
-  const branchKey = String(remaining[0]);
-  const index = remaining[1] as number;
-  if (remaining.length === 2) {
-    const branch = getBranchSteps(step, branchKey).slice();
-    const nextIndex = index + direction;
-    if (nextIndex < 0 || nextIndex >= branch.length) return step;
-    [branch[index], branch[nextIndex]] = [branch[nextIndex]!, branch[index]!];
-    return setBranchSteps(step, branchKey, branch);
-  }
-  const branch = getBranchSteps(step, branchKey).slice();
-  branch[index] = moveNestedStep(branch[index]!, remaining.slice(2), direction);
-  return setBranchSteps(step, branchKey, branch);
+  const index = path[path.length - 1] as number;
+  return updateContainerAtPath(config, path.slice(0, -1), steps =>
+    moveStep(steps, index, direction),
+  );
 }
 
 /**
@@ -332,21 +304,17 @@ export function insertStepAtPath(
   index: number | undefined,
   step: AutomationStepConfig,
 ): AutomationConfig {
-  const insertInto = (steps: AutomationStepConfig[]): AutomationStepConfig[] => {
+  return updateContainerAtPath(config, container, steps => {
     if (index === undefined || index < 0 || index > steps.length) return [...steps, step];
     return [...steps.slice(0, index), step, ...steps.slice(index)];
-  };
-  if (container.length <= 1) return { ...config, steps: insertInto(config.steps) };
-  const ownerPath = container.slice(0, -1);
-  const branchKey = String(container[container.length - 1]);
-  const owner = getStepAtPath(config, ownerPath);
-  if (!owner || !listBranchKeys(owner).includes(branchKey)) return config;
-  const next = setBranchSteps(owner, branchKey, insertInto(getBranchSteps(owner, branchKey)));
-  return updateStepAtPath(config, ownerPath, next);
+  });
 }
 
 /** The steps held by one branch of a control step. */
-function getBranchSteps(step: AutomationStepConfig, branchKey: string): AutomationStepConfig[] {
+export function getBranchSteps(
+  step: AutomationStepConfig,
+  branchKey: string,
+): AutomationStepConfig[] {
   if (step.type === CONDITIONAL_STEP_TYPE) {
     const conditional = step as ConditionalStepConfig;
     // Both branches are optional at runtime: a draft saved before validation can
@@ -358,11 +326,8 @@ function getBranchSteps(step: AutomationStepConfig, branchKey: string): Automati
   if (step.type === SWITCH_STEP_TYPE) {
     const sw = step as SwitchStepConfig;
     if (branchKey === 'default') return sw.config.default ?? [];
-    const caseMatch = /^case:(\d+)$/.exec(branchKey);
-    if (caseMatch) {
-      const caseIndex = Number(caseMatch[1]);
-      return sw.config.cases[caseIndex]?.steps ?? [];
-    }
+    const caseIndex = caseIndexOf(branchKey);
+    if (caseIndex !== undefined) return sw.config.cases[caseIndex]?.steps ?? [];
   }
   return [];
 }
@@ -387,59 +352,145 @@ function setBranchSteps(
     if (branchKey === 'default') {
       return { ...sw, config: { ...sw.config, default: next } };
     }
-    const caseMatch = /^case:(\d+)$/.exec(branchKey);
-    if (caseMatch) {
-      const caseIndex = Number(caseMatch[1]);
+    const caseIndex = caseIndexOf(branchKey);
+    if (caseIndex !== undefined) {
       const cases = sw.config.cases.slice();
       const existing = cases[caseIndex];
-      if (existing) {
-        cases[caseIndex] = { ...existing, steps: next };
-      }
+      if (existing) cases[caseIndex] = { ...existing, steps: next };
       return { ...sw, config: { ...sw.config, cases } };
     }
   }
   return step;
 }
 
+/**
+ * The validator's path for a step, as the List view builds it:
+ * `['root', 1, 'case:0', 2]` → `steps[1].config.cases[0].steps[2]`.
+ */
 export function buildPathPrefix(path: ViewStepPath): string {
   if (path.length < 2) return '';
-  const rootIndex = path[1] as number;
-  if (path.length === 2) return `steps[${rootIndex}]`;
-  const segments: string[] = [`steps[${rootIndex}]`];
+  let prefix = `steps[${path[1] as number}]`;
   for (let i = 2; i < path.length; i += 2) {
     const branchKey = String(path[i]);
     const index = path[i + 1] as number;
-    if (branchKey === 'if_true' || branchKey === 'if_false') {
-      segments.push(`config.${branchKey}[${index}]`);
-    } else if (branchKey === 'default') {
-      segments.push(`config.default[${index}]`);
-    } else if (/^case:\d+$/.test(branchKey)) {
-      const caseIndex = Number(branchKey.split(':')[1]);
-      segments.push(`config.cases[${caseIndex}].steps[${index}]`);
-    }
+    const caseIndex = caseIndexOf(branchKey);
+    prefix +=
+      caseIndex === undefined
+        ? `.config.${branchKey}[${index}]`
+        : `.config.cases[${caseIndex}].steps[${index}]`;
   }
-  return segments.join('.');
+  return prefix;
 }
 
+/**
+ * The executor's positional step-row name for a step path, e.g.
+ * `['root', 1, 'case:0', 2]` → `step_1__case_0__step_2`. Mirrors `walkSteps` /
+ * `walkNestedBranch` + `branchKeyToString` in apps/backend/src/automations/engine.
+ */
+export function stepNameForPath(path: ViewStepPath): string {
+  if (path.length < 2) return '';
+  const segments: string[] = [`step_${path[1] as number}`];
+  for (let i = 2; i < path.length; i += 2) {
+    const branchKey = String(path[i]).replace(/^case:/, 'case_');
+    segments.push(`${branchKey}__step_${path[i + 1] as number}`);
+  }
+  return segments.join('__');
+}
+
+/**
+ * Display number for a step, from its validation path prefix (`buildPathPrefix`):
+ * `steps[1]` → `2`, `steps[1].config.if_true[0]` → `2.1`. Numbered per branch, so
+ * the List cards and Flow nodes show the same number.
+ */
+export function stepNumberForPrefix(prefix: string): string {
+  return Array.from(
+    prefix.matchAll(/(?:steps|if_true|if_false|default)\[(\d+)\]/g),
+    match => Number(match[1]) + 1,
+  ).join('.');
+}
+
+/**
+ * Run view: the canvas items the run got to, so the path it took can be drawn
+ * and the rest faded. A step counts once it has a status; a branch placeholder
+ * when its owner took that branch; a merge dot (and the End node) once
+ * everything before it finished. Relies on `buildFlowItems` order (parents first).
+ */
+export function collectReachedIds(
+  items: FlowItem[],
+  overlay: Pick<FlowRunOverlay, 'statusByStepName' | 'takenBranchByStepName'>,
+): Set<string> {
+  const { statusByStepName, takenBranchByStepName } = overlay;
+  const byId = new Map(items.map(item => [item.id, item]));
+  const reached = new Set<string>();
+  const finished = (item: FlowItem | undefined): boolean => {
+    if (!item) return false;
+    if (item.nodeType === 'trigger') return true;
+    if (isStepItem(item)) return statusByStepName[stepNameForPath(item.path)] === 'COMPLETED';
+    return reached.has(item.id);
+  };
+  for (const item of items) {
+    let isReached: boolean;
+    if (item.nodeType === 'trigger') {
+      isReached = true;
+    } else if (isStepItem(item)) {
+      isReached = Boolean(statusByStepName[stepNameForPath(item.path)]);
+    } else if (item.nodeType === 'merge') {
+      isReached = finished(byId.get(item.id.slice('merge:'.length)));
+    } else if (item.path.length > 1) {
+      // Empty-branch placeholder: its path is the branch container.
+      const ownerName = stepNameForPath(item.path.slice(0, -1));
+      isReached = takenBranchByStepName[ownerName] === String(item.path[item.path.length - 1]);
+    } else {
+      // The root "End" node.
+      isReached = item.parentIds.every(id => finished(byId.get(id)));
+    }
+    if (isReached) reached.add(item.id);
+  }
+  return reached;
+}
+
+/** Issues on the step at `path`, including those of steps nested in its branches. */
 export function issuesUnderPath(
   all: ValidationIssue[] | undefined,
   path: ViewStepPath,
-  nodeType: FlowItem['nodeType'],
 ): ValidationIssue[] {
-  if (!all) return [];
   const prefix = buildPathPrefix(path);
-  if (!prefix) {
-    if (nodeType === 'trigger') return all.filter(i => i.path === 'trigger.config');
-    return [];
-  }
-  if (nodeType === 'action') {
-    return all.filter(i => i.path.startsWith(`${prefix}.config.`));
-  }
-  // `steps[1]` must not also match `steps[10]`.
-  return all.filter(i => i.path === prefix || i.path.startsWith(`${prefix}.`));
+  return prefix ? issuesAtStep(all, prefix) : [];
 }
 
-const NESTED_STEP_SEGMENT = /^\.config\.(if_true|if_false|default|cases\[\d+\]\.steps)\[\d+\]/;
+// One nested-step hop: branch key (if_true/if_false/default) or case index, then the step index.
+const NESTED_STEP_SEGMENT =
+  /^\.config\.(?:(if_true|if_false|default)|cases\[(\d+)\]\.steps)\[(\d+)\]/;
+
+/**
+ * Of the issues under a step (`prefix` = its `buildPathPrefix`), the ones that
+ * belong to the step itself — not to steps nested in its branches, which are
+ * marked on their own card / node.
+ */
+export function ownStepIssues(under: ValidationIssue[], prefix: string): ValidationIssue[] {
+  return under.filter(issue => !NESTED_STEP_SEGMENT.test(issue.path.slice(prefix.length)));
+}
+
+/**
+ * Step ids from the outermost to the innermost step an issue path points into
+ * (`steps[1].config.cases[0].steps[2].config.url` → [switch id, nested id]).
+ * Empty for trigger/schedule issues or a path that no longer matches the config.
+ */
+export function stepIdsForIssuePath(steps: AutomationStepConfig[], path: string): string[] {
+  const root = /^steps\[(\d+)\]/.exec(path);
+  let step = root ? steps[Number(root[1])] : undefined;
+  if (!root || !step) return [];
+  const ids = [step.id];
+  let rest = path.slice(root[0].length);
+  for (let hop = NESTED_STEP_SEGMENT.exec(rest); hop; hop = NESTED_STEP_SEGMENT.exec(rest)) {
+    const branchKey = hop[1] ?? `case:${hop[2]}`;
+    step = getBranchSteps(step, branchKey)[Number(hop[3])];
+    if (!step) break;
+    ids.push(step.id);
+    rest = rest.slice(hop[0].length);
+  }
+  return ids;
+}
 
 /**
  * Issues that belong to this node itself. For control steps this excludes
@@ -449,15 +500,14 @@ export function ownIssuesForItem(
   all: ValidationIssue[] | undefined,
   item: FlowItem,
 ): ValidationIssue[] {
-  if (!all) return [];
-  if (item.nodeType === 'trigger') return issuesUnderPath(all, item.path, 'trigger');
+  // The trigger node's panel also holds the schedule, so its issues are marked here too.
+  if (item.nodeType === 'trigger') {
+    return [...issuesUnder(all, 'trigger'), ...issuesUnder(all, 'schedule')];
+  }
   if (!isStepItem(item)) return [];
-  const prefix = buildPathPrefix(item.path);
-  const under = issuesUnderPath(all, item.path, item.nodeType);
+  const under = issuesUnderPath(all, item.path);
   if (item.nodeType === 'action') return under;
-  return under.filter(issue => {
-    return !NESTED_STEP_SEGMENT.test(issue.path.slice(prefix.length));
-  });
+  return ownStepIssues(under, buildPathPrefix(item.path));
 }
 
 export function buildVariableSourcesForPath(
@@ -507,23 +557,6 @@ export function buildVariableSourcesForPath(
   }
 
   return base;
-}
-
-export function getContainerInfo(
-  config: AutomationConfig,
-  path: ViewStepPath,
-): { steps: AutomationStepConfig[]; index: number } | undefined {
-  if (path.length < 2) return undefined;
-  const rootIndex = path[1] as number;
-  if (path.length === 2) {
-    return { steps: config.steps, index: rootIndex };
-  }
-  const ownerPath = path.slice(0, -2);
-  const owner = getStepAtPath(config, ownerPath);
-  if (!owner) return undefined;
-  const leafBranchKey = String(path[path.length - 2]);
-  const leafIndex = path[path.length - 1] as number;
-  return { steps: getBranchSteps(owner, leafBranchKey), index: leafIndex };
 }
 
 /** Human description of a container, e.g. "the True branch" or "the main flow". */

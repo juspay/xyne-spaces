@@ -26,8 +26,14 @@ import {
   summarizeCondition,
   hasInvalidTagCondition,
 } from '../ConditionEditor/ConditionEditor.utils';
+import { useEntityNameLookup } from '../ConditionEditor/useEntityNameLookup';
 import { BranchSteps } from '../BranchSteps/BranchSteps';
 import type { SwitchCardProps } from './SwitchCard.types';
+import { DiffBadge } from '../DiffHighlight/DiffBadge';
+import { diffHighlightClass, useDiffMark } from '../DiffHighlight/DiffHighlight';
+import { useCollapseAll } from '../CollapseAll/CollapseAll';
+import { StepIssueBadge } from '../ValidationBanner/StepIssueBadge';
+import { ownStepIssues, stepNumberForPrefix } from '../FlowAutomationView/FlowAutomationView.utils';
 
 export function SwitchCard({
   step,
@@ -53,6 +59,7 @@ export function SwitchCard({
   const [menuOpen, setMenuOpen] = useState(false);
   const [editingCaseIndex, setEditingCaseIndex] = useState<number | null>(null);
   const [tagConditionError, setTagConditionError] = useState<string | null>(null);
+  const nameForId = useEntityNameLookup();
   const [draftCondition, setDraftCondition] = useState<Condition>({
     variable: '',
     operator: 'eq',
@@ -121,12 +128,21 @@ export function SwitchCard({
 
   const issuesUnder = (prefix: string): ValidationIssue[] =>
     issues.filter(i => i.path.startsWith(prefix));
+  const diff = useDiffMark(step.id);
+  useCollapseAll(setCollapsed);
+  const issueMessages = ownStepIssues(issues, pathPrefix).map(i => i.message);
 
   return (
     <div
       data-slot='automation-switch-card'
-      className='flex flex-col gap-4 rounded-md border border-border bg-background p-5'
+      data-step-id={step.id}
+      className={cn(
+        'flex flex-col gap-4 rounded-md border border-border bg-background p-5',
+        issueMessages.length > 0 && 'border-destructive/60',
+        diff && diffHighlightClass(diff),
+      )}
     >
+      {diff && <DiffBadge diff={diff} />}
       {/* Header */}
       <div className='flex items-start justify-between gap-3'>
         <button
@@ -140,8 +156,9 @@ export function SwitchCard({
             <ListTree className='size-4' />
           </div>
           <div className='flex flex-col'>
-            <span className='text-[10px] font-medium uppercase tracking-wide text-muted-foreground'>
-              Step {index} · control
+            <span className='flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground'>
+              Step {stepNumberForPrefix(pathPrefix)} · control
+              {issueMessages.length > 0 && <StepIssueBadge messages={issueMessages} />}
             </span>
             <span className='text-sm font-medium text-foreground'>Switch / Case</span>
             <span className='mt-1 text-xs text-muted-foreground'>
@@ -224,7 +241,11 @@ export function SwitchCard({
         <div className='flex flex-col gap-3 border-t border-border pt-4'>
           <div className='flex gap-4 overflow-x-auto pb-2'>
             {step.config.cases.map((caseEntry, caseIndex) => {
-              const caseSummary = summarizeCondition(caseEntry.condition);
+              const caseSummary = summarizeCondition(
+                caseEntry.condition,
+                variableSources,
+                nameForId,
+              );
               const caseConditionUnset =
                 caseSummary === 'Click to set a condition' || caseSummary === 'Condition';
 
@@ -270,7 +291,7 @@ export function SwitchCard({
                       'rounded-md border px-3 py-1.5 text-left text-xs truncate',
                       caseConditionUnset
                         ? 'border-dashed border-border text-muted-foreground hover:bg-accent/30'
-                        : 'border-border bg-accent/20 text-foreground font-mono hover:bg-accent/40',
+                        : 'border-border bg-accent/20 text-foreground hover:bg-accent/40',
                     )}
                   >
                     {caseSummary}

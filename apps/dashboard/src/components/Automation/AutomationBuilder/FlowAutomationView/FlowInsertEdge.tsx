@@ -55,7 +55,11 @@ function InsertEdge({
         {label && (
           <span
             className='pointer-events-none absolute rounded-full border border-border bg-background px-1.5 py-px text-[10px] font-medium text-muted-foreground'
-            style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelTop}px)` }}
+            style={{
+              transform: `translate(-50%, -50%) translate(${labelX}px, ${labelTop}px)`,
+              // Run view fades untaken branches, label included.
+              ...(style?.opacity !== undefined ? { opacity: style.opacity } : {}),
+            }}
           >
             {label}
           </span>

@@ -9,7 +9,12 @@ import type {
   ValidationIssue,
   JsonSchema,
 } from '../Automation.types';
-import { CONDITIONAL_STEP_TYPE, SWITCH_STEP_TYPE, WEBHOOK_TRIGGER_TYPE } from '../Automation.types';
+import {
+  CONDITIONAL_STEP_TYPE,
+  SWITCH_STEP_TYPE,
+  WEBHOOK_TRIGGER_TYPE,
+  makeStepId,
+} from '../Automation.types';
 import type { VariablePickerSource } from './VariablePicker/VariablePicker.types';
 import { resolveSchema } from './SchemaForm/SchemaForm.utils';
 
@@ -215,6 +220,19 @@ export function buildOutputSchemaFromWebhookConfig(config: Record<string, unknow
   };
 }
 
+/** A new If/else step with an empty condition; `ifTrue` seeds the True branch. */
+export function makeConditionalStep(ifTrue: AutomationStepConfig[] = []): ConditionalStepConfig {
+  return {
+    id: makeStepId(),
+    type: CONDITIONAL_STEP_TYPE,
+    config: {
+      condition: { variable: '', operator: 'eq', value: '' },
+      if_true: ifTrue,
+      if_false: [],
+    },
+  };
+}
+
 export function moveStep(
   steps: AutomationStepConfig[],
   index: number,
@@ -260,4 +278,13 @@ function walk(steps: AutomationStepConfig[], set: Set<string>): void {
 export function issuesUnder(all: ValidationIssue[] | undefined, prefix: string): ValidationIssue[] {
   if (!all) return [];
   return all.filter(i => i.path.startsWith(prefix));
+}
+
+/** Issues on one step (`steps[1]`), without also matching `steps[10]`. */
+export function issuesAtStep(
+  all: ValidationIssue[] | undefined,
+  stepPrefix: string,
+): ValidationIssue[] {
+  if (!all) return [];
+  return all.filter(i => i.path === stepPrefix || i.path.startsWith(`${stepPrefix}.`));
 }

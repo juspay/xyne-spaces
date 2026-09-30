@@ -20,15 +20,13 @@ import { AddStepRow } from '../AddStepRow/AddStepRow';
 import { ScheduleCard } from '../ScheduleCard/ScheduleCard';
 import { StepCard } from '../StepCard/StepCard';
 import { TriggerCard } from '../TriggerCard/TriggerCard';
-import {
-  CONDITIONAL_STEP_TYPE,
-  makeStepId,
-  type ActionStepConfig,
-  type AutomationStepConfig,
-  type ConditionalStepConfig,
-  type SwitchStepConfig,
+import type {
+  ActionStepConfig,
+  AutomationStepConfig,
+  ConditionalStepConfig,
+  SwitchStepConfig,
 } from '../../Automation.types';
-
+import { issuesUnder, makeConditionalStep } from '../AutomationBuilder.utils';
 import type { ControlFlowRenderProps } from '../BranchSteps/BranchSteps';
 import {
   computeFlowLayout,
@@ -49,8 +47,9 @@ import {
   buildFlowItems,
   buildPathPrefix,
   buildVariableSourcesForPath,
+  collectReachedIds,
   describeContainer,
-  getContainerInfo,
+  getContainerSteps,
   getEdgeInsertTarget,
   getEdgeLabel,
   getInsertAfterTarget,
@@ -60,6 +59,8 @@ import {
   moveStepAtPath,
   ownIssuesForItem,
   removeStepAtPath,
+  stepNameForPath,
+  stepNumberForPrefix,
   structureKey,
   updateStepAtPath,
 } from './FlowAutomationView.utils';
@@ -108,6 +109,9 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
   const {
     config,
     onConfigChange,
+    onTriggerTypeChange,
+    onTriggerConfigChange,
+    onScheduleChange,
     triggerCatalog,
     triggerSchema,
     stepCatalog,
@@ -126,6 +130,8 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
     triggerExtras,
     renderConditionalCard,
     renderSwitchCard,
+    runOverlay,
+    focusRequest,
   } = props;
 
   const { setCenter, getZoom, fitView, zoomIn, zoomOut } = useReactFlow();
@@ -163,18 +169,12 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
       0,
     );
     layout.delete(VIRTUAL_ROOT_ID);
-    let minX = Infinity;
-    let minY = Infinity;
-    for (const position of layout.values()) {
-      minX = Math.min(minX, position.x);
-      minY = Math.min(minY, position.y);
-    }
-    const offsetX = Number.isFinite(minX) ? minX - 24 : 0;
-    const offsetY = Number.isFinite(minY) ? minY - 24 : 0;
+    // Pin the top-left node 24px from the origin.
+    const all = [...layout.values()];
+    const offsetX = all.length ? Math.min(...all.map(p => p.x)) - 24 : 0;
+    const offsetY = all.length ? Math.min(...all.map(p => p.y)) - 24 : 0;
     const shifted = new Map<string, { x: number; y: number }>();
-    for (const [id, position] of layout) {
-      shifted.set(id, { x: position.x - offsetX, y: position.y - offsetY });
-    }
+    for (const [id, p] of layout) shifted.set(id, { x: p.x - offsetX, y: p.y - offsetY });
     return shifted;
   }, [layoutKey]);
 
@@ -187,11 +187,12 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
     const map = new Map<string, string[]>();
     for (const item of items) {
       const own = ownIssuesForItem(validation?.issues, item);
-      if (own.length)
+      if (own.length) {
         map.set(
           item.id,
           own.map(i => i.message),
         );
+      }
     }
     return map;
   }, [items, validation]);
@@ -218,6 +219,18 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
     pendingFocusId.current = null;
     centerOn(id);
   }, [positions, centerOn]);
+
+  // A validation-banner click from the builder: select the node and bring it into view.
+  const appliedFocus = useRef(focusRequest);
+  useEffect(() => {
+    if (!focusRequest || focusRequest === appliedFocus.current) return;
+    appliedFocus.current = focusRequest;
+    if (!itemsById.has(focusRequest.id)) return;
+    setSelectedNodeId(focusRequest.id);
+    setPendingInsert(null);
+    setContextMenu(null);
+    centerOn(focusRequest.id);
+  }, [focusRequest, itemsById, centerOn]);
 
   // The minimap is sized from, and hidden below, the canvas width.
   useEffect(() => {
@@ -267,15 +280,7 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
   const handleWrapInCondition = (item: FlowItem): void => {
     const step = getStepAtPath(config, item.path);
     if (!step) return;
-    const wrapper: ConditionalStepConfig = {
-      id: makeStepId(),
-      type: CONDITIONAL_STEP_TYPE,
-      config: {
-        condition: { variable: '', operator: 'eq', value: '' },
-        if_true: [step],
-        if_false: [],
-      },
-    };
+    const wrapper = makeConditionalStep([step]);
     onConfigChange(updateStepAtPath(config, item.path, wrapper));
     setSelectedNodeId(wrapper.id);
     pendingFocusId.current = wrapper.id;
@@ -288,6 +293,12 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
   };
 
   /* ── React Flow nodes & edges ── */
+
+  // Run view only: what the run reached, to draw its path and fade the rest.
+  const reachedIds = useMemo(
+    () => (runOverlay ? collectReachedIds(items, runOverlay) : null),
+    [items, runOverlay],
+  );
 
   const derivedNodes = useMemo<Node<FlowNodeData>[]>(
     () =>
@@ -308,15 +319,30 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
           draggable: false,
           connectable: false,
           ...(interactive ? { ariaLabel: describeNode(item, triggerCatalogItem?.name) } : {}),
-          style: { width: item.width, height: item.height, padding: 0 },
+          style: {
+            width: item.width,
+            height: item.height,
+            padding: 0,
+            // Steps fade themselves via runStatus; merge dots and placeholders here.
+            ...(reachedIds && !isStepItem(item) && !reachedIds.has(item.id)
+              ? { opacity: 0.5 }
+              : {}),
+          },
           data: {
             item,
             readOnly: !editable,
             catalogItem,
             issueMessages: issuesById.get(item.id) ?? [],
+            stepNumber: isStepItem(item)
+              ? stepNumberForPrefix(buildPathPrefix(item.path))
+              : undefined,
             stepCatalog,
             onInsert: handleInsert,
             onRequestEdit,
+            runStatus:
+              runOverlay && isStepItem(item)
+                ? (runOverlay.statusByStepName[stepNameForPath(item.path)] ?? null)
+                : undefined,
           },
         };
       }),
@@ -330,6 +356,8 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
       issuesById,
       handleInsert,
       onRequestEdit,
+      runOverlay,
+      reachedIds,
     ],
   );
 
@@ -349,9 +377,17 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
   }, [derivedNodes, setNodes]);
 
   // Positions and selection are owned by this view; only let React Flow record
-  // measured dimensions.
+  // measured dimensions. Enter/Space on a focused node arrives only as a select
+  // change (no click event), so take the selection from it.
   const onNodesChange = useCallback(
     (changes: NodeChange[]): void => {
+      for (const change of changes) {
+        if (change.type === 'select' && change.selected) {
+          setSelectedNodeId(change.id);
+          setPendingInsert(null);
+          setContextMenu(null);
+        }
+      }
       onNodesChangeBase(changes.filter(change => change.type === 'dimensions'));
     },
     [onNodesChangeBase],
@@ -365,6 +401,9 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
         if (!source) continue;
         const id = `${parentId}->${item.id}`;
         const toPlaceholder = item.nodeType === 'placeholder';
+        // Run view: an edge was taken when the run reached both of its ends.
+        const taken = reachedIds?.has(parentId) && reachedIds.has(item.id);
+        const stroke = taken ? 'hsl(var(--foreground))' : 'hsl(var(--border))';
         next.push({
           id,
           source: parentId,
@@ -373,11 +412,14 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
           focusable: false,
           ...(toPlaceholder
             ? {}
-            : { markerEnd: { type: MarkerType.ArrowClosed, width: 12, height: 12 } }),
+            : {
+                markerEnd: { type: MarkerType.ArrowClosed, width: 12, height: 12, color: stroke },
+              }),
           style: {
-            stroke: 'hsl(var(--border))',
-            strokeWidth: 1.5,
+            stroke,
+            strokeWidth: taken ? 2 : 1.5,
             ...(toPlaceholder ? { strokeDasharray: '4 4' } : {}),
+            ...(reachedIds && !taken ? { opacity: 0.4 } : {}),
           },
           data: {
             label: getEdgeLabel(source, item),
@@ -392,7 +434,16 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
       }
     }
     return next;
-  }, [items, itemsById, editable, hoveredEdgeId, stepCatalog, handleInsert, onRequestEdit]);
+  }, [
+    items,
+    itemsById,
+    editable,
+    hoveredEdgeId,
+    stepCatalog,
+    handleInsert,
+    onRequestEdit,
+    reachedIds,
+  ]);
 
   /* ── Canvas interaction ── */
 
@@ -426,6 +477,19 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
     setPendingInsert(null);
     setContextMenu(null);
   }, [editable, selectedNodeId, onRequestEdit]);
+
+  // Escape on a focused node clears the selection. React Flow reports it only as an
+  // unselect change, which an edge click also sends, so read the key instead.
+  const handleCanvasKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>): void => {
+    if (
+      event.key === 'Escape' &&
+      event.target instanceof HTMLElement &&
+      event.target.closest('.react-flow__node')
+    ) {
+      setSelectedNodeId(null);
+      setContextMenu(null);
+    }
+  }, []);
 
   const handleNodeDoubleClick: NodeMouseHandler = useCallback(
     (_event, node) => {
@@ -497,7 +561,7 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
   );
 
   const renderTriggerPanel = (): React.ReactElement => {
-    const triggerIssues = issuesUnderPath(validation?.issues, ['trigger'], 'trigger');
+    const triggerIssues = issuesUnder(validation?.issues, 'trigger');
     return (
       <div className='flex flex-col gap-4'>
         <TriggerCard
@@ -506,10 +570,8 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
           catalog={triggerCatalog}
           schema={triggerSchema}
           schemaLoading={triggerSchemaLoading}
-          onChangeType={type => onConfigChange({ ...config, trigger: { type, config: {} } })}
-          onConfigChange={next =>
-            onConfigChange({ ...config, trigger: { ...config.trigger, config: next } })
-          }
+          onChangeType={onTriggerTypeChange}
+          onConfigChange={onTriggerConfigChange}
           issues={triggerIssues}
         />
         {triggerExtras}
@@ -519,72 +581,63 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
           catalog={triggerCatalog}
           schema={triggerSchema}
           schemaLoading={triggerSchemaLoading}
-          onChangeType={type => onConfigChange({ ...config, trigger: { type, config: {} } })}
-          onConfigChange={next =>
-            onConfigChange({ ...config, trigger: { ...config.trigger, config: next } })
-          }
+          onChangeType={onTriggerTypeChange}
+          onConfigChange={onTriggerConfigChange}
           issues={triggerIssues}
           onFormFieldNamesResolved={map => onFormFieldNamesResolved?.(map)}
         />
         <ScheduleCard
-          schedule={config.schedule ?? { type: 'IMMEDIATE' }}
+          schedule={config.schedule}
           triggerSchema={triggerSchema}
-          onChange={next => onConfigChange({ ...config, schedule: next ?? { type: 'IMMEDIATE' } })}
+          onChange={onScheduleChange}
         />
       </div>
     );
   };
 
-  const buildControlProps = (
-    item: FlowItem,
-    nodeType: 'conditional' | 'switch',
-  ): ControlFlowRenderProps => {
-    const containerInfo = getContainerInfo(config, item.path) ?? {
-      steps: config.steps,
-      index: item.path[1] as number,
-    };
-    return {
-      catalog: stepCatalog,
-      schemaCache: stepSchemaCache,
-      schemaLoadingFor,
-      operators,
-      variableSources: buildVariableSourcesForPath(
-        config,
-        triggerSchema,
-        stepSchemaCache,
-        item.path,
-        formFieldNameMap,
-      ),
-      index: containerInfo.index + 1,
-      total: containerInfo.steps.length,
-      onChange: next => handleUpdateStep(item.path, next),
-      onMoveUp: () => handleMoveStep(item.path, -1),
-      onMoveDown: () => handleMoveStep(item.path, 1),
-      onDelete: () => requestDelete(item.id),
-      issues: issuesUnderPath(validation?.issues, item.path, nodeType),
-      pathPrefix: buildPathPrefix(item.path),
-      readOnly: !editable,
-      ensureSchema,
-      renderConditionalCard,
-      renderSwitchCard,
-    };
-  };
+  // 1-based position within the step's own container, as the List view's cards show it.
+  const positionOf = (item: FlowItem): { index: number; total: number } => ({
+    index: (item.path[item.path.length - 1] as number) + 1,
+    total: getContainerSteps(config, item.path.slice(0, -1)).length,
+  });
+
+  const buildControlProps = (item: FlowItem): ControlFlowRenderProps => ({
+    catalog: stepCatalog,
+    schemaCache: stepSchemaCache,
+    schemaLoadingFor,
+    operators,
+    variableSources: buildVariableSourcesForPath(
+      config,
+      triggerSchema,
+      stepSchemaCache,
+      item.path,
+      formFieldNameMap,
+    ),
+    ...positionOf(item),
+    onChange: next => handleUpdateStep(item.path, next),
+    onMoveUp: () => handleMoveStep(item.path, -1),
+    onMoveDown: () => handleMoveStep(item.path, 1),
+    onDelete: () => requestDelete(item.id),
+    issues: issuesUnderPath(validation?.issues, item.path),
+    pathPrefix: buildPathPrefix(item.path),
+    readOnly: !editable,
+    ensureSchema,
+    renderConditionalCard,
+    renderSwitchCard,
+  });
 
   const renderActionPanel = (item: FlowItem): React.ReactElement | null => {
     const step = getStepAtPath(config, item.path) as ActionStepConfig | undefined;
     if (!step) return null;
-    const containerInfo = getContainerInfo(config, item.path) ?? {
-      steps: config.steps,
-      index: item.path[1] as number,
-    };
+    const { index, total } = positionOf(item);
     return (
       <StepCard
         step={step}
         catalogItem={stepCatalog.find(c => c.type === step.type) ?? null}
         schema={stepSchemaCache[step.type] ?? null}
         schemaLoading={schemaLoadingFor(step.type)}
-        index={containerInfo.index + 1}
-        total={containerInfo.steps.length}
+        index={index}
+        total={total}
         variableSources={buildVariableSourcesForPath(
           config,
           triggerSchema,
@@ -596,7 +649,7 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
         onMoveUp={() => handleMoveStep(item.path, -1)}
         onMoveDown={() => handleMoveStep(item.path, 1)}
         onDelete={() => requestDelete(item.id)}
-        issues={issuesUnderPath(validation?.issues, item.path, 'action')}
+        issues={issuesUnderPath(validation?.issues, item.path)}
         pathPrefix={`${buildPathPrefix(item.path)}.config.`}
         readOnly={!editable}
       />
@@ -609,18 +662,16 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
     const step = getStepAtPath(config, item.path);
     if (!step) return null;
     if (item.nodeType === 'conditional') {
-      return renderConditionalCard(
-        step as ConditionalStepConfig,
-        buildControlProps(item, 'conditional'),
-      );
+      return renderConditionalCard(step as ConditionalStepConfig, buildControlProps(item));
     }
     if (item.nodeType === 'switch') {
-      return renderSwitchCard(step as SwitchStepConfig, buildControlProps(item, 'switch'));
+      return renderSwitchCard(step as SwitchStepConfig, buildControlProps(item));
     }
     return null;
   };
 
-  const renderSidePanelBody = (): React.ReactElement => {
+  const renderSidePanelBody = (): React.ReactNode => {
+    if (runOverlay) return runOverlay.renderPanel(selectedItem);
     if (pendingInsert && editable) return renderPendingInsertPanel(pendingInsert);
     if (!selectedItem) return renderEmptyPanel();
     return renderSelectedPanel(selectedItem) ?? renderEmptyPanel();
@@ -632,7 +683,9 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
       ? selectedItem.nodeType === 'trigger'
         ? 'Trigger'
         : 'Step'
-      : 'Builder';
+      : runOverlay
+        ? 'Run'
+        : 'Builder';
 
   const insertAfterSelected =
     editable && selectedItem && !pendingInsert ? getInsertAfterTarget(selectedItem) : undefined;
@@ -709,6 +762,7 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
             onNodeDoubleClick={handleNodeDoubleClick}
             zoomOnDoubleClick={false}
             onPaneClick={handlePaneClick}
+            onKeyDown={handleCanvasKeyDown}
             onEdgeMouseEnter={(_event, edge) => setHoveredEdgeId(edge.id)}
             onEdgeMouseLeave={() => setHoveredEdgeId(null)}
             onInit={() => void fitView({ padding: 0.2 })}
@@ -776,20 +830,18 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
                     <GitBranch className='size-4 text-muted-foreground' aria-hidden='true' />
                     Wrap in condition
                   </button>
+                  <button
+                    type='button'
+                    role='menuitem'
+                    className={cn(menuButtonClass, 'text-destructive')}
+                    data-track-category={TRACK_CATEGORY}
+                    data-track-name='context-delete'
+                    onClick={() => requestDelete(menuItem.id)}
+                  >
+                    <Trash2 className='size-4' aria-hidden='true' />
+                    Delete
+                  </button>
                 </>
-              )}
-              {menuIsStep && (
-                <button
-                  type='button'
-                  role='menuitem'
-                  className={cn(menuButtonClass, 'text-destructive')}
-                  data-track-category={TRACK_CATEGORY}
-                  data-track-name='context-delete'
-                  onClick={() => requestDelete(menuItem.id)}
-                >
-                  <Trash2 className='size-4' aria-hidden='true' />
-                  Delete
-                </button>
               )}
             </div>
           )}
@@ -815,7 +867,7 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
             </Button>
           )}
         </div>
-        {!editable && selectedItem && (
+        {!editable && !runOverlay && selectedItem && (
           <div className='flex items-center justify-between gap-2 border-b border-border bg-muted/40 px-4 py-2 text-xs text-muted-foreground'>
             <span className='flex items-center gap-1.5'>
               <Eye className='size-3.5' aria-hidden='true' />
@@ -836,7 +888,10 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
           </div>
         )}
         <div className='flex-1 overflow-y-auto p-4'>
-          <div inert={!editable && Boolean(selectedItem)}>{renderSidePanelBody()}</div>
+          {/* Run data stays interactive so its JSON can be scrolled and copied. */}
+          <div inert={!editable && !runOverlay && Boolean(selectedItem)}>
+            {renderSidePanelBody()}
+          </div>
         </div>
         {insertAfterSelected && selectedItem && (
           <div className='flex items-center justify-between gap-2 border-t border-border p-3'>

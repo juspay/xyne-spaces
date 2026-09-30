@@ -6,6 +6,7 @@ import type {
   ConditionalStepConfig,
   SwitchStepConfig,
   OperatorMeta,
+  ScheduleConfig,
   StepCatalogItem,
   StepSchema,
   TriggerCatalogItem,
@@ -39,9 +40,26 @@ export interface FlowNodeData {
   readOnly: boolean;
   catalogItem?: StepCatalogItem | TriggerCatalogItem | undefined;
   issueMessages: string[];
+  /** Steps only: the same number the List view's card shows (`stepNumberForPrefix`). */
+  stepNumber?: string | undefined;
   stepCatalog: StepCatalogItem[];
   onInsert: (target: FlowInsertTarget, type: string) => void;
   onRequestEdit?: (() => void) | undefined;
+  /** Run view only: the step row's status, or null when the run never reached it. */
+  runStatus?: string | null | undefined;
+}
+
+/** Turns the canvas into a read-only picture of one run. */
+export interface FlowRunOverlay {
+  /**
+   * Badge status keyed by the executor's positional name (see `stepNameForPath`).
+   * A step missing here is drawn as not reached.
+   */
+  statusByStepName: Record<string, string>;
+  /** If/Switch step name → the branch key it took (`if_true`, `case:0`, `default`…). */
+  takenBranchByStepName: Record<string, string>;
+  /** Replaces the side panel; `item` is null when nothing is selected. */
+  renderPanel: (item: FlowItem | null) => ReactNode;
 }
 
 export interface FlowEdgeData {
@@ -57,6 +75,10 @@ export interface FlowEdgeData {
 export interface FlowAutomationViewProps {
   config: AutomationConfig;
   onConfigChange: (next: AutomationConfig) => void;
+  /** The builder's own trigger/schedule handlers, shared with the List view. */
+  onTriggerTypeChange: (type: string) => void;
+  onTriggerConfigChange: (next: Record<string, unknown>) => void;
+  onScheduleChange: (next: ScheduleConfig | undefined) => void;
   triggerCatalog: TriggerCatalogItem[];
   triggerSchema: TriggerSchema | null;
   stepCatalog: StepCatalogItem[];
@@ -83,4 +105,8 @@ export interface FlowAutomationViewProps {
   renderSwitchCard: (step: SwitchStepConfig, props: ControlFlowRenderProps) => React.ReactElement;
   /** Extra trigger UI (e.g. the webhook endpoint panel). */
   triggerExtras?: ReactNode;
+  /** Run detail: overlay step statuses and show run data in the side panel. */
+  runOverlay?: FlowRunOverlay | undefined;
+  /** Select and centre this node (a step id, or the trigger); each new object applies once. */
+  focusRequest?: { id: string } | null | undefined;
 }

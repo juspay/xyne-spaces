@@ -3,7 +3,7 @@ import { Node, mergeAttributes, InputRule } from '@tiptap/core';
 import { NodeViewWrapper, ReactNodeViewRenderer, type NodeViewProps } from '@tiptap/react';
 import { Variable as VariableIcon } from 'lucide-react';
 import type { VariablePickerSource } from '../VariablePicker/VariablePicker.types';
-import { parseReference } from '../VariablePicker/VariablePicker.utils';
+import { formatVariableLabel, parseReference } from '../VariablePicker/VariablePicker.utils';
 
 const VARIABLE_REF_REGEX = /\{\{([^{}]+)\}\}/g;
 const VARIABLE_REF_INPUT_RULE = /\{\{([^{}]+)\}\}$/;
@@ -50,13 +50,11 @@ export function buildVariableLabelResolver(
       };
     }
 
-    const pathPart = parsed.path ? parsed.path.replace(/\./g, ' / ') : '';
-    const rolePart = parsed.role === 'trigger' ? '' : parsed.role;
-    const parts = [info.groupLabel.split(' — ')[0] ?? info.groupLabel, rolePart, pathPart].filter(
-      Boolean,
+    const full = formatVariableLabel(
+      info.groupLabel.split(' — ')[0] ?? info.groupLabel,
+      parsed.role,
+      parsed.path,
     );
-
-    const full = parts.join(' / ');
     return { full, short: full, unknown: false };
   };
 }

@@ -90,6 +90,15 @@ export function labelForFieldKey(fieldKey: string): string | null {
   return FIELD_LABEL_OVERRIDES[fieldKey] ?? null;
 }
 
+export function humanise(key: string): string {
+  return key
+    .replace(/[_-]+/g, ' ')
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/\bid\b/gi, 'ID')
+    .replace(/\burl\b/gi, 'URL')
+    .replace(/^(.)/, c => c.toUpperCase());
+}
+
 export function detectEntityArrayKind(fieldKey: string): EntityKind | null {
   switch (fieldKey) {
     case 'channelIds':

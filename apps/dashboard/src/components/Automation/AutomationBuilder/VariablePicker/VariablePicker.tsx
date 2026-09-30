@@ -8,7 +8,7 @@ import type {
   VariableEntry,
   VariablePickerSource,
 } from './VariablePicker.types';
-import { acceptsVariable, flattenSource } from './VariablePicker.utils';
+import { acceptsVariable, flattenSource, formatPathLabel } from './VariablePicker.utils';
 
 interface PickerGroup {
   groupKey: string;
@@ -184,7 +184,7 @@ export function VariablePicker({
                             )}
                           >
                             <Tooltip content={entry.path} side='top' delayDuration={500}>
-                              <span className='truncate'>{entry.path}</span>
+                              <span className='truncate'>{formatPathLabel(entry.path)}</span>
                             </Tooltip>
                             <span className='ml-2 flex-shrink-0 rounded-md border border-border px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground'>
                               {entry.leafType}

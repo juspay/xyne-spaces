@@ -3,6 +3,8 @@ import { CONDITIONAL_STEP_TYPE, SWITCH_STEP_TYPE, makeStepId } from '../../Autom
 import {
   buildOutputSchemaFromRunAgentConfig,
   buildOutputSchemaFromWebhookConfig,
+  issuesAtStep,
+  makeConditionalStep,
 } from '../AutomationBuilder.utils';
 import type {
   ActionStepConfig,
@@ -131,16 +133,7 @@ export function BranchSteps({
 }: BranchStepsProps): React.ReactElement {
   const handleAdd = (type: string): void => {
     if (type === CONDITIONAL_STEP_TYPE) {
-      const cond: ConditionalStepConfig = {
-        id: makeStepId(),
-        type: CONDITIONAL_STEP_TYPE,
-        config: {
-          condition: { variable: '', operator: 'eq', value: '' },
-          if_true: [],
-          if_false: [],
-        },
-      };
-      onChange([...steps, cond]);
+      onChange([...steps, makeConditionalStep()]);
       return;
     }
     if (type === SWITCH_STEP_TYPE) {
@@ -192,9 +185,6 @@ export function BranchSteps({
     onChange(copy);
   };
 
-  const issuesUnder = (prefix: string): ValidationIssue[] =>
-    issues.filter(i => i.path.startsWith(prefix));
-
   return (
     <div className={cn('flex flex-1 flex-col gap-2 rounded-lg border p-3', ACCENT_CLASSES[accent])}>
       <div className='text-xs font-medium uppercase tracking-wide text-foreground'>{label}</div>
@@ -205,7 +195,7 @@ export function BranchSteps({
           </div>
         ) : (
           steps.map((s, i) => {
-            const stepIssues = issuesUnder(`${pathPrefix}[${i}]`);
+            const stepIssues = issuesAtStep(issues, `${pathPrefix}[${i}]`);
             const stepVariableSources = buildBranchVariableSources(
               variableSources,
               steps,

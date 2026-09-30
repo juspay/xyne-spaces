@@ -7,10 +7,12 @@ export function ValidationBanner({
   result,
   isSaving,
   errorMessage,
+  onIssueClick,
 }: ValidationBannerProps): React.ReactElement {
   const [expanded, setExpanded] = useState(false);
 
-  if (errorMessage) {
+  // An invalid result keeps its clickable issue list; the error goes in its header.
+  if (errorMessage && (!result || result.valid)) {
     return (
       <div
         data-slot='automation-validation-banner'
@@ -78,6 +80,7 @@ export function ValidationBanner({
       >
         <AlertTriangle className='size-4 flex-shrink-0' />
         <span className='flex-1 font-medium'>
+          {errorMessage && `${errorMessage} · `}
           {result.issues.length} issue{result.issues.length === 1 ? '' : 's'} to resolve
         </span>
         {expanded ? <ChevronUp className='size-4' /> : <ChevronDown className='size-4' />}
@@ -86,10 +89,18 @@ export function ValidationBanner({
         <ul className='border-t border-amber-500/30 px-4 py-2 text-xs text-amber-900 dark:text-amber-200'>
           {result.issues.map((issue, index) => (
             <li key={`${issue.path}-${index}`} className='py-1'>
-              <code className='mr-2 rounded bg-amber-500/20 dark:bg-amber-500/30 px-1.5 py-0.5 font-mono text-[10px]'>
-                {issue.path || '(root)'}
-              </code>
-              <span>{issue.message}</span>
+              <button
+                type='button'
+                onClick={() => onIssueClick?.(issue.path)}
+                data-track-category='automation-builder'
+                data-track-name='validation-issue-jump'
+                className='text-left hover:underline'
+              >
+                <code className='mr-2 rounded bg-amber-500/20 dark:bg-amber-500/30 px-1.5 py-0.5 font-mono text-[10px]'>
+                  {issue.path || '(root)'}
+                </code>
+                <span>{issue.message}</span>
+              </button>
             </li>
           ))}
         </ul>

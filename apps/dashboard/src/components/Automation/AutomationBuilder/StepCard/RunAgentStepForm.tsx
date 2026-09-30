@@ -171,7 +171,7 @@ export function RunAgentStepForm({
       </FieldRow>
 
       {/* Prompt — rich text field renders variable refs as inline chips
-          (e.g. "Step 1 / output / category") instead of raw {{...}}. */}
+          (e.g. "Step 1 › Output › Category") instead of raw {{...}}. */}
       <FieldRow
         label='Prompt'
         error={issuesAt.get('prompt')}
