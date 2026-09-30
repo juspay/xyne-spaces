@@ -157,9 +157,7 @@ export const useIsCallHost = (externalId: string, userId: string | undefined) =>
   const isActingHost = useSelector(
     roomActor,
     state =>
-      !!userId &&
-      state.context.externalId === externalId &&
-      state.context.actingHostId === userId,
+      !!userId && state.context.externalId === externalId && state.context.actingHostId === userId,
   );
 
   return useMemo(() => {
