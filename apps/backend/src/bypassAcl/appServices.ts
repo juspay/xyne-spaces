@@ -113,16 +113,17 @@ export function findWorkspaceOrgId(workspaceId: string): Promise<string | null> 
 }
 
 /**
- * Relocated from appsInternal POST / ensure-lookup. Must span the org's workspaces or a second
- * workspace would recreate the app. Same case-insensitive org+name rule as createApp.
+ * Org-wide same-name lookup (names aren't unique in an org — the route picks the owned one).
+ * Must span the org's workspaces; app tenant key is the creator's workspace.
  */
-export function findOrgAppByName(orgId: string, name: string) {
+export function findOrgAppsByName(orgId: string, name: string) {
   return asSystem(
     ['Apps'],
     'org-app idempotency lookup spans the org\'s workspaces (app tenant key = creator\'s workspace)',
     () =>
-      db.apps.findFirst({
+      db.apps.findMany({
         where: { orgId, name: { equals: name.trim(), mode: 'insensitive' } },
+        orderBy: { createdAt: 'asc' },
       }),
   );
 }

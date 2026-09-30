@@ -4,7 +4,7 @@ import { AppError } from '@/middleware/errorHandler';
 import {
   claimAppSigningSecret,
   ensureOrgAppConfig,
-  findOrgAppByName,
+  findOrgAppsByName,
   findOrgAppTemplate,
   findWorkspaceOrgId,
   installOrgAppForWorkspace,
@@ -17,13 +17,7 @@ import crypto from 'crypto';
 import { isValidUrl } from '@/utils/urlUtils';
 import { logger } from '@/utils/logger';
 
-/**
- * Internal S2S routes for org-scoped app provisioning (mounted at /api/internal/apps,
- * guarded by validateS2SKey in app.ts). Used by claw-auth's spaces-sync flow to create
- * the org's default-agent apps and install them into newly created workspaces — the
- * user-auth /api/apps/* routes are unreachable from that context. All DB access is
- * delegated to named operations in bypassAcl/appServices.ts (bypass audit boundary).
- */
+/** S2S org-app provisioning for claw-auth's spaces-sync; all DB access via bypassAcl/appServices. */
 const router = Router();
 
 function route(
@@ -66,36 +60,47 @@ async function ensureSigningSecretEnc(appId: string, signingSecretEnc: string | 
   return rows[0]?.signingSecret ?? fresh;
 }
 
+/** Adoptable only if the stored webhook already equals this template resolved for the app's own id. */
+function findTemplateOwnedApp<T extends { id: string; webhookUrl: string | null }>(
+  apps: T[],
+  webhookUrlTemplate: string | undefined,
+): T | undefined {
+  if (!webhookUrlTemplate) return undefined;
+  return apps.find((app) => app.webhookUrl === substituteAppId(webhookUrlTemplate, app.id));
+}
+
 /**
- * POST /api/internal/apps
- * Idempotently ensure an ORG-scoped app exists (matched by orgId + name, case-insensitive,
- * same rule as AppsRepository.createApp). Returns the app id and the decrypted app-level
- * signing secret — plaintext is acceptable here because this route is S2S-only; the caller
- * (claw-auth) re-encrypts under its own key for webhook HMAC verification.
+ * Idempotently ensure an org app exists (orgId + name, case-insensitive). Names aren't unique,
+ * so only a template-owned app is adopted — a foreign same-name app gets 409, never an adoption.
+ * Returns the decrypted signing secret; S2S-only, the caller re-encrypts for webhook verification.
  */
 router.post(
   '/',
   route(async (req, res) => {
     const input = createAppSchema.parse(req.body);
 
-    // Defence-in-depth: the tenant-key workspace must belong to the app's org.
     const workspaceOrgId = await findWorkspaceOrgId(input.workspaceId);
     if (!workspaceOrgId) throw new AppError('Workspace not found', 404);
     if (workspaceOrgId !== input.orgId) {
       throw new AppError('workspaceId does not belong to orgId', 400);
     }
 
-    const existing = await findOrgAppByName(input.orgId, input.name);
+    const sameNameApps = await findOrgAppsByName(input.orgId, input.name);
+    const existing = findTemplateOwnedApp(sameNameApps, input.webhookUrlTemplate);
     if (existing) {
       await ensureOrgAppConfig(existing.id, existing.workspaceId, {
-        webhookUrl: input.webhookUrlTemplate
-          ? substituteAppId(input.webhookUrlTemplate, existing.id)
-          : undefined,
+        webhookUrl: substituteAppId(input.webhookUrlTemplate!, existing.id),
         permissions: input.permissions,
       });
       const signingSecretEnc = await ensureSigningSecretEnc(existing.id, existing.signingSecret);
       res.status(200).json({ id: existing.id, signingSecret: decrypt(signingSecretEnc), created: false });
       return;
+    }
+    if (sameNameApps.length > 0) {
+      throw new AppError(
+        `An app named "${input.name}" already exists in this org and was not provisioned for this webhook template — refusing to adopt it`,
+        409,
+      );
     }
 
     let created;
@@ -104,7 +109,10 @@ router.post(
     } catch (err) {
       // Lost a concurrent create race — the winner answers the same lookup now.
       if (err instanceof Error && err.message.includes('already exists')) {
-        const winner = await findOrgAppByName(input.orgId, input.name);
+        const winner = findTemplateOwnedApp(
+          await findOrgAppsByName(input.orgId, input.name),
+          input.webhookUrlTemplate,
+        );
         if (winner) {
           const signingSecretEnc = await ensureSigningSecretEnc(winner.id, winner.signingSecret);
           res.status(200).json({ id: winner.id, signingSecret: decrypt(signingSecretEnc), created: false });
@@ -126,12 +134,7 @@ router.post(
   }),
 );
 
-/**
- * GET /api/internal/apps/:appId/installations/:workspaceId
- * Presence check — whether this app has an install row in the given workspace.
- * Lets claw-auth install exactly the apps a workspace is missing instead of
- * keying off the sync's `created` flag (which a transient failure can strand).
- */
+/** Presence check: is this app installed in the given workspace. */
 router.get(
   '/:appId/installations/:workspaceId',
   route(async (req, res) => {
@@ -143,12 +146,7 @@ router.get(
   }),
 );
 
-/**
- * POST /api/internal/apps/:appId/install
- * Install an app into a workspace. Same ORG-scope eligibility rule as the user-auth
- * route; installApp itself is idempotent (an existing install is refreshed — new JWT,
- * permissions re-synced, version bumped).
- */
+/** Install an app into a workspace (same ORG-eligibility rule as the user-auth route; idempotent). */
 router.post(
   '/:appId/install',
   route(async (req, res) => {
