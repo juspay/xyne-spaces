@@ -143,7 +143,7 @@ import {
   isReadOnlyJob as isScheduledOrAutomationRun,
   type SetupStep,
 } from "xyne-claw-shared";
-import { SERVER, PATHS, LITELLM, isAllowedCallbackUrl } from "../config.js";
+import { SERVER, PATHS, LITELLM, litellmEndpoint, isAllowedCallbackUrl } from "../config.js";
 import { judgeChainContinuation } from "../chain-judge.js";
 import { isDigitalTwinAgent, listSubsystemTaxonomy, fetchAgentPromptFiles } from "../memory.js";
 import { buildMemorySearchTool } from "../memory-search.js";
@@ -1404,9 +1404,13 @@ function buildInterruptSummary(partialResult: string, fallback?: { toolsUsed?: s
   const fallbackText = details.length > 0
     ? details.join("\n")
     : "I had not produced a stable partial result yet.";
+  // Claw speaking about itself, not agent output — italic marks it as an aside
+  // so it reads as distinct from the summary below, which is the agent's own
+  // words. See systemNote() in xyne-claw-auth notice-format.ts for the rule.
+  const lead = "_Picked up your new message and I'm switching to it now._";
   return trimmed
-    ? `✅ Picked up your new message and I’m switching to it now.\n\n**Summary of the work so far:**\n\n${trimmed}`
-    : `✅ Picked up your new message and I’m switching to it now.\n\n**Summary of the work so far:** ${fallbackText}`;
+    ? `${lead}\n\n**Summary of the work so far:**\n\n${trimmed}`
+    : `${lead}\n\n**Summary of the work so far:** ${fallbackText}`;
 }
 
 export async function processTask(
@@ -1809,6 +1813,7 @@ export async function processTask(
     if (agentSlug) meta["agentSlug"] = agentSlug;
     if (channelId) meta["channelId"] = channelId;
     if (conversationId) meta["conversationId"] = conversationId;
+    else meta["sandboxConversationId"] = sessionId;
     // Root of this run's spilled tool-result / attachment files, so sandbox-copy-in can forward a whole MCP result file into a sandbox (contextPath).
     meta["contextRoot"] = join(mcpOutputDir, ".context");
     if (taskCommand) meta["taskCommand"] = taskCommand.command;
@@ -3045,7 +3050,7 @@ export async function processTask(
       allTools.push(buildDescribeAgentTool(describeAgentRef));
     }
     if (interactiveCardRun && hasSpacesCardSurface) {
-      allTools.push(buildSuggestConnectorsTool(suggestConnectorsRef, userId));
+      allTools.push(buildSuggestConnectorsTool(suggestConnectorsRef, userId, { agentSlug }));
     }
 
 
@@ -5410,7 +5415,7 @@ router.post("/generate-prompt", validateS2SKey, async (req, res: Response) => {
     : `Generate a system prompt for an agent${agentName ? ` called "${agentName}"` : ""}. The user described it as:\n\n"${intent}"\n\nThe prompt should:\n- Define the agent's role and personality\n- List what the agent can and cannot do\n- Include guidelines for response style\n- Be concise but thorough (200-400 words)`;
 
   try {
-    const llmRes = await fetch(`${LITELLM.url}/v1/chat/completions`, {
+    const llmRes = await fetch(litellmEndpoint("/v1/chat/completions"), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -5600,7 +5605,7 @@ router.post(
 
     try {
       const llmRes = await fetchLiteLLMWithRetry(
-        `${LITELLM.url}/v1/chat/completions`,
+        litellmEndpoint("/v1/chat/completions"),
         {
           method: "POST",
           headers: {
@@ -5819,7 +5824,7 @@ router.post("/suggest-tools", validateS2SKey, async (req, res: Response) => {
   ].join("\n");
 
   try {
-    const llmRes = await fetch(`${LITELLM.url}/v1/chat/completions`, {
+    const llmRes = await fetch(litellmEndpoint("/v1/chat/completions"), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

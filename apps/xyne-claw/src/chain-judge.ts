@@ -3,7 +3,7 @@
  * Uses structured JSON output to determine if a chain should continue or stop.
  */
 
-import { LITELLM } from "./config.js";
+import { LITELLM, litellmEndpoint } from "./config.js";
 import { jevAsk, jevEnabled, jevThreshold } from "./jev.js";
 
 import { createLogger } from "./logger.js";
@@ -121,7 +121,7 @@ export async function judgeChainContinuation(
     const jevDecision = await judgeViaJev(userContent, sourceAgent, targetAgent, judgeContext);
     if (jevDecision) return jevDecision;
 
-    const res = await fetch(`${LITELLM.url}/v1/chat/completions`, {
+    const res = await fetch(litellmEndpoint("/v1/chat/completions"), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

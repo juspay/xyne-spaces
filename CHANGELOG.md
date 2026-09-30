@@ -1,3 +1,53 @@
+## [1.433.0](https://github.com/juspay/xyne-spaces/compare/v1.432.1...v1.433.0) (2026-09-30)
+
+
+### Features
+
+* call desk pull feature ([#2419](https://github.com/juspay/xyne-spaces/issues/2419)) ([e53a358](https://github.com/juspay/xyne-spaces/commit/e53a358c0086b18bbbf49b5667cbdc475b453b35))
+
+## [1.432.1](https://github.com/juspay/xyne-spaces/compare/v1.432.0...v1.432.1) (2026-09-30)
+
+
+### Bug Fixes
+
+* normalize the LiteLLM base URL and stop using Redis KEYS in the Control Center ([#2473](https://github.com/juspay/xyne-spaces/issues/2473)) ([c8d8f40](https://github.com/juspay/xyne-spaces/commit/c8d8f4074fcd47938441dc7aadeae5942976ef00))
+
+## [1.432.0](https://github.com/juspay/xyne-spaces/compare/v1.431.2...v1.432.0) (2026-09-29)
+
+
+### Features
+
+* raise app file count and size limits ([#2469](https://github.com/juspay/xyne-spaces/issues/2469)) ([3054e68](https://github.com/juspay/xyne-spaces/commit/3054e688fddf129d730706acf791c4d7a5bb9b21))
+
+
+### Bug Fixes
+
+* count agent-level credentials when deciding whether to show a connector card ([#2470](https://github.com/juspay/xyne-spaces/issues/2470)) ([4a233e4](https://github.com/juspay/xyne-spaces/commit/4a233e41f537d28924af58883d7363709e312fa6))
+
+## [1.431.2](https://github.com/juspay/xyne-spaces/compare/v1.431.1...v1.431.2) (2026-09-29)
+
+## [1.431.1](https://github.com/juspay/xyne-spaces/compare/v1.431.0...v1.431.1) (2026-09-29)
+
+
+### Bug Fixes
+
+* give conversation-less runs a run-scoped sandbox so workflow steps can create one ([#2466](https://github.com/juspay/xyne-spaces/issues/2466)) ([063fd98](https://github.com/juspay/xyne-spaces/commit/063fd986b79c819aa6b6042b8df06ebde42976eb)), closes [#2463](https://github.com/juspay/xyne-spaces/issues/2463)
+
+## [1.431.0](https://github.com/juspay/xyne-spaces/compare/v1.430.1...v1.431.0) (2026-09-29)
+
+
+### Features
+
+* allow writable sandboxes for workflow-engine agent steps ([#2463](https://github.com/juspay/xyne-spaces/issues/2463)) ([22fdcb4](https://github.com/juspay/xyne-spaces/commit/22fdcb497a8d97c0c358cd8346561451095cba8b))
+* audit logs for desk ([#2345](https://github.com/juspay/xyne-spaces/issues/2345)) ([43043d8](https://github.com/juspay/xyne-spaces/commit/43043d8cad56c682bbdbe0f5b8529121bc84f5cc))
+
+## [1.430.1](https://github.com/juspay/xyne-spaces/compare/v1.430.0...v1.430.1) (2026-09-29)
+
+
+### Bug Fixes
+
+* run MCP-gateway writes approved on WhatsApp instead of sending people back to Spaces ([#2458](https://github.com/juspay/xyne-spaces/issues/2458)) ([4848f42](https://github.com/juspay/xyne-spaces/commit/4848f42a5e844c7215626e978812244b327a7a86))
+
 ## [1.430.0](https://github.com/juspay/xyne-spaces/compare/v1.429.0...v1.430.0) (2026-09-29)
 
 

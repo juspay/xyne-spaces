@@ -6,7 +6,7 @@
 import express, { Router, Request, Response } from 'express';
 import crypto from 'crypto';
 import type { ExternalSource } from '@prisma/client';
-import { DeskType, isDeskChannelType } from '@xyne/shared';
+import { ChannelType, DeskType, isDeskChannelType } from '@xyne/shared';
 import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
 import { extractEmailAddress } from '@/utils/email';
 import { MAILBOX_SOURCE_TYPES } from '@/database/repositories/externalSourceRepository';
@@ -69,9 +69,15 @@ export async function resolveChannelMailbox(
   if (!mailbox) {
     const channel = await db.channel.findUnique({
       where: { id: channelId },
-      select: { workspaceId: true },
+      select: { workspaceId: true, type: true },
     });
-    if (channel?.workspaceId) {
+    if (channel?.type === ChannelType.CALL && channel.workspaceId) {
+      mailbox = await db.externalSource.findFirst({
+        where: { workspaceId: channel.workspaceId, sourceType: 'ozonetel', isActive: true },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (mailbox) targetChannelId = channelId;
+    } else if (channel?.workspaceId) {
       const channelEmailSource = await channelEmailAliasService.getWorkspaceChannelEmailSource(
         channel.workspaceId,
       );
@@ -519,6 +525,10 @@ router.post(
             error: 'App desk history fetch requires ENABLE_EMAIL_FETCH_WORKER=true',
           });
         }
+        // A call pull waits 31s between Ozonetel requests, far too long to hold an HTTP request open.
+        if (mailboxTarget.source.sourceType === 'ozonetel') {
+          return res.status(503).json({ success: false, error: 'Call fetch needs the background fetch worker, which is turned off.' });
+        }
         if (mailboxTarget !== actionable[0] || actionable.length > 1) {
           logger.info('Worker disabled — skipping app targets, fetching mailbox inline', {
             channelId,
@@ -558,8 +568,14 @@ router.post(
       // dead-letter key from wedging that source+range permanently.
       const jobs: Array<{ sourceId: string; installedAppId: string | null; jobId: string }> = [];
       for (const { source, installedAppId, jobData } of actionable) {
+        const isCallPull = source.sourceType === 'ozonetel';
+        // Ozonetel allows 2 requests a minute per account, so only one call pull may run per source.
+        const callPullJobId = `ozonetel-refetch:${source.id}`;
+        if (isCallPull && (await emailFetchQueue.getQueue().getJob(callPullJobId))) {
+          return res.status(409).json({ success: false, error: 'A call fetch is already running. Try again when it finishes.' });
+        }
         const job = await emailFetchQueue.getQueue().add(
-          'refetch',
+          isCallPull ? 'ozonetel-refetch' : 'refetch',
           {
             sourceId: source.id,
             channelId,
@@ -569,7 +585,11 @@ router.post(
             endDate,
             ...jobData,
           },
-          { jobId: refetchJobIdFor(source.id, jobData), removeOnComplete: true, removeOnFail: true },
+          {
+            jobId: isCallPull ? callPullJobId : refetchJobIdFor(source.id, jobData),
+            removeOnComplete: true,
+            removeOnFail: true,
+          },
         );
         logger.info('Fetch enqueued', { jobId: job.id, sourceId: source.id, channelId });
         jobs.push({ sourceId: source.id, installedAppId, jobId: String(job.id) });

@@ -73,7 +73,7 @@ describe("redeemApproval", () => {
       senderId: base.senderId,
       chatId: base.chatId,
     });
-    expect(enqueueOutbound).toHaveBeenCalledWith("acc", expect.objectContaining({ text: "✅ Created ticket ENG-43" }));
+    expect(enqueueOutbound).toHaveBeenCalledWith("acc", expect.objectContaining({ text: "Created ticket ENG-43" }));
   });
 
   it("skips the record when the run had no conversation", async () => {
@@ -163,5 +163,18 @@ describe("approval card never shows raw ids", () => {
     expect(body).toBe(
       'Reply as you in the thread in your direct message with *Mohan Kumar Mishra* started by *Mohan Kumar Mishra*:\n> can you check @Aryan\n\nYour reply:\n\n"ok"',
     );
+  });
+});
+
+describe("generic write card", () => {
+  it("shows list parameters so the person can see what changes", () => {
+    expect(
+      describeWriteAction("google-gmail-modify-labels", {
+        messageIds: ["18f2a", "18f2b"],
+        addLabelIds: ["STARRED"],
+        removeLabelIds: [],
+        options: { dryRun: false },
+      }),
+    ).toBe("Run *google-gmail-modify-labels*\n\nmessageIds: 18f2a, 18f2b\naddLabelIds: STARRED");
   });
 });

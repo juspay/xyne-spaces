@@ -1,4 +1,4 @@
-import { LITELLM } from "./config.js";
+import { LITELLM, litellmEndpoint } from "./config.js";
 import { createLogger } from "./logger.js";
 import { TASK_COMMANDS, type TaskCommand } from "./task-commands.js";
 
@@ -53,7 +53,7 @@ export async function routeTaskMode(
   const signal = abortSignal ? AbortSignal.any([abortSignal, timeout]) : timeout;
 
   try {
-    const response = await fetch(`${LITELLM.url.replace(/\/$/, "")}/v1/chat/completions`, {
+    const response = await fetch(litellmEndpoint("/v1/chat/completions"), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

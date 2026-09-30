@@ -35,7 +35,12 @@ import {
   normalizePlanTitle,
 } from "../lib/session-context.js";
 import { executeTool as executeGatewayTool } from "../mcpgateway/services/execution.js";
-import { GATEWAY_KEY_PREFIX, parseGatewayCatalogSource } from "../mcpgateway/key-format.js";
+import {
+  defaultGatewayTenant,
+  formatGatewayApprovalExecutionError,
+  parseGatewayServerTypeForApproval,
+  sanitizeApprovalToolError,
+} from "../lib/gateway-approval.js";
 import { redisService } from "../redis.js";
 import {
   findPlanBindingByMessageId,
@@ -69,52 +74,7 @@ function sanitizeForLog(value: unknown): string {
 }
 
 const router = Router();
-const DEFAULT_GATEWAY_TENANT = process.env.ALLOWED_TENANTS
-  ?.split(",")
-  .map((tenant) => tenant.trim())
-  .find((tenant) => tenant.length > 0);
-
-function resolveGatewayTenantForApproval(): string | null {
-  return DEFAULT_GATEWAY_TENANT ?? null;
-}
-
-function parseGatewayServerTypeForApproval(serverType: string): { serviceName: string; backendId?: string } | null {
-  const parsed = parseGatewayCatalogSource(serverType);
-  if (parsed) return { serviceName: parsed.serviceName, backendId: parsed.backendId };
-
-  if (!serverType.startsWith(GATEWAY_KEY_PREFIX)) return null;
-  const raw = serverType.slice(GATEWAY_KEY_PREFIX.length).trim();
-  if (!raw) return null;
-  const parts = raw.split(":");
-  if (parts.length !== 1) return null;
-  const [serviceName] = parts;
-  if (!serviceName) return null;
-  return { serviceName };
-}
-
-function formatGatewayApprovalExecutionError(
-  execution: { error?: string; errorDetail?: unknown },
-  serviceName: string,
-  toolName: string,
-): string {
-  const detail = execution.errorDetail;
-  if (detail && typeof detail === "object" && !Array.isArray(detail)) {
-    const record = detail as Record<string, unknown>;
-    const responseMessage = typeof record.responseMessage === "string" ? record.responseMessage.trim() : "";
-    if (responseMessage.length > 0) return responseMessage;
-
-    const message = typeof record.message === "string" ? record.message.trim() : "";
-    if (message.length > 0) return message;
-
-    const error = typeof record.error === "string" ? record.error.trim() : "";
-    if (error.length > 0) return error;
-  }
-
-  const directError = typeof execution.error === "string" ? execution.error.trim() : "";
-  if (directError.length > 0) return directError;
-
-  return `Gateway execution failed for ${serviceName}/${toolName}`;
-}
+const resolveGatewayTenantForApproval = defaultGatewayTenant;
 
 /**
  * Flag a conversation's most-recent run as having touched a user-scoped
@@ -132,16 +92,6 @@ function flagUserTokenRun(conversationId: string | undefined, agentSlug: string 
         errMsg(e),
       ),
     );
-}
-
-function sanitizeApprovalToolError(err: unknown): string {
-  const raw = errMsg(err);
-  return raw
-    .replace(/https?:\/\/\S+/gi, "")
-    .replace(/\{[^{}]{20,}\}/g, "{...}")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 240) || "tool execution failed";
 }
 
 function approvalToolFailureMessage(errMsg: string): string {
@@ -568,7 +518,7 @@ async function dispatchXyneAiWriteContinuation(opts: {
  *  it has to be a card, because the card is the only thing to replace. */
 function buildWriteDeclinedFlow(): FlowDefinition {
   return new FlowBuilder(`write-declined-${randomUUID()}`)
-    .addText("declined", "❌ Action declined.", { variant: "muted", size: "sm" })
+    .addText("declined", "Action declined.", { variant: "muted", size: "sm" })
     .build();
 }
 
@@ -936,10 +886,10 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
             xyneAi: xyneAiCard,
           });
         }
-        resp = { type: "close_screen", finalMessage: "❌ Action declined." };
+        resp = { type: "close_screen", finalMessage: "Action declined." };
         res.json(resp);
         if (!xyneAiCard) {
-          void replaceFlowCardWithText(messageId, agentSlug, "❌ **Action declined.**", conversationId, undefined, spacesAppId);
+          void replaceFlowCardWithText(messageId, agentSlug, "**Action declined.**", conversationId, undefined, spacesAppId);
         }
         void (async () => {
           const { resumeLocalHarnessRunForAction, rejectionResultText } = await import("../lib/local-harness-approval.js");
@@ -989,7 +939,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         if (!targetChannelId) {
           const b = msgConversationId ? { conversationId: msgConversationId, text: content } : { channelId, text: content };
           await spacesPost("/chat/postMessage", b);
-          resp = { type: "close_screen", finalMessage: "✅ Message sent." };
+          resp = { type: "close_screen", finalMessage: "Message sent." };
         } else {
           let channelName = targetChannelId;
           try {
@@ -998,20 +948,20 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
           } catch (e) {
             const errText = errMsg(e);
             if (errText.includes("private")) {
-              resp = { type: "close_screen", finalMessage: `❌ Cannot post to #${targetChannelId} — private channel. Add me first.` };
+              resp = { type: "close_screen", finalMessage: `Cannot post to #${targetChannelId} — private channel. Add me first.` };
               res.json(resp);
-              void replaceFlowCardWithText(messageId, agentSlug, `❌ Cannot post to #${targetChannelId} — private channel.`, conversationId, undefined, spacesAppId);
+              void replaceFlowCardWithText(messageId, agentSlug, `Cannot post to #${targetChannelId} — private channel.`, conversationId, undefined, spacesAppId);
               return;
             }
           }
           await spacesPost("/chat/postMessage", { channelId: targetChannelId, text: content });
           if (sourceConversationId) {
-            await spacesPost("/chat/postMessage", { conversationId: sourceConversationId, text: `✅ Posted in #${channelName}` }).catch(() => {});
+            await spacesPost("/chat/postMessage", { conversationId: sourceConversationId, text: `Posted in #${channelName}.` }).catch(() => {});
           }
-          resp = { type: "close_screen", finalMessage: `✅ Posted in #${channelName}` };
+          resp = { type: "close_screen", finalMessage: `Posted in #${channelName}.` };
         }
         res.json(resp);
-        void replaceFlowCardWithText(messageId, agentSlug, typeof resp === "object" && "finalMessage" in resp ? (resp.finalMessage ?? "✅ Done.") : "✅ Done.", conversationId, undefined, spacesAppId);
+        void replaceFlowCardWithText(messageId, agentSlug, typeof resp === "object" && "finalMessage" in resp ? (resp.finalMessage ?? "Done.") : "Done.", conversationId, undefined, spacesAppId);
         if (actionId === "approve-continue" || actionId === "retry-continue") {
           await dispatchContinuationRun({
             writeUserId, agentSlug, spacesAppId, conversationId, channelId: continueChannelId, tool,
@@ -1072,7 +1022,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         log.info(
           `[flow-action] Gateway write action approved: ${serverType}/${tool} backend=${execution.backendId} duration=${execution.duration}ms`,
         );
-        resp = { type: "close_screen", finalMessage: `✅ ${tool} executed successfully.` };
+        resp = { type: "close_screen", finalMessage: `${tool} ran successfully.` };
         await completeWriteSuccess({
           actionId, tool, serverType, params, writeUserId, signature, agentSlug, spacesAppId,
           messageId, conversationId, channelId: continueChannelId, resultText: safeResultString(execution.result),
@@ -1091,7 +1041,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         flagUserTokenRun(conversationId, agentSlug);
         const result = await prepared.run(params);
         log.info(`[flow-action] ${prepared.label} write action approved: ${tool} → ${result.slice(0, 100)}`);
-        resp = { type: "close_screen", finalMessage: `✅ ${tool} executed successfully.` };
+        resp = { type: "close_screen", finalMessage: `${tool} ran successfully.` };
         await completeWriteSuccess({
           actionId, tool, serverType, params, writeUserId, signature, agentSlug, spacesAppId,
           messageId, conversationId, channelId: continueChannelId, resultText: safeResultString(result),
@@ -1111,18 +1061,18 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       if (serverType === "agent-tools" && AGENT_TOOL_SLUGS.has(tool)) {
         const outcome = await applyAgentToolAction(tool, params, writeUserId);
         if (!outcome.ok) {
-          resp = { type: "close_screen", finalMessage: `⚠️ ${outcome.error}` };
+          resp = { type: "close_screen", finalMessage: `${outcome.error}` };
           if (xyneAiCard) {
             await finishTextWriteOnRow({ card: xyneAiCard, tool, ok: false, heading: `${tool} failed`, errorText: outcome.error });
             res.json(resp);
             return;
           }
           res.json(resp);
-          void replaceFlowCardWithText(messageId, agentSlug, `⚠️ ${outcome.error}`, conversationId, undefined, spacesAppId);
+          void replaceFlowCardWithText(messageId, agentSlug, `${outcome.error}`, conversationId, undefined, spacesAppId);
           return;
         }
         const suffix = outcome.note ? `\n\n_${outcome.note}_` : "";
-        resp = { type: "close_screen", finalMessage: `✅ ${outcome.message}` };
+        resp = { type: "close_screen", finalMessage: `${outcome.message}` };
         if (xyneAiCard) {
           await finishTextWriteOnRow({
             card: xyneAiCard,
@@ -1135,7 +1085,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
           return;
         }
         res.json(resp);
-        void replaceFlowCardWithText(messageId, agentSlug, `✅ **${outcome.message}**${suffix}`, conversationId, undefined, spacesAppId);
+        void replaceFlowCardWithText(messageId, agentSlug, `**${outcome.message}**${suffix}`, conversationId, undefined, spacesAppId);
         return;
       }
 
@@ -1153,17 +1103,17 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
           return;
         }
         if (outcome.status === "duplicate") {
-          resp = { type: "close_screen", finalMessage: `⚠️ ${outcome.error}` };
+          resp = { type: "close_screen", finalMessage: `${outcome.error}` };
           if (xyneAiCard) {
             await finishTextWriteOnRow({ card: xyneAiCard, tool, ok: false, heading: `${tool} failed`, errorText: outcome.error });
             res.json(resp);
             return;
           }
           res.json(resp);
-          void replaceFlowCardWithText(messageId, agentSlug, `⚠️ ${outcome.error}`, conversationId, undefined, spacesAppId);
+          void replaceFlowCardWithText(messageId, agentSlug, `${outcome.error}`, conversationId, undefined, spacesAppId);
           return;
         }
-        resp = { type: "close_screen", finalMessage: `✅ ${outcome.message}` };
+        resp = { type: "close_screen", finalMessage: `${outcome.message}` };
         if (xyneAiCard) {
           await finishTextWriteOnRow({
             card: xyneAiCard,
@@ -1176,7 +1126,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
           return;
         }
         res.json(resp);
-        void replaceFlowCardWithText(messageId, agentSlug, `✅ **Skill created:** ${outcome.name} (\`${outcome.slug}\`)`, conversationId, undefined, spacesAppId);
+        void replaceFlowCardWithText(messageId, agentSlug, `**Skill created:** ${outcome.name} (\`${outcome.slug}\`)`, conversationId, undefined, spacesAppId);
         return;
       }
 
@@ -1221,7 +1171,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         return;
       }
       log.info(`[flow-action] Write action approved: ${tool} → ${toolResult.content.slice(0, 100)}`);
-      resp = { type: "close_screen", finalMessage: `✅ ${tool} executed successfully.` };
+      resp = { type: "close_screen", finalMessage: `${tool} ran successfully.` };
       await completeWriteSuccess({
         actionId, tool, serverType, params, writeUserId, signature, agentSlug, spacesAppId,
         messageId, conversationId, channelId: continueChannelId, resultText: toolResult.content,
@@ -1266,9 +1216,9 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       }
 
       if (actionId === "twin-decline") {
-        resp = { type: "close_screen", finalMessage: "❌ Response declined." };
+        resp = { type: "close_screen", finalMessage: "Response declined." };
         res.json(resp);
-        void replaceFlowCardWithText(messageId, data["agentSlug"] as string | undefined, "❌ **Response declined.**", conversationId, data["dmChannelId"] as string | undefined, data["spacesAppId"] as string | undefined);
+        void replaceFlowCardWithText(messageId, data["agentSlug"] as string | undefined, "**Response declined.**", conversationId, data["dmChannelId"] as string | undefined, data["spacesAppId"] as string | undefined);
         void recordTwinApprovalOutcome(data, "declined");
         return;
       }
@@ -1340,7 +1290,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       if (!row) {
         resp = { type: "close_screen", finalMessage: "This scheduled job no longer exists." };
         res.json(resp);
-        void replaceFlowCardWithText(messageId, cardAgentSlug, "⚠️ **This scheduled job no longer exists.**", conversationId, undefined, cardSpacesAppId);
+        void replaceFlowCardWithText(messageId, cardAgentSlug, "**This scheduled job no longer exists.**", conversationId, undefined, cardSpacesAppId);
         return;
       }
 
@@ -1348,9 +1298,9 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         if (row.status === "pending_approval") {
           await prisma.scheduledJob.update({ where: { id: row.id }, data: { status: "cancelled" } });
         }
-        resp = { type: "close_screen", finalMessage: "❌ Channel post declined." };
+        resp = { type: "close_screen", finalMessage: "Channel post declined." };
         res.json(resp);
-        void replaceFlowCardWithText(messageId, cardAgentSlug, "❌ **Channel post declined — the job was not scheduled.**", conversationId, undefined, cardSpacesAppId);
+        void replaceFlowCardWithText(messageId, cardAgentSlug, "**Channel post declined — the job was not scheduled.**", conversationId, undefined, cardSpacesAppId);
         return;
       }
 
@@ -1562,7 +1512,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
             .replaceUiFlow(answerChatMessageId, answeredFlow.screenId, answeredFlow)
             .catch((err: unknown) => log.warn(`[flow-action] xyne-ai answer card not persisted: ${errMsg(err)}`));
         }
-        resp = { type: "close_screen", finalMessage: "✅ Answers submitted" };
+        resp = { type: "close_screen", finalMessage: "Answers submitted." };
         res.json(resp);
         if (answerSurface !== "xyne-ai") {
           void replaceFlowCardWithFlow(messageId, answerAgentSlug, answeredFlow, answerConversationId, undefined, answerSpacesAppId);
@@ -1617,6 +1567,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
           // Like plan approval, this direct /internal/run dispatch skips the
           // mention path that ordinarily lights the thread's working pill.
           void emitAgentWorkingSignal({
+            sessionId: runBody.sessionId,
             conversationId: answerConversationId,
             channelId: answerChannelId,
             agentSlug: answerAgentSlug,
@@ -1701,7 +1652,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         void replaceFlowCardWithText(
           messageId,
           proposerAgentSlug,
-          `✋ **Dismissed.** Did not run ${targetAgentName ?? targetAgentSlug}.`,
+          `**Dismissed.** Did not run ${targetAgentName ?? targetAgentSlug}.`,
           proposalConversationId,
           proposalChannelId,
           proposalSpacesAppId,
@@ -1737,7 +1688,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         void replaceFlowCardWithText(
           messageId,
           proposerAgentSlug,
-          `❌ **Could not run ${targetAgentName ?? targetAgentSlug}.** Target agent is not visible or is no longer available.`,
+          `**Could not run ${targetAgentName ?? targetAgentSlug}.** Target agent is not visible or is no longer available.`,
           proposalConversationId,
           proposalChannelId,
           proposalSpacesAppId,
@@ -1778,7 +1729,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
             void replaceFlowCardWithText(
               messageId,
               proposerAgentSlug,
-              `❌ **Could not queue ${targetAgent.name}.** ${msg}`,
+              `**Could not queue ${targetAgent.name}.** ${msg}`,
               proposalConversationId,
               proposalChannelId,
               proposalSpacesAppId,
@@ -1790,7 +1741,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
           void replaceFlowCardWithText(
             messageId,
             proposerAgentSlug,
-            `🕒 **Queued ${targetAgent.name}.** It will run in this thread after the current run finishes.`,
+            `**Queued ${targetAgent.name}.** It will run in this thread after the current run finishes.`,
             proposalConversationId,
             proposalChannelId,
             proposalSpacesAppId,
@@ -1832,7 +1783,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         void replaceFlowCardWithText(
           messageId,
           proposerAgentSlug,
-          `❌ **Could not run ${targetAgent.name}.** ${msg}`,
+          `**Could not run ${targetAgent.name}.** ${msg}`,
           proposalConversationId,
           proposalChannelId,
           proposalSpacesAppId,
@@ -1924,13 +1875,13 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       if (!result.ok) {
         resp = { type: "close_screen", finalMessage: result.error };
         res.json(resp);
-        void replaceFlowCardWithText(messageId, cloneAgentSlug, `⚠️ ${result.error}`, conversationId, undefined, cloneSpacesAppId);
+        void replaceFlowCardWithText(messageId, cloneAgentSlug, `${result.error}`, conversationId, undefined, cloneSpacesAppId);
         return;
       }
 
       const finalText = result.alreadyResolved
-        ? (result.status === "approved" ? "✅ **Clone already approved.**" : "❌ **Clone request already declined.**")
-        : (result.status === "approved" ? "✅ **Clone approved.** The requester now has their own copy." : "❌ **Clone request declined.**");
+        ? (result.status === "approved" ? "**Clone already approved.**" : "**Clone request already declined.**")
+        : (result.status === "approved" ? "**Clone approved.** The requester now has their own copy." : "**Clone request declined.**");
       resp = { type: "close_screen", finalMessage: finalText };
       res.json(resp);
       void replaceFlowCardWithText(messageId, cloneAgentSlug, finalText, conversationId, undefined, cloneSpacesAppId);
@@ -1965,13 +1916,13 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       if (!result.ok) {
         resp = { type: "close_screen", finalMessage: result.error };
         res.json(resp);
-        void replaceFlowCardWithText(messageId, skillAgentSlug, `⚠️ ${result.error}`, conversationId, undefined, skillSpacesAppId);
+        void replaceFlowCardWithText(messageId, skillAgentSlug, `${result.error}`, conversationId, undefined, skillSpacesAppId);
         return;
       }
 
       const finalText = result.alreadyResolved
-        ? (result.status === "approved" ? "✅ **Skill update already applied.**" : "❌ **Skill update already declined.**")
-        : (result.status === "approved" ? "✅ **Skill update approved & applied.**" : "❌ **Skill update declined.**");
+        ? (result.status === "approved" ? "**Skill update already applied.**" : "**Skill update already declined.**")
+        : (result.status === "approved" ? "**Skill update approved & applied.**" : "**Skill update declined.**");
       resp = { type: "close_screen", finalMessage: finalText };
       res.json(resp);
       void replaceFlowCardWithText(messageId, skillAgentSlug, finalText, conversationId, undefined, skillSpacesAppId);
@@ -2039,7 +1990,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         }
         resp = { type: "close_screen", finalMessage: result.error };
         res.json(resp);
-        void replaceFlowCardWithText(messageId, cardAgentSlug, `⚠️ ${result.error}`, cardConversationId, cardChannelId, cardSpacesAppId);
+        void replaceFlowCardWithText(messageId, cardAgentSlug, `${result.error}`, cardConversationId, cardChannelId, cardSpacesAppId);
         return;
       }
 
@@ -2058,11 +2009,11 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       const finalText =
         result.status === "approved"
           ? result.alreadyResolved
-            ? `✅ Agent "${result.identity.name}" was already created.`
-            : `✅ Agent "${result.identity.name}" created.`
+            ? `Agent "${result.identity.name}" was already created.`
+            : `Agent "${result.identity.name}" created.`
           : result.alreadyResolved
-            ? "❌ This draft was already declined."
-            : "❌ Agent draft declined.";
+            ? "This draft was already declined."
+            : "Agent draft declined.";
 
       resp = { type: "close_screen", finalMessage: finalText };
       res.json(resp);
@@ -2467,7 +2418,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
           .catch(() => "");
         // Stamp the reject decision time once — the card is terminal (never re-rendered).
         const rejectedAt = new Date().toISOString();
-        resp = { type: "close_screen", finalMessage: "✋ Plan rejected." };
+        resp = { type: "close_screen", finalMessage: "Plan rejected." };
         res.json(resp);
         void replaceFlowCardWithFlow(
           messageId,
@@ -2645,6 +2596,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
             // dispatch), so without it the indicator only shows on the first
             // tool-call tick — minutes later on a slow model (the approve→pill lag).
             void emitAgentWorkingSignal({
+              sessionId: runBody.sessionId,
               conversationId: planConversationId,
               channelId: planChannelId,
               agentSlug: planAgentSlug,

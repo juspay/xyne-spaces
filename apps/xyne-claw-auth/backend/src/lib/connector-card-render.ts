@@ -42,6 +42,7 @@ export interface PendingConnectorSuggestions {
 /** Identity the suggest cards are built from. `channelId` is "" on Xyne AI. */
 export interface ConnectorCardIdentity {
   agentSlug: string | undefined;
+  agentOrgId?: string | null | undefined;
   userId: string;
   conversationId: string;
   channelId: string;
@@ -122,6 +123,7 @@ export async function renderConnectorSuggestCard(args: {
   const availability = await availabilityForServerIds(
     id.userId,
     rows.map((r) => r.id),
+    { agentSlug: id.agentSlug, agentOrgId: id.agentOrgId },
   );
   const blockedTypes = new Set(args.blockedConnectors ?? []);
 
@@ -141,14 +143,14 @@ export async function renderConnectorSuggestCard(args: {
     .filter((row) => {
       if (listAll || askedToConnect.has(row.type)) return true;
       if (availability.personal.has(row.id)) return false;
-      if (availability.org.has(row.id)) return blockedTypes.has(row.type);
+      if (availability.agent.has(row.id) || availability.org.has(row.id)) return blockedTypes.has(row.type);
       return true;
     })
     .map((row) => ({
       serverType: row.type,
       name: row.name,
       ...(row.description ? { description: row.description } : {}),
-      connected: availability.personal.has(row.id) || availability.org.has(row.id),
+      connected: availability.personal.has(row.id) || availability.agent.has(row.id) || availability.org.has(row.id),
     }));
 
   if (connectors.length === 0) {
