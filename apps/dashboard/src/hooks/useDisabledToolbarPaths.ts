@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { useCacConfig } from '@xyne/shared/hooks';
 import { useAuth } from './useAuth';
+import { LEGACY_DISABLED_TOOLBAR_PATH_ALIASES } from '../components/AppSidebar/navigationConfig';
 import {
   DISABLED_TOOLBAR_PATHS_CAC_KEY,
   DEFAULT_DISABLED_TOOLBAR_PATHS_CAC_CONFIG,
@@ -27,5 +28,15 @@ export const useDisabledToolbarPaths = (): Set<string> => {
   // this Set's identity stable too — callers put it in useMemo/useCallback
   // deps (useVisibleNavigationItems), which would otherwise recompute every
   // render against a freshly-built Set.
-  return useMemo(() => new Set(paths ?? []), [paths]);
+  // Old paths still in a workspace's list also disable the screen they became.
+  return useMemo(
+    () =>
+      new Set(
+        (paths ?? []).flatMap(path => {
+          const alias = LEGACY_DISABLED_TOOLBAR_PATH_ALIASES[path];
+          return alias ? [path, alias] : [path];
+        }),
+      ),
+    [paths],
+  );
 };

@@ -3,6 +3,8 @@ import { NavLink, Navigate, Outlet } from 'react-router-dom';
 import { SwapArrowHorizontal, ChatChatting } from '@xyne/icons';
 import { cn } from '../../utils/classNames';
 import { useHasResourceAccess } from '../../hooks/usePermissions';
+import { useDisabledToolbarPaths } from '../../hooks/useDisabledToolbarPaths';
+import NotFoundScreen from '../NotFoundScreen/NotFoundScreen';
 import type { PikaIcon } from '../../components/AppSidebar/navigationConfig';
 
 interface MigrationTabDef {
@@ -38,12 +40,19 @@ const TABS: MigrationTabDef[] = [
 /** `/migrations` has no content of its own — land on the first tab the user can actually open. */
 export const MigrationsIndexRedirect = (): ReactElement => {
   const hasTicketMigration = useHasResourceAccess('TICKET-MIGRATION');
-  return <Navigate to={hasTicketMigration ? 'jira' : 'slack'} replace />;
+  const slackDisabled = useDisabledToolbarPaths().has('/migrations/slack');
+  if (hasTicketMigration) return <Navigate to='jira' replace />;
+  return slackDisabled ? <NotFoundScreen /> : <Navigate to='slack' replace />;
 };
 
 const MigrationsScreen = (): ReactElement => {
   const hasTicketMigration = useHasResourceAccess('TICKET-MIGRATION');
-  const visibleTabs = TABS.filter(tab => !tab.requiresTicketMigration || hasTicketMigration);
+  const disabledToolbarPaths = useDisabledToolbarPaths();
+  const visibleTabs = TABS.filter(tab =>
+    tab.requiresTicketMigration
+      ? hasTicketMigration
+      : !disabledToolbarPaths.has(`/migrations/${tab.key}`),
+  );
 
   return (
     <div className='h-full w-full flex flex-col'>
