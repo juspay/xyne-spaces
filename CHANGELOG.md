@@ -1,3 +1,10 @@
+## [1.439.1](https://github.com/juspay/xyne-spaces/compare/v1.439.0...v1.439.1) (2026-09-30)
+
+
+### Bug Fixes
+
+* open the desk list, not the last ticket, when Support is reopened ([#2494](https://github.com/juspay/xyne-spaces/issues/2494)) ([2e7b1ca](https://github.com/juspay/xyne-spaces/commit/2e7b1ca51396be85929b2c18aa1c580032d4cbf2))
+
 ## [1.439.0](https://github.com/juspay/xyne-spaces/compare/v1.438.0...v1.439.0) (2026-09-30)
 
 
