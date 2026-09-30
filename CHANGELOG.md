@@ -1,3 +1,15 @@
+## [1.434.0-release-20260930.7](https://github.com/juspay/xyne-spaces/compare/v1.434.0-release-20260930.6...v1.434.0-release-20260930.7) (2026-09-30)
+
+
+### Features
+
+* answer browser panel calls from the Xyne AI screen (release-20260930) ([#2542](https://github.com/juspay/xyne-spaces/issues/2542)) ([1846001](https://github.com/juspay/xyne-spaces/commit/1846001e872b07d1bba617b0960a477e0d142820))
+
+
+### Bug Fixes
+
+* open sandbox preview and VS Code links in the desktop browser panel ([#2517](https://github.com/juspay/xyne-spaces/issues/2517)) ([#2541](https://github.com/juspay/xyne-spaces/issues/2541)) ([3c229c7](https://github.com/juspay/xyne-spaces/commit/3c229c7aaf38b410d69a31ea0d28f5c5965fa958))
+
 ## [1.434.0-release-20260930.6](https://github.com/juspay/xyne-spaces/compare/v1.434.0-release-20260930.5...v1.434.0-release-20260930.6) (2026-09-30)
 
 
