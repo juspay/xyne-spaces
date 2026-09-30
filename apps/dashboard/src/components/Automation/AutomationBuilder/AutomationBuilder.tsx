@@ -362,6 +362,8 @@ export function AutomationBuilder({
     const otherChanges = (['name', 'description', 'priority'] as const).filter(
       key => (live[key] ?? null) !== (automation[key] ?? null),
     );
+    // Nothing differs: no summary bar and no highlight colours.
+    if (!diff.newerMarks.size && !diff.olderMarks.size && !otherChanges.length) return null;
     return {
       highlight: { tone: 'new' as const, marks: diff.newerMarks },
       summary: summarizeDiff(diff.counts, otherChanges),
@@ -1336,10 +1338,9 @@ export function AutomationBuilder({
             !editMode && 'pointer-events-none select-none opacity-90',
           )}
           aria-readonly={!editMode}
-          // pointer-events-none only blocks the mouse — it doesn't remove step/trigger
-          // form fields from the tab order, so they could still be focused and typed
-          // into via keyboard. `inert` fully removes this subtree from focus/interaction.
-          inert={readOnlyPreview}
+          // pointer-events-none only blocks the mouse, so form content is also made
+          // `inert` (sections below, card bodies via `readOnly`) to keep it out of the
+          // tab order — leaving each card's expand/collapse toggle usable.
         >
           <LockBanner status={savedStatus} isLiveRow={isLiveRow} />
           <RuleSummaryCard
@@ -1353,6 +1354,7 @@ export function AutomationBuilder({
             title='When this happens'
             description='The event that fires this automation.'
             diffKey={TRIGGER_TYPE_DIFF_KEY}
+            inert={readOnlyPreview}
           >
             <TriggerCard
               view='event'
@@ -1377,6 +1379,7 @@ export function AutomationBuilder({
             title='Run timing'
             description='Run now, or wait a fixed time after a date field on the trigger.'
             diffKey={SCHEDULE_DIFF_KEY}
+            inert={readOnlyPreview}
           >
             <ScheduleCard
               schedule={config.schedule}
@@ -1391,6 +1394,7 @@ export function AutomationBuilder({
             title='With these conditions'
             description='Evaluated against fresh state when the actions are about to run.'
             diffKey={TRIGGER_CONFIG_DIFF_KEY}
+            inert={readOnlyPreview}
           >
             <TriggerCard
               view='condition'
@@ -1412,7 +1416,11 @@ export function AutomationBuilder({
             title='Then do this'
             description='One or more actions run in order. Conditionals can branch inside a step.'
           >
-            <AddStepRow catalog={stepCatalog} onPick={type => handleAddStep(type, 0)} />
+            <AddStepRow
+              catalog={stepCatalog}
+              onPick={type => handleAddStep(type, 0)}
+              inert={readOnlyPreview}
+            />
 
             {config.steps.map((step, index) => {
               const isLast = index === config.steps.length - 1;
@@ -1497,6 +1505,7 @@ export function AutomationBuilder({
                     <AddStepRow
                       catalog={stepCatalog}
                       onPick={type => handleAddStep(type, index + 1)}
+                      inert={readOnlyPreview}
                     />
                   )}
                 </div>
@@ -1504,7 +1513,11 @@ export function AutomationBuilder({
             })}
 
             {config.steps.length > 0 && (
-              <AddStepRow catalog={stepCatalog} onPick={type => handleAddStep(type)} />
+              <AddStepRow
+                catalog={stepCatalog}
+                onPick={type => handleAddStep(type)}
+                inert={readOnlyPreview}
+              />
             )}
           </BuilderSection>
         </div>
@@ -1972,6 +1985,7 @@ function BuilderSection({
   description,
   isLast,
   diffKey,
+  inert,
   children,
 }: {
   number: number;
@@ -1981,6 +1995,7 @@ function BuilderSection({
   isLast?: boolean;
   /** Version compare: the key this section is highlighted under (see DiffHighlight). */
   diffKey?: string;
+  inert?: boolean;
   children: React.ReactNode;
 }): React.ReactElement {
   const k = SECTION_KICKER[kicker];
@@ -2020,6 +2035,7 @@ function BuilderSection({
             diff && 'rounded-md p-2',
             diff && diffHighlightClass(diff),
           )}
+          inert={inert}
         >
           {children}
         </div>

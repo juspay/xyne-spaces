@@ -12,4 +12,6 @@ export interface AddStepRowProps {
   trigger?: ReactNode;
   /** Called with the picker's open state, e.g. to keep a hover control visible. */
   onOpenChange?: (open: boolean) => void;
+  /** Read-only views: keep the row visible but out of reach (mouse and keyboard). */
+  inert?: boolean;
 }

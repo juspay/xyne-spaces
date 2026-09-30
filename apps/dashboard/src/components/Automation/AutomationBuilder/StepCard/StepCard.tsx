@@ -80,10 +80,14 @@ export function StepCard({
           data-track-category='automation-builder'
           data-track-name='step-card-toggle-collapse'
           className={cn(
-            'flex flex-1 items-start gap-3 rounded-md text-left',
+            'pointer-events-auto flex flex-1 items-start gap-3 rounded-md text-left',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/40',
           )}
-          onClick={() => setCollapsed(prev => !prev)}
+          onClick={e => {
+            // Read-only views: expanding must not also trigger the builder's click-to-edit.
+            e.stopPropagation();
+            setCollapsed(prev => !prev);
+          }}
         >
           <div
             aria-hidden='true'
@@ -106,7 +110,7 @@ export function StepCard({
           </div>
         </button>
 
-        <div className='flex items-center gap-1'>
+        <div className='flex items-center gap-1' inert={readOnly}>
           <button
             type='button'
             onClick={onMoveUp}
@@ -182,7 +186,7 @@ export function StepCard({
       </div>
 
       {!collapsed && (
-        <div className='border-t border-border pt-4'>
+        <div className='border-t border-border pt-4' inert={readOnly}>
           {schemaLoading ? (
             <div className='flex items-center gap-2 text-xs text-muted-foreground'>
               <Loader2 className='size-4 animate-spin' />

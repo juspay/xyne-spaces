@@ -12,6 +12,7 @@ export function AddStepRow({
   variant = 'full',
   trigger,
   onOpenChange,
+  inert,
 }: AddStepRowProps): React.ReactElement {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -43,6 +44,7 @@ export function AddStepRow({
         trigger ? 'contents' : 'flex flex-col items-center',
         !trigger && (variant === 'full' ? 'py-1' : 'py-0.5'),
       )}
+      inert={inert}
     >
       {!trigger && <div className={cn('w-px bg-border', variant === 'full' ? 'h-3' : 'h-2')} />}
       <Popover

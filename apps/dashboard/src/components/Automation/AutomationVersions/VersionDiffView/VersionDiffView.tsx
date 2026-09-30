@@ -109,6 +109,7 @@ export function VersionDiffView({
       from: fromIsOlder ? olderValue : newerValue,
       to: fromIsOlder ? newerValue : olderValue,
       summary: summarizeDiff(diff.counts, otherChanges),
+      hasChanges: diff.newerMarks.size > 0 || diff.olderMarks.size > 0 || otherChanges.length > 0,
     };
   }, [from, to]);
 
@@ -146,14 +147,18 @@ export function VersionDiffView({
       {highlights && (
         <div className='flex flex-wrap items-center gap-3 border-b border-border bg-muted/30 px-6 py-2 text-xs text-muted-foreground'>
           <span className='font-medium text-foreground'>{highlights.summary}</span>
-          <span className='flex items-center gap-1.5'>
-            <span className='size-2.5 rounded-sm bg-red-500/60' aria-hidden='true' />
-            Older version
-          </span>
-          <span className='flex items-center gap-1.5'>
-            <span className='size-2.5 rounded-sm bg-green-500/60' aria-hidden='true' />
-            Newer version
-          </span>
+          {highlights.hasChanges && (
+            <>
+              <span className='flex items-center gap-1.5'>
+                <span className='size-2.5 rounded-sm bg-red-500/60' aria-hidden='true' />
+                Older version
+              </span>
+              <span className='flex items-center gap-1.5'>
+                <span className='size-2.5 rounded-sm bg-green-500/60' aria-hidden='true' />
+                Newer version
+              </span>
+            </>
+          )}
         </div>
       )}
 

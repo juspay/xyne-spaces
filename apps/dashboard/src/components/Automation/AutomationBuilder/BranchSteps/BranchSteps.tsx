@@ -258,7 +258,7 @@ export function BranchSteps({
             );
           })
         )}
-        <AddStepRow catalog={catalog} onPick={handleAdd} variant='compact' />
+        <AddStepRow catalog={catalog} onPick={handleAdd} variant='compact' inert={readOnly} />
       </div>
     </div>
   );

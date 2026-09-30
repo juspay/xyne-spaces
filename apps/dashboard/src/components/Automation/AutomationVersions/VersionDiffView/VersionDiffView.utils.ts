@@ -34,15 +34,29 @@ export function summarizeDiff(counts: Record<DiffMark, number>, otherChanges: st
   return parts.length ? parts.join(' · ') : 'No differences';
 }
 
-/** JSON with object keys sorted, so key order never reads as a change. */
-function stableStringify(value: unknown): string {
-  return JSON.stringify(value ?? null, (_key, v: unknown) =>
-    v && typeof v === 'object' && !Array.isArray(v)
-      ? Object.fromEntries(
-          Object.entries(v as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : 1)),
-        )
-      : v,
+/** An unset field: saves write `[]`, `''` or `null` where older versions omit the key. */
+function isEmptyValue(v: unknown): boolean {
+  if (v === null || v === undefined || v === '') return true;
+  if (Array.isArray(v)) return v.length === 0;
+  return typeof v === 'object' && Object.keys(v).length === 0;
+}
+
+/** Keys sorted and empty fields dropped (at any depth). */
+function normalize(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map(normalize);
+  if (!v || typeof v !== 'object') return v;
+  return Object.fromEntries(
+    Object.entries(v as Record<string, unknown>)
+      .map(([key, child]) => [key, normalize(child)] as const)
+      .filter(([, child]) => !isEmptyValue(child))
+      .sort(([a], [b]) => (a < b ? -1 : 1)),
   );
+}
+
+/** Neither key order nor an empty-vs-missing field reads as a change. */
+function stableStringify(value: unknown): string {
+  const normalized = normalize(value);
+  return JSON.stringify(isEmptyValue(normalized) ? null : normalized);
 }
 
 /** A step without its branches — nested steps are compared on their own. */

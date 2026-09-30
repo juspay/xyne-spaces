@@ -92,8 +92,12 @@ export function ConditionalCard({
       <div className='flex items-start justify-between gap-3'>
         <button
           type='button'
-          className='flex flex-1 items-start gap-3 text-left'
-          onClick={() => setCollapsed(prev => !prev)}
+          className='pointer-events-auto flex flex-1 items-start gap-3 text-left'
+          onClick={e => {
+            // Read-only views: expanding must not also trigger the builder's click-to-edit.
+            e.stopPropagation();
+            setCollapsed(prev => !prev);
+          }}
           data-track-category='automation-builder'
           data-track-name='conditional-toggle-collapse'
         >
@@ -115,7 +119,7 @@ export function ConditionalCard({
           </div>
         </button>
 
-        <div className='flex items-center gap-1'>
+        <div className='flex items-center gap-1' inert={readOnly}>
           <button
             type='button'
             onClick={onMoveUp}
@@ -184,7 +188,7 @@ export function ConditionalCard({
 
       {!collapsed && (
         <>
-          <div className='flex flex-col gap-2 border-t border-border pt-4'>
+          <div className='flex flex-col gap-2 border-t border-border pt-4' inert={readOnly}>
             <div className='flex items-center justify-between gap-3'>
               <span className='text-xs font-medium text-foreground'>Condition</span>
               <Button
