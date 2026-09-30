@@ -17,7 +17,7 @@ import {
   DiffHighlightContext,
   type DiffHighlightValue,
 } from '../../AutomationBuilder/DiffHighlight/DiffHighlight';
-import { computeVersionDiff, summarizeDiff } from './VersionDiffView.utils';
+import { computeVersionDiff } from './VersionDiffView.utils';
 
 interface VersionDiffViewProps {
   automationId: string;
@@ -99,17 +99,14 @@ export function VersionDiffView({
     if (!from || !to || from.id === to.id) return null;
     const fromIsOlder = new Date(from.createdAt).getTime() <= new Date(to.createdAt).getTime();
     const [older, newer] = fromIsOlder ? [from, to] : [to, from];
-    const diff = computeVersionDiff(older.config, newer.config);
+    const diff = computeVersionDiff(older, newer);
     const olderValue: DiffHighlightValue = { tone: 'old', marks: diff.olderMarks };
     const newerValue: DiffHighlightValue = { tone: 'new', marks: diff.newerMarks };
-    const otherChanges = (['name', 'description', 'priority'] as const).filter(
-      key => (older[key] ?? null) !== (newer[key] ?? null),
-    );
     return {
       from: fromIsOlder ? olderValue : newerValue,
       to: fromIsOlder ? newerValue : olderValue,
-      summary: summarizeDiff(diff.counts, otherChanges),
-      hasChanges: diff.newerMarks.size > 0 || diff.olderMarks.size > 0 || otherChanges.length > 0,
+      summary: diff.summary,
+      hasChanges: diff.hasChanges,
     };
   }, [from, to]);
 

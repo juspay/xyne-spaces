@@ -96,10 +96,7 @@ import {
   diffHighlightClass,
   useDiffMark,
 } from './DiffHighlight/DiffHighlight';
-import {
-  computeVersionDiff,
-  summarizeDiff,
-} from '../AutomationVersions/VersionDiffView/VersionDiffView.utils';
+import { computeVersionDiff } from '../AutomationVersions/VersionDiffView/VersionDiffView.utils';
 
 const MAX_AUTOMATION_NAME_LENGTH = 80;
 
@@ -357,16 +354,13 @@ export function AutomationBuilder({
     if (!isLockedStatus || readOnlyPreview || !automation) return null;
     const live = versionsQuery.data?.find(v => v.id !== automation.id && isLiveStatus(v.status));
     if (!live) return null;
-    const diff = computeVersionDiff(live.config, automation.config);
-    const otherChanges = (['name', 'description', 'priority'] as const).filter(
-      key => (live[key] ?? null) !== (automation[key] ?? null),
-    );
+    const diff = computeVersionDiff(live, automation);
     // Nothing differs: no summary bar and no highlight colours.
-    if (!diff.newerMarks.size && !diff.olderMarks.size && !otherChanges.length) return null;
+    if (!diff.hasChanges) return null;
     return {
       highlight: { tone: 'new' as const, marks: diff.newerMarks },
-      summary: summarizeDiff(diff.counts, otherChanges),
-      hasRemoved: diff.counts.removed > 0,
+      summary: diff.summary,
+      hasRemoved: diff.hasRemoved,
     };
   }, [isLockedStatus, readOnlyPreview, automation, versionsQuery.data]);
 

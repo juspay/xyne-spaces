@@ -1,5 +1,6 @@
 import { CONDITIONAL_STEP_TYPE, SWITCH_STEP_TYPE } from '../../Automation.types';
 import type {
+  Automation,
   AutomationConfig,
   AutomationStepConfig,
   ConditionalStepConfig,
@@ -17,16 +18,21 @@ import {
   listBranchKeys,
 } from '../../AutomationBuilder/FlowAutomationView/FlowAutomationView.utils';
 
+type DiffSide = Pick<Automation, 'config' | 'name' | 'description' | 'priority'>;
+
 interface VersionDiff {
   /** Marks for the older version's pane: removed, changed, moved. */
   olderMarks: Map<string, DiffMark>;
   /** Marks for the newer version's pane: added, changed, moved. */
   newerMarks: Map<string, DiffMark>;
-  counts: Record<DiffMark, number>;
+  /** e.g. "2 changed · 1 added · trigger, name changed", or "No differences". */
+  summary: string;
+  hasChanges: boolean;
+  hasRemoved: boolean;
 }
 
-/** One-line summary, e.g. "2 changed · 1 added · name changed", or "No differences". */
-export function summarizeDiff(counts: Record<DiffMark, number>, otherChanges: string[]): string {
+/** Step counts first, then the non-step parts that changed. */
+function summarizeDiff(counts: Record<DiffMark, number>, otherChanges: string[]): string {
   const parts = (['changed', 'added', 'removed', 'moved'] as const)
     .filter(mark => counts[mark] > 0)
     .map(mark => `${counts[mark]} ${mark}`);
@@ -126,7 +132,7 @@ function reorderedIds(
   const moved = new Set<string>();
   for (const group of byContainer.values()) {
     group.sort(([, a], [, b]) => a.index - b.index);
-    const olderIndex = group.map(([id]) => older.get(id)?.index ?? 0);
+    const olderIndex = group.map(([id]) => older.get(id)!.index);
     // Longest increasing subsequence of the older indices, O(n²) — branches are short.
     const length = olderIndex.map(() => 1);
     const previous = olderIndex.map(() => -1);
@@ -155,13 +161,16 @@ function normalizedSchedule(config: AutomationConfig): unknown {
 }
 
 /**
- * Step-level diff between two versions of one automation. Steps are matched by
- * id, which a proposed change keeps from the version it started from.
+ * Diff between two versions of one automation. Steps are matched by id, which a
+ * proposed change keeps from the version it started from; counts are steps only.
  */
-export function computeVersionDiff(older: AutomationConfig, newer: AutomationConfig): VersionDiff {
+export function computeVersionDiff(olderVersion: DiffSide, newerVersion: DiffSide): VersionDiff {
+  const older = olderVersion.config;
+  const newer = newerVersion.config;
   const olderMarks = new Map<string, DiffMark>();
   const newerMarks = new Map<string, DiffMark>();
   const counts: Record<DiffMark, number> = { added: 0, removed: 0, changed: 0, moved: 0 };
+  const otherChanges: string[] = [];
 
   const markSection = (key: string, mark: DiffMark): void => {
     olderMarks.set(key, mark);
@@ -173,14 +182,16 @@ export function computeVersionDiff(older: AutomationConfig, newer: AutomationCon
   };
 
   if (stableStringify(older.trigger) !== stableStringify(newer.trigger)) {
-    markBoth(TRIGGER_DIFF_KEY, 'changed');
+    markSection(TRIGGER_DIFF_KEY, 'changed');
     if (older.trigger.type !== newer.trigger.type) markSection(TRIGGER_TYPE_DIFF_KEY, 'changed');
     if (stableStringify(older.trigger.config) !== stableStringify(newer.trigger.config)) {
       markSection(TRIGGER_CONFIG_DIFF_KEY, 'changed');
     }
+    otherChanges.push('trigger');
   }
   if (stableStringify(normalizedSchedule(older)) !== stableStringify(normalizedSchedule(newer))) {
-    markBoth(SCHEDULE_DIFF_KEY, 'changed');
+    markSection(SCHEDULE_DIFF_KEY, 'changed');
+    otherChanges.push('timing');
   }
 
   const olderSteps = flattenSteps(older.steps, 'root', new Map());
@@ -209,5 +220,15 @@ export function computeVersionDiff(older: AutomationConfig, newer: AutomationCon
     }
   }
 
-  return { olderMarks, newerMarks, counts };
+  for (const key of ['name', 'description', 'priority'] as const) {
+    if ((olderVersion[key] ?? null) !== (newerVersion[key] ?? null)) otherChanges.push(key);
+  }
+
+  return {
+    olderMarks,
+    newerMarks,
+    summary: summarizeDiff(counts, otherChanges),
+    hasChanges: olderMarks.size > 0 || newerMarks.size > 0 || otherChanges.length > 0,
+    hasRemoved: counts.removed > 0,
+  };
 }
