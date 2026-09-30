@@ -1,5 +1,6 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { RenderMessageWithHTML } from '../RenderMessageWithHTML/RenderMessageWithHTML';
+import { ExpandableMessageContext } from './ExpandableMessageContext';
 import { MaximizeTwoArrow } from '@xyne/icons';
 import useMeasure from '../../../hooks/useMeasure';
 
@@ -52,13 +53,26 @@ export const ExpandableMessage: React.FC<ExpandableMessageProps> = ({
     setIsExpanded(!isExpanded);
   };
 
-  return (
+  // Blocks inside the message that collapse themselves (long code blocks) report
+  // when the user expands them. That already expands the message, so don't clip
+  // it or show a second toggle while any of them is open.
+  const [expandedChildCount, setExpandedChildCount] = useState(0);
+  const childContext = useMemo(
+    () => ({
+      setChildExpanded: (expanded: boolean) =>
+        setExpandedChildCount(count => Math.max(0, count + (expanded ? 1 : -1))),
+    }),
+    [],
+  );
+  const hasExpandedChild = expandedChildCount > 0;
+
+  const content = (
     <div className={`expandable-message relative ${className}`}>
       <div
         ref={contentRef}
         className='transition-all duration-300 ease-in-out overflow-hidden'
         style={{
-          maxHeight: isExpanded ? 'none' : `${maxHeight}px`,
+          maxHeight: isExpanded || hasExpandedChild ? 'none' : `${maxHeight}px`,
         }}
       >
         {children !== undefined ? (
@@ -77,7 +91,7 @@ export const ExpandableMessage: React.FC<ExpandableMessageProps> = ({
         )}
       </div>
 
-      {shouldShowButton && (
+      {shouldShowButton && !hasExpandedChild && (
         <div
           className={
             isExpanded
@@ -106,5 +120,11 @@ export const ExpandableMessage: React.FC<ExpandableMessageProps> = ({
         </div>
       )}
     </div>
+  );
+
+  return (
+    <ExpandableMessageContext.Provider value={childContext}>
+      {content}
+    </ExpandableMessageContext.Provider>
   );
 };
