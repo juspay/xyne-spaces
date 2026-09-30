@@ -1,3 +1,4 @@
+import { XyneSpacesConnector } from './connectors/xyne-spaces';
 import {
   ApprovalRequirement,
   BaseConnector,
@@ -45,6 +46,7 @@ const storage = new WorkflowStorageAdapter();
 const services = new ServiceRegistry();
 
 const connectors = new ConnectorRegistry();
+connectors.register(new XyneSpacesConnector());
 connectors.register(new GitHubConnector());
 connectors.register(new BitbucketConnector({ apiBaseUrl: config.bitbucket.baseUrl }));
 
