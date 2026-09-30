@@ -83,7 +83,7 @@ import { redisService } from "../redis.js";
 import { publishLiveEvent } from "../lib/live-conversation-bus.js";
 import { deliverXyneAiFlow, postFlowCard, resolveXyneAiCardTarget } from "../lib/flow-card-delivery.js";
 import { renderAgentProfileCard, renderAgentProfileListCard, renderAgentSummaryCard } from "../lib/agent-card-render.js";
-import { renderConnectorSuggestCard, renderProviderSuggestCard, resolveConnectorSuggestions } from "../lib/connector-card-render.js";
+import { renderConnectorSuggestCard, renderProviderSuggestCard } from "../lib/connector-card-render.js";
 import { buildWriteApprovalCardFlow, formatActionDescription, mintWriteCardAction, readPendingWriteAction } from "../lib/write-card-render.js";
 import { UNREGISTERED_USER_TEMPLATE } from "../constants.js";
 import {
@@ -163,7 +163,6 @@ import type { TwinDelivery, UiWidget, PrProvider, PrStatus, FlowDefinition } fro
 import { isAgentInvocableBy } from "xyne-claw-shared";
 import { isSupportedInboundAttachment } from "xyne-claw-shared";
 import type { Todo } from "xyne-claw-shared";
-import { } from "../lib/connector-hints.js";
 import {
   providersUserAskedFor,
   stripAddressedAgentMention,
@@ -570,18 +569,11 @@ import {
 
 /** Agents listed on the roster card before it defers to "Browse agents". */
 
-/** Cap on connectors the server offers unprompted, so a card never becomes a list. */
-
-/**
- * Connector cards to post alongside a reply. The model requests these
- * explicitly (`title`/`listAll`); the server fills the same shape when it
- * infers a suggestion from the message text (`inferred`).
- */
+/** Connector cards the agent's suggest-connectors call queued for this reply. */
 type PendingConnectorSuggestions = {
   serverTypes: string[];
   title?: string;
   listAll?: boolean;
-  inferred?: boolean;
 };
 
 
@@ -4780,16 +4772,12 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       log.warn("Failed to post agent profile card (non-fatal)", { error: errMsg(err) });
     }
   }
-  const connectorSuggestions = resolveConnectorSuggestions(
-    payload.pendingConnectorSuggestions,
-    ctx.rootTask ?? ctx.task ?? "",
-  );
+  const connectorSuggestions = payload.pendingConnectorSuggestions;
   if (connectorSuggestions && agentCardDeliverable) {
     try {
       await renderConnectorSuggestCard({
         suggestions: connectorSuggestions,
         blockedConnectors: payload.blockedConnectors,
-        taskText: ctx.rootTask ?? ctx.task ?? "",
         id: connectorCardIdentity,
         target: agentCardTarget,
       });

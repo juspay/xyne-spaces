@@ -1333,6 +1333,17 @@ export const agentRunRepository = {
     return rows.map((r) => r.toolsUsed);
   },
 
+  /** Same as toolsUsedSince across every agent in the org. */
+  toolsUsedSinceInOrg: async (orgId: string, since: Date, maxRuns: number): Promise<string[][]> => {
+    const rows = await prisma.agentRun.findMany({
+      where: { orgId, startedAt: { gte: since } },
+      select: { toolsUsed: true },
+      orderBy: { startedAt: "desc" },
+      take: maxRuns,
+    });
+    return rows.map((r) => r.toolsUsed);
+  },
+
   /** High-level global overview suitable for dashboard header cards. */
   globalOverviewStats: async (cutoff: Date | null) => {
     type Row = {

@@ -61,7 +61,21 @@ export const OPTIMIZATION_KEYS = Object.keys(OPTIMIZATIONS) as OptimizationKey[]
 
 export type OptimizationOverrides = Partial<Record<OptimizationKey, boolean>>;
 
-const store = new AsyncLocalStorage<{ overrides: OptimizationOverrides }>();
+const store = new AsyncLocalStorage<{ overrides: OptimizationOverrides; tierDefaults?: OptimizationOverrides }>();
+
+/**
+ * Defaults that follow from an agent's delegation tier. They sit BELOW every
+ * explicit choice — the run's spec, the agent's own `optimizations`, and the
+ * XYNE_OPT_* env flags (so ops can still switch one off fleet-wide) — and
+ * above the fleet default.
+ *
+ * Orchestrators get `active_tool_cap`: with nothing selected they receive every
+ * tool the run can resolve, so only their most-used tools stay always-active
+ * and the rest wait behind search-tools / load-tools.
+ */
+export function tierOptimizationDefaults(delegationMode: string | undefined): OptimizationOverrides {
+  return delegationMode === "orchestrator" ? { active_tool_cap: true } : {};
+}
 
 function isKey(value: string): value is OptimizationKey {
   return Object.prototype.hasOwnProperty.call(OPTIMIZATIONS, value);
@@ -97,9 +111,13 @@ export function parseOptimizationSpec(input: unknown): OptimizationOverrides {
   return out;
 }
 
-export function pinRunOptimizations(spec: unknown, agentSpec?: unknown): OptimizationOverrides {
+export function pinRunOptimizations(
+  spec: unknown,
+  agentSpec?: unknown,
+  tierDefaults: OptimizationOverrides = {},
+): OptimizationOverrides {
   const overrides = { ...parseOptimizationSpec(agentSpec), ...parseOptimizationSpec(spec) };
-  store.enterWith({ overrides });
+  store.enterWith({ overrides, tierDefaults });
   return overrides;
 }
 
@@ -110,6 +128,8 @@ export function optEnabled(key: OptimizationKey): boolean {
   if (own !== undefined) return own;
   const all = envFlag("XYNE_OPT_ALL");
   if (all !== undefined) return all;
+  const tier = store.getStore()?.tierDefaults?.[key];
+  if (tier !== undefined) return tier;
   return OPTIMIZATIONS[key].defaultOn;
 }
 

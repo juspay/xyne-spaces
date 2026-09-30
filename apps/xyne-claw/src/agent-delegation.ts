@@ -88,6 +88,8 @@ export interface CallableAgentSpec {
   description: string;
   systemPrompt: string;
   agentConfig?: Record<string, unknown>;
+  /** The callee's tier; absent from older claw-auth builds (read as standard). */
+  delegationTier?: "standard" | "orchestrator";
   /** Tool param the parent fills with the delegated task. Defaults to "task". */
   paramName?: string;
   paramDescription?: string;

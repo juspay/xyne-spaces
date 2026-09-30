@@ -154,6 +154,19 @@ export function AgentToolsTabV2({
 
   const note = canEdit ? null : <DetailLockedNote>{LOCK_NOTE}</DetailLockedNote>;
 
+  // No saved selection means different things per tier (resolveAgentToolsConfig
+  // in xyne-claw-shared): a standard agent runs with only the built-in file
+  // tools, an orchestrator with every tool the user has connected. The empty
+  // lists below would otherwise read as "no tools" for both.
+  const palette = (agent.config?.['tools'] as { openPalette?: unknown } | undefined)?.openPalette;
+  const nothingSelected =
+    [saved.subagents, saved.direct, saved.custom, saved.gateway, saved.callableAgents].every(
+      list => list.length === 0,
+    ) &&
+    palette !== 'read' &&
+    palette !== 'all';
+  const isOrchestrator = agent.delegationTier === 'orchestrator';
+
   /** Manage opens the same browse dialog the create flow uses; read-only says why. */
   const trailingFor = (label: string, section: ManageSectionId): ReactElement =>
     canEdit ? (
@@ -164,6 +177,23 @@ export function AgentToolsTabV2({
 
   return (
     <div className='flex w-full flex-col gap-8'>
+      {nothingSelected && (
+        <p className='rounded-lg border border-border bg-muted/40 px-4 py-2.5 text-xs leading-5 text-muted-foreground'>
+          {isOrchestrator ? (
+            <>
+              <span className='font-medium text-foreground'>Nothing selected — all tools.</span> As an
+              orchestrator this agent gets every tool the signed-in user has connected; its most-used tools
+              stay active and the rest load on demand. Add tools here to restrict it to them.
+            </>
+          ) : (
+            <>
+              <span className='font-medium text-foreground'>Nothing selected — file tools only.</span> This
+              agent runs with just the built-in file tools (read, write, grep, find, ls) and per-run defaults
+              such as Spaces tools in a Spaces thread. Add tools here to give it more.
+            </>
+          )}
+        </p>
+      )}
       <DetailSection
         label='Subagents'
         info='Specialists this agent can delegate a whole task to'

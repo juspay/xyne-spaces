@@ -99,6 +99,15 @@ const TOOL_DISCOVERY_OPTIMIZATIONS = [
   },
 ] as const;
 
+/**
+ * Optimizations that default ON for a delegation tier. Mirrors claw's
+ * `tierOptimizationDefaults` (xyne-claw/src/optimizations.ts): a stored `true`/
+ * `false` always wins; an absent key falls back to this, then off.
+ */
+const TIER_OPTIMIZATION_DEFAULTS: Record<string, Record<string, boolean>> = {
+  orchestrator: { active_tool_cap: true },
+};
+
 function kindToTab(kind: string): Exclude<ToolTabKey, "subagents"> {
   const map: Record<string, Exclude<ToolTabKey, "subagents">> = {
     mcp:     "integrations",
@@ -1894,6 +1903,20 @@ export function AgentDetailLeftColumn({
     draftTools.direct.length +
     draftTools.custom.length +
     draftTools.callableAgents.length;
+  // Same test the save path uses to keep or drop `config.tools`
+  // (AgentDetailPageV3): no key at all is the "nothing selected" state, whose
+  // meaning depends on the tier — see resolveAgentToolsConfig in xyne-claw-shared.
+  const hasToolSelection =
+    selectedToolCount + draftTools.gateway.length > 0 || !!draftTools.openPalette;
+  const isOrchestratorTier = agent.delegationTier === "orchestrator";
+  const toolsSummary = hasToolSelection
+    ? `${selectedToolCount} selected`
+    : isOrchestratorTier
+      ? "All tools"
+      : "File tools only";
+  const tierOptimizationDefaults = TIER_OPTIMIZATION_DEFAULTS[agent.delegationTier ?? "standard"] ?? {};
+  const optimizationOn = (key: string): boolean =>
+    draftOptimizations[key] ?? tierOptimizationDefaults[key] ?? false;
 
 
   // Filtered lists for search — narrows integration cards (Subagents tab has its own search).
@@ -2194,13 +2217,32 @@ export function AgentDetailLeftColumn({
         label="Tools"
         tech="what it can do"
         subtitle="acts on real systems — credentials live with each integration"
-        summary={`${selectedToolCount} selected`}
+        summary={toolsSummary}
         open={activeTab === "toolbox"}
         onToggle={() => toggleSection("toolbox")}
       />
 
       {activeTab === "toolbox" && (
        <div className="border-t border-xyne-border-subtle px-4 py-4">
+        {!hasToolSelection && (
+          <div className="mb-3 rounded-lg border border-xyne-border-subtle bg-xyne-surface-raised px-3 py-2.5 text-[12px] leading-relaxed text-xyne-fg-secondary">
+            {isOrchestratorTier ? (
+              <>
+                <span className="font-medium text-xyne-fg-primary">Nothing selected — all available tools.</span>{" "}
+                As an orchestrator this agent gets every tool the signed-in user has connected. Its most-used
+                tools stay active and the rest load on demand through{" "}
+                <code className="text-xyne-fg-tertiary">search-tools</code> /{" "}
+                <code className="text-xyne-fg-tertiary">load-tools</code>. Select tools to restrict it to them.
+              </>
+            ) : (
+              <>
+                <span className="font-medium text-xyne-fg-primary">Nothing selected — file tools only.</span>{" "}
+                This agent runs with just the built-in file tools (read, write, grep, find, ls) and per-run
+                defaults such as Spaces tools in a Spaces thread. Select integrations or tools to give it more.
+              </>
+            )}
+          </div>
+        )}
         <ToolboxPicker
           availableTools={availableTools}
           loading={!availableTools}
@@ -3109,8 +3151,12 @@ export function AgentDetailLeftColumn({
           <SettingRow
             title="Tool discovery"
             summary="How the agent finds tools it has not loaded yet."
-            detail="Off = fleet default. Grants no new access: only tools this agent already has are affected."
-            enabled={TOOL_DISCOVERY_OPTIMIZATIONS.some((o) => draftOptimizations[o.key] === true)}
+            detail={
+              isOrchestratorTier
+                ? "Orchestrators start with Top-25 active tools on. Grants no new access: only tools this agent already has are affected."
+                : "Off = fleet default. Grants no new access: only tools this agent already has are affected."
+            }
+            enabled={TOOL_DISCOVERY_OPTIMIZATIONS.some((o) => optimizationOn(o.key))}
             control={
               <span className="rounded-full bg-xyne-surface-sunken px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-xyne-fg-tertiary">
                 beta
@@ -3125,11 +3171,13 @@ export function AgentDetailLeftColumn({
                     <p className="text-[12px] leading-relaxed text-xyne-fg-secondary">{o.description}</p>
                   </div>
                   <Switch
-                    checked={draftOptimizations[o.key] === true}
+                    checked={optimizationOn(o.key)}
                     onChange={(v) => {
+                      // Store only a departure from the tier default, so an
+                      // orchestrator that never touched this keeps following it.
                       const next = { ...draftOptimizations };
-                      if (v) next[o.key] = true;
-                      else delete next[o.key];
+                      if (v === (tierOptimizationDefaults[o.key] ?? false)) delete next[o.key];
+                      else next[o.key] = v;
                       onDraftOptimizationsChange(next);
                     }}
                     disabled={!canEdit}

@@ -63,7 +63,7 @@ import {
 import { loadCustomTools } from "../custom-tools.js";
 import { buildCopilotTool } from "../copilot.js";
 import { pinRunJudgeBackend } from "../judge-backend.js";
-import { optEnabled, pinRunOptimizations } from "../optimizations.js";
+import { optEnabled, pinRunOptimizations, tierOptimizationDefaults } from "../optimizations.js";
 import { activeToolCap, demotedCatalogItem, planActiveToolCap, readToolUsageRank } from "../active-tool-cap.js";
 import { buildExperimentTools, buildExperimentReviewTools, type ExperimentContext } from "../experiment.js";
 import {
@@ -111,6 +111,7 @@ import {
   buildFastModeMetaTools,
   duplicatesMetaTool,
   type DeploymentToolSearch,
+  renderUnresolvedConfigured,
   buildToolCatalog,
   describeMcpServers,
   renderToolCatalogForPrompt,
@@ -131,6 +132,7 @@ import {
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import {
   parseToolsConfig,
+  resolveAgentToolsConfig,
   COPILOT_SYSTEM_INSTRUCTION,
   REPO_CONFIGS,
   getSandboxSession,
@@ -154,7 +156,7 @@ import { buildProposePlanTool, PROPOSE_PLAN_TOOL_NAME, type ProposePlanRef } fro
 import { presentationCatalogDefaultOn, isFreePresentationTool, buildPresentationPrimer } from "../presentation-catalog.js";
 import { buildProposeAgentTool, type ProposeAgentRef } from "../propose-agent.js";
 import { buildDescribeAgentTool, type DescribeAgentRef } from "../describe-agent.js";
-import { buildSuggestConnectorsTool, type SuggestConnectorsRef } from "../suggest-connectors.js";
+import { buildSuggestConnectorsTool, SUGGEST_CONNECTORS_TOOL_NAME, type SuggestConnectorsRef } from "../suggest-connectors.js";
 import { buildEmitBriefTool, EMIT_BRIEF_TOOL_NAME, type EmitBriefRef } from "../daily-brief.js";
 import {
   buildSuggestGoalTool,
@@ -573,7 +575,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
 
   const experiment = normalizeExperimentContext(rawExperiment);
   pinRunJudgeBackend(judgeBackend);
-  pinRunOptimizations(optimizations, agentConfig?.["optimizations"]);
+  pinRunOptimizations(optimizations, agentConfig?.["optimizations"], tierOptimizationDefaults(delegationMode));
 
   // [AUTODBG] claw-side receipt of every /run forward (esp. automations). Confirms
   // the request crossed claw-auth → claw and which session id it arrived under
@@ -1781,6 +1783,7 @@ export async function processTask(
     const trustedSdlcBindings = trustedSdlcToolBindings(agentConfig?.["sdlcContext"]);
     const {
       groups: mcpGroups,
+      unresolvedConfigured,
       cleanup,
       getPendingActions,
       getAttachments: getMcpAttachments,
@@ -1880,13 +1883,23 @@ export async function processTask(
     // For google-agent: fetch the user's Google OAuth token from xyne-claw-auth
     const effectiveConfig = { ...(agentConfig ?? {}) };
 
+    // The tools selection this run enforces (resolveAgentToolsConfig, shared
+    // with claw-auth's MCP gate). A standard agent with nothing selected gets
+    // an EMPTY selection here — only framework tools no selection gates
+    // survive the filters below. Only an orchestrator with nothing selected
+    // keeps a missing `tools` object, which every filter reads as unrestricted.
+    const runToolsSelection = resolveAgentToolsConfig(effectiveConfig, delegationMode ?? "standard");
+    if (runToolsSelection) effectiveConfig["tools"] = runToolsSelection;
+    else delete effectiveConfig["tools"];
+
     // Surface-default tool injection, per run only. Slack already injects its
     // subagent in claw-auth before dispatch; Spaces runs arrive directly from
     // the Spaces webhook and need the same default here so mention/automation/
     // scheduled runs can read the room without mutating the stored agent config.
     // Scheduled jobs post into a Spaces channel too, so they get the same spaces
-    // default as an interactive mention. A missing tools object means the agent
-    // is unrestricted, so do not create one.
+    // default as an interactive mention. A missing tools object only remains for
+    // an unrestricted orchestrator (see above), which already has everything, so
+    // do not create one.
     const effectiveTools = effectiveConfig["tools"];
     const isSpacesSurfaceEvent =
       eventType === "APP_MENTIONED" ||
@@ -2371,6 +2384,8 @@ export async function processTask(
         customTools: ToolDefinition[];
       },
     ): ToolDefinition[] => {
+      // No selection only reaches here for an orchestrator callee
+      // (resolveAgentToolsConfig): unrestricted by design.
       if (!cfg) return tools;
       const allowedSubagents = new Set(cfg.subagents ?? []);
       const allowedDirect = cfg.direct ?? [];
@@ -2399,7 +2414,9 @@ export async function processTask(
       const label = spec.progressLabels?.[0] ?? `Delegating to ${spec.name}...`;
       onProgress?.(label);
       const calleeConfig = spec.agentConfig ?? {};
-      const calleeToolsConfig = parseToolsConfig(calleeConfig);
+      // Same tier rule as the parent run: an empty selection means nothing
+      // granted unless the callee itself is an orchestrator.
+      const calleeToolsConfig = resolveAgentToolsConfig(calleeConfig, spec.delegationTier ?? "standard");
       const calleeMeta: Record<string, string> = { userId };
       if (userName) calleeMeta["userName"] = userName;
       if (userEmail) calleeMeta["userEmail"] = userEmail;
@@ -2430,6 +2447,10 @@ export async function processTask(
         spec.slug,
         mcpOutputDir,
         (att) => pushAttachment(progressUrl, sessionId, att),
+        undefined,
+        // A delegated agent's 401/403 is the same signal as the parent's: the
+        // user's own connection is the fix, so it feeds the same connector card.
+        (serverType) => blockedConnectors.add(serverType),
       );
       try {
         const calleeCustom = loadCustomTools(
@@ -2779,6 +2800,8 @@ export async function processTask(
 
     // Apply agent-level tool config from DB (agent.config.tools). Reuses the
     // toolsConfigEarly parse we did above for the directPickSuffixes hoist.
+    // `toolsConfigEarly` is undefined only for an orchestrator with nothing
+    // selected — it keeps every resolved tool, capped by active_tool_cap below.
     if (toolsConfigEarly) {
       const allowedSubagents = new Set(toolsConfigEarly.subagents ?? []);
       const allowedDirect = toolsConfigEarly.direct ?? [];
@@ -2888,6 +2911,17 @@ export async function processTask(
         `Agent tools config applied: ${allTools.length} tools after filtering` +
         (paletteMode === "off" ? "" : ` (open palette "${paletteMode}" admitted ${allTools.length - granted} beyond the grant, of ${before} offered)`),
       );
+
+      // task-status / task-stop were built from the PRE-filter wrappers. When
+      // the selection kept nothing that can run in the background (e.g. a
+      // standard agent with nothing selected), they have nothing to inspect.
+      const canRunInBackground = allTools.some((t) =>
+        subagentTools.some((s) => s.name === t.name) || callableAgentTools.some((c) => c.name === t.name),
+      );
+      if (!canRunInBackground && childTaskTools.length > 0) {
+        const childTaskNames = new Set(childTaskTools.map((t) => t.name));
+        allTools = allTools.filter((t) => !childTaskNames.has(t.name));
+      }
     }
 
     // ── Plan tools: framework default, not per-agent config ──────────────────
@@ -3384,16 +3418,26 @@ export async function processTask(
     // there is something to catalogue. `fastModeEnabled ||` keeps fast mode
     // byte-identical — a fast-mode run with an EMPTY catalog still gets its
     // (empty) meta-tools exactly as it did before, rather than silently losing
-    // search-tools/load-tools.
-    const catalogActive = fastModeEnabled || fastCatalogCandidateItems.length > 0;
+    // search-tools/load-tools. Orchestrators ALWAYS get them: their job is
+    // finding the right capability, and search-tools scope="claw" is how they
+    // see tools (connected or not) beyond what this run resolved.
+    //
+    // Decided on the catalog that SURVIVED the selection filter, not on the
+    // pre-filter candidates: a standard agent whose selection leaves nothing to
+    // load gets no search-tools / load-tools (they would only ever answer
+    // "the catalog is empty").
+    const isOrchestratorRun = delegationMode === "orchestrator";
+    const registeredToolNames = new Set(allTools.map((tool) => tool.name));
+    const survivingCatalogItems = fastCatalogCandidateItems.filter((item) =>
+      registeredToolNames.has(item.entry.name) &&
+      // Palette-admitted tools can also be in the always-active list (def-less
+      // servers push everything to directTools) — palette wins, route to catalog.
+      (paletteAdmittedNames.has(item.entry.name) || !fastAlwaysActiveToolNames.has(item.entry.name)),
+    );
+    const catalogActive = fastModeEnabled || survivingCatalogItems.length > 0 || isOrchestratorRun;
+    const suggestConnectorsRegistered = allTools.some((tool) => tool.name === SUGGEST_CONNECTORS_TOOL_NAME);
     if (catalogActive) {
-      const registeredToolNames = new Set(allTools.map((tool) => tool.name));
-      fastCatalogItems = fastCatalogCandidateItems.filter((item) =>
-        registeredToolNames.has(item.entry.name) &&
-        // Palette-admitted tools can also be in the always-active list (def-less
-        // servers push everything to directTools) — palette wins, route to catalog.
-        (paletteAdmittedNames.has(item.entry.name) || !fastAlwaysActiveToolNames.has(item.entry.name)),
-      );
+      fastCatalogItems = survivingCatalogItems;
       fastCatalogNames = fastCatalogItems.map((item) => item.entry.name);
       const finalFastCatalogNameSet = new Set(fastCatalogNames);
       const activeToolEntries: ToolCatalogEntry[] | undefined =
@@ -3428,6 +3472,9 @@ export async function processTask(
             : {}),
           openPalette: openPaletteEnabled,
           mcpServers: describeMcpServers(allGroups),
+          unresolvedConfigured,
+          suggestConnectorsAvailable: suggestConnectorsRegistered,
+          runToolNames: [...registeredToolNames],
           ...(fastCatalogItems.length === 0 && (customSubagents?.length ?? 0) > 0
             ? {
                 emptyCatalogNote:
@@ -3543,6 +3590,17 @@ export async function processTask(
       fullContext = fullContext
         ? `${fullContext}\n\n${metaLines.join("\n")}`
         : metaLines.join("\n");
+    }
+
+    // Configured-but-unresolved connectors. The agent's selection grants these
+    // servers, the UI shows them as selected, but this user has no working
+    // connection, so their tools never reached the tool list. Say so up front:
+    // otherwise the agent answers as if the capability does not exist instead
+    // of offering the one fix (the user connecting it).
+    if (unresolvedConfigured.length > 0) {
+      const connectorPrimer = renderUnresolvedConfigured(unresolvedConfigured, suggestConnectorsRegistered);
+      fullContext = fullContext ? `${fullContext}\n\n${connectorPrimer}` : connectorPrimer;
+      log(`[connectors] configured-but-unresolved: ${unresolvedConfigured.map((u) => `${u.serverType}:${u.reason}`).join(", ")}`);
     }
 
     // /goal-awareness primer. Injected only when suggest-goal is registered
