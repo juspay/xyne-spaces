@@ -11,6 +11,7 @@ export {
   sandboxContentType,
   sandboxDestroy,
   sandboxRepoSetup,
+  sandboxListProfiles,
   gitRead,
   SANDBOX_CONFIG_SCHEMA,
   makeRepoSetupTool,
@@ -26,6 +27,7 @@ export {
 } from "./tools.js";
 
 export { REPO_CONFIGS as DEFAULT_REPO_CONFIGS, SBX_GIT } from "./repo-configs.js";
+export { findSandboxKeys, normalizeRepoUrl } from "./repo-url.js";
 export {
   buildEffectiveRepoConfigs,
   getCachedRepoConfigs,
