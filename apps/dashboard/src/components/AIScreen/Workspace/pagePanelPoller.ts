@@ -43,10 +43,10 @@ export function startPagePanelPoller(): () => void {
     if (stopped) return;
     let next = POLL_MS;
     const runIds = streamingRunIds();
-    if (runIds.length > 0 && getWorkspaceWebview() && Date.now() >= pausedUntil) {
+    if (runIds.length > 0 && Date.now() >= pausedUntil) {
       try {
         const data = await clawApiRequest<{ call: PagePanelCall | null }>(
-          `/surface/page-calls/next?runIds=${encodeURIComponent(runIds.join(','))}`,
+          `/surface/page-calls/next?runIds=${encodeURIComponent(runIds.join(','))}&panel=${getWorkspaceWebview() ? '1' : '0'}`,
         );
         const call = data?.call;
         if (call && typeof call.id === 'string' && typeof call.toolName === 'string') {
