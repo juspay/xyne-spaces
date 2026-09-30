@@ -69,6 +69,8 @@ import {
 const MINIMAP_MIN_STEPS = 9;
 const MIN_ZOOM = 0.2;
 const MAX_ZOOM = 1.5;
+/** Small flows fit at 100%, not zoomed in; shared by the initial fit and the fit button. */
+const FIT_VIEW_OPTIONS = { padding: 0.2, maxZoom: 1 };
 /** Context menu footprint, to keep it inside the canvas. */
 const MENU_WIDTH = 200;
 const MENU_HEIGHT = 80;
@@ -498,39 +500,43 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
     );
   };
 
-  // View mode: the trigger forms have no read-only mode, so the panel is inert.
-  // Step cards take `readOnly` themselves and keep their expand toggle usable.
+  // View mode: the trigger forms have no read-only mode, so they are inert.
+  // `triggerExtras` (the webhook URL, shown once) stays copyable.
   const renderTriggerPanel = (): React.ReactElement => {
     const triggerIssues = issuesUnder(validation?.issues, 'trigger');
     return (
-      <div className='flex flex-col gap-4' inert={!editable}>
-        <TriggerCard
-          view='event'
-          trigger={config.trigger}
-          catalog={triggerCatalog}
-          schema={triggerSchema}
-          schemaLoading={triggerSchemaLoading}
-          onChangeType={onTriggerTypeChange}
-          onConfigChange={onTriggerConfigChange}
-          issues={triggerIssues}
-        />
+      <div className='flex flex-col gap-4'>
+        <div inert={!editable}>
+          <TriggerCard
+            view='event'
+            trigger={config.trigger}
+            catalog={triggerCatalog}
+            schema={triggerSchema}
+            schemaLoading={triggerSchemaLoading}
+            onChangeType={onTriggerTypeChange}
+            onConfigChange={onTriggerConfigChange}
+            issues={triggerIssues}
+          />
+        </div>
         {triggerExtras}
-        <TriggerCard
-          view='condition'
-          trigger={config.trigger}
-          catalog={triggerCatalog}
-          schema={triggerSchema}
-          schemaLoading={triggerSchemaLoading}
-          onChangeType={onTriggerTypeChange}
-          onConfigChange={onTriggerConfigChange}
-          issues={triggerIssues}
-          onFormFieldNamesResolved={map => onFormFieldNamesResolved?.(map)}
-        />
-        <ScheduleCard
-          schedule={config.schedule}
-          triggerSchema={triggerSchema}
-          onChange={onScheduleChange}
-        />
+        <div className='flex flex-col gap-4' inert={!editable}>
+          <TriggerCard
+            view='condition'
+            trigger={config.trigger}
+            catalog={triggerCatalog}
+            schema={triggerSchema}
+            schemaLoading={triggerSchemaLoading}
+            onChangeType={onTriggerTypeChange}
+            onConfigChange={onTriggerConfigChange}
+            issues={triggerIssues}
+            onFormFieldNamesResolved={map => onFormFieldNamesResolved?.(map)}
+          />
+          <ScheduleCard
+            schedule={config.schedule}
+            triggerSchema={triggerSchema}
+            onChange={onScheduleChange}
+          />
+        </div>
       </div>
     );
   };
@@ -654,7 +660,7 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
             onEdgeMouseEnter={(_event, edge) => setHoveredEdgeId(edge.id)}
             onEdgeMouseLeave={() => setHoveredEdgeId(null)}
             fitView
-            fitViewOptions={{ padding: 0.2 }}
+            fitViewOptions={FIT_VIEW_OPTIONS}
             deleteKeyCode={null}
             multiSelectionKeyCode={null}
             selectionKeyCode={null}
@@ -670,7 +676,8 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
             <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
             <Controls
               showInteractive={false}
-              className='!bg-background !border-border !shadow-md'
+              fitViewOptions={FIT_VIEW_OPTIONS}
+              className='!bg-background !border-border !shadow-md [&_button]:!bg-background [&_button]:!border-border [&_button]:!fill-foreground'
             />
             {showMiniMap && (
               <MiniMap
