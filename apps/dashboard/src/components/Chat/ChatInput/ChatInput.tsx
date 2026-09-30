@@ -23,6 +23,8 @@ import {
   ChannelType,
   BaseTicketType,
   CommandAccessibility,
+  buildPollMessageSummary,
+  type PollDraft,
 } from '@xyne/shared';
 import { BLOCKED_EXTENSIONS } from '../../ui/utils/files';
 import { getAllChannels, useChannel, useChannelMentionSearch } from '../../../hooks/useChannels';
@@ -101,6 +103,7 @@ import { RelatedContextDialog } from './RelatedContextDialog';
 import { openSearchResult } from '../../../utils/searchNavigation';
 import { isElectronApp } from '../../../utils/electronApp';
 import type { RelatedItem } from '../../../types/search';
+import { PollComposerDialog } from '../Polls/PollComposerDialog';
 
 const CHAT_MESSAGE_SENT_EVENT = 'xyne:chat-message-sent';
 
@@ -404,6 +407,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
     }, [handleTyping, interruptRelated]);
     const [typingUsers, setTypingUsers] = useState<Array<{ userId: string; username: string }>>([]);
     const [alsoSendToChannel, setAlsoSendToChannel] = useState(false);
+    const [pollComposerOpen, setPollComposerOpen] = useState(false);
     const [isCreateTicketModalOpen, setIsCreateTicketModalOpen] = useState(false);
     // Which surface opened the create form (composer button vs intent toast).
     const [createTicketSource, setCreateTicketSource] = useState('chat_composer');
@@ -650,6 +654,26 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
         }
       },
       [channelId, conversationId, navigate],
+    );
+
+    const handlePublishPoll = useCallback(
+      (poll: PollDraft): void => {
+        const timestamp = Date.now();
+        const ref: ConversationRef = conversationId
+          ? { kind: 'thread', channelId, conversationId }
+          : { kind: 'channel', channelId };
+        sendMessage(zero as Parameters<typeof sendMessage>[0], ref, {
+          content: buildPollMessageSummary(poll),
+          type: MessageType.USER,
+          messageId: uuidv4(),
+          timestamp,
+          poll,
+          ...(conversationId ? { alsoSendToChannel } : { conversationId: uuidv4() }),
+        });
+        setPollComposerOpen(false);
+        if (conversationId) onMessageChange(conversationId, channelId);
+      },
+      [alsoSendToChannel, channelId, conversationId, onMessageChange, zero],
     );
 
     const handleMentionSearch = useCallback(
@@ -1374,6 +1398,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
                 inputBoxRef.current?.insertContent(content);
               }}
               onCreateCanvas={handleCreateCanvasFromComposer}
+              {...(!messageId && { onCreatePoll: () => setPollComposerOpen(true) })}
               hasTicket={hasTicket}
               sendDisabled={isOffline || isAttachmentUploading}
               {...(isAttachmentUploading && {
@@ -1426,6 +1451,11 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
             onTicketCreated={handleTicketCreated}
           />
         ) : null}
+        <PollComposerDialog
+          open={pollComposerOpen}
+          onClose={() => setPollComposerOpen(false)}
+          onPublish={handlePublishPoll}
+        />
         {relatedEnabled && (
           <RelatedContextDialog
             open={relatedPopup.open}

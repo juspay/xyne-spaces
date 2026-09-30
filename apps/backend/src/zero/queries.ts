@@ -816,6 +816,21 @@ const applyArchiveFilter = <T extends { where: Function }>(
 };
 
 export const queries: AnyQueryRegistry = defineQueries({
+  pollByMessageId: defineQuery(
+    z.object({ messageId: z.string() }),
+    ({ args: { messageId } }) =>
+      zql.polls
+        .where('messageId', '=', messageId)
+        .related('questions', question =>
+          question
+            .orderBy('position', 'asc')
+            .related('options', option =>
+              option.orderBy('position', 'asc').orderBy('createdAt', 'asc'),
+            )
+            .related('votes'),
+        )
+        .one(),
+  ),
   activeSlashCommandArtifacts: defineQuery(({ ctx }) =>
     zql.message_artifacts
       .where('workspaceId', ctx.workspaceId)
