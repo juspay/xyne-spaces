@@ -24,6 +24,7 @@ import {
   verifyProviderCredential,
 } from "../lib/provider-credential-verify.js";
 import { assertSafeOutboundUrl } from "../mcpgateway/services/http-client.js";
+import { MAX_BASE_URL_CHARS, trimTrailingSlashes } from "../lib/provider-credential-verify.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("settings");
@@ -656,6 +657,7 @@ router.post("/provider-credentials/litellm/models", asyncHandler(async (req: Req
 
   let apiKey = typedKey;
   let baseUrl = (body.baseUrl ?? "").trim();
+  if (baseUrl.length > MAX_BASE_URL_CHARS) throw badRequest("baseUrl is too long");
   if (!apiKey) {
     const cred = await userProviderCredentialsRepository.findByUserAndProvider(userId, "litellm");
     if (!cred?.encryptedKey || !cred.iv || !cred.authTag) {
@@ -665,8 +667,14 @@ router.post("/provider-credentials/litellm/models", asyncHandler(async (req: Req
     if (!baseUrl) baseUrl = cred.baseUrl ?? "";
   }
 
-  const root = (baseUrl || CONFIG.litellmBaseUrl).replace(/\/+$/, "");
+  const root = trimTrailingSlashes(baseUrl || CONFIG.litellmBaseUrl);
   log.info(`[settings] litellm/models fetching ${root}/v1/models (keyLen=${apiKey.length}, source=${typedKey ? "typed" : "saved-cred"})`);
+  // Same egress rule as the save path: only public http(s) destinations.
+  try {
+    await assertSafeOutboundUrl(`${root}/v1/models`);
+  } catch {
+    throw badRequest("baseUrl must be a public https endpoint");
+  }
   const upstream = await fetch(`${root}/v1/models`, {
     headers: { Authorization: `Bearer ${apiKey}`, "User-Agent": "xyne-claw-auth" },
     signal: AbortSignal.timeout(20_000),

@@ -510,6 +510,7 @@ router.post("/:slug/propose-update", asyncHandler(async (req: Request<{ slug: st
   // 318-rule skill today). Full-replacement `content` stays only for small
   // skills, where truncation cannot occur.
   const FULL_REPLACEMENT_MAX_CHARS = 8_000;
+  const MAX_SKILL_CONTENT_CHARS = 512_000;
   let content: string;
   if (Array.isArray(edits) && edits.length > 0) {
     let working = normalizeSkillContent(skill.content);
@@ -536,6 +537,10 @@ router.post("/:slug/propose-update", asyncHandler(async (req: Request<{ slug: st
     content = rawContent;
   } else {
     throw badRequest("Provide `edits` (preferred) or `content`.");
+  }
+
+  if (content.length > MAX_SKILL_CONTENT_CHARS) {
+    throw badRequest(`Proposed content is ${content.length} chars — the limit is ${MAX_SKILL_CONTENT_CHARS}.`);
   }
 
   // Hard shrink guard: a proposal that deletes most of the skill is almost

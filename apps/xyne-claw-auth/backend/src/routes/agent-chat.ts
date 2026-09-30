@@ -610,10 +610,22 @@ async function resolveCallbackOrgId(req: Request, sessionId?: string, userId?: s
   return undefined;
 }
 
+/** Conversation ids are path segments of internal URLs: keep them to a plain token. */
+const SAFE_CONVERSATION_ID = /^[A-Za-z0-9_-]{1,128}$/;
+function isSafeConversationId(value: unknown): value is string {
+  return typeof value === "string" && SAFE_CONVERSATION_ID.test(value);
+}
+
 function getCookieValue(req: Request, name: string): string | undefined {
-  const cookie = req.headers["cookie"] ?? "";
-  const match = cookie.match(new RegExp(`(?:^|;\\s*)${name}=([^;]*)`));
-  return match?.[1] ? decodeURIComponent(match[1]) : undefined;
+  const header = req.headers["cookie"] ?? "";
+  for (const part of header.split(";")) {
+    const eq = part.indexOf("=");
+    if (eq === -1) continue;
+    if (part.slice(0, eq).trim() !== name) continue;
+    const raw = part.slice(eq + 1);
+    return raw ? decodeURIComponent(raw) : undefined;
+  }
+  return undefined;
 }
 
 function extractSpacesUserToken(req: Request): string | undefined {
@@ -1212,6 +1224,10 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high";
       sandboxMode?: "local" | "remote" | "container";
     };
+    if (existingConvId != null && !isSafeConversationId(existingConvId)) {
+      res.status(400).json({ success: false, error: "conversationId is invalid" });
+      return;
+    }
     const userId = getRequesterId(req) ?? (req.body as { userId?: string }).userId;
     const speedOverride: "standard" | "fast" | undefined =
       rawSpeed === "fast" || rawSpeed === "standard" ? rawSpeed : undefined;
