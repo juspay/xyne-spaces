@@ -5,7 +5,7 @@
  */
 import type { ReactElement } from 'react';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
-import { Command } from 'cmdk';
+import { Command, defaultFilter } from 'cmdk';
 import { Check, Hash, Lock, Plus, Search } from 'lucide-react';
 import type { SdlcHubOption } from './SdlcHubSidebar';
 
@@ -48,7 +48,12 @@ export function SdlcHubSwitcher(props: {
           className='fixed inset-x-0 top-[14vh] z-50 mx-auto w-[min(560px,calc(100vw-2rem))] overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-2xl duration-100 focus:outline-none data-[state=closed]:animate-out data-[state=open]:animate-in data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0'
         >
           <DialogPrimitive.Title className='sr-only'>Switch hub</DialogPrimitive.Title>
-          <Command label='Switch hub' loop>
+          {/* Scored on the hub's name alone: its value is its id, which is noise to search. */}
+          <Command
+            label='Switch hub'
+            loop
+            filter={(_value, search, keywords) => defaultFilter('', search, keywords)}
+          >
             <div className='flex items-center gap-2.5 border-b border-border px-4'>
               <Search className='size-4 shrink-0 text-muted-foreground' />
               <Command.Input

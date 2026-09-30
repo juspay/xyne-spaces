@@ -3998,6 +3998,8 @@ export default function SdlcScreen(): ReactElement {
                       // call's discussion opens beside the list on its own: the hub has
                       // no list of discussions to go back to.
                       <SdlcCalls
+                        // Its lists, filter and loaded pages are one hub's.
+                        key={channel.id}
                         channelId={channel.id}
                         track={null}
                         hubName={channel.name}

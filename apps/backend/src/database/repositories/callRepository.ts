@@ -198,6 +198,59 @@ export class CallRepository {
   }
 
 
+  /** An SDLC hub's live call filed on one track or item: its owner -> CALL link. */
+  async findActiveCallFiledOn(
+    channelId: string,
+    owner: { ownerType: string; ownerId: string }
+  ): Promise<Call | null> {
+    const db = DatabaseClient.getInstance();
+    const links = await db.sdlcEntityLink.findMany({
+      where: {
+        channelId,
+        sourceType: owner.ownerType,
+        sourceId: owner.ownerId,
+        targetType: 'CALL',
+        relationType: 'CALL',
+      },
+      select: { targetId: true },
+    });
+    if (links.length === 0) return null;
+    return db.call.findFirst({
+      where: {
+        id: { in: links.map(link => link.targetId) },
+        channelId,
+        status: CallStatus.ACTIVE,
+      },
+      orderBy: { startedAt: 'desc' },
+    });
+  }
+
+  /** An SDLC hub's live channel call that is not filed on any of its tracks or items. */
+  async findActiveUnfiledCallByChannelId(channelId: string): Promise<Call | null> {
+    const db = DatabaseClient.getInstance();
+    const live = await db.call.findMany({
+      where: {
+        channelId,
+        status: CallStatus.ACTIVE,
+        callOrigin: CallOrigin.CHANNEL,
+      },
+      orderBy: { startedAt: 'desc' },
+      take: 50,
+    });
+    if (live.length === 0) return null;
+    const filed = await db.sdlcEntityLink.findMany({
+      where: {
+        channelId,
+        targetType: 'CALL',
+        relationType: 'CALL',
+        targetId: { in: live.map(call => call.id) },
+      },
+      select: { targetId: true },
+    });
+    const filedIds = new Set(filed.map(link => link.targetId));
+    return live.find(call => !filedIds.has(call.id)) ?? null;
+  }
+
   async findActiveCallByChannelIdAndConversationId(
     channelId: string,
     conversationId: string

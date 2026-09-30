@@ -70,8 +70,9 @@ export type FolderTabKind = 'CANVAS' | 'LINK' | 'ATTACHMENT' | 'BROWSER';
 export const SCRATCH_TAB_ID = 'browse';
 
 /**
- * How many tabs a folder's strip looks up. Past this many the oldest drop out of the
- * strip, as ones whose items are gone already do.
+ * How many tabs a folder's strip looks up: the open one and the most recently added.
+ * Past this many the oldest drop out of the strip, as ones whose items are gone
+ * already do; they stay saved.
  */
 const TAB_LOOKUP_LIMIT = 100;
 
@@ -552,17 +553,17 @@ export function SdlcFolderPage(props: {
   const openId = props.activeTab?.id;
   const tabRefs = useMemo(() => {
     const open = openKind && openId ? [{ kind: openKind, id: openId }] : [];
-    const refs = [...open, ...(storedTabs ?? [])].flatMap(tab =>
+    // Saved tabs are kept oldest first, so the newest are the last ones.
+    const recent = (storedTabs ?? []).slice(-(TAB_LOOKUP_LIMIT - open.length));
+    const refs = [...open, ...recent].flatMap(tab =>
       tab.kind === 'BROWSER' ? [] : [{ type: tab.kind, id: tab.id }],
     );
-    return refs
-      .filter(
-        (ref, index) =>
-          refs.findIndex(other => other.type === ref.type && other.id === ref.id) === index,
-      )
-      .slice(0, TAB_LOOKUP_LIMIT);
+    return refs.filter(
+      (ref, index) =>
+        refs.findIndex(other => other.type === ref.type && other.id === ref.id) === index,
+    );
   }, [storedTabs, openKind, openId]);
-  const [tabItemRows] = useCachedQuery(
+  const [tabItemRows, tabItemDetails] = useCachedQuery(
     queries.getSdlcTrackItems({ channelId: props.channelId, items: tabRefs }),
     { enabled: Boolean(props.channelId) && tabRefs.length > 0 },
   );
@@ -920,13 +921,27 @@ export function SdlcFolderPage(props: {
   };
 
   const closeTab = (tab: FolderTab): void => {
-    const remaining = tabs.filter(item => !(item.kind === tab.kind && item.id === tab.id));
+    const isClosed = (item: FolderTab): boolean => item.kind === tab.kind && item.id === tab.id;
+    // Saved from the tabs as kept, not as shown: those whose items are still on their
+    // way, or past the lookup limit, would otherwise be lost. Only a tab the lookup
+    // has answered for and not found — its item is gone — is dropped.
+    const lookedUp = new Set(tabRefs.map(ref => tabKey({ kind: ref.type, id: ref.id })));
+    const answered = tabItemDetails.type === 'complete';
+    const kept = (storedTabs ?? []).filter(
+      item =>
+        !isClosed(item) &&
+        (item.kind === 'BROWSER' ||
+          tabItems.has(tabKey(item)) ||
+          !answered ||
+          !lookedUp.has(tabKey(item))),
+    );
+    const remaining = tabs.filter(item => !isClosed(item));
     // Closing the open tab also navigates away from it, and that lands a beat
     // later. Until it does, the url still names this tab, and the effect that
     // keeps the open tab in the strip would put it straight back — which read
     // as the first click doing nothing.
     closedRef.current = `${tab.kind}:${tab.id}`;
-    setTabs(remaining);
+    setTabs(kept);
     if (active && active.kind === tab.kind && active.id === tab.id) {
       openTab(remaining.at(-1) ?? null);
     }

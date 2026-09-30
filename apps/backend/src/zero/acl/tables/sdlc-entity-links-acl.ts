@@ -43,15 +43,7 @@ export class SdlcEntityLinksACL extends BaseACL<'sdlc_entity_links'> {
     // Track membership is structure too, but sdlc.createTrack writes it through this
     // path, so it is gated rather than refused: the writer must be in that hub.
     if (args.relationType === SDLC_TRACK_MEMBERSHIP_RELATION) {
-      const participant = await tx.run(
-        zql.channel_participants
-          .where('channelId', args.channelId)
-          .where('userId', this.ctx.userID)
-          .one(),
-      );
-      if (!participant) {
-        throw new MutationACLError('Hub membership required', 'sdlc_entity_links');
-      }
+      await this.assertHubMember(args.channelId, tx);
     }
   }
 
@@ -72,7 +64,11 @@ export class SdlcEntityLinksACL extends BaseACL<'sdlc_entity_links'> {
     }
     assertWorkspaceMatch(this.ctx, row.workspaceId, 'sdlc_entity_links');
     // Folder edges follow an item whenever it is moved or unfiled, and those
-    // mutators are what delete them. The link API still refuses them as structural.
+    // mutators are what delete them — for someone in that hub. The link API still
+    // refuses them as structural.
+    if (row.relationType === SDLC_FOLDER_FLAT_RELATION) {
+      await this.assertHubMember(row.channelId, tx);
+    }
     if (
       row.relationType !== SDLC_FOLDER_FLAT_RELATION &&
       (SDLC_STRUCTURAL_RELATIONS as readonly string[]).includes(row.relationType)
@@ -81,6 +77,21 @@ export class SdlcEntityLinksACL extends BaseACL<'sdlc_entity_links'> {
         'Structural SDLC edges are not deleted through the link API',
         'sdlc_entity_links',
       );
+    }
+  }
+
+  /** The writer is in the hub the edge belongs to. */
+  private async assertHubMember(channelId: string | null, tx: Transaction<Schema>): Promise<void> {
+    const participant = channelId
+      ? await tx.run(
+          zql.channel_participants
+            .where('channelId', channelId)
+            .where('userId', this.ctx.userID)
+            .one(),
+        )
+      : undefined;
+    if (!participant) {
+      throw new MutationACLError('Hub membership required', 'sdlc_entity_links');
     }
   }
 

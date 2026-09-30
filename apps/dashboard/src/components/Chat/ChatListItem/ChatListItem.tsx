@@ -160,6 +160,9 @@ const ChatListItemComponent = ({
     // card's rounded edge and reads as a band above and below it.
     const openDiscussion = (event: React.MouseEvent<HTMLDivElement>): void => {
       if (window.getSelection()?.toString()) return;
+      // React bubbles clicks out of portals: a click in a dialog or menu opened from
+      // the card's own actions (Forward, Remind me, delete) isn't a click on the card.
+      if (!(event.target instanceof Node) || !event.currentTarget.contains(event.target)) return;
       if (event.target instanceof Element && event.target.closest(CARD_OWN_CONTROLS)) return;
       handleOpenThread(conversation.conversationId, event);
     };

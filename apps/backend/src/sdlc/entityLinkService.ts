@@ -157,6 +157,9 @@ export async function resolveInheritedOwner(
       targetId: conversationId,
       relationType: 'DISCUSSION',
     },
+    // A thread filed on more than one item inherits the one it was filed on first,
+    // the same one every time.
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
     select: { sourceType: true, sourceId: true },
   });
   return link &&

@@ -113,9 +113,20 @@ function useMinute(): number {
   return minute;
 }
 
+/** Past calls in the order the query pages them: most recently ended first, then by id. */
+function byEndedDesc(left: SdlcCall, right: SdlcCall): number {
+  const ended = (right.endedAt ?? 0) - (left.endedAt ?? 0);
+  return ended !== 0 ? ended : left.id.localeCompare(right.id);
+}
+
 /**
  * The past calls: the first page live, later ones fetched once as the list reaches
  * them. A call that has ended doesn't change, so later pages needn't be live.
+ *
+ * Every row the list has shown is kept, by id. When a call ends it joins the live
+ * first page and pushes that page's last row out of it; the row sits before the
+ * cursor the next page was fetched from, so without this it would fall between the
+ * two and vanish.
  */
 function usePastCalls(args: { channelId: string; trackId?: string; invitedOnly: boolean }): {
   calls: SdlcCall[];
@@ -127,23 +138,32 @@ function usePastCalls(args: { channelId: string; trackId?: string; invitedOnly: 
   const [firstPage, firstDetails] = useCachedQuery(
     queries.getSdlcCalls({ ...args, phase: 'PAST', limit: PAST_PAGE_SIZE }),
   );
-  // Later pages, for the list they were fetched for; another track or filter starts over.
-  const listKey = `${args.trackId ?? 'hub'}:${String(args.invitedOnly)}`;
-  const [later, setLater] = useState<{ key: string; calls: SdlcCall[]; hasMore: boolean }>({
-    key: listKey,
-    calls: [],
-    hasMore: true,
-  });
+  // What was kept, for the list it was kept for: another hub, track or filter starts over.
+  const listKey = `${args.channelId}:${args.trackId ?? 'hub'}:${String(args.invitedOnly)}`;
+  const [kept, setKept] = useState<{
+    key: string;
+    rows: ReadonlyMap<string, SdlcCall>;
+    hasMore: boolean;
+  }>({ key: listKey, rows: new Map(), hasMore: true });
+  useEffect(() => {
+    if (!Array.isArray(firstPage)) return;
+    setKept(current => {
+      const own = current.key === listKey;
+      const rows = new Map(own ? current.rows : []);
+      for (const call of firstPage) rows.set(call.id, call);
+      return { key: listKey, rows, hasMore: own ? current.hasMore : true };
+    });
+  }, [firstPage, listKey]);
   const fetching = useRef(false);
   const loaded = firstDetails.type === 'complete';
   const calls = useMemo(() => {
-    const first: readonly SdlcCall[] = Array.isArray(firstPage) ? firstPage : [];
-    const laterCalls = later.key === listKey ? later.calls : [];
-    const seen = new Set(first.map(call => call.id));
-    return [...first, ...laterCalls.filter(call => !seen.has(call.id))];
-  }, [firstPage, later, listKey]);
+    const rows = new Map(kept.key === listKey ? kept.rows : []);
+    // The live page's rows as they are now, over any kept copy.
+    for (const call of Array.isArray(firstPage) ? firstPage : []) rows.set(call.id, call);
+    return [...rows.values()].sort(byEndedDesc);
+  }, [firstPage, kept, listKey]);
   const hasMore =
-    loaded && calls.length >= PAST_PAGE_SIZE && (later.key === listKey ? later.hasMore : true);
+    loaded && calls.length >= PAST_PAGE_SIZE && (kept.key === listKey ? kept.hasMore : true);
 
   const loadMore = (): void => {
     const last = calls.at(-1);
@@ -155,11 +175,11 @@ function usePastCalls(args: { channelId: string; trackId?: string; invitedOnly: 
         type: 'complete',
       })
       .then(page => {
-        setLater(current => ({
-          key: listKey,
-          calls: [...(current.key === listKey ? current.calls : []), ...page],
-          hasMore: page.length === PAST_PAGE_SIZE,
-        }));
+        setKept(current => {
+          const rows = new Map(current.key === listKey ? current.rows : []);
+          for (const call of page) rows.set(call.id, call);
+          return { key: listKey, rows, hasMore: page.length === PAST_PAGE_SIZE };
+        });
       })
       .finally(() => {
         fetching.current = false;

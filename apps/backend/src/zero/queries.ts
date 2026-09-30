@@ -904,6 +904,36 @@ const visibleSdlcLinks = <TReturn>(
     ),
   );
 
+/**
+ * Canvases the viewer may see: theirs, shared with them, a group they are in or a
+ * channel they are in, or public. The rule applyCanvasVisibilityQueryFilter applies,
+ * typed, so a join keeps its rows' shape. Joined rows skip their own table's read
+ * rules, so every canvas an SDLC query attaches goes through this.
+ */
+const visibleSdlcCanvases = <TReturn>(
+  query: Query<'canvases', typeof schema, TReturn>,
+  userId: string,
+): Query<'canvases', typeof schema, TReturn> =>
+  query.where(({ or, cmp, exists }) =>
+    or(
+      cmp('createdBy', userId),
+      exists('participants', participant =>
+        participant.where(({ or: anyOf, cmp: is, exists: has }) =>
+          anyOf(
+            is('userId', userId),
+            has('userGroup', group =>
+              group.whereExists('userGroupMappings', mapping => mapping.where('userId', userId)),
+            ),
+            has('channel', channel =>
+              channel.whereExists('participants', member => member.where('userId', userId)),
+            ),
+          ),
+        ),
+      ),
+      cmp('visibility', CanvasVisibility.PUBLIC),
+    ),
+  );
+
 /** Files uploaded to the hub, and not deleted since. */
 const sdlcHubFiles = <TReturn>(
   query: Query<'message_attachments', typeof schema, TReturn>,
@@ -929,7 +959,7 @@ const withSdlcTargetItems = (
     .related('targetFolder')
     .related('targetLink', link => visibleSdlcLinks(link, userId))
     .related('targetFile', file => sdlcHubFiles(file, channelId))
-    .related('targetCanvas', canvas => canvas.related('folder'));
+    .related('targetCanvas', canvas => visibleSdlcCanvases(canvas, userId).related('folder'));
 
 /** A conversation's DISCUSSION link, with the item it is about, for saying where it is. */
 const sdlcDiscussionOwnerLink = (
@@ -943,7 +973,7 @@ const sdlcDiscussionOwnerLink = (
     .related('sourceFolder')
     .related('sourceLink', item => visibleSdlcLinks(item, userId))
     .related('sourceFile', file => sdlcHubFiles(file, channelId))
-    .related('sourceCanvas');
+    .related('sourceCanvas', canvas => visibleSdlcCanvases(canvas, userId));
 
 /** A hub artifact as its pages show it: its status, and the track edge naming its track. */
 const withSdlcHubCanvas = (query: typeof zql.canvases) =>
@@ -966,7 +996,7 @@ const sdlcCallOwnerLink = (
     .related('sourceFolder')
     .related('sourceLink', item => visibleSdlcLinks(item, userId))
     .related('sourceFile', file => sdlcHubFiles(file, channelId))
-    .related('sourceCanvas');
+    .related('sourceCanvas', canvas => visibleSdlcCanvases(canvas, userId));
 
 const trackKanbanTicketsPageArgsSchema = kanbanTicketsPageV3ArgsSchema.extend(trackTicketsScopeShape);
 const trackTableTicketsPageArgsSchema = tableTicketsPageArgsSchema.extend(trackTicketsScopeShape);
@@ -5517,12 +5547,16 @@ dmChannelsLatestMessagesPaginated: defineQuery(
         .one(),
   ),
   /** Every Wiki and Hub Knowledge placement edge in a hub; the tree is built from these. */
-  getSdlcHubItems: defineQuery(z.object({ channelId: z.string() }), ({ args: { channelId } }) =>
-    zql.sdlc_entity_links
-      .where('channelId', channelId)
-      .where('relationType', SDLC_HUB_ITEM_RELATION)
-      // A page's artifact rides with its link, so the wiki needs no hub-wide list.
-      .related('targetCanvas', canvas => canvas.related('sdlcArtifact')),
+  getSdlcHubItems: defineQuery(
+    z.object({ channelId: z.string() }),
+    ({ ctx, args: { channelId } }) =>
+      zql.sdlc_entity_links
+        .where('channelId', channelId)
+        .where('relationType', SDLC_HUB_ITEM_RELATION)
+        // A page's artifact rides with its link, so the wiki needs no hub-wide list.
+        .related('targetCanvas', canvas =>
+          visibleSdlcCanvases(canvas, ctx.userID).related('sdlcArtifact'),
+        ),
   ),
   getSdlcHubFolders: defineQuery(z.object({ channelId: z.string() }), ({ args: { channelId } }) =>
     zql.sdlc_folders.whereExists('sdlcEntityLinks', link =>
@@ -5556,9 +5590,8 @@ dmChannelsLatestMessagesPaginated: defineQuery(
     ({ ctx, args: { channelId, folderId } }) =>
       withSdlcHubCanvas(
         // Reads are scoped to the workspace only, so the canvas visibility rule every
-        // canvas list uses applies here too: yours, shared with you or a channel you
-        // are in, or public.
-        applyCanvasVisibilityQueryFilter(
+        // canvas list uses applies here too.
+        visibleSdlcCanvases(
           zql.canvases
             .where('folderId', folderId)
             .whereExists('folder', folder => folder.where('channelId', channelId)),
