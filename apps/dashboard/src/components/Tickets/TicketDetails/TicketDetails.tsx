@@ -4159,6 +4159,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
               isLoading={hasBoardDropdownOpened && !boards}
               width='auto'
               noBorder={true}
+              inputClassName='bg-transparent dark:bg-transparent'
               isOpen={boardDropdownOpen}
               onOpenChange={open => {
                 setBoardDropdownOpen(open);
