@@ -64,9 +64,15 @@ const UNKNOWN_AVAILABILITY: ConnectorAvailability = {
   catalogKnown: false,
 };
 
+interface AgentScope {
+  agentSlug?: string | undefined;
+  agentOrgId?: string | undefined;
+}
+
 async function fetchAvailability(
   userId: string | undefined,
   serverTypes: string[],
+  agent: AgentScope = {},
 ): Promise<ConnectorAvailability> {
   if (!userId || !SERVER.s2sKey || serverTypes.length === 0) return UNKNOWN_AVAILABILITY;
   try {
@@ -74,7 +80,12 @@ async function fetchAvailability(
     const res = await fetch(`${base}/claw/api/v1/internal/connectors/available`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-s2s-key": SERVER.s2sKey },
-      body: JSON.stringify({ userId, serverTypes }),
+      body: JSON.stringify({
+        userId,
+        serverTypes,
+        ...(agent.agentSlug ? { agentSlug: agent.agentSlug } : {}),
+        ...(agent.agentOrgId ? { agentOrgId: agent.agentOrgId } : {}),
+      }),
       signal: AbortSignal.timeout(AVAILABILITY_TIMEOUT_MS),
     });
     if (!res.ok) return UNKNOWN_AVAILABILITY;
@@ -105,6 +116,7 @@ async function fetchAvailability(
 export function buildSuggestConnectorsTool(
   ref: SuggestConnectorsRef,
   userId?: string,
+  agent: AgentScope = {},
 ): ToolDefinition {
   return {
     name: SUGGEST_CONNECTORS_TOOL_NAME,
@@ -214,7 +226,7 @@ export function buildSuggestConnectorsTool(
       const title = typeof p["title"] === "string" ? p["title"].trim().slice(0, 120) : "";
       const availability = listAll
         ? UNKNOWN_AVAILABILITY
-        : await fetchAvailability(userId, serverTypes);
+        : await fetchAvailability(userId, serverTypes, agent);
 
       const renderable =
         listAll || !availability.catalogKnown

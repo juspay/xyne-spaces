@@ -359,7 +359,7 @@ async function sendAttachments(
 ): Promise<void> {
   const caps = plugin.capabilities;
   if (!plugin.sendMedia || !caps.media) {
-    await plugin.sendText(handle, chatId, `📎 ${attachments.length} attachment(s) could not be sent on this channel.`);
+    await plugin.sendText(handle, chatId, `${attachments.length} attachment(s) could not be sent on this channel.`);
     return;
   }
   const already = sent?.attachments ?? 0;
@@ -404,14 +404,14 @@ async function sendAttachments(
   }
   if (skipped.length > 0) {
     await plugin
-      .sendText(handle, chatId, `⚠️ Too large to send here: ${skipped.join(", ")}.`)
+      .sendText(handle, chatId, `Too large to send here: ${skipped.join(", ")}.`)
       .catch(() => undefined);
   }
   if (empty.length > 0) {
     // Says what is true — the file came through empty — rather than blaming a
     // size limit it never reached.
     await plugin
-      .sendText(handle, chatId, `⚠️ ${empty.join(", ")} came through empty, so there was nothing to send.`)
+      .sendText(handle, chatId, `${empty.join(", ")} came through empty, so there was nothing to send.`)
       .catch(() => undefined);
   }
 }

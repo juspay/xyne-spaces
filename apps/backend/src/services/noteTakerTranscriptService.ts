@@ -288,7 +288,7 @@ class NoteTakerTranscriptService {
   private async notifySummaryReady(call: Call): Promise<void> {
     const actionUrl = isRecording(call)
       ? `/recordings/${call.externalId}`
-      : `/calls/${call.id}/detail`;
+      : `/calls/${call.externalId}/detail`;
     try {
       if (!call.workspaceId) return;
       // The AI title may have landed after our `call` snapshot was taken —
@@ -820,6 +820,7 @@ class NoteTakerTranscriptService {
           freshCallTitle,
           citationCtx,
           workspaceId,
+          true,
         );
         if (!canvasId) {
           logDetailedSummaryFailed(callId, 'canvas_update_failed');
@@ -909,7 +910,7 @@ class NoteTakerTranscriptService {
             resolvedCallTitle,
             citationCtx,
             workspaceId,
-            { deferInsertSideEffects: true },
+            { deferInsertSideEffects: true, isRecording: true },
           );
           if (!canvasId) {
             throw new Error('Failed to create detailed summary canvas');
@@ -1004,6 +1005,8 @@ class NoteTakerTranscriptService {
         call.startedAt,
         freshCallTitle,
         citationCtx,
+        undefined,
+        true,
       );
       if (!finalized) {
         logDetailedSummaryFailed(callId, 'canvas_finalize_failed');

@@ -230,12 +230,8 @@ import {
 } from './viewDraft';
 import { useConfirmDialog } from '../../hooks/useConfirmDialog';
 import { getApiErrorMessage } from '../../utils/apiError';
-import {
-  hasExactSearchQuotes,
-  matchesTicketSearch,
-  unwrapExactSearchQuery,
-  wrapExactSearchQuery,
-} from '../../utils/exactSearch';
+import { openTicketSearch, registerTicketView } from '../../search/ticketSearchScope';
+import { buildTicketSearchView, type TicketScreenState } from './ticketSearchContext';
 
 type SavedConfigValue = {
   id: string;
@@ -838,17 +834,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     }
   }, [expandedGroupsStorageKey, groupByKey, groupBy]);
 
-  // Exact mode *is* the query being quoted — the quotes are ordinary characters in the
-  // search text, the same ones the user can type by hand and the same ones the backend
-  // reads exactness off. So there is no separate flag and nothing to keep in sync: delete
-  // a quote and the mode goes with it.
-  const searchInputValue = searchParams.get('search') ?? '';
-  // `hasExactSearchQuotes`, not `isExactSearchQuery`: the pill reports whether the quotes are
-  // there, and a bare `""` is exact mode with the phrase still to be typed.
-  const isExactSearch = hasExactSearchQuotes(searchInputValue);
-  // A bare `""` carries no query, so it counts as an empty box — no request goes out and the
-  // local filter stops narrowing, rather than searching for nothing.
-  const searchTerm = unwrapExactSearchQuery(searchInputValue).trim() ? searchInputValue.trim() : '';
   const [isBoardDropdownOpen, setIsBoardDropdownOpen] = useState(false);
   const [isSourceChannelsOpen, setIsSourceChannelsOpen] = useState(false);
   const [isFiltersDropdownOpen, setIsFiltersDropdownOpen] = useState(false);
@@ -898,32 +883,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     },
     [send],
   );
-
-  const setSearchTerm = (value: string) => {
-    setSearchParams(
-      prev => {
-        const next = new URLSearchParams(prev);
-        if (value) {
-          next.set('search', value);
-        } else {
-          next.delete('search');
-        }
-        return next;
-      },
-      { replace: true },
-    );
-  };
-
-  // The pill edits the query rather than a flag beside it. An empty box still gets a pair,
-  // so exact mode can be armed before typing — `wrapExactSearchQuery` returns '' for empty
-  // input, which would have made the click a no-op.
-  const setIsExactSearch = (value: boolean): void => {
-    if (!value) {
-      setSearchTerm(unwrapExactSearchQuery(searchInputValue));
-      return;
-    }
-    setSearchTerm(wrapExactSearchQuery(searchInputValue) || '""');
-  };
 
   // Initialize machine on mount or when dependencies change
   useEffect(() => {
@@ -2352,24 +2311,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       user?.id,
     );
 
-    // Apply search filter. A quoted query ("payment failed") is an exact-phrase search:
-    // the string must appear verbatim, same words, same order. Unquoted stays loose —
-    // every word must appear, in any order. Mirrors what Vespa does on the kanban path.
-    if (searchTerm.trim()) {
-      tickets = tickets.filter(ticket => {
-        const searchableText = [
-          ticket.title || '',
-          ticket.description || '',
-          ticket.xyneId || '',
-          ticket.merchantId || '',
-          ticket.statusV2 || '',
-          ticket.priority || '',
-        ].join(' ');
-
-        return matchesTicketSearch(searchableText, searchTerm);
-      });
-    }
-
     // Filter for stage overdue tickets
     if (showOverdueOnly) {
       tickets = tickets.filter(ticket => isStageOverdue(ticket));
@@ -2383,7 +2324,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     tagsByTicketId,
     formValuesByTicketId,
     formFieldsById,
-    searchTerm,
     user?.id,
     showOverdueOnly,
   ]);
@@ -3404,7 +3344,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const navBaseArgs = useMemo<KanbanTicketsPageBaseArgs>(
     () => ({
       ...ticketsQueryParams,
-      searchTerm,
       filters: deferredFilters,
       formEntityValueFieldIds: fevFieldIds,
       dynamicFieldVespaTokens,
@@ -3415,7 +3354,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     }),
     [
       ticketsQueryParams,
-      searchTerm,
       deferredFilters,
       fevFieldIds,
       dynamicFieldVespaTokens,
@@ -3438,7 +3376,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     () =>
       JSON.stringify({
         ticketsQueryParams,
-        searchTerm: searchTerm.trim(),
         columnType: shouldUseStatusColumns ? 'status' : 'stage',
         filters: deferredFilters,
         groupBy,
@@ -3457,7 +3394,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       groupBy,
       shouldUseStatusColumns,
       showOverdueOnly,
-      searchTerm,
       ticketsQueryParams,
     ],
   );
@@ -3892,12 +3828,10 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   // do not need to choose it again.
   const currentBoardId = filteredSingleBoardId ?? null;
 
-  const hasSearchTerm = searchTerm.trim().length > 0;
   // Also require deferredFilters to have caught up before enabling queries
   const canUseKanbanColumnPagination = isKanbanLayout && workspaceViewReady && deferredFiltersReady;
   const canUseTablePagination = isTableLayout && workspaceViewReady && deferredFiltersReady;
-  const shouldFetchKanbanCounts =
-    (canUseKanbanColumnPagination || canUseTablePagination) && !hasSearchTerm;
+  const shouldFetchKanbanCounts = canUseKanbanColumnPagination || canUseTablePagination;
   const kanbanCounts = useKanbanCounts({
     ...ticketsQueryParams,
     columnType: shouldUseStatusColumns ? 'status' : 'stage',
@@ -3921,7 +3855,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
 
   useEffect(() => {
     if (!isKanbanLayout && !isTableLayout) return;
-    if (hasSearchTerm) return;
 
     // Don't reset lastKnownKanbanGroupsRef to null when query key changes.
     // Keep the old groups visible until new ones load to prevent the view
@@ -3938,14 +3871,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       groups: kanbanCounts.groups,
       groupByKey: JSON.stringify(groupBy ?? 'none'),
     };
-  }, [
-    hasSearchTerm,
-    isKanbanLayout,
-    isTableLayout,
-    kanbanCounts.groups,
-    kanbanColumnQueryKey,
-    groupBy,
-  ]);
+  }, [isKanbanLayout, isTableLayout, kanbanCounts.groups, kanbanColumnQueryKey, groupBy]);
 
   useEffect(() => {
     if (!isKanbanLayout) return;
@@ -3968,9 +3894,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     (lastKnownKanbanGroupsRef.current?.groups.length ?? 0) > 0;
 
   const isTicketsSyncing =
-    isKanbanLayout || isTableLayout
-      ? !hasSearchTerm && kanbanCounts.isLoading
-      : ticketsDetails.type !== 'complete';
+    isKanbanLayout || isTableLayout ? kanbanCounts.isLoading : ticketsDetails.type !== 'complete';
 
   // TICKET_LIST_VIEWED: one event per list arrival (scope + layout), once the
   // tickets have resolved so the size can ride along. Latched so filter churn
@@ -4003,7 +3927,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       groupBy: groupBy || null,
       activeFilterKeys,
       activeFilterCount: activeFilterKeys.length,
-      hasSearchTerm,
       savedViewApplied: !!selectedViewId,
       ...(typeof knownCount === 'number' && { ticketCountBucket: ticketCountBucket(knownCount) }),
       source: readTrackSource(listLocation.state, listNavigationType, listLocation.key),
@@ -4017,7 +3940,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     boardId,
     groupBy,
     filters,
-    hasSearchTerm,
     selectedViewId,
     filteredTickets,
     allProjectTickets,
@@ -4064,21 +3986,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     const localEntries = Object.entries(groupedRows);
     const serverGroups =
       isKanbanLayout || isTableLayout
-        ? hasSearchTerm
-          ? groupBy === 'status'
-            ? getStatusColumns().map(column => ({
-                groupKey: column.id,
-                displayName: column.name,
-                totalCount: 0,
-                stages: {},
-                statuses: {},
-              }))
-            : hasMatchingLastKnownKanbanGroups
-              ? (lastKnownKanbanGroupsRef.current?.groups ?? [])
-              : kanbanCounts.groups
-          : hasMatchingLastKnownKanbanGroups
-            ? (lastKnownKanbanGroupsRef.current?.groups ?? [])
-            : kanbanCounts.groups
+        ? hasMatchingLastKnownKanbanGroups
+          ? (lastKnownKanbanGroupsRef.current?.groups ?? [])
+          : kanbanCounts.groups
         : [];
     const serverGroupKeys = new Set(serverGroups.map(group => group.groupKey));
 
@@ -4092,11 +4002,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           ]
         : localEntries;
 
-    // Table layout with a search term active from first render has neither
-    // counts (disabled during search) nor loaded rows to derive groups from —
-    // fall back to one ungrouped section so the search actually runs.
+    // Ungrouped table with no loaded rows yet: one section, so its page query runs.
     const entries =
-      isTableLayout && baseEntries.length === 0 && (hasSearchTerm || groupBy === 'none')
+      isTableLayout && baseEntries.length === 0 && groupBy === 'none'
         ? ([['All Tickets', []] as const] as typeof baseEntries)
         : baseEntries;
 
@@ -4112,7 +4020,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           : (serverCountGroup?.stages ?? {});
       const ticketsByColumn = shouldUseStatusColumns
         ? groupTicketsByStatus(groupTickets, stages)
-        : groupTicketsByStage(groupTickets, stages, canReorder && !hasSearchTerm);
+        : groupTicketsByStage(groupTickets, stages, canReorder);
 
       let displayName = serverCountGroup?.displayName ?? groupName;
       let entityType: 'user' | 'group' | null = null;
@@ -4157,9 +4065,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       const isSpecialMissingGroup =
         groupName === 'No Value' || groupName === 'Unassigned' || groupName === NO_MERCHANT_GROUP;
       const fallbackCount = isSpecialMissingGroup ? 0 : groupTickets.length;
-      const count = hasSearchTerm
-        ? groupTickets.length
-        : (serverCountGroup?.totalCount ?? fallbackCount);
+      const count = serverCountGroup?.totalCount ?? fallbackCount;
 
       return {
         key: groupName,
@@ -4224,8 +4130,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     canReorder,
     shouldUseStatusColumns,
     isKanbanLayout,
-    hasSearchTerm,
-    searchTerm,
     kanbanCounts.groups,
     kanbanCounts.groupsByKey,
     kanbanColumnQueryKey,
@@ -4259,16 +4163,13 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const allColumnsHidden = stages.length > 0 && hiddenStages.length === stages.length;
   const kanbanGroups = allColumnsHidden ? [] : processedGroups;
 
-  // Mirrors what a column header shows: server counts, unless a search has left
-  // them stale, in which case only the rows actually loaded can be counted.
-  const columnCountsAreReliable = !(canUseKanbanColumnPagination && hasSearchTerm);
+  // Mirrors what a column header shows: server counts, else the rows loaded.
   const countStageInGroup = useCallback(
     (group: (typeof processedGroups)[number], stage: Stage): number => {
       const loaded = group.columnData[stage.id]?.length ?? 0;
-      if (!columnCountsAreReliable) return loaded;
       return group.stageCounts?.[stage.id] ?? group.stageCounts?.[stage.name] ?? loaded;
     },
-    [columnCountsAreReliable],
+    [],
   );
   const countHiddenInGroup = useCallback(
     (group: (typeof processedGroups)[number]): number =>
@@ -4331,7 +4232,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       ),
     [processedGroups],
   );
-  const headerIsFiltered = hasSearchTerm || hasAnyFilterChip(filters, showOverdueOnly);
+  const headerIsFiltered = hasAnyFilterChip(filters, showOverdueOnly);
   const ownsSavedView = viewId !== undefined && isStarred !== undefined;
   const headerStar = ownsSavedView
     ? { isStarred, onToggle: () => toggleViewStar({ id: viewId, isStarred }) }
@@ -4456,6 +4357,28 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     () => ({ userNamesById, userGroupNamesById, channelNamesById }),
     [userNamesById, userGroupNamesById, channelNamesById],
   );
+
+  // The header search bar opens a ticket search within this screen's filters. The palette
+  // reads the provider when it opens, so the ref only has to hold the latest state.
+  const ticketScreenState: TicketScreenState = {
+    viewName: headerTitle,
+    viewMode,
+    filters,
+    projectId: projectIdParam,
+    routeBoardId: boardId,
+    userId: user?.id,
+    dynamicFieldVespaTokens,
+    dynamicFieldDateRanges,
+    zeroOnlyDynamicFieldIds,
+    showOverdueOnly,
+    ticketsQueryParams,
+  };
+  const ticketScreenStateRef = useRef(ticketScreenState);
+  ticketScreenStateRef.current = ticketScreenState;
+  useEffect(
+    () => registerTicketView(() => buildTicketSearchView(ticketScreenStateRef.current)),
+    [],
+  );
   const headerViewSave = isWorkspaceView
     ? {
         isDirty: isViewDirty,
@@ -4511,13 +4434,10 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       <TicketsHeader
         startSlot={projectsScreenContext?.leftHeaderSlot}
         title={headerTitle}
-        ticketCount={isTableLayout && hasSearchTerm ? null : headerTicketCount}
+        ticketCount={headerTicketCount}
         isFiltered={headerIsFiltered}
         star={headerStar}
-        searchValue={searchInputValue}
-        onSearchChange={setSearchTerm}
-        isExactSearch={isExactSearch}
-        onExactSearchChange={setIsExactSearch}
+        onOpenSearch={openTicketSearch}
         share={isWorkspaceView && ownsSavedView ? { viewId, viewName: savedViewName } : null}
         onCreateTicket={
           canCreateTicket &&
@@ -5354,7 +5274,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                   <TableGroupSection
                     args={{
                       ...ticketsQueryParams,
-                      searchTerm,
                       filters: deferredFilters,
                       formEntityValueFieldIds: fevFieldIds,
                       dynamicFieldVespaTokens,
@@ -5430,7 +5349,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                       columnType: shouldUseStatusColumns ? ('status' as const) : ('stage' as const),
                       baseArgs: {
                         ...ticketsQueryParams,
-                        searchTerm,
                         filters: deferredFilters,
                         formEntityValueFieldIds: fevFieldIds,
                         dynamicFieldVespaTokens,
@@ -5528,7 +5446,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                           onSearchTags={handleSearchTags}
                           keyPrefix={`${group.key}::`}
                           layoutScope={kanbanLayoutScope}
-                          searchActive={hasSearchTerm}
                           onTicketsChange={handleKanbanTicketsChange}
                           allKnownTickets={group.allTickets}
                           {...(paginatedColumnConfig ? { paginatedColumnConfig } : {})}

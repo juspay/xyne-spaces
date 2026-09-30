@@ -54,6 +54,21 @@ variable "lb_controller_service_account" {
   default = "aws-load-balancer-controller"
 }
 
+variable "cluster_autoscaler_enabled" {
+  type    = bool
+  default = true
+}
+
+variable "cluster_autoscaler_namespace" {
+  type    = string
+  default = "kube-system"
+}
+
+variable "cluster_autoscaler_service_account" {
+  type    = string
+  default = "cluster-autoscaler"
+}
+
 variable "external_dns_enabled" {
   type    = bool
   default = false

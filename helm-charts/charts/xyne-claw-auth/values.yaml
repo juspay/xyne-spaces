@@ -263,4 +263,54 @@ serviceMonitor:
   interval: 30s
   scrapeTimeout: ""
 
+migrations:
+  enabled: true
+  workingDir: /repo/apps/xyne-claw-auth/backend
+  secretEnv:
+    - name: DATABASE_URL
+      secret: xyne-claw-auth-secrets
+    - name: SPACES_DB_URL
+      secret: xyne-backend-secrets
+      key: DATABASE_URL
+      optional: true
+    - name: ENCRYPTION_KEY
+      secret: xyne-claw-auth-secrets
+  env:
+    NODE_ENV: production
+    NODE_OPTIONS: ""
+    DEFAULT_ADMIN_EMAIL: admin@xyne.ai
+  schemas:
+    - path: prisma/schema.prisma
+      reseed: true
+      seeds:
+        - prisma/seed.ts
+  skillsImage:
+    registry: ""
+    repository: juspay/xyne-spaces-claw
+    tag: ""
+  initContainers:
+    - name: claw-skills
+      image: '{{ .Values.migrations.skillsImage.registry | default .Values.image.registry }}/{{ .Values.migrations.skillsImage.repository }}:{{ .Values.migrations.skillsImage.tag | default .Values.image.tag | default .Chart.AppVersion }}'
+      imagePullPolicy: IfNotPresent
+      command:
+        - /bin/sh
+        - -c
+        - cp -R /repo/apps/xyne-claw/skills/. /skills/
+      volumeMounts:
+        - name: claw-skills
+          mountPath: /skills
+  volumes:
+    - name: claw-skills
+      emptyDir: {}
+  volumeMounts:
+    - name: claw-skills
+      mountPath: /repo/apps/xyne-claw/skills
+      readOnly: true
+  backoffLimit: 2
+  activeDeadlineSeconds: 1800
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+
 extraObjects: []

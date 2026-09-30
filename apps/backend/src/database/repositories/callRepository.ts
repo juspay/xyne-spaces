@@ -584,6 +584,33 @@ export class CallRepository {
   }
 
   /**
+   * Record the ring status a callee device reported. Returns the number of rows updated.
+   * Only applies while the participant is still INVITED, and BUSY is sticky: an idle
+   * second device reporting RINGING must not undo it.
+   *
+   * Best-effort under concurrency: with relationMode = "prisma" an updateMany selects the
+   * matching ids and then updates by id, so two devices reporting within the same few
+   * milliseconds can both pass the guard and the later write wins.
+   */
+  async updateParticipantRingStatus(
+    participantId: string,
+    ringStatus: RingStatus.RINGING | RingStatus.BUSY,
+  ): Promise<number> {
+    const { count } = await DatabaseClient.getInstance().callParticipant.updateMany({
+      where: {
+        id: participantId,
+        response: InvitationResponse.INVITED,
+        OR: [
+          { ringStatus: null },
+          { ringStatus: { notIn: [ringStatus, RingStatus.BUSY] } },
+        ],
+      },
+      data: { ringStatus },
+    });
+    return count;
+  }
+
+  /**
    * Create a SCHEDULED call together with its participants in a single transaction.
    * Used by both one-time scheduled calls and recurring series instances.
    * Channel participants are fetched first (outside the transaction) and then

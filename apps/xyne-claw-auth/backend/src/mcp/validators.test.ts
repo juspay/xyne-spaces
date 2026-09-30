@@ -16,6 +16,11 @@ vi.mock("./servers/xyne-spaces-client.js", async (importOriginal) => {
   };
 });
 
+const spacesConversationExists = vi.fn(async (_id: string) => null as boolean | null);
+vi.mock("../lib/spaces-post-target.js", () => ({
+  spacesConversationExists: (id: string) => spacesConversationExists(id),
+}));
+
 const { validateWriteAction } = await import("./validators.js");
 const { SpacesApiError } = await import("./servers/xyne-spaces-client.js");
 
@@ -29,6 +34,8 @@ const ticketParams = {
 };
 
 afterEach(() => {
+  spacesConversationExists.mockReset();
+  spacesConversationExists.mockResolvedValue(null);
   interact.mockReset();
   appFetch.mockReset();
   spacesFetch.mockReset();
@@ -86,5 +93,24 @@ describe("spaces-create-ticket target channel access (queue-time)", () => {
     expect(err).toBe("title is required");
     expect(interact).not.toHaveBeenCalled();
     expect(appFetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("user-send-message target conversation (queue-time)", () => {
+  const reply = { conversationId: "eed03881-3c10-4365-9a95-7a2c5f973844", content: "hi" };
+
+  it("accepts a conversation the Spaces DB has, whatever its id format, without the HTTP probe", async () => {
+    spacesConversationExists.mockResolvedValue(true);
+    spacesFetch.mockRejectedValue(new SpacesApiError(404, "Spaces API 404: not found"));
+    await expect(validateWriteAction("xyne-spaces", "user-send-message", reply, CREDS)).resolves.toBeNull();
+    expect(spacesFetch).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the HTTP probe when the DB does not have it or is unavailable", async () => {
+    for (const dbAnswer of [false, null]) {
+      spacesConversationExists.mockResolvedValue(dbAnswer);
+      spacesFetch.mockRejectedValueOnce(new SpacesApiError(404, "Spaces API 404: not found"));
+      await expect(validateWriteAction("xyne-spaces", "user-send-message", reply, CREDS)).resolves.toMatch(/not found/);
+    }
   });
 });

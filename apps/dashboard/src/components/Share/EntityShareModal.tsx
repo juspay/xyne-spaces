@@ -40,7 +40,7 @@ export interface EntityShareEntry {
   target: EntityShareTarget;
   /** The conversation the share posted into, when it posted one. */
   post: { channelId: string; conversationId: string } | null;
-  /** The level this share grants. Only read when `roles` is supplied. */
+  /** The level this share grants; a flat share shows it as a label when set. */
   access?: GrantableEntityUserAccess;
 }
 
@@ -86,6 +86,10 @@ export interface EntityShareModalProps {
   onClose?: () => void;
   /** Access levels, for entities that have them. Omit for a flat share. */
   roles?: EntityShareRoleOptions;
+  /** `false` for a silent share: no note field, and `onGrant` gets an empty message. */
+  withMessage?: boolean;
+  /** Owner's display name for a flat share, which has no `roles` to carry it. */
+  ownerLabel?: string;
 }
 
 /** Sentinel select value, so Remove can sit in the same menu as the levels. */
@@ -111,6 +115,8 @@ export const EntityShareModal: React.FC<EntityShareModalProps> = ({
   generalAccess,
   onClose,
   roles,
+  withMessage = true,
+  ownerLabel: flatOwnerLabel,
 }) => {
   const { user: currentUser } = useAuth();
 
@@ -121,10 +127,10 @@ export const EntityShareModal: React.FC<EntityShareModalProps> = ({
   const [inviteAccess, setInviteAccess] = useState<GrantableEntityUserAccess>(
     EntityUserAccess.VIEW,
   );
-  const inputBoxRef = useRef<InputBoxHandle>(null);
 
   // No `roles` means no levels: everyone who can open the modal can share.
   const canManage = roles?.canManage ?? true;
+  const ownerLabel = roles?.ownerLabel ?? flatOwnerLabel;
 
   const sharedUserIds = useMemo(
     () => new Set(shares.map(share => share.userId).filter((id): id is string => Boolean(id))),
@@ -162,55 +168,6 @@ export const EntityShareModal: React.FC<EntityShareModalProps> = ({
     [selectedValues],
   );
 
-  const { results: channelScopedMentions, searchMentions: searchChannelScopedMentions } =
-    useMentionSearch(selectedChannelId);
-
-  const [mentionQuery, setMentionQuery] = useState('');
-  const mentionUsers = useActiveUserSearch(mentionQuery, MENTION_USER_LIMIT);
-  const mentionGroups = useUserGroupSearch(mentionQuery, MENTION_GROUP_LIMIT);
-  const workspaceMentions = useMemo<MentionResult[]>(
-    () => [
-      ...mentionUsers.map(u => userToMentionResult(u, u.id === currentUser?.id)),
-      ...mentionGroups.map(
-        (g): MentionResult => ({
-          id: g.id,
-          name: g.name,
-          type: 'group',
-          ...(g.alias && { alias: g.alias }),
-          ...(g.description && { description: g.description }),
-          memberCount: 0,
-          isDeactivated: g.isActive === false,
-        }),
-      ),
-    ],
-    [mentionUsers, mentionGroups, currentUser?.id],
-  );
-
-  const mentionResults = selectedChannelId ? channelScopedMentions : workspaceMentions;
-  const handleMentionSearch = useCallback(
-    (query: string) => {
-      if (selectedChannelId) {
-        searchChannelScopedMentions(query);
-      } else {
-        setMentionQuery(query);
-      }
-    },
-    [selectedChannelId, searchChannelScopedMentions],
-  );
-
-  const [channelMentionQuery, setChannelMentionQuery] = useState('');
-  const channelMentionResults = useChannelMentionSearch(channelMentionQuery, 10);
-  const channelMentionItems = useMemo(
-    () =>
-      channelMentionResults.map(channel => ({
-        id: channel.id,
-        name: channel.name,
-        isPrivate: channel.visibility === ChannelVisibility.PRIVATE,
-        ...(channel.description && { description: channel.description }),
-      })),
-    [channelMentionResults],
-  );
-
   const handleShare = async (): Promise<void> => {
     if (selectedValues.length === 0) return;
 
@@ -223,7 +180,7 @@ export const EntityShareModal: React.FC<EntityShareModalProps> = ({
             ? { type: 'channel', id: value.replace('channel:', '') }
             : { type: 'user', id: value.replace('user:', '') },
       );
-      await onGrant(targets, messageContent, roles ? inviteAccess : undefined);
+      await onGrant(targets, withMessage ? messageContent : '', roles ? inviteAccess : undefined);
       toast.success(
         selectedValues.length === 1
           ? `${subject.charAt(0).toUpperCase()}${subject.slice(1)} shared`
@@ -298,48 +255,16 @@ export const EntityShareModal: React.FC<EntityShareModalProps> = ({
         </div>
       )}
 
-      {canManage && (
-        <div
-          className='space-y-1.5'
-          data-track-category={trackCategory}
-          data-track-name={`share_${subject}_message_input`}
-          onKeyDownCapture={event => {
-            if (event.key === 'Enter' && !event.shiftKey && selectedValues.length > 0) {
-              if (inputBoxRef.current?.isSuggestionOpen()) return;
-              event.preventDefault();
-              event.stopPropagation();
-              void handleShare();
-            }
-          }}
-        >
-          <label htmlFor={`share-${subject}-message`} className='text-muted-foreground text-[13px]'>
-            Add a message (optional)
-          </label>
-          <InputBox
-            ref={inputBoxRef}
-            id={`share-${subject}-message`}
-            placeholder={`Say something about this ${subject}...`}
-            onSendMessage={() => {}}
-            onContentChange={(html, _text) => {
-              setMessageContent(html);
-            }}
-            mentionItems={mentionResults}
-            onMentionSearch={handleMentionSearch}
-            channelItems={channelMentionItems}
-            onChannelSearch={setChannelMentionQuery}
-            features={{
-              richText: true,
-              mentions: true,
-              commands: false,
-              fileAttachments: false,
-              emojiPicker: true,
-            }}
-            showTypingIndicator={false}
-            disabled={sharing}
-            disableEnterToSend
-            hideSendButton
-          />
-        </div>
+      {canManage && withMessage && (
+        <ShareMessageInput
+          subject={subject}
+          trackCategory={trackCategory}
+          selectedChannelId={selectedChannelId}
+          disabled={sharing}
+          canSubmit={selectedValues.length > 0}
+          onChange={setMessageContent}
+          onSubmit={() => void handleShare()}
+        />
       )}
 
       {canManage && (
@@ -356,16 +281,16 @@ export const EntityShareModal: React.FC<EntityShareModalProps> = ({
         </div>
       )}
 
-      {(shares.length > 0 || !!roles?.ownerLabel) && (
+      {(shares.length > 0 || !!ownerLabel) && (
         <div className='space-y-2 border-t border-border pt-3'>
           <p className='text-muted-foreground text-[13px]'>{accessListTitle}</p>
           <div className='space-y-3.5 max-h-60 overflow-y-auto pr-1'>
             {/* Pinned first, no dropdown: ownership neither transfers nor revokes. */}
-            {roles?.ownerLabel && (
+            {ownerLabel && (
               <div className='flex items-center justify-between gap-2'>
                 <div className='flex items-center gap-2 min-w-0'>
                   <Avatar userId={ownerId ?? null} size='sm' showActiveStatus={false} />
-                  <span className='text-sm truncate'>{roles.ownerLabel}</span>
+                  <span className='text-sm truncate'>{ownerLabel}</span>
                 </div>
                 <span className='shrink-0 px-2 text-sm text-muted-foreground'>Owner</span>
               </div>
@@ -398,16 +323,23 @@ export const EntityShareModal: React.FC<EntityShareModalProps> = ({
                     )}
                   </div>
                   {!roles ? (
-                    <button
-                      type='button'
-                      onClick={() => void onRevoke(share.target)}
-                      className='shrink-0 rounded p-1 text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground group-hover:opacity-100'
-                      aria-label='Remove access'
-                      data-track-category={trackCategory}
-                      data-track-name={`revoke_${subject}_share`}
-                    >
-                      <X className='size-3.5' />
-                    </button>
+                    <div className='flex shrink-0 items-center gap-1'>
+                      {share.access && (
+                        <span className='text-sm text-muted-foreground'>
+                          {accessLabel(share.access)}
+                        </span>
+                      )}
+                      <button
+                        type='button'
+                        onClick={() => void onRevoke(share.target)}
+                        className='shrink-0 rounded p-1 text-muted-foreground opacity-0 hover:bg-muted hover:text-foreground group-hover:opacity-100'
+                        aria-label='Remove access'
+                        data-track-category={trackCategory}
+                        data-track-name={`revoke_${subject}_share`}
+                      >
+                        <X className='size-3.5' />
+                      </button>
+                    </div>
                   ) : canManage ? (
                     <ShareRoleSelect
                       value={share.access ?? EntityUserAccess.VIEW}
@@ -444,6 +376,125 @@ export const EntityShareModal: React.FC<EntityShareModalProps> = ({
       )}
 
       {generalAccess}
+    </div>
+  );
+};
+
+interface ShareMessageInputProps {
+  subject: string;
+  trackCategory: string;
+  /** The channel picked as a recipient, when there is one. */
+  selectedChannelId: string | undefined;
+  disabled: boolean;
+  /** Whether Enter may share: there is at least one recipient. */
+  canSubmit: boolean;
+  onChange: (html: string) => void;
+  onSubmit: () => void;
+}
+
+/** The optional note; its own component so a silent share skips its mention searches. */
+const ShareMessageInput: React.FC<ShareMessageInputProps> = ({
+  subject,
+  trackCategory,
+  selectedChannelId,
+  disabled,
+  canSubmit,
+  onChange,
+  onSubmit,
+}) => {
+  const { user: currentUser } = useAuth();
+  const inputBoxRef = useRef<InputBoxHandle>(null);
+
+  const { results: channelScopedMentions, searchMentions: searchChannelScopedMentions } =
+    useMentionSearch(selectedChannelId);
+
+  const [mentionQuery, setMentionQuery] = useState('');
+  const mentionUsers = useActiveUserSearch(mentionQuery, MENTION_USER_LIMIT);
+  const mentionGroups = useUserGroupSearch(mentionQuery, MENTION_GROUP_LIMIT);
+  const workspaceMentions = useMemo<MentionResult[]>(
+    () => [
+      ...mentionUsers.map(u => userToMentionResult(u, u.id === currentUser?.id)),
+      ...mentionGroups.map(
+        (g): MentionResult => ({
+          id: g.id,
+          name: g.name,
+          type: 'group',
+          ...(g.alias && { alias: g.alias }),
+          ...(g.description && { description: g.description }),
+          memberCount: 0,
+          isDeactivated: g.isActive === false,
+        }),
+      ),
+    ],
+    [mentionUsers, mentionGroups, currentUser?.id],
+  );
+
+  const mentionResults = selectedChannelId ? channelScopedMentions : workspaceMentions;
+  const handleMentionSearch = useCallback(
+    (query: string) => {
+      if (selectedChannelId) {
+        searchChannelScopedMentions(query);
+      } else {
+        setMentionQuery(query);
+      }
+    },
+    [selectedChannelId, searchChannelScopedMentions],
+  );
+
+  const [channelMentionQuery, setChannelMentionQuery] = useState('');
+  const channelMentionResults = useChannelMentionSearch(channelMentionQuery, 10);
+  const channelMentionItems = useMemo(
+    () =>
+      channelMentionResults.map(channel => ({
+        id: channel.id,
+        name: channel.name,
+        isPrivate: channel.visibility === ChannelVisibility.PRIVATE,
+        ...(channel.description && { description: channel.description }),
+      })),
+    [channelMentionResults],
+  );
+
+  return (
+    <div
+      className='space-y-1.5'
+      data-track-category={trackCategory}
+      data-track-name={`share_${subject}_message_input`}
+      onKeyDownCapture={event => {
+        if (event.key === 'Enter' && !event.shiftKey && canSubmit) {
+          if (inputBoxRef.current?.isSuggestionOpen()) return;
+          event.preventDefault();
+          event.stopPropagation();
+          onSubmit();
+        }
+      }}
+    >
+      <label htmlFor={`share-${subject}-message`} className='text-muted-foreground text-[13px]'>
+        Add a message (optional)
+      </label>
+      <InputBox
+        ref={inputBoxRef}
+        id={`share-${subject}-message`}
+        placeholder={`Say something about this ${subject}...`}
+        onSendMessage={() => {}}
+        onContentChange={(html, _text) => {
+          onChange(html);
+        }}
+        mentionItems={mentionResults}
+        onMentionSearch={handleMentionSearch}
+        channelItems={channelMentionItems}
+        onChannelSearch={setChannelMentionQuery}
+        features={{
+          richText: true,
+          mentions: true,
+          commands: false,
+          fileAttachments: false,
+          emojiPicker: true,
+        }}
+        showTypingIndicator={false}
+        disabled={disabled}
+        disableEnterToSend
+        hideSendButton
+      />
     </div>
   );
 };

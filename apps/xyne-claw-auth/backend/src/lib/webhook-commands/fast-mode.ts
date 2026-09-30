@@ -24,7 +24,7 @@ export async function handleFastModeToggle(ctx: WebhookCommandCtx, enabled: bool
       await setFastModeOverride(payload.conversationId, agent.slug, enabled);
     } catch (err) {
       log.warn("Failed to set /fast override", { error: errMsg(err) });
-      markdownText = "⚠️ couldn't persist fast mode — try again";
+      markdownText = "couldn't persist fast mode — try again";
     }
   }
   await ctx.reply(markdownText, "Failed to post /fast reply");

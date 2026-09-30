@@ -14,6 +14,31 @@ import {
 
 export const PENDING_WORKSPACE_ID_KEY = 'pending_workspace_id';
 export const PENDING_WORKSPACE_NAME_KEY = 'pending_workspace_name';
+
+const ENTERPRISE_LOGIN_INTENT_KEY = 'enterprise_login_intent';
+
+/**
+ * Marks the current sign-in attempt as an enterprise ("Continue with work
+ * email") flow. The backend stores this in OAuth state and uses it to fail
+ * fast on public email domains and filter community workspaces.
+ */
+export const setEnterpriseLoginIntent = (): void => {
+  sessionStorage.setItem(ENTERPRISE_LOGIN_INTENT_KEY, 'true');
+};
+
+export const clearEnterpriseLoginIntent = (): void => {
+  sessionStorage.removeItem(ENTERPRISE_LOGIN_INTENT_KEY);
+};
+
+/**
+ * The enterprise intent only applies when the user is not joining a pending
+ * community workspace — a pending community join always wins so gmail users
+ * can still sign in to join communities.
+ */
+const shouldRequestEnterpriseLogin = (): boolean =>
+  sessionStorage.getItem(ENTERPRISE_LOGIN_INTENT_KEY) === 'true' &&
+  !localStorage.getItem(PENDING_WORKSPACE_ID_KEY);
+
 import { clearAllSessionKeys } from '../services/sessionKeyStore';
 import { indexedDBService } from '../services/indexedDBService';
 import { resetEncryption } from './encryptionMachine';
@@ -21,6 +46,7 @@ import { stateMachineActor } from './stateMachine';
 import { decryptionCache } from '@xyne/shared';
 import { resetGlobalEncryptionBootstrap } from '@xyne/shared/hooks';
 import { dropAllZeroDatabases, dropZeroDatabases } from '../zero/dropZeroDatabases';
+import { getPendingSdkSso, takePendingSdkSso } from '../utils/pendingSdkSso';
 
 export interface User {
   id: string;
@@ -289,6 +315,11 @@ export const authMachine = createMachine(
           src: 'processOAuthCallback',
           onDone: [
             {
+              // SDK SSO flow - redirect to authorize page to complete device flow
+              target: 'redirectingToSdkSso',
+              guard: 'hasPendingSdkSso',
+            },
+            {
               // If pending invitation exists in localStorage, prioritize invitation flow
               // This overrides auto-login so user can see and accept the invitation
               target: 'redirectingToInvitation',
@@ -432,6 +463,15 @@ export const authMachine = createMachine(
           const pendingInvitationId = localStorage.getItem('pending_invitation_id');
           if (pendingInvitationId) {
             window.location.href = `/invite?invitationId=${encodeURIComponent(pendingInvitationId)}&loginComplete=true`;
+          }
+        },
+      },
+      redirectingToSdkSso: {
+        // Entry action that redirects to SDK SSO authorize page
+        entry: () => {
+          const pendingUserCode = takePendingSdkSso();
+          if (pendingUserCode) {
+            window.location.href = `/sdk-sso/authorize?user_code=${encodeURIComponent(pendingUserCode)}`;
           }
         },
       },
@@ -698,6 +738,11 @@ export const authMachine = createMachine(
         invoke: {
           src: 'validateSession',
           onDone: [
+            {
+              // SDK SSO flow - redirect to authorize page to complete device flow
+              target: 'redirectingToSdkSso',
+              guard: 'hasPendingSdkSso',
+            },
             {
               target: 'joiningWorkspace',
               guard: 'hasPendingWorkspaceAfterSessionValidation',
@@ -1213,6 +1258,9 @@ export const authMachine = createMachine(
         const status = (event as { error?: { status?: number } }).error?.status;
         return status !== 401 && !!context.user?.id;
       },
+      hasPendingSdkSso: () => {
+        return !!getPendingSdkSso();
+      },
     },
     actions: {
       clearSessionCookies: () => {
@@ -1221,6 +1269,7 @@ export const authMachine = createMachine(
         localStorage.removeItem('user_email');
         localStorage.removeItem(PENDING_WORKSPACE_ID_KEY);
         localStorage.removeItem(PENDING_WORKSPACE_NAME_KEY);
+        clearEnterpriseLoginIntent();
         clearOnboardingCookie();
         decryptionCache.clear();
         resetEncryption();
@@ -1277,6 +1326,9 @@ export const authMachine = createMachine(
           if (invitationId) {
             loginParams.set('invitationId', invitationId);
           }
+          if (shouldRequestEnterpriseLogin()) {
+            loginParams.set('enterpriseLogin', 'true');
+          }
           const loginQuery = loginParams.toString();
           const loginUrl = `${API_BASE_URL}/auth/login${loginQuery ? `?${loginQuery}` : ''}`;
 
@@ -1321,6 +1373,9 @@ export const authMachine = createMachine(
           }
           if (invitationId) {
             loginParams.set('invitationId', invitationId);
+          }
+          if (shouldRequestEnterpriseLogin()) {
+            loginParams.set('enterpriseLogin', 'true');
           }
           const loginQuery = loginParams.toString();
           const loginUrl = `${API_BASE_URL}/v2/auth/microsoft/login${loginQuery ? `?${loginQuery}` : ''}`;

@@ -16,6 +16,7 @@ import { useCallActions } from '../../../hooks/useCallActions';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { getUserDisplayName, isUserDeactivated } from '../../../utils/userDisplayName';
 import { useRouteContext } from '../../../hooks/useRouteContext';
+import { useIsCommunityWorkspace } from '../../../hooks/useIsCommunityWorkspace';
 
 /**
  * UserHoverWrapper Component
@@ -31,6 +32,7 @@ const UserHoverWrapperInner: React.FC<UserHoverWrapperProps> = ({
   const { hasTyped } = useTypingState();
   const { isMobile } = usePlatform();
   const user = useUser(userId);
+  const isCommunityWorkspace = useIsCommunityWorkspace();
   const [dmChannelId, setDmChannelId] = useState<string | null>(null);
   const { baseRoute } = useRouteContext();
   const { channelId, conversationId } = useParams<{ channelId: string; conversationId?: string }>();
@@ -208,7 +210,8 @@ const UserHoverWrapperInner: React.FC<UserHoverWrapperProps> = ({
                 </span>
               )}
             </div>
-            {user.email && (
+            {/* Email hidden in community workspaces */}
+            {user.email && !isCommunityWorkspace && (
               <div className='text-sm text-muted-foreground truncate'>{user.email}</div>
             )}
             {displayStatus.hasStatus && (
@@ -226,7 +229,7 @@ const UserHoverWrapperInner: React.FC<UserHoverWrapperProps> = ({
             )}
           </div>
         </div>
-        {!isCurrentUser && (
+        {!isCurrentUser && !isUserDeactivated(user) && (
           <div className='flex items-center justify-end p-4 gap-3 border-t border-muted-foreground/20'>
             <Button
               variant='secondary'

@@ -22,6 +22,8 @@ import { useAuthContextValues } from '../../../hooks/useAuth';
 import { mutators } from '../../../zero/mutators';
 import { usePreviousChannelId } from '../../../hooks/usePreviousChannelId';
 import { useChannel, useChannelParticipation } from '../../../hooks/useChannels';
+import { useUser } from '../../../hooks/useUsers';
+import { isUserDeactivated } from '../../../utils/userDisplayName';
 import { setLastVisitedChannel } from '../../../hooks/useLastVisitedChannel';
 import { useRouteContext } from '../../../hooks/useRouteContext';
 import { usePlatform } from '../../../hooks/usePlatform';
@@ -196,6 +198,16 @@ const ChatView = (): ReactElement => {
   const isFocusThread = isThreadActive && searchParams.get('focusThread') === '1';
   const isProfileActive = !!userId;
   const isThreadProfileActive = isThreadActive && isProfileActive;
+  // Deactivated-user profile: routed to from Cmd+K's fallback when the target
+  // has no prior DM. Render just the ProfileSidebar full-viewport (like the
+  // focus-thread branch below), so the anchor channel behind it is hidden and
+  // the Slack-style layout inside ProfileSidebar owns the screen.
+  const deactivatedProfileUser = useUser(userId ?? '');
+  const isDeactivatedProfileActive =
+    isProfileActive &&
+    !isThreadActive &&
+    !!deactivatedProfileUser &&
+    isUserDeactivated(deactivatedProfileUser);
   const showSecondaryPanel =
     isThreadActive ||
     isCanvasActive ||
@@ -280,6 +292,21 @@ const ChatView = (): ReactElement => {
     );
   }
 
+  // Deactivated-user profile: render ProfileSidebar full-viewport (see
+  // isDeactivatedProfileActive above) — the anchor channel behind it is
+  // suppressed so the Slack-style layout inside ProfileSidebar owns the screen.
+  if (isDeactivatedProfileActive) {
+    return (
+      <div
+        ref={chatViewContainerRef}
+        data-component='ChatView'
+        className={`w-full h-full overflow-hidden relative ${isInPanelWebview ? '' : 'rounded-2xl'}`}
+      >
+        <Outlet />
+      </div>
+    );
+  }
+
   // Handler to close channel summary
   const handleCloseChannelSummary = (): void => {
     void navigate(`${baseRoute}/${channelId}`);
@@ -303,6 +330,13 @@ const ChatView = (): ReactElement => {
     void navigate(newUrl, { replace: true });
   };
 
+  const handleCloseCanvas = (): void => {
+    const newSearchParams = new URLSearchParams(searchParams);
+    newSearchParams.delete('canvasFullscreen');
+    const searchString = newSearchParams.toString();
+    void navigate(`${location.pathname}${searchString ? `?${searchString}` : ''}`);
+  };
+
   // Secondary panel content — defined once, reused for both overlay and
   // side-by-side layouts so there is no JSX duplication.
   const secondaryPanelContent = isExternalChatActive ? (
@@ -312,6 +346,7 @@ const ChatView = (): ReactElement => {
       canvasId={canvasId}
       isFullscreen={isCanvasFullscreen}
       onToggleFullscreen={toggleCanvasFullscreen}
+      onClose={handleCloseCanvas}
     />
   ) : isChannelSummaryActive ? (
     <ChannelSummary

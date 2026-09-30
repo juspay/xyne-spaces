@@ -1,9 +1,14 @@
 import { z } from 'zod';
-import { MeetingStatus } from '@xyne/shared';
+import { MeetingStatus, RingStatus } from '@xyne/shared';
 
 export const UpdateRsvpSchema = z.object({
   status: z.nativeEnum(MeetingStatus),
   isSeries: z.boolean().optional(),
+});
+
+// CALLING is written by the invite, never reported by a device.
+export const UpdateRingStatusSchema = z.object({
+  ringStatus: z.enum([RingStatus.RINGING, RingStatus.BUSY]),
 });
 
 export const HideCallSchema = z.object({

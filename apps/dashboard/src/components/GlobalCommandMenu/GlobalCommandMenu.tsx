@@ -1,4 +1,4 @@
-import { ReactElement, useState, useMemo, useCallback } from 'react';
+import { ReactElement, useState, useMemo, useCallback, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import { isDeskChannelType, ChannelType } from '@xyne/shared';
 import { useAuthContextValues } from '../../hooks/useAuth';
@@ -31,6 +31,11 @@ import { queries } from '../../zero/queries';
 import { getUserDisplayName } from '../../utils/userDisplayName';
 import { DEFAULT_SEARCH_FILTERS, readLastSearchState } from '../../hooks/useSearchResultsScreen';
 import { buildChips, buildQueryText, readFiltersFromParams } from '../../search/filterRegistry';
+import {
+  OPEN_TICKET_SEARCH_EVENT,
+  getCurrentTicketView,
+  type TicketSearchView,
+} from '../../search/ticketSearchScope';
 
 interface GlobalCommandMenuProps {
   open?: boolean;
@@ -54,6 +59,10 @@ interface GlobalCommandMenuProps {
   // Show the inline AI overview above the results. Only the cmd+K search overlay sets it;
   // the pickers built on this menu leave it off.
   aiOverview?: boolean;
+  // Listen for the ticket screen's search bar and open as a search of that screen's tickets:
+  // Tickets tab only, seeded with its filters. Only the app-level cmd+K instance sets it;
+  // pickers built on this menu leave it off. Cmd+K itself always opens the global search.
+  ticketScreenScope?: boolean;
 }
 
 const GlobalCommandMenu = ({
@@ -75,6 +84,7 @@ const GlobalCommandMenu = ({
   restoreQueryFromUrl,
   seedCommand,
   aiOverview,
+  ticketScreenScope,
 }: GlobalCommandMenuProps = {}): ReactElement | null => {
   const context = useAuthContextValues();
   const channelData = useAllChannels();
@@ -91,6 +101,7 @@ const GlobalCommandMenu = ({
   const [internalHideTabs, setInternalHideTabs] = useState(false);
   const [internalEnabledTabs, setInternalEnabledTabs] = useState<TabType[] | undefined>(undefined);
   const [deskMergeEnabled, setDeskMergeEnabled] = useState(false);
+  const [ticketView, setTicketView] = useState<TicketSearchView | null>(null);
 
   // External props take priority over internal state (e.g. when opened from SupportScreen)
   const initialMention =
@@ -108,6 +119,42 @@ const GlobalCommandMenu = ({
   const open = controlledOpen ?? internalOpen;
   const onOpenChange = controlledOnOpenChange ?? setInternalOpen;
 
+  /**
+   * Opens the palette scoped to the ticket screen underneath, read at open time so the
+   * filters are never stale. False when no ticket screen is mounted.
+   */
+  const applyTicketView = useCallback((ticketContext: TicketSearchView): void => {
+    setTicketView(ticketContext);
+    setInternalInitialMention(null);
+    setInternalContextualTab(TabType.TICKETS);
+    setInternalHideTabs(true);
+    setInternalEnabledTabs([TabType.TICKETS]);
+  }, []);
+
+  const openScopedToTicketScreen = useCallback((): boolean => {
+    const ticketContext = getCurrentTicketView();
+    if (!ticketContext) return false;
+    applyTicketView(ticketContext);
+    onOpenChange(true);
+    return true;
+  }, [applyTicketView, onOpenChange]);
+
+  // Removing the view keeps the palette open on Tickets, as a plain search with every tab.
+  const removeTicketView = useCallback((): void => {
+    setTicketView(null);
+    setInternalHideTabs(false);
+    setInternalEnabledTabs(undefined);
+  }, []);
+
+  useEffect(() => {
+    if (!ticketScreenScope) return;
+    const open = (): void => {
+      openScopedToTicketScreen();
+    };
+    window.addEventListener(OPEN_TICKET_SEARCH_EVENT, open);
+    return (): void => window.removeEventListener(OPEN_TICKET_SEARCH_EVENT, open);
+  }, [ticketScreenScope, openScopedToTicketScreen]);
+
   const handleOpenChange = useCallback(
     (newOpen: boolean) => {
       if (newOpen && internalContextualTab === undefined && externalInitialTab === undefined) {
@@ -123,12 +170,16 @@ const GlobalCommandMenu = ({
         setInternalHideTabs(false);
         setInternalEnabledTabs(undefined);
         setDeskMergeEnabled(false);
+        setTicketView(null);
       }
     },
     [onOpenChange, internalContextualTab, externalInitialTab, location.pathname],
   );
 
   const handleFindInChannel = useCallback(() => {
+    // On a ticket screen, Cmd+F is the screen's search bar: a ticket search in its view.
+    if (ticketScreenScope && openScopedToTicketScreen()) return;
+
     const pathParts = location.pathname.split('/').filter(Boolean);
     const supportIndex = pathParts.indexOf('support');
     setDeskMergeEnabled(supportIndex !== -1);
@@ -210,7 +261,16 @@ const GlobalCommandMenu = ({
     setInternalHideTabs(false);
     setInternalEnabledTabs(undefined);
     onOpenChange(true);
-  }, [location.pathname, location.search, channelData, allUsers, onOpenChange, context.userID]);
+  }, [
+    location.pathname,
+    location.search,
+    channelData,
+    allUsers,
+    onOpenChange,
+    context.userID,
+    ticketScreenScope,
+    openScopedToTicketScreen,
+  ]);
 
   // Only the search-mode instance owns Cmd+F; the context-picker copy mounted in
   // ThreadPannel would otherwise win the tiebreak and hijack the shortcut.
@@ -380,6 +440,9 @@ const GlobalCommandMenu = ({
       {...(effectiveHideTabs ? { hideTabs: effectiveHideTabs } : {})}
       {...(aiOverview !== undefined ? { aiOverview } : {})}
       deskMergeEnabled={deskMergeEnabled}
+      ticketView={ticketView}
+      onRemoveTicketView={removeTicketView}
+      onRestoreTicketView={applyTicketView}
     />
   );
 };

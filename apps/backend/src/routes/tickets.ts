@@ -50,6 +50,7 @@ router.patch('/:ticketId', ticketController.updateTicket);
 // Workflow metrics for tickets dashboard
 router.get('/workflow-metrics', analyticsAuthMiddleware.requireWorkspaceContext, analyticsController.getWorkflowMetrics);
 router.post('/duplicates', validate(ticketDuplicateCheckSchema), ticketController.checkDuplicateTickets);
+router.post('/:ticketId/duplicates/recheck', ticketController.recheckTicketDuplicates);
 router.post('/suggest-board', validate(ticketBoardSuggestionSchema), ticketController.suggestBoard);
 
 router.get('/:ticketId/pending-human-intervention', ticketController.getPendingHumanIntervention);

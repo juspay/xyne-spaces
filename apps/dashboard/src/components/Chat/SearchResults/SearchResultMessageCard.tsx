@@ -127,6 +127,7 @@ export const SearchResultMessageCard = memo(function SearchResultMessageCard({
           createdBy: uploadedByUserId,
           metadata: null,
           conversationId,
+          channelId,
           thumbnailUrl: null,
           isDeleted: false,
           uploadStatus: null,
@@ -137,6 +138,7 @@ export const SearchResultMessageCard = memo(function SearchResultMessageCard({
   }, [
     attachmentIds,
     attachmentResults?.results,
+    channelId,
     conversationId,
     renderedMessageId,
     searchThread.createdAt,

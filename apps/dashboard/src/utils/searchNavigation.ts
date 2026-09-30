@@ -14,6 +14,7 @@ import { browserPanelActor } from '../machines/browserPanelMachine';
 import { xyneAIActor } from '../machines/xyneAIMachine';
 import { isXyneOrigin } from './browserPanelPartition';
 import { toStandalonePath } from './electronApp';
+import { parseDMParticipantIds } from '../components/Chat/ChatDirectory/ChatDirectory.utils';
 
 /**
  * Channel data interface for navigation
@@ -21,10 +22,33 @@ import { toStandalonePath } from './electronApp';
  */
 interface Channel {
   readonly id: string;
+  readonly name: string;
   readonly scopeType: ChannelScopeType;
   readonly type?: ChannelType;
-  readonly participants?: ReadonlyArray<{ readonly userId: string }>;
 }
+
+/**
+ * Find a caller ↔ userId 1:1 DM in the channel list. DMs are stored with
+ * `name = "userId1,userId2"` (sorted); the participants relation isn't loaded
+ * on `useAllChannels`, so match on the name instead — same pattern
+ * useExistingDmChannel uses.
+ *
+ * When `callerUserId` is provided, only DMs where BOTH the caller and the
+ * target are participants match — this defends against stray channels whose
+ * name happens to include the target id but where the caller isn't the other
+ * party, which would otherwise land the click in the wrong chat.
+ */
+const findOneToOneDmChannel = (
+  channels: readonly Channel[],
+  userId: string,
+  callerUserId?: string,
+): Channel | undefined =>
+  channels.find(channel => {
+    if (channel.scopeType !== ChannelScopeType.DM) return false;
+    const ids = parseDMParticipantIds({ name: channel.name, scopeType: channel.scopeType });
+    if (ids.length !== 2 || !ids.includes(userId)) return false;
+    return callerUserId ? ids.includes(callerUserId) : true;
+  });
 
 /**
  * Main navigation router for search results
@@ -37,10 +61,11 @@ export const navigateToSearchResult = async (
   result: DisplaySearchResult,
   navigate: NavigateFunction,
   channelData?: Channel[],
+  options?: { profileFallbackAnchorChannelId?: string; callerUserId?: string },
 ): Promise<void> => {
   switch (result.type) {
     case 'user':
-      await navigateToUser(result, navigate, channelData);
+      await navigateToUser(result, navigate, channelData, options);
       break;
 
     case 'channel':
@@ -96,24 +121,30 @@ export const navigateToSearchResult = async (
 export const resolveOrCreateDmChannelId = async (
   userId: string,
   channelData: Channel[],
+  callerUserId?: string,
 ): Promise<string> => {
-  const existingDmChannel = channelData.find(
-    channel =>
-      channel.scopeType === ChannelScopeType.DM &&
-      channel.participants?.length === 2 &&
-      channel.participants?.some(p => p.userId === userId),
-  );
+  const existingDmChannel = findOneToOneDmChannel(channelData, userId, callerUserId);
   if (existingDmChannel) return existingDmChannel.id;
 
   const dmResponse = await channelService.createDm({ participantIds: [userId] });
   return dmResponse.id;
 };
 
-/** Open (or create) the user's 1:1 DM and navigate to it. */
+/**
+ * Open (or create) the user's 1:1 DM and navigate to it.
+ *
+ * `profileFallbackAnchorChannelId` handles the deactivated-user edge case:
+ * the backend refuses to create a DM with a deactivated user, so a click
+ * from Cmd+K that has no prior DM would otherwise land nowhere. When set,
+ * a failed DM creation redirects to the existing profile route
+ * (`/chat/dir/{anchor}/profile/{userId}`) so the caller lands on the user's
+ * read-only profile instead of getting silent nothing.
+ */
 export const navigateToUser = async (
   result: DisplaySearchResult,
   navigate: NavigateFunction,
   channelData?: Channel[],
+  options?: { profileFallbackAnchorChannelId?: string; callerUserId?: string },
 ): Promise<void> => {
   if (!channelData) {
     logger.warn(LogEvent.FRONTEND_ERROR, {
@@ -124,9 +155,19 @@ export const navigateToUser = async (
   }
 
   try {
-    const channelId = await resolveOrCreateDmChannelId(result.id, channelData);
+    const channelId = await resolveOrCreateDmChannelId(
+      result.id,
+      channelData,
+      options?.callerUserId,
+    );
     void navigate(`/chat/dir/${channelId}`);
   } catch (error) {
+    if (options?.profileFallbackAnchorChannelId) {
+      // Most common cause: target is deactivated so createDm 404s. Fall back to
+      // the existing profile route so the click produces a visible result.
+      void navigate(`/chat/dir/${options.profileFallbackAnchorChannelId}/profile/${result.id}`);
+      return;
+    }
     logger.error(LogEvent.FRONTEND_ERROR, {
       type: 'migrated_console_error',
       message: String('[SEARCH-NAVIGATION] Failed to create DM:'),
@@ -368,16 +409,12 @@ type SearchResultTarget =
 export const computeSearchResultPath = (
   result: DisplaySearchResult,
   channelData?: Channel[],
+  callerUserId?: string,
 ): SearchResultTarget | null => {
   switch (result.type) {
     case 'user': {
       if (!channelData) return null;
-      const existingDmChannel = channelData.find(
-        channel =>
-          channel.scopeType === ChannelScopeType.DM &&
-          channel.participants?.length === 2 &&
-          channel.participants?.some(p => p.userId === result.id),
-      );
+      const existingDmChannel = findOneToOneDmChannel(channelData, result.id, callerUserId);
       if (existingDmChannel) {
         return { kind: 'internal', path: `/chat/dir/${existingDmChannel.id}` };
       }
@@ -503,17 +540,18 @@ export const openSearchResult = async (
   options: { modifier: boolean; isElectron: boolean; isMobile: boolean },
   navigate: NavigateFunction,
   channelData?: Channel[],
+  navOptions?: { callerUserId?: string; profileFallbackAnchorChannelId?: string },
 ): Promise<void> => {
   const { modifier, isElectron, isMobile } = options;
 
   if (!modifier || isMobile) {
-    await navigateToSearchResult(result, navigate, channelData);
+    await navigateToSearchResult(result, navigate, channelData, navOptions);
     return;
   }
 
-  let target = computeSearchResultPath(result, channelData);
+  let target = computeSearchResultPath(result, channelData, navOptions?.callerUserId);
   if (!target) {
-    await navigateToSearchResult(result, navigate, channelData);
+    await navigateToSearchResult(result, navigate, channelData, navOptions);
     return;
   }
   if (target.kind === 'async-user') {

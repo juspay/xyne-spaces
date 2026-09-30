@@ -40,7 +40,7 @@ describe("claimOrQueue", () => {
     expect(enqueueMessage.mock.calls[0]?.[0]).toMatchObject({ ...message, queueReason: "interrupt_followup", interruptMode: "interrupt_with_reply" });
     expect(String(fetchMock.mock.calls[0]?.[0])).toBe("http://claw/claw/api/v1/internal/run/sess-old/interrupt-with-reply");
     expect(gate).toMatchObject({ kind: "queued", accepted: true, interrupted: true });
-    expect((gate as { notice: string }).notice).toContain("wrap up my current reply");
+    expect((gate as { notice: string }).notice).toContain("Finishing the current reply first");
   });
 
   it("only queues for an explicit /queue or when the running reply has no session yet", async () => {
@@ -51,8 +51,8 @@ describe("claimOrQueue", () => {
     tryAcquireSlot.mockResolvedValue("tok-1");
     expect(fetchMock).not.toHaveBeenCalled();
     expect(enqueueMessage.mock.calls.map((c) => c[0]["queueReason"])).toEqual(["explicit_queue", "busy"]);
-    expect((explicit as { notice: string }).notice).toContain("Queued after the current run");
-    expect((noSession as { notice: string }).notice).toContain("this one is queued (position 1)");
+    expect((explicit as { notice: string }).notice).toContain("Queued behind the current run");
+    expect((noSession as { notice: string }).notice).toContain("queued at position 1");
   });
 
   it("does not interrupt when the message could not be queued", async () => {
@@ -61,7 +61,7 @@ describe("claimOrQueue", () => {
     const gate = await claimOrQueue({ message, place: "chat" });
     expect(fetchMock).not.toHaveBeenCalled();
     expect(gate).toMatchObject({ kind: "queued", accepted: false, interrupted: false });
-    expect((gate as { notice: string }).notice).toContain("this chat’s queue is full (10)");
+    expect((gate as { notice: string }).notice).toContain("this chat's queue is full at 10");
   });
 });
 
