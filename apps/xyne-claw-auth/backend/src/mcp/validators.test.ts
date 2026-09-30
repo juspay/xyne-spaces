@@ -114,3 +114,79 @@ describe("user-send-message target conversation (queue-time)", () => {
     }
   });
 });
+
+describe("user-send-message target validation", () => {
+  const userId = "user_123";
+  const token = [
+    Buffer.from(JSON.stringify({ alg: "none", typ: "JWT" })).toString("base64url"),
+    Buffer.from(JSON.stringify({ sub: userId })).toString("base64url"),
+    "signature",
+  ].join(".");
+  const userCreds = { token, url: "https://spaces.example" };
+  const channelId = "channel_private_dm";
+
+  it("uses the invoking user's membership and does not require app access", async () => {
+    interact
+      .mockResolvedValueOnce([{ id: channelId }])
+      .mockResolvedValueOnce([{ channelId, userId }]);
+
+    const error = await validateWriteAction(
+      "xyne-spaces",
+      "user-send-message",
+      { channelId, content: "hello" },
+      userCreds,
+    );
+
+    expect(error).toBeNull();
+    expect(interact).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        model: "channelParticipant",
+        where: { channelId: { equals: channelId }, userId: { equals: userId } },
+      }),
+      expect.objectContaining({ token }),
+    );
+    expect(appFetch).not.toHaveBeenCalled();
+  });
+
+  it("rejects a channel when the invoking user is not a member", async () => {
+    interact
+      .mockResolvedValueOnce([{ id: channelId }])
+      .mockResolvedValueOnce([]);
+
+    const error = await validateWriteAction(
+      "xyne-spaces",
+      "user-send-message",
+      { channelId, content: "hello" },
+      userCreds,
+    );
+
+    expect(error).toMatch(/must be a member/i);
+    expect(appFetch).not.toHaveBeenCalled();
+  });
+
+  it("accepts recipientUserId as an exclusive DM target without app validation", async () => {
+    const error = await validateWriteAction(
+      "xyne-spaces",
+      "user-send-message",
+      { recipientUserId: "recipient_456", content: "hello" },
+      userCreds,
+    );
+
+    expect(error).toBeNull();
+    expect(interact).not.toHaveBeenCalled();
+    expect(appFetch).not.toHaveBeenCalled();
+  });
+
+  it("rejects multiple targets", async () => {
+    const error = await validateWriteAction(
+      "xyne-spaces",
+      "user-send-message",
+      { channelId, recipientUserId: "recipient_456", content: "hello" },
+      userCreds,
+    );
+
+    expect(error).toMatch(/exactly one target/i);
+    expect(interact).not.toHaveBeenCalled();
+  });
+});

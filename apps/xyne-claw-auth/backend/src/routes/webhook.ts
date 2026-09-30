@@ -111,6 +111,7 @@ import {
 import { persistBase64ChatAttachments } from "../services/chatAttachmentService.js";
 import { gcsService } from "../services/storageService.js";
 import { getSpacesAuthForUser, spacesDbAvailable, getSpacesUserWorkspaceId, getWorkspaceIdForUser } from "../lib/spaces-db.js";
+import { getSpacesPostTarget } from "../lib/spaces-post-target.js";
 import { ensureUserExists, orgIdForSpacesUser } from "../lib/users-jit.js";
 import { finalizeOrphanedRun } from "../services/orphan-run-finalizer.js";
 import { requireStrictS2S, s2sKeyMatches, requireResultToken } from "../middleware/require-auth.js";
@@ -674,16 +675,38 @@ function pendingActionTargetChannelId(action: Record<string, unknown>): string |
   return typeof raw === "string" && raw.trim() ? raw.trim() : undefined;
 }
 
+function pendingActionTargetRecipientUserId(action: Record<string, unknown>): string | undefined {
+  const params = recordParam(action["params"]);
+  const raw = params["recipientUserId"];
+  return typeof raw === "string" && raw.trim() ? raw.trim() : undefined;
+}
+
 async function pendingActionTargetValidation(
   action: Record<string, unknown>,
   ctx: SessionContext,
   appToken: string,
-): Promise<{ error: string | null; channelName?: string }> {
+): Promise<{ error: string | null; channelName?: string; recipientName?: string }> {
   const conversationId = pendingActionTargetConversationId(action);
   const channelId = pendingActionTargetChannelId(action);
+  const recipientUserId = pendingActionTargetRecipientUserId(action);
 
-  if (action["tool"] === "user-send-message" && !!conversationId === !!channelId) {
-    return { error: "provide exactly one target: use conversationId for an existing thread or channelId to post into a channel" };
+  if (action["tool"] === "user-send-message") {
+    const targetCount = [conversationId, channelId, recipientUserId].filter(Boolean).length;
+    if (targetCount !== 1) {
+      return { error: "provide exactly one target: use conversationId for an existing thread, channelId to post into a channel, or recipientUserId to create/reuse a DM" };
+    }
+    // Queue-time validation already used the invoking user's credential. Do not
+    // repeat it here with the app token: private DMs intentionally do not include
+    // the agent app, and that mismatch used to suppress the approval card.
+    if (recipientUserId) {
+      // Card display only: resolve the recipient's name with the invoking
+      // user's credential so the card never shows a raw user id. Fails open.
+      const auth = await getSpacesAuthForUser(ctx.senderId, "webhook").catch(() => null);
+      const target = auth ? await getSpacesPostTarget({ recipientUserId }, auth, ctx.senderId).catch(() => null) : null;
+      const recipientName = target?.directMessage?.with[0];
+      return recipientName ? { error: null, recipientName } : { error: null };
+    }
+    return { error: null };
   }
 
   if (conversationId) {
@@ -1078,7 +1101,7 @@ async function postWriteApprovalAction(args: {
   action: Record<string, unknown>;
   ctx: SessionContext;
   token: string;
-  targetValidation: { channelName?: string };
+  targetValidation: { channelName?: string; recipientName?: string };
 }): Promise<void> {
   const { action, ctx, token, targetValidation } = args;
   const params = action["params"] as Record<string, unknown>;

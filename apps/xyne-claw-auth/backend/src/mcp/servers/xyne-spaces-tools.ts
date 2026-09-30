@@ -7010,6 +7010,7 @@ const spacesWorkflowStats: ToolDef = {
 // Uses the same endpoints a real user hits in Spaces:
 //   - POST /api/conversations/:conversationId/messages to reply in a thread
 //   - POST /api/channels/:channelId/conversations to start a new top-level thread
+//   - POST /api/users/me/dms to create/reuse a DM and send its initial message
 const userSendMessage: ToolDef = {
   name: "user-send-message",
   // Posts AS the human via their session token — inherently meaningless for an
@@ -7041,12 +7042,17 @@ const userSendMessage: ToolDef = {
       conversationId: {
         type: "string",
         description:
-          "Reply into this existing conversation/thread ID. Provide exactly one of conversationId or channelId.",
+          "Reply into this existing conversation/thread ID. Provide exactly one of conversationId, channelId, or recipientUserId.",
       },
       channelId: {
         type: "string",
         description:
-          "Post a new top-level message into this channel ID. Provide exactly one of conversationId or channelId.",
+          "Post a new top-level message into this channel ID. You must already be a member. Provide exactly one of conversationId, channelId, or recipientUserId.",
+      },
+      recipientUserId: {
+        type: "string",
+        description:
+          "Create or reuse a direct-message channel with this active user ID, then send the message. Provide exactly one of conversationId, channelId, or recipientUserId.",
       },
       content: {
         type: "string",
@@ -7055,18 +7061,20 @@ const userSendMessage: ToolDef = {
     },
     required: ["content"],
     oneOf: [
-      { required: ["conversationId"], not: { required: ["channelId"] } },
-      { required: ["channelId"], not: { required: ["conversationId"] } },
+      { required: ["conversationId"], not: { anyOf: [{ required: ["channelId"] }, { required: ["recipientUserId"] }] } },
+      { required: ["channelId"], not: { anyOf: [{ required: ["conversationId"] }, { required: ["recipientUserId"] }] } },
+      { required: ["recipientUserId"], not: { anyOf: [{ required: ["conversationId"] }, { required: ["channelId"] }] } },
     ],
   },
   async handler(args, ctx) {
     try {
       const conversationId = String(args["conversationId"] ?? "").trim();
       const channelId = String(args["channelId"] ?? "").trim();
+      const recipientUserId = String(args["recipientUserId"] ?? "").trim();
       const rawContent = String(args["content"] ?? "");
-      if (!!conversationId === !!channelId) {
+      if ([conversationId, channelId, recipientUserId].filter(Boolean).length !== 1) {
         return err(
-          "Provide exactly one target: use conversationId for an existing thread or channelId to post into a channel.",
+          "Provide exactly one target: use conversationId for an existing thread, channelId to post into a channel, or recipientUserId to create/reuse a DM.",
         );
       }
       if (!rawContent.trim()) return err("content cannot be empty");
@@ -7083,6 +7091,37 @@ const userSendMessage: ToolDef = {
         ? await resolveUnboundMentions(rawContent, buildSpacesMentionLookupsDb(workspaceId)).catch(() => rawContent)
         : rawContent;
       const content = expandSpacesMentions(resolved);
+
+      if (recipientUserId) {
+        const result = (await spacesFetch("/api/users/me/dms", {
+          method: "POST",
+          body: JSON.stringify({ participantIds: [recipientUserId], message: content }),
+        })) as
+          | {
+              id?: string;
+              initialConversation?: {
+                conversationId?: string;
+                initialMessage?: { messageId?: string };
+              } | null;
+            }
+          | undefined;
+
+        if (!result?.initialConversation) {
+          return err("Spaces created or reused the DM but did not confirm that the message was sent.");
+        }
+        const ids = [
+          result.id ? `channelId=${result.id}` : "",
+          result.initialConversation.conversationId
+            ? `conversationId=${result.initialConversation.conversationId}`
+            : "",
+          result.initialConversation.initialMessage?.messageId
+            ? `messageId=${result.initialConversation.initialMessage.messageId}`
+            : "",
+        ]
+          .filter(Boolean)
+          .join(", ");
+        return ok(`Message sent as user in a DM with ${recipientUserId}${ids ? ` (${ids})` : ""}.`);
+      }
 
       if (conversationId) {
         const result = (await spacesFetch(
@@ -7120,7 +7159,7 @@ const userSendMessage: ToolDef = {
     } catch (e) {
       const msg = errMsg(e);
       return err(
-        `user-send-message error: ${msg}. Use conversationId for an existing thread or channelId to post into a channel.`,
+        `user-send-message error: ${msg}. Use conversationId for an existing thread, channelId to post into a channel, or recipientUserId to create/reuse a DM.`,
       );
     }
   },
