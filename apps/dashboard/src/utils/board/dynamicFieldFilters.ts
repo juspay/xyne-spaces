@@ -47,11 +47,13 @@ export const matchesDynamicFieldValue = (
         ticketValue = String(actualFieldValue);
       }
       // A lone value is typed free text, so it stays a substring match; several are exact
-      // picks matched as OR. Same split as kanbanCountsService.matchesDynamicFilter, so a
-      // filter counts the same tickets it shows.
-      if (filterValue.length > 1) return filterValue.includes(ticketValue);
-      const searchTerm = (filterValue[0] || '').toLowerCase();
-      return ticketValue.toLowerCase().includes(searchTerm);
+      // picks matched as OR. Both are case-insensitive: the dropdown folds spellings that
+      // differ only in case into one option, so a case-sensitive OR would drop the tickets
+      // holding the other spelling. Same split as kanbanCountsService.matchesDynamicFilter,
+      // so a filter counts the same tickets it shows.
+      const needle = ticketValue.toLowerCase();
+      if (filterValue.length > 1) return filterValue.some(value => value.toLowerCase() === needle);
+      return needle.includes((filterValue[0] || '').toLowerCase());
     }
     if (fieldType === FormFieldType.NUMBER) {
       const ticketValue =

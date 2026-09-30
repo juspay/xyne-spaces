@@ -119,7 +119,11 @@ const matchesDynamicFilter = (
       return normalizedValues.some(item => item.toLowerCase().includes(needle));
     }
 
-    return normalizedValues.some(item => filterValue.includes(item));
+    // Case-insensitive like the single-value branch above: the values dropdown folds spellings
+    // that differ only in case into one option, so an exact OR would count fewer tickets than
+    // the board shows. Mirrors matchesDynamicFieldValue in the dashboard.
+    const needles = new Set(filterValue.map(value => value.toLowerCase()));
+    return normalizedValues.some(item => needles.has(item.toLowerCase()));
   }
 
   const scalarValue = getScalarValue(value);

@@ -3,6 +3,7 @@ import type { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { FormEntityType } from '@xyne/shared';
 import { db } from '@/database/client';
+import { cacheManager } from '@/utils/cacheManager';
 import { logger } from '@/utils/logger';
 
 const router = Router();
@@ -11,12 +12,16 @@ const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
 
 /**
- * Distinct value groups read per request — a backstop for a field used as free text, not the
- * normal path. Groups arrive by count, so the cap only drops the rarest values. `q` is matched
- * over the same window rather than pushed down: the value is a Json column the query builder
- * can't filter case-insensitively, and raw SQL is barred (scripts/validate-no-raw-sql.sh).
+ * Distinct value groups read per aggregate — a backstop for a field used as free text, not the
+ * normal path. Groups arrive by count, so the cap only drops the rarest values.
  */
 const GROUP_LIMIT = 1000;
+
+/**
+ * How long one field's value list is reused. The aggregate scans every row of the field, so it
+ * must not run per keystroke; short enough that a newly typed value shows up on the next open.
+ */
+const CACHE_TTL_SECONDS = 30;
 
 const ListFieldValuesQuerySchema = z.object({
   fieldId: z.string().trim().min(1).max(200),
@@ -56,7 +61,8 @@ const extractStoredValues = (row: StoredValueRow): string[] => {
  */
 router.get('/', async (req: Request, res: Response): Promise<void> => {
   try {
-    if (!req.user?.id) {
+    const workspaceId = req.user?.workspaceId;
+    if (!req.user?.id || !workspaceId) {
       res.status(401).json({ success: false, error: 'Unauthorized' });
       return;
     }
@@ -73,49 +79,59 @@ router.get('/', async (req: Request, res: Response): Promise<void> => {
 
     const { fieldId, q, limit } = parsed.data;
 
-    // Grouped in the database so only distinct values cross the wire. Both columns are grouped
-    // because `fieldValue` is the fallback for rows without `actualFieldValue`. Workspace-scoped
-    // by the tenant ACL extension (see database/tenant/acl-extension.ts).
-    const groups = await db.formEntityValues.groupBy({
-      by: ['actualFieldValue', 'fieldValue'],
-      where: { fieldId, entityType: FormEntityType.TICKET },
-      _count: { fieldValue: true },
-      orderBy: { _count: { fieldValue: 'desc' } },
-      take: GROUP_LIMIT,
-    });
+    // The whole list is cached per workspace + field, and `q`/`limit` are applied to it below,
+    // so a debounced search filters in memory instead of re-running the aggregate per keystroke.
+    const cacheKey = `form-field-values:${workspaceId}:${fieldId}`;
+    let ranked = cacheManager.get<string[]>(cacheKey);
 
-    const search = q?.toLowerCase();
-    // Keyed case-insensitively so "MID 1" and "mid 1" are one option. Groups arrive by count,
-    // so the spelling kept is the most common one.
-    const tallyByKey = new Map<string, { value: string; count: number }>();
-    for (const group of groups) {
-      for (const value of extractStoredValues(group)) {
-        const trimmed = value.trim();
-        if (!trimmed) continue;
-        const key = trimmed.toLowerCase();
-        if (search && !key.includes(search)) continue;
-        const tally = tallyByKey.get(key);
-        if (tally) {
-          tally.count += group._count.fieldValue;
-        } else {
-          tallyByKey.set(key, { value: trimmed, count: group._count.fieldValue });
+    if (!ranked) {
+      // Grouped in the database so only distinct values cross the wire. Both columns are grouped
+      // because `fieldValue` is the fallback for rows without `actualFieldValue`. Workspace-scoped
+      // by the tenant ACL extension (see database/tenant/acl-extension.ts).
+      const groups = await db.formEntityValues.groupBy({
+        by: ['actualFieldValue', 'fieldValue'],
+        where: { fieldId, entityType: FormEntityType.TICKET },
+        _count: { fieldValue: true },
+        orderBy: { _count: { fieldValue: 'desc' } },
+        take: GROUP_LIMIT,
+      });
+
+      // Keyed case-insensitively so "MID 1" and "mid 1" are one option. Groups arrive by count,
+      // so the spelling kept is the most common one.
+      const tallyByKey = new Map<string, { value: string; count: number }>();
+      for (const group of groups) {
+        for (const value of extractStoredValues(group)) {
+          const trimmed = value.trim();
+          if (!trimmed) continue;
+          const key = trimmed.toLowerCase();
+          const tally = tallyByKey.get(key);
+          if (tally) {
+            tally.count += group._count.fieldValue;
+          } else {
+            tallyByKey.set(key, { value: trimmed, count: group._count.fieldValue });
+          }
         }
       }
+
+      ranked = [...tallyByKey.values()]
+        .sort((left, right) =>
+          left.count === right.count
+            ? left.value.localeCompare(right.value)
+            : right.count - left.count,
+        )
+        .map(tally => tally.value);
+
+      cacheManager.set(cacheKey, ranked, CACHE_TTL_SECONDS);
     }
 
-    const ranked = [...tallyByKey.values()]
-      .sort((left, right) =>
-        left.count === right.count
-          ? left.value.localeCompare(right.value)
-          : right.count - left.count,
-      )
-      .map(tally => tally.value);
+    const search = q?.toLowerCase();
+    const matches = search ? ranked.filter(value => value.toLowerCase().includes(search)) : ranked;
 
     res.status(200).json({
       success: true,
-      values: ranked.slice(0, limit),
+      values: matches.slice(0, limit),
       // The client shows a "refine your search" hint rather than paginating.
-      hasMore: ranked.length > limit,
+      hasMore: matches.length > limit,
     });
   } catch (error) {
     logger.error('[FormFieldValueRoutes] Failed to list form field values:', error);
