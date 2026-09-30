@@ -29,3 +29,22 @@ export function findSandboxKeys(configs: Record<string, { repoUrl?: string }>, r
     .map(([key]) => key)
     .sort();
 }
+
+export type SandboxProfileChoice = { key: string } | { error: string };
+
+// undefined → no repo match, the caller keeps its pin / template path.
+export function resolveSandboxProfile(
+  configs: Record<string, { repoUrl?: string }>,
+  repoUrl: string | undefined,
+  profile: string | undefined,
+): SandboxProfileChoice | undefined {
+  if (!repoUrl) return undefined;
+  const keys = findSandboxKeys(configs, repoUrl);
+  const [first, ...rest] = keys;
+  if (!first) return undefined;
+  if (rest.length === 0) return { key: first };
+  if (profile && keys.includes(profile)) return { key: profile };
+  return {
+    error: `Error: ${repoUrl} has several sandbox profiles: ${keys.join(", ")}. Pass profile as one of them (sandbox-list-profiles describes each).`,
+  };
+}

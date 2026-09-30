@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { findSandboxKeys, normalizeRepoUrl } from "./repo-url.js";
+import { findSandboxKeys, normalizeRepoUrl, resolveSandboxProfile } from "./repo-url.js";
 
 describe("normalizeRepoUrl", () => {
   it("reduces every common form of the same GitHub repo to one value", () => {
@@ -49,5 +49,31 @@ describe("findSandboxKeys", () => {
   it("returns nothing for an unknown or malformed URL", () => {
     expect(findSandboxKeys(configs, "https://github.com/example-org/other")).toEqual([]);
     expect(findSandboxKeys(configs, "not a url")).toEqual([]);
+  });
+});
+
+describe("resolveSandboxProfile", () => {
+  const configs = {
+    "xyne-spaces": { repoUrl: "https://github.com/example-org/xyne-spaces" },
+    "xyne-spaces-light": { repoUrl: "git@github.com:example-org/xyne-spaces.git" },
+    torana: { repoUrl: "https://bitbucket.example.net/scm/lp/torana.git" },
+  };
+  const spaces = "https://github.com/example-org/xyne-spaces";
+
+  it("uses the only profile for the repo and ignores profile", () => {
+    expect(resolveSandboxProfile(configs, "ssh://git@ssh.bitbucket.example.net/lp/torana.git", "xyne-spaces")).toEqual({ key: "torana" });
+  });
+
+  it("needs profile when several profiles match", () => {
+    expect(resolveSandboxProfile(configs, spaces, "xyne-spaces-light")).toEqual({ key: "xyne-spaces-light" });
+    for (const profile of [undefined, "torana"]) {
+      const choice = resolveSandboxProfile(configs, spaces, profile);
+      expect(choice && "error" in choice && choice.error).toContain("xyne-spaces, xyne-spaces-light");
+    }
+  });
+
+  it("falls through without a URL or a match", () => {
+    expect(resolveSandboxProfile(configs, undefined, "torana")).toBeUndefined();
+    expect(resolveSandboxProfile(configs, "https://github.com/example-org/other", undefined)).toBeUndefined();
   });
 });

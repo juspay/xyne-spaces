@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { asyncHandler, badRequest, notFound, ok } from "../lib/http.js";
 import { loadEffectiveRepoConfigs } from "../lib/sandbox-repo-configs.js";
-import { findSandboxKeys } from "../lib/repo-url.js";
+import { findSandboxKeys } from "xyne-claw-shared";
 
 export const sandboxReposInternalRouter = Router();
 
