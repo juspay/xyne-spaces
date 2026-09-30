@@ -88,6 +88,8 @@ export const shortcuts = {
     category: 'Navigation',
     priority: 50,
     allowInInputs: true,
+    // ⌘⇧A / Ctrl+⇧A is Chrome's Tab Search — only hijack it inside Electron.
+    electronOnly: true,
   },
   'global.openThreads': {
     keys: 'mod+shift+t',
