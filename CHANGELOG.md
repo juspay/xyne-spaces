@@ -1,3 +1,15 @@
+## [1.444.0](https://github.com/juspay/xyne-spaces/compare/v1.443.0...v1.444.0) (2026-09-30)
+
+
+### Features
+
+* play store service account integration ([#2480](https://github.com/juspay/xyne-spaces/issues/2480)) ([26a05d8](https://github.com/juspay/xyne-spaces/commit/26a05d823e262519bb3b2f749617461a9578f715))
+
+
+### Bug Fixes
+
+* always prefilter /mcp/tools; drop MCP_TOOLS_PREFILTER off/shadow modes ([#2537](https://github.com/juspay/xyne-spaces/issues/2537)) ([11555e9](https://github.com/juspay/xyne-spaces/commit/11555e96e50e94d50b6dc26e19180eca59424d9b))
+
 ## [1.443.0](https://github.com/juspay/xyne-spaces/compare/v1.442.5...v1.443.0) (2026-09-30)
 
 
