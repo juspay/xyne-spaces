@@ -1,5 +1,6 @@
 import type { Request, Response } from 'express';
-import { findWorkflowExecutionForCallback, resumeWorkflowClawCallback } from '@/bypassAcl/workflowServices';
+import { findWorkflowExecutionForCallback } from '@/bypassAcl/workflowServices';
+import { resumeWorkflowClawCallback } from '@/bypassAcl/workflowOperations';
 import { logger } from '@/utils/logger';
 
 /**

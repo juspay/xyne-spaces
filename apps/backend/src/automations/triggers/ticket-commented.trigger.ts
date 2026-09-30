@@ -1,8 +1,8 @@
+import { emitDomainEvent } from '@/events/emitDomainEvent';
 import { z } from 'zod';
 import { MessageType } from '@xyne/shared';
 import { BaseTrigger } from './base-trigger';
 import { TriggerCategory } from '../types/categories';
-import { eventRouter } from '../engine/event-router';
 import { repositories } from '@/database/repositories';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
@@ -132,7 +132,7 @@ export async function emitTicketCommented(message: AddedMessage): Promise<void> 
     const ticketStub = await repositories.tickets.findFirstByConversationId(message.conversationId);
     if (!ticketStub) return;
 
-    await eventRouter.emit(
+    await emitDomainEvent(
       {
         type: TICKET_COMMENTED_EVENT,
         payload: {
