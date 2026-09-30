@@ -9,9 +9,6 @@ export type BaseRoute =
 
 const CHANNEL_ROUTE_SEGMENTS = ['dm', 'bookmarks', 'drafts-sent', 'activity'];
 
-/**
- * Hook to detect the current route context and build a context-aware navigation URL
- */
 /** The channel route base for a pathname (e.g. "/ws/chat/dm/123" -> "/chat/dm"). */
 export const getBaseRoute = (pathname: string): BaseRoute => {
   const pathSegments = pathname.split('/');
@@ -26,6 +23,9 @@ export const getBaseRoute = (pathname: string): BaseRoute => {
   ) as BaseRoute;
 };
 
+/**
+ * Hook to detect the current route context and build a context-aware navigation URL
+ */
 export const useRouteContext = (): {
   baseRoute: BaseRoute;
   buildChannelRoute: (channelId: string, params?: Record<string, string>) => string;
