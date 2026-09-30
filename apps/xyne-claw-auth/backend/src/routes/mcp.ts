@@ -73,11 +73,13 @@ import { requiresGatewayToolApproval } from "../mcpgateway/tool-approval.js";
 import { buildAgentCallProposalFlow, isEmptyToolsSelection, parseToolsConfig, resolveAgentToolsConfig, type AgentToolsConfig } from "xyne-claw-shared";
 import { findUnresolvedConfiguredServers, visibleConnectors, type UnresolvedConfiguredServer } from "../lib/connector-access.js";
 import { visibleAgentWhereForRunningUser } from "../lib/callable-agent-resolver.js";
+import { loadKnownMcpTools } from "../lib/mcp-tool-name-index.js";
 import { isClawAdmin } from "../middleware/agent-acl.js";
 import {
   buildSubagentToolRefs,
   filterMcpServerToolsForAgentConfig,
   isMcpToolAllowedByAgentConfig,
+  mcpServerMayServeAgentConfig,
   shouldBypassMcpToolAgentFilter,
   subagentReferencingTool,
   type SubagentToolRefs,
@@ -602,6 +604,37 @@ function enforcementLogTypeForEntry(entry: ListEntry): EnforcementLogType {
 
 function serverToolsKey(serverType: string, serverName: string): string {
   return `${serverType}\u0000${serverName}`;
+}
+
+type McpToolsPrefilterMode = "off" | "shadow" | "on";
+
+function mcpToolsPrefilterMode(): McpToolsPrefilterMode {
+  const raw = (process.env["MCP_TOOLS_PREFILTER"] ?? "shadow").trim().toLowerCase();
+  return raw === "on" || raw === "off" ? raw : "shadow";
+}
+
+async function serverTypesAgentCannotUse(
+  entries: ListEntry[],
+  userId: string,
+  config: AgentToolsConfig | undefined,
+  sessionAgentTools: { slug: string; subagentToolRefs: SubagentToolRefs[] } | null | undefined,
+): Promise<Set<string>> {
+  const skipped = new Set<string>();
+  if (!config || !sessionAgentTools) return skipped;
+  const known = await loadKnownMcpTools(userId, [...new Set(entries.map((e) => e.serverType))]);
+  for (const entry of entries) {
+    if (CUSTOM_TOOL_INJECTIONS.some((inj) => inj.match(entry.serverType))) continue;
+    const keep = mcpServerMayServeAgentConfig({
+      config,
+      serverType: entry.serverType,
+      serverName: entry.serverName,
+      knownTools: known.get(entry.serverType) ?? null,
+      parseGatewayServerType,
+      subagentRefs: sessionAgentTools.subagentToolRefs,
+    });
+    if (!keep) skipped.add(entry.serverType);
+  }
+  return skipped;
 }
 
 function enforceMcpToolsListing(
@@ -1215,8 +1248,22 @@ router.get("/:sessionId/mcp/tools", async (req: Request<{ sessionId: string }>, 
       }
     }
 
+    const prefilterMode = mcpToolsPrefilterMode();
+    const prefilterSkips = prefilterMode === "off"
+      ? new Set<string>()
+      : await serverTypesAgentCannotUse(entries, userId, strictAgentToolsConfig, sessionAgentTools);
+    const listingEntries = prefilterMode === "on"
+      ? entries.filter((entry) => !prefilterSkips.has(entry.serverType))
+      : entries;
+    if (prefilterSkips.size > 0) {
+      log.info(
+        `[mcp/tools] prefilter mode=${prefilterMode} agent=${sessionAgentTools?.slug ?? "-"} ` +
+        `entries=${entries.length} skip=${prefilterSkips.size} [${[...prefilterSkips].join(",")}]`,
+      );
+    }
+
     const results = await Promise.allSettled(
-      entries.map(async (entry) => {
+      listingEntries.map(async (entry) => {
         if (!(await hasConnectorDefinition(entry.serverType))) return null;
         const effective = entry.serverType === "slack"
           ? await loadEffectiveCredentialsWithSpacesFallback(
@@ -1484,6 +1531,18 @@ router.get("/:sessionId/mcp/tools", async (req: Request<{ sessionId: string }>, 
           sessionAgentTools.subagentToolRefs,
         ),
       );
+    }
+
+    if (prefilterMode === "shadow" && prefilterSkips.size > 0) {
+      const misses = data.filter((serverTools) => prefilterSkips.has(serverTools.serverType));
+      if (misses.length > 0) {
+        log.warn(
+          `[mcp/tools] prefilter-shadow MISS agent=${sessionAgentTools?.slug ?? "-"} userId=${userId} ` +
+          `servers=[${misses.map((m) => `${m.serverType}:${m.tools.map((t) => t.name).join("|")}`).join(",")}]`,
+        );
+      } else {
+        log.info(`[mcp/tools] prefilter-shadow ok agent=${sessionAgentTools?.slug ?? "-"} wouldSkip=${prefilterSkips.size}`);
+      }
     }
 
     // Servers the agent's selection grants that never reached `data`: no

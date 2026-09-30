@@ -37,6 +37,9 @@ vi.mock("@modelcontextprotocol/sdk/validation/ajv", () => ({
     }
   },
 }));
+vi.mock("../lib/mcp-tool-name-index.js", () => ({
+  recordKnownMcpTools: vi.fn(async () => undefined),
+}));
 vi.mock("./connector-definitions.js", () => ({
   resolveConnectorDefinition: vi.fn(async () => ({
     transport: "stdio",

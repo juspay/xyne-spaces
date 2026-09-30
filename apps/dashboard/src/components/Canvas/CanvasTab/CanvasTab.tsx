@@ -32,6 +32,8 @@ import {
   AudioLines,
   ArrowLeft,
   Archive,
+  Eye,
+  EyeOff,
   Folder,
   FolderPlus,
   GitCompare,
@@ -61,7 +63,6 @@ import {
   isRecordingCanvas,
 } from '../canvasFilters';
 import { usePersistedCanvasPreferences } from '../../../hooks/usePersistedCanvasPreferences';
-import { Switch } from '@/components/ui/Switch';
 import {
   createCanvasContentTextDiff,
   isVisibleCanvasContentDiffPart,
@@ -857,20 +858,21 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
     return (
       <>
         <div className='flex flex-col h-full bg-background'>
-          <div className='p-4 border-b border-border flex justify-between items-center'>
+          <div className='flex items-center justify-between gap-4 border-b border-border p-4'>
             <h3 className='text-lg font-semibold text-foreground' data-testid='canvas-list-header'>
               Channel Canvases
             </h3>
-            <div className='flex items-center gap-2'>
+            <div className='flex h-9 max-w-full items-center gap-0.5 overflow-x-auto rounded-lg border border-border bg-background p-0.5 shadow-sm'>
               <Tooltip
                 content={showStarredOnly ? 'Show all items' : 'Show starred only'}
                 className='px-2 py-1 text-[10px]'
               >
                 <button
-                  className={`flex items-center justify-center rounded-md border p-1.5 transition-colors ${
+                  type='button'
+                  className={`flex size-7 shrink-0 items-center justify-center rounded-md transition-colors ${
                     showStarredOnly
-                      ? 'border-amber-200 bg-amber-50 text-amber-600'
-                      : 'border-border text-muted-foreground hover:bg-accent'
+                      ? 'bg-amber-50 text-amber-600'
+                      : 'text-muted-foreground hover:bg-accent'
                   }`}
                   onClick={() => setShowStarredOnly(prev => !prev)}
                   data-track-category='CANVAS'
@@ -882,39 +884,89 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
                   />
                 </button>
               </Tooltip>
-              <Tooltip content='Hide system generated' className='px-2 py-1 text-[10px]'>
-                <div className='origin-left scale-90'>
-                  <Switch
-                    id='exclude-channel-call-generated-canvases'
-                    checked={excludeCallGeneratedCanvases}
-                    onCheckedChange={setExcludeCallGeneratedCanvases}
-                  />
-                </div>
+              <Tooltip
+                content={
+                  excludeCallGeneratedCanvases ? 'Show system generated' : 'Hide system generated'
+                }
+                className='px-2 py-1 text-[10px]'
+              >
+                <button
+                  type='button'
+                  className={`flex size-7 shrink-0 items-center justify-center rounded-md transition-colors ${
+                    excludeCallGeneratedCanvases
+                      ? 'bg-muted text-foreground'
+                      : 'text-muted-foreground hover:bg-accent'
+                  }`}
+                  onClick={() => setExcludeCallGeneratedCanvases(prev => !prev)}
+                  aria-label={
+                    excludeCallGeneratedCanvases
+                      ? 'Show system generated canvases'
+                      : 'Hide system generated canvases'
+                  }
+                  aria-pressed={excludeCallGeneratedCanvases}
+                  data-track-category='CANVAS'
+                  data-track-name='TOGGLE_CHANNEL_SYSTEM_GENERATED_CANVAS_FILTER'
+                >
+                  {excludeCallGeneratedCanvases ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
               </Tooltip>
-              <Tooltip content='Only recording canvases' className='px-2 py-1 text-[10px]'>
-                <div className='origin-left scale-90'>
-                  <Switch
-                    id='only-channel-recording-generated-canvases'
-                    checked={onlyRecordingGeneratedCanvases}
-                    onCheckedChange={setOnlyRecordingGeneratedCanvases}
-                  />
-                </div>
+              <Tooltip
+                content={
+                  onlyRecordingGeneratedCanvases
+                    ? 'Show all canvases'
+                    : 'Show only recording canvases'
+                }
+                className='px-2 py-1 text-[10px]'
+              >
+                <button
+                  type='button'
+                  className={`flex size-7 shrink-0 items-center justify-center rounded-md transition-colors ${
+                    onlyRecordingGeneratedCanvases
+                      ? 'bg-primary/10 text-primary'
+                      : 'text-muted-foreground hover:bg-accent'
+                  }`}
+                  onClick={() => setOnlyRecordingGeneratedCanvases(prev => !prev)}
+                  aria-label={
+                    onlyRecordingGeneratedCanvases
+                      ? 'Show all canvases'
+                      : 'Show only recording canvases'
+                  }
+                  aria-pressed={onlyRecordingGeneratedCanvases}
+                  data-track-category='CANVAS'
+                  data-track-name='TOGGLE_CHANNEL_RECORDING_CANVAS_FILTER'
+                >
+                  <AudioLines size={16} />
+                </button>
               </Tooltip>
-              <Tooltip content='Only archived' className='px-2 py-1 text-[10px]'>
-                <div className='flex origin-left scale-90 items-center gap-1.5 rounded-md border border-border px-2 py-1 text-muted-foreground'>
-                  <Archive size={14} />
-                  <Switch
-                    id='only-archived-channel-canvases'
-                    checked={onlyArchivedCanvases}
-                    onCheckedChange={setOnlyArchivedCanvases}
-                  />
-                </div>
+              <Tooltip
+                content={onlyArchivedCanvases ? 'Show all canvases' : 'Show only archived canvases'}
+                className='px-2 py-1 text-[10px]'
+              >
+                <button
+                  type='button'
+                  className={`flex size-7 shrink-0 items-center justify-center rounded-md transition-colors ${
+                    onlyArchivedCanvases
+                      ? 'bg-primary/10 text-primary'
+                      : 'text-muted-foreground hover:bg-accent'
+                  }`}
+                  onClick={() => setOnlyArchivedCanvases(prev => !prev)}
+                  aria-label={
+                    onlyArchivedCanvases ? 'Show all canvases' : 'Show only archived canvases'
+                  }
+                  aria-pressed={onlyArchivedCanvases}
+                  data-track-category='CANVAS'
+                  data-track-name='TOGGLE_CHANNEL_ARCHIVED_CANVAS_FILTER'
+                >
+                  <Archive size={16} />
+                </button>
               </Tooltip>
               {!isDmReadOnly && (
                 <>
+                  <div className='mx-1 h-5 w-px shrink-0 bg-border' aria-hidden='true' />
                   <Button
                     variant='outline'
                     size='sm'
+                    className='h-7 shrink-0 gap-1.5 px-2.5 text-xs'
                     onClick={openCreateFolderDialog}
                     disabled={isCreatingFolder || isChannelArchived}
                     data-track-category='CANVAS'
@@ -922,15 +974,16 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
                     data-track-metadata={JSON.stringify({ channelId })}
                   >
                     {isCreatingFolder ? (
-                      <Loader2 size={16} className='animate-spin' />
+                      <Loader2 size={14} className='animate-spin' />
                     ) : (
-                      <Plus size={16} />
+                      <FolderPlus size={14} />
                     )}
-                    {isCreatingFolder ? 'Creating...' : 'New Folder'}
+                    {isCreatingFolder ? 'Creating...' : 'Folder'}
                   </Button>
                   <Button
                     variant='default'
                     size='sm'
+                    className='h-7 shrink-0 gap-1.5 px-2.5 text-xs'
                     onClick={() => void handleCreateCanvas()}
                     disabled={isCreatingCanvas || isChannelArchived}
                     data-track-category='CANVAS'
@@ -938,11 +991,11 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
                     data-track-metadata={JSON.stringify({ channelId })}
                   >
                     {isCreatingCanvas ? (
-                      <Loader2 size={16} className='animate-spin' />
+                      <Loader2 size={14} className='animate-spin' />
                     ) : (
-                      <Plus size={16} />
+                      <Plus size={14} />
                     )}
-                    {isCreatingCanvas ? 'Creating...' : 'New Canvas'}
+                    {isCreatingCanvas ? 'Creating...' : 'Canvas'}
                   </Button>
                 </>
               )}
