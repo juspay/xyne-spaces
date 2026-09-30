@@ -1,5 +1,6 @@
 import { prisma } from "../db.js";
 import { createLogger } from "../logger.js";
+import { callPagePanelTool, isPagePanelTool } from "./page-panel-calls.js";
 
 const log = createLogger("surface-calls");
 
@@ -11,18 +12,6 @@ export const SURFACE_TOOLS = new Set([
   "app-type",
   "app-screenshot",
 ]);
-
-export const PAGE_SURFACE_TOOLS = new Set([
-  "page-read",
-  "page-snapshot",
-  "page-navigate",
-  "page-click",
-  "page-type",
-  "page-press",
-  "page-screenshot",
-]);
-
-const PAGE_SURFACE_TRIGGER_SOURCES = new Set(["chat"]);
 
 const READ_DEADLINE_MS = 6000;
 const ACT_DEADLINE_MS = 12000;
@@ -39,50 +28,11 @@ export interface SurfaceCallResult {
 }
 
 export function isSurfaceTool(toolName: string): boolean {
-  return SURFACE_TOOLS.has(toolName) || PAGE_SURFACE_TOOLS.has(toolName);
+  return SURFACE_TOOLS.has(toolName) || isPagePanelTool(toolName);
 }
-
-export function isPageSurfaceTool(toolName: string): boolean {
-  return PAGE_SURFACE_TOOLS.has(toolName);
-}
-
-const PAGE_DEADLINES_MS: Record<string, number> = {
-  "page-navigate": 18_000,
-  "page-click": 12_000,
-  "page-type": 12_000,
-  "page-press": 12_000,
-  "page-screenshot": 10_000,
-};
-const PAGE_READ_DEADLINE_MS = 8_000;
 
 function deadlineFor(toolName: string): number {
-  if (isPageSurfaceTool(toolName)) return PAGE_DEADLINES_MS[toolName] ?? PAGE_READ_DEADLINE_MS;
   return toolName === "app-click" || toolName === "app-type" ? ACT_DEADLINE_MS : READ_DEADLINE_MS;
-}
-
-function unavailable(content: string): SurfaceCallResult {
-  return { ok: false, content, unavailable: true };
-}
-
-export function pageSurfaceAllowedForTrigger(triggerSource: string | null | undefined): boolean {
-  return !!triggerSource && PAGE_SURFACE_TRIGGER_SOURCES.has(triggerSource);
-}
-
-async function pageSurfaceBlockedReason(sessionId: string | null | undefined, userId: string): Promise<string | null> {
-  if (!sessionId) return "Browser panel tools need a run started from the Xyne AI screen.";
-  const run = await prisma.agentRun.findUnique({
-    where: { sessionId },
-    select: { userId: true, triggerSource: true },
-  });
-  if (!run || run.userId !== userId) return "Browser panel tools need a run started from the Xyne AI screen.";
-  if (!pageSurfaceAllowedForTrigger(run.triggerSource)) {
-    return "Browser panel tools only work for runs started from the Xyne AI screen.";
-  }
-  return null;
-}
-
-function isDeclinedByOldApp(toolName: string, content: string): boolean {
-  return isPageSurfaceTool(toolName) && content.startsWith("Unknown app tool");
 }
 
 interface DeviceRow {
@@ -134,10 +84,8 @@ export async function callSurfaceTool(input: {
   if (tooBig(args)) {
     return { ok: false, content: "Arguments are too large for an app tool." };
   }
-  const pageTool = isPageSurfaceTool(toolName);
-  if (pageTool) {
-    const blocked = await pageSurfaceBlockedReason(input.sessionId, userId);
-    if (blocked) return unavailable(blocked);
+  if (isPagePanelTool(toolName)) {
+    return callPagePanelTool({ userId, sessionId: input.sessionId, toolName, args });
   }
 
   const devices = await prisma.localHarnessDevice.findMany({
@@ -147,7 +95,6 @@ export async function callSurfaceTool(input: {
 
   const picked = pickDevice(devices);
   if (!picked.device) {
-    if (pageTool) return unavailable("The Xyne desktop app is not open, so there is no browser panel to use.");
     if (picked.reason === "ambiguous") {
       const names = picked.online.map((d) => d.deviceName).join(", ");
       return {
@@ -192,14 +139,9 @@ export async function callSurfaceTool(input: {
         image && typeof image.data === "string" && typeof image.mimeType === "string"
           ? { data: image.data, mimeType: image.mimeType }
           : undefined;
-      const content = typeof row.content === "string" ? row.content : "";
-      if (row.ok !== true && isDeclinedByOldApp(toolName, content)) {
-        return unavailable(`The Xyne app on ${picked.device.deviceName} is too old to use its browser panel.`);
-      }
-      if (pageTool) log.info(`[surface-calls] ${toolName} ok=${row.ok === true} device=${picked.device.id} session=${input.sessionId ?? "-"}`);
       return {
         ok: row.ok === true,
-        content,
+        content: typeof row.content === "string" ? row.content : "",
         ...(valid ? { image: valid } : {}),
       };
     }

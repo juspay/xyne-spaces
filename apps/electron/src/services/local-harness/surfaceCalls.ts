@@ -2,7 +2,7 @@ import log from 'electron-log/main';
 import { BrowserWindow, net } from 'electron';
 import { getMainWindow } from '../../window/manager';
 import { isAppControlTool } from './appControl';
-import { isWorkspacePageTool, workspaceBrowserBridge } from './workspaceBrowser';
+import { workspaceBrowserBridge } from './workspaceBrowser';
 
 const POLL_IDLE_MS = 1500;
 const POLL_ERROR_MS = 5000;
@@ -75,7 +75,7 @@ export class SurfaceCallWatcher {
   }
 
   private async answer(token: string, call: PendingSurfaceCall): Promise<void> {
-    const result = isAppControlTool(call.toolName) || isWorkspacePageTool(call.toolName)
+    const result = isAppControlTool(call.toolName)
       ? await workspaceBrowserBridge.call(call.toolName, call.args)
       : { ok: false, content: `Unknown app tool: ${call.toolName}` };
 
