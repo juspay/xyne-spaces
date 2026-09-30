@@ -15,7 +15,7 @@ import {
   UserTwo,
   File02Ai,
 } from '@xyne/icons';
-import { X } from 'lucide-react';
+import { Server, X } from 'lucide-react';
 import { usePlatform } from '../../hooks/usePlatform';
 import { useClawAdminAccessQuery } from '../../hooks/useClawAdminAccess';
 import { useClawOrgManageAccess } from '../../hooks/useClawOrganization';
@@ -71,6 +71,7 @@ export interface AINavItem {
 export const NAV_ITEMS: AINavItem[] = [
   { key: 'knowledge', label: 'Knowledge', icon: Notebook as NavIcon, to: '/ai/knowledge' },
   { key: 'agent-hub', label: 'Agent Hub', icon: LayoutGridStackDown as NavIcon, to: '/ai/library' },
+  { key: 'environments', label: 'Environments', icon: Server as NavIcon, to: '/ai/environments' },
   { key: 'digital-twin', label: 'Digital twin', icon: UserTwo as NavIcon, to: '/ai/digital-twin' },
   {
     key: 'organization',
