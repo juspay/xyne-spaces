@@ -17,6 +17,7 @@ export interface DeriveSummaryPanelStateInput {
   awaitingSummary: boolean;
   /** Last regenerate attempt from this browser session threw. */
   summaryFailed: boolean;
+  noTranscriptTimedOut: boolean;
 }
 
 /**
@@ -33,7 +34,9 @@ export interface DeriveSummaryPanelStateInput {
  *      recordings that predate the status field.
  */
 export function deriveSummaryPanelState(input: DeriveSummaryPanelStateInput): SummaryPanelState {
-  const { recording, awaitingSummary, summaryFailed } = input;
+  const { recording, awaitingSummary, summaryFailed, noTranscriptTimedOut } = input;
+
+  if (noTranscriptTimedOut) return 'failed';
 
   // 1. Backend-published status wins. 'failed' in particular is terminal — the
   // panel must render "Try again" regardless of any stale awaiting marker,

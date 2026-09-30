@@ -189,6 +189,17 @@ function assertTrustedErrorReportSender(event: IpcMainInvokeEvent): void {
 }
 
 export function setupIpcHandlers(): void {
+  // Flags <html data-fs> while a window is in native full screen.
+  app.on('browser-window-created', (_e, win) => {
+    const set = (on: boolean): void => {
+      win.webContents
+        .executeJavaScript(`document.documentElement.toggleAttribute('data-fs', ${on})`)
+        .catch(() => {});
+    };
+    win.on('enter-full-screen', () => set(true));
+    win.on('leave-full-screen', () => set(false));
+    win.webContents.on('did-finish-load', () => set(win.isFullScreen()));
+  });
 
   // Set up mTLS IPC handlers
   setupMTLSIpcHandlers();
