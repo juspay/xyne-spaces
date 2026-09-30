@@ -104,6 +104,7 @@ import { getUserDisplayName, isUserDeactivated } from '../../../utils/userDispla
 import { LexicalSearchInput, type InitialQueryData } from './LexicalSearchInput';
 import { StatusIndicator } from '../../ui/StatusIndicator';
 import { useSearchMetrics, CMDK_USER_LIMIT } from '../../../hooks/useSearchMetrics';
+import { useCmdkAiAnswer } from '../../../hooks/useCmdkAiAnswer';
 import {
   filterChannelsBySearchableNames,
   rankUsersWithMfu,
@@ -911,6 +912,7 @@ const ChannelCommandMenu = ({
     searchLocalOnlyOnShownTabs: true,
     ticketView,
   });
+  const aiAnswer = useCmdkAiAnswer(searchText, aiOverview && !isInTicketView && !mentionSearchType);
 
   // In a ticket view, the skeleton fills the list while a search runs and nothing is listed yet.
   const showTicketViewSkeleton =
@@ -4726,8 +4728,8 @@ const ChannelCommandMenu = ({
                     keep arrow keys and the Enter target. */}
                 {aiOverview && !isInTicketView && (
                   <AiAnswerCard
+                    answer={aiAnswer.answer}
                     query={searchText}
-                    active={!mentionSearchType}
                     onOpenSource={(result, event) => void handleAiSourceOpen(result, event)}
                     onContinue={handleAiContinue}
                   />
@@ -5770,6 +5772,7 @@ const ChannelCommandMenu = ({
               onValueChange={() => undefined}
               data-nav-active={hasNavigated ? 'true' : undefined}
               data-mention-active={mentionSearchType ? 'true' : undefined}
+              data-active={aiAnswer.looking ? 'true' : undefined}
               shouldFilter={false}
               onMouseMove={() => {
                 if (suppressHover) {
@@ -5791,7 +5794,7 @@ const ChannelCommandMenu = ({
                 // come and go. Header + footer are shrink-0; Command.List is flex-1 and
                 // absorbs the remainder, so a wrapped filter-chip row or a hidden tab bar
                 // changes the list height, never the total. Mobile keeps h-[100dvh]/h-screen.
-                'md:w-full md:h-[549px] md:overflow-hidden bg-card md:rounded-2xl shadow-[0px_7px_15px_0px_#0000000D,0px_28px_28px_0px_#00000017,0px_62px_37px_0px_#0000000D,0px_111px_44px_0px_#00000003,0px_173px_48px_0px_#00000000] border border-border',
+                'cmdk-ai-scan md:w-full md:h-[549px] md:overflow-hidden bg-card md:rounded-2xl shadow-[0px_7px_15px_0px_#0000000D,0px_28px_28px_0px_#00000017,0px_62px_37px_0px_#0000000D,0px_111px_44px_0px_#00000003,0px_173px_48px_0px_#00000000] border border-border',
                 showMergeDialog ? 'z-40' : 'z-[9999]',
               )}
               onKeyDownCapture={handleCommandKeyDown}

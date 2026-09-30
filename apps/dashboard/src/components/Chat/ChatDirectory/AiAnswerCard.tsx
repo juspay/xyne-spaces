@@ -11,7 +11,7 @@ import {
 import { motion, useReducedMotion } from 'framer-motion';
 import { MessageSquareText } from 'lucide-react';
 import type { Components } from 'react-markdown';
-import { useCmdkAiAnswer } from '../../../hooks/useCmdkAiAnswer';
+import type { CmdkAiAnswer } from '../../../hooks/useCmdkAiAnswer';
 import XyneAIStar from '../../icons/xyne-ai/XyneAIStar';
 import { HoverCard } from '../../ui/HoverCard';
 import { MarkdownMessageRenderer } from '../../ui/MessageBubble/MarkdownMessageRenderer';
@@ -22,8 +22,8 @@ import type { CmdkAnswerSource, DisplaySearchResult } from '../../../types/searc
 import { citationOrder, linkCitations, senderOf, sourceNumberOf } from './AiAnswerCard.utils';
 
 interface AiAnswerCardProps {
+  answer: CmdkAiAnswer | null;
   query: string;
-  active: boolean;
   onOpenSource: (result: DisplaySearchResult, event: MouseEvent<HTMLButtonElement>) => void;
   onContinue: (question: string) => void;
 }
@@ -204,12 +204,11 @@ const SourceChip = ({ source, number, label, index }: SourceChipProps): ReactEle
  * Not a cmdk item: arrow keys and Enter keep working on the results underneath.
  */
 export const AiAnswerCard = ({
+  answer,
   query,
-  active,
   onOpenSource,
   onContinue,
 }: AiAnswerCardProps): ReactElement | null => {
-  const answer = useCmdkAiAnswer(query, active);
   const content = answer?.content ?? '';
   const sources = answer?.sources ?? NO_SOURCES;
   const streaming = answer?.streaming ?? false;
@@ -238,7 +237,7 @@ export const AiAnswerCard = ({
     [sources, focused, order, onOpenSource],
   );
 
-  if (!active || !answer?.content) return null;
+  if (!answer?.content) return null;
   const phase = streaming ? 'answering' : 'done';
 
   return (

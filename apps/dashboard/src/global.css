@@ -4918,7 +4918,8 @@ img.inline-emoji,
   position: relative;
 }
 
-.xyne-related-scan::after {
+.xyne-related-scan::after,
+.cmdk-ai-scan::after {
   content: "";
   position: absolute;
   inset: 0;
@@ -4958,7 +4959,8 @@ img.inline-emoji,
     visibility 0s linear 420ms;
 }
 
-.xyne-related-scan[data-active="true"]::after {
+.xyne-related-scan[data-active="true"]::after,
+.cmdk-ai-scan[data-active="true"]::after {
   animation-play-state: running;
   opacity: 1;
   visibility: visible;
@@ -4968,7 +4970,8 @@ img.inline-emoji,
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .xyne-related-scan::after {
+  .xyne-related-scan::after,
+  .cmdk-ai-scan::after {
     animation: none;
   }
 }

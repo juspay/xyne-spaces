@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { isRelatedDraftWorthLookingUp, normalizeRelatedDraft } from '@xyne/shared';
 import { useAuthContextValues } from './useAuth';
-import { MIN_RELATED_CONTEXT_DEBOUNCE_MS } from './useRelatedContext';
 import { searchService } from '../services/searchService';
 import type { CmdkAnswerSource } from '../types/search';
 
@@ -12,15 +11,20 @@ export interface CmdkAiAnswer {
   streaming: boolean;
 }
 
+const ASK_DELAY_MS = 400;
 const QUIET_MS = 60_000;
 const CACHE_SIZE = 20;
 
 const continues = (draft: string, foundFor: string): boolean =>
   foundFor !== '' && draft.startsWith(foundFor);
 
-export function useCmdkAiAnswer(query: string, enabled: boolean): CmdkAiAnswer | null {
+export function useCmdkAiAnswer(
+  query: string,
+  enabled: boolean,
+): { answer: CmdkAiAnswer | null; looking: boolean } {
   const { workspaceId } = useAuthContextValues();
   const [shown, setShown] = useState<CmdkAiAnswer | null>(null);
+  const [looking, setLooking] = useState(false);
   const cache = useRef(new Map<string, CmdkAiAnswer | null>());
   const quietUntil = useRef(0);
 
@@ -49,6 +53,7 @@ export function useCmdkAiAnswer(query: string, enabled: boolean): CmdkAiAnswer |
       }
       if (Date.now() < quietUntil.current) return;
 
+      setLooking(true);
       let answer: CmdkAiAnswer = { query: draft, content: '', sources: [], streaming: true };
       searchService
         .streamCmdkAnswer(
@@ -56,6 +61,7 @@ export function useCmdkAiAnswer(query: string, enabled: boolean): CmdkAiAnswer |
           workspaceId,
           event => {
             if (controller.signal.aborted) return;
+            if (event.type !== 'sources') setLooking(false);
             if (event.type === 'sources') {
               answer = { ...answer, sources: event.sources };
             } else if (event.type === 'delta') {
@@ -82,16 +88,18 @@ export function useCmdkAiAnswer(query: string, enabled: boolean): CmdkAiAnswer |
           if ((error as { status?: number }).status === 429) {
             quietUntil.current = Date.now() + QUIET_MS;
           }
+          setLooking(false);
           keepIfContinued();
         });
-    }, MIN_RELATED_CONTEXT_DEBOUNCE_MS);
+    }, ASK_DELAY_MS);
 
     return () => {
       clearTimeout(timer);
       controller.abort();
+      setLooking(false);
       setShown(current => (current?.streaming ? null : current));
     };
   }, [query, enabled, workspaceId]);
 
-  return shown;
+  return { answer: shown, looking };
 }
