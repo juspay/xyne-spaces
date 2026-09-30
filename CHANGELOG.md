@@ -1,3 +1,10 @@
+## [1.442.5](https://github.com/juspay/xyne-spaces/compare/v1.442.4...v1.442.5) (2026-09-30)
+
+
+### Bug Fixes
+
+* fixed acl for dm open ([#2515](https://github.com/juspay/xyne-spaces/issues/2515)) ([28b4c4f](https://github.com/juspay/xyne-spaces/commit/28b4c4f5d0602c6639fc998956bc66ad24d66ba1))
+
 ## [1.442.4](https://github.com/juspay/xyne-spaces/compare/v1.442.3...v1.442.4) (2026-09-30)
 
 
