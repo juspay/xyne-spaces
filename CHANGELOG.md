@@ -1,3 +1,10 @@
+## [1.432.1](https://github.com/juspay/xyne-spaces/compare/v1.432.0...v1.432.1) (2026-09-30)
+
+
+### Bug Fixes
+
+* normalize the LiteLLM base URL and stop using Redis KEYS in the Control Center ([#2473](https://github.com/juspay/xyne-spaces/issues/2473)) ([c8d8f40](https://github.com/juspay/xyne-spaces/commit/c8d8f4074fcd47938441dc7aadeae5942976ef00))
+
 ## [1.432.0](https://github.com/juspay/xyne-spaces/compare/v1.431.2...v1.432.0) (2026-09-29)
 
 
