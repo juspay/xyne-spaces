@@ -8,11 +8,10 @@ import {
   type Plan,
   type TurnResponse,
 } from '@xyne/shared/assistant';
-import { askJev, type JevConnection, type JevFailure } from '@/services/queryIntent/jevClient';
 import { normalizeName, type FoundRecord, type RecordFinder } from './records';
 import { EMPTY_SESSION, parseSession, serializeSession, type AssistantSession } from './session';
 import { handleTurn, type TurnServices } from './turn';
-import { jevConnection } from './gateway';
+import { askJevInTime, jevConnection, JEV_TURN_MS } from './gateway';
 
 /**
  * How well the assistant understands people, measured end to end: real sentences go through
@@ -111,7 +110,8 @@ const workspace: RecordFinder = {
   },
   async get(kind, id) {
     if (kind === 'channel') return CHANNELS.find(({ record }) => record.id === id) ?? null;
-    if (kind === 'thread') return THREADS.find(({ found }) => found.record.id === id)?.found ?? null;
+    if (kind === 'thread')
+      return THREADS.find(({ found }) => found.record.id === id)?.found ?? null;
     if (kind === 'message' && id === SELECTED_MESSAGE.record.id) return SELECTED_MESSAGE;
     return null;
   },
@@ -877,8 +877,6 @@ interface Score {
   kind: boolean | null;
   /** Jev did not answer (a gateway refusal or timeout), so the case says nothing about understanding. */
   jevFailed: boolean;
-  /** Safe failure categories only; never store the request or provider response. */
-  jevFailures: string[];
   required: boolean;
   ms: number[];
 }
@@ -886,15 +884,12 @@ interface Score {
 const live = process.env.ASSISTANT_LIVE === '1' ? describe : describe.skip;
 
 live('understanding, end to end, with the real Jev', () => {
-  let connection: JevConnection;
   const scores: Score[] = [];
 
   beforeAll(() => {
-    const configured = jevConnection();
-    if (!configured) {
+    if (!jevConnection()) {
       throw new Error('Live Jev evaluation needs LITELLM_BASE_URL and LITELLM_API_KEY.');
     }
-    connection = configured;
   });
 
   afterAll(() => {
@@ -931,10 +926,6 @@ live('understanding, end to end, with the real Jev', () => {
         return `  ✗ ${score.name}${score.action === false ? ' [action]' : ''}${score.actionChoices === false ? ' [action choices]' : ''}${score.asks === false ? ' [asks]' : ''}${score.kind === false ? ' [kind]' : ''} ${wrong.join(' ')}`;
       });
     const failed = scores.filter((score) => score.jevFailed);
-    const failedSummary = failed.map(({ name, jevFailures }) => {
-      const reason = jevFailures.join(', ') || 'no usable answer';
-      return `${name}: ${reason}`;
-    });
     const requiredMisses = scores.filter(
       (score) =>
         score.required &&
@@ -947,7 +938,7 @@ live('understanding, end to end, with the real Jev', () => {
     const p = (q: number): number => ms[Math.min(ms.length - 1, Math.floor(q * ms.length))] ?? 0;
     const report = [
       ...rows,
-      `jev failed ${failed.length}${failed.length ? ` (${failedSummary.join('; ')})` : ''}`,
+      `jev failed ${failed.length}${failed.length ? ` (${failed.map(({ name }) => name).join(', ')})` : ''}`,
       `turn time  median ${p(0.5)} ms · p90 ${p(0.9)} ms`,
       ...misses,
     ].join('\n');
@@ -957,7 +948,9 @@ live('understanding, end to end, with the real Jev', () => {
       writeFileSync(process.env.ASSISTANT_EVAL_OUT, JSON.stringify({ report, scores }, null, 2));
     }
     if (failed.length > 0) {
-      throw new Error(`Jev returned no usable answer for ${failed.length} live evaluation case(s).`);
+      throw new Error(
+        `Jev returned no usable answer for ${failed.length} live evaluation case(s).`
+      );
     }
     if (requiredMisses.length > 0) {
       throw new Error(
@@ -970,18 +963,8 @@ live('understanding, end to end, with the real Jev', () => {
     '$name',
     async (evalCase) => {
       let session: AssistantSession = EMPTY_SESSION;
-      const jevFailures: JevFailure[] = [];
-      const ask: TurnServices['askJev'] = async (state, questions) => {
-        // Mirror production: retry once when Jev refuses a request immediately.
-        const options = {
-          connection,
-          onFailure: (failure: JevFailure) => jevFailures.push(failure),
-        };
-        const startedAt = Date.now();
-        const answers = await askJev(state, questions, 8000, undefined, options);
-        if (answers || Date.now() - startedAt > 1000) return answers;
-        return askJev(state, questions, 8000, undefined, options);
-      };
+      // Like production: every Jev request of a turn shares one deadline.
+      let deadline = 0;
       const services: TurnServices = {
         catalog: ACTIONS,
         sessions: {
@@ -991,7 +974,7 @@ live('understanding, end to end, with the real Jev', () => {
           },
         },
         records: workspace,
-        askJev: (state, questions) => ask(state, questions),
+        askJev: (state, questions) => askJevInTime(state, questions, deadline),
         newId: (() => {
           let id = 0;
           return () => `id-${++id}`;
@@ -1020,6 +1003,7 @@ live('understanding, end to end, with the real Jev', () => {
       const ms: number[] = [];
       for (const turn of evalCase.turns) {
         const startedAt = Date.now();
+        deadline = startedAt + JEV_TURN_MS;
         const input = turn.startsWith('tap:')
           ? { kind: 'choose' as const, optionId: turn.slice(4) }
           : { kind: 'text' as const, text: turn, via: evalCase.via ?? 'voice' };
@@ -1046,9 +1030,6 @@ live('understanding, end to end, with the real Jev', () => {
         asks: evalCase.asks ? seen.asks === evalCase.asks : null,
         kind: evalCase.kind ? seen.kind === evalCase.kind : null,
         jevFailed,
-        jevFailures: jevFailures.map((failure) =>
-          failure.kind === 'status' ? `status ${failure.status}` : failure.kind
-        ),
         required: evalCase.required ?? false,
         ms,
       });

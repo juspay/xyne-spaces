@@ -202,50 +202,23 @@ describe('a turn', () => {
     expect(chat.session().run).toBeNull();
   });
 
-  it('resolves a short recipient answer without asking Jev again', async () => {
-    const deepanshu: FoundRecord = {
-      record: { kind: 'person', id: 'u-deepanshu', name: 'Deepanshu Sharma' },
-    };
-    const chat = assistant([deepanshu]);
-    chat.hears({ action: 'send_dm' });
-
-    const question = await chat.say('Send a direct message');
-    expect(question.say).toBe('Who should I message?');
-    const jevCalls = chat.jevCalls();
-
-    const answer = await chat.say('deepanshu');
-
-    expect(answer.say).toBe('What should I say to Deepanshu Sharma?');
-    expect(answer.run).toBeUndefined();
-    expect(chat.jevCalls()).toBe(jevCalls);
-    expect(chat.session().conversation.active?.values.recipient).toMatchObject({
-      kind: 'person',
-      id: 'u-deepanshu',
-    });
-  });
-
   it('keeps the typed message for preview when Jev is unavailable', async () => {
-    const deepanshu: FoundRecord = {
-      record: { kind: 'person', id: 'u-deepanshu', name: 'Deepanshu Sharma' },
-    };
-    const chat = assistant([deepanshu]);
-    chat.hears({ action: 'send_dm' });
-
-    await chat.say('Send a direct message');
-    await chat.say('deepanshu');
+    const chat = assistant([priyaShah]);
+    chat.hears({ action: 'send_dm', fields: { recipient: 'Priya Shah' } });
+    expect((await chat.say('message Priya Shah')).say).toBe('What should I say to Priya Shah?');
     chat.services.askJev = async () => null;
     const message = 'The project meeting starts at 3.';
 
     const preview = await chat.say(message);
 
     expect(preview).toMatchObject({
-      say: `Send “${message}” to Deepanshu Sharma?`,
+      say: `Send “${message}” to Priya Shah?`,
       display: { kind: 'preview', confirmLabel: 'Yes', cancelLabel: 'Cancel' },
     });
     expect(preview.run).toBeUndefined();
     const sent = await chat.tap('yes');
     expect(sent.run?.plan).toEqual([
-      { op: 'open_or_create_dm', user: deepanshu.record },
+      { op: 'open_or_create_dm', user: priyaShah.record },
       { op: 'navigate', target: { fromStep: 0 } },
       { op: 'send_message', target: { fromStep: 0 }, text: message },
     ]);
@@ -438,7 +411,8 @@ describe('a turn', () => {
         channelName: 'android',
       },
     };
-    chat.services.records.find = async (kind) => (kind === 'thread' ? [...perfThreads, thirdThread] : []);
+    chat.services.records.find = async (kind) =>
+      kind === 'thread' ? [...perfThreads, thirdThread] : [];
     chat.hears({
       action: 'find_conversation',
       fields: { conversation: 'release nots' },
@@ -802,7 +776,9 @@ describe('a turn', () => {
       fields: { mentions: 'Build Bot', message: 'check the latest crash' },
     });
 
-    const preview = await chat.say('mention Build Bot in this thread and ask it to check the latest crash');
+    const preview = await chat.say(
+      'mention Build Bot in this thread and ask it to check the latest crash'
+    );
 
     expect(preview).toMatchObject({
       say: 'Reply “check the latest crash” in this thread mentioning Build Bot?',
@@ -817,9 +793,6 @@ describe('a turn', () => {
   });
 
   it('finds and narrows a thread, opens the third result, then drafts an agent task there', async () => {
-    const deepanshu: FoundRecord = {
-      record: { kind: 'person', id: 'u-deepanshu', name: 'Deepanshu Sharma' },
-    };
     const doctor: FoundRecord = {
       record: { kind: 'person', id: 'u-doctor', name: 'Xyne Doctor' },
       detail: 'Agent',
@@ -836,21 +809,21 @@ describe('a turn', () => {
         channelName: android.record.name,
       },
     }));
-    const chat = assistant([deepanshu, doctor]);
+    const chat = assistant([meera, doctor]);
     chat.services.records.find = async (kind, mention) => {
-      if (kind === 'person') return mention.includes('Xyne') ? [doctor] : [deepanshu];
+      if (kind === 'person') return mention.includes('Xyne') ? [doctor] : [meera];
       if (kind === 'channel') return [android];
       if (kind === 'thread') return androidThreads;
       return [];
     };
     chat.services.records.get = async (kind, id) =>
-      kind === 'thread' ? androidThreads.find(({ record }) => record.id === id) ?? null : null;
+      kind === 'thread' ? (androidThreads.find(({ record }) => record.id === id) ?? null) : null;
 
     chat.hears({
       action: 'find_conversation',
-      fields: { conversation: 'mobile login issues', with: 'Deepanshu Sharma' },
+      fields: { conversation: 'mobile login issues', with: 'Meera Mehta' },
     });
-    const found = await chat.say('find the thread where Deepanshu and I discussed mobile login issues');
+    const found = await chat.say('find the thread where Meera and I discussed mobile login issues');
     expect(found.display?.kind).toBe('choices');
 
     chat.hears({
@@ -923,7 +896,7 @@ describe('a turn', () => {
 
     const preview = await chat.say(
       'Reply to the thread about the release notes draft saying looks good',
-      'typed',
+      'typed'
     );
 
     expect(searched).toEqual(['release notes draft']);

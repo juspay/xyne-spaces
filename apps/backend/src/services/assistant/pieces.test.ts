@@ -8,7 +8,7 @@ import {
 } from '@xyne/shared/assistant';
 import type { JevAnswer } from '@/services/queryIntent/jevClient';
 import { createBreaker } from './breaker';
-import { piecesWereCut, readingFor, sentencePieces, type FieldReading } from './fields';
+import { isLongSentence, readingFor, sentencePieces, type FieldReading } from './fields';
 import { decideIntent, readSentence } from './intent';
 import { quickChoice, quickText } from './quickReplies';
 import {
@@ -467,6 +467,19 @@ describe('reading details from the sentence', () => {
     ).toEqual({ name: 'ops weekly' });
   });
 
+  it('does not post the channel’s name as the message', () => {
+    const reading = readingFor(ACTIONS.get('post_message')!, 'post in design');
+    const design = optionFor(reading, 'channel', 'design');
+
+    expect(
+      reading.read({
+        channel: picked(design),
+        mentions: picked('none'),
+        message: picked(optionFor(reading, 'message', 'design')),
+      })
+    ).toEqual({ channel: 'design' });
+  });
+
   it('preserves the reply body when its words overlap with the thread topic', () => {
     const reading = readingFor(ACTIONS.get('reply_in_thread')!, 'reply here saying looks good');
     const sameWords = optionFor(reading, 'thread', 'looks good');
@@ -525,23 +538,22 @@ describe('reading details from the sentence', () => {
     expect(options.filter((option) => option.startsWith('current_'))).toEqual([]);
   });
 
-  it.each([
-    'summarize this channel',
-    'review this message',
-    'explain who I should talk to',
-  ])('preserves a message body ending in a framing word: %s', (message) => {
-    const reading = readingFor(ACTIONS.get('reply_in_thread')!, message);
-    const selected = optionFor(reading, 'message', message);
+  it.each(['summarize this channel', 'review this message', 'explain who I should talk to'])(
+    'preserves a message body ending in a framing word: %s',
+    (message) => {
+      const reading = readingFor(ACTIONS.get('reply_in_thread')!, message);
+      const selected = optionFor(reading, 'message', message);
 
-    expect(reading.read({ message: picked(selected) })).toEqual({ message });
-  });
+      expect(reading.read({ message: picked(selected) })).toEqual({ message });
+    }
+  );
 
   it('cuts a long sentence to 51 pieces, unless the details are read on their own', () => {
     const postMessage = ACTIONS.get('post_message')!;
     const names = 'Daniel Okafor and Priya Shah';
 
     expect(sentencePieces(LONG_SENTENCE)).toHaveLength(51);
-    expect(piecesWereCut(postMessage, LONG_SENTENCE)).toBe(true);
+    expect(isLongSentence(LONG_SENTENCE)).toBe(true);
     expect(optionFor(readingFor(postMessage, LONG_SENTENCE), 'mentions', names)).toBe('none');
 
     const everything = readingFor(postMessage, LONG_SENTENCE, { every: true });
@@ -551,9 +563,9 @@ describe('reading details from the sentence', () => {
 
   it('asks the same questions with or without every piece when none were cut', () => {
     const text = 'tell Priya hi';
+    expect(isLongSentence(text)).toBe(false);
 
     for (const action of ACTIONS.values()) {
-      expect(piecesWereCut(action, text)).toBe(false);
       expect(readingFor(action, text, { every: true }).questions).toEqual(
         readingFor(action, text).questions
       );

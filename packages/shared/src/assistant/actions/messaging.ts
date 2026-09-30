@@ -167,8 +167,8 @@ export const MESSAGING = {
           'Reply to the thread about the release notes saying it is done',
           'In this thread, tell them the fix is live',
           'Mention Build Bot in this thread and ask it to check the latest crash',
-          'Invoke Xyne Doctor and ask it to summarize this thread',
-          'Mention Xyne Doctor and ask it to explain who I should talk to',
+          'Invoke Review Bot and ask it to summarize this thread',
+          'Mention Review Bot and ask it to explain who owns this',
         ],
         notFor: [
           {
@@ -207,7 +207,7 @@ export const MESSAGING = {
           required: true,
           ask: 'What should I reply?',
           describe:
-            'the exact reply body in the user’s own words. For a normal reply, keep what follows the reply cue (“reply here saying looks good” → “looks good”); for an agent request, keep what the agent should do (“invoke Xyne Doctor and ask it to summarize this thread” → “summarize this thread”). Remove only the wording that asks to mention or invoke the named person or agent. Preserve task words such as “channel”, “message”, or “to”.',
+            'the exact reply body in the user’s own words. For a normal reply, keep what follows the reply cue (“reply here saying looks good” → “looks good”); for an agent request, keep what the agent should do (“invoke Review Bot and ask it to summarize this thread” → “summarize this thread”). Remove only the wording that asks to mention or invoke the named person or agent. Preserve task words such as “channel”, “message”, or “to”.',
         },
       },
       summarize: 'Reply “{message}” in {thread}[ mentioning {mentions}]',

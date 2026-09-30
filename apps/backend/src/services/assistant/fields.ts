@@ -1,4 +1,4 @@
-import type { ActionDefinition, EntityKind, FieldDefinition } from '@xyne/shared/assistant';
+import type { ActionDefinition, EntityKind } from '@xyne/shared/assistant';
 import type { JevAnswer, JevQuestion, JevState } from '@/services/queryIntent/jevClient';
 
 /**
@@ -46,30 +46,21 @@ export function sentencePieces(text: string): string[] {
 }
 
 /** The pieces of `text` that one question offers, at most `limit` of them. */
-function piecesFrom(text: string, preserveFraming: boolean, limit = MAX_PIECES): string[] {
-  return allPieces(text, preserveFraming).slice(0, limit);
+function piecesFrom(text: string, asSaid: boolean, limit = MAX_PIECES): string[] {
+  return allPieces(text, asSaid).slice(0, limit);
 }
 
-/** Whether the field holds records found by name or by search, rather than text or a choice. */
-export function namesRecords(field: FieldDefinition): boolean {
-  return field.kind !== 'text' && field.kind !== 'choice';
+/** A sentence with more pieces than one question offers, so a value may be left out. */
+export function isLongSentence(text: string): boolean {
+  return allPieces(text, false).length > MAX_PIECES;
 }
 
 /**
- * Whether a name in `text` may be missing from what a combined request offers `action`: the
- * sentence has more pieces than one question takes there, and the action has names to find.
- * A message is not at risk the same way: it runs to the end of the sentence, and those
- * pieces are offered first.
+ * Every piece of `text`, in the order they are offered: sentence endings first, then shortest.
+ * `asSaid` also offers each ending as it was said, framing words and all, for a message that
+ * ends on one ("ask it to summarize this thread").
  */
-export function piecesWereCut(action: ActionDefinition, text: string): boolean {
-  return (
-    Object.values(action.fields).some(namesRecords) &&
-    allPieces(text, false).length > MAX_PIECES
-  );
-}
-
-/** Every piece of `text`, in the order they are offered: sentence endings first, then shortest. */
-function allPieces(text: string, preserveFraming: boolean): string[] {
+function allPieces(text: string, asSaid: boolean): string[] {
   const words = text.split(/\s+/).filter(Boolean);
   const pieces = new Set<string>();
   for (let start = 0; start < words.length; start += 1) {
@@ -80,7 +71,8 @@ function allPieces(text: string, preserveFraming: boolean): string[] {
     for (const end of ends) {
       const run = words.slice(start, end);
       const hasContent = run.some((word) => !isFrame(word));
-      if (!hasContent || (!preserveFraming && (isFrame(run[0]) || isFrame(run.at(-1))))) continue;
+      const framed = isFrame(run[0]) || isFrame(run.at(-1));
+      if (!hasContent || (framed && !(asSaid && end === words.length))) continue;
       const piece = run.join(' ').replace(EDGE_PUNCTUATION, '');
       if (piece) pieces.add(piece);
     }
@@ -163,29 +155,22 @@ export function readingFor(
         if (!value) continue;
         words[id] = field.many ? value.split(/\s*,\s*|\s+and\s+/).filter(Boolean) : value;
       }
-      // Other text fields exclude record names, then earlier text fields.
-      // This keeps a member out of a channel name and a channel name out of its first message.
-      const recordValues = Object.entries(words).flatMap(([id, value]) =>
-        ['text', 'choice', 'thread'].includes(action.fields[id]?.kind ?? '')
-          ? []
-          : Array.isArray(value)
-            ? value
-            : [value]
-      );
-      const earlierTextValues: string[] = [];
+      // A text value never starts or ends with another detail: with the channel “design”,
+      // “post in design” gives no message. A thread's topic may be repeated in a reply.
+      const others = Object.entries(words).flatMap(([id, value]) => {
+        const kind = action.fields[id]?.kind;
+        return kind === 'person' || kind === 'channel' ? [value].flat() : [];
+      });
       for (const [id, value] of Object.entries(words)) {
         const field = action.fields[id];
-        if (field?.kind === 'text' && typeof value === 'string') {
-          const trimmed = field.preserveText
-            ? value
-            : trimEdges(value, [...recordValues, ...earlierTextValues]);
-          if (trimmed) words[id] = trimmed;
-          else delete words[id];
+        if (field?.kind !== 'text' || typeof value !== 'string') continue;
+        const trimmed = trimEdges(value, others, field.preserveText);
+        if (!trimmed) {
+          delete words[id];
+          continue;
         }
-        const current = words[id];
-        if (field?.kind === 'text' && typeof current === 'string') {
-          earlierTextValues.push(current);
-        }
+        words[id] = trimmed;
+        others.push(trimmed);
       }
       return words;
     },
@@ -215,17 +200,20 @@ function isFrame(word: string | undefined): boolean {
   return FRAME_WORDS.has((word ?? '').replace(EDGE_PUNCTUATION, '').toLowerCase());
 }
 
-/** Removes framing words and other fields' values from both ends of `text`, one at a time. */
-function trimEdges(text: string, others: readonly string[]): string {
+/**
+ * Removes other fields' values, and framing words unless `keepFrames`, from both ends of
+ * `text`, one at a time.
+ */
+function trimEdges(text: string, others: readonly string[], keepFrames = false): string {
   let words = text.split(/\s+/);
   const matches = (run: readonly string[], other: string): boolean =>
     run.join(' ').replace(EDGE_PUNCTUATION, '').toLowerCase() === other.toLowerCase();
   const trimOnce = (): boolean => {
-    if (isFrame(words[0])) {
+    if (!keepFrames && isFrame(words[0])) {
       words = words.slice(1);
       return true;
     }
-    if (isFrame(words.at(-1))) {
+    if (!keepFrames && isFrame(words.at(-1))) {
       words = words.slice(0, -1);
       return true;
     }

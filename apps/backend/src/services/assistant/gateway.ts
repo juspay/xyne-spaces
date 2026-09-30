@@ -25,14 +25,21 @@ export const JEV_TURN_MS = 8_000;
  * an outlier: it is asked again alongside, and the first answer wins.
  */
 export const JEV_SECOND_ASK_MS = 1_500;
+/** The first pause before asking again after a busy or failed gateway; it doubles each time. */
+export const JEV_RETRY_PAUSE_MS = 250;
 /** After three outages in a row, Jev is not asked for 30 s. */
 const jevBreaker = createBreaker(3, 30_000);
 
 type JevAnswers = Record<string, JevAnswer>;
 
-/** Jev or the gateway is down or busy, rather than this one request being unreadable. */
+/** The gateway is busy (429): it will answer soon, and Jev is not down. */
+function isBusy(failure: JevFailure): boolean {
+  return failure.kind === 'status' && failure.status === 429;
+}
+
+/** Jev or the gateway is down, rather than this one request being unreadable. */
 function isOutage(failure: JevFailure): boolean {
-  if (failure.kind === 'status') return failure.status >= 500 || failure.status === 429;
+  if (failure.kind === 'status') return failure.status >= 500;
   return failure.kind === 'timeout' || failure.kind === 'network';
 }
 
@@ -42,9 +49,10 @@ function isUsable(questions: Record<string, JevQuestion>, answers: JevAnswers): 
 }
 
 /**
- * Asks Jev before `deadline`. A request that fails, or is still open after
- * `JEV_SECOND_ASK_MS`, is asked once more; whichever answers first is used and the other is
- * cancelled. While Jev is down the turn fails at once instead of waiting.
+ * Asks Jev before `deadline`. A busy or failed request is asked again after a pause that
+ * doubles each time, and one still open after `JEV_SECOND_ASK_MS` is asked again alongside;
+ * the first answer is used and the rest are cancelled. Only outages count toward the breaker,
+ * so while Jev is down a turn fails at once, but a busy gateway never stops the assistant.
  */
 export async function askJevInTime(
   state: JevState,
@@ -56,11 +64,11 @@ export async function askJevInTime(
   const startedAt = Date.now();
   const answered = new AbortController();
   const failures: JevFailure[] = [];
+  const pause = (ms: number): Promise<void> =>
+    wait(ms, undefined, { signal: answered.signal }).catch(() => undefined);
 
   const ask = async (): Promise<JevAnswers | null> => {
-    const remainingMs = deadline - Date.now();
-    if (remainingMs <= 0 || answered.signal.aborted) return null;
-    const answers = await askJev(state, questions, remainingMs, answered.signal, {
+    const answers = await askJev(state, questions, deadline - Date.now(), answered.signal, {
       connection,
       partial: true,
       onFailure: (failure) => failures.push(failure),
@@ -68,11 +76,24 @@ export async function askJevInTime(
     return answers && isUsable(questions, answers) ? answers : null;
   };
 
-  const first = ask();
-  const second = Promise.race([
-    first,
-    wait(JEV_SECOND_ASK_MS, undefined, { signal: answered.signal }).catch(() => undefined),
-  ]).then((early) => early ?? ask());
+  const askUntilAnswered = async (): Promise<JevAnswers | null> => {
+    for (let pauseMs = JEV_RETRY_PAUSE_MS; ; pauseMs *= 2) {
+      if (answered.signal.aborted || Date.now() >= deadline) return null;
+      const failed = failures.length;
+      const answers = await ask();
+      const failure = failures[failed];
+      if (answers || !failure || !(isBusy(failure) || isOutage(failure))) return answers;
+      if (Date.now() + pauseMs >= deadline) return null;
+      await pause(pauseMs);
+    }
+  };
+
+  const first = askUntilAnswered();
+  const stillOpen = Promise.race([
+    first.then(() => false),
+    pause(JEV_SECOND_ASK_MS).then(() => true),
+  ]);
+  const second = stillOpen.then((open) => (open ? askUntilAnswered() : null));
   const answers = await Promise.race([
     first.then((found) => found ?? second),
     second.then((found) => found ?? first),

@@ -8,10 +8,6 @@ import {
 import type { FieldWords } from './fields';
 import { matchFound, normalizeName, type RecordFinder, type SearchHints } from './records';
 
-const CHANNEL_REFERENCE_WORDS = new Set(
-  'and channel here in one that the this was where which'.split(' ')
-);
-
 /**
  * Turns the words read from a request into engine updates: text as it was said, a choice
  * by its option id, and names as the records they match. `clear` says whether the request
@@ -34,9 +30,7 @@ export async function toFieldUpdates(
   const named = await Promise.all(
     others.map(([field, value]) => fieldUpdates(action, field, value, finder, clear))
   );
-  const namedUpdates = named.flat().filter((update, _, updates) =>
-    !isChannelPhraseMistakenForPerson(action, update, updates)
-  );
+  const namedUpdates = named.flat().filter((update) => !repeatsFound(update, words));
 
   // A search narrowed by a person or channel waits until that name is settled.
   const filterOpen = namedUpdates.some(
@@ -59,33 +53,18 @@ export async function toFieldUpdates(
   return [...namedUpdates, ...searched.flat()];
 }
 
-/** Jev can assign “the one in ios” to both the channel and participant fields. */
-function isChannelPhraseMistakenForPerson(
-  action: ActionDefinition,
-  update: FieldUpdate,
-  updates: readonly FieldUpdate[]
-): boolean {
-  if (update.op !== 'open' || !action.fields[update.field]?.searchFilter) return false;
-
-  const channelNames = updates.flatMap((candidate) => {
-    if (
-      candidate.op !== 'set' ||
-      !action.fields[candidate.field]?.searchFilter ||
-      !isEntityRef(candidate.value) ||
-      candidate.value.kind !== 'channel'
-    ) {
-      return [];
-    }
-    return [normalizeName(candidate.value.name)];
-  });
-
-  return channelNames.some((channel) => {
-    const channelWords = new Set(channel.split(' '));
-    const leftover = normalizeName(update.said)
-      .split(' ')
-      .filter((word) => !channelWords.has(word));
-    return leftover.length > 0 && leftover.every((word) => CHANNEL_REFERENCE_WORDS.has(word));
-  });
+/**
+ * A name that matched nothing but contains another detail's words is that detail said twice:
+ * with the channel “ios”, “the one in the ios” is no person to look for.
+ */
+function repeatsFound(update: FieldUpdate, words: FieldWords): boolean {
+  if (update.op !== 'open' || update.options.length > 0) return false;
+  const said = ` ${normalizeName(update.said)} `;
+  return Object.entries(words).some(
+    ([field, value]) =>
+      field !== update.field &&
+      [value].flat().some((other) => said.includes(` ${normalizeName(other)} `))
+  );
 }
 
 async function fieldUpdates(

@@ -14,13 +14,7 @@ import {
 } from '@xyne/shared/assistant';
 import type { JevAnswer, JevQuestion, JevState } from '@/services/queryIntent/jevClient';
 import { toFieldUpdates } from './fieldUpdates';
-import {
-  MAX_VALUE_WORDS,
-  namesRecords,
-  piecesWereCut,
-  readingFor,
-  type FieldWords,
-} from './fields';
+import { isLongSentence, MAX_VALUE_WORDS, readingFor, type FieldWords } from './fields';
 import { readSentence, type RankedAction, type SentenceKind, type Understanding } from './intent';
 import { quickChoice, quickText, type QuickReply } from './quickReplies';
 import { withScreen, type RecordFinder } from './records';
@@ -143,9 +137,6 @@ async function understand(
   services: TurnServices,
   onScreen: readonly EntityRef[]
 ): Promise<Outcome> {
-  const pendingRecord = await answerPendingRecord(text, session, services);
-  if (pendingRecord) return pendingRecord;
-
   const { catalog } = services;
   const draft = session.conversation.active;
   const screen = await channelName(onScreen, services.records);
@@ -192,17 +183,7 @@ async function understand(
       // Answering "which one?" with more details ("the one with Meera") looks again with the
       // same words, narrowed by the new ones.
       const [name] = draft.open;
-      const addsSearchFilter = Object.keys(words).some((field) => {
-        const kind = action.fields[field]?.kind;
-        return kind === 'person' || kind === 'channel';
-      });
-      if (
-        name?.options.length &&
-        action.fields[name.field]?.kind === 'thread' &&
-        (addsSearchFilter || !words[name.field])
-      ) {
-        words[name.field] = name.said;
-      }
+      if (name?.options.length && !words[name.field]) words[name.field] = name.said;
       const answer = asking && !words[asking] ? { [asking]: bareAnswer(text) } : {};
       const updates = await toFieldUpdates(
         action,
@@ -231,49 +212,6 @@ async function understand(
   }
 }
 
-/** Resolve a short name answer to the field the assistant just asked about, without Jev. */
-async function answerPendingRecord(
-  text: string,
-  session: AssistantSession,
-  services: TurnServices
-): Promise<Outcome | null> {
-  const draft = session.conversation.active;
-  if (!draft || draft.awaiting?.kind !== 'field') return null;
-  const awaiting = draft.awaiting;
-  if (draft.open.some(({ field }) => field === awaiting.field)) return null;
-
-  const fieldId = awaiting.field;
-  const action = services.catalog.get(draft.action);
-  const field = action?.fields[fieldId];
-  const answer = bareAnswer(text);
-  if (
-    !action ||
-    !field ||
-    field.kind === 'text' ||
-    field.kind === 'choice' ||
-    !answer ||
-    answer.split(/\s+/).length > 5
-  ) {
-    return null;
-  }
-
-  const updates = await toFieldUpdates(
-    action,
-    { [fieldId]: answer },
-    services.records,
-    true,
-    draft.values
-  );
-  const resolved = updates.some(
-    (update) =>
-      update.field === fieldId &&
-      (update.op === 'set' ||
-        update.op === 'add' ||
-        (update.op === 'open' && update.options.length > 0))
-  );
-  return resolved ? applyEvent({ type: 'details', updates }, session, services) : null;
-}
-
 /** Keep a text answer as a draft if Jev is unavailable; uncertainty forces a send preview. */
 async function answerPendingText(
   text: string,
@@ -285,7 +223,11 @@ async function answerPendingText(
 
   const fieldId = draft.awaiting.field;
   const action = services.catalog.get(draft.action);
-  if (!action || action.fields[fieldId]?.kind !== 'text' || draft.open.some((name) => name.field === fieldId)) {
+  if (
+    !action ||
+    action.fields[fieldId]?.kind !== 'text' ||
+    draft.open.some((name) => name.field === fieldId)
+  ) {
     return null;
   }
 
@@ -369,11 +311,10 @@ async function startAction(
 }
 
 /**
- * The details of a new request. The first read also judged the action, so this action's
- * details are read once more on their own in two cases: a required text is missing although
- * another required detail was found, which fills the gaps; or the sentence is long enough
- * that a name may have been left out of what the first read was offered, which reads the names
- * again from every piece.
+ * The details of a new request, from the first read, which covered every action at once. That
+ * read is repeated for this action alone, from every piece of the sentence, when the sentence
+ * was too long to offer them all, or when it found some details but missed a required one; a
+ * repeated read of a long sentence replaces the first, and otherwise fills only its gaps.
  */
 async function wordsForAction(
   action: ActionDefinition,
@@ -381,29 +322,13 @@ async function wordsForAction(
   services: TurnServices,
   heard?: Understanding
 ): Promise<FieldWords> {
-  const combined = heard?.words(action);
-  if (!combined) return wordsFor(action, text, services);
-  const requiredFields = Object.entries(action.fields).filter(([, field]) => field.required);
-  const missingText = requiredFields.some(
-    ([id, field]) => field.kind === 'text' && combined[id] === undefined
+  const first = heard?.words(action);
+  if (!first || isLongSentence(text)) return wordsFor(action, text, services, true);
+  const gap = Object.entries(action.fields).some(
+    ([id, field]) => field.required && first[id] === undefined
   );
-  const hasOtherRequiredField = requiredFields.some(
-    ([id, field]) => field.kind !== 'text' && combined[id] !== undefined
-  );
-  const fillsGaps = missingText && hasOtherRequiredField;
-  const cut = piecesWereCut(action, text);
-  if (!fillsGaps && !cut) return combined;
-
-  const focused = await wordsFor(action, text, services, cut);
-  const names = Object.entries(focused).filter(([id]) => {
-    const field = action.fields[id];
-    return field !== undefined && namesRecords(field);
-  });
-  return {
-    ...(fillsGaps ? focused : {}),
-    ...combined,
-    ...(cut ? Object.fromEntries(names) : {}),
-  };
+  if (!gap || Object.keys(first).length === 0) return first;
+  return { ...(await wordsFor(action, text, services, true)), ...first };
 }
 
 /** A long sentence may have been read short, so the words it sends are previewed first. */

@@ -63,13 +63,37 @@ describe('asking Jev in time', () => {
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 
-  it('asks again at once when the request is refused', async () => {
+  it('asks again after a short pause when the request fails', async () => {
     fetch.mockResolvedValueOnce(failing(503)).mockResolvedValueOnce(answering(ANSWERS));
 
     const answers = await gateway.askJevInTime('request', QUESTIONS, inTime());
 
     expect(answers?.action).toMatchObject({ choice: 'send_dm' });
     expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('waits out a busy gateway, pausing longer each time', async () => {
+    fetch
+      .mockResolvedValueOnce(failing(429))
+      .mockResolvedValueOnce(failing(429))
+      .mockResolvedValueOnce(answering(ANSWERS));
+    const startedAt = Date.now();
+
+    const answers = await gateway.askJevInTime('request', QUESTIONS, inTime());
+
+    expect(answers?.action).toMatchObject({ choice: 'send_dm' });
+    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(3 * gateway.JEV_RETRY_PAUSE_MS);
+  });
+
+  it('never stops asking because the gateway is busy', async () => {
+    fetch.mockResolvedValue(failing(429));
+    for (let turn = 0; turn < 3; turn += 1) {
+      expect(await gateway.askJevInTime('request', QUESTIONS, Date.now() + 100)).toBeNull();
+    }
+    fetch.mockReset().mockResolvedValue(answering(ANSWERS));
+
+    expect(await gateway.askJevInTime('request', QUESTIONS, inTime())).not.toBeNull();
   });
 
   it('asks again alongside a slow request, and cancels the slow one', async () => {
@@ -98,16 +122,17 @@ describe('asking Jev in time', () => {
     expect(answers).toEqual({ action: expect.objectContaining({ choice: 'send_dm' }) });
   });
 
-  it('has no answer when the action is unreadable', async () => {
+  it('has no answer, and does not ask again, when the action is unreadable', async () => {
     fetch.mockResolvedValue(answering({ action: {}, 'send_dm.recipient': picked('p0') }));
 
     expect(await gateway.askJevInTime('request', QUESTIONS, inTime())).toBeNull();
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
 
   it('stops asking after three outages in a row', async () => {
     fetch.mockResolvedValue(failing(503));
     for (let turn = 0; turn < 3; turn += 1) {
-      await gateway.askJevInTime('request', QUESTIONS, inTime());
+      await gateway.askJevInTime('request', QUESTIONS, Date.now() + 100);
     }
     fetch.mockClear();
 

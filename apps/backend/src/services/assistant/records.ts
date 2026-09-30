@@ -189,7 +189,7 @@ function nameScore(said: string, name: string): number {
   if (allWordsSoundLike) return WORDS + exactWords / (saidWords.length + 1);
   if (name.includes(said)) return PART;
   // Speech recognition can get one name wrong while retaining a useful surname or role
-  // word ("Zahn Doctor" for "Xyne Doctor"). Offer this only as an uncertain match.
+  // word ("Jon Bot" for "Build Bot"). Offer this only as an uncertain match.
   if (saidWords.some((word) => nameWords.includes(word))) return PART;
   const nameSounds = nameWords.map(soundKey);
   return saidWords.every((word) => nameSounds.some((sound) => soundsAlike(soundKey(word), sound)))
