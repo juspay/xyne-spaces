@@ -73,7 +73,7 @@ export function summarizeCondition(
   if (!condition) return 'Click to set a condition';
   if (isLeaf(condition)) {
     if (isEmptyLeaf(condition)) return 'Click to set a condition';
-    const lhs = formatVariableRef(condition.variable, sources);
+    const lhs = formatReferenceLabel(condition.variable, sources) || '<empty>';
     const verb = OPERATOR_VERBS[condition.operator] ?? condition.operator;
     if (condition.operator === 'exists') return `${lhs} ${verb}`;
     const rhs =
@@ -99,10 +99,6 @@ function entityName(leaf: LeafCondition, nameForId: EntityNameLookup): string | 
   const lastKey = parseReference(leaf.variable)?.path.split('.').pop() ?? '';
   const kind = detectEntityKind(lastKey);
   return kind ? nameForId(kind, leaf.value) : undefined;
-}
-
-function formatVariableRef(value: string, sources: VariablePickerSource[]): string {
-  return parseReference(value) ? formatReferenceLabel(value, sources) : value || '<empty>';
 }
 
 export function resolveLeafSchema(

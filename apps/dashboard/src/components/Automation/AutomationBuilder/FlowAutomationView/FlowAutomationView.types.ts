@@ -84,12 +84,10 @@ export interface FlowAutomationViewProps {
   stepCatalog: StepCatalogItem[];
   stepSchemaCache: Record<string, StepSchema | undefined>;
   schemaLoadingFor: (type: string) => boolean;
-  /** True while the trigger schema for the current trigger type is being fetched. */
   triggerSchemaLoading: boolean;
   ensureSchema: (type: string) => void;
   operators: OperatorMeta[];
   validation: ValidationResult | null;
-  readOnly: boolean;
   editMode: boolean;
   /** Inserts a new step of `type`; returns its id so the canvas can select it. */
   onAddStep: (type: string, index?: number, container?: ViewStepPath) => string;

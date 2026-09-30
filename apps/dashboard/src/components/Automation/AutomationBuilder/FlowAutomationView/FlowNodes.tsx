@@ -44,8 +44,6 @@ function RunStatusBadge({ status }: { status: string }): React.ReactElement {
   );
 }
 
-/* ─────────────────────────────── Nodes ─────────────────────────────── */
-
 // Invisible anchors the edges attach to; nodes are never connected by hand.
 const TARGET_HANDLE = (
   <Handle type='target' position={Position.Top} className='!opacity-0' isConnectable={false} />

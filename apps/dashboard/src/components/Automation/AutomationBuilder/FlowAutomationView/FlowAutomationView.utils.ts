@@ -31,9 +31,7 @@ export const TRACK_CATEGORY = 'automation-builder-flow';
 export const TRIGGER_NODE_ID = 'trigger';
 export const ROOT_CONTAINER: ViewStepPath = ['root'];
 const NODE_WIDTH = 248;
-// Fixed heights: every text line inside a node is single-line + truncated, so
-// these are guaranteed to fit the content (see FlowAutomationView nodes).
-/** Icon row plus padding; every node renders the same chrome. */
+// Fixed heights: every text line in a node (FlowNodes.tsx) is single-line + truncated.
 const NODE_HEIGHT = 64;
 const PLACEHOLDER_HEIGHT = 44;
 const MERGE_SIZE = 12;
@@ -197,9 +195,7 @@ export function getEdgeInsertTarget(
     };
   }
   // Last node of a branch → merge: append to that branch.
-  if (target.nodeType === 'merge') {
-    return getInsertAfterTarget(source);
-  }
+  if (target.nodeType === 'merge') return getInsertAfterTarget(source);
   return undefined;
 }
 
@@ -292,11 +288,7 @@ export function moveStepAtPath(
   );
 }
 
-/**
- * Inserts `step` into a container at `index` (clamped; out of range appends).
- * `container` is `['root']` for the main list or `[...ownerStepPath, branchKey]`
- * for a branch (`if_true`, `if_false`, `case:n`, `default`).
- */
+/** Inserts `step` into a container at `index` (clamped; out of range appends). */
 export function insertStepAtPath(
   config: AutomationConfig,
   container: ViewStepPath,

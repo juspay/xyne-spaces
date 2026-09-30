@@ -100,6 +100,11 @@ import { computeVersionDiff } from '../AutomationVersions/VersionDiffView/Versio
 
 const MAX_AUTOMATION_NAME_LENGTH = 80;
 
+const VIEW_OPTIONS = [
+  { mode: 'list', label: 'List view', Icon: List },
+  { mode: 'flow', label: 'Flow view', Icon: Workflow },
+] as const;
+
 const STATUS_PILL: Record<string, string> = {
   DRAFT: 'bg-muted text-muted-foreground border-border',
   ACTIVE:
@@ -706,6 +711,7 @@ export function AutomationBuilder({
           config: type === 'RUN_AGENT' ? { outputSchema: { result: 'string' } } : {},
         };
         step = action;
+        ensureSchema(type);
       }
       setConfig(prev => {
         const next = insertStepAtPath(prev, container, insertAt, step);
@@ -716,7 +722,6 @@ export function AutomationBuilder({
         });
         return next;
       });
-      if (type !== CONDITIONAL_STEP_TYPE && type !== SWITCH_STEP_TYPE) ensureSchema(type);
       return step.id;
     },
     [ensureSchema],
@@ -1248,40 +1253,28 @@ export function AutomationBuilder({
               aria-label='View'
               className='flex items-center rounded-md border border-border p-0.5'
             >
-              <button
-                type='button'
-                aria-label='List view'
-                aria-pressed={builderView === 'list'}
-                data-track-category='automation-builder'
-                data-track-name='switch-to-list-view'
-                onClick={() => {
-                  // Cards remount expanded when the list comes back, so drop the last signal.
-                  if (builderView !== 'list') setCollapseAll(null);
-                  setBuilderView('list');
-                }}
-                className={cn(
-                  'flex h-7 w-7 items-center justify-center rounded-sm text-muted-foreground transition-colors',
-                  builderView === 'list' && 'bg-accent text-foreground',
-                  'hover:text-foreground',
-                )}
-              >
-                <List className='size-4' aria-hidden='true' />
-              </button>
-              <button
-                type='button'
-                aria-label='Flow view'
-                aria-pressed={builderView === 'flow'}
-                data-track-category='automation-builder'
-                data-track-name='switch-to-flow-view'
-                onClick={() => setBuilderView('flow')}
-                className={cn(
-                  'flex h-7 w-7 items-center justify-center rounded-sm text-muted-foreground transition-colors',
-                  builderView === 'flow' && 'bg-accent text-foreground',
-                  'hover:text-foreground',
-                )}
-              >
-                <Workflow className='size-4' aria-hidden='true' />
-              </button>
+              {VIEW_OPTIONS.map(({ mode, label, Icon }) => (
+                <button
+                  key={mode}
+                  type='button'
+                  aria-label={label}
+                  aria-pressed={builderView === mode}
+                  data-track-category='automation-builder'
+                  data-track-name={`switch-to-${mode}-view`}
+                  onClick={() => {
+                    // Cards remount expanded when the list comes back, so drop the last signal.
+                    if (mode === 'list' && builderView !== 'list') setCollapseAll(null);
+                    setBuilderView(mode);
+                  }}
+                  className={cn(
+                    'flex h-7 w-7 items-center justify-center rounded-sm text-muted-foreground transition-colors',
+                    builderView === mode && 'bg-accent text-foreground',
+                    'hover:text-foreground',
+                  )}
+                >
+                  <Icon className='size-4' aria-hidden='true' />
+                </button>
+              ))}
             </div>
           </>
         )}
@@ -1304,7 +1297,6 @@ export function AutomationBuilder({
           operators={operators}
           validation={validation}
           focusRequest={flowFocus}
-          readOnly={!editMode}
           editMode={editMode}
           onAddStep={handleAddStep}
           formFieldNameMap={formFieldNameMap}

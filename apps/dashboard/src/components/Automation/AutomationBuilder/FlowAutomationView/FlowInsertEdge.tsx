@@ -1,5 +1,3 @@
-// The one custom edge type: a smooth-step edge carrying an optional branch label
-// and the "insert a step here" + button.
 import { useState } from 'react';
 import { Plus } from 'lucide-react';
 import { BaseEdge, EdgeLabelRenderer, getSmoothStepPath, type EdgeProps } from 'reactflow';
@@ -7,8 +5,6 @@ import { cn } from '../../../../utils/classNames';
 import { AddStepRow } from '../AddStepRow/AddStepRow';
 import type { FlowEdgeData } from './FlowAutomationView.types';
 import { TRACK_CATEGORY } from './FlowAutomationView.utils';
-
-/* ─────────────────────────────── Edges ─────────────────────────────── */
 
 /** Smooth-step edge with an optional branch label and an "insert step here" +. */
 function InsertEdge({

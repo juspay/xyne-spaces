@@ -29,6 +29,7 @@ import type {
 } from '../../Automation.types';
 import { issuesUnder, makeConditionalStep } from '../AutomationBuilder.utils';
 import type { ControlFlowRenderProps } from '../BranchSteps/BranchSteps';
+import type { VariablePickerSource } from '../VariablePicker/VariablePicker.types';
 import {
   computeFlowLayout,
   VIRTUAL_ROOT_ID,
@@ -75,8 +76,6 @@ const FIT_VIEW_OPTIONS = { padding: 0.2, maxZoom: 1 };
 const MENU_WIDTH = 200;
 const MENU_HEIGHT = 80;
 
-/* ─────────────────────────────── View ─────────────────────────────── */
-
 interface ContextMenuState {
   itemId: string;
   x: number;
@@ -106,8 +105,7 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
     ensureSchema,
     operators,
     validation,
-    readOnly,
-    editMode,
+    editMode: editable,
     onAddStep,
     formFieldNameMap,
     onFormFieldNamesResolved,
@@ -127,8 +125,6 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
   const [hoveredEdgeId, setHoveredEdgeId] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const pendingFocusId = useRef<string | null>(null);
-
-  const editable = editMode && !readOnly;
 
   /* ── Items, layout, lookups ── */
 
@@ -457,9 +453,8 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
   useEffect(() => {
     if (!contextMenu) return undefined;
     const onPointerDown = (event: PointerEvent): void => {
-      if (menuRef.current && event.target instanceof globalThis.Node) {
-        if (menuRef.current.contains(event.target)) return;
-      }
+      if (event.target instanceof globalThis.Node && menuRef.current?.contains(event.target))
+        return;
       setContextMenu(null);
     };
     const onKeyDown = (event: KeyboardEvent): void => {
@@ -477,28 +472,25 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
 
   const selectedItem = selectedNodeId ? (itemsById.get(selectedNodeId) ?? null) : null;
 
-  const renderEmptyPanel = (): React.ReactElement => {
-    const hasTrigger = Boolean(config.trigger.type);
-    return (
-      <div className='flex flex-col gap-4'>
-        <div className='rounded-md border border-border bg-background p-4'>
-          <div className='mb-2 flex items-center gap-2 text-sm font-semibold text-foreground'>
-            <Workflow className='size-4 text-muted-foreground' />
-            Flow view
-          </div>
-          <p className='text-xs text-muted-foreground'>
-            Select a node to see its settings. Hover a connection and press + to insert a step, or
-            right-click a step to wrap it in a condition or delete it.
-          </p>
+  const renderEmptyPanel = (): React.ReactElement => (
+    <div className='flex flex-col gap-4'>
+      <div className='rounded-md border border-border bg-background p-4'>
+        <div className='mb-2 flex items-center gap-2 text-sm font-semibold text-foreground'>
+          <Workflow className='size-4 text-muted-foreground' />
+          Flow view
         </div>
-        {!hasTrigger && (
-          <div className='rounded-md border border-dashed border-border p-4 text-xs text-muted-foreground'>
-            Choose a trigger first to start building the automation.
-          </div>
-        )}
+        <p className='text-xs text-muted-foreground'>
+          Select a node to see its settings. Hover a connection and press + to insert a step, or
+          right-click a step to wrap it in a condition or delete it.
+        </p>
       </div>
-    );
-  };
+      {!config.trigger.type && (
+        <div className='rounded-md border border-dashed border-border p-4 text-xs text-muted-foreground'>
+          Choose a trigger first to start building the automation.
+        </div>
+      )}
+    </div>
+  );
 
   // View mode: the trigger forms have no read-only mode, so they are inert.
   // `triggerExtras` (the webhook URL, shown once) stays copyable.
@@ -547,18 +539,21 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
     total: getContainerSteps(config, item.path.slice(0, -1)).length,
   });
 
-  const buildControlProps = (item: FlowItem): ControlFlowRenderProps => ({
-    catalog: stepCatalog,
-    schemaCache: stepSchemaCache,
-    schemaLoadingFor,
-    operators,
-    variableSources: buildVariableSourcesForPath(
+  const variableSourcesFor = (item: FlowItem): VariablePickerSource[] =>
+    buildVariableSourcesForPath(
       config,
       triggerSchema,
       stepSchemaCache,
       item.path,
       formFieldNameMap,
-    ),
+    );
+
+  const buildControlProps = (item: FlowItem): ControlFlowRenderProps => ({
+    catalog: stepCatalog,
+    schemaCache: stepSchemaCache,
+    schemaLoadingFor,
+    operators,
+    variableSources: variableSourcesFor(item),
     ...positionOf(item),
     onChange: next => handleUpdateStep(item.path, next),
     onMoveUp: () => handleMoveStep(item.path, -1),
@@ -575,22 +570,14 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
   const renderActionPanel = (item: FlowItem): React.ReactElement | null => {
     const step = getStepAtPath(config, item.path) as ActionStepConfig | undefined;
     if (!step) return null;
-    const { index, total } = positionOf(item);
     return (
       <StepCard
         step={step}
         catalogItem={stepCatalog.find(c => c.type === step.type) ?? null}
         schema={stepSchemaCache[step.type] ?? null}
         schemaLoading={schemaLoadingFor(step.type)}
-        index={index}
-        total={total}
-        variableSources={buildVariableSourcesForPath(
-          config,
-          triggerSchema,
-          stepSchemaCache,
-          item.path,
-          formFieldNameMap,
-        )}
+        {...positionOf(item)}
+        variableSources={variableSourcesFor(item)}
         onConfigChange={next => handleUpdateStep(item.path, { ...step, config: next })}
         onMoveUp={() => handleMoveStep(item.path, -1)}
         onMoveDown={() => handleMoveStep(item.path, 1)}

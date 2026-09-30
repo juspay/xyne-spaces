@@ -174,7 +174,6 @@ export function RunDetail({ runId, onBack }: RunDetailProps): React.ReactElement
           ensureSchema={noop}
           operators={[]}
           validation={null}
-          readOnly
           editMode={false}
           onAddStep={() => ''}
           renderConditionalCard={renderNothing}
@@ -455,8 +454,6 @@ function JsonBlock({
   );
 }
 
-const TERMINAL_RUN_STATUSES: ReadonlySet<string> = new Set(['COMPLETED', 'CANCELLED', 'SKIPPED']);
-
 /**
  * A step row's status, corrected by the run's: rows left RUNNING/EXTERNAL_WAIT by a
  * nested pause or a cancel/fail outside the walk would otherwise show a live badge.
@@ -466,7 +463,7 @@ function resolveStepStatus(rowStatus: string, runStatus: AutomationRunStatus): s
   if (rowStatus !== 'RUNNING' && rowStatus !== 'EXTERNAL_WAIT') return rowStatus;
   if (runStatus === 'EXTERNAL_WAIT') return 'EXTERNAL_WAIT';
   if (runStatus === 'FAILED') return 'FAILED';
-  return TERMINAL_RUN_STATUSES.has(runStatus) ? 'CANCELLED' : rowStatus;
+  return ['COMPLETED', 'CANCELLED', 'SKIPPED'].includes(runStatus) ? 'CANCELLED' : rowStatus;
 }
 
 /** A nested row name, e.g. `step_1__case_0__step_2` → owner `step_1`, branch `case_0`. */
