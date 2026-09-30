@@ -99,6 +99,7 @@ import { CallConfirmationModal } from '../../Call/CallConfirmationModal';
 import { ActionModal } from '../../Call/ActionModal';
 import { cn } from '../../../utils/classNames';
 import SearchResultItem from './SearchResultItem';
+import SearchSectionSkeleton from './SearchSectionSkeleton';
 import { getUserDisplayName, isUserDeactivated } from '../../../utils/userDisplayName';
 import { LexicalSearchInput, type InitialQueryData } from './LexicalSearchInput';
 import { StatusIndicator } from '../../ui/StatusIndicator';
@@ -573,6 +574,9 @@ const ChannelCommandMenu = ({
   initialTab,
   hideTabs = false,
   deskMergeEnabled = false,
+  ticketView = null,
+  onRemoveTicketView,
+  onRestoreTicketView,
 }: ChannelCommandMenuProps): ReactElement | null => {
   const navigate = useNavigate();
   const channelData = useAllChannels();
@@ -610,6 +614,11 @@ const ChannelCommandMenu = ({
 
   const { searchMode } = useSearchMode();
 
+  // Opened from a ticket screen: tickets only, so nothing that reaches beyond them (the AI
+  // answer, the jump to the all-types results page, the ALL tab) is offered.
+  const isInTicketView = ticketView !== null;
+  const ticketViewName = ticketView?.viewName ?? null;
+
   // The top-bar palette (screen mode, tabs hidden) always routes to the results page;
   // the default cmd+K popup renders results inline. Both show the "Show results for"
   // row, but only the screen palette lets it own the default Enter target.
@@ -641,6 +650,8 @@ const ChannelCommandMenu = ({
   // Held in a ref so `onRestore` (registered once) always calls the current closure.
   const restoreFromLastSearchRef = useRef(restoreFromLastSearch);
   restoreFromLastSearchRef.current = restoreFromLastSearch;
+  const onRestoreTicketViewRef = useRef(onRestoreTicketView);
+  onRestoreTicketViewRef.current = onRestoreTicketView;
 
   // Toggles restored from the history entry; `initialToggles` (URL-derived) is the
   // fallback for opens that aren't a back-navigation.
@@ -669,6 +680,7 @@ const ChannelCommandMenu = ({
       const source = restored ?? null;
       setRestoredQuery(source ? { text: source.text, mentions: source.mentions } : null);
       setRestoredToggles(source?.toggles ?? null);
+      if (source?.ticketView) onRestoreTicketViewRef.current?.(source.ticketView);
       onOpenChange(true);
     },
     id: 'command-menu',
@@ -838,6 +850,7 @@ const ChannelCommandMenu = ({
   const {
     searchResults: backendResults,
     isSearching: isLoading,
+    isSearchPending,
     searchError: error,
     paginationState,
     isLoadingMore,
@@ -880,13 +893,18 @@ const ChannelCommandMenu = ({
     defaultIncludeBotMessages: initialToggles?.includeBotMessages ?? false,
     // Classifying costs a request per settled query, so only surfaces that can show the
     // overview ask for it (the backend gates the feature itself on cmdk_ai_intent_config.enabled).
-    classifyIntent: aiOverview,
+    classifyIntent: aiOverview && !isInTicketView,
     // cmd+k hides archived tickets on its Desk and Tickets tabs (the hook gates this by
     // active tab). There is no toggle here to opt back in.
     defaultExcludeArchived: true,
     buildMentionHighlights,
     searchLocalOnlyOnShownTabs: true,
+    ticketView,
   });
+
+  // In a ticket view, the skeleton fills the list while a search runs and nothing is listed yet.
+  const showTicketViewSkeleton =
+    isInTicketView && (isLoading || isSearchPending) && backendResults.length === 0;
 
   // Aliases to match old usage if needed or just use new names
   const search = cleanedSearchText;
@@ -1429,8 +1447,18 @@ const ChannelCommandMenu = ({
       // Scope travels with the search: without it, back-navigation would restore the query
       // but silently re-run it at the default scope.
       toggles: { onlyMyChannels, includeBotMessages },
+      // The view too, or coming back would restore the query outside it.
+      ...(ticketView ? { ticketView } : {}),
     });
-  }, [open, searchText, selectedMentions, onlyMyChannels, includeBotMessages, setPayload]);
+  }, [
+    open,
+    searchText,
+    selectedMentions,
+    onlyMyChannels,
+    includeBotMessages,
+    ticketView,
+    setPayload,
+  ]);
 
   // Leave the palette for the full-screen results page via the "Show results for" row.
   // Logged as its own event so the jump-out rate is readable per palette and trigger.
@@ -3103,8 +3131,11 @@ const ChannelCommandMenu = ({
               // moves activeTab off All, and those searches still need the way out.
               // Every section here is a capped slice, so there is more to see even when
               // nothing was truncated locally. Screen mode keeps its narrower rule: it
-              // only offers the link when it actually cut items off.
-              const showSeeMore = !!sectionTab && (!isScreenAll || hiddenCount > 0);
+              // only offers the link when it actually cut items off. A ticket-screen search
+              // never offers it: the results page would drop the view's filters, and the
+              // list already pages in place.
+              const showSeeMore =
+                !!sectionTab && !isInTicketView && (!isScreenAll || hiddenCount > 0);
 
               return (
                 <div key={groupKey} className='mb-4'>
@@ -3918,7 +3949,7 @@ const ChannelCommandMenu = ({
       const next = e.shiftKey ? idx - 1 : idx + 1;
 
       if (next < 0 || next >= tabs.length) {
-        if (inline) {
+        if (inline || isInTicketView) {
           const wrappedIdx = ((next % tabs.length) + tabs.length) % tabs.length;
           setActiveTab(tabs[wrappedIdx]!.id);
           onTabChange?.(tabs[wrappedIdx]!.id);
@@ -4214,6 +4245,7 @@ const ChannelCommandMenu = ({
   const showResultsForRow =
     !inline &&
     !contextSelectionMode &&
+    !isInTicketView &&
     !mentionSearchType &&
     (searchText.trim() || selectedMentions.length > 0) ? (
       <div className='mb-4'>
@@ -4269,9 +4301,11 @@ const ChannelCommandMenu = ({
             placeholder={
               openTargetLabel
                 ? `${openTargetLabel} – Open`
-                : hideTabs || activeTab === TabType.ALL
-                  ? 'Type / for quick commands, or search'
-                  : `Search ${activeTab}...`
+                : isInTicketView
+                  ? 'Search tickets...'
+                  : hideTabs || activeTab === TabType.ALL
+                    ? 'Type / for quick commands, or search'
+                    : `Search ${activeTab}...`
             }
             onChange={handleEditorChange}
             currentUserID={currentUserID}
@@ -4354,7 +4388,12 @@ const ChannelCommandMenu = ({
               filter is reachable by typing its prefix, and these three have no syntax —
               they're modes, so they need a control. Active = filled, per the design. */}
           <div className='flex items-center gap-1 flex-shrink-0'>
-            {SEARCH_MODE_TOGGLES.map(({ id, label, tooltip, isOn, toggle }) => (
+            {/* Channel and bot scoping only shape message results; a ticket search keeps
+                just exact match. */}
+            {(isInTicketView
+              ? SEARCH_MODE_TOGGLES.filter(toggle => toggle.id === 'exact')
+              : SEARCH_MODE_TOGGLES
+            ).map(({ id, label, tooltip, isOn, toggle }) => (
               <div key={id} className='relative group/modetip'>
                 <button
                   type='button'
@@ -4431,6 +4470,28 @@ const ChannelCommandMenu = ({
             }
           }}
         >
+          {/* The view a ticket screen's search bar opened the palette in, as a heading.
+              Removing it drops that screen's filters and leaves a plain search. */}
+          {ticketViewName && activeTab === TabType.TICKETS && (
+            <div className='flex shrink-0 items-center gap-1.5 px-6 pt-2 text-xs'>
+              <span className='truncate'>
+                <span className='text-muted-foreground'>View · </span>
+                <span className='font-medium text-foreground'>{ticketViewName}</span>
+              </span>
+              <button
+                type='button'
+                onMouseDown={event => event.preventDefault()}
+                onClick={onRemoveTicketView}
+                aria-label='Remove view'
+                title='Remove view'
+                className='flex size-4 shrink-0 items-center justify-center rounded-full bg-muted-foreground/15 text-muted-foreground transition-colors hover:bg-muted-foreground/30 hover:text-foreground'
+                data-track-category='SEARCH'
+                data-track-name='REMOVE_TICKET_VIEW'
+              >
+                <X size={10} strokeWidth={2.5} />
+              </button>
+            </div>
+          )}
           {/* Tabs - hidden when bot is selected or hideTabs is true */}
           <div
             data-tab-strip
@@ -4495,7 +4556,10 @@ const ChannelCommandMenu = ({
                             // where ALL is somewhere to land. Inline callers that
                             // omit it from `enabledTabs` have no unfiltered state,
                             // so for them this stays a no-op, as it always was.
-                            if (!inline || activeEnabledTabs.includes(TabType.ALL)) {
+                            if (
+                              !isInTicketView &&
+                              (!inline || activeEnabledTabs.includes(TabType.ALL))
+                            ) {
                               setActiveTab(TabType.ALL);
                               onTabChange?.(TabType.ALL);
                             }
@@ -4603,7 +4667,7 @@ const ChannelCommandMenu = ({
                 {/* AI answer above the current tab's results when the query needs AI
                     (Google "AI Overview" style). Not a cmdk item, so the results below
                     keep arrow keys and the Enter target. */}
-                {aiOverview && (
+                {aiOverview && !isInTicketView && (
                   <AiAnswerCard
                     query={searchText}
                     tab={activeTab}
@@ -5246,8 +5310,23 @@ const ChannelCommandMenu = ({
                         `after:`/`before:`/`status:`… out of it — so the results branch has to
                         test the chips too, or a filters-only search runs and renders the
                         browse list instead of its results. */}
-                    {searchText.trim() || typeFilter || selectedMentions.length > 0 ? (
+                    {/* A ticket view lists its tickets before anything is typed. */}
+                    {searchText.trim() ||
+                    typeFilter ||
+                    selectedMentions.length > 0 ||
+                    isInTicketView ? (
                       <>
+                        {/* Under the same heading the results arrive under, so they land in place. */}
+                        {showTicketViewSkeleton && (
+                          <div className='mb-4'>
+                            <Command.Group
+                              heading={getGroupLabel('ticket')}
+                              className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
+                            >
+                              <SearchSectionSkeleton rows={4} />
+                            </Command.Group>
+                          </div>
+                        )}
                         {hasFromOrInFilter ? (
                           <>
                             {backendResults.length > 0 && renderSearchBackendResults()}
