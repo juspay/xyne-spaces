@@ -5,6 +5,7 @@ import { TicketUpdatedTrigger } from './triggers/ticket-updated.trigger';
 import { CallTrigger } from './triggers/call.trigger';
 import { UpdateTicketStep } from './steps/update-ticket.step';
 import { SendMessageStep } from './steps/send-message.step';
+import { ReplyOnMessageStep } from './steps/reply-on-message.step';
 
 export class XyneSpacesConnector extends BaseConnector {
   readonly id = 'xyne-spaces';
@@ -23,5 +24,6 @@ export class XyneSpacesConnector extends BaseConnector {
   readonly steps: readonly AnyStep[] = [
     new SendMessageStep(),
     new UpdateTicketStep(),
+    new ReplyOnMessageStep(),
   ];
 }
