@@ -1,3 +1,10 @@
+## [1.434.0-release-20260930.1](https://github.com/juspay/xyne-spaces/compare/v1.433.0...v1.434.0-release-20260930.1) (2026-09-30)
+
+
+### Features
+
+* old-user-fix ([#2434](https://github.com/juspay/xyne-spaces/issues/2434)) ([#2477](https://github.com/juspay/xyne-spaces/issues/2477)) ([b4c60b0](https://github.com/juspay/xyne-spaces/commit/b4c60b0542cc8efd1b45343fa60b645c92c6dee4))
+
 ## [1.433.0](https://github.com/juspay/xyne-spaces/compare/v1.432.1...v1.433.0) (2026-09-30)
 
 
