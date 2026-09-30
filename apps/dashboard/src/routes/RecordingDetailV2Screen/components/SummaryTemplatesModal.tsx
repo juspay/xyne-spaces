@@ -29,10 +29,10 @@ import {
   SearchDefault,
   Spinner,
   ThreeDotsMenuHorizontal,
-  UserTwo,
+  UploadUp,
 } from '@xyne/icons';
 import { toast } from 'sonner';
-import { DefaultOutlet, MANDATORY_SUMMARY_SECTION_IDS } from '@xyne/shared';
+import { DefaultOutlet } from '@xyne/shared';
 import { XyneAIStar } from '../../../components/icons/xyne-ai';
 import Avatar from '../../../components/ui/Avatar/Avatar';
 import { Button } from '../../../components/ui/Button/Button';
@@ -55,8 +55,22 @@ import {
 import { cn } from '../../../utils/classNames';
 import { getApiErrorMessage } from '../../../utils/apiError';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
+import { SummaryTemplateBulkUpload } from './SummaryTemplateBulkUpload';
 import { SummaryTemplateShareModal } from './SummaryTemplateShareModal';
 import { SummaryTemplateTestPanel, type SummaryTemplateTestKind } from './SummaryTemplateTestPanel';
+import {
+  MANDATORY_SECTIONS,
+  MAX_EDITABLE_SECTIONS,
+  MAX_MEETING_CONTEXT_LENGTH,
+  MAX_SECTION_DESCRIPTION_LENGTH,
+  MAX_SECTION_TITLE_LENGTH,
+  MAX_SYSTEM_PROMPT_LENGTH,
+  MAX_TEMPLATE_TITLE_LENGTH,
+  isMandatorySection,
+  isReservedSectionTitle,
+  normalizedSectionTitle,
+  withMandatorySections,
+} from './summaryTemplateSectionRules';
 
 // The dialog widens itself while a test panel is open, so callers don't
 // need to track the panel's state.
@@ -108,71 +122,6 @@ const EMPTY_SECTION = (): SummaryTemplateSection => ({
   title: '',
   description: '',
 });
-
-const MANDATORY_SECTIONS = [
-  {
-    id: MANDATORY_SUMMARY_SECTION_IDS.decisions,
-    key: 'decisions',
-    title: '✅ Decisions',
-    displayTitle: 'Decisions',
-    description:
-      'Every meeting decision, who made it, and why. High-confidence decisions are pinned to the timeline, uncertain ones appear as “Suggested” for verification.',
-    legacyDescriptions: ['- [Decision] — Owner: [Person] ([why / context])'],
-    dotClassName: 'bg-primary',
-  },
-  {
-    id: MANDATORY_SUMMARY_SECTION_IDS.actionItems,
-    key: 'action items',
-    title: '📋 Action Items',
-    displayTitle: 'Action items',
-    description:
-      'Who does what by when — one line per task, owner attributed from the speaker. Each item links back to the moment it was said.',
-    legacyDescriptions: ['- [Task] — @[Assignee] · Due: [Date] · Priority: [H/M/L]'],
-    dotClassName: 'bg-action-primary',
-  },
-] as const;
-const MAX_TEMPLATE_TITLE_LENGTH = 120;
-const MAX_MEETING_CONTEXT_LENGTH = 500;
-const MAX_SECTION_TITLE_LENGTH = 100;
-const MAX_SECTION_DESCRIPTION_LENGTH = 500;
-const MAX_SYSTEM_PROMPT_LENGTH = 12_000;
-
-const MAX_TEMPLATE_SECTIONS = 20;
-const MAX_EDITABLE_SECTIONS = MAX_TEMPLATE_SECTIONS - MANDATORY_SECTIONS.length;
-
-const normalizedSectionTitle = (title: string): string =>
-  title
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, ' ')
-    .trim();
-
-const isReservedSectionTitle = (title: string): boolean =>
-  MANDATORY_SECTIONS.some(({ key }) => normalizedSectionTitle(title) === key);
-
-const isMandatorySection = (section: Pick<SummaryTemplateSection, 'id'>): boolean =>
-  MANDATORY_SECTIONS.some(({ id }) => section.id === id);
-
-/**
- * Mandatory sections are stored in the regular sections payload so summary generation keeps
- * using the existing API contract. Runtime checks use reserved IDs rather than editable titles,
- * so a custom section named "Decisions" remains a normal editable section.
- *
- * A Scribe admin can switch a mandatory section off; the `disabled` flag is the only part of
- * these sections that persists from the incoming payload, so title/description stay canonical.
- */
-const withMandatorySections = (sections: SummaryTemplateSection[]): SummaryTemplateSection[] => {
-  const editableSections = sections.filter(section => !isMandatorySection(section));
-  const mandatorySections = MANDATORY_SECTIONS.map(definition => ({
-    id: definition.id,
-    title: definition.title,
-    description: definition.description,
-    ...(sections.find(section => section.id === definition.id)?.disabled === true
-      ? { disabled: true }
-      : {}),
-  }));
-
-  return [...editableSections, ...mandatorySections];
-};
 
 /** Sections handed to the AI helpers: everything the summary will actually contain. */
 const toAiSections = (
@@ -262,6 +211,17 @@ const GROUP_ORDER: TemplateGroup[] = [
   'PUBLIC',
   'STARTER',
 ];
+
+/** Who shared the template; the section heading already says it is shared. */
+const TemplateSharerLabel = ({ userId }: { userId: string }): ReactElement => {
+  const sharer = useUser(userId);
+  return (
+    <span className='flex min-w-0 items-center gap-1.5'>
+      <Avatar userId={userId} size='xs' rounded showActiveStatus={false} className='shrink-0' />
+      <span className='truncate'>{sharer ? getUserDisplayName(sharer) : 'Shared with me'}</span>
+    </span>
+  );
+};
 
 interface SortableTemplateSectionProps {
   section: SummaryTemplateSection;
@@ -391,10 +351,12 @@ export function SummaryTemplatesModal({
   const [publicationAction, setPublicationAction] = useState<'approve' | 'deny' | null>(null);
   const [aiAction, setAiAction] = useState<'context' | 'sections' | 'systemPrompt' | null>(null);
   const [shareTemplate, setShareTemplate] = useState<SummaryTemplate | null>(null);
-  const [shareCount, setShareCount] = useState<number | null>(null);
   const [limitMessage, setLimitMessage] = useState<string | null>(null);
   const [testPanel, setTestPanel] = useState<SummaryTemplateTestKind | null>(null);
+  const [isBulkUploadOpen, setIsBulkUploadOpen] = useState(false);
   const draftCreator = useUser(draft?.createdBy ?? '');
+  // Sharing and deleting stay with the creator; `canEdit` also covers shared editors.
+  const isDraftOwner = draft?.createdBy === currentUserId;
 
   const nameInputRef = useRef<HTMLInputElement>(null);
   const limitMessageTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -402,24 +364,6 @@ export function SummaryTemplatesModal({
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
-
-  useEffect(() => {
-    const templateId = draft?.id;
-    setShareCount(null);
-    if (!templateId || !draft.canEdit) return;
-
-    let cancelled = false;
-    void recordingService
-      .getSummaryTemplateShares(templateId)
-      .then(shares => {
-        if (!cancelled) setShareCount(shares.length);
-      })
-      .catch(() => undefined);
-
-    return (): void => {
-      cancelled = true;
-    };
-  }, [draft?.id, draft?.canEdit]);
 
   // A brand-new template opens with every field blank, so put the caret in the title
   // rather than making the user hunt for the first thing to fill in.
@@ -728,7 +672,7 @@ export function SummaryTemplatesModal({
   const handleOpenShare = async (): Promise<void> => {
     if (!draft?.id || saving || (draft.canEdit && isDirty && !draftRequirements.isComplete)) return;
     const canReview = isScribeAdmin && draft.visibility === 'WAITING_FOR_APPROVAL';
-    if (!draft.canEdit && !canReview) return;
+    if (!isDraftOwner && !canReview) return;
     setSaving(true);
     try {
       const template = draft.canEdit && isDirty ? await saveDraft() : existingDraft;
@@ -783,7 +727,7 @@ export function SummaryTemplatesModal({
   };
 
   const handleDelete = async (): Promise<void> => {
-    if (!draft?.id || !draft.canEdit || saving) return;
+    if (!draft?.id || !isDraftOwner || saving) return;
     setSaving(true);
     try {
       await recordingService.deleteSummaryTemplate(draft.id);
@@ -881,7 +825,7 @@ export function SummaryTemplatesModal({
   const canOpenShare = Boolean(
     draft?.id &&
     !isAdminPublicationReview &&
-    (draft.canEdit ||
+    (isDraftOwner ||
       (isScribeAdmin && draft.visibility === 'WAITING_FOR_APPROVAL') ||
       // A Scribe admin can reverse a publish on any public template, not just their own.
       (isScribeAdmin && draft.visibility === 'PUBLIC')),
@@ -892,9 +836,14 @@ export function SummaryTemplatesModal({
       ? { icon: <Globe className='size-3.5' />, label: 'Public' }
       : draft?.visibility === 'WAITING_FOR_APPROVAL'
         ? { icon: <ClockDefault className='size-3.5' />, label: 'Pending review' }
-        : shareCount
-          ? { icon: <UserTwo className='size-3.5' />, label: `Shared · ${shareCount}` }
-          : { icon: <Lock02Close className='size-3.5' />, label: 'Private' };
+        : { icon: <Lock02Close className='size-3.5' />, label: 'Private' };
+
+  // The API enforces the same check; a non-admin never reaches this view.
+  if (isBulkUploadOpen && isScribeAdmin) {
+    return (
+      <SummaryTemplateBulkUpload templates={templates} onClose={() => setIsBulkUploadOpen(false)} />
+    );
+  }
 
   return (
     <div
@@ -936,6 +885,20 @@ export function SummaryTemplatesModal({
               <PlusDefault className='size-4' />
               New template
             </Button>
+
+            {isScribeAdmin && (
+              <Button
+                type='button'
+                variant='outline'
+                onClick={() => setIsBulkUploadOpen(true)}
+                className='h-9 w-full gap-2.5 rounded-lg border-border px-3 shadow-none hover:bg-muted'
+                data-track-category='SummaryTemplates'
+                data-track-name='OpenBulkUpload'
+              >
+                <UploadUp className='size-4' />
+                Bulk upload
+              </Button>
+            )}
 
             <label className='flex h-9 items-center gap-2 rounded-lg border border-border bg-background px-2.5 text-sm focus-within:ring-2 focus-within:ring-ring'>
               <SearchDefault className='size-4 shrink-0 text-muted-foreground' />
@@ -990,15 +953,17 @@ export function SummaryTemplatesModal({
                               {template.name}
                             </span>
                             <span className='block text-xs text-muted-foreground'>
-                              {template.visibility === 'WAITING_FOR_APPROVAL'
-                                ? 'Waiting for approval'
-                                : template.isSystem
-                                  ? 'Xyne'
-                                  : template.createdBy === currentUserId
-                                    ? 'Me'
-                                    : template.visibility === 'PUBLIC'
-                                      ? 'Public template'
-                                      : 'Shared with me'}
+                              {template.visibility === 'WAITING_FOR_APPROVAL' ? (
+                                'Waiting for approval'
+                              ) : template.isSystem ? (
+                                'Xyne'
+                              ) : template.createdBy === currentUserId ? (
+                                'Me'
+                              ) : template.visibility === 'PUBLIC' ? (
+                                'Public template'
+                              ) : (
+                                <TemplateSharerLabel userId={template.createdBy} />
+                              )}
                             </span>
                           </span>
                         </Button>
@@ -1115,10 +1080,8 @@ export function SummaryTemplatesModal({
                             event.preventDefault();
                           }
                         }}
-                        // Bounded flex column, not a scroller: the recipient list
-                        // inside owns the overflow so the search field and actions
-                        // stay put.
-                        className='flex max-h-96 w-80 flex-col rounded-xl border-border p-3 shadow-xl'
+                        // Sized for EntityShareModal, which brings its own padding.
+                        className='max-h-[min(36rem,var(--radix-popover-content-available-height))] w-[26rem] max-w-[calc(100vw-2rem)] overflow-y-auto rounded-xl border-border p-0 shadow-xl'
                         trigger={
                           <Button
                             type='button'
@@ -1142,7 +1105,6 @@ export function SummaryTemplatesModal({
                           <SummaryTemplateShareModal
                             template={shareTemplate}
                             onTemplateChange={handlePublicationChange}
-                            onSharesChange={setShareCount}
                           />
                         )}
                       </Popover>
@@ -1173,7 +1135,7 @@ export function SummaryTemplatesModal({
                     >
                       Test template output
                     </DropdownMenuItem>
-                    {draft.id && draft.canEdit && (
+                    {draft.id && isDraftOwner && (
                       <DropdownMenuItem
                         onClick={() => void handleDelete()}
                         className='gap-2 text-destructive focus:text-destructive'

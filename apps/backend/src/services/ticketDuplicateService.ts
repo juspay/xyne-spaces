@@ -28,6 +28,25 @@ import {
 const prisma = DatabaseClient.getInstance();
 const emailChannelPreferenceRepo = new EmailChannelPreferenceRepository();
 const DUPLICATE_REFERENCE_LIMIT = 10;
+// Cap on extra Vespa hits fetched to make up for excluded tickets, so a ticket with
+// many links can't blow up the search size.
+const MAX_EXCLUDED_OVERFETCH = 20;
+
+const DUPLICATE_RELATIONS = [
+  TicketReferenceRelation.DUPLICATE_POSSIBLE,
+  TicketReferenceRelation.DUPLICATE_CONFIRMED,
+];
+
+// Set on the analysis when Vespa could not be searched, so an on-demand check can tell
+// "nothing similar" apart from "couldn't look".
+const SEARCH_UNAVAILABLE_ERROR = 'SEARCH_UNAVAILABLE';
+
+/** What one detection run found, and the ticket it linked as a possible duplicate. */
+export type DuplicateDetectionOutcome = {
+  analysis: TicketDuplicateCheckAnalysis;
+  candidateCount: number;
+  linkedTicketId: string | null;
+};
 
 /**
  * One raw scope-field value carried by the NEW ticket, handed to the service as a
@@ -294,13 +313,7 @@ class TicketDuplicateService {
     if (updatedFieldIds.length === 0) return;
 
     try {
-      const ticket = await prisma.ticket.findUnique({
-        where: { id: ticketId },
-        select: {
-          id: true, title: true, description: true,
-          projectId: true, channelId: true, createdBy: true,
-        },
-      });
+      const ticket = await this.findTicketForDetection(ticketId);
       if (!ticket) return;
 
       const scope = await this.resolveDuplicateScopeConfig(ticket.channelId);
@@ -315,33 +328,90 @@ class TicketDuplicateService {
       );
       if (movedScopeFields.length === 0) return;
 
-      const savedValues = await prisma.formEntityValues.findMany({
-        where: { entityId: ticketId, entityType: 'TICKET' },
-        orderBy: [{ version: 'desc' }, { updatedAt: 'desc' }],
-        distinct: ['fieldId'],
-        select: { fieldId: true, actualFieldValue: true },
-      });
-
       logger.info('[TicketDuplicateService] Re-running duplicate detection after classification filled a scope field', {
         ticketId, channelId: ticket.channelId, movedScopeFields,
       });
 
-      await this.persistDuplicateReferences({
-        ticketId: ticket.id,
-        ticketCreatedBy: ticket.createdBy,
-        title: ticket.title,
-        description: ticket.description,
-        projectId: ticket.projectId,
-        userId: ticket.createdBy,
-        channelId: ticket.channelId,
-        scopeFieldValues: savedValues.map(v => ({ fieldId: v.fieldId, value: v.actualFieldValue })),
-      });
+      await this.detectForSavedTicket(ticket);
     } catch (error) {
       logger.error('[TicketDuplicateService] Duplicate detection re-run failed', {
         ticketId,
         error: error instanceof Error ? error.message : String(error),
       });
     }
+  }
+
+  /**
+   * Re-run duplicate detection on demand — the desk's "Check for duplicates" action.
+   * Same append-only semantics as the creation-time run: it can link a new possible
+   * duplicate but never removes one. Null when the ticket is gone or the run failed.
+   */
+  async recheckDuplicatesForTicket(ticketId: string): Promise<DuplicateDetectionOutcome | null> {
+    const ticket = await this.findTicketForDetection(ticketId);
+    if (!ticket) return null;
+    return this.detectForSavedTicket(ticket);
+  }
+
+  private findTicketForDetection(ticketId: string) {
+    return prisma.ticket.findUnique({
+      where: { id: ticketId },
+      select: {
+        id: true, title: true, description: true,
+        projectId: true, channelId: true, createdBy: true,
+      },
+    });
+  }
+
+  /**
+   * Detection for a ticket that already exists, scoped by its saved form values.
+   *
+   * Searches as the ticket's creator, like the creation-time run, so the candidate set
+   * doesn't depend on who asked and every link is one its createdBy could have made.
+   * Excludes the ticket's parents (a sub-ticket is not a duplicate of the ticket it
+   * came from) and tickets already linked as duplicates either way — re-finding one of
+   * those would link nothing new.
+   */
+  private async detectForSavedTicket(
+    ticket: NonNullable<Awaited<ReturnType<TicketDuplicateService['findTicketForDetection']>>>,
+  ): Promise<DuplicateDetectionOutcome | null> {
+    const [savedValues, parentMappings, duplicateReferences] = await Promise.all([
+      prisma.formEntityValues.findMany({
+        where: { entityId: ticket.id, entityType: 'TICKET' },
+        orderBy: [{ version: 'desc' }, { updatedAt: 'desc' }],
+        distinct: ['fieldId'],
+        select: { fieldId: true, actualFieldValue: true },
+      }),
+      prisma.ticketSubTicketMapping.findMany({
+        where: { subTicket: { mappedTicketId: ticket.id } },
+        select: { ticketId: true },
+      }),
+      prisma.ticketReferenceMapping.findMany({
+        where: {
+          relationType: { in: DUPLICATE_RELATIONS },
+          OR: [{ sourceTicketId: ticket.id }, { targetTicketId: ticket.id }],
+        },
+        select: { sourceTicketId: true, targetTicketId: true },
+      }),
+    ]);
+
+    const excludeTicketIds = [
+      ...parentMappings.map(mapping => mapping.ticketId),
+      ...duplicateReferences.map(reference =>
+        reference.sourceTicketId === ticket.id ? reference.targetTicketId : reference.sourceTicketId,
+      ),
+    ];
+
+    return this.persistDuplicateReferences({
+      ticketId: ticket.id,
+      ticketCreatedBy: ticket.createdBy,
+      title: ticket.title,
+      description: ticket.description,
+      projectId: ticket.projectId,
+      userId: ticket.createdBy,
+      channelId: ticket.channelId,
+      scopeFieldValues: savedValues.map(v => ({ fieldId: v.fieldId, value: v.actualFieldValue })),
+      excludeTicketIds,
+    });
   }
 
   async checkDuplicates(params: {
@@ -352,10 +422,11 @@ class TicketDuplicateService {
     limit: number;
     excludeTicketId?: string;
     parentTicketId?: string;
+    excludeTicketIds?: string[];
     channelId?: string;
     scopeFieldValues?: DuplicateScopeFieldValue[];
   }): Promise<{ candidates: TicketDuplicateCandidate[]; analysis: TicketDuplicateCheckAnalysis }> {
-    const { title, description, projectId, userId, limit, excludeTicketId, parentTicketId, channelId, scopeFieldValues } = params;
+    const { title, description, projectId, userId, limit, excludeTicketId, parentTicketId, excludeTicketIds, channelId, scopeFieldValues } = params;
 
     const scopeDynamicFieldValues = await this.buildScopeDynamicFieldValues({
       channelId,
@@ -364,7 +435,7 @@ class TicketDuplicateService {
       excludeTicketId,
     });
 
-    const candidates = await this.getDuplicateCandidates({
+    const { candidates, searchFailed } = await this.getDuplicateCandidates({
       title,
       description,
       projectId,
@@ -372,8 +443,22 @@ class TicketDuplicateService {
       limit,
       excludeTicketId,
       parentTicketId,
+      excludeTicketIds,
       dynamicFieldValues: scopeDynamicFieldValues ?? undefined,
     });
+
+    if (searchFailed) {
+      return {
+        candidates,
+        analysis: {
+          isDuplicate: false,
+          duplicateTicketId: null,
+          confidence: 0,
+          reason: 'Duplicate search unavailable. Please try again.',
+          error: SEARCH_UNAVAILABLE_ERROR,
+        },
+      };
+    }
 
     if (candidates.length === 0) {
       return {
@@ -490,18 +575,28 @@ class TicketDuplicateService {
     limit: number;
     excludeTicketId?: string;
     parentTicketId?: string;
+    excludeTicketIds?: string[];
     dynamicFieldValues?: string[];
-  }): Promise<TicketDuplicateCandidate[]> {
-    const { title, description, projectId, userId, limit, excludeTicketId, parentTicketId, dynamicFieldValues } = params;
+  }): Promise<{ candidates: TicketDuplicateCandidate[]; searchFailed: boolean }> {
+    const { title, description, projectId, userId, limit, excludeTicketId, parentTicketId, excludeTicketIds, dynamicFieldValues } = params;
     const query = buildDuplicateSearchQuery(title, description);
 
     if (!query) {
-      return [];
+      return { candidates: [], searchFailed: false };
     }
 
     if (config.isTestEnv) {
       logger.debug('[TicketDuplicateService] Skipping Vespa in test environment');
-      return [];
+      return { candidates: [], searchFailed: false };
+    }
+
+    // Build set of IDs to exclude (self, parent, already-linked)
+    const excludeIds = new Set<string>(excludeTicketIds);
+    if (excludeTicketId) {
+      excludeIds.add(excludeTicketId);
+    }
+    if (parentTicketId) {
+      excludeIds.add(parentTicketId);
     }
 
     let vespaResults;
@@ -512,7 +607,9 @@ class TicketDuplicateService {
         ['ticket'],
         {
           offset: 0,
-          limit,
+          // Over-fetch by what gets filtered out below, so exclusions don't shrink the
+          // candidate list the model sees.
+          limit: limit + Math.min(excludeIds.size, MAX_EXCLUDED_OVERFETCH),
           rankProfile: RankProfile.duplicateDetection,
           ticket: {
             projectId: [projectId],
@@ -527,7 +624,7 @@ class TicketDuplicateService {
         '[TicketDuplicateService] Vespa search unavailable, skipping duplicate check',
         { error: error instanceof Error ? error.message : String(error) },
       );
-      return [];
+      return { candidates: [], searchFailed: true };
     }
 
     const hits = vespaResults.root.children || [];
@@ -547,20 +644,10 @@ class TicketDuplicateService {
         createdAt: result.metadata.timestamp,
       }));
 
-    // Build set of IDs to exclude (self, parent)
-    const excludeIds = new Set<string>();
-    if (excludeTicketId) {
-      excludeIds.add(excludeTicketId);
-    }
-    if (parentTicketId) {
-      excludeIds.add(parentTicketId);
-    }
-
-    if (excludeIds.size === 0) {
-      return candidates;
-    }
-
-    return candidates.filter(candidate => !excludeIds.has(candidate.id));
+    return {
+      candidates: candidates.filter(candidate => !excludeIds.has(candidate.id)).slice(0, limit),
+      searchFailed: false,
+    };
   }
 
   async persistDuplicateReferences(params: {
@@ -571,11 +658,12 @@ class TicketDuplicateService {
     projectId: string;
     userId: string;
     parentTicketId?: string;
+    excludeTicketIds?: string[];
     channelId?: string;
     scopeFieldValues?: DuplicateScopeFieldValue[];
-  }): Promise<void> {
+  }): Promise<DuplicateDetectionOutcome | null> {
     try {
-      const { ticketId, ticketCreatedBy, title, description, projectId, userId, parentTicketId, channelId, scopeFieldValues } = params;
+      const { ticketId, ticketCreatedBy, title, description, projectId, userId, parentTicketId, excludeTicketIds, channelId, scopeFieldValues } = params;
       const { candidates, analysis } = await this.checkDuplicates({
         title,
         description,
@@ -584,16 +672,23 @@ class TicketDuplicateService {
         limit: DUPLICATE_REFERENCE_LIMIT,
         excludeTicketId: ticketId,
         parentTicketId,
+        excludeTicketIds,
         channelId,
         scopeFieldValues,
       });
 
+      const noLink: DuplicateDetectionOutcome = {
+        analysis,
+        candidateCount: candidates.length,
+        linkedTicketId: null,
+      };
+
       if (candidates.length === 0) {
-        return;
+        return noLink;
       }
 
       if (!analysis.isDuplicate || !analysis.duplicateTicketId) {
-        return;
+        return noLink;
       }
 
       const duplicateCandidate = candidates.find(
@@ -601,7 +696,7 @@ class TicketDuplicateService {
       );
 
       if (!duplicateCandidate) {
-        return;
+        return noLink;
       }
 
       const workspaceId = await resolveWorkspaceIdFromModel(prisma, 'project', { id: projectId });
@@ -616,12 +711,16 @@ class TicketDuplicateService {
         },
       ];
 
-      await prisma.ticketReferenceMapping.createMany({
+      const { count } = await prisma.ticketReferenceMapping.createMany({
         data: referenceRows,
         skipDuplicates: true,
       });
+
+      // skipDuplicates makes an existing link a silent no-op; only report a link made now.
+      return { ...noLink, linkedTicketId: count > 0 ? duplicateCandidate.id : null };
     } catch (error) {
       logger.error('Failed to persist duplicate ticket references', error);
+      return null;
     }
   }
 }

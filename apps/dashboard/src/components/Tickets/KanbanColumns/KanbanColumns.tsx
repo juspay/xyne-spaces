@@ -31,6 +31,11 @@ import {
   type KanbanTicketsPageBaseArgs,
   useKanbanTicketsPage,
 } from '../../../routes/KanbanBoardScreen/useKanbanTicketsPage';
+import {
+  type SupportKanbanPageBaseArgs,
+  useSupportKanbanTicketsPage,
+} from '../../../routes/SupportScreen/useSupportKanbanTicketsPage';
+import type { DynamicFieldFilterEntry } from '../../../utils/board/dynamicFieldFilters';
 import { TicketCard } from '../TicketCard/TicketCard';
 import {
   DropdownMenu,
@@ -516,6 +521,61 @@ const PaginatedStageList: React.FC<{
   );
 };
 
+const DeskPaginatedStageList: React.FC<{
+  stage: Stage;
+  columnKey: string;
+  pageArgs: SupportKanbanPageBaseArgs;
+  otherStageNames?: string[] | undefined;
+  dynamicFieldEntries?: DynamicFieldFilterEntry[] | undefined;
+  onPageComplete?: ((pageArgs: SupportKanbanPageBaseArgs) => void) | undefined;
+  expectedCount?: number | undefined;
+  onTicketsChange?: ((columnKey: string, tickets: Ticket[]) => void) | undefined;
+  availableTags: string[];
+  visibleColumns?: Set<string> | undefined;
+  activeTicketId?: string;
+  showEmailReads?: boolean;
+  onTicketClick: (e: React.MouseEvent | KeyboardEvent, ticket: Ticket) => void;
+  slaPolicies?: BoardSlaPolicy[];
+}> = ({
+  stage,
+  columnKey,
+  pageArgs,
+  otherStageNames,
+  dynamicFieldEntries,
+  onPageComplete,
+  expectedCount,
+  ...listProps
+}) => {
+  const { tickets, isComplete, hasMore, isLoadingMore, loadMore } = useSupportKanbanTicketsPage({
+    ...pageArgs,
+    stage: stage.name,
+    ...(otherStageNames ? { otherStageNames } : {}),
+    ...(dynamicFieldEntries ? { dynamicFieldEntries } : {}),
+    ...(expectedCount !== undefined ? { expectedCount } : {}),
+  });
+
+  React.useEffect(() => {
+    if (isComplete) onPageComplete?.(pageArgs);
+  }, [isComplete, onPageComplete, pageArgs]);
+
+  return (
+    <SortableContext
+      items={tickets.map(ticket => ticket.id)}
+      strategy={verticalListSortingStrategy}
+    >
+      <VirtualizedStageList
+        stageId={stage.id}
+        columnKey={columnKey}
+        stageTickets={tickets}
+        hasMore={hasMore}
+        isLoadingMore={isLoadingMore}
+        onLoadMore={loadMore}
+        {...listProps}
+      />
+    </SortableContext>
+  );
+};
+
 const ticketBelongsToColumn = (
   ticket: Ticket,
   columnType: 'stage' | 'status',
@@ -555,12 +615,11 @@ interface KanbanColumnsProps {
     columnType: 'stage' | 'status';
     baseArgs: KanbanTicketsPageBaseArgs;
   };
-  /**
-   * A search is active. Server counts are not refetched for the search term, so
-   * they are either stale or absent, and the count display has to stop trusting
-   * `stageCounts` while this is true.
-   */
-  searchActive?: boolean;
+  deskPaginationConfig?: {
+    pageArgs: SupportKanbanPageBaseArgs;
+    dynamicFieldEntries?: DynamicFieldFilterEntry[] | undefined;
+    onPageComplete?: (pageArgs: SupportKanbanPageBaseArgs) => void;
+  };
   allKnownTickets?: Ticket[];
   onTicketsChange?: (columnKey: string, tickets: Ticket[]) => void;
   onAddTicketInColumn?: (column: {
@@ -604,7 +663,7 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
   showEmailReads,
   slaPolicies,
   paginatedColumnConfig,
-  searchActive,
+  deskPaginationConfig,
   allKnownTickets,
   onTicketsChange,
   onAddTicketInColumn,
@@ -623,21 +682,16 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
     // In normal mode, use allKnownTickets for optimistic updates
     return allKnownTickets ?? Object.values(ticketsByStage).flat();
   }, [allKnownTickets, isGroupByActive, ticketsByStage]);
-  // Only the paginated board can starve a collapsed column of its count; the
-  // non-paginated board always has every ticket in `ticketsByStage`.
-  const countsAreReliable = !(paginatedColumnConfig && searchActive);
   const stageCountById = React.useMemo(() => {
     const counts: Record<string, number> = {};
 
     for (const stage of stages) {
       const loaded = ticketsByStage[stage.id]?.length ?? 0;
-      counts[stage.id] = countsAreReliable
-        ? (stageCounts?.[stage.id] ?? stageCounts?.[stage.name] ?? loaded)
-        : loaded;
+      counts[stage.id] = stageCounts?.[stage.id] ?? stageCounts?.[stage.name] ?? loaded;
     }
 
     return counts;
-  }, [stages, stageCounts, ticketsByStage, countsAreReliable]);
+  }, [stages, stageCounts, ticketsByStage]);
   const [columnOrder, setColumnOrder] = React.useState<string[]>([]);
   const [draggedStageId, setDraggedStageId] = React.useState<string | null>(null);
 
@@ -696,10 +750,9 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
         const stageTickets = ticketsByStage[stage.id] || [];
         const ticketIds = stageTickets.map(t => t.id);
         const stageCount = stageCountById[stage.id] ?? stageTickets.length;
-        const serverStageCount =
-          countsAreReliable && stageCounts
-            ? (stageCounts[stage.id] ?? stageCounts[stage.name] ?? 0)
-            : undefined;
+        const serverStageCount = stageCounts
+          ? (stageCounts[stage.id] ?? stageCounts[stage.name] ?? 0)
+          : undefined;
         const columnKey = `${keyPrefix}${stage.id}`;
         const handleAddTicket = onAddTicketInColumn
           ? (): void =>
@@ -792,6 +845,26 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
                     {...(slaPolicies !== undefined && { slaPolicies })}
                     {...(formValuesByTicketId !== undefined && { formValuesByTicketId })}
                     {...(userNamesById !== undefined && { userNamesById })}
+                  />
+                ) : deskPaginationConfig ? (
+                  <DeskPaginatedStageList
+                    key={columnKey}
+                    stage={stage}
+                    columnKey={columnKey}
+                    pageArgs={deskPaginationConfig.pageArgs}
+                    otherStageNames={
+                      stage.id === stages[0]?.id ? stages.slice(1).map(s => s.name) : undefined
+                    }
+                    dynamicFieldEntries={deskPaginationConfig.dynamicFieldEntries}
+                    onPageComplete={deskPaginationConfig.onPageComplete}
+                    {...(serverStageCount !== undefined ? { expectedCount: serverStageCount } : {})}
+                    {...(onTicketsChange !== undefined ? { onTicketsChange } : {})}
+                    availableTags={availableTags}
+                    visibleColumns={visibleColumns}
+                    {...(activeTicketId !== undefined && { activeTicketId })}
+                    {...(showEmailReads !== undefined && { showEmailReads })}
+                    onTicketClick={onTicketClick}
+                    {...(slaPolicies !== undefined && { slaPolicies })}
                   />
                 ) : (
                   <SortableContext items={ticketIds} strategy={verticalListSortingStrategy}>

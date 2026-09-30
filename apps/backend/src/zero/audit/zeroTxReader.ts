@@ -28,15 +28,16 @@ type AnyBuilder = {
 const builderFor = (table: string): AnyBuilder | undefined =>
   (zql as unknown as Record<string, AnyBuilder>)[table];
 
-/** Read a single row by id from any table (used to capture before-state). */
+/** Read a single row by primary key from any table (used to capture before-state). */
 export async function readZeroAuditRow(
   tx: Transaction<Schema>,
   table: string,
   recordId: string,
+  primaryKey = 'id',
 ): Promise<AuditRow | null> {
   const builder = builderFor(table);
   if (!builder) return null;
-  const row = (await tx.run(builder.where('id', recordId).one() as never)) as AuditRow | undefined;
+  const row = (await tx.run(builder.where(primaryKey, recordId).one() as never)) as AuditRow | undefined;
   return row ?? null;
 }
 
@@ -69,6 +70,8 @@ export function createZeroAuditLookup(tx: Transaction<Schema>): AuditLookup {
       (await rowsByIds('forms', ids)) as unknown as { id: string; formName: string }[],
     globalFieldsByIds: async ids =>
       (await rowsByIds('global_fields', ids)) as unknown as { id: string; fieldName: string }[],
+    userGroupsByIds: async ids =>
+      (await rowsByIds('user_groups', ids)) as unknown as { id: string; name: string }[],
     boardIdsForFormIds: async formIds => {
       if (formIds.length === 0) return [];
       const mappingBuilder = (zql as unknown as Record<string, AnyBuilder>)['forms_context_mapping'];
@@ -136,14 +139,16 @@ export async function collectZeroAuditOperation(params: {
   accumulator: AuditJobsAccumulator;
   staging: AuditJobsAccumulator;
 }): Promise<void> {
-  if (!AUDIT_TABLE_CONFIG[params.table]) return;
+  const config = AUDIT_TABLE_CONFIG[params.table];
+  if (!config) return;
+  const primaryKey = config.primaryKey ?? 'id';
   const rowArgs = (params.args ?? {}) as AuditRow;
-  const recordId = String(rowArgs.id ?? '');
+  const recordId = String(rowArgs[primaryKey] ?? '');
   if (!recordId) return;
 
   let beforeRow: AuditRow | null = null;
   if (params.operation !== 'insert') {
-    beforeRow = await readZeroAuditRow(params.tx, params.table, recordId);
+    beforeRow = await readZeroAuditRow(params.tx, params.table, recordId, primaryKey);
   }
   const afterRow =
     params.operation === 'delete'

@@ -221,7 +221,7 @@ runs skip every prompt (`pnpm run bootstrap:raw`, `XYNE_DEV_APPS=all pnpm run de
 The bootstrap phases and `validate` use **Xyne Doctor**. In an interactive
 terminal, a nonzero exit can package a redacted local failure report and hand it to Claude Code or
 Codex without leaving the terminal. Plain and automated runs keep normal output without persisting
-a report. See [Xyne Doctor](docs/setup/xyne-doctor.md) for safety behavior and a demo.
+a report. Its behaviour is in [scripts/xyne-doctor.mjs](scripts/xyne-doctor.mjs).
 
 </details>
 
@@ -372,8 +372,10 @@ xyne-spaces/
 
 Run Xyne Spaces on your own GCP, AWS or Azure account with Terraform and Argo CD: one command
 brings up the network, cluster, managed Postgres/Redis/object storage, TLS ingress and every
-service. Start at [deployment/README.md](deployment/README.md), then follow the guide for your
-cloud ([GCP](deployment/docs/gcp.md), [AWS](deployment/docs/aws.md), [Azure](deployment/docs/azure.md)).
+service. Start at [deployment/README.md](deployment/README.md), then follow the
+[install guide](deployment/docs/install/README.md) and the page for your cloud
+([GCP](deployment/docs/install/gcp.md), [AWS](deployment/docs/install/aws.md),
+[Azure](deployment/docs/install/azure.md)).
 
 ---
 

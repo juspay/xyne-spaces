@@ -49,6 +49,20 @@ function isReasonableTokenTypo(queryToken: string, nameToken: string): boolean {
   return maxDistance > 0 && isWithinEditDistance(queryToken, nameToken, maxDistance);
 }
 
+/** Fuse options for people, shared with callers that run the match in a web worker. */
+export const USER_FUSE_OPTIONS = {
+  keys: [
+    { name: 'displayName', weight: 2 },
+    { name: 'name', weight: 2 },
+    { name: 'email', weight: 1 },
+  ],
+  threshold: 0.2,
+  ignoreLocation: true,
+  includeScore: true,
+  minMatchCharLength: 2,
+  isCaseSensitive: false,
+};
+
 /**
  * Search users and return scored results, mirroring `searchChannelsWithScores`.
  *
@@ -59,11 +73,14 @@ function isReasonableTokenTypo(queryToken: string, nameToken: string): boolean {
  *
  * The score is RELEVANCE ONLY — no affinity is folded in here. Callers that merge across
  * sources apply affinity once, in the merge, so it is not counted twice.
+ *
+ * `fuseMatches`: matches already computed with `USER_FUSE_OPTIONS` (e.g. in a web worker).
  */
 export function searchUsersWithScores<T extends UserLike>(
   users: T[],
   query: string,
   limit = 10,
+  fuseMatches?: ReadonlyArray<{ item: T; score?: number | undefined }>,
 ): { item: T; score: number }[] {
   // No query: keep the incoming order but float active users above deactivated
   // ones. Array.sort is stable (ES2019+), so order within each group is intact.
@@ -76,20 +93,7 @@ export function searchUsersWithScores<T extends UserLike>(
 
   const q = query.toLowerCase();
 
-  const fuse = new Fuse(users, {
-    keys: [
-      { name: 'displayName', weight: 2 },
-      { name: 'name', weight: 2 },
-      { name: 'email', weight: 1 },
-    ],
-    threshold: 0.2,
-    ignoreLocation: true,
-    includeScore: true,
-    minMatchCharLength: 2,
-    isCaseSensitive: false,
-  });
-
-  const results = fuse.search(query);
+  const results = fuseMatches ?? new Fuse(users, USER_FUSE_OPTIONS).search(query);
 
   const rescored = results.map(r => {
     // Prefer the display name (what the user actually sees) for prefix/word-boundary
@@ -146,9 +150,34 @@ export function searchUsersWithScores<T extends UserLike>(
     .slice(0, limit);
 }
 
-export function searchUsers<T extends UserLike>(users: T[], query: string, limit = 10): T[] {
-  return searchUsersWithScores(users, query, limit).map(r => r.item);
+export function searchUsers<T extends UserLike>(
+  users: T[],
+  query: string,
+  limit = 10,
+  fuseMatches?: ReadonlyArray<{ item: T; score?: number | undefined }>,
+): T[] {
+  return searchUsersWithScores(users, query, limit, fuseMatches).map(r => r.item);
 }
+
+/** Fuse options for channel names, shared with callers that run the match in a web worker. */
+export const CHANNEL_FUSE_OPTIONS = {
+  keys: ['name'],
+  // 0.3 threshold: accept results up to 30% "wrong" by Fuse's measure.
+  // Tighter than default (0.6) to avoid surfacing obviously unrelated channels.
+  threshold: 0.3,
+  // Don't penalise matches that appear late in the string.
+  // Without this, "eng" matching "engineering" at position 0 would score
+  // better than "eng" matching "backend-eng" at position 8, which is not
+  // the behaviour we want.
+  ignoreLocation: true,
+  includeScore: true,
+  minMatchCharLength: 2,
+  isCaseSensitive: false,
+};
+
+// Normalize hyphens to spaces in both query and channel names so that
+// "xyne feedback" matches "xyne-spaces-feedback".
+export const normalizeChannelName = (text: string): string => text.replace(/-/g, ' ');
 
 /**
  * Search channels by name and return scored results.
@@ -169,41 +198,29 @@ export function searchUsers<T extends UserLike>(users: T[], query: string, limit
  *
  * Use this function when you need scores for further processing.
  * Use searchChannels() when you only need the sorted items.
+ *
+ * `fuseMatches`: matches already computed with `CHANNEL_FUSE_OPTIONS` (e.g. in a web worker).
  */
 export function searchChannelsWithScores<T extends Searchable>(
   channels: T[],
   query: string,
   limit = 10,
+  fuseMatches?: ReadonlyArray<{ item: T; score?: number | undefined }>,
 ): { item: T; score: number }[] {
   if (!query.trim()) return channels.slice(0, limit).map(item => ({ item, score: 0 }));
 
-  // Normalize hyphens to spaces in both query and channel names so that
-  // "xyne feedback" matches "xyne-spaces-feedback".
-  const normalizedQuery = query.replace(/-/g, ' ');
+  const normalizedQuery = normalizeChannelName(query);
   const q = normalizedQuery.toLowerCase();
 
-  const fuse = new Fuse(channels, {
-    keys: ['name'],
-    // 0.3 threshold: accept results up to 30% "wrong" by Fuse's measure.
-    // Tighter than default (0.6) to avoid surfacing obviously unrelated channels.
-    threshold: 0.3,
-    // Don't penalise matches that appear late in the string.
-    // Without this, "eng" matching "engineering" at position 0 would score
-    // better than "eng" matching "backend-eng" at position 8, which is not
-    // the behaviour we want.
-    ignoreLocation: true,
-    includeScore: true,
-    minMatchCharLength: 2,
-    isCaseSensitive: false,
-    getFn: (obj) => {
+  const results =
+    fuseMatches ??
+    new Fuse(channels, {
+      ...CHANNEL_FUSE_OPTIONS,
       // keys is always ['name'] — access the typed property directly
       // instead of dynamic property access, which is both safer and avoids
       // relying on internal Fuse.js APIs.
-      return obj.name.replace(/-/g, ' ');
-    },
-  });
-
-  const results = fuse.search(normalizedQuery);
+      getFn: obj => normalizeChannelName(obj.name),
+    }).search(normalizedQuery);
 
   const rescored = results.map(r => {
     const name = r.item.name.toLowerCase().replace(/-/g, ' ');

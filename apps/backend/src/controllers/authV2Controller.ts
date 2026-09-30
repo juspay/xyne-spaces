@@ -8,7 +8,6 @@ import { jwtService } from '../services/jwtService';
 import { oauthStateServiceV2 } from '../services/oauthStateServiceV2';
 import { pkceServiceV2 } from '../services/pkceServiceV2';
 import { MicrosoftAuthController } from './microsoftAuthController';
-import { channelService } from '../services/channelService';
 import { WorkspaceJoinPolicy, WorkspaceType, AuthProvider, UserStatus, OrgRole } from '@xyne/shared';
 import type { WorkspaceJoinPolicy as WorkspaceJoinPolicyValue, WorkspaceType as WorkspaceTypeValue } from '@xyne/shared';
 
@@ -16,7 +15,7 @@ import '../types/express';
 import { config } from '@/config/env';
 import { isRefreshAllowed } from '@/services/sessionRefreshValidator';
 import { DatabaseClient } from '@/database/client';
-import { switchWorkspaceData } from '@/bypassAcl/authServices';
+import { switchWorkspaceData, ensureSelfDmForUserData, getWorkspaceLandingChannelData } from '@/bypassAcl/authServices';
 import { getEncryptionProvider } from '@/services/encryption';
 import { getFrontendUrl, resolveConfiguredOAuthRedirectUrl } from '@/utils/publicUrls';
 import {
@@ -118,14 +117,7 @@ export class AuthV2Controller {
     userId: string,
     workspaceId: string
   ): Promise<string | null> {
-    try {
-      const selfDmChannelId = await channelService.ensureSelfDmExists(userId, workspaceId);
-      logger.info(`[ensureSelfDmForUser] Self-DM ensured for user ${userId}: ${selfDmChannelId}`);
-      return selfDmChannelId;
-    } catch (error) {
-      logger.error(`[ensureSelfDmForUser] Failed to ensure self-DM for user ${userId}:`, error);
-      return null;
-    }
+    return ensureSelfDmForUserData(userId, workspaceId);
   }
 
   /**
@@ -544,13 +536,24 @@ export class AuthV2Controller {
       let publicEmailError = null;
 
       if (workspaces.length === 0 && !userExistsButRemoved) {
-        if (stateData.enterpriseLogin) {
+        // Public email domains can never create enterprise workspaces — the only
+        // path forward for a workspace-less user without a pending community join
+        // or invitation — so fail fast on them regardless of the entry flow. The
+        // remaining domain-conflict assert stays gated on the explicit
+        // enterprise intent.
+        try {
+          await organizationDomainService.assertNotPublicEmailDomain(googleUserData.email);
+        } catch (error) {
+          if (error instanceof PublicEmailDomainError) {
+            publicEmailError = error;
+          }
+        }
+
+        if (stateData.enterpriseLogin && !publicEmailError) {
           try {
             await organizationDomainService.assertCanCreateOrgForEmail(googleUserData.email);
           } catch (error) {
-            if (error instanceof PublicEmailDomainError) {
-              publicEmailError = error;
-            } else if (error instanceof OrganizationDomainConflictError) {
+            if (error instanceof OrganizationDomainConflictError) {
               domainConflictError = error;
             }
           }
@@ -957,13 +960,23 @@ export class AuthV2Controller {
       let publicEmailError = null;
 
       if (workspaces.length === 0 && !userExistsButRemoved) {
-        if (stateData.enterpriseLogin) {
+        // Public email domains can never create enterprise workspaces, so fail fast
+        // on them regardless of the entry flow (mirrors handleCallback). The
+        // remaining domain-conflict assert stays gated on the explicit
+        // enterprise intent.
+        try {
+          await organizationDomainService.assertNotPublicEmailDomain(googleUserData.email);
+        } catch (error) {
+          if (error instanceof PublicEmailDomainError) {
+            publicEmailError = error;
+          }
+        }
+
+        if (stateData.enterpriseLogin && !publicEmailError) {
           try {
             await organizationDomainService.assertCanCreateOrgForEmail(googleUserData.email);
           } catch (error) {
-            if (error instanceof PublicEmailDomainError) {
-              publicEmailError = error;
-            } else if (error instanceof OrganizationDomainConflictError) {
+            if (error instanceof OrganizationDomainConflictError) {
               domainConflictError = error;
             }
           }
@@ -1663,10 +1676,7 @@ export class AuthV2Controller {
       await this.userService.ensureUserPresence(workspaceUser.id, workspaceId);
       const selfDmChannelId = await this.ensureSelfDmForUser(workspaceUser.id, workspaceId);
 
-      const workspace = await this.prisma.workspace.findUnique({
-        where: { id: workspaceId },
-        select: { landingChannelId: true },
-      });
+      const workspace = await getWorkspaceLandingChannelData(workspaceId);
 
       let sessionId = null;
       if (pendingRefreshToken || provider==AuthProvider.EMAIL) {
@@ -1847,10 +1857,7 @@ export class AuthV2Controller {
       await this.userService.ensureUserPresence(workspaceUser.id, workspace.id);
       const selfDmChannelId = await this.ensureSelfDmForUser(workspaceUser.id, workspace.id);
 
-      const workspaceRecord = await this.prisma.workspace.findUnique({
-        where: { id: workspace.id },
-        select: { landingChannelId: true },
-      });
+      const workspaceRecord = await getWorkspaceLandingChannelData(workspace.id);
 
       let sessionId = null;
 
@@ -2220,10 +2227,7 @@ export class AuthV2Controller {
         await this.userService.ensureUserPresence(workspaceUser.id, workspace.id);
         const selfDmChannelId = await this.ensureSelfDmForUser(workspaceUser.id, workspace.id);
 
-        const workspaceRecord = await this.prisma.workspace.findUnique({
-          where: { id: workspace.id },
-          select: { landingChannelId: true },
-        });
+        const workspaceRecord = await getWorkspaceLandingChannelData(workspace.id);
 
         let sessionId = null;
         if (pendingRefreshToken) {
@@ -2379,10 +2383,7 @@ export class AuthV2Controller {
       await this.userService.ensureUserPresence(workspaceUser.id, workspace.id);
       const selfDmChannelId = await this.ensureSelfDmForUser(workspaceUser.id, workspace.id);
 
-      const workspaceRecord = await this.prisma.workspace.findUnique({
-        where: { id: workspace.id },
-        select: { landingChannelId: true },
-      });
+      const workspaceRecord = await getWorkspaceLandingChannelData(workspace.id);
 
       // Reuse refresh token from current session
       // Get global session cookie

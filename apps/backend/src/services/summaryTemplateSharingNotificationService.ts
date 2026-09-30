@@ -19,20 +19,26 @@ export class SummaryTemplateSharingNotificationService {
     const uniqueChanges = [
       ...new Map(changes.map((change) => [`${change.shareId}:${change.action}`, change])).values(),
     ];
-    await Promise.all(
-      uniqueChanges.map((change) =>
-        this.publishOne(actorId, change).catch((error) => {
-          logger.error('[SummaryTemplateSharingNotificationService] Failed to publish change', {
-            actorId,
-            ...change,
-            error,
-          });
-        })
-      )
-    );
+    // Run in order so a person reached by several shares is told once.
+    const notified = new Set<string>();
+    for (const change of uniqueChanges) {
+      try {
+        await this.publishOne(actorId, change, notified);
+      } catch (error) {
+        logger.error('[SummaryTemplateSharingNotificationService] Failed to publish change', {
+          actorId,
+          ...change,
+          error,
+        });
+      }
+    }
   }
 
-  private async publishOne(actorId: string, change: SummaryTemplateAccessActivity): Promise<void> {
+  private async publishOne(
+    actorId: string,
+    change: SummaryTemplateAccessActivity,
+    notified: Set<string>
+  ): Promise<void> {
     const share = await db.entityAccess.findUnique({ where: { id: change.shareId } });
     if (!share || share.shareableEntityType !== ShareableEntityType.SUMMARY_TEMPLATE) return;
 
@@ -43,6 +49,7 @@ export class SummaryTemplateSharingNotificationService {
     ) {
       return;
     }
+    // Channel access does not have one specific notification recipient.
     if (!share.userId && !share.userGroupId) return;
 
     const template = await db.summaryTemplate.findUnique({ where: { id: share.entityId } });
@@ -55,9 +62,13 @@ export class SummaryTemplateSharingNotificationService {
             select: { userId: true },
           })
         ).map((mapping) => mapping.userId);
-    const recipients = [...new Set(recipientIds)].filter(
-      (userId) => userId !== actorId && userId !== template.createdBy
-    );
+    const recipients = [...new Set(recipientIds)].filter((userId) => {
+      if (userId === actorId || userId === template.createdBy) return false;
+      const key = `${change.action}:${template.id}:${userId}`;
+      if (notified.has(key)) return false;
+      notified.add(key);
+      return true;
+    });
     if (recipients.length === 0) return;
 
     const actor = await repositories.users.findById(actorId);

@@ -1,8 +1,10 @@
 import { ReactElement, useEffect, useMemo, useState } from 'react';
 import { ChevronDown, Bot, SearchDefault } from '@xyne/icons';
+import { Check } from 'lucide-react';
 import { Popover } from '../../../ui/Popover';
 import { cn } from '../../../../utils/classNames';
 import { usePlatform } from '../../../../hooks/usePlatform';
+import { SELECTOR_ROW_CLASS, SELECTOR_ROW_SELECTED_CLASS } from '../../../AIScreen/selectorStyles';
 
 /** Get initials from a name (e.g., "Xyne Grafana" -> "XG", "Assistant" -> "As") */
 const getInitials = (name: string): string => {
@@ -157,7 +159,7 @@ export const AgentSelector = ({
         </div>
 
         {/* Scrollable list */}
-        <div className='overflow-auto py-1'>
+        <div className='overflow-auto p-1.5'>
           {/* Ask AI option */}
           <button
             onClick={() => {
@@ -166,17 +168,19 @@ export const AgentSelector = ({
               setOpen(false);
             }}
             className={cn(
-              'flex items-center gap-2.5 px-3 py-2 mx-1 rounded-md text-left text-sm transition-colors',
-              selectedAgentSlug === null
-                ? 'bg-primary/10 text-primary'
-                : 'hover:bg-accent text-foreground',
+              SELECTOR_ROW_CLASS,
+              'justify-between',
+              selectedAgentSlug === null && SELECTOR_ROW_SELECTED_CLASS,
             )}
             data-track-category='XyneAI'
             data-track-name='SELECT_AGENT'
             data-track-metadata={JSON.stringify({ agentSlug: 'ask-ai' })}
           >
-            <Bot className='w-4 h-4 shrink-0' />
-            <span className='font-medium'>Ask AI</span>
+            <span className='flex min-w-0 items-center gap-2.5'>
+              <Bot className='w-4 h-4 shrink-0 text-primary' />
+              <span className='font-medium'>Ask AI</span>
+            </span>
+            {selectedAgentSlug === null && <Check className='h-3.5 w-3.5 shrink-0' aria-hidden />}
           </button>
 
           {/* Divider if there are agents */}
@@ -197,27 +201,31 @@ export const AgentSelector = ({
                   setOpen(false);
                 }}
                 className={cn(
-                  'flex items-center gap-2.5 px-3 py-2 mx-1 rounded-md text-left text-sm transition-colors',
-                  selectedAgentSlug === agent.slug
-                    ? 'bg-primary/10 text-primary'
-                    : 'hover:bg-accent text-foreground',
+                  SELECTOR_ROW_CLASS,
+                  'justify-between',
+                  selectedAgentSlug === agent.slug && SELECTOR_ROW_SELECTED_CLASS,
                 )}
                 data-track-category='XyneAI'
                 data-track-name='SELECT_AGENT'
                 data-track-metadata={JSON.stringify({ agentSlug: agent.slug })}
               >
-                <span
-                  className={cn(
-                    'inline-block rounded-full shrink-0',
-                    !agent.color && 'bg-muted-foreground',
-                  )}
-                  style={{
-                    width: 12,
-                    height: 12,
-                    ...(agent.color ? { backgroundColor: agent.color } : {}),
-                  }}
-                />
-                <span className='font-medium truncate'>{agent.name}</span>
+                <span className='flex min-w-0 items-center gap-2.5'>
+                  <span
+                    className={cn(
+                      'inline-block rounded-full shrink-0',
+                      !agent.color && 'bg-muted-foreground',
+                    )}
+                    style={{
+                      width: 12,
+                      height: 12,
+                      ...(agent.color ? { backgroundColor: agent.color } : {}),
+                    }}
+                  />
+                  <span className='font-medium truncate'>{agent.name}</span>
+                </span>
+                {selectedAgentSlug === agent.slug && (
+                  <Check className='h-3.5 w-3.5 shrink-0' aria-hidden />
+                )}
               </button>
             ))
           )}

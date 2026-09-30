@@ -62,6 +62,7 @@ import {
 } from '../ChatList/ChatListUtils';
 import { useUserBookmarks } from '../../../hooks/useUserBookmarks';
 import { useChannel } from '../../../hooks/useChannels';
+import { useIsDmReadOnly } from '../../../hooks/useIsDmReadOnly';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { logger, Event } from '../../../utils/logger';
 import { MessageActionsDrawer } from '../MessageActionsDrawer/MessageActionsDrawer';
@@ -1017,13 +1018,19 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       </>
     ) : undefined;
 
+  // A DM whose other participant is deactivated is an archive: no reactions, no
+  // edits, no thread replies — hide the hover toolbar and the mobile actions
+  // drawer entirely. The composer above is already replaced with a banner in
+  // ConversationPanelV2, so this closes the remaining write paths from the row.
+  const isDmReadOnly = useIsDmReadOnly(channelId);
   const canShowHoverToolbar =
     !isMobile &&
     !searchItemView &&
     variant !== 'pinned' &&
     !isMentionUserAddition &&
     !isTicketActivity &&
-    !isCurrentEditing;
+    !isCurrentEditing &&
+    !isDmReadOnly;
 
   // No dependency array on purpose: re-registering is a cheap Map.set and this
   // keeps the registered handlers/capabilities in sync with the latest render.
@@ -1420,7 +1427,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
             />
           )}
           {/* Mobile Actions Drawer */}
-          {isMobile && !searchItemView && isActionsDrawerOpen && (
+          {isMobile && !searchItemView && isActionsDrawerOpen && !isDmReadOnly && (
             <MessageActionsDrawer
               open
               onOpenChange={handleActionsDrawerOpenChange}

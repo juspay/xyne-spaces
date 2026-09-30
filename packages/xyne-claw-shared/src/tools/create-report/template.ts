@@ -19,6 +19,41 @@ export interface HtmlTemplateInput {
   subtitle?: string;
   /** Pre-rendered HTML body — output of marked.parse() after sanitization. */
   body: string;
+  themeCss?: string;
+}
+
+const MAX_THEME_CSS_CHARS = 200_000;
+const STYLE_BLOCK_RE = /<style\b[^>]*>([\s\S]*?)<\/style\s*>/gi;
+const SAFE_DATA_IMAGE_RE = /^data:image\/(png|jpe?g|gif|webp);base64,[a-z0-9+/=\s]+$/i;
+
+export function extractThemeStyles(markdown: string): { css: string; markdown: string } {
+  const blocks: string[] = [];
+  const parts = markdown.split(/(```[\s\S]*?```)/g);
+  const rest = parts
+    .map((part, i) =>
+      i % 2 === 1
+        ? part
+        : part.replace(STYLE_BLOCK_RE, (_match, css: string) => {
+            blocks.push(css);
+            return "";
+          }),
+    )
+    .join("");
+  return { css: blocks.join("\n"), markdown: rest };
+}
+
+export function sanitizeThemeCss(css: string): string {
+  return css
+    .slice(0, MAX_THEME_CSS_CHARS)
+    .replace(/</g, "")
+    .replace(/@import[^;]*;?/gi, "")
+    .replace(/url\(\s*(['"]?)([\s\S]*?)\1\s*\)/gi, (match, _q: string, target: string) =>
+      SAFE_DATA_IMAGE_RE.test(target.trim()) ? match : "none",
+    )
+    .replace(/expression\s*\(/gi, "")
+    .replace(/(-moz-binding|behavior)\s*:[^;}]*/gi, "")
+    .replace(/javascript:/gi, "")
+    .trim();
 }
 
 const CSS = `
@@ -142,7 +177,7 @@ export function buildHtmlDocument(input: HtmlTemplateInput): string {
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>${escapeHtml(input.title)}</title>
-  <style>${CSS}</style>
+  <style>${CSS}</style>${input.themeCss ? `\n  <style>${input.themeCss}</style>` : ""}
 </head>
 <body>
   <main class="container">

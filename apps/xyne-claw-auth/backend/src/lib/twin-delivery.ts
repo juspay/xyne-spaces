@@ -165,7 +165,7 @@ export async function executeTwinApprovalDelivery(
     posted = target;
   }
 
-  const doneMsg = willReact && willReply ? "✅ Reacted & replied." : willReply ? "✅ Response sent." : "✅ Reacted.";
+  const doneMsg = willReact && willReply ? "Reacted & replied." : willReply ? "Response sent." : "Reacted.";
   log.info(`[twin-delivery] delivered — action=${ctx.deliveryAction} dest=${ctx.destinationKind} edited=${wasEdited}`);
   return { ok: true, doneMsg, wasEdited, finalContent, ...(posted ? { posted } : {}) };
 }

@@ -560,6 +560,7 @@ export class EmailController {
                 uploadedByUserId: userId,
                 storageProvider: 'zoho',
                 conversationId: conversationId,
+                channelId: conversation.channelId,
                 workspaceId: emailWorkspaceId,
                 metadata: { zohoAttachmentId: attachmentId, source: 'zoho_upload' },
               }),
@@ -1076,7 +1077,10 @@ export class EmailController {
               }),
               db.messageAttachment.updateMany({
                 where: { id: { in: stagedAttachmentRowIds } },
-                data: { conversationId: conversation.conversationId },
+                data: {
+                  conversationId: conversation.conversationId,
+                  channelId: conversation.channelId,
+                },
               }),
             ]);
           } catch (error) {

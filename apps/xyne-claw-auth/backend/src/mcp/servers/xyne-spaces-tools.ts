@@ -22,7 +22,7 @@ import { esc, queryDirect, type DirectSearchResponse } from "./vespa-direct.js";
 import { buildYqlFromParams, AREA_NAMES, AREA_ALIASES, describeAreasForPrompt } from "./vespa-search-areas.js";
 import { validateCorpusScan, buildCorpusScanYql, parseBucketKey, termToQuery, MAX_SCAN_TERMS, type CorpusScanScope } from "./vespa-corpus-scan.js";
 import { validateEvidencePack, bucketRange, buildPackFetchYql, formatIstDate, toSnippet, MAX_PACK_PER_BUCKET, DEFAULT_PACK_PER_BUCKET, MAX_BUCKET_FETCHES } from "./vespa-evidence-pack.js";
-import { getWorkspaceIdForUser } from "../../lib/spaces-db.js";
+import { getWorkspaceIdForUser, spacesDbAvailable } from "../../lib/spaces-db.js";
 import {
   extractCleanTextFromFlowJson,
   isFlowJsonContent,
@@ -3263,8 +3263,20 @@ function userDetailLines(u: UserRow): string[] {
   if (u.lastActiveAt) times.push(`Last seen: ${toIST(u.lastActiveAt)} IST`);
   if (times.length > 0) out.push(`  ${times.join(" · ")}`);
   if (u.statusContent) out.push(`  Status: ${u.statusEmoji ? `${u.statusEmoji} ` : ""}${u.statusContent}`);
-  if (u.picture) out.push(`  Avatar: ${u.picture}`);
+  if (u.picture) out.push(`  Avatar: ${buildAvatarUrl(u.id, u.picture)}`);
   return out;
+}
+
+/** Build a READY-MADE, absolute avatar URL the agent can drop into HTML
+ *  verbatim. We emit the full URL (never the bare id + storage path) so the
+ *  desk/report agent never re-types — and truncates — the 25-char user id.
+ *  If `picture` is already an absolute http(s) URL it's passed through
+ *  unchanged; otherwise it's treated as a storage path and encoded into the
+ *  authenticated `/api/users/<id>/picture?v=<path>` endpoint. */
+function buildAvatarUrl(userId: string, picture: string): string {
+  if (/^https?:\/\//i.test(picture)) return picture;
+  const base = CONFIG.spacesAppUrl.replace(/\/+$/, "");
+  return `${base}/api/users/${userId}/picture?v=${encodeURIComponent(picture)}`;
 }
 
 // ── spaces-activity ──────────────────────────────────────────────────
@@ -7047,7 +7059,7 @@ const userSendMessage: ToolDef = {
       { required: ["channelId"], not: { required: ["conversationId"] } },
     ],
   },
-  async handler(args) {
+  async handler(args, ctx) {
     try {
       const conversationId = String(args["conversationId"] ?? "").trim();
       const channelId = String(args["channelId"] ?? "").trim();
@@ -7061,8 +7073,16 @@ const userSendMessage: ToolDef = {
 
       // Same mention-expansion the app-tools version uses, so @Name[userId]
       // shorthand works consistently across both tools.
-      const { expandSpacesMentions } = await import("../../lib/mention-transform.js");
-      const content = expandSpacesMentions(rawContent);
+      const { expandSpacesMentions, resolveUnboundMentions } = await import("../../lib/mention-transform.js");
+      const { buildSpacesMentionLookupsDb } = await import("../../lib/mention-lookups.js");
+      const workspaceId =
+        (process.env["XYNE_SPACES_WORKSPACE_ID"] ?? "").trim() ||
+        (ctx?.userId ? await getWorkspaceIdForUser(ctx.userId).catch(() => null) : null) ||
+        undefined;
+      const resolved = spacesDbAvailable()
+        ? await resolveUnboundMentions(rawContent, buildSpacesMentionLookupsDb(workspaceId)).catch(() => rawContent)
+        : rawContent;
+      const content = expandSpacesMentions(resolved);
 
       if (conversationId) {
         const result = (await spacesFetch(

@@ -82,10 +82,8 @@ export interface TicketsHeaderProps {
   ticketCount: number | null;
   isFiltered: boolean;
   star?: { isStarred: boolean; onToggle: () => void } | null;
-  searchValue: string;
-  onSearchChange: (value: string) => void;
-  isExactSearch: boolean;
-  onExactSearchChange: (exact: boolean) => void;
+  /** Opens the palette as a ticket search scoped to this screen's filters. */
+  onOpenSearch: () => void;
   share?: { viewId: string; viewName: string } | null;
   onCreateTicket?: (() => void) | null;
   createTicketMetadata?: string;

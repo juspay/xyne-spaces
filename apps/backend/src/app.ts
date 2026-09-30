@@ -199,6 +199,7 @@ import { coerceTwinReplyDraft, destinationNameLookup, createTwinReplyDraft } fro
 import userMigrationRoutes from '@/routes/userMigration';
 import { decryptRequestBodyMiddleware, encryptResponseBodyMiddleware } from './middleware/decryptionMiddleware';
 import internalRoutes from '@/routes/internal';
+import userDeactivationRoutes from '@/routes/userDeactivation';
 import collectionsRoutes from '@/routes/collections';
 import merchantRoutes from '@/routes/merchants';
 import officeConversionRoutes from '@/routes/officeConversion';
@@ -208,6 +209,7 @@ import sdlcVcsInternalRoutes from '@/routes/sdlcVcsInternal';
 import sdlcAgentInternalRoutes from '@/routes/sdlcAgentInternal';
 import { createSdkPublicRouter, createSdkRouter } from '@/api/sdk';
 import { errorHandler as sdkErrorHandler } from '@/api/sdk/handler';
+import sdkSsoRoutes from '@/routes/sdk-sso';
 
 
 export class App {
@@ -370,6 +372,9 @@ export class App {
     // everything else. The trailing `sdkErrorHandler` gives auth failures the
     // SDK's own error envelope.
     if (config.sdk.enabled) {
+      // Xyne SSO device flow, mounted before authMiddleware: init/poll/consent
+      // are public, status/approve authenticate the dashboard session themselves.
+      this.app.use('/api/sdk/auth/sso', sdkSsoRoutes);
       this.app.use('/api/sdk', createSdkPublicRouter());
       this.app.use('/api/sdk', authMiddleware.authenticate, createSdkRouter(), sdkErrorHandler);
       logger.info('Public SDK API mounted at /api/sdk');
@@ -639,6 +644,8 @@ export class App {
 
     // Internal canvas read/update (S2S-only, used by MCP tools)
     this.app.use('/api/internal/canvas', internalCanvasRoutes);
+    // User deactivation cleanup, called by an out-of-cluster service (own secret)
+    this.app.use('/api/internal/users', userDeactivationRoutes);
     this.app.use('/api/canvas/claw', authenticateUserOrApp, canvasRoutes);
     this.app.use('/api/vespaSearch/claw', authenticateUserOrApp, vespaSearchRoutes);
     this.app.use('/api/dashboard/claw', authenticateUserOrApp, dashboardClawRouter);

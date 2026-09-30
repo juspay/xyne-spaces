@@ -59,7 +59,7 @@ async function rehostCanvasImages(html: string, canvasId: string, createdBy: str
       const [up] = await uploadFiles([{ originalname: info.name || fileId, mimetype: info.mimetype || 'application/octet-stream', size: buffer.length, buffer } as Express.Multer.File]);
       if (!up) continue;
       const att = await attachmentRepo.create({
-        entityId: canvasId, entityType: AttachmentEntityType.CANVAS, conversationId: `canvas_${canvasId}`,
+        entityId: canvasId, entityType: AttachmentEntityType.CANVAS, conversationId: `canvas_${canvasId}`, channelId: null,
         originalFilename: up.originalName, size: up.fileSize, mimetype: up.mimeType, url: up.fileUrl, thumbnailUrl: up.thumbnailUrl,
         width: up.width, height: up.height, uploadedByUserId: createdBy, createdBy, storageProvider: config.fileStorage.provider,
         workspaceId: target.workspaceId, metadata: { canvasId, type: 'canvas_attachment' },

@@ -25,7 +25,7 @@ import {
   ChevronDown,
   Check,
 } from 'lucide-react';
-import { ResolutionQualityHd, Spinner } from '@xyne/icons';
+import { PhoneDefault, ResolutionQualityHd, Spinner } from '@xyne/icons';
 import {
   NotificationLevel,
   MAX_NOTIFICATION_KEYWORDS,
@@ -63,7 +63,6 @@ import { DailyBriefToggle } from '../DailyBriefToggle';
 import { IntentSuggestionsToggle } from '../IntentSuggestionsToggle';
 import { UpdateAssignmentStatusModal } from '../../AppSidebar/UpdateAssignmentStatusModal';
 import { VoiceSignatureModal } from '../VoiceSignatureModal/VoiceSignatureModal';
-import HuddleIcon from '../../icons/HuddleIcon';
 import { useGlobalNotificationSettings } from '../../../hooks/useGlobalNotificationSettings';
 import { useNotificationKeywords } from '../../../hooks/useNotificationKeywords';
 import { Badge } from '../../ui/Badge/Badge';
@@ -106,7 +105,7 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'notifications', label: 'Notifications', icon: <Bell className='size-4' /> },
   { id: 'availability', label: 'Availability', icon: <PauseCircle className='size-4' /> },
   { id: 'voice', label: 'Voice', icon: <Mic className='size-4' /> },
-  { id: 'calls', label: 'Calls', icon: <HuddleIcon size={16} /> },
+  { id: 'calls', label: 'Calls', icon: <PhoneDefault size={16} /> },
   { id: 'recordings', label: 'Recordings', icon: <AudioLines className='size-4' /> },
   {
     id: 'messaging',
@@ -659,19 +658,16 @@ const CallsSection: FC<{ state: PreferencesState }> = ({ state }) => {
 
       <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
         <div>
-          <p className='text-sm font-medium text-foreground'>Use new recording experience</p>
+          <p className='text-sm font-medium text-foreground'>Use new calls experience</p>
           <p className='text-xs text-muted-foreground mt-0.5'>
-            {state.canSwitchRecordingVersion
-              ? 'Switch between the classic and redesigned recording interface on this device.'
-              : 'Stop the active recording before switching experiences.'}
+            Switch between the classic and redesigned calls list on this device.
           </p>
         </div>
         <Switch
-          id='recording-version-v2'
-          aria-label='Use new recording experience'
-          checked={state.recordingVersion === 'v2'}
-          disabled={!state.canSwitchRecordingVersion}
-          onCheckedChange={checked => state.setRecordingVersion(checked ? 'v2' : 'v1')}
+          id='calls-version-v2'
+          aria-label='Use new calls experience'
+          checked={state.callsVersion === 'v2'}
+          onCheckedChange={checked => state.setCallsVersion(checked ? 'v2' : 'v1')}
         />
       </div>
 
@@ -715,6 +711,24 @@ const RecordingsSection: FC<{ state: PreferencesState }> = ({ state }) => (
       title='Recordings'
       subtitle='Configure how your recording summaries are generated'
     />
+
+    <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
+      <div>
+        <p className='text-sm font-medium text-foreground'>Use new recording experience</p>
+        <p className='text-xs text-muted-foreground mt-0.5'>
+          {state.canSwitchRecordingVersion
+            ? 'Switch between the classic and redesigned recording interface on this device.'
+            : 'Stop the active recording before switching experiences.'}
+        </p>
+      </div>
+      <Switch
+        id='recording-version-v2'
+        aria-label='Use new recording experience'
+        checked={state.recordingVersion === 'v2'}
+        disabled={!state.canSwitchRecordingVersion}
+        onCheckedChange={checked => state.setRecordingVersion(checked ? 'v2' : 'v1')}
+      />
+    </div>
 
     <div className='p-3 rounded-lg border border-border bg-muted/30 space-y-3'>
       <div>

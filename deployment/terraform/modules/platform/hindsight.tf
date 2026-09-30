@@ -1,10 +1,10 @@
 locals {
-  hindsight_llm_key_set = var.app_secrets.hindsight_llm_api_key != ""
+  hindsight_llm_key_set = nonsensitive(var.app_secrets.hindsight_llm_api_key != "")
   hindsight_secret      = var.enable_hindsight && local.hindsight_llm_key_set
 }
 
 resource "kubernetes_namespace_v1" "hindsight" {
-  count = local.hindsight_secret ? 1 : 0
+  count = var.enable_hindsight ? 1 : 0
 
   metadata {
     name = var.hindsight_namespace

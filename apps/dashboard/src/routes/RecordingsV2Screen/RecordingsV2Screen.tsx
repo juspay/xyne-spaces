@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactElement } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { Virtuoso } from 'react-virtuoso';
-import { Spinner } from '@xyne/icons';
+import { GridDashboardBento, Spinner } from '@xyne/icons';
 import { CallStatus, TagMethod } from '@xyne/shared';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { toast } from 'sonner';
@@ -18,13 +18,19 @@ import { recordingService } from '../../services/Recording/recordingService';
 import { logRecordingError } from '../../utils/recordingUtils';
 import { getApiErrorMessage } from '../../utils/apiError';
 import { RecordingShareModal } from '../RecordingDetailV2Screen/components/RecordingShareModal';
+import {
+  SummaryTemplatesModal,
+  SUMMARY_TEMPLATES_DIALOG_CLASS,
+} from '../RecordingDetailV2Screen/components/SummaryTemplatesModal';
 import { useLeaveRecording } from '../../hooks/useLeaveRecording';
+import { useSummaryTemplates } from '../../hooks/useSummaryTemplates';
 import { usePlatform } from '../../hooks/usePlatform';
 import { getRecordingDefaultLayout } from '../../hooks/useRecordingDefaultLayout';
 import { sendRecordingEvent, useRecordingStore } from '../../hooks/useRecordingStore';
 import { useSelf, useUsers } from '../../hooks/useUsers';
 import { xyneAIActor } from '../../machines/xyneAIMachine';
 import { cn } from '../../utils/classNames';
+import { getUserDisplayName } from '../../utils/userDisplayName';
 import { RecordingsEmptyStateIllustration } from './components/RecordingsEmptyStateIllustration';
 import { RecordingDateFilter } from './components/RecordingDateFilter';
 import RecordingControlsOverlay from './components/RecordingControlsOverlay';
@@ -40,10 +46,8 @@ import { RecordingsV2Skeleton } from './components/RecordingsV2Skeleton';
 import { RecordingDeleteDialog } from './components/RecordingDeleteDialog';
 import { useResolvedRecordingLabels } from '../../hooks/useResolvedRecordingLabels';
 import {
-  buildRecordingRows,
   filterRecordingsByLabels,
   filterRecordingsByOwnership,
-  findNearestVisibleRecording,
   formatRecordingParticipants,
   getRecordingDatePresetLabel,
   isRecordingInDatePreset,
@@ -51,6 +55,12 @@ import {
   type RecordingDatePreset,
   type RecordingOwnershipTab,
 } from './utils/RecordingsV2.utils';
+import { buildDateGroupedRowsFromItems, findNearestVisibleItem } from '../../utils/dateGroupedList';
+import {
+  resolveSummaryTemplateLink,
+  SUMMARY_TEMPLATE_ID_PARAM,
+  SUMMARY_TEMPLATES_PARAM,
+} from './utils/summaryTemplateLink';
 import { getRecordingParticipantIds, normalizeRecordingTags } from '../../utils/recordingUtils';
 import { DEFAULT_RECORDING_TITLE, readRecordingCanvasIds } from '@/utils/recordingUtils';
 
@@ -62,8 +72,9 @@ const RecordingsV2Screen = (): ReactElement => {
   const shouldReduceMotion = useReducedMotion();
   const [scrollContainer, setScrollContainer] = useState<HTMLDivElement | null>(null);
   const listTabParam = searchParams.get('tab');
+  // "Created by me" is the default tab; "All" and "Shared" are explicit `?tab=` values.
   const activeListTab: RecordingOwnershipTab =
-    listTabParam === 'created' || listTabParam === 'shared' ? listTabParam : 'all';
+    listTabParam === 'all' || listTabParam === 'shared' ? listTabParam : 'created';
   const [selectedCreatorId, setSelectedCreatorId] = useState<string | null>(null);
   const [selectedDatePreset, setSelectedDatePreset] = useState<RecordingDatePreset>('all-time');
   const [selectedLabels, setSelectedLabels] = useState<string[]>([]);
@@ -186,7 +197,10 @@ const RecordingsV2Screen = (): ReactElement => {
     [ownershipFilteredRecordings],
   );
 
-  const rows = useMemo(() => buildRecordingRows(filteredRecordings), [filteredRecordings]);
+  const rows = useMemo(
+    () => buildDateGroupedRowsFromItems(filteredRecordings),
+    [filteredRecordings],
+  );
   const sourceIndexByRecordingId = useMemo(
     () => new Map(recordings.map((recording, index) => [recording.id, index])),
     [recordings],
@@ -197,7 +211,7 @@ const RecordingsV2Screen = (): ReactElement => {
       setSearchParams(
         prev => {
           const next = new URLSearchParams(prev);
-          if (tab === 'all') next.delete('tab');
+          if (tab === 'created') next.delete('tab');
           else next.set('tab', tab);
           return next;
         },
@@ -206,6 +220,58 @@ const RecordingsV2Screen = (): ReactElement => {
     },
     [setSearchParams],
   );
+
+  // URL-driven so the share notification can open the dialog on one template.
+  const isTemplatesOpen = searchParams.get(SUMMARY_TEMPLATES_PARAM) === '1';
+  const linkedTemplateId = isTemplatesOpen ? searchParams.get(SUMMARY_TEMPLATE_ID_PARAM) : null;
+  const {
+    templates: summaryTemplates,
+    isLoading: summaryTemplatesLoading,
+    isComplete: summaryTemplatesComplete,
+  } = useSummaryTemplates(isTemplatesOpen);
+  const templateLinkState = useMemo(
+    () =>
+      resolveSummaryTemplateLink({
+        linkedTemplateId,
+        templateIds: summaryTemplates.map(template => template.id),
+        isComplete: summaryTemplatesComplete,
+      }),
+    [linkedTemplateId, summaryTemplates, summaryTemplatesComplete],
+  );
+
+  const setTemplatesOpen = useCallback(
+    (open: boolean): void => {
+      setSearchParams(
+        prev => {
+          const next = new URLSearchParams(prev);
+          if (open) next.set(SUMMARY_TEMPLATES_PARAM, '1');
+          else next.delete(SUMMARY_TEMPLATES_PARAM);
+          next.delete(SUMMARY_TEMPLATE_ID_PARAM);
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
+
+  // The linked template is gone or no longer shared: say so and show the list.
+  useEffect(() => {
+    if (templateLinkState !== 'unavailable') return;
+
+    toast.info('That template is not available', {
+      id: 'summary-template-link-unavailable',
+      description: 'It may have been deleted, or your access to it was removed.',
+    });
+    setSearchParams(
+      prev => {
+        const next = new URLSearchParams(prev);
+        next.delete(SUMMARY_TEMPLATE_ID_PARAM);
+        return next;
+      },
+      { replace: true },
+    );
+  }, [setSearchParams, templateLinkState]);
 
   const handleTabChange = useCallback(
     (tab: RecordingOwnershipTab): void => {
@@ -353,7 +419,7 @@ const RecordingsV2Screen = (): ReactElement => {
 
   const handleVisibleRangeChanged = useCallback(
     (startIndex: number): void => {
-      const firstVisibleRecording = findNearestVisibleRecording(rows, startIndex);
+      const firstVisibleRecording = findNearestVisibleItem(rows, startIndex);
       if (!firstVisibleRecording) return;
 
       const sourceIndex = sourceIndexByRecordingId.get(firstVisibleRecording.id);
@@ -458,6 +524,19 @@ const RecordingsV2Screen = (): ReactElement => {
               </div>
 
               <div className='col-start-2 row-start-1 flex items-center gap-2 sm:row-start-2'>
+                {/* Icon-only below `sm`, where this row shares a line with the title. */}
+                <Button
+                  type='button'
+                  variant='outline'
+                  onClick={() => setTemplatesOpen(true)}
+                  className='h-9 gap-1.5 whitespace-nowrap rounded-xl border-border px-3 font-semibold hover:bg-muted/70 sm:px-4'
+                  aria-label='Summary templates'
+                  data-track-category='RecordingsV2'
+                  data-track-name='open_summary_templates'
+                >
+                  <GridDashboardBento strokeWidth={2} className='size-4' />
+                  <span className='hidden sm:inline'>Templates</span>
+                </Button>
                 <Button
                   type='button'
                   variant='outline'
@@ -601,23 +680,23 @@ const RecordingsV2Screen = (): ReactElement => {
                   ) : (
                     <div className='pb-2'>
                       <RecordingsV2Pill
-                        recording={row.recording}
-                        creator={usersById.get(row.recording.createdByUserId) ?? null}
+                        recording={row.item}
+                        creator={usersById.get(row.item.createdByUserId) ?? null}
                         participantsLabel={formatRecordingParticipants(
                           getRecordingParticipantIds(
-                            row.recording.createdByUserId,
-                            row.recording.recordingParticipants,
+                            row.item.createdByUserId,
+                            row.item.recordingParticipants,
                           ),
                           usersById,
                           currentUser?.id,
                         )}
-                        tags={row.recording.labels.filter(isResolved).filter(isManualLabel)}
-                        suggestedTags={row.recording.labels.filter(
+                        tags={row.item.labels.filter(isResolved).filter(isManualLabel)}
+                        suggestedTags={row.item.labels.filter(
                           label =>
                             isResolved(label) && resolveMethod(label) === TagMethod.AUTOMATED,
                         )}
                         pendingLabelCount={
-                          row.recording.labels.filter(label => !isResolved(label)).length
+                          row.item.labels.filter(label => !isResolved(label)).length
                         }
                         resolveLabel={resolveLabel}
                         onOpen={handleOpenRecording}
@@ -664,6 +743,28 @@ const RecordingsV2Screen = (): ReactElement => {
           testId='recordings-v2-share-dialog'
         >
           <RecordingShareModal recording={shareRecording} onClose={() => setShareRecording(null)} />
+        </Dialog>
+      )}
+
+      {isTemplatesOpen && currentUser && (
+        <Dialog
+          open
+          onOpenChange={open => !open && setTemplatesOpen(false)}
+          title='Summary Templates'
+          description='Create, edit, and share recording summary templates.'
+          className={SUMMARY_TEMPLATES_DIALOG_CLASS}
+          testId='recordings-v2-summary-templates-dialog'
+        >
+          {/* The list is held back while the linked template syncs. */}
+          <SummaryTemplatesModal
+            key={linkedTemplateId ?? 'browse'}
+            templates={templateLinkState === 'resolving' ? [] : summaryTemplates}
+            loading={summaryTemplatesLoading || templateLinkState === 'resolving'}
+            selectedTemplateId={templateLinkState === 'found' ? linkedTemplateId : null}
+            currentUserId={currentUser.id}
+            currentUserName={getUserDisplayName(currentUser)}
+            onClose={() => setTemplatesOpen(false)}
+          />
         </Dialog>
       )}
 

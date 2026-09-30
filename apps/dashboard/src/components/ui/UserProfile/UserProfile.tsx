@@ -7,7 +7,6 @@ import {
   Calendar,
   Cake,
   MessageSquare,
-  Headphones,
   Edit2,
   Check,
   Camera,
@@ -42,9 +41,12 @@ import type { User } from '@xyne/shared';
 import { CommonChannelsSection } from '../../UserProfile/CommonChannelsSection';
 import { useUserPresence } from '../../../hooks/usePresence';
 import { uploadProfilePicture } from '../../../services/userProfile/userProfileService';
+import { RemoveProfilePictureButton } from './RemoveProfilePictureButton';
 import { queryClient } from '../../../services/clients/queryClient';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useMettleEmployeeDetails } from '../../../hooks/useMettleEmployeeDetails';
+import { PhoneDefault } from '@xyne/icons';
+import { useIsCommunityWorkspace } from '../../../hooks/useIsCommunityWorkspace';
 
 interface UserProfileProps {
   userId: string;
@@ -70,6 +72,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({
   const navigate = useNavigate();
   const { user: currentUser } = useAuth();
   const { isMobile } = usePlatform();
+  const isCommunityWorkspace = useIsCommunityWorkspace();
 
   const [userProfile] = useCachedQuery(queries.getUserProfile({ userId }));
   const user = useUser(userId);
@@ -381,6 +384,12 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                 className='hidden'
                 disabled={isUploadingPicture}
               />
+              <RemoveProfilePictureButton
+                disabled={isUploadingPicture}
+                {...(isInlineHeader && {
+                  className: 'top-0.5 right-0.5 size-4 [&_svg]:size-2.5',
+                })}
+              />
             </div>
           ) : (
             <Avatar
@@ -499,8 +508,9 @@ export const UserProfile: React.FC<UserProfileProps> = ({
             </div>
           )}
 
-          {/* Action Buttons - Message and Huddle */}
-          {!isOwnProfile && (
+          {/* Action Buttons - Message and Huddle. Hidden for deactivated users: both
+              would hit /users/me/dms → 404 and surface a toast on click. */}
+          {!isOwnProfile && !isUserDeactivated(user) && (
             <div className='flex items-center gap-2 mt-4'>
               <Button
                 onClick={handleMessageClick}
@@ -519,7 +529,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({
                 className='flex items-center gap-2 px-4 py-2 border border-input bg-background hover:bg-accent text-foreground rounded-lg'
                 variant='outline'
               >
-                <Headphones className='size-4' />
+                <PhoneDefault className='size-4' />
                 <span>Huddle</span>
               </Button>
             </div>
@@ -713,18 +723,20 @@ export const UserProfile: React.FC<UserProfileProps> = ({
             </div>
           </div>
 
-          {/* Email Address */}
-          <div className='flex items-start gap-3'>
-            <div className='p-2 bg-muted rounded-lg flex-shrink-0'>
-              <Mail className='size-4 text-muted-foreground' />
-            </div>
-            <div className='flex-1'>
-              <div className='text-sm font-semibold text-foreground leading-tight'>
-                Email Address
+          {/* Email Address — hidden in community workspaces */}
+          {!isCommunityWorkspace && (
+            <div className='flex items-start gap-3'>
+              <div className='p-2 bg-muted rounded-lg flex-shrink-0'>
+                <Mail className='size-4 text-muted-foreground' />
               </div>
-              <div className='text-sm text-foreground mt-1'>{user.email}</div>
+              <div className='flex-1'>
+                <div className='text-sm font-semibold text-foreground leading-tight'>
+                  Email Address
+                </div>
+                <div className='text-sm text-foreground mt-1'>{user.email}</div>
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Display Name */}
           {userProfile?.displayName || isOwnProfile ? (

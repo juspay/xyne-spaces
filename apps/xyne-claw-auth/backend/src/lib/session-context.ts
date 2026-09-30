@@ -13,6 +13,7 @@ import { getRecoveryContextForSession } from "../queue/run-recovery-worker.js";
 import type { ExternalResultCallbackConfig } from "../surfaces/external-api/delivery.js";
 import type { SlackDeliveryTarget } from "../surfaces/slack/delivery.js";
 import type { ChannelDeliveryTarget, MessagingChannelKey } from "../surfaces/messaging/plugin.js";
+import type { RootAttachmentRef } from "./workflow-handoff.js";
 
 
 export interface SessionContext {
@@ -44,6 +45,7 @@ export interface SessionContext {
    * whether the user's request is satisfied.
    */
   rootTask?: string;
+  rootAttachments?: RootAttachmentRef[];
   agentId?: string;
   agentOrgId?: string | null;
   agentSlug?: string | undefined;
@@ -87,7 +89,7 @@ export interface SessionContext {
    */
   isExperiment?: boolean;
   /**
-   * MessageId of the "⏳ Working on it…" placeholder we posted at webhook-arrival
+   * MessageId of the "Working on it…" placeholder we posted at webhook-arrival
    * time. Used ONLY when USE_EPHEMERAL_PROGRESS=false — we edit this message
    * in-place as tools run, and replace its content with the final agent
    * response in the result handler. Undefined under the ephemeral path.

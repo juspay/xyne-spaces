@@ -285,6 +285,8 @@ export const DeskReportPanel: React.FC<DeskReportPanelProps> = ({
                     Last regeneration attempt failed: {report.error}
                   </p>
                 )}
+                {/* Load via src: the /view route sends a strict CSP and inlines
+                    avatars server-side, so no client fetch/inline is needed. */}
                 <iframe
                   title='Desk report'
                   src={report.url ? `${BASE_URL}${report.url}` : undefined}

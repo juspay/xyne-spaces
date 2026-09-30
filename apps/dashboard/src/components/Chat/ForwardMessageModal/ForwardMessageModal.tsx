@@ -27,7 +27,7 @@ import {
   formatRelativeTime,
   formatRelativeTimestamp,
 } from '../../../utils/dateUtils';
-import HuddleIcon from '../../icons/HuddleIcon';
+import { PhoneDefault } from '@xyne/icons';
 import AIAgentIcon from '../../icons/AIAgentIcon';
 import { getEmojiFontSizeClass } from '../../../utils/emojiUtils';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
@@ -1182,7 +1182,7 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
                   <div className='flex-shrink-0'>
                     {isCallMessage ? (
                       <div className='w-10 h-10 rounded-md flex items-center justify-center bg-accent'>
-                        <HuddleIcon color='hsl(var(--muted-foreground))' size={20} />
+                        <PhoneDefault color='hsl(var(--muted-foreground))' size={20} />
                       </div>
                     ) : (
                       <Avatar userId={message.senderId} size='md' />

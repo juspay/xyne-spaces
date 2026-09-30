@@ -2,7 +2,7 @@ import { BrowserWindow, shell, Menu, MenuItem, app, dialog, screen } from 'elect
 import path from 'path';
 import log from 'electron-log/main';
 import { config } from '../app/config';
-import { getIsQuitting } from '../app/main';
+import { getIsQuitting } from '../app/app-state';
 import { setMainWindow as setDeepLinksMainWindow } from '../services/deep-links';
 import { setupPermissionRequestOnFocus } from '../services/media-permission';
 import {
@@ -192,7 +192,6 @@ function applyWindowPolicy(win: BrowserWindow): void {
         contextIsolation: true,
         webviewTag: true,
         preload: path.join(__dirname, '..', 'preload.js'),
-        backgroundThrottling: false,
         spellcheck: true,
       };
 
@@ -399,7 +398,6 @@ export async function createMainWindow(options?: { inactive?: boolean }): Promis
       contextIsolation: true,
       webviewTag: true,
       preload: path.join(__dirname, '..', 'preload.js'),
-      backgroundThrottling: false,
       spellcheck: true,
     },
   });

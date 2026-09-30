@@ -10,7 +10,7 @@ import {
   ScrollText,
   MoreVertical,
 } from 'lucide-react';
-import HuddleIcon from '../../components/icons/HuddleIcon';
+import { PhoneDefault } from '@xyne/icons';
 import Avatar from '../../components/ui/Avatar/Avatar';
 import { AvatarStackItem } from '../../components/ui/Avatar/AvatarGroup';
 import Button from '../../components/ui/Button';
@@ -47,7 +47,6 @@ import { roomActor } from '../../machines/roomMachine';
 interface CallHistoryItemProps {
   call: Call;
   currentUserId: string | undefined;
-  isLastItem?: boolean;
   onCallClick: () => void;
   onParticipantsClick: () => void;
   handleGotoTranscript?: (() => void) | undefined;
@@ -205,7 +204,7 @@ export const CallCard = ({
 
   const isHighlighted = isRecentCall && isActiveState;
   const isRecurring = Boolean(call.recurringSeriesId);
-  const CallIcon = isRecurring ? Repeat : HuddleIcon;
+  const CallIcon = isRecurring ? Repeat : PhoneDefault;
 
   return (
     <div
@@ -497,7 +496,7 @@ export const CallCard = ({
                         })}
                         className='size-7 flex items-center justify-center border border-border rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent'
                       >
-                        <HuddleIcon size={16} />
+                        <PhoneDefault size={16} />
                       </button>
                     </Tooltip>
                   </div>

@@ -108,7 +108,7 @@ export async function handleStatus(ctx: WebhookCommandCtx): Promise<void> {
     });
   } catch (err) {
     ctx.log.warn("/status panel build failed", { error: err instanceof Error ? err.message : String(err) });
-    markdown = "🔎 **Status** — could not read the run state right now. Try again in a moment.";
+    markdown = "**Status** — could not read the run state right now. Try again in a moment.";
   }
   await ctx.reply(markdown, "Failed to post /status reply");
 }

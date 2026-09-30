@@ -1994,6 +1994,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                         thinkingLevel={thinkingLevel}
                         onSelectThinking={onSelectThinking ?? (() => {})}
                         disabled={false}
+                        align='start'
                       />
                     </div>
                   )}

@@ -113,6 +113,7 @@ interface MCPDetailSidebarProps {
   healthMap: Record<string, HealthResult | "checking" | null>;
   healthCheckedAt?: Record<string, number>;
   userId: string;
+  isAdmin: boolean;
   onConnect: (server: McpServer) => void;
   onDisconnect: (conn: UserConnection) => void;
   onCheckHealth: (conn: UserConnection, opts?: { force?: boolean }) => void;
@@ -195,6 +196,7 @@ export function MCPDetailSidebar({
   healthMap,
   healthCheckedAt,
   userId,
+  isAdmin,
   onConnect,
   onDisconnect,
   onCheckHealth,
@@ -228,6 +230,10 @@ export function MCPDetailSidebar({
   const publishStatus = rawPublishStatus ?? "unknown";
   const ownerUserId = server.connectorMeta?.ownerUserId as string | undefined;
   const isOwner = ownerUserId === userId;
+  // Delete (footer, below) matches the backend rule in servers.ts: owner OR
+  // CLAW_ADMIN may delete. Kept separate from isOwner since Publish still
+  // gates on ownership alone, not admin status.
+  const canDelete = isOwner || isAdmin;
   const publishReviewNote = server.connectorMeta?.publishReviewNote as
     | string
     | undefined;
@@ -312,12 +318,12 @@ export function MCPDetailSidebar({
 
   const footer = (
     // Footer = two clusters of icon-bubble actions. Left = destructive
-    // (Delete, owner-only). Right = configure + connect/disconnect. Each
-    // action is icon-only at rest; hovering or keyboard-focusing morphs
+    // (Delete, owner or CLAW_ADMIN). Right = configure + connect/disconnect.
+    // Each action is icon-only at rest; hovering or keyboard-focusing morphs
     // it into a labeled pill so users can scan without tooltips.
     <div data-id="mcp-sidebar-footer" className="flex w-full items-center justify-between gap-2">
       <div className="flex items-center gap-1.5">
-        {isOwner && (
+        {canDelete && (
           <ExpandingAction
             icon={<TrashIcon size={15} />}
             label="Delete"
