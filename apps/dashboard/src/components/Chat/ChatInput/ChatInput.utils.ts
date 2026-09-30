@@ -14,6 +14,13 @@ const escapeHtml = (unsafe: string): string => {
     .replace(/'/g, '&#039;');
 };
 
+/**
+ * A new discussion's opening message: its title as the first, bold line, then what
+ * was written under it. The title is plain text, so it is escaped here.
+ */
+export const discussionOpeningHtml = (title: string, bodyHtml: string): string =>
+  `<p><strong>${escapeHtml(title)}</strong></p>${bodyHtml}`;
+
 export const sanitizeHtmlContent = (html: string): string => {
   const doc = new DOMParser().parseFromString(html, 'text/html');
 
