@@ -7,6 +7,7 @@ const prisma = new PrismaClient();
 const appPermissions = new AppPermissionRepository();
 
 const APP_PERMISSION_SCOPES = [
+  { scope: 'calls:read', description: 'Read call details, participants, and transcripts from apps' },
   { scope: 'calls:write', description: 'Schedule and manage calls from apps' },
   { scope: 'channels:read', description: 'Read channel metadata and history from apps' },
   { scope: 'chat:write', description: 'Post and update chat messages from apps' },
@@ -17,6 +18,8 @@ const APP_PERMISSION_SCOPES = [
   { scope: 'files:read', description: 'Read file metadata and download attachments from apps' },
   { scope: 'files:write', description: 'Upload files and attachments from apps' },
   { scope: 'im:write', description: 'Open direct-message channels from apps' },
+  { scope: 'summaries:read', description: 'Read call summaries and summary templates from apps' },
+  { scope: 'summaries:write', description: 'Regenerate call summaries from apps' },
   { scope: 'tickets:read', description: 'Read tickets and ticket-linked conversations from apps' },
   { scope: 'tickets:write', description: 'Create and update tickets from apps' },
   { scope: 'usergroups:read', description: 'Read user groups from apps' },
