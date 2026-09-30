@@ -61,9 +61,10 @@ export function useCmdkAiAnswer(
           workspaceId,
           event => {
             if (controller.signal.aborted) return;
-            if (event.type !== 'sources') setLooking(false);
+            setLooking(false);
             if (event.type === 'sources') {
               answer = { ...answer, sources: event.sources };
+              setShown(answer);
             } else if (event.type === 'delta') {
               answer = { ...answer, content: answer.content + event.content };
               setShown(answer);
@@ -97,7 +98,9 @@ export function useCmdkAiAnswer(
       clearTimeout(timer);
       controller.abort();
       setLooking(false);
-      setShown(current => (current?.streaming ? null : current));
+      setShown(current =>
+        current?.streaming ? { ...current, content: '', streaming: false } : current,
+      );
     };
   }, [query, enabled, workspaceId]);
 

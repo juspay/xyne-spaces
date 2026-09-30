@@ -16,10 +16,10 @@ import XyneAIStar from '../../icons/xyne-ai/XyneAIStar';
 import { HoverCard } from '../../ui/HoverCard';
 import { MarkdownMessageRenderer } from '../../ui/MessageBubble/MarkdownMessageRenderer';
 import { createMarkdownComponents } from '../../../utils/markdownComponents';
-import { KINDS, snippetOf } from '../ChatInput/relatedContextDisplay';
+import { KINDS, LABELS, snippetOf } from '../ChatInput/relatedContextDisplay';
 import { useWhereOf } from '../ChatInput/useRelatedWhere';
 import type { CmdkAnswerSource, DisplaySearchResult } from '../../../types/search';
-import { citationOrder, linkCitations, senderOf, sourceNumberOf } from './AiAnswerCard.utils';
+import { linkCitations, senderOf, sourceNumberOf } from './AiAnswerCard.utils';
 
 interface AiAnswerCardProps {
   answer: CmdkAiAnswer | null;
@@ -51,7 +51,6 @@ interface CitationContextValue {
   sources: CmdkAnswerSource[];
   focused: number | null;
   setFocused: (source: number | null) => void;
-  labelOf: (source: number) => number;
   onOpenSource: AiAnswerCardProps['onOpenSource'];
 }
 
@@ -61,8 +60,13 @@ const SourcePreview = ({ source }: { source: CmdkAnswerSource }): ReactElement =
   const where = useWhereOf(source);
   const sender = senderOf(source);
   const snippet = snippetOf(source);
+  const relation = LABELS[source.label];
   return (
     <div className='space-y-1.5 text-left'>
+      <p className={`flex items-center gap-1.5 text-[11px] font-medium ${relation.tint}`}>
+        <span aria-hidden className={`size-1.5 shrink-0 rounded-full ${relation.dot}`} />
+        {relation.hint}
+      </p>
       <p className='text-xs font-medium leading-snug text-popover-foreground'>
         {KINDS[source.kind].name} · {where}
       </p>
@@ -82,7 +86,6 @@ interface CitationButtonProps {
 
 const CitationButton = ({ source, number, context }: CitationButtonProps): ReactElement => {
   const where = useWhereOf(source);
-  const label = context.labelOf(number);
   return (
     <HoverCard
       side='top'
@@ -94,7 +97,7 @@ const CitationButton = ({ source, number, context }: CitationButtonProps): React
         <button
           type='button'
           className='cmdk-ai-cite'
-          aria-label={`Source ${label}: ${where}`}
+          aria-label={`Source ${number}: ${where}`}
           data-active={context.focused === number}
           data-track-category='SEARCH'
           data-track-name='AI_OVERVIEW_CITATION'
@@ -104,7 +107,7 @@ const CitationButton = ({ source, number, context }: CitationButtonProps): React
           onBlur={() => context.setFocused(null)}
           onClick={event => context.onOpenSource(source.result, event)}
         >
-          {label}
+          {number}
         </button>
       }
     >
@@ -143,15 +146,14 @@ const MARKDOWN_COMPONENTS: Components = { ...BASE_COMPONENTS, a: AnswerAnchor };
 interface SourceChipProps {
   source: CmdkAnswerSource;
   number: number;
-  label: number;
   index: number;
 }
 
-const SourceChip = ({ source, number, label, index }: SourceChipProps): ReactElement => {
+const SourceChip = ({ source, number, index }: SourceChipProps): ReactElement => {
   const context = useContext(CitationContext);
   const reduceMotion = useReducedMotion();
   const where = useWhereOf(source);
-  const sender = senderOf(source);
+  const relation = LABELS[source.label];
   const Icon = KINDS[source.kind].icon;
   return (
     <motion.li
@@ -171,7 +173,7 @@ const SourceChip = ({ source, number, label, index }: SourceChipProps): ReactEle
           <button
             type='button'
             className={CHIP_CLASS}
-            aria-label={`Source ${label}: ${where}${sender ? `, ${sender}` : ''}`}
+            aria-label={`Source ${number}: ${relation.chip}, ${where}`}
             data-active={context?.focused === number}
             data-track-category='SEARCH'
             data-track-name='AI_OVERVIEW_SOURCE'
@@ -181,10 +183,13 @@ const SourceChip = ({ source, number, label, index }: SourceChipProps): ReactEle
             onBlur={() => context?.setFocused(null)}
             onClick={event => context?.onOpenSource(source.result, event)}
           >
-            <span className='font-medium tabular-nums'>{label}</span>
-            <Icon aria-hidden className='size-3.5 shrink-0' strokeWidth={2} />
-            <span className='min-w-0 truncate font-medium text-foreground/90'>{where}</span>
-            {sender && <span className='hidden min-w-0 truncate sm:inline'>{sender}</span>}
+            <span className='font-medium tabular-nums'>{number}</span>
+            <Icon aria-hidden className={`size-3.5 shrink-0 ${relation.tint}`} strokeWidth={2} />
+            <span className='shrink-0 font-medium text-foreground/90'>{relation.chip}</span>
+            <span aria-hidden className='shrink-0 text-muted-foreground/50'>
+              ·
+            </span>
+            <span className='min-w-0 truncate'>{where}</span>
           </button>
         }
       >
@@ -215,29 +220,14 @@ export const AiAnswerCard = ({
   const reduceMotion = useReducedMotion();
   const [focused, setFocused] = useState<number | null>(null);
 
-  const order = useMemo(() => citationOrder(content, sources.length), [content, sources.length]);
+  const order = useMemo(() => sources.map((_source, index) => index + 1), [sources]);
   const renderedContent = useMemo(() => linkCitations(content, order), [content, order]);
-  const shown = useMemo((): Array<{ source: CmdkAnswerSource; number: number }> => {
-    if (order.length > 0) {
-      return order.flatMap(number => {
-        const source = sources[number - 1];
-        return source ? [{ source, number }] : [];
-      });
-    }
-    return streaming ? [] : sources.map((source, index) => ({ source, number: index + 1 }));
-  }, [order, sources, streaming]);
   const context = useMemo(
-    (): CitationContextValue => ({
-      sources,
-      focused,
-      setFocused,
-      labelOf: number => order.indexOf(number) + 1 || number,
-      onOpenSource,
-    }),
-    [sources, focused, order, onOpenSource],
+    (): CitationContextValue => ({ sources, focused, setFocused, onOpenSource }),
+    [sources, focused, onOpenSource],
   );
 
-  if (!answer?.content) return null;
+  if (!answer || (!content && sources.length === 0)) return null;
   const phase = streaming ? 'answering' : 'done';
 
   return (
@@ -255,16 +245,20 @@ export const AiAnswerCard = ({
           <XyneAIStar size={14} />
           <span className={HEADING_CLASS}>AI overview</span>
           <div className='ml-auto flex items-center'>
-            <button
-              type='button'
-              className={CONTINUE_CLASS}
-              data-track-category='SEARCH'
-              data-track-name='AI_OVERVIEW_CONTINUE'
-              onClick={() => onContinue(query.trim())}
-            >
-              <MessageSquareText aria-hidden className='size-3.5' strokeWidth={2} />
-              Continue in Xyne AI
-            </button>
+            {streaming && !content ? (
+              <span className='cmdk-ai-status px-2 text-xs'>Writing an answer</span>
+            ) : (
+              <button
+                type='button'
+                className={CONTINUE_CLASS}
+                data-track-category='SEARCH'
+                data-track-name='AI_OVERVIEW_CONTINUE'
+                onClick={() => onContinue(query.trim())}
+              >
+                <MessageSquareText aria-hidden className='size-3.5' strokeWidth={2} />
+                Continue in Xyne AI
+              </button>
+            )}
           </div>
         </header>
 
@@ -275,25 +269,21 @@ export const AiAnswerCard = ({
           animate={{ opacity: 1 }}
           transition={{ duration: 0.18, ease: EASE_OUT }}
         >
-          <div
-            className={`cmdk-ai-answer ${ANSWER_MAX_HEIGHT} overflow-y-auto text-pretty text-sm leading-6 text-foreground [&_p]:my-1.5 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0`}
-            data-streaming={phase === 'answering'}
-          >
-            <MarkdownMessageRenderer
-              content={renderedContent}
-              markdownComponents={MARKDOWN_COMPONENTS}
-            />
-          </div>
-          {shown.length > 0 && (
-            <ul aria-label='Sources' className='mt-2.5 flex flex-wrap gap-1.5'>
-              {shown.map(({ source, number }, index) => (
-                <SourceChip
-                  key={source.id}
-                  source={source}
-                  number={number}
-                  label={order.length > 0 ? index + 1 : number}
-                  index={index}
-                />
+          {content && (
+            <div
+              className={`cmdk-ai-answer ${ANSWER_MAX_HEIGHT} mb-2.5 overflow-y-auto text-pretty text-sm leading-6 text-foreground [&_p]:my-1.5 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0`}
+              data-streaming={phase === 'answering'}
+            >
+              <MarkdownMessageRenderer
+                content={renderedContent}
+                markdownComponents={MARKDOWN_COMPONENTS}
+              />
+            </div>
+          )}
+          {sources.length > 0 && (
+            <ul aria-label='Sources' className='flex flex-wrap gap-1.5'>
+              {sources.map((source, index) => (
+                <SourceChip key={source.id} source={source} number={index + 1} index={index} />
               ))}
             </ul>
           )}

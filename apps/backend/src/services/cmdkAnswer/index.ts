@@ -5,13 +5,13 @@ import { logger } from '@/utils/logger';
 import { superpositionClient } from '@/services/superpositionClient';
 import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
 import { getIntentConfig } from '@/services/queryIntent';
-import { findRelatedContext } from '@/services/relatedContext';
+import { findRelatedContext, type RelatedItem } from '@/services/relatedContext';
 import type { Candidate, RetrievalContext } from '@/services/relatedContext/retrieval';
 
 export type CmdkAnswerSkipReason = 'off' | 'not_ready' | 'failed' | 'nothing';
 
 export type CmdkAnswerEvent =
-  | { type: 'sources'; sources: Array<Pick<Candidate, 'id' | 'kind' | 'result'>> }
+  | { type: 'sources'; sources: Array<Pick<RelatedItem, 'id' | 'kind' | 'result' | 'label'>> }
   | { type: 'delta'; content: string }
   | { type: 'done' }
   | { type: 'skip'; reason: CmdkAnswerSkipReason }
@@ -95,16 +95,32 @@ export async function answerCmdkQuery(
     if (related.ready === false) return skip('not_ready', 'not_ready');
 
     const byId = new Map(pool.map((candidate) => [candidate.id, candidate]));
-    const sources = related.items.slice(0, MAX_SOURCES).flatMap((item) => byId.get(item.id) ?? []);
-    if (sources.length === 0) {
+    const picked = related.items.slice(0, MAX_SOURCES).flatMap((item) => {
+      const candidate = byId.get(item.id);
+      return candidate ? [{ item, candidate }] : [];
+    });
+    if (picked.length === 0) {
       return skip('nothing', 'not_relevant', { candidates: pool.length });
     }
+    emit({
+      type: 'sources',
+      sources: picked.map(({ item }) => ({
+        id: item.id,
+        kind: item.kind,
+        result: item.result,
+        label: item.label,
+      })),
+    });
+    const sources = picked.map(({ candidate }) => candidate);
 
     const credential = await orgLLMCredentialService.getCredentialByWorkspaceId(
       ctx.auth.workspaceId,
       OrgLLMServiceAccountPurpose.ASK_AI
     );
-    if (!credential) return skip('off', 'no_credential');
+    if (!credential) {
+      emit({ type: 'done' });
+      return finish('no_credential', { sources: sources.length });
+    }
 
     const llm = new LLMClient({
       provider: {
@@ -140,14 +156,13 @@ export async function answerCmdkQuery(
       if (NO_ANSWER.startsWith(head)) continue;
       answering = true;
       timings.firstTokenMs = Date.now() - started;
-      emit({
-        type: 'sources',
-        sources: sources.map(({ id, kind, result }) => ({ id, kind, result })),
-      });
       emit({ type: 'delta', content: head });
     }
     if (signal.aborted) return finish('abandoned');
-    if (!answering) return skip('nothing', 'no_answer', { sources: sources.length });
+    if (!answering) {
+      emit({ type: 'done' });
+      return finish('no_answer', { sources: sources.length });
+    }
     emit({ type: 'done' });
     finish('ok', { candidates: pool.length, sources: sources.length });
   } catch (error) {

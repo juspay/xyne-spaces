@@ -5025,6 +5025,29 @@ img.inline-emoji,
   opacity: 1;
 }
 
+@keyframes cmdk-ai-sheen {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0% 0;
+  }
+}
+
+.cmdk-ai-status {
+  background-image: linear-gradient(
+    100deg,
+    hsl(var(--muted-foreground)) 40%,
+    var(--cmdk-ai-peach) 50%,
+    hsl(var(--muted-foreground)) 60%
+  );
+  background-size: 300% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: cmdk-ai-sheen 2s linear infinite;
+}
+
 .cmdk-ai-cite {
   display: inline-flex;
   align-items: center;
@@ -5117,6 +5140,12 @@ img.inline-emoji,
 
   .cmdk-ai-overview[data-state="answering"]::before {
     background: rgba(255, 138, 92, 0.55);
+  }
+
+  .cmdk-ai-status {
+    animation: none;
+    background: none;
+    color: hsl(var(--muted-foreground));
   }
 }
 

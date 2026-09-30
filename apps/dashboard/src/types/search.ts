@@ -200,7 +200,7 @@ export interface RelatedContext {
   failed?: boolean;
 }
 
-export type CmdkAnswerSource = Pick<RelatedItem, 'id' | 'kind' | 'result'>;
+export type CmdkAnswerSource = Pick<RelatedItem, 'id' | 'kind' | 'result' | 'label'>;
 
 export type CmdkAnswerEvent =
   | { type: 'sources'; sources: CmdkAnswerSource[] }
