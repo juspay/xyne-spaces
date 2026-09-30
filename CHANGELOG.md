@@ -1,3 +1,10 @@
+## [1.442.1](https://github.com/juspay/xyne-spaces/compare/v1.442.0...v1.442.1) (2026-09-30)
+
+
+### Bug Fixes
+
+* paste the whole message when it ends with an emoji code ([#2503](https://github.com/juspay/xyne-spaces/issues/2503)) ([519af6d](https://github.com/juspay/xyne-spaces/commit/519af6d01dcbb997f9c9b1133764b8f888e2a42e))
+
 ## [1.442.0](https://github.com/juspay/xyne-spaces/compare/v1.441.0...v1.442.0) (2026-09-30)
 
 
