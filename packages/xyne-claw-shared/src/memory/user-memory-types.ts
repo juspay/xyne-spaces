@@ -140,6 +140,11 @@ export interface UserMemoryCandidatePayload {
   /** Record IDs from the input batch that grounded this candidate. The route
    *  handler resolves these to {type, id, channelId, ts} for sourceRefs. */
   groundedOnIds: string[];
+  /** Classifier second opinion (claw, jev_memory_candidate_check): how the
+   *  candidate relates to the user's stored memories. Absent when not checked. */
+  jevVerdict?: "new" | "duplicate" | "update" | "noise";
+  /** Classifier usefulness score 0-1. When present, auto-approve also needs it ≥ 0.5. */
+  jevScore?: number;
 }
 
 /**
@@ -177,7 +182,30 @@ export interface UserMemoryCuratorEmittedCandidate {
    *  low-signal: signalScore < 0.7.
    *  ungrounded: no groundedOnIds matching an input record.
    *  malformed: not an object / unparseable entry. */
-  dropReason?: "empty" | "empty-or-too-long" | "bad-subsystem" | "low-signal" | "ungrounded" | "malformed";
+  dropReason?: "empty" | "empty-or-too-long" | "bad-subsystem" | "low-signal" | "ungrounded" | "malformed" | "classifier-duplicate" | "classifier-noise";
+  /** Classifier (Jev) second opinion, when it answered: its pick and how sure it was. */
+  jevVerdict?: "new" | "duplicate" | "update" | "noise";
+  jevConfidence?: number;
+  /** Classifier usefulness score 0-1 (kept candidates). */
+  jevScore?: number;
+}
+
+/** The classifier (Jev) second-opinion pass over one curator batch (R8). */
+export interface UserMemoryClassifierTrace {
+  checked: number;
+  kept: number;
+  dropped: number;
+  /** Candidates Jev did not answer for (timeout / down / batch cutoff) — passed through unchanged. */
+  unavailable: number;
+  ms: number;
+  /** One entry per candidate Jev was asked about, with the full call. */
+  calls: Array<{
+    text: string;
+    verdict?: "new" | "duplicate" | "update" | "noise";
+    confidence?: number;
+    worth?: number;
+    exchange: import("../types/twin-delivery.js").ClassifierExchange;
+  }>;
 }
 
 /**
@@ -230,6 +258,8 @@ export interface UserMemoryCuratorTrace {
   usage?: { promptTokens?: number; completionTokens?: number };
   /** Every candidate the LLM emitted, in order, with keep/drop verdicts. */
   emitted: UserMemoryCuratorEmittedCandidate[];
+  /** The classifier pass after the LLM (R8), stored with the LLM exchange. */
+  classifier?: UserMemoryClassifierTrace;
   /** Failure stage when the call produced no candidates for a non-content
    *  reason: "no-api-key" | "llm-http-<status>" | "no-tool-call" |
    *  "bad-json" | "malformed-candidates" | the thrown error message. */

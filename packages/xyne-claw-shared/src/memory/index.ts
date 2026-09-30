@@ -36,6 +36,7 @@ export type {
   UserMemoryDistillResponse,
   ExistingUserMemory,
   UserMemoryCuratorTrace,
+  UserMemoryClassifierTrace,
   UserMemoryCuratorEmittedCandidate,
 } from "./user-memory-types.js";
 export { USER_MEMORY_SUBSYSTEMS } from "./user-memory-types.js";

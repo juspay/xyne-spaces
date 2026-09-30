@@ -149,6 +149,7 @@ import { isDigitalTwinAgent, listSubsystemTaxonomy, fetchAgentPromptFiles } from
 import { buildMemorySearchTool } from "../memory-search.js";
 import { buildMemoryWriteTool } from "../memory-write.js";
 import { buildMemoryFileTools } from "../memory-file-tools.js";
+import { pickPersonaFiles } from "../persona-pick.js";
 import { buildTwinDeliverTool, buildTwinDeliverMandate, type TwinDeliverRef } from "../twin-deliver.js";
 import { buildProposePlanTool, PROPOSE_PLAN_TOOL_NAME, type ProposePlanRef } from "../propose-plan.js";
 import { presentationCatalogDefaultOn, isFreePresentationTool, buildPresentationPrimer } from "../presentation-catalog.js";
@@ -456,6 +457,11 @@ The minimum unit size is ₹1 crore. [1.1](cite:clf-chatcmpl-tool-9a01ab9ff7b89d
 The minimum unit size is ₹1 crore [clf-agzja79pabewihgzkfe9pa97#14-#22].
 
 The inline citation tokens are the only citation mechanism for Claw v3. Never use the legacy add-citations flow.`;
+
+const RESULT_SIFT_GUIDE = `
+
+## Filtered tool results
+Large list results from tools are pre-filtered to the items most relevant to this conversation. A filtered result starts with a "Relevance filter" note giving how many items were hidden and the file holding the full result. Counts and totals must use the full number from that note. If an item you need seems missing, read that file, or call the tool again with "sift": false to get the raw result. Pass "sift": true to filter a result that would not be filtered by default.`;
 
 const SPACES_MENTION_GUIDE = `
 
@@ -1677,8 +1683,8 @@ export async function processTask(
     const explicitTaskCommand = parseTaskCommand(task);
     const routedMode = await routeTaskMode(task, explicitTaskCommand, abortSignal);
     const taskCommand = routedMode.command;
-    if (routedMode.source === "model" && taskCommand) {
-      log(`[task-command] ${taskCommand.command} selected by the mode router`);
+    if ((routedMode.source === "model" || routedMode.source === "jev") && taskCommand) {
+      log(`[task-command] ${taskCommand.command} selected by the mode router (${routedMode.source})`);
     }
     const recordSkillCommand = taskCommand?.command === "/record-skill";
     const {
@@ -2092,7 +2098,11 @@ export async function processTask(
       // flow (which sends no systemPrompt) and interactive chat. Files are the
       // user's own, ≤3, each ≤20k chars — enforced in claw-auth.
       if (isDigitalTwin) {
-        const promptFiles = await fetchAgentPromptFiles(agentSlug, userId).catch(() => []);
+        // R9: with jev_memory_file_pick on, fetch every non-empty file and let
+        // the classifier pick ≤3 for THIS message; otherwise today's toggled set.
+        const pick = optEnabled("jev_memory_file_pick");
+        const available = await fetchAgentPromptFiles(agentSlug, userId, { candidates: pick }).catch(() => []);
+        const promptFiles = pick ? await pickPersonaFiles(available, task ?? "") : available;
         if (promptFiles.length > 0) {
           const body = promptFiles
             .map((f) => `=== ${f.name} ===\n${f.content.trim()}`)
@@ -3994,9 +4004,12 @@ export async function processTask(
       ? `\n\n## Experiment mode\nYou are in a time-boxed experiment (epoch ${experiment.epoch}; deadline ${experiment.deadlineAt}; focus ${experiment.focus ?? "unspecified"}). You cannot finish early — end-experiment refuses before the deadline. Loop: read the ledger → declare a hypothesis (experiment-ledger action=hypothesis) → gather PROOF in the sandbox (failing test, benchmark delta, profile) → record the finding with its proof path. Never re-test refuted hypotheses. If your current lead dies, pick a different subsystem. Prose without a recorded finding is wasted time.`
       : "";
     const authoritativeSdlcContext = trustedSdlcContext ? buildSdlcRunContextSection(trustedSdlcContext) : "";
+    // R4: when tool-result sifting is on, tell the model up front what it will
+    // see and how to get the raw result — not only after the fact per result.
+    const siftGuide = optEnabled("jev_result_sift") ? RESULT_SIFT_GUIDE : "";
     const effectiveSystemPrompt = ((channelId
       ? `${basePrompt}${citationGuide}${SPACES_MENTION_GUIDE}`
-      : `${basePrompt}${citationGuide}`) + authoritativeSdlcContext) + twinMandate + experimentGuide;
+      : `${basePrompt}${citationGuide}`) + authoritativeSdlcContext) + siftGuide + twinMandate + experimentGuide;
     // Proof (twin mention flow only) that BOTH prompt changes actually reach the
     // model: the twin_deliver mandate + its who/where line in the SYSTEM prompt,
     // and the "@mentioned by" note in the USER-prompt context. Grep the run logs

@@ -56,6 +56,26 @@ export interface TwinDelivery {
    * when the model provided none. Not applicable to `ignore`.
    */
   reasoning?: string;
+  /**
+   * Classifier self-check of this delivery (advisory, never blocks). Set by claw
+   * after the delivery is accepted; each score is 0..1, higher is better.
+   */
+  check?: TwinDeliveryCheck;
+}
+
+export interface TwinDeliveryCheck {
+  /** The reply addresses what was asked (reply actions). */
+  answersAsk?: number;
+  /** Every claim in the reply is supported by the conversation/context (reply actions). */
+  grounded?: number;
+  /** Staying silent / only reacting was the right call (ignore/react actions). */
+  actionFits?: number;
+  /** "right" | "wrong" | "unsure" — the destination (reply actions with a destination). */
+  destination?: string;
+  /** Lowest of the scores above — one number to sort/flag by. */
+  overall: number;
+  source: "jev";
+  ms: number;
 }
 
 /**
@@ -88,4 +108,21 @@ export function isTwinDelivery(v: unknown): v is TwinDelivery {
   if (wantsEmoji && (typeof d["emoji"] !== "string" || !d["emoji"].trim())) return false;
   if (wantsMessage && (typeof d["message"] !== "string" || !d["message"].trim())) return false;
   return true;
+}
+
+/**
+ * One classifier (Jev) call, in full: what it was told (state), what it was
+ * asked, and what it answered. Stored next to the decision it drove so the
+ * pipeline UI can show it — no classifier decision is a black box.
+ */
+export interface ClassifierExchange {
+  purpose: string;
+  backend: string;
+  ms: number;
+  ok: boolean;
+  error?: string;
+  state: string;
+  questionSpec: Record<string, unknown>;
+  answers: Record<string, unknown> | null;
+  at: string;
 }

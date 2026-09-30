@@ -11,6 +11,8 @@ import type { Request, Response } from "express";
 import { validateS2SKey } from "../middleware/auth.js";
 import { distillUserMemory } from "../user-memory-curator.js";
 import { synthesizeMemoryFile, type SynthesizeFileRequest } from "../twin-soul-synthesizer.js";
+import { checkMemoryUpdate } from "../memory-update-check.js";
+import { checkMemoryCandidates, type CandidateCheckSummary } from "../memory-candidate-check.js";
 import { decideRespond, type RespondGateRequest } from "../twin-respond-gate.js";
 import type {
   UserMemoryCuratorTrace,
@@ -71,12 +73,18 @@ userMemoryRouter.post("/internal/user-memory/distill", validateS2SKey, async (re
         )
       : [];
 
-    const { candidates, trace } = await distillUserMemory(
+    const distilled = await distillUserMemory(
       body.userId,
       { from: body.window.from, to: body.window.to },
       records,
       existingMemories,
     );
+    // R8: classifier second opinion against the user's similar stored memories.
+    const { candidates, summary } = await checkMemoryCandidates(distilled.candidates, existingMemories).catch(() => ({
+      candidates: distilled.candidates,
+      summary: null,
+    }));
+    const trace = summary ? markClassifierDrops(distilled.trace, summary) : distilled.trace;
     res.json({ success: true, candidates, ...(includeTrace ? { trace } : {}) });
   } catch (err) {
     log.error(`[user-memory-route] distill failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -104,11 +112,25 @@ userMemoryRouter.post("/internal/user-memory/synthesize-file", validateS2SKey, a
       ...(typeof body.currentContent === "string" ? { currentContent: body.currentContent } : {}),
       ...(body.preserveEdits === true ? { preserveEdits: true } : {}),
     });
+    // R10: nightly rewrites (claw-auth sends check:true) are scored before
+    // claw-auth writes them; only verdict "accept" replaces the old file.
+    const bodyCheck = (req.body as { check?: unknown } | undefined)?.check === true;
+    const check =
+      bodyCheck && result.content
+        ? await checkMemoryUpdate({
+            fileName: body.fileName,
+            description: typeof body.description === "string" ? body.description : "",
+            ...(typeof body.currentContent === "string" ? { oldContent: body.currentContent } : {}),
+            newContent: result.content,
+            facts: body.facts.filter((f): f is string => typeof f === "string"),
+          }).catch(() => null)
+        : null;
     res.json({
       success: !!result.content,
       content: result.content,
       ...(result.error ? { error: result.error } : {}),
       ...(result.trace ? { trace: result.trace } : {}),
+      ...(check ? { check } : {}),
     });
   } catch (err) {
     log.error(`[user-memory-route] synthesize-file failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -151,3 +173,48 @@ userMemoryRouter.post("/internal/user-memory/should-respond", validateS2SKey, as
     res.json({ respond: false, confidence: 0, reason: "gate error — stay silent", source: "fail-closed" });
   }
 });
+
+/**
+ * Store the classifier pass WITH the curator's LLM exchange (same trace row):
+ * a batch-level record of every Jev call, plus its verdict on each candidate
+ * and its drops turned into candidate verdicts.
+ */
+function markClassifierDrops(trace: UserMemoryCuratorTrace, summary: CandidateCheckSummary): UserMemoryCuratorTrace {
+  const byText = new Map(summary.verdicts.map((v) => [v.text, v]));
+  const dropped = new Set(summary.dropped.map((d) => d.text));
+  const classifier = {
+    checked: summary.checked,
+    kept: summary.checked - summary.dropped.length,
+    dropped: summary.dropped.length,
+    unavailable: summary.unavailable,
+    ms: summary.ms,
+    calls: summary.exchanges.map((x) => {
+      const v = byText.get(x.text);
+      return {
+        text: x.text,
+        ...(v ? { verdict: v.verdict, confidence: v.p } : {}),
+        ...(v?.worth !== undefined ? { worth: v.worth } : {}),
+        exchange: x.exchange,
+      };
+    }),
+  };
+  return {
+    ...trace,
+    classifier,
+    emitted: trace.emitted.map((e) => {
+      if (e.verdict !== "kept") return e;
+      const key = e.text.slice(0, 200);
+      const v = byText.get(key);
+      if (!v) return e;
+      const annotated = {
+        ...e,
+        jevVerdict: v.verdict,
+        jevConfidence: v.p,
+        ...(v.worth !== undefined ? { jevScore: v.worth } : {}),
+      };
+      return dropped.has(key)
+        ? { ...annotated, verdict: "dropped" as const, dropReason: v.verdict === "duplicate" ? "classifier-duplicate" as const : "classifier-noise" as const }
+        : annotated;
+    }),
+  };
+}

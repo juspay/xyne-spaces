@@ -239,6 +239,66 @@ export function computeReplyAgg(rows: ReplyFeedbackRow[]): ReplyAgg {
   };
 }
 
+// ── Weekly trend (R11: "is the twin getting better?") ────────────────────────
+
+export interface WeeklyReplyPoint {
+  /** Monday 00:00 UTC of the week, ISO date (YYYY-MM-DD). */
+  weekStart: string;
+  proposed: number;
+  accepted: number;
+  acceptedEdited: number;
+  declined: number;
+  ignored: number;
+  /** approved / (approved + declined). null when no explicit decisions. */
+  approvalRate: number | null;
+  /** accepted as-is / (approved + declined): drafts good enough to send untouched. */
+  cleanApprovalRate: number | null;
+}
+
+function weekStartUtc(d: Date): string {
+  const day = (d.getUTCDay() + 6) % 7; // Monday = 0
+  const monday = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - day));
+  return monday.toISOString().slice(0, 10);
+}
+
+/**
+ * Per-week approval trend, oldest first, bucketed by when the draft was
+ * proposed. The one number that says whether accept/edit/decline feedback is
+ * actually improving the twin over time.
+ */
+export function computeWeeklyTrend(rows: ReplyFeedbackRow[]): WeeklyReplyPoint[] {
+  const weeks = new Map<string, WeeklyReplyPoint>();
+  for (const r of rows) {
+    const key = weekStartUtc(r.proposedAt);
+    const w = weeks.get(key) ?? {
+      weekStart: key,
+      proposed: 0,
+      accepted: 0,
+      acceptedEdited: 0,
+      declined: 0,
+      ignored: 0,
+      approvalRate: null,
+      cleanApprovalRate: null,
+    };
+    w.proposed += 1;
+    if (r.status === "accepted") w.accepted += 1;
+    else if (r.status === "accepted_edited") w.acceptedEdited += 1;
+    else if (r.status === "declined") w.declined += 1;
+    else if (r.status === "ignored") w.ignored += 1;
+    weeks.set(key, w);
+  }
+  return [...weeks.values()]
+    .sort((a, b) => a.weekStart.localeCompare(b.weekStart))
+    .map((w) => {
+      const decided = w.accepted + w.acceptedEdited + w.declined;
+      return {
+        ...w,
+        approvalRate: ratio(w.accepted + w.acceptedEdited, decided),
+        cleanApprovalRate: ratio(w.accepted, decided),
+      };
+    });
+}
+
 // ── Gate aggregation ─────────────────────────────────────────────────────────
 
 export function computeGateAgg(rows: GateEventRow[]): GateAgg {

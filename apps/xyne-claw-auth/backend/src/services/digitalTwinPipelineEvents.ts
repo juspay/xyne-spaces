@@ -8,6 +8,7 @@
  * break the pipeline it is observing.
  */
 
+import type { ClassifierExchange } from "xyne-claw-shared";
 import { prisma } from "../db.js";
 import { errMsg } from "../lib/errors.js";
 import { createLogger, createTraceId } from "../logger.js";
@@ -40,8 +41,19 @@ export interface CuratorBatchTrace {
 export interface SynthFileResult {
   name: string;
   factsUsed: number;
-  action: "updated" | "skipped" | "error";
+  /** "held" = the rewrite was generated but the update check kept the old file. */
+  action: "updated" | "skipped" | "error" | "held";
   chars?: number;
+  /** Classifier verdict on the rewrite (nightly runs, R10). */
+  check?: {
+    verdict: "accept" | "review" | "reject";
+    keepsOld?: number;
+    supported?: number;
+    choice?: string;
+    source: "jev" | "fallback";
+    ms: number;
+    exchange?: ClassifierExchange;
+  };
   error?: string;
   model?: string;
   durationMs?: number;
@@ -376,6 +388,9 @@ export interface GateTrace {
    *  fail-opened. Recorded with status="error" so failures are visible in the
    *  pipeline UI instead of being silently dropped. */
   error?: string;
+  /** Every classifier (Jev) call the gate made, in full — present whether Jev
+   *  decided or handed off to the LLM. */
+  classifier?: ClassifierExchange[];
 }
 
 /**
@@ -393,6 +408,7 @@ export async function recordGateEvent(input: {
   sourceMessageId?: string;
   decision: { respond: boolean; confidence: number; reason: string; source: string };
   llm?: { systemPrompt: string; userPrompt: string; response: string; thinking?: string; model: string } | null;
+  classifier?: ClassifierExchange[] | null;
   /** Set when the gate failed (timeout / HTTP error / bad response). Records the
    *  event with status="error" so it's visible + filterable in the pipeline UI. */
   error?: string;
@@ -411,6 +427,7 @@ export async function recordGateEvent(input: {
       ...(input.channelType ? { channelType: input.channelType } : {}),
       ...(input.senderName ? { senderName: input.senderName } : {}),
       ...(input.error ? { error: input.error } : {}),
+      ...(input.classifier?.length ? { classifier: input.classifier } : {}),
       ...(input.llm
         ? {
             systemPrompt: input.llm.systemPrompt,

@@ -105,6 +105,9 @@ function errMsg(err: unknown): string {
 export interface PromptMemoryFile {
   name: string;
   content: string;
+  /** Present on candidate lists: whether the user toggled it to always load. */
+  loadInPrompt?: boolean;
+  description?: string;
 }
 
 /**
@@ -114,10 +117,14 @@ export interface PromptMemoryFile {
  * breaks a run. Content is already ≤20k chars/file and ≤3 files (enforced
  * server-side).
  */
-export async function fetchAgentPromptFiles(agentSlug: string, userId: string): Promise<PromptMemoryFile[]> {
+export async function fetchAgentPromptFiles(
+  agentSlug: string,
+  userId: string,
+  opts: { candidates?: boolean } = {},
+): Promise<PromptMemoryFile[]> {
   if (!SERVER.authServiceUrl || !userId) return [];
   try {
-    const qs = new URLSearchParams({ agentSlug, userId });
+    const qs = new URLSearchParams({ agentSlug, userId, ...(opts.candidates ? { candidates: "1" } : {}) });
     const res = await fetch(
       `${SERVER.authServiceUrl.replace(/\/+$/, "")}/claw/api/v1/memory/agent-prompt-files?${qs.toString()}`,
       {
@@ -129,12 +136,20 @@ export async function fetchAgentPromptFiles(agentSlug: string, userId: string): 
     );
     if (!res.ok) return [];
     const data = (await res.json()) as {
-      data?: { files?: Array<{ name?: unknown; content?: unknown }> };
+      data?: { files?: Array<{ name?: unknown; content?: unknown; loadInPrompt?: unknown; description?: unknown }> };
     };
     const files = data?.data?.files ?? [];
     return files
       .filter((f): f is { name: string; content: string } => typeof f?.name === "string" && typeof f?.content === "string")
-      .map((f) => ({ name: f.name, content: f.content }));
+      .map((f) => {
+        const raw = f as { loadInPrompt?: unknown; description?: unknown };
+        return {
+          name: f.name,
+          content: f.content,
+          ...(typeof raw.loadInPrompt === "boolean" ? { loadInPrompt: raw.loadInPrompt } : {}),
+          ...(typeof raw.description === "string" ? { description: raw.description } : {}),
+        };
+      });
   } catch (err) {
     log.warn(`[memory] fetchAgentPromptFiles failed agent=${agentSlug}: ${errMsg(err)}`);
     return [];

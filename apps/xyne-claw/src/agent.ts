@@ -49,7 +49,9 @@ import { kickOffPrReviewRoom, registerLivePrRunContext, unregisterLivePrRunConte
 import { judgeRunSummary, recordJudgeOutcome, setJudgeDebugSink } from "./judge-backend.js";
 import { effectiveOptimizations, optEnabled } from "./optimizations.js";
 import { jevThreshold } from "./jev.js";
-import { pinRunTask } from "./run-context.js";
+import { attachRunMessages, pinRunTask } from "./run-context.js";
+import { CONTEXT_GATE_NUDGE, checkpointPrecheck, contextGate } from "./answer-gates.js";
+import { runWithToolCall, takeSiftParam, withSiftParam, type ToolCallContext } from "./tool-call-context.js";
 import { assessAnswer, type AnswerAssessment } from "./jev-completeness.js";
 import { gcsUploadDebugRunWithRetries, gcsUploadDebugObject, gcsPutDebugIndex } from "./storage.js";
 import {
@@ -711,16 +713,32 @@ export async function applyCopilotProxyIfNeeded<T extends { apiKey: string; mode
  * catches the heavy-investigation bloat path.
  */
 export function capCustomToolOutput(tools: ToolDefinition[], outputBaseDir: string): ToolDefinition[] {
+  // With result sifting on, every wrapped tool gets an optional `sift` switch
+  // the model can set per call (R3); it is stripped here, before the tool (or
+  // its MCP server) ever sees the params.
+  const offerSift = optEnabled("jev_result_sift");
   return tools.map((tool) => {
     const orig = tool.execute.bind(tool);
+    // Only a `sift` we added is ours to strip; a tool's own `sift` param passes through.
+    const ownsSift = offerSift && withSiftParam(tool.parameters) !== tool.parameters;
     const wrapped: ToolDefinition["execute"] = async (...args) => {
-      const result = await orig(...args);
+      const [toolCallId, rawParams, ...rest] = args;
+      const { params, sift } = ownsSift ? takeSiftParam(rawParams) : { params: rawParams, sift: undefined };
+      const callCtx: ToolCallContext = { tool: tool.name, args: params, ...(sift !== undefined ? { sift } : {}) };
+      const result = await runWithToolCall(
+        callCtx,
+        () => (orig as (...a: unknown[]) => ReturnType<ToolDefinition["execute"]>)(toolCallId, params, ...rest),
+      );
       const content = (result as { content?: unknown })?.content;
       if (Array.isArray(content)) {
         const mapped = await Promise.all(content.map(async (block) => {
           const b = block as { type?: string; text?: string };
           if (b && b.type === "text" && typeof b.text === "string") {
-            return { ...b, text: await promoteIfOversized(outputBaseDir, "custom", tool.name, b.text) };
+            const text = b.text;
+            return {
+              ...b,
+              text: await runWithToolCall(callCtx, () => promoteIfOversized(outputBaseDir, "custom", tool.name, text)),
+            };
           }
           return block;
         }));
@@ -728,7 +746,9 @@ export function capCustomToolOutput(tools: ToolDefinition[], outputBaseDir: stri
       }
       return result;
     };
-    return { ...tool, execute: wrapped };
+    return ownsSift
+      ? { ...tool, parameters: withSiftParam(tool.parameters), execute: wrapped }
+      : { ...tool, execute: wrapped };
   });
 }
 
@@ -2532,6 +2552,12 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   // mid-turn-compaction.ts, where the pi-internals coupling is contained and
   // version-guarded — see that file's header.
   installMidTurnCompaction(session);
+  // Digital Twin: end the loop right after the first accepted twin_deliver.
+  // Installed after mid-turn compaction so it chains that stop hook.
+  if (twinDeliverRef) {
+    const { installStopAfterDelivery } = await import("./twin-deliver.js");
+    installStopAfterDelivery(session.agent, () => twinDeliverRef.value !== undefined);
+  }
   // Pi v0.75 dropped the `setBeforeToolCall(fn)` method in favour of a
   // directly-assignable property of the same name on the Agent. Semantics
   // unchanged — the hook still runs before each tool call.
@@ -2674,8 +2700,10 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   const pushDebugEvent = (kind: DebugEventKind, data: Record<string, unknown> = {}, extras?: Partial<DebugEventRecord>): void => {
     recorder?.record(kind, data, extras);
   };
-  setJudgeDebugSink((kind, data) => pushDebugEvent(kind, data));
   pinRunTask(task);
+  // Lazy view of the live transcript for classifier call sites (result sift,
+  // context gate): read at call time, so a tool mid-loop sees every prior turn.
+  attachRunMessages(() => (session as unknown as { messages?: readonly unknown[] }).messages);
 
   /**
    * The single terminal path for a run's trace. Idempotent — the success path
@@ -2978,6 +3006,11 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     ...(provider ? { provider } : {}),
   });
 
+  // Attach the judge sink only once capture has started: it flushes every Jev
+  // call made so far (pre-run sites: mode router, prefetch gate, plan gate,
+  // persona pick) into this run's trace. Attached earlier, those events went to
+  // a recorder with no open store and were lost.
+  setJudgeDebugSink((kind, data) => pushDebugEvent(kind, data));
   pushDebugEvent("session_start", {
     conversationId,
     sessionId,
@@ -3922,6 +3955,19 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     }
     const delivered = twinDeliverRef.value !== undefined;
     pushDebugEvent("twin_deliver_reflection", { phase: "result", delivered, action: twinDeliverRef.value?.action ?? null });
+    // R6: classifier self-check of the accepted delivery. Advisory — the owner
+    // still approves; the scores ride along for the approver and calibration.
+    if (delivered && twinDeliverRef.value && !abortSignal?.aborted) {
+      const { checkTwinDelivery } = await import("./twin-deliver.js");
+      const check = await checkTwinDelivery(twinDeliverRef.value, {
+        task,
+        messages: (session as unknown as { messages?: readonly unknown[] }).messages ?? [],
+      }).catch(() => null);
+      if (check) {
+        twinDeliverRef.value = { ...twinDeliverRef.value, check };
+        pushDebugEvent("twin_deliver_reflection", { phase: "check", ...check });
+      }
+    }
     if (!delivered) {
       log.warn("[agent] twin_deliver: model never delivered (no tool_call, nothing to recover) — staying silent (fail-closed)");
     }
@@ -3952,7 +3998,14 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     };
     const isCheckpointAnswer = (): boolean =>
       looksLikeCompactionCheckpoint(extractFinalAnswerText(session, opts.finalAnswerMaxTurns)) && endedWithoutTools();
-    if (isCheckpointAnswer()) {
+    // Jev confirms the text-pattern match before paying for a full LLM turn.
+    const confirmedAnswer =
+      isCheckpointAnswer() &&
+      (await checkpointPrecheck(task, extractFinalAnswerText(session, opts.finalAnswerMaxTurns) ?? "").catch(() => false));
+    if (confirmedAnswer) {
+      log.info("[agent] Checkpoint-looking final text confirmed as a real answer by the classifier — no nudge");
+    }
+    if (!confirmedAnswer && isCheckpointAnswer()) {
       metric.count("agent_summary_as_answer", { provider: provider ?? "spaces" });
       log.warn("[agent] Final text looks like a compaction checkpoint, not an answer — nudging once to continue the task");
       if (!abortSignal?.aborted) {
@@ -3986,10 +4039,35 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   const maxContinuations = optEnabled("jev_auto_continue")
     ? Math.max(0, Number(process.env["JEV_MAX_CONTINUATIONS"]) || 1)
     : 0;
-  const continuable = structuredOutputRef?.value === undefined && !checkpointSuppressed;
+  // A twin run's only output is twin_deliver (enforced by the reflection stage
+  // above); an auto-continue nudge would reopen a finished delivery.
+  const continuable = structuredOutputRef?.value === undefined && !checkpointSuppressed && !twinDeliverRef;
 
   let text = computeFinalText();
   let answerAssessment: AnswerAssessment | null = null;
+
+  // R12: before the answer is accepted, check the evidence supports it. A
+  // clear gap earns ONE nudge to fetch more context (never on twin runs or
+  // structured output — `continuable` excludes those).
+  if (continuable && text.trim() && optEnabled("jev_context_gate") && !abortSignal?.aborted) {
+    const messages = (session as unknown as { messages?: Array<Record<string, unknown>> }).messages ?? [];
+    const { extractEvidenceDigest } = await import("./verify-response.js");
+    const gate = await contextGate({
+      task,
+      messages,
+      answer: text,
+      evidence: extractEvidenceDigest(messages as Parameters<typeof extractEvidenceDigest>[0], 4_000),
+    }).catch(() => "accept" as const);
+    if (gate === "fetch-more") {
+      pushDebugEvent("auto_continue", { attempt: 0, maxAttempts: 1, verdict: "context-gate" });
+      metric.count("agent_context_gate_nudge", {});
+      log.info("[agent] context gate: evidence does not support the answer — nudging once to fetch more");
+      await promptWithAbort(() => session.prompt(`<system>${CONTEXT_GATE_NUDGE}</system>`));
+      const gq = session as unknown as { _agentEventQueue?: Promise<void> };
+      if (gq._agentEventQueue) await withAbort(gq._agentEventQueue);
+      text = computeFinalText();
+    }
+  }
 
   for (let attempt = 0; ; attempt += 1) {
     answerAssessment = await assessAnswer({

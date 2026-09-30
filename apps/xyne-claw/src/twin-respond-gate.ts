@@ -14,7 +14,12 @@
  */
 
 import { fetchLiteLLMWithRetry } from "@xyne/litellm-client";
+import type { ClassifierExchange } from "xyne-claw-shared";
+import type { JevAnswer, JevQuestion } from "./jev.js";
+import { collectJudgeExchanges, storableExchange } from "./judge-backend.js";
+import { answerProb, band, runJudgeSite } from "./judge-site.js";
 import { createLogger } from "./logger.js";
+import { optEnabled } from "./optimizations.js";
 
 const log = createLogger("twin-respond-gate");
 
@@ -75,9 +80,11 @@ export interface RespondGateResult {
   confidence: number; // 0-1
   reason: string;
   /** How the decision was reached — for observability. */
-  source: "llm" | "fail-closed" | "no-patterns";
+  source: "jev" | "llm" | "fail-closed" | "no-patterns";
   /** Present only when the request set includeTrace and the LLM actually ran. */
   trace?: RespondGateTrace;
+  /** Every classifier call the gate made (includeTrace only), whichever path decided. */
+  classifier?: ClassifierExchange[];
 }
 
 const DECISION_TOOL = {
@@ -207,7 +214,83 @@ export function parseGateDecision(raw: unknown): { respond: boolean; confidence:
   return { respond, confidence: coerceConfidence(obj["confidence"]), reason };
 }
 
+// Jev band: clear cases are decided by the classifier in ~0.4s; everything in
+// between (and every Jev outage) goes to the LLM gate exactly as before.
+const JEV_RESPOND_AT = Number(process.env["TWIN_GATE_JEV_RESPOND_AT"] ?? 0.7);
+const JEV_SKIP_AT = Number(process.env["TWIN_GATE_JEV_SKIP_AT"] ?? 0.3);
+const JEV_GATE_BUDGET_MS = Number(process.env["TWIN_GATE_JEV_TIMEOUT_MS"] ?? 3_000);
+
+export const JEV_GATE_QUESTIONS: Record<string, JevQuestion> = {
+  worth: {
+    type: "score",
+    instructions:
+      "How worthwhile is it for the user's Digital Twin to look at this incoming message and consider replying as the user?",
+    criteria: [
+      "Clear noise: an automated or bot ping, a broad @channel/@here FYI, or a topic the user has no involvement in",
+      "Unclear: weak or mixed signals about whether the user would engage",
+      "A real message for the user: a direct question, review or ask, a DM, a thread they are active in, or their own project or people",
+    ],
+  },
+};
+
+/** Pure: Jev answers → gate decision, or null (unsure → LLM gate). Exported for tests. */
+export function decideFromJev(
+  answers: Record<string, JevAnswer>,
+  high = JEV_RESPOND_AT,
+  low = JEV_SKIP_AT,
+): { respond: boolean; confidence: number; reason: string } | null {
+  const p = answerProb(answers, "worth");
+  const verdict = band(p, high, low);
+  if (verdict === null || p === undefined) return null;
+  return verdict === "yes"
+    ? { respond: true, confidence: p, reason: `classifier: worth a look (score ${p.toFixed(2)} ≥ ${high})` }
+    : { respond: false, confidence: 1 - p, reason: `classifier: clear noise (score ${p.toFixed(2)} ≤ ${low})` };
+}
+
+/**
+ * Gate entry point. With `jev_twin_gate` on, the classifier decides the clear
+ * cases; unsure or unavailable → the LLM gate below, unchanged.
+ */
 export async function decideRespond(req: RespondGateRequest): Promise<RespondGateResult> {
+  if (!req.includeTrace) return decideRespondInner(req);
+  const { result, exchanges } = await collectJudgeExchanges(() => decideRespondInner(req));
+  return exchanges.length ? { ...result, classifier: exchanges.map((x) => storableExchange(x)) } : result;
+}
+
+async function decideRespondInner(req: RespondGateRequest): Promise<RespondGateResult> {
+  const userPrompt = buildUserPrompt(req);
+  const result = await runJudgeSite<RespondGateResult>({
+    site: "twin-respond-gate",
+    enabled: optEnabled("jev_twin_gate"),
+    budgetMs: JEV_GATE_BUDGET_MS,
+    state: userPrompt,
+    questions: JEV_GATE_QUESTIONS,
+    decide: (answers) => {
+      const d = decideFromJev(answers);
+      if (!d) return null;
+      return {
+        ...d,
+        source: "jev",
+        ...(req.includeTrace
+          ? {
+              trace: {
+                systemPrompt: `Jev classifier · respond ≥ ${JEV_RESPOND_AT}, skip ≤ ${JEV_SKIP_AT}, otherwise LLM gate`,
+                userPrompt,
+                response: JSON.stringify(answers),
+                model: "jev",
+              },
+            }
+          : {}),
+      };
+    },
+    fallback: () => decideRespondLlm(req),
+    describe: (d) => `${d.respond ? "respond" : "skip"} via ${d.source}`,
+  });
+  return result.decision ?? (await decideRespondLlm(req));
+}
+
+/** The LLM gate (the only path before Jev). */
+export async function decideRespondLlm(req: RespondGateRequest): Promise<RespondGateResult> {
   const FAIL_CLOSED: RespondGateResult = { respond: false, confidence: 0, reason: "gate unavailable — staying silent", source: "fail-closed" };
   if (!LITELLM_API_KEY) return FAIL_CLOSED;
   // No short-circuit on missing patterns — EVERY mention goes through the LLM.

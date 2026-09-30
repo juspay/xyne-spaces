@@ -12,6 +12,7 @@
  * "always" skips this entirely.
  */
 
+import type { ClassifierExchange } from "xyne-claw-shared";
 import { bankIdForAgent, getMemoryProvider } from "xyne-claw-shared";
 import { errMsg } from "../lib/errors.js";
 import { CONFIG } from "../config.js";
@@ -346,6 +347,7 @@ export async function shouldTwinRespond(userId: string, args: RespondGateArgs): 
     }
     const d = (await res.json()) as Partial<TwinRespondDecision> & {
       trace?: { systemPrompt: string; userPrompt: string; response: string; thinking?: string; model: string };
+      classifier?: ClassifierExchange[];
     };
     if (typeof d.respond !== "boolean") {
       recordFailure("gate returned no usable decision", d.trace ?? null);
@@ -367,6 +369,7 @@ export async function shouldTwinRespond(userId: string, args: RespondGateArgs): 
       ...(args.sourceMessageId ? { sourceMessageId: args.sourceMessageId } : {}),
       decision,
       llm: d.trace ?? null,
+      classifier: Array.isArray(d.classifier) ? d.classifier : null,
       durationMs: Date.now() - tStart,
     });
     return decision;

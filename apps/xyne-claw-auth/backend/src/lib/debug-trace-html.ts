@@ -845,6 +845,16 @@ export function buildTraceParts(run: DebugTraceRun): TraceParts {
     } else if (kind === "judge_call") {
       judgeCalls += 1;
       if (data["ok"] === false) judgeFailed += 1;
+      // Only the classifier's ANSWERS (scores / picks) are shown here: this page
+      // is shareable and never carries content. The input (state) and questions
+      // hold user messages and tool output — they stay in the stored trace, for
+      // the owner-only debug panel.
+      const answersPayload = payload(data, "answers");
+      const answered = payloadBlock(
+        typeof answersPayload.value === "string" ? { ...answersPayload, value: parseJsonOr(answersPayload.value) } : answersPayload,
+        8_000,
+      );
+      const body = answered ? `<details><summary>answers</summary><pre>${answered}</pre></details>` : "";
       rendered = row({
         offset: off,
         badge: clean(data["backend"], 12) || "judge",
@@ -853,8 +863,9 @@ export function buildTraceParts(run: DebugTraceRun): TraceParts {
         meta: [
           num(data["questions"]) !== null ? `${num(data["questions"])} questions` : "",
           num(data["ms"]) !== null ? ms(data["ms"]) : "",
-          data["ok"] === false ? "FAILED — caller fell back to its previous path" : "",
+          data["ok"] === false ? `FAILED${data["error"] ? ` (${clean(data["error"], 120)})` : ""} — caller fell back to its previous path` : "",
         ].filter(Boolean).join(" · "),
+        ...(body ? { body } : {}),
       });
     } else if (kind === "judge_outcome") {
       const detailPayload = payload(data, "detail");

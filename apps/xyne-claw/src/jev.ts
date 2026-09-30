@@ -16,7 +16,7 @@ import { createLogger } from "./logger.js";
 import { metric } from "./metrics.js";
 import {
   activeJudgeBackend,
-  recordJudgeCall,
+  recordJudgeExchange,
   recordJudgeShadow,
   shadowJudgeBackends,
   SYSTEM_ONE_BACKENDS,
@@ -34,7 +34,11 @@ const DEFAULT_BATCH = Math.min(Math.max(Number(process.env["JEV_BATCH"] ?? 50), 
 export type JevQuestion =
   | { type: "noul"; instructions: string }
   | { type: "choice"; instructions: string; criteria: Record<string, string> }
-  | { type: "score"; instructions: string; criteria?: string[] };
+  /**
+   * `criteria` are ordered anchor levels from low (score 0) to high (score 1);
+   * the answer is where the state falls between them. Required by the API.
+   */
+  | { type: "score"; instructions: string; criteria: string[] };
 
 export interface JevAnswer {
   type: string;
@@ -67,11 +71,25 @@ function systemOneConfig(backend: SystemOneBackendName): SystemOneConfig & { dis
   const ownUrl = env(`${spec.envPrefix}_URL`);
   const ownModel = env(`${spec.envPrefix}_MODEL`);
   const shared = spec.sharedEnvPrefix;
+  const viaLitellm = "viaLitellm" in spec && spec.viaLitellm === true;
+  const litellmBase = env("LITELLM_URL").replace(/\/$/, "");
   return {
-    url: ownUrl || (shared ? env(`${shared}_URL`) : "") || spec.defaultUrl || "",
-    key: env(`${spec.envPrefix}_API_KEY`) || (shared ? env(`${shared}_API_KEY`) : ""),
+    url:
+      ownUrl ||
+      (shared ? env(`${shared}_URL`) : "") ||
+      spec.defaultUrl ||
+      (viaLitellm && litellmBase ? `${litellmBase}/v1/systemone` : ""),
+    key:
+      env(`${spec.envPrefix}_API_KEY`) ||
+      (shared ? env(`${shared}_API_KEY`) : "") ||
+      (viaLitellm ? env("LITELLM_API_KEY") : ""),
     model: ownModel || spec.defaultModel || "",
-    distinct: !shared || Boolean(ownUrl || ownModel),
+    // Distinct from its sibling when it has its own URL/model, or when it is the
+    // LiteLLM-served default (only while no shared OUR_JEV_URL is configured).
+    distinct:
+      !shared ||
+      Boolean(ownUrl || ownModel) ||
+      (viaLitellm && Boolean(litellmBase) && !env(`${shared}_URL`)),
   };
 }
 
@@ -113,11 +131,51 @@ async function post(
   });
   if (!res.ok) throw new Error(`${backend} ${res.status}`);
   const body = (await res.json()) as { answers?: Record<string, JevAnswer> };
-  return body.answers ?? {};
+  return normaliseScores(body.answers ?? {}, questions);
 }
 
-function backendTimeoutMs(backend: JudgeBackendName, requested: number | undefined): number {
-  if (backend === "llm") return llmJudgeConfig().timeoutMs;
+/**
+ * Scores come back relative to the question's ordered levels. Our grid endpoint
+ * returns the expected LEVEL INDEX (0 … n-1, e.g. 1.76 with 3 levels); every
+ * caller reads 0..1. Derive 0..1 from the per-level probabilities when present
+ * (Σ level·p / (n-1)) — scale-independent, so it is right whichever System One
+ * endpoint answered — else rescale an out-of-range score by (n-1). Exported for tests.
+ */
+export function normaliseScores(
+  answers: Record<string, JevAnswer>,
+  questions: Record<string, JevQuestion>,
+): Record<string, JevAnswer> {
+  const out: Record<string, JevAnswer> = {};
+  for (const [id, a] of Object.entries(answers)) {
+    const q = questions[id];
+    if (a?.type !== "score" || q?.type !== "score" || q.criteria.length < 2) {
+      out[id] = a;
+      continue;
+    }
+    const top = q.criteria.length - 1;
+    const probs = a.probabilities ? Object.entries(a.probabilities) : [];
+    const levelProbs = probs.filter(([k, p]) => /^\d+$/.test(k) && typeof p === "number");
+    let score: number | undefined;
+    if (levelProbs.length > 0) {
+      const mass = levelProbs.reduce((n, [, p]) => n + p, 0);
+      if (mass > 0) score = levelProbs.reduce((n, [k, p]) => n + Number(k) * p, 0) / mass / top;
+    }
+    if (score === undefined && typeof a.score === "number") score = a.score > 1 ? a.score / top : a.score;
+    out[id] = score === undefined ? a : { ...a, score: Math.min(1, Math.max(0, score)) };
+  }
+  return out;
+}
+
+/**
+ * The caller's budget wins. A slower backend may only shorten it, never
+ * stretch it: a 1.5s hot-path gate must not become a 30s stall just because
+ * the run is pinned to the LLM judge.
+ */
+export function backendTimeoutMs(backend: JudgeBackendName, requested: number | undefined): number {
+  if (backend === "llm") {
+    const llm = llmJudgeConfig().timeoutMs;
+    return requested === undefined ? llm : Math.min(requested, llm);
+  }
   return requested ?? DEFAULT_TIMEOUT_MS;
 }
 
@@ -196,7 +254,10 @@ export async function jevAskOn(
     const answers = await post(backend, state, questions, controller.signal);
     const elapsed = Date.now() - started;
     metric.observe("jev_ms", elapsed, { purpose, backend, result: "ok", questions: count });
-    recordJudgeCall({ backend, purpose, ms: elapsed, questions: count, ok: true });
+    recordJudgeExchange({
+      backend, purpose, ms: elapsed, questions: count, ok: true,
+      state, questionSpec: questions, answers, at: new Date(started).toISOString(),
+    });
     for (const shadow of shadowJudgeBackends(backend)) {
       if (!judgeBackendConfigured(shadow)) continue;
       void runShadow(backend, shadow, state, questions, answers, elapsed, purpose);
@@ -204,8 +265,14 @@ export async function jevAskOn(
     return answers;
   } catch (err) {
     const elapsed = Date.now() - started;
-    metric.count("jev_failed", { purpose, backend, reason: controller.signal.aborted ? "timeout" : "error" });
-    recordJudgeCall({ backend, purpose, ms: elapsed, questions: count, ok: false });
+    const reason = controller.signal.aborted ? "timeout" : "error";
+    metric.count("jev_failed", { purpose, backend, reason });
+    recordJudgeExchange({
+      backend, purpose, ms: elapsed, questions: count, ok: false,
+      state, questionSpec: questions, answers: null,
+      error: `${reason}: ${err instanceof Error ? err.message : String(err)}`,
+      at: new Date(started).toISOString(),
+    });
     log.warn(
       `[jev] ${purpose} via ${backend} unavailable after ${elapsed}ms — caller falls back:`,
       err instanceof Error ? err.message : String(err),

@@ -5,6 +5,7 @@
  * POST /webhook/result — callback from xyne-claw, sends result to mentioned user's DM with approve/decline
  */
 
+import { reasoningWithCheck } from "../lib/twin-check.js";
 import { Router, type Request, type Response } from "express";
 import { errMsg } from "../lib/errors.js";
 import { ingestDeliveredArtifact } from "../lib/conversation-artifact-signals.js";
@@ -901,6 +902,13 @@ async function sendTwinReplyDraft(
     }
   }
 
+  // Classifier self-check (claw, R6) goes on the owner-only "Why?" panel. Appended
+  // AFTER citation baking so `[clf-…]` offsets are unaffected.
+  const draftReasoning = reasoningWithCheck(effectiveDelivery.reasoning, effectiveDelivery.check);
+  if (effectiveDelivery.check) {
+    clog.info(`[webhook/result] Twin self-check overall=${effectiveDelivery.check.overall} session ${sessionId}`);
+  }
+
   const dest = effectiveDelivery.destination;
   const draft = {
     conversationId: ctx.conversationId,
@@ -909,7 +917,7 @@ async function sendTwinReplyDraft(
     action: effectiveDelivery.action,
     ...(effectiveDelivery.message ? { message: effectiveDelivery.message } : {}),
     ...(effectiveDelivery.emoji ? { emoji: effectiveDelivery.emoji } : {}),
-    ...(effectiveDelivery.reasoning ? { reasoning: effectiveDelivery.reasoning } : {}),
+    ...(draftReasoning ? { reasoning: draftReasoning } : {}),
     ...(citationMeta?.clawCitations ? { clawCitations: citationMeta.clawCitations } : {}),
     ...(citationMeta?.clawCitationIcons ? { clawCitationIcons: citationMeta.clawCitationIcons } : {}),
     destinationKind: dest?.kind ?? "origin_thread",

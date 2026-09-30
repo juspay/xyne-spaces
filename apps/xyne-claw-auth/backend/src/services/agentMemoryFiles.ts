@@ -341,3 +341,32 @@ export async function getPromptFiles(agentSlug: string, owner: FileOwner): Promi
   })) as FileRow[];
   return rows.map(toDTO).filter((f) => f.content.trim().length > 0);
 }
+
+/** Max files offered to claw's per-task picker (jev_memory_file_pick). */
+export const MAX_CANDIDATE_FILES = 8;
+
+/**
+ * Every non-empty file for (agent, user) — the pool claw's classifier picks the
+ * ≤MAX_LOADED_FILES to load from, per task. Each carries its loadInPrompt flag
+ * (the user's toggled set is the fallback when the classifier is unavailable)
+ * and the default-file description when it is one of the seeded files.
+ */
+export async function getCandidatePromptFiles(
+  agentSlug: string,
+  owner: FileOwner,
+): Promise<Array<AgentMemoryFileDTO & { description?: string }>> {
+  const rows = (await prisma.agentMemoryFile.findMany({
+    where: { agentSlug, ...ownerWhere(owner) },
+    orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+    take: MAX_CANDIDATE_FILES * 2,
+  })) as FileRow[];
+  const describe = new Map(DEFAULT_TWIN_FILES.map((f) => [f.name, f.description]));
+  return rows
+    .map(toDTO)
+    .filter((f) => f.content.trim().length > 0)
+    .slice(0, MAX_CANDIDATE_FILES)
+    .map((f) => {
+      const description = describe.get(f.name);
+      return description ? { ...f, description } : f;
+    });
+}

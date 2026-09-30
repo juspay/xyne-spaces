@@ -31,6 +31,7 @@ import { enqueueAgentBackfill, getAgentBackfillQueue } from "../queue/agent-back
 import { runRetentionSweep } from "../services/memoryRetentionService.js";
 import {
   getPromptFiles,
+  getCandidatePromptFiles,
   getFile as getAgentFile,
   listFiles as listAgentFiles,
   upsertFile as upsertAgentFile,
@@ -114,6 +115,24 @@ memoryRouter.get("/agent-prompt-files", requireAuth, async (req, res) => {
       return;
     }
     if (!(await assertMemoryUserAccess(req, res, userId))) return;
+    // candidates=1: every non-empty file with its loadInPrompt flag, so claw can
+    // pick per task (jev_memory_file_pick). Default: today's toggled set.
+    if (req.query["candidates"] === "1") {
+      const files = await getCandidatePromptFiles(agentSlug, userId);
+      res.json({
+        success: true,
+        data: {
+          candidates: true,
+          files: files.map((f) => ({
+            name: f.name,
+            content: f.content,
+            loadInPrompt: f.loadInPrompt,
+            ...(f.description ? { description: f.description } : {}),
+          })),
+        },
+      });
+      return;
+    }
     const files = await getPromptFiles(agentSlug, userId);
     res.json({
       success: true,

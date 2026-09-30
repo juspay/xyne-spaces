@@ -453,8 +453,14 @@ export async function curateAndPersistBatch(args: {
   // Make sure the twin bank has observations enabled before we retain (cached).
   if (autoApproveEnabled) await ensureTwinBank();
 
+  // R8: when claw's classifier scored a candidate, auto-approve needs BOTH the
+  // curator's own score and the classifier's usefulness score.
+  const jevScoreByText = new Map(
+    candidates.filter((c) => typeof c.jevScore === "number").map((c) => [c.text, c.jevScore as number]),
+  );
   for (const row of writable) {
-    if (autoApproveEnabled && row.signalScore >= minScore) {
+    const jevScore = jevScoreByText.get(row.text as string);
+    if (autoApproveEnabled && row.signalScore >= minScore && (jevScore === undefined || jevScore >= 0.5)) {
       try {
         const content = row.text;
         const tags = [

@@ -70,6 +70,19 @@ interface SynthReq {
   maxChars: number;
   currentContent?: string;
   preserveEdits?: boolean;
+  /** Ask claw to score the rewrite (nightly runs only, R10). */
+  check?: boolean;
+}
+
+/** claw's classifier verdict on a rewrite (R10). Only "accept" is written. */
+export interface SynthUpdateCheck {
+  verdict: "accept" | "review" | "reject";
+  keepsOld?: number;
+  supported?: number;
+  choice?: string;
+  source: "jev" | "fallback";
+  ms: number;
+  exchange?: import("xyne-claw-shared").ClassifierExchange;
 }
 
 interface SynthCallTrace {
@@ -90,7 +103,7 @@ interface SynthCallTrace {
   usage?: { promptTokens?: number; completionTokens?: number };
 }
 
-async function synthesizeViaClaw(req: SynthReq): Promise<{ content: string | null; error?: string; trace?: SynthCallTrace }> {
+async function synthesizeViaClaw(req: SynthReq): Promise<{ content: string | null; error?: string; trace?: SynthCallTrace; check?: SynthUpdateCheck }> {
   if (!CONFIG.xyneClawS2sKey) return { content: null, error: "no-s2s-key" };
   const url = `${CONFIG.xyneClawUrl.replace(/\/$/, "")}/internal/user-memory/synthesize-file`;
   try {
@@ -101,11 +114,12 @@ async function synthesizeViaClaw(req: SynthReq): Promise<{ content: string | nul
       signal: AbortSignal.timeout(SYNTH_TIMEOUT_MS),
     });
     if (!res.ok) return { content: null, error: `http-${res.status}` };
-    const data = (await res.json()) as { content?: string | null; error?: string; trace?: SynthCallTrace };
+    const data = (await res.json()) as { content?: string | null; error?: string; trace?: SynthCallTrace; check?: SynthUpdateCheck };
     return {
       content: data.content ?? null,
       ...(data.error ? { error: data.error } : {}),
       ...(data.trace ? { trace: data.trace } : {}),
+      ...(data.check ? { check: data.check } : {}),
     };
   } catch (err) {
     return { content: null, error: errMsg(err) };
@@ -141,13 +155,15 @@ export async function synthesizeSoulFilesForUser(
     }
     const current = await getFile(TWIN_AGENT_SLUG, userId, spec.name);
     const userEdited = current?.updatedBy === "user";
-    const { content, error, trace } = await synthesizeViaClaw({
+    const { content, error, trace, check } = await synthesizeViaClaw({
       fileName: spec.name,
       description: spec.description,
       facts,
       maxChars: MAX_FILE_CHARS,
       ...(current?.content ? { currentContent: current.content } : {}),
       ...(userEdited ? { preserveEdits: true } : {}),
+      // Only the nightly run is scored; manual re-synthesis writes as before.
+      ...(trigger === "daily" ? { check: true } : {}),
     });
     if (!content) {
       skipped.push(spec.name);
@@ -159,6 +175,28 @@ export async function synthesizeSoulFilesForUser(
         ...(error ? { error } : {}),
       });
       if (error) logger.info("[soul-synth] file skipped", { userId, file: spec.name, error });
+      continue;
+    }
+    // R10: only an explicit "reject" holds the rewrite back (old file kept).
+    // "review" still writes — holding on "unsure" would freeze a file forever,
+    // since the same synthesis reruns every night.
+    if (check && check.verdict === "reject") {
+      skipped.push(spec.name);
+      fileResults.push({
+        name: spec.name,
+        ...(trace ?? {}),
+        factsUsed: trace?.factsUsed ?? facts.length,
+        action: "held",
+        chars: content.length,
+        check,
+      });
+      logger.info("[soul-synth] rewrite held by update check — old file kept", {
+        userId,
+        file: spec.name,
+        verdict: check.verdict,
+        keepsOld: check.keepsOld,
+        supported: check.supported,
+      });
       continue;
     }
     // upsert only changes content + updatedBy on an existing file, so the user's
@@ -180,6 +218,7 @@ export async function synthesizeSoulFilesForUser(
       factsUsed: trace?.factsUsed ?? facts.length,
       action: "updated",
       chars: content.length,
+      ...(check ? { check } : {}),
     });
   }
 

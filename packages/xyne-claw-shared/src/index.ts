@@ -15,7 +15,7 @@ export { openPaletteMode, openPaletteModeFromTools, openPaletteAdmits, type Open
 export { getSandboxSession, probeSession, cleanupSdlcSandboxCredentialsForContext, buildSandboxStoreKey, sandboxConversationIdFromMeta, sandboxContentType, REPO_CONFIGS, SBX_GIT, type RepoSetupConfig, type SetupStep } from "./tools/sandbox/index.js";
 export type { Citation, CitationIconKey } from "./types/citation.js";
 export { citationIconUrl, citationIconKey, iconUrlForKey, toolIconKey, CITATION_ICONS } from "./types/citation.js";
-export type { TwinDelivery, TwinDeliveryAction, TwinReplyDestination, TwinDestinationCandidate } from "./types/twin-delivery.js";
+export type { ClassifierExchange, TwinDelivery, TwinDeliveryAction, TwinDeliveryCheck, TwinReplyDestination, TwinDestinationCandidate } from "./types/twin-delivery.js";
 export { isTwinDelivery } from "./types/twin-delivery.js";
 export type {
   LocalHarnessProvider,
@@ -135,6 +135,7 @@ export type {
   UserMemoryDistillResponse,
   ExistingUserMemory,
   UserMemoryCuratorTrace,
+  UserMemoryClassifierTrace,
   UserMemoryCuratorEmittedCandidate,
   EntityGraph,
   EntityGraphNode,

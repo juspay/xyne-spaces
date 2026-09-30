@@ -29,6 +29,7 @@ import { getAdminOrgScope, getOrgNameMap, withOrgLabel } from "../lib/admin-org-
 import {
   computeReplyAgg,
   computeGateAgg,
+  computeWeeklyTrend,
   computeBehaviorAgg,
   computePerUser,
   type ReplyFeedbackRow,
@@ -789,7 +790,7 @@ router.get("/twin-reply-metrics", requireClawAdmin, asyncHandler(async (req: Req
       until: until ? until.toISOString() : null,
       days,
     },
-    replies: { ...replies, previousApprovalRate, previousEditRate },
+    replies: { ...replies, previousApprovalRate, previousEditRate, weekly: computeWeeklyTrend(replyRows) },
     gate: { ...gate, previousRespondRate },
     behavior,
     byUser,

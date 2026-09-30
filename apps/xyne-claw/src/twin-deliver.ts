@@ -21,7 +21,7 @@
 
 import { Type } from "@sinclair/typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
-import type { TwinDelivery, TwinReplyDestination } from "xyne-claw-shared";
+import type { TwinDelivery, TwinDeliveryCheck, TwinReplyDestination } from "xyne-claw-shared";
 import { isDigitalTwinAgent } from "./memory.js";
 import { createLogger } from "./logger.js";
 
@@ -190,6 +190,7 @@ export function buildTwinDeliverTool(
         return {
           content: [{ type: "text" as const, text: "You have ALREADY delivered your response with twin_deliver — that first call is final and is queued for the user's approval. Do NOT call twin_deliver again. Stop here and produce no further output." }],
           details: { duplicate: true, action: ref.value.action },
+          terminate: true,
         };
       }
       const p = (params as Record<string, unknown> | undefined) ?? {};
@@ -204,6 +205,7 @@ export function buildTwinDeliverTool(
         return {
           content: [{ type: "text" as const, text: "Noted — you'll stay silent and post nothing. The task is complete; do not produce further output." }],
           details: { action: "ignore" },
+          terminate: true,
         };
       }
       const wantsEmoji = action === "react" || action === "react_and_reply";
@@ -242,6 +244,11 @@ export function buildTwinDeliverTool(
       return {
         content: [{ type: "text" as const, text: "Delivered — queued for the user's approval. The task is complete; do not produce further output." }],
         details: { action, destination: delivery.destination?.kind ?? "origin_thread" },
+        // Delivery is the twin's last act. pi ends the loop after this batch
+        // (when every result in it terminates); the agent.ts stop hook covers
+        // mixed batches. Without this the model kept calling tools — up to 117
+        // duplicate twin_deliver calls in one prod run.
+        terminate: true,
       };
     },
   };
@@ -386,3 +393,153 @@ NEVER narrate your process or expose the machinery: no "Saved to memory", "Searc
  *  without a twin_deliver call. */
 export const TWIN_DELIVER_NUDGE =
   "You finished without calling the `twin_deliver` tool. Your response reaches the user ONLY through that tool — any plain text is discarded. Decide now: react with a single emoji, reply in the user's own first-person voice, do both, or — if no response is truly warranted — choose `ignore` to stay silent. Then call `twin_deliver`. Do NOT narrate this.";
+
+interface StoppableAgent {
+  createLoopConfig?: (opts?: unknown) => {
+    shouldStopAfterTurn?: (ctx: unknown) => boolean | Promise<boolean>;
+  };
+}
+
+/**
+ * End the pi loop at the first turn boundary after a delivery is accepted.
+ *
+ * `terminate: true` on the tool result only stops when EVERY result in the
+ * batch terminates, and pi still drains queued steering after it. The
+ * shouldStopAfterTurn hook runs before either, so it is the reliable stop.
+ * It CHAINS the previous hook (mid-turn compaction installs one) — install it
+ * after installMidTurnCompaction. Returns false when pi's shape has drifted.
+ */
+export function installStopAfterDelivery(agent: object, delivered: () => boolean): boolean {
+  const a = agent as StoppableAgent;
+  if (typeof a.createLoopConfig !== "function") {
+    log.warn("[twin-deliver] pi createLoopConfig missing — stop-after-delivery relies on terminate only");
+    return false;
+  }
+  const orig = a.createLoopConfig.bind(agent);
+  a.createLoopConfig = (opts?: unknown) => {
+    const cfg = orig(opts);
+    const prev = cfg.shouldStopAfterTurn;
+    cfg.shouldStopAfterTurn = async (ctx: unknown): Promise<boolean> => {
+      if (delivered()) {
+        log.info("[twin-deliver] delivery accepted — ending the run at this turn boundary");
+        return true;
+      }
+      return prev ? Boolean(await prev(ctx)) : false;
+    };
+    return cfg;
+  };
+  return true;
+}
+
+/** Pure: Jev answers → delivery check. Exported for tests. */
+export function twinCheckFromAnswers(
+  delivery: TwinDelivery,
+  answers: Record<string, import("./jev.js").JevAnswer>,
+  ms: number,
+): TwinDeliveryCheck | null {
+  const num = (id: string): number | undefined => {
+    const a = answers[id];
+    const v = a?.score ?? a?.noul;
+    return typeof v === "number" && Number.isFinite(v) ? Math.round(v * 1000) / 1000 : undefined;
+  };
+  const check: TwinDeliveryCheck = { overall: 1, source: "jev", ms };
+  const answersAsk = num("answers_ask");
+  const grounded = num("grounded");
+  const actionFits = num("action_fits");
+  if (answersAsk !== undefined) check.answersAsk = answersAsk;
+  if (grounded !== undefined) check.grounded = grounded;
+  if (actionFits !== undefined) check.actionFits = actionFits;
+  const dest = answers["destination"]?.choice;
+  if (dest) check.destination = dest;
+  const scores = [answersAsk, grounded, actionFits].filter((v): v is number => v !== undefined);
+  if (scores.length === 0) return null;
+  check.overall = Math.min(...scores, dest === "wrong" ? 0 : 1);
+  return check;
+}
+
+/** Jev questions for a delivery; which ones depend on the action. Exported for tests. */
+export function twinCheckQuestions(delivery: TwinDelivery): Record<string, import("./jev.js").JevQuestion> {
+  const q: Record<string, import("./jev.js").JevQuestion> = {};
+  const hasMessage = Boolean(delivery.message);
+  if (hasMessage) {
+    q["answers_ask"] = {
+      type: "score",
+      instructions: "How well does the drafted reply address what the incoming message actually asked or needed from the user?",
+      criteria: ["Ignores or misreads what was asked", "Partly addresses it", "Directly and fully addresses what was asked"],
+    };
+    q["grounded"] = {
+      type: "score",
+      instructions: "Is every factual statement in the drafted reply supported by the conversation and the context the twin gathered?",
+      criteria: ["States things nothing in the conversation or context supports", "Mostly supported, with some unsupported detail", "Every statement is supported"],
+    };
+    if (delivery.destination) {
+      q["destination"] = {
+        type: "choice",
+        instructions: "Is the chosen destination the right place for this reply?",
+        criteria: {
+          right: "The destination fits: it is where the person expects the answer",
+          wrong: "The reply belongs somewhere else (e.g. the original thread)",
+          unsure: "Not enough information to tell",
+        },
+      };
+    }
+  } else {
+    q["action_fits"] = {
+      type: "score",
+      instructions:
+        delivery.action === "ignore"
+          ? "How right is it for the user to stay silent on this incoming message?"
+          : "How right is it for the user to only react with an emoji rather than reply in words?",
+      criteria: ["Wrong: the message clearly needed a written reply", "Borderline", "Right: nothing more was needed"],
+    };
+  }
+  return q;
+}
+
+/**
+ * Score an accepted delivery with Jev (R6). Advisory only: the owner approves
+ * every draft anyway; the scores ride along with the delivery so the approver
+ * sees them and declines can be calibrated against them. Null when disabled,
+ * unavailable, or there is nothing to judge.
+ */
+export async function checkTwinDelivery(
+  delivery: TwinDelivery,
+  context: { task: string; messages: readonly unknown[] },
+  deps: { ask?: typeof import("./jev.js").jevAsk; enabled?: boolean } = {},
+): Promise<TwinDeliveryCheck | null> {
+  const { runJudgeSite } = await import("./judge-site.js");
+  const { buildJudgeState } = await import("./judge-state.js");
+  const { optEnabled } = await import("./optimizations.js");
+  const payload = [
+    `action: ${delivery.action}`,
+    delivery.emoji ? `emoji: ${delivery.emoji}` : "",
+    delivery.message ? `reply: ${delivery.message}` : "",
+    delivery.destination ? `destination: ${JSON.stringify(delivery.destination)}` : "",
+    delivery.destinationReason ? `destination reason: ${delivery.destinationReason}` : "",
+  ].filter(Boolean).join("\n");
+  // "grounded" can only be judged against what the twin actually read, so the
+  // tool results it gathered go in as evidence (not just the conversation).
+  const { extractEvidenceDigest } = await import("./verify-response.js");
+  const evidence = extractEvidenceDigest(context.messages as Parameters<typeof extractEvidenceDigest>[0], 4_000);
+  const state = [
+    buildJudgeState({
+      task: context.task,
+      messages: context.messages,
+      payload: { label: "The twin's delivered response", text: payload },
+      caps: { history: 3_000, payload: 4_000 },
+    }),
+    `## Evidence the twin gathered (data)\n<<<DATA\n${evidence || "(no tool results)"}\nDATA>>>`,
+  ].join("\n\n");
+  const started = Date.now();
+  const result = await runJudgeSite<TwinDeliveryCheck>({
+    site: "twin-delivery-check",
+    enabled: deps.enabled ?? optEnabled("jev_twin_delivery_check"),
+    budgetMs: Number(process.env["TWIN_DELIVERY_CHECK_TIMEOUT_MS"] ?? 3_000),
+    state,
+    questions: twinCheckQuestions(delivery),
+    decide: (answers) => twinCheckFromAnswers(delivery, answers, Date.now() - started),
+    describe: (c) => `overall ${c.overall.toFixed(2)}`,
+    ...(deps.ask ? { ask: deps.ask } : {}),
+  });
+  return result.decision;
+}
