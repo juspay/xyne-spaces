@@ -4159,6 +4159,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
               isLoading={hasBoardDropdownOpened && !boards}
               width='auto'
               noBorder={true}
+              inputClassName='bg-transparent dark:bg-transparent'
               isOpen={boardDropdownOpen}
               onOpenChange={open => {
                 setBoardDropdownOpen(open);
@@ -4912,11 +4913,13 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
               />
             </DetailFieldRow>
 
-            {ticket.merchantId && (
-              <DetailFieldRow label='Merchant ID' locked>
+            <DetailFieldRow label='Merchant ID' locked>
+              {ticket.merchantId ? (
                 <span className='text-[13px] font-medium text-foreground'>{ticket.merchantId}</span>
-              </DetailFieldRow>
-            )}
+              ) : (
+                <span className='text-[13px] text-muted-foreground/60'>Empty</span>
+              )}
+            </DetailFieldRow>
 
             {visibleFormFields.map(fieldValue => (
               <EditableFormField

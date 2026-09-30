@@ -1156,8 +1156,8 @@ function isEmitter(dest: ProgressDest): dest is ProgressEmitter {
 // parent tools AND nested subagent child tools — so a PR card is emitted whether
 // create_pull_request runs directly in the parent or inside the git-host
 // subagent. Fire-and-forget: PR card rendering must NEVER block or fail a tool.
-// Only the URL/webhook progress path carries the card; SSE (emitter) mode has no
-// such surface, so we skip there (mirrors the plan card).
+// Both progress transports carry the card: an emitter run hands the fact to
+// emitter.pr() (see below), a URL run POSTs kind:"pr".
 
 type PrProviderName = "github" | "bitbucket" | "gitlab" | "other";
 
@@ -2058,6 +2058,9 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   }
 
   const authStorage = AuthStorage.create();
+  if (LITELLM.apiKey) {
+    authStorage.setRuntimeApiKey("litellm", LITELLM.apiKey);
+  }
   // Pi v0.75 made the ModelRegistry constructor private — must use the
   // static factory. `.create(authStorage)` uses the default models.json path
   // (~/.pi/agent/models.json); for in-memory use ModelRegistry.inMemory().

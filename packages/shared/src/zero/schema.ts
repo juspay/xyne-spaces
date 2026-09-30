@@ -84,6 +84,7 @@ import {
   SavedConfigContextType,
   SavedConfigEntityName,
   SavedConfigVisibility,
+  SlackDeskTriggerMode,
   Status,
   SurfaceAreaType,
   SurfaceLinkKind,
@@ -985,6 +986,7 @@ export const messageAttachmentTable = table('message_attachments')
     createdBy: string(),
     metadata: json().optional(),
     conversationId: string().optional(),
+    channelId: string().optional(), // denormalized conversation.channelId; NULL = not conversation-anchored
     thumbnailUrl: string().optional(),
     isDeleted: boolean(),
     uploadStatus: enumeration<AttachmentUploadStatus>().optional(),
@@ -1705,6 +1707,7 @@ export const emailChannelPreferenceTable = table('email_channel_preferences')
     deskReportAgentSlug: string().optional(),
     deskReportRangeDays: number().optional(),
     duplicateScopeConfig: string().optional(),
+    slackDeskTriggerMode: enumeration<SlackDeskTriggerMode>().optional(),
   })
   .primaryKey('channelId');
 

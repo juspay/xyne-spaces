@@ -6,6 +6,7 @@ import {
   ChannelUserStatus,
   ChannelSection,
   isDeskChannelType,
+  NotificationLevel,
 } from '@xyne/shared';
 import { generateKeyBetween } from 'fractional-indexing';
 import { VisibleChannel } from '../../../machines/stateMachine';
@@ -240,7 +241,7 @@ export const formatChannelLabel = (ch: {
 export const getDMNames = (
   channel: { name: string; scopeType: ChannelScopeType },
   currentUserId: string,
-  usersById: Map<string, { name: string; displayName?: string | null }>,
+  usersById: ReadonlyMap<string, { name: string; displayName?: string | null }>,
 ): { display: string[]; search: string[] } => {
   if (!isDMChannel(channel.scopeType)) {
     return { display: [channel.name], search: [channel.name] };
@@ -325,90 +326,6 @@ export const resolveChannelLabel = (
   return names.length > 0 ? names.join(', ') : 'Direct message';
 };
 
-/**
- * True when this channel is the current user's self-DM ("message yourself").
- *
- * The channel table stores a self-DM with `name` = the owner's own user id (backend
- * getDMChannel(userId, userId)), so a self-DM parses to exactly one participant id that
- * equals currentUserId. Pure (no hooks), so both sort hooks can share it.
- */
-export const isSelfDMChannel = (
-  channel: { name: string | null | undefined; scopeType: ChannelScopeType },
-  currentUserId: string,
-): boolean => {
-  if (!isDMChannel(channel.scopeType)) return false;
-  const participantIds = parseDMParticipantIds({
-    name: channel.name ?? '',
-    scopeType: channel.scopeType,
-  });
-  return participantIds.length === 1 && participantIds[0] === currentUserId;
-};
-
-/** Minimal user shape the sort key needs — structural, so the shared users Map fits. */
-export type ChannelSortUser = {
-  id: string;
-  name: string;
-  displayName?: string | null;
-  email?: string | null;
-};
-
-/**
- * A channel's alphabetical SORT KEY = the label the sidebar actually renders.
- *
- * Sorting by `channel.name` is wrong for DMs: the `name` column holds participant cuids
- * (XYNE-65074), so "A-Z" ordered by cuid and looked random. Mirror useChannelDisplayName's
- * label chain instead — displayName > name > email — so sort order equals visual order.
- * Self-DM → "<name> (you)"; group DM → "A, B, C and N others".
- */
-export const getChannelSortKey = (
-  channel: VisibleChannel,
-  currentUserId: string,
-  usersById: Map<string, ChannelSortUser>,
-): string => {
-  const nameFor = (user?: ChannelSortUser | null): string =>
-    user?.displayName || user?.name || user?.email || 'Unknown User';
-  if (isSelfDMChannel(channel, currentUserId)) {
-    const self = usersById.get(currentUserId);
-    return self ? `${self.displayName || self.name || self.email} (you)` : 'You';
-  }
-  if (isOneToOneDMChannel(channel.scopeType)) {
-    const otherId = parseDMParticipantIds({
-      name: channel.name ?? '',
-      scopeType: channel.scopeType,
-    }).find(id => id !== currentUserId);
-    return otherId ? nameFor(usersById.get(otherId)) : 'Unknown User';
-  }
-  if (isGroupDMChannel(channel.scopeType)) {
-    const others = parseDMParticipantIds({
-      name: channel.name ?? '',
-      scopeType: channel.scopeType,
-    })
-      .filter(id => id !== currentUserId)
-      .map(id => nameFor(usersById.get(id)));
-    if (others.length === 0) return 'Group Chat';
-    const shown = others.slice(0, 3).join(', ');
-    return others.length > 3 ? `${shown} and ${others.length - 3} others` : shown;
-  }
-  return channel.name ?? '';
-};
-
-/**
- * Keep the self-DM ("message yourself") pinned to the BOTTOM of a sorted DM list.
- *
- * Its display name is "<your name> (you)", so plain A-Z would file it under your own
- * initial — mid-list. Every other DM sorts naturally; the self-DM lands last.
- */
-export const pinSelfDMsLast = <
-  T extends { name: string | null | undefined; scopeType: ChannelScopeType },
->(
-  list: T[],
-  currentUserId: string,
-): T[] => {
-  const selfDMs = list.filter(channel => isSelfDMChannel(channel, currentUserId));
-  const rest = list.filter(channel => !isSelfDMChannel(channel, currentUserId));
-  return [...rest, ...selfDMs];
-};
-
 export const getDMSearchableName = (
   channel: VisibleChannel,
   userMap: Map<string, string>,
@@ -418,4 +335,89 @@ export const getDMSearchableName = (
   const participantIds = parseDMParticipantIds(channel).filter(id => id !== currentUserId);
   const names = participantIds.map(id => userMap.get(id)).filter(Boolean) as string[];
   return names.length > 0 ? names.join(', ') : (channel.name ?? '');
+};
+
+type SortableChannel = { id: string; name: string | null; scopeType: ChannelScopeType };
+type SortUserLookup = ReadonlyMap<string, { name: string; displayName?: string | null }>;
+
+/** True for the current user's own DM ("notes to self") — a DM whose only participant is them. */
+export const isSelfDMChannel = (
+  channel: { name: string | null; scopeType: ChannelScopeType },
+  currentUserId: string,
+): boolean => {
+  if (!isDMChannel(channel.scopeType)) return false;
+  const ids = (channel.name ?? '').split(',').filter(Boolean);
+  return ids.length === 1 && ids[0] === currentUserId;
+};
+
+/**
+ * Key used by the "Alphabetical A-Z" sort. A DM's `name` column holds participant ids, so
+ * sorting on it orders DMs by cuid — resolve to the names the sidebar renders instead.
+ * Falls back to the raw `name` if a participant isn't in the users list (e.g. deleted user).
+ */
+export const getChannelSortName = (
+  channel: SortableChannel,
+  currentUserId: string,
+  usersById: SortUserLookup,
+): string => {
+  const raw = channel.name ?? '';
+  if (!isDMChannel(channel.scopeType)) return raw;
+  // Derive from the canonical resolver so the sort key can't drift from the rendered names.
+  const { display } = getDMNames(
+    { name: raw, scopeType: channel.scopeType },
+    currentUserId,
+    usersById,
+  );
+  return display.length > 0 ? display.join(', ') : raw;
+};
+
+/**
+ * True when the sidebar row renders bold. DMs: unread count only. Channels: unread count or
+ * activity since last view, unless muted.
+ */
+export const isChannelBold = (
+  channel: Pick<VisibleChannel, 'scopeType' | 'channelStats'>,
+  unreadCount: number,
+  status: Pick<ChannelUserStatus, 'lastViewedAt' | 'desktopNotificationLevel'> | undefined,
+): boolean => {
+  if (isDMChannel(channel.scopeType)) return unreadCount > 0;
+  if (status?.desktopNotificationLevel === NotificationLevel.NONE) return false;
+  const lastActivityAt = channel.channelStats?.lastActivityAt;
+  return (
+    unreadCount > 0 ||
+    (!!status?.lastViewedAt && !!lastActivityAt && lastActivityAt > status.lastViewedAt)
+  );
+};
+
+/**
+ * A-Z: bold (unread) rows first, then the rest — each group case/accent-insensitive
+ * A-Z by display name, ties broken by id for a stable order.
+ */
+export const sortChannelsAlphabetically = <T extends SortableChannel>(
+  list: readonly T[],
+  currentUserId: string,
+  usersById: SortUserLookup,
+  isBold: (channel: T) => boolean = () => false,
+): T[] => {
+  const keys = new Map(list.map(c => [c.id, getChannelSortName(c, currentUserId, usersById)]));
+  const bold = new Set(list.filter(isBold).map(c => c.id));
+  return [...list].sort(
+    (a, b) =>
+      Number(bold.has(b.id)) - Number(bold.has(a.id)) ||
+      (keys.get(a.id) ?? '').localeCompare(keys.get(b.id) ?? '', undefined, {
+        sensitivity: 'base',
+      }) ||
+      a.id.localeCompare(b.id),
+  );
+};
+
+/** Moves the self-DM to the end of the list, preserving everyone else's order. */
+export const pinSelfDMLast = <T extends { name: string | null; scopeType: ChannelScopeType }>(
+  list: readonly T[],
+  currentUserId: string,
+): T[] => {
+  const others: T[] = [];
+  const self: T[] = [];
+  for (const c of list) (isSelfDMChannel(c, currentUserId) ? self : others).push(c);
+  return self.length === 0 ? [...list] : [...others, ...self];
 };

@@ -40,6 +40,11 @@ class EmailFetchWorker {
       return this.processCursorCatchup(job as Bull.Job<CursorCatchupJobData>);
     });
 
+    // Call pulls sleep 31s between Ozonetel requests; a separate job name keeps them from queueing behind email refetches.
+    queue.process('ozonetel-refetch', 1, async (job) => {
+      return this.processJob(job as Bull.Job<EmailFetchJobData>);
+    });
+
     queue.on('failed', (job, err) => {
       const source = 'sourceId' in job.data ? job.data.sourceId : job.data.sourceIds.join(',');
       logger.error(
@@ -49,7 +54,7 @@ class EmailFetchWorker {
 
       if ('sourceIds' in job.data) {
         void this.notifySocialMediaFailure(job.data, err);
-      } else if (job.name === 'refetch') {
+      } else if (job.name === 'refetch' || job.name === 'ozonetel-refetch') {
         void this.notifyFailure(job.data as EmailFetchJobData, err);
       }
     });
@@ -88,7 +93,7 @@ class EmailFetchWorker {
       return;
     }
 
-    const adapter = adapterRegistry.getAdapter(source.name);
+    const adapter = adapterRegistry.getAdapter(source.sourceType);
     try {
       const result = await catchUpEmailSource(workspaceId, source, adapter, cursor);
 
@@ -135,7 +140,7 @@ class EmailFetchWorker {
       return;
     }
 
-    const adapter = adapterRegistry.getAdapter(source.name);
+    const adapter = adapterRegistry.getAdapter(source.sourceType);
     if (!adapter.refetch) {
       logger.warn(
         `[EMAIL-FETCH-WORKER] Adapter ${source.name} does not support fetch — skipping`,
@@ -168,7 +173,7 @@ class EmailFetchWorker {
       `[EMAIL-FETCH-WORKER] Job ${job.id} done — processed=${result.processed} new=${result.newTickets} skipped=${result.skipped} errors=${result.errors?.length ?? 0}`,
     );
 
-    await this.notifySuccess(job.data, result);
+    await this.notifySuccess(job.data, result, source.sourceType === 'ozonetel' ? 'call' : 'email');
 
     if (job.data.isDlMemberSync) {
       await this.cleanupDlMemberSyncSource(sourceRepo, sourceId);
@@ -217,26 +222,48 @@ class EmailFetchWorker {
 
   private async notifySuccess(
     data: EmailFetchJobData,
-    result: { processed: number; newTickets: number; skipped: number; errors?: string[] },
+    result: { processed: number; newTickets: number; skipped: number; errors?: string[]; partial?: boolean },
+    noun: 'email' | 'call' = 'email',
   ): Promise<void> {
     try {
       const newCount = result.newTickets;
       const skipped = result.skipped;
       const isMemberSync = data.isDlMemberSync;
+      const errors = result.errors ?? [];
+      const nothingLanded = newCount === 0 && skipped === 0 && errors.length > 0;
+      // A failed Ozonetel request drops a whole day of calls, so the user must not read "up to date".
+      const failedCount = noun === 'call' ? errors.length : 0;
+      const failedNote = failedCount > 0
+        ? ` ${failedCount} failed, so some calls may be missing. First error: ${errors[0]}`
+        : '';
       const title = isMemberSync
         ? (newCount > 0
           ? `Synced ${newCount} older ${newCount === 1 ? 'email' : 'emails'} from DL member`
           : 'No older emails found to sync')
-        : (newCount > 0
-          ? `Fetched ${newCount} new ${newCount === 1 ? 'email' : 'emails'}`
-          : 'Inbox is up to date');
+        : failedCount > 0 && newCount === 0
+          ? 'Call fetch finished with errors'
+        : nothingLanded
+          ? 'Fetch completed but imported nothing — check the source configuration'
+          : result.partial
+            ? (newCount > 0
+              ? `Partially fetched ${newCount} new ${newCount === 1 ? noun : `${noun}s`} — rerun Fetch to continue`
+              : 'Partially fetched — rerun Fetch to continue')
+            : (newCount > 0
+              ? `Fetched ${newCount} new ${newCount === 1 ? noun : `${noun}s`}`
+              : noun === 'call' ? 'Calls are up to date' : 'Inbox is up to date');
       const message = isMemberSync
         ? (newCount > 0
           ? `${newCount} new, ${skipped} already existed.`
           : `All ${skipped} emails were already in the desk.`)
-        : (newCount > 0
-          ? `${newCount} new, ${skipped} already imported.`
-          : `${skipped} emails were already imported.`);
+        : failedCount > 0
+          ? `${newCount} new, ${skipped} already imported.${failedNote}`
+        : nothingLanded
+          // The first error carries the offending field path, which is what an
+          // operator needs — a count alone sends them to the logs.
+          ? `${errors.length} ${errors.length === 1 ? 'problem' : 'problems'}: ${errors[0]}`
+          : (newCount > 0
+            ? `${newCount} new, ${skipped} already imported.${errors.length > 0 ? ` ${errors.length} skipped with errors.` : ''}`
+            : `${skipped} ${noun}s were already imported.${errors.length > 0 ? ` ${errors.length} skipped with errors.` : ''}`);
 
       await notificationService.sendNotification(
         data.requesterUserId,

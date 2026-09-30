@@ -26,7 +26,7 @@
  * and a 401 there silently fails the verifier open (no verification at all).
  * The main model is always accessible since the agent itself uses it.
  */
-import { LITELLM } from "./config.js";
+import { LITELLM, litellmEndpoint } from "./config.js";
 
 import { createLogger } from "./logger.js";
 import { metric } from "./metrics.js";
@@ -266,7 +266,7 @@ async function llmVerify(input: VerifyResponseInput): Promise<ResponseVerdict | 
   ].join("\n");
 
   try {
-    const res = await fetch(`${LITELLM.url}/v1/chat/completions`, {
+    const res = await fetch(litellmEndpoint("/v1/chat/completions"), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

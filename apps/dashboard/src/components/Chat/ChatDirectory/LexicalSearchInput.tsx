@@ -516,7 +516,13 @@ function SetTextPlugin({
   return null;
 }
 
-function CursorPositionPlugin({ onPositionChange }: { onPositionChange: (left: number) => void }) {
+type SuffixPosition = { left: number; top: number | null };
+
+function CursorPositionPlugin({
+  onPositionChange,
+}: {
+  onPositionChange: (position: SuffixPosition) => void;
+}) {
   const [editor] = useLexicalComposerContext();
 
   useEffect(() => {
@@ -530,10 +536,25 @@ function CursorPositionPlugin({ onPositionChange }: { onPositionChange: (left: n
         const containerRect = editorEl.closest('[data-suffix-anchor]')?.getBoundingClientRect();
         if (!containerRect) return;
 
-        // Only the horizontal offset is measured. The suffix is single-line ghost text pinned to
+        // On a single line only the horizontal offset is measured and the suffix stays pinned to
         // the row center in CSS (top-1/2), exactly like the placeholder. Measuring a vertical
-        // anchor from the caret or text drifts, because a chip inflates the line box and shifts the
-        // text's vertical center between a plain-text query and a chip query.
+        // anchor from the caret or text drifts there, because a chip inflates the line box and
+        // shifts the text's vertical center between a plain-text query and a chip query.
+        // Once the query wraps, the row center lands mid-paragraph, so the suffix follows the
+        // last visual line instead; chip drift is a few px, far below the one-line threshold.
+        const firstLineTop = ((): number | undefined => {
+          const all = document.createRange();
+          all.selectNodeContents(editorEl);
+          return all.getClientRects()[0]?.top;
+        })();
+        const toPosition = (rect: DOMRect, x: number): SuffixPosition => {
+          const wrapped = firstLineTop !== undefined && rect.top - firstLineTop >= rect.height;
+          return {
+            left: x - containerRect.left,
+            top: wrapped ? rect.top + rect.height / 2 - containerRect.top : null,
+          };
+        };
+
         // Hug the RIGHT EDGE of the typed text; getClientRects() yields one rect per visual line,
         // and the LAST is the end of the last wrapped line. Chips-only (no trailing text) uses the
         // caret's x, which sits right after the chip.
@@ -547,7 +568,7 @@ function CursorPositionPlugin({ onPositionChange }: { onPositionChange: (left: n
           const rects = range.getClientRects();
           const lastRect = rects.length > 0 ? rects[rects.length - 1] : undefined;
           const rect = lastRect ?? range.getBoundingClientRect();
-          onPositionChange(rect.right - containerRect.left);
+          onPositionChange(toPosition(rect, rect.right));
           return;
         }
 
@@ -555,7 +576,8 @@ function CursorPositionPlugin({ onPositionChange }: { onPositionChange: (left: n
         if (!selection || selection.rangeCount === 0) return;
         const caret = selection.getRangeAt(0).cloneRange();
         caret.collapse(false);
-        onPositionChange(caret.getBoundingClientRect().left - containerRect.left);
+        const caretRect = caret.getBoundingClientRect();
+        onPositionChange(toPosition(caretRect, caretRect.left));
       });
     });
   }, [editor, onPositionChange]);
@@ -709,10 +731,12 @@ export function LexicalSearchInput({
 }: LexicalSearchInputProps) {
   const { isMobile } = usePlatform();
   const showLeadingIcon = !hideSearchIcon && !isMobile;
-  // Only the horizontal offset is dynamic; the suffix is pinned to the row center in CSS.
-  const [suffixLeft, setSuffixLeft] = useState(0);
-  const handlePositionChange = useCallback((left: number) => {
-    setSuffixLeft(left);
+  // `top` is null on a single line, where the suffix is pinned to the row center in CSS.
+  const [suffixPosition, setSuffixPosition] = useState<SuffixPosition>({ left: 0, top: null });
+  const handlePositionChange = useCallback((position: SuffixPosition) => {
+    setSuffixPosition(prev =>
+      prev.left === position.left && prev.top === position.top ? prev : position,
+    );
   }, []);
 
   const initialConfig = {
@@ -747,8 +771,14 @@ export function LexicalSearchInput({
                 />
                 {autocompleteSuffix && (
                   <span
-                    className='text-muted-foreground pointer-events-none text-sm absolute top-1/2 -translate-y-1/2 whitespace-nowrap'
-                    style={{ left: `${suffixLeft}px` }}
+                    className={cn(
+                      'text-muted-foreground pointer-events-none text-sm absolute -translate-y-1/2 whitespace-nowrap',
+                      suffixPosition.top === null && 'top-1/2',
+                    )}
+                    style={{
+                      left: `${suffixPosition.left}px`,
+                      ...(suffixPosition.top !== null && { top: `${suffixPosition.top}px` }),
+                    }}
                   >
                     {autocompleteSuffix}
                   </span>

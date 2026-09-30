@@ -11,7 +11,10 @@ vi.mock("./identity.js", () => ({ resolveIdentity: async () => null }));
 vi.mock("./cards.js", () => ({ newCardToken: () => "t", parkOptions: vi.fn() }));
 const getSpacesPostTarget = vi.fn();
 const getSpacesAuthForUser = vi.fn(async () => ({ token: "t", sessionId: "s", workspaceId: "ws" }));
-vi.mock("../../lib/spaces-post-target.js", () => ({ getSpacesPostTarget }));
+vi.mock("../../lib/spaces-post-target.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/spaces-post-target.js")>()),
+  getSpacesPostTarget,
+}));
 vi.mock("../../lib/spaces-db.js", () => ({ getSpacesAuthForUser }));
 
 const { redeemApproval, enqueueApprovalCards, describeWriteAction } = await import("./approvals.js");
@@ -70,7 +73,7 @@ describe("redeemApproval", () => {
       senderId: base.senderId,
       chatId: base.chatId,
     });
-    expect(enqueueOutbound).toHaveBeenCalledWith("acc", expect.objectContaining({ text: "✅ Created ticket ENG-43" }));
+    expect(enqueueOutbound).toHaveBeenCalledWith("acc", expect.objectContaining({ text: "Created ticket ENG-43" }));
   });
 
   it("skips the record when the run had no conversation", async () => {
@@ -106,7 +109,7 @@ describe("user-send-message approval card", () => {
     await enqueueApprovalCards({ target, userId: "u1", pendingActions: [signed({ channelId: "cmi345s9b07pmk5k4en17sbuy", content: "Go <b>try</b> it" })] });
     const card = enqueueOutbound.mock.calls[0]?.[1].card;
     expect(card.body).toBe('Send this message as you to *#general*:\n\n"Go *try* it"');
-    expect(getSpacesPostTarget).toHaveBeenCalledWith({ channelId: "cmi345s9b07pmk5k4en17sbuy" }, { token: "t", sessionId: "s", workspaceId: "ws" });
+    expect(getSpacesPostTarget).toHaveBeenCalledWith({ channelId: "cmi345s9b07pmk5k4en17sbuy" }, { token: "t", sessionId: "s", workspaceId: "ws" }, "u1");
     expect(getSpacesAuthForUser).toHaveBeenCalledWith("u1", "write-action");
   });
 
@@ -121,7 +124,57 @@ describe("user-send-message approval card", () => {
   });
 
   it("falls back to ids when the Spaces DB has nothing", () => {
-    expect(describeWriteAction("user-send-message", { channelId: "ch1", content: "hi" }, null)).toBe('Send this message as you to #ch1:\n\n"hi"');
+    expect(describeWriteAction("user-send-message", { channelId: "ch1", content: "hi" }, null)).toBe('Send this message as you to a Spaces channel:\n\n"hi"');
     expect(describeWriteAction("user-send-message", { conversationId: "c1", content: "hi" }, null)).toBe('Reply as you in an existing thread:\n\n"hi"');
+  });
+});
+
+describe("approval card never shows raw ids", () => {
+  it("names the other person in a direct message", () => {
+    expect(
+      describeWriteAction("user-send-message", { channelId: "dm-1", content: "ping" }, { channelName: null, directMessage: { with: ["Venkatesan S"] } }),
+    ).toBe('Send this message as you in a direct message to *Venkatesan S*:\n\n"ping"');
+    expect(
+      describeWriteAction("user-send-message", { channelId: "dm-1", content: "ping" }, { channelName: null, directMessage: { with: [] } }),
+    ).toBe('Send this message as you in a direct message:\n\n"ping"');
+  });
+
+  it("does not print a DM name that is just member ids", () => {
+    expect(
+      describeWriteAction("user-send-message", { channelId: "dm-1", content: "ping" }, { channelName: "cmgjlq6rb003o3uq3p6siynu8,i2okgxo3r0px2trepfsq6f9b" }),
+    ).toBe('Send this message as you to a Spaces channel:\n\n"ping"');
+  });
+
+  it("shows mention shorthand in the message as plain names", () => {
+    const body = describeWriteAction(
+      "user-send-message",
+      { channelId: "ch1", content: "cc @xyne-Doctor[cmnnn2zdk1lmoma4flzkwh4k1] and @spaces[group:grp_xynespaces00000:xyne-spaces]" },
+      { channelName: "general" },
+    );
+    expect(body).toBe('Send this message as you to *#general*:\n\n"cc @xyne-Doctor and @spaces"');
+  });
+
+  it("names a thread inside a direct message without ids", () => {
+    const body = describeWriteAction("user-send-message", { conversationId: "c1", content: "ok" }, {
+      channelName: null,
+      directMessage: { with: ["Mohan Kumar Mishra"] },
+      thread: { author: "Mohan Kumar Mishra", html: "<p>can you check @Aryan[cmgjk11yl001w3uq33fj18ng7]</p>" },
+    });
+    expect(body).toBe(
+      'Reply as you in the thread in your direct message with *Mohan Kumar Mishra* started by *Mohan Kumar Mishra*:\n> can you check @Aryan\n\nYour reply:\n\n"ok"',
+    );
+  });
+});
+
+describe("generic write card", () => {
+  it("shows list parameters so the person can see what changes", () => {
+    expect(
+      describeWriteAction("google-gmail-modify-labels", {
+        messageIds: ["18f2a", "18f2b"],
+        addLabelIds: ["STARRED"],
+        removeLabelIds: [],
+        options: { dryRun: false },
+      }),
+    ).toBe("Run *google-gmail-modify-labels*\n\nmessageIds: 18f2a, 18f2b\naddLabelIds: STARRED");
   });
 });

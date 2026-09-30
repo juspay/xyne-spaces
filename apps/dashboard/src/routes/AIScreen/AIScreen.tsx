@@ -2,6 +2,7 @@ import type { XyneAiSendTrigger } from '../../services/Analytics/xyneAiTracking'
 import { type ReactElement, useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useNavigate, useParams, useLocation, useNavigationType } from 'react-router-dom';
 import { Upload } from 'lucide-react';
+import { SidebarLeftOpen } from '@xyne/icons';
 import { AIShell, type WorkspacePanelControls } from '../../components/AIScreen/AIShell';
 import { ArtifactAppPane } from '../../components/AIScreen/ReactArtifact/ArtifactAppPane';
 import { AppCreationModeProvider } from '../../components/AIScreen/ReactArtifact/appCreationModeContext';
@@ -615,6 +616,7 @@ const AIScreen = (): ReactElement => {
               mobileOpen={mobileSidebarOpen}
               onMobileOpenChange={setMobileSidebarOpen}
               mainRef={dropZoneRef}
+              onToggleCollapse={handleToggleSidebar}
               collapseSignal={collapseSignal}
               onSidebarCollapsedChange={setSidebarCollapsed}
               sidebarToggleRef={sidebarToggleRef}
@@ -659,7 +661,24 @@ const AIScreen = (): ReactElement => {
                 />
               ) : (
                 /* Landing page – centred greeting + composer */
-                <main className='flex h-full flex-1 items-center justify-center px-6 py-8'>
+                <main className='relative flex h-full flex-1 items-center justify-center px-6 py-8'>
+                  {/* The landing page has no header, so without this the
+                      sidebar's own collapse button would strand the user with
+                      no way to bring it back. */}
+                  {sidebarCollapsed && (
+                    <button
+                      type='button'
+                      onClick={handleToggleSidebar}
+                      aria-label='Expand sidebar'
+                      aria-controls='ai-sidebar'
+                      title='Expand sidebar'
+                      className='absolute left-3 top-3 hidden size-8 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground sm:left-4 md:grid'
+                      data-track-category='XyneAI'
+                      data-track-name='TOGGLE_DESKTOP_SIDEBAR'
+                    >
+                      <SidebarLeftOpen size={16} aria-hidden='true' />
+                    </button>
+                  )}
                   <div className='flex w-full max-w-3xl flex-col'>
                     <AIEmptyState />
                     <div className='mt-6'>

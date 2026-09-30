@@ -826,7 +826,7 @@ export const sandboxRun: ToolDefinition = {
     }
 
     // Try auto-resolve from conversation context
-    const conversationId = context.meta?.["conversationId"];
+    const conversationId = sandboxConversationIdFromMeta(context.meta);
     const storeKey = storeKeyFromContext(context);
     if (conversationId && !replacedDeadSession) {
       const session = storeKey ? SESSION_STORE.get(storeKey) : undefined;
@@ -1693,7 +1693,7 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
 
     async execute(params, context) {
       if (!context) return "Error: No execution context available.";
-      const conversationId = context.meta?.["conversationId"];
+      const conversationId = sandboxConversationIdFromMeta(context.meta);
       if (!conversationId) return "Error: No conversationId in context.";
       const storeKey = storeKeyFromContext(context);
       if (!storeKey) return "Error: No userId/conversationId in context.";

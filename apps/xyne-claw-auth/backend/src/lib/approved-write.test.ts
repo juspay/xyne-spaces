@@ -8,6 +8,10 @@ vi.mock("../logger.js", () => ({ createLogger: () => ({ info: vi.fn(), warn: vi.
 vi.mock("../routes/mcp.js", () => ({ verifyActionSignatureAny: () => true }));
 vi.mock("../repositories/index.js", () => ({ agentRunRepository: { markUsedUserTokenByConversation } }));
 vi.mock("./agent-tools-apply.js", () => ({ AGENT_TOOL_SLUGS: new Set<string>() }));
+const executeTool = vi.fn();
+const findUnique = vi.fn(async () => ({ email: "sheetal@example.com" }) as { email: string } | null);
+vi.mock("../mcpgateway/services/execution.js", () => ({ executeTool }));
+vi.mock("../db.js", () => ({ prisma: { user: { findUnique } } }));
 vi.mock("./oauth-custom-tool.js", () => ({
   isOAuthProvider: (s: string) => s === "google" || s === "microsoft",
   prepareOAuthCustomTool,
@@ -56,5 +60,68 @@ describe("executeApprovedWrite — Google/Microsoft tools", () => {
 
     expect(outcome).toMatchObject({ ok: false, reason: "signature" });
     expect(prepareOAuthCustomTool).not.toHaveBeenCalled();
+  });
+});
+
+describe("executeApprovedWrite — MCP gateway tools", () => {
+  const gatewayAction = { ...action, serverType: "gateway:google-workspace:backend-1" };
+
+  beforeEach(() => {
+    executeTool.mockReset();
+    findUnique.mockClear();
+    process.env["ALLOWED_TENANTS"] = " , juspay-tenant ,other";
+  });
+
+  it("runs a gateway write approved from a messenger with the approver's email and tenant", async () => {
+    executeTool.mockResolvedValue({ success: true, toolName: action.tool, backendId: "backend-1", result: { updated: 1 }, duration: 12 });
+
+    const outcome = await executeApprovedWrite({ action: gatewayAction, approverUserId: "user-1" });
+
+    expect(outcome).toEqual({ ok: true, message: `Done — ${action.tool} ran.`, resultText: '{"updated":1}' });
+    expect(findUnique).toHaveBeenCalledWith({ where: { id: "user-1" }, select: { email: true } });
+    expect(executeTool).toHaveBeenCalledWith("juspay-tenant", "sheetal@example.com", {
+      serviceName: "google-workspace",
+      toolName: action.tool,
+      arguments: action.params,
+      backendId: "backend-1",
+    });
+  });
+
+  it("accepts the service-only gateway form without a backend", async () => {
+    executeTool.mockResolvedValue({ success: true, toolName: action.tool, backendId: "auto", result: "ok", duration: 1 });
+
+    await executeApprovedWrite({ action: { ...action, serverType: "gateway:google-workspace" }, approverUserId: "user-1" });
+
+    expect(executeTool.mock.calls[0]?.[2]).toEqual({ serviceName: "google-workspace", toolName: action.tool, arguments: action.params });
+  });
+
+  it("returns the gateway's own error, without urls, when the tool fails", async () => {
+    executeTool.mockResolvedValue({
+      success: false,
+      toolName: action.tool,
+      backendId: "backend-1",
+      duration: 5,
+      errorDetail: { responseMessage: "Label STARRED not found, see https://internal.example/x" },
+    });
+
+    const outcome = await executeApprovedWrite({ action: gatewayAction, approverUserId: "user-1" });
+
+    expect(outcome).toEqual({ ok: false, reason: "failed", message: `${action.tool} failed: Label STARRED not found, see` });
+  });
+
+  it("points back to Spaces only when the gateway or the approver's email is unavailable", async () => {
+    delete process.env["ALLOWED_TENANTS"];
+    await expect(executeApprovedWrite({ action: gatewayAction, approverUserId: "user-1" })).resolves.toMatchObject({ ok: false, reason: "unsupported" });
+
+    process.env["ALLOWED_TENANTS"] = "juspay-tenant";
+    findUnique.mockResolvedValueOnce(null);
+    await expect(executeApprovedWrite({ action: gatewayAction, approverUserId: "user-1" })).resolves.toMatchObject({ ok: false, reason: "no-connection" });
+    expect(executeTool).not.toHaveBeenCalled();
+  });
+
+  it("still refuses Spaces-only writes such as skill changes", async () => {
+    await expect(
+      executeApprovedWrite({ action: { ...action, serverType: "skill", tool: "update-skill" }, approverUserId: "user-1" }),
+    ).resolves.toMatchObject({ ok: false, reason: "unsupported" });
   });
 });

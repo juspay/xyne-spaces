@@ -18,18 +18,19 @@ import {
   type ChannelUserStatus,
 } from '@xyne/shared';
 import { useZero } from '../../../hooks/useZero';
+import { useUsersById } from '../../../hooks/useUsers';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
 import { mutators } from '../../../zero/mutators';
-import { useUsersById } from '../../../hooks/useUsers';
 import {
   applyChannelFilter,
   bucketChannelsBySection,
   DEFAULT_FILTER_MODE,
-  getChannelSortKey,
-  pinSelfDMsLast,
+  isChannelBold,
   isDMChannel,
   keyBetween,
+  pinSelfDMLast,
+  sortChannelsAlphabetically,
   suppressNextClick,
   sumSectionUnread,
   type ChannelFilterContext,
@@ -147,28 +148,15 @@ export const useChannelSectionDnd = ({
     if (!sortOrder) return chs;
     const sorted = [...chs];
     if (sortOrder === ChannelSortOrder.ALPHABETICAL) {
-      // Sort by the rendered label, not `channel.name` — DM names are participant
-      // cuids, which is why "A-Z" looked random (XYNE-65074).
-      const keys = new Map<string, string>();
-      for (const channel of sorted) {
-        keys.set(channel.id, getChannelSortKey(channel, currentUserId, usersById));
-      }
-      return pinSelfDMsLast(
-        sorted.sort((a, b) => {
-          const keyA = (keys.get(a.id) ?? '').toLowerCase();
-          const keyB = (keys.get(b.id) ?? '').toLowerCase();
-          const byKey = keyA.localeCompare(keyB);
-          if (byKey !== 0) return byKey;
-          return (a.name ?? '').toLowerCase().localeCompare((b.name ?? '').toLowerCase());
-        }),
-        currentUserId,
+      return sortChannelsAlphabetically(chs, currentUserId, usersById, c =>
+        isChannelBold(c, unreadCounts[c.id] ?? 0, statuses.get(c.id)),
       );
     }
     const lastActivity = (c: VisibleChannel) => c.channelStats?.lastActivityAt ?? 0;
     const lastViewed = (c: VisibleChannel) => statuses.get(c.id)?.lastViewedAt ?? 0;
     const unread = (c: VisibleChannel) => statuses.get(c.id)?.unreadCount ?? 0;
     if (sortOrder === ChannelSortOrder.RECENCY) {
-      return pinSelfDMsLast(sorted.sort((a, b) => lastActivity(b) - lastActivity(a)), currentUserId);
+      return sorted.sort((a, b) => lastActivity(b) - lastActivity(a));
     }
     return sorted.sort((a, b) => {
       const aUnread = unread(a) > 0 ? 2 : lastActivity(a) > lastViewed(a) ? 1 : 0;
@@ -201,11 +189,16 @@ export const useChannelSectionDnd = ({
     ? sectioned.map(bucket => ({ section: bucket.section, channels: fromDrag(bucket.section.id) }))
     : sectioned.map(bucket => ({
         section: bucket.section,
-        channels: applySectionSort(
-          filterFor(bucket.channels, bucket.section.filterMode ?? DEFAULT_FILTER_MODE),
-          bucket.section.sortOrder,
-          statusByChannelId,
-        ),
+        channels: bucket.section.sortOrder
+          ? pinSelfDMLast(
+              applySectionSort(
+                filterFor(bucket.channels, bucket.section.filterMode ?? DEFAULT_FILTER_MODE),
+                bucket.section.sortOrder,
+                statusByChannelId,
+              ),
+              currentUserId,
+            )
+          : filterFor(bucket.channels, bucket.section.filterMode ?? DEFAULT_FILTER_MODE),
       }));
   const defaultDisplayChannels = dragItems
     ? fromDrag(DEFAULT_CONTAINER)

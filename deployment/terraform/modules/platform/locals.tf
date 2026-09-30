@@ -171,6 +171,7 @@ locals {
     monitoring        = var.enable_monitoring
     sandbox           = var.enable_sandbox
     hindsight         = var.enable_hindsight
+    workflows         = var.enable_workflows
   }
 
   addon_extra = merge(

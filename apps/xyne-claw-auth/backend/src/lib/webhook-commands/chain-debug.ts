@@ -8,7 +8,7 @@ import type { WebhookCommandCtx } from "./context.js";
 const REPLY_LABEL = "Failed to post /debug chain reply";
 
 function tick(ok: boolean): string {
-  return ok ? "✅" : "❌";
+  return ok ? "✓" : "✕";
 }
 
 /**
@@ -23,7 +23,7 @@ function tick(ok: boolean): string {
 export async function handleChainDebug(ctx: WebhookCommandCtx): Promise<void> {
   const { channelId, conversationId, userId } = ctx.payload;
   const entryAgentSlug = ctx.agent.slug;
-  const lines: string[] = [`🔗 **Chain debug** — channel \`${channelId}\`, agent \`${entryAgentSlug}\``, ""];
+  const lines: string[] = [`**Chain debug** — channel \`${channelId}\`, agent \`${entryAgentSlug}\``, ""];
 
   const candidates = await prisma.channelAgentChainBinding.findMany({
     where: {
@@ -115,7 +115,7 @@ export async function handleChainDebug(ctx: WebhookCommandCtx): Promise<void> {
   if (planMode) {
     lines.push(
       "",
-      "⚠️ **This is almost certainly why nothing chained.** With plan mode on, the first turn ends with an EMPTY result plus a plan card and returns before the chain runs — the judge is never consulted. Chaining resumes only on the turn AFTER the plan is approved. Turn plan mode off to chain on every turn.",
+      "**This is almost certainly why nothing chained.** With plan mode on, the first turn ends with an EMPTY result plus a plan card and returns before the chain runs — the judge is never consulted. Chaining resumes only on the turn AFTER the plan is approved. Turn plan mode off to chain on every turn.",
     );
   }
   lines.push("");

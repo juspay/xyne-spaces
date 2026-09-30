@@ -30,19 +30,9 @@ const log = createLogger("artifact-app-session");
 const ARTIFACT_MIME = "application/json";
 const MAX_TITLE = 120;
 
-/**
- * Conversation id prefixes that are not user-facing chat threads and must never
- * materialize an app: `scheduled_` is a cron firing, `app_` is an artifact app
- * invoking an agent of its own. Both share the assistant-result path, and an
- * app silently appearing in someone's Library from a nightly job would be
- * baffling. Mirrors the prefix checks the runtime already keys behaviour off.
- */
-const NON_CHAT_PREFIXES = ["scheduled_", "app_"] as const;
+import { isChatConversation } from "./conversation-kind.js";
 
-export function isChatConversation(conversationId: string | null | undefined): boolean {
-  if (!conversationId) return false;
-  return !NON_CHAT_PREFIXES.some((prefix) => conversationId.startsWith(prefix));
-}
+export { isChatConversation };
 
 /** Where a version's bytes live. Copied, never referenced from the attachment:
  *  an app must not break because someone deleted the conversation that made it

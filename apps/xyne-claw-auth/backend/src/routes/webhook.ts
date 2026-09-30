@@ -10,6 +10,8 @@ import { errMsg } from "../lib/errors.js";
 import { ingestDeliveredArtifact } from "../lib/conversation-artifact-signals.js";
 import { deliveredDesignCommand, recordDeliveredArtifacts } from "../lib/delivered-artifacts.js";
 import crypto from "node:crypto";
+import { claimAutomationStep } from "../lib/automation-step-dedup.js";
+import { automationRunAllowsSandboxWrite } from "../lib/automation-write-policy.js";
 import { CONFIG } from "../config.js";
 import {
   agentRepository,
@@ -21,17 +23,15 @@ import {
   agentChainWorkflowRepository,
   activeGoalRepository,
   experimentRepository,
-  agentRequestRepository,
-  userProviderCredentialsRepository,
 } from "../repositories/index.js";
+import { hashSkillContent } from "xyne-claw-shared";
+import { agentRequestRepository } from "../repositories/agentRequestRepository.js";
 import { buildAvailableToolsCatalog } from "./tools.js";
-import { isVisibleToUser, parseConnectorMeta } from "./servers.js";
+import { } from "./servers.js";
 import {
-  identityFromAgentRow,
   identityFromDraftSpec,
   isValidAgentSlug,
   resolveAgentCapabilities,
-  toolIdsFromConfig,
   unknownToolsNote,
   draftNote,
   expandMcpRequests,
@@ -81,6 +81,10 @@ import { decrypt } from "../crypto.js";
 import { prisma } from "../db.js";
 import { redisService } from "../redis.js";
 import { publishLiveEvent } from "../lib/live-conversation-bus.js";
+import { deliverXyneAiFlow, postFlowCard, resolveXyneAiCardTarget } from "../lib/flow-card-delivery.js";
+import { renderAgentProfileCard, renderAgentProfileListCard, renderAgentSummaryCard } from "../lib/agent-card-render.js";
+import { renderConnectorSuggestCard, renderProviderSuggestCard, resolveConnectorSuggestions } from "../lib/connector-card-render.js";
+import { buildWriteApprovalCardFlow, formatActionDescription, mintWriteCardAction, readPendingWriteAction } from "../lib/write-card-render.js";
 import { UNREGISTERED_USER_TEMPLATE } from "../constants.js";
 import {
   registerRunRecovery,
@@ -118,6 +122,7 @@ import { deliverSlackResult, type SlackDeliveryTarget } from "../surfaces/slack/
 import { deliverChannelResult } from "../surfaces/messaging/delivery.js";
 import { sendInterimMessage } from "../surfaces/messaging/interim.js";
 import { claimOrQueue } from "../lib/conversation-gate.js";
+import { buildHandoffContext, downloadRootAttachments, mergeHandoffAttachments, toRootAttachmentRefs } from "../lib/workflow-handoff.js";
 import { designShareUrl, upsertDesignShare } from "./design-shares.js";
 import {
   getActivePlanCard,
@@ -133,47 +138,38 @@ import {
   clearPlanLastTodos,
 } from "../lib/session-context.js";
 import { emitAgentWorkingSignal } from "../surfaces/spaces/client.js";
+import { emitAgentProgressDone, emitAgentProgressWorking } from "../surfaces/spaces/agent-progress.js";
+import { systemNote } from "../lib/notice-format.js";
 import JSZip from "jszip";
 
 import {
   buildWriteApprovalFlow,
-  buildTicketProposalFlow,
   buildTwinApprovalFlow,
   buildUserQuestionFlow,
   buildCapacityRetryFlow,
   buildGoalSuggestionFlow,
   buildPlanFlow,
   buildAgentCardFlow,
-  buildAgentSummaryFlow,
-  buildMcpSuggestFlow,
-  MAX_AGENT_LIST_CARDS,
-  buildProviderSuggestFlow,
   buildCodeFlow,
   buildDiffFlow,
   buildChartFlow,
-  hashSkillContent,
   buildPrFlow,
   prScreenId,
   isTwinDelivery,
   isUiWidget,
 } from "xyne-claw-shared";
 import { scheduleProviderRetry } from "../queue/provider-retry-worker.js";
-import type { TwinDelivery, UiWidget, PrProvider, PrStatus } from "xyne-claw-shared";
+import type { TwinDelivery, UiWidget, PrProvider, PrStatus, FlowDefinition } from "xyne-claw-shared";
 import { isAgentInvocableBy } from "xyne-claw-shared";
 import { isSupportedInboundAttachment } from "xyne-claw-shared";
 import type { Todo } from "xyne-claw-shared";
-import { connectorTypesFromText, connectorTypesUserAskedFor, wantsConnectorRoster } from "../lib/connector-hints.js";
+import { } from "../lib/connector-hints.js";
 import {
-  SUPPORTED_PROVIDERS,
-  PROVIDER_LABELS,
-  PROVIDER_DESCRIPTIONS,
-  PROVIDER_CONNECT_METHOD,
   providersUserAskedFor,
   stripAddressedAgentMention,
-  unsupportedProvidersFromText,
   wantsProviderRoster,
 } from "../lib/provider-hints.js";
-import { availabilityForServerIds } from "../lib/connector-availability.js";
+import { } from "../lib/connector-availability.js";
 import { countTrailingBase64Padding, safePathSegment } from "../lib/url-path.js";
 import { assertSafeOutboundUrl } from "../mcpgateway/services/http-client.js";
 
@@ -571,13 +567,10 @@ import {
 
 /** Owner display name + id for an agent's card chin ("Created by @x"). */
 /** Connectors shown before the card defers to "Browse MCPs". */
-const MCP_SUGGEST_ROSTER_SAMPLE = 5;
 
 /** Agents listed on the roster card before it defers to "Browse agents". */
-const AGENT_SUMMARY_SAMPLE = 5;
 
 /** Cap on connectors the server offers unprompted, so a card never becomes a list. */
-const MCP_SUGGEST_INFERRED_MAX = 3;
 
 /**
  * Connector cards to post alongside a reply. The model requests these
@@ -591,15 +584,6 @@ type PendingConnectorSuggestions = {
   inferred?: boolean;
 };
 
-async function agentOwnerCredit(
-  ownerUserId: string | null | undefined,
-): Promise<{ name?: string | null; id?: string | null } | undefined> {
-  if (!ownerUserId) return undefined;
-  const owner = await prisma.user
-    .findUnique({ where: { id: ownerUserId }, select: { id: true, name: true } })
-    .catch(() => null);
-  return owner?.name ? { name: owner.name, id: owner.id } : undefined;
-}
 
 
 
@@ -1090,149 +1074,6 @@ export async function fetchConversationHistory(
 
 // buildAppActionFrontmatter removed — replaced by buildTwinApprovalFlow from xyne-claw-shared
 
-// ── Action formatting ───────────────────────────────────────────────
-
-/** Tickets rendered in full inside the bulk approval card. The rest are
- *  summarised by count — every ticket in `params` is still created on approve,
- *  since the executed payload comes from the HMAC-signed action, not the card. */
-const BULK_TICKETS_CARD_LIMIT = 25;
-
-type TicketCardPriority = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
-const TICKET_CARD_PRIORITIES: TicketCardPriority[] = ["LOW", "MEDIUM", "HIGH", "CRITICAL"];
-
-function formatActionDescription(tool: string, params: Record<string, unknown>, options?: { channelName?: string }): string {
-  if (tool === "user-send-message") {
-    const content = (params["content"] as string ?? "").slice(0, 300);
-    const conversationId = params["conversationId"] as string | undefined;
-    const channelId = params["channelId"] as string | undefined;
-    const lines = [`**Send Message as You**`, ``];
-    if (channelId) {
-      lines.push(`**Destination:** post NEW message to #${options?.channelName ?? channelId}`);
-    } else if (conversationId) {
-      lines.push(`**Destination:** reply in existing thread ${conversationId}`);
-    }
-    if (content) lines.push(``, `**Message:** ${content}${(params["content"] as string ?? "").length > 300 ? "..." : ""}`);
-    return lines.join("\n");
-  }
-
-  if (tool === "spaces-create-ticket") {
-    const title = params["title"] as string ?? "";
-    const desc = (params["description"] as string ?? "").slice(0, 300);
-    const lines = [`**Create Ticket**`, ``, `**Title:** ${title}`];
-    if (desc) lines.push(`**Description:** ${desc}${(params["description"] as string ?? "").length > 300 ? "..." : ""}`);
-    return lines.join("\n");
-  }
-
-  if (tool === "spaces-create-bulk-tickets") {
-    const tickets = Array.isArray(params["tickets"]) ? params["tickets"] as Array<Record<string, unknown>> : [];
-    const lines = [
-      `**Create ${tickets.length} Tickets**`,
-      ``,
-      `**Project/Board/Channel:** ${String(params["projectId"] ?? "")} / ${String(params["boardId"] ?? "")} / ${options?.channelName ? `#${options.channelName}` : String(params["channelId"] ?? "")}`,
-      ``,
-    ];
-    // Everything the approver needs lives in THIS card — no companion file
-    // upload. Same shape as spaces-create-ticket above (title + trimmed
-    // description), repeated per ticket. The card body scrolls past 280px
-    // (buildWriteApprovalFlow), so a long batch stays readable in-thread.
-    tickets.slice(0, BULK_TICKETS_CARD_LIMIT).forEach((ticket, index) => {
-      const title = String(ticket["title"] ?? "(untitled)");
-      const priority = String(ticket["priority"] ?? params["defaultPriority"] ?? "");
-      const assignee = String(ticket["assignedTo"] ?? params["defaultAssignedTo"] ?? "");
-      const tags = Array.isArray(ticket["tags"]) ? (ticket["tags"] as unknown[]).join(", ") : "";
-      const rawDesc = String(ticket["description"] ?? "");
-      const desc = rawDesc.slice(0, 200);
-      const meta = [priority, assignee && `→ ${assignee}`, tags && `[${tags}]`].filter(Boolean).join(" · ");
-      lines.push(`**${index + 1}. ${title}**${meta ? ` — ${meta}` : ""}`);
-      if (desc) lines.push(`${desc}${rawDesc.length > 200 ? "…" : ""}`);
-      lines.push(``);
-    });
-    if (tickets.length > BULK_TICKETS_CARD_LIMIT) {
-      lines.push(`_…and ${tickets.length - BULK_TICKETS_CARD_LIMIT} more — all ${tickets.length} are created on approve._`);
-    }
-    return lines.join("\n");
-  }
-
-  if (tool === "spaces-update-bulk-tickets") {
-    const tickets = Array.isArray(params["tickets"]) ? params["tickets"] as Array<Record<string, unknown>> : [];
-    const lines = [`**Update ${tickets.length} Tickets**`, ``];
-
-    const defaults: string[] = [];
-    if (params["defaultStatus"]) defaults.push(`status \u2192 ${String(params["defaultStatus"])}`);
-    if (params["defaultStage"]) defaults.push(`stage \u2192 ${String(params["defaultStage"])}`);
-    if (params["defaultPriority"]) defaults.push(`priority \u2192 ${String(params["defaultPriority"])}`);
-    if (params["defaultAssigneeId"]) defaults.push(`assignee \u2192 ${String(params["defaultAssigneeId"])}`);
-    if (Array.isArray(params["defaultTags"]) && (params["defaultTags"] as unknown[]).length) {
-      defaults.push(`tags [${(params["defaultTags"] as unknown[]).join(", ")}]`);
-    }
-    if (defaults.length) lines.push(`**Defaults:** ${defaults.join(" \u00b7 ")}`, ``);
-
-    tickets.slice(0, BULK_TICKETS_CARD_LIMIT).forEach((ticket, index) => {
-      const ticketId = String(ticket["ticketId"] ?? "(no id)");
-      const changes: string[] = [];
-      const status = ticket["status"] ?? params["defaultStatus"];
-      const stage = ticket["stage"] ?? params["defaultStage"];
-      const priority = ticket["priority"] ?? params["defaultPriority"];
-      const assignee = ticket["assigneeId"] ?? params["defaultAssigneeId"];
-      if (status) changes.push(`status \u2192 ${String(status)}`);
-      if (stage) changes.push(`stage \u2192 ${String(stage)}`);
-      if (priority) changes.push(`priority \u2192 ${String(priority)}`);
-      if (assignee) changes.push(`assignee \u2192 ${String(assignee)}`);
-      if (ticket["title"]) changes.push(`title`);
-      if (ticket["description"]) changes.push(`description`);
-      if (ticket["eta"]) changes.push(`eta \u2192 ${String(ticket["eta"])}`);
-      if (Array.isArray(ticket["tags"]) || Array.isArray(params["defaultTags"])) changes.push(`tags`);
-      lines.push(`**${index + 1}. ${ticketId}**${changes.length ? ` \u2014 ${changes.join(" \u00b7 ")}` : ""}`);
-    });
-    if (tickets.length > BULK_TICKETS_CARD_LIMIT) {
-      lines.push(``, `_\u2026and ${tickets.length - BULK_TICKETS_CARD_LIMIT} more \u2014 all ${tickets.length} are updated on approve._`);
-    }
-    return lines.join("\n");
-  }
-
-  if (tool === "spaces-schedule-call") {
-    const title = params["title"] as string ?? "Call";
-    const startsAt = params["startsAt"] as string ?? "";
-    const endsAt = params["endsAt"] as string ?? "";
-    const lines = [`**Schedule Call**`, ``, `**Title:** ${title}`];
-    if (startsAt) lines.push(`**Starts:** ${new Date(startsAt).toLocaleString()}`);
-    if (endsAt) lines.push(`**Ends:** ${new Date(endsAt).toLocaleString()}`);
-    return lines.join("\n");
-  }
-
-  if (tool === "spaces-memory-create") {
-    const docType = (params["docType"] as string ?? "fact").toUpperCase();
-    const query = params["query"] as string ?? "";
-    const tags = params["tags"] as string[] ?? [];
-    const lines = [`**Save to Knowledge Base (${docType})**`];
-    if (query) lines.push(``, `**Summary:** ${query}`);
-    if (tags.length > 0) lines.push(`**Tags:** ${tags.join(", ")}`);
-    lines.push(``, `_See attached file for full content._`);
-    return lines.join("\n");
-  }
-
-  if (tool === "create-skill") {
-    const name = (params["name"] as string) ?? "";
-    const slug = (params["slug"] as string) ?? "";
-    const description = (params["description"] as string) ?? "";
-    const content = (params["content"] as string) ?? "";
-    const lines = [`**Create Skill**`, ``, `**Name:** ${name}`];
-    if (slug) lines.push(`**Slug:** \`${slug}\``);
-    if (description) lines.push(`**Description:** ${description}`);
-    lines.push(``, `**Content (${content.length} chars):**`, "```md", content.slice(0, 1500) + (content.length > 1500 ? "\n…(truncated)" : ""), "```");
-    return lines.join("\n");
-  }
-
-  // Fallback for unknown tools
-  const entries = Object.entries(params).filter(([, v]) => v != null).slice(0, 8);
-  const lines = [`**${tool}**`, ``];
-  for (const [key, value] of entries) {
-    const val = typeof value === "string" ? value.slice(0, 200) : JSON.stringify(value).slice(0, 200);
-    lines.push(`**${key}:** ${val}`);
-  }
-  return lines.join("\n");
-}
-
 async function postWriteApprovalAction(args: {
   action: Record<string, unknown>;
   ctx: SessionContext;
@@ -1246,51 +1087,27 @@ async function postWriteApprovalAction(args: {
   // The pending-action signature is minted before the Spaces delivery target is
   // known. Verify it, then bind the trusted session agent to the card signature
   // so flow-action cannot be replayed with another org's app credentials.
-  const { signAction, verifyActionSignature } = await import("./mcp.js");
-  const pendingActionPayload = {
-    serverType: action["serverType"] as string,
-    tool: action["tool"] as string,
-    params,
-    userId: action["userId"] as string,
-  };
-  if (!verifyActionSignature(pendingActionPayload, action["signature"] as string)) {
-    throw new Error("Invalid pending write-action signature");
+  const pendingWriteAction = readPendingWriteAction(action);
+  if (!pendingWriteAction) {
+    throw new Error("Invalid pending write-action shape");
   }
   const agentSlug = ctx.agentSlug ?? "";
   const spacesAppId = ctx.spacesAppId ?? "";
-  const cardSignature = signAction({ ...pendingActionPayload, agentSlug, spacesAppId });
-
-  const cardAction = {
-    serverType: pendingActionPayload.serverType,
-    tool: pendingActionPayload.tool,
-    params,
-    userId: pendingActionPayload.userId,
-    signature: cardSignature,
+  const cardAction = await mintWriteCardAction(pendingWriteAction, {
     agentSlug,
+    spacesAppId,
     channelId: ctx.channelId,
     conversationId: ctx.conversationId,
-  };
+  });
 
-  const ticketTitle = typeof params?.["title"] === "string" ? params["title"].trim() : "";
   // The rich `ticket` FlowUI component is only rendered by newer Spaces
   // backends; older deployments reject it. Track when we used it so a flow-
   // schema rejection can fall back to the generic approval card below.
-  const usedRichTicketCard = pendingActionPayload.tool === "spaces-create-ticket" && !!ticketTitle;
-  const writeFlow = withSpacesAppId(
-    usedRichTicketCard
-      ? buildTicketProposalFlow({
-          title: ticketTitle,
-          ...(TICKET_CARD_PRIORITIES.includes(params["priority"] as TicketCardPriority)
-            ? { priority: params["priority"] as TicketCardPriority }
-            : {}),
-          ...(typeof params["eta"] === "string" && params["eta"] ? { eta: params["eta"] } : {}),
-          ...(typeof params["assignedTo"] === "string" && params["assignedTo"]
-            ? { assigneeId: params["assignedTo"] }
-            : {}),
-        }, cardAction)
-      : buildWriteApprovalFlow(actionDesc, cardAction),
-    spacesAppId,
+  const { flow: cardFlow, usedTicketCard: usedRichTicketCard } = buildWriteApprovalCardFlow(
+    cardAction,
+    actionDesc,
   );
+  const writeFlow = withSpacesAppId(cardFlow, spacesAppId);
 
   // Any attachment is a SEPARATE post from the card. `/files/filesUpload`
   // (filesController.uploadFiles) has no flow handling at all — a `flow` field
@@ -1350,7 +1167,7 @@ async function postWriteApprovalAction(args: {
     // with no code change.
     if (!usedRichTicketCard || !isFlowSchemaRejection(err)) throw err;
     clog.warn(
-      `[webhook/result] ticket approval card rejected by Spaces flow schema; falling back to generic approval card tool=${pendingActionPayload.tool} channelId=${ctx.channelId} conversationId=${ctx.conversationId ?? ""}`,
+      `[webhook/result] ticket approval card rejected by Spaces flow schema; falling back to generic approval card tool=${cardAction.tool} channelId=${ctx.channelId} conversationId=${ctx.conversationId ?? ""}`,
     );
     await postCard(withSpacesAppId(buildWriteApprovalFlow(actionDesc, cardAction), spacesAppId));
   }
@@ -1741,7 +1558,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
               {
                 channelId: payload.channelId,
                 conversationId: payload.conversationId,
-                markdownText: `⚠️ Recording **${att.fileName ?? att.attachmentId}** was skipped: ${reason}. The run will continue without it.`,
+                markdownText: systemNote(`Recording **${att.fileName ?? att.attachmentId}** was skipped: ${reason}. The run will continue without it.`),
                 metadata: { contentFormat: "markdown" },
               }
             ).catch(() => {});
@@ -1942,6 +1759,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       ...(planModeEnabled && !immediateTaskCommand && eventType !== "USER_MENTIONED" ? { mode: "plan" as const } : {}),
     };
 
+    const rootAttachmentRefs = toRootAttachmentRefs(payload.attachments);
     // progressMessageId is assigned post-placeholder below; everything else is final here.
     const sessionContext: SessionContext = {
       mentionedUserId: eventType === "USER_MENTIONED" ? targetUserId : agent.spacesAppUserId,
@@ -1964,6 +1782,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       traceId,
       rootAgentSlug: agent.slug,
       triggerSource: "spaces",
+      ...(rootAttachmentRefs.length > 0 ? { rootAttachments: rootAttachmentRefs } : {}),
       ...(resolvedParentProvider ? { provider: resolvedParentProvider } : {}),
       ...(userSpacesWorkspaceId ? { workspaceId: userSpacesWorkspaceId } : {}),
       ...(twinWorkspaceId ? { workspaceId: twinWorkspaceId } : {}),
@@ -2105,7 +1924,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     if (body.success && body.sessionId) {
       // Progress signal to the dashboard. Two paths, switched by flag:
       //   USE_EPHEMERAL_PROGRESS=true  → POST /chat/agentProgress (requires Spaces XYNE-12145)
-      //   USE_EPHEMERAL_PROGRESS=false → POST /chat/postMessage for a "⏳ Working on it..."
+      //   USE_EPHEMERAL_PROGRESS=false → POST /chat/postMessage for a "Working on it..."
       //                                  placeholder; we capture messageId and edit it later.
       // USER_MENTIONED (twin) skips this entirely, so progressMessageId stays
       // undefined on the twin path. `resultForwardUrl` was resolved pre-dispatch.
@@ -2113,27 +1932,27 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       if (eventType !== "USER_MENTIONED" && !resultForwardUrl) {
         const initialProgressLabel = body.queued
           ? body.queuePosition && body.queuePosition > 0
-            ? `🕒 Queued — waiting for a runner (position ~${body.queuePosition})`
-            : "🕒 Queued — waiting for a runner"
+            ? `Queued — about ${body.queuePosition} ahead of this one`
+            : "Queued — waiting for a runner"
           : "Working on it...";
         try {
           if (USE_EPHEMERAL_PROGRESS) {
-            await spacesAppFetch("/chat/agentProgress", {
+            await emitAgentProgressWorking({
+              sessionId: body.sessionId,
               conversationId: payload.conversationId,
               channelId: payload.channelId,
               agentSlug: agent.slug,
               agentName: agent.name,
-              userId: agent.spacesAppUserId,
-              toolLabel: initialProgressLabel,
-              status: "working",
-            }, agent.appToken);
+              spacesAppUserId: agent.spacesAppUserId,
+              appToken: agent.appToken,
+            }, initialProgressLabel);
           } else {
             const placeholderRes = await postAgentMessage(
               { spacesAppUserId: agent.spacesAppUserId, appToken: agent.appToken },
               {
                 channelId: payload.channelId,
                 conversationId: payload.conversationId,
-                markdownText: `⏳ ${initialProgressLabel}`,
+                markdownText: `${initialProgressLabel}`,
                 metadata: { contentFormat: "markdown" },
               }
             );
@@ -2199,8 +2018,8 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     if (!(body.success && body.sessionId) && eventType !== "USER_MENTIONED" && !resultForwardUrl && payload.conversationId) {
       const refusal = body.error ?? "the run could not be started";
       const notice = /disabled/i.test(refusal)
-        ? `🚫 **${agent.slug}** is currently disabled — an admin can re-enable it in the agent dashboard.`
-        : `⚠️ I couldn't start this request: ${refusal}`;
+        ? systemNote(`**${agent.slug}** is currently disabled — an admin can re-enable it in the agent dashboard.`)
+        : systemNote(`I couldn't start this request: ${refusal}`);
       await postAgentMessage(
         { spacesAppUserId: agent.spacesAppUserId, appToken: agent.appToken },
         {
@@ -2333,7 +2152,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
             {
               channelId: payload.channelId,
               conversationId: payload.conversationId,
-              markdownText: `🚫 **${agent.slug}** is restricted — you don't have access to it. Ask the agent's owner to add you.`,
+              markdownText: systemNote(`**${agent.slug}** is restricted — you don't have access to it. Ask the agent's owner to add you.`),
               metadata: { contentFormat: "markdown" },
             }
           ).catch((err) =>
@@ -2353,6 +2172,39 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       await drainNextQueued(payload.conversationId, agent.slug, slotToken).catch(() => {});
     }
   }
+}
+
+/**
+ * Clear the Spaces "agent is working" pill for one session.
+ *
+ * Every terminal path must call this — completed, failed, cancelled, stopped.
+ * It used to be inline in the `completed` branch of /webhook/result, which made
+ * it unreachable for `/stop` (prod 2026-09-28: the pill kept showing the last
+ * tool label after the stop confirmation had already posted, until the 10-minute
+ * Redis TTL). It is idempotent, so a path that is unsure whether another already
+ * cleared should just call it.
+ */
+async function clearSpacesAgentProgress(
+  sessionId: string,
+  ctx: {
+    conversationId?: string | undefined;
+    channelId?: string | undefined;
+    agentSlug?: string | undefined;
+    agentName?: string | undefined;
+    spacesAppUserId?: string | undefined;
+    appToken?: string | undefined;
+  } | null | undefined,
+): Promise<void> {
+  if (!ctx) return;
+  await emitAgentProgressDone({
+    sessionId,
+    conversationId: ctx.conversationId,
+    channelId: ctx.channelId,
+    agentSlug: ctx.agentSlug,
+    agentName: ctx.agentName,
+    spacesAppUserId: ctx.spacesAppUserId,
+    appToken: ctx.appToken,
+  });
 }
 
 interface StopReconcileSummary {
@@ -2405,14 +2257,24 @@ async function reconcileStoppedRuns(conversationId: string, targetAgentSlug: str
       }
 
       const body = (await res.json().catch(() => ({}))) as { status?: string; ownerPod?: string };
-      if (body.status === "cancelled") {
+      if (body.status === "cancelled" || body.status === "forwarded") {
         summary.stopped++;
-        clog.info(`[stop] cancelled run ${run.sessionId} for conv ${conversationId}`);
-        continue;
-      }
-      if (body.status === "forwarded") {
-        summary.stopped++;
-        clog.info(`[stop] run ${run.sessionId} cancel forwarded to pod ${body.ownerPod ?? "unknown"}`);
+        clog.info(
+          body.status === "cancelled"
+            ? `[stop] cancelled run ${run.sessionId} for conv ${conversationId}`
+            : `[stop] run ${run.sessionId} cancel forwarded to pod ${body.ownerPod ?? "unknown"}`,
+        );
+        // Drop the spinner here rather than waiting for the run's own terminal
+        // callback: we just called cancelRunRecovery above, so that callback
+        // will classify as "stale" and take an early return. Clearing at the
+        // source also covers a cancel that kills the run before it can post
+        // back at all. Idempotent, so the callback path clearing again is fine.
+        if (USE_EPHEMERAL_PROGRESS) {
+          await clearSpacesAgentProgress(
+            run.sessionId,
+            await resolveSessionContext(run.sessionId, conversationId, run.agentSlug).catch(() => null),
+          );
+        }
         continue;
       }
 
@@ -2549,6 +2411,7 @@ async function redispatchQueuedMessage(msg: QueuedMessage): Promise<void> {
   await setSession(body.sessionId, queuedContext);
   if (msg.queueReason === "interrupt_followup") {
     void emitAgentWorkingSignal({
+      sessionId: body.sessionId,
       conversationId: msg.conversationId,
       channelId: msg.channelId,
       agentSlug: msg.agentSlug,
@@ -2756,33 +2619,35 @@ export async function handleAutomationWebhook(
   // Workflow-step idempotency. The automation engine retries a step whose
   // async result hasn't arrived within its (~20s) ack window, re-sending the
   // SAME dispatch id suffixed `:retry-N` (observed prod 2026-07-08: a 24s run
-  // executed 4x — original + retry-1..3). Every retry of one step must map to
+  // executed 4x — original + retry-1..3). Every re-send of one step must map to
   // the ONE already-running run: dedupe on the retry-stripped step id for the
   // lifetime of a plausible run. Deliberately conversation-INDEPENDENT —
   // workflow steps are usually conversation-less, which skips the
   // (conversation, agent) key below — and the reply is a 200 ack (not 409) so
   // the engine keeps waiting for the original run's result instead of
-  // error-retrying. No release needed: retries share the base id only within
-  // one firing; a future re-fire mints a fresh step id.
+  // error-retrying. The engine ALSO uses `:retry-N` for its output-validation
+  // retry (run-agent.step.ts handleValidationFailure), which re-asks the agent
+  // after the previous attempt finished and failed its output check. A higher
+  // retry number is therefore a new attempt and runs; only a same-or-older
+  // attempt is absorbed (lib/automation-step-dedup.ts).
   if (typeof sessionId === "string" && sessionId.length > 0) {
-    const stepBaseId = sessionId.replace(/:retry-\d+$/, "");
-    const stepKey = `automation-step-dedup:${agentSlug}:${stepBaseId}`;
     try {
-      const redis = redisService.getConnection();
-      const acquiredStep = await redis.set(stepKey, sessionId, "EX", 900, "NX");
-      if (acquiredStep !== "OK") {
-        const holder = await redis.get(stepKey);
-        if (holder && holder !== sessionId) {
-          clog.info(
-            `[webhook/automation-run] step retry absorbed step=${stepBaseId} incoming=${sessionId} holder=${holder} agent=${agentSlug}`,
-          );
-          res.status(200).json({ success: true, sessionId: holder, deduplicated: true });
-          return;
-        }
+      const step = await claimAutomationStep(redisService.getConnection(), agentSlug, sessionId);
+      if (step.kind === "absorb") {
+        clog.info(
+          `[webhook/automation-run] step retry absorbed step=${step.stepBaseId} incoming=${sessionId} holder=${step.holder} agent=${agentSlug}`,
+        );
+        res.status(200).json({ success: true, sessionId: step.holder, deduplicated: true });
+        return;
+      }
+      if (step.kind === "run-new-attempt") {
+        clog.info(
+          `[webhook/automation-run] step retry accepted as a new attempt step=${step.stepBaseId} incoming=${sessionId} previous=${step.previous} agent=${agentSlug}`,
+        );
       }
     } catch (err) {
       clog.warn(
-        `[webhook/automation-run] step dedup check failed step=${stepBaseId} agent=${agentSlug}: ${errMsg(err)}`,
+        `[webhook/automation-run] step dedup check failed session=${sessionId} agent=${agentSlug}: ${errMsg(err)}`,
       );
     }
   }
@@ -2937,18 +2802,25 @@ export async function handleAutomationWebhook(
   // so it can fix → build → push → PR), we merge it into the forwarded
   // agentConfig; claw already honors that flag on both gates (tool-palette strip
   // + sbx-git routing). Any caller that doesn't send it stays read-only, and no
-  // per-agent DB flag is needed.
+  // per-agent DB flag is needed. Workflow-engine steps (`wf-` session ids) get
+  // it too; Spaces automations (`<runId>:<step>`) never match and stay
+  // read-only (lib/automation-write-policy.ts).
   const sdlcProfile =
     payload.executionProfile === "sdlc" &&
     agentSlug === SDLC_AGENT_SLUG &&
     s2sKeyMatches(req.headers["x-s2s-key"]);
+  const allowSandboxWrite = automationRunAllowsSandboxWrite({
+    sessionId,
+    requested: payload.allowWriteInReadOnlyJob,
+    sdlcProfile,
+  });
   const baseAgentConfig = (agent.config as Record<string, unknown> | null) ?? {};
   // SDLC tools are merged in /internal/run (start-run) for any run carrying hub context.
   const forwardedAgentConfig: Record<string, unknown> | undefined =
-    agent.config || payload.allowWriteInReadOnlyJob || sdlcProfile
+    agent.config || allowSandboxWrite
       ? {
           ...baseAgentConfig,
-          ...(payload.allowWriteInReadOnlyJob || sdlcProfile ? { allowWriteInReadOnlyJob: true } : {}),
+          ...(allowSandboxWrite ? { allowWriteInReadOnlyJob: true } : {}),
           ...(sdlcProfile ? { sdlcContext: payload.sdlcContext } : {}),
         }
       : undefined;
@@ -3322,7 +3194,7 @@ async function publishThreadArtifactShare(
       {
         channelId: ctx.channelId,
         conversationId: ctx.conversationId,
-        markdownText: `🔗 **Live ${command}:** ${designShareLink}\nOpens the rendered snapshot in the browser — the same link updates with future revisions in this thread.`,
+        markdownText: `**Live ${command}:** ${designShareLink}\nOpens the rendered snapshot in the browser — the same link updates with future revisions in this thread.`,
         metadata: { contentFormat: "markdown" },
       }
     );
@@ -3450,7 +3322,7 @@ router.post("/review-room", requireStrictS2S, async (req: Request, res: Response
     const link = designShareUrl(share.sharePath);
 
     const markdownText =
-      `🧭 **Review room${prNumber ? ` for ${prNumber}` : ""}:** ${link}\n` +
+      `**Review room${prNumber ? ` for ${prNumber}` : ""}:** ${link}\n` +
       `Diff stats, per-file history and test coverage are computed from git; the findings are adversarial questions, not a verdict.`;
 
     // ONE message carries both the link and the HTML: `/files/filesUpload`
@@ -3845,12 +3717,12 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       const names = [...new Set(queued.map(toolOf))].slice(0, 6).map((t) => `\`${t}\``);
       const noun = queued.length === 1 ? "action is" : "actions are";
       lines.push(
-        `⏳ ${queued.length} write ${noun} queued and awaiting your approval — nothing has run yet: ${names.join(", ")}. Approve the card${queued.length === 1 ? "" : "s"} to execute.`,
+        `${queued.length} write ${noun} queued and awaiting your approval — nothing has run yet: ${names.join(", ")}. Approve the card${queued.length === 1 ? "" : "s"} to execute.`,
       );
     }
     for (const action of rejected) {
       const reason = pendingActionValidation.get(action)?.error ?? "target not accessible";
-      lines.push(`⚠️ \`${toolOf(action)}\` was NOT queued — nothing was created. ${reason}`);
+      lines.push(`\`${toolOf(action)}\` was NOT queued — nothing was created. ${reason}`);
     }
     if (lines.length > 0) {
       const body = lines.map((l) => `_${l}_`).join("\n\n");
@@ -3871,7 +3743,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       .findActiveByConversation(ctx.conversationId)
       .catch(() => null);
     if (goal) {
-      resultWithCitations = `🎯 **Goal · Turn ${goal.turnCount + 1}/${goal.maxTurns}**\n\n${resultWithCitations}`;
+      resultWithCitations = `**Goal · Turn ${goal.turnCount + 1}/${goal.maxTurns}**\n\n${resultWithCitations}`;
     }
   }
 
@@ -3881,6 +3753,12 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
   });
   if (recoveryCallbackDisposition === "stale") {
     clog.info(`[webhook/result] Ignoring callback from superseded or settled session=${sessionId}`);
+    // The callback is superseded, but the PILL is not: this is the path a
+    // /stop-cancelled run takes (reconcileStoppedRuns calls cancelRunRecovery
+    // first, which marks the recovery state exhausted, so the run's own
+    // terminal callback classifies as stale here). Dropping it silently left
+    // the spinner showing the last tool label until its 10-minute TTL.
+    if (USE_EPHEMERAL_PROGRESS) await clearSpacesAgentProgress(sessionId, ctx);
     return;
   }
 
@@ -4173,6 +4051,10 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
   );
 
   if (payload.status !== "completed") {
+    // Failed / cancelled / interrupted runs clear the pill too. The clear
+    // further down lives inside the completed branch, so without this every
+    // non-happy terminal state left the spinner running.
+    if (USE_EPHEMERAL_PROGRESS) await clearSpacesAgentProgress(sessionId, ctx);
     // Result-forward callers (Spaces auto-draft / automations) get the failure
     // via their callback and return BEFORE the bot-mention surfacing below —
     // they want the callback, not a message posted into a thread.
@@ -4222,7 +4104,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
             {
               channelId: ctx.channelId,
               conversationId: ctx.conversationId,
-              markdownText: `⚠️ **Agent chain escalation**: \`${ctx.agentSlug}\` failed. Error: ${payload.error ?? "unknown"}. Manual intervention needed.`,
+              markdownText: `**Agent chain escalation**: \`${ctx.agentSlug}\` failed. Error: ${payload.error ?? "unknown"}. Manual intervention needed.`,
               metadata: { contentFormat: "markdown" },
             }
           ).catch(() => {});
@@ -4338,10 +4220,10 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       const isQuota = /\b429\b|quota|rate.?limit|exceeded|out of credit/i.test(rawErr);
       const harnessLabel = payload.localHarnessProvider === "codex-cli" ? "Codex CLI" : "Claude Code";
       const notice = payload.localHarnessUnreachable
-        ? `⚠️ I couldn't reach **${harnessLabel}** on your machine, and running this on Xyne's servers instead didn't start either. Open the Xyne desktop app (or turn off the local harness for this agent) and try again.`
+        ? `I couldn't reach **${harnessLabel}** on your machine, and running this on Xyne's servers instead didn't start either. Open the Xyne desktop app (or turn off the local harness for this agent) and try again.`
         : isQuota
-          ? "⚠️ I couldn't respond — the provider configured for this agent is out of quota / rate-limited right now. Please retry shortly, or switch the agent's provider in its settings."
-          : "⚠️ I couldn't complete this request due to an internal error. Please try again.";
+          ? "I couldn't respond — the provider configured for this agent is out of quota / rate-limited right now. Please retry shortly, or switch the agent's provider in its settings."
+          : "I couldn't complete this request due to an internal error. Please try again.";
       await postAgentMessage(
         { spacesAppUserId: ctx.spacesAppUserId, appToken: ctx.appToken },
         {
@@ -4481,21 +4363,12 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
 
   // Clear the ephemeral agent progress signal — dashboard drops the spinner.
   // Only fires in the ephemeral path; the placeholder path clears naturally
-  // when we edit the "⏳" message with the final result below.
+  // when we edit the placeholder message with the final result below.
   // Same deliverability guard as the per-tool push in /progress: twin runs and
   // claw-only conversations (no Spaces channelId) never posted a spinner, so
   // clearing would only add another guaranteed-4xx call.
-  if (USE_EPHEMERAL_PROGRESS && ctx.agentSlug !== "digital-twin" && ctx.channelId) {
-    spacesAppFetch("/chat/agentProgress", {
-      conversationId: ctx.conversationId,
-      channelId: ctx.channelId,
-      agentSlug: ctx.agentSlug,
-      agentName: ctx.agentName,
-      userId: ctx.spacesAppUserId,
-      status: "done",
-    }, ctx.appToken).catch((err) =>
-      log.warn("Failed to clear agent progress signal", { error: errMsg(err) }),
-    );
+  if (USE_EPHEMERAL_PROGRESS) {
+    void clearSpacesAgentProgress(sessionId, ctx);
   }
 
   // Persist the assistant response as a ChatMessage (transcript) — fire-and-forget
@@ -4819,6 +4692,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           // /internal/run (bypassing the normal mention path that posts this), so
           // without it the indicator only appears on the first tool-call tick.
           void emitAgentWorkingSignal({
+            sessionId: runBody.sessionId,
             conversationId: ctx.conversationId,
             channelId: ctx.channelId,
             agentSlug: ctx.agentSlug,
@@ -4872,185 +4746,53 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
   // only names a slug — nothing the model wrote reaches this card, so an agent
   // cannot advertise a capability it was never granted.
   let postedAgentProfileCard = false;
-  if (pendingAgentCard?.variant === "profile" && agentCardDeliverable && ctx.agentOrgId) {
+  const agentCardIdentity = ctx.agentOrgId && ctx.agentSlug
+    ? {
+        agentSlug: ctx.agentSlug,
+        orgId: ctx.agentOrgId,
+        userId: ctx.senderId,
+        conversationId: ctx.conversationId,
+        channelId: ctx.channelId,
+        spacesAppId: ctx.spacesAppId ?? undefined,
+      }
+    : null;
+  const connectorCardIdentity = {
+    agentSlug: ctx.agentSlug,
+    agentOrgId: ctx.agentOrgId ?? null,
+    userId: ctx.senderId,
+    conversationId: ctx.conversationId,
+    channelId: ctx.channelId,
+    spacesAppId: ctx.spacesAppId ?? undefined,
+  };
+  const agentCardTarget = {
+    kind: "spaces" as const,
+    channelId: ctx.channelId,
+    conversationId: ctx.conversationId,
+    spacesAppUserId: ctx.spacesAppUserId,
+    appToken: ctx.appToken,
+  };
+  if (pendingAgentCard?.variant === "profile" && agentCardDeliverable && agentCardIdentity) {
     try {
       const targetSlug = pendingAgentCard.slug?.trim() || ctx.agentSlug!;
-      const row = await agentRepository.findBySlug(targetSlug, ctx.agentOrgId);
-      if (!row) {
-        log.info(`[agent-card] profile card skipped — no agent "${targetSlug}" in org ${ctx.agentOrgId}`);
-      } else {
-        const catalog = await buildAvailableToolsCatalog(undefined, ctx.agentOrgId);
-        const resolved = await resolveAgentCapabilities(
-          toolIdsFromConfig(row.config),
-          catalog,
-          ctx.senderId,
-          await listCallableAgentOptions(ctx.agentOrgId, ctx.senderId, row.slug),
-        );
-        const ownerCredit = await agentOwnerCredit(row.ownerUserId);
-        const flow = withSpacesAppId(
-          buildAgentCardFlow(
-            { variant: "profile", agent: identityFromAgentRow(row, resolved, undefined, ownerCredit) },
-            {
-              agentSlug: ctx.agentSlug!,
-              targetSlug,
-              userId: ctx.senderId,
-              conversationId: ctx.conversationId,
-              channelId: ctx.channelId,
-            },
-          ),
-          ctx.spacesAppId,
-        );
-        await spacesAppFetch("/chat/postMessage", {
-          channelId: ctx.channelId,
-          conversationId: ctx.conversationId,
-          flow,
-          userId: ctx.spacesAppUserId,
-        }, ctx.appToken);
-        postedAgentProfileCard = true;
-        log.info(`[agent-card] posted profile card for ${targetSlug} conv=${ctx.conversationId}`);
-      }
+      postedAgentProfileCard = Boolean(await renderAgentProfileCard(targetSlug, agentCardIdentity, agentCardTarget));
     } catch (err) {
       // Non-fatal: the reply itself still posts below.
-      log.warn("Failed to post agent profile card (non-fatal)", {
-        error: errMsg(err),
-      });
+      log.warn("Failed to post agent profile card (non-fatal)", { error: errMsg(err) });
     }
   }
-  // Fall back to the server's own reading of the request when the model did not
-  // ask for cards. It routinely misses the moment — most often by assuming a
-  // connector is already connected — and a missing capability is exactly when
-  // the user most needs the offer. Only unconnected connectors survive the
-  // filter below, so a wrong guess costs nothing.
-  // Fail-safe: this runs before the reply is posted, so a throw here would cost
-  // the user their answer. A suggestion is never worth that.
-  let inferredTypes: string[] = [];
-  if (!payload.pendingConnectorSuggestions) {
+  const connectorSuggestions = resolveConnectorSuggestions(
+    payload.pendingConnectorSuggestions,
+    ctx.rootTask ?? ctx.task ?? "",
+  );
+  if (connectorSuggestions && agentCardDeliverable) {
     try {
-      inferredTypes = connectorTypesFromText(ctx.rootTask ?? ctx.task ?? "", {
-        includeKeywords: true,
-      }).slice(0, MCP_SUGGEST_INFERRED_MAX);
-    } catch (err) {
-      log.warn("[mcp-suggest] connector inference failed (non-fatal)", {
-        error: err instanceof Error ? err.message : String(err),
+      await renderConnectorSuggestCard({
+        suggestions: connectorSuggestions,
+        blockedConnectors: payload.blockedConnectors,
+        taskText: ctx.rootTask ?? ctx.task ?? "",
+        id: connectorCardIdentity,
+        target: agentCardTarget,
       });
-    }
-  }
-
-  const rosterAsked =
-    !payload.pendingConnectorSuggestions && wantsConnectorRoster(ctx.rootTask ?? ctx.task ?? "");
-
-  const pendingConnectorSuggestions: PendingConnectorSuggestions | undefined =
-    payload.pendingConnectorSuggestions ??
-    (rosterAsked
-      ? { serverTypes: [], listAll: true, inferred: true }
-      : inferredTypes.length > 0
-        ? { serverTypes: inferredTypes, inferred: true }
-        : undefined);
-  if (pendingConnectorSuggestions && agentCardDeliverable) {
-    try {
-      // Roster mode: the user asked what exists, so the SERVER picks the sample
-      // — the model must not decide which connectors represent the catalog.
-      const listAll = pendingConnectorSuggestions.listAll === true;
-      const totalCount = listAll
-        ? await prisma.mcpServer.count({ where: { enabled: true } })
-        : undefined;
-
-      // Resolve every requested type against the catalog. The model supplies
-      // names only — descriptions and display names come from the row, and an
-      // unknown type is dropped rather than rendered as an empty card.
-      const candidates = listAll
-        ? await prisma.mcpServer.findMany({
-            where: { enabled: true },
-            select: { id: true, type: true, name: true, description: true, connectorMeta: true },
-            orderBy: { name: "asc" },
-          })
-        : await prisma.mcpServer.findMany({
-            where: { type: { in: pendingConnectorSuggestions.serverTypes }, enabled: true },
-            select: { id: true, type: true, name: true, description: true, connectorMeta: true },
-          });
-      const visibleRows = candidates.filter((row) =>
-        isVisibleToUser(parseConnectorMeta(row.connectorMeta), ctx.senderId),
-      );
-      const rows = listAll ? visibleRows.slice(0, MCP_SUGGEST_ROSTER_SAMPLE) : visibleRows;
-      const byType = new Map(rows.map((row) => [row.type, row]));
-
-      const availability = await availabilityForServerIds(
-        ctx.senderId,
-        rows.map((r) => r.id),
-      );
-      const blockedTypes = new Set(payload.blockedConnectors ?? []);
-
-      // Roster mode is already ordered by the query; otherwise preserve the
-      // model's ordering, since it ranked them by relevance.
-      const ordered = listAll
-        ? rows
-        : pendingConnectorSuggestions.serverTypes
-            .map((type) => byType.get(type))
-            .filter((row): row is NonNullable<typeof row> => !!row);
-
-      const inferred = pendingConnectorSuggestions.inferred === true;
-
-      // Derived from the user's own words, never from the model's claim: a model
-      // that wants its card shown will assert explicit intent for a plain task
-      // request, which is exactly how an already-usable connector slipped
-      // through. The server owns this fact like every other on the card.
-      const askedToConnect = new Set(
-        connectorTypesUserAskedFor(ctx.rootTask ?? ctx.task ?? ""),
-      );
-
-      const connectors = ordered
-        // An unsolicited suggestion only earns its place when the connector is
-        // not already usable — personally connected or shared org-wide. Two
-        // exceptions, both genuine user intent: roster mode ("what exists?"),
-        // and the user naming a connector they want to connect, where a personal
-        // connection is a legitimate want even under an org credential.
-        .filter((row) => {
-          if (listAll || askedToConnect.has(row.type)) return true;
-          if (availability.personal.has(row.id)) return false;
-          if (availability.org.has(row.id)) return blockedTypes.has(row.type);
-          return true;
-        })
-        .map((row) => ({
-          serverType: row.type,
-          name: row.name,
-          ...(row.description ? { description: row.description } : {}),
-          connected: availability.personal.has(row.id) || availability.org.has(row.id),
-        }));
-
-      if (connectors.length === 0) {
-        log.info(
-          `[mcp-suggest] skipped — none of ${pendingConnectorSuggestions.serverTypes.join(", ")} are known connectors`,
-        );
-      } else {
-        const flow = withSpacesAppId(
-          buildMcpSuggestFlow({
-            connectors,
-            ...(pendingConnectorSuggestions.title
-              ? { title: pendingConnectorSuggestions.title }
-              : listAll
-                ? { title: "Connectors you can add" }
-                : {}),
-            ...(listAll ? { browseAll: true } : {}),
-            ...(inferred && !pendingConnectorSuggestions.title
-              ? { title: "Connect to unlock this" }
-              : {}),
-            ...(totalCount !== undefined ? { totalCount } : {}),
-            screenKey: `${ctx.senderId}-${connectors.map((c) => c.serverType).join("-")}`,
-            ...(ctx.agentSlug ? { agentSlug: ctx.agentSlug } : {}),
-            userId: ctx.senderId,
-            conversationId: ctx.conversationId,
-            channelId: ctx.channelId,
-          }),
-          ctx.spacesAppId,
-        );
-        await spacesAppFetch("/chat/postMessage", {
-          channelId: ctx.channelId,
-          conversationId: ctx.conversationId,
-          flow,
-          userId: ctx.spacesAppUserId,
-        }, ctx.appToken);
-        log.info(`[mcp-suggest] posted ${connectors.length} connector cards conv=${ctx.conversationId}`);
-      }
     } catch (err) {
       log.warn("Failed to post connector suggestions (non-fatal)", {
         error: err instanceof Error ? err.message : String(err),
@@ -5065,60 +4807,11 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
   // a card that will never render.
   if (agentCardDeliverable) {
     try {
-      const askText = stripAddressedAgentMention(ctx.rootTask ?? ctx.task ?? "", ctx.agentSlug);
-      const namedProviders = providersUserAskedFor(askText);
-      const unsupported = unsupportedProvidersFromText(askText);
-      const providerRoster = wantsProviderRoster(askText);
-
-      if (namedProviders.length > 0 || providerRoster) {
-        const creds = await userProviderCredentialsRepository
-          .listByUser(ctx.senderId)
-          .catch(() => []);
-        const connectedByProvider = new Map(creds.map((c) => [c.provider, c] as const));
-
-        const shown = providerRoster ? [...SUPPORTED_PROVIDERS] : namedProviders;
-        const providers = shown.map((provider) => {
-          const cred = connectedByProvider.get(provider);
-          return {
-            provider,
-            name: PROVIDER_LABELS[provider] ?? provider,
-            ...(PROVIDER_DESCRIPTIONS[provider]
-              ? { description: PROVIDER_DESCRIPTIONS[provider] as string }
-              : {}),
-            connected: provider === "spaces" ? true : !!cred,
-            ...(cred?.sharedCredentialId ? { sharedName: "Shared with your org" } : {}),
-            ...(PROVIDER_CONNECT_METHOD[provider]
-              ? { connectMethod: PROVIDER_CONNECT_METHOD[provider] as "oauth" | "device" | "api_key" | "none" }
-              : {}),
-          };
-        });
-
-        const flow = withSpacesAppId(
-          buildProviderSuggestFlow({
-            providers,
-            title: providerRoster ? "AI providers you can connect" : "Connect this provider",
-            ...(providerRoster ? { browseAll: true, totalCount: SUPPORTED_PROVIDERS.length } : {}),
-            ...(unsupported.length > 0
-              ? { reason: `${unsupported.join(", ")} ${unsupported.length === 1 ? "is" : "are"} not available on Xyne.` }
-              : {}),
-            screenKey: `${ctx.senderId}-${shown.join("-")}`,
-            ...(ctx.agentSlug ? { agentSlug: ctx.agentSlug } : {}),
-            userId: ctx.senderId,
-            conversationId: ctx.conversationId,
-            channelId: ctx.channelId,
-          }),
-          ctx.spacesAppId,
-        );
-        await spacesAppFetch("/chat/postMessage", {
-          channelId: ctx.channelId,
-          conversationId: ctx.conversationId,
-          flow,
-          userId: ctx.spacesAppUserId,
-        }, ctx.appToken);
-        log.info(`[provider-suggest] posted ${providers.length} provider cards conv=${ctx.conversationId}`);
-      } else if (unsupported.length > 0) {
-        log.info(`[provider-suggest] unsupported only: ${unsupported.join(", ")} — no card`);
-      }
+      await renderProviderSuggestCard({
+        taskText: ctx.rootTask ?? ctx.task ?? "",
+        id: connectorCardIdentity,
+        target: agentCardTarget,
+      });
     } catch (err) {
       log.warn("Failed to post provider suggestions (non-fatal)", {
         error: err instanceof Error ? err.message : String(err),
@@ -5126,120 +4819,21 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     }
   }
 
-  if (pendingAgentCard?.variant === "summary" && agentCardDeliverable && ctx.agentOrgId) {
+  if (pendingAgentCard?.variant === "summary" && agentCardDeliverable && agentCardIdentity) {
     try {
-      const [total, globalCount, sampleAgents] = await Promise.all([
-        prisma.agent.count({ where: { orgId: ctx.agentOrgId, enabled: true } }),
-        prisma.agent.count({ where: { orgId: ctx.agentOrgId, enabled: true, scope: "global" } }),
-        // Sample rows for the card. The SERVER picks them — the model must not
-        // decide which agents represent the roster.
-        prisma.agent.findMany({
-          where: { orgId: ctx.agentOrgId, enabled: true },
-          select: { slug: true, name: true, description: true },
-          orderBy: { name: "asc" },
-          take: AGENT_SUMMARY_SAMPLE,
-        }),
-      ]);
-
-      if (total === 0) {
-        log.info(`[agent-card] summary skipped — no agents in org ${ctx.agentOrgId}`);
-      } else {
-        const flow = withSpacesAppId(
-          buildAgentSummaryFlow(
-            {
-              total,
-              global: globalCount,
-              personal: total - globalCount,
-              agents: sampleAgents.map((a) => ({
-                slug: a.slug,
-                name: a.name,
-                ...(a.description ? { description: a.description } : {}),
-              })),
-            },
-            {
-              agentSlug: ctx.agentSlug!,
-              userId: ctx.senderId,
-              conversationId: ctx.conversationId,
-              channelId: ctx.channelId,
-            },
-          ),
-          ctx.spacesAppId,
-        );
-        await spacesAppFetch("/chat/postMessage", {
-          channelId: ctx.channelId,
-          conversationId: ctx.conversationId,
-          flow,
-          userId: ctx.spacesAppUserId,
-        }, ctx.appToken);
-        postedAgentProfileCard = true;
-        log.info(`[agent-card] posted roster summary (${total}) conv=${ctx.conversationId}`);
-      }
+      postedAgentProfileCard = Boolean(await renderAgentSummaryCard(agentCardIdentity, agentCardTarget));
     } catch (err) {
-      log.warn("Failed to post agent summary card (non-fatal)", {
-        error: err instanceof Error ? err.message : String(err),
-      });
+      log.warn("Failed to post agent roster summary (non-fatal)", { error: errMsg(err) });
     }
   }
 
-  if (pendingAgentCard?.variant === "profile-list" && agentCardDeliverable && ctx.agentOrgId) {
+  if (pendingAgentCard?.variant === "profile-list" && agentCardDeliverable && agentCardIdentity) {
     try {
-      const unique = [
-        ...new Set(pendingAgentCard.slugs.map((slug) => slug.trim()).filter((slug) => slug.length > 0)),
-      ];
-      const capped = unique.slice(0, MAX_AGENT_LIST_CARDS);
-
-      // Matches are rendered as compact roster rows, not full profile cards:
-      // "which agents can review PRs?" wants a scannable shortlist, and five
-      // stacked identity cards buries it. Each row opens the agent's own page.
-      const rows = [];
-      for (const slug of capped) {
-        const row = await agentRepository.findBySlug(slug, ctx.agentOrgId);
-        if (!row) {
-          log.info(`[agent-card] list row skipped — no agent "${slug}" in org ${ctx.agentOrgId}`);
-          continue;
-        }
-        rows.push({
-          slug: row.slug,
-          name: row.name,
-          ...(row.description ? { description: row.description } : {}),
-        });
-      }
-
-      if (rows.length === 0) {
-        log.info(`[agent-card] list card skipped — none of ${unique.length} slugs resolved`);
-      } else {
-        const flow = withSpacesAppId(
-          buildAgentSummaryFlow(
-            {
-              total: rows.length,
-              agents: rows,
-            },
-            {
-              agentSlug: ctx.agentSlug!,
-              userId: ctx.senderId,
-              conversationId: ctx.conversationId,
-              channelId: ctx.channelId,
-            },
-            // Matches, not the whole roster — so the header counts what was
-            // found rather than claiming every agent in the org.
-            `${rows.length} ${rows.length === 1 ? "agent" : "agents"} that can help`,
-          ),
-          ctx.spacesAppId,
-        );
-        await spacesAppFetch("/chat/postMessage", {
-          channelId: ctx.channelId,
-          conversationId: ctx.conversationId,
-          flow,
-          userId: ctx.spacesAppUserId,
-        }, ctx.appToken);
-        postedAgentProfileCard = true;
-        log.info(`[agent-card] posted ${rows.length} matching agents conv=${ctx.conversationId}`);
-      }
+      postedAgentProfileCard = Boolean(
+        await renderAgentProfileListCard(pendingAgentCard.slugs, agentCardIdentity, agentCardTarget),
+      );
     } catch (err) {
-      // Non-fatal: the reply itself still posts below.
-      log.warn("Failed to post matching agent card (non-fatal)", {
-        error: err instanceof Error ? err.message : String(err),
-      });
+      log.warn("Failed to post agent list card (non-fatal)", { error: errMsg(err) });
     }
   }
 
@@ -5263,7 +4857,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           {
             channelId: ctx.channelId,
             conversationId: ctx.conversationId,
-            markdownText: `⚠️ I drafted an agent but \`${spec.slug}\` isn't a usable identifier. Ask me again with a simple name like "ticket triage".`,
+            markdownText: `I drafted an agent but \`${spec.slug}\` isn't a usable identifier. Ask me again with a simple name like "ticket triage".`,
             metadata: { contentFormat: "markdown" },
           }
         );
@@ -5281,7 +4875,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           {
             channelId: ctx.channelId,
             conversationId: ctx.conversationId,
-            markdownText: `⚠️ An agent called **${existing.name}** (\`${spec.slug}\`) already exists here, so I didn't create a draft. Ask me again with a different name, or edit the existing agent.`,
+            markdownText: `An agent called **${existing.name}** (\`${spec.slug}\`) already exists here, so I didn't create a draft. Ask me again with a different name, or edit the existing agent.`,
             metadata: { contentFormat: "markdown" },
           }
         );
@@ -5374,12 +4968,13 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
         ctx.spacesAppId,
       );
 
-      await spacesAppFetch("/chat/postMessage", {
+      await postFlowCard(flow, {
+        kind: "spaces",
         channelId: ctx.channelId,
         conversationId: ctx.conversationId,
-        flow,
-        userId: ctx.spacesAppUserId,
-      }, token);
+        spacesAppUserId: ctx.spacesAppUserId,
+        appToken: token,
+      });
       log.info(`[agent-card] posted draft card slug=${spec.slug} request=${outcome.request.id} conv=${ctx.conversationId}`);
 
       // Persist an assistant transcript row: the interactive card exists only in
@@ -5420,7 +5015,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           {
             channelId: ctx.channelId,
             conversationId: ctx.conversationId,
-            markdownText: "⚠️ I drafted the agent but couldn't post it for approval. Please try again.",
+            markdownText: "I drafted the agent but couldn't post it for approval. Please try again.",
             metadata: { contentFormat: "markdown" },
           }
         );
@@ -5512,7 +5107,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       // a transient provider issue to retry, not the agent having nothing to say.
       const usedTools = (payload.toolsUsed?.length ?? 0) > 0;
       const sorryText = payload.emptyReason === "provider_capacity"
-        ? `⚠️ The AI provider had a temporary problem and couldn't complete your request${payload.emptyReasonDetail ? ` — \`${payload.emptyReasonDetail}\`` : ""}. Please try again in a moment.`
+        ? `The AI provider had a temporary problem and couldn't complete your request${payload.emptyReasonDetail ? ` — \`${payload.emptyReasonDetail}\`` : ""}. Please try again in a moment.`
         : usedTools
           ? "Sorry — I completed some steps but didn't have a final answer to show. Please try rephrasing, or send your message again."
           : "Sorry, I wasn't able to produce a response. Please try sending your message again.";
@@ -5721,10 +5316,28 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           // `context`, independent of whether the task template used {{result}}),
           // plus any attachments the previous agent produced — so artifacts (CSV,
           // PDF, screenshots, …) carry across the hop instead of being dropped.
-          const handoffContext =
-            `--- Final output from the previous agent ("${ctx.agentSlug}") ---\n` +
-            resultText.slice(0, 8000);
-          const forwardedAttachments = payload.attachments ?? [];
+          // The human's original request and the files on it are pinned on every
+          // hop too: they reach only the first agent through the @mention path,
+          // and a later agent otherwise never sees them.
+          const rootAttachmentRefs = ctx.rootAttachments ?? [];
+          const rootFiles = rootAttachmentRefs.length > 0
+            ? await downloadRootAttachments(rootAttachmentRefs, {
+                appToken: decryptStoredField(targetAgentRow.spacesAppToken),
+                scopeId: ctx.conversationId || ctx.channelId || "unscoped",
+              })
+            : { attachments: [], failed: [] };
+          if (rootFiles.failed.length > 0) {
+            log.warn(`Chain: could not carry original file(s) to ${targetAgentSlug}: ${rootFiles.failed.join(", ")}`);
+          }
+          const handoffContext = buildHandoffContext({
+            rootTask: originalTask,
+            senderName: ctx.senderName,
+            rootFileNames: rootFiles.attachments.map((att) => att.fileName),
+            failedFileNames: rootFiles.failed,
+            previousAgentSlug: ctx.agentSlug ?? "",
+            previousOutput: resultText,
+          });
+          const forwardedAttachments = mergeHandoffAttachments(rootFiles.attachments, payload.attachments ?? []);
 
           const runRes = await fetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run`, {
             method: "POST",
@@ -5736,8 +5349,10 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
               userId: ctx.senderId,
               task: interpolatedTask,
               context: handoffContext,
+              ...(ctx.conversationId ? { conversationId: ctx.conversationId } : {}),
               agentSlug: targetAgentSlug,
               orgId: targetAgentRow.orgId,
+              eventType: "APP_MENTIONED",
               channelId: ctx.channelId,
               ...(forwardedAttachments.length > 0 ? { attachments: forwardedAttachments } : {}),
               callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
@@ -5759,6 +5374,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
               conversationId: ctx.conversationId,
               task: interpolatedTask,
               rootTask: originalTask,
+              ...(rootAttachmentRefs.length > 0 ? { rootAttachments: rootAttachmentRefs } : {}),
               agentId: targetAgentRow.id,
               agentOrgId: targetAgentRow.orgId ?? null,
               agentSlug: targetAgentSlug,
@@ -5897,7 +5513,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
             `Copilot: attachment upload failed for ${ctx.agentSlug} — falling back to text-only reply`,
             { error: errMsg(err) },
           );
-          const fileNote = `⚠️ _Couldn't attach ${prepared.attachments.length} file(s) (upload failed)._`;
+          const fileNote = `_Couldn't attach ${prepared.attachments.length} file(s) (upload failed)._`;
           const fallbackText = prepared.text?.trim()
             ? `${prepared.text}\n\n${fileNote}`
             : `${fileNote} Please try again.`;
@@ -6070,7 +5686,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
             `Attachment upload failed for ${ctx.agentSlug} — falling back to text-only reply`,
             { error: errMsg(err) },
           );
-          const fileNote = `⚠️ _Couldn't attach ${prepared.attachments.length} file(s) (upload failed)._`;
+          const fileNote = `_Couldn't attach ${prepared.attachments.length} file(s) (upload failed)._`;
           const fallbackText = prepared.text?.trim()
             ? `${prepared.text}\n\n${fileNote}`
             : `${fileNote} Please try again.`;
@@ -6086,7 +5702,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           log.info(`Agent ${ctx.agentSlug}: posted text-only fallback after attachment upload failure in thread ${ctx.conversationId}`);
         }
       } else {
-        // Placeholder path: if we have the "⏳" messageId, edit it with the final
+        // Placeholder path: if we have the placeholder messageId, edit it with the final
         // result so the same message transitions from "working..." to the answer.
         // On any update failure, fall through to a fresh postMessage so the user
         // never goes without the final answer. (Long-result case never reaches
@@ -6182,7 +5798,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
             // (same surface as tool calls), not a new chat message — only the
             // terminal outcome above is posted permanently.
             await postGoalPhase(
-              { conversationId: ctx.conversationId, channelId: ctx.channelId, agentSlug: ctx.agentSlug, spacesAppUserId: ctx.spacesAppUserId, appToken: token },
+              { sessionId, conversationId: ctx.conversationId, channelId: ctx.channelId, agentSlug: ctx.agentSlug, spacesAppUserId: ctx.spacesAppUserId, appToken: token },
               decision.replyToUser,
             );
             // Refire claw's /run with the stashed dispatch payload, overriding
@@ -6938,6 +6554,142 @@ async function finishCreateWidget(sessionId: string, widgetId: string, token: st
   }
 }
 
+export interface WidgetFlowContext {
+  agentSlug: string;
+  channelId: string;
+  conversationId: string;
+  userId: string;
+  spacesAppId?: string | null | undefined;
+  /** Omitted on the Spaces path, keeping its signature payload byte-identical
+   *  to cards minted before this existed. */
+  surface?: "xyne-ai";
+  /** Signed, so a tampered card can't redirect the continuation elsewhere. */
+  chatMessageId?: string;
+}
+
+/**
+ * UiWidget → signed FlowDefinition. Shared by both surfaces so the
+ * `user-answer` signature payload, which flow-action.ts rebuilds byte-for-byte,
+ * has one definition. Null for `plan` (its own path) and for empty payloads.
+ */
+export async function widgetToFlow(
+  widget: UiWidget,
+  ctx: WidgetFlowContext,
+): Promise<FlowDefinition | null> {
+  const withAppId = (flow: FlowDefinition): FlowDefinition =>
+    withSpacesAppId(flow, ctx.spacesAppId);
+
+  switch (widget.type) {
+    case "question": {
+      const { questionId, questions } = widget.payload;
+      if (!questionId || questions.length === 0) return null;
+      const { signAction } = await import("./mcp.js");
+      const flow = withAppId(buildUserQuestionFlow(questions, {
+        questionId,
+        agentSlug: ctx.agentSlug,
+        channelId: ctx.channelId,
+        conversationId: ctx.conversationId,
+        userId: ctx.userId,
+      }));
+      const surfaceFields = ctx.surface
+        ? { surface: ctx.surface, chatMessageId: ctx.chatMessageId ?? "" }
+        : {};
+      flow.data = {
+        ...(flow.data ?? {}),
+        ...surfaceFields,
+        signature: signAction({
+          actionType: "user-answer",
+          questionId,
+          userId: ctx.userId,
+          agentSlug: ctx.agentSlug,
+          spacesAppId: ctx.spacesAppId ?? "",
+          channelId: ctx.channelId,
+          conversationId: ctx.conversationId,
+          ...surfaceFields,
+        }),
+      };
+      return flow;
+    }
+    case "code":
+      if (!widget.payload.code.trim()) return null;
+      return withAppId(buildCodeFlow(widget.payload.code, widget.payload.language));
+    case "diff":
+      if (!widget.payload.path.trim() || !widget.payload.patch.trim()) return null;
+      return withAppId(buildDiffFlow(widget.payload.path.trim(), widget.payload.patch));
+    case "chart":
+      return withAppId(buildChartFlow(widget.payload));
+    default:
+      return null;
+  }
+}
+
+/**
+ * No-channel counterpart to renderUiWidget: persists the card onto its assistant
+ * row and publishes it to the live bus. Must stay reachable from both claw
+ * transports — SSE and the internal /progress handlers (the default).
+ */
+export async function deliverXyneAiWidget(args: {
+  widget: UiWidget;
+  agentSlug: string;
+  conversationId: string;
+  userId?: string | null | undefined;
+  orgId?: string | null | undefined;
+  assistantMessageId?: string | null | undefined;
+}): Promise<FlowDefinition | null> {
+  if (args.widget.type === "plan") return null;
+
+  const target = await resolveXyneAiCardTarget({
+    assistantMessageId: args.assistantMessageId,
+    conversationId: args.conversationId,
+    agentSlug: args.agentSlug,
+  });
+  const assistantMessageId = target?.chatMessageId ?? null;
+  const userId = target?.userId ?? args.userId ?? null;
+  const orgId = target?.orgId ?? args.orgId ?? null;
+  const spacesAppId = target
+    ? target.spacesAppId
+    : orgId
+      ? (await prisma.agent
+          .findFirst({ where: { slug: args.agentSlug, orgId }, select: { spacesAppId: true } })
+          .catch(() => null))?.spacesAppId ?? undefined
+      : undefined;
+  if (!orgId) {
+    clog.warn(`[xyne-ai widget] no org scope for agent=${args.agentSlug} conv=${args.conversationId}; card will not be answerable`);
+  }
+
+  const flow = await widgetToFlow(args.widget, {
+    agentSlug: args.agentSlug,
+    channelId: "",
+    conversationId: args.conversationId,
+    userId: userId ?? "",
+    spacesAppId,
+    surface: "xyne-ai",
+    chatMessageId: assistantMessageId ?? "",
+  });
+  if (!flow) return null;
+
+  if (args.widget.type === "question" && (!assistantMessageId || !spacesAppId || !userId)) {
+    clog.warn(
+      `[xyne-ai widget] question card not answerable conv=${args.conversationId} ` +
+        `(assistantRow=${assistantMessageId ? "yes" : "no"}, spacesAppId=${spacesAppId ? "yes" : "no"}, userId=${userId ? "yes" : "no"})`,
+    );
+  }
+
+  // Persist BEFORE the caller emits: replaceUiFlow finds the card by screenId.
+  if (target) return deliverXyneAiFlow(flow, target);
+  if (CONFIG.liveToolCallsEnabled && userId) {
+    publishLiveEvent(args.conversationId, {
+      type: "ui-flow",
+      conversationId: args.conversationId,
+      agentSlug: args.agentSlug,
+      userId,
+      flow,
+      ts: Date.now(),
+    });
+  }
+  return flow;
+}
+
 async function renderUiWidget(
   sessionId: string,
   widget: UiWidget,
@@ -6960,46 +6712,15 @@ async function renderUiWidget(
     // clarification questions also support approval-mode agent runs.
     if (widget.type !== "question" && ctx.responseMode !== "conversation") return false;
     const log = createLogger("webhook/ui-widget", ctx.traceId ?? sessionId.slice(0, 8));
-    let flow;
 
-    switch (widget.type) {
-      case "question": {
-        const { questionId, questions } = widget.payload;
-        if (!questionId || questions.length === 0) return false;
-        const { signAction } = await import("./mcp.js");
-        flow = withSpacesAppId(buildUserQuestionFlow(questions, {
-          questionId,
-          agentSlug: ctx.agentSlug ?? "",
-          channelId: ctx.channelId,
-          conversationId: ctx.conversationId,
-          userId: ctx.senderId,
-        }), ctx.spacesAppId);
-        flow.data = {
-          ...(flow.data ?? {}),
-          signature: signAction({
-            actionType: "user-answer",
-            questionId,
-            userId: ctx.senderId,
-            agentSlug: ctx.agentSlug ?? "",
-            spacesAppId: ctx.spacesAppId ?? "",
-            channelId: ctx.channelId,
-            conversationId: ctx.conversationId,
-          }),
-        };
-        break;
-      }
-      case "code":
-        if (!widget.payload.code.trim()) return false;
-        flow = withSpacesAppId(buildCodeFlow(widget.payload.code, widget.payload.language), ctx.spacesAppId);
-        break;
-      case "diff":
-        if (!widget.payload.path.trim() || !widget.payload.patch.trim()) return false;
-        flow = withSpacesAppId(buildDiffFlow(widget.payload.path.trim(), widget.payload.patch), ctx.spacesAppId);
-        break;
-      case "chart":
-        flow = withSpacesAppId(buildChartFlow(widget.payload), ctx.spacesAppId);
-        break;
-    }
+    const flow = await widgetToFlow(widget, {
+      agentSlug: ctx.agentSlug ?? "",
+      channelId: ctx.channelId,
+      conversationId: ctx.conversationId,
+      userId: ctx.senderId,
+      spacesAppId: ctx.spacesAppId,
+    });
+    if (!flow) return false;
 
     await spacesAppFetch("/chat/postMessage", {
       channelId: ctx.channelId,
@@ -7197,7 +6918,14 @@ router.post("/progress", requireStrictS2S, async (req: Request, res: Response) =
         {
           channelId: ctx.channelId,
           conversationId: ctx.conversationId,
-          markdownText: `🖥️ **Live preview** — agent is working in this room. Anyone in this channel can watch (and drive) chromium over noVNC.\n\n👉 ${sandboxPreviewUrl}${sandboxCodePreviewUrl ? `\n\nCode Changes available at ${sandboxCodePreviewUrl}/` : ""}`,
+          markdownText: [
+            systemNote("**Live preview**"),
+            "",
+            systemNote("This agent is working in a browser you can watch — and take over — from this channel."),
+            "",
+            systemNote(`Browser: ${sandboxPreviewUrl}`),
+            ...(sandboxCodePreviewUrl ? [systemNote(`Code changes: ${sandboxCodePreviewUrl}/`)] : []),
+          ].join("\n"),
           metadata: { contentFormat: "markdown" },
         }
       );
@@ -7249,20 +6977,20 @@ router.post("/progress", requireStrictS2S, async (req: Request, res: Response) =
 
   try {
     if (USE_EPHEMERAL_PROGRESS) {
-      await spacesAppFetch("/chat/agentProgress", {
+      await emitAgentProgressWorking({
+        sessionId,
         conversationId: ctx.conversationId,
         channelId: ctx.channelId,
         agentSlug: ctx.agentSlug,
         agentName: ctx.agentName,
-        userId: ctx.spacesAppUserId,
-        toolLabel,
-        status: "working",
-      }, ctx.appToken);
+        spacesAppUserId: ctx.spacesAppUserId,
+        appToken: ctx.appToken,
+      }, toolLabel);
       log.info(`Progress (ephemeral): ${toolLabel} → conv=${ctx.conversationId}`);
     } else if (ctx.progressMessageId) {
       await spacesAppFetch("/chat/updateMessage", {
         messageId: ctx.progressMessageId,
-        markdownText: `⏳ ${toolLabel}`,
+        markdownText: `${toolLabel}`,
         userId: ctx.spacesAppUserId,
       }, ctx.appToken);
       log.info(`Progress (placeholder): ${toolLabel} → messageId=${ctx.progressMessageId}`);
