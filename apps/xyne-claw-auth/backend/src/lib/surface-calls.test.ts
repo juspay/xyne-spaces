@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isSurfaceTool, pickDevice } from "./surface-calls.js";
+import { isPageSurfaceTool, isSurfaceTool, pageSurfaceAllowedForTrigger, pickDevice } from "./surface-calls.js";
 
 const NOW = Date.parse("2026-09-16T12:00:00Z");
 const ago = (ms: number): Date => new Date(NOW - ms);
@@ -17,11 +17,22 @@ const device = (
 });
 
 describe("which tools go to the window", () => {
-  it("claims the app tools only", () => {
+  it("claims the app tools and the browser panel tools only", () => {
     expect(isSurfaceTool("app-navigate")).toBe(true);
     expect(isSurfaceTool("app-screenshot")).toBe(true);
-    expect(isSurfaceTool("page-read")).toBe(false);
+    expect(isSurfaceTool("page-read")).toBe(true);
+    expect(isSurfaceTool("page-click")).toBe(true);
     expect(isSurfaceTool("spaces-users")).toBe(false);
+    expect(isPageSurfaceTool("app-click")).toBe(false);
+  });
+
+  it("lets browser panel tools run only for Xyne AI screen runs", () => {
+    expect(pageSurfaceAllowedForTrigger("chat")).toBe(true);
+    expect(pageSurfaceAllowedForTrigger("spaces")).toBe(false);
+    expect(pageSurfaceAllowedForTrigger("slack")).toBe(false);
+    expect(pageSurfaceAllowedForTrigger("automation")).toBe(false);
+    expect(pageSurfaceAllowedForTrigger("scheduled")).toBe(false);
+    expect(pageSurfaceAllowedForTrigger(null)).toBe(false);
   });
 });
 
