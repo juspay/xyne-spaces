@@ -1,3 +1,11 @@
+## [1.440.1](https://github.com/juspay/xyne-spaces/compare/v1.440.0...v1.440.1) (2026-09-30)
+
+
+### Bug Fixes
+
+* changed toggle buttons ui in the channels and removing delete modal to delete the canva ([#2502](https://github.com/juspay/xyne-spaces/issues/2502)) ([7a1830b](https://github.com/juspay/xyne-spaces/commit/7a1830b439a4d1ca6f50ff2d71f52baf5d1098ad))
+* list only the connectors an agent can use in /mcp/tools ([#2500](https://github.com/juspay/xyne-spaces/issues/2500)) ([7d5462b](https://github.com/juspay/xyne-spaces/commit/7d5462b609079862eb2435b3eec2781668c2c054))
+
 ## [1.440.0](https://github.com/juspay/xyne-spaces/compare/v1.439.2...v1.440.0) (2026-09-30)
 
 
