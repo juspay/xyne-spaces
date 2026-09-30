@@ -1128,6 +1128,31 @@ export const router = createBrowserRouter(
                   element: <HomeScreen />,
                 },
                 {
+                  // A saved artifact app on its own, opened from the toolbar.
+                  // Outside the /ai subtree on purpose: a workspace that has
+                  // disabled Xyne AI from the rail can still keep apps there.
+                  path: 'app/:appId',
+                  element: <ArtifactAppHostRoute placement={{ surface: 'toolbar' }} />,
+                },
+                {
+                  // Standalone migration/insights URLs from before these were
+                  // folded into /migrations or removed; bookmarks still land here.
+                  path: 'slack-migration',
+                  element: <Navigate to='../migrations/slack' replace />,
+                },
+                {
+                  path: 'jira-migration',
+                  element: <Navigate to='../migrations/jira' replace />,
+                },
+                {
+                  path: 'migration/whatsapp',
+                  element: <Navigate to='../migrations/whatsapp' replace />,
+                },
+                {
+                  path: 'product-insights',
+                  element: <Navigate to='..' replace />,
+                },
+                {
                   path: 'ai',
                   element: (
                     <ToolbarProtectedRoute path='/ai'>
@@ -1970,7 +1995,11 @@ export const router = createBrowserRouter(
                 },
                 {
                   path: 'migrations',
-                  element: <MigrationsScreen />,
+                  element: (
+                    <ToolbarProtectedRoute path='/migrations'>
+                      <MigrationsScreen />
+                    </ToolbarProtectedRoute>
+                  ),
                   children: [
                     { index: true, element: <MigrationsIndexRedirect /> },
                     {
@@ -1989,7 +2018,14 @@ export const router = createBrowserRouter(
                         </ResourceProtectedRoute>
                       ),
                     },
-                    { path: 'slack', element: <SlackMigration /> },
+                    {
+                      path: 'slack',
+                      element: (
+                        <ToolbarProtectedRoute path='/migrations/slack'>
+                          <SlackMigration />
+                        </ToolbarProtectedRoute>
+                      ),
+                    },
                   ],
                 },
                 {

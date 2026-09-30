@@ -359,9 +359,31 @@ export class WorkerScheduler {
         } else {
             logger.info('[WORKER_SCHEDULER] Instagram token refresh worker is disabled (ENABLE_INSTAGRAM_TOKEN_REFRESH_WORKER=false)');
         }
+        await this.removeRetiredQueues(workerRedisConfig);
 
         this.isRunning = true;
         logger.info('[WORKER_SCHEDULER] All workers started');
+    }
+
+    /**
+     * Queues whose worker was removed. Bull keeps a repeatable job's repeat key
+     * and next delayed job in Redis until something deletes them, so drop the
+     * whole queue once on startup. Safe to repeat: obliterating an empty queue
+     * is a no-op. Remove an entry once every environment has run it.
+     */
+    private async removeRetiredQueues(redis: Bull.QueueOptions['redis']): Promise<void> {
+        const retiredQueueNames = ['product-insights-recluster'];
+        for (const name of retiredQueueNames) {
+            const queue = new Bull(name, { redis });
+            try {
+                await queue.obliterate({ force: true });
+                logger.info(`[WORKER_SCHEDULER] Removed retired queue ${name}`);
+            } catch (error) {
+                logger.error(`[WORKER_SCHEDULER] Failed to remove retired queue ${name}:`, error);
+            } finally {
+                await queue.close();
+            }
+        }
     }
 
 
