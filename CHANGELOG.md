@@ -1,3 +1,11 @@
+## [1.442.4](https://github.com/juspay/xyne-spaces/compare/v1.442.3...v1.442.4) (2026-09-30)
+
+
+### Bug Fixes
+
+* block deactivated users from being carried into group DMs ([#2509](https://github.com/juspay/xyne-spaces/issues/2509)) ([e28c6f3](https://github.com/juspay/xyne-spaces/commit/e28c6f35e862f40553d21875178831140f278c68))
+* single show more/less toggle for long code blocks in messages ([#2499](https://github.com/juspay/xyne-spaces/issues/2499)) ([097cadc](https://github.com/juspay/xyne-spaces/commit/097cadc2fa5a38f407a8464f80cf6ddf2a9296d1))
+
 ## [1.442.3](https://github.com/juspay/xyne-spaces/compare/v1.442.2...v1.442.3) (2026-09-30)
 
 
