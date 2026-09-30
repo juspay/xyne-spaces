@@ -6,9 +6,6 @@ import remarkFrontmatter from 'remark-frontmatter';
 /**
  * Rewrite a Pulse actionables message's YAML frontmatter to move `itemId`
  * from the `pulseItems` array into the `pulseSent` array.
- *
- * Mirrors the backend equivalent of replaceTicketSuggestionWithCreated from
- * markdownTicketSuggestions.ts but for the Pulse schema.
  */
 function parseFrontmatter(markdown: string): { data: unknown; end: number } | null {
   const tree = unified().use(remarkParse).use(remarkFrontmatter, ['yaml']).parse(markdown);

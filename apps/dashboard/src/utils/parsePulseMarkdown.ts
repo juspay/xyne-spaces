@@ -1,7 +1,8 @@
 /**
  * Utility to parse a Pulse actionables message.
- * The message content follows the same YAML frontmatter convention as
- * markdownTicketSuggestions.ts, but uses a `pulseItems` / `pulseSent` schema.
+ * The message content follows the same YAML frontmatter convention as the
+ * ticket-updates card (markdownTicketUpdates.ts), but uses a `pulseItems` /
+ * `pulseSent` schema.
  *
  * Frontmatter shape produced by transcriptService.postPulseTicketsAsMessage:
  *
