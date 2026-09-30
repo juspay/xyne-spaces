@@ -17,7 +17,7 @@ import {
 } from '@/services/orgLLMCredentialService';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { messageSchema } from '@/vespa/src/types';
-import { buildClassifierPrompt } from './prompt';
+import { buildClassifierPrompt, MAX_SOURCES_PER_TYPE } from './prompt';
 import { getThreadTypeVocabulary } from './vocabulary';
 import { runJevBeforeLlm } from './jev';
 
@@ -548,8 +548,6 @@ export interface Classification {
   threadTypes: ClassifiedType[];
 }
 
-/** No more than this many citations per type, matching what the prompt asks for. */
-const MAX_SOURCES_PER_TYPE = 3;
 
 // Lenient on purpose: the model's raw shape is untrusted. Anything unrecognised is dropped
 // rather than failing the whole job. Both the current object form and a bare list of names

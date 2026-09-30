@@ -16,6 +16,7 @@ import {
   type JevComparison,
 } from '@/services/queryIntent/jevShadowLog';
 import type { Classification, ClassifierInput } from './index';
+import { MAX_SOURCES_PER_TYPE } from './prompt';
 
 /**
  * Thread-type classification with Jev instead of the LLM.
@@ -49,9 +50,6 @@ const JEV_TIMEOUT_MS = 15_000;
 
 /** Each option carries its message's text, so a pasted log dump is cut to this. */
 const OPTION_TEXT_CHARS = 400;
-
-/** Citations kept per type — the same cap the LLM is given (MAX_SOURCES_PER_TYPE). */
-const MAX_SOURCES_PER_TYPE = 3;
 
 const SHADOW_TAG = '[MSG-TAG][SHADOW]';
 const REPLACE_TAG = '[MSG-TAG][REPLACE]';
