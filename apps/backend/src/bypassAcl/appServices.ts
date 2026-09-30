@@ -259,24 +259,6 @@ export function isAppInstalledInWorkspace(appId: string, workspaceId: string): P
   );
 }
 
-/**
- * Wraps appUtils' installApp for the S2S route: org eligibility is checked by the caller,
- * same gate as AppController.installApp; installApp's org-spanning template reads are
- * themselves relocated in this module (findOrgAppTemplate / listAppTemplatePermissionRefs).
- */
-export function installOrgAppForWorkspace(appId: string, workspaceId: string) {
-  return asService(
-    ['Apps', 'InstalledApps', 'AppPermission', 'InstalledAppPermission', 'AppCommand', 'InstalledAppCommand', 'User', 'OrgMember', 'Workspace'],
-    'S2S app install into the caller-named workspace; org eligibility checked by the caller',
-    SYSTEM_USER_ID,
-    workspaceId,
-    async () => {
-      const { installApp } = await import('@/apps/core/appUtils');
-      return installApp(appId, workspaceId);
-    },
-  );
-}
-
 /** Relocated from appsInternal's post-install #general join (caller treats it as best-effort). */
 export function joinAppBotToGeneralChannel(appId: string, workspaceId: string): Promise<string | null> {
   return asService(

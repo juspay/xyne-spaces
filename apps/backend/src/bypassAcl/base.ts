@@ -20,7 +20,9 @@ function recordBypass(meta: BypassMeta): void {
 
 export function asSystem<T>(tables: TableName[], reason: string, fn: () => Promise<T>): Promise<T> {
   recordBypass({ kind: 'system', tables, reason });
-  return runAsSystem(fn);
+  // fn MUST be awaited inside storage.run: Prisma promises don't execute the ACL hook until
+  // awaited, and storage.run restores the context the moment fn returns an unexecuted promise.
+  return runAsSystem(async () => await fn());
 }
 
 export function asService<T>(
@@ -31,7 +33,8 @@ export function asService<T>(
   fn: () => Promise<T>,
 ): Promise<T> {
   recordBypass({ kind: 'service', tables, reason });
-  return runAsServiceActor(userId, workspaceId, fn);
+  // See asSystem: keep the scope open until the query has actually run.
+  return runAsServiceActor(userId, workspaceId, async () => await fn());
 }
 
 export type TxOptions = { maxWait?: number; timeout?: number; isolationLevel?: Prisma.TransactionIsolationLevel };

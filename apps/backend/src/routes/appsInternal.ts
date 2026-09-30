@@ -7,11 +7,11 @@ import {
   findOrgAppsByName,
   findOrgAppTemplate,
   findWorkspaceOrgId,
-  installOrgAppForWorkspace,
   isAppInstalledInWorkspace,
   joinAppBotToGeneralChannel,
   provisionOrgApp,
 } from '@/bypassAcl/appServices';
+import { installOrgAppForWorkspace } from '@/bypassAcl/installAppWrapper';
 import { decrypt, encrypt } from '@/services/encryptionService';
 import crypto from 'crypto';
 import { isValidUrl } from '@/utils/urlUtils';
