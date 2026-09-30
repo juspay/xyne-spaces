@@ -1108,6 +1108,12 @@ export async function snapshotLiveSessionHandle(
   }
 }
 
+export async function sessionExistsAnywhere(conversationId: string): Promise<boolean> {
+  if (existsSync(sessionDir(conversationId))) return true;
+  await restoreSessionFromArchive(conversationId).catch(() => false);
+  return existsSync(sessionDir(conversationId));
+}
+
 export async function branchSession(
   sourceConversationId: string,
   targetConversationId: string,
