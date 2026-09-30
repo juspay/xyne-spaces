@@ -26,6 +26,7 @@ import { verifySpacesSignature } from "../middleware/verify-spaces-signature.js"
 import { agentRunRepository, chatMessageRepository } from "../repositories/index.js";
 import { recordTwinApprovalOutcome } from "../services/twinResponseFeedback.js";
 import type { FlowDefinition } from "xyne-claw-shared";
+import { FORK_TO_CONVERSATION_TOOL } from "xyne-claw-shared";
 import { mdToMrkdwn, FlowBuilder, buildWriteResultFlow, buildPlanFlow, buildUserQuestionFlow, buildTicketFlow, buildAgentCardFlow, userQuestionOptionLabel, PLAN_COMPONENT_ID, AGENT_COMPONENT_ID, AGENT_EDITS_STATE_KEY } from "xyne-claw-shared";
 import {
   clearActivePlanCard,
@@ -62,6 +63,7 @@ import { dispatchXyneAiContinuationRun } from "../lib/xyne-ai-continuation.js";
 import { applyCreateSkill, isCreateSkillAction } from "../lib/skill-apply.js";
 import { isClawAdmin } from "../middleware/agent-acl.js";
 import { applyAgentToolAction, AGENT_TOOL_SLUGS } from "../lib/agent-tools-apply.js";
+import { applyConversationFork } from "../lib/conversation-fork.js";
 import { registerRunRecovery } from "../queue/run-recovery-worker.js";
 import { enqueueDelayedJob, enqueueCronJob, type ScheduledJobData } from "../queue/scheduled-jobs-queue.js";
 import { retryNowByToken, cancelProviderRetry } from "../queue/provider-retry-worker.js";
@@ -258,6 +260,23 @@ type AppActionResponse =
   | { type: "error"; message: string; code?: string };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+function decryptSpacesAppToken(stored: string): string | null {
+  const [ciphertext, iv, authTag] = stored.split(":");
+  if (!ciphertext || !iv || !authTag) return null;
+  return decrypt(ciphertext, iv, authTag, CONFIG.encryptionKey);
+}
+
+async function postAsSpacesApp(appToken: string, path: string, body: Record<string, unknown>): Promise<unknown> {
+  const r = await fetch(`${CONFIG.spacesInternalUrl}/api/apps${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${appToken}` },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!r.ok) throw new Error(`Spaces ${r.status}: ${(await r.text().catch(() => "")).slice(0, 300)}`);
+  return r.json();
+}
 
 async function findAgentForFlow(agentSlug: string | undefined, spacesAppId?: string, orgId?: string): Promise<{
   id: string;
@@ -911,12 +930,11 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
           res.json({ type: "error", message: `No spacesAppToken for agent ${agentSlug ?? "(default)"}` } satisfies AppActionResponse);
           return;
         }
-        const parts = agent.spacesAppToken.split(":");
-        if (parts.length < 3 || !parts[0] || !parts[1] || !parts[2]) {
+        const appToken = decryptSpacesAppToken(agent.spacesAppToken);
+        if (!appToken) {
           res.json({ type: "error", message: "Invalid spacesAppToken format" } satisfies AppActionResponse);
           return;
         }
-        const appToken = decrypt(parts[0], parts[1], parts[2], CONFIG.encryptionKey);
 
         const content = params["content"] as string;
         const targetChannelId = params["targetChannelId"] as string | undefined;
@@ -1058,6 +1076,31 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       // carries no authority of its own. create-skill also routes here now that
       // it shares the group's source; the legacy "skill" branch below still
       // handles actions signed before that change shipped.
+      if (serverType === "agent-tools" && tool === FORK_TO_CONVERSATION_TOOL) {
+        if (xyneAiCard) {
+          resp = { type: "close_screen", finalMessage: "Forking works from a Spaces thread." };
+          await finishTextWriteOnRow({ card: xyneAiCard, tool, ok: false, heading: `${tool} failed`, errorText: "Forking works from a Spaces thread." });
+          res.json(resp);
+          return;
+        }
+        const agent = await findAgentForFlow(agentSlug, spacesAppId, writeUser.orgId);
+        const appToken = agent?.spacesAppToken ? decryptSpacesAppToken(agent.spacesAppToken) : null;
+        if (!agent || !appToken) {
+          res.json({ type: "error", message: `No spacesAppToken for agent ${agentSlug ?? "(default)"}` } satisfies AppActionResponse);
+          return;
+        }
+        const outcome = await applyConversationFork(
+          params,
+          { conversationId, ...(continueChannelId ? { channelId: continueChannelId } : {}), agentSlug: agent.slug, userId: writeUserId },
+          { post: (body) => postAsSpacesApp(appToken, "/chat/postMessage", body) as Promise<{ conversationId?: string }> },
+        );
+        const text = outcome.ok ? outcome.message : `Fork failed: ${outcome.error}`;
+        resp = { type: "close_screen", finalMessage: text };
+        res.json(resp);
+        void replaceFlowCardWithText(messageId, agentSlug, text, conversationId, undefined, spacesAppId);
+        return;
+      }
+
       if (serverType === "agent-tools" && AGENT_TOOL_SLUGS.has(tool)) {
         const outcome = await applyAgentToolAction(tool, params, writeUserId);
         if (!outcome.ok) {

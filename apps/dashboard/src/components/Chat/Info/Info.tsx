@@ -62,7 +62,7 @@ import { useUser, useUsers } from '../../../hooks/useUsers';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { v4 as uuidv4 } from 'uuid';
 import { VisibleChannel } from '../../../machines/stateMachine';
-import { getUserDisplayName } from '../../../utils/userDisplayName';
+import { getUserDisplayName, isUserDeactivated } from '../../../utils/userDisplayName';
 import { channelTrackingMetadata } from '../../../services/Analytics/channelTracking';
 
 export type ChannelTab =
@@ -151,6 +151,9 @@ const Info = ({
   }, [channel?.scopeType, channel?.name, context.userID, isDM]);
 
   const targetUser = useUser(targetUserId || '');
+
+  // A 1:1 DM with a deactivated user must not be turned into a group DM.
+  const canAddPeople = showAddPeopleButton && !(isDM && isUserDeactivated(targetUser));
 
   const hasValidStatus = useMemo(() => {
     return (
@@ -354,7 +357,7 @@ const Info = ({
             Starred
           </div>
         </button>
-        {showAddPeopleButton && (
+        {canAddPeople && (
           <button
             onClick={handleAddPeopleClick}
             className={headerLinkContainerStyle}

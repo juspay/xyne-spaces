@@ -95,7 +95,7 @@ export async function cloneSessionViaProxy(args: {
   branchMode: BranchMode;
   internalUrl: string;
   s2sKey?: string;
-}): Promise<{ success: boolean; error?: string }> {
+}): Promise<{ success: boolean; error?: string; targetExisted?: boolean }> {
   const res = await fetch(`${args.internalUrl}/claw/api/v1/clone-session`, {
     method: "POST",
     headers: {
@@ -108,7 +108,7 @@ export async function cloneSessionViaProxy(args: {
       branchMode: args.branchMode,
     }),
   });
-  const body = (await res.json().catch(() => ({}))) as { success?: boolean; error?: string };
+  const body = (await res.json().catch(() => ({}))) as { success?: boolean; error?: string; targetExisted?: boolean };
   if (!res.ok || !body.success) {
     const errResult: { success: boolean; error?: string } = {
       success: false,
@@ -116,7 +116,7 @@ export async function cloneSessionViaProxy(args: {
     };
     return errResult;
   }
-  return { success: true };
+  return { success: true, ...(body.targetExisted ? { targetExisted: true } : {}) };
 }
 
 /**
@@ -128,7 +128,7 @@ export function cloneBranchSession(args: {
   sourceConversationId: string;
   targetConversationId: string;
   branchMode: BranchMode;
-}): Promise<{ success: boolean; error?: string }> {
+}): Promise<{ success: boolean; error?: string; targetExisted?: boolean }> {
   return cloneSessionViaProxy({
     ...args,
     internalUrl: CONFIG.internalUrl,
