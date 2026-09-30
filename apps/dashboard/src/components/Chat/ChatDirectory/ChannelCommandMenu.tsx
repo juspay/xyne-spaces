@@ -1681,9 +1681,7 @@ const ChannelCommandMenu = ({
         };
         await navigateToUser(result, navigate, channelData || [], {
           callerUserId: currentUserID,
-          ...(profileFallbackAnchorChannelId && {
-            profileFallbackAnchorChannelId,
-          }),
+          ...(profileFallbackAnchorChannelId && { profileFallbackAnchorChannelId }),
         });
         return;
       }
@@ -2550,6 +2548,7 @@ const ChannelCommandMenu = ({
         { modifier: true, isElectron: isElectronApp(), isMobile },
         navigate,
         channelData || [],
+        { callerUserId: currentUserID },
       );
       onOpenChange(false);
       return;
@@ -2592,17 +2591,13 @@ const ChannelCommandMenu = ({
           channelData || [],
           {
             callerUserId: currentUserID,
-            ...(profileFallbackAnchorChannelId && {
-              profileFallbackAnchorChannelId,
-            }),
+            ...(profileFallbackAnchorChannelId && { profileFallbackAnchorChannelId }),
           },
         );
       } else {
         await navigateToSearchResult(result, navigate, channelData || [], {
           callerUserId: currentUserID,
-          ...(profileFallbackAnchorChannelId && {
-            profileFallbackAnchorChannelId,
-          }),
+          ...(profileFallbackAnchorChannelId && { profileFallbackAnchorChannelId }),
         });
       }
       onOpenChange(false);
