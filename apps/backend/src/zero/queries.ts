@@ -5372,14 +5372,7 @@ dmChannelsLatestMessagesPaginated: defineQuery(
       .related('participants')
       .related('channelStats')
       .related('canvasFolders', folder =>
-        folder.related('canvases', canvas =>
-          canvas
-            .related('sdlcArtifact')
-            // The track it belongs to, so no hub-wide list of links is needed to say.
-            .related('sdlcEntityLinks', link =>
-              link.where('sourceType', 'TRACK').where('relationType', SDLC_TRACK_FLAT_RELATION),
-            ),
-        ),
+        folder.related('canvases', canvas => canvas.related('sdlcArtifact')),
       )
       .related('sdlcEntityLinks', link =>
         link
@@ -5399,6 +5392,8 @@ dmChannelsLatestMessagesPaginated: defineQuery(
       .where('channelId', channelId)
       .where('status', CallStatus.ACTIVE)
       .where(helpers => helpers.cmp('callType', '!=', CallType.HEADLESS))
+      // Reads are scoped to the workspace only; this is the calls rule every call list uses.
+      .where(eb => callsReachableByUser(eb, ctx.userID, ctx.workspaceId))
       .related('participants', participant => participant.where('userId', ctx.userID))
       .related('sdlcEntityLinks', link =>
         sdlcCallOwnerLink(link, channelId, ctx.userID).related('sourceItemLinks', edge =>
@@ -5430,7 +5425,9 @@ dmChannelsLatestMessagesPaginated: defineQuery(
       const { channelId, trackId, phase } = args;
       let query = zql.calls
         .where('channelId', channelId)
-        .where(({ cmp }) => cmp('callType', '!=', CallType.HEADLESS));
+        .where(({ cmp }) => cmp('callType', '!=', CallType.HEADLESS))
+        // Reads are scoped to the workspace only; this is the calls rule every call list uses.
+        .where(eb => callsReachableByUser(eb, ctx.userID, ctx.workspaceId));
       if (trackId) {
         query = query.whereExists('sdlcEntityLinks', link =>
           link
@@ -5466,7 +5463,13 @@ dmChannelsLatestMessagesPaginated: defineQuery(
       } else if (phase === 'UPCOMING') {
         query = query
           .where('status', CallStatus.SCHEDULED)
-          .where('endsAt', '>=', args.from ?? 0)
+          // Not over yet; one with no end time, until it starts.
+          .where(({ or, and, cmp }) =>
+            or(
+              cmp('endsAt', '>=', args.from ?? 0),
+              and(cmp('endsAt', 'IS', null), cmp('startsAt', '>=', args.from ?? 0)),
+            ),
+          )
           .orderBy('startsAt', 'asc')
           .orderBy('id', 'asc');
       } else {
@@ -5537,6 +5540,8 @@ dmChannelsLatestMessagesPaginated: defineQuery(
       .where('id', channelId)
       .where('type', ChannelType.SDLC)
       .related('participants', participant => participant.where('userId', ctx.userID))
+      // Its add-member policy and member count, which the members dialog reads.
+      .related('channelStats')
       .related('canvasFolders')
       .related('sdlcEntityLinks', link =>
         link
@@ -5548,11 +5553,17 @@ dmChannelsLatestMessagesPaginated: defineQuery(
   /** One of the hub's artifact folders with its artifacts: Hub Knowledge, or a type. */
   getSdlcFolderCanvases: defineQuery(
     z.object({ channelId: z.string(), folderId: z.string() }),
-    ({ args: { channelId, folderId } }) =>
+    ({ ctx, args: { channelId, folderId } }) =>
       withSdlcHubCanvas(
-        zql.canvases
-          .where('folderId', folderId)
-          .whereExists('folder', folder => folder.where('channelId', channelId)),
+        // Reads are scoped to the workspace only, so the canvas visibility rule every
+        // canvas list uses applies here too: yours, shared with you or a channel you
+        // are in, or public.
+        applyCanvasVisibilityQueryFilter(
+          zql.canvases
+            .where('folderId', folderId)
+            .whereExists('folder', folder => folder.where('channelId', channelId)),
+          ctx.userID,
+        ),
       ),
   ),
   /**

@@ -13,7 +13,7 @@ import { cn } from '../../utils/classNames';
 import { getUserDisplayName } from '../../utils/userDisplayName';
 import { queries } from '../../zero/queries';
 import { getPreviewParticipantUserIds } from '../CallHistoryScreen/callHistoryItem.utils';
-import { isPartOfCall } from './ActivityPill';
+import { wasInvitedToCall } from './ActivityPill';
 import { sdlcItemName, sourceItemOf } from './sdlcItems';
 
 type SdlcCall = QueryResultType<ReturnType<typeof queries.getSdlcCalls>>[number];
@@ -249,7 +249,7 @@ function CallRow(props: {
       <span className='min-w-0 flex-1'>
         <span className='flex min-w-0 items-center gap-2'>
           <span className='truncate text-sm font-medium text-foreground'>{title}</span>
-          {isPartOfCall(call.participants[0]) && (
+          {wasInvitedToCall(call.participants[0]) && (
             <span className='shrink-0 rounded-full bg-primary/10 px-1.5 py-px text-[10.5px] font-medium text-primary'>
               Invited
             </span>
