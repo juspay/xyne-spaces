@@ -1,3 +1,10 @@
+## [1.419.0-release-20260929.4](https://github.com/juspay/xyne-spaces/compare/v1.419.0-release-20260929.3...v1.419.0-release-20260929.4) (2026-09-30)
+
+
+### Bug Fixes
+
+* open sandbox preview and VS Code links in the desktop browser panel ([#2517](https://github.com/juspay/xyne-spaces/issues/2517)) ([937aae4](https://github.com/juspay/xyne-spaces/commit/937aae431fadf885c36a45b7ce04608b89b263e6))
+
 ## [1.419.0-release-20260929.3](https://github.com/juspay/xyne-spaces/compare/v1.419.0-release-20260929.2...v1.419.0-release-20260929.3) (2026-09-30)
 
 
