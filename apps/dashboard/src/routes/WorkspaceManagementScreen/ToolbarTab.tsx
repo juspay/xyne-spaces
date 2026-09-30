@@ -12,6 +12,7 @@ import {
   NAVIGATION_ITEMS,
   NON_RAIL_TOOLBAR_ITEMS,
   TOOLBAR_ITEM_DESCRIPTIONS,
+  TOOLBAR_UNMANAGED_PATHS,
 } from '../../components/AppSidebar/navigationConfig';
 import { PATH_TO_RESOURCE } from '../../components/AppSidebar/utils/resourceMapping';
 
@@ -51,7 +52,10 @@ export const ToolbarTab = ({ isActive: _isActive = false }: ToolbarTabProps): Re
   const { showStreams } = useStreamsVisibility();
   const manageableItems = [
     ...NAVIGATION_ITEMS.filter(
-      item => !(item.path in PATH_TO_RESOURCE) && (showStreams || item.path !== '/streams'),
+      item =>
+        !(item.path in PATH_TO_RESOURCE) &&
+        !TOOLBAR_UNMANAGED_PATHS.has(item.path) &&
+        (showStreams || item.path !== '/streams'),
     ),
     ...NON_RAIL_TOOLBAR_ITEMS,
   ];
