@@ -47,6 +47,8 @@ import { entityLinkOwnerSchema, type EntityLinkOwner } from '@xyne/shared';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { messageClassificationQueue } from '@/queues/messageClassificationQueue';
 import { ticketSchema, fileSchema, SubApp } from '@/vespa/src/types';
+import { vespaBackfillQueue } from '@/queues/vespaQueue';
+import { createTicketWithConversation as createTransferredTicket } from '@/apps/core/ticketutils';
 import { isSupportedMimeType } from '@/services/fileProcessor';
 import { logger } from '@/utils/logger';
 import { resolveChannelDefaultBoard } from '@/utils/channelDefaultBoard';
@@ -266,7 +268,7 @@ export class TicketController {
       const channelWorkspaceId = await this.channelRepository.getWorkspaceId(channelId);
 
       // Generate xyneId using project-scoped format
-      const xyneId = await TicketIdService.generateTicketId(tx, projectId);
+      const xyneId = await TicketIdService.generateTicketId(tx, boardId);
 
       const creationMessageId = randomUUID();
 
@@ -457,6 +459,190 @@ export class TicketController {
     } catch (error) {
       logger.error('[TicketController] Failed to fetch my ticket board ids', error);
       res.status(500).json({ error: 'Failed to fetch board ids' });
+    }
+  };
+
+  /**
+   * Transfer a ticket to a board in a DIFFERENT ticket namespace. We never re-key
+   * an id (it is immutable and external refs depend on it), so instead we create a
+   * fresh ticket on the target board — which draws a new id from the target
+   * namespace — link it to the original via TicketReferenceMapping, copy the
+   * labels, and (by default) close the original. A move WITHIN the same namespace
+   * must use the normal ticket update (boardId change), not this endpoint.
+   */
+  transferTicketToBoard = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const userId = req.user?.id;
+      const workspaceId = req.user?.workspaceId;
+      if (!userId || !workspaceId) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+
+      const ticketId = req.params.ticketId;
+      const { targetBoardId } = req.body as { targetBoardId?: string };
+      const closeOld = req.body?.closeOld !== false; // default: close the original
+      if (!ticketId || !targetBoardId) {
+        res.status(400).json({ error: 'ticketId and targetBoardId are required' });
+        return;
+      }
+
+      const source = await db.ticket.findFirst({
+        where: { id: ticketId, workspaceId },
+        select: {
+          id: true, xyneId: true, title: true, description: true, boardId: true,
+          projectId: true, channelId: true, assignedTo: true, priority: true,
+          userGroupId: true, eta: true, ticketType: true,
+          tags: { select: { name: true } },
+        },
+      });
+      if (!source) {
+        res.status(404).json({ error: 'Ticket not found' });
+        return;
+      }
+
+      const [targetBoard, sourceBoard] = await Promise.all([
+        db.board.findFirst({
+          where: { id: targetBoardId, workspaceId },
+          select: { id: true, projectId: true, ticketNamespaceId: true },
+        }),
+        db.board.findFirst({
+          where: { id: source.boardId },
+          select: { projectId: true, ticketNamespaceId: true },
+        }),
+      ]);
+      if (!targetBoard) {
+        res.status(404).json({ error: 'Target board not found' });
+        return;
+      }
+
+      // Effective namespace = board's own namespace, else its project's default.
+      const effectiveNamespaceId = async (
+        boardNamespaceId: string | null,
+        projectId: string,
+      ): Promise<string | null> => {
+        if (boardNamespaceId) return boardNamespaceId;
+        const project = await db.project.findUnique({
+          where: { id: projectId },
+          select: { defaultTicketNamespaceId: true },
+        });
+        return project?.defaultTicketNamespaceId ?? null;
+      };
+      const [sourceNamespaceId, targetNamespaceId] = await Promise.all([
+        effectiveNamespaceId(sourceBoard?.ticketNamespaceId ?? null, source.projectId),
+        effectiveNamespaceId(targetBoard.ticketNamespaceId, targetBoard.projectId),
+      ]);
+
+      if (sourceNamespaceId && targetNamespaceId && sourceNamespaceId === targetNamespaceId) {
+        res.status(400).json({
+          error:
+            'Target board shares the same ticket namespace; move the ticket with a board update instead of a transfer.',
+        });
+        return;
+      }
+
+      // Create the new ticket on the target board (fresh id from its namespace).
+      const created = await createTransferredTicket({
+        title: source.title,
+        description: source.description?.trim() || source.title,
+        projectId: targetBoard.projectId,
+        boardId: targetBoardId,
+        channelId: source.channelId,
+        userId,
+        priority: source.priority as TicketPriority,
+        assignedTo: source.assignedTo ?? undefined,
+        userGroupId: source.userGroupId ?? undefined,
+        eta: source.eta ?? undefined,
+        ticketType: source.ticketType ?? undefined,
+      });
+
+      const relationType = closeOld
+        ? TicketReferenceRelation.MERGED_INTO
+        : TicketReferenceRelation.LINKED;
+
+      await db.$transaction(async (tx) => {
+        // Link original -> new (MERGED_INTO surfaces the original on the new
+        // ticket's detail view; LINKED keeps both visibly related).
+        await tx.ticketReferenceMapping.create({
+          data: {
+            workspaceId,
+            sourceTicketId: source.id,
+            targetTicketId: created.ticketId,
+            relationType,
+            createdBy: userId,
+          },
+        });
+
+        // Carry the labels over to the new ticket.
+        if (source.tags.length > 0) {
+          await tx.ticketTag.createMany({
+            data: source.tags.map((tag) => ({
+              workspaceId,
+              name: tag.name,
+              ticketId: created.ticketId,
+            })),
+          });
+        }
+        const tagMappings = await tx.ticketTagMapping.findMany({
+          where: { ticketId: source.id },
+          select: { tagId: true, tagName: true },
+        });
+        if (tagMappings.length > 0) {
+          await tx.ticketTagMapping.createMany({
+            data: tagMappings.map((mapping) => ({
+              workspaceId,
+              ticketId: created.ticketId,
+              tagId: mapping.tagId,
+              tagName: mapping.tagName,
+            })),
+            skipDuplicates: true,
+          });
+        }
+
+        // Close the original: archive it and mark it cancelled (superseded).
+        if (closeOld) {
+          await tx.ticket.update({
+            where: { id: source.id },
+            data: {
+              isArchived: true,
+              statusV2: TicketStatusV2.CANCELLED,
+              statusUpdatedAt: new Date(),
+              updatedBy: userId,
+            },
+          });
+        }
+      });
+
+      // Re-index the original in search (its archived/closed state changed). The
+      // new ticket is indexed by createTicketWithConversation itself.
+      if (closeOld) {
+        try {
+          await vespaBackfillQueue.addJob({
+            schema: ticketSchema,
+            jobType: 'update',
+            docId: source.id,
+            userId,
+            workspaceId,
+          });
+        } catch (error) {
+          logger.error(`[TRANSFER-TICKET] Vespa re-index failed for ${source.id}:`, error);
+        }
+      }
+
+      res.status(200).json({
+        success: true,
+        newTicketId: created.ticketId,
+        newXyneId: created.xyneId,
+        oldTicketId: source.id,
+        oldXyneId: source.xyneId,
+        relationType,
+        closedOld: closeOld,
+      });
+    } catch (error) {
+      logger.error('[TRANSFER-TICKET] Transfer failed:', error);
+      res.status(500).json({
+        error: error instanceof Error ? error.message : 'Failed to transfer ticket',
+      });
     }
   };
 
@@ -906,7 +1092,7 @@ export class TicketController {
       // Wrap all database operations in a transaction for data integrity
       const { ticket } = await prisma.$transaction(async (tx) => {
         // Generate xyneId using project-scoped format
-        const xyneId = await TicketIdService.generateTicketId(tx, projectId);
+        const xyneId = await TicketIdService.generateTicketId(tx, boardId);
 
         let conversationId: string;
         let ticket: Ticket;

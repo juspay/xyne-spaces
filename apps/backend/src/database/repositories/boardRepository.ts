@@ -31,6 +31,7 @@ export interface CreateBoardInput {
   boardType?: BoardType;
   metadata?: Record<string, unknown>;
   flowPlan?: FlowPlan;
+  ticketNamespaceId?: string;
 }
 
 export interface CreateBoardWithStagesInput extends CreateBoardInput {
@@ -105,6 +106,7 @@ export class BoardRepository {
           createdBy: data.createdBy,
           boardType: resolvedBoardType,
           metadata: metadataWithEtaDefaults as Prisma.InputJsonValue,
+          ...(data.ticketNamespaceId && { ticketNamespaceId: data.ticketNamespaceId }),
           ...(data.flowPlan !== undefined && { flowPlan: serializeFlowPlan(data.flowPlan) }),
         },
       });
