@@ -26,6 +26,7 @@ export const SDLC_ENTITY_TYPES = [
   "TRACK",
   "FOLDER",
   "LINK",
+  "AGENT",
 ] as const;
 
 export const sdlcEntityTypeSchema = z.enum(SDLC_ENTITY_TYPES);
@@ -60,6 +61,9 @@ export const sdlcIconNameSchema = z
   .string()
   .max(64)
   .regex(/^[a-z0-9]+(-[a-z0-9]+)*$/);
+
+/** A CHANNEL -> AGENT (claw agent id) edge for an agent created from the hub and not yet registered; replaced by channel membership once it is. */
+export const SDLC_AGENT_PENDING_RELATION = "AGENT_PENDING";
 
 export const SDLC_WORKFLOW_RELATION = "WORKFLOW";
 export const SDLC_WIKI_WORKFLOW_RELATION = "WIKI_WORKFLOW";
@@ -148,6 +152,7 @@ export const SDLC_STRUCTURAL_RELATIONS = [
   SDLC_WIKI_WORKFLOW_RELATION,
   SDLC_HUB_ITEM_RELATION,
   SDLC_HUB_ITEM_FLAT_RELATION,
+  SDLC_AGENT_PENDING_RELATION,
 ] as const;
 
 /**
@@ -165,6 +170,7 @@ export const SDLC_HUB_GRAPH_EXCLUDED_RELATIONS = [
   SDLC_WIKI_WORKFLOW_RELATION,
   SDLC_HUB_ITEM_RELATION,
   SDLC_HUB_ITEM_FLAT_RELATION,
+  SDLC_AGENT_PENDING_RELATION,
 ] as const;
 
 /** Relation types a user may create or delete through the generic link API. */
@@ -496,6 +502,13 @@ export const bootstrapSdlcRuntimeCredentialSchema = z
 export type BootstrapSdlcRuntimeCredentialInput = z.infer<
   typeof bootstrapSdlcRuntimeCredentialSchema
 >;
+
+export interface SdlcEnvironmentRow {
+  repoId: string;
+  name: string;
+  url: string;
+  hubChannelIds: string[];
+}
 
 export interface SdlcSandboxGitCredential {
   provider: SdlcVcsProvider;

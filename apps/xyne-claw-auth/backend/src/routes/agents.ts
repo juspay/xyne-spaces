@@ -1,5 +1,6 @@
 import { Router, type Request, type RequestHandler, type Response } from "express";
 import { errMsg } from "../lib/errors.js";
+import { notifySdlcAgentRegistered } from "../lib/sdlc-repository-context.js";
 import { assertSafeOutboundUrl } from "../mcpgateway/services/http-client.js";
 import { safeFetch } from "../lib/safe-fetch.js";
 import {
@@ -2814,6 +2815,12 @@ router.post("/:slug/install-app", requireAgentOwnerOrAdmin, async (req: Request<
     });
 
     log.info(`[agents] Installed Spaces App ${agent.spacesAppId} for ${req.params.slug} (botUser=${appUserId})`);
+    // The hub's Agents page also promotes on read, so a failed notice only delays the join.
+    if (appUserId) {
+      notifySdlcAgentRegistered(agent.id, appUserId).catch((err) =>
+        log.warn(`[agents] install-app: SDLC hub notice failed for ${req.params.slug} — ${errMsg(err)}`),
+      );
+    }
     res.json({ success: true, data: { spacesAppUserId: appUserId } });
   } catch (err) {
     log.error("[agents] install-app error:", err);

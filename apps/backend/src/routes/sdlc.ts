@@ -24,6 +24,8 @@ import {
 import { cleanupLegacySdlc } from '@/sdlc/cleanupLegacy';
 import { SdlcHubService, type SdlcActor } from '@/sdlc';
 import { sdlcAgentContext } from '@/sdlc/SdlcAgentContextService';
+import { listEnvironments } from '@/sdlc/sdlcEnvironment';
+import { listHubAgents, markHubAgentPending } from '@/sdlc/sdlcHubAgents';
 import { requireSdlcProjectAccess } from '@/sdlc/sdlcProjectAccess';
 import { sdlcVcs } from '@/sdlc/vcs';
 import { deriveAccessStatus } from '@/sdlc/vcs/accessStatus';
@@ -143,6 +145,31 @@ router.post(
       input.repoIds
     );
     res.status(200).json({ success: true, ...result });
+  })
+);
+
+router.get(
+  '/channels/:channelId/agents',
+  route(async (req, res) => {
+    const agents = await listHubAgents(prisma, actorFromRequest(req), req.params.channelId);
+    res.status(200).json({ success: true, ...agents });
+  })
+);
+
+router.post(
+  '/channels/:channelId/agents/pending',
+  route(async (req, res) => {
+    const { agentId } = z.object({ agentId: z.string().min(1) }).parse(req.body);
+    await markHubAgentPending(prisma, actorFromRequest(req), req.params.channelId, agentId);
+    res.status(204).send();
+  })
+);
+
+router.get(
+  '/environments',
+  route(async (req, res) => {
+    const environments = await listEnvironments(prisma, actorFromRequest(req));
+    res.status(200).json({ success: true, environments });
   })
 );
 

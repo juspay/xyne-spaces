@@ -125,3 +125,14 @@ export async function loadSdlcHubKnowledge(channelId: string, userId: string): P
     ...documents.map((document) => `## ${document.title}\n\n${document.markdown}`),
   ].join("\n\n");
 }
+
+/** Tells Spaces an agent got its bot user, so an SDLC hub it was created in adds it right away. */
+export async function notifySdlcAgentRegistered(agentId: string, botUserId: string): Promise<void> {
+  const s2sKey = process.env["INTERNAL_S2S_KEY"] ?? process.env["XYNE_CLAW_S2S_KEY"] ?? "";
+  if (!s2sKey) return;
+  await spacesFetch(
+    "/api/internal/sdlc/agent/registered",
+    { method: "POST", body: JSON.stringify({ agentId, botUserId }), signal: AbortSignal.timeout(5_000) },
+    { s2sKey, baseUrl: CONFIG.spacesInternalUrl },
+  );
+}

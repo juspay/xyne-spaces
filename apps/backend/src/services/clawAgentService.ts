@@ -313,6 +313,7 @@ export interface S2SClawAgent {
   color: string;
   spacesAppId?: string | null;
   spacesAppUserId?: string | null;
+  ownerUserId?: string | null;
 }
 
 export interface S2SRunAgentRequest {
@@ -1735,8 +1736,9 @@ export function agentSlugFromWebhookUrl(url: string | null | undefined): string 
 }
 
 /** List enabled Claw agents via S2S (used by email auto-draft agent picker). */
-export async function listS2SClawAgents(): Promise<S2SClawAgent[]> {
-  const url = `${getClawBaseUrl()}/claw/api/v1/agents`;
+/** `userId` widens the list to that user's personal and shared agents; without it, global only. */
+export async function listS2SClawAgents(userId?: string): Promise<S2SClawAgent[]> {
+  const url = `${getClawBaseUrl()}/claw/api/v1/agents${userId ? `?userId=${encodeURIComponent(userId)}` : ''}`;
   let res: globalThis.Response;
   try {
     res = await fetch(url, {
