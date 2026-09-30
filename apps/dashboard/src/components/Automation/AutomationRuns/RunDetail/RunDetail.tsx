@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { cn } from '../../../../utils/classNames';
 import { useCopyButton } from '../../../../hooks/useCopyButton';
+import HighlightedJsonBlock from '../../../DynamicDashboard/ComponentGrid/preview/JsonBlock';
 import {
   fetchAutomationRun,
   fetchAutomationVersions,
@@ -29,6 +30,7 @@ import type {
 } from '../../AutomationBuilder/FlowAutomationView/FlowAutomationView.types';
 import { stepNameForPath } from '../../AutomationBuilder/FlowAutomationView/FlowAutomationView.utils';
 import type { RunDetailProps } from './RunDetail.types';
+import { RunValueView } from './RunValueView';
 
 const noop = (): void => undefined;
 // Only used by the builder side panel, which the run overlay replaces.
@@ -106,7 +108,7 @@ export function RunDetail({ runId, onBack }: RunDetailProps): React.ReactElement
     () => (data ? buildRunOverlay(data) : undefined),
     [data],
   );
-  const showFlow = view === 'flow' && canShowFlow && runOverlay !== undefined;
+  const showFlow = view === 'flow' && canShowFlow;
 
   return (
     <div className='flex h-full w-full flex-col bg-background'>
@@ -338,27 +340,13 @@ function StepCard({
         </div>
       </div>
       {error && (
-        <div className='whitespace-pre-wrap rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-700'>
+        <div className='whitespace-pre-wrap rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-700 dark:text-red-400'>
           {error}
         </div>
       )}
       <div className={cn('grid grid-cols-1 gap-3', !stacked && 'lg:grid-cols-2')}>
-        <div className='flex flex-col gap-1.5'>
-          <span className='text-[11px] uppercase tracking-wide text-muted-foreground'>
-            Resolved input
-          </span>
-          <JsonBlock
-            text={input === undefined ? null : prettyJson(input)}
-            placeholder='— (no input recorded)'
-          />
-        </div>
-        <div className='flex flex-col gap-1.5'>
-          <span className='text-[11px] uppercase tracking-wide text-muted-foreground'>Output</span>
-          <JsonBlock
-            text={output === undefined || output === null ? null : prettyJson(output)}
-            placeholder='— (no output)'
-          />
-        </div>
+        <JsonBlock title='Resolved input' value={input} placeholder='— (no input recorded)' />
+        <JsonBlock title='Output' value={output} placeholder='— (no output)' />
       </div>
     </div>
   );
@@ -388,37 +376,80 @@ function SectionCard({
           )}
         </div>
       </div>
-      <JsonBlock text={prettyJson(json)} />
+      <JsonBlock title='Payload' value={json} placeholder='— (no data)' />
     </div>
   );
 }
 
-/** A JSON `<pre>` with a copy button; `placeholder` shows (uncopyable) when `text` is null. */
+const PAYLOAD_MODES = [
+  { mode: 'fields', label: 'Fields' },
+  { mode: 'json', label: 'Raw JSON' },
+] as const;
+
+/**
+ * A run payload as labelled fields or highlighted JSON, scrolling past 320px.
+ * Copy always copies the JSON; `placeholder` shows when nothing was recorded.
+ */
 function JsonBlock({
-  text,
+  title,
+  value,
   placeholder,
 }: {
-  text: string | null;
-  placeholder?: string;
+  title: string;
+  value: unknown;
+  placeholder: string;
 }): React.ReactElement {
+  const [mode, setMode] = useState<'fields' | 'json'>('fields');
   const { copied, copy } = useCopyButton();
+  if (value === undefined || value === null) {
+    return (
+      <div className='rounded-md border border-border bg-muted/40 p-3 text-[11px] text-muted-foreground'>
+        <span className='font-semibold uppercase tracking-wide'>{title}</span> {placeholder}
+      </div>
+    );
+  }
   return (
-    <div className='relative'>
-      <pre className='max-h-[280px] overflow-auto rounded-md border border-border bg-muted/40 p-3 pr-9 text-[11px] leading-relaxed text-foreground font-mono'>
-        {text ?? placeholder}
-      </pre>
-      {text !== null && (
+    <div className='flex max-h-[320px] flex-col overflow-hidden rounded-md border border-border'>
+      <div className='flex items-center gap-2 border-b border-border bg-muted/40 px-3 py-1.5'>
+        <span className='text-[11px] font-semibold uppercase tracking-wide text-muted-foreground'>
+          {title}
+        </span>
+        <div className='ml-auto flex items-center rounded-md border border-border p-0.5'>
+          {PAYLOAD_MODES.map(option => (
+            <button
+              key={option.mode}
+              type='button'
+              aria-pressed={mode === option.mode}
+              onClick={() => setMode(option.mode)}
+              data-track-category='automation-runs'
+              data-track-name={`run-detail-payload-${option.mode}`}
+              className={cn(
+                'rounded-sm px-1.5 py-0.5 text-[11px] text-muted-foreground hover:text-foreground',
+                mode === option.mode && 'bg-accent text-foreground',
+              )}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
         <button
           type='button'
           aria-label='Copy JSON'
           title='Copy JSON'
-          onClick={() => copy(text)}
+          onClick={() => copy(JSON.stringify(value, null, 2))}
           data-track-category='automation-runs'
           data-track-name='run-detail-copy-json'
-          className='absolute right-1.5 top-1.5 flex size-6 items-center justify-center rounded border border-border bg-background text-muted-foreground hover:text-foreground'
+          className='flex size-6 items-center justify-center rounded border border-border bg-background text-muted-foreground hover:text-foreground'
         >
           {copied ? <Check className='size-3.5' /> : <Copy className='size-3.5' />}
         </button>
+      </div>
+      {mode === 'fields' ? (
+        <div className='min-h-0 overflow-auto p-3'>
+          <RunValueView value={value} />
+        </div>
+      ) : (
+        <HighlightedJsonBlock title={title} value={value} hideHeader />
       )}
     </div>
   );
@@ -496,14 +527,12 @@ function buildRunOverlay({ run, steps }: RunDetailData): FlowRunOverlay {
     }
     if (!item.step) return null;
     const stepName = stepNameForPath(item.path);
-    const title =
-      item.label ??
-      (item.nodeType === 'conditional' ? 'Condition' : item.nodeType === 'switch' ? 'Switch' : '');
+    const title = item.label ?? (item.nodeType === 'switch' ? 'Switch' : 'Condition');
     const status = statusByStepName[stepName];
     if (!status) {
       return (
         <div className='rounded-md border border-border bg-background p-5 text-sm text-muted-foreground'>
-          {title || 'This step'} did not run.
+          {title} did not run.
         </div>
       );
     }
@@ -523,12 +552,4 @@ function buildRunOverlay({ run, steps }: RunDetailData): FlowRunOverlay {
   };
 
   return { statusByStepName, takenBranchByStepName, renderPanel };
-}
-
-function prettyJson(value: unknown): string {
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
 }
