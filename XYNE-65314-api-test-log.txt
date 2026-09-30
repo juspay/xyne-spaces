@@ -1,0 +1,17 @@
+XYNE-65314 proof of testing: API run against the real local backend and Postgres (branch fix/XYNE-65314-block-deactivated-user-in-group-dm @ 3084fdd0)
+Actors: Test User (logged in), Mayank Gupta (users.status = INACTIVE), Priya Sharma (ACTIVE), Rahul Verma (ACTIVE)
+
+BASELINE: backend process started before the fix branch was checked out, so it was still running old code
+POST /api/users/me/dms/<Mayank DM>/add {userIds:[Priya]}
+-> HTTP 201 {"message":"New group DM created"}
+group participants in DB: Test User|ACTIVE, Priya Sharma|ACTIVE, Mayank Gupta|INACTIVE   <-- the bug
+
+AFTER restarting the backend on the fix branch:
+Case 1: from the deactivated DM (Mayank), add Priya
+-> HTTP 400 {"error":"Cannot create a group with a deactivated member. Start a new conversation instead."}
+Case 2: add deactivated Mayank directly into the active DM with Priya
+-> HTTP 404 {"error":"One or more participants not found or inactive"}   (existing guard, unchanged)
+Case 3 (regression, active users only): active DM with Priya, add Rahul
+-> HTTP 201, group has Test User, Priya, Rahul (all ACTIVE)
+Case 4 (idempotency): the same add again
+-> HTTP 200 {"message":"Opened the existing group conversation"}
