@@ -38,7 +38,7 @@ import { createTicketCustomFieldActivity } from '@/services/ticketCustomFieldAct
 
 import { resolveChannelId } from '../utils/channelUtils';
 import { decodeCursor, paginateResults } from '../core/paginationUtils';
-import type { MerchantTicketListItem } from '../types';
+import type { MerchantTicketListItem, TicketUserInfo } from '../types';
 import { validateChannelIdsAccess } from '../middelware/channelValidation';
 import { resolveFormFieldDefinitionsForForm } from '@/utils/fieldDefinition';
 import type { TicketCustomFormData } from '@/database/repositories/formsRepository';
@@ -248,6 +248,14 @@ const SearchTicketsBodySchema = z.object({
   }
 });
 
+const ListBoardsQuerySchema = z.object({
+  projectId: z.string().min(1, 'projectId must not be empty').trim().optional(),
+});
+
+const BoardIdParamsSchema = z.object({
+  boardId: z.string().min(1, 'boardId is required').trim(),
+});
+
 const TicketConversationQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
   cursor: z.string().optional(),
@@ -285,6 +293,34 @@ interface TicketConversationCursor {
   id: string;
   createdAt: number;
 }
+/**
+ * Batch-resolve user ids to { userId, email, name, displayName } so ticket
+ * responses can expose who a ticket is assigned to / created by without the
+ * caller making a follow-up users lookup.
+ */
+const getTicketUserInfoMap = async (
+  userIds: Array<string | null | undefined>,
+): Promise<Map<string, TicketUserInfo>> => {
+  const ids = Array.from(new Set(userIds.filter((id): id is string => !!id)));
+  if (ids.length === 0) return new Map();
+
+  const users = await prismaClient.user.findMany({
+    where: { id: { in: ids } },
+    select: { id: true, email: true, name: true, displayName: true },
+  });
+  return new Map(
+    users.map(user => [
+      user.id,
+      { userId: user.id, email: user.email, name: user.name, displayName: user.displayName },
+    ]),
+  );
+};
+
+const userInfoOrNull = (
+  userMap: Map<string, TicketUserInfo>,
+  userId: string | null | undefined,
+): TicketUserInfo | null => (userId ? userMap.get(userId) ?? null : null);
+
 const replaceTicketTags = async (ticketId: string, tags: string[]): Promise<void> => {
   const normalizedTags = Array.from(new Set(tags.map(tag => tag.trim()).filter(Boolean)));
   const ticket = await prismaClient.ticket.findUnique({
@@ -1310,6 +1346,8 @@ export class TicketController {
         boardId: true,
         projectId: true,
         merchantId: true,
+        assignedTo: true,
+        createdBy: true,
       } as const;
 
       const hasCustomFieldFilters = !!(customFields && Object.keys(customFields).length > 0);
@@ -1390,6 +1428,11 @@ export class TicketController {
         );
       }
 
+      // Only the page actually returned (limit), not the +1 lookahead row.
+      const userMap = await getTicketUserInfoMap(
+        tickets.slice(0, limit).flatMap(ticket => [ticket.assignedTo, ticket.createdBy]),
+      );
+
       const items: MerchantTicketListItem[] = tickets.map(ticket => {
         return {
           ticketId: ticket.id,
@@ -1405,6 +1448,10 @@ export class TicketController {
           boardId: ticket.boardId,
           projectId: ticket.projectId,
           merchantId: ticket.merchantId,
+          assignedTo: ticket.assignedTo,
+          assignedToUser: userInfoOrNull(userMap, ticket.assignedTo),
+          createdBy: ticket.createdBy,
+          createdByUser: userInfoOrNull(userMap, ticket.createdBy),
           ...(includeCustomFields ? { customFormData: customFormDataByTicketId.get(ticket.id) ?? null } : {}),
         };
       });
@@ -1425,6 +1472,122 @@ export class TicketController {
         res.status(400).json({ error: error.message, code: 'VALIDATION_ERROR' });
         return;
       }
+      res.status(500).json({ error: 'Internal server error', code: 'INTERNAL_ERROR' });
+    }
+  };
+
+  /**
+   * List boards in the app's workspace, optionally narrowed to one project.
+   * GET /api/apps/ticket/boards?projectId=...
+   */
+  listBoards = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const queryResult = ListBoardsQuerySchema.safeParse(req.query);
+      if (!queryResult.success) {
+        res.status(400).json({
+          error: 'Validation error',
+          code: 'VALIDATION_ERROR',
+          details: queryResult.error.errors,
+        });
+        return;
+      }
+
+      const workspaceId = req.user?.workspaceId;
+      if (!workspaceId) {
+        res.status(400).json({ error: 'Authenticated workspace is required', code: 'VALIDATION_ERROR' });
+        return;
+      }
+
+      const { projectId } = queryResult.data;
+      const boards = await prismaClient.board.findMany({
+        where: { workspaceId, ...(projectId ? { projectId } : {}) },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        select: {
+          id: true,
+          name: true,
+          boardType: true,
+          description: true,
+          projectId: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      });
+
+      res.status(200).json({
+        boards: boards.map(board => ({
+          boardId: board.id,
+          name: board.name,
+          boardType: board.boardType,
+          description: board.description,
+          projectId: board.projectId,
+          createdAt: board.createdAt,
+          updatedAt: board.updatedAt,
+        })),
+      });
+    } catch (error) {
+      logger.error('[TicketController] listBoards error:', error);
+      res.status(500).json({ error: 'Internal server error', code: 'INTERNAL_ERROR' });
+    }
+  };
+
+  /**
+   * List the stages of a board, ordered by sequence.
+   * GET /api/apps/ticket/boards/:boardId/stages
+   */
+  listBoardStages = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const paramsResult = BoardIdParamsSchema.safeParse(req.params);
+      if (!paramsResult.success) {
+        res.status(400).json({
+          error: 'Validation error',
+          code: 'VALIDATION_ERROR',
+          details: paramsResult.error.errors,
+        });
+        return;
+      }
+
+      const workspaceId = req.user?.workspaceId;
+      if (!workspaceId) {
+        res.status(400).json({ error: 'Authenticated workspace is required', code: 'VALIDATION_ERROR' });
+        return;
+      }
+
+      const { boardId } = paramsResult.data;
+      const board = await prismaClient.board.findFirst({
+        where: { id: boardId, workspaceId },
+        select: { id: true, name: true, projectId: true },
+      });
+      if (!board) {
+        res.status(404).json({ error: `Board with ID ${boardId} not found`, code: 'BOARD_NOT_FOUND' });
+        return;
+      }
+
+      const stages = await prismaClient.stage.findMany({
+        where: { boardId },
+        orderBy: [{ sequenceNumber: 'asc' }, { createdAt: 'asc' }],
+        select: {
+          id: true,
+          name: true,
+          sequenceNumber: true,
+          eta: true,
+          defaultTicketStatusV2: true,
+        },
+      });
+
+      res.status(200).json({
+        boardId: board.id,
+        boardName: board.name,
+        projectId: board.projectId,
+        stages: stages.map(stage => ({
+          stageId: stage.id,
+          name: stage.name,
+          sequenceNumber: stage.sequenceNumber,
+          eta: stage.eta,
+          defaultTicketStatusV2: stage.defaultTicketStatusV2,
+        })),
+      });
+    } catch (error) {
+      logger.error('[TicketController] listBoardStages error:', error);
       res.status(500).json({ error: 'Internal server error', code: 'INTERNAL_ERROR' });
     }
   };
