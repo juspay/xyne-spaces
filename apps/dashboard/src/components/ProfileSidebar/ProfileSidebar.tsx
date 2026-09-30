@@ -31,9 +31,8 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({ className }) => 
   const [userProfile] = useCachedQuery(queries.getUserProfile({ userId: userId || '' }), {
     enabled: !!userId,
   });
-  // Slack-style empty-DM view is only reached when this sidebar was routed to
-  // from Cmd+K's deactivated-user fallback. `View Profile` opens the shared
-  // ProfileModal in-place instead of navigating away.
+  // Slack-style empty-DM view (reached from Cmd+K's deactivated-user fallback).
+  // `View Profile` opens the shared ProfileModal in-place — no route change.
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
 
   const handleClose = (): void => {
@@ -71,8 +70,10 @@ export const ProfileSidebar: React.FC<ProfileSidebarProps> = ({ className }) => 
   const displayName = getUserDisplayName(user);
 
   // Deactivated target → Slack-style empty-DM view. Reached only from Cmd+K's
-  // profile-fallback (no prior DM with a deactivated user). Renders inside the
-  // same route/component slot as the normal sidebar; no new route.
+  // profile-fallback (no prior DM with a deactivated user). ChatView renders
+  // this component full-viewport for that case (see isDeactivatedProfileActive
+  // in ChatView.tsx), so the layout owns the screen instead of showing as a
+  // sidebar. No new route needed.
   if (!isOwnProfile && isUserDeactivated(user)) {
     return (
       <div className={`flex h-full min-h-0 flex-col bg-background ${className}`}>

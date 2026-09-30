@@ -284,6 +284,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
           { modifier: event.metaKey || event.ctrlKey, isElectron: isElectronApp(), isMobile },
           navigate,
           getAllChannels(),
+          { callerUserId: context.userID },
         ).catch((error: unknown) => {
           logger.error(Event.FRONTEND_ERROR, {
             message: 'Opening a related-context item failed',
@@ -291,7 +292,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
           });
         });
       },
-      [isMobile, navigate],
+      [isMobile, navigate, context.userID],
     );
     const openRelated = useCallback(
       (item: RelatedItem, event: React.MouseEvent): void => {
