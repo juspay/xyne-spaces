@@ -158,7 +158,11 @@ export const SummaryGenerationPanel = ({
                 <AlertCircle size={17} strokeWidth={1.8} />
               </span>
               <div className='min-w-0 flex-1'>
-                <p className='font-semibold text-foreground'>Something went wrong</p>
+                <p className='font-semibold text-foreground'>
+                  {canGenerate
+                    ? 'Failed to generate summary'
+                    : 'Transcript required to generate summary'}
+                </p>
                 <p className='mt-1 text-pretty text-sm text-muted-foreground'>
                   Scribe couldn&rsquo;t generate a summary for this recording. Your notes and
                   transcript are untouched.
