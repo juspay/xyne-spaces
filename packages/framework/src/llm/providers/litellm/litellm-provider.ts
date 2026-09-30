@@ -128,14 +128,15 @@ export class LiteLLMProvider extends BaseProvider {
    */
   protected async *generateStreamInternal(
     request: LLMRequest,
-    context: ProviderExecutionContext
+    context: ProviderExecutionContext,
+    abortSignal?: AbortSignal
   ): AsyncIterable<StreamChunk> {
     try {
       // Convert to LiteLLM streaming format
       const litellmRequest = this.convertToLiteLLMRequest(request, true);
       
       // Make streaming API call
-      const stream = this.callLiteLLMStreamAPI(litellmRequest);
+      const stream = this.callLiteLLMStreamAPI(litellmRequest, abortSignal);
       
       // Convert and yield chunks
       for await (const chunk of stream) {
@@ -636,13 +637,14 @@ export class LiteLLMProvider extends BaseProvider {
     }
   }
 
-  private async *callLiteLLMStreamAPI(request: LiteLLMRequest): AsyncIterable<LiteLLMStreamChunk> {
+  private async *callLiteLLMStreamAPI(request: LiteLLMRequest, abortSignal?: AbortSignal): AsyncIterable<LiteLLMStreamChunk> {
     try {
+      const timeout = AbortSignal.timeout(this.providerConfig.timeout || 30000);
       const response = await fetch(`${this.baseUrl}/chat/completions`, {
         method: 'POST',
         headers: this.headers,
         body: JSON.stringify(request),
-        signal: AbortSignal.timeout(this.providerConfig.timeout || 30000)
+        signal: abortSignal ? AbortSignal.any([timeout, abortSignal]) : timeout
       });
 
       if (!response.ok) {

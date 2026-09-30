@@ -113,6 +113,7 @@ import {
 } from '../../../utils/rankingUtils';
 import { mergeRankedCandidates, type RankedCandidate } from '@xyne/shared/utils';
 import type { User } from '../../../machines/stateMachine';
+import { xyneAIActor } from '../../../machines/xyneAIMachine';
 import { searchMetricsService } from '../../../services/searchMetricsService';
 import { useHistoryBackedOverlay } from '../../../hooks/useHistoryBackedOverlay';
 import {
@@ -878,6 +879,7 @@ const ChannelCommandMenu = ({
     setText: setSearchText,
     inputRef,
     isAiQuery,
+    aiQuestion,
     // New hookstate
     activeTab,
     setActiveTab,
@@ -2641,6 +2643,37 @@ const ChannelCommandMenu = ({
         error: err,
       });
     }
+  };
+
+  const handleAiSourceOpen = async (
+    result: DisplaySearchResult,
+    event: React.MouseEvent,
+  ): Promise<void> => {
+    recentSearches.save();
+    try {
+      await openSearchResult(
+        result,
+        { modifier: event.metaKey || event.ctrlKey, isElectron: isElectronApp(), isMobile },
+        navigate,
+        channelData || [],
+      );
+      onOpenChange(false);
+    } catch (err) {
+      logger.error(LogEvent.FRONTEND_ERROR, {
+        message: 'Opening an AI overview source failed',
+        error: err,
+      });
+    }
+  };
+
+  const handleAiContinue = (question: string): void => {
+    xyneAIActor.send({
+      type: 'OPEN',
+      startFreshChat: true,
+      initialQuery: question,
+      trackSource: 'cmdk_ai_overview',
+    });
+    onOpenChange(false);
   };
 
   const handleItemMouseDown = (e: React.MouseEvent): void => {
@@ -4699,8 +4732,10 @@ const ChannelCommandMenu = ({
                 {aiOverview && !isInTicketView && (
                   <AiAnswerCard
                     query={searchText}
-                    tab={activeTab}
+                    question={mentionSearchType ? null : aiQuestion}
                     active={isAiQuery && !mentionSearchType}
+                    onOpenSource={(result, event) => void handleAiSourceOpen(result, event)}
+                    onContinue={handleAiContinue}
                   />
                 )}
 

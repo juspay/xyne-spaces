@@ -55,7 +55,7 @@ export const plain = (value: string | undefined): string =>
     .trim();
 
 /** The channel a thread lives in, as the sidebar names it: `#name`, or the DM's name. */
-export function channelOf(item: RelatedItem): string {
+export function channelOf(item: Pick<RelatedItem, 'result'>): string {
   const { result } = item;
   const context = result.searchContext;
   const channel = plain(context?.channelTitle ?? result.metadata.channelName).replace(/^#/, '');
@@ -64,7 +64,7 @@ export function channelOf(item: RelatedItem): string {
 }
 
 /** Where the item lives, as short as it can be and still be recognised. */
-export function whereOf(item: RelatedItem): string {
+export function whereOf(item: Pick<RelatedItem, 'kind' | 'result'>): string {
   const { result } = item;
   if (item.kind === 'thread') {
     return channelOf(item);
@@ -79,7 +79,7 @@ export function whereOf(item: RelatedItem): string {
  * The matched text as a sentence: canvas chunks arrive as markdown, so heading and
  * list markers go, and a leading heading that only repeats the title is dropped.
  */
-export function snippetOf(item: RelatedItem): string {
+export function snippetOf(item: Pick<RelatedItem, 'result'>): string {
   const text = plain(
     (item.result.context ?? '')
       .replace(/^\s*#{1,6}\s+/gm, '')

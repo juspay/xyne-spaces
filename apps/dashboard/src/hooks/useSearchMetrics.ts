@@ -1971,11 +1971,14 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     queryIntent?.intent?.mode === 'ai' &&
     trimmedText !== '' &&
     trimmedText.startsWith(queryIntent.query);
+  const aiQuestion =
+    queryIntent?.intent?.mode === 'ai' && trimmedText === queryIntent.query ? trimmedText : null;
 
   return {
     // Session state
     searchSessionId,
     isAiQuery,
+    aiQuestion,
 
     // Actions
     onOpen,

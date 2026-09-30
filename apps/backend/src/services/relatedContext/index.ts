@@ -125,7 +125,7 @@ const IS_COMPLETE: JevNoulQuestion = {
 };
 
 /** The gate: the cleanest signal Jev gives here, far cleaner than the label's own score. */
-const RELEVANT_CRITERIA = {
+export const RELEVANT_CRITERIA = {
   true: 'The same problem or topic, even in different words',
   false: 'A different subject, even if some words match',
 };
@@ -153,7 +153,7 @@ const LABELS: RelatedLabel[] = ['answers_it', 'same_question', 'related_discussi
  * become plain quotes: in Jev's instructions they point into the state, and a quoted
  * `draft` would pull the user's own draft into someone else's message.
  */
-const quoteCandidate = (candidate: Candidate): string => {
+export const quoteCandidate = (candidate: Candidate): string => {
   const text = candidate.text.replace(/"{3,}/g, '"').replace(/`/g, "'");
   return `Candidate ${KIND_NAMES[candidate.kind]}:\n"""\n${text}\n"""`;
 };

@@ -78,7 +78,7 @@ const DEFAULT_INTENT_CONFIG: IntentConfig = {
 };
 
 /** The intent config from Superposition, or the defaults above (feature off). */
-const getIntentConfig = async (ctx: QueryIntentContext): Promise<IntentConfig> =>
+export const getIntentConfig = async (ctx: QueryIntentContext): Promise<IntentConfig> =>
   (await superpositionClient.getObjectValue(
     INTENT_CONFIG_KEY,
     DEFAULT_INTENT_CONFIG as unknown as JsonValue,

@@ -1,5 +1,6 @@
-import { apiInstance } from './clients/apiClient';
+import { apiInstance, BASE_URL } from './clients/apiClient';
 import {
+  CmdkAnswerEvent,
   DisplaySearchResult,
   QueryIntent,
   RelatedContext,
@@ -166,6 +167,43 @@ export class SearchService {
       signal ? { signal } : {},
     );
     return response.data.success ? response.data.data : null;
+  }
+
+  async streamCmdkAnswer(
+    query: string,
+    workspaceId: string | null | undefined,
+    onEvent: (event: CmdkAnswerEvent) => void,
+    signal: AbortSignal,
+  ): Promise<void> {
+    // eslint-disable-next-line local-rules/no-fetch-use-axios
+    const response = await fetch(`${BASE_URL}${this.vespaBaseUrl}/answer`, {
+      method: 'POST',
+      headers: {
+        Accept: 'text/event-stream',
+        'Content-Type': 'application/json',
+        ...(workspaceId ? { 'x-workspace-id': workspaceId } : {}),
+      },
+      body: JSON.stringify({ q: query }),
+      credentials: 'include',
+      signal,
+    });
+    if (!response.ok || !response.body) {
+      throw new Error(`AI overview request failed (${response.status})`);
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) return;
+      buffer += decoder.decode(value, { stream: true });
+      const frames = buffer.split('\n\n');
+      buffer = frames.pop() ?? '';
+      for (const frame of frames) {
+        if (frame.startsWith('data: ')) onEvent(JSON.parse(frame.slice(6)) as CmdkAnswerEvent);
+      }
+    }
   }
 
   /**

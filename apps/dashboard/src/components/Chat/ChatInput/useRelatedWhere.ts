@@ -25,7 +25,7 @@ const isDmScope = (scopeType: string | undefined): boolean =>
   scopeType === 'DM' || scopeType === 'GROUP_DM';
 
 /** The channel an item lives in: `#name`, or the other people in a DM. */
-export function useChannelLabel(item: RelatedItem): string {
+export function useChannelLabel(item: Pick<RelatedItem, 'result'>): string {
   const context = item.result.searchContext;
   const isDm = isDmScope(context?.scopeType);
   const channel = useChannel(isDm ? (context?.channelId ?? '') : '');
@@ -60,7 +60,7 @@ export function useChannelLabel(item: RelatedItem): string {
 }
 
 /** `whereOf`, with DMs named by their people. */
-export function useWhereOf(item: RelatedItem): string {
+export function useWhereOf(item: Pick<RelatedItem, 'kind' | 'result'>): string {
   const channelLabel = useChannelLabel(item);
   return item.kind === 'thread' ? channelLabel : whereOf(item);
 }

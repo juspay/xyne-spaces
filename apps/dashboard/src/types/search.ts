@@ -207,6 +207,15 @@ export interface RelatedContext {
   failed?: boolean;
 }
 
+export type CmdkAnswerSource = Pick<RelatedItem, 'id' | 'kind' | 'result'>;
+
+export type CmdkAnswerEvent =
+  | { type: 'sources'; sources: CmdkAnswerSource[] }
+  | { type: 'delta'; content: string }
+  | { type: 'done' }
+  | { type: 'skip' }
+  | { type: 'error' };
+
 export interface VespaSearchResponse {
   success: boolean;
   data: {
