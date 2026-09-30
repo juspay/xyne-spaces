@@ -22,9 +22,9 @@ export type ControlCommand = "new" | "stop" | "status";
 const COMMANDS: ReadonlyArray<readonly [RegExp, ControlCommand]> = [
   // `/clear` is what the same command is called in Spaces; accept it here so
   // one person does not have to remember two names for one thing.
-  [/^[@/](new|reset|clear)\s*$/i, "new"],
-  [/^[@/](stop|cancel|abort)\s*$/i, "stop"],
-  [/^[@/]status\s*$/i, "status"],
+  [/^\/(new|reset|clear)\s*$/i, "new"],
+  [/^\/(stop|cancel|abort)\s*$/i, "stop"],
+  [/^\/status\s*$/i, "status"],
 ];
 
 export function parseControlCommand(text: string): ControlCommand | null {

@@ -32,7 +32,7 @@ export interface PolicyInput {
   hasIdentity: boolean;
   mentionedSelf: boolean;
   replyToSelf: boolean;
-  /** The text opened with "/slug" or "@slug" — the one-to-one equivalent of a
+  /** The text opened with "/slug" — the one-to-one equivalent of a
    *  native mention, since messengers offer no @mention outside a group. */
   namedInText?: boolean;
   /** The owner messaging their own number. There is nobody to authorise: the
