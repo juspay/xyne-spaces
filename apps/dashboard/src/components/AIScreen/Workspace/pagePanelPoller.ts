@@ -22,8 +22,12 @@ export function streamingRunIds(): string[] {
 }
 
 async function runCall(call: PagePanelCall): Promise<PageToolResult> {
-  if (!call.toolName.startsWith('page-')) return { ok: false, content: `Unknown page tool: ${call.toolName}` };
-  return executePageTool(call.toolName, call.args ?? {}).catch(() => ({ ok: false, content: 'Tool failed' }));
+  if (!call.toolName.startsWith('page-'))
+    return { ok: false, content: `Unknown page tool: ${call.toolName}` };
+  return executePageTool(call.toolName, call.args ?? {}).catch(() => ({
+    ok: false,
+    content: 'Tool failed',
+  }));
 }
 
 export function startPagePanelPoller(): () => void {
