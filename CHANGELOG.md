@@ -1,3 +1,10 @@
+## [1.444.2](https://github.com/juspay/xyne-spaces/compare/v1.444.1...v1.444.2) (2026-09-30)
+
+
+### Bug Fixes
+
+* cut style-recalc and render CPU when switching channels ([#2382](https://github.com/juspay/xyne-spaces/issues/2382)) ([68f9cbc](https://github.com/juspay/xyne-spaces/commit/68f9cbca004012c6b20a5dfda3eca96b6110f263))
+
 ## [1.444.1](https://github.com/juspay/xyne-spaces/compare/v1.444.0...v1.444.1) (2026-09-30)
 
 
