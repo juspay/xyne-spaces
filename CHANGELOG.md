@@ -1,3 +1,10 @@
+## [1.434.0-release-20260930.2](https://github.com/juspay/xyne-spaces/compare/v1.434.0-release-20260930.1...v1.434.0-release-20260930.2) (2026-09-30)
+
+
+### Bug Fixes
+
+* drop required() on JEV_URL/JEV_MODEL so their defaults apply ([#2482](https://github.com/juspay/xyne-spaces/issues/2482)) ([05bd314](https://github.com/juspay/xyne-spaces/commit/05bd3145466bce7617942755b2167bbe751c1233))
+
 ## [1.434.0-release-20260930.1](https://github.com/juspay/xyne-spaces/compare/v1.433.0...v1.434.0-release-20260930.1) (2026-09-30)
 
 
