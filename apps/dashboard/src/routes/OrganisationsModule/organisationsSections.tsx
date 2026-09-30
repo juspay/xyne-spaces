@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import {
+  BriefcaseJob,
   BuildingApartmentTwo,
   GitBranch,
   LayoutGridTwoVertical,
@@ -21,8 +22,6 @@ export interface OrganisationsSection {
   key: OrganisationsSectionKey;
   label: string;
   icon: PikaIcon;
-  /** Draws a divider before this tab, separating it from the workspace tabs. */
-  dividerBefore?: boolean;
 }
 
 /** One entry in the Organisations sidebar; more than one section renders as tabs. */
@@ -30,6 +29,10 @@ export interface OrganisationsSectionGroup {
   key: string;
   label: string;
   icon: PikaIcon;
+  /** Subtitle under the header when the entry renders as tabs. */
+  description?: string;
+  /** Settings that apply to the current workspace: the header names it. */
+  showsWorkspaceName?: boolean;
   sections: OrganisationsSection[];
 }
 
@@ -41,14 +44,21 @@ const GuestIcon: PikaIcon = ({ size, className }) => (
   <UserCheck size={typeof size === 'number' ? size : 16} className={className} />
 );
 
-// Sidebar order. Organisations holds the workspace settings (formerly
-// Workspace Management + User Management) and the organisations list as tabs;
-// User Groups and Roles are their own entries.
+// Sidebar order. Workspace holds the workspace settings (formerly Workspace
+// Management + User Management) as tabs; the others are single pages.
 export const ORGANISATIONS_SECTION_GROUPS: OrganisationsSectionGroup[] = [
   {
     key: 'organisations',
     label: 'Organisations',
     icon: BuildingApartmentTwo,
+    sections: [{ key: 'all', label: 'Organisations', icon: BuildingApartmentTwo }],
+  },
+  {
+    key: 'workspace',
+    label: 'Workspace',
+    icon: BriefcaseJob,
+    description: 'Settings, members and access for this workspace.',
+    showsWorkspaceName: true,
     sections: [
       { key: 'general', label: 'General', icon: Settings01 },
       { key: 'members', label: 'Members', icon: UserShield },
@@ -56,12 +66,6 @@ export const ORGANISATIONS_SECTION_GROUPS: OrganisationsSectionGroup[] = [
       { key: 'guests', label: 'Guest users', icon: GuestIcon },
       { key: 'repository-credentials', label: 'Repository credentials', icon: GitBranch },
       { key: 'toolbar', label: 'Toolbar', icon: LayoutGridTwoVertical },
-      {
-        key: 'all',
-        label: 'All organisations',
-        icon: BuildingApartmentTwo,
-        dividerBefore: true,
-      },
     ],
   },
   {
