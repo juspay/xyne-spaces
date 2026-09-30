@@ -5,6 +5,7 @@ import type { Element } from 'hast';
 import type { Components } from 'react-markdown';
 import { CopyCopied, CopyDefault, MaximizeTwoArrow } from '@xyne/icons';
 import { copyTextToClipboard } from './clipboardUtils';
+import { useIsInsideExpandableMessage } from '../components/Chat/ExpandableMessage/ExpandableMessageContext';
 import { MermaidBlock } from '../components/Markdown/MermaidBlock';
 import { FilesystemBlock } from '../components/Markdown/FilesystemBlock';
 import { D2Block } from '../components/Markdown/D2Block';
@@ -76,7 +77,10 @@ const FencedCodeBlock = ({
   };
 
   const lines = codeText.length > 0 ? codeText.replace(/\n$/, '').split('\n').length : 0;
-  const collapsible = lines > CODE_BLOCK_COLLAPSE_THRESHOLD;
+  // Inside an ExpandableMessage the message owns the only Show more/less toggle;
+  // a second collapse here renders a duplicate "Show less" pill.
+  const insideExpandableMessage = useIsInsideExpandableMessage();
+  const collapsible = !insideExpandableMessage && lines > CODE_BLOCK_COLLAPSE_THRESHOLD;
 
   return (
     <div className='xyne-code-block group/code-block relative my-3 max-w-full overflow-hidden rounded-[10px] border border-border bg-muted'>
