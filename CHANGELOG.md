@@ -1,3 +1,31 @@
+## [1.439.0](https://github.com/juspay/xyne-spaces/compare/v1.438.0...v1.439.0) (2026-09-30)
+
+
+### Features
+
+* dailybranchcut ([#2492](https://github.com/juspay/xyne-spaces/issues/2492)) ([a1ae134](https://github.com/juspay/xyne-spaces/commit/a1ae1344b55ea37dd66bd98028af445a8b7c71f9))
+
+## [1.438.0](https://github.com/juspay/xyne-spaces/compare/v1.437.0...v1.438.0) (2026-09-30)
+
+
+### Features
+
+* key internal user deactivation API on email with its own service secret ([#2410](https://github.com/juspay/xyne-spaces/issues/2410)) ([73ee179](https://github.com/juspay/xyne-spaces/commit/73ee179c23ebb3d9e064891bd7e0f77ee2e5140b))
+
+## [1.437.0](https://github.com/juspay/xyne-spaces/compare/v1.436.0...v1.437.0) (2026-09-30)
+
+
+### Features
+
+* always show merchant ID in ticket details ([#2488](https://github.com/juspay/xyne-spaces/issues/2488)) ([90181a2](https://github.com/juspay/xyne-spaces/commit/90181a252a8fb7f2a1ad2ac306589c1811068bd4))
+
+## [1.436.0](https://github.com/juspay/xyne-spaces/compare/v1.435.2...v1.436.0) (2026-09-30)
+
+
+### Features
+
+* expose replyTo in EMAIL_RECEIVED and EMAIL_SENT trigger values ([#1812](https://github.com/juspay/xyne-spaces/issues/1812)) ([5874104](https://github.com/juspay/xyne-spaces/commit/5874104fff7a75dda9c322d79ac6608186570d5e))
+
 ## [1.435.2](https://github.com/juspay/xyne-spaces/compare/v1.435.1...v1.435.2) (2026-09-30)
 
 
