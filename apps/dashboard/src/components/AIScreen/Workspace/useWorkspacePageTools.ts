@@ -3,7 +3,6 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { isElectronApp } from '../../../utils/electronApp';
 import { executePageTool } from './workspaceBrowserTools';
 import { executeAppTool, isAppControlTool, registerAppControlHost } from './appControlTools';
-import { startPagePanelPoller } from './pagePanelPoller';
 
 export function useWorkspacePageTools(): void {
   const navigate = useNavigate();
@@ -20,11 +19,6 @@ export function useWorkspacePageTools(): void {
     });
     return () => registerAppControlHost(null);
   }, [navigate, location.pathname, workspaceId]);
-
-  useEffect(() => {
-    if (!isElectronApp()) return undefined;
-    return startPagePanelPoller();
-  }, []);
 
   useEffect(() => {
     if (!isElectronApp()) return undefined;
