@@ -14,6 +14,8 @@ const MAX_ARG_CHARS = 4000;
 const MAX_RUNS_PER_POLL = 5;
 const OWNER_CACHE_MS = 60_000;
 const PAGE_PANEL_TRIGGER_SOURCES = new Set(["chat"]);
+const OPEN_URL_TOOL = "open-url";
+const PANEL_OPEN_WAIT_MS = 8_000;
 
 export const PAGE_PANEL_TOOLS = new Set([
   "page-read",
@@ -55,7 +57,7 @@ const callKey = (callId: string) => `claw:page-panel:call:${callId}`;
 const resultKey = (callId: string) => `claw:page-panel:result:${callId}`;
 
 export function isPagePanelTool(toolName: string): boolean {
-  return PAGE_PANEL_TOOLS.has(toolName);
+  return PAGE_PANEL_TOOLS.has(toolName) || toolName === OPEN_URL_TOOL;
 }
 
 export function pagePanelAllowedForTrigger(triggerSource: string | null | undefined): boolean {
@@ -66,17 +68,30 @@ function unavailable(content: string): PagePanelResult {
   return { ok: false, content, unavailable: true };
 }
 
-const ownerCache = new Map<string, { userId: string; allowed: boolean; at: number }>();
+interface RunOwner {
+  userId: string;
+  allowed: boolean;
+  conversationId: string | null;
+  orgId: string;
+}
 
-async function runOwner(runId: string): Promise<{ userId: string; allowed: boolean } | null> {
+const ownerCache = new Map<string, RunOwner & { at: number }>();
+
+async function runOwner(runId: string): Promise<RunOwner | null> {
   const cached = ownerCache.get(runId);
   if (cached && Date.now() - cached.at < OWNER_CACHE_MS) return cached;
   const run = await prisma.agentRun.findUnique({
     where: { sessionId: runId },
-    select: { userId: true, triggerSource: true },
+    select: { userId: true, triggerSource: true, conversationId: true, orgId: true },
   });
   if (!run) return null;
-  const entry = { userId: run.userId, allowed: pagePanelAllowedForTrigger(run.triggerSource), at: Date.now() };
+  const entry = {
+    userId: run.userId,
+    allowed: pagePanelAllowedForTrigger(run.triggerSource),
+    conversationId: run.conversationId,
+    orgId: run.orgId,
+    at: Date.now(),
+  };
   ownerCache.set(runId, entry);
   if (ownerCache.size > 5000) {
     const oldest = ownerCache.keys().next().value;
@@ -111,10 +126,11 @@ export async function callPagePanelTool(input: {
   }
 
   const redis = redisService.getConnection();
-  const present = await redis.get(presenceKey(runId)).catch(() => null);
-  if (present !== userId) {
-    return unavailable("The Xyne AI screen for this run is not open with a browser panel on the desktop app.");
+  const presence = parsePresence(await redis.get(presenceKey(runId)).catch(() => null));
+  if (presence?.userId !== userId) {
+    return unavailable("The Xyne AI screen for this run is not open on the desktop app.");
   }
+  if (toolName === OPEN_URL_TOOL) return openInPanel(owner, runId, args);
 
   const deadlineMs = DEADLINES_MS[toolName] ?? READ_DEADLINE_MS;
   const call: PagePanelCall = { id: randomUUID(), runId, toolName, args, expiresAt: Date.now() + deadlineMs };
@@ -144,12 +160,59 @@ export async function callPagePanelTool(input: {
   return { ok: false, content: `The browser panel did not answer ${toolName} in time.` };
 }
 
-export async function nextPagePanelCall(userId: string, runIds: ReadonlyArray<string>): Promise<PagePanelCall | null> {
+function parsePresence(raw: string | null): { userId: string; panelOpen: boolean } | null {
+  if (!raw) return null;
+  const [userId, panel] = raw.split("|");
+  return userId ? { userId, panelOpen: panel === "1" } : null;
+}
+
+async function openInPanel(owner: RunOwner, runId: string, args: Record<string, unknown>): Promise<PagePanelResult> {
+  const raw = typeof args["url"] === "string" ? args["url"].trim() : "";
+  if (!/^https?:\/\//i.test(raw)) return { ok: false, content: "Error: url must be an absolute http(s) URL." };
+  if (!owner.conversationId) return unavailable("This run has no conversation to open the page in.");
+  const { recordConversationArtifact, normalizeExternalUrl, detectLinkProvider } = await import("./conversation-artifacts.js");
+  const normalized = normalizeExternalUrl(raw);
+  if (!normalized) return { ok: false, content: "Error: url could not be parsed." };
+  const title = typeof args["title"] === "string" && args["title"].trim() ? args["title"].trim() : new URL(raw).host;
+  await recordConversationArtifact({
+    conversationId: owner.conversationId,
+    runId,
+    kind: "PAGE",
+    refService: "EXTERNAL",
+    refId: normalized,
+    url: raw,
+    provider: detectLinkProvider(normalized),
+    title,
+    createdByUserId: owner.userId,
+    orgId: owner.orgId,
+  });
+  log.info(`[page-panel] open-url run=${runId} host=${new URL(raw).host}`);
+
+  const redis = redisService.getConnection();
+  const until = Date.now() + PANEL_OPEN_WAIT_MS;
+  while (Date.now() < until) {
+    await new Promise((resolve) => setTimeout(resolve, RESULT_POLL_MS));
+    const presence = parsePresence(await redis.get(presenceKey(runId)).catch(() => null));
+    if (presence?.panelOpen) break;
+  }
+  return {
+    ok: true,
+    content:
+      `Opened ${raw} in the user's browser panel on the right of the Xyne AI screen. ` +
+      "Use page-snapshot, page-read, page-click and page-type to work with it.",
+  };
+}
+
+export async function nextPagePanelCall(
+  userId: string,
+  runIds: ReadonlyArray<string>,
+  panelOpen = true,
+): Promise<PagePanelCall | null> {
   const redis = redisService.getConnection();
   for (const runId of runIds.slice(0, MAX_RUNS_PER_POLL)) {
     const owner = await runOwner(runId).catch(() => null);
     if (!owner || owner.userId !== userId || !owner.allowed) continue;
-    await redis.set(presenceKey(runId), userId, "EX", PRESENCE_TTL_SECONDS).catch(() => undefined);
+    await redis.set(presenceKey(runId), `${userId}|${panelOpen ? "1" : "0"}`, "EX", PRESENCE_TTL_SECONDS).catch(() => undefined);
     for (;;) {
       const raw = await redis.lpop(queueKey(runId)).catch(() => null);
       if (!raw) break;

@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const state = vi.hoisted(() => ({
-  runs: new Map<string, { userId: string; triggerSource: string }>(),
+  runs: new Map<string, { userId: string; triggerSource: string; conversationId: string | null; orgId: string }>(),
+  artifacts: [] as Array<Record<string, unknown>>,
   kv: new Map<string, string>(),
   lists: new Map<string, string[]>(),
 }));
@@ -38,6 +39,14 @@ vi.mock("../redis.js", () => ({
   },
 }));
 
+vi.mock("./conversation-artifacts.js", () => ({
+  normalizeExternalUrl: (url: string) => url,
+  detectLinkProvider: () => "google_docs",
+  recordConversationArtifact: vi.fn(async (input: Record<string, unknown>) => {
+    state.artifacts.push(input);
+  }),
+}));
+
 import {
   callPagePanelTool,
   nextPagePanelCall,
@@ -48,7 +57,7 @@ import {
 let run = 0;
 const newRun = (userId: string, triggerSource: string) => {
   const id = `run-${++run}`;
-  state.runs.set(id, { userId, triggerSource });
+  state.runs.set(id, { userId, triggerSource, conversationId: `conv-${id}`, orgId: "org-1" });
   return id;
 };
 
@@ -56,6 +65,7 @@ describe("browser panel calls for Xyne AI screen runs", () => {
   beforeEach(() => {
     state.kv.clear();
     state.lists.clear();
+    state.artifacts.length = 0;
   });
 
   it("only allows runs started from the Xyne AI screen", () => {
@@ -103,5 +113,43 @@ describe("browser panel calls for Xyne AI screen runs", () => {
     const id = newRun("u2", "chat");
     expect(await nextPagePanelCall("u1", [id])).toBeNull();
     expect(state.kv.size).toBe(0);
+  });
+
+  it("opens a URL in the panel of the run's Xyne AI screen and waits for it", async () => {
+    const id = newRun("u1", "chat");
+    await nextPagePanelCall("u1", [id], false);
+    const pending = callPagePanelTool({
+      userId: "u1",
+      sessionId: id,
+      toolName: "open-url",
+      args: { url: "https://docs.google.com/", title: "Google Docs" },
+    });
+    await new Promise((r) => setTimeout(r, 300));
+    await nextPagePanelCall("u1", [id], true);
+    const result = await pending;
+    expect(result.ok).toBe(true);
+    expect(result.content).toContain("browser panel");
+    expect(state.artifacts[0]).toMatchObject({
+      conversationId: `conv-${id}`,
+      runId: id,
+      kind: "PAGE",
+      url: "https://docs.google.com/",
+      title: "Google Docs",
+      createdByUserId: "u1",
+    });
+  });
+
+  it("does not open a URL when no Xyne AI screen is watching the run", async () => {
+    const id = newRun("u1", "chat");
+    const result = await callPagePanelTool({ userId: "u1", sessionId: id, toolName: "open-url", args: { url: "https://docs.google.com/" } });
+    expect(result.unavailable).toBe(true);
+    expect(state.artifacts).toHaveLength(0);
+  });
+
+  it("does not open a URL for a thread run", async () => {
+    const id = newRun("u1", "spaces");
+    const result = await callPagePanelTool({ userId: "u1", sessionId: id, toolName: "open-url", args: { url: "https://docs.google.com/" } });
+    expect(result.unavailable).toBe(true);
+    expect(state.artifacts).toHaveLength(0);
   });
 });

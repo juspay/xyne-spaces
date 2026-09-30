@@ -12,7 +12,8 @@ router.get("/page-calls/next", async (req: Request, res: Response) => {
   }
   const raw = typeof req.query["runIds"] === "string" ? req.query["runIds"] : "";
   const runIds = raw.split(",").map((id) => id.trim()).filter(Boolean);
-  const call = runIds.length > 0 ? await nextPagePanelCall(userId, runIds) : null;
+  const panelOpen = req.query["panel"] !== "0";
+  const call = runIds.length > 0 ? await nextPagePanelCall(userId, runIds, panelOpen) : null;
   res.json({ success: true, data: { call } });
 });
 
