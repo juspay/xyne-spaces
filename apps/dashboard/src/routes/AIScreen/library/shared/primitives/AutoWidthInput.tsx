@@ -5,6 +5,7 @@ import {
   type ComponentPropsWithoutRef,
   type CSSProperties,
   type ReactElement,
+  type Ref,
 } from 'react';
 import { cn } from '@/utils/classNames';
 
@@ -21,8 +22,9 @@ export function AutoWidthInput({
   style,
   size = 1,
   type = 'text',
+  ref,
   ...rest
-}: AutoWidthInputProps): ReactElement {
+}: AutoWidthInputProps & { ref?: Ref<HTMLInputElement> }): ReactElement {
   const mirrorRef = useRef<HTMLSpanElement>(null);
   const [width, setWidth] = useState<number | null>(null);
 
@@ -51,6 +53,7 @@ export function AutoWidthInput({
         {value || placeholder || ' '}
       </span>
       <input
+        ref={ref}
         data-track-category='Claw Agents'
         data-track-name='Auto-width input'
         type={type}

@@ -9,6 +9,7 @@ import SkillsV2 from './skills/SkillsV2';
 import McpV2 from './mcp/McpV2';
 import AppsV2 from './apps/AppsV2';
 import { LibraryToolbarSlotProvider } from './shared/components/LibraryToolbarSlot';
+import { CreateAgentDialog } from './agents/create/CreateAgentDialog';
 
 interface LibraryTab {
   id: string;
@@ -74,6 +75,12 @@ const LibraryV2 = (): ReactElement => {
   const activeTab = LIBRARY_TABS.find(t => t.id === rawTab) ?? LIBRARY_TABS[0];
   const TabContent = activeTab.content;
 
+  const [createAgentOpen, setCreateAgentOpen] = useState(false);
+  const startCreate = (path: string): void => {
+    if (activeTab.id === 'agents') setCreateAgentOpen(true);
+    else void navigate(prefixWs(path));
+  };
+
   const query = searchParams.get('q') ?? '';
   const [searchOpen, setSearchOpen] = useState(query.length > 0);
 
@@ -119,7 +126,7 @@ const LibraryV2 = (): ReactElement => {
             <Button
               type='button'
               className='shrink-0'
-              onClick={() => void navigate(prefixWs(activeTab.create.path))}
+              onClick={() => startCreate(activeTab.create.path)}
               data-track-category='Claw Agents'
               data-track-name={activeTab.create.label}
             >
@@ -200,6 +207,8 @@ const LibraryV2 = (): ReactElement => {
           <TabContent key={activeTab.id} query={query} />
         </div>
       </LibraryToolbarSlotProvider>
+
+      <CreateAgentDialog open={createAgentOpen} onOpenChange={setCreateAgentOpen} />
     </div>
   );
 };
