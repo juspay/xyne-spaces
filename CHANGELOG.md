@@ -1,3 +1,10 @@
+## [1.433.1](https://github.com/juspay/xyne-spaces/compare/v1.433.0...v1.433.1) (2026-09-30)
+
+
+### Bug Fixes
+
+* keep Cmd+K search ghost suffix after the last line of a wrapped query ([#2462](https://github.com/juspay/xyne-spaces/issues/2462)) ([1e2c7e2](https://github.com/juspay/xyne-spaces/commit/1e2c7e286839031363ec25b0d9eafcd9f143f9c7))
+
 ## [1.433.0](https://github.com/juspay/xyne-spaces/compare/v1.432.1...v1.433.0) (2026-09-30)
 
 
