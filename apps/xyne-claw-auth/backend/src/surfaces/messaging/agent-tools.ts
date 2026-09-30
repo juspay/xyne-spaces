@@ -105,7 +105,7 @@ export function channelAgentTools(channel: MessagingChannelKey): McpToolInfo[] {
         `Read what has been said recently in the ${label} group this conversation is happening in — the messages ` +
         `nobody addressed the agent in, which it would otherwise never see. Use this when asked to summarise or ` +
         `catch up on "this group" / "this chat". Bounded: only what arrived since the agent last replied here, ` +
-        `and only from the last 12 hours. Returns [] in a one-to-one chat, or when there is nothing buffered — ` +
+        `and only from the last 15 days. Returns [] in a one-to-one chat, or when there is nothing buffered — ` +
         `say so plainly rather than guessing, and do NOT substitute a Spaces conversation.`,
       inputSchema: { type: "object", properties: {}, required: [] },
     }]
@@ -235,7 +235,7 @@ export async function handleChannelAgentTool(input: {
         })),
         note:
           buffered.length === 0
-            ? "Nothing buffered for this group. Only messages that did not address the agent are kept, for 12 hours — say that rather than looking somewhere else."
+            ? "Nothing buffered for this group. Only messages that did not address the agent are kept, for 15 days — say that rather than looking somewhere else."
             : undefined,
       });
     }
