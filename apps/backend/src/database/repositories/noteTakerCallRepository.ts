@@ -5,6 +5,7 @@ import { repositories } from './index';
 import { createThreadAnchorMessageTx } from '@/bypassAcl/transactions/noteTakerCallRepository';
 import { handleParticipantLeaveTx } from '@/bypassAcl/transactions/noteTakerCallRepository';
 import { handleRoomFinishedTx } from '@/bypassAcl/transactions/noteTakerCallRepository';
+import { syncRecordingParticipantRows } from './callRepository';
 
 export interface CreateNoteTakerCallParams {
   callId: string;
@@ -54,20 +55,33 @@ export class NoteTakerCallRepository {
       detailedSummaryStatus: 'pending',
     };
 
-    return this.db.call.create({
-      data: {
-        id: callId,
-        externalId: roomName,
+    return this.db.$transaction(async tx => {
+      const call = await tx.call.create({
+        data: {
+          id: callId,
+          externalId: roomName,
+          workspaceId,
+          createdByUserId: createdBy,
+          callType: CallType.HEADLESS,
+          recordingParticipants: JSON.stringify([createdBy]),
+          status: CallStatus.ACTIVE,
+          roomLink,
+          metadata: metadata as Prisma.InputJsonValue,
+          startedAt: now,
+          lastActivityAt: now,
+        },
+      });
+
+      // Derived index over `recordingParticipants`; same transaction as the
+      // JSON write so the two can't diverge.
+      await syncRecordingParticipantRows(tx, {
+        callId: call.id,
         workspaceId,
         createdByUserId: createdBy,
-        callType: CallType.HEADLESS,
-        recordingParticipants: JSON.stringify([createdBy]),
-        status: CallStatus.ACTIVE,
-        roomLink,
-        metadata: metadata as Prisma.InputJsonValue,
-        startedAt: now,
-        lastActivityAt: now,
-      },
+        participantIds: [createdBy],
+      });
+
+      return call;
     });
   }
 

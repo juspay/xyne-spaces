@@ -3010,6 +3010,22 @@ model CallParticipant {
   isExternal   Boolean             @default(false)  // True for external lobby users
   ringStatus   String?             // CALLING | RINGING | BUSY — ring delivery state, only meaningful while response = INVITED
 
+  /// True when this row exists because the user is one of the people a HEADLESS
+  /// (note-taker) recording is *about* — mirrors an entry in
+  /// `calls.recordingParticipants`, which remains the source of truth.
+  ///
+  /// This is NOT call membership. Unlike an ordinary participant row, it grants
+  /// no access to the call: the ACLs exclude flagged rows from their
+  /// `exists('participants', ...)` checks, so visibility for a recording still
+  /// comes only from `entity_access` shares. Do not read this flag as "joined".
+  ///
+  /// Invariant that keeps the two meanings from colliding on one row: recording
+  /// participants exist only on HEADLESS calls (every write path is gated on
+  /// callType), and HEADLESS calls never get invitee rows (see
+  /// NoteTakerCallRepository). So on any given call a row is one kind or the
+  /// other, never both.
+  isRecordingParticipant Boolean @default(false)
+
   // Relations
   call Call @relation(fields: [callId], references: [id])
 
@@ -3020,6 +3036,7 @@ model CallParticipant {
   @@index([email]) // Fast external invitee lookup
   @@index([callId, leftAt]) // Fast active participants lookup
   @@index([response]) // Fast response lookup
+  @@index([userId, isRecordingParticipant, callId]) // drives the People filter on the Oats recording lists
   @@map("call_participants")
   @@schema("public")
 }
