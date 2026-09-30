@@ -47,6 +47,8 @@ const MODEL_TO_TABLE: Record<string, string> = {
   UserGroupMapping: 'user_group_mappings',
   BoardComplexityScore: 'board_complexity_scores',
   UserExpertiseMapping: 'user_expertise_mappings',
+  EmailChannelPreference: 'email_channel_preferences',
+  ClassificationMapping: 'classification_mappings',
 };
 
 const AUDITED_PRISMA_OPERATIONS = new Set([
@@ -107,6 +109,8 @@ function createPrismaAuditLookup(prisma: PrismaAuditClient): AuditLookup {
       (await rowsByIds('Form', ids)) as unknown as { id: string; formName: string }[],
     globalFieldsByIds: async ids =>
       (await rowsByIds('GlobalField', ids)) as unknown as { id: string; fieldName: string }[],
+    userGroupsByIds: async ids =>
+      (await rowsByIds('UserGroup', ids)) as unknown as { id: string; name: string }[],
     boardIdsForFormIds: async formIds => {
       if (formIds.length === 0) return [];
       const mappings = (await prisma.formContextMapping.findMany({
@@ -216,6 +220,8 @@ async function emitPrismaAudit(
     typeof result === 'object' && result !== null && !('count' in (result as Record<string, unknown>))
       ? (result as AuditRow)
       : null;
+  const primaryKey = AUDIT_TABLE_CONFIG[table]?.primaryKey ?? 'id';
+  const recordIdOf = (row: AuditRow): string => String(row[primaryKey] ?? '');
 
   interface AuditedWrite {
     operation: AuditOperation;
@@ -228,7 +234,7 @@ async function emitPrismaAudit(
   switch (operation) {
     case 'create':
       if (resultRow) {
-        writes.push({ operation: 'insert', beforeRow: null, afterRow: resultRow, recordId: String(resultRow.id ?? '') });
+        writes.push({ operation: 'insert', beforeRow: null, afterRow: resultRow, recordId: recordIdOf(resultRow) });
       }
       break;
     case 'createMany': {
@@ -240,14 +246,14 @@ async function emitPrismaAudit(
           operation: 'insert',
           beforeRow: null,
           afterRow: row as AuditRow,
-          recordId: String((row as AuditRow).id ?? `${table}-bulk-${index}`),
+          recordId: recordIdOf(row as AuditRow) || `${table}-bulk-${index}`,
         });
       });
       break;
     }
     case 'update':
       if (resultRow) {
-        writes.push({ operation: 'update', beforeRow: beforeRows[0] ?? null, afterRow: resultRow, recordId: String(resultRow.id ?? '') });
+        writes.push({ operation: 'update', beforeRow: beforeRows[0] ?? null, afterRow: resultRow, recordId: recordIdOf(resultRow) });
       }
       break;
     case 'upsert':
@@ -256,13 +262,13 @@ async function emitPrismaAudit(
           operation: beforeRows[0] ? 'update' : 'insert',
           beforeRow: beforeRows[0] ?? null,
           afterRow: resultRow,
-          recordId: String(resultRow.id ?? ''),
+          recordId: recordIdOf(resultRow),
         });
       }
       break;
     case 'delete':
       if (resultRow) {
-        writes.push({ operation: 'delete', beforeRow: resultRow, afterRow: null, recordId: String(resultRow.id ?? '') });
+        writes.push({ operation: 'delete', beforeRow: resultRow, afterRow: null, recordId: recordIdOf(resultRow) });
       }
       break;
     case 'updateMany':
@@ -271,13 +277,13 @@ async function emitPrismaAudit(
           operation: 'update',
           beforeRow: row,
           afterRow: { ...row, ...(args.data as Record<string, unknown>) },
-          recordId: String(row.id ?? ''),
+          recordId: recordIdOf(row),
         });
       }
       break;
     case 'deleteMany':
       for (const row of beforeRows) {
-        writes.push({ operation: 'delete', beforeRow: row, afterRow: null, recordId: String(row.id ?? '') });
+        writes.push({ operation: 'delete', beforeRow: row, afterRow: null, recordId: recordIdOf(row) });
       }
       break;
   }

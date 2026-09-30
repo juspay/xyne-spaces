@@ -6,6 +6,8 @@ import {
   createWorkspaceInOrgData,
   hasCompletedOnboardingQuery,
   getWorkspacesByEmailData,
+  findAuthIdentityByEmailData,
+  ensureUserPresenceData,
 } from '@/bypassAcl/userServices';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import { grantPermissionsForRole, syncOrgResourceAdminAccess } from './permissionMatrix';
@@ -13,7 +15,6 @@ import { USER_PREFERENCE_NOTIFICATION_DEFAULTS } from '@/constants/userPreferenc
 import { OrgRole,
   WorkspaceJoinPolicy,
   WorkspaceType,
-  UserPresenceStatus,
   AuthProvider,
   ProjectType,
   UserStatus,
@@ -172,14 +173,7 @@ export class UserService {
     email: string,
   ): Promise<{ authProvider: AuthProvider; providerUserId: string } | null> {
     try {
-      const user = await this.prisma.user.findFirst({
-        where: { email: { equals: email, mode: 'insensitive' } },
-        select: { authProvider: true, providerUserId: true },
-        orderBy: { createdAt: 'asc' },
-      });
-      return user
-        ? { authProvider: user.authProvider as AuthProvider, providerUserId: user.providerUserId }
-        : null;
+      return await findAuthIdentityByEmailData(email);
     } catch (error) {
       logger.error('Error finding auth identity by email:', error);
       throw new Error('Failed to find auth identity');
@@ -285,39 +279,7 @@ export class UserService {
    * Ensure user presence entry exists (create if not exists)
    */
   async ensureUserPresence(userId: string, workspaceId: string): Promise<void> {
-    try {
-      const existingPresence = await this.prisma.userPresence.findUnique({
-        where: { userId },
-      });
-
-      if (!existingPresence) {
-        logger.info(`Creating user presence entry for user ${userId}`);
-        await this.prisma.userPresence.create({
-          data: {
-            userId,
-            workspaceId,
-            status: UserPresenceStatus.ONLINE,
-            lastActiveAt: new Date(),
-            lastSeenAt: new Date(),
-            isManual: false,
-          },
-        });
-        logger.info(`Successfully created user presence entry for user ${userId}`);
-      } else {
-        // Update last seen and last active timestamps on login
-        await this.prisma.userPresence.update({
-          where: { userId },
-          data: {
-            lastActiveAt: new Date(),
-            lastSeenAt: new Date(),
-          },
-        });
-        logger.debug(`Updated user presence timestamps for user ${userId}`);
-      }
-    } catch (error) {
-      logger.error(`Error ensuring user presence for user ${userId}:`, error);
-      // Don't throw - this shouldn't block authentication
-    }
+    await ensureUserPresenceData(userId, workspaceId);
   }
 
   /**

@@ -56,7 +56,6 @@ env:
   ZERO_CVR_MAX_CONNS: "10"
   ZERO_UPSTREAM_MAX_CONNS: "10"
   ZERO_NUM_SYNC_WORKERS: "5"
-  ZERO_CHANGE_STREAMER_URI: http://xyne-zero-replication:80
 
 secretEnv:
   ZERO_UPSTREAM_DB:

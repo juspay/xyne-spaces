@@ -267,7 +267,7 @@ const handlers: ExperimentHandlers = {
       // 57-table list mid-word and the run explored a narrower scope than the
       // user believed they had asked for.
       ...(experimentCommand.droppedFocus
-        ? [`⚠️ Focus was too long — this was NOT included: \`${experimentCommand.droppedFocus.slice(0, 400)}\`${experimentCommand.droppedFocus.length > 400 ? " …" : ""}\nStart a second run for the remainder, or shorten the focus.`]
+        ? [`Focus was too long — this was NOT included: \`${experimentCommand.droppedFocus.slice(0, 400)}\`${experimentCommand.droppedFocus.length > 400 ? " …" : ""}\nStart a second run for the remainder, or shorten the focus.`]
         : []),
       `Use \`/experiment status\` to inspect progress.`,
     ].join("\n"), REPLY_LABEL);
@@ -279,7 +279,7 @@ const handlers: ExperimentHandlers = {
       const msg = errMsg(err);
       log.warn("[experiment] initial dispatch failed", { error: msg });
       await experimentRepository.update(run.id, { status: "aborted", lastEpochEndedAt: new Date() }).catch(() => undefined);
-      await ctx.reply(`⚠️ /experiment could not start: ${msg.slice(0, 300)}\nThe experiment was aborted — fix the issue and start again.`, REPLY_LABEL);
+      await ctx.reply(`/experiment could not start: ${msg.slice(0, 300)}\nThe experiment was aborted — fix the issue and start again.`, REPLY_LABEL);
     }
   },
 };

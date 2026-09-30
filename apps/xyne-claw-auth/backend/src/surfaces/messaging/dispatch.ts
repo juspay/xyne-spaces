@@ -61,6 +61,8 @@ function channelSurfaceInstructions(channel: MessagingChannelKey): string {
     // asked for WhatsApp-style *bold* produces _italics_ on the phone.
     "- Write markdown: **bold**, _italic_, ~~strike~~, `code`, code blocks and `- ` bullets. It is converted to the messenger's own styling on the way out. There is no underline and no heading — bold a line instead. No tables. No markdown links — write the URL itself.",
     "- Bold the names you hand back — a channel, a person, a ticket, a file — so they are findable in a wall of phone text.",
+    "- They are waiting on a phone. When a task takes more than one step, write one short line of what you have found so far next to your next tool call — it is sent to them straight away. Say findings, not plumbing: \"2 of your 3 PRs have failing CI\", never \"calling the GitHub tool\". Skip it when you have nothing new to say.",
+    "- Those lines are already on their screen. Your final answer should not repeat them — give the conclusion.",
     `- Be brief. Replies longer than ${limit} characters are split across several messages.`,
   ];
   if (plugin?.capabilities.media) {
@@ -77,6 +79,8 @@ function channelSurfaceInstructions(channel: MessagingChannelKey): string {
   if (plugin && !plugin.capabilities.groups) lines.push("- This is a one-to-one conversation. There are no groups or threads here.");
   return lines.join("\n");
 }
+
+export const CHANNEL_RUN_OPTIMIZATIONS = "+subagent_direct_only,+interim_messages";
 
 /** A photo or PDF is the same weight here as in Spaces, so it takes the same
  *  route: bytes to object storage and a ref in the body, falling back to
@@ -148,7 +152,8 @@ export async function buildChannelRun(input: ChannelRunInput): Promise<ChannelRu
       ...(runAttachments.length ? { attachments: runAttachments } : {}),
       additionalInstructions: channelSurfaceInstructions(input.target.channel),
       subagentProviderMode: resolveSubagentProviderMode(input.agent.config),
-      ...(input.agent.config ? { agentConfig: input.agent.config } : {}),
+      optimizations: CHANNEL_RUN_OPTIMIZATIONS,
+      agentConfig: { ...((input.agent.config as Record<string, unknown> | null) ?? {}), planTracking: false },
     },
     sessionContext: {
       mentionedUserId: input.userId,

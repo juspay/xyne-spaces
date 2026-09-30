@@ -97,7 +97,7 @@ export function ScheduledCallPill({ message, callId }: ScheduledCallPillProps): 
   };
 
   const openSummary = (): void => {
-    void navigate(`/calls/${call.id}/detail`);
+    void navigate(`/calls/${callId}/detail`);
   };
 
   const handleJoin = (): void => {

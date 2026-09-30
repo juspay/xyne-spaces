@@ -84,6 +84,7 @@ export interface AskAIInitialContextSelections {
     conversationId?: string;
     externalId?: string;
   }>;
+  calls?: Array<{ id: string; title: string; channelId?: string; conversationId?: string }>;
 }
 
 export interface WorkflowContext {

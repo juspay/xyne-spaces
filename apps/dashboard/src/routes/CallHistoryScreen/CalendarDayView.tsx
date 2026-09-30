@@ -148,7 +148,7 @@ function DayViewCallCard({
           )}
           <div
             className={cn(
-              'px-1 py-1.5 h-full flex flex-row gap-1 justify-start overflow-hidden',
+              'px-1 py-1 h-full flex flex-row gap-1 justify-start overflow-hidden',
               isBeingResized && 'invisible',
             )}
           >
@@ -157,8 +157,8 @@ function DayViewCallCard({
               <span
                 className='leading-tight truncate text-foreground'
                 style={{
-                  fontSize: '12px',
-                  lineHeight: '18px',
+                  fontSize: '11px',
+                  lineHeight: '14px',
                   fontWeight: 500,
                   textDecorationLine: isDeclined ? 'line-through' : 'none',
                 }}
@@ -177,7 +177,7 @@ function DayViewCallCard({
               </span>
               {height >= 40 && (
                 <span
-                  className='leading-tight mt-0.5 whitespace-nowrap text-muted-foreground'
+                  className='leading-tight whitespace-nowrap text-muted-foreground'
                   style={{
                     fontSize: '10px',
                     lineHeight: '14px',

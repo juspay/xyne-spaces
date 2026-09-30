@@ -21,6 +21,7 @@ import { useAuth } from '../../../hooks/useAuth';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useChannelByName } from '../../../hooks/useChannels';
 import Avatar from '../../ui/Avatar/Avatar';
+import { RemoveProfilePictureButton } from '../../ui/UserProfile/RemoveProfilePictureButton';
 import { StatusIndicator } from '../../ui/StatusIndicator';
 import { Button } from '../../ui/Button/Button';
 import { cn } from '../../../utils/classNames';
@@ -231,6 +232,10 @@ const ProfileView = ({
               }}
               className='hidden'
               disabled={isUploadingPicture}
+            />
+            <RemoveProfilePictureButton
+              disabled={isUploadingPicture}
+              className='top-0 right-0 size-4 [&_svg]:size-2.5'
             />
           </div>
         </div>

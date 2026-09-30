@@ -19,6 +19,7 @@ import { TrackSource } from 'livekit-server-sdk';
 import {
   HideCallSchema,
   SaveWhiteboardAttachmentSchema,
+  UpdateRingStatusSchema,
   UpdateRsvpSchema,
 } from '@/validators/callValidator';
 import { notificationService } from '@/services/notificationService';
@@ -43,6 +44,8 @@ import {
   NotificationType,
   RecordingType,
   AttachmentEntityType,
+  SUPPORTED_TRANSCRIPT_LANGUAGES,
+  ORIGINAL_TRANSCRIPT_LANGUAGE,
 } from '@xyne/shared';
 import { storageService } from '@/services/storage';
 import { CallVespaFeedSource, queueCallVespaFeed } from '@/services/callVespaQueue';
@@ -442,6 +445,7 @@ export class CallController {
           metadata: {
             source: 'call_notes',
             callId: callExternalId,
+            isRecording: true,
           },
         });
 
@@ -464,7 +468,7 @@ export class CallController {
           undefined,
           undefined,
           req.user!.workspaceId,
-          { summaryModelPreference: summaryModelPref },
+          { summaryModelPreference: summaryModelPref, isRecording: true },
         );
         if (!detailedSummaryCanvasId) {
           throw new Error('Failed to create detailed summary canvas');
@@ -1370,24 +1374,54 @@ export class CallController {
         return;
       }
 
-      // Fetch transcript content from GCS URL if available
-      let transcriptContent: string | null = null;
-      let identifiedTranscriptContent: string | null = null;
-
-      if (call.transcript) {
-        try {
-          // Fetch transcript content from storage (handles both legacy gs:// URIs and plain paths)
-          transcriptContent = await transcriptService.getTranscriptContent(call.externalId);
-        } catch (fetchError) {
-          logger.warn(`Failed to fetch transcript from storage: ${fetchError}`);
-        }
+      const scope = req.query.scope as string | undefined;
+      if (scope === 'status') {
+        const uploadedRecording = await repositories.callRecordings
+          .findLatestUploadedByCallId(call.id)
+          .catch(() => null);
+        res.json({
+          success: true,
+          recording: {
+            hasRecording: !!uploadedRecording,
+            durationMs: call.endedAt
+              ? new Date(call.endedAt).getTime() - new Date(call.startedAt).getTime()
+              : null,
+            recordingType: uploadedRecording?.recordingType ?? null,
+            attachmentId: uploadedRecording?.attachmentId ?? null,
+          },
+        });
+        return;
       }
 
-      // Fetch real-time identified transcript (written during call by the Python agent)
-      try {
-        identifiedTranscriptContent = await transcriptService.getIdentifiedTranscriptContent(call.externalId);
-      } catch (fetchError) {
-        logger.warn(`Failed to fetch identified transcript: ${fetchError}`);
+      // ?scope=metadata only needs presence, not text — skip the GCS reads below.
+      let transcriptContent: string | null = null;
+      let identifiedTranscriptContent: string | null = null;
+      let hasTranscript: boolean;
+      let hasIdentifiedTranscript: boolean;
+
+      if (scope === 'metadata') {
+        [hasTranscript, hasIdentifiedTranscript] = await Promise.all([
+          transcriptService.transcriptExists(call.externalId),
+          transcriptService.identifiedTranscriptExists(call.externalId),
+        ]);
+      } else {
+        if (call.transcript) {
+          try {
+            // Fetch transcript content from storage (handles both legacy gs:// URIs and plain paths)
+            transcriptContent = await transcriptService.getTranscriptContent(call.externalId);
+          } catch (fetchError) {
+            logger.warn(`Failed to fetch transcript from storage: ${fetchError}`);
+          }
+        }
+
+        // Fetch real-time identified transcript (written during call by the Python agent)
+        try {
+          identifiedTranscriptContent = await transcriptService.getIdentifiedTranscriptContent(call.externalId);
+        } catch (fetchError) {
+          logger.warn(`Failed to fetch identified transcript: ${fetchError}`);
+        }
+        hasTranscript = !!transcriptContent;
+        hasIdentifiedTranscript = !!identifiedTranscriptContent;
       }
 
       // Determine AI summary format (markdown if starts with ## or has no HTML tags)
@@ -1480,11 +1514,11 @@ export class CallController {
           durationMs: call.endedAt
             ? new Date(call.endedAt).getTime() - new Date(call.startedAt).getTime()
             : null,
-          hasTranscript: !!transcriptContent,
+          hasTranscript,
           hasSummary: !!call.aiSummary,
           transcript: transcriptContent,
           identifiedTranscript: identifiedTranscriptContent,
-          hasIdentifiedTranscript: !!identifiedTranscriptContent,
+          hasIdentifiedTranscript,
           aiSummary: call.aiSummary,
           aiSummaryFormat,
           labels: call.labels,
@@ -1923,6 +1957,93 @@ export class CallController {
     } catch (error) {
       logger.error(`[${callId}] download_transcript_failed | user_id=${userId}, error=${error}`);
       res.status(500).json({ success: false, error: 'Failed to download transcript' });
+    }
+  };
+
+  // POST /api/calls/:callId/translate-transcript — only ever the main transcript.
+  // 'original' returns it as-is, synchronously (no LLM). Any other language is async:
+  // this kicks off translation in the background and returns {status:'pending'}; the
+  // client polls the same endpoint again until GCS has the cached result ({status:'ready'}).
+  translateTranscript = async (req: Request, res: Response): Promise<void> => {
+    const userId = req.user?.id;
+    const { callId } = req.params;
+    const { language } = (req.body ?? {}) as { language?: string };
+
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    if (!callId) {
+      res.status(400).json({ success: false, error: 'Call ID is required' });
+      return;
+    }
+
+    // 'original' = no LLM, exempt from the whitelist below.
+    const isOriginal = language === ORIGINAL_TRANSCRIPT_LANGUAGE;
+
+    // Whitelist-only: this value is interpolated into the LLM prompt.
+    const supportedLanguage = isOriginal
+      ? undefined
+      : SUPPORTED_TRANSCRIPT_LANGUAGES.find(l => l.code === language);
+    if (!isOriginal && !supportedLanguage) {
+      res.status(400).json({ success: false, error: 'Unsupported language' });
+      return;
+    }
+
+    try {
+      const call = await repositories.calls.findByExternalId(callId);
+
+      if (!call) {
+        res.status(404).json({ success: false, error: 'Call not found' });
+        return;
+      }
+
+      if (!(await callShareService.isCallAudience(call, userId))) {
+        res.status(403).json({ success: false, error: 'You do not have access to this call' });
+        return;
+      }
+
+      if (!(await this.assertCanViewCallRecordings(callId, userId))) {
+        res.status(403).json({ success: false, error: 'Access denied' });
+        return;
+      }
+
+      const transcript = await transcriptService.getTranscriptContent(callId);
+      if (transcript === null) {
+        res.status(404).json({ success: false, error: 'Transcript not available for this call' });
+        return;
+      }
+
+      if (isOriginal) {
+        res.status(200).json({ success: true, status: 'ready', text: transcript });
+        return;
+      }
+
+      // Non-null: whitelist check above already returned otherwise.
+      const languageCode = supportedLanguage!.code;
+
+      const cached = await transcriptService.getTranslatedTranscript(callId, languageCode);
+      if (cached !== null) {
+        res.status(200).json({ success: true, status: 'ready', text: cached });
+        return;
+      }
+
+      const basePath = isRecording(call) ? `/recordings/${call.externalId}` : `/calls/${call.id}/detail`;
+      const actionUrl = `${basePath}?${new URLSearchParams({ lang: languageCode })}`;
+      transcriptService.translateTranscriptInBackground(
+        call.externalId,
+        languageCode,
+        transcript,
+        supportedLanguage!.label,
+        userId,
+        actionUrl,
+      );
+
+      res.status(202).json({ success: true, status: 'pending' });
+    } catch (error) {
+      logger.error(`[${callId}] Failed to translate transcript`, error);
+      res.status(500).json({ success: false, error: 'Failed to translate transcript' });
     }
   };
 
@@ -2450,6 +2571,62 @@ export class CallController {
     } catch (error) {
       logger.error('Failed to decline call:', error);
       res.status(500).json({ success: false, error: 'Failed to decline call' });
+    }
+  };
+
+  /**
+   * POST /api/calls/:callId/ring-status
+   * Callee device reports it is ringing, or BUSY when the ring arrives silenced.
+   * Mirrors the Zero `calls.updateRingStatus` mutator for clients that have no Zero
+   * connection when the call arrives (native app woken by a VoIP push).
+   */
+  updateRingStatus = async (req: Request, res: Response): Promise<void> => {
+    const userId = req.user?.id;
+    const { callId } = req.params;
+
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Unauthorized' });
+      return;
+    }
+
+    if (!callId) {
+      res.status(400).json({ success: false, error: 'Call ID is required' });
+      return;
+    }
+
+    try {
+      const { ringStatus } = UpdateRingStatusSchema.parse(req.body);
+
+      const call = await repositories.calls.findByExternalId(callId);
+      if (!call) {
+        logger.warn(`[CallController] Call not found for ring status: ${callId}`);
+        res.status(404).json({ success: false, error: 'Call not found' });
+        return;
+      }
+
+      const participant = await repositories.calls.findParticipant(call.id, userId);
+      if (!participant) {
+        logger.warn(`[CallController] Participant not found for ring status: callId=${callId}, userId=${userId}`);
+        res.status(404).json({ success: false, error: 'Participant not found' });
+        return;
+      }
+
+      // No-op unless still INVITED; a reported RINGING does not replace BUSY.
+      const count = await repositories.calls.updateParticipantRingStatus(participant.id, ringStatus);
+
+      if (count > 0) {
+        logger.info(`User ${userId} reported ring status ${ringStatus} for call ${callId}`);
+      }
+
+      res.json({ success: true });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        res.status(400).json({ success: false, error: error.errors[0]?.message || 'Invalid request body' });
+        return;
+      }
+
+      logger.error('Failed to update ring status:', error);
+      res.status(500).json({ success: false, error: 'Failed to update ring status' });
     }
   };
 

@@ -103,6 +103,16 @@ variable "argocd_namespace" {
   default = "argocd"
 }
 
+variable "argocd_expose" {
+  type    = bool
+  default = false
+}
+
+variable "argocd_host" {
+  type    = string
+  default = ""
+}
+
 variable "argocd_values" {
   type    = string
   default = ""
@@ -124,6 +134,11 @@ variable "enable_sandbox" {
 }
 
 variable "enable_hindsight" {
+  type    = bool
+  default = false
+}
+
+variable "enable_workflows" {
   type    = bool
   default = false
 }

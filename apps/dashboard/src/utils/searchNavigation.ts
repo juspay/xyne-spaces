@@ -14,6 +14,7 @@ import { browserPanelActor } from '../machines/browserPanelMachine';
 import { xyneAIActor } from '../machines/xyneAIMachine';
 import { isXyneOrigin } from './browserPanelPartition';
 import { toStandalonePath } from './electronApp';
+import { parseDMParticipantIds } from '../components/Chat/ChatDirectory/ChatDirectory.utils';
 
 /**
  * Channel data interface for navigation
@@ -21,10 +22,22 @@ import { toStandalonePath } from './electronApp';
  */
 interface Channel {
   readonly id: string;
+  readonly name: string;
   readonly scopeType: ChannelScopeType;
   readonly type?: ChannelType;
-  readonly participants?: ReadonlyArray<{ readonly userId: string }>;
 }
+
+/**
+ * Find a caller ↔ userId 1:1 DM in the channel list. DMs are stored with
+ * `name = "userId1,userId2"` (sorted); the participants relation isn't loaded on
+ * `useAllChannels`, so match on the name instead — same pattern useExistingDmChannel uses.
+ */
+const findOneToOneDmChannel = (channels: readonly Channel[], userId: string): Channel | undefined =>
+  channels.find(channel => {
+    if (channel.scopeType !== ChannelScopeType.DM) return false;
+    const ids = parseDMParticipantIds({ name: channel.name, scopeType: channel.scopeType });
+    return ids.length === 2 && ids.includes(userId);
+  });
 
 /**
  * Main navigation router for search results
@@ -97,12 +110,7 @@ export const resolveOrCreateDmChannelId = async (
   userId: string,
   channelData: Channel[],
 ): Promise<string> => {
-  const existingDmChannel = channelData.find(
-    channel =>
-      channel.scopeType === ChannelScopeType.DM &&
-      channel.participants?.length === 2 &&
-      channel.participants?.some(p => p.userId === userId),
-  );
+  const existingDmChannel = findOneToOneDmChannel(channelData, userId);
   if (existingDmChannel) return existingDmChannel.id;
 
   const dmResponse = await channelService.createDm({ participantIds: [userId] });
@@ -372,12 +380,7 @@ export const computeSearchResultPath = (
   switch (result.type) {
     case 'user': {
       if (!channelData) return null;
-      const existingDmChannel = channelData.find(
-        channel =>
-          channel.scopeType === ChannelScopeType.DM &&
-          channel.participants?.length === 2 &&
-          channel.participants?.some(p => p.userId === result.id),
-      );
+      const existingDmChannel = findOneToOneDmChannel(channelData, result.id);
       if (existingDmChannel) {
         return { kind: 'internal', path: `/chat/dir/${existingDmChannel.id}` };
       }

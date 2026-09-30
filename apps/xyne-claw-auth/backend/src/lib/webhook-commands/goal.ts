@@ -20,13 +20,17 @@ export async function replyGoalControl(ctx: WebhookCommandCtx, replyToUser: stri
   await ctx.reply(replyToUser, "Failed to post /goal control reply");
 }
 
-export async function announceGoalStart(ctx: WebhookCommandCtx, replyToUser: string): Promise<void> {
+export async function announceGoalStart(
+  ctx: WebhookCommandCtx,
+  replyToUser: string,
+  sessionId: string,
+): Promise<void> {
   const { agent, payload } = ctx;
   // Show "Starting /goal…" on the ephemeral progress spinner (same surface as
   // tool calls), not as a permanent chat message — the goal loop's meta lines
   // shouldn't clutter the thread. The terminal outcome stays a real message.
   await postGoalPhase(
-    { conversationId: payload.conversationId, channelId: payload.channelId, agentSlug: agent.slug, spacesAppUserId: agent.spacesAppUserId, appToken: agent.appToken },
+    { sessionId, conversationId: payload.conversationId, channelId: payload.channelId, agentSlug: agent.slug, spacesAppUserId: agent.spacesAppUserId, appToken: agent.appToken },
     replyToUser,
   );
 }

@@ -74,6 +74,12 @@ export enum EmailMergeMode {
 }
 
 // @ts-ignore TS1294
+export enum SlackDeskTriggerMode {
+  ALL_MESSAGES = 'ALL_MESSAGES',
+  MENTION_ONLY = 'MENTION_ONLY',
+}
+
+// @ts-ignore TS1294
 export enum UserResponsibility {
   MANAGER = 'MANAGER',
   TEAM_LEAD = 'TEAM_LEAD',
@@ -122,6 +128,17 @@ export enum AttachmentEntityType {
   RECORDING = 'RECORDING',
   SDLC_HUB = 'SDLC_HUB',
 }
+
+export const UNSENT_ATTACHMENT_ENTITY_TYPES: AttachmentEntityType[] = [
+  AttachmentEntityType.DRAFT,
+  AttachmentEntityType.DELAYED_MESSAGE,
+];
+
+export const CHANNEL_VISIBLE_ATTACHMENT_ENTITY_TYPES: AttachmentEntityType[] = [
+  AttachmentEntityType.CHAT,
+  AttachmentEntityType.EMAIL,
+  AttachmentEntityType.TICKET,
+];
 
 // @ts-ignore TS1294
 export enum TicketEnvironment {
@@ -600,6 +617,7 @@ export enum AuditAction {
 export enum AuditEntityType {
   USER_GROUP_ASSIGNMENT_CONFIG = 'USER_GROUP_ASSIGNMENT_CONFIG',
   BOARD = 'BOARD',
+  DESK = 'DESK',
 }
 
 // @ts-ignore TS1294
@@ -684,6 +702,7 @@ export enum NotificationType {
   CANVAS_SHARED = "CANVAS_SHARED",
   RECORDING_SHARED = "RECORDING_SHARED",
   RECORDING_SUMMARY_READY = "RECORDING_SUMMARY_READY",
+  TRANSCRIPT_TRANSLATION_READY = "TRANSCRIPT_TRANSLATION_READY",
   SUMMARY_TEMPLATE_SHARED = "SUMMARY_TEMPLATE_SHARED",
   COLLECTION_INGESTION_COMPLETED = "COLLECTION_INGESTION_COMPLETED",
   MAX_WORKLOAD_REACHED = "MAX_WORKLOAD_REACHED",

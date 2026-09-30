@@ -1022,7 +1022,7 @@ importers:
         specifier: ^12.23.24
         version: 12.43.0(@emotion/is-prop-valid@1.4.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       fuse.js:
-        specifier: ^7.1.0
+        specifier: ^7.4.0
         version: 7.5.0
       hast-util-to-html:
         specifier: ^9.0.5
@@ -2219,7 +2219,7 @@ importers:
         specifier: 5.10.1
         version: 5.10.1
       fuse.js:
-        specifier: ^7.1.0
+        specifier: ^7.4.0
         version: 7.5.0
       react:
         specifier: '>=18.0.0'

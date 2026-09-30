@@ -118,6 +118,7 @@ export const EmailReceivedOutputSchema = TicketContextSchema.partial().extend({
     channelId: z.string(),
     externalThreadId: z.string(),
     externalMessageId: z.string(),
+    rating: z.number().nullable(),
     createdAt: z.coerce.date(),
     hasAttachments: z.boolean(),
   }),
