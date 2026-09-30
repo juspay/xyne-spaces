@@ -35,7 +35,13 @@ import type {
   ExecutionPauseType,
   ExecutionRecord,
   ExecutionStateRecord,
+  CursorPage,
   FolderRecord,
+  LastRun,
+  Paged,
+  PendingApprovalFacets,
+  PendingApprovalQuery,
+  PendingApprovalRow,
   PersistenceAdapter,
   ResolvedCredential,
   ResourceAttributes,
@@ -44,7 +50,7 @@ import type {
   WorkflowContext,
   WorkflowRecord,
 } from '@xyne/workflow-sdk';
-import { validateCredentialAuth, validateCredentialValues } from '@xyne/workflow-sdk';
+import { validateCredentialAuth, validateCredentialValues, WorkflowStatus } from '@xyne/workflow-sdk';
 import type { ResumePayload } from '@xyne/workflow-sdk/common';
 import type { Prisma } from '@prisma/client';
 import { db } from '@/database/client';
@@ -69,7 +75,12 @@ import {
 import type { XyneFilter, XyneResourceAttrs } from '../types';
 import {
   decodeCursor,
+  decodeSeek,
   encodeCursor,
+  encodeSeek,
+  leafStepId,
+  readStepTitleFromConfig,
+  readTagsFromMetadata,
   notBacked,
   readNameFromMetadata,
   requireWorkspaceId,
@@ -82,6 +93,35 @@ import {
 
 // ─── Adapter ─────────────────────────────────────────────────────────────────
 
+/** An execution parked on something external — the state an approval waits in. */
+const EXECUTION_EXTERNAL_WAIT = 'EXTERNAL_WAIT';
+
+/** The two states a step itself reports while parked. */
+const PARKED_STEP_STATUSES = ['EXTERNAL_WAIT', 'REVIEW_WAIT'] as const;
+
+/**
+ * The seek half of a `(createdAt DESC, id DESC)` keyset page: everything sorting
+ * strictly after the cursor's position. A tuple comparison rather than an
+ * id lookup, so a row leaving the list cannot strand the rows behind it.
+ */
+const seekTimeDesc = (seek: readonly string[]): Prisma.WorkflowWhereInput => {
+  const createdAt = new Date(Number(seek[0]));
+  const id = seek[1] ?? '';
+  return { OR: [{ createdAt: { lt: createdAt } }, { AND: [{ createdAt }, { id: { lt: id } }] }] };
+};
+
+/**
+ * Which parked step is the gate a reviewer is looking at.
+ *
+ * A conditional that is itself waiting is scaffolding around the gate, not the
+ * gate, so it is only the answer when nothing else is parked.
+ */
+const pickGate = <T extends { status: string | null; stepExecutorType: string }>(
+  steps: readonly T[],
+): T | undefined =>
+  steps.find((step) => step.stepExecutorType !== 'conditional') ??
+  steps.find((step) => step.status === EXECUTION_EXTERNAL_WAIT);
+
 export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> {
   // ── Workflow definitions ───────────────────────────────────────────────────
 
@@ -92,19 +132,229 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
 
   async listWorkflows(
     filter: XyneFilter,
-    page?: { folderId?: string; limit?: number; offset?: number },
-  ): Promise<WorkflowRecord[]> {
+    page: CursorPage & { folderId?: string },
+  ): Promise<Paged<WorkflowRecord>> {
+    const seek = page.cursor !== undefined ? decodeSeek(page.cursor) : null;
     const rows = await db.workflow.findMany({
       where: {
         workspaceId: filter.workspaceId,
         ...WORKFLOWS_SCOPE,
-        ...(page?.folderId !== undefined ? { folderId: page.folderId } : {}),
+        ...(page.folderId !== undefined ? { folderId: page.folderId } : {}),
+        ...(seek ? seekTimeDesc(seek) : {}),
       },
-      orderBy: { createdAt: 'desc' },
-      ...(page?.limit !== undefined ? { take: page.limit } : {}),
-      ...(page?.offset !== undefined ? { skip: page.offset } : {}),
+      // The tuple the cursor is built from, and the shape of the
+      // (workflowType, createdAt desc, id) index.
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: page.limit + 1,
     });
-    return rows.map(toWorkflowRecord);
+
+    const hasMore = rows.length > page.limit;
+    const items = (hasMore ? rows.slice(0, page.limit) : rows).map(toWorkflowRecord);
+    const last = hasMore ? rows[page.limit - 1] : undefined;
+    return last
+      ? { items, nextCursor: encodeSeek([String(last.createdAt.getTime()), last.id]) }
+      : { items };
+  }
+
+  /**
+   * Workflows awaiting review, newest submission first.
+   *
+   * Keyset-paged on the row id via Prisma's own `cursor`, rather than the
+   * timestamp cursor `listExecutions` uses: two workflows submitted in the same
+   * millisecond are entirely ordinary (a batch, a script), and a `lt` on the
+   * timestamp would drop one of them. A row that silently never appears is a
+   * bad outcome for a run list and a worse one for a review queue.
+   *
+   * `updatedAt` is the sort key because a workflow enters PENDING_APPROVAL by a
+   * status write — so it is when this was submitted, not when it was authored.
+   */
+  async listPendingWorkflows(
+    filter: XyneFilter,
+    params: { limit?: number; cursor?: string },
+  ): Promise<{ items: WorkflowRecord[]; nextCursor?: string }> {
+    const limit = params.limit;
+    const rows = await db.workflow.findMany({
+      where: {
+        workspaceId: filter.workspaceId,
+        ...WORKFLOWS_SCOPE,
+        status: WorkflowStatus.PENDING_APPROVAL,
+      },
+      // `id` breaks ties, which is what makes the cursor stable.
+      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+      ...(params.cursor !== undefined ? { cursor: { id: params.cursor }, skip: 1 } : {}),
+      // One extra row answers "is there another page?" without a second count.
+      ...(limit !== undefined ? { take: limit + 1 } : {}),
+    });
+
+    const hasMore = limit !== undefined && rows.length > limit;
+    const page = hasMore ? rows.slice(0, limit) : rows;
+    const items = page.map(toWorkflowRecord);
+    const last = page[page.length - 1];
+
+    return hasMore && last ? { items, nextCursor: last.id } : { items };
+  }
+
+  /**
+   * Every visible run parked on a gate — the ONE pass `listPendingApprovals`,
+   * `countPendingApprovals` and `pendingApprovalFacets` share, so they cannot
+   * disagree about what "pending" means.
+   *
+   * One query, joined; never a loop of them. The filters that survive in SQL are
+   * applied here; the rest cannot be, because `metadata` is a JSON **string**
+   * column, so a workflow's name and tags are only knowable once parsed. Those
+   * are filtered by the caller on this result — which is sound because the set is
+   * bounded by design: a run sits here only while a person has not yet looked at
+   * it.
+   */
+  private async pendingApprovalRows(
+    filter: XyneFilter,
+    workflowIds?: readonly string[],
+  ): Promise<PendingApprovalRow[]> {
+    const executions = await db.workflowExecution.findMany({
+      where: {
+        ...WORKFLOWS_SCOPE,
+        status: EXECUTION_EXTERNAL_WAIT,
+        workflow: { workspaceId: filter.workspaceId, ...WORKFLOWS_SCOPE },
+        ...(workflowIds && workflowIds.length > 0 ? { workflowId: { in: [...workflowIds] } } : {}),
+      },
+      select: {
+        id: true,
+        workflowId: true,
+        createdAt: true,
+        workflow: { select: { metadata: true, context: true } },
+        workflowSteps: {
+          where: { status: { in: [...PARKED_STEP_STATUSES] } },
+          select: { stepName: true, status: true, stepExecutorType: true },
+        },
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    });
+
+    const rows: PendingApprovalRow[] = [];
+    for (const execution of executions) {
+      const gate = pickGate(execution.workflowSteps);
+      // A run can report EXTERNAL_WAIT a moment before its step row lands. It is
+      // not yet a reviewable gate, so it is not yet in the queue.
+      if (!gate?.stepName) continue;
+
+      const metadata = execution.workflow?.metadata ?? null;
+      const displayName = leafStepId(gate.stepName);
+      const title = readStepTitleFromConfig(execution.workflow?.context ?? null, displayName);
+      const workflowName = readNameFromMetadata(metadata);
+      const tags = readTagsFromMetadata(metadata);
+
+      rows.push({
+        id: execution.id,
+        workflowId: execution.workflowId,
+        ...(workflowName !== null ? { workflowName } : {}),
+        pausedStepName: title ?? displayName,
+        pausedNodePath: gate.stepName,
+        createdAt: execution.createdAt,
+        ...(tags !== null ? { tags } : {}),
+      });
+    }
+    return rows;
+  }
+
+  async listPendingApprovals(
+    filter: XyneFilter,
+    params: PendingApprovalQuery,
+  ): Promise<Paged<PendingApprovalRow>> {
+    let rows = await this.pendingApprovalRows(filter, params.workflowIds);
+
+    if (params.stages && params.stages.length > 0) {
+      const wanted = new Set(params.stages);
+      rows = rows.filter((row) => wanted.has(row.pausedStepName));
+    }
+    if (params.tags && params.tags.length > 0) {
+      const wanted = new Set(params.tags);
+      rows = rows.filter((row) => (row.tags ?? []).some((tag) => wanted.has(tag)));
+    }
+    if (params.search) {
+      const needle = params.search.trim().toLowerCase();
+      rows = rows.filter(
+        (row) =>
+          row.id.toLowerCase().includes(needle) ||
+          (row.workflowName ?? row.workflowId).toLowerCase().includes(needle) ||
+          row.pausedStepName.toLowerCase().includes(needle),
+      );
+    }
+
+    // The pass builds newest-first; oldest-first reverses it, and the seek has to
+    // follow or it runs the wrong way and returns the page already read.
+    const oldestFirst = params.sort === 'oldest';
+    if (oldestFirst) rows.reverse();
+
+    const seek = params.cursor !== undefined ? decodeSeek(params.cursor) : null;
+    if (seek) {
+      const at = Number(seek[0]);
+      const id = seek[1] ?? '';
+      rows = rows.filter((row) => {
+        const t = row.createdAt.getTime();
+        return oldestFirst ? t > at || (t === at && row.id > id) : t < at || (t === at && row.id < id);
+      });
+    }
+
+    const hasMore = rows.length > params.limit;
+    const items = hasMore ? rows.slice(0, params.limit) : rows;
+    const last = hasMore ? items[items.length - 1] : undefined;
+    return last
+      ? { items, nextCursor: encodeSeek([String(last.createdAt.getTime()), last.id]) }
+      : { items };
+  }
+
+  /** The sidebar badge wants a number, so this is its own statement, not a page. */
+  async countPendingApprovals(filter: XyneFilter): Promise<number> {
+    return (await this.pendingApprovalRows(filter)).length;
+  }
+
+  /** Describes the WHOLE visible set, which is why it is not derived from a page. */
+  async pendingApprovalFacets(filter: XyneFilter): Promise<PendingApprovalFacets> {
+    const rows = await this.pendingApprovalRows(filter);
+    const workflows = new Map<string, { workflowId: string; name: string; count: number }>();
+    const stages = new Map<string, number>();
+    const tags = new Set<string>();
+
+    for (const row of rows) {
+      const entry = workflows.get(row.workflowId) ?? {
+        workflowId: row.workflowId,
+        name: row.workflowName ?? row.workflowId,
+        count: 0,
+      };
+      entry.count++;
+      workflows.set(row.workflowId, entry);
+      stages.set(row.pausedStepName, (stages.get(row.pausedStepName) ?? 0) + 1);
+      for (const tag of row.tags ?? []) tags.add(tag);
+    }
+
+    return {
+      workflows: [...workflows.values()].sort((a, b) => b.count - a.count),
+      stages: [...stages].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count),
+      tags: [...tags].sort(),
+    };
+  }
+
+  /**
+   * The "Last run" column — not implemented yet, so nothing is claimed. An
+   * absent entry renders as "Never run", which is wrong but honest; a made-up
+   * timestamp would be neither.
+   *
+   * TODO: implement it. What it needs, so none of this is worked out twice:
+   * `DISTINCT ON (e."workflowId") … ORDER BY e."workflowId", e."createdAt" DESC`
+   * in raw SQL — Prisma's own `distinct` de-duplicates in the client, so asking
+   * it for one row per workflow reads every execution in the workspace first.
+   * That shape matches the `(workflowId, createdAt desc, id)` index the
+   * executions table already carries. Raw means no middleware, so the tenant key
+   * and `workflowType` belong in the predicate explicitly, on BOTH sides of the
+   * join — and the join has to name schemas (`"workflow"."workflow_executions"`,
+   * `"public"."workflows"`), which is the part to re-check before it runs
+   * anywhere those two tables do not live where it expects.
+   */
+  lastRunByWorkflow(
+    _filter: XyneFilter,
+    _params: { folderId?: string; workflowIds?: readonly string[] },
+  ): Promise<Record<string, LastRun>> {
+    return Promise.resolve({});
   }
 
   /**
@@ -221,12 +471,24 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
     return row ? toFolderRecord(row) : null;
   }
 
-  async listFolders(filter: XyneFilter): Promise<FolderRecord[]> {
+  async listFolders(filter: XyneFilter, page: CursorPage): Promise<Paged<FolderRecord>> {
+    const seek = page.cursor !== undefined ? decodeSeek(page.cursor) : null;
+    const [name, id] = seek ?? [];
     const rows = await db.workflowFolder.findMany({
-      where: { workspaceId: filter.workspaceId },
-      orderBy: { name: 'asc' },
+      where: {
+        workspaceId: filter.workspaceId,
+        ...(name !== undefined && id !== undefined
+          ? { OR: [{ name: { gt: name } }, { AND: [{ name }, { id: { gt: id } }] }] }
+          : {}),
+      },
+      orderBy: [{ name: 'asc' }, { id: 'asc' }],
+      take: page.limit + 1,
     });
-    return rows.map(toFolderRecord);
+
+    const hasMore = rows.length > page.limit;
+    const items = (hasMore ? rows.slice(0, page.limit) : rows).map(toFolderRecord);
+    const last = hasMore ? rows[page.limit - 1] : undefined;
+    return last ? { items, nextCursor: encodeSeek([last.name, last.id]) } : { items };
   }
 
   /**
@@ -532,21 +794,39 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
 
   // ── Credentials ────────────────────────────────────────────────────────────
 
-  async listCredentials(
-    filter: XyneFilter,
-    page?: { limit?: number; offset?: number },
-  ): Promise<CredentialListItem[]> {
+  async listCredentials(filter: XyneFilter, page: CursorPage): Promise<Paged<CredentialListItem>> {
+    const seek = page.cursor !== undefined ? decodeSeek(page.cursor) : null;
+    const after = seek?.[0];
     const rows = await db.workflowCredential.findMany({
-      where: { workspaceId: filter.workspaceId },
+      where: {
+        workspaceId: filter.workspaceId,
+        ...(after !== undefined ? { name: { gt: after } } : {}),
+      },
       select: CREDENTIAL_SUMMARY_SELECT,
       orderBy: { name: 'asc' },
-      ...(page?.limit !== undefined ? { take: page.limit } : {}),
-      ...(page?.offset !== undefined ? { skip: page.offset } : {}),
+      take: page.limit + 1,
     });
-    return rows.map((row) => ({
+
+    const hasMore = rows.length > page.limit;
+    const items = (hasMore ? rows.slice(0, page.limit) : rows).map((row) => ({
       summary: toCredentialSummary(row),
       attributes: { workspaceId: row.workspaceId } satisfies XyneResourceAttrs,
     }));
+    const last = hasMore ? rows[page.limit - 1] : undefined;
+    return last ? { items, nextCursor: encodeSeek([last.name]) } : { items };
+  }
+
+  async getCredentialByName(filter: XyneFilter, name: string): Promise<CredentialListItem | null> {
+    const row = await db.workflowCredential.findFirst({
+      where: { workspaceId: filter.workspaceId, name },
+      select: CREDENTIAL_SUMMARY_SELECT,
+    });
+    return row
+      ? {
+          summary: toCredentialSummary(row),
+          attributes: { workspaceId: row.workspaceId } satisfies XyneResourceAttrs,
+        }
+      : null;
   }
 
   async createCredential(

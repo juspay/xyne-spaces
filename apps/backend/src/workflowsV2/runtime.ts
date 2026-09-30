@@ -1,10 +1,12 @@
 import {
+  ApprovalRequirement,
   BaseConnector,
   ConnectorRegistry,
   ServiceRegistry,
   WorkflowExecutor,
   WorkflowRuntime,
   type AnyStep,
+  type ApprovalConfig,
   type ExecutorLogger,
 } from '@xyne/workflow-sdk';
 import { BitbucketConnector } from '@xyne/connector-sdk/bitbucket';
@@ -113,6 +115,12 @@ if (config.xyneClaw.s2sKey && config.xyneClaw.authUrl) {
   logger.warn('[workflows] xyne-claw not configured — RUN_AGENT will not be available');
 }
 
+const APPROVAL_POLICY = {
+  default: ApprovalRequirement.NOT_REQUIRED,
+  steps: {},
+  triggers: {},
+} as const satisfies ApprovalConfig;
+
 const executor = new WorkflowExecutor(persistence, connectors, services, {
   eventBus,
   baseUrl: BASE_URL,
@@ -134,6 +142,7 @@ export const workflowRuntime = new WorkflowRuntime<Record<string, unknown>, Xyne
   config: {
     baseUrl: BASE_URL,
     defaultCronTimezone: DEFAULT_CRON_TIMEZONE,
+    approval: APPROVAL_POLICY,
   },
 });
 
