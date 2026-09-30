@@ -7,7 +7,7 @@ import { RANGES, SyncPill, type SyncStatus } from './Portfolio';
 import { CleanupStrip } from './CleanupDialog';
 import { AgentText, XyneAIStar, type AskState } from './AgentText';
 import type { FTicket } from '../lib/portfolio';
-import { ORDER_KEYS, ORDER_TEXT, type Order } from '../lib/order';
+import { ORDER_TEXT, SORT_COLS, type Order, type SortCol, type SortDir } from '../lib/order';
 import { threadLines } from '../lib/ui';
 import { Avatar, BUCKET_COLOR, Check, ChevronDown, ChevronLeft, Close, MENU_STYLE, useEscape, DONE_COLOR, HealthPill, Menu, PAL, PriorityIcon, StatusGlyph, pressable, ageColor, toneColor } from './primitives';
 
@@ -23,6 +23,9 @@ const dateOf = (ts: number): string => {
 // Each row leads with fixed age and priority columns so they line up down the list; the tree starts after them.
 const AGE_W = 35;
 const PRI_W = 14;
+/** Time since the last update, at the row's right before the avatar. */
+const UPD_W = 34;
+const AVATAR_W = 18;
 const GAP = 10;
 /** Left edge of a depth-0 status glyph: row padding, then the age and priority columns. */
 // Rows run edge to edge so hover greys the whole card width; this is their side padding.
@@ -157,9 +160,12 @@ function ThreadCard({
                   {flags.length > 1 ? ` +${flags.length - 1}` : ''}
                 </span>
               )}
+              <span data-tip={`Updated ${ago(t.u)}`} style={{ flex: 'none', width: UPD_W, textAlign: 'right', fontSize: 12, lineHeight: '18px', color: 'var(--t4)', fontVariantNumeric: 'tabular-nums' }}>
+                {t.u < 1 / 24 ? 'now' : fmtDays(t.u)}
+              </span>
               {/* Assignee as an avatar at the row's right edge; the name is in the tooltip. */}
               <span data-tip={t.who ?? 'Unassigned'} style={{ flex: 'none', height: 18, display: 'flex', alignItems: 'center' }}>
-                {t.who ? <Avatar name={t.who} size={18} /> : <span style={{ width: 18, height: 18, boxSizing: 'border-box', borderRadius: '50%', border: '1px dashed var(--t5)' }} />}
+                {t.who ? <Avatar name={t.who} size={AVATAR_W} /> : <span style={{ width: AVATAR_W, height: AVATAR_W, boxSizing: 'border-box', borderRadius: '50%', border: '1px dashed var(--t5)' }} />}
               </span>
             </div>
           );
@@ -170,6 +176,9 @@ function ThreadCard({
 }
 
 const CARD = { border: '1px solid var(--bd)', borderRadius: 8 } as const;
+
+/** Every column and direction, as the subtitle's single sort menu offers them. */
+const ORDER_OPTIONS = SORT_COLS.flatMap(col => (['desc', 'asc'] as const).map(dir => ({ value: `${col}:${dir}`, label: ORDER_TEXT[col][dir] })));
 
 /** A menu that reads as part of a sentence: the current choice as underlined text with a small chevron. */
 function InlineMenu<T extends string>({ value, options, onChange }: { value: T; options: { value: T; label: string }[]; onChange: (v: T) => void }) {
@@ -215,6 +224,7 @@ function InlineMenu<T extends string>({ value, options, onChange }: { value: T; 
     </span>
   );
 }
+
 
 /** The merchant's summary from the agent: generating, written (with when), or failed. */
 export type TldrState = AskState;
@@ -486,17 +496,15 @@ export function MerchantPage({
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
               <span style={{ fontSize: 15, fontWeight: 600 }}>Tickets</span>
-              <span style={{ fontSize: 12, lineHeight: '17px', color: 'var(--t4)', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 3 }}>
+              <span style={{ fontSize: 12, lineHeight: '17px', color: 'var(--t4)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                Sorted by
                 <InlineMenu
-                  value={v.order.by}
-                  options={ORDER_KEYS.map(k => ({ value: k, label: ORDER_TEXT[k].first }))}
-                  onChange={by => onOrder({ by, then: by === v.order.then ? (by === 'oldest' ? 'priority' : 'oldest') : v.order.then })}
-                />
-                <span>, then</span>
-                <InlineMenu
-                  value={v.order.then}
-                  options={ORDER_KEYS.filter(k => k !== v.order.by).map(k => ({ value: k, label: ORDER_TEXT[k].then }))}
-                  onChange={then => onOrder({ ...v.order, then })}
+                  value={`${v.order.col}:${v.order.dir}`}
+                  options={ORDER_OPTIONS}
+                  onChange={k => {
+                    const [col, dir] = k.split(':') as [SortCol, SortDir];
+                    onOrder({ col, dir });
+                  }}
                 />
               </span>
             </div>

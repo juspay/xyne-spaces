@@ -1,5 +1,5 @@
 import { FLAG_CFG } from './config';
-import { DEFAULT_ORDER, type Order, type OrderKey } from './order';
+import { DEFAULT_ORDER, type Order, type SortCol } from './order';
 import { isAbandoned } from './cleanup';
 import { RANK, fmtDays, type Sev } from './flags';
 import { BUCKETS, bucketOf, median, merchantRow, type FTicket, type MerchantRow } from './portfolio';
@@ -96,29 +96,35 @@ const ago = (d: number): string => (d < 1 / 24 ? 'just now' : `${fmtDays(d)} ago
 const PRI_RANK: Record<Pri, number> = { critical: 4, high: 3, medium: 2, low: 1, none: 0 };
 const topPri = (ts: FTicket[]): Pri => ts.reduce<Pri>((w, t) => (PRI_RANK[t.pri] > PRI_RANK[w] ? t.pri : w), 'none');
 
-// Each key as "which comes first": sub-tickets by their own values, chains by their open tickets'.
-const TICKET_CMP: Record<OrderKey, (a: FTicket, b: FTicket) => number> = {
-  oldest: (a, b) => b.d - a.d,
-  newest: (a, b) => a.d - b.d,
-  priority: (a, b) => PRI_RANK[b.pri] - PRI_RANK[a.pri],
-  stale: (a, b) => b.u - a.u,
-  recent: (a, b) => a.u - b.u,
+// Each column as a value where 'desc' means bigger first: sub-tickets by their own values, chains by their open tickets'.
+const TICKET_VAL: Record<SortCol, (t: FTicket) => number> = {
+  age: t => t.d,
+  priority: t => PRI_RANK[t.pri],
+  updated: t => t.u,
 };
-const CHAIN_CMP: Record<OrderKey, (a: Thread, b: Thread) => number> = {
-  oldest: (a, b) => b.age - a.age,
-  newest: (a, b) => a.age - b.age,
-  priority: (a, b) => PRI_RANK[b.pri] - PRI_RANK[a.pri],
-  stale: (a, b) => b.idle - a.idle,
-  recent: (a, b) => a.lastU - b.lastU,
+// Updated, for a chain: its longest-idle open ticket when stale-first, its latest update when recent-first.
+const CHAIN_VAL: Record<SortCol, (t: Thread, dir: Order['dir']) => number> = {
+  age: t => t.age,
+  priority: t => PRI_RANK[t.pri],
+  updated: (t, dir) => (dir === 'desc' ? t.idle : t.lastU),
 };
+const signed = (dir: Order['dir'], a: number, b: number): number => (dir === 'desc' ? b - a : a - b);
 
-/** Sub-tickets: open before closed, then the chosen keys, then most recently updated. */
+/** Sub-tickets: open before closed, then the chosen column; ties oldest, then highest priority, then most recently updated. */
 const siblingOrder = (o: Order) => (a: FTicket, b: FTicket): number =>
-  Number(b.open) - Number(a.open) || TICKET_CMP[o.by](a, b) || TICKET_CMP[o.then](a, b) || a.u - b.u;
+  Number(b.open) - Number(a.open) ||
+  signed(o.dir, TICKET_VAL[o.col](a), TICKET_VAL[o.col](b)) ||
+  b.d - a.d ||
+  PRI_RANK[b.pri] - PRI_RANK[a.pri] ||
+  a.u - b.u;
 
-/** Chains: those with open tickets first, then the chosen keys, then most recently updated. */
+/** Chains: those with open tickets first, then the chosen column; ties oldest, then highest priority, then most recently updated. */
 const chainOrder = (o: Order) => (a: Thread, b: Thread): number =>
-  Number(b.anyOpen) - Number(a.anyOpen) || CHAIN_CMP[o.by](a, b) || CHAIN_CMP[o.then](a, b) || a.lastU - b.lastU;
+  Number(b.anyOpen) - Number(a.anyOpen) ||
+  signed(o.dir, CHAIN_VAL[o.col](a, o.dir), CHAIN_VAL[o.col](b, o.dir)) ||
+  b.age - a.age ||
+  PRI_RANK[b.pri] - PRI_RANK[a.pri] ||
+  a.lastU - b.lastU;
 
 const COURT_LABELS: [Court, string][] = [['us', 'With us'], ['merchant', 'With merchant'], ['external', 'External']];
 

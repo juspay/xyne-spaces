@@ -114,13 +114,21 @@ describe('saved agent answers', () => {
 });
 
 describe('saved sort order', () => {
-  it('defaults to oldest then priority, round-trips, and ignores junk', () => {
+  it('defaults to oldest first, round-trips, and ignores junk', () => {
     const s = mem();
-    expect(loadOrder(s)).toEqual({ by: 'oldest', then: 'priority' });
-    saveOrder(s, { by: 'stale', then: 'priority' });
-    expect(loadOrder(s)).toEqual({ by: 'stale', then: 'priority' });
-    s.setItem('mpv.order', JSON.stringify({ by: 'nope', then: 'oldest' }));
-    expect(loadOrder(s)).toEqual({ by: 'oldest', then: 'priority' });
-    expect(loadOrder(null)).toEqual({ by: 'oldest', then: 'priority' });
+    expect(loadOrder(s)).toEqual({ col: 'age', dir: 'desc' });
+    saveOrder(s, { col: 'updated', dir: 'asc' });
+    expect(loadOrder(s)).toEqual({ col: 'updated', dir: 'asc' });
+    s.setItem('mpv.order', JSON.stringify({ col: 'nope', dir: 'asc' }));
+    expect(loadOrder(s)).toEqual({ col: 'age', dir: 'desc' });
+    expect(loadOrder(null)).toEqual({ col: 'age', dir: 'desc' });
+  });
+
+  it('keeps an order saved in the old "first, then" format', () => {
+    const s = mem();
+    s.setItem('mpv.order', JSON.stringify({ by: 'stale', then: 'priority' }));
+    expect(loadOrder(s)).toEqual({ col: 'updated', dir: 'desc' });
+    s.setItem('mpv.order', JSON.stringify({ by: 'newest', then: 'oldest' }));
+    expect(loadOrder(s)).toEqual({ col: 'age', dir: 'asc' });
   });
 });

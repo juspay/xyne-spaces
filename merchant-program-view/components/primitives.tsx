@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type 
 import { Check as LCheck, ChevronDown as LChevronDown, ChevronLeft as LChevronLeft, ExternalLink, Search, X } from 'lucide-react';
 import { bucketOf } from '../lib/portfolio';
 import { usePeople } from '../lib/people';
+import { avatarColors, avatarInitial } from '../lib/avatar';
 import type { Sev } from '../lib/flags';
 import type { Pri, St } from '../lib/model';
 
@@ -117,39 +118,21 @@ export function PriorityIcon({ pri, size = 12 }: { pri: Pri; size?: number }) {
   );
 }
 
-const PASTELS = [
-  ['#F5C4C0', '#B24A42'],
-  ['#BFD6F2', '#3B6BA5'],
-  ['#BEE4CB', '#3C8557'],
-  ['#F3DEB2', '#96701E'],
-  ['#DAC6EE', '#7350A8'],
-  ['#BAE2E2', '#328282'],
-  ['#F4CBDF', '#B0517E'],
-  ['#D0DAF2', '#4A5AA0'],
-  ['#F6D2B8', '#A9662B'],
-  ['#CDE7B7', '#5C8438'],
-];
-/** A person's avatar: their Spaces photo when it can load here, else pastel initials. */
+/** A person's Xyne profile picture, else their first letter on the colour the Xyne dashboard gives them. */
 export function Avatar({ name, size = 18, src }: { name: string; size?: number; src?: string | null }) {
   const people = usePeople();
   const [broken, setBroken] = useState(false);
-  const picture = src === undefined ? (people.byName.get(name)?.picture ?? null) : src;
-  let h = 0;
-  for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-  const [bg, fg] = PASTELS[h % PASTELS.length];
-  const initials = name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map(w => w.charAt(0).toUpperCase())
-    .join('');
+  const person = people.byName.get(name);
+  const picture = src === undefined ? (person?.picture ?? null) : src;
+  // By user id, like the dashboard; a name we can't match to a person still gets a steady colour.
+  const { bg, fg } = avatarColors(person?.id ?? name);
   const box: CSSProperties = { width: size, height: size, borderRadius: '50%', flex: 'none' };
   if (picture && !broken) {
     return <img src={picture} alt="" referrerPolicy="no-referrer" onError={() => setBroken(true)} style={{ ...box, objectFit: 'cover', background: 'var(--bg3)' }} />;
   }
   return (
-    <span aria-hidden="true" style={{ ...box, background: bg, color: fg, fontSize: size * 0.45, fontWeight: 600, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
-      {initials || '?'}
+    <span aria-hidden="true" style={{ ...box, background: bg, color: fg, fontSize: size * 0.5, fontWeight: 500, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+      {avatarInitial(name) || '?'}
     </span>
   );
 }

@@ -1,20 +1,33 @@
-/** How the merchant page's ticket list is sorted: a first key, then a second one. */
+/** How the merchant page's ticket list is sorted: one column, either way round (picked in the list's subtitle). */
 
-export type OrderKey = 'oldest' | 'newest' | 'priority' | 'stale' | 'recent';
+export type SortCol = 'age' | 'priority' | 'updated';
+export type SortDir = 'desc' | 'asc';
 
 export interface Order {
-  by: OrderKey;
-  then: OrderKey;
+  col: SortCol;
+  /** 'desc' puts the biggest value first: oldest, highest priority, longest without an update. */
+  dir: SortDir;
 }
 
-export const ORDER_KEYS: OrderKey[] = ['oldest', 'newest', 'priority', 'stale', 'recent'];
-export const DEFAULT_ORDER: Order = { by: 'oldest', then: 'priority' };
+export const SORT_COLS: SortCol[] = ['age', 'priority', 'updated'];
+export const DEFAULT_ORDER: Order = { col: 'age', dir: 'desc' };
 
-/** Wording as the subtitle reads: "<first>, then <then>". */
-export const ORDER_TEXT: Record<OrderKey, { first: string; then: string }> = {
-  oldest: { first: 'Oldest first', then: 'oldest' },
-  newest: { first: 'Newest first', then: 'newest' },
-  priority: { first: 'Highest priority first', then: 'highest priority' },
-  stale: { first: 'Least recently updated', then: 'least recently updated' },
-  recent: { first: 'Most recently updated', then: 'most recently updated' },
+/** Menu wording for each column and direction. */
+export const ORDER_TEXT: Record<SortCol, Record<SortDir, string>> = {
+  age: { desc: 'Oldest first', asc: 'Newest first' },
+  priority: { desc: 'Highest priority first', asc: 'Lowest priority first' },
+  updated: { desc: 'Least recently updated first', asc: 'Most recently updated first' },
 };
+
+const LEGACY: Record<string, Order> = {
+  oldest: { col: 'age', dir: 'desc' },
+  newest: { col: 'age', dir: 'asc' },
+  priority: { col: 'priority', dir: 'desc' },
+  stale: { col: 'updated', dir: 'desc' },
+  recent: { col: 'updated', dir: 'asc' },
+};
+
+/** An order saved in the old two-key format ({ by, then }): keep its first key. */
+export function fromLegacy(by: string): Order | null {
+  return LEGACY[by] ?? null;
+}

@@ -1,6 +1,6 @@
 /** Per-viewer preferences kept in browser storage. Storage may be missing or blocked in the sandbox. */
 
-import { DEFAULT_ORDER, ORDER_KEYS, type Order, type OrderKey } from './order';
+import { DEFAULT_ORDER, SORT_COLS, fromLegacy, type Order, type SortCol } from './order';
 
 export type Range = 'all' | number;
 
@@ -150,8 +150,10 @@ const ORDER_KEY = 'mpv.order';
 export function loadOrder(store: Storage | null): Order {
   try {
     const raw = store?.getItem(ORDER_KEY);
-    const v = raw ? (JSON.parse(raw) as Partial<Order>) : null;
-    if (v && ORDER_KEYS.includes(v.by as OrderKey) && ORDER_KEYS.includes(v.then as OrderKey)) return { by: v.by as OrderKey, then: v.then as OrderKey };
+    const v = raw ? (JSON.parse(raw) as Partial<Order> & { by?: string }) : null;
+    if (v && SORT_COLS.includes(v.col as SortCol) && (v.dir === 'asc' || v.dir === 'desc')) return { col: v.col as SortCol, dir: v.dir };
+    const old = typeof v?.by === 'string' ? fromLegacy(v.by) : null;
+    if (old) return old;
   } catch {
     // Unreadable: fall back to the default.
   }

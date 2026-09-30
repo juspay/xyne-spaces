@@ -68,7 +68,7 @@ describe('merchantView', () => {
   });
 });
 
-describe('merchantView order (oldest first, then highest priority)', () => {
+describe('merchantView default order (oldest first; ties by priority, then latest update)', () => {
   const done = { open: false, st: 'completed' as const, closedD: 1 };
   const order = (...ts: MTicket[]) => merchantView(model(...ts), withFlags(model(...ts)), 'acme', 'all').threads.map(t => t.rootId);
 
@@ -230,16 +230,18 @@ describe('merchantView sort order', () => {
   );
   const ids = (order?: Parameters<typeof merchantView>[6]) => merchantView(X, withFlags(X), 'acme', 'open', null, 'all', order).threads.map(t => t.rootId);
 
-  it('defaults to oldest first, then highest priority', () => {
-    expect(merchantView(X, withFlags(X), 'acme', 'open').order).toEqual({ by: 'oldest', then: 'priority' });
+  it('defaults to oldest first', () => {
+    expect(merchantView(X, withFlags(X), 'acme', 'open').order).toEqual({ col: 'age', dir: 'desc' });
     expect(ids()).toEqual(['a', 'c', 'b']);
   });
 
-  it('sorts chains by the chosen first and second keys', () => {
-    expect(ids({ by: 'priority', then: 'oldest' })).toEqual(['b', 'c', 'a']);
-    expect(ids({ by: 'newest', then: 'priority' })).toEqual(['b', 'c', 'a']);
-    expect(ids({ by: 'stale', then: 'oldest' })).toEqual(['c', 'a', 'b']);
-    expect(ids({ by: 'recent', then: 'oldest' })).toEqual(['b', 'a', 'c']);
+  it('sorts chains by the chosen column, either way round', () => {
+    expect(ids({ col: 'age', dir: 'asc' })).toEqual(['b', 'c', 'a']);
+    expect(ids({ col: 'priority', dir: 'desc' })).toEqual(['b', 'c', 'a']);
+    expect(ids({ col: 'priority', dir: 'asc' })).toEqual(['a', 'c', 'b']);
+    // Updated: longest without an update first, or most recently updated first.
+    expect(ids({ col: 'updated', dir: 'desc' })).toEqual(['c', 'a', 'b']);
+    expect(ids({ col: 'updated', dir: 'asc' })).toEqual(['b', 'a', 'c']);
   });
 
   it('orders sub-tickets the same way, open before closed', () => {
@@ -251,7 +253,8 @@ describe('merchantView sort order', () => {
     );
     const kids = (order: Parameters<typeof merchantView>[6]) =>
       merchantView(Y, withFlags(Y), 'acme', 'all', null, 'all', order).threads[0].rows.map(r => (r.kind === 'ticket' ? r.t.id : ''));
-    expect(kids({ by: 'oldest', then: 'priority' })).toEqual(['p', 'x', 'y', 'z']);
-    expect(kids({ by: 'priority', then: 'oldest' })).toEqual(['p', 'y', 'x', 'z']);
+    expect(kids({ col: 'age', dir: 'desc' })).toEqual(['p', 'x', 'y', 'z']);
+    expect(kids({ col: 'priority', dir: 'desc' })).toEqual(['p', 'y', 'x', 'z']);
+    expect(kids({ col: 'age', dir: 'asc' })).toEqual(['p', 'y', 'x', 'z']);
   });
 });

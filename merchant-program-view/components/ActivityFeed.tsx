@@ -40,16 +40,16 @@ function Icon({ it, name }: { it: ActivityItem; name: string | null }) {
 function PartView({ p, first }: { p: Part; first: boolean }) {
   const lead = first || (typeof p === 'string' && /^[,.:;]/.test(p)) ? '' : ' ';
   if (typeof p === 'string') return <>{lead + p}</>;
-  if ('b' in p) return <>{lead}<b style={{ color: 'var(--t1)', fontWeight: 600 }}>{p.b}</b></>;
+  if ('b' in p) return <>{lead}<b style={{ color: 'var(--t2)', fontWeight: 500 }}>{p.b}</b></>;
   return (
     <>
       {lead}
       {p.href ? (
-        <a href={p.href} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} style={{ color: 'var(--blue)', fontWeight: 600, textDecoration: 'none' }}>
+        <a href={p.href} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} style={{ color: 'var(--blue)', fontWeight: 500, textDecoration: 'none' }}>
           {p.link}
         </a>
       ) : (
-        <b style={{ color: 'var(--t1)', fontWeight: 600 }}>{p.link}</b>
+        <b style={{ color: 'var(--t2)', fontWeight: 500 }}>{p.link}</b>
       )}
     </>
   );
@@ -88,19 +88,19 @@ export function ActivityFeed({
   return (
     <div style={{ display: 'flex', flexDirection: 'column' }}>
       {shown.map((it, i) => (
-        <div key={it.id} style={{ position: 'relative', display: 'grid', gridTemplateColumns: '18px 1fr auto', gap: 10, alignItems: 'start', paddingBottom: 12 }}>
+        <div key={it.id} style={{ position: 'relative', display: 'grid', gridTemplateColumns: '18px 1fr auto', gap: 10, alignItems: 'start', paddingBottom: 18 }}>
           {/* Rail joining each icon to the next. */}
-          {i < shown.length - 1 && <span style={{ position: 'absolute', left: 8.5, top: 20, bottom: 0, width: 1, background: 'var(--bd)' }} />}
-          <span data-tip={it.actor ?? undefined} style={{ height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          {i < shown.length - 1 && <span style={{ position: 'absolute', left: 8.5, top: 24, bottom: 4, width: 1, background: 'var(--bd)' }} />}
+          <span data-tip={it.actor ?? undefined} style={{ height: 20, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <Icon it={it} name={it.icon === 'avatar' ? it.actor : null} />
           </span>
-          <span style={{ fontSize: 13, lineHeight: '18px', color: 'var(--t3)', minWidth: 0, overflowWrap: 'anywhere' }}>
-            {it.actor && <span style={{ color: 'var(--t1)', fontWeight: 500 }}>{it.actor} </span>}
+          <span style={{ fontSize: 13, lineHeight: '20px', color: 'var(--t4)', minWidth: 0, overflowWrap: 'anywhere' }}>
+            {it.actor && <span style={{ color: 'var(--t2)', fontWeight: 500 }}>{it.actor} </span>}
             {it.parts.map((p, j) => (
               <PartView key={j} p={p} first={j === 0} />
             ))}
           </span>
-          <span data-tip={exact(it.at)} style={{ fontSize: 12, lineHeight: '18px', color: 'var(--t4)', whiteSpace: 'nowrap' }}>
+          <span data-tip={exact(it.at)} style={{ fontSize: 12, lineHeight: '20px', color: 'var(--t5)', whiteSpace: 'nowrap' }}>
             {ago(it.at, now)}
           </span>
         </div>
