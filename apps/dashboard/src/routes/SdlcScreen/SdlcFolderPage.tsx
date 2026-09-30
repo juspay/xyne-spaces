@@ -83,6 +83,22 @@ export interface FolderTab {
   id: string;
 }
 
+/**
+ * A stored per-folder record with one folder's entry replaced. Folder ids can arrive
+ * from the URL, so the record is rebuilt from its entries, each defined as its own
+ * key, rather than written through a key taken from outside.
+ */
+function withFolderEntry<T>(
+  record: Readonly<Record<string, T>>,
+  folderId: string,
+  value: T,
+): Record<string, T> {
+  return Object.fromEntries([
+    ...Object.entries(record).filter(([key]) => key !== folderId),
+    [folderId, value],
+  ]);
+}
+
 interface TreeNode {
   kind: 'FOLDER' | 'CANVAS' | 'LINK' | 'ATTACHMENT';
   id: string;
@@ -267,7 +283,10 @@ function TreeRow(
           type='button'
           onClick={() => {
             if (node.kind === 'FOLDER') {
-              setUserPreference('sdlcFolderTreeExpanded', { ...expanded, [node.id]: !isOpen });
+              setUserPreference(
+                'sdlcFolderTreeExpanded',
+                withFolderEntry(expanded, node.id, !isOpen),
+              );
               return;
             }
             props.onOpen({ kind: node.kind, id: node.id });
@@ -614,7 +633,7 @@ export function SdlcFolderPage(props: {
     rows().find(row => row.dataset['explorerRow'] === cursorId) ?? null;
 
   const setFolderOpen = (id: string, open: boolean): void => {
-    setUserPreference('sdlcFolderTreeExpanded', { ...expandedFolders, [id]: open });
+    setUserPreference('sdlcFolderTreeExpanded', withFolderEntry(expandedFolders, id, open));
   };
 
   const bind = { enabled: treeFocused };
@@ -661,7 +680,7 @@ export function SdlcFolderPage(props: {
   );
 
   const setTabs = (next: FolderTab[]): void => {
-    setUserPreference('sdlcFolderTabs', { ...tabsByFolder, [props.folder.id]: next });
+    setUserPreference('sdlcFolderTabs', withFolderEntry(tabsByFolder, props.folder.id, next));
   };
 
   // A link into a folder names one item; it joins the strip so the tab bar and
