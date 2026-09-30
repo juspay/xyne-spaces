@@ -9,6 +9,7 @@ import { workspaceScopedRoute } from '@/database/tenant/context';
 import { summaryTemplateController } from '@/controllers/summaryTemplateController';
 import { recordingSharingController } from '@/controllers/recordingSharingController';
 import { recordingGoogleDocController } from '@/controllers/recordingGoogleDocController';
+import { callTicketUpdateController } from '@/controllers/callTicketUpdateController';
 
 const router = Router();
 
@@ -151,6 +152,10 @@ router.post('/:callId/leave', callController.leaveCall);
 
 // End call for everyone (host only)
 router.post('/:callId/end-for-all', callController.endCallForAll);
+
+// Ticket updates proposed from the transcript: approve (comment and/or move stage) or ignore one item
+router.post('/:callId/ticket-updates/:updateId/apply', callTicketUpdateController.apply);
+router.post('/:callId/ticket-updates/:updateId/ignore', callTicketUpdateController.ignore);
 
 // Pulse actionable proxy (keeps Pulse credentials server-side)
 router.post('/:callId/pulse-actionable', callController.createPulseActionable);

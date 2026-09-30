@@ -10,29 +10,26 @@ function getMeter(): Meter {
   return metrics.getMeter(config.otel.serviceName);
 }
 
-// Total ticket suggestions generated from call summaries
-let _callTicketSuggestionsTotal: Counter<SuggestionAttributes> | null = null;
-export function getCallTicketSuggestionsTotal(): Counter<SuggestionAttributes> {
-  if (!_callTicketSuggestionsTotal) {
-    _callTicketSuggestionsTotal = getMeter().createCounter('call_ticket_suggestions_total', {
-      description: 'Total number of ticket suggestions generated from call summaries',
+// Ticket updates proposed from call transcripts (updates to existing tickets)
+let _callTicketUpdatesTotal: Counter<SuggestionAttributes> | null = null;
+export function getCallTicketUpdatesTotal(): Counter<SuggestionAttributes> {
+  if (!_callTicketUpdatesTotal) {
+    _callTicketUpdatesTotal = getMeter().createCounter('call_ticket_updates_total', {
+      description: 'Total number of ticket updates proposed from call transcripts',
       unit: '1',
     });
   }
-  return _callTicketSuggestionsTotal;
+  return _callTicketUpdatesTotal;
 }
 
-// Total tickets actually created from call summary suggestions
-let _callTicketsCreatedFromSuggestionsTotal: Counter<SuggestionAttributes> | null = null;
-export function getCallTicketsCreatedFromSuggestionsTotal(): Counter<SuggestionAttributes> {
-  if (!_callTicketsCreatedFromSuggestionsTotal) {
-    _callTicketsCreatedFromSuggestionsTotal = getMeter().createCounter(
-      'call_tickets_created_from_suggestions_total',
-      {
-        description: 'Total number of tickets created from call summary suggestions',
-        unit: '1',
-      }
-    );
+// Ticket updates the user actually applied (comment posted and/or status moved)
+let _callTicketUpdatesAppliedTotal: Counter<SuggestionAttributes> | null = null;
+export function getCallTicketUpdatesAppliedTotal(): Counter<SuggestionAttributes> {
+  if (!_callTicketUpdatesAppliedTotal) {
+    _callTicketUpdatesAppliedTotal = getMeter().createCounter('call_ticket_updates_applied_total', {
+      description: 'Total number of call ticket updates applied by users',
+      unit: '1',
+    });
   }
-  return _callTicketsCreatedFromSuggestionsTotal;
+  return _callTicketUpdatesAppliedTotal;
 }

@@ -83,8 +83,13 @@ import { CallBubble } from './CallBubble';
 import { RecordingBubble } from './RecordingBubble';
 import { CallShareBubble } from './CallShareBubble';
 import { getEmojiDisplayName, renderEmoji } from '../../../utils/customEmojiUtils';
-import { parseMarkdownWithTicketSuggestions } from '../../../utils/markdownTicketSuggestions';
-import { TicketSuggestions } from './TicketSuggestions';
+import {
+  parseLegacySuggestedTickets,
+  parseTicketUpdatesMarkdown,
+  stripFrontmatter,
+} from '../../../utils/markdownTicketUpdates';
+import { TicketUpdates } from './TicketUpdates';
+import { LegacySuggestedTickets } from './LegacySuggestedTickets';
 import { AppActions } from './AppActions';
 import { parseMarkdownWithAppActions } from '../../../utils/markdownAppActions';
 import { PulseTickets } from './PulseTickets';
@@ -622,16 +627,22 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const isEphemeralNotice = metadata?.['__xyneEphemeral'] === true;
   // Detect any message with markdown content format (call_summary, call_prd, etc.)
   const isMarkdownContent = metadata?.['contentFormat'] === 'markdown';
-  const hasSuggestedTickets = metadata?.['hasSuggestedTickets'] === true;
+  const isTicketUpdatesMessage = metadata?.['messageSubtype'] === 'call_ticket_updates';
+  // Retired "Suggested Tickets" cards stay readable: the old suggestions as plain
+  // text, and links to the tickets that were created from them.
+  const isLegacySuggestedTickets = metadata?.['messageSubtype'] === 'call_suggested_tickets';
   const parsedMarkdown = useMemo(() => {
-    if (isMarkdownContent) {
-      return parseMarkdownWithTicketSuggestions(message.content, hasSuggestedTickets);
+    if (!isMarkdownContent) {
+      return { updates: [], applied: [], ignored: [], content: message.content };
     }
-    return { ticketSuggestions: [], ticketsCreated: [], content: message.content };
-  }, [isMarkdownContent, hasSuggestedTickets, message.content]);
-
-  const ticketSuggestions = parsedMarkdown.ticketSuggestions;
-  const ticketsCreated = parsedMarkdown.ticketsCreated;
+    if (isTicketUpdatesMessage) return parseTicketUpdatesMarkdown(message.content);
+    // Every other markdown bot message may carry a frontmatter block for its own card.
+    return { updates: [], applied: [], ignored: [], content: stripFrontmatter(message.content) };
+  }, [isMarkdownContent, isTicketUpdatesMessage, message.content]);
+  const legacySuggestedTickets = useMemo(
+    () => (isLegacySuggestedTickets ? parseLegacySuggestedTickets(message.content) : null),
+    [isLegacySuggestedTickets, message.content],
+  );
 
   const { user } = useAuth();
 
@@ -1413,13 +1424,21 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                         />
                       </div>
                     ))}
-                  {(ticketSuggestions.length > 0 || ticketsCreated.length > 0) && channelId && (
-                    <TicketSuggestions
-                      suggestions={ticketSuggestions}
-                      ticketsCreated={ticketsCreated}
+                  {isTicketUpdatesMessage && channelId && typeof metadata?.callId === 'string' && (
+                    <TicketUpdates
+                      callId={metadata.callId}
                       channelId={channelId}
                       messageId={message.messageId}
-                      conversationId={message.conversationId}
+                      updates={parsedMarkdown.updates}
+                      applied={parsedMarkdown.applied}
+                      ignored={parsedMarkdown.ignored}
+                    />
+                  )}
+                  {legacySuggestedTickets && channelId && (
+                    <LegacySuggestedTickets
+                      suggestions={legacySuggestedTickets.suggestions}
+                      created={legacySuggestedTickets.created}
+                      channelId={channelId}
                     />
                   )}
                   {(parsedAppActions.appActions.length > 0 ||
