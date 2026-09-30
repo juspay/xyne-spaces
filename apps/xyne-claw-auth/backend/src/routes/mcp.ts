@@ -593,17 +593,24 @@ function serverToolsKey(serverType: string, serverName: string): string {
   return `${serverType}\u0000${serverName}`;
 }
 
-async function entriesNeededForAgent(
+type McpToolsPrefilterMode = "off" | "shadow" | "on";
+
+function mcpToolsPrefilterMode(): McpToolsPrefilterMode {
+  const raw = (process.env["MCP_TOOLS_PREFILTER"] ?? "shadow").trim().toLowerCase();
+  return raw === "on" || raw === "off" ? raw : "shadow";
+}
+
+async function serverTypesAgentCannotUse(
   entries: ListEntry[],
   userId: string,
   config: AgentToolsConfig | undefined,
   sessionAgentTools: { slug: string; subagentToolRefs: SubagentToolRefs[] } | null | undefined,
-): Promise<ListEntry[]> {
-  if (!config || !sessionAgentTools) return entries;
+): Promise<Set<string>> {
+  const skipped = new Set<string>();
+  if (!config || !sessionAgentTools) return skipped;
   const known = await loadKnownMcpTools(userId, [...new Set(entries.map((e) => e.serverType))]);
-  const skipped: string[] = [];
-  const needed = entries.filter((entry) => {
-    if (CUSTOM_TOOL_INJECTIONS.some((inj) => inj.match(entry.serverType))) return true;
+  for (const entry of entries) {
+    if (CUSTOM_TOOL_INJECTIONS.some((inj) => inj.match(entry.serverType))) continue;
     const keep = mcpServerMayServeAgentConfig({
       config,
       serverType: entry.serverType,
@@ -612,15 +619,9 @@ async function entriesNeededForAgent(
       parseGatewayServerType,
       subagentRefs: sessionAgentTools.subagentToolRefs,
     });
-    if (!keep) skipped.push(entry.serverType);
-    return keep;
-  });
-  if (skipped.length > 0) {
-    log.info(
-      `[mcp/tools] prefilter agent=${sessionAgentTools.slug} listing=${needed.length} skipped=${skipped.length} [${skipped.join(",")}]`,
-    );
+    if (!keep) skipped.add(entry.serverType);
   }
-  return needed;
+  return skipped;
 }
 
 function enforceMcpToolsListing(
@@ -1206,7 +1207,19 @@ router.get("/:sessionId/mcp/tools", async (req: Request<{ sessionId: string }>, 
       }
     }
 
-    const listingEntries = await entriesNeededForAgent(entries, userId, strictAgentToolsConfig, sessionAgentTools);
+    const prefilterMode = mcpToolsPrefilterMode();
+    const prefilterSkips = prefilterMode === "off"
+      ? new Set<string>()
+      : await serverTypesAgentCannotUse(entries, userId, strictAgentToolsConfig, sessionAgentTools);
+    const listingEntries = prefilterMode === "on"
+      ? entries.filter((entry) => !prefilterSkips.has(entry.serverType))
+      : entries;
+    if (prefilterSkips.size > 0) {
+      log.info(
+        `[mcp/tools] prefilter mode=${prefilterMode} agent=${sessionAgentTools?.slug ?? "-"} ` +
+        `entries=${entries.length} skip=${prefilterSkips.size} [${[...prefilterSkips].join(",")}]`,
+      );
+    }
 
     const results = await Promise.allSettled(
       listingEntries.map(async (entry) => {
@@ -1477,6 +1490,18 @@ router.get("/:sessionId/mcp/tools", async (req: Request<{ sessionId: string }>, 
           sessionAgentTools.subagentToolRefs,
         ),
       );
+    }
+
+    if (prefilterMode === "shadow" && prefilterSkips.size > 0) {
+      const misses = data.filter((serverTools) => prefilterSkips.has(serverTools.serverType));
+      if (misses.length > 0) {
+        log.warn(
+          `[mcp/tools] prefilter-shadow MISS agent=${sessionAgentTools?.slug ?? "-"} userId=${userId} ` +
+          `servers=[${misses.map((m) => `${m.serverType}:${m.tools.map((t) => t.name).join("|")}`).join(",")}]`,
+        );
+      } else {
+        log.info(`[mcp/tools] prefilter-shadow ok agent=${sessionAgentTools?.slug ?? "-"} wouldSkip=${prefilterSkips.size}`);
+      }
     }
 
     res.json({ success: true, data });
