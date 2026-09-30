@@ -27,9 +27,11 @@ import { InterruptGuard } from './components/InterruptGuard/InterruptGuard';
 import { WorkspaceSwitchToastListener } from './components/WorkspaceSwitchToastListener';
 import { TRUSTED_ORIGINS } from '@xyne/shared';
 import {
+  isSandboxViewLink,
   parseCallInviteLink,
   parseInternalXyneLink,
 } from './components/Chat/RenderMessageWithHTML/internalLinkUtils';
+import { openLink } from './utils/openLink';
 import { crossWorkspaceNavigate } from './hooks/useCrossWorkspaceNavigate';
 import { joinCallSwitchingIfNeeded } from './machines/roomMachine';
 import { detectPlatform } from './hooks/usePlatform';
@@ -100,6 +102,12 @@ const App = (): ReactElement => {
           viewMode: detectPlatform() === 'mobile' ? 'full' : 'mini',
           externalLobbyUrl: anchor.href,
         });
+        return;
+      }
+
+      if (isSandboxViewLink(anchor.href)) {
+        event.preventDefault();
+        openLink(anchor.href, event, { force: 'in-app' });
         return;
       }
 
