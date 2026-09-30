@@ -11,7 +11,7 @@ import { ingestDeliveredArtifact } from "../lib/conversation-artifact-signals.js
 import { deliveredDesignCommand, recordDeliveredArtifacts } from "../lib/delivered-artifacts.js";
 import crypto from "node:crypto";
 import { claimAutomationStep } from "../lib/automation-step-dedup.js";
-import { automationRunAllowsSandboxWrite } from "../lib/automation-write-policy.js";
+import { automationRunAllowsSandboxWrite, automationRunIsHeadlessBulk } from "../lib/automation-write-policy.js";
 import { CONFIG } from "../config.js";
 import {
   agentRepository,
@@ -2854,7 +2854,7 @@ export async function handleAutomationWebhook(
       providerConfigs,
       providerOrder,
       parent: providerParent,
-    } = await resolveAgentProviderConfigs(agent, { headlessBulk: true }));
+    } = await resolveAgentProviderConfigs(agent, { headlessBulk: automationRunIsHeadlessBulk(sessionId) }));
   } catch (provErr) {
     clog.error(
       `[webhook] AUTODBG ${sessionId}: resolveAgentProviderConfigs THREW: ${provErr instanceof Error ? provErr.stack || provErr.message : String(provErr)}`,
