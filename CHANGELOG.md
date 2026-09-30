@@ -1,3 +1,10 @@
+## [1.444.1](https://github.com/juspay/xyne-spaces/compare/v1.444.0...v1.444.1) (2026-09-30)
+
+
+### Bug Fixes
+
+* fix-forpersonal-dm ([#2524](https://github.com/juspay/xyne-spaces/issues/2524)) ([f884a2f](https://github.com/juspay/xyne-spaces/commit/f884a2f85caab94e0bbd01acaa46da55877b4e8d))
+
 ## [1.444.0](https://github.com/juspay/xyne-spaces/compare/v1.443.0...v1.444.0) (2026-09-30)
 
 
