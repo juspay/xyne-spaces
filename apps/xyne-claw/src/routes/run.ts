@@ -132,7 +132,7 @@ import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import {
   parseToolsConfig,
   COPILOT_SYSTEM_INSTRUCTION,
-  getRepoConfig,
+  getRepoConfigsFor,
   getSandboxSession,
   probeSession,
   buildSandboxStoreKey,
@@ -1827,6 +1827,8 @@ export async function processTask(
     // automation runs to the shared read-only sbx-git sandbox instead of cloning
     // a per-project golden snapshot (see sandboxRepoSetup → resolveSbxGit).
     if (eventType) meta["eventType"] = eventType;
+    // Set by claw-auth start-run: scopes the sandbox profiles this run can use.
+    if (typeof agentConfig?.["workspaceId"] === "string") meta["workspaceId"] = agentConfig["workspaceId"];
     // Surface the originating scheduled-job row id so the scheduledJobControl
     // tool can resolve jobId:"current" (worker forwards it in the run body).
     if (scheduledJobId) meta["scheduledJobId"] = scheduledJobId;
@@ -3712,7 +3714,8 @@ export async function processTask(
       const pinnedRepoName =
         (agentConfig?.["sandboxRepo"] as string | undefined) ?? undefined;
       const pinnedRepo = pinnedRepoName
-        ? await getRepoConfig(pinnedRepoName)
+        ? // Same scope as the sandbox tools: built-ins plus this run's workspace.
+          (await getRepoConfigsFor(meta[SDLC_META_KEYS.workspaceId] || meta["workspaceId"]))[pinnedRepoName]
         : undefined;
       if (pinnedRepoName && pinnedRepo) {
         const installPkgs = pinnedRepo.steps

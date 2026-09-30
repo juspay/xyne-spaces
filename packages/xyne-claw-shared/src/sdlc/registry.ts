@@ -45,6 +45,7 @@ export const SDLC_TOOL_CAPABILITIES: readonly SdlcToolCapability[] = [
 ] as const;
 
 export const SDLC_GENERIC_SANDBOX_TOOLS = [
+  "sandbox-list-profiles",
   "sandbox-create",
   "sandbox-run",
   "sandbox-run-detached",
