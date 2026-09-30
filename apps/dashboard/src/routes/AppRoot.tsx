@@ -1890,41 +1890,40 @@ export const router = createBrowserRouter(
                     {
                       path: 'user-groups',
                       element: (
-                        <ResourceProtectedRoute
-                          resourceName='USER-GROUPS'
-                          minAccess='WRITE'
-                          allowUserGroupCreator
-                        >
+                        <OrganisationsSectionGuard section='user-groups'>
                           <UserGroupsScreen />
-                        </ResourceProtectedRoute>
+                        </OrganisationsSectionGuard>
                       ),
                     },
                     {
                       path: 'user-groups/:userGroupId/assignment-config',
+                      // The inner guard also checks a creator owns *this* group.
                       element: (
-                        <ResourceProtectedRoute
-                          resourceName='USER-GROUPS'
-                          minAccess='WRITE'
-                          allowUserGroupCreator
-                        >
-                          <AssignmentConfigWrapper />
-                        </ResourceProtectedRoute>
+                        <OrganisationsSectionGuard section='user-groups'>
+                          <ResourceProtectedRoute
+                            resourceName='USER-GROUPS'
+                            minAccess='WRITE'
+                            allowUserGroupCreator
+                          >
+                            <AssignmentConfigWrapper />
+                          </ResourceProtectedRoute>
+                        </OrganisationsSectionGuard>
                       ),
                     },
                     {
                       path: 'roles',
                       element: (
-                        <ResourceProtectedRoute resourceName='ROLES'>
+                        <OrganisationsSectionGuard section='roles'>
                           <RoleManagementScreen />
-                        </ResourceProtectedRoute>
+                        </OrganisationsSectionGuard>
                       ),
                     },
                     {
                       path: 'all',
                       element: (
-                        <ResourceProtectedRoute resourceName='ORGANIZATIONS'>
+                        <OrganisationsSectionGuard section='all'>
                           <OrganisationsScreen />
-                        </ResourceProtectedRoute>
+                        </OrganisationsSectionGuard>
                       ),
                     },
                   ],
@@ -1994,12 +1993,11 @@ export const router = createBrowserRouter(
                   ),
                 },
                 {
+                  // No toolbar guard on the hub itself: Jira/WhatsApp are gated by
+                  // TICKET-MIGRATION, Slack by its own toolbar path, and the index
+                  // redirect 404s when neither is reachable.
                   path: 'migrations',
-                  element: (
-                    <ToolbarProtectedRoute path='/migrations'>
-                      <MigrationsScreen />
-                    </ToolbarProtectedRoute>
-                  ),
+                  element: <MigrationsScreen />,
                   children: [
                     { index: true, element: <MigrationsIndexRedirect /> },
                     {

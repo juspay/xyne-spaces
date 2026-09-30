@@ -244,6 +244,11 @@ export const LEGACY_DISABLED_TOOLBAR_PATH_ALIASES: Readonly<Record<string, strin
   '/slack-migration': '/migrations/slack',
 };
 
+// Rail items a workspace can't switch off as a whole, so the admin Toolbar tab
+// leaves them out. Migrations' tabs are gated individually (TICKET-MIGRATION
+// for Jira/WhatsApp, /migrations/slack for Slack).
+export const TOOLBAR_UNMANAGED_PATHS: ReadonlySet<string> = new Set(['/migrations']);
+
 // Toolbar-guarded screens that aren't rail items of their own but can still be
 // disabled per workspace, so the admin Toolbar tab keeps listing them.
 export const NON_RAIL_TOOLBAR_ITEMS: NavigationItem[] = [
