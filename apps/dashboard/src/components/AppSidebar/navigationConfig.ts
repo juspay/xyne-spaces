@@ -77,7 +77,6 @@ export interface ChatNavItem {
   icon: PikaIcon;
   trackName: string;
   replace?: boolean;
-  sidebarTo?: string;
   requiresRadar?: boolean;
 }
 
@@ -117,7 +116,6 @@ export const CHAT_NAV_ITEMS: ChatNavItem[] = [
     to: '/chat/drafts-sent',
     icon: SendPlaneSlant,
     trackName: 'OPEN_DRAFTS_AND_SENT',
-    sidebarTo: 'drafts-sent',
   },
   {
     key: 'recap',

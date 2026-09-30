@@ -78,7 +78,7 @@ import { logger, Event } from '../../../utils/logger';
 
 export type { EditCallData } from './types';
 
-export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = ({
+const ScheduleCallModalContent: React.FC<ScheduleCallModalProps> = ({
   isOpen,
   onClose,
   initialCall,
@@ -2135,4 +2135,16 @@ const SubmitFooter: React.FC<{
       )}
     </div>
   );
+};
+
+/**
+ * Mounts the modal on its first open and keeps it mounted afterwards (so close
+ * animations and state behave as before). It is rendered closed inside every
+ * channel's composer, where its roster queries and ~40 hooks otherwise ran on
+ * every channel switch for a dialog that is rarely opened.
+ */
+export const ScheduleCallModal: React.FC<ScheduleCallModalProps> = props => {
+  const [hasOpened, setHasOpened] = useState(props.isOpen);
+  if (props.isOpen && !hasOpened) setHasOpened(true);
+  return hasOpened ? <ScheduleCallModalContent {...props} /> : null;
 };
