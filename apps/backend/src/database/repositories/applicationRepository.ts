@@ -189,7 +189,7 @@ export class ApplicationRepository {
 
       try {
         const txResult = await prisma.$transaction(async (tx) => {
-          const xyneId = await TicketIdService.generateTicketId(tx, projectId);
+          const xyneId = await TicketIdService.generateTicketId(tx, application.boardId!);
 
           const prLinks = prLinksByApplication.get(application.id) || [];
           const prLinksSection = prLinks.length > 0

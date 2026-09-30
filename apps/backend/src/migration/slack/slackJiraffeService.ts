@@ -437,7 +437,7 @@ async function ingestTicket(
   // Generate xyneId and create ticket
   const { TicketIdService } = await import('../../services/ticketIdService');
   const createdTicket = await db.$transaction(async (tx) => {
-    const xyneId = await TicketIdService.generateTicketId(tx, boardProjectId);
+    const xyneId = await TicketIdService.generateTicketId(tx, boardId);
     const channel = await channelRepo.findById(channelId);
 
     const newTicket = await tx.ticket.create({
