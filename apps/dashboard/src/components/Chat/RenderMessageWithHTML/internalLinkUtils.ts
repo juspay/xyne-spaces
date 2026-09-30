@@ -182,6 +182,20 @@ export const isExternalUrl = (url: string): boolean => {
   }
 };
 
+const SANDBOX_VIEW_PATH_PREFIXES = ['/claw-preview/', '/claw-code/'];
+
+export const isSandboxViewLink = (href: string): boolean => {
+  try {
+    const url = new URL(href, window.location.origin);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
+    const isOurHost =
+      INTERNAL_XYNE_HOSTS.has(url.hostname) || url.origin === window.location.origin;
+    return isOurHost && SANDBOX_VIEW_PATH_PREFIXES.some(prefix => url.pathname.startsWith(prefix));
+  } catch {
+    return false;
+  }
+};
+
 /**
  * Converts legacy internal Xyne URL formats to the current format.
  * Handles old workspace-scoped paths and legacy hostname rewrites.
