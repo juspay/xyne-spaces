@@ -1,3 +1,66 @@
+## [1.439.0](https://github.com/juspay/xyne-spaces/compare/v1.438.0...v1.439.0) (2026-09-30)
+
+
+### Features
+
+* dailybranchcut ([#2492](https://github.com/juspay/xyne-spaces/issues/2492)) ([a1ae134](https://github.com/juspay/xyne-spaces/commit/a1ae1344b55ea37dd66bd98028af445a8b7c71f9))
+
+## [1.438.0](https://github.com/juspay/xyne-spaces/compare/v1.437.0...v1.438.0) (2026-09-30)
+
+
+### Features
+
+* key internal user deactivation API on email with its own service secret ([#2410](https://github.com/juspay/xyne-spaces/issues/2410)) ([73ee179](https://github.com/juspay/xyne-spaces/commit/73ee179c23ebb3d9e064891bd7e0f77ee2e5140b))
+
+## [1.437.0](https://github.com/juspay/xyne-spaces/compare/v1.436.0...v1.437.0) (2026-09-30)
+
+
+### Features
+
+* always show merchant ID in ticket details ([#2488](https://github.com/juspay/xyne-spaces/issues/2488)) ([90181a2](https://github.com/juspay/xyne-spaces/commit/90181a252a8fb7f2a1ad2ac306589c1811068bd4))
+
+## [1.436.0](https://github.com/juspay/xyne-spaces/compare/v1.435.2...v1.436.0) (2026-09-30)
+
+
+### Features
+
+* expose replyTo in EMAIL_RECEIVED and EMAIL_SENT trigger values ([#1812](https://github.com/juspay/xyne-spaces/issues/1812)) ([5874104](https://github.com/juspay/xyne-spaces/commit/5874104fff7a75dda9c322d79ac6608186570d5e))
+
+## [1.435.2](https://github.com/juspay/xyne-spaces/compare/v1.435.1...v1.435.2) (2026-09-30)
+
+
+### Bug Fixes
+
+* Remove board name background color from ticket details ([#2479](https://github.com/juspay/xyne-spaces/issues/2479)) ([8463771](https://github.com/juspay/xyne-spaces/commit/846377145443e9e50022a6512b032b2a742890f0))
+
+## [1.435.1](https://github.com/juspay/xyne-spaces/compare/v1.435.0...v1.435.1) (2026-09-30)
+
+
+### Bug Fixes
+
+* drop required() on JEV_URL/JEV_MODEL so their defaults apply ([#2481](https://github.com/juspay/xyne-spaces/issues/2481)) ([8f17c93](https://github.com/juspay/xyne-spaces/commit/8f17c937720c7a24ef053accbcdd82e106d87e08))
+
+## [1.435.0](https://github.com/juspay/xyne-spaces/compare/v1.434.0...v1.435.0) (2026-09-30)
+
+
+### Features
+
+* old-user-fix ([#2434](https://github.com/juspay/xyne-spaces/issues/2434)) ([#2476](https://github.com/juspay/xyne-spaces/issues/2476)) ([4b5f9ba](https://github.com/juspay/xyne-spaces/commit/4b5f9ba0f9677004cb1e71983d17bc27666e12bb))
+
+## [1.434.0](https://github.com/juspay/xyne-spaces/compare/v1.433.1...v1.434.0) (2026-09-30)
+
+
+### Features
+
+* search tickets within the current view from the ticket screen ([#2423](https://github.com/juspay/xyne-spaces/issues/2423)) ([2e0c2f7](https://github.com/juspay/xyne-spaces/commit/2e0c2f7523648a2664bbcac95c3565bf81d4bdc1))
+
+## [1.433.1](https://github.com/juspay/xyne-spaces/compare/v1.433.0...v1.433.1) (2026-09-30)
+
+
+### Bug Fixes
+
+* keep Cmd+K search ghost suffix after the last line of a wrapped query ([#2462](https://github.com/juspay/xyne-spaces/issues/2462)) ([1e2c7e2](https://github.com/juspay/xyne-spaces/commit/1e2c7e286839031363ec25b0d9eafcd9f143f9c7))
+
 ## [1.433.0](https://github.com/juspay/xyne-spaces/compare/v1.432.1...v1.433.0) (2026-09-30)
 
 
