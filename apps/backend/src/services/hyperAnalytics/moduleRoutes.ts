@@ -52,6 +52,17 @@ const EXACT_MODULES = new Set([
   '/apps',
   '/resource-access',
   '/roles',
+  // Administration (/organisations) settles on one of these tabs; the bare
+  // /organisations and the standalone admin paths above only redirect now.
+  '/organisations/general',
+  '/organisations/members',
+  '/organisations/invitations',
+  '/organisations/guests',
+  '/organisations/repository-credentials',
+  '/organisations/toolbar',
+  '/organisations/all',
+  '/organisations/user-groups',
+  '/organisations/roles',
   '/migrations/jira',
   '/migrations/whatsapp',
   '/migrations/slack',

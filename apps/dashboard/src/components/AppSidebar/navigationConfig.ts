@@ -74,6 +74,8 @@ export interface ChatNavItem {
   trackName: string;
   replace?: boolean;
   requiresRadar?: boolean;
+  /** disabled_toolbar_paths entry that hides this item for a workspace. */
+  toolbarPath?: string;
 }
 
 export const CHAT_NAV_ITEMS: ChatNavItem[] = [
@@ -119,6 +121,7 @@ export const CHAT_NAV_ITEMS: ChatNavItem[] = [
     to: '/scheduled-messages',
     icon: CalendarTimer,
     trackName: 'OPEN_SCHEDULED_MESSAGES',
+    toolbarPath: '/scheduled-messages',
   },
   {
     key: 'recap',
@@ -222,6 +225,32 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
   { path: '/team-intelligence', label: 'Team Intelligence', icon: Atom, popout: true },
 ];
 
+// Rail items that were folded into a combined screen. A toolbar pin stored on
+// the old path pins the new one instead of silently disappearing.
+export const LEGACY_TOOLBAR_PATH_ALIASES: Readonly<Record<string, string>> = {
+  '/workspace-management': '/organisations',
+  '/resource-access': '/organisations',
+  '/user-groups': '/organisations',
+  '/roles': '/organisations',
+  '/jira-migration': '/migrations',
+  '/migration/whatsapp': '/migrations',
+  '/slack-migration': '/migrations',
+};
+
+// Old entries in a workspace's disabled_toolbar_paths, read as their new path.
+// Slack Migration could be disabled on its own (Jira/WhatsApp are permission-
+// gated instead), so it maps to its tab, not to the whole Migrations screen.
+export const LEGACY_DISABLED_TOOLBAR_PATH_ALIASES: Readonly<Record<string, string>> = {
+  '/slack-migration': '/migrations/slack',
+};
+
+// Toolbar-guarded screens that aren't rail items of their own but can still be
+// disabled per workspace, so the admin Toolbar tab keeps listing them.
+export const NON_RAIL_TOOLBAR_ITEMS: NavigationItem[] = [
+  { path: '/migrations/slack', label: 'Slack Migration', icon: SwapArrowHorizontal },
+  { path: '/scheduled-messages', label: 'Scheduled Messages', icon: CalendarTimer },
+];
+
 // Paths shown in the toolbar by default (before any user customization).
 export const DEFAULT_TOOLBAR_PATHS: string[] = [
   '/ai',
@@ -254,6 +283,8 @@ export const TOOLBAR_ITEM_DESCRIPTIONS: Record<string, string> = {
   '/knowledge-base': 'File and folder knowledge base for Ask AI',
   '/memory': 'Saved context and memory for AI',
   '/releaseManager': 'Release and deployment tracking',
+  '/migrations/slack': 'Slack Migration tab under Migrations',
+  '/scheduled-messages': 'Messages scheduled for later delivery (Inbox)',
 };
 
 type Permissions = ReturnType<typeof usePermissions>;
