@@ -37,7 +37,7 @@ import type {
 import { OrgBadge } from './components/AdminTable';
 import { FilterSelect } from './components/FilterSelect';
 import { TabMessage } from './components/TabMessage';
-import { RegistrationFlowCard } from './components/RegistrationFlowCard';
+import { RegistrationFlowDialog } from './components/RegistrationFlowDialog';
 import {
   adminAgentsPrefix,
   mcpPublishKey,
@@ -571,16 +571,14 @@ export function RequestsTab({
 
   return (
     <div className='flex min-h-0 flex-1 flex-col gap-6 overflow-auto pb-6'>
-      {registration.flow && (
-        <RegistrationFlowCard
-          flow={registration.flow}
-          onRun={() => void registration.runStep()}
-          onPickPicture={registration.pickPicture}
-          onSkipUpload={registration.dismiss}
-          onDismiss={registration.dismiss}
-          showUploadStep
-        />
-      )}
+      <RegistrationFlowDialog
+        flow={registration.flow}
+        onRun={() => void registration.runStep()}
+        onPickPicture={registration.pickPicture}
+        onSkipUpload={registration.dismiss}
+        onDismiss={registration.dismiss}
+        showUploadStep
+      />
 
       {filterBar}
 
