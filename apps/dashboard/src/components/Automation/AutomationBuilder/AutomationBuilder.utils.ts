@@ -94,23 +94,10 @@ export function buildVariableSources(
     if (step.type === CONDITIONAL_STEP_TYPE || step.type === SWITCH_STEP_TYPE) continue;
     const schema = schemaCache[step.type];
     if (!schema) continue;
-    pushStepVariableSources(
-      sources,
-      step as ActionStepConfig,
-      schema,
-      formatStepSourceLabel(i + 1),
-    );
+    pushStepVariableSources(sources, step as ActionStepConfig, schema, `Step ${i + 1}`);
   }
 
   return sources;
-}
-
-/**
- * Label for a step in the variable picker. Root steps read "Step 2"; steps
- * inside a branch carry the branch trail, e.g. "True → Step 1".
- */
-export function formatStepSourceLabel(displayIndex: number, branchTrail: string[] = []): string {
-  return [...branchTrail, `Step ${displayIndex}`].join(' → ');
 }
 
 /** Pushes the input + output picker sources for one action step. */

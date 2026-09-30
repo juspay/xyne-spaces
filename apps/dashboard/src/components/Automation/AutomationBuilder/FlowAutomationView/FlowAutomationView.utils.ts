@@ -13,7 +13,6 @@ import type {
 import type { VariablePickerSource } from '../VariablePicker/VariablePicker.types';
 import {
   buildVariableSources as buildRootVariableSources,
-  formatStepSourceLabel,
   issuesAtStep,
   issuesUnder,
   moveStep,
@@ -159,7 +158,7 @@ export function buildFlowItems(
         id: mergeId,
         nodeType: 'merge',
         path: [...path, 'merge'],
-        parentIds: lasts.length ? lasts : [id],
+        parentIds: lasts,
         width: MERGE_SIZE,
         height: MERGE_SIZE,
       });
@@ -198,7 +197,7 @@ export function getEdgeInsertTarget(
     };
   }
   // Last node of a branch → merge: append to that branch.
-  if (target.nodeType === 'merge' && target.id !== `merge:${source.id}`) {
+  if (target.nodeType === 'merge') {
     return getInsertAfterTarget(source);
   }
   return undefined;
@@ -532,25 +531,20 @@ export function buildVariableSourcesForPath(
   // Walk into branches, collecting preceding steps at each level.
   let currentSteps = config.steps;
   let position = rootIndex;
-  const trail: string[] = [];
   for (let i = 2; i < path.length; i += 2) {
     const branchKey = String(path[i]);
     const index = path[i + 1] as number;
     const owner = currentSteps[position];
     if (!owner) break;
-    trail.push(branchLabel(owner, branchKey));
     const branch = getBranchSteps(owner, branchKey);
     for (let j = 0; j < index; j++) {
       const step = branch[j];
       if (!step || step.type === CONDITIONAL_STEP_TYPE || step.type === SWITCH_STEP_TYPE) continue;
       const schema = stepSchemaCache[step.type];
       if (!schema) continue;
-      pushStepVariableSources(
-        base,
-        step as ActionStepConfig,
-        schema,
-        formatStepSourceLabel(j + 1, trail),
-      );
+      // Same number the step's card and node show, e.g. "Step 2.1".
+      const number = stepNumberForPrefix(buildPathPrefix([...path.slice(0, i + 1), j]));
+      pushStepVariableSources(base, step as ActionStepConfig, schema, `Step ${number}`);
     }
     currentSteps = branch;
     position = index;
@@ -559,17 +553,8 @@ export function buildVariableSourcesForPath(
   return base;
 }
 
-/** Human description of a container, e.g. "the True branch" or "the main flow". */
-export function describeContainer(config: AutomationConfig, container: ViewStepPath): string {
-  if (container.length <= 1) return 'the main flow';
-  const owner = getStepAtPath(config, container.slice(0, -1));
-  return `the ${branchLabel(owner, String(container[container.length - 1]))} branch`;
-}
-
 export function getEdgeLabel(source: FlowItem, target: FlowItem): string | undefined {
   if (source.nodeType !== 'conditional' && source.nodeType !== 'switch') return undefined;
-  // A control step with no branch steps links straight to its own merge dot.
-  if (target.nodeType === 'merge') return undefined;
   return branchLabel(source.step, String(target.path[source.path.length]));
 }
 

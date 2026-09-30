@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Eye, GitBranch, LayoutGrid, Maximize, Minus, Plus, Trash2 } from 'lucide-react';
+import { Eye, GitBranch, Trash2, Workflow } from 'lucide-react';
 import ReactFlow, {
   Background,
   BackgroundVariant,
+  Controls,
   MarkerType,
   MiniMap,
   ReactFlowProvider,
@@ -48,7 +49,6 @@ import {
   buildPathPrefix,
   buildVariableSourcesForPath,
   collectReachedIds,
-  describeContainer,
   getContainerSteps,
   getEdgeInsertTarget,
   getEdgeLabel,
@@ -66,25 +66,12 @@ import {
 } from './FlowAutomationView.utils';
 
 /** Show the minimap only once the flow no longer fits comfortably on screen. */
-const MINIMAP_MIN_NODES = 10;
-/** Below this canvas width the minimap would cover the nodes it summarises. */
-const MINIMAP_MIN_CANVAS_WIDTH = 640;
-/** Minimap width as a share of the canvas, clamped; height keeps a 4:3 ratio. */
-const MINIMAP_WIDTH_RATIO = 0.2;
-const MINIMAP_MIN_WIDTH = 120;
-const MINIMAP_MAX_WIDTH = 180;
-const FIT_VIEW_OPTIONS = { padding: 0.2, duration: 200 } as const;
+const MINIMAP_MIN_STEPS = 9;
 const MIN_ZOOM = 0.2;
 const MAX_ZOOM = 1.5;
-
-const MINIMAP_COLORS: Record<FlowItem['nodeType'], string> = {
-  trigger: 'hsl(38 92% 50%)',
-  action: 'hsl(217 91% 60%)',
-  conditional: 'hsl(271 81% 56%)',
-  switch: 'hsl(199 89% 48%)',
-  merge: 'hsl(var(--muted-foreground))',
-  placeholder: 'hsl(var(--border))',
-};
+/** Context menu footprint, to keep it inside the canvas. */
+const MENU_WIDTH = 200;
+const MENU_HEIGHT = 80;
 
 /* ─────────────────────────────── View ─────────────────────────────── */
 
@@ -92,10 +79,6 @@ interface ContextMenuState {
   itemId: string;
   x: number;
   y: number;
-}
-
-interface PendingInsert extends FlowInsertTarget {
-  description: string;
 }
 
 function describeNode(item: FlowItem, triggerName: string | undefined): string {
@@ -134,16 +117,14 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
     focusRequest,
   } = props;
 
-  const { setCenter, getZoom, fitView, zoomIn, zoomOut } = useReactFlow();
+  const { setCenter, getZoom } = useReactFlow();
   const canvasRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [hoveredEdgeId, setHoveredEdgeId] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
-  const [pendingInsert, setPendingInsert] = useState<PendingInsert | null>(null);
   const pendingFocusId = useRef<string | null>(null);
-  const [canvasWidth, setCanvasWidth] = useState(0);
 
   const editable = editMode && !readOnly;
 
@@ -169,13 +150,7 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
       0,
     );
     layout.delete(VIRTUAL_ROOT_ID);
-    // Pin the top-left node 24px from the origin.
-    const all = [...layout.values()];
-    const offsetX = all.length ? Math.min(...all.map(p => p.x)) - 24 : 0;
-    const offsetY = all.length ? Math.min(...all.map(p => p.y)) - 24 : 0;
-    const shifted = new Map<string, { x: number; y: number }>();
-    for (const [id, p] of layout) shifted.set(id, { x: p.x - offsetX, y: p.y - offsetY });
-    return shifted;
+    return layout;
   }, [layoutKey]);
 
   const triggerCatalogItem = useMemo(
@@ -227,22 +202,9 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
     appliedFocus.current = focusRequest;
     if (!itemsById.has(focusRequest.id)) return;
     setSelectedNodeId(focusRequest.id);
-    setPendingInsert(null);
     setContextMenu(null);
     centerOn(focusRequest.id);
   }, [focusRequest, itemsById, centerOn]);
-
-  // The minimap is sized from, and hidden below, the canvas width.
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || typeof ResizeObserver === 'undefined') return undefined;
-    const observer = new ResizeObserver(entries => {
-      const width = entries[0]?.contentRect.width;
-      if (width !== undefined) setCanvasWidth(width);
-    });
-    observer.observe(canvas);
-    return (): void => observer.disconnect();
-  }, []);
 
   /* ── Mutations ── */
 
@@ -251,7 +213,6 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
       if (!editable) return;
       const id = onAddStep(type, target.index, target.container);
       setSelectedNodeId(id);
-      setPendingInsert(null);
       pendingFocusId.current = id;
     },
     [editable, onAddStep],
@@ -266,30 +227,22 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
     onConfigChange(moveStepAtPath(config, path, direction));
   };
 
-  const requestDelete = useCallback(
-    (id: string): void => {
-      const item = itemsById.get(id);
-      if (!editable || !item || !isStepItem(item)) return;
-      setContextMenu(null);
-      onConfigChange(removeStepAtPath(config, item.path));
-      if (selectedNodeId === id) setSelectedNodeId(null);
-    },
-    [editable, itemsById, config, onConfigChange, selectedNodeId],
-  );
+  const requestDelete = (id: string): void => {
+    const item = itemsById.get(id);
+    if (!editable || !item || !isStepItem(item)) return;
+    setContextMenu(null);
+    onConfigChange(removeStepAtPath(config, item.path));
+    if (selectedNodeId === id) setSelectedNodeId(null);
+  };
 
   const handleWrapInCondition = (item: FlowItem): void => {
+    if (!editable) return;
     const step = getStepAtPath(config, item.path);
     if (!step) return;
     const wrapper = makeConditionalStep([step]);
     onConfigChange(updateStepAtPath(config, item.path, wrapper));
     setSelectedNodeId(wrapper.id);
     pendingFocusId.current = wrapper.id;
-  };
-
-  const openPendingInsert = (item: FlowItem): void => {
-    const target = getInsertAfterTarget(item);
-    if (!target) return;
-    setPendingInsert({ ...target, description: describeContainer(config, target.container) });
   };
 
   /* ── React Flow nodes & edges ── */
@@ -384,7 +337,6 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
       for (const change of changes) {
         if (change.type === 'select' && change.selected) {
           setSelectedNodeId(change.id);
-          setPendingInsert(null);
           setContextMenu(null);
         }
       }
@@ -450,20 +402,21 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
   const handleNodeClick: NodeMouseHandler = useCallback((_event, node) => {
     if (node.type === 'merge' || node.type === 'placeholder') return;
     setSelectedNodeId(node.id);
-    setPendingInsert(null);
     setContextMenu(null);
   }, []);
 
+  // Steps only: the menu wraps or deletes a step. Kept inside the canvas bounds.
   const handleNodeContextMenu: NodeMouseHandler = useCallback(
     (event, node) => {
-      if (!editable || node.type === 'merge' || node.type === 'placeholder') return;
+      if (!editable || !['action', 'conditional', 'switch'].includes(node.type ?? '')) return;
       event.preventDefault();
       const bounds = canvasRef.current?.getBoundingClientRect();
+      if (!bounds) return;
       setSelectedNodeId(node.id);
       setContextMenu({
         itemId: node.id,
-        x: event.clientX - (bounds?.left ?? 0),
-        y: event.clientY - (bounds?.top ?? 0),
+        x: Math.max(0, Math.min(event.clientX - bounds.left, bounds.width - MENU_WIDTH)),
+        y: Math.max(0, Math.min(event.clientY - bounds.top, bounds.height - MENU_HEIGHT)),
       });
     },
     [editable],
@@ -474,7 +427,6 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
   const handlePaneClick = useCallback((): void => {
     if (!editable && !selectedNodeId && onRequestEdit) onRequestEdit();
     setSelectedNodeId(null);
-    setPendingInsert(null);
     setContextMenu(null);
   }, [editable, selectedNodeId, onRequestEdit]);
 
@@ -499,7 +451,7 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
     [editable, onRequestEdit],
   );
 
-  // Close the context menu on any outside pointer-down.
+  // Close the context menu on any outside pointer-down, or on Escape.
   useEffect(() => {
     if (!contextMenu) return undefined;
     const onPointerDown = (event: PointerEvent): void => {
@@ -508,8 +460,15 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
       }
       setContextMenu(null);
     };
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setContextMenu(null);
+    };
     document.addEventListener('pointerdown', onPointerDown);
-    return (): void => document.removeEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return (): void => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
   }, [contextMenu]);
 
   /* ── Side panel ── */
@@ -522,12 +481,12 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
       <div className='flex flex-col gap-4'>
         <div className='rounded-md border border-border bg-background p-4'>
           <div className='mb-2 flex items-center gap-2 text-sm font-semibold text-foreground'>
-            <LayoutGrid className='size-4 text-muted-foreground' />
+            <Workflow className='size-4 text-muted-foreground' />
             Flow view
           </div>
           <p className='text-xs text-muted-foreground'>
             Select a node to see its settings. Hover a connection and press + to insert a step, or
-            right-click a step for more actions.
+            right-click a step to wrap it in a condition or delete it.
           </p>
         </div>
         {!hasTrigger && (
@@ -539,31 +498,12 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
     );
   };
 
-  const renderPendingInsertPanel = (target: PendingInsert): React.ReactElement => (
-    <div className='flex flex-col gap-3'>
-      <p className='text-sm text-foreground'>Add a step to {target.description}.</p>
-      <AddStepRow
-        catalog={stepCatalog}
-        onPick={type => handleInsert(target, type)}
-        variant='full'
-      />
-      <Button
-        variant='ghost'
-        size='sm'
-        className='self-start text-xs'
-        onClick={() => setPendingInsert(null)}
-        data-track-category={TRACK_CATEGORY}
-        data-track-name='pending-insert-cancel'
-      >
-        Cancel
-      </Button>
-    </div>
-  );
-
+  // View mode: the trigger forms have no read-only mode, so the panel is inert.
+  // Step cards take `readOnly` themselves and keep their expand toggle usable.
   const renderTriggerPanel = (): React.ReactElement => {
     const triggerIssues = issuesUnder(validation?.issues, 'trigger');
     return (
-      <div className='flex flex-col gap-4'>
+      <div className='flex flex-col gap-4' inert={!editable}>
         <TriggerCard
           view='event'
           trigger={config.trigger}
@@ -672,79 +612,27 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
 
   const renderSidePanelBody = (): React.ReactNode => {
     if (runOverlay) return runOverlay.renderPanel(selectedItem);
-    if (pendingInsert && editable) return renderPendingInsertPanel(pendingInsert);
     if (!selectedItem) return renderEmptyPanel();
     return renderSelectedPanel(selectedItem) ?? renderEmptyPanel();
   };
 
-  const panelTitle = pendingInsert
-    ? 'Add step'
-    : selectedItem
-      ? selectedItem.nodeType === 'trigger'
-        ? 'Trigger'
-        : 'Step'
-      : runOverlay
-        ? 'Run'
-        : 'Builder';
+  const panelTitle = selectedItem
+    ? describeNode(selectedItem, triggerCatalogItem?.name)
+    : runOverlay
+      ? 'Run'
+      : 'Builder';
 
   const insertAfterSelected =
-    editable && selectedItem && !pendingInsert ? getInsertAfterTarget(selectedItem) : undefined;
+    editable && selectedItem ? getInsertAfterTarget(selectedItem) : undefined;
   const menuItem = contextMenu ? itemsById.get(contextMenu.itemId) : undefined;
-  const menuIsStep = Boolean(menuItem && isStepItem(menuItem));
-  const showMiniMap =
-    items.filter(isStepItem).length + 1 >= MINIMAP_MIN_NODES &&
-    canvasWidth >= MINIMAP_MIN_CANVAS_WIDTH;
-  const miniMapWidth = Math.round(
-    Math.min(MINIMAP_MAX_WIDTH, Math.max(MINIMAP_MIN_WIDTH, canvasWidth * MINIMAP_WIDTH_RATIO)),
-  );
+  const showMiniMap = items.filter(isStepItem).length >= MINIMAP_MIN_STEPS;
 
   const menuButtonClass =
     'flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground hover:bg-accent focus-visible:bg-accent focus-visible:outline-none';
 
-  const zoomButtonClass =
-    'flex size-7 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
-
   return (
     <div className='flex flex-1 overflow-hidden'>
       <div className='flex min-w-0 flex-1 flex-col'>
-        {/* Toolbar sits above the canvas so it never covers nodes. */}
-        <div className='flex items-center gap-2 border-b border-border bg-background px-3 py-1.5'>
-          <div className='ml-auto flex items-center gap-0.5' role='group' aria-label='Zoom'>
-            <button
-              type='button'
-              className={zoomButtonClass}
-              onClick={() => void zoomOut({ duration: 200 })}
-              aria-label='Zoom out'
-              title='Zoom out'
-              data-track-category={TRACK_CATEGORY}
-              data-track-name='zoom-out'
-            >
-              <Minus className='size-3.5' aria-hidden='true' />
-            </button>
-            <button
-              type='button'
-              className={zoomButtonClass}
-              onClick={() => void zoomIn({ duration: 200 })}
-              aria-label='Zoom in'
-              title='Zoom in'
-              data-track-category={TRACK_CATEGORY}
-              data-track-name='zoom-in'
-            >
-              <Plus className='size-3.5' aria-hidden='true' />
-            </button>
-            <button
-              type='button'
-              className={zoomButtonClass}
-              onClick={() => void fitView(FIT_VIEW_OPTIONS)}
-              aria-label='Fit flow to view'
-              title='Fit to view'
-              data-track-category={TRACK_CATEGORY}
-              data-track-name='fit-view'
-            >
-              <Maximize className='size-3.5' aria-hidden='true' />
-            </button>
-          </div>
-        </div>
         <div
           ref={canvasRef}
           role='region'
@@ -765,7 +653,8 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
             onKeyDown={handleCanvasKeyDown}
             onEdgeMouseEnter={(_event, edge) => setHoveredEdgeId(edge.id)}
             onEdgeMouseLeave={() => setHoveredEdgeId(null)}
-            onInit={() => void fitView({ padding: 0.2 })}
+            fitView
+            fitViewOptions={{ padding: 0.2 }}
             deleteKeyCode={null}
             multiSelectionKeyCode={null}
             selectionKeyCode={null}
@@ -779,15 +668,20 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
             proOptions={{ hideAttribution: true }}
           >
             <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
+            <Controls
+              showInteractive={false}
+              className='!bg-background !border-border !shadow-md'
+            />
             {showMiniMap && (
               <MiniMap
-                style={{ width: miniMapWidth, height: Math.round(miniMapWidth * 0.75) }}
-                nodeStrokeWidth={3}
-                zoomable
                 pannable
-                nodeColor={node => MINIMAP_COLORS[node.type as FlowItem['nodeType']] ?? 'gray'}
+                zoomable
+                nodeColor='hsl(var(--muted-foreground))'
                 maskColor='hsl(var(--background) / 0.72)'
-                className='!border-border !bg-background/80'
+                style={{
+                  backgroundColor: 'hsl(var(--card))',
+                  border: '1px solid hsl(var(--border))',
+                }}
               />
             )}
           </ReactFlow>
@@ -805,44 +699,26 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
                 role='menuitem'
                 className={menuButtonClass}
                 data-track-category={TRACK_CATEGORY}
-                data-track-name='context-add-after'
+                data-track-name='context-wrap-condition'
                 onClick={() => {
-                  openPendingInsert(menuItem);
+                  handleWrapInCondition(menuItem);
                   setContextMenu(null);
                 }}
               >
-                <Plus className='size-4 text-muted-foreground' aria-hidden='true' />
-                {menuItem.nodeType === 'trigger' ? 'Add first step' : 'Add step after'}
+                <GitBranch className='size-4 text-muted-foreground' aria-hidden='true' />
+                Wrap in condition
               </button>
-              {menuIsStep && (
-                <>
-                  <button
-                    type='button'
-                    role='menuitem'
-                    className={menuButtonClass}
-                    data-track-category={TRACK_CATEGORY}
-                    data-track-name='context-wrap-condition'
-                    onClick={() => {
-                      handleWrapInCondition(menuItem);
-                      setContextMenu(null);
-                    }}
-                  >
-                    <GitBranch className='size-4 text-muted-foreground' aria-hidden='true' />
-                    Wrap in condition
-                  </button>
-                  <button
-                    type='button'
-                    role='menuitem'
-                    className={cn(menuButtonClass, 'text-destructive')}
-                    data-track-category={TRACK_CATEGORY}
-                    data-track-name='context-delete'
-                    onClick={() => requestDelete(menuItem.id)}
-                  >
-                    <Trash2 className='size-4' aria-hidden='true' />
-                    Delete
-                  </button>
-                </>
-              )}
+              <button
+                type='button'
+                role='menuitem'
+                className={cn(menuButtonClass, 'text-destructive')}
+                data-track-category={TRACK_CATEGORY}
+                data-track-name='context-delete'
+                onClick={() => requestDelete(menuItem.id)}
+              >
+                <Trash2 className='size-4' aria-hidden='true' />
+                Delete
+              </button>
             </div>
           )}
         </div>
@@ -851,14 +727,11 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
       <div className='flex w-96 flex-col overflow-hidden border-l border-border bg-background'>
         <div className='flex items-center justify-between border-b border-border px-4 py-3'>
           <span className='text-sm font-semibold text-foreground'>{panelTitle}</span>
-          {(selectedItem || pendingInsert) && (
+          {selectedItem && (
             <Button
               variant='ghost'
               size='sm'
-              onClick={() => {
-                setSelectedNodeId(null);
-                setPendingInsert(null);
-              }}
+              onClick={() => setSelectedNodeId(null)}
               data-track-category={TRACK_CATEGORY}
               data-track-name='panel-clear-selection'
               className='h-7 text-xs'
@@ -887,35 +760,15 @@ function FlowAutomationViewInner(props: FlowAutomationViewProps): React.ReactEle
             )}
           </div>
         )}
-        <div className='flex-1 overflow-y-auto p-4'>
-          {/* Run data stays interactive so its JSON can be scrolled and copied. */}
-          <div inert={!editable && !runOverlay && Boolean(selectedItem)}>
-            {renderSidePanelBody()}
-          </div>
-        </div>
+        <div className='flex-1 overflow-y-auto p-4'>{renderSidePanelBody()}</div>
         {insertAfterSelected && selectedItem && (
-          <div className='flex items-center justify-between gap-2 border-t border-border p-3'>
-            <div className='flex items-center gap-2 text-xs text-muted-foreground'>
-              <AddStepRow
-                catalog={stepCatalog}
-                variant='compact'
-                onPick={type => handleInsert(insertAfterSelected, type)}
-              />
-              {selectedItem.nodeType === 'trigger' ? 'Add first step' : 'Add step after'}
-            </div>
-            {isStepItem(selectedItem) && (
-              <Button
-                variant='outline'
-                size='sm'
-                className='gap-1 text-destructive'
-                onClick={() => requestDelete(selectedItem.id)}
-                data-track-category={TRACK_CATEGORY}
-                data-track-name='panel-delete-step'
-              >
-                <Trash2 className='size-3.5' aria-hidden='true' />
-                Delete
-              </Button>
-            )}
+          <div className='flex items-center gap-2 border-t border-border p-3 text-xs text-muted-foreground'>
+            <AddStepRow
+              catalog={stepCatalog}
+              variant='compact'
+              onPick={type => handleInsert(insertAfterSelected, type)}
+            />
+            {selectedItem.nodeType === 'trigger' ? 'Add first step' : 'Add step after'}
           </div>
         )}
       </div>
