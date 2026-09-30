@@ -1,6 +1,7 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import { sanitizeProjectCode, ProjectType, ChannelRole, ChannelScopeType, ChannelVisibility } from '@xyne/shared';
 import { repositories } from '@/database/repositories';
+import { createDefaultTicketNamespace } from './ticketNamespaceUtils';
 
 type PrismaClientLike = PrismaClient | Prisma.TransactionClient;
 
@@ -61,6 +62,13 @@ export async function ensureGeneralChannelForWorkspace(
           createdBy,
         },
         select: { id: true },
+      });
+
+      await createDefaultTicketNamespace(db, {
+        workspaceId,
+        projectId: project.id,
+        code,
+        createdBy,
       });
     }
 

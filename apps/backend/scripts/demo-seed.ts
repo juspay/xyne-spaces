@@ -29,6 +29,7 @@
 import { PrismaClient } from '@prisma/client';
 import { createId } from '@paralleldrive/cuid2';
 import { hashPassword } from '../src/utils/passwordUtils';
+import { createDefaultTicketNamespace } from '../src/utils/ticketNamespaceUtils';
 import {
   serializeInitialMessageMd,
   serializeTicketMd,
@@ -293,6 +294,13 @@ async function ensureProjectAndBoard(workspaceId: string, createdBy: string) {
       },
     });
   }
+
+  await createDefaultTicketNamespace(prisma, {
+    workspaceId,
+    projectId: project.id,
+    code: PROJECT_CODE,
+    createdBy,
+  });
 
   return { projectId: project.id, boardId: board.id };
 }

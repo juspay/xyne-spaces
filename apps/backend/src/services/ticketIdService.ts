@@ -8,34 +8,69 @@ type PrismaTransaction = Omit<
 >;
 
 /**
- * Service for generating ticket IDs with project-scoped format
- * Format: {PROJECT_CODE}-{number} (e.g., XYNE-0001, EUL-0001)
+ * Generates ticket IDs. Format: {CODE}-{number} (e.g. EUL-0001).
+ * Code + sequence come from the board's TicketNamespace; boards without one
+ * (legacy, pre-backfill) fall back to the project's code + sequence.
  */
 export class TicketIdService {
-  /**
-   * Generate a new ticket ID based on project
-   * Uses exactly one sequence source, selected by configuration.
-   */
   static async generateTicketId(
     tx: PrismaTransaction,
-    projectId: string
+    boardId: string
   ): Promise<string> {
+    const board = await tx.board.findUnique({
+      where: { id: boardId },
+      select: { projectId: true, ticketNamespaceId: true },
+    });
+
+    if (!board) {
+      throw new Error(`Board not found: ${boardId}`);
+    }
+
+    if (board.ticketNamespaceId) {
+      const namespace = await tx.ticketNamespace.findUnique({
+        where: { id: board.ticketNamespaceId },
+        select: { code: true },
+      });
+      if (namespace) {
+        const project = await tx.project.findUnique({
+          where: { id: board.projectId },
+          select: { defaultTicketNamespaceId: true },
+        });
+        const isDefaultNamespace =
+          project?.defaultTicketNamespaceId === board.ticketNamespaceId;
+        // Option B: the default namespace draws from the legacy PROJECT_TICKET
+        // counter, so its numbers stay continuous with pre-namespace tickets and a
+        // rollback to project-based ids can't collide. Non-default namespaces get
+        // their own counter.
+        const sequenceNumber = isDefaultNamespace
+          ? await EntitySequenceService.getNextProjectTicketSequence(tx, board.projectId)
+          : await EntitySequenceService.getNextNamespaceTicketSequence(
+              tx,
+              board.ticketNamespaceId
+            );
+        return this.formatId(namespace.code, sequenceNumber);
+      }
+    }
+
     const project = await tx.project.findUnique({
-      where: { id: projectId },
+      where: { id: board.projectId },
       select: { code: true },
     });
 
     if (!project) {
-      throw new Error(`Project not found: ${projectId}`);
+      throw new Error(`Project not found: ${board.projectId}`);
     }
 
-    const sequenceNumber = await EntitySequenceService.getNextProjectTicketSequence(tx, projectId);
+    const sequenceNumber = await EntitySequenceService.getNextProjectTicketSequence(
+      tx,
+      board.projectId
+    );
 
-    return this.formatProjectScopedId(project.code, sequenceNumber);
+    return this.formatId(project.code, sequenceNumber);
   }
 
-  private static formatProjectScopedId(projectCode: string, sequenceNumber: number): string {
+  private static formatId(code: string, sequenceNumber: number): string {
     // Format: CODE-0001 (zero-padded to 4 digits)
-    return `${projectCode.toUpperCase()}-${String(sequenceNumber).padStart(4, '0')}`;
+    return `${code.toUpperCase()}-${String(sequenceNumber).padStart(4, '0')}`;
   }
 }

@@ -20,7 +20,8 @@ function isUniqueViolation(error: unknown): boolean {
  * entityValue holds the id of the entity that owns the counter.
  */
 export const SequenceEntityType = {
-  PROJECT_TICKET: 'PROJECT_TICKET', // entityValue = projectId; ticket numbering (e.g. XYNE-0001)
+  PROJECT_TICKET: 'PROJECT_TICKET', // entityValue = projectId; legacy ticket numbering
+  NAMESPACE_TICKET: 'NAMESPACE_TICKET', // entityValue = namespaceId; ticket numbering per board namespace
   BOARD_STAGE: 'BOARD_STAGE', // entityValue = boardId; monotonic stage sequence numbers
   FORM_FIELD: 'FORM_FIELD', // entityValue = formId; monotonic field sequence numbers
 } as const;
@@ -68,6 +69,30 @@ export class EntitySequenceService {
     });
 
     return project.ticketSequence;
+  }
+
+  static async getNextNamespaceTicketSequence(
+    tx: MainPrismaTransaction,
+    namespaceId: string
+  ): Promise<number> {
+    if (this.isCommonEntitySequenceEnabled()) {
+      try {
+        return await this.getNextSequence(SequenceEntityType.NAMESPACE_TICKET, namespaceId);
+      } catch (error) {
+        logger.error(
+          `[EntitySequenceService] Common DB namespace ticket allocation failed for namespace ${namespaceId}; falling back to main DB:`,
+          error
+        );
+      }
+    }
+
+    const namespace = await tx.ticketNamespace.update({
+      where: { id: namespaceId },
+      data: { ticketSequence: { increment: 1 } },
+      select: { ticketSequence: true },
+    });
+
+    return namespace.ticketSequence;
   }
 
   private static async getNextScopedSequence(

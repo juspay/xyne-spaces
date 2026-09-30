@@ -3,6 +3,7 @@ import { BaseRepository } from './base';
 import { Project } from '@prisma/client';
 import { QueryOptions, PaginationOptions, PaginatedResult } from '@/types/database';
 import { sanitizeProjectCode, ProjectType, TicketStatusV2 } from '@xyne/shared';
+import { createDefaultTicketNamespace } from '@/utils/ticketNamespaceUtils';
 //import { queueProjectIngestion } from '@/queues/vespaQueue';
 
 export interface CreateProjectInput {
@@ -45,7 +46,7 @@ export class ProjectRepository extends BaseRepository<Project, CreateProjectInpu
     // Validate project code
     await this.validateProjectCode(data.code, undefined, data.workspaceId);
 
-    // Use transaction to create project and default board together
+    // Use transaction to create project, its default namespace and default board together
     const result =  await this.db.$transaction(async (tx) => {
       const project = await tx.project.create({
         data: {
@@ -106,7 +107,15 @@ export class ProjectRepository extends BaseRepository<Project, CreateProjectInpu
         ]
       });
 
-      return project;
+      // Seed the project's default namespace and link its board(s)
+      const namespace = await createDefaultTicketNamespace(tx, {
+        workspaceId: data.workspaceId,
+        projectId: project.id,
+        code: data.code,
+        createdBy: data.createdBy,
+      });
+
+      return { ...project, defaultTicketNamespaceId: namespace?.id ?? null };
     });
 
 

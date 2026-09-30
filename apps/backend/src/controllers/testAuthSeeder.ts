@@ -1,4 +1,5 @@
 import { DatabaseClient } from '@/database/client';
+import { createDefaultTicketNamespace } from '@/utils/ticketNamespaceUtils';
 import {
   ActivityClassification,
   AuthProvider,
@@ -618,6 +619,13 @@ export class TestAuthSeeder {
           type: ProjectType.DEFAULT,
           createdBy: userId,
         },
+      });
+
+      await createDefaultTicketNamespace(db, {
+        workspaceId,
+        projectId: project.id,
+        code: 'TST',
+        createdBy: userId,
       });
     }
 
