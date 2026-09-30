@@ -58,6 +58,16 @@ export function optionsQuery<TConfig>(
 
 // ── the three things that genuinely repeat ───────────────────────────────────
 
+/**
+ * These return WHERE FRAGMENTS, and fragments are combined with `AND: [...]`,
+ * never by spreading them into one object.
+ *
+ * Spreading looks equivalent and is not: two fragments that both use `OR` —
+ * the channel visibility rule and the keyset seek, say — collide on the key,
+ * and the later one silently wins. That dropped the visibility filter on every
+ * page after the first, which is an ACL bypass that page one cannot show you.
+ */
+
 /** Case-insensitive contains, or nothing when the author has not typed. */
 const nameLike = (search: string | undefined) =>
   search?.trim() ? { name: { contains: search.trim(), mode: 'insensitive' as const } } : {};
@@ -119,14 +129,14 @@ export async function channelOptions(
 
   if (q.values?.length) {
     const rows = await db.channel.findMany({
-      where: { ...visible, id: { in: [...q.values] } },
+      where: { AND: [visible, { id: { in: [...q.values] } }] },
       select,
       orderBy: BY_NAME,
     });
     return { items: rows.map(label) };
   }
   const rows = await db.channel.findMany({
-    where: { ...visible, ...nameLike(q.search), ...after(q.cursor) },
+    where: { AND: [visible, nameLike(q.search), after(q.cursor)] },
     select,
     orderBy: BY_NAME,
     take: PAGE + 1,
@@ -147,14 +157,14 @@ export async function projectOptions(q: OptionsQuery): Promise<FieldOptionsPage>
 
   if (q.values?.length) {
     const rows = await db.project.findMany({
-      where: { ...real, id: { in: [...q.values] } },
+      where: { AND: [real, { id: { in: [...q.values] } }] },
       select,
       orderBy: BY_NAME,
     });
     return { items: rows.map(label) };
   }
   const rows = await db.project.findMany({
-    where: { ...real, ...nameLike(q.search), ...after(q.cursor) },
+    where: { AND: [real, nameLike(q.search), after(q.cursor)] },
     select,
     orderBy: BY_NAME,
     take: PAGE + 1,
@@ -188,7 +198,9 @@ export async function boardOptions(
     return { items: rows.map(label) };
   }
   const rows = await db.board.findMany({
-    where: { workspaceId: q.workspaceId, ...inProjects, ...nameLike(q.search), ...after(q.cursor) },
+    where: {
+      AND: [{ workspaceId: q.workspaceId }, inProjects, nameLike(q.search), after(q.cursor)],
+    },
     select,
     orderBy: BY_NAME,
     take: PAGE + 1,
@@ -251,26 +263,25 @@ export async function userOptions(q: OptionsQuery): Promise<FieldOptionsPage> {
 
   if (q.values?.length) {
     const rows = await db.user.findMany({
-      where: { ...active, id: { in: [...q.values] } },
+      where: { AND: [active, { id: { in: [...q.values] } }] },
       select,
       orderBy: BY_NAME,
     });
     return { items: rows.map(label) };
   }
   const search = q.search?.trim();
+  // A person is found by name or by address, so this fragment is its own `OR` —
+  // which is exactly why it is AND-ed with the seek rather than spread beside it.
+  const matches = search
+    ? {
+        OR: [
+          { name: { contains: search, mode: 'insensitive' as const } },
+          { email: { contains: search, mode: 'insensitive' as const } },
+        ],
+      }
+    : {};
   const rows = await db.user.findMany({
-    where: {
-      ...active,
-      ...(search
-        ? {
-            OR: [
-              { name: { contains: search, mode: 'insensitive' as const } },
-              { email: { contains: search, mode: 'insensitive' as const } },
-            ],
-          }
-        : {}),
-      ...after(q.cursor),
-    },
+    where: { AND: [active, matches, after(q.cursor)] },
     select,
     orderBy: BY_NAME,
     take: PAGE + 1,
@@ -289,14 +300,14 @@ export async function userGroupOptions(q: OptionsQuery): Promise<FieldOptionsPag
 
   if (q.values?.length) {
     const rows = await db.userGroup.findMany({
-      where: { workspaceId: q.workspaceId, id: { in: [...q.values] } },
+      where: { AND: [{ workspaceId: q.workspaceId }, { id: { in: [...q.values] } }] },
       select,
       orderBy: BY_NAME,
     });
     return { items: rows.map(label) };
   }
   const rows = await db.userGroup.findMany({
-    where: { workspaceId: q.workspaceId, ...nameLike(q.search), ...after(q.cursor) },
+    where: { AND: [{ workspaceId: q.workspaceId }, nameLike(q.search), after(q.cursor)] },
     select,
     orderBy: BY_NAME,
     take: PAGE + 1,
