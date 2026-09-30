@@ -1,3 +1,10 @@
+## [1.434.0-release-20260930.5](https://github.com/juspay/xyne-spaces/compare/v1.434.0-release-20260930.4...v1.434.0-release-20260930.5) (2026-09-30)
+
+
+### Features
+
+* suggest related conversations by default ([#2506](https://github.com/juspay/xyne-spaces/issues/2506)) ([179e473](https://github.com/juspay/xyne-spaces/commit/179e4730b662e806e386d65e59ddf272eec40479))
+
 ## [1.434.0-release-20260930.4](https://github.com/juspay/xyne-spaces/compare/v1.434.0-release-20260930.3...v1.434.0-release-20260930.4) (2026-09-30)
 
 
