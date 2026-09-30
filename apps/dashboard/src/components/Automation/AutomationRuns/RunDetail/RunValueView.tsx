@@ -85,7 +85,7 @@ function Value({
           dangerouslySetInnerHTML={{
             __html: DOMPurify.sanitize(value, {
               FORBID_TAGS: ['style', 'img', 'form', 'input', 'button'],
-              FORBID_ATTR: ['style'],
+              FORBID_ATTR: ['style', 'class'],
             }),
           }}
         />

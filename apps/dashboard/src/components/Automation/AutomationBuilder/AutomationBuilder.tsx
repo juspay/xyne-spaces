@@ -1351,18 +1351,21 @@ export function AutomationBuilder({
             title='When this happens'
             description='The event that fires this automation.'
             diffKey={TRIGGER_TYPE_DIFF_KEY}
-            inert={!editMode}
+            // The webhook panel's copy button must stay usable in view mode (URL is shown once).
+            inert={readOnlyPreview}
           >
-            <TriggerCard
-              view='event'
-              trigger={config.trigger}
-              catalog={triggerCatalog}
-              schema={triggerSchema}
-              schemaLoading={triggerSchemaQuery.isLoading && !!config.trigger.type}
-              onChangeType={handleTriggerTypeChange}
-              onConfigChange={handleTriggerConfigChange}
-              issues={triggerIssues}
-            />
+            <div inert={!editMode}>
+              <TriggerCard
+                view='event'
+                trigger={config.trigger}
+                catalog={triggerCatalog}
+                schema={triggerSchema}
+                schemaLoading={triggerSchemaQuery.isLoading && !!config.trigger.type}
+                onChangeType={handleTriggerTypeChange}
+                onConfigChange={handleTriggerConfigChange}
+                issues={triggerIssues}
+              />
+            </div>
             {config.trigger.type === 'WEBHOOK' && (
               <div className='mt-4'>
                 <WebhookEndpointPanel automationId={savedId} />
