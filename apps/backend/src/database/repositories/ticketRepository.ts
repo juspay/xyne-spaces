@@ -1,3 +1,4 @@
+import { emitDomainEvent } from '@/events/emitDomainEvent';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { extractEmailAddress } from '@/utils/email';
 import { CreateTicketRequest, ActivitySource } from '../../types/ticket';
@@ -20,7 +21,6 @@ import {
 } from '@xyne/shared';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { generateKeyBetween } from 'fractional-indexing';
-import { eventRouter } from '@/automations/engine/event-router';
 import { TICKET_CREATED_EVENT } from '@/automations/triggers/ticket-created.trigger';
 import {
   emitTicketUpdated,
@@ -123,16 +123,27 @@ const makeFallbackCountsSnapshot = (ticket: {
  * board/project/channel filter fail closed and the run get SKIPPED.
  */
 export async function emitTicketCreated(
-  ticket: { id: string; workspaceId: string },
+  ticket: {
+    id: string;
+    workspaceId: string;
+    boardId?: string | null;
+    projectId?: string | null;
+    channelId?: string | null;
+  },
   formFieldChanges: FormFieldChanges | undefined,
   createdBy: string,
 ): Promise<void> {
   try {
-    await eventRouter.emit(
+    await emitDomainEvent(
       {
         type: TICKET_CREATED_EVENT,
         payload: {
           ticketId: ticket.id,
+          scope: {
+            boardId: ticket.boardId ?? null,
+            projectId: ticket.projectId ?? null,
+            channelId: ticket.channelId ?? null,
+          },
           formFieldChanges,
           performedBy: { id: createdBy },
         },
