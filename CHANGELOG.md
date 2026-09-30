@@ -1,3 +1,22 @@
+## [1.442.0](https://github.com/juspay/xyne-spaces/compare/v1.441.0...v1.442.0) (2026-09-30)
+
+
+### Features
+
+* added support ([#2511](https://github.com/juspay/xyne-spaces/issues/2511)) ([3b11a2b](https://github.com/juspay/xyne-spaces/commit/3b11a2b49c99e5f4c0724927a0620439768e296f))
+
+
+### Bug Fixes
+
+* repair Nix development startup and add runtime CI ([#1768](https://github.com/juspay/xyne-spaces/issues/1768)) ([71dca4c](https://github.com/juspay/xyne-spaces/commit/71dca4cc112c2c63eb0657f7dbaaf8a858154047))
+
+## [1.441.0](https://github.com/juspay/xyne-spaces/compare/v1.440.1...v1.441.0) (2026-09-30)
+
+
+### Features
+
+* suggest related conversations by default ([#2504](https://github.com/juspay/xyne-spaces/issues/2504)) ([b95ffaa](https://github.com/juspay/xyne-spaces/commit/b95ffaa4088a873870100696414b828d64c9ae42))
+
 ## [1.440.1](https://github.com/juspay/xyne-spaces/compare/v1.440.0...v1.440.1) (2026-09-30)
 
 
