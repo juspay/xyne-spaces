@@ -6261,6 +6261,8 @@ export function createMutators(
               ...(firstStage.defaultTicketStatusV2 && {
                 statusV2: firstStage.defaultTicketStatusV2
               }),
+              ...(firstStage.defaultTicketStatusV2 &&
+                firstStage.defaultTicketStatusV2 !== ticket.statusV2 && { statusUpdatedAt: now }),
               kanbanPosition: newKanbanPosition,
               updatedAt: now,
               updatedBy: authData.sub
@@ -6432,8 +6434,10 @@ export function createMutators(
           // - Always track status change timestamp in statusUpdatedAt
           // - When leaving PAUSED (and ETA isn't explicitly set), push ETA forward by effective paused working duration.
           // - When ETA is manually changed while PAUSED, reset statusUpdatedAt to restart the pause timer
-          if (params.statusV2 !== undefined && params.statusV2 !== ticket.statusV2 && params.boardId === undefined) {
+          if (params.statusV2 !== undefined && params.statusV2 !== ticket.statusV2) {
             updateData.statusUpdatedAt = params.updatedAt;
+          }
+          if (params.statusV2 !== undefined && params.statusV2 !== ticket.statusV2 && params.boardId === undefined) {
 
             const isLeavingPaused =
               ticket.statusV2 === TicketStatusV2.PAUSED && params.statusV2 !== TicketStatusV2.PAUSED;
@@ -14522,6 +14526,8 @@ export function createMutators(
                 id: ticket.id,
                 stageName: stage.name,
                 ...(stage.defaultTicketStatusV2 && { statusV2: stage.defaultTicketStatusV2 }),
+                ...(stage.defaultTicketStatusV2 &&
+                  stage.defaultTicketStatusV2 !== ticket.statusV2 && { statusUpdatedAt: updatedAt }),
                 updatedAt,
               });
             } else {
@@ -14529,6 +14535,8 @@ export function createMutators(
                 id: ticket.id,
                 stageName: stage.name,
                 ...(stage.defaultTicketStatusV2 && { statusV2: stage.defaultTicketStatusV2 }),
+                ...(stage.defaultTicketStatusV2 &&
+                  stage.defaultTicketStatusV2 !== ticket.statusV2 && { statusUpdatedAt: updatedAt }),
                 updatedAt,
               });
             }
@@ -15011,6 +15019,8 @@ export function createMutators(
             await tx.mutate.tickets.update({
               id: devTicket.id,
               ...(defaultTicketStatusV2 !== undefined && { statusV2: defaultTicketStatusV2 }),
+              ...(defaultTicketStatusV2 !== undefined &&
+                defaultTicketStatusV2 !== devTicket.statusV2 && { statusUpdatedAt: timestamp }),
               ...(stageName !== undefined && { stageName }),
               updatedAt: timestamp,
             });
@@ -18579,6 +18589,8 @@ export function createMutators(
             ...(targetStage.defaultTicketStatusV2 && {
               statusV2: targetStage.defaultTicketStatusV2,
             }),
+            ...(targetStage.defaultTicketStatusV2 &&
+              targetStage.defaultTicketStatusV2 !== ticket.statusV2 && { statusUpdatedAt: now }),
             updatedAt: now,
             ...(finalEtaMs !== undefined && finalEtaMs !== null ? { eta: finalEtaMs } : {}),
             metadata: mergedMetadata as ReadonlyJSONValue,
