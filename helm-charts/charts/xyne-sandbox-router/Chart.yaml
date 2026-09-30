@@ -2,8 +2,8 @@ apiVersion: v2
 name: xyne-sandbox-router
 description: Xyne sandbox router (FastAPI) - forwards HTTP and WebSocket traffic to Kata sandbox pods by X-Sandbox-* headers or the /claw-preview path
 type: application
-version: 0.1.0-app.1.434.0-release-20260930.3
-appVersion: "1.434.0-release-20260930.3"
+version: 0.1.0-app.1.434.0-release-20260930.4
+appVersion: "1.434.0-release-20260930.4"
 keywords:
   - xyne
   - sandbox
