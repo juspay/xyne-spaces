@@ -28,15 +28,19 @@ interface Channel {
 }
 
 /**
- * Find a caller ↔ userId 1:1 DM in the channel list. DMs are stored with
- * `name = "userId1,userId2"` (sorted); the participants relation isn't loaded
- * on `useAllChannels`, so match on the name instead — same pattern
- * useExistingDmChannel uses.
+ * Find the caller ↔ userId DM in the channel list — matches both regular 1:1
+ * DMs and self-DMs. DMs are stored with `name = "userId1,userId2"` (sorted) for
+ * 1:1, or `name = "userId"` (a single id) for a self-DM. The participants
+ * relation isn't loaded on `useAllChannels`, so match on the name instead —
+ * same pattern useExistingDmChannel uses.
  *
- * When `callerUserId` is provided, only DMs where BOTH the caller and the
- * target are participants match — this defends against stray channels whose
- * name happens to include the target id but where the caller isn't the other
- * party, which would otherwise land the click in the wrong chat.
+ * `callerUserId` does two things when provided:
+ *  - target === caller → returns the SELF-DM (single-id name). Without this
+ *    branch, Array.find picks whichever 1:1 DM the user happens to be in first
+ *    and drops them into someone else's chat.
+ *  - target !== caller → also requires the caller to be a participant of the
+ *    1:1 DM, defending against stray channels whose name happens to include
+ *    the target id but where the caller isn't the other party.
  */
 const findOneToOneDmChannel = (
   channels: readonly Channel[],
@@ -46,6 +50,10 @@ const findOneToOneDmChannel = (
   channels.find(channel => {
     if (channel.scopeType !== ChannelScopeType.DM) return false;
     const ids = parseDMParticipantIds({ name: channel.name, scopeType: channel.scopeType });
+    if (callerUserId && userId === callerUserId) {
+      // Self-DM: exactly one participant, the user themselves.
+      return ids.length === 1 && ids[0] === userId;
+    }
     if (ids.length !== 2 || !ids.includes(userId)) return false;
     return callerUserId ? ids.includes(callerUserId) : true;
   });
@@ -61,7 +69,7 @@ export const navigateToSearchResult = async (
   result: DisplaySearchResult,
   navigate: NavigateFunction,
   channelData?: Channel[],
-  options?: { profileFallbackAnchorChannelId?: string; callerUserId?: string },
+  options?: { callerUserId?: string; profileFallbackAnchorChannelId?: string },
 ): Promise<void> => {
   switch (result.type) {
     case 'user':
@@ -134,17 +142,17 @@ export const resolveOrCreateDmChannelId = async (
  * Open (or create) the user's 1:1 DM and navigate to it.
  *
  * `profileFallbackAnchorChannelId` handles the deactivated-user edge case:
- * the backend refuses to create a DM with a deactivated user, so a click
- * from Cmd+K that has no prior DM would otherwise land nowhere. When set,
- * a failed DM creation redirects to the existing profile route
- * (`/chat/dir/{anchor}/profile/{userId}`) so the caller lands on the user's
- * read-only profile instead of getting silent nothing.
+ * the backend refuses to create a DM with a deactivated user (404), so a click
+ * from Cmd+K that has no prior DM would otherwise land nowhere. When set, a
+ * failed DM creation redirects to the existing profile route
+ * (`/chat/dir/{anchor}/profile/{userId}`) so the click produces a visible
+ * result.
  */
 export const navigateToUser = async (
   result: DisplaySearchResult,
   navigate: NavigateFunction,
   channelData?: Channel[],
-  options?: { profileFallbackAnchorChannelId?: string; callerUserId?: string },
+  options?: { callerUserId?: string; profileFallbackAnchorChannelId?: string },
 ): Promise<void> => {
   if (!channelData) {
     logger.warn(LogEvent.FRONTEND_ERROR, {
@@ -162,7 +170,11 @@ export const navigateToUser = async (
     );
     void navigate(`/chat/dir/${channelId}`);
   } catch (error) {
-    if (options?.profileFallbackAnchorChannelId) {
+    // Self-DM failures never redirect to profile — landing a user on their own
+    // profile page when their Saved Messages fails to open would be surprising.
+    // Let the error propagate so the caller (or a retry) can handle it.
+    const isSelfDmAttempt = !!options?.callerUserId && options.callerUserId === result.id;
+    if (options?.profileFallbackAnchorChannelId && !isSelfDmAttempt) {
       // Most common cause: target is deactivated so createDm 404s. Fall back to
       // the existing profile route so the click produces a visible result.
       void navigate(`/chat/dir/${options.profileFallbackAnchorChannelId}/profile/${result.id}`);

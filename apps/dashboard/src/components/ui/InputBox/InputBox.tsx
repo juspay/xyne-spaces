@@ -761,11 +761,6 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       ],
       content: value || '',
       editable: !isSending,
-      onCreate: ({ editor }) => {
-        const initialText = editor.getText().trim();
-        setContent(initialText.length > 0 ? 'has-content' : '');
-        updateEmojiSizeClass(editor);
-      },
       autofocus: autoFocus ? autoFocus : null,
       onFocus: () => {
         setIsFocused(true);
@@ -1217,6 +1212,14 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         },
       },
     });
+
+    // What the editor starts with, read once it exists. It is made during the first
+    // render, so onCreate would set this state before the component had mounted.
+    useEffect(() => {
+      if (!editor) return;
+      setContent(editor.getText().trim().length > 0 ? 'has-content' : '');
+      updateEmojiSizeClass(editor);
+    }, [editor, updateEmojiSizeClass]);
 
     useEffect(() => {
       editor?.setEditable(!disabled && !isSending, false);
