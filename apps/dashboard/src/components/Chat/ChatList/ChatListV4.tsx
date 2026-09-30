@@ -579,6 +579,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
           queries.channelConversationsPaginatedV3({
             channelId,
             isMember,
+            ...(discussionScope && { discussionScope }),
             start: newConversationsAnchor,
             direction: 'backward',
             limit: PAGE_SIZE / 2,

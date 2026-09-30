@@ -16,10 +16,24 @@ export interface SdlcLiveCalls {
 }
 
 /**
- * Whether you are part of a call, from your own participant row: on it because you
- * were asked, or let in. A request to join still waiting doesn't count.
+ * Whether you are part of a call going on, from your own participant row: asked and
+ * not yet answered, or in it. Declining, leaving, missing it or a request to join
+ * still waiting doesn't count.
  */
 export function isPartOfCall(mine: { response?: string | null } | undefined): boolean {
+  if (!mine) return false;
+  return mine.response === null || mine.response === undefined || PART_OF_CALL.has(mine.response);
+}
+const PART_OF_CALL: ReadonlySet<string> = new Set<string>([
+  InvitationResponse.INVITED,
+  InvitationResponse.ACCEPTED,
+]);
+
+/**
+ * Whether you were asked to a call, whatever you did then — a call list's Invited
+ * mark and filter. A request to join doesn't count: nobody asked.
+ */
+export function wasInvitedToCall(mine: { response?: string | null } | undefined): boolean {
   return mine !== undefined && mine.response !== InvitationResponse.REQUESTED;
 }
 
