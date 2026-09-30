@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
 import { Check as LCheck, ChevronDown as LChevronDown, ChevronLeft as LChevronLeft, ExternalLink, Search, X } from 'lucide-react';
 import { bucketOf } from '../lib/portfolio';
 import { usePeople } from '../lib/people';
@@ -311,9 +311,20 @@ export function TipLayer() {
       window.removeEventListener('scroll', hide, true);
     };
   }, []);
+  // Balanced lines leave the box at its max width; shrink it to the widest line so there's no gap on the right.
+  const box = useRef<HTMLDivElement>(null);
+  const line = useRef<HTMLSpanElement>(null);
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (!el || !line.current) return;
+    el.style.width = 'max-content';
+    const widest = Math.max(0, ...[...line.current.getClientRects()].map(r => r.width));
+    if (widest > 0) el.style.width = `${Math.ceil(widest) + 1}px`;
+  }, [tip]);
   if (!tip) return null;
   return (
     <div
+      ref={box}
       style={{
         position: 'fixed',
         zIndex: 100,
@@ -326,13 +337,14 @@ export function TipLayer() {
         lineHeight: 1.35,
         padding: '6px 12px',
         borderRadius: 6,
-        maxWidth: 260,
+        maxWidth: 236,
         width: 'max-content',
+        boxSizing: 'content-box',
         textWrap: 'balance',
         pointerEvents: 'none',
       }}
     >
-      {tip.text}
+      <span ref={line}>{tip.text}</span>
       {/* Spaces Tooltip: inverted colours with a rotated-square arrow. */}
       <span style={{ position: 'absolute', left: '50%', [tip.below ? 'top' : 'bottom']: -4, width: 8, height: 8, background: 'var(--tip)', transform: 'translateX(-50%) rotate(45deg)', borderRadius: 1 }} />
     </div>

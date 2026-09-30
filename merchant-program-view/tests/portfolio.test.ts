@@ -238,9 +238,11 @@ describe('abandoned tickets', () => {
   );
   const ids = (over: object) => portfolio(X, { ...DEFAULT_PSTATE, ...over }).abandoned.map(t => t.id);
 
-  it('lists old idle tickets oldest first, whatever the Created range', () => {
+  it('lists old idle tickets oldest first, within the Created range like everything else', () => {
     expect(ids({})).toEqual(['old1', 'old2']);
-    expect(ids({ range: 30 })).toEqual(['old1', 'old2']);
+    expect(ids({ range: 365 })).toEqual(['old1', 'old2']);
+    expect(ids({ range: 180 })).toEqual(['old2']);
+    expect(ids({ range: 30 })).toEqual([]);
   });
 
   it('follows the merchant search and the Desks, Boards and Assignee filters', () => {

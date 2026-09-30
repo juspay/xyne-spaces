@@ -208,7 +208,7 @@ describe('merchantView abandoned', () => {
 });
 
 describe('merchantView Created range', () => {
-  it('counts only tickets created in the range, like the portfolio; abandoned ignores it', () => {
+  it('counts only tickets created in the range, like the portfolio, abandoned ones included', () => {
     // d: d1 12, c1 11, p1 10, p2 9 (closed), c2 24 (closed), d2 1
     const v = merchantView(M, F, 'acme', 'all', null, 11);
     expect(v.threads.map(t => t.rootId).sort()).toEqual(['c1', 'd2']);
@@ -216,6 +216,42 @@ describe('merchantView Created range', () => {
     expect(v.range).toBe(11);
     expect(merchantView(M, F, 'acme', 'open').range).toBe('all');
     const X = model(mk('o', { d: 150, u: 40 }));
-    expect(merchantView(X, withFlags(X), 'acme', 'open', null, 7).abandoned.map(t => t.id)).toEqual(['o']);
+    expect(merchantView(X, withFlags(X), 'acme', 'open', null, 7).abandoned).toEqual([]);
+    expect(merchantView(X, withFlags(X), 'acme', 'open', null, 365).abandoned.map(t => t.id)).toEqual(['o']);
+  });
+});
+
+describe('merchantView sort order', () => {
+  // Three one-ticket chains: A old & low, B young & critical, C mid-age, high, long idle.
+  const X = model(
+    mk('a', { d: 50, pri: 'low', u: 2 }),
+    mk('b', { d: 10, pri: 'critical', u: 1 }),
+    mk('c', { d: 30, pri: 'high', u: 40 }),
+  );
+  const ids = (order?: Parameters<typeof merchantView>[6]) => merchantView(X, withFlags(X), 'acme', 'open', null, 'all', order).threads.map(t => t.rootId);
+
+  it('defaults to oldest first, then highest priority', () => {
+    expect(merchantView(X, withFlags(X), 'acme', 'open').order).toEqual({ by: 'oldest', then: 'priority' });
+    expect(ids()).toEqual(['a', 'c', 'b']);
+  });
+
+  it('sorts chains by the chosen first and second keys', () => {
+    expect(ids({ by: 'priority', then: 'oldest' })).toEqual(['b', 'c', 'a']);
+    expect(ids({ by: 'newest', then: 'priority' })).toEqual(['b', 'c', 'a']);
+    expect(ids({ by: 'stale', then: 'oldest' })).toEqual(['c', 'a', 'b']);
+    expect(ids({ by: 'recent', then: 'oldest' })).toEqual(['b', 'a', 'c']);
+  });
+
+  it('orders sub-tickets the same way, open before closed', () => {
+    const Y = model(
+      mk('p', { kids: ['x', 'y', 'z'], d: 60 }),
+      mk('x', { parent: 'p', root: 'p', d: 9, pri: 'low' }),
+      mk('y', { parent: 'p', root: 'p', d: 5, pri: 'critical' }),
+      mk('z', { parent: 'p', root: 'p', d: 50, open: false, st: 'completed', closedD: 1 }),
+    );
+    const kids = (order: Parameters<typeof merchantView>[6]) =>
+      merchantView(Y, withFlags(Y), 'acme', 'all', null, 'all', order).threads[0].rows.map(r => (r.kind === 'ticket' ? r.t.id : ''));
+    expect(kids({ by: 'oldest', then: 'priority' })).toEqual(['p', 'x', 'y', 'z']);
+    expect(kids({ by: 'priority', then: 'oldest' })).toEqual(['p', 'y', 'x', 'z']);
   });
 });

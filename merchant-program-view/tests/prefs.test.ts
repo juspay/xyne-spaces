@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { loadAnswer, loadFilters, loadRange, loadMidPicks, recordMidPick, saveAnswer, saveFilters, saveRange } from '../lib/prefs';
+import { loadAnswer, loadFilters, loadOrder, loadRange, loadMidPicks, recordMidPick, saveAnswer, saveFilters, saveOrder, saveRange } from '../lib/prefs';
 
 function mem(): Storage {
   const m = new Map<string, string>();
@@ -110,5 +110,17 @@ describe('saved agent answers', () => {
     expect(loadAnswer(s, 'k304')).toBeNull();
     expect(loadAnswer(null, 'a')).toBeNull();
     expect(() => saveAnswer(null, 'a', 'b')).not.toThrow();
+  });
+});
+
+describe('saved sort order', () => {
+  it('defaults to oldest then priority, round-trips, and ignores junk', () => {
+    const s = mem();
+    expect(loadOrder(s)).toEqual({ by: 'oldest', then: 'priority' });
+    saveOrder(s, { by: 'stale', then: 'priority' });
+    expect(loadOrder(s)).toEqual({ by: 'stale', then: 'priority' });
+    s.setItem('mpv.order', JSON.stringify({ by: 'nope', then: 'oldest' }));
+    expect(loadOrder(s)).toEqual({ by: 'oldest', then: 'priority' });
+    expect(loadOrder(null)).toEqual({ by: 'oldest', then: 'priority' });
   });
 });

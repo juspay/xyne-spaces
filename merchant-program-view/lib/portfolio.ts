@@ -156,7 +156,7 @@ export interface Portfolio {
   deskOptions: string[];
   boardOptions: string[];
   byId: Map<string, FTicket>;
-  /** Tickets that look abandoned (see lib/cleanup), oldest first; not limited by the Created range. */
+  /** Tickets that look abandoned (see lib/cleanup), oldest first, within the page's filters and Created range. */
   abandoned: FTicket[];
 }
 
@@ -332,9 +332,9 @@ export function portfolio(m: Model, s: PState, cfg = FLAG_CFG): Portfolio {
   const people = [...new Set(tv.map(t => t.who).filter((w): w is string => w !== null))].sort();
   const deskOptions = [...new Set(tvAll.filter(t => t.kind === 'desk').map(t => t.src))].sort();
   const boardOptions = [...new Set(tvAll.filter(t => t.kind !== 'desk').map(t => t.src))].sort();
-  // Abandoned tickets are old by definition, so the Created range doesn't apply; the other scoping does.
-  const abandoned = [...byId.values()]
-    .filter(t => isAbandoned(t, byId) && (scoped || t.midR.some(midMatch)) && srcOk(t) && ownOk(t))
+  // Same scope as the rest of the page: Created range, merchant search, Desks, Boards and Assignee.
+  const abandoned = tv
+    .filter(t => isAbandoned(t, byId) && srcOk(t) && ownOk(t))
     .sort((a, b) => b.d - a.d);
 
   return { kpis, buckets, merchants, merchantRows, ticketRows, people, deskOptions, boardOptions, byId, abandoned };

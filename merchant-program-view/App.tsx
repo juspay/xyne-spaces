@@ -15,7 +15,8 @@ import { formatClock, updateBarText } from './lib/format';
 import { merchantView, sameFocus, type MFocus, type Nudge, type ThreadStatus } from './lib/merchantView';
 import { buildModel } from './lib/model';
 import { DEFAULT_PSTATE, defaultMidSuggestions, midSuggestions, portfolio, type FTicket, type Kpi, type PState } from './lib/portfolio';
-import { browserStorage, loadAnswer, loadFilters, loadMidPicks, loadRange, recordMidPick, saveAnswer, saveFilters, saveRange } from './lib/prefs';
+import { browserStorage, loadAnswer, loadFilters, loadMidPicks, loadOrder, loadRange, recordMidPick, saveAnswer, saveFilters, saveOrder, saveRange } from './lib/prefs';
+import type { Order } from './lib/order';
 import { M_FIRST, T_FIRST, nextSort, sortMerchantRows, sortTicketRows, type MKey, type Sort, type TKey } from './lib/sort';
 import { THEME_CSS } from './lib/theme';
 import { useMerchantData } from './lib/useMerchantData';
@@ -41,6 +42,8 @@ export default function App() {
     saveFilters(browserStorage(), { tab: ps.tab, desks: ps.desks, boards: ps.boards, owners: ps.owners, health: ps.health });
   }, [ps.tab, ps.desks, ps.boards, ps.owners, ps.health]);
   const [threadStatus, setThreadStatus] = useState<ThreadStatus>('open');
+  // How the merchant page's list is sorted; remembered between visits.
+  const [order, setOrder] = useState<Order>(() => loadOrder(browserStorage()));
   const [mFocus, setMFocus] = useState<MFocus | null>(null);
   const [nudging, setNudging] = useState<string | null>(null);
   // Agent answers by key ('tldr|<range>|<merchant>'): a live run, else the answer saved last time,
@@ -184,8 +187,8 @@ export default function App() {
   const closeDrawer = useCallback(() => setDrawerId(null), []);
 
   const mv = useMemo(
-    () => (view.kind === 'merchant' && model.byMid.has(view.mid) ? merchantView(model, pf.byId, view.mid, threadStatus, mFocus, ps.range) : null),
-    [view, model, pf.byId, threadStatus, mFocus, ps.range],
+    () => (view.kind === 'merchant' && model.byMid.has(view.mid) ? merchantView(model, pf.byId, view.mid, threadStatus, mFocus, ps.range, order) : null),
+    [view, model, pf.byId, threadStatus, mFocus, ps.range, order],
   );
 
   // A merchant's summary is written the first time it's opened (per Created range), then kept.
@@ -301,6 +304,10 @@ export default function App() {
           onRange={onRange}
 
           tldr={tldrKey ? answerFor(tldrKey) : undefined}
+          onOrder={o => {
+            setOrder(o);
+            saveOrder(browserStorage(), o);
+          }}
           onTldr={() => tldrKey && runAnswer(tldrKey, () => summarizeMerchant(mv.mid, mv.row.tickets))}
           onCleanup={setCleanup}
           nudging={nudging}

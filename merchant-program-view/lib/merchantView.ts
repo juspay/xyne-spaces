@@ -1,4 +1,5 @@
 import { FLAG_CFG } from './config';
+import { DEFAULT_ORDER, type Order, type OrderKey } from './order';
 import { isAbandoned } from './cleanup';
 import { RANK, fmtDays, type Sev } from './flags';
 import { BUCKETS, bucketOf, median, merchantRow, type FTicket, type MerchantRow } from './portfolio';
@@ -54,6 +55,8 @@ export interface Thread {
   pri: Pri;
   /** Days since the thread's latest update. */
   lastU: number;
+  /** Longest any open ticket has gone without an update (of any ticket when nothing is open). */
+  idle: number;
   origin: string;
   size: number;
 }
@@ -83,7 +86,8 @@ export interface MerchantView {
   court: { id: Court; label: string; count: number; pct: number }[];
   closed: FTicket[];
   range: 'all' | number;
-  /** This merchant's tickets that look abandoned, oldest first (whatever the Created range). */
+  order: Order;
+  /** This merchant's tickets that look abandoned, oldest first, within the Created range. */
   abandoned: FTicket[];
 }
 
@@ -92,13 +96,29 @@ const ago = (d: number): string => (d < 1 / 24 ? 'just now' : `${fmtDays(d)} ago
 const PRI_RANK: Record<Pri, number> = { critical: 4, high: 3, medium: 2, low: 1, none: 0 };
 const topPri = (ts: FTicket[]): Pri => ts.reduce<Pri>((w, t) => (PRI_RANK[t.pri] > PRI_RANK[w] ? t.pri : w), 'none');
 
-/** Sibling order: open before closed, then oldest first, then higher priority, then most recently updated. */
-const bySibling = (a: FTicket, b: FTicket): number =>
-  Number(b.open) - Number(a.open) || b.d - a.d || PRI_RANK[b.pri] - PRI_RANK[a.pri] || a.u - b.u;
+// Each key as "which comes first": sub-tickets by their own values, chains by their open tickets'.
+const TICKET_CMP: Record<OrderKey, (a: FTicket, b: FTicket) => number> = {
+  oldest: (a, b) => b.d - a.d,
+  newest: (a, b) => a.d - b.d,
+  priority: (a, b) => PRI_RANK[b.pri] - PRI_RANK[a.pri],
+  stale: (a, b) => b.u - a.u,
+  recent: (a, b) => a.u - b.u,
+};
+const CHAIN_CMP: Record<OrderKey, (a: Thread, b: Thread) => number> = {
+  oldest: (a, b) => b.age - a.age,
+  newest: (a, b) => a.age - b.age,
+  priority: (a, b) => PRI_RANK[b.pri] - PRI_RANK[a.pri],
+  stale: (a, b) => b.idle - a.idle,
+  recent: (a, b) => a.lastU - b.lastU,
+};
 
-/** Chain order: chains with open tickets first, then oldest, then highest priority, then most recently updated. */
-const byChain = (a: Thread, b: Thread): number =>
-  Number(b.anyOpen) - Number(a.anyOpen) || b.age - a.age || PRI_RANK[b.pri] - PRI_RANK[a.pri] || a.lastU - b.lastU;
+/** Sub-tickets: open before closed, then the chosen keys, then most recently updated. */
+const siblingOrder = (o: Order) => (a: FTicket, b: FTicket): number =>
+  Number(b.open) - Number(a.open) || TICKET_CMP[o.by](a, b) || TICKET_CMP[o.then](a, b) || a.u - b.u;
+
+/** Chains: those with open tickets first, then the chosen keys, then most recently updated. */
+const chainOrder = (o: Order) => (a: Thread, b: Thread): number =>
+  Number(b.anyOpen) - Number(a.anyOpen) || CHAIN_CMP[o.by](a, b) || CHAIN_CMP[o.then](a, b) || a.lastU - b.lastU;
 
 const COURT_LABELS: [Court, string][] = [['us', 'With us'], ['merchant', 'With merchant'], ['external', 'External']];
 
@@ -109,8 +129,10 @@ export function merchantView(
   status: ThreadStatus,
   focus: MFocus | null = null,
   range: 'all' | number = 'all',
+  order: Order = DEFAULT_ORDER,
   cfg = FLAG_CFG,
 ): MerchantView {
+  const bySibling = siblingOrder(order);
   const everything = (m.byMid.get(mid) ?? []).map(t => byId.get(t.id)!).filter(Boolean);
   // The portfolio's Created range carries over: only tickets created in it count here.
   const tickets = range === 'all' ? everything : everything.filter(t => t.d <= range);
@@ -182,6 +204,7 @@ export function merchantView(
       age: Math.max(...ranked.map(t => t.d)),
       pri: topPri(ranked),
       lastU: Math.min(...members.map(t => t.u)),
+      idle: Math.max(...ranked.map(t => t.u)),
       origin,
       size: members.length,
     };
@@ -195,7 +218,7 @@ export function merchantView(
   // A focus shows every chain with a match, whatever the Show menu says (closed tickets included).
   const threads = threadsAll
     .filter(t => (focus ? t.rows.some(r => r.kind === 'ticket' && r.match) : status === 'all' || (status === 'open' ? t.anyOpen : !t.anyOpen)))
-    .sort(byChain);
+    .sort(chainOrder(order));
 
   const closed = tickets.filter(isClosed30).sort((a, b) => (a.closedD ?? 0) - (b.closedD ?? 0));
   const etaTickets = tickets.filter(isEta);
@@ -245,7 +268,8 @@ export function merchantView(
     court: COURT_LABELS.map(([id, label]) => ({ id, label, count: row.court[id], pct: Math.round((row.court[id] / total) * 100) })),
     closed,
     range,
-    abandoned: everything.filter(t => isAbandoned(t, byId)).sort((a, b) => b.d - a.d),
+    order,
+    abandoned: tickets.filter(t => isAbandoned(t, byId)).sort((a, b) => b.d - a.d),
   };
 }
 

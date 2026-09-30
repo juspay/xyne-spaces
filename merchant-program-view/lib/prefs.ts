@@ -1,5 +1,7 @@
 /** Per-viewer preferences kept in browser storage. Storage may be missing or blocked in the sandbox. */
 
+import { DEFAULT_ORDER, ORDER_KEYS, type Order, type OrderKey } from './order';
+
 export type Range = 'all' | number;
 
 /** The Created menu's choices; anything else in storage is ignored. */
@@ -139,5 +141,27 @@ export function saveAnswer(store: Storage | null, key: string, text: string, now
     store?.setItem(ANSWERS_KEY, JSON.stringify(Object.fromEntries(kept)));
   } catch {
     // Blocked storage: the answer just isn't remembered.
+  }
+}
+
+const ORDER_KEY = 'mpv.order';
+
+/** The merchant page's sort order, remembered between visits. */
+export function loadOrder(store: Storage | null): Order {
+  try {
+    const raw = store?.getItem(ORDER_KEY);
+    const v = raw ? (JSON.parse(raw) as Partial<Order>) : null;
+    if (v && ORDER_KEYS.includes(v.by as OrderKey) && ORDER_KEYS.includes(v.then as OrderKey)) return { by: v.by as OrderKey, then: v.then as OrderKey };
+  } catch {
+    // Unreadable: fall back to the default.
+  }
+  return DEFAULT_ORDER;
+}
+
+export function saveOrder(store: Storage | null, o: Order): void {
+  try {
+    store?.setItem(ORDER_KEY, JSON.stringify(o));
+  } catch {
+    // Blocked storage: the order just lasts for this session.
   }
 }

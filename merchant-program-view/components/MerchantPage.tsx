@@ -7,8 +7,9 @@ import { RANGES, SyncPill, type SyncStatus } from './Portfolio';
 import { CleanupStrip } from './CleanupDialog';
 import { AgentText, XyneAIStar, type AskState } from './AgentText';
 import type { FTicket } from '../lib/portfolio';
+import { ORDER_KEYS, ORDER_TEXT, type Order } from '../lib/order';
 import { threadLines } from '../lib/ui';
-import { Avatar, BUCKET_COLOR, ChevronDown, ChevronLeft, Close, DONE_COLOR, HealthPill, Menu, PAL, PriorityIcon, StatusGlyph, pressable, ageColor, toneColor } from './primitives';
+import { Avatar, BUCKET_COLOR, Check, ChevronDown, ChevronLeft, Close, MENU_STYLE, useEscape, DONE_COLOR, HealthPill, Menu, PAL, PriorityIcon, StatusGlyph, pressable, ageColor, toneColor } from './primitives';
 
 /** One merchant: KPIs, ticket threads as trees, age histogram, waiting-on and recently closed. */
 
@@ -20,12 +21,12 @@ const dateOf = (ts: number): string => {
 };
 
 // Each row leads with fixed age and priority columns so they line up down the list; the tree starts after them.
-const AGE_W = 40;
+const AGE_W = 35;
 const PRI_W = 14;
 const GAP = 10;
 /** Left edge of a depth-0 status glyph: row padding, then the age and priority columns. */
 // Rows run edge to edge so hover greys the whole card width; this is their side padding.
-const ROW_X = 16;
+const ROW_X = 12;
 const TREE_X = ROW_X + AGE_W + GAP + PRI_W + GAP;
 
 
@@ -169,6 +170,51 @@ function ThreadCard({
 }
 
 const CARD = { border: '1px solid var(--bd)', borderRadius: 8 } as const;
+
+/** A menu that reads as part of a sentence: the current choice as underlined text with a small chevron. */
+function InlineMenu<T extends string>({ value, options, onChange }: { value: T; options: { value: T; label: string }[]; onChange: (v: T) => void }) {
+  const [open, setOpen] = useState(false);
+  useEscape(open, () => setOpen(false));
+  const current = options.find(o => o.value === value)?.label ?? value;
+  return (
+    <span style={{ position: 'relative', display: 'inline-flex' }}>
+      <button
+        type="button"
+        aria-haspopup="true"
+        aria-expanded={open}
+        onClick={() => setOpen(o => !o)}
+        style={{ all: 'unset', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 2, color: 'var(--t2)', fontWeight: 500, textDecoration: 'underline dotted', textUnderlineOffset: 3, textDecorationColor: 'var(--t5)' }}
+      >
+        {current}
+        <ChevronDown size={11} color="var(--t4)" />
+      </button>
+      {open && (
+        <>
+          <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 24 }} />
+          <div style={{ ...MENU_STYLE, top: 20, left: 0, width: 220 }}>
+            {options.map(o => (
+              <button
+                key={o.value}
+                type="button"
+                className="hov"
+                onClick={() => {
+                  setOpen(false);
+                  onChange(o.value);
+                }}
+                style={{ all: 'unset', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, minHeight: 30, padding: '0 8px', borderRadius: 4, fontSize: 13, color: 'var(--t1)' }}
+              >
+                <span style={{ flex: 1 }}>{o.label.charAt(0).toUpperCase() + o.label.slice(1)}</span>
+                <span style={{ display: 'flex', opacity: o.value === value ? 1 : 0 }}>
+                  <Check size={13} />
+                </span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </span>
+  );
+}
 
 /** The merchant's summary from the agent: generating, written (with when), or failed. */
 export type TldrState = AskState;
@@ -339,6 +385,7 @@ export function MerchantPage({
   onRange,
   tldr,
   onTldr,
+  onOrder,
 }: {
   v: MerchantView;
   status: ThreadStatus;
@@ -363,6 +410,8 @@ export function MerchantPage({
   /** The agent's summary of this merchant, and writing a fresh one. */
   tldr: TldrState | undefined;
   onTldr: () => void;
+  /** Change how the ticket list is sorted (shown and picked in the subtitle). */
+  onOrder: (o: Order) => void;
 }) {
   const statusOpts = [
     { value: 'open' as const, label: 'Open tickets', count: v.threadCounts.open },
@@ -437,7 +486,19 @@ export function MerchantPage({
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
               <span style={{ fontSize: 15, fontWeight: 600 }}>Tickets</span>
-              <span style={{ fontSize: 12, lineHeight: '17px', color: 'var(--t4)' }}>Oldest first, then highest priority</span>
+              <span style={{ fontSize: 12, lineHeight: '17px', color: 'var(--t4)', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 3 }}>
+                <InlineMenu
+                  value={v.order.by}
+                  options={ORDER_KEYS.map(k => ({ value: k, label: ORDER_TEXT[k].first }))}
+                  onChange={by => onOrder({ by, then: by === v.order.then ? (by === 'oldest' ? 'priority' : 'oldest') : v.order.then })}
+                />
+                <span>, then</span>
+                <InlineMenu
+                  value={v.order.then}
+                  options={ORDER_KEYS.filter(k => k !== v.order.by).map(k => ({ value: k, label: ORDER_TEXT[k].then }))}
+                  onChange={then => onOrder({ ...v.order, then })}
+                />
+              </span>
             </div>
             <div style={{ flex: 'none' }}>
               <Menu prefix="Show" value={status} options={statusOpts} onChange={onStatus} align="right" width={190} height={30} />
