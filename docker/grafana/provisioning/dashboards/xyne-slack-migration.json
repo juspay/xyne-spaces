@@ -109,8 +109,8 @@
       "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "palette-classic" }, "custom": { "drawStyle": "line", "fillOpacity": 10 } }, "overrides": [] },
       "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "max"] }, "tooltip": { "mode": "multi" } },
       "targets": [
-        { "refId": "A", "expr": "slack_migration_queue_waiting", "legendFormat": "wait · {{queue}}" },
-        { "refId": "B", "expr": "slack_migration_queue_active", "legendFormat": "active · {{queue}}" }
+        { "refId": "A", "expr": "sum by (queue) (slack_migration_queue_waiting)", "legendFormat": "wait · {{queue}}" },
+        { "refId": "B", "expr": "sum by (queue) (slack_migration_queue_active)", "legendFormat": "active · {{queue}}" }
       ]
     },
     {
