@@ -34,7 +34,7 @@ import type {
 import { MAX_INBOUND_BYTES, TYPING_MAX_MS } from "../messaging/const.js";
 import { makeStoredAuthState } from "./auth-state.js";
 import { formatForWhatsApp } from "../whatsapp-shared/format.js";
-import { toInbound, type MediaDescriptor, type SelfIdentity } from "./messages.js";
+import { labelMentions, toInbound, type MediaDescriptor, type SelfIdentity } from "./messages.js";
 import { jidFromTarget, phoneFromJid, whatsappChannelConfigSchema, type WhatsAppChannelConfig } from "./schema.js";
 
 const MAX_TEXT_CHARS = 4000;
@@ -66,6 +66,9 @@ export interface WhatsAppHandle {
    *  Short-lived: membership changes, and a stale map would mis-attribute a
    *  message to the wrong person. */
   lidMaps: Map<string, { at: number; byLid: Map<string, string> }>;
+  /** Display name each sender set for themselves, keyed by every JID they
+   *  have written from (phone and LID). Bounded, insertion-ordered. */
+  pushNames: Map<string, string>;
 }
 
 const LID_MAP_TTL_MS = 10 * 60 * 1_000;
@@ -207,6 +210,38 @@ function forceReconnect(handle: WhatsAppHandle): void {
 }
 
 const SENT_IDS_MAX = 1000;
+const PUSH_NAMES_MAX = 5000;
+
+function rememberPushName(handle: WhatsAppHandle, message: WAMessage): void {
+  const name = message.pushName?.trim();
+  const key = message.key as { remoteJid?: string | null; fromMe?: boolean | null; participant?: string | null; senderPn?: string | null; participantPn?: string | null } | undefined;
+  if (!name || !key || key.fromMe) return;
+  const isGroup = key.remoteJid?.endsWith("@g.us") === true;
+  for (const jid of [key.participant, key.participantPn, key.senderPn, isGroup ? null : key.remoteJid]) {
+    if (!jid) continue;
+    const id = jidNormalizedUser(jid);
+    handle.pushNames.delete(id);
+    handle.pushNames.set(id, name);
+  }
+  while (handle.pushNames.size > PUSH_NAMES_MAX) {
+    const oldest = handle.pushNames.keys().next().value as string | undefined;
+    if (oldest === undefined) break;
+    handle.pushNames.delete(oldest);
+  }
+}
+
+/** Best readable label for a mentioned JID: the name they set, else their
+ *  phone number, else null (the digits stay as they are). */
+async function mentionLabel(handle: WhatsAppHandle, groupJid: string | null, jid: string): Promise<string | null> {
+  const named = handle.pushNames.get(jid);
+  if (named) return named;
+  const phoneJid = jid.endsWith("@lid") && groupJid ? await phoneForGroupLid(handle, groupJid, jid) : jid;
+  if (!phoneJid) return null;
+  const namedByPhone = handle.pushNames.get(phoneJid);
+  if (namedByPhone) return namedByPhone;
+  const phone = phoneFromJid(phoneJid);
+  return phone ? `+${phone}` : null;
+}
 
 function rememberSent(handle: WhatsAppHandle, id: string | null | undefined): void {
   if (!id) return;
@@ -369,6 +404,7 @@ async function connect(handle: WhatsAppHandle): Promise<void> {
     if (type !== "notify" || !self) return;
     const selfChat = channelConfigOf(ctx).selfChat;
     for (const message of messages) {
+      rememberPushName(handle, message);
       const first = toInbound(message, self, { sentIds: handle.sentIds });
       if (!first) continue;
       // "My own chat: off" means silence, not "fall through to the DM rules" —
@@ -403,6 +439,14 @@ async function connect(handle: WhatsAppHandle): Promise<void> {
         if (inbound.isGroup && inbound.senderId.endsWith("@lid")) {
           const phone = await phoneForGroupLid(handle, inbound.chatId, inbound.senderId);
           if (phone) inbound.senderId = phone;
+        }
+        if (inbound.mentions?.length) {
+          const labels = new Map<string, string>();
+          for (const jid of inbound.mentions) {
+            const label = await mentionLabel(handle, inbound.isGroup ? inbound.chatId : null, jid);
+            if (label) labels.set(jid, label);
+          }
+          labelMentions(inbound, labels);
         }
         await ctx.onInbound(inbound);
       })().catch((err) => ctx.logger.warn(`[whatsapp] inbound handling failed: ${errMsg(err)}`));
@@ -495,6 +539,7 @@ export const whatsappPlugin: ChannelPlugin<WhatsAppHandle, WhatsAppChannelConfig
       sentIds: new Set(),
       typingTimers: new Map(),
       lidMaps: new Map(),
+      pushNames: new Map(),
       qrRounds: 0,
       lastSeenAt: Date.now(),
       watchdogTimer: null,

@@ -1287,6 +1287,8 @@ const parseNode = (
     if (title) {
       (props as { src: string; alt?: string; title?: string }).title = title;
     }
+    props['data-emoji'] = 'true';
+    props['data-emoji-id'] = emojiId;
   }
 
   if (tag === 'img' && shouldPreserveStyles) {

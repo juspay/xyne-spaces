@@ -18,9 +18,13 @@ describe("parseControlCommand", () => {
     expect(parseControlCommand("/status")).toBe("status");
   });
 
-  it("accepts the @ prefix and odd spacing", () => {
-    expect(parseControlCommand("  @stop  ")).toBe("stop");
+  it("accepts odd spacing and case", () => {
+    expect(parseControlCommand("  /stop  ")).toBe("stop");
     expect(parseControlCommand("/STATUS")).toBe("status");
+  });
+
+  it("reads a leading @ as a mention of a person, not a command", () => {
+    expect(parseControlCommand("@stop")).toBeNull();
   });
 
   it("leaves anything with an argument alone", () => {
