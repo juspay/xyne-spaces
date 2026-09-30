@@ -303,6 +303,9 @@ class WorkerService {
         this.automationTemplateCleanupTimer.unref();
       }
 
+      // Not tied to ENABLE_VESPA_WORKER: runs wherever ENABLE_DESK_REPORT_SCHEDULER=true
+      await workerScheduler.startDeskReportScheduler()
+
       if (appConfig.enableEmailFetchWorker) {
         logger.info('Initializing notification service for email refetch worker...');
         await notificationService.initialize();
@@ -529,6 +532,8 @@ class WorkerService {
       if (appConfig.enableEtaDeadlineWorker) {
         await etaDeadlineWorker.shutdown();
       }
+
+      await workerScheduler.stopDeskReportScheduler()
 
       if (appConfig.enableEmailFetchWorker) {
         await emailFetchWorker.shutdown();
