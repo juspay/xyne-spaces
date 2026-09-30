@@ -36,6 +36,8 @@ import { db } from '@/database/client';
  * `lean` returns only the fields the search UI needs, keeping payloads small.
  */
 const DEFAULT_PRESENTATION_SUMMARY = 'lean';
+// Grouping window used by ticket tag search when a text query is given.
+const TAG_SEARCH_GROUP_LIMIT = 1000;
 
 function escapeQueryForUserInput(query: string): string {
   if (!query) return query;
@@ -763,7 +765,11 @@ export class SearchService {
 
     // YQL with grouping on the tags array
     // Vespa automatically expands array fields in grouping, returning each unique tag value with its count
-    const yql = `select * from ticket where ${conditions.join(' and ')} | all(group(tags) max(${limit}) order(-count()) each(output(count())))`;
+    // The text filter runs after grouping, so grouping only the top `limit` tags by
+    // usage would drop new or rarely used labels before they can match. Widen the
+    // grouping window when searching, then cap the filtered result to `limit`.
+    const groupLimit = queryLower ? Math.max(limit, TAG_SEARCH_GROUP_LIMIT) : limit;
+    const yql = `select * from ticket where ${conditions.join(' and ')} | all(group(tags) max(${groupLimit}) order(-count()) each(output(count())))`;
 
     try {
       const response = await this.vespa.search<VespaSearchResponse>({
@@ -805,8 +811,9 @@ export class SearchService {
 
       // Sort alphabetically
       tags.sort((a, b) => a.localeCompare(b));
+      const limitedTags = tags.slice(0, limit);
 
-      return { tags, total: tags.length };
+      return { tags: limitedTags, total: tags.length };
     } catch (error) {
       this.logger.error(`Error searching ticket tags: ${getErrorMessage(error)}`);
       return { tags: [], total: 0 };

@@ -2092,13 +2092,14 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const [accumulatedTags, setAccumulatedTags] = useState<Array<{ name: string; id: string }>>([]);
   const [hasMoreZeroTags, setHasMoreZeroTags] = useState(true);
 
-  // Reset pagination when project IDs change or search starts
+  // Reset pagination only when the project scope changes. Search text changes must
+  // keep the loaded labels so the client-side search fallback has something to filter.
   const tagsProjectIdsKey = tagsProjectIds.join(',');
   useEffect(() => {
     setTagsCursor(null);
     setAccumulatedTags([]);
     setHasMoreZeroTags(true);
-  }, [tagsProjectIdsKey, tagsSearchQuery]);
+  }, [tagsProjectIdsKey]);
 
   // Fetch tags via Zero query for single project (for initial load without search)
   // Only used for regular board views (not my-tickets or workspace views)
@@ -2163,12 +2164,28 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     }
   }, [hasMoreZeroTags, tagsSearchQuery, accumulatedTags]);
 
+  // Board IDs that bound tag search when the view spans more than one project.
+  // projectId is singular, so without this the search silently covers only the
+  // first project (e.g. My tickets across several projects).
+  const tagSearchBoardIds = useMemo(() => {
+    if (tagsProjectIds.length <= 1) return undefined;
+    if (filters.boards && filters.boards.length > 0) return filters.boards;
+    if (isMyTicketsView) return availableBoards;
+    if (channelId) return channelBoards.boardIds;
+    return undefined;
+  }, [
+    tagsProjectIds.length,
+    filters.boards,
+    isMyTicketsView,
+    availableBoards,
+    channelId,
+    channelBoards.boardIds,
+  ]);
+
   // Fetch tags via Vespa search (only when there's a search query).
-  // projectId is singular, so a channel whose linked boards cross projects scopes by
-  // those boards instead — otherwise tag search silently covers one project out of N.
   const { tags: vespaTags } = useVespaTagSearch({
-    ...(channelId && tagsProjectIds.length > 1
-      ? { boardIds: channelBoards.boardIds }
+    ...(tagSearchBoardIds && tagSearchBoardIds.length > 0
+      ? { boardIds: tagSearchBoardIds }
       : { projectId: tagsProjectIds[0] }),
     searchQuery: tagsSearchQuery,
     enabled: tagsProjectIds.length > 0 && !!tagsSearchQuery.trim(),
@@ -3469,16 +3486,14 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         ? Array.from(new Set(projectTags.map(tag => tag.name))).sort()
         : [];
 
-    // If there's a search query, prefer Vespa results
+    // With a search query, merge Vespa results with client-side matches on the
+    // project labels already loaded from Zero. Vespa only knows labels that are on
+    // indexed tickets, while project_tags also has new or unused labels.
     if (tagsSearchQuery.trim()) {
-      // If Vespa has results, use them
-      if (vespaTags && vespaTags.length > 0) {
-        return vespaTags;
-      }
-      // Fallback to client-side filtering on Zero tags
-      const lower = tagsSearchQuery.toLowerCase();
+      const lower = tagsSearchQuery.trim().toLowerCase();
       const filtered = zeroTags.filter(tag => tag.toLowerCase().includes(lower));
-      return filtered.length > 0 ? filtered : undefined;
+      const merged = Array.from(new Set([...(vespaTags ?? []), ...filtered])).sort();
+      return merged.length > 0 ? merged : undefined;
     }
 
     // No search - return Zero query results
