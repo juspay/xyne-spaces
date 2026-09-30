@@ -9,6 +9,7 @@ import React, {
   useRef,
   startTransition,
   useState,
+  useContext,
 } from 'react';
 import { useChannelParticipation, useVisibleChannel } from '../../../hooks/useChannels';
 import { useZero } from '../../../hooks/useZero';
@@ -28,7 +29,11 @@ import { formatDatePill } from '../../../utils/dateUtils';
 import { standaloneNavigate } from '../../../utils/electronApp';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useRouteContext } from '../../../hooks/useRouteContext';
-import { ArrowDown } from 'lucide-react';
+import { ArrowDown, MessagesSquare } from 'lucide-react';
+import {
+  DiscussionListContext,
+  type DiscussionScope,
+} from '../ConversationPannel/DiscussionListContext';
 import { mutators } from '../../../zero/mutators';
 import { queryCacheActor, flushQueryCachePersistence } from '../../../machines/queryCacheMachine';
 import { browserPanelActor } from '../../../machines/browserPanelMachine';
@@ -46,6 +51,8 @@ export type ChatListProps = {
   projectId?: string | undefined;
   cachedConversations: Conversation[];
   conversationIds?: string[] | undefined;
+  /** Scopes the list to SDLC discussions, joined in the query; paged as ever. */
+  discussionScope?: DiscussionScope | undefined;
   onOpenThread?: ((conversationId: string, e?: React.MouseEvent) => void) | undefined;
   linkedItemCreatedAt?: Anchor;
   linkedCutoffCreatedAt?: Anchor;
@@ -223,6 +230,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
   projectId,
   cachedConversations,
   conversationIds: conversationIdsFilter,
+  discussionScope,
   onOpenThread: onOpenThreadOverride,
   linkedItemCreatedAt,
   linkedCutoffCreatedAt,
@@ -234,6 +242,8 @@ const ChatListV4: React.FC<ChatListProps> = ({
   loadingFallback,
   onTotalHeightChange,
 }) => {
+  // Set where these conversations are shown as discussions (the SDLC panel).
+  const discussionList = useContext(DiscussionListContext);
   // Save scroll position when unmounting due to /browser fullscreen navigation.
   useEffect(() => {
     return () => {
@@ -420,7 +430,8 @@ const ChatListV4: React.FC<ChatListProps> = ({
     // paddingEnd is baked into getTotalSize(), so scrollToEnd()/isAtEnd() and the
     // anchorTo:'end' prepend adjustment all account for it — no per-frame cost,
     // it's a constant added to the sized container.
-    paddingEnd: 28,
+    // Discussion cards carry their own spacing, so the list ends close to the composer.
+    paddingEnd: discussionList ? 12 : 28,
     anchorTo: 'end',
     followOnAppend: 'auto',
     scrollEndThreshold: 80,
@@ -497,6 +508,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
       channelId,
       isMember,
       ...(conversationIdsFilter && { conversationIds: conversationIdsFilter }),
+      ...(discussionScope && { discussionScope }),
       start: inViewAnchor ? { createdAt: inViewAnchor.createdAt } : null,
       direction: inViewAnchor ? inViewAnchor.direction : 'forward',
       limit: PAGE_SIZE,
@@ -520,6 +532,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
       channelId,
       isMember,
       ...(conversationIdsFilter && { conversationIds: conversationIdsFilter }),
+      ...(discussionScope && { discussionScope }),
       start: cutoffAnchor,
       direction: 'backward',
       limit: PAGE_SIZE,
@@ -534,6 +547,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
       channelId,
       isMember,
       ...(conversationIdsFilter && { conversationIds: conversationIdsFilter }),
+      ...(discussionScope && { discussionScope }),
       limit: PAGE_SIZE / 2,
     }),
     { enabled: conversationFilterEnabled },
@@ -552,6 +566,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
               channelId,
               isMember,
               ...(conversationIdsFilter && { conversationIds: conversationIdsFilter }),
+              ...(discussionScope && { discussionScope }),
               start: oldConversationsAnchorRef.current,
               direction: 'forward',
               limit: PAGE_SIZE,
@@ -685,6 +700,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
           channelId,
           isMember,
           ...(conversationIdsFilter && { conversationIds: conversationIdsFilter }),
+          ...(discussionScope && { discussionScope }),
           start: oldConversationsAnchorRef.current,
           direction: 'forward',
           limit: PAGE_SIZE,
@@ -736,6 +752,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
           channelId,
           isMember,
           ...(conversationIdsFilter && { conversationIds: conversationIdsFilter }),
+          ...(discussionScope && { discussionScope }),
           start: newConversationsAnchor,
           direction: 'backward',
           limit: PAGE_SIZE,
@@ -1103,7 +1120,8 @@ const ChatListV4: React.FC<ChatListProps> = ({
 
   // ── Persist conversations to query cache ──────────────────────────────────────
   useEffect(() => {
-    if (!channelId || conversationIdsFilter) return;
+    // A filtered list isn't the channel's, so it never stands in for it in the cache.
+    if (!channelId || conversationIdsFilter || discussionScope) return;
 
     const flushToCache = (): void => {
       const latest = conversationsRef.current;
@@ -1132,7 +1150,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       flushToCache();
     };
-  }, [channelId, conversationIdsFilter]);
+  }, [channelId, conversationIdsFilter, discussionScope]);
 
   // ── Thread opening scroll ──────────────────────────────────────────────────────
   const { conversationId: activeThreadConversationId } = useParams<{ conversationId?: string }>();
@@ -1585,7 +1603,16 @@ const ChatListV4: React.FC<ChatListProps> = ({
 
   // ── Empty / loading states ─────────────────────────────────────────────────────
   if (conversations.length === 0 && isInitialLoadComplete)
-    return (
+    return discussionList ? (
+      <div className='flex flex-1 flex-col items-center justify-start px-6 pt-[16vh] text-center'>
+        <span className='mb-3 flex size-10 items-center justify-center rounded-xl bg-muted text-muted-foreground'>
+          <MessagesSquare className='size-5' />
+        </span>
+        <p className='max-w-[18rem] text-[14px] font-medium text-foreground'>
+          No discussions about {discussionList.subject} yet
+        </p>
+      </div>
+    ) : (
       <div className='text-center text-muted-foreground flex-1 flex items-center justify-center'>
         <p className='text-muted-foreground'>No conversations in this channel yet</p>
       </div>
@@ -1617,7 +1644,8 @@ const ChatListV4: React.FC<ChatListProps> = ({
       className='flex-1 relative no-scrollbar min-h-0 isolate'
     >
       {/* Sticky date pill overlay */}
-      {stickyDate && isFirstItemScrolledOff && (
+      {/* Over discussion cards it covers the top one, and each card has its date. */}
+      {stickyDate && isFirstItemScrolledOff && !discussionList && (
         <div className='absolute top-0 left-0 right-0 z-10 pointer-events-none'>
           <div className='relative flex justify-center py-2'>
             <DatePill dateText={stickyDate} />
@@ -1648,13 +1676,14 @@ const ChatListV4: React.FC<ChatListProps> = ({
         {/* Flex wrapper: when content is shorter than the viewport, justify-content: flex-end
                pushes it to the bottom. For full/overflowing lists it has no effect. This is a
                pure CSS solution — no state, no TanStack paddingStart — so item deletion and
-               addition never interfere with anchorTo:'end' scroll adjustments. */}
+               addition never interfere with anchorTo:'end' scroll adjustments. Discussions
+               start at the top instead: a short list of them reads down from the first. */}
         <div
           style={{
             minHeight: '100%',
             display: 'flex',
             flexDirection: 'column',
-            justifyContent: 'flex-end',
+            justifyContent: discussionList ? 'flex-start' : 'flex-end',
           }}
         >
           <div

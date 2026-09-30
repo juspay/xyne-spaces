@@ -2938,6 +2938,10 @@ model Call {
 
   @@index([status, startedAt(sort: Desc), externalId])
   @@index([status, startsAt, externalId])
+  // A hub's or track's calls, a page at a time: the ended ones newest first, and the
+  // scheduled ones by when they start.
+  @@index([channelId, status, endedAt(sort: Desc)])
+  @@index([channelId, status, startsAt])
   @@map("calls")
   @@schema("public")
 }
@@ -3554,6 +3558,8 @@ model SdlcFolder {
   workspaceId String
   id          String   @id @default(cuid())
   name        String
+  /// An @xyne/icons name shown in place of the folder mark; null shows the mark.
+  icon        String?
   createdBy   String
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -3570,6 +3576,8 @@ model SdlcTrack {
   repoId      String?
   name        String
   description String?
+  /// An @xyne/icons name shown in place of the track mark; null shows the mark.
+  icon        String?
   status      String   @default("ACTIVE") // ACTIVE | COMPLETED | ARCHIVED
   createdBy   String
   createdAt   DateTime @default(now())

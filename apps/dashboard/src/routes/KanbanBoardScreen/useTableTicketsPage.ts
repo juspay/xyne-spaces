@@ -158,6 +158,7 @@ export const useTableTicketsPage = (
           formEntityValueFieldIds: options.formEntityValueFieldIds,
           showOverdueOnly: options.showOverdueOnly,
           overdueReferenceTime: overdueReferenceTimeRef.current ?? undefined,
+          ...(options.trackId ? { trackId: options.trackId } : {}),
         },
         options.channelId,
       ),
@@ -174,10 +175,26 @@ export const useTableTicketsPage = (
       options.formEntityValueFieldIds,
       options.showOverdueOnly,
       options.channelId,
+      options.trackId,
       pageSize,
       vespaIdsKey,
     ],
   );
+
+  // A track's pages come from the track query: the same page over the track's tickets,
+  // with the same rows, so it is typed as the board page for the hooks that run it.
+  const tablePageQuery = (
+    args: typeof basePageArgs,
+  ): ReturnType<typeof queries.tableTicketsPage> =>
+    options.trackId && options.channelId
+      ? (queries.trackTableTicketsPage({
+          ...args,
+          channelId: options.channelId,
+          trackId: options.trackId,
+        } as Parameters<typeof queries.trackTableTicketsPage>[0]) as unknown as ReturnType<
+          typeof queries.tableTicketsPage
+        >)
+      : queries.tableTicketsPage(args as Parameters<typeof queries.tableTicketsPage>[0]);
 
   const queryKey = useMemo(() => {
     const { start: _start, ...rest } = basePageArgs as Record<string, unknown>;
@@ -197,10 +214,7 @@ export const useTableTicketsPage = (
   const pageEnabled = enabled && (!requiresVespaIds || vespaTicketIds !== null);
 
   const pageArgs = useMemo(() => ({ ...basePageArgs, start: cursor }), [basePageArgs, cursor]);
-  const [page, pageDetails] = useCachedQuery(
-    queries.tableTicketsPage(pageArgs as Parameters<typeof queries.tableTicketsPage>[0]),
-    { enabled: pageEnabled },
-  );
+  const [page, pageDetails] = useCachedQuery(tablePageQuery(pageArgs), { enabled: pageEnabled });
 
   const pageDetailsType = pageDetails.type;
   useEffect(() => {
@@ -230,10 +244,9 @@ export const useTableTicketsPage = (
     }
   }, [pageDetailsType, page, pageEnabled, queryKey, cursor, pageSize]);
 
-  const [headPage, headPageDetails] = useCachedQuery(
-    queries.tableTicketsPage(basePageArgs as Parameters<typeof queries.tableTicketsPage>[0]),
-    { enabled: pageEnabled && cursor !== null },
-  );
+  const [headPage, headPageDetails] = useCachedQuery(tablePageQuery(basePageArgs), {
+    enabled: pageEnabled && cursor !== null,
+  });
   useEffect(() => {
     if (cursor === null || headPageDetails.type !== 'complete' || !pageEnabled) return;
     const headRows = (headPage ?? []) as KanbanTicketsPageRow[];

@@ -5,12 +5,6 @@ import { indexedDBService } from '../services/indexedDBService';
 export interface UserPreferences {
   sdlcSidebarCollapsed: boolean;
   sdlcSidebarWidth: number;
-  sdlcFinderColumnWidths: Record<string, number>;
-  sdlcFinderGroupBy: 'none' | 'type';
-  sdlcFinderPathByTrack: Record<
-    string,
-    Array<{ type: 'TRACK' | 'FOLDER'; id: string; name: string }>
-  >;
   /** Which tabs a folder page has open, per folder. The active one lives in the
    *  URL instead, so a shared link opens the item you meant rather than a copy
    *  of someone else's working set. */
@@ -22,7 +16,6 @@ export interface UserPreferences {
   /** The folder page's explorer, folded away to give the page its full width. */
   sdlcExplorerCollapsed: boolean;
   sdlcSidebarSectionsCollapsed: Record<string, boolean>;
-  sdlcSidebarSectionHeights: Record<string, number>;
   sdlcShowClosedTracks: boolean;
   // TODO: move relatedContextOn and relatedContextDebounceMs to the server-side
   // user_preferences table (with the other Messaging preferences) once the
@@ -39,15 +32,11 @@ export interface UserPreferences {
 
 export const DEFAULT_USER_PREFERENCES: UserPreferences = {
   sdlcSidebarCollapsed: false,
-  sdlcSidebarWidth: 260,
-  sdlcFinderColumnWidths: {},
-  sdlcFinderGroupBy: 'none',
-  sdlcFinderPathByTrack: {},
+  sdlcSidebarWidth: 280,
   sdlcFolderTabs: {},
   sdlcFolderTreeExpanded: {},
   sdlcExplorerCollapsed: false,
-  sdlcSidebarSectionsCollapsed: { 'sdlc-sidebar-artifacts': true },
-  sdlcSidebarSectionHeights: {},
+  sdlcSidebarSectionsCollapsed: {},
   sdlcShowClosedTracks: false,
   relatedContextOn: true,
   relatedContextDebounceMs: 1000,

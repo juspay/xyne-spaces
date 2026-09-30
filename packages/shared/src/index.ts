@@ -72,4 +72,6 @@ export * from './templates/summaryTemplateSections';
 export * from './types/flowUI';
 export * from './validation/flowSchema';
 export * from './sdlc';
+export * from './sdlcFolderAncestry';
+export { refileSdlcFolderEdges } from './zero/sdlcFolderAncestry';
 export * from './validation/etaManagementSchema';
