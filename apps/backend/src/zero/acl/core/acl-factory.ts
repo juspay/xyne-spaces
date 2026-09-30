@@ -34,6 +34,7 @@ import { DenyGuestsACL } from './deny-guests-acl';
 import { ProjectAcl } from '../tables/projects-acl';
 import { StageAcl } from '../tables/stage-acl';
 import { BoardAcl } from '../tables/boards-acl';
+import { TicketNamespaceAcl } from '../tables/ticket-namespaces-acl';
 import { TicketACl } from '../tables/tickets-acl';
 import { WOrkflowsAcl } from '../tables/workflows-acl';
 import { WorkflowExecutionsAcl } from '../tables/workflow-executions-acl';
@@ -196,6 +197,8 @@ export class ACLFactory {
         return new BoardComplexityScoresACL(ctx);
       case 'boards':
         return new BoardAcl(ctx);
+      case 'ticket_namespaces':
+        return new TicketNamespaceAcl(ctx);
       case 'bookmarks':
         return new BookmarksACL(ctx);
       case 'email_signatures':

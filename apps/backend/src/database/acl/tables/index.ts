@@ -1,6 +1,7 @@
 export { ActivitiesACL } from './activities-acl'
 export { BoardComplexityScoresACL } from './board-complexity-scores-acl'
 export { BoardsACL } from './boards-acl'
+export { TicketNamespacesACL } from './ticket-namespaces-acl'
 export { BookmarksACL } from './bookmarks-acl'
 export { CallParticipantsACL } from './call-participants-acl'
 export { CallsACL } from './calls-acl'

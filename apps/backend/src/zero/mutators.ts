@@ -8202,6 +8202,24 @@ export function createMutators(
         },
       ),
     },
+    ticketNamespace: {
+      update: defineMutator(
+        z.object({ namespaceId: z.string(), name: z.string(), timestamp: z.number() }),
+        async ({ tx, args: { namespaceId, name, timestamp } }) => {
+          const namespace = await tx.run(zql.ticket_namespaces.where('id', namespaceId).one());
+          if (!namespace) {
+            throw new Error('Ticket namespace not found');
+          }
+          // Only the display label is editable; the ACL freezes code/projectId/sequence.
+          await tx.mutate.ticket_namespaces.update({
+            id: namespaceId,
+            name,
+            updatedBy: authData.sub,
+            updatedAt: timestamp,
+          });
+        },
+      ),
+    },
     board: {
       updateFlowPlan: defineMutator(
         z.object({
@@ -8237,6 +8255,7 @@ export function createMutators(
           description: z.string().optional(),
           projectId: z.string().optional(),
           boardType: z.nativeEnum(BoardType).optional(),
+          ticketNamespaceId: z.string().optional(),
           metadata: z.any().optional(),
           // Automatic ETA management. Merged into `metadata.etaManagement` below rather
           // than going through the raw `metadata` arg above, which is a whole-column
@@ -8281,6 +8300,7 @@ export function createMutators(
             description,
             projectId,
             boardType,
+            ticketNamespaceId,
             metadata,
             autoRecomputeEnabled,
             standardPathStageIds,
@@ -8294,6 +8314,16 @@ export function createMutators(
           const board = await tx.run(zql.boards.where('id', boardId).one());
           if (!board) {
             throw new Error('Board not found');
+          }
+
+          // A board can only be pointed at a ticket code of its own project.
+          if (ticketNamespaceId !== undefined && ticketNamespaceId !== board.ticketNamespaceId) {
+            const namespace = await tx.run(
+              zql.ticket_namespaces.where('id', ticketNamespaceId).one(),
+            );
+            if (!namespace || namespace.projectId !== board.projectId) {
+              throw new Error("Ticket code does not belong to this board's project");
+            }
           }
 
           if (board.boardType === BoardType.RELEASE) {
@@ -8435,6 +8465,7 @@ export function createMutators(
             ...(description !== undefined && { description }),
             ...(projectId !== undefined && { projectId }),
             ...(boardType !== undefined && { boardType }),
+            ...(ticketNamespaceId !== undefined && { ticketNamespaceId }),
             ...(nextMetadata !== undefined && { metadata: nextMetadata as ReadonlyJSONValue }),
             updatedBy: authData.sub,
             updatedAt: timestamp,

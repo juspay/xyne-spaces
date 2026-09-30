@@ -4860,6 +4860,28 @@ export const mutators = defineMutators({
       },
     ),
   },
+  ticketNamespace: {
+    update: defineMutator(
+      z.object({
+        namespaceId: z.string(),
+        name: z.string(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { namespaceId, name, timestamp } }) => {
+        const namespace = await tx.run(zql.ticket_namespaces.where('id', namespaceId).one());
+        if (!namespace) {
+          throw new Error('Ticket namespace not found');
+        }
+        // Only the display label is editable; the ACL freezes code/projectId/sequence.
+        await tx.mutate.ticket_namespaces.update({
+          id: namespaceId,
+          name,
+          updatedBy: ctx.userID,
+          updatedAt: timestamp,
+        });
+      },
+    ),
+  },
   board: {
     updateFlowPlan: defineMutator(
       z.object({
@@ -4891,6 +4913,7 @@ export const mutators = defineMutators({
         description: z.string().optional(),
         projectId: z.string().optional(),
         boardType: z.nativeEnum(BoardType).optional(),
+        ticketNamespaceId: z.string().optional(),
         metadata: z.any().optional(),
         // Automatic ETA management - see the backend mutator for the Standard Path
         // validation this optimistic client-side write deliberately skips (the server is
@@ -4940,6 +4963,7 @@ export const mutators = defineMutators({
           stageIds = {},
           prStatusMappingIds = {},
           boardType,
+          ticketNamespaceId,
         },
       }) => {
         // Validate board exists
@@ -5004,6 +5028,7 @@ export const mutators = defineMutators({
           ...(description !== undefined && { description }),
           ...(projectId !== undefined && { projectId }),
           ...(boardType !== undefined && { boardType }),
+          ...(ticketNamespaceId !== undefined && { ticketNamespaceId }),
           ...(nextMetadata !== undefined && { metadata: nextMetadata as ReadonlyJSONValue }),
           updatedBy: ctx.userID,
           updatedAt: timestamp,
