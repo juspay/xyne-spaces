@@ -13,6 +13,7 @@ import { useQuery } from '@tanstack/react-query';
 import { logger, Event } from '../../utils/logger';
 import { useAuth } from '../../hooks/useAuth';
 import { useCanCreateTicket, usePermissions } from '../../hooks/usePermissions';
+import { useScrollFade } from '../../hooks/useScrollFade';
 import { usePlatform } from '../../hooks/usePlatform';
 import { useRouteContext } from '../../hooks/useRouteContext';
 import { FileSpreadsheet, Archive } from 'lucide-react';
@@ -334,6 +335,19 @@ interface BoardKanbanScreenProps {
   /** Version of the saved view (config updatedAt) — bumps when the owner updates it. */
   initialViewVersion?: number;
   isStarred?: boolean;
+  /**
+   * Show only the tickets this SDLC track holds, from every board they are on
+   * (`channelId` is the track's hub). The board filter is then optional — all boards
+   * by default — and the controls that manage a channel's boards stay out of it.
+   */
+  trackId?: string;
+  /**
+   * Opens a ticket where the embedding screen shows it, in place of navigating away
+   * (a track opens it beside the track). ⌘-click still opens a new tab.
+   */
+  onOpenTicket?: (ticket: Ticket) => void;
+  /** Beside New ticket in the header: a host's own action (a track's Chat). */
+  headerEndSlot?: React.ReactNode;
 }
 
 function isFormFieldGroup(value: unknown): value is FormFieldGroup {
@@ -479,7 +493,14 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   initialViewVersion,
   isStarred,
   hasSharedSeed,
+  trackId,
+  onOpenTicket,
+  headerEndSlot,
 }) => {
+  const isTrackView = Boolean(trackId && channelId);
+  // Filters, layout and saved state are kept per track, apart from the channel's own
+  // Tickets tab, so the two never overwrite each other.
+  const filtersScopeId = isTrackView ? `track-${trackId}` : channelId;
   const { projectId: projectIdParam, boardId } = useParams<{
     projectId?: string;
     boardId?: string;
@@ -542,6 +563,17 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const [kanbanTicketsByColumn, setKanbanTicketsByColumn] = useState<Record<string, Ticket[]>>({});
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [tableScrollElement, setTableScrollElement] = useState<HTMLDivElement | null>(null);
+  // The list view fades at its ends while there are more rows past them, as the
+  // kanban columns do.
+  const tableFade = useScrollFade<HTMLDivElement>('y', 32);
+  const tableFadeRef = tableFade.ref;
+  const setTableScroller = useCallback(
+    (element: HTMLDivElement | null) => {
+      setTableScrollElement(element);
+      tableFadeRef(element);
+    },
+    [tableFadeRef],
+  );
   const [flowSelection, setFlowSelection] = useState<FlowNodeSelection | null>(null);
   const [collapsedFlowGroups, setCollapsedFlowGroups] = useState<Set<string>>(new Set());
   const [flowLegendOpen, setFlowLegendOpen] = useState(false);
@@ -568,7 +600,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   // Channels have no "All Boards" state: exactly one board is always selected,
   // seeded through the filters machine. Everything downstream (paged query,
   // counts, Vespa pushdown) then scopes off that single board as it always has.
-  const channelDefaultBoardId = channelBoards.boards[0]?.id ?? null;
+  // A track spans boards, so it starts on all of them instead.
+  const channelDefaultBoardId = isTrackView ? null : (channelBoards.boards[0]?.id ?? null);
   // Gates the "Link Boards" control only; the mutator enforces the same rule.
   const canLinkChannelBoards = useCanLinkChannelBoards(channelId);
   const [isLinkBoardsOpen, setIsLinkBoardsOpen] = useState(false);
@@ -727,7 +760,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const channelUserStatus = useGetChannelUserStatus(channelId || '') as
     | { selectedBoardId?: string }
     | undefined;
-  const selectedBoardIdFromDb: string | undefined = channelUserStatus?.selectedBoardId;
+  const selectedBoardIdFromDb: string | undefined = isTrackView
+    ? undefined
+    : channelUserStatus?.selectedBoardId;
 
   // Use XState machine for filter persistence
   const [searchParams, setSearchParams] = useSearchParams();
@@ -745,7 +780,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   }, [searchParams]);
   const [state, send] = useMachine(ticketFiltersMachine);
   const requestedLayoutView = searchParams.get('layout');
-  const layoutStorageKey = `kanban-layout-${getStorageKey(channelId, viewMode, projectIdParam, boardId, viewId)}`;
+  const layoutStorageKey = `kanban-layout-${getStorageKey(filtersScopeId, viewMode, projectIdParam, boardId, viewId)}`;
   const storedLayoutView = useMemo((): StorableLayoutView | null => {
     try {
       const raw = localStorage.getItem(layoutStorageKey);
@@ -755,9 +790,16 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     }
   }, [layoutStorageKey]);
   const defaultLayoutView: StorableLayoutView = storedLayoutView ?? 'kanban';
-  const layoutView: LayoutView = isLayoutView(requestedLayoutView)
+  const requestedOrDefaultLayoutView: LayoutView = isLayoutView(requestedLayoutView)
     ? requestedLayoutView
     : defaultLayoutView;
+  // Calendar and flow read the whole board through the legacy query, which knows
+  // nothing of tracks, so a track offers kanban and table only.
+  const layoutView: LayoutView =
+    isTrackView &&
+    (requestedOrDefaultLayoutView === 'calendar' || requestedOrDefaultLayoutView === 'flow')
+      ? 'kanban'
+      : requestedOrDefaultLayoutView;
   const isKanbanLayout = layoutView === 'kanban';
   const showTicketReport = searchParams.get('ticketReport') === '1';
   // Flow view: the open run lives in the URL so browser back returns to the
@@ -891,7 +933,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   useEffect(() => {
     send({
       type: 'INIT',
-      channelId,
+      channelId: filtersScopeId,
       projectId: projectIdParam,
       boardId: boardId,
       viewMode: viewMode,
@@ -907,7 +949,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     // persisted board never gets one selected and the view stays empty.
   }, [
     send,
-    channelId,
+    filtersScopeId,
     projectIdParam,
     boardId,
     viewMode,
@@ -938,7 +980,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   // A channel view carries no projectId, so its only scope is the selected board.
   // Querying before one is seeded would send an unscoped request that returns
   // every ticket in the workspace, so hold until a board is in the filters.
-  const channelScopeReady = !channelId || (filters.boards?.length ?? 0) > 0;
+  // A track is scoped by the track itself, so it needs no board to be ready.
+  const channelScopeReady = !channelId || isTrackView || (filters.boards?.length ?? 0) > 0;
   const workspaceViewReady =
     isMachineInitialized &&
     channelScopeReady &&
@@ -1000,8 +1043,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         filters: nextFilters,
       });
 
-      // Persist selected board to DB for channel views
-      if (channelId && viewMode === 'project') {
+      // Persist selected board to DB for channel views — not a track's, which is not
+      // the channel's choice to remember.
+      if (channelId && !isTrackView && viewMode === 'project') {
         const selectedBoardId = nextFilters.boards?.[0] ?? null;
         if (selectedBoardId !== currentBoardId) {
           void zero.mutate(
@@ -1033,6 +1077,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       filters,
       boardId,
       channelId,
+      isTrackView,
     ],
   );
 
@@ -1400,6 +1445,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   // layout on that snapshot would tear down the flow view on every remount.
   const filtersInitialized = state.matches('initialized');
   useEffect(() => {
+    if (isTrackView) return;
     if (isFlowBoard && layoutView !== 'flow') {
       setSearchParams(
         prev => {
@@ -1428,6 +1474,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       );
     }
   }, [
+    isTrackView,
     filtersInitialized,
     isFlowBoard,
     selectedBoardDetail,
@@ -1819,6 +1866,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       boardId?: string;
       boardIds?: string[];
       formEntityValueFieldIds?: string[];
+      channelId?: string;
+      trackId?: string;
     } = { viewMode: queryViewMode };
 
     // Always pass boardId if it exists (from URL param)
@@ -1866,11 +1915,19 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       params.formEntityValueFieldIds = fevFieldIds;
     }
 
+    // A track's view pages through the track queries, which need the track and its hub.
+    if (isTrackView && trackId && channelId) {
+      params.channelId = channelId;
+      params.trackId = trackId;
+    }
+
     return params;
   }, [
     viewMode,
     queryViewMode,
     isWorkspaceView,
+    isTrackView,
+    trackId,
     channelId,
     boardId,
     projectIdParam,
@@ -1884,6 +1941,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     {
       enabled:
         legacyTicketsEnabled &&
+        !isTrackView &&
         ((viewMode === 'board' && !!boardId) ||
           // A channel is also a 'project' view, but with no projectId — its scope is
           // the selected board, so it gates on that being seeded instead.
@@ -3635,6 +3693,10 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           window.open(`${ws ? `/${ws}` : ''}${sdlcUrl}`, '_blank');
           return;
         }
+        if (onOpenTicket) {
+          onOpenTicket(ticket);
+          return;
+        }
         void navigate(sdlcUrl, { state: { trackSource } });
         return;
       }
@@ -3715,6 +3777,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       allChannels,
       channelsById,
       projectsScreenContext,
+      onOpenTicket,
     ],
   );
 
@@ -3864,6 +3927,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const shouldFetchKanbanCounts = canUseKanbanColumnPagination || canUseTablePagination;
   const kanbanCounts = useKanbanCounts({
     ...ticketsQueryParams,
+    track: isTrackView && trackId && channelId ? { channelId, trackId } : undefined,
     columnType: shouldUseStatusColumns ? 'status' : 'stage',
     filters: deferredFilters,
     groupBy,
@@ -4348,8 +4412,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       availableBoardDetails,
       sourceChannelProjectIds,
       // A channel always has exactly one board selected; "All boards" would clear
-      // the filter and leave the query with no scope.
-      allowAllBoards: !channelId,
+      // the filter and leave the query with no scope. A track is its own scope.
+      allowAllBoards: !channelId || isTrackView,
+      alwaysOfferAllBoards: isTrackView,
       availableTags,
       onLoadMoreTags: handleLoadMoreTags,
       hasMoreTags: !tagsSearchQuery.trim() && hasMoreZeroTags,
@@ -4369,6 +4434,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       isMyTicketsView,
       projectIdParam,
       channelId,
+      isTrackView,
       availablePriorities,
       availableUsers,
       availableBoards,
@@ -4435,7 +4501,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   // catches this before mounting us, but Streams surfaces (Surfaces.tsx) and the SDLC
   // screen mount this component with a channelId directly — without this they would
   // render a permanent loading state with no empty state and no way to link a board.
-  if (channelId && channelBoards.isSynced && !channelBoards.hasBoards) {
+  if (channelId && !isTrackView && channelBoards.isSynced && !channelBoards.hasBoards) {
     return <ChannelNoBoardsEmptyState channelId={channelId} />;
   }
 
@@ -4468,6 +4534,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     >
       <TicketsHeader
         startSlot={projectsScreenContext?.leftHeaderSlot}
+        endSlot={headerEndSlot}
         title={headerTitle}
         ticketCount={headerTicketCount}
         isFiltered={headerIsFiltered}
@@ -4482,7 +4549,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         }
         createTicketMetadata={JSON.stringify({ boardId, channelId, source: 'kanban_header' })}
         onLinkBoards={
-          channelId && channel && !channel.isArchived && canLinkChannelBoards
+          channelId && !isTrackView && channel && !channel.isArchived && canLinkChannelBoards
             ? handleHeaderLinkBoards
             : null
         }
@@ -4490,7 +4557,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         layoutView={layoutView}
         onLayoutChange={handleLayoutChange}
         showLayoutPicker={!isFlowBoard}
-        showCalendarLayout={!isMobile}
+        showCalendarLayout={!isMobile && !isTrackView}
         groupBy={groupBy}
         groupingOptions={groupingOptions}
         onGroupByChange={value => handleSetGroupBy(value as GroupByType)}
@@ -4520,7 +4587,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         onOverdueChange={setShowOverdueOnly}
         onClearFilters={handleHeaderClearFilters}
         viewSave={headerViewSave}
-        onExport={layoutView === 'table' ? handleTicketExport : null}
+        onExport={layoutView === 'table' && !isTrackView ? handleTicketExport : null}
         onOpenTicketReport={canExportTickets ? handleOpenTicketReport : null}
       />
 
@@ -5235,7 +5302,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         </div>
       ) : layoutView === 'table' ? (
         <div
-          ref={setTableScrollElement}
+          ref={setTableScroller}
+          onScroll={tableFade.onScroll}
+          style={tableFade.style}
           className='flex-1 overflow-y-auto p-4 space-y-4 bg-background pb-14'
         >
           {isTableEmpty && (

@@ -27,6 +27,7 @@ const flowRunExportController = new FlowRunExportController();
 
 // Kanban board counts grouped by the active view, filters, and group-by mode
 router.post('/kanban/counts', kanbanTicketController.getCounts);
+router.post('/kanban/track-counts', kanbanTicketController.getTrackCounts);
 router.post('/flow-run-export/pdf', flowRunExportController.exportPdf);
 router.get('/my-board-ids', ticketController.getMyTicketBoardIds);
 

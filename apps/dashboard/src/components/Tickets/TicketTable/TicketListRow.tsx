@@ -93,7 +93,8 @@ export const TicketListRow: React.FC<TicketListRowProps> = ({
       >
         {isSelected ? (
           <button
-            className='flex h-4 w-4 cursor-pointer items-center justify-center rounded bg-blue-600'
+            // The app's checkbox colours (see ui/Checkbox): primary fill, primary-foreground tick.
+            className='flex h-4 w-4 cursor-pointer items-center justify-center rounded border border-primary bg-primary'
             onClick={e => {
               e.stopPropagation();
               onToggleSelect(ticket);
@@ -101,12 +102,12 @@ export const TicketListRow: React.FC<TicketListRowProps> = ({
             data-track-category='Tickets'
             data-track-name='DeselectRow'
           >
-            <Check className='h-3 w-3 text-white' strokeWidth={3} />
+            <Check className='h-3 w-3 text-primary-foreground' strokeWidth={3} />
           </button>
         ) : (
           <button
             aria-label='Select ticket'
-            className='h-4 w-4 cursor-pointer rounded border border-border bg-transparent transition-colors hover:border-muted-foreground'
+            className='h-4 w-4 cursor-pointer rounded border border-border bg-card transition-colors hover:border-muted-foreground'
             onClick={e => {
               e.stopPropagation();
               onToggleSelect(ticket);

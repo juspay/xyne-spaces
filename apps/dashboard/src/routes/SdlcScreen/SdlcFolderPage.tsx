@@ -37,7 +37,10 @@ import {
 import type { SdlcEmbedTab } from './sdlcFrameMessages';
 import { AttachmentPreviewPane } from '../../components/FileViewer/AttachmentPreviewPane';
 import { detectFileType } from '../../components/FileViewer/utils';
-import { fileKind, formatFileSize } from './fileKind';
+import { fileKind, formatFileSize, type FileKind } from './fileKind';
+import { FileTypeIcon } from './FileTypeIcon';
+import { AppIcon } from '../../components/AppIcon/AppIcon';
+import { ActivityPill, type SdlcLiveCalls } from './ActivityPill';
 import {
   CommentsPanel,
   ItemView,
@@ -51,12 +54,26 @@ import {
   type PickedBlock,
   type WorkspaceItem,
 } from '../../components/workspaceItems';
-import type { SdlcFinderCanvas, SdlcFinderFile, SdlcFinderLink } from './SdlcFinder';
+import {
+  sdlcItemName,
+  sdlcParentFolders,
+  targetItemOf,
+  type SdlcFileItem,
+  type SdlcLinkItem,
+  type SdlcTargetLink,
+  type SdlcTrackItem,
+} from './sdlcItems';
 
 export type FolderTabKind = 'CANVAS' | 'LINK' | 'ATTACHMENT' | 'BROWSER';
 
 /** The one scratch tab a folder can have open; it is not an item of anything. */
 export const SCRATCH_TAB_ID = 'browse';
+
+/**
+ * How many tabs a folder's strip looks up. Past this many the oldest drop out of the
+ * strip, as ones whose items are gone already do.
+ */
+const TAB_LOOKUP_LIMIT = 100;
 
 /** Where scratch browsing starts. */
 const SCRATCH_START_PAGE = 'https://www.google.com';
@@ -66,23 +83,46 @@ export interface FolderTab {
   id: string;
 }
 
-interface ContainmentEdge {
-  targetType: string;
-  targetId: string;
+/**
+ * A stored per-folder record with one folder's entry replaced. Folder ids can arrive
+ * from the URL, so the record is rebuilt from its entries, each defined as its own
+ * key, rather than written through a key taken from outside.
+ */
+function withFolderEntry<T>(
+  record: Readonly<Record<string, T>>,
+  folderId: string,
+  value: T,
+): Record<string, T> {
+  return Object.fromEntries([
+    ...Object.entries(record).filter(([key]) => key !== folderId),
+    [folderId, value],
+  ]);
 }
 
 interface TreeNode {
   kind: 'FOLDER' | 'CANVAS' | 'LINK' | 'ATTACHMENT';
   id: string;
   name: string;
+  /** A link's favicon, when the page offered one. */
+  favicon: string | null;
+  /** An uploaded file's format, which picks its icon. */
+  fileKind: FileKind | null;
+  /** A folder's chosen icon, an @xyne/icons name. */
+  folderIcon: string | null;
 }
 
-interface Maps {
-  folderById: ReadonlyMap<string, { id: string; name: string }>;
-  canvasById: ReadonlyMap<string, SdlcFinderCanvas>;
-  linkById: ReadonlyMap<string, SdlcFinderLink>;
-  fileById: ReadonlyMap<string, SdlcFinderFile>;
+function treeNodeOf(item: SdlcTrackItem): TreeNode {
+  return {
+    kind: item.kind,
+    id: item.id,
+    name: sdlcItemName(item),
+    favicon: item.kind === 'LINK' ? item.favicon : null,
+    fileKind: item.kind === 'ATTACHMENT' ? fileKind(item.mimetype, item.name) : null,
+    folderIcon: item.kind === 'FOLDER' ? item.icon : null,
+  };
 }
+
+const tabKey = (tab: { kind: string; id: string }): string => `${tab.kind}:${tab.id}`;
 
 export function compareTreeNodes(
   left: { kind: string; name: string },
@@ -94,43 +134,25 @@ export function compareTreeNodes(
   return left.name.localeCompare(right.name, undefined, { sensitivity: 'base', numeric: true });
 }
 
-function nodesFromEdges(edges: readonly ContainmentEdge[], maps: Maps): TreeNode[] {
-  const nodes = edges.flatMap<TreeNode>(edge => {
-    if (edge.targetType === 'FOLDER') {
-      const folder = maps.folderById.get(edge.targetId);
-      return folder ? [{ kind: 'FOLDER', id: folder.id, name: folder.name }] : [];
-    }
-    if (edge.targetType === 'LINK') {
-      const link = maps.linkById.get(edge.targetId);
-      return link ? [{ kind: 'LINK', id: link.id, name: link.title.trim() || link.url }] : [];
-    }
-    if (edge.targetType === 'ATTACHMENT') {
-      const file = maps.fileById.get(edge.targetId);
-      return file ? [{ kind: 'ATTACHMENT', id: file.id, name: file.name }] : [];
-    }
-    const canvas = maps.canvasById.get(edge.targetId);
-    return canvas ? [{ kind: 'CANVAS', id: canvas.id, name: canvas.title }] : [];
+function nodesFromEdges(edges: readonly SdlcTargetLink[]): TreeNode[] {
+  const nodes = edges.flatMap(edge => {
+    const item = targetItemOf(edge);
+    return item ? [treeNodeOf(item)] : [];
   });
   return nodes.sort(compareTreeNodes);
 }
 
-function NodeIcon(props: {
-  node: TreeNode;
-  maps: Maps;
-  size?: string;
-  active?: boolean;
-}): ReactElement {
+function NodeIcon(props: { node: TreeNode; size?: string; active?: boolean }): ReactElement {
   const className = cn(
     props.size ?? 'size-[15px]',
     'shrink-0',
     props.active ? '' : 'text-muted-foreground',
   );
   if (props.node.kind === 'LINK') {
-    const link = props.maps.linkById.get(props.node.id);
-    if (link?.favicon) {
+    if (props.node.favicon) {
       return (
         <img
-          src={link.favicon}
+          src={props.node.favicon}
           alt=''
           className={cn(props.size ?? 'size-[15px]', 'shrink-0 rounded-sm object-contain')}
         />
@@ -139,9 +161,8 @@ function NodeIcon(props: {
     return <Link2 className={className} />;
   }
   if (props.node.kind === 'ATTACHMENT') {
-    const file = props.maps.fileById.get(props.node.id);
-    const Icon = file ? fileKind(file.mimetype, file.name).icon : Paperclip;
-    return <Icon className={className} />;
+    if (!props.node.fileKind) return <Paperclip className={className} />;
+    return <FileTypeIcon kind={props.node.fileKind} size='sm' className={props.size} />;
   }
   return (
     <FileText
@@ -153,11 +174,12 @@ function NodeIcon(props: {
 /**
  * One level of the tree. Each expanded folder subscribes to its own children,
  * so opening a branch costs one query and closing it drops one — the same
- * bargain the finder's columns make.
+ * bargain the track's file list makes, one folder at a time.
  */
 interface TreeHandlers {
   channelId: string;
-  maps: Maps;
+  /** Calls in progress in each track, folder and item, counting everything under it. */
+  liveCallCounts: ReadonlyMap<string, SdlcLiveCalls>;
   activeTab: FolderTab | null;
   onOpen: (tab: FolderTab) => void;
   onDiscuss: (item: {
@@ -170,7 +192,7 @@ interface TreeHandlers {
   onAddItem: (tab: 'artifact' | 'upload' | 'link', parent: { id: string; name: string }) => void;
   /** The row the keyboard is on, which is not the same as the open tab. */
   cursorId: string | null;
-  /** Filing an item into another folder, the same move the finder performs. */
+  /** Filing an item into another folder, the same move the track's file list makes. */
   onMoveItem: (
     item: { type: 'FOLDER' | 'CANVAS' | 'LINK' | 'ATTACHMENT'; id: string },
     parentFolderId: string,
@@ -195,7 +217,15 @@ function TreeRow(
   },
 ): ReactElement {
   const expanded = useUserPreference('sdlcFolderTreeExpanded');
-  const { node } = props;
+  // What is this row's own stays here: its children take only the handlers, or the
+  // root's track parent and its open-by-default would pass to every row beneath it.
+  const {
+    node,
+    depth: _depth,
+    defaultExpanded: _defaultExpanded,
+    childrenParentType,
+    ...handlers
+  } = props;
   const isFolder = node.kind === 'FOLDER';
   const isOpen = isFolder && (expanded[node.id] ?? props.defaultExpanded ?? false);
   const isActive =
@@ -253,7 +283,10 @@ function TreeRow(
           type='button'
           onClick={() => {
             if (node.kind === 'FOLDER') {
-              setUserPreference('sdlcFolderTreeExpanded', { ...expanded, [node.id]: !isOpen });
+              setUserPreference(
+                'sdlcFolderTreeExpanded',
+                withFolderEntry(expanded, node.id, !isOpen),
+              );
               return;
             }
             props.onOpen({ kind: node.kind, id: node.id });
@@ -276,7 +309,14 @@ function TreeRow(
           ) : (
             <span className='size-3 shrink-0' />
           )}
-          {isFolder ? (
+          {isFolder && node.folderIcon ? (
+            <AppIcon
+              name={node.folderIcon}
+              size={15}
+              className={cn('shrink-0', isActive ? '' : 'text-primary/70')}
+              aria-hidden='true'
+            />
+          ) : isFolder ? (
             <Folder
               className={cn(
                 'size-[15px] shrink-0',
@@ -288,9 +328,15 @@ function TreeRow(
               )}
             />
           ) : (
-            <NodeIcon node={node} maps={props.maps} active={isActive} />
+            <NodeIcon node={node} active={isActive} />
           )}
           <span className='min-w-0 flex-1 truncate'>{node.name}</span>
+          <ActivityPill
+            live={props.liveCallCounts.get(node.id)}
+            place={node.name}
+            size='sm'
+            className='mr-1'
+          />
         </button>
         <button
           type='button'
@@ -321,8 +367,8 @@ function TreeRow(
       </div>
       {isOpen && (
         <TreeLevel
-          {...props}
-          parentType={props.childrenParentType ?? 'FOLDER'}
+          {...handlers}
+          parentType={childrenParentType ?? 'FOLDER'}
           parentId={node.id}
           depth={props.depth + 1}
         />
@@ -334,7 +380,7 @@ function TreeRow(
 /**
  * One level of the tree. Each expanded folder subscribes to its own children,
  * so opening a branch costs one query and closing it drops one — the same
- * bargain the finder's columns make.
+ * bargain the track's file list makes, one folder at a time.
  */
 function TreeLevel(
   props: TreeHandlers & { parentType: 'TRACK' | 'FOLDER'; parentId: string; depth: number },
@@ -347,8 +393,7 @@ function TreeLevel(
     }),
     { enabled: Boolean(props.channelId && props.parentId) },
   );
-  const edges: ContainmentEdge[] = Array.isArray(edgeRows) ? (edgeRows as ContainmentEdge[]) : [];
-  const nodes = useMemo(() => nodesFromEdges(edges, props.maps), [edges, props.maps]);
+  const nodes = useMemo(() => nodesFromEdges(Array.isArray(edgeRows) ? edgeRows : []), [edgeRows]);
 
   if (nodes.length === 0) {
     return (
@@ -443,8 +488,8 @@ function AddMenu(props: {
   );
 }
 
-function TabLabel(props: { tab: FolderTab; maps: Maps }): ReactElement {
-  const { tab, maps } = props;
+function TabLabel(props: { tab: FolderTab; item: SdlcTrackItem | undefined }): ReactElement {
+  const { tab, item } = props;
   if (tab.kind === 'BROWSER') {
     return (
       <>
@@ -453,29 +498,31 @@ function TabLabel(props: { tab: FolderTab; maps: Maps }): ReactElement {
       </>
     );
   }
-  const name =
-    tab.kind === 'LINK'
-      ? (() => {
-          const link = maps.linkById.get(tab.id);
-          return link ? link.title.trim() || link.url : 'Link';
-        })()
-      : tab.kind === 'ATTACHMENT'
-        ? (maps.fileById.get(tab.id)?.name ?? 'File')
-        : (maps.canvasById.get(tab.id)?.title ?? 'Artifact');
+  // Only the open tab is ever shown before its item has arrived.
+  const node: TreeNode = item
+    ? treeNodeOf(item)
+    : {
+        kind: tab.kind,
+        id: tab.id,
+        name: tab.kind === 'LINK' ? 'Link' : tab.kind === 'ATTACHMENT' ? 'File' : 'Artifact',
+        favicon: null,
+        fileKind: null,
+        folderIcon: null,
+      };
   return (
     <>
-      <NodeIcon node={{ kind: tab.kind, id: tab.id, name }} maps={maps} size='size-3.5' />
-      <span className='min-w-0 truncate'>{name}</span>
+      <NodeIcon node={node} size='size-3.5' />
+      <span className='min-w-0 truncate'>{node.name}</span>
     </>
   );
 }
 
 export function SdlcFolderPage(props: {
   channelId: string;
-  folder: { id: string; name: string };
+  liveCallCounts: ReadonlyMap<string, SdlcLiveCalls>;
+  folder: { id: string; name: string; icon: string | null };
   /** A track's own page is this page with the track as its root. */
   rootType?: 'TRACK' | 'FOLDER';
-  maps: Maps;
   activeTab: FolderTab | null;
   onOpenTab: (tab: FolderTab | null) => void;
   onDiscuss: (item: {
@@ -493,15 +540,51 @@ export function SdlcFolderPage(props: {
   renderCanvas: (canvasId: string) => ReactElement;
   /** Offers a page the reader browsed to for adding as a link in this folder. */
   onAddLink?: (url: string, title: string) => void;
-  /** `KIND:id` -> the folder holding it, for reaching a buried item. */
-  parentFolderOf: ReadonlyMap<string, string>;
   /** The strip lives in the page header when there is one, so the top bar is
    *  the tab bar rather than a breadcrumb repeating what the tabs already say. */
   tabsContainer: HTMLElement | null;
 }): ReactElement {
   const tabsByFolder = useUserPreference('sdlcFolderTabs');
+  const storedTabs = tabsByFolder[props.folder.id];
+  // The items the strip names and the open tab shows, looked up together by the ids
+  // the page keeps for its tabs: never the hub's every link and file.
+  const openKind = props.activeTab?.kind;
+  const openId = props.activeTab?.id;
+  const tabRefs = useMemo(() => {
+    const open = openKind && openId ? [{ kind: openKind, id: openId }] : [];
+    const refs = [...open, ...(storedTabs ?? [])].flatMap(tab =>
+      tab.kind === 'BROWSER' ? [] : [{ type: tab.kind, id: tab.id }],
+    );
+    return refs
+      .filter(
+        (ref, index) =>
+          refs.findIndex(other => other.type === ref.type && other.id === ref.id) === index,
+      )
+      .slice(0, TAB_LOOKUP_LIMIT);
+  }, [storedTabs, openKind, openId]);
+  const [tabItemRows] = useCachedQuery(
+    queries.getSdlcTrackItems({ channelId: props.channelId, items: tabRefs }),
+    { enabled: Boolean(props.channelId) && tabRefs.length > 0 },
+  );
+  // `KIND:id` -> the folder holding it, for the tabs' items and every folder above
+  // them: how the explorer opens the branches down to a tab.
+  const parentFolderOf = useMemo(
+    () => sdlcParentFolders(tabRefs.length > 0 && Array.isArray(tabItemRows) ? tabItemRows : []),
+    [tabRefs.length, tabItemRows],
+  );
+  // By `KIND:id`.
+  const tabItems = useMemo<ReadonlyMap<string, SdlcTrackItem>>(
+    () =>
+      new Map(
+        (tabRefs.length > 0 && Array.isArray(tabItemRows) ? tabItemRows : []).flatMap(row => {
+          const item = targetItemOf(row);
+          return item ? [[tabKey(item), item] as const] : [];
+        }),
+      ),
+    [tabRefs.length, tabItemRows],
+  );
   const tabs = useMemo<FolderTab[]>(() => {
-    const stored = tabsByFolder[props.folder.id] ?? [];
+    const stored = storedTabs ?? [];
     // Items get deleted; the stored tab list does not hear about it. Dropping
     // the ones that no longer resolve keeps ghosts labelled 'Link' out of the
     // strip. The open tab is the exception: a row that has not replicated yet —
@@ -512,16 +595,11 @@ export function SdlcFolderPage(props: {
     return stored.filter(
       tab =>
         (open && tab.kind === open.kind && tab.id === open.id) ||
-        (tab.kind === 'BROWSER'
-          ? true
-          : tab.kind === 'LINK'
-            ? props.maps.linkById.has(tab.id)
-            : tab.kind === 'ATTACHMENT'
-              ? props.maps.fileById.has(tab.id)
-              : props.maps.canvasById.has(tab.id)),
+        tab.kind === 'BROWSER' ||
+        tabItems.has(tabKey(tab)),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tabsByFolder, props.folder.id, props.maps, props.activeTab?.kind, props.activeTab?.id]);
+  }, [storedTabs, tabItems, props.activeTab?.kind, props.activeTab?.id]);
   const [dragging, setDragging] = useState<{
     type: 'FOLDER' | 'CANVAS' | 'LINK' | 'ATTACHMENT';
     id: string;
@@ -555,7 +633,7 @@ export function SdlcFolderPage(props: {
     rows().find(row => row.dataset['explorerRow'] === cursorId) ?? null;
 
   const setFolderOpen = (id: string, open: boolean): void => {
-    setUserPreference('sdlcFolderTreeExpanded', { ...expandedFolders, [id]: open });
+    setUserPreference('sdlcFolderTreeExpanded', withFolderEntry(expandedFolders, id, open));
   };
 
   const bind = { enabled: treeFocused };
@@ -602,7 +680,7 @@ export function SdlcFolderPage(props: {
   );
 
   const setTabs = (next: FolderTab[]): void => {
-    setUserPreference('sdlcFolderTabs', { ...tabsByFolder, [props.folder.id]: next });
+    setUserPreference('sdlcFolderTabs', withFolderEntry(tabsByFolder, props.folder.id, next));
   };
 
   // A link into a folder names one item; it joins the strip so the tab bar and
@@ -614,8 +692,8 @@ export function SdlcFolderPage(props: {
   const [draftAnchor, setDraftAnchor] = useState<{ quote: string; selector?: string } | null>(null);
   const [viewerRoot, setViewerRoot] = useState<HTMLDivElement | null>(null);
   const activeItem = useMemo(
-    () => (active ? tabItem(active, props.maps) : null),
-    [active, props.maps],
+    () => (active ? tabItem(active, tabItems.get(tabKey(active))) : null),
+    [active, tabItems],
   );
   // The scratch tab is ad-hoc browsing, not an item of the hub: it has no
   // entity id of its own (every folder would share SCRATCH_TAB_ID), so a
@@ -645,7 +723,7 @@ export function SdlcFolderPage(props: {
         folderName: props.folder.name,
       },
       items: tabs.flatMap(tab => {
-        const item = tabItem(tab, props.maps);
+        const item = tabItem(tab, tabItems.get(tabKey(tab)));
         if (!item) return [];
         return [
           {
@@ -658,7 +736,7 @@ export function SdlcFolderPage(props: {
       }),
     });
     return () => publishOpenItems(null);
-  }, [tabs, active, props.folder.id, props.folder.name, props.channelId, props.maps]);
+  }, [tabs, active, props.folder.id, props.folder.name, props.channelId, tabItems]);
 
   const openThread = (commentId: string): void => {
     setCommentsOpen(true);
@@ -715,21 +793,29 @@ export function SdlcFolderPage(props: {
       ?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }, [active?.kind, active?.id, tabs.length]);
 
-  // Opening a tab for something filed deeper down should show it where it
-  // lives, not leave the reader looking at a closed branch.
-  useEffect(() => {
-    if (!active) return undefined;
-
+  // The folders from the open tab's item up to the page's own, which arrive with the
+  // tab's lookup — often after the tab opens.
+  const activeChain = useMemo(() => {
     const chain: string[] = [];
-    let key = `${active.kind}:${active.id}`;
+    if (!openKind || !openId) return chain;
+    let key = `${openKind}:${openId}`;
     // Bounded: a cycle in the edges would otherwise spin here forever.
     for (let step = 0; step < 32; step += 1) {
-      const parent = props.parentFolderOf.get(key);
+      const parent = parentFolderOf.get(key);
       if (!parent) break;
       chain.push(parent);
       if (parent === props.folder.id) break;
       key = `FOLDER:${parent}`;
     }
+    return chain;
+  }, [openKind, openId, parentFolderOf, props.folder.id]);
+  const activeChainKey = activeChain.join('/');
+
+  // Opening a tab for something filed deeper down should show it where it
+  // lives, not leave the reader looking at a closed branch.
+  useEffect(() => {
+    if (!active) return undefined;
+    const chain = activeChain;
 
     const shut = chain.filter(id => expandedFolders[id] !== true);
     if (shut.length > 0) {
@@ -757,7 +843,7 @@ export function SdlcFolderPage(props: {
     raf = requestAnimationFrame(reveal);
     return () => cancelAnimationFrame(raf);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active?.kind, active?.id]);
+  }, [active?.kind, active?.id, activeChainKey]);
 
   useEffect(() => {
     if (!active) {
@@ -769,10 +855,13 @@ export function SdlcFolderPage(props: {
     // The url names something else, so the closure is spent. Reaching that tab
     // again — the back button, a url someone re-shares — has to put it back.
     closedRef.current = null;
-    if (tabs.some(tab => tab.kind === active.kind && tab.id === active.id)) return;
-    setTabs([...tabs, active]);
+    // Added to the tabs as kept, not as shown: those whose items are still on their
+    // way would otherwise be dropped with it.
+    const stored = storedTabs ?? [];
+    if (stored.some(tab => tab.kind === active.kind && tab.id === active.id)) return;
+    setTabs([...stored, active]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active?.kind, active?.id, tabs]);
+  }, [active?.kind, active?.id, storedTabs]);
 
   /**
    * The strip scrolls; the browsing button does not. It sits at the end of the
@@ -896,12 +985,19 @@ export function SdlcFolderPage(props: {
               it: it expands, takes new items and carries conversations exactly
               as the folders beneath it do. */}
           <TreeRow
-            node={{ kind: 'FOLDER', id: props.folder.id, name: props.folder.name }}
+            node={{
+              kind: 'FOLDER',
+              id: props.folder.id,
+              name: props.folder.name,
+              favicon: null,
+              fileKind: null,
+              folderIcon: props.folder.icon,
+            }}
             depth={0}
             defaultExpanded
             childrenParentType={props.rootType ?? 'FOLDER'}
             channelId={props.channelId}
-            maps={props.maps}
+            liveCallCounts={props.liveCallCounts}
             activeTab={active}
             onOpen={openTab}
             onDiscuss={props.onDiscuss}
@@ -944,7 +1040,7 @@ export function SdlcFolderPage(props: {
                       data-track-category='SdlcHub'
                       data-track-name='FolderTabSelected'
                     >
-                      <TabLabel tab={tab} maps={props.maps} />
+                      <TabLabel tab={tab} item={tabItems.get(tabKey(tab))} />
                     </button>
                     <button
                       type='button'
@@ -972,7 +1068,7 @@ export function SdlcFolderPage(props: {
               <div ref={setViewerRoot} className='relative min-h-0 min-w-0 flex-1 overflow-hidden'>
                 <TabContent
                   tab={active}
-                  maps={props.maps}
+                  item={tabItems.get(tabKey(active))}
                   renderCanvas={props.renderCanvas}
                   {...(props.onAddLink ? { onAddLink: props.onAddLink } : {})}
                 />
@@ -989,7 +1085,16 @@ export function SdlcFolderPage(props: {
             </>
           ) : (
             <div className='flex h-full flex-col items-center justify-center gap-1.5 text-center'>
-              <FolderOpen className='size-6 text-muted-foreground' />
+              {props.folder.icon ? (
+                <AppIcon
+                  name={props.folder.icon}
+                  size={24}
+                  className='text-muted-foreground'
+                  aria-hidden='true'
+                />
+              ) : (
+                <FolderOpen className='size-6 text-muted-foreground' />
+              )}
               <p className='text-sm font-medium'>{props.folder.name}</p>
               <p className='text-[12.5px] text-muted-foreground'>
                 Pick something on the left to open it here.
@@ -1013,7 +1118,7 @@ const EMPTY_ITEM: WorkspaceItem = {
   row: {},
 };
 
-function tabItem(tab: FolderTab, maps: Maps): WorkspaceItem | null {
+function tabItem(tab: FolderTab, item: SdlcTrackItem | undefined): WorkspaceItem | null {
   if (tab.kind === 'BROWSER') {
     return itemFromSdlc({
       id: tab.id,
@@ -1022,34 +1127,22 @@ function tabItem(tab: FolderTab, maps: Maps): WorkspaceItem | null {
       url: SCRATCH_START_PAGE,
     });
   }
-  if (tab.kind === 'CANVAS') {
-    const canvas = maps.canvasById.get(tab.id);
-    return canvas ? itemFromSdlc({ id: tab.id, title: canvas.title, kind: 'CANVAS' }) : null;
+  if (!item || item.kind === 'FOLDER') return null;
+  if (item.kind === 'CANVAS')
+    return itemFromSdlc({ id: tab.id, title: item.title, kind: 'CANVAS' });
+  if (item.kind === 'LINK') {
+    return itemFromSdlc({ id: tab.id, title: sdlcItemName(item), kind: 'LINK', url: item.url });
   }
-  if (tab.kind === 'LINK') {
-    const link = maps.linkById.get(tab.id);
-    return link
-      ? itemFromSdlc({
-          id: tab.id,
-          title: link.title.trim() || link.url,
-          kind: 'LINK',
-          url: link.url,
-        })
-      : null;
-  }
-  const file = maps.fileById.get(tab.id);
-  return file
-    ? itemFromSdlc({
-        id: tab.id,
-        title: file.name,
-        kind: 'FILE',
-        url: file.url,
-        mimeType: file.mimetype,
-      })
-    : null;
+  return itemFromSdlc({
+    id: tab.id,
+    title: item.name,
+    kind: 'FILE',
+    url: item.url,
+    mimeType: item.mimetype,
+  });
 }
 
-function FileFallback({ file }: { file: SdlcFinderFile }): ReactElement {
+function FileFallback({ file }: { file: SdlcFileItem }): ReactElement {
   const kind = fileKind(file.mimetype, file.name);
   // The same viewers the rest of the app previews attachments with — csv, xlsx,
   // docx, pptx, markdown and html included — rather than a second, poorer set
@@ -1070,7 +1163,7 @@ function FileFallback({ file }: { file: SdlcFinderFile }): ReactElement {
   }
   return (
     <div className='flex h-full flex-col items-center justify-center gap-3 p-8 text-center'>
-      <kind.icon className='size-10 text-muted-foreground' />
+      <FileTypeIcon kind={kind} size='lg' />
       <div>
         <p className='text-[15px] font-semibold'>{file.name}</p>
         <p className='mt-0.5 text-[12.5px] text-muted-foreground'>
@@ -1090,7 +1183,7 @@ function FileFallback({ file }: { file: SdlcFinderFile }): ReactElement {
   );
 }
 
-function LinkCard({ link }: { link: SdlcFinderLink }): ReactElement {
+function LinkCard({ link }: { link: SdlcLinkItem }): ReactElement {
   return (
     <div className='flex h-full flex-col items-center justify-center gap-3 p-8 text-center'>
       {link.favicon ? (
@@ -1127,11 +1220,13 @@ function LinkCard({ link }: { link: SdlcFinderLink }): ReactElement {
  */
 function TabContent(props: {
   tab: FolderTab;
-  maps: Maps;
+  /** The tab's item, once it has arrived. */
+  item: SdlcTrackItem | undefined;
   renderCanvas: (canvasId: string) => ReactElement;
   onAddLink?: (url: string, title: string) => void;
 }): ReactElement {
-  const item = tabItem(props.tab, props.maps);
+  const found = props.item;
+  const item = tabItem(props.tab, found);
   if (!item) {
     return (
       <Missing
@@ -1147,8 +1242,9 @@ function TabContent(props: {
         canvas: canvasItem => props.renderCanvas(canvasItem.refId),
         browser: browsable => {
           if (!canHostEmbedPages()) {
-            const link = props.maps.linkById.get(browsable.refId);
-            return link ? <LinkCard link={link} /> : null;
+            return found?.kind === 'LINK' && found.id === browsable.refId ? (
+              <LinkCard link={found} />
+            ) : null;
           }
           return (
             <EmbeddedPage
@@ -1157,10 +1253,10 @@ function TabContent(props: {
             />
           );
         },
-        fileFallback: fileItem => {
-          const file = props.maps.fileById.get(fileItem.refId);
-          return file ? <FileFallback file={file} /> : null;
-        },
+        fileFallback: fileItem =>
+          found?.kind === 'ATTACHMENT' && found.id === fileItem.refId ? (
+            <FileFallback file={found} />
+          ) : null,
       }}
     />
   );
@@ -1379,7 +1475,7 @@ function EmbeddedPage(props: {
   );
 }
 
-/** Same rule as the finder: the host opens it unless a modifier says otherwise. */
+/** Same rule as the track's file list: the host opens it unless a modifier says otherwise. */
 function openFromTab(url: string, event: { metaKey: boolean; ctrlKey: boolean }): void {
   if (!event.metaKey && !event.ctrlKey && openLinkFromSdlcFrame(url)) return;
   openLink(url, event);

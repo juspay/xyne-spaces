@@ -44,6 +44,7 @@ const menuRowClass =
 export const TicketsHeader = (props: TicketsHeaderProps): ReactElement => {
   const {
     startSlot,
+    endSlot,
     title,
     ticketCount,
     isFiltered,
@@ -251,6 +252,7 @@ export const TicketsHeader = (props: TicketsHeaderProps): ReactElement => {
               Link boards
             </button>
           )}
+          {endSlot}
           {onCreateTicket && (
             <button
               type='button'
