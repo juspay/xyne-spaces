@@ -117,7 +117,6 @@ describe("browser panel calls for Xyne AI screen runs", () => {
 
   it("opens a URL in the panel of the run's Xyne AI screen and waits for it", async () => {
     const id = newRun("u1", "chat");
-    await nextPagePanelCall("u1", [id], false);
     const pending = callPagePanelTool({
       userId: "u1",
       sessionId: id,
@@ -139,12 +138,12 @@ describe("browser panel calls for Xyne AI screen runs", () => {
     });
   });
 
-  it("does not open a URL when no Xyne AI screen is watching the run", async () => {
+  it("falls back when no desktop panel opens the page in time", async () => {
     const id = newRun("u1", "chat");
     const result = await callPagePanelTool({ userId: "u1", sessionId: id, toolName: "open-url", args: { url: "https://docs.google.com/" } });
     expect(result.unavailable).toBe(true);
-    expect(state.artifacts).toHaveLength(0);
-  });
+    expect(state.artifacts).toHaveLength(1);
+  }, 15_000);
 
   it("does not open a URL for a thread run", async () => {
     const id = newRun("u1", "spaces");

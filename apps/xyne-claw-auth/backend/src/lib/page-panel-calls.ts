@@ -125,12 +125,13 @@ export async function callPagePanelTool(input: {
     return unavailable("Browser panel tools only work for runs started from the Xyne AI screen.");
   }
 
+  if (toolName === OPEN_URL_TOOL) return openInPanel(owner, runId, args);
+
   const redis = redisService.getConnection();
   const presence = parsePresence(await redis.get(presenceKey(runId)).catch(() => null));
   if (presence?.userId !== userId) {
-    return unavailable("The Xyne AI screen for this run is not open on the desktop app.");
+    return unavailable("The Xyne AI screen for this run is not open with a browser panel on the desktop app.");
   }
-  if (toolName === OPEN_URL_TOOL) return openInPanel(owner, runId, args);
 
   const deadlineMs = DEADLINES_MS[toolName] ?? READ_DEADLINE_MS;
   const call: PagePanelCall = { id: randomUUID(), runId, toolName, args, expiresAt: Date.now() + deadlineMs };
@@ -190,10 +191,14 @@ async function openInPanel(owner: RunOwner, runId: string, args: Record<string, 
 
   const redis = redisService.getConnection();
   const until = Date.now() + PANEL_OPEN_WAIT_MS;
-  while (Date.now() < until) {
+  let opened = false;
+  while (!opened && Date.now() < until) {
     await new Promise((resolve) => setTimeout(resolve, RESULT_POLL_MS));
     const presence = parsePresence(await redis.get(presenceKey(runId)).catch(() => null));
-    if (presence?.panelOpen) break;
+    opened = presence?.userId === owner.userId && presence.panelOpen;
+  }
+  if (!opened) {
+    return unavailable(`Added ${raw} to the Xyne AI screen's sources, but no desktop browser panel opened it.`);
   }
   return {
     ok: true,
