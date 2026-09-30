@@ -55,12 +55,54 @@ function omit<T extends object, K extends keyof T>(value: T, key: K): Omit<T, K>
   return rest;
 }
 
-function slugify(value: string): string {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9._-]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 64);
+/** `trim: false` while typing, so a trailing '-' survives until the next character. */
+function slugify(value: string, trim = true): string {
+  const slug = value.toLowerCase().replace(/[^a-z0-9._-]+/g, '-');
+  return (trim ? slug.replace(/^-+|-+$/g, '') : slug.replace(/^-+/, '')).slice(0, 64);
+}
+
+/** The form reads these fields directly; a pasted value of another type would crash it. */
+function configShapeError(p: Record<string, unknown>): string | null {
+  const steps = p['steps'];
+  if (
+    steps !== undefined &&
+    !(
+      Array.isArray(steps) &&
+      steps.every(
+        step =>
+          typeof step === 'object' &&
+          step !== null &&
+          typeof (step as { type?: unknown }).type === 'string',
+      )
+    )
+  ) {
+    return 'steps must be an array of step objects with a type';
+  }
+  const auxRepos = p['auxRepos'];
+  if (
+    auxRepos !== undefined &&
+    !(Array.isArray(auxRepos) && auxRepos.every(aux => typeof aux === 'object' && aux !== null))
+  ) {
+    return 'auxRepos must be an array of objects';
+  }
+  if (
+    p['ports'] !== undefined &&
+    (typeof p['ports'] !== 'object' || p['ports'] === null || Array.isArray(p['ports']))
+  ) {
+    return 'ports must be an object';
+  }
+  for (const field of [
+    'slug',
+    'name',
+    'description',
+    'repoUrl',
+    'defaultBranch',
+    'workDir',
+    'template',
+  ]) {
+    if (p[field] !== undefined && typeof p[field] !== 'string') return `${field} must be a string`;
+  }
+  return null;
 }
 
 /** Drops empty optional values so the stored JSON stays what the person actually set. */
@@ -544,6 +586,11 @@ function Form({
       setJsonError('The config must be a JSON object');
       return;
     }
+    const shapeError = configShapeError(parsed as Record<string, unknown>);
+    if (shapeError) {
+      setJsonError(shapeError);
+      return;
+    }
     const next = {
       steps: [],
       ...(parsed as Partial<SandboxProfileConfig>),
@@ -568,7 +615,7 @@ function Form({
     }
     setSaving(true);
     try {
-      await save(key, clean(config));
+      await save(slugify(key), clean(config));
       toast.success(isNew ? 'Sandbox profile created' : 'Sandbox profile saved');
       onDone();
     } catch (err) {
@@ -652,7 +699,7 @@ function Form({
                       mono
                       value={key}
                       disabled={!isNew}
-                      onChange={value => setKey(slugify(value))}
+                      onChange={value => setKey(slugify(value, false))}
                     />
                   </Row>
                   <Row required label='Slug' error={invalid('slug')}>
@@ -986,8 +1033,16 @@ export function SandboxProfileFormPage(): ReactElement {
   const returnTo = searchParams.get('returnTo');
   const save = useSaveSandboxProfile();
   const reset = useResetSandboxProfile();
-  const { data: profileList, isPending: profilesPending } = useSandboxProfiles();
-  const { data: repos, isPending: reposPending } = useQuery({
+  const {
+    data: profileList,
+    isPending: profilesPending,
+    error: profilesError,
+  } = useSandboxProfiles();
+  const {
+    data: repos,
+    isPending: reposPending,
+    error: reposError,
+  } = useQuery({
     queryKey: ['sdlc-environments', null],
     queryFn: async () =>
       (await apiInstance.get<{ environments: SdlcEnvironmentRow[] }>('/sdlc/environments')).data
@@ -997,7 +1052,7 @@ export function SandboxProfileFormPage(): ReactElement {
 
   const done = (): void =>
     void navigate(
-      returnTo?.startsWith('/')
+      returnTo?.startsWith('/') && !returnTo.startsWith('//')
         ? returnTo
         : `${workspaceId ? `/${workspaceId}` : ''}/ai/environments`,
     );
@@ -1006,6 +1061,14 @@ export function SandboxProfileFormPage(): ReactElement {
   const repo = repoId ? repos?.find(candidate => candidate.repoId === repoId) : undefined;
   const missing = key ? !profilesPending && !profile?.canEdit : !reposPending && !repo;
 
+  const loadError = key ? profilesError : reposError;
+  if (loadError) {
+    return (
+      <div className='p-8 text-sm text-destructive'>
+        {getApiErrorMessage(loadError, 'Could not load sandbox profiles')}
+      </div>
+    );
+  }
   if (missing) {
     return (
       <div className='p-8 text-sm text-muted-foreground'>

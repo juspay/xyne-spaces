@@ -6,6 +6,12 @@ export const sandboxRepoConfigRepository = {
 
   find: (key: string) => prisma.sandboxRepoConfig.findUnique({ where: { key } }),
 
+  // Plain insert: a key taken meanwhile fails with P2002 instead of being overwritten.
+  create: (key: string, config: Prisma.InputJsonValue, workspaceId: string, userId: string) =>
+    prisma.sandboxRepoConfig.create({
+      data: { key, config, enabled: true, updatedByUserId: userId, workspaceId, createdByUserId: userId },
+    }),
+
   // workspaceId and createdByUserId are set on create only; an update never moves a profile.
   upsert: (
     key: string,
