@@ -1142,7 +1142,14 @@ export const router = createBrowserRouter(
                     { path: 'daily-brief', element: <AIDailyBriefScreen /> },
                     { path: 'daily-brief/:briefDate', element: <AIDailyBriefScreen /> },
                     { path: 'library', element: <AILibraryScreen /> },
-                    { path: 'environments', element: <AIEnvironmentsScreen /> },
+                    {
+                      path: 'environments',
+                      element: (
+                        <RequireClawAdmin orSdlcAdmin>
+                          <AIEnvironmentsScreen />
+                        </RequireClawAdmin>
+                      ),
+                    },
                     {
                       path: 'admin',
                       element: (
