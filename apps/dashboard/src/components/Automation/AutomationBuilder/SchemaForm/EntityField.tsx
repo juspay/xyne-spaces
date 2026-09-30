@@ -402,7 +402,12 @@ function SenderField({ value, onChange, placeholder }: FieldProps): React.ReactE
     // rejected by the backend send/reply steps (impersonation). So the picker
     // offers bot and app/agent accounts only, never a human user.
     for (const u of users) {
-      if (u.userType !== UserType.BOT && u.userType !== UserType.APP && u.userType !== UserType.AGENT) continue;
+      if (
+        u.userType !== UserType.BOT &&
+        u.userType !== UserType.APP &&
+        u.userType !== UserType.AGENT
+      )
+        continue;
       const label = getUserDisplayName(u);
       if (!matches(label) && !matches(u.email ?? '')) continue;
       out.push({
@@ -424,7 +429,9 @@ function SenderField({ value, onChange, placeholder }: FieldProps): React.ReactE
         label: getUserDisplayName(selectedUser),
         subtitle: selectedUser.email ?? undefined,
         icon:
-          selectedUser.userType === UserType.BOT || selectedUser.userType === UserType.APP || selectedUser.userType === UserType.AGENT ? (
+          selectedUser.userType === UserType.BOT ||
+          selectedUser.userType === UserType.APP ||
+          selectedUser.userType === UserType.AGENT ? (
             <Bot className='size-4 text-muted-foreground' />
           ) : (
             <UserAvatar
