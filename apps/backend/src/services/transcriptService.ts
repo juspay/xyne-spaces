@@ -139,7 +139,7 @@ Generate a 1-line description for this call:
 `;
 
 // Pulse data extraction prompt — extracts multiple merchants and their actionable items from the transcript.
-// This is completely separate from Xyne ticket suggestions.
+// This is completely separate from the ticket-updates card.
 const PULSE_DATA_PROMPT = `
 You are analyzing a call/meeting transcript between a sales or support team and one or more merchants/customers.
 
@@ -1215,7 +1215,7 @@ export class TranscriptService {
   /**
    * Run the dedicated Pulse LLM prompt against the transcript.
    * Returns extracted merchant name + merchant-specific action items in one call.
-   * Completely independent of Xyne ticket suggestions.
+   * Completely independent of the ticket-updates card.
    */
   async generatePulseData(
     transcript: string,
@@ -1719,8 +1719,8 @@ export class TranscriptService {
           : this.generateAndSaveLabels(call, formattedTranscript);
 
       // Start all five post-call LLM operations immediately. Detailed-summary
-      // streaming remains unchanged; title, summary, and tickets persist their
-      // own result as soon as it is ready rather than waiting on one another.
+      // streaming remains unchanged; title, summary, and ticket updates persist
+      // their own result as soon as it is ready rather than waiting on one another.
       pendingDetailedSummary = callDocumentService.generateAndPostDetailedSummary(
         callId,
         formattedTranscript,
@@ -1910,7 +1910,7 @@ export class TranscriptService {
 
   /**
    * Posts a dedicated bot message for Pulse actionables.
-   * Uses the same YAML frontmatter pattern as Xyne ticket suggestions so the
+   * Uses the same YAML frontmatter pattern as the ticket-updates card so the
    * frontend can parse + track which items have been sent to Pulse.
    *
    * Frontmatter shape:

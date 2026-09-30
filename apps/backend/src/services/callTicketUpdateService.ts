@@ -3,21 +3,27 @@
  * call transcript, extract what was said about each one and any spoken status
  * change, and post them as a review card in the call thread. Nothing is applied
  * automatically — a call participant approves each item (comment on the ticket
- * and/or move its stage) or ignores it. See docs/plan-call-ticket-updates.md.
+ * and/or move its stage) or ignores it.
  *
  * Matching never searches the whole workspace: the LLM only chooses among a
  * bounded candidate list (ticket ids spoken in the transcript, the channel's open
  * tickets, tickets assigned to the participants, and tickets discussed in earlier
  * instances of the same recurring series), so a garbled project code still
  * resolves against a small set.
+ *
+ * The card is one message read by everyone in the call's channel, so a ticket
+ * from any other channel is posted as a "restricted" row that carries no ticket
+ * identity: each viewer resolves it through their own ticket access, and approve
+ * / ignore check that access again here.
  */
 import { randomUUID } from 'crypto';
 import type { Agent } from '@framework';
 import type { Call, Message } from '@prisma/client';
-import { ActivityType, BoardType, MessageType, TicketStatusV2 } from '@xyne/shared';
+import { ActivityType, BoardType, ChannelVisibility, MessageType, TicketStatusV2 } from '@xyne/shared';
 import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { withWorkspaceScope } from '@/database/tenant/context';
+import { mutateTicketUpdatesCardTx } from '@/bypassAcl/transactions/callTicketUpdateService';
 import { logger } from '@/utils/logger';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import { executeCallLlmWithRetry } from './callLlmRetry';
@@ -32,7 +38,7 @@ import { getCallTicketUpdatesTotal, getCallTicketUpdatesAppliedTotal } from '@/s
 import {
   CALL_TICKET_UPDATES_SUBTYPE,
   buildTicketUpdatesContent,
-  moveTicketUpdate,
+  isTicketUpdateClaimFresh,
   parseTicketUpdatesContent,
   type AppliedTicketUpdate,
   type IgnoredTicketUpdate,
@@ -52,6 +58,7 @@ const OPEN_STATUSES = [TicketStatusV2.TODO, TicketStatusV2.STARTED, TicketStatus
 const RECENTLY_CLOSED_DAYS = 14;
 const RECENTLY_CLOSED_LIMIT = 30;
 const STATUS_VALUES: string[] = Object.values(TicketStatusV2);
+const GUEST_ROLE = 'GUEST';
 
 interface CandidateTicket {
   id: string;
@@ -61,6 +68,7 @@ interface CandidateTicket {
   stageName: string;
   boardId: string;
   boardType: string;
+  channelId: string;
   conversationId: string;
   assigneeName: string | null;
   /** Where this candidate came from; series entries carry the date it was last discussed. */
@@ -112,6 +120,7 @@ const TICKET_CANDIDATE_SELECT = {
   statusV2: true,
   stageName: true,
   boardId: true,
+  channelId: true,
   conversationId: true,
   assignedTo: true,
   board: { select: { boardType: true } },
@@ -124,10 +133,13 @@ type TicketCandidateRow = {
   statusV2: string;
   stageName: string;
   boardId: string;
+  channelId: string;
   conversationId: string;
   assignedTo: string | null;
   board: { boardType: string } | null;
 };
+
+type BoardStage = { name: string; sequenceNumber: number; defaultTicketStatusV2: string };
 
 function timestampToSeconds(timestamp: string): number | null {
   const parts = timestamp.split(':').map((p) => Number(p));
@@ -151,6 +163,15 @@ function formatSeconds(seconds: number): string {
   return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
 }
 
+/** The thread a call's messages live in, from the ids the call row keeps after it ends. */
+function callThreadRefs(metadata: unknown): { conversationId: string | null; systemMessageId: string | null } {
+  const meta = (metadata && typeof metadata === 'object' ? metadata : {}) as Record<string, unknown>;
+  return {
+    conversationId: typeof meta['conversationId'] === 'string' ? meta['conversationId'] : null,
+    systemMessageId: typeof meta['systemMessageId'] === 'string' ? meta['systemMessageId'] : null,
+  };
+}
+
 /**
  * Pick the stage a ticket should move to for a spoken status. Exact
  * `defaultTicketStatusV2` matches win; when several stages share that status
@@ -166,11 +187,7 @@ const STAGE_NAME_HINTS: Record<string, RegExp> = {
   [TicketStatusV2.TODO]: /\b(todo|to do|backlog|triage|new|open|not started)\b/i,
 };
 
-export function resolveStageForStatus(
-  stages: Array<{ name: string; sequenceNumber: number; defaultTicketStatusV2: string }>,
-  currentStageName: string,
-  status: string,
-): string | null {
+export function resolveStageForStatus(stages: BoardStage[], currentStageName: string, status: string): string | null {
   const ordered = [...stages].sort((a, b) => a.sequenceNumber - b.sequenceNumber);
   const others = ordered.filter((s) => s.name !== currentStageName);
   if (others.length === 0) return null;
@@ -195,13 +212,17 @@ export function resolveStageForStatus(
   return byStatus.find((s) => s.sequenceNumber > currentSeq)?.name ?? byStatus[0].name;
 }
 
+type Failure<S extends number> = { ok: false; status: S; error: string; stageOptions?: string[] };
+
 export type ApplyTicketUpdateResult =
   | { ok: true; content: string; applied: AppliedTicketUpdate }
-  | { ok: false; status: 400 | 403 | 404 | 409; error: string; stageOptions?: string[] };
+  | Failure<400 | 403 | 404 | 409>;
 
 export type IgnoreTicketUpdateResult =
   | { ok: true; content: string; ignored: IgnoredTicketUpdate }
-  | { ok: false; status: 403 | 404 | 409; error: string };
+  | Failure<403 | 404 | 409>;
+
+type AccessibleTicket = NonNullable<Awaited<ReturnType<CallTicketUpdateService['findTicket']>>>;
 
 export class CallTicketUpdateService {
   /**
@@ -232,7 +253,7 @@ export class CallTicketUpdateService {
     const { numbered, segments } = numberTranscriptSegments(formattedTranscript);
     const segmentByN = new Map(segments.map((s) => [s.n, s]));
     const mentions = await this.extractMentions(callExternalId, numbered, candidates, createAgent);
-    const proposals = await this.toProposals(mentions, candidates, segmentByN);
+    const proposals = await this.toProposals(mentions, candidates, segmentByN, call.channelId);
 
     const posted = await this.postCard(call, callExternalId, conversationId, workspaceId, proposals);
     getCallTicketUpdatesTotal().add(posted, { workspaceId });
@@ -240,6 +261,7 @@ export class CallTicketUpdateService {
       candidates: candidates.size,
       mentions: mentions.length,
       proposals: proposals.length,
+      restricted: proposals.filter((p) => p.restricted).length,
       pending_on_card: posted,
     });
     return posted;
@@ -270,6 +292,7 @@ export class CallTicketUpdateService {
         stageName: row.stageName,
         boardId: row.boardId,
         boardType: row.board?.boardType ?? BoardType.DEFAULT,
+        channelId: row.channelId,
         conversationId: row.conversationId,
         assigneeName: null,
         source,
@@ -319,7 +342,10 @@ export class CallTicketUpdateService {
     recentlyClosed.forEach((r) => add(r, 'channel'));
 
     // 3. Open tickets assigned to people on the call.
-    const participants = await repositories.calls.getCallParticipantsWithUserDetails(callExternalId).catch(() => []);
+    const participants = await repositories.calls.getCallParticipantsWithUserDetails(callExternalId).catch((error) => {
+      logger.warn(`[${callExternalId}] ticket_updates_participants_lookup_failed`, { error });
+      return [];
+    });
     const participantIds = [...new Set([call.createdByUserId, ...participants.map((p) => p.userId)])];
     if (participantIds.length > 0) {
       const rows = await db.ticket.findMany({
@@ -334,23 +360,7 @@ export class CallTicketUpdateService {
     // 4. Series memory: tickets discussed in earlier instances of the same
     //    recurring series, including ones that have since been closed.
     if (call.recurringSeriesId) {
-      const earlier = await db.call.findMany({
-        where: { recurringSeriesId: call.recurringSeriesId, id: { not: call.id }, startedAt: { lt: call.startedAt } },
-        orderBy: { startedAt: 'desc' },
-        take: SERIES_MEMORY_INSTANCES,
-        select: { externalId: true, startedAt: true },
-      });
-      const startedAtByExternalId = new Map(earlier.map((c) => [c.externalId, c.startedAt]));
-      const messages = await repositories.messages.findTicketUpdateMessagesByCallIds(earlier.map((c) => c.externalId));
-      const discussed = new Map<string, string>();
-      for (const message of messages) {
-        const callId = (message.metadata as Record<string, unknown> | null)?.['callId'];
-        const when = typeof callId === 'string' ? startedAtByExternalId.get(callId) : undefined;
-        const doc = parseTicketUpdatesContent(message.content);
-        for (const item of [...doc.updates, ...doc.applied, ...doc.ignored]) {
-          if (!discussed.has(item.ticketId)) discussed.set(item.ticketId, (when ?? message.createdAt).toISOString().slice(0, 10));
-        }
-      }
+      const discussed = await this.ticketsDiscussedEarlierInSeries(call, workspaceId);
       if (discussed.size > 0) {
         const rows = await db.ticket.findMany({
           where: { workspaceId, id: { in: [...discussed.keys()] } },
@@ -361,10 +371,10 @@ export class CallTicketUpdateService {
     }
 
     // Assignee names for the prompt.
-    const assigneeIds = [...new Set([...candidates.values()].map((c) => c.id))];
-    if (assigneeIds.length > 0) {
+    const candidateTicketIds = [...candidates.keys()];
+    if (candidateTicketIds.length > 0) {
       const ticketAssignees = await db.ticket.findMany({
-        where: { id: { in: assigneeIds } },
+        where: { id: { in: candidateTicketIds } },
         select: { id: true, assignedTo: true },
       });
       const userIds = [...new Set(ticketAssignees.map((t) => t.assignedTo).filter((x): x is string => !!x))];
@@ -379,6 +389,40 @@ export class CallTicketUpdateService {
     }
 
     return candidates;
+  }
+
+  /**
+   * ticketId → date it was last discussed, read from the cards of the series'
+   * earlier calls. Looks the cards up by each call's thread, which the call row
+   * still records after the call has ended.
+   */
+  private async ticketsDiscussedEarlierInSeries(call: Call, workspaceId: string): Promise<Map<string, string>> {
+    const earlier = await db.call.findMany({
+      where: { recurringSeriesId: call.recurringSeriesId, id: { not: call.id }, startedAt: { lt: call.startedAt } },
+      orderBy: { startedAt: 'desc' },
+      take: SERIES_MEMORY_INSTANCES,
+      select: { startedAt: true, metadata: true },
+    });
+    const startedAtByConversationId = new Map<string, Date>();
+    for (const c of earlier) {
+      const refs = callThreadRefs(c.metadata);
+      const conversationId =
+        refs.conversationId ??
+        (refs.systemMessageId ? (await repositories.messages.findById(refs.systemMessageId))?.conversationId ?? null : null);
+      if (conversationId) startedAtByConversationId.set(conversationId, c.startedAt);
+    }
+    const messages = await repositories.messages.findTicketUpdateMessagesByConversationIds(workspaceId, [
+      ...startedAtByConversationId.keys(),
+    ]);
+    const discussed = new Map<string, string>();
+    for (const message of messages) {
+      const when = startedAtByConversationId.get(message.conversationId) ?? message.createdAt;
+      const doc = parseTicketUpdatesContent(message.content);
+      for (const item of [...doc.updates, ...doc.applied, ...doc.ignored]) {
+        if (!discussed.has(item.ticketId)) discussed.set(item.ticketId, when.toISOString().slice(0, 10));
+      }
+    }
+    return discussed;
   }
 
   // ── LLM ───────────────────────────────────────────────────────────────────
@@ -470,6 +514,7 @@ export class CallTicketUpdateService {
     mentions: LlmMention[],
     candidates: Map<string, CandidateTicket>,
     segmentByN: Map<number, CitationSegment>,
+    callChannelId: string,
   ): Promise<TicketUpdateProposal[]> {
     const boardIds = [...new Set(mentions.map((m) => candidates.get(m.ref)!.boardId))];
     const stages = boardIds.length
@@ -488,31 +533,56 @@ export class CallTicketUpdateService {
 
     return mentions.map((m) => {
       const c = candidates.get(m.ref)!;
-      const boardStages = stagesByBoard.get(c.boardId) ?? [];
-      const proposedStageName =
-        m.statusIntent && m.statusIntent !== c.statusV2 && c.boardType !== BoardType.FLOW
-          ? resolveStageForStatus(boardStages, c.stageName, m.statusIntent)
-          : null;
       const segment = m.segment !== null ? segmentByN.get(m.segment) ?? null : null;
-      return {
+      const spoken = {
         updateId: randomUUID(),
         ticketId: c.id,
-        xyneId: c.xyneId,
-        title: c.title,
-        ticketConversationId: c.conversationId,
-        boardType: c.boardType,
-        currentStageName: c.stageName,
-        currentStatusV2: c.statusV2,
         update: m.update,
         proposedStatusV2: m.statusIntent && m.statusIntent !== c.statusV2 ? m.statusIntent : null,
-        proposedStageName,
-        stageOptions: boardStages.map((s) => s.name).filter((n) => n !== c.stageName),
         speaker: segment?.speaker ?? m.speaker,
         timestampSeconds: segment ? timestampToSeconds(segment.timestamp) : null,
         segment: segment ? segment.n : null,
         quote: segment?.text ?? m.quote,
         confidence: Math.round(m.confidence * 100) / 100,
         matchedBy: m.matchedBy,
+        claim: null,
+      };
+
+      // A ticket from another channel: everyone in this channel reads the card,
+      // so it gets no identity and no board details. What was said about it comes
+      // from the transcript the same audience can already open.
+      if (c.channelId !== callChannelId) {
+        return {
+          ...spoken,
+          restricted: true,
+          xyneId: '',
+          title: '',
+          ticketConversationId: '',
+          ticketChannelId: '',
+          boardType: '',
+          currentStageName: '',
+          currentStatusV2: '',
+          proposedStageName: null,
+          stageOptions: [],
+        };
+      }
+
+      const boardStages = stagesByBoard.get(c.boardId) ?? [];
+      return {
+        ...spoken,
+        restricted: false,
+        xyneId: c.xyneId,
+        title: c.title,
+        ticketConversationId: c.conversationId,
+        ticketChannelId: c.channelId,
+        boardType: c.boardType,
+        currentStageName: c.stageName,
+        currentStatusV2: c.statusV2,
+        proposedStageName:
+          spoken.proposedStatusV2 && c.boardType !== BoardType.FLOW
+            ? resolveStageForStatus(boardStages, c.stageName, spoken.proposedStatusV2)
+            : null,
+        stageOptions: boardStages.map((s) => s.name).filter((n) => n !== c.stageName),
       };
     });
   }
@@ -527,46 +597,46 @@ export class CallTicketUpdateService {
     proposals: TicketUpdateProposal[],
   ): Promise<number> {
     const existing = await repositories.messages.findTicketUpdatesByCallId(conversationId, callExternalId);
-    const previous = existing ? parseTicketUpdatesContent(existing.content) : { updates: [], applied: [], ignored: [] };
-
-    // A re-run never re-proposes a ticket the user already approved or ignored.
-    const handled = new Set([...previous.applied, ...previous.ignored].map((x) => x.ticketId));
-    const updates = proposals.filter((p) => !handled.has(p.ticketId));
-
-    if (!existing && updates.length === 0) return 0;
-
-    const content = buildTicketUpdatesContent({ updates, applied: previous.applied, ignored: previous.ignored });
-    const baseMetadata = {
-      messageSubtype: CALL_TICKET_UPDATES_SUBTYPE,
-      callId: callExternalId,
-      isAiGenerated: true,
-      contentFormat: 'markdown',
-      ticketUpdatesCount: updates.length,
-    };
 
     if (existing) {
-      const version = Number((existing.metadata as Record<string, unknown> | null)?.['version'] ?? 1);
-      await repositories.messages.update(existing.messageId, {
-        content,
-        metadata: { ...baseMetadata, version: version + 1, lastUpdatedAt: new Date().toISOString() },
+      // A re-run merges into whatever the card holds right now: decisions people
+      // made stay, a row someone is in the middle of approving stays, and the
+      // rest of the pending rows are replaced by the new proposals.
+      const merged = await mutateTicketUpdatesCardTx(existing.messageId, (doc) => {
+        const inFlight = doc.updates.filter((u) => isTicketUpdateClaimFresh(u.claim));
+        const settled = new Set([...doc.applied, ...doc.ignored, ...inFlight].map((x) => x.ticketId));
+        const updates = [...inFlight, ...proposals.filter((p) => !settled.has(p.ticketId))];
+        return { doc: { updates, applied: doc.applied, ignored: doc.ignored }, result: updates.length };
       });
-      logger.info(`[${callExternalId}] ticket_updates_card_updated`, { message_id: existing.messageId, version: version + 1 });
-      return updates.length;
+      if (merged.found) {
+        logger.info(`[${callExternalId}] ticket_updates_card_updated`, { message_id: existing.messageId });
+        return merged.result;
+      }
     }
+
+    if (proposals.length === 0) return 0;
 
     const bot = await unifiedBotUserService.getBotByBotId('xyne-automatic', workspaceId);
     if (!bot) throw new Error('Xyne Automatic bot not found - cannot post ticket updates');
     const message = await repositories.messages.create({
       conversationId,
       senderId: bot.id,
-      content,
+      content: buildTicketUpdatesContent({ updates: proposals, applied: [], ignored: [] }),
       msgType: MessageType.BOT,
       showInChannel: false,
-      metadata: { ...baseMetadata, version: 1, createdAt: new Date().toISOString() },
+      metadata: {
+        messageSubtype: CALL_TICKET_UPDATES_SUBTYPE,
+        callId: callExternalId,
+        isAiGenerated: true,
+        contentFormat: 'markdown',
+        ticketUpdatesCount: proposals.length,
+        version: 1,
+        createdAt: new Date().toISOString(),
+      },
     });
     await repositories.conversations.incrementReplyCount(conversationId);
     logger.info(`[${callExternalId}] ticket_updates_card_created`, { message_id: message.messageId, call_id: call.id });
-    return updates.length;
+    return proposals.length;
   }
 
   // ── approve / ignore ──────────────────────────────────────────────────────
@@ -583,20 +653,51 @@ export class CallTicketUpdateService {
     if (!(await callShareService.isCallAudience(call, userId))) {
       return { error: { status: 403 as const, error: 'Not part of this call' } };
     }
-    const head = await repositories.messages.findHeadMessageByCallId(callExternalId);
-    if (!head) return { error: { status: 404 as const, error: 'Call thread not found' } };
-    const message = await repositories.messages.findTicketUpdatesByCallId(head.conversationId, callExternalId);
+    // The call row records its thread; the metadata scan is only for older rows.
+    const conversationId =
+      callThreadRefs(call.metadata).conversationId ??
+      (await repositories.messages.findHeadMessageByCallId(callExternalId))?.conversationId;
+    if (!conversationId) return { error: { status: 404 as const, error: 'Call thread not found' } };
+    const message = await repositories.messages.findTicketUpdatesByCallId(conversationId, callExternalId);
     if (!message) return { error: { status: 404 as const, error: 'No ticket updates for this call' } };
     return { call, message };
   }
 
+  private findTicket(ticketId: string) {
+    // Workspace scope, not the caller's ACL: the access decision is made
+    // explicitly in loadTicketForUser so "no such ticket" and "no access" stay
+    // distinguishable. Awaited inside the scope on purpose: a Prisma query only
+    // runs when it is awaited, and awaiting it outside would run it back under
+    // the caller's ACL.
+    return withWorkspaceScope(async () => {
+      return await db.ticket.findUnique({
+        where: { id: ticketId },
+        include: { board: { select: { boardType: true } }, channel: { select: { visibility: true } } },
+      });
+    });
+  }
+
   /**
-   * The card is a bot message, and the messages ACL only lets a user edit their
-   * own messages. The caller has already checked the user is in the call's
-   * audience, so the rewrite itself runs at workspace scope.
+   * The ticket, if this user may read it. Mirrors the tickets read rule
+   * (`accessibleTicketWhere`): a ticket in a public channel is readable by every
+   * member of the workspace, a ticket in a private channel only by that
+   * channel's members, and guests only through channels they were added to.
    */
-  private rewriteCard(messageId: string, content: string): Promise<unknown> {
-    return withWorkspaceScope(() => repositories.messages.update(messageId, { content, edited: true }));
+  private async loadTicketForUser(
+    ticketId: string,
+    userId: string,
+    workspaceId: string,
+    role: string | undefined,
+  ): Promise<{ error: { status: 403 | 404; error: string } } | { ticket: AccessibleTicket }> {
+    const ticket = await this.findTicket(ticketId);
+    if (!ticket || ticket.workspaceId !== workspaceId) {
+      return { error: { status: 404 as const, error: 'Ticket not found' } };
+    }
+    const isPublic = ticket.channel?.visibility === ChannelVisibility.PUBLIC && role !== GUEST_ROLE;
+    if (!isPublic && !(await repositories.channelParticipants.isParticipant(ticket.channelId, userId))) {
+      return { error: { status: 403 as const, error: "You don't have access to this ticket" } };
+    }
+    return { ticket };
   }
 
   async apply(params: {
@@ -604,6 +705,7 @@ export class CallTicketUpdateService {
     updateId: string;
     userId: string;
     workspaceId: string;
+    role?: string;
     postComment: boolean;
     changeStatus: boolean;
     message?: string;
@@ -620,26 +722,29 @@ export class CallTicketUpdateService {
     const update = parseTicketUpdatesContent(message.content).updates.find((u) => u.updateId === updateId);
     if (!update) return { ok: false, status: 409, error: 'This update was already handled' };
 
-    const ticket = await db.ticket.findUnique({ where: { id: update.ticketId }, include: { board: { select: { boardType: true } } } });
-    if (!ticket || ticket.workspaceId !== workspaceId) return { ok: false, status: 404, error: 'Ticket not found' };
-    if (!(await repositories.channelParticipants.isParticipant(ticket.channelId, userId))) {
-      return { ok: false, status: 403, error: "You are not a member of the ticket's channel" };
-    }
+    const access = await this.loadTicketForUser(update.ticketId, userId, workspaceId, params.role);
+    if ('error' in access) return { ok: false, ...access.error };
+    const { ticket } = access;
+    const boardType = ticket.board?.boardType ?? BoardType.DEFAULT;
 
     // Resolve the target stage before touching anything, so a bad choice fails cleanly.
-    let targetStage: { name: string; defaultTicketStatusV2: string } | null = null;
+    let targetStage: BoardStage | null = null;
     if (changeStatus) {
-      const boardType = ticket.board?.boardType ?? BoardType.DEFAULT;
-      const stageName = params.stageName?.trim() || update.proposedStageName;
-      const stages = await db.stage.findMany({
-        where: { boardId: ticket.boardId },
-        orderBy: { sequenceNumber: 'asc' },
-        select: { name: true, defaultTicketStatusV2: true },
-      });
-      const options = stages.map((s) => s.name).filter((n) => n !== ticket.stageName);
       if (boardType === BoardType.FLOW) {
         return { ok: false, status: 400, error: 'Tickets on a flow board move through their board transitions; post the comment only', stageOptions: [] };
       }
+      const stages = await db.stage.findMany({
+        where: { boardId: ticket.boardId },
+        orderBy: { sequenceNumber: 'asc' },
+        select: { name: true, sequenceNumber: true, defaultTicketStatusV2: true },
+      });
+      const options = stages.map((s) => s.name).filter((n) => n !== ticket.stageName);
+      // A restricted row carries no stage on the card, so it is resolved here from
+      // the status that was spoken.
+      const stageName =
+        params.stageName?.trim() ||
+        update.proposedStageName ||
+        (update.proposedStatusV2 ? resolveStageForStatus(stages, ticket.stageName, update.proposedStatusV2) : null);
       if (!stageName) {
         return { ok: false, status: 400, error: 'Choose the stage to move the ticket to', stageOptions: options };
       }
@@ -647,119 +752,253 @@ export class CallTicketUpdateService {
       if (!targetStage) {
         return { ok: false, status: 400, error: `"${stageName}" is not a stage on this board`, stageOptions: options };
       }
-      if (targetStage.name === ticket.stageName) {
-        return { ok: false, status: 400, error: `Ticket is already in "${ticket.stageName}"`, stageOptions: options };
-      }
     }
 
-    // 1. Comment on the ticket thread, as the user who approved it.
-    let commentMessageId: string | null = null;
-    if (postComment) {
-      const body = (params.message?.trim() || update.update).trim();
-      const when = update.timestampSeconds !== null ? ` at ${formatSeconds(update.timestampSeconds)}` : '';
-      const callLabel = call.title
-        ? `the call "${call.title}"`
-        : `the call on ${call.startedAt.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}`;
-      const source = `_From ${callLabel}${when}${update.speaker ? `, said by ${update.speaker}` : ''}._`;
-      const result = await conversationService.addMessageToConversation({
-        conversationId: ticket.conversationId,
-        userId,
-        content: `${body}\n\n${source}`,
-        msgType: MessageType.USER,
-        metadata: {
-          contentFormat: 'markdown',
-          source: 'call_ticket_update',
-          callId: callExternalId,
-          updateId,
-          ...(update.timestampSeconds !== null ? { timestampSeconds: update.timestampSeconds } : {}),
-        },
-      });
-      commentMessageId = result.message.messageId;
-      // Notifications, mentions and unread counts live in the side-effect
-      // handler; conversationService does not fire it. Best-effort, as in the
-      // automation reply step.
-      try {
-        const ctx = await buildUserQueryContext(userId);
-        void new MessagesSideEffectHandler(ctx)
-          .onInsert({ entityId: commentMessageId, entityType: 'messages', operation: 'insert' })
-          .catch((err) => logger.error('[callTicketUpdate] comment side-effect failed', err));
-      } catch (err) {
-        logger.error('[callTicketUpdate] comment side-effect context failed', err);
-      }
-    }
-
-    // 2. Move the stage. Always a stage move (never a bare statusV2 write): the
-    //    stage carries the status, the activity row and the thread system message.
-    let newStageName: string | null = null;
-    let newStatusV2: string | null = null;
-    if (changeStatus && targetStage) {
-      const boardType = ticket.board?.boardType ?? BoardType.DEFAULT;
-      if (boardType === BoardType.NON_LINEAR) {
-        const result = await ticketStageTransitionService.transitionTicket(ticket.id, userId, targetStage.name, {});
-        if (!result.success) {
-          return { ok: false, status: 400, error: result.message ?? 'Stage transition not allowed' };
-        }
-        void db.ticketActivity
-          .create({
-            data: {
-              ticketId: ticket.id,
-              updatedBy: userId,
-              workspaceId,
-              activityType: ActivityType.STAGE_NAME,
-              value: { field: 'stageName', oldValue: ticket.stageName, newValue: targetStage.name, source: ActivitySource.INTERNAL },
-            },
-          })
-          .catch((err) => logger.warn(`[callTicketUpdate] stage audit write failed ticketId=${ticket.id}:`, err));
-      } else {
-        await repositories.tickets.updateTicketStage(ticket.id, targetStage.name, userId, ActivitySource.INTERNAL);
-      }
-      newStageName = targetStage.name;
-      newStatusV2 = targetStage.defaultTicketStatusV2;
-    }
-
-    // 3. Record it on the card.
-    const applied: AppliedTicketUpdate = {
-      updateId,
-      ticketId: ticket.id,
-      xyneId: ticket.xyneId,
-      title: ticket.title,
-      ticketConversationId: ticket.conversationId,
-      appliedBy: userId,
-      appliedAt: new Date().toISOString(),
-      commentMessageId,
-      newStageName,
-      newStatusV2,
-    };
-    const moved = moveTicketUpdate(message.content, updateId, { applied });
-    if (!moved) return { ok: false, status: 409, error: 'This update was already handled' };
-    await this.rewriteCard(message.messageId, moved.content);
-    getCallTicketUpdatesAppliedTotal().add(1, { workspaceId });
-    logger.info(`[${callExternalId}] ticket_update_applied`, {
-      update_id: updateId, ticket: ticket.xyneId, comment: !!commentMessageId, stage: newStageName, user_id: userId,
+    // Claim the row before any side effect. Two approvals of the same row race
+    // here, under the card's row lock, and only one gets past. A live claim
+    // blocks its own author too, so a double submit cannot apply twice; a claim
+    // is released on failure and otherwise expires.
+    const claim = await mutateTicketUpdatesCardTx(message.messageId, (doc) => {
+      const row = doc.updates.find((u) => u.updateId === updateId);
+      if (!row) return { result: 'handled' as const };
+      if (isTicketUpdateClaimFresh(row.claim)) return { result: 'claimed' as const };
+      row.claim = { by: userId, at: new Date().toISOString() };
+      return { doc, result: 'ok' as const };
     });
-    return { ok: true, content: moved.content, applied };
+    if (!claim.found || claim.result === 'handled') {
+      return { ok: false, status: 409, error: 'This update was already handled' };
+    }
+    if (claim.result === 'claimed') {
+      return { ok: false, status: 409, error: 'This update is already being applied' };
+    }
+
+    const releaseClaim = () =>
+      mutateTicketUpdatesCardTx(message.messageId, (doc) => {
+        const row = doc.updates.find((u) => u.updateId === updateId);
+        if (!row || row.claim?.by !== userId) return { result: null };
+        row.claim = null;
+        return { doc, result: null };
+      }).catch((error) => logger.error(`[${callExternalId}] ticket_update_claim_release_failed`, { update_id: updateId, error }));
+
+    try {
+      // 1. Move the stage first: it is the step that can be refused (a form or an
+      //    approval on the board), and refusing before the comment exists means a
+      //    retry cannot post the comment twice. Always a stage move, never a bare
+      //    statusV2 write: the stage carries the status, the activity row and the
+      //    thread's system message.
+      let newStageName: string | null = null;
+      let newStatusV2: string | null = null;
+      let stagePendingApproval: string | null = null;
+      if (targetStage && targetStage.name !== ticket.stageName) {
+        const moved = await this.moveStage(ticket, boardType, targetStage, userId, workspaceId);
+        if (moved.outcome === 'refused') {
+          await releaseClaim();
+          return { ok: false, status: 400, error: moved.error };
+        }
+        if (moved.outcome === 'pending-approval') {
+          stagePendingApproval = targetStage.name;
+        } else {
+          newStageName = targetStage.name;
+          newStatusV2 = targetStage.defaultTicketStatusV2;
+        }
+      }
+
+      // 2. Comment on the ticket thread, as the user who approved it.
+      const commentMessageId = postComment
+        ? await this.postCommentOnce({ call, callExternalId, update, ticket, userId, text: params.message })
+        : null;
+
+      // 3. Record it on the card, against the card as it is now.
+      const applied: AppliedTicketUpdate = {
+        updateId,
+        ticketId: ticket.id,
+        restricted: update.restricted,
+        xyneId: ticket.xyneId,
+        title: ticket.title,
+        ticketConversationId: ticket.conversationId,
+        ticketChannelId: ticket.channelId,
+        appliedBy: userId,
+        appliedAt: new Date().toISOString(),
+        commentMessageId,
+        newStageName,
+        newStatusV2,
+        stagePendingApproval,
+      };
+      const finalised = await mutateTicketUpdatesCardTx(message.messageId, (doc) => ({
+        doc: {
+          updates: doc.updates.filter((u) => u.updateId !== updateId),
+          applied: [...doc.applied.filter((a) => a.updateId !== updateId), applied],
+          ignored: doc.ignored,
+        },
+        result: null,
+      }));
+      if (!finalised.found) return { ok: false, status: 404, error: 'No ticket updates for this call' };
+
+      getCallTicketUpdatesAppliedTotal().add(1, { workspaceId });
+      logger.info(`[${callExternalId}] ticket_update_applied`, {
+        update_id: updateId,
+        ticket: ticket.xyneId,
+        comment: !!commentMessageId,
+        stage: newStageName,
+        stage_pending_approval: stagePendingApproval,
+        user_id: userId,
+      });
+      return { ok: true, content: finalised.content, applied };
+    } catch (error) {
+      await releaseClaim();
+      throw error;
+    }
   }
 
-  async ignore(params: { callExternalId: string; updateId: string; userId: string; workspaceId: string }): Promise<IgnoreTicketUpdateResult> {
+  private async moveStage(
+    ticket: AccessibleTicket,
+    boardType: string,
+    targetStage: BoardStage,
+    userId: string,
+    workspaceId: string,
+  ): Promise<{ outcome: 'moved' | 'pending-approval' } | { outcome: 'refused'; error: string }> {
+    if (boardType !== BoardType.NON_LINEAR) {
+      try {
+        await repositories.tickets.updateTicketStage(ticket.id, targetStage.name, userId, ActivitySource.INTERNAL);
+        return { outcome: 'moved' };
+      } catch (error) {
+        logger.error('[callTicketUpdate] stage move failed', { ticket_id: ticket.id, stage: targetStage.name, error });
+        return { outcome: 'refused', error: `Could not move the ticket to "${targetStage.name}"` };
+      }
+    }
+
+    const result = await ticketStageTransitionService.transitionTicket(ticket.id, userId, targetStage.name, {});
+    // The board asked an approver to confirm the move and recorded the request:
+    // that is done from the card's side, not an error to retry.
+    if (!result.success && result.requiresApproval) return { outcome: 'pending-approval' };
+    if (!result.success) {
+      return {
+        outcome: 'refused',
+        error: `${result.message ?? 'Stage transition not allowed'}. Move it from the board, or approve with the comment only.`,
+      };
+    }
+    void db.ticketActivity
+      .create({
+        data: {
+          ticketId: ticket.id,
+          updatedBy: userId,
+          workspaceId,
+          activityType: ActivityType.STAGE_NAME,
+          value: { field: 'stageName', oldValue: ticket.stageName, newValue: targetStage.name, source: ActivitySource.INTERNAL },
+        },
+      })
+      .catch((err) => logger.warn(`[callTicketUpdate] stage audit write failed ticketId=${ticket.id}:`, err));
+    return { outcome: 'moved' };
+  }
+
+  /**
+   * Post the update on the ticket thread, unless this same card row already
+   * produced a comment (an earlier attempt that failed after posting). The
+   * comment carries the row's `updateId`, which is what makes the retry safe.
+   */
+  private async postCommentOnce(params: {
+    call: Call;
+    callExternalId: string;
+    update: TicketUpdateProposal;
+    ticket: AccessibleTicket;
+    userId: string;
+    text: string | undefined;
+  }): Promise<string> {
+    const { call, callExternalId, update, ticket, userId, text } = params;
+    const existing = await db.message.findFirst({
+      where: {
+        conversationId: ticket.conversationId,
+        AND: [
+          { metadata: { path: ['source'], equals: 'call_ticket_update' } },
+          { metadata: { path: ['updateId'], equals: update.updateId } },
+        ],
+      },
+      select: { messageId: true },
+    });
+    if (existing) return existing.messageId;
+
+    const body = (text?.trim() || update.update).trim();
+    const when = update.timestampSeconds !== null ? ` at ${formatSeconds(update.timestampSeconds)}` : '';
+    const callLabel = call.title
+      ? `the call "${call.title}"`
+      : `the call on ${call.startedAt.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}`;
+    const source = `_From ${callLabel}${when}${update.speaker ? `, said by ${update.speaker}` : ''}._`;
+    const result = await conversationService.addMessageToConversation({
+      conversationId: ticket.conversationId,
+      userId,
+      content: `${body}\n\n${source}`,
+      msgType: MessageType.USER,
+      metadata: {
+        contentFormat: 'markdown',
+        source: 'call_ticket_update',
+        callId: callExternalId,
+        updateId: update.updateId,
+        ...(update.timestampSeconds !== null ? { timestampSeconds: update.timestampSeconds } : {}),
+      },
+    });
+    const commentMessageId = result.message.messageId;
+    // Notifications, mentions and unread counts live in the side-effect handler;
+    // conversationService does not fire it. Best-effort, as in the automation
+    // reply step.
+    try {
+      const ctx = await buildUserQueryContext(userId);
+      void new MessagesSideEffectHandler(ctx)
+        .onInsert({ entityId: commentMessageId, entityType: 'messages', operation: 'insert' })
+        .catch((err) => logger.error('[callTicketUpdate] comment side-effect failed', err));
+    } catch (err) {
+      logger.error('[callTicketUpdate] comment side-effect context failed', err);
+    }
+    return commentMessageId;
+  }
+
+  async ignore(params: {
+    callExternalId: string;
+    updateId: string;
+    userId: string;
+    workspaceId: string;
+    role?: string;
+  }): Promise<IgnoreTicketUpdateResult> {
     const { callExternalId, updateId, userId, workspaceId } = params;
     const loaded = await this.loadCard(callExternalId, userId, workspaceId);
     if ('error' in loaded) return { ok: false, ...loaded.error };
     const { message } = loaded;
+
     const update = parseTicketUpdatesContent(message.content).updates.find((u) => u.updateId === updateId);
     if (!update) return { ok: false, status: 409, error: 'This update was already handled' };
+    const access = await this.loadTicketForUser(update.ticketId, userId, workspaceId, params.role);
+    if ('error' in access) return { ok: false, ...access.error };
+    const { ticket } = access;
+
     const ignored: IgnoredTicketUpdate = {
       updateId,
-      ticketId: update.ticketId,
-      xyneId: update.xyneId,
-      title: update.title,
+      ticketId: ticket.id,
+      restricted: update.restricted,
+      xyneId: ticket.xyneId,
+      title: ticket.title,
       ignoredBy: userId,
       ignoredAt: new Date().toISOString(),
     };
-    const moved = moveTicketUpdate(message.content, updateId, { ignored });
-    if (!moved) return { ok: false, status: 409, error: 'This update was already handled' };
-    await this.rewriteCard(message.messageId, moved.content);
-    logger.info(`[${callExternalId}] ticket_update_ignored`, { update_id: updateId, ticket: update.xyneId, user_id: userId });
-    return { ok: true, content: moved.content, ignored };
+    const written = await mutateTicketUpdatesCardTx(message.messageId, (doc) => {
+      const row = doc.updates.find((u) => u.updateId === updateId);
+      if (!row) return { result: 'handled' as const };
+      if (isTicketUpdateClaimFresh(row.claim)) return { result: 'claimed' as const };
+      return {
+        doc: {
+          updates: doc.updates.filter((u) => u.updateId !== updateId),
+          applied: doc.applied,
+          ignored: [...doc.ignored, ignored],
+        },
+        result: 'ok' as const,
+      };
+    });
+    if (!written.found || written.result === 'handled') {
+      return { ok: false, status: 409, error: 'This update was already handled' };
+    }
+    if (written.result === 'claimed') {
+      return { ok: false, status: 409, error: 'This update is already being applied' };
+    }
+    logger.info(`[${callExternalId}] ticket_update_ignored`, { update_id: updateId, ticket: ticket.xyneId, user_id: userId });
+    return { ok: true, content: written.content, ignored };
   }
 }
 

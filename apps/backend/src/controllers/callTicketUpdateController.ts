@@ -31,7 +31,14 @@ export class CallTicketUpdateController {
       return;
     }
     try {
-      const result = await callTicketUpdateService.apply({ callExternalId: callId, updateId, userId, workspaceId, ...parsed.data });
+      const result = await callTicketUpdateService.apply({
+        callExternalId: callId,
+        updateId,
+        userId,
+        workspaceId,
+        role: req.user?.role,
+        ...parsed.data,
+      });
       if (!result.ok) {
         res.status(result.status).json({ success: false, error: result.error, ...(result.stageOptions ? { stageOptions: result.stageOptions } : {}) });
         return;
@@ -53,7 +60,13 @@ export class CallTicketUpdateController {
       return;
     }
     try {
-      const result = await callTicketUpdateService.ignore({ callExternalId: callId, updateId, userId, workspaceId });
+      const result = await callTicketUpdateService.ignore({
+        callExternalId: callId,
+        updateId,
+        userId,
+        workspaceId,
+        role: req.user?.role,
+      });
       if (!result.ok) {
         res.status(result.status).json({ success: false, error: result.error });
         return;

@@ -189,6 +189,36 @@ export interface CallSharingResult {
   shares?: Array<{ id: string; target: CallShareTarget; access: string }>;
 }
 
+/** What approving one ticket update actually did. */
+export interface AppliedTicketUpdateResult {
+  commentPosted: boolean;
+  newStageName: string | null;
+  /** Stage the board will move the ticket to once an approver confirms. */
+  stagePendingApproval: string | null;
+}
+
+/**
+ * Approving a ticket update was refused. When the server could not settle on a
+ * stage itself, `stageOptions` lists the stages the user can choose from.
+ */
+export class TicketUpdateApplyError extends Error {
+  readonly stageOptions: string[];
+
+  constructor(message: string, stageOptions: string[] = []) {
+    super(message);
+    this.name = 'TicketUpdateApplyError';
+    this.stageOptions = stageOptions;
+  }
+}
+
+function extractStageOptions(error: unknown): string[] {
+  if (!(error instanceof AxiosError)) return [];
+  const data = error.response?.data as { stageOptions?: unknown } | undefined;
+  return Array.isArray(data?.stageOptions)
+    ? data.stageOptions.filter((s): s is string => typeof s === 'string')
+    : [];
+}
+
 function extractApiError(error: unknown, fallback: string): string {
   if (error instanceof AxiosError) {
     const data = error.response?.data as { error?: unknown } | undefined;
@@ -915,15 +945,27 @@ export class CallService {
     callId: string,
     updateId: string,
     body: { postComment: boolean; changeStatus: boolean; message?: string; stageName?: string },
-  ): Promise<{ content: string }> {
+  ): Promise<AppliedTicketUpdateResult> {
     try {
-      const response = await apiInstance.post<{ success: true; content: string }>(
-        `/calls/${callId}/ticket-updates/${updateId}/apply`,
-        body,
-      );
-      return { content: response.data.content };
+      const response = await apiInstance.post<{
+        success: true;
+        applied: {
+          commentMessageId: string | null;
+          newStageName: string | null;
+          stagePendingApproval: string | null;
+        };
+      }>(`/calls/${callId}/ticket-updates/${updateId}/apply`, body);
+      const { applied } = response.data;
+      return {
+        commentPosted: applied.commentMessageId !== null,
+        newStageName: applied.newStageName,
+        stagePendingApproval: applied.stagePendingApproval,
+      };
     } catch (error) {
-      throw new Error(extractApiError(error, 'Failed to apply the ticket update'));
+      throw new TicketUpdateApplyError(
+        extractApiError(error, 'Failed to apply the ticket update'),
+        extractStageOptions(error),
+      );
     }
   }
 

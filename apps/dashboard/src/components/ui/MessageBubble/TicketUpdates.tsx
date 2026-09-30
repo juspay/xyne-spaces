@@ -1,9 +1,17 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
+import { isTicketUpdateClaimFresh } from '@xyne/shared';
 import { logger, Event as LogEvent } from '../../../utils/logger';
-import { callService } from '../../../services/Call/callService';
+import {
+  callService,
+  TicketUpdateApplyError,
+  type AppliedTicketUpdateResult,
+} from '../../../services/Call/callService';
 import { globalClickTracker } from '../../../services/Analytics/globalClickTracker';
+import { useAuth } from '../../../hooks/useAuth';
+import { useQuery } from '../../../hooks/useQuery';
+import { queries } from '../../../zero/queries';
 import {
   formatTranscriptTimestamp,
   type AppliedTicketUpdate,
@@ -27,6 +35,29 @@ interface RowDraft {
   stageName: string;
 }
 
+/** What a row shows about its ticket, and whether this viewer may see it at all. */
+interface RowTicket {
+  state: 'ready' | 'loading' | 'locked';
+  xyneId: string;
+  title: string;
+  channelId: string;
+  conversationId: string;
+  stageName: string;
+}
+
+/** The identity a card entry may or may not carry (restricted rows carry none). */
+interface TicketRef {
+  restricted: boolean;
+  ticketId: string;
+  xyneId: string;
+  title: string;
+  ticketChannelId?: string;
+  ticketConversationId?: string;
+  currentStageName?: string;
+}
+
+const NO_ACCESS = "You don't have access to this ticket";
+
 const draftFor = (u: TicketUpdateProposal): RowDraft => ({
   text: u.update,
   postComment: true,
@@ -39,6 +70,10 @@ const draftFor = (u: TicketUpdateProposal): RowDraft => ({
  * Each row can be approved (posts the note on the ticket thread and/or moves the
  * ticket's stage, both as the signed-in user) or ignored. State lives in the
  * message content, so every participant sees the same card.
+ *
+ * A ticket from outside the call's channel arrives without its identity: the row
+ * is filled in from the viewer's own synced tickets, and stays locked for a
+ * viewer who cannot read that ticket.
  */
 export const TicketUpdates: React.FC<TicketUpdatesProps> = ({
   callId,
@@ -49,11 +84,71 @@ export const TicketUpdates: React.FC<TicketUpdatesProps> = ({
   ignored,
 }) => {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [drafts, setDrafts] = useState<Record<string, RowDraft>>({});
   const [busyId, setBusyId] = useState<string | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [showIgnored, setShowIgnored] = useState(false);
+  // Stages the server offered after refusing a move it could not resolve itself.
+  const [offeredStages, setOfferedStages] = useState<Record<string, string[]>>({});
+
+  const restrictedIds = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          [...updates, ...applied, ...ignored].filter(e => e.restricted).map(e => e.ticketId),
+        ),
+      ),
+    [updates, applied, ignored],
+  );
+  const [restrictedTickets, restrictedDetails] = useQuery(
+    queries.ticketsByIds({ ticketIds: restrictedIds }),
+    { enabled: restrictedIds.length > 0 },
+  );
+  const restrictedLoaded = restrictedIds.length === 0 || restrictedDetails.type === 'complete';
+  const restrictedById = useMemo(
+    () => new Map((restrictedTickets ?? []).map(t => [t.id, t])),
+    [restrictedTickets],
+  );
+
+  const ticketFor = (entry: TicketRef): RowTicket => {
+    if (!entry.restricted) {
+      return {
+        state: 'ready',
+        xyneId: entry.xyneId,
+        title: entry.title,
+        // Cards posted before the ticket's channel was recorded fall back to the call's.
+        channelId: entry.ticketChannelId || channelId,
+        conversationId: entry.ticketConversationId ?? '',
+        stageName: entry.currentStageName ?? '',
+      };
+    }
+    const ticket = restrictedById.get(entry.ticketId);
+    if (!ticket) {
+      return {
+        state: restrictedLoaded ? 'locked' : 'loading',
+        xyneId: '',
+        title: '',
+        channelId: '',
+        conversationId: '',
+        stageName: '',
+      };
+    }
+    return {
+      state: 'ready',
+      xyneId: ticket.xyneId ?? '',
+      title: ticket.title ?? '',
+      channelId: ticket.channelId ?? '',
+      conversationId: ticket.conversationId ?? '',
+      stageName: ticket.stageName ?? '',
+    };
+  };
+
+  const claimedByOther = (u: TicketUpdateProposal): boolean =>
+    isTicketUpdateClaimFresh(u.claim) && u.claim.by !== user?.id;
+  const actionable = updates.filter(u => ticketFor(u).state === 'ready' && !claimedByOther(u));
+  const lockedCount = updates.filter(u => ticketFor(u).state === 'locked').length;
 
   // Seed a draft per pending row; keep the user's edits across re-renders, and
   // drop selections for rows that were approved or ignored (possibly by someone else).
@@ -78,7 +173,7 @@ export const TicketUpdates: React.FC<TicketUpdatesProps> = ({
     });
   }, [updates.length, messageId, channelId, applied.length]);
 
-  const patch = (id: string, changes: Partial<RowDraft>) =>
+  const patch = (id: string, changes: Partial<RowDraft>): void =>
     setDrafts(prev => ({
       ...prev,
       [id]: {
@@ -87,59 +182,73 @@ export const TicketUpdates: React.FC<TicketUpdatesProps> = ({
       },
     }));
 
-  const openTicket = (ticketId: string, conversationId: string) => {
-    void navigate(`/chat/dir/${channelId}/${conversationId}/${ticketId}?selectedTab=details`, {
-      state: { trackSource: 'chat_message' },
-    });
+  const openTicket = (ticketId: string, ticket: RowTicket): void => {
+    void navigate(
+      `/chat/dir/${ticket.channelId}/${ticket.conversationId}/${ticketId}?selectedTab=details`,
+      { state: { trackSource: 'chat_message' } },
+    );
   };
 
-  /** Apply one row with its current draft. Returns an error message, or null on success. */
-  const applyOne = async (u: TicketUpdateProposal): Promise<string | null> => {
+  const stageOptionsFor = (u: TicketUpdateProposal): string[] =>
+    offeredStages[u.updateId] ?? u.stageOptions;
+
+  /** Apply one row with its current draft. */
+  const applyOne = async (
+    u: TicketUpdateProposal,
+  ): Promise<{ error: string } | { result: AppliedTicketUpdateResult }> => {
     const d = drafts[u.updateId] ?? draftFor(u);
-    if (!d.postComment && !d.changeStatus) return 'nothing selected to apply';
-    if (d.changeStatus && !d.stageName) return 'no stage chosen';
+    if (!d.postComment && !d.changeStatus) return { error: 'nothing selected to apply' };
+    // A restricted row has no stage list on the card: the server picks the stage
+    // from the status that was said, or answers with the stages to choose from.
+    if (d.changeStatus && !d.stageName && !u.restricted) return { error: 'no stage chosen' };
     try {
-      await callService.applyTicketUpdate(callId, u.updateId, {
+      const result = await callService.applyTicketUpdate(callId, u.updateId, {
         postComment: d.postComment,
         changeStatus: d.changeStatus,
         message: d.text,
-        ...(d.changeStatus ? { stageName: d.stageName } : {}),
+        ...(d.changeStatus && d.stageName ? { stageName: d.stageName } : {}),
       });
-      return null;
+      return { result };
     } catch (error) {
+      if (error instanceof TicketUpdateApplyError && error.stageOptions.length > 0) {
+        const options = error.stageOptions;
+        setOfferedStages(prev => ({ ...prev, [u.updateId]: options }));
+      }
       logger.error(LogEvent.FRONTEND_ERROR, {
         type: 'ticket_update_apply',
         message: String(error),
         error,
       });
-      return error instanceof Error ? error.message : 'failed to apply';
+      return { error: error instanceof Error ? error.message : 'failed to apply' };
     }
   };
 
-  const approve = async (u: TicketUpdateProposal) => {
+  const approve = async (u: TicketUpdateProposal): Promise<void> => {
+    const label = ticketFor(u).xyneId || 'Ticket';
     setBusyId(u.updateId);
     try {
-      const error = await applyOne(u);
-      if (error) {
-        toast.error(`${u.xyneId}: ${error}`);
+      const outcome = await applyOne(u);
+      if ('error' in outcome) {
+        toast.error(`${label}: ${outcome.error}`);
         return;
       }
-      const d = drafts[u.updateId] ?? draftFor(u);
-      toast.success(
-        d.changeStatus
-          ? `${u.xyneId}: comment posted, moved to ${d.stageName}`
-          : `${u.xyneId}: comment posted`,
-      );
+      const { commentPosted, newStageName, stagePendingApproval } = outcome.result;
+      const parts = [
+        commentPosted ? 'comment posted' : '',
+        newStageName ? `moved to ${newStageName}` : '',
+        stagePendingApproval ? `move to ${stagePendingApproval} sent for approval` : '',
+      ].filter(Boolean);
+      toast.success(`${label}: ${parts.join(', ') || 'applied'}`);
     } finally {
       setBusyId(null);
     }
   };
 
   /**
-   * Approve several rows one after another: every approval rewrites the card
-   * message, so running them in parallel would lose updates.
+   * Approve several rows one after another, so the toast can report them in
+   * order and a slow ticket does not hold the others back visibly out of order.
    */
-  const approveMany = async (rows: TicketUpdateProposal[]) => {
+  const approveMany = async (rows: TicketUpdateProposal[]): Promise<void> => {
     if (rows.length === 0) return;
     setBulkBusy(true);
     const failures: string[] = [];
@@ -147,9 +256,12 @@ export const TicketUpdates: React.FC<TicketUpdatesProps> = ({
     try {
       for (const u of rows) {
         setBusyId(u.updateId);
-        const error = await applyOne(u);
-        if (error) failures.push(`${u.xyneId}: ${error}`);
-        else done += 1;
+        const outcome = await applyOne(u);
+        if ('error' in outcome) {
+          failures.push(`${ticketFor(u).xyneId || 'Ticket'}: ${outcome.error}`);
+        } else {
+          done += 1;
+        }
       }
     } finally {
       setBusyId(null);
@@ -166,12 +278,22 @@ export const TicketUpdates: React.FC<TicketUpdatesProps> = ({
     });
   };
 
-  const toggleSelected = (id: string) =>
-    setSelectedIds(prev => (prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]));
-  const allSelected = updates.length > 0 && selectedIds.length === updates.length;
-  const toggleSelectAll = () => setSelectedIds(allSelected ? [] : updates.map(u => u.updateId));
+  const approveAll = (): void => {
+    if (lockedCount > 0) {
+      toast.info(
+        `Skipping ${lockedCount} private ticket${lockedCount === 1 ? '' : 's'} you don't have access to`,
+      );
+    }
+    void approveMany(actionable);
+  };
 
-  const ignore = async (u: TicketUpdateProposal) => {
+  const toggleSelected = (id: string): void =>
+    setSelectedIds(prev => (prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]));
+  const allSelected = actionable.length > 0 && selectedIds.length === actionable.length;
+  const toggleSelectAll = (): void =>
+    setSelectedIds(allSelected ? [] : actionable.map(u => u.updateId));
+
+  const ignore = async (u: TicketUpdateProposal): Promise<void> => {
     setBusyId(u.updateId);
     try {
       await callService.ignoreTicketUpdate(callId, u.updateId);
@@ -189,29 +311,43 @@ export const TicketUpdates: React.FC<TicketUpdatesProps> = ({
 
   if (updates.length === 0 && applied.length === 0 && ignored.length === 0) return null;
 
+  const privateLabel = (state: RowTicket['state']): string =>
+    state === 'loading' ? 'Loading ticket…' : 'Private ticket';
+
   return (
     <div className='mt-3 pl-2 -ml-8 space-y-3'>
-      {applied.map(a => (
-        <div key={a.updateId} className='text-sm'>
-          <button
-            onClick={() => openTicket(a.ticketId, a.ticketConversationId)}
-            data-track-category='MESSAGE'
-            data-track-name='OPEN_TICKET_FROM_UPDATE'
-            className='text-left hover:underline focus:outline-none bg-transparent border-none p-0'
-          >
-            <span className='font-semibold text-primary'>{a.xyneId}</span>
-            <span className='mx-1.5 text-muted-foreground'>•</span>
-            <span className='text-foreground'>{a.title}</span>
-          </button>
-          <span className='ml-2 text-xs text-muted-foreground'>
-            {a.commentMessageId ? 'commented' : ''}
-            {a.commentMessageId && a.newStageName ? ' · ' : ''}
-            {a.newStageName ? `moved to ${a.newStageName}` : ''}
-          </span>
-        </div>
-      ))}
+      {applied.map(a => {
+        const ticket = ticketFor(a);
+        const outcome = [
+          a.commentMessageId ? 'commented' : '',
+          a.newStageName ? `moved to ${a.newStageName}` : '',
+          a.stagePendingApproval ? `move to ${a.stagePendingApproval} awaiting approval` : '',
+          a.restricted && !a.commentMessageId ? 'applied' : '',
+        ]
+          .filter(Boolean)
+          .join(' · ');
+        return (
+          <div key={a.updateId} className='text-sm'>
+            {ticket.state === 'ready' ? (
+              <button
+                onClick={() => openTicket(a.ticketId, ticket)}
+                data-track-category='MESSAGE'
+                data-track-name='OPEN_TICKET_FROM_UPDATE'
+                className='text-left hover:underline focus:outline-none bg-transparent border-none p-0'
+              >
+                <span className='font-semibold text-primary'>{ticket.xyneId}</span>
+                <span className='mx-1.5 text-muted-foreground'>•</span>
+                <span className='text-foreground'>{ticket.title}</span>
+              </button>
+            ) : (
+              <span className='text-muted-foreground'>{privateLabel(ticket.state)}</span>
+            )}
+            <span className='ml-2 text-xs text-muted-foreground'>{outcome}</span>
+          </div>
+        );
+      })}
 
-      {updates.length > 1 && (
+      {actionable.length > 1 && (
         <div className='flex flex-wrap items-center gap-x-4 gap-y-1 text-sm'>
           <label className='flex items-center gap-1.5 cursor-pointer'>
             <input
@@ -224,7 +360,9 @@ export const TicketUpdates: React.FC<TicketUpdatesProps> = ({
             Select all
           </label>
           <button
-            onClick={() => void approveMany(updates.filter(u => selectedIds.includes(u.updateId)))}
+            onClick={() =>
+              void approveMany(actionable.filter(u => selectedIds.includes(u.updateId)))
+            }
             disabled={bulkBusy || selectedIds.length === 0}
             data-track-category='MESSAGE'
             data-track-name='APPROVE_SELECTED_TICKET_UPDATES'
@@ -233,22 +371,30 @@ export const TicketUpdates: React.FC<TicketUpdatesProps> = ({
             Approve selected ({selectedIds.length})
           </button>
           <button
-            onClick={() => void approveMany(updates)}
+            onClick={approveAll}
             disabled={bulkBusy}
             data-track-category='MESSAGE'
             data-track-name='APPROVE_ALL_TICKET_UPDATES'
             className='font-medium text-primary hover:underline disabled:opacity-50 bg-transparent border-none p-0'
           >
-            {bulkBusy ? 'Applying…' : `Approve all (${updates.length})`}
+            {bulkBusy ? 'Applying…' : `Approve all (${actionable.length})`}
           </button>
         </div>
       )}
 
       {updates.map(u => {
         const d = drafts[u.updateId] ?? draftFor(u);
-        const busy = bulkBusy || busyId === u.updateId;
+        const ticket = ticketFor(u);
+        const locked = ticket.state !== 'ready';
+        const inFlightElsewhere = claimedByOther(u);
+        const busy = bulkBusy || busyId === u.updateId || inFlightElsewhere;
+        const disabled = busy || locked;
         const selected = selectedIds.includes(u.updateId);
-        const canChangeStatus = u.boardType !== 'FLOW' && u.stageOptions.length > 0;
+        const stageOptions = stageOptionsFor(u);
+        const canChangeStatus = u.restricted
+          ? u.proposedStatusV2 !== null || stageOptions.length > 0
+          : u.boardType !== 'FLOW' && stageOptions.length > 0;
+        const blockedReason = ticket.state === 'locked' ? NO_ACCESS : undefined;
         return (
           <div
             key={u.updateId}
@@ -258,35 +404,44 @@ export const TicketUpdates: React.FC<TicketUpdatesProps> = ({
               <input
                 type='checkbox'
                 checked={selected}
-                disabled={bulkBusy}
+                disabled={bulkBusy || locked || inFlightElsewhere}
                 onChange={() => toggleSelected(u.updateId)}
-                aria-label={`Select ${u.xyneId}`}
+                aria-label={`Select ${ticket.xyneId || 'ticket update'}`}
+                title={blockedReason}
                 data-track-category='MESSAGE'
                 data-track-name='TOGGLE_TICKET_UPDATE'
                 className='h-4 w-4 rounded border-border self-center'
               />
-              <button
-                onClick={() => openTicket(u.ticketId, u.ticketConversationId)}
-                data-track-category='MESSAGE'
-                data-track-name='OPEN_TICKET_FROM_UPDATE'
-                className='text-left hover:underline focus:outline-none bg-transparent border-none p-0'
-              >
-                <span className='font-semibold text-primary'>{u.xyneId}</span>
-                <span className='mx-1.5 text-muted-foreground'>•</span>
-                <span className='text-foreground'>{u.title}</span>
-              </button>
+              {locked ? (
+                <span className='text-muted-foreground'>
+                  {privateLabel(ticket.state)}
+                  {ticket.state === 'locked' ? ` · ${NO_ACCESS.toLowerCase()}` : ''}
+                </span>
+              ) : (
+                <button
+                  onClick={() => openTicket(u.ticketId, ticket)}
+                  data-track-category='MESSAGE'
+                  data-track-name='OPEN_TICKET_FROM_UPDATE'
+                  className='text-left hover:underline focus:outline-none bg-transparent border-none p-0'
+                >
+                  <span className='font-semibold text-primary'>{ticket.xyneId}</span>
+                  <span className='mx-1.5 text-muted-foreground'>•</span>
+                  <span className='text-foreground'>{ticket.title}</span>
+                </button>
+              )}
               <span className='text-xs text-muted-foreground'>
-                {u.currentStageName}
+                {ticket.stageName}
                 {u.matchedBy !== 'xyne-id'
                   ? ` · matched by ${u.matchedBy === 'title' ? 'topic' : 'number only'}`
                   : ''}
                 {u.confidence < 0.7 ? ' · low confidence' : ''}
+                {inFlightElsewhere ? ' · being applied…' : ''}
               </span>
             </div>
 
             <textarea
               value={d.text}
-              disabled={busy}
+              disabled={disabled}
               rows={2}
               onChange={e => patch(u.updateId, { text: e.target.value })}
               className='w-full rounded border border-border bg-background px-2 py-1 text-sm'
@@ -307,7 +462,7 @@ export const TicketUpdates: React.FC<TicketUpdatesProps> = ({
                 <input
                   type='checkbox'
                   checked={d.postComment}
-                  disabled={busy}
+                  disabled={disabled}
                   onChange={e => patch(u.updateId, { postComment: e.target.checked })}
                   className='h-4 w-4 rounded border-border'
                 />
@@ -318,24 +473,26 @@ export const TicketUpdates: React.FC<TicketUpdatesProps> = ({
                   <input
                     type='checkbox'
                     checked={d.changeStatus}
-                    disabled={busy}
+                    disabled={disabled}
                     onChange={e => patch(u.updateId, { changeStatus: e.target.checked })}
                     className='h-4 w-4 rounded border-border'
                   />
-                  Move to
-                  <select
-                    value={d.stageName}
-                    disabled={busy || !d.changeStatus}
-                    onChange={e => patch(u.updateId, { stageName: e.target.value })}
-                    className='rounded border border-border bg-background px-1 py-0.5 text-sm'
-                  >
-                    <option value=''>choose stage…</option>
-                    {u.stageOptions.map(s => (
-                      <option key={s} value={s}>
-                        {s}
-                      </option>
-                    ))}
-                  </select>
+                  {stageOptions.length > 0 ? 'Move to' : 'Change status'}
+                  {stageOptions.length > 0 && (
+                    <select
+                      value={d.stageName}
+                      disabled={disabled || !d.changeStatus}
+                      onChange={e => patch(u.updateId, { stageName: e.target.value })}
+                      className='rounded border border-border bg-background px-1 py-0.5 text-sm'
+                    >
+                      <option value=''>choose stage…</option>
+                      {stageOptions.map(s => (
+                        <option key={s} value={s}>
+                          {s}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                   {u.proposedStatusV2 ? (
                     <span className='text-xs text-muted-foreground'>
                       (said: {u.proposedStatusV2.toLowerCase()})
@@ -348,16 +505,18 @@ export const TicketUpdates: React.FC<TicketUpdatesProps> = ({
             <div className='flex items-center gap-3'>
               <button
                 onClick={() => void approve(u)}
-                disabled={busy}
+                disabled={disabled}
+                title={blockedReason}
                 data-track-category='MESSAGE'
                 data-track-name='APPROVE_TICKET_UPDATE'
                 className='text-sm font-medium text-primary hover:underline disabled:opacity-50 bg-transparent border-none p-0'
               >
-                {busy ? 'Applying…' : 'Approve'}
+                {busyId === u.updateId ? 'Applying…' : 'Approve'}
               </button>
               <button
                 onClick={() => void ignore(u)}
-                disabled={busy}
+                disabled={disabled}
+                title={blockedReason}
                 data-track-category='MESSAGE'
                 data-track-name='IGNORE_TICKET_UPDATE'
                 className='text-sm text-muted-foreground hover:underline disabled:opacity-50 bg-transparent border-none p-0'
@@ -379,11 +538,20 @@ export const TicketUpdates: React.FC<TicketUpdatesProps> = ({
           </button>
           {showIgnored && (
             <ul className='mt-1 space-y-0.5'>
-              {ignored.map(i => (
-                <li key={i.updateId}>
-                  <span className='font-medium'>{i.xyneId}</span> · {i.title}
-                </li>
-              ))}
+              {ignored.map(i => {
+                const ticket = ticketFor(i);
+                return (
+                  <li key={i.updateId}>
+                    {ticket.state === 'ready' ? (
+                      <>
+                        <span className='font-medium'>{ticket.xyneId}</span> · {ticket.title}
+                      </>
+                    ) : (
+                      privateLabel(ticket.state)
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>
