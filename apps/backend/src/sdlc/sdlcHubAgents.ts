@@ -19,19 +19,11 @@ export async function promoteRegisteredAgent(
     where: { relationType: SDLC_AGENT_PENDING_RELATION, targetType: 'AGENT', targetId: agentId },
     select: { channelId: true },
   });
+  // Add before delete, no transaction: addParticipant is idempotent, so a crash in between just retries.
   for (const { channelId } of links) {
-    const cutoff = await participants.resolveSeenCutoff(channelId);
-    await db.$transaction(async (tx) => {
-      await participants.addParticipantInTransaction(
-        tx,
-        channelId,
-        botUserId,
-        cutoff,
-        ChannelRole.MEMBER
-      );
-      await tx.sdlcEntityLink.deleteMany({
-        where: { channelId, relationType: SDLC_AGENT_PENDING_RELATION, targetId: agentId },
-      });
+    await participants.addParticipant(channelId, botUserId, ChannelRole.MEMBER);
+    await db.sdlcEntityLink.deleteMany({
+      where: { channelId, relationType: SDLC_AGENT_PENDING_RELATION, targetId: agentId },
     });
   }
   return links.length;
