@@ -1,5 +1,6 @@
 import type { ThreadTypeEntry } from '@xyne/shared';
 import { config } from '@/config/env';
+import { AgentsConfig } from '@/agents/config';
 import {
   askJev,
   isJevConfigured,
@@ -36,14 +37,26 @@ import { MAX_SOURCES_PER_TYPE } from './prompt';
  * Where the data goes: the whole thread — DMs and private channels included — is sent to
  * JEV_URL, which is TypeSafe's hosted Jev unless the env points elsewhere.
  *
- * Thresholds are tuned per JEV_MODEL — re-tune them against the shadow logs when it changes.
+ * The two thresholds come from CAC (message_classification_jev_type_threshold,
+ * message_classification_jev_citation_threshold), like ticket_duplicate_jev_threshold, so
+ * they can be tuned against the shadow logs without a deploy. They are only valid for the
+ * JEV_MODEL they were tuned on.
  */
 
-/** A type at or above this probability applies to the thread. */
-const THREAD_TYPE_THRESHOLD = 0.5;
+interface Thresholds {
+  /** A type at or above this probability applies to the thread. */
+  type: number;
+  /** A message at or above this probability is evidence for a type. */
+  citation: number;
+}
 
-/** A message at or above this probability is evidence for a type. */
-const CITATION_THRESHOLD = 0.3;
+const readThresholds = async (): Promise<Thresholds> => {
+  const cac = await AgentsConfig.fetch();
+  return {
+    type: cac.messageClassificationJevTypeThreshold,
+    citation: cac.messageClassificationJevCitationThreshold,
+  };
+};
 
 /** Per call. Classification runs in a background worker, so this can be generous. */
 const JEV_TIMEOUT_MS = 15_000;
@@ -110,6 +123,7 @@ const toState = (input: ClassifierInput): Record<string, unknown> => ({ ...input
 async function classifyThreadWithJev(
   input: ClassifierInput,
   vocabulary: readonly ThreadTypeEntry[],
+  thresholds: Thresholds,
 ): Promise<JevClassificationResult> {
   try {
     const state = toState(input);
@@ -150,7 +164,7 @@ async function classifyThreadWithJev(
     // Never empty, as the LLM is told: when nothing clears the bar, the likeliest type
     // stands. The vocabulary's own catch-all (DISCUSSION in the standard set) is worded to
     // score highest exactly then, so no name is special-cased here.
-    const passing = ranked.filter(([, p]) => p >= THREAD_TYPE_THRESHOLD);
+    const passing = ranked.filter(([, p]) => p >= thresholds.type);
     const chosen = (passing.length > 0 ? passing : ranked.slice(0, 1)).map(([name]) => name);
 
     // ─── Call 2: which messages are the evidence ─────────────────────────────────
@@ -212,7 +226,7 @@ async function classifyThreadWithJev(
       // No message clearing the bar means the type came from the ticket or the thread as a
       // whole — cite nothing rather than guess, as the LLM is told to.
       const sourceMessageIds = Object.entries(answer.probabilities)
-        .filter(([id, p]) => p >= CITATION_THRESHOLD && Object.prototype.hasOwnProperty.call(options, id))
+        .filter(([id, p]) => p >= thresholds.citation && Object.prototype.hasOwnProperty.call(options, id))
         .sort(([, a], [, b]) => b - a)
         .slice(0, MAX_SOURCES_PER_TYPE)
         .map(([id]) => id);
@@ -231,7 +245,7 @@ type LogMeta = {
 };
 
 interface LogContext {
-  meta: LogMeta;
+  meta: LogMeta & { thresholds: Thresholds };
   vocabulary: readonly ThreadTypeEntry[];
   /** Size of what Jev was sent, for the log. */
   stateChars: number;
@@ -339,22 +353,38 @@ export async function runJevBeforeLlm(
 ): Promise<JevBeforeLlm | null> {
   if (!isJevClassificationActive()) return null;
   const { replace, logEnabled } = config.messageClassification.jev;
-  const ctx: LogContext = { meta, vocabulary, stateChars: JSON.stringify(input).length };
+  const stateChars = JSON.stringify(input).length;
 
-  const pending = classifyThreadWithJev(input, vocabulary);
+  // The CAC read is part of Jev's work, so in shadow mode it too runs off the model's path.
+  // AgentsConfig.fetch falls back to the defaults rather than throwing.
+  const pending = readThresholds().then(async thresholds => ({
+    thresholds,
+    jev: await classifyThreadWithJev(input, vocabulary, thresholds),
+  }));
+  // Every line records the thresholds that produced it, so the logs can be re-read against
+  // other values when tuning.
+  const contextFor = (thresholds: Thresholds): LogContext => ({
+    meta: { ...meta, thresholds },
+    vocabulary,
+    stateChars,
+  });
+
   if (!replace) {
     return {
       answer: null,
       afterLlm: llm => {
         if (!logEnabled) return;
-        void pending.then(jev =>
-          jev.ok ? logComparison(SHADOW_TAG, ctx, jev, llm) : logNoAnswer(SHADOW_TAG, ctx, jev, 'info'),
-        );
+        void pending.then(({ thresholds, jev }) => {
+          const ctx = contextFor(thresholds);
+          if (jev.ok) logComparison(SHADOW_TAG, ctx, jev, llm);
+          else logNoAnswer(SHADOW_TAG, ctx, jev, 'info');
+        });
       },
     };
   }
 
-  const jev = await pending;
+  const { thresholds, jev } = await pending;
+  const ctx = contextFor(thresholds);
   if (jev.ok) {
     if (logEnabled) logDecision(ctx, jev);
     return { answer: jev.classification, afterLlm: () => {} };

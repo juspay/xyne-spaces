@@ -1,4 +1,5 @@
 import { config } from '@/config/env';
+import { AgentsConfig } from '@/agents/config';
 import {
   askJev,
   isJevConfigured,
@@ -38,21 +39,32 @@ import type {
  * elsewhere.
  *
  * Jev's yes/no answers are probabilities, so every decision below is a threshold on one.
- * Thresholds are tuned per JEV_MODEL — re-tune them against the logs when it changes.
+ * The thresholds come from CAC (radar_jev_window_skip_threshold,
+ * radar_jev_reaction_completion_threshold, radar_jev_reaction_item_threshold), like
+ * ticket_duplicate_jev_threshold, so they can be tuned against the logs without a deploy.
+ * They are only valid for the JEV_MODEL they were tuned on.
  */
 
-/**
- * A window Jev rates at or below this is skipped without a parse. Deliberately low: a
- * skipped real ask is never tracked, while an unneeded parse only costs a call.
- */
-const WINDOW_SKIP_THRESHOLD = 0.15;
+interface Thresholds {
+  /** A window Jev rates at or below this is skipped without a parse. Deliberately low: a
+   *  skipped real ask is never tracked, while an unneeded parse only costs a call. */
+  windowSkip: number;
+  /** The reaction's emoji must assert completion at least this strongly… */
+  reactionCompletion: number;
+  /** …and one item must be this clearly the one settled. Above 0.5, no other item can
+   *  tie, which is the parser's rule: two items fitting equally well settle neither. */
+  reactionItem: number;
+}
 
-/** The reaction's emoji must assert completion at least this strongly… */
-const REACTION_COMPLETION_THRESHOLD = 0.5;
-
-/** …and one item must be this clearly the one settled. Above 0.5, no other item can tie,
- *  which is the parser's rule: two items fitting equally well settle neither. */
-const REACTION_ITEM_THRESHOLD = 0.6;
+/** AgentsConfig.fetch falls back to the defaults rather than throwing. */
+const readThresholds = async (): Promise<Thresholds> => {
+  const cac = await AgentsConfig.fetch();
+  return {
+    windowSkip: cac.radarJevWindowSkipThreshold,
+    reactionCompletion: cac.radarJevReactionCompletionThreshold,
+    reactionItem: cac.radarJevReactionItemThreshold,
+  };
+};
 
 const JEV_TIMEOUT_MS = 8_000;
 
@@ -88,7 +100,7 @@ const WINDOW_QUESTION: JevNoulQuestion = {
 };
 
 /** Never throws. `input` is exactly what the parser is sent for this window. */
-async function checkWindow(input: ParserInput): Promise<WindowCheck> {
+async function checkWindow(input: ParserInput, thresholds: Thresholds): Promise<WindowCheck> {
   try {
     let failure: JevFailure | undefined;
     const answers = await askJev({ ...input }, { trackable: WINDOW_QUESTION }, JEV_TIMEOUT_MS, undefined, {
@@ -101,7 +113,7 @@ async function checkWindow(input: ParserInput): Promise<WindowCheck> {
     return {
       ok: true,
       probability: answer.noul,
-      skip: answer.noul <= WINDOW_SKIP_THRESHOLD,
+      skip: answer.noul <= thresholds.windowSkip,
     };
   } catch (error) {
     return { ok: false, reason: error instanceof Error ? error.name : 'unknown' };
@@ -127,7 +139,7 @@ type ReactionCheck =
  * reacted message as the one entry in new_messages, the items the reactor is party to,
  * and who reacted with what.
  */
-async function checkReaction(input: ParserInput): Promise<ReactionCheck> {
+async function checkReaction(input: ParserInput, thresholds: Thresholds): Promise<ReactionCheck> {
   try {
     const message = input.new_messages[0];
     const emoji = input.reaction?.emoji;
@@ -191,9 +203,9 @@ async function checkReaction(input: ParserInput): Promise<ReactionCheck> {
 
     const itemProbability = s.probabilities[s.choice];
     const resolves =
-      c.noul >= REACTION_COMPLETION_THRESHOLD &&
+      c.noul >= thresholds.reactionCompletion &&
       s.choice !== NONE &&
-      itemProbability >= REACTION_ITEM_THRESHOLD;
+      itemProbability >= thresholds.reactionItem;
     const scores = `completion ${c.noul.toFixed(2)}, item ${s.choice} ${itemProbability.toFixed(2)}`;
 
     return {
@@ -336,21 +348,28 @@ export async function runJevBeforeLlm(
   if (!isRadarJevActive()) return null;
   const { replace, logEnabled } = config.radar.jev;
   const stateChars = JSON.stringify(input).length;
+  // The CAC read is part of Jev's work, so in shadow mode it too runs off the parser's path.
+  const thresholdsRead = readThresholds();
 
   if (input.reaction) {
     const emoji = input.reaction.emoji;
-    const ctx: LogContext = {
-      meta: { conversationId, pass: 'reaction', emoji, candidates: input.open_items.length },
+    // Every line records the thresholds that produced it, so the logs can be re-read
+    // against other values when tuning.
+    const contextFor = (thresholds: Thresholds): LogContext => ({
+      meta: { conversationId, pass: 'reaction', emoji, candidates: input.open_items.length, thresholds },
       stateChars,
-    };
+    });
     const categories = ['completion', 'settles'];
-    const pending = checkReaction(input);
+    const pending = thresholdsRead.then(async thresholds => ({
+      ctx: contextFor(thresholds),
+      check: await checkReaction(input, thresholds),
+    }));
     if (!replace) {
       return {
         answer: null,
         afterLlm: llm => {
           if (!logEnabled) return;
-          void pending.then(check =>
+          void pending.then(({ ctx, check }) =>
             check.ok
               ? logReaction(SHADOW_TAG, ctx, check, llm)
               : noAnswer(SHADOW_TAG, ctx, check, categories, 'info'),
@@ -358,7 +377,7 @@ export async function runJevBeforeLlm(
         },
       };
     }
-    const check = await pending;
+    const { ctx, check } = await pending;
     if (check.ok) {
       if (logEnabled) {
         logJevDecision(REPLACE_TAG, conversationId, {
@@ -385,24 +404,27 @@ export async function runJevBeforeLlm(
     return { answer: null, afterLlm: () => {} };
   }
 
-  const ctx: LogContext = {
-    meta: { conversationId, pass: 'window', windowSize: input.new_messages.length },
+  const contextFor = (thresholds: Thresholds): LogContext => ({
+    meta: { conversationId, pass: 'window', windowSize: input.new_messages.length, thresholds },
     stateChars,
-  };
+  });
   const categories = ['trackable'];
-  const pending = checkWindow(input);
+  const pending = thresholdsRead.then(async thresholds => ({
+    ctx: contextFor(thresholds),
+    check: await checkWindow(input, thresholds),
+  }));
   if (!replace) {
     return {
       answer: null,
       afterLlm: llm => {
         if (!logEnabled) return;
-        void pending.then(check =>
+        void pending.then(({ ctx, check }) =>
           check.ok ? logWindow(SHADOW_TAG, ctx, check, llm) : noAnswer(SHADOW_TAG, ctx, check, categories, 'info'),
         );
       },
     };
   }
-  const check = await pending;
+  const { ctx, check } = await pending;
   if (check.ok && check.skip) {
     if (logEnabled) {
       logJevDecision(REPLACE_TAG, conversationId, {

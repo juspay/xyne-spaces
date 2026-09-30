@@ -42,6 +42,13 @@ const DEFAULT_RELEASE_NOTES_GENERATOR_MODEL = 'glm-latest';
 const DEFAULT_RELEASE_AI_MODEL = 'glm-flash-experimental';
 const DEFAULT_TICKET_DUPLICATE_JEV_ENABLED = false;
 const DEFAULT_TICKET_DUPLICATE_JEV_THRESHOLD = 0.75;
+// Jev thresholds for message tagging and Radar. Starting points, tuned against the
+// [MSG-TAG]/[RADAR] shadow logs and only valid for the JEV_MODEL they were tuned on.
+const DEFAULT_MESSAGE_CLASSIFICATION_JEV_TYPE_THRESHOLD = 0.5;
+const DEFAULT_MESSAGE_CLASSIFICATION_JEV_CITATION_THRESHOLD = 0.3;
+const DEFAULT_RADAR_JEV_WINDOW_SKIP_THRESHOLD = 0.15;
+const DEFAULT_RADAR_JEV_REACTION_COMPLETION_THRESHOLD = 0.5;
+const DEFAULT_RADAR_JEV_REACTION_ITEM_THRESHOLD = 0.6;
 const DEFAULT_SUMMARISER_MODEL = 'glm-flash-experimental';
 const DEFAULT_ATTACHMENT_SUMMARISER_MODEL = 'kimi-latest';
 const DEFAULT_CLASSIFICATION_MODEL = 'glm-flash-experimental';
@@ -88,6 +95,11 @@ const CAC_KEYS = {
   shadowTagGenerationLogEnabled: 'shadow_tag_generation_log_enabled',
   ticketDuplicateJevEnabled: 'ticket_duplicate_jev_enabled',
   ticketDuplicateJevThreshold: 'ticket_duplicate_jev_threshold',
+  messageClassificationJevTypeThreshold: 'message_classification_jev_type_threshold',
+  messageClassificationJevCitationThreshold: 'message_classification_jev_citation_threshold',
+  radarJevWindowSkipThreshold: 'radar_jev_window_skip_threshold',
+  radarJevReactionCompletionThreshold: 'radar_jev_reaction_completion_threshold',
+  radarJevReactionItemThreshold: 'radar_jev_reaction_item_threshold',
   ticketBoardModel: 'ticket_board_model_name',
   releaseNotesGeneratorModel: 'release_notes_generator_model_name',
   releaseAiModel: 'release_ai_model_name',
@@ -140,6 +152,16 @@ export class AgentsConfig {
   public readonly releaseAiModelName: string;
   public readonly ticketDuplicateJevEnabled: boolean;
   public readonly ticketDuplicateJevThreshold: number;
+  /** Jev P(type applies) at or above which a thread type is chosen. */
+  public readonly messageClassificationJevTypeThreshold: number;
+  /** Jev P(message is the evidence) at or above which a message is cited. */
+  public readonly messageClassificationJevCitationThreshold: number;
+  /** Jev P(window is trackable) at or below which replace mode skips the parse. */
+  public readonly radarJevWindowSkipThreshold: number;
+  /** Jev P(emoji asserts completion) needed before a reaction can resolve. */
+  public readonly radarJevReactionCompletionThreshold: number;
+  /** Jev P(this item is the one settled) needed to resolve it; above 0.5 no item can tie. */
+  public readonly radarJevReactionItemThreshold: number;
   public readonly summariserModelName: string;
   public readonly attachmentSummariserModelName: string;
 
@@ -200,6 +222,11 @@ export class AgentsConfig {
     shadowTagGenerationLogEnabled: boolean,
     ticketDuplicateJevEnabled: boolean,
     ticketDuplicateJevThreshold: number,
+    messageClassificationJevTypeThreshold: number,
+    messageClassificationJevCitationThreshold: number,
+    radarJevWindowSkipThreshold: number,
+    radarJevReactionCompletionThreshold: number,
+    radarJevReactionItemThreshold: number,
   ) {
     this.xyneAiTracingEnabled = xyneAiTracingEnabled;
     this.xyneAiMaskingEnabled = xyneAiMaskingEnabled;
@@ -231,6 +258,11 @@ export class AgentsConfig {
     this.shadowTagGenerationLogEnabled = shadowTagGenerationLogEnabled;
     this.ticketDuplicateJevEnabled = ticketDuplicateJevEnabled;
     this.ticketDuplicateJevThreshold = ticketDuplicateJevThreshold;
+    this.messageClassificationJevTypeThreshold = messageClassificationJevTypeThreshold;
+    this.messageClassificationJevCitationThreshold = messageClassificationJevCitationThreshold;
+    this.radarJevWindowSkipThreshold = radarJevWindowSkipThreshold;
+    this.radarJevReactionCompletionThreshold = radarJevReactionCompletionThreshold;
+    this.radarJevReactionItemThreshold = radarJevReactionItemThreshold;
   }
 
   /**
@@ -282,6 +314,11 @@ export class AgentsConfig {
       const releaseAiModelName = getValue<string>(CAC_KEYS.releaseAiModel, DEFAULT_RELEASE_AI_MODEL);
       const ticketDuplicateJevEnabled = getValue<boolean>(CAC_KEYS.ticketDuplicateJevEnabled, DEFAULT_TICKET_DUPLICATE_JEV_ENABLED);
       const ticketDuplicateJevThreshold = getValue<number>(CAC_KEYS.ticketDuplicateJevThreshold, DEFAULT_TICKET_DUPLICATE_JEV_THRESHOLD);
+      const messageClassificationJevTypeThreshold = getValue<number>(CAC_KEYS.messageClassificationJevTypeThreshold, DEFAULT_MESSAGE_CLASSIFICATION_JEV_TYPE_THRESHOLD);
+      const messageClassificationJevCitationThreshold = getValue<number>(CAC_KEYS.messageClassificationJevCitationThreshold, DEFAULT_MESSAGE_CLASSIFICATION_JEV_CITATION_THRESHOLD);
+      const radarJevWindowSkipThreshold = getValue<number>(CAC_KEYS.radarJevWindowSkipThreshold, DEFAULT_RADAR_JEV_WINDOW_SKIP_THRESHOLD);
+      const radarJevReactionCompletionThreshold = getValue<number>(CAC_KEYS.radarJevReactionCompletionThreshold, DEFAULT_RADAR_JEV_REACTION_COMPLETION_THRESHOLD);
+      const radarJevReactionItemThreshold = getValue<number>(CAC_KEYS.radarJevReactionItemThreshold, DEFAULT_RADAR_JEV_REACTION_ITEM_THRESHOLD);
       const summariserModelName = getValue<string>(CAC_KEYS.summariserModel, DEFAULT_SUMMARISER_MODEL);
       const attachmentSummariserModelName = getValue<string>(CAC_KEYS.attachmentSummariserModel, DEFAULT_ATTACHMENT_SUMMARISER_MODEL);
 
@@ -552,6 +589,11 @@ export class AgentsConfig {
         shadowTagGenerationLogEnabled,
         ticketDuplicateJevEnabled,
         ticketDuplicateJevThreshold,
+        messageClassificationJevTypeThreshold,
+        messageClassificationJevCitationThreshold,
+        radarJevWindowSkipThreshold,
+        radarJevReactionCompletionThreshold,
+        radarJevReactionItemThreshold,
       );
     } catch (error) {
       logger.error('[Agents Config] Error fetching CAC config, using DEFAULTS:', error);
@@ -587,6 +629,11 @@ export class AgentsConfig {
         DEFAULT_SHADOW_TAG_GENERATION_LOG_ENABLED,
         DEFAULT_TICKET_DUPLICATE_JEV_ENABLED,
         DEFAULT_TICKET_DUPLICATE_JEV_THRESHOLD,
+        DEFAULT_MESSAGE_CLASSIFICATION_JEV_TYPE_THRESHOLD,
+        DEFAULT_MESSAGE_CLASSIFICATION_JEV_CITATION_THRESHOLD,
+        DEFAULT_RADAR_JEV_WINDOW_SKIP_THRESHOLD,
+        DEFAULT_RADAR_JEV_REACTION_COMPLETION_THRESHOLD,
+        DEFAULT_RADAR_JEV_REACTION_ITEM_THRESHOLD,
       );
     }
   }
@@ -623,6 +670,11 @@ export class AgentsConfig {
       DEFAULT_SHADOW_TAG_GENERATION_LOG_ENABLED,
       DEFAULT_TICKET_DUPLICATE_JEV_ENABLED,
       DEFAULT_TICKET_DUPLICATE_JEV_THRESHOLD,
+      DEFAULT_MESSAGE_CLASSIFICATION_JEV_TYPE_THRESHOLD,
+      DEFAULT_MESSAGE_CLASSIFICATION_JEV_CITATION_THRESHOLD,
+      DEFAULT_RADAR_JEV_WINDOW_SKIP_THRESHOLD,
+      DEFAULT_RADAR_JEV_REACTION_COMPLETION_THRESHOLD,
+      DEFAULT_RADAR_JEV_REACTION_ITEM_THRESHOLD,
     );
   }
 }
