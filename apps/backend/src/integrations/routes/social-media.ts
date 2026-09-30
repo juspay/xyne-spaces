@@ -194,14 +194,13 @@ router.post(
         return;
       }
 
-      // An App Store .p8 is a team-wide key with no programmatic revocation, so disconnecting a
-      // desk must actually destroy our copy. Play's refresh token is scoped and user-revocable,
-      // and its reconnect path re-consents, so it is left alone here.
+      // App Store .p8 and Play service-account keys are long-lived and not revocable from here,
+      // so disconnecting a desk destroys our copy; "Replace key" restores it.
       await db.externalSource.updateMany({
         where: {
           channelId: req.params.channelId,
           workspaceId,
-          sourceType: ExternalSourcePlatform.APP_STORE,
+          sourceType: { in: [ExternalSourcePlatform.APP_STORE, ExternalSourcePlatform.GOOGLE_PLAY] },
         },
         data: { credentials: '' },
       });

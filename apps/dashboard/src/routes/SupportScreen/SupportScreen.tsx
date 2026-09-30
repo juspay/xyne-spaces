@@ -1581,6 +1581,7 @@ const SupportScreen = (): ReactElement => {
   const [isReportOpen, setIsReportOpen] = useState(() => searchParams.get('report') === 'open');
   const [isTopicsOpen, setIsTopicsOpen] = useState(() => searchParams.get('topics') === 'open');
   const [showCreateChannelModal, setShowCreateChannelModal] = useState(false);
+  const [isConnectingReviewDesk, setIsConnectingReviewDesk] = useState(false);
   const [showDeskIntegrationsModal, setShowDeskIntegrationsModal] = useState(
     () =>
       searchParams.get('deskIntegrations') === 'open' ||
@@ -2564,6 +2565,7 @@ const SupportScreen = (): ReactElement => {
           toast.error('At least one bundle ID is required');
           return;
         }
+        setIsConnectingReviewDesk(true);
         void connectAppStoreDesk({
           channelName: rest.name,
           keyId: appStore.keyId,
@@ -2588,7 +2590,8 @@ const SupportScreen = (): ReactElement => {
               (error as { response?: { data?: { error?: string } } })?.response?.data?.error ??
                 (error instanceof Error ? error.message : 'Failed to connect App Store desk'),
             );
-          });
+          })
+          .finally(() => setIsConnectingReviewDesk(false));
         return;
       }
 
@@ -2600,6 +2603,7 @@ const SupportScreen = (): ReactElement => {
         toast.error('A service account key is required');
         return;
       }
+      setIsConnectingReviewDesk(true);
       void connectGooglePlayDesk({
         serviceAccountKey,
         channelName: rest.name,
@@ -2618,11 +2622,9 @@ const SupportScreen = (): ReactElement => {
           void navigate(`${supportBase}/${channelId}`);
         })
         .catch(error => {
-          toast.error(
-            (error as { response?: { data?: { error?: string } } })?.response?.data?.error ??
-              (error instanceof Error ? error.message : 'Failed to connect Google Play desk'),
-          );
-        });
+          toast.error(getApiErrorMessage(error, 'Failed to connect Google Play desk'));
+        })
+        .finally(() => setIsConnectingReviewDesk(false));
       return;
     }
 
@@ -4579,7 +4581,7 @@ const SupportScreen = (): ReactElement => {
             requireConnector={true}
             onSubmit={data => handleCreateEmailChannel(data)}
             onCancel={() => setShowCreateChannelModal(false)}
-            loading={createChannelMutation.isPending}
+            loading={createChannelMutation.isPending || isConnectingReviewDesk}
           />
         </div>
       </Dialog>

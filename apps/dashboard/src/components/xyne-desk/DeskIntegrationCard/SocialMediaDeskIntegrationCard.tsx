@@ -16,6 +16,7 @@ import {
 import { Dialog } from '../../ui/Dialog';
 import Button from '../../ui/Button';
 import Input from '../../ui/Input';
+import { getApiErrorMessage } from '../../../utils/apiError';
 import { DeskConnectionCard } from './DeskConnectionCard';
 import {
   GooglePlayServiceAccountKeyInput,
@@ -30,13 +31,6 @@ interface GooglePlayApplicationInput {
 
 function createGooglePlayApplication(): GooglePlayApplicationInput {
   return { id: crypto.randomUUID(), displayName: '', packageName: '' };
-}
-
-function apiErrorMessage(error: unknown, fallback: string): string {
-  return (
-    (error as { response?: { data?: { error?: string } } })?.response?.data?.error ??
-    (error instanceof Error ? error.message : fallback)
-  );
 }
 
 interface SocialMediaDeskIntegrationCardProps {
@@ -72,7 +66,7 @@ export const SocialMediaDeskIntegrationCard = ({
       clearChannelConnectedEmailCache(channelId);
       toast.success('Google Play apps disconnected. Existing tickets are preserved.');
     } catch (error) {
-      toast.error(apiErrorMessage(error, 'Failed to disconnect review source.'));
+      toast.error(getApiErrorMessage(error, 'Failed to disconnect review source.'));
       throw error;
     }
   };
@@ -92,7 +86,7 @@ export const SocialMediaDeskIntegrationCard = ({
       setServiceAccountKey('');
       toast.success('Google Play service account key replaced.');
     } catch (error) {
-      toast.error(apiErrorMessage(error, 'Failed to replace the key.'));
+      toast.error(getApiErrorMessage(error, 'Failed to replace the key.'));
     } finally {
       setIsReplacingKey(false);
     }
@@ -110,7 +104,7 @@ export const SocialMediaDeskIntegrationCard = ({
       toast.success(reconnect ? 'Google Play app reconnected.' : 'Google Play app disconnected.');
     } catch (error) {
       toast.error(
-        apiErrorMessage(
+        getApiErrorMessage(
           error,
           `Failed to ${reconnect ? 'reconnect' : 'disconnect'} Google Play app.`,
         ),
@@ -163,7 +157,7 @@ export const SocialMediaDeskIntegrationCard = ({
         `${result.added} Google Play app${result.added === 1 ? '' : 's'} added successfully.`,
       );
     } catch (error) {
-      toast.error(apiErrorMessage(error, 'Failed to add Google Play applications.'));
+      toast.error(getApiErrorMessage(error, 'Failed to add Google Play applications.'));
     } finally {
       setIsAdding(false);
     }
@@ -177,6 +171,7 @@ export const SocialMediaDeskIntegrationCard = ({
         isConnected={isConnected}
         onDisconnect={handleDisconnect}
         onReconnect={openReplaceKey}
+        reconnectLabel='Replace key'
         disconnectTitle='Disconnect review integration'
         disconnectPrompt='Disconnect all Google Play apps from this desk?'
         disconnectBullets={[

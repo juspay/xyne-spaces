@@ -351,13 +351,17 @@ router.post(
         return;
       }
 
+      // Disconnected apps may have lost Play access for good; checking them would make the key
+      // impossible to replace. The key is still written to them so per-app reconnect works.
+      const reactivateAll = sources.every((source) => !source.isActive);
       await validatePackages(
         credentials,
         sources.flatMap((source) =>
-          source.externalIdentifier ? [{ packageName: source.externalIdentifier }] : []
+          source.externalIdentifier && (reactivateAll || source.isActive)
+            ? [{ packageName: source.externalIdentifier }]
+            : []
         ),
       );
-      const reactivateAll = sources.every((source) => !source.isActive);
       await db.externalSource.updateMany({
         where: { id: { in: sources.map((source) => source.id) } },
         data: {

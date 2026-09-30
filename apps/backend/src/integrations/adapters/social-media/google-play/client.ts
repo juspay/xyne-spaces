@@ -39,6 +39,11 @@ export function parseServiceAccountKey(json: string): GooglePlayCredentials {
 }
 
 export function readSourceCredentials(source: Pick<ExternalSource, 'credentials'>): GooglePlayCredentials {
+  if (!source.credentials) {
+    throw new GooglePlayKeyError(
+      'The service account key was deleted when this desk was disconnected. Use "Replace key" to upload one.'
+    );
+  }
   const credentials = JSON.parse(decrypt(source.credentials)) as Partial<GooglePlayCredentials>;
   if (!credentials.clientEmail || !credentials.privateKey) {
     throw new GooglePlayKeyError(
@@ -63,11 +68,15 @@ export function toGooglePlayErrorResponse(
         'Google rejected this service account key. It may be deleted or disabled; create a new key and upload it.',
     };
   }
-  if (response?.status !== 401 && response?.status !== 403 && response?.status !== 404) {
-    return null;
-  }
-  const account = context.clientEmail ?? 'The service account';
   const googleReason = error instanceof Error ? ` Google said: ${error.message}` : '';
+  if (response?.status === 404) {
+    return {
+      status: 404,
+      error: `Google Play could not find ${context.packageName ?? 'this app or review'}.${googleReason}`,
+    };
+  }
+  if (response?.status !== 401 && response?.status !== 403) return null;
+  const account = context.clientEmail ?? 'The service account';
   return {
     status: 403,
     error: `${account} cannot access ${context.packageName ?? 'this app'}. Invite it in Play Console with View app information and Reply to reviews, and check the Google Play Android Developer API is enabled on its Cloud project.${googleReason}`,
