@@ -171,7 +171,10 @@ export function KpiCards({ kpis, isActive, onClick }: { kpis: Kpi[]; isActive: (
             }}
           >
             <span style={{ fontSize: 13, color: 'var(--t3)', fontWeight: 500 }}>{k.label}</span>
-            <span style={{ fontSize: 26, lineHeight: '32px', fontWeight: 600, color: toneColor(k.tone, k.value), fontVariantNumeric: 'tabular-nums' }}>{k.value}</span>
+            <span style={{ display: 'flex', alignItems: 'baseline', gap: 6, minWidth: 0 }}>
+              <span style={{ fontSize: 26, lineHeight: '32px', fontWeight: 600, color: toneColor(k.tone, k.value), fontVariantNumeric: 'tabular-nums' }}>{k.value}</span>
+              {k.of && <span style={{ fontSize: 12.5, color: 'var(--t4)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{k.of}</span>}
+            </span>
             <span style={{ fontSize: 12, color: 'var(--t4)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{k.sub}</span>
           </div>
         );
@@ -420,6 +423,7 @@ const HEALTH_OPTS: PillOption[] = [
 
 export function typeFilterLabel(t: PState['typeFilter']): string {
   if (t === null) return '';
+  if (t === 'open') return 'Open tickets';
   return t === 'anyEta' ? 'ETA breached · ticket or stage' : FLAG_LABEL[t];
 }
 

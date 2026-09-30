@@ -218,7 +218,7 @@ export default function App() {
     const t = k.target;
     if (!t || 'drawer' in t) return false;
     if (t.kind === 'merchants') return ps.tab === 'merchants' && sameSet(ps.health, t.health);
-    return ps.tab === 'tickets' && ps.typeFilter === t.typeFilter && ps.bucket === null && (t.typeFilter !== null || ps.health.length === 0);
+    return ps.tab === 'tickets' && ps.typeFilter === t.typeFilter && ps.bucket === null && (t.typeFilter !== 'open' || ps.health.length === 0);
   };
   const kpiClick = (k: Kpi): void => {
     const t = k.target;
@@ -232,7 +232,7 @@ export default function App() {
       return;
     }
     if (t.kind === 'merchants') set({ tab: 'merchants', health: t.health });
-    else set({ tab: 'tickets', typeFilter: t.typeFilter, bucket: null, ...(t.typeFilter === null ? { health: [] } : {}) });
+    else set({ tab: 'tickets', typeFilter: t.typeFilter, bucket: null, ...(t.typeFilter === 'open' ? { health: [] } : {}) });
   };
   const bucketClick = (i: number): void => {
     if (ps.bucket === i) set({ bucket: null });

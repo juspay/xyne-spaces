@@ -49,7 +49,7 @@ describe('portfolio', () => {
 
   it('computes the six KPIs', () => {
     const k = Object.fromEntries(p.kpis.map(x => [x.id, x]));
-    expect(k.attention).toMatchObject({ value: '2', sub: '1 critical · 1 at risk · of 3' });
+    expect(k.attention).toMatchObject({ label: 'Needs attention', value: '2', of: 'merchants', sub: '1 critical · 1 at risk · of 3' });
     expect(k.open).toMatchObject({ value: '6', sub: '2 Desk · 4 board' });
     expect(k.median).toMatchObject({ value: '5d', sub: '1 open longer than 14d' });
     expect(k.oldest).toMatchObject({ value: '20d', sub: 'A2 · acme', target: { drawer: 'a2' } });
@@ -109,6 +109,20 @@ describe('portfolio', () => {
     expect(k.stale.value).toBe(String(list('stale')));
     expect(k.stale.value).toBe('1');
     expect(k.median.sub).toBe(`${list('ageing')} open longer than 14d`);
+  });
+
+  it('the Open tickets KPI opens only open tickets, not closed ones that carry a flag', () => {
+    const X = model(
+      mk('d', { kind: 'desk', src: 'Desk · support', open: false, st: 'completed', closedD: 2, kids: ['b'] }),
+      mk('b', { parent: 'd', root: 'd' }),
+    );
+    const open = portfolio(X, DEFAULT_PSTATE).kpis.find(x => x.id === 'open')!;
+    expect(open.target).toEqual({ kind: 'tickets', typeFilter: 'open' });
+    const list = portfolio(X, { ...DEFAULT_PSTATE, tab: 'tickets', typeFilter: 'open' }).ticketRows.map(t => t.id);
+    expect(list).toEqual(['b']);
+    expect(open.value).toBe(String(list.length));
+    // The unfiltered Tickets tab still shows the flagged closed Desk ticket.
+    expect(portfolio(X, { ...DEFAULT_PSTATE, tab: 'tickets' }).ticketRows.map(t => t.id)).toEqual(['d', 'b']);
   });
 
   it('a ticket that only borrows merchant IDs from its sub-tickets does not set their severity', () => {

@@ -6,7 +6,8 @@ import type { Court, MTicket, Model } from './model';
 /** Everything the portfolio page shows, derived from the model and the page's filter state. */
 
 export type Tab = 'merchants' | 'tickets';
-export type TypeFilter = FlagType | 'anyEta' | null;
+/** Narrows the Tickets tab: one flag type, any ETA breach, or only open tickets (the Open tickets KPI). */
+export type TypeFilter = FlagType | 'anyEta' | 'open' | null;
 
 export interface PState {
   tab: Tab;
@@ -87,6 +88,8 @@ export interface Kpi {
   id: 'attention' | 'open' | 'median' | 'oldest' | 'eta' | 'stale';
   label: string;
   value: string;
+  /** What the value counts, shown after it (e.g. "merchants"). */
+  of?: string;
   sub: string;
   tone: 'default' | 'red' | 'amber' | 'age';
   target: KpiTarget | null;
@@ -244,7 +247,7 @@ export function portfolio(m: Model, s: PState, cfg = FLAG_CFG): Portfolio {
   const srcOk = (t: MTicket): boolean => (desks.size === 0 && boards.size === 0) || (t.kind === 'desk' ? desks.has(t.src) : boards.has(t.src));
   const ownOk = (t: MTicket): boolean => s.owners.length === 0 || (t.who !== null && s.owners.includes(t.who));
   const typeOk = (t: FTicket): boolean =>
-    !s.typeFilter || t.flags.some(f => f.type === s.typeFilter || (s.typeFilter === 'anyEta' && isEta(f)));
+    !s.typeFilter || (s.typeFilter === 'open' ? t.open : t.flags.some(f => f.type === s.typeFilter || (s.typeFilter === 'anyEta' && isEta(f))));
   const healthOk = (sev: Sev): boolean => s.health.length === 0 || s.health.includes(sev);
 
   const merchantRows = merchants.filter(
@@ -283,6 +286,7 @@ export function portfolio(m: Model, s: PState, cfg = FLAG_CFG): Portfolio {
       id: 'attention',
       label: 'Needs attention',
       value: String(need.length),
+      of: need.length === 1 ? 'merchant' : 'merchants',
       sub: `${merchants.filter(r => r.sev === 'red').length} critical · ${merchants.filter(r => r.sev === 'amber').length} at risk · of ${merchants.length}`,
       tone: 'default',
       target: { kind: 'merchants', health: ['red', 'amber'] },
@@ -293,7 +297,7 @@ export function portfolio(m: Model, s: PState, cfg = FLAG_CFG): Portfolio {
       value: String(allOpen.length),
       sub: `${allOpen.filter(t => t.kind === 'desk').length} Desk · ${allOpen.filter(t => t.kind !== 'desk').length} board`,
       tone: 'default',
-      target: { kind: 'tickets', typeFilter: null },
+      target: { kind: 'tickets', typeFilter: 'open' },
     },
     {
       id: 'median',
