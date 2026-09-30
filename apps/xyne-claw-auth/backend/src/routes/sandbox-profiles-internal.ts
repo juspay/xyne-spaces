@@ -119,12 +119,12 @@ sandboxProfilesInternalRouter.put(
       if (!SANDBOX_REPO_KEY_PATTERN.test(key)) {
         throw badRequest("key must be lowercase letters, digits, '.', '_' or '-' (max 64 chars)");
       }
-      if (isBuiltIn(key) || (await sandboxRepoConfigRepository.find(key))) {
-        throw conflict(`sandbox profile "${key}" already exists`, "sandbox_profile_exists");
-      }
-      const row = await sandboxRepoConfigRepository.upsert(key, config, true, actorUserId, {
-        workspaceId,
-        createdByUserId: actorUserId,
+      // Keys are global, so the key may belong to another workspace.
+      const taken = conflict(`sandbox profile key "${key}" is already taken`, "sandbox_profile_exists");
+      if (isBuiltIn(key)) throw taken;
+      const row = await sandboxRepoConfigRepository.create(key, config, workspaceId, actorUserId).catch((err) => {
+        if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") throw taken;
+        throw err;
       });
       log.info(`[sandbox-profiles] ${actorUserId} created "${key}" in ${workspaceId}`);
       ok(res, row);
