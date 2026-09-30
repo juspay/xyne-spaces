@@ -667,10 +667,10 @@ export const USER_GUIDE_FEATURES: UserGuideFeature[] = [
     title: 'Members',
     tagline: 'Control access and role permissions.',
     path: '/organisations/members',
-    findIn: 'Sidebar -> Administration -> Members',
+    findIn: 'Sidebar -> Administration -> Workspace -> Members',
     actions: ['Grant access', 'Adjust permissions', 'Audit member rights'],
     steps: [
-      'Open Administration in the left sidebar, then open the Members [[ShieldUser]] tab (Admins only).',
+      'Open Administration in the left sidebar, then Workspace, and open the Members [[ShieldUser]] tab (Admins only).',
       'The member table shows every workspace user with their team, manager, job title and workspace role.',
       'Click "Edit access" on a row to choose which resources that user can use, and at what level.',
       'Use the ⋯ menu on a row to make someone an Admin or Member, or to remove them from the workspace.',
