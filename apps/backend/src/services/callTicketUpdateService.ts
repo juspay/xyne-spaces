@@ -17,6 +17,7 @@ import type { Call, Message } from '@prisma/client';
 import { ActivityType, BoardType, MessageType, TicketStatusV2 } from '@xyne/shared';
 import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
+import { withWorkspaceScope } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import { executeCallLlmWithRetry } from './callLlmRetry';
@@ -46,6 +47,10 @@ const MAX_PROPOSALS = 25;
 const MIN_CONFIDENCE = 0.5;
 const NUMBER_ONLY_MAX_CONFIDENCE = 0.6;
 const OPEN_STATUSES = [TicketStatusV2.TODO, TicketStatusV2.STARTED, TicketStatusV2.PAUSED];
+// Tickets closed this recently are still talked about ("had to revert it, back to
+// backlog"), so they stay in the channel candidate list.
+const RECENTLY_CLOSED_DAYS = 14;
+const RECENTLY_CLOSED_LIMIT = 30;
 const STATUS_VALUES: string[] = Object.values(TicketStatusV2);
 
 interface CandidateTicket {
@@ -299,6 +304,19 @@ export class CallTicketUpdateService {
       select: TICKET_CANDIDATE_SELECT,
     });
     channelRows.forEach((r) => add(r, 'channel'));
+    const recentlyClosed = await db.ticket.findMany({
+      where: {
+        workspaceId,
+        channelId,
+        isArchived: false,
+        statusV2: { in: [TicketStatusV2.COMPLETED, TicketStatusV2.CANCELLED] },
+        updatedAt: { gte: new Date(Date.now() - RECENTLY_CLOSED_DAYS * 24 * 3600 * 1000) },
+      },
+      orderBy: { updatedAt: 'desc' },
+      take: RECENTLY_CLOSED_LIMIT,
+      select: TICKET_CANDIDATE_SELECT,
+    });
+    recentlyClosed.forEach((r) => add(r, 'channel'));
 
     // 3. Open tickets assigned to people on the call.
     const participants = await repositories.calls.getCallParticipantsWithUserDetails(callExternalId).catch(() => []);
@@ -421,7 +439,13 @@ export class CallTicketUpdateService {
       const matchedBy: TicketUpdateMatchedBy =
         matchedByRaw === 'title' || matchedByRaw === 'number-only' ? matchedByRaw : 'xyne-id';
       let confidence = typeof m['confidence'] === 'number' ? Math.max(0, Math.min(1, m['confidence'])) : 0;
-      if (matchedBy === 'number-only') confidence = Math.min(confidence, NUMBER_ONLY_MAX_CONFIDENCE);
+      if (matchedBy === 'number-only') {
+        // A bare number is only trusted against this channel's tickets (or ones this
+        // series already discussed); a participant's ticket from another channel that
+        // happens to share the number is far more likely to be a wrong match.
+        if (candidates.get(ref)!.source === 'participant') continue;
+        confidence = Math.min(confidence, NUMBER_ONLY_MAX_CONFIDENCE);
+      }
       if (confidence < MIN_CONFIDENCE) continue;
       const statusIntent = typeof m['statusIntent'] === 'string' && STATUS_VALUES.includes(m['statusIntent']) ? m['statusIntent'] : null;
       const mention: LlmMention = {
@@ -566,6 +590,15 @@ export class CallTicketUpdateService {
     return { call, message };
   }
 
+  /**
+   * The card is a bot message, and the messages ACL only lets a user edit their
+   * own messages. The caller has already checked the user is in the call's
+   * audience, so the rewrite itself runs at workspace scope.
+   */
+  private rewriteCard(messageId: string, content: string): Promise<unknown> {
+    return withWorkspaceScope(() => repositories.messages.update(messageId, { content, edited: true }));
+  }
+
   async apply(params: {
     callExternalId: string;
     updateId: string;
@@ -624,7 +657,10 @@ export class CallTicketUpdateService {
     if (postComment) {
       const body = (params.message?.trim() || update.update).trim();
       const when = update.timestampSeconds !== null ? ` at ${formatSeconds(update.timestampSeconds)}` : '';
-      const source = `_From the call "${call.title ?? 'Untitled call'}"${when}${update.speaker ? `, said by ${update.speaker}` : ''}._`;
+      const callLabel = call.title
+        ? `the call "${call.title}"`
+        : `the call on ${call.startedAt.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}`;
+      const source = `_From ${callLabel}${when}${update.speaker ? `, said by ${update.speaker}` : ''}._`;
       const result = await conversationService.addMessageToConversation({
         conversationId: ticket.conversationId,
         userId,
@@ -696,7 +732,7 @@ export class CallTicketUpdateService {
     };
     const moved = moveTicketUpdate(message.content, updateId, { applied });
     if (!moved) return { ok: false, status: 409, error: 'This update was already handled' };
-    await repositories.messages.update(message.messageId, { content: moved.content, edited: true });
+    await this.rewriteCard(message.messageId, moved.content);
     getCallTicketUpdatesAppliedTotal().add(1, { workspaceId });
     logger.info(`[${callExternalId}] ticket_update_applied`, {
       update_id: updateId, ticket: ticket.xyneId, comment: !!commentMessageId, stage: newStageName, user_id: userId,
@@ -721,7 +757,7 @@ export class CallTicketUpdateService {
     };
     const moved = moveTicketUpdate(message.content, updateId, { ignored });
     if (!moved) return { ok: false, status: 409, error: 'This update was already handled' };
-    await repositories.messages.update(message.messageId, { content: moved.content, edited: true });
+    await this.rewriteCard(message.messageId, moved.content);
     logger.info(`[${callExternalId}] ticket_update_ignored`, { update_id: updateId, ticket: update.xyneId, user_id: userId });
     return { ok: true, content: moved.content, ignored };
   }
