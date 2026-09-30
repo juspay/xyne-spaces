@@ -777,10 +777,11 @@ const applyArchiveFilter = <T extends { where: Function }>(
 
 export const queries = defineQueries({
   pollByMessageId: defineQuery(
-    z.object({ messageId: z.string() }),
+    z.object({ messageId: z.string(), channelId: z.string().optional() }),
     ({ args: { messageId } }) =>
       zql.polls
         .where('messageId', '=', messageId)
+        .whereExists('message', message => message.where('isDeleted', false))
         .related('questions', question =>
           question
             .orderBy('position', 'asc')

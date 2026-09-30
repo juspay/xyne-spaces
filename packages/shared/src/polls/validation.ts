@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { POLL_LIMITS, type PollDraft } from './types.js';
+import { normalizePollChoice } from './policy.js';
 
 const stableIdSchema = z.string().trim().min(1, 'A stable ID is required');
 
@@ -43,7 +44,7 @@ const pollQuestionDraftSchema = z
       }
       optionIds.add(option.id);
 
-      const normalizedLabel = option.text.toLocaleLowerCase();
+      const normalizedLabel = normalizePollChoice(option.text);
       if (optionLabels.has(normalizedLabel)) {
         context.addIssue({
           code: z.ZodIssueCode.custom,

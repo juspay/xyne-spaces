@@ -95,3 +95,29 @@ ALTER TABLE "public"."poll_votes"
 ADD CONSTRAINT "poll_votes_questionId_fkey"
 FOREIGN KEY ("questionId") REFERENCES "public"."poll_questions"("id")
 ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- Enforce allowComments for every message writer, including bots, APIs and
+-- direct Prisma inserts that do not pass through the Zero messages.send mutator.
+CREATE OR REPLACE FUNCTION "public"."reject_disabled_poll_comments"()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM "public"."conversations" AS conversation
+        INNER JOIN "public"."polls" AS poll
+            ON poll."messageId" = conversation."initialMessageId"
+        WHERE conversation."conversationId" = NEW."conversationId"
+          AND poll."allowComments" = false
+    ) THEN
+        RAISE EXCEPTION 'Comments are disabled for this poll'
+            USING ERRCODE = 'P0001';
+    END IF;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER "messages_reject_disabled_poll_comments"
+BEFORE INSERT ON "public"."messages"
+FOR EACH ROW
+EXECUTE FUNCTION "public"."reject_disabled_poll_comments"();

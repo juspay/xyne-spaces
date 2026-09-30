@@ -1,16 +1,23 @@
 import { useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { Check, Plus } from 'lucide-react';
+import { POLL_LIMITS } from '@xyne/shared';
 import { queries } from '../../../zero/queries';
 import { mutators } from '../../../zero/mutators';
 import { useQuery } from '../../../hooks/useQuery';
 import { useZero } from '../../../hooks/useZero';
+import { surfaceMutationError } from '../../../utils/zeroMutationToast';
 import { calculatePollResults } from './pollResults';
-import { toast } from 'sonner';
 
-export function MessagePollCard({ messageId }: { messageId: string }) {
+export function MessagePollCard({
+  messageId,
+  channelId,
+}: {
+  messageId: string;
+  channelId?: string;
+}) {
   const zero = useZero();
-  const [poll] = useQuery(queries.pollByMessageId({ messageId }));
+  const [poll] = useQuery(queries.pollByMessageId({ messageId, ...(channelId && { channelId }) }));
   const [newChoices, setNewChoices] = useState<Record<string, string>>({});
 
   if (!poll) {
@@ -35,8 +42,8 @@ export function MessagePollCard({ messageId }: { messageId: string }) {
                   aria-pressed={selected}
                   data-track-category='POLL'
                   data-track-name='VOTE'
-                  onClick={() =>
-                    zero.mutate(
+                  onClick={() => {
+                    const mutation = zero.mutate(
                       mutators.polls.vote({
                         voteId: uuidv4(),
                         pollId: poll.id,
@@ -45,8 +52,9 @@ export function MessagePollCard({ messageId }: { messageId: string }) {
                         selected: !selected,
                         timestamp: Date.now(),
                       }),
-                    )
-                  }
+                    );
+                    void surfaceMutationError(mutation, 'Unable to update your vote');
+                  }}
                   className='relative flex w-full items-center gap-2 overflow-hidden rounded-lg border border-border px-3 py-2 text-left hover:bg-accent'
                 >
                   <span
@@ -64,9 +72,9 @@ export function MessagePollCard({ messageId }: { messageId: string }) {
               );
             })}
             <p className='text-xs text-muted-foreground'>
-              {results.voterCount} {results.voterCount === 1 ? 'vote' : 'voters'}
+              {results.voterCount} {results.voterCount === 1 ? 'voter' : 'voters'}
             </p>
-            {poll.allowAudienceChoices && question.options.length < 10 && (
+            {poll.allowAudienceChoices && question.options.length < POLL_LIMITS.maxOptions && (
               <div className='flex gap-2' data-prevent-thread>
                 <input
                   value={newChoices[question.id] ?? ''}
@@ -77,7 +85,7 @@ export function MessagePollCard({ messageId }: { messageId: string }) {
                     }))
                   }
                   placeholder='Add a choice'
-                  maxLength={200}
+                  maxLength={POLL_LIMITS.maxOptionLength}
                   data-track-category='POLL'
                   data-track-name='TYPE_AUDIENCE_CHOICE'
                   className='min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-sm'
@@ -91,17 +99,19 @@ export function MessagePollCard({ messageId }: { messageId: string }) {
                   onClick={() => {
                     const text = (newChoices[question.id] ?? '').trim();
                     if (!text) return;
-                    zero
-                      .mutate(
-                        mutators.polls.addOption({
-                          id: uuidv4(),
-                          questionId: question.id,
-                          text,
-                          timestamp: Date.now(),
-                        }),
-                      )
-                      .client.catch(error => toast.error(String(error)));
-                    setNewChoices(current => ({ ...current, [question.id]: '' }));
+                    const mutation = zero.mutate(
+                      mutators.polls.addOption({
+                        id: uuidv4(),
+                        questionId: question.id,
+                        text,
+                        timestamp: Date.now(),
+                      }),
+                    );
+                    void surfaceMutationError(mutation, 'Unable to add this choice').then(ok => {
+                      if (ok) {
+                        setNewChoices(current => ({ ...current, [question.id]: '' }));
+                      }
+                    });
                   }}
                 >
                   <Plus className='h-4 w-4' />

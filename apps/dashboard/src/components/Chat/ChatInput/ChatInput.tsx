@@ -1398,7 +1398,8 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
                 inputBoxRef.current?.insertContent(content);
               }}
               onCreateCanvas={handleCreateCanvasFromComposer}
-              {...(!messageId && { onCreatePoll: () => setPollComposerOpen(true) })}
+              {...(!messageId &&
+                !conversationId && { onCreatePoll: () => setPollComposerOpen(true) })}
               hasTicket={hasTicket}
               sendDisabled={isOffline || isAttachmentUploading}
               {...(isAttachmentUploading && {

@@ -135,6 +135,10 @@ import {
   pollDraftSchema,
   nextBallotOptionIds,
   POLL_LIMITS,
+  assertPollMessageActive,
+  assertPollPlacement,
+  isPollMessageMetadata,
+  normalizePollChoice,
   type PollDraft,
 } from '@xyne/shared';
 import {
@@ -1085,7 +1089,7 @@ async function insertPollGraph(
         workspaceId,
         questionId: question.id,
         text: option.text,
-        normalizedText: option.text.toLocaleLowerCase(),
+        normalizedText: normalizePollChoice(option.text),
         position: optionPosition,
         createdBy: userId,
         createdAt: timestamp,
@@ -2847,7 +2851,9 @@ export function createMutators(
             edited: false,
             showInChannel: false,
             createdAt: now,
-            metadata: poll ? { messageSubtype: 'poll' } : undefined,
+            metadata: poll
+              ? { messageSubtype: 'poll', pollAllowComments: poll.allowComments }
+              : undefined,
             visibleTo: null,
             isDeleted: false,
             isSent: true
@@ -3536,7 +3542,7 @@ export function createMutators(
         }),
         async ({ tx, args }) => {
           const [poll, question, option, existing] = await Promise.all([
-            tx.run(zql.polls.where('id', '=', args.pollId).one()),
+            tx.run(zql.polls.where('id', '=', args.pollId).related('message').one()),
             tx.run(zql.poll_questions.where('id', '=', args.questionId).one()),
             tx.run(zql.poll_options.where('id', '=', args.optionId).one()),
             tx.run(
@@ -3556,6 +3562,7 @@ export function createMutators(
           ) {
             throw new ApplicationError('Poll option is not available');
           }
+          assertPollMessageActive(poll.message);
           const optionIds = nextBallotOptionIds(
             existing?.optionIds ?? [],
             args.optionId,
@@ -3595,11 +3602,15 @@ export function createMutators(
         }),
         async ({ tx, args }) => {
           const question = await tx.run(
-            zql.poll_questions.where('id', '=', args.questionId).related('poll').one(),
+            zql.poll_questions
+              .where('id', '=', args.questionId)
+              .related('poll', poll => poll.related('message'))
+              .one(),
           );
           if (!question?.poll || question.workspaceId !== authData.workspaceId) {
             throw new ApplicationError('Poll question is not available');
           }
+          assertPollMessageActive(question.poll.message);
           if (
             question.poll.createdBy !== authData.sub &&
             !question.poll.allowAudienceChoices
@@ -3609,7 +3620,10 @@ export function createMutators(
           const options = await tx.run(
             zql.poll_options.where('questionId', '=', args.questionId),
           );
-          const normalizedText = args.text.toLocaleLowerCase();
+          const normalizedText = normalizePollChoice(args.text);
+          // The normalized-text unique constraint closes duplicate races. Two distinct
+          // concurrent additions can briefly exceed the cap; that bounded race is
+          // accepted until option creation moves to a serialized server transaction.
           if (options.length >= POLL_LIMITS.maxOptions) {
             throw new ApplicationError('This question already has the maximum number of choices');
           }
@@ -3647,6 +3661,7 @@ export function createMutators(
           poll: pollDraftSchema.optional(),
         }),
         async ({ tx, args: { conversationId, content, type, showInChannel = false, timestamp, messageId, childConversationId, attachmentIds, poll } }) => {
+          assertPollPlacement(poll, 'thread');
           if (content === '' && !poll) {
             throw new Error('Message content or files are required to start a conversation');
           }
@@ -3714,7 +3729,9 @@ export function createMutators(
             showInChannel,
             createdAt: timestamp,
             childConversationId: showInChannel ? childConversationId : null,
-            metadata: poll ? { messageSubtype: 'poll' } : null,
+            metadata: poll
+              ? { messageSubtype: 'poll', pollAllowComments: poll.allowComments }
+              : null,
             visibleTo: null,
             isDeleted: false,
             isSent: true
@@ -4099,6 +4116,10 @@ export function createMutators(
           const message = await tx.run(zql.messages.where('messageId', messageId).one());
           if (!message) {
             throw new Error('Message not available');
+          }
+
+          if (isPollMessageMetadata(message.metadata)) {
+            throw new ApplicationError('Poll messages cannot be edited');
           }
 
           // For forwarded messages, empty content is allowed (clearing optional message)
@@ -4658,6 +4679,13 @@ export function createMutators(
               });
             })
           );
+
+          // Removing the poll row also covers soft-deleted roots; PostgreSQL
+          // cascades questions, choices and ballots in the authoritative write.
+          const poll = await tx.run(zql.polls.where('messageId', '=', messageId).one());
+          if (poll) {
+            await tx.mutate.polls.delete({ id: poll.id });
+          }
 
           // Get all OTHER messages in the conversation (excluding the one being deleted)
           const allMessages = await tx.run(zql.messages

@@ -2,13 +2,13 @@
 
 ## Summary
 
-Add native, Polly-style polls to Xyne Spaces channel messages and thread replies. A user can create a poll with one or more multiple-choice questions, preview it, and publish it as a normal chat message. Participants can vote in real time, optionally select multiple choices, comment through the existing message thread, and add choices when the poll author permits it.
+Add native, Polly-style polls to Xyne Spaces top-level channel messages. A user can create a poll with one or more multiple-choice questions, preview it, and publish it as a normal chat message. Participants can vote in real time, optionally select multiple choices, comment through the existing message thread, and add choices when the poll author permits it.
 
 The first release supports only multiple-choice questions. Rating, ranking, free-text answers, scheduled closing, anonymous voting, and poll reopening are explicitly out of scope.
 
 ## Goals
 
-- Create a poll from the chat composer in a channel or thread.
+- Create a poll from a top-level channel composer.
 - Support one or more multiple-choice questions per poll.
 - Require a non-empty question and between 2 and 10 non-empty, unique choices per question.
 - Support `allowComments`, `allowMultipleVotes`, and `allowAudienceChoices` settings.
@@ -34,7 +34,7 @@ The first release supports only multiple-choice questions. Rating, ranking, free
 
 ### Entry point
 
-Add a `Create poll` item with the existing shared `Poll` icon to the composer attachment menu. Do not show it while editing an existing message. The action is available in both top-level channel composers and thread composers when the user can send a normal message.
+Add a `Create poll` item with the existing shared `Poll` icon to the composer attachment menu. Show it only in top-level channel composers when the user can send a normal message; do not expose it while editing or replying in a thread.
 
 ### Creation modal
 
@@ -127,6 +127,8 @@ Counts are derived from replicated vote rows. The maximum option/question limits
 
 Unique `(questionId, userId)` stores exactly one ballot per user and question, preventing cross-device races from creating two single-choice answers. Single-vote ballots contain zero or one option ID; multiple-vote ballots may contain several unique option IDs. The backend mutator revalidates every ID against the supplied question and poll. Empty ballots are deleted.
 
+The JSON ballot is deliberate for this first release: named per-user ballots are the source of truth and result counts are bounded client-side derivations. Anonymous voting and server-side aggregate counts are non-goals. If either enters the roadmap, the ballot and aggregation model must be redesigned and migrated rather than extending this JSON representation implicitly.
+
 Deleting the owning message deletes the poll, questions, options, and votes in the existing message-delete mutation. Database foreign keys use cascading deletes as a final integrity backstop.
 
 ## Zero Schema and Queries
@@ -157,7 +159,7 @@ Within the existing message-send transaction:
 3. Insert the poll, ordered questions, and ordered options using client-generated IDs.
 4. Commit all rows together or roll back all rows.
 
-Client-generated IDs make optimistic rows identical to server-confirmed rows. Poll drafts participate in the existing pending-send/retry machinery so a top-level poll can be queued offline consistently with normal channel messages. Thread poll creation follows the existing thread-send connectivity restriction.
+Client-generated IDs make optimistic rows identical to server-confirmed rows. Poll drafts participate in the existing pending-send/retry machinery so a top-level poll can be queued offline consistently with normal channel messages. Thread composers do not offer or accept poll drafts.
 
 ### Voting
 
@@ -177,6 +179,8 @@ Add a `polls.addOption` mutator accepting generated option ID, poll/question IDs
 - Validate the caller can access the owning message's channel.
 - Reject blank, duplicate, over-length, or eleventh choices.
 - Assign the next position inside the mutation; rendering tie-breaks concurrent additions by timestamp and ID.
+
+The normalized-text database constraint makes duplicate additions race-safe. The maximum-count check is read-then-insert, so two distinct simultaneous additions can briefly exceed the cap; this bounded race is accepted in the first release and is documented in both mutator copies.
 
 Poll authors use the same mutation; the setting controls post-publication additions for everyone, including the author, to keep behavior predictable.
 
@@ -239,7 +243,7 @@ The dialog has labelled fields, announced validation errors, deterministic focus
 - A user cannot create or delete another user's vote.
 - Poll entity ancestry is verified.
 - Message deletion removes all poll rows.
-- Channel and thread publishing create the message and full poll atomically.
+- Top-level channel publishing creates the message and full poll atomically; thread poll drafts are rejected.
 
 ### Dashboard tests
 
@@ -257,7 +261,7 @@ The dialog has labelled fields, announced validation errors, deterministic focus
 - Focused unit/component/ACL tests.
 - Prisma migration validation and Zero column parity scripts.
 - Dashboard lint and build required by the repository pre-commit hook.
-- Manual smoke test in a public channel, private channel, and thread with two browser sessions.
+- Manual smoke test in public and private channels with two browser sessions, including confirmation that thread composers cannot create polls.
 
 ## Rollout and Compatibility
 

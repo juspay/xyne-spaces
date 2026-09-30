@@ -1295,7 +1295,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               {message.isDeleted ? (
                 <div className='text-sm text-muted-foreground italic'>This message was deleted</div>
               ) : metadata?.messageSubtype === 'poll' ? (
-                <MessagePollCard messageId={message.messageId} />
+                <MessagePollCard messageId={message.messageId} {...(channelId && { channelId })} />
               ) : isMentionUserAddition ? (
                 <NonParticipantActions
                   messageId={message.messageId}

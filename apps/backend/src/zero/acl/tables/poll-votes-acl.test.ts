@@ -52,7 +52,7 @@ const ballot = (overrides: Record<string, unknown> = {}) => ({
 const pollScope = (overrides: Record<string, unknown> = {}) => ({
   id: 'poll-1',
   workspaceId: context.workspaceId,
-  message: { conversation: { channelId: 'channel-1' } },
+  message: { isDeleted: false, conversation: { channelId: 'channel-1' } },
   ...overrides,
 });
 
@@ -114,5 +114,15 @@ describe('PollVotesACL', () => {
     await expect(
       new PollVotesACL(guestContext).canInsert(ballot(), tx),
     ).resolves.toBeUndefined();
+  });
+
+  it('rejects a ballot when the owning poll message is deleted', async () => {
+    const tx = transactionReturning(
+      pollScope({
+        message: { isDeleted: true, conversation: { channelId: 'channel-1' } },
+      }),
+    );
+
+    await expect(new PollVotesACL(context).canInsert(ballot(), tx)).rejects.toThrow('deleted');
   });
 });

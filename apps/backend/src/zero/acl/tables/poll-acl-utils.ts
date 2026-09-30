@@ -23,6 +23,10 @@ export async function requireAccessiblePoll(
     throw new MutationACLError('Poll not found in this workspace', tableName);
   }
 
+  if (poll.message?.isDeleted) {
+    throw new MutationACLError('This poll message was deleted', tableName);
+  }
+
   if (!(await hasChannelMutationAccess(ctx, tx, channelId))) {
     throw new MutationACLError('Poll mutation requires channel access', tableName);
   }
