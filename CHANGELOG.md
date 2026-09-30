@@ -1,3 +1,10 @@
+## [1.434.0-release-20260930.3](https://github.com/juspay/xyne-spaces/compare/v1.434.0-release-20260930.2...v1.434.0-release-20260930.3) (2026-09-30)
+
+
+### Features
+
+* key internal user deactivation API on email with its own service secret (release-20260930) ([#2486](https://github.com/juspay/xyne-spaces/issues/2486)) ([5b43fe1](https://github.com/juspay/xyne-spaces/commit/5b43fe1573e80003cb4baec3c31eb44c566bb8ab))
+
 ## [1.434.0-release-20260930.2](https://github.com/juspay/xyne-spaces/compare/v1.434.0-release-20260930.1...v1.434.0-release-20260930.2) (2026-09-30)
 
 
