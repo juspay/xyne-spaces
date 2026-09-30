@@ -1,6 +1,7 @@
 import { memo, ReactElement, useState } from 'react';
 import { withProfiler } from '../../../utils/withProfiler';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
+import { useStableNavigate } from '../../../hooks/useStableRouter';
 import {
   Hashtag,
   PencilEdit,
@@ -74,7 +75,8 @@ const ChannelItemV2 = memo(
     const [sectionMenuOpen, setSectionMenuOpen] = useState(false);
     const zero = useZero();
     const context = useAuthContextValues();
-    const navigate = useNavigate();
+    // One row per channel, not virtualized: useNavigate would re-render every row on every navigation.
+    const navigate = useStableNavigate();
 
     const currentUserID = context.userID;
 
