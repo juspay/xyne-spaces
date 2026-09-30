@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   PointerSensor,
   closestCenter,
@@ -214,7 +214,7 @@ export const useChannelSectionDnd = ({
       ? ((channelSections ?? []).find(s => s.id === activeDragId) ?? null)
       : null;
 
-  const moveChannelToSection = (channelId: string, sectionId: string | null): void => {
+  const moveChannelToSectionLatest = (channelId: string, sectionId: string | null): void => {
     const timestamp = Date.now();
     let position = keyBetween(null, null);
     if (sectionId) {
@@ -231,6 +231,13 @@ export const useChannelSectionDnd = ({
     }
     void zero.mutate(mutators.channel.moveToSection({ channelId, sectionId, position, timestamp }));
   };
+  const moveChannelToSectionRef = useRef(moveChannelToSectionLatest);
+  moveChannelToSectionRef.current = moveChannelToSectionLatest;
+  const moveChannelToSection = useCallback(
+    (channelId: string, sectionId: string | null): void =>
+      moveChannelToSectionRef.current(channelId, sectionId),
+    [],
+  );
 
   const findContainer = (id: string, items: Record<string, string[]>): string | null => {
     if (id.startsWith('section-drop-')) {

@@ -230,6 +230,8 @@ const CHAT_NAV_SHORTCUTS: Partial<Record<InboxItemKey, ShortcutId>> = {
   threads: 'global.openThreads',
 };
 
+const NO_SECTIONS: ChannelSection[] = [];
+
 const ChatDirectory = ({
   channelData,
   allChannelsUserStatus,
@@ -897,7 +899,7 @@ const ChatDirectory = ({
                               channel={channel}
                               unreadCount={unreadCounts[channel.id] ?? 0}
                               isActive={activeChannelId === channel.id}
-                              sections={channelSections ?? []}
+                              sections={channelSections ?? NO_SECTIONS}
                               onMoveToSection={moveChannelToSection}
                             />
                           ))
@@ -918,7 +920,7 @@ const ChatDirectory = ({
                     key={section.id}
                     section={section}
                     channels={sectionChannels}
-                    sections={channelSections ?? []}
+                    sections={channelSections ?? NO_SECTIONS}
                     unreadCounts={unreadCounts}
                     sectionUnreadCount={sectionUnreadCounts[section.id] ?? 0}
                     activeChannelId={activeChannelId}
@@ -1094,7 +1096,7 @@ const ChatDirectory = ({
                         channel={channel}
                         unreadCount={unreadCounts[channel.id] ?? 0}
                         isActive={activeChannelId === channel.id}
-                        sections={channelSections ?? []}
+                        sections={channelSections ?? NO_SECTIONS}
                         onMoveToSection={moveChannelToSection}
                       />
                     ))}
@@ -1187,7 +1189,7 @@ const ChatDirectory = ({
                         channel={channel}
                         unreadCount={unreadCounts[channel.id] ?? 0}
                         isActive={activeChannelId === channel.id}
-                        sections={channelSections ?? []}
+                        sections={channelSections ?? NO_SECTIONS}
                         onMoveToSection={moveChannelToSection}
                       />
                     ))}
