@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { AWAKENING_SEND_TOOL } from "../awakening/send-tool.js";
 import { errMsg } from "../lib/errors.js";
-import { withSdlcRunTools } from "../lib/sdlc-run-tools.js";
+import { isSdlcRun, withSdlcRunTools } from "../lib/sdlc-run-tools.js";
 import crypto from "node:crypto";
 import { prisma } from "../db.js";
 import { decrypt } from "../crypto.js";
@@ -14,7 +14,7 @@ import { BITBUCKET_CUSTOM_TOOLS, handleUploadPrScreenshot, handleGetPrComments, 
 import { GITHUB_CUSTOM_TOOLS, handleUploadPrAttachment } from "../mcp/adapters/github.js";
 import { GITHUB_INSIGHTS_TOOLS, isGithubInsightsTool, handleGithubInsightsTool } from "../mcp/adapters/github-insights.js";
 import { GRAFANA_CUSTOM_TOOLS, handleGrafanaQueryLogs, handleGrafanaListMetrics, handleGrafanaQueryMetrics, handleGrafanaQueryDatabase, buildUpstreamGrafanaCitation, prefixChunk } from "../mcp/adapters/grafana.js";
-import { type Citation } from "xyne-claw-shared";
+import { type Citation, SDLC_AGENT_SLUG, SDLC_MCP_SERVER_TYPE } from "xyne-claw-shared";
 import { SLACK_CUSTOM_TOOLS, handleSlackFindChannel } from "../mcp/adapters/slack.js";
 import { channelAgentTools, handleChannelAgentTool, isChannelAgentTool } from "../surfaces/messaging/agent-tools.js";
 import { getChannel, isMessagingChannelKey, MESSAGING_CHANNEL_KEYS } from "../surfaces/messaging/plugin.js";
@@ -916,7 +916,7 @@ async function loadEffectiveCredentialsWithSpacesFallback(
   const effective = await loadEffectiveCredentials(userId, serverType, agentSlug, undefined, agentOrgId, subagentId);
   if (effective) return effective;
 
-  if (serverType === "xyne-spaces") {
+  if (serverType === "xyne-spaces" || serverType === SDLC_MCP_SERVER_TYPE) {
     const appCreds = await getAppTokenCredentials(userId);
     if (appCreds) {
       // App-token creds are the agent's Spaces app token. Mark as user-sourced
@@ -925,7 +925,7 @@ async function loadEffectiveCredentialsWithSpacesFallback(
       return {
         credentials: appCreds,
         source: "user",
-        connectionId: `app-token:xyne-spaces:${userId}`,
+        connectionId: `app-token:${serverType}:${userId}`,
         isUserOwned: true,
       };
     }
@@ -1093,6 +1093,15 @@ router.get("/:sessionId/mcp/tools", async (req: Request<{ sessionId: string }>, 
       }
     }
 
+    const hasSdlcEntry = entries.some((e) => e.serverType === SDLC_MCP_SERVER_TYPE);
+    if (!hasSdlcEntry && (agentSlug === SDLC_AGENT_SLUG || (await isSdlcRun(req.params.sessionId)))) {
+      const sdlcServer = await prisma.mcpServer.findUnique({ where: { type: SDLC_MCP_SERVER_TYPE } });
+      if (sdlcServer?.enabled) {
+        entries.push({ type: "user", serverType: SDLC_MCP_SERVER_TYPE, serverName: sdlcServer.name, enforcementType: "virtual" });
+        log.info(`[mcp/tools] added virtual ${SDLC_MCP_SERVER_TYPE} entry for userId=${userId}`);
+      }
+    }
+
     // Virtual xyne-spaces-app-tools entry: same pattern as xyne-spaces above.
     // The adapter declares credentialFields: [] (the app_token is auto-sourced
     // from the default agent's spacesAppToken, not user-supplied), so existing
@@ -1224,7 +1233,7 @@ router.get("/:sessionId/mcp/tools", async (req: Request<{ sessionId: string }>, 
     const results = await Promise.allSettled(
       listingEntries.map(async (entry) => {
         if (!(await hasConnectorDefinition(entry.serverType))) return null;
-        const effective = entry.serverType === "slack"
+        const effective = entry.serverType === "slack" || entry.serverType === SDLC_MCP_SERVER_TYPE
           ? await loadEffectiveCredentialsWithSpacesFallback(
               userId,
               entry.serverType,

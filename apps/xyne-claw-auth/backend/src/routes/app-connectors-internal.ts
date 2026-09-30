@@ -40,7 +40,7 @@ const log = createLogger("app-connectors-internal");
 /**
  * Claw's own plumbing, not services a user connected. Each one short-circuits
  * in lib/credentials-loader.ts to a credential the user never handed over:
- *  - xyne-spaces / xyne-dashboard / xyne-workflows: the viewer's LIVE Spaces
+ *  - xyne-spaces / xyne-spaces-sdlc / xyne-dashboard / xyne-workflows: the viewer's LIVE Spaces
  *    session — exposing them would give an app a second, ungated route into
  *    Spaces that bypasses the /api/sdk gateway;
  *  - xyne-spaces-app-tools: an agent's bot app token;
@@ -48,6 +48,7 @@ const log = createLogger("app-connectors-internal");
  */
 const PLATFORM_INTERNAL_TYPES = new Set<string>([
   "xyne-spaces",
+  "xyne-spaces-sdlc",
   "xyne-dashboard",
   "xyne-workflows",
   "xyne-spaces-app-tools",

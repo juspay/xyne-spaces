@@ -1,7 +1,7 @@
 import { createLogger } from "../logger.js";
 import { errMsg } from "../lib/errors.js";
 import { appFetch, interact, spacesFetch, SpacesApiError, type SpacesAuthContext } from "./servers/xyne-spaces-client.js";
-import { SDLC_TOOL_NAMES } from "xyne-claw-shared";
+import { SDLC_MCP_SERVER_TYPE, SDLC_TOOL_NAMES } from "xyne-claw-shared";
 import { spacesConversationExists } from "../lib/spaces-post-target.js";
 const log = createLogger("validators");
 
@@ -94,7 +94,7 @@ async function validateTargetConversationId(
   params: Record<string, unknown>,
   credentials: Record<string, unknown>,
 ): Promise<string | null> {
-  if (serverType !== "xyne-spaces") return null;
+  if (serverType !== "xyne-spaces" && serverType !== SDLC_MCP_SERVER_TYPE) return null;
   const conversationId = targetConversationId(params);
   const channelId = targetChannelId(params);
 
@@ -318,7 +318,7 @@ register("xyne-spaces", "spaces-edit-canvas", async (params) => {
   return null;
 });
 
-register("xyne-spaces", SDLC_TOOL_NAMES.writeArtifact, async (params) => {
+register(SDLC_MCP_SERVER_TYPE, SDLC_TOOL_NAMES.writeArtifact, async (params) => {
   const action = String(params["action"] ?? "");
   const has = (key: string) => String(params[key] ?? "").trim().length > 0;
   const wiki = params["kind"] === "WIKI";
@@ -343,7 +343,7 @@ register("xyne-spaces", SDLC_TOOL_NAMES.writeArtifact, async (params) => {
   return null;
 });
 
-register("xyne-spaces", SDLC_TOOL_NAMES.createTrackFolder, async (params) => {
+register(SDLC_MCP_SERVER_TYPE, SDLC_TOOL_NAMES.createTrackFolder, async (params) => {
   for (const key of ["channelId", "trackId", "name"]) {
     if (!String(params[key] ?? "").trim()) return `${key} is required`;
   }
@@ -351,7 +351,7 @@ register("xyne-spaces", SDLC_TOOL_NAMES.createTrackFolder, async (params) => {
   return null;
 });
 
-register("xyne-spaces", SDLC_TOOL_NAMES.createPullRequest, async (params) => {
+register(SDLC_MCP_SERVER_TYPE, SDLC_TOOL_NAMES.createPullRequest, async (params) => {
   for (const key of ["workspaceId", "actorUserId", "repoId", "title", "head", "base"]) {
     if (!String(params[key] ?? "").trim()) return `${key} is required`;
   }
@@ -361,7 +361,7 @@ register("xyne-spaces", SDLC_TOOL_NAMES.createPullRequest, async (params) => {
 });
 
 for (const tool of [SDLC_TOOL_NAMES.readArtifact, SDLC_TOOL_NAMES.listArtifactVersions, SDLC_TOOL_NAMES.archiveArtifact]) {
-  register("xyne-spaces", tool, async (params) => {
+  register(SDLC_MCP_SERVER_TYPE, tool, async (params) => {
     const canvasId = String(params["canvasId"] ?? "").trim();
     if (!canvasId) return "canvasId is required";
     if (canvasId.length > 256) return "canvasId must be at most 256 characters";

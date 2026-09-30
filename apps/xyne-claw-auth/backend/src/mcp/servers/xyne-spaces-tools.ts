@@ -10288,6 +10288,21 @@ const spacesAutomationAgents: ToolDef = {
   }),
 };
 
+export const sdlcTools: ToolDef[] = [
+  spacesSdlcListArtifacts,
+  spacesSdlcReadArtifact,
+  spacesSdlcListRepositories,
+  spacesSdlcListTracks,
+  spacesSdlcCreateTrack,
+  spacesSdlcCreateTrackFolder,
+  spacesSdlcListArtifactTypes,
+  spacesSdlcWriteArtifact,
+  spacesSdlcArchiveArtifact,
+  spacesSdlcCreatePullRequest,
+  spacesSdlcListEntityLinks,
+  spacesSdlcListArtifactVersions,
+];
+
 export const tools: ToolDef[] = [
   spacesWhoami,
   // `spaces-vespa-search` is the general search tool (2026-09-26). The older
@@ -10335,18 +10350,6 @@ export const tools: ToolDef[] = [
   spacesEditCanvas,
   spacesTriggerAgent,
   spacesCreateCanvas,
-  spacesSdlcListArtifacts,
-  spacesSdlcReadArtifact,
-  spacesSdlcListRepositories,
-  spacesSdlcListTracks,
-  spacesSdlcCreateTrack,
-  spacesSdlcCreateTrackFolder,
-  spacesSdlcListArtifactTypes,
-  spacesSdlcWriteArtifact,
-  spacesSdlcArchiveArtifact,
-  spacesSdlcCreatePullRequest,
-  spacesSdlcListEntityLinks,
-  spacesSdlcListArtifactVersions,
   spacesAutomationsList,
   // /api/automations/* needs a user session; hide these in app-mode runs.
   ...[

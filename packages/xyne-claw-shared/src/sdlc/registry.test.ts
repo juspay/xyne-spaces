@@ -3,13 +3,14 @@ import {
   buildSdlcAgentToolProfile,
   mergeSdlcToolProfile,
   SDLC_DIRECT_TOOL_NAMES,
+  SDLC_MCP_SERVER_TYPE,
   SDLC_TOOL_NAMES,
   withSdlcToolsConfig,
 } from "./registry.js";
 
-const profile = buildSdlcAgentToolProfile([...SDLC_DIRECT_TOOL_NAMES, "spaces-search", "spaces-create-ticket"]);
-const write = `xyne-spaces__${SDLC_TOOL_NAMES.writeArtifact}`;
-const read = `xyne-spaces__${SDLC_TOOL_NAMES.readArtifact}`;
+const profile = buildSdlcAgentToolProfile(["spaces-search", "spaces-create-ticket"], [...SDLC_DIRECT_TOOL_NAMES]);
+const write = `${SDLC_MCP_SERVER_TYPE}__${SDLC_TOOL_NAMES.writeArtifact}`;
+const read = `${SDLC_MCP_SERVER_TYPE}__${SDLC_TOOL_NAMES.readArtifact}`;
 
 describe("mergeSdlcToolProfile", () => {
   const agent = {
@@ -49,5 +50,22 @@ describe("withSdlcToolsConfig", () => {
     const tools = withSdlcToolsConfig({ subagents: ["jira"] }, profile)!;
     expect(tools["subagents"]).toEqual(expect.arrayContaining(["jira", "github"]));
     expect(tools["direct"]).toEqual(expect.arrayContaining([SDLC_TOOL_NAMES.createTrackFolder]));
+  });
+});
+
+describe("buildSdlcAgentToolProfile", () => {
+  it("keys SDLC permissions by the SDLC server and generic Spaces writes by xyne-spaces", () => {
+    expect(SDLC_MCP_SERVER_TYPE).toBe("xyne-spaces-sdlc");
+    expect(profile.toolPermissions[write]).toBe("ask");
+    expect(profile.toolPermissions[`xyne-spaces__${SDLC_TOOL_NAMES.writeArtifact}`]).toBeUndefined();
+    expect(profile.toolPermissions["xyne-spaces__spaces-create-ticket"]).toBe("ask");
+  });
+
+  it("requires every SDLC tool on the SDLC server, not the Spaces one", () => {
+    expect(() => buildSdlcAgentToolProfile([...SDLC_DIRECT_TOOL_NAMES], [])).toThrow(/Xyne Spaces SDLC server/);
+  });
+
+  it("rejects a tool exported by both servers", () => {
+    expect(() => buildSdlcAgentToolProfile([SDLC_TOOL_NAMES.readArtifact], [...SDLC_DIRECT_TOOL_NAMES])).toThrow(/Duplicate/);
   });
 });

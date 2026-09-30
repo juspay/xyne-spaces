@@ -89,6 +89,8 @@ export const SDLC_RETIRED_TOOL_NAMES = [
   "sandbox-sdlc-git-context",
 ] as const;
 
+export const SDLC_MCP_SERVER_TYPE = "xyne-spaces-sdlc";
+
 export const SDLC_DIRECT_TOOL_NAMES = SDLC_TOOL_CAPABILITIES
   .filter((tool) => tool.transport === "direct")
   .map((tool) => tool.name);
@@ -117,7 +119,7 @@ export function sdlcToolPermissions(
   }
   for (const tool of SDLC_TOOL_CAPABILITIES) {
     if (tool.transport === "direct") {
-      toolPermissions[`xyne-spaces__${tool.name}`] = tool.mutation === "write" ? write : "allow";
+      toolPermissions[`${SDLC_MCP_SERVER_TYPE}__${tool.name}`] = tool.mutation === "write" ? write : "allow";
     }
   }
   for (const name of WORKFLOW_MCP_WRITE_TOOL_NAMES) {
@@ -126,19 +128,23 @@ export function sdlcToolPermissions(
   return toolPermissions;
 }
 
-export function buildSdlcAgentToolProfile(spacesMcpToolNames: readonly string[]): SdlcAgentToolProfile {
-  const uniqueToolNames = [...new Set(spacesMcpToolNames)];
-  if (uniqueToolNames.length !== spacesMcpToolNames.length) {
-    throw new Error("Duplicate tool names in Xyne Spaces MCP export");
+export function buildSdlcAgentToolProfile(
+  spacesMcpToolNames: readonly string[],
+  sdlcMcpToolNames: readonly string[],
+): SdlcAgentToolProfile {
+  const exported = [...spacesMcpToolNames, ...sdlcMcpToolNames];
+  const uniqueToolNames = [...new Set(exported)];
+  if (uniqueToolNames.length !== exported.length) {
+    throw new Error("Duplicate tool names across the Xyne Spaces and Xyne Spaces SDLC MCP exports");
   }
   const retired = SDLC_RETIRED_TOOL_NAMES.filter((name) => uniqueToolNames.includes(name));
   if (retired.length > 0) {
     throw new Error(`Retired SDLC tools remain exported: ${retired.join(", ")}`);
   }
   const direct = [...uniqueToolNames, ...WORKFLOW_MCP_TOOL_NAMES];
-  const missing = SDLC_DIRECT_TOOL_NAMES.filter((name) => !direct.includes(name));
+  const missing = SDLC_DIRECT_TOOL_NAMES.filter((name) => !sdlcMcpToolNames.includes(name));
   if (missing.length > 0) {
-    throw new Error(`SDLC MCP tools missing from Xyne Spaces server: ${missing.join(", ")}`);
+    throw new Error(`SDLC MCP tools missing from Xyne Spaces SDLC server: ${missing.join(", ")}`);
   }
   return {
     tools: {
@@ -153,8 +159,11 @@ export function buildSdlcAgentToolProfile(spacesMcpToolNames: readonly string[])
 
 let cachedProfile: SdlcAgentToolProfile | undefined;
 
-export function sdlcAgentToolProfile(spacesMcpToolNames: readonly string[]): SdlcAgentToolProfile {
-  cachedProfile ??= buildSdlcAgentToolProfile(spacesMcpToolNames);
+export function sdlcAgentToolProfile(
+  spacesMcpToolNames: readonly string[],
+  sdlcMcpToolNames: readonly string[],
+): SdlcAgentToolProfile {
+  cachedProfile ??= buildSdlcAgentToolProfile(spacesMcpToolNames, sdlcMcpToolNames);
   return cachedProfile;
 }
 

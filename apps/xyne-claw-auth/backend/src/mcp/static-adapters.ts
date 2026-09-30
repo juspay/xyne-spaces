@@ -3,6 +3,7 @@ import { grafanaAdapter } from "./adapters/grafana.js";
 import { bitbucketAdapter } from "./adapters/bitbucket.js";
 import { kibanaAdapter } from "./adapters/kibana.js";
 import { xyneSpacesAdapter } from "./adapters/xyne-spaces.js";
+import { xyneSpacesSdlcAdapter } from "./adapters/xyne-spaces-sdlc.js";
 import { xyneDashboardAdapter } from "./adapters/xyne-dashboard.js";
 import { xyneWorkflowsAdapter } from "./adapters/xyne-workflows.js";
 import { figmaAdapter } from "./adapters/figma.js";
@@ -65,6 +66,7 @@ export const STATIC_ADAPTERS: Record<string, McpAdapter> = {
   bitbucket: bitbucketAdapter,
   kibana: kibanaAdapter,
   "xyne-spaces": xyneSpacesAdapter,
+  [xyneSpacesSdlcAdapter.type]: xyneSpacesSdlcAdapter,
   "xyne-dashboard": xyneDashboardAdapter,
   "xyne-workflows": xyneWorkflowsAdapter,
   google: googleAdapter,

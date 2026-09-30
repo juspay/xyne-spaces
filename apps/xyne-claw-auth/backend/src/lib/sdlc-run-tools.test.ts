@@ -10,7 +10,7 @@ vi.mock("../redis.js", () => ({
   },
 }));
 
-const { markSdlcRun, withSdlcRunTools } = await import("./sdlc-run-tools.js");
+const { isSdlcRun, markSdlcRun, withSdlcRunTools } = await import("./sdlc-run-tools.js");
 
 describe("withSdlcRunTools", () => {
   beforeEach(() => store.clear());
@@ -27,5 +27,11 @@ describe("withSdlcRunTools", () => {
   it("leaves an unrestricted agent unrestricted", async () => {
     await markSdlcRun("run-2", "hub-1");
     expect(await withSdlcRunTools(undefined, "run-2")).toBeUndefined();
+  });
+
+  it("reports whether a run is marked as in a hub", async () => {
+    expect(await isSdlcRun("run-3")).toBe(false);
+    await markSdlcRun("run-3", "hub-1");
+    expect(await isSdlcRun("run-3")).toBe(true);
   });
 });

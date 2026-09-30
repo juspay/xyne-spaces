@@ -12,6 +12,7 @@ const OAUTH_ISSUED_TYPES = new Set([
   "google",
   "microsoft",
   "xyne-spaces",
+  "xyne-spaces-sdlc",
   "xyne-spaces-app-tools",
   "xyne-dashboard",
 ]);

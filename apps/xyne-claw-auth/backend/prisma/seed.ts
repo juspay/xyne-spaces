@@ -134,6 +134,13 @@ const SERVERS = [
     description: "Internal Xyne Spaces platform integration",
   },
   {
+    type: "xyne-spaces-sdlc",
+    name: "Xyne Spaces SDLC",
+    url: "",
+    description: "SDLC Hub tools (tracks, artifacts, pull requests); listed for SDLC runs, not user-connectable.",
+    credentialForm: { fields: [] },
+  },
+  {
     type: "xyne-dashboard",
     name: "Xyne Dashboard",
     url: "",

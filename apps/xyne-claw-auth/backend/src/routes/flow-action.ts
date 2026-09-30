@@ -26,6 +26,7 @@ import { verifySpacesSignature } from "../middleware/verify-spaces-signature.js"
 import { agentRunRepository, chatMessageRepository } from "../repositories/index.js";
 import { recordTwinApprovalOutcome } from "../services/twinResponseFeedback.js";
 import type { FlowDefinition } from "xyne-claw-shared";
+import { approvalServerType, approvalToolFailureMessage } from "../lib/approval-tool-routing.js";
 import { mdToMrkdwn, FlowBuilder, buildWriteResultFlow, buildPlanFlow, buildUserQuestionFlow, buildTicketFlow, buildAgentCardFlow, userQuestionOptionLabel, PLAN_COMPONENT_ID, AGENT_COMPONENT_ID, AGENT_EDITS_STATE_KEY } from "xyne-claw-shared";
 import {
   clearActivePlanCard,
@@ -92,13 +93,6 @@ function flagUserTokenRun(conversationId: string | undefined, agentSlug: string 
         errMsg(e),
       ),
     );
-}
-
-function approvalToolFailureMessage(errMsg: string): string {
-  if (/conversation not found/i.test(errMsg) || /Spaces API 404/i.test(errMsg)) {
-    return "target conversation not found — re-run the agent to regenerate this approval";
-  }
-  return errMsg;
 }
 
 const AGENT_CALL_CONSUMED_TTL_SEC = 24 * 60 * 60;
@@ -999,7 +993,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
           const errText = sanitizeApprovalToolError(
             formatGatewayApprovalExecutionError(execution, gatewayTarget.serviceName, tool),
           );
-          const userMessage = approvalToolFailureMessage(errText);
+          const userMessage = approvalToolFailureMessage(errText, params);
           log.error(
             `[flow-action] gateway approval tool failed server=${serverType} tool=${tool} conversationId=${conversationId} userId=${writeUserId} spacesAppId=${spacesAppId ?? ""} err=${errText}`,
           );
@@ -1134,25 +1128,26 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       const { callTool } = await import("../mcp/runner.js");
       const { hasConnectorDefinition } = await import("../mcp/connector-definitions.js");
       const { loadEffectiveCredentials, isPrivateUserCredential } = await import("../lib/credentials-loader.js");
-      if (!(await hasConnectorDefinition(serverType))) {
-        res.json({ type: "error", message: `No adapter for ${serverType}` } satisfies AppActionResponse);
+      const mcpServerType = approvalServerType(serverType, tool);
+      if (!(await hasConnectorDefinition(mcpServerType))) {
+        res.json({ type: "error", message: `No adapter for ${mcpServerType}` } satisfies AppActionResponse);
         return;
       }
-      const effective = await loadEffectiveCredentials(writeUserId, serverType, agentSlug);
+      const effective = await loadEffectiveCredentials(writeUserId, mcpServerType, agentSlug);
       if (!effective) {
-        res.json({ type: "error", message: `No connection for user ${writeUserId} / ${serverType}` } satisfies AppActionResponse);
+        res.json({ type: "error", message: `No connection for user ${writeUserId} / ${mcpServerType}` } satisfies AppActionResponse);
         return;
       }
       // Private user credential on an approved write → flag the run for the ACL
       // (excludes the ambient Spaces session — see isPrivateUserCredential).
-      if (isPrivateUserCredential(serverType, effective.source)) flagUserTokenRun(conversationId, agentSlug);
+      if (isPrivateUserCredential(mcpServerType, effective.source)) flagUserTokenRun(conversationId, agentSlug);
 
       let toolResult: Awaited<ReturnType<typeof callTool>>;
       try {
-        toolResult = await callTool(writeUserId, serverType, effective.credentials, tool, params);
+        toolResult = await callTool(writeUserId, mcpServerType, effective.credentials, tool, params);
       } catch (err) {
         const errText = sanitizeApprovalToolError(err);
-        const userMessage = approvalToolFailureMessage(errText);
+        const userMessage = approvalToolFailureMessage(errText, params);
         log.error(
           `[flow-action] approval tool failed tool=${tool} conversationId=${conversationId} userId=${writeUserId} spacesAppId=${spacesAppId ?? ""} err=${errText}`,
         );

@@ -42,6 +42,7 @@ import { getOAuthProvider } from "../routes/oauth-token.js";
 import { OAUTH_SERVER_TYPES as STDIO_OAUTH_SERVER_TYPES } from "./oauth-server-types.js";
 
 import { createLogger } from "../logger.js";
+import { SDLC_MCP_SERVER_TYPE } from "xyne-claw-shared";
 const log = createLogger("credentials-loader");
 
 export interface EffectiveCredentials {
@@ -63,6 +64,7 @@ export interface EffectiveCredentials {
  */
 export const AMBIENT_USER_CREDENTIAL_SERVER_TYPES = new Set([
   "xyne-spaces",
+  "xyne-spaces-sdlc",
   "xyne-dashboard",
   "xyne-workflows",
 ]);
@@ -192,6 +194,10 @@ export async function loadEffectiveCredentials(
     if (live) return live;
     log.info(`[creds-loader] xyne-workflows userId=${userId} → no live Spaces session`);
     return null;
+  }
+
+  if (serverType === SDLC_MCP_SERVER_TYPE) {
+    return loadEffectiveCredentials(userId, "xyne-spaces", agentSlug, instanceSlug, agentOrgId, subagentId);
   }
 
   // xyne-spaces-app-tools: resolved HERE, before the agent-pin cascade. The

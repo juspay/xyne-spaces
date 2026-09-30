@@ -1,6 +1,6 @@
 import type { AppPrismaClient } from "../db.js";
 import { SDLC_AGENT_PROMPT, SDLC_AGENT_SLUG, sdlcAgentToolProfile } from "xyne-claw-shared";
-import { tools as xyneSpacesTools } from "../mcp/servers/xyne-spaces-tools.js";
+import { sdlcTools, tools as xyneSpacesTools } from "../mcp/servers/xyne-spaces-tools.js";
 import { agentRepository } from "../repositories/agentRepository.js";
 
 export interface SdlcAgentDesiredState {
@@ -17,7 +17,10 @@ export interface SdlcAgentDesiredState {
 }
 
 export function sdlcAgentDesiredState(): SdlcAgentDesiredState {
-  const profile = sdlcAgentToolProfile(xyneSpacesTools.map((tool) => tool.name));
+  const profile = sdlcAgentToolProfile(
+    xyneSpacesTools.map((tool) => tool.name),
+    sdlcTools.map((tool) => tool.name),
+  );
   return {
     name: "SDLC Assistant",
     description: "Repository-grounded Wiki, Hub Knowledge, PRDs, Tech Docs, and implementation workflows.",
