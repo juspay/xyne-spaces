@@ -48,6 +48,7 @@ import { ChannelScopeType, type FlowDefinition } from '@xyne/shared';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import { withWorkspacePrefix } from '../../../hooks/useShareableOrigin';
 import { formatChannelLabel } from '../ChatDirectory/ChatDirectory.utils';
+import { useReportExpandedToMessage } from '../ExpandableMessage/ExpandableMessageContext';
 
 interface RenderMessageWithHTMLProps {
   message: string;
@@ -607,6 +608,7 @@ function MessageCodeBlock({
 
   const lines = codeText.length > 0 ? codeText.replace(/\n$/, '').split('\n').length : 0;
   const collapsible = lines > CODE_BLOCK_COLLAPSE_THRESHOLD;
+  useReportExpandedToMessage(collapsible && isExpanded);
 
   return (
     <div className='xyne-code-block group/code-block relative my-3 max-w-full overflow-hidden rounded-[10px] border border-border bg-muted'>
