@@ -1,11 +1,11 @@
 import { cn } from '../../../../utils/classNames';
 import { CONDITIONAL_STEP_TYPE, SWITCH_STEP_TYPE, makeStepId } from '../../Automation.types';
 import {
-  buildOutputSchemaFromRunAgentConfig,
-  buildOutputSchemaFromWebhookConfig,
   issuesAtStep,
   makeConditionalStep,
+  pushStepVariableSources,
 } from '../AutomationBuilder.utils';
+import { stepNumberForPrefix } from '../FlowAutomationView/FlowAutomationView.utils';
 import type {
   ActionStepConfig,
   AutomationStepConfig,
@@ -76,6 +76,7 @@ function buildBranchVariableSources(
   steps: AutomationStepConfig[],
   schemaCache: Record<string, StepSchema | undefined>,
   upToIndex: number,
+  pathPrefix: string,
 ): VariablePickerSource[] {
   if (upToIndex === 0) return parentSources;
 
@@ -85,31 +86,9 @@ function buildBranchVariableSources(
     if (!s || s.type === CONDITIONAL_STEP_TYPE || s.type === SWITCH_STEP_TYPE) continue;
     const schema = schemaCache[s.type];
     if (!schema) continue;
-    const groupLabel = `Branch step ${i + 1} — ${schema.name}`;
-    sources.push({
-      sourceKey: s.id,
-      role: 'input',
-      label: `Branch step ${i + 1} input`,
-      sublabel: schema.name,
-      groupKey: s.id,
-      groupLabel,
-      schema: schema.configSchema,
-    });
-    const outputSchema =
-      s.type === 'RUN_AGENT'
-        ? buildOutputSchemaFromRunAgentConfig(s.config)
-        : s.type === 'TRIGGER_WEBHOOK'
-          ? buildOutputSchemaFromWebhookConfig(s.config)
-          : schema.outputSchema;
-    sources.push({
-      sourceKey: s.id,
-      role: 'output',
-      label: `Branch step ${i + 1} output`,
-      sublabel: schema.name,
-      groupKey: s.id,
-      groupLabel,
-      schema: outputSchema,
-    });
+    // Same "Step 2.1" number the card shows.
+    const label = `Step ${stepNumberForPrefix(`${pathPrefix}[${i}]`)}`;
+    pushStepVariableSources(sources, s as ActionStepConfig, schema, label);
   }
   return sources;
 }
@@ -201,6 +180,7 @@ export function BranchSteps({
               steps,
               schemaCache,
               i,
+              pathPrefix,
             );
             const renderProps: ControlFlowRenderProps = {
               catalog,

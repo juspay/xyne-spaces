@@ -76,7 +76,7 @@ export function StepCard({
         <button
           type='button'
           aria-expanded={!collapsed}
-          aria-label={`Step ${stepNumber} — ${heading}. ${collapsed ? 'Expand' : 'Collapse'} configuration.`}
+          aria-label={`Step ${stepNumber} — ${heading}.${issueMessages.length ? ` ${issueMessages.length} validation issue${issueMessages.length === 1 ? '' : 's'}.` : ''} ${collapsed ? 'Expand' : 'Collapse'} configuration.`}
           data-track-category='automation-builder'
           data-track-name='step-card-toggle-collapse'
           className={cn(

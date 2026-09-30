@@ -6,9 +6,9 @@ import {
   CheckCircle2,
   Copy,
   Hourglass,
-  LayoutGrid,
   List,
   Loader2,
+  Workflow,
   XCircle,
 } from 'lucide-react';
 import { cn } from '../../../../utils/classNames';
@@ -38,7 +38,7 @@ const renderNothing = (): React.ReactElement => <></>;
 
 const VIEW_OPTIONS = [
   { mode: 'list', label: 'List view', Icon: List },
-  { mode: 'flow', label: 'Flow view', Icon: LayoutGrid },
+  { mode: 'flow', label: 'Flow view', Icon: Workflow },
 ] as const;
 
 const STATUS_CLASSES: Record<AutomationRunStatus, string> = {

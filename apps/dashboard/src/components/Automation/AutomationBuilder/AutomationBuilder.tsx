@@ -11,7 +11,6 @@ import {
   Copy,
   GitBranch,
   History,
-  LayoutGrid,
   List,
   Pencil,
   Power,
@@ -19,6 +18,7 @@ import {
   Send,
   Trash2,
   Undo2,
+  Workflow,
   X,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -37,7 +37,6 @@ import {
   type ScheduleConfig,
   CONDITIONAL_STEP_TYPE,
   SWITCH_STEP_TYPE,
-  WEBHOOK_TRIGGER_TYPE,
   AutomationStatusValues,
   makeStepId,
   type SaveResult,
@@ -1250,7 +1249,11 @@ export function AutomationBuilder({
         {!readOnlyPreview && (
           <>
             <span className='text-xs text-muted-foreground'>View</span>
-            <div className='flex items-center rounded-md border border-border p-0.5'>
+            <div
+              role='group'
+              aria-label='View'
+              className='flex items-center rounded-md border border-border p-0.5'
+            >
               <button
                 type='button'
                 aria-label='List view'
@@ -1283,7 +1286,7 @@ export function AutomationBuilder({
                   'hover:text-foreground',
                 )}
               >
-                <LayoutGrid className='size-4' aria-hidden='true' />
+                <Workflow className='size-4' aria-hidden='true' />
               </button>
             </div>
           </>
@@ -1316,7 +1319,7 @@ export function AutomationBuilder({
           renderSwitchCard={renderSwitchCard}
           onRequestEdit={!editMode && canEdit ? handleRequestEdit : undefined}
           triggerExtras={
-            config.trigger.type === WEBHOOK_TRIGGER_TYPE ? (
+            config.trigger.type === 'WEBHOOK' ? (
               <WebhookEndpointPanel automationId={savedId} />
             ) : undefined
           }
@@ -1354,7 +1357,7 @@ export function AutomationBuilder({
             title='When this happens'
             description='The event that fires this automation.'
             diffKey={TRIGGER_TYPE_DIFF_KEY}
-            inert={readOnlyPreview}
+            inert={!editMode}
           >
             <TriggerCard
               view='event'
@@ -1366,7 +1369,7 @@ export function AutomationBuilder({
               onConfigChange={handleTriggerConfigChange}
               issues={triggerIssues}
             />
-            {config.trigger.type === WEBHOOK_TRIGGER_TYPE && (
+            {config.trigger.type === 'WEBHOOK' && (
               <div className='mt-4'>
                 <WebhookEndpointPanel automationId={savedId} />
               </div>
@@ -1379,7 +1382,7 @@ export function AutomationBuilder({
             title='Run timing'
             description='Run now, or wait a fixed time after a date field on the trigger.'
             diffKey={SCHEDULE_DIFF_KEY}
-            inert={readOnlyPreview}
+            inert={!editMode}
           >
             <ScheduleCard
               schedule={config.schedule}
@@ -1394,7 +1397,7 @@ export function AutomationBuilder({
             title='With these conditions'
             description='Evaluated against fresh state when the actions are about to run.'
             diffKey={TRIGGER_CONFIG_DIFF_KEY}
-            inert={readOnlyPreview}
+            inert={!editMode}
           >
             <TriggerCard
               view='condition'
@@ -1419,7 +1422,7 @@ export function AutomationBuilder({
             <AddStepRow
               catalog={stepCatalog}
               onPick={type => handleAddStep(type, 0)}
-              inert={readOnlyPreview}
+              inert={!editMode}
             />
 
             {config.steps.map((step, index) => {
@@ -1505,7 +1508,7 @@ export function AutomationBuilder({
                     <AddStepRow
                       catalog={stepCatalog}
                       onPick={type => handleAddStep(type, index + 1)}
-                      inert={readOnlyPreview}
+                      inert={!editMode}
                     />
                   )}
                 </div>
@@ -1516,7 +1519,7 @@ export function AutomationBuilder({
               <AddStepRow
                 catalog={stepCatalog}
                 onPick={type => handleAddStep(type)}
-                inert={readOnlyPreview}
+                inert={!editMode}
               />
             )}
           </BuilderSection>

@@ -9,12 +9,7 @@ import type {
   ValidationIssue,
   JsonSchema,
 } from '../Automation.types';
-import {
-  CONDITIONAL_STEP_TYPE,
-  SWITCH_STEP_TYPE,
-  WEBHOOK_TRIGGER_TYPE,
-  makeStepId,
-} from '../Automation.types';
+import { CONDITIONAL_STEP_TYPE, SWITCH_STEP_TYPE, makeStepId } from '../Automation.types';
 import type { VariablePickerSource } from './VariablePicker/VariablePicker.types';
 import { resolveSchema } from './SchemaForm/SchemaForm.utils';
 
@@ -36,7 +31,7 @@ export function buildVariableSources(
   const sources: VariablePickerSource[] = [];
   if (triggerSchema) {
     let triggerOutputSchema: JsonSchema =
-      triggerSchema.type === WEBHOOK_TRIGGER_TYPE
+      triggerSchema.type === 'WEBHOOK'
         ? buildWebhookTriggerOutputSchema(triggerConfig)
         : triggerSchema.outputSchema;
 
