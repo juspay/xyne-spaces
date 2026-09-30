@@ -593,13 +593,6 @@ function serverToolsKey(serverType: string, serverName: string): string {
   return `${serverType}\u0000${serverName}`;
 }
 
-type McpToolsPrefilterMode = "off" | "shadow" | "on";
-
-function mcpToolsPrefilterMode(): McpToolsPrefilterMode {
-  const raw = (process.env["MCP_TOOLS_PREFILTER"] ?? "shadow").trim().toLowerCase();
-  return raw === "on" || raw === "off" ? raw : "shadow";
-}
-
 async function serverTypesAgentCannotUse(
   entries: ListEntry[],
   userId: string,
@@ -1207,16 +1200,11 @@ router.get("/:sessionId/mcp/tools", async (req: Request<{ sessionId: string }>, 
       }
     }
 
-    const prefilterMode = mcpToolsPrefilterMode();
-    const prefilterSkips = prefilterMode === "off"
-      ? new Set<string>()
-      : await serverTypesAgentCannotUse(entries, userId, strictAgentToolsConfig, sessionAgentTools);
-    const listingEntries = prefilterMode === "on"
-      ? entries.filter((entry) => !prefilterSkips.has(entry.serverType))
-      : entries;
+    const prefilterSkips = await serverTypesAgentCannotUse(entries, userId, strictAgentToolsConfig, sessionAgentTools);
+    const listingEntries = entries.filter((entry) => !prefilterSkips.has(entry.serverType));
     if (prefilterSkips.size > 0) {
       log.info(
-        `[mcp/tools] prefilter mode=${prefilterMode} agent=${sessionAgentTools?.slug ?? "-"} ` +
+        `[mcp/tools] prefilter agent=${sessionAgentTools?.slug ?? "-"} ` +
         `entries=${entries.length} skip=${prefilterSkips.size} [${[...prefilterSkips].join(",")}]`,
       );
     }
@@ -1490,18 +1478,6 @@ router.get("/:sessionId/mcp/tools", async (req: Request<{ sessionId: string }>, 
           sessionAgentTools.subagentToolRefs,
         ),
       );
-    }
-
-    if (prefilterMode === "shadow" && prefilterSkips.size > 0) {
-      const misses = data.filter((serverTools) => prefilterSkips.has(serverTools.serverType));
-      if (misses.length > 0) {
-        log.warn(
-          `[mcp/tools] prefilter-shadow MISS agent=${sessionAgentTools?.slug ?? "-"} userId=${userId} ` +
-          `servers=[${misses.map((m) => `${m.serverType}:${m.tools.map((t) => t.name).join("|")}`).join(",")}]`,
-        );
-      } else {
-        log.info(`[mcp/tools] prefilter-shadow ok agent=${sessionAgentTools?.slug ?? "-"} wouldSkip=${prefilterSkips.size}`);
-      }
     }
 
     res.json({ success: true, data });
