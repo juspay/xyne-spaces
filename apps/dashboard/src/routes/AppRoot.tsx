@@ -35,7 +35,6 @@ import { RequireOrgManager } from './AIScreen/screens/RequireOrgManager';
 import { KnowledgeBaseV2Layout } from '../components/knowledgeBaseV2/KnowledgeBaseV2Layout';
 import KnowledgeBaseV2Screen from '../components/knowledgeBaseV2/KnowledgeBaseV2Screen';
 import { LegacyKbRedirect } from '../components/knowledgeBaseV2/LegacyKbRedirect';
-import { MemoryScreen } from './MemoryScreen';
 import { FileViewerLayout } from '../components/knowledgeBase/layout/FileViewerLayout';
 import AnalyticsScreen from './AnalyticsScreen/AnalyticsScreen';
 import ProjectsScreen from './ProjectsScreen/ProjectsScreen';
@@ -1559,12 +1558,9 @@ export const router = createBrowserRouter(
                   ],
                 },
                 {
+                  // The Context screen was removed; old links land on the workspace home.
                   path: 'memory',
-                  element: (
-                    <ToolbarProtectedRoute path='/memory'>
-                      <MemoryScreen />
-                    </ToolbarProtectedRoute>
-                  ),
+                  element: <Navigate to='..' replace />,
                 },
                 {
                   path: 'analytics',
