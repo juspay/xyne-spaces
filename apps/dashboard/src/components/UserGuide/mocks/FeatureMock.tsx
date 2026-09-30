@@ -1131,30 +1131,6 @@ export const FeatureMock = ({ visualKey, title }: FeatureMockProps): ReactElemen
         </MockFrame>
       );
 
-    case 'memory':
-      return (
-        <MockFrame title={title}>
-          <Shell railActive='ai'>
-            <ScreenHeader title='Context Memory' />
-            <div className='flex-1 p-2 space-y-1.5 overflow-hidden'>
-              {[
-                {
-                  title: 'Platform migration decision',
-                  note: 'Postgres over MySQL decided Apr 2025',
-                },
-                { title: 'On-call rotation', note: 'Alice leads P0 response; Bob as backup' },
-                { title: 'Release cadence', note: 'Deploys every Tue & Thu at 14:00 UTC' },
-              ].map((m, i) => (
-                <div key={i} className='rounded-lg border border-border/60 p-2 space-y-0.5'>
-                  <p className='text-[10px] font-medium text-foreground'>{m.title}</p>
-                  <p className='text-[9px] text-muted-foreground leading-relaxed'>{m.note}</p>
-                </div>
-              ))}
-            </div>
-          </Shell>
-        </MockFrame>
-      );
-
     case 'ai-onboarding':
       return (
         <MockFrame title={title}>

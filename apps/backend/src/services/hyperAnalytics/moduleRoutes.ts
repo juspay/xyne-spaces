@@ -33,7 +33,6 @@ const EXACT_MODULES = new Set([
   '/search-results',
   '/agents',
   '/knowledge-base',
-  '/memory',
   '/analytics',
   '/analytics-dashboard',
   '/dashboards',
