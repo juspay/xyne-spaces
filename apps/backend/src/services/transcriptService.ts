@@ -6,7 +6,7 @@ import { config } from '@/config/env';
 import { Agent, createUserMessage } from '@framework';
 import { extractAgentContent } from '@/utils/agentUtils';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
-import { MessageType, OrgLLMServiceAccountPurpose, AttachmentEntityType, CallOrigin, CallType, TicketPriority, NotificationType } from '@xyne/shared';
+import { MessageType, OrgLLMServiceAccountPurpose, AttachmentEntityType, CallOrigin, CallType, NotificationType } from '@xyne/shared';
 import { notificationService } from '@/services/notificationService';
 import { db } from '@/database/client';
 import { randomUUID } from 'crypto';
@@ -17,7 +17,6 @@ import { pulseService, type PulseActionItem } from '@/services/pulseService';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
 import { CacConfigService } from '@/services/cacConfigService';
-import { getCallTicketSuggestionsTotal } from '@/services/otel/suggestionMetrics';
 import { executeCallLlmWithRetry, executeStreamingLlmRequest, type SummaryModelType } from './callLlmRetry';
 import { callRecordingService } from '@/services/callRecordingService';
 import { callLabelService } from '@/services/callLabelService';
@@ -32,6 +31,7 @@ import { mapWithConcurrency } from '@/utils/concurrency';
 import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
 import { processCallWithSummaryTx } from '@/bypassAcl/transactions/transcriptService';
 import { emitCallSummaryReadyToApp } from '@/services/callSummaryAppEventService';
+import { callTicketUpdateService } from '@/services/callTicketUpdateService';
 
 const SPEAKER_IDENTIFICATION_CAC_KEY = 'speaker_identification_config';
 
@@ -139,49 +139,6 @@ Generate a 1-line description for this call:
 {transcript}
 `;
 
-// AI Ticket Suggestions prompt - analyzes transcript for actionable work items
-const TICKET_SUGGESTIONS_PROMPT = `
-You are analyzing a call transcript to identify actionable work items that should be tracked as tickets.
-
-CRITICAL RULES:
-- Output ONLY valid JSON
-- Generate 1-25 actionable ticket suggestions based on the call content
-- Don't create small tickets for every minor work item. Instead, group related work items or tasks assigned to the same person into a single ticket when it makes sense.
-- Do NOT force all work into a single ticket. Create separate tickets for fundamentally different, unrelated tasks.
-- Each suggestion must be a concrete task (or cohesive group of related tasks) mentioned or implied in the call
-- Extract assignee names ONLY if explicitly mentioned in the transcript (e.g., "John will handle this")
-- Use "unassigned" if no specific person is mentioned
-- Prioritize based on urgency indicators in the call
-- Keep titles concise and action-oriented (5-10 words)
-- Keep descriptions clear and context-rich (2-3 sentences)
-
-BRAND NAME CORRECTION:
-- The word "Xyne" (product name, pronounced "zine") is often misspelled by speech-to-text as "Zain", "Zine", "Xine", "Zyane", or "Zyne"
-- When any word that phonetically sounds like "Xyne" appears, replace it with "Xyne"
-- Only apply this correction when the word is clearly a reference to the brand (e.g. "Xyne Spaces", "Xyne Calls")
-
-JSON STRUCTURE (FOLLOW EXACTLY):
-{
-  "suggestions": [
-    {
-      "title": "[Action-oriented title]",
-      "description": "[Detailed description with context from the call]",
-      "priority": "LOW" | "MEDIUM" | "HIGH" | "CRITICAL",
-      "suggestedAssignee": "[Name from transcript]" or "unassigned"
-    }
-  ]
-}
-
-Only output valid JSON.
-No explanations.
-
-TRANSCRIPT:
-{transcript}
-
-SUMMARY:
-{summary}
-`;
-
 // Pulse data extraction prompt — extracts multiple merchants and their actionable items from the transcript.
 // This is completely separate from Xyne ticket suggestions.
 const PULSE_DATA_PROMPT = `
@@ -287,16 +244,6 @@ IMPORTANT:
 Output ONLY the translated transcript, nothing else.
 `;
 
-export interface TicketSuggestion {
-  id: string;
-  title: string;
-  description: string;
-  priority: TicketPriority;
-  suggestedAssignee: string;
-  status: 'pending' | 'created' | 'dismissed';
-  createdTicketId?: string;
-}
-
 export class TranscriptService {
   private transcriptStorage: StorageService;
 
@@ -311,7 +258,7 @@ export class TranscriptService {
    * Create a fresh Agent instance for each request
    * This prevents state pollution and BUSY errors between concurrent requests
    */
-  private async createAgent(callId?: string, modelType?: SummaryModelType): Promise<Agent | null> {
+  async createAgent(callId?: string, modelType?: SummaryModelType): Promise<Agent | null> {
     try {
       const userId = await this.getCreatedByUserIdForCall(callId);
       const credential = await orgLLMCredentialService.getCredentialByUserId(
@@ -1186,74 +1133,6 @@ export class TranscriptService {
   }
 
   /**
-   * Generate ticket suggestions from call transcript and summary
-   * @param transcript - The formatted transcript text
-   * @param summary - The AI-generated call summary
-   * @returns Array of ticket suggestions or empty array if generation fails
-   */
-  async generateTicketSuggestions(transcript: string, callId?: string): Promise<TicketSuggestion[]> {
-    const logCallId = callId || 'unknown';
-    const agent = await this.createAgent(logCallId);
-    if (!agent) {
-      logger.warn('Agent creation failed. Skipping ticket suggestions generation.');
-      return [];
-    }
-
-    const prompt = TICKET_SUGGESTIONS_PROMPT.replace('{transcript}', transcript).replace(
-      '{summary}',
-      'Summary not available (analyze transcript directly)'
-    );
-
-    try {
-      const result = await agent.execute({
-        messages: [createUserMessage(prompt)],
-      });
-
-      const extracted = extractAgentContent(result);
-      if (!extracted.ok) {
-        logger.error(`ticket_suggestions_generation_failed | reason=${extracted.reason} | status=${extracted.status ?? result.status}`);
-        return [];
-      }
-
-      let jsonContent = extracted.content;
-
-      // Strip markdown code fences if present (```json...``` or ```...```)
-      const codeBlockMatch = jsonContent.match(/^```(?:json)?\s*\n([\s\S]*?)\n```$/);
-      if (codeBlockMatch) {
-        jsonContent = codeBlockMatch[1].trim();
-      }
-
-      // Parse JSON response
-      const parsed = JSON.parse(jsonContent);
-
-      if (!parsed.suggestions || !Array.isArray(parsed.suggestions)) {
-        logger.error(`ticket_suggestions_generation_failed | error=invalid_format, parsed=${JSON.stringify(parsed)}`);
-        return [];
-      }
-
-      // Transform and validate suggestions
-      const suggestions: TicketSuggestion[] = parsed.suggestions
-        .slice(0, 25) // Limit to 25 suggestions
-        .map((s: any, index: number) => ({
-          id: `suggestion-${Date.now()}-${index}`,
-          title: s.title || 'Untitled Task',
-          description: s.description || '',
-          priority: ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'].includes(s.priority)
-            ? s.priority
-            : 'MEDIUM',
-          suggestedAssignee: s.suggestedAssignee || 'unassigned',
-          status: 'pending' as const,
-        }));
-
-      logger.info(`Generated ${suggestions.length} ticket suggestions`);
-      return suggestions;
-    } catch (error) {
-      logger.error(`ticket_suggestions_generation_failed | error=${error instanceof Error ? error.message : JSON.stringify(error)}`, error);
-      return [];
-    }
-  }
-
-  /**
    * Generate a small set of short topical labels from the transcript (for
    * browsing/search). Returns [] on any failure or when nothing qualifies —
    * callers should treat an empty array as "nothing to add", not an error.
@@ -1410,13 +1289,11 @@ export class TranscriptService {
    * @param conversationId - The conversation ID of the call message
    * @param callId - The external call ID
    * @param markdownSummary - The AI-generated Markdown summary
-   * @param ticketSuggestions - Optional array of ticket suggestions to append as markdown
    */
   async postSummaryAsReply(
     conversationId: string,
     callId: string,
     markdownSummary: string | null,
-    ticketSuggestions?: TicketSuggestion[],
   ) {
     logger.info(
       `[postSummaryAsReply] Starting for callId: ${callId}, conversationId: ${conversationId}`
@@ -1467,8 +1344,6 @@ export class TranscriptService {
           callId,
           isAiGenerated: true,
           contentFormat: 'markdown',
-          hasSuggestedTickets: false,
-          suggestedTicketsCount: 0,
           version: currentVersion + 1,
           lastUpdatedAt: new Date().toISOString(),
         },
@@ -1488,8 +1363,6 @@ export class TranscriptService {
           callId,
           isAiGenerated: true,
           contentFormat: 'markdown',
-          hasSuggestedTickets: false,
-          suggestedTicketsCount: 0,
           version: 1,
           createdAt: new Date().toISOString(),
         },
@@ -1499,104 +1372,6 @@ export class TranscriptService {
         `[postSummaryAsReply] Summary message created: ${summaryMessage.messageId} in conversation ${conversationId}`
       );
     }
-    }
-
-    // ── 3. Post ticket suggestions as batched separate messages ──────────────
-    // Update existing ticket messages in place (preserves chat position).
-    // Delete extras if batch count shrinks. Create new ones if it grows.
-    getCallTicketSuggestionsTotal().add(ticketSuggestions?.length ?? 0, { workspaceId: channel.workspaceId });
-    if (ticketSuggestions && ticketSuggestions.length > 0) {
-      const BATCH_SIZE = 10;
-
-      const batches: TicketSuggestion[][] = [];
-      for (let i = 0; i < ticketSuggestions.length; i += BATCH_SIZE) {
-        batches.push(ticketSuggestions.slice(i, i + BATCH_SIZE));
-      }
-
-      logger.info(
-        `[postSummaryAsReply] Posting ${ticketSuggestions.length} tickets in ${batches.length} batch(es) of up to ${BATCH_SIZE}`
-      );
-
-      const existingTicketMessages = await repositories.messages.findTicketsByCallId(conversationId, callId);
-
-      for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
-        const batch = batches[batchIndex];
-
-        const frontmatterData = {
-          suggestions: batch.map((suggestion) => ({
-            suggestionId: randomUUID(),
-            title: suggestion.title,
-            priority: suggestion.priority,
-            description: suggestion.description,
-            assignee: suggestion.suggestedAssignee,
-          })),
-        };
-
-        const batchContent =
-          '---\n' + yaml.dump(frontmatterData) + '---\n' + (batchIndex === 0 ? '\n## Suggested Tickets:\n' : '');
-
-        const existing = existingTicketMessages[batchIndex];
-
-        if (existing) {
-          // Update in place — preserves the message's position in the chat thread
-          const existingMetadata = existing.metadata as any;
-          const currentVersion = existingMetadata?.version || 1;
-          await repositories.messages.update(existing.messageId, {
-            content: batchContent,
-            metadata: {
-              messageSubtype: 'call_suggested_tickets',
-              callId,
-              isAiGenerated: true,
-              contentFormat: 'markdown',
-              hasSuggestedTickets: true,
-              suggestedTicketsCount: batch.length,
-              batchIndex,
-              totalBatches: batches.length,
-              version: currentVersion + 1,
-              lastUpdatedAt: new Date().toISOString(),
-            },
-          });
-          logger.info(
-            `[postSummaryAsReply] Updated ticket batch message ${existing.messageId} (batch ${batchIndex + 1}/${batches.length})`
-          );
-        } else {
-          // More batches than before — create the new ones
-          const batchMessage = await repositories.messages.create({
-            conversationId,
-            senderId: xyneAutomaticBot.id,
-            content: batchContent,
-            msgType: MessageType.BOT,
-            showInChannel: false,
-            metadata: {
-              messageSubtype: 'call_suggested_tickets',
-              callId,
-              isAiGenerated: true,
-              contentFormat: 'markdown',
-              hasSuggestedTickets: true,
-              suggestedTicketsCount: batch.length,
-              batchIndex,
-              totalBatches: batches.length,
-              version: 1,
-              createdAt: new Date().toISOString(),
-            },
-          });
-          await repositories.conversations.incrementReplyCount(conversationId);
-          logger.info(
-            `[postSummaryAsReply] Ticket batch message created: ${batchMessage.messageId} (batch ${batchIndex + 1}/${batches.length})`
-          );
-        }
-      }
-
-      // Fewer batches than before — delete the now-unused extra messages
-      if (existingTicketMessages.length > batches.length) {
-        const extras = existingTicketMessages.slice(batches.length);
-        for (const extra of extras) {
-          await repositories.messages.delete(extra.messageId);
-          logger.info(
-            `[postSummaryAsReply] Deleted surplus ticket batch message ${extra.messageId}`
-          );
-        }
-      }
     }
 
     logger.info(`[postSummaryAsReply] Done for callId: ${callId}`);
@@ -1925,10 +1700,21 @@ export class TranscriptService {
           logger.error(`[${callId}] generate_title_threw`, { error: err, stack: err instanceof Error ? err.stack : undefined });
           return null;
         });
-      const ticketSuggestionsPromise = this.generateTicketSuggestions(formattedTranscript).catch((err) => {
-        logger.error(`[${callId}] generate_ticket_suggestions_threw`, { error: err, stack: err instanceof Error ? err.stack : undefined });
-        return [];
-      });
+      // Updates to EXISTING tickets mentioned in the call — posts its own card
+      // message in the thread (see callTicketUpdateService). Resolves to the
+      // number of proposals posted; failures are logged and count as 0.
+      const ticketUpdatesPromise = callTicketUpdateService
+        .generateAndPost({
+          call,
+          callExternalId: callId,
+          conversationId: callMessage.conversationId,
+          formattedTranscript,
+          createAgent: () => this.createAgent(callId),
+        })
+        .catch((err) => {
+          logger.error(`[${callId}] generate_ticket_updates_threw`, { error: err, stack: err instanceof Error ? err.stack : undefined });
+          return 0;
+        });
       // Recordings already label themselves on the note-taker path; running here
       // too would spend a second LLM call on the same tags.
       const labelsPromise =
@@ -1997,21 +1783,6 @@ export class TranscriptService {
         return title;
       });
 
-      const ticketsUiPromise = ticketSuggestionsPromise.then(async (ticketSuggestions) => {
-        if (ticketSuggestions.length === 0) return ticketSuggestions;
-        try {
-          await this.postSummaryAsReply(
-            callMessage.conversationId, callId, null, ticketSuggestions,
-          );
-        } catch (ticketError) {
-          logger.error(`[${callId}] post_ticket_suggestions_failed`, {
-            error: ticketError,
-            stack: ticketError instanceof Error ? ticketError.stack : undefined,
-          });
-        }
-        return ticketSuggestions;
-      });
-
       // appendLabels merges, so a label typed mid-processing survives this write.
       const labelsUiPromise = labelsPromise.then(async (labelIds) => {
         if (labelIds.length === 0) return labelIds;
@@ -2024,23 +1795,23 @@ export class TranscriptService {
         return labelIds;
       });
 
-      const [summary, title, ticketSuggestions] = await Promise.all([
+      const [summary, title, ticketUpdateCount] = await Promise.all([
         summaryUiPromise,
         titleUiPromise,
-        ticketsUiPromise,
+        ticketUpdatesPromise,
         labelsUiPromise,
       ]);
 
       const duration = Date.now() - startTime;
       logger.info(
-        `AI generation completed in ${duration}ms. Summary: ${!!summary}, Title: ${!!title}, Tickets: ${ticketSuggestions.length}`
+        `AI generation completed in ${duration}ms. Summary: ${!!summary}, Title: ${!!title}, Ticket updates: ${ticketUpdateCount}`
       );
 
       // If ALL three AI calls failed, escalate from per-call warns to a single error so
       // an LLM outage affecting every call is immediately visible rather than buried in warns.
-      const aiFullyFailed = !summary && !title && ticketSuggestions.length === 0;
+      const aiFullyFailed = !summary && !title && ticketUpdateCount === 0;
       if (aiFullyFailed) {
-        logger.error(`[${callId}] ai_generation_all_failed`, { summary: false, title: false, tickets: 0 });
+        logger.error(`[${callId}] ai_generation_all_failed`, { summary: false, title: false, ticketUpdates: 0 });
       }
 
       if (summary) {

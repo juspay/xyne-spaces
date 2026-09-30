@@ -553,29 +553,38 @@ export class MessageRepository extends BaseRepository<Message, CreateMessageInpu
   /**
    * Find all existing ticket batch messages for a specific call, ordered by creation time.
    */
-  async findTicketsByCallId(conversationId: string, callId: string): Promise<Message[]> {
-    return await this.db.message.findMany({
+  /**
+   * The single "ticket updates" card message a call posted into its thread
+   * (see callTicketUpdateService). Null until the pipeline has run.
+   */
+  async findTicketUpdatesByCallId(conversationId: string, callId: string): Promise<Message | null> {
+    return await this.db.message.findFirst({
       where: {
         conversationId,
         msgType: MessageType.BOT,
         AND: [
-          {
-            metadata: {
-              path: ['messageSubtype'],
-              equals: 'call_suggested_tickets',
-            },
-          },
-          {
-            metadata: {
-              path: ['callId'],
-              equals: callId,
-            },
-          },
+          { metadata: { path: ['messageSubtype'], equals: 'call_ticket_updates' } },
+          { metadata: { path: ['callId'], equals: callId } },
         ],
       },
-      orderBy: {
-        createdAt: 'asc',
+    });
+  }
+
+  /**
+   * Ticket-update card messages for several calls at once (series memory for
+   * recurring calls). Newest first.
+   */
+  async findTicketUpdateMessagesByCallIds(callIds: string[]): Promise<Message[]> {
+    if (callIds.length === 0) return [];
+    return await this.db.message.findMany({
+      where: {
+        msgType: MessageType.BOT,
+        AND: [
+          { metadata: { path: ['messageSubtype'], equals: 'call_ticket_updates' } },
+          { OR: callIds.map((callId) => ({ metadata: { path: ['callId'], equals: callId } })) },
+        ],
       },
+      orderBy: { createdAt: 'desc' },
     });
   }
 
