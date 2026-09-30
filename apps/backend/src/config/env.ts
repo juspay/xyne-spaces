@@ -330,8 +330,8 @@ const envSchema = Joi.object({
   // services/queryIntent and services/radar are only valid for the model they were
   // tuned on.
   JEV_API_KEY: Joi.string().allow('').default(''),
-  JEV_URL: Joi.string().uri().required().default('https://api.typesafe.ai/v1/systemone'),
-  JEV_MODEL: Joi.string().required().default('jev-1.13.0'),
+  JEV_URL: Joi.string().uri().default('https://api.typesafe.ai/v1/systemone'),
+  JEV_MODEL: Joi.string().default('jev-1.13.0'),
   // Genius Bot API Configuration
   GENIUS_API_URL: Joi.string().uri().default('http://localhost:8000'),
   GENIUS_API_KEY: Joi.string().allow('').default(''),
