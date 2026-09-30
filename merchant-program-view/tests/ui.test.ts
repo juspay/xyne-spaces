@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { pageWindow, selectAll, threadLines } from '../lib/ui';
+import { pageWindow, pillSummary, selectAll, threadLines } from '../lib/ui';
 
 describe('threadLines', () => {
   it('draws nothing for a root without children', () => {
@@ -57,5 +57,21 @@ describe('selectAll', () => {
 
   it('treats an empty list as nothing to select', () => {
     expect(selectAll([], ['x'])).toEqual({ all: false, next: ['x'] });
+  });
+});
+
+describe('pillSummary', () => {
+  const opts = ['a', 'b', 'c'];
+  it('shows nothing when nothing is picked', () => {
+    expect(pillSummary([], opts, 2)).toEqual({ kind: 'none' });
+  });
+  it('names picks up to the limit, then shows a count', () => {
+    expect(pillSummary(['a'], opts, 1)).toEqual({ kind: 'names', values: ['a'] });
+    expect(pillSummary(['a', 'b'], opts, 1)).toEqual({ kind: 'count', n: 2 });
+    expect(pillSummary(['a', 'b'], opts, 2)).toEqual({ kind: 'names', values: ['a', 'b'] });
+  });
+  it('says All when every option is picked', () => {
+    expect(pillSummary(['a', 'b', 'c'], opts, 1)).toEqual({ kind: 'all' });
+    expect(pillSummary(['a'], ['a'], 1)).toEqual({ kind: 'names', values: ['a'] });
   });
 });

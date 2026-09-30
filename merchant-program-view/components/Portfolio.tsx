@@ -4,7 +4,7 @@ import { FLAG_LABEL, HEALTH, RANK, fmtDays } from '../lib/flags';
 import { BUCKETS, paginate, type FTicket, type Kpi, type MerchantRow, type PState, type Portfolio } from '../lib/portfolio';
 import type { Sev } from '../lib/flags';
 import type { MKey, Sort, TKey } from '../lib/sort';
-import { pageWindow, selectAll } from '../lib/ui';
+import { pageWindow, pillSummary, selectAll } from '../lib/ui';
 import {
   Avatar,
   BUCKET_COLOR,
@@ -287,6 +287,7 @@ function MultiPill({
   placeholder = 'Search…',
   width = 250,
   align = 'right',
+  maxNames = 2,
 }: {
   label: string;
   options: PillOption[];
@@ -297,6 +298,8 @@ function MultiPill({
   width?: number;
   /** Which edge the menu lines up with; pills at the left of a row open rightwards. */
   align?: 'left' | 'right';
+  /** Picks shown by name before the pill switches to a count. */
+  maxNames?: number;
 }) {
   const [open, setOpen] = useState(false);
   useEscape(open, () => setOpen(false));
@@ -304,7 +307,7 @@ function MultiPill({
   const shown = searchable ? options.filter(o => o.label.toLowerCase().includes(q.trim().toLowerCase())) : options;
   const on = selected.length > 0;
   const every = selectAll(shown.map(o => o.value), selected);
-  const allPicked = options.length > 1 && options.every(o => selected.includes(o.value));
+  const summary = pillSummary(selected, options.map(o => o.value), maxNames);
   const toggle = (v: string): void => onChange(selected.includes(v) ? selected.filter(x => x !== v) : [...selected, v]);
   const labelOf = (v: string): string => options.find(o => o.value === v)?.label ?? v;
   const close = (): void => {
@@ -323,11 +326,11 @@ function MultiPill({
         style={{ all: 'unset', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6, height: 32, boxSizing: 'border-box', padding: on ? '0 8px 0 10px' : '0 8px 0 12px', border: '1px solid var(--input)', borderRadius: 6, background: 'transparent', fontSize: 13, fontWeight: 500, color: on ? 'var(--t3)' : 'var(--t1)', whiteSpace: 'nowrap', maxWidth: 360 }}
       >
         {label}
-        {on &&
-          (allPicked ? (
+        {summary.kind !== 'none' &&
+          (summary.kind === 'all' ? (
             <span style={{ height: 22, display: 'inline-flex', alignItems: 'center', padding: '0 7px', borderRadius: 4, background: 'var(--bg3)', fontSize: 12, fontWeight: 500, color: 'var(--t1)' }}>All</span>
-          ) : selected.length <= 2 ? (
-            selected.map(v => (
+          ) : summary.kind === 'names' ? (
+            summary.values.map(v => (
               <span key={v} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, height: 22, padding: '0 4px 0 7px', borderRadius: 4, background: 'var(--bg3)', fontSize: 12, fontWeight: 500, color: 'var(--t1)', maxWidth: 160 }}>
                 <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{labelOf(v).replace(/^Desk · /, '')}</span>
                 <span
@@ -431,8 +434,8 @@ export function typeFilterLabel(t: PState['typeFilter']): string {
 export function SourcePills({ s, set, pf }: { s: PState; set: (p: Partial<PState>) => void; pf: Pick<Portfolio, 'deskOptions' | 'boardOptions'> }) {
   return (
     <>
-      <MultiPill label="Desks" options={pf.deskOptions.map(d => ({ value: d, label: d.replace(/^Desk · /, '') }))} selected={s.desks} onChange={desks => set({ desks })} placeholder="Search desks…" align="left" />
-      <MultiPill label="Boards" options={pf.boardOptions.map(b => ({ value: b, label: b }))} selected={s.boards} onChange={boards => set({ boards })} placeholder="Search boards…" width={280} align="left" />
+      <MultiPill label="Desks" options={pf.deskOptions.map(d => ({ value: d, label: d.replace(/^Desk · /, '') }))} selected={s.desks} onChange={desks => set({ desks })} placeholder="Search desks…" align="left" maxNames={1} />
+      <MultiPill label="Boards" options={pf.boardOptions.map(b => ({ value: b, label: b }))} selected={s.boards} onChange={boards => set({ boards })} placeholder="Search boards…" width={280} align="left" maxNames={1} />
     </>
   );
 }

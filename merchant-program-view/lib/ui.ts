@@ -57,3 +57,12 @@ export function selectAll(shown: string[], selected: string[]): { all: boolean; 
   if (all) return { all, next: selected.filter(v => !shown.includes(v)) };
   return { all, next: [...selected, ...shown.filter(v => !selected.includes(v))] };
 }
+
+export type PillSummary = { kind: 'none' } | { kind: 'all' } | { kind: 'names'; values: string[] } | { kind: 'count'; n: number };
+
+/** What a multi-select pill shows: the picked names up to `maxNames`, else a count ("All" when every option is picked). */
+export function pillSummary(selected: string[], options: string[], maxNames: number): PillSummary {
+  if (selected.length === 0) return { kind: 'none' };
+  if (options.length > 1 && options.every(o => selected.includes(o))) return { kind: 'all' };
+  return selected.length <= maxNames ? { kind: 'names', values: selected } : { kind: 'count', n: selected.length };
+}
