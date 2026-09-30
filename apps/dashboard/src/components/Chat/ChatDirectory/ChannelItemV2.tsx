@@ -76,7 +76,6 @@ const ChannelItemV2 = memo(
     const [sectionMenuOpen, setSectionMenuOpen] = useState(false);
     const zero = useZero();
     const context = useAuthContextValues();
-    // One row per channel, not virtualized: useNavigate would re-render every row on every navigation.
     const navigate = useStableNavigate();
 
     const currentUserID = context.userID;

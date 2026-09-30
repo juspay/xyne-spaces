@@ -71,7 +71,6 @@ export interface ResolvedRecordingShareMessage extends ParsedRecordingShareMessa
 export const useRecordingShareMessage = (
   content: string | null | undefined,
 ): ResolvedRecordingShareMessage | null => {
-  // Used by every message bubble; useNavigate would re-render each of them on every navigation.
   const navigate = useStableNavigate();
   const parsed = useMemo(() => (content ? parseRecordingShareMessage(content) : null), [content]);
   const [recording] = useQuery(
