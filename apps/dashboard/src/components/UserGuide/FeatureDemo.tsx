@@ -15,7 +15,6 @@ import {
   CheckCircle2,
   Circle,
   BookOpen,
-  Brain,
   CalendarClock,
   ArrowRightLeft,
   FileText,
@@ -1520,7 +1519,6 @@ function genericScenes(visualKey: string): SceneConfig[] {
     jira: 'tickets',
     agents: 'ai',
     'knowledge-base': 'ai',
-    memory: 'ai',
     'ai-onboarding': 'ai',
     'user-groups': 'analytics',
     'user-management': 'analytics',
@@ -1625,15 +1623,6 @@ function genericScenes(visualKey: string): SceneConfig[] {
         'API Documentation — Engineering',
         'Onboarding Guide — HR',
         'Engineering Runbook — Ops',
-      ],
-    },
-    memory: {
-      title: 'Context Memory',
-      icon: <Brain size={10} />,
-      lines: [
-        'Platform migration: use Postgres',
-        'On-call: Alice leads P0',
-        'Deploys: Tue & Thu 14:00 UTC',
       ],
     },
     'ai-onboarding': {
