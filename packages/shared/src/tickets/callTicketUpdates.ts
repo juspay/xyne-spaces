@@ -7,6 +7,8 @@
  * object into a typed document and back.
  */
 
+import { TicketStatusV2 } from '../zero/types.js';
+
 export const CALL_TICKET_UPDATES_SUBTYPE = 'call_ticket_updates';
 export const TICKET_UPDATES_HEADING = '## Ticket updates from this call';
 
@@ -225,6 +227,60 @@ export function serializeTicketUpdatesDoc(doc: TicketUpdatesDoc): Record<string,
   if (doc.applied.length > 0) data['applied'] = doc.applied.map((a) => compact(stripIdentity(a)));
   if (doc.ignored.length > 0) data['ignored'] = doc.ignored.map((i) => compact(stripIdentity(i)));
   return data;
+}
+
+export interface TicketUpdateBoardStage {
+  name: string;
+  sequenceNumber: number;
+  defaultTicketStatusV2: string;
+}
+
+const STAGE_NAME_HINTS: Record<string, RegExp> = {
+  [TicketStatusV2.COMPLETED]: /\b(done|complete|completed|closed|resolved|shipped|released|finished)\b/i,
+  [TicketStatusV2.STARTED]:
+    /\b(in progress|in-progress|doing|development|in dev|working|active|started|implementation)\b/i,
+  [TicketStatusV2.PAUSED]: /\b(paused|on hold|on-hold|blocked|parked|waiting|hold)\b/i,
+  [TicketStatusV2.CANCELLED]: /\b(cancelled|canceled|won'?t (do|fix)|rejected|dropped|invalid|discarded)\b/i,
+  [TicketStatusV2.TODO]: /\b(todo|to do|backlog|triage|new|open|not started)\b/i,
+};
+
+/**
+ * Pick the stage a ticket should move to for a spoken status. Exact
+ * `defaultTicketStatusV2` matches win; when several stages share that status
+ * (common on boards where every stage defaults to STARTED) or none does, fall
+ * back to the stage name and board order so the card can still prefill the
+ * picker. Returns null only when nothing sensible exists.
+ *
+ * Shared because both sides need the same answer: the backend when it builds a
+ * proposal or applies one without a stage, the dashboard when it prefills the
+ * picker for a ticket whose stages the card does not carry.
+ */
+export function resolveStageForStatus(
+  stages: TicketUpdateBoardStage[],
+  currentStageName: string,
+  status: string,
+): string | null {
+  const ordered = [...stages].sort((a, b) => a.sequenceNumber - b.sequenceNumber);
+  const others = ordered.filter((s) => s.name !== currentStageName);
+  if (others.length === 0) return null;
+  const hint = STAGE_NAME_HINTS[status];
+  const byStatus = others.filter((s) => s.defaultTicketStatusV2 === status);
+
+  if (byStatus.length === 1) return byStatus[0].name;
+  const pool = byStatus.length > 1 ? byStatus : others;
+  const byName = hint ? pool.filter((s) => hint.test(s.name)) : [];
+  if (byName.length > 0) return byName[0].name;
+  if (byStatus.length === 0) {
+    // No stage carries the status and none is named for it: "done" still means
+    // the last stage of the board; anything else has no sensible target.
+    const last = ordered[ordered.length - 1];
+    return status === TicketStatusV2.COMPLETED && last.name !== currentStageName ? last.name : null;
+  }
+  // Several stages carry the status and none is named for it: use board order.
+  const currentSeq = ordered.find((s) => s.name === currentStageName)?.sequenceNumber ?? -1;
+  if (status === TicketStatusV2.COMPLETED) return byStatus[byStatus.length - 1].name;
+  if (status === TicketStatusV2.TODO) return byStatus[0].name;
+  return byStatus.find((s) => s.sequenceNumber > currentSeq)?.name ?? byStatus[0].name;
 }
 
 export function isTicketUpdateClaimFresh(

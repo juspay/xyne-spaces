@@ -19,7 +19,15 @@
 import { randomUUID } from 'crypto';
 import type { Agent } from '@framework';
 import type { Call, Message } from '@prisma/client';
-import { ActivityType, BoardType, ChannelVisibility, MessageType, TicketStatusV2 } from '@xyne/shared';
+import {
+  ActivityType,
+  BoardType,
+  ChannelVisibility,
+  MessageType,
+  TicketStatusV2,
+  resolveStageForStatus,
+  type TicketUpdateBoardStage,
+} from '@xyne/shared';
 import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { withWorkspaceScope } from '@/database/tenant/context';
@@ -139,7 +147,7 @@ type TicketCandidateRow = {
   board: { boardType: string } | null;
 };
 
-type BoardStage = { name: string; sequenceNumber: number; defaultTicketStatusV2: string };
+type BoardStage = TicketUpdateBoardStage;
 
 function timestampToSeconds(timestamp: string): number | null {
   const parts = timestamp.split(':').map((p) => Number(p));
@@ -170,46 +178,6 @@ function callThreadRefs(metadata: unknown): { conversationId: string | null; sys
     conversationId: typeof meta['conversationId'] === 'string' ? meta['conversationId'] : null,
     systemMessageId: typeof meta['systemMessageId'] === 'string' ? meta['systemMessageId'] : null,
   };
-}
-
-/**
- * Pick the stage a ticket should move to for a spoken status. Exact
- * `defaultTicketStatusV2` matches win; when several stages share that status
- * (common on boards where every stage defaults to STARTED) or none does, fall
- * back to the stage name and board order so the card can still prefill the
- * picker. Returns null only when nothing sensible exists.
- */
-const STAGE_NAME_HINTS: Record<string, RegExp> = {
-  [TicketStatusV2.COMPLETED]: /\b(done|complete|completed|closed|resolved|shipped|released|finished)\b/i,
-  [TicketStatusV2.STARTED]: /\b(in progress|in-progress|doing|development|in dev|working|active|started|implementation)\b/i,
-  [TicketStatusV2.PAUSED]: /\b(paused|on hold|on-hold|blocked|parked|waiting|hold)\b/i,
-  [TicketStatusV2.CANCELLED]: /\b(cancelled|canceled|won'?t (do|fix)|rejected|dropped|invalid|discarded)\b/i,
-  [TicketStatusV2.TODO]: /\b(todo|to do|backlog|triage|new|open|not started)\b/i,
-};
-
-export function resolveStageForStatus(stages: BoardStage[], currentStageName: string, status: string): string | null {
-  const ordered = [...stages].sort((a, b) => a.sequenceNumber - b.sequenceNumber);
-  const others = ordered.filter((s) => s.name !== currentStageName);
-  if (others.length === 0) return null;
-  const hint = STAGE_NAME_HINTS[status];
-  const byStatus = others.filter((s) => s.defaultTicketStatusV2 === status);
-  const named = (list: typeof others) => (hint ? list.filter((s) => hint.test(s.name)) : []);
-
-  if (byStatus.length === 1) return byStatus[0].name;
-  const pool = byStatus.length > 1 ? byStatus : others;
-  const byName = named(pool);
-  if (byName.length > 0) return byName[0].name;
-  if (byStatus.length === 0) {
-    // No stage carries the status and none is named for it: "done" still means
-    // the last stage of the board; anything else has no sensible target.
-    const last = ordered[ordered.length - 1];
-    return status === TicketStatusV2.COMPLETED && last.name !== currentStageName ? last.name : null;
-  }
-  // Several stages carry the status and none is named for it: use board order.
-  const currentSeq = ordered.find((s) => s.name === currentStageName)?.sequenceNumber ?? -1;
-  if (status === TicketStatusV2.COMPLETED) return byStatus[byStatus.length - 1].name;
-  if (status === TicketStatusV2.TODO) return byStatus[0].name;
-  return byStatus.find((s) => s.sequenceNumber > currentSeq)?.name ?? byStatus[0].name;
 }
 
 type Failure<S extends number> = { ok: false; status: S; error: string; stageOptions?: string[] };
