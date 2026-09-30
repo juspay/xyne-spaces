@@ -128,6 +128,8 @@ type SendTrigger =
   | 'mobile_editor'
   | 'unknown';
 import { useChannel } from '../../../hooks/useChannels';
+import { extractCallLinkFromInviteText } from '../../../utils/callControls';
+import { parseCallInviteLink } from '../../Chat/RenderMessageWithHTML/internalLinkUtils';
 
 const lowlight = createLowlight(all);
 
@@ -1050,6 +1052,21 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
               editor?.commands.insertContent(plainText);
               return true;
             }
+          }
+
+          // A copied call invite ("Copy link" / "Copy joining info") is written for email and
+          // calendars. In chat, keep only its link: the message then renders as the call card.
+          const inviteCallLink = extractCallLinkFromInviteText(
+            clipboard?.getData('text/plain') ?? '',
+          );
+          if (inviteCallLink && parseCallInviteLink(inviteCallLink)) {
+            event.preventDefault();
+            editor?.commands.insertContent({
+              type: 'text',
+              text: inviteCallLink,
+              marks: [{ type: 'link', attrs: { href: inviteCallLink } }],
+            });
+            return true;
           }
 
           /** Handle File Pasting */
