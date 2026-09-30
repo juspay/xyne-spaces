@@ -1,3 +1,17 @@
+## [1.442.3](https://github.com/juspay/xyne-spaces/compare/v1.442.2...v1.442.3) (2026-09-30)
+
+
+### Bug Fixes
+
+* added user detail in ticket fetch ([#2468](https://github.com/juspay/xyne-spaces/issues/2468)) ([3177873](https://github.com/juspay/xyne-spaces/commit/31778735a52269bb0f2f37baadab4b77b2b41bc2))
+
+## [1.442.2](https://github.com/juspay/xyne-spaces/compare/v1.442.1...v1.442.2) (2026-09-30)
+
+
+### Bug Fixes
+
+* open sandbox preview and VS Code links in the desktop browser panel ([#2507](https://github.com/juspay/xyne-spaces/issues/2507)) ([48b0f94](https://github.com/juspay/xyne-spaces/commit/48b0f940c5134ce0b71ad64651fe8048371747ec))
+
 ## [1.442.1](https://github.com/juspay/xyne-spaces/compare/v1.442.0...v1.442.1) (2026-09-30)
 
 
