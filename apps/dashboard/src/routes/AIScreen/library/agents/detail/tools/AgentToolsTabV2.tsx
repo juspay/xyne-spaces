@@ -181,15 +181,19 @@ export function AgentToolsTabV2({
         <p className='rounded-lg border border-border bg-muted/40 px-4 py-2.5 text-xs leading-5 text-muted-foreground'>
           {isOrchestrator ? (
             <>
-              <span className='font-medium text-foreground'>Nothing selected — all tools.</span> As an
-              orchestrator this agent gets every tool the signed-in user has connected; its most-used tools
-              stay active and the rest load on demand. Add tools here to restrict it to them.
+              <span className='font-medium text-foreground'>Nothing selected — all tools.</span> As
+              an orchestrator this agent gets every tool the signed-in user has connected; its
+              most-used tools stay active and the rest load on demand. Add tools here to restrict it
+              to them.
             </>
           ) : (
             <>
-              <span className='font-medium text-foreground'>Nothing selected — file tools only.</span> This
-              agent runs with just the built-in file tools (read, write, grep, find, ls) and per-run defaults
-              such as Spaces tools in a Spaces thread. Add tools here to give it more.
+              <span className='font-medium text-foreground'>
+                Nothing selected — file tools only.
+              </span>{' '}
+              This agent runs with just the built-in file tools (read, write, grep, find, ls) and
+              per-run defaults such as Spaces tools in a Spaces thread. Add tools here to give it
+              more.
             </>
           )}
         </p>
