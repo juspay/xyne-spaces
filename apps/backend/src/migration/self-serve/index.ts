@@ -26,8 +26,8 @@ const queues = new MigrationQueues();
 const engine = new SlackMigrationEngine();
 const service = new SlackMigrationService(store, queues, engine);
 
-/** Fork N dedicated worker children (workers only, no HTTP). Each gets a NODE_APP_INSTANCE; instance 0 owns the
- *  singleton duties. MIGRATION_WORKER_PROCESSES=1 in the child env stops it from forking again. Respawns on crash. */
+/** Fork N dedicated worker children (workers only, no HTTP). A Redis leader lease (see workers.ts) elects the single
+ *  worker that runs the singleton duties. MIGRATION_WORKER_PROCESSES=1 in the child env stops it from forking again. Respawns on crash. */
 function forkMigrationWorkerChildren(count: number): void {
   const usingTs = import.meta.url.endsWith('.ts');
   const workerPath = fileURLToPath(new URL(usingTs ? './workerMain.ts' : './workerMain.js', import.meta.url));
@@ -88,8 +88,12 @@ if (config.runSlackMigrationWorkers) {
         .then((paused) => { if (paused) logger.warn('[SlackMigration] ingestion paused on boot — MIGRATION_INGEST_CONTROL is off'); })
         .catch((e: unknown) => logger.error('[SlackMigration] failed to pause ingestion (control disabled)', { error: e instanceof Error ? e.message : String(e) }));
     }
-    new MigrationWorkers(queues, store, engine).register();
-    registerMigrationMetrics(queues, store); // dashboard gauges (queue depth + jobs by status)
+    const workers = new MigrationWorkers(queues, store, engine);
+    workers.register();
+    registerMigrationMetrics(queues, store, () => workers.isLeader()); // dashboard gauges — leader reports, so counts aren't N×
+    // Release the leader lease on shutdown so another worker takes over immediately (TTL is the backstop).
+    process.on('SIGTERM', () => void workers.shutdown().catch(() => undefined));
+    process.on('SIGINT', () => void workers.shutdown().catch(() => undefined));
   }
 }
 

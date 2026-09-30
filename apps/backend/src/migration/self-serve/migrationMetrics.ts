@@ -46,7 +46,12 @@ function sampleJobAggregate(store: MigrationStore): Promise<JobAggregate> {
 }
 
 let _registered = false;
-export function registerMigrationMetrics(queues: MigrationQueues, store: MigrationStore): void {
+/**
+ * `isLeader` gates observation to the single lease-holding worker: the counts are Redis/DB-global, so if every pod
+ * reported them the series would be multiplied N×. Instruments are still created on all workers (cheap); only the
+ * leader's callbacks observe, and reporting follows the lease across pods on failover.
+ */
+export function registerMigrationMetrics(queues: MigrationQueues, store: MigrationStore, isLeader: () => boolean = () => true): void {
   if (_registered) return;
   _registered = true;
   const meter = metrics.getMeter(config.otel.serviceName);
@@ -57,6 +62,7 @@ export function registerMigrationMetrics(queues: MigrationQueues, store: Migrati
         description: `Slack migration queue ${state} job count`,
       })
       .addCallback(async (result) => {
+        if (!isLeader()) return;
         for (const name of QUEUE_NAMES) {
           try {
             const stats = await queues.getStats(name);
@@ -78,6 +84,7 @@ export function registerMigrationMetrics(queues: MigrationQueues, store: Migrati
 
   meter.addBatchObservableCallback(
     async (result) => {
+      if (!isLeader()) return;
       try {
         const agg = await sampleJobAggregate(store);
         for (const a of Object.values(agg)) {

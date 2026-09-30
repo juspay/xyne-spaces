@@ -85,6 +85,11 @@ export class MigrationQueues {
   resume(name: QueueName): Promise<void> { return this.queue(name).resume(); }
   isPaused(name: QueueName): Promise<boolean> { return this.queue(name).isPaused(); }
 
+  // Local pause/resume affect ONLY this worker's consumption (not the shared queue). The leader lease uses these to
+  // keep the singleton queues (collection + ingestion planner) draining on exactly one worker cluster-wide.
+  pauseLocal(name: QueueName): Promise<void> { return this.queue(name).pause(true); }
+  resumeLocal(name: QueueName): Promise<void> { return this.queue(name).resume(true); }
+
   /** Live Bull counts for one queue — drives the dashboard queue-depth gauges. (completed/failed read ~0 here
    *  because the queues use removeOnComplete/removeOnFail; waiting/active/delayed are the meaningful ones.) */
   async getStats(name: QueueName): Promise<{ waiting: number; active: number; completed: number; failed: number; delayed: number; total: number }> {
@@ -102,12 +107,16 @@ export class MigrationQueues {
     if (firstInit) await q.pause();
   }
 
-  /** Pause the ingestion queue if it's running; returns true if it paused. MIGRATION_INGEST_CONTROL kill-switch on boot. */
+  /** Kill-switch (MIGRATION_INGEST_CONTROL off): globally pause BOTH the planner and the fan-out so nothing ingests
+   *  cluster-wide — pausing the planner alone would let already-fanned-out conversations keep draining. Returns true
+   *  if it paused anything. Global (Redis) pause, so one pod is enough and repeated calls are idempotent. */
   async pauseIngestionIfRunning(): Promise<boolean> {
-    const q = this.queue(QueueName.INGESTION);
-    if (await q.isPaused()) return false;
-    await q.pause();
-    return true;
+    let paused = false;
+    for (const name of [QueueName.INGESTION, QueueName.CONV_INGEST]) {
+      const q = this.queue(name);
+      if (!(await q.isPaused())) { await q.pause(); paused = true; }
+    }
+    return paused;
   }
 
   private queue(name: QueueName): Bull.Queue<JobRef> {

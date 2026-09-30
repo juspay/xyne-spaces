@@ -1,5 +1,6 @@
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
+import { acquireLeadership, releaseLock, renewLock, type LockHandle } from '@/utils/distributedLock';
 import { MigrationStore } from './store';
 import { MigrationQueues } from './queues';
 import { SlackMigrationEngine, type CollectedConversation, type DirUser } from './engine';
@@ -9,6 +10,11 @@ import { getMigrationRuntimeConfig } from './migrationRuntimeConfig';
 const HEARTBEAT_MS = 15_000;
 const RECONCILE_EVERY_MS = 60_000;
 const RECLAIM_STALE_MS = 90_000; // several missed heartbeats ⇒ the pod that owned the job is gone
+// Leader lease: exactly one worker cluster-wide runs the singleton duties (collection, ingestion planner, reconcile).
+// Renew 3× per TTL so a transient Redis blip doesn't drop it; a dead leader is reclaimed within one TTL.
+const LEADER_KEY = 'slackmig:leader';
+const LEADER_TTL_S = 30;
+const LEADER_RENEW_MS = 10_000;
 // Transient encryption-provider / DB-transaction blips during a heavy ingest — retry the conversation before failing it.
 const INGEST_MAX_ATTEMPTS = 4;
 const INGEST_RETRY_BASE_MS = 2_000;
@@ -32,22 +38,93 @@ export class MigrationWorkers {
     private readonly engine: SlackMigrationEngine,
   ) {}
 
+  private leaderHandle: LockHandle | null = null;
+  private singletonsRegistered = false;
+  private reconcileTimer: NodeJS.Timeout | null = null;
+  private leaderTimer: NodeJS.Timeout | null = null;
+
   register(): void {
-    // Under pm2 cluster mode NODE_APP_INSTANCE is 0..N-1; single process → undefined. Singleton duties (collection,
-    // the ingestion planner, and reconcile) run on instance 0 only, so they don't fire N times. Every process drains
-    // the fanned-out conversation jobs for cross-process parallelism.
-    const isPrimary = !process.env.NODE_APP_INSTANCE || process.env.NODE_APP_INSTANCE === '0';
-    if (isPrimary) {
+    // Fan-out ingest runs on EVERY worker (every process on every pod). Bull delivers each conversation to exactly
+    // one worker cluster-wide, and re-ingest is idempotent (done-set skip + per-message dedup), so this is safe to fan out.
+    this.queues.processConv(config.slackMigration.ingestConcurrency, (mid, cid) => this.ingestConversation(mid, cid));
+
+    // Collection, the ingestion planner and reconcile are SINGLETON duties — exactly one worker cluster-wide may run
+    // them (N collectors would blow Slack's rate limits). A Redis lease elects that one; the winner lazily subscribes
+    // to those queues on promote (so a follower never consumes them), and on its death the lease TTL-expires and
+    // another worker takes over.
+    void this.runLeaderLoop();
+
+    logger.info('[SlackMigration] workers registered', {
+      instance: process.env.NODE_APP_INSTANCE ?? 'single', ingestConcurrency: config.slackMigration.ingestConcurrency,
+    });
+  }
+
+  /** True while this worker holds the migration leader lease — gates leader-only metrics so counts aren't reported N×. */
+  isLeader(): boolean { return this.leaderHandle !== null; }
+
+  /** Poll the lease: renew while leader (step down if lost), else try to acquire and promote. */
+  private async runLeaderLoop(): Promise<void> {
+    const tick = async (): Promise<void> => {
+      try {
+        if (this.leaderHandle) {
+          if (!(await renewLock(this.leaderHandle, LEADER_TTL_S))) await this.demote();
+        } else {
+          const handle = await acquireLeadership(LEADER_KEY, LEADER_TTL_S);
+          if (handle) await this.promote(handle);
+        }
+      } catch (e) {
+        logger.warn('[SlackMigration] leader loop tick failed', { error: e instanceof Error ? e.message : String(e) });
+      }
+    };
+    this.leaderTimer = setInterval(() => void tick(), LEADER_RENEW_MS);
+    this.leaderTimer.unref?.();
+    await tick();
+  }
+
+  private async promote(handle: LockHandle): Promise<void> {
+    this.leaderHandle = handle;
+    logger.info('[SlackMigration] acquired leadership — running collection, ingestion planner & reconcile');
+    if (!this.singletonsRegistered) {
+      // First time as leader: subscribe to the singleton queues. Bull's .process() is once-per-process, so followers
+      // that never win the lease never register these handlers and therefore never consume collection/planner jobs.
       this.queues.process(QueueName.COLLECTION, (id) => this.guard(id, (j) => j.refreshRequested ? this.refresh(j) : this.collect(j)));
       this.queues.process(QueueName.INGESTION, (id) => this.guard(id, (j) => this.ingest(j)));
-      const timer = setInterval(() => void this.reconcile().catch(() => undefined), RECONCILE_EVERY_MS);
-      timer.unref?.();
-      void this.reconcile().catch(() => undefined);
+      this.singletonsRegistered = true;
+    } else {
+      // Re-elected after a demotion: resume local consumption of the already-registered processors.
+      await this.queues.resumeLocal(QueueName.COLLECTION).catch(() => undefined);
+      await this.queues.resumeLocal(QueueName.INGESTION).catch(() => undefined);
     }
-    this.queues.processConv(config.slackMigration.ingestConcurrency, (mid, cid) => this.ingestConversation(mid, cid));
-    logger.info('[SlackMigration] workers registered', {
-      primary: isPrimary, instance: process.env.NODE_APP_INSTANCE ?? 'single', ingestConcurrency: config.slackMigration.ingestConcurrency,
-    });
+    this.startReconcile();
+  }
+
+  private async demote(): Promise<void> {
+    logger.warn('[SlackMigration] lost leadership — stepping down from singleton duties');
+    this.leaderHandle = null;
+    this.stopReconcile();
+    if (this.singletonsRegistered) {
+      await this.queues.pauseLocal(QueueName.COLLECTION).catch(() => undefined);
+      await this.queues.pauseLocal(QueueName.INGESTION).catch(() => undefined);
+    }
+  }
+
+  private startReconcile(): void {
+    if (this.reconcileTimer) return;
+    this.reconcileTimer = setInterval(() => void this.reconcile().catch(() => undefined), RECONCILE_EVERY_MS);
+    this.reconcileTimer.unref?.();
+    void this.reconcile().catch(() => undefined);
+  }
+
+  private stopReconcile(): void {
+    if (this.reconcileTimer) { clearInterval(this.reconcileTimer); this.reconcileTimer = null; }
+  }
+
+  /** Graceful shutdown: release the lease (if held) so another worker takes over immediately instead of waiting the TTL. */
+  async shutdown(): Promise<void> {
+    if (this.leaderTimer) { clearInterval(this.leaderTimer); this.leaderTimer = null; }
+    const handle = this.leaderHandle;
+    this.leaderHandle = null;
+    if (handle) await releaseLock(handle);
   }
 
   /** Recover running jobs that a live worker can no longer make progress on: pod died (stale heartbeat) → re-enqueue;
