@@ -24,6 +24,7 @@ const ZeroProvider: React.FC<ZeroProviderProps> = ({ children }): ReactElement |
   const prevWorkspaceIdRef = useRef<string | undefined>(undefined);
 
   const [zero, setZero] = useState<Zero | null>(null);
+  const zeroRef = useRef<Zero | null>(null);
 
   useEffect(() => {
     if (!user || !encryptionReady) {
@@ -56,6 +57,7 @@ const ZeroProvider: React.FC<ZeroProviderProps> = ({ children }): ReactElement |
     const prevWorkspaceId = prevWorkspaceIdRef.current;
     const currentWorkspaceId = user.workspaceId ?? '';
     prevWorkspaceIdRef.current = currentWorkspaceId;
+    let cancelled = false;
 
     const initZero = async (): Promise<void> => {
       // If workspaceId changed, drop this lane's local databases to prevent stale
@@ -67,6 +69,7 @@ const ZeroProvider: React.FC<ZeroProviderProps> = ({ children }): ReactElement |
           // Ignore errors during drop
         }
       }
+      if (cancelled) return;
 
       const zeroObj = new Zero({
         userID: user.id,
@@ -97,6 +100,7 @@ const ZeroProvider: React.FC<ZeroProviderProps> = ({ children }): ReactElement |
       // logout can scope its drop after the client has been torn down.
       rememberZeroLane(zeroObj.idbName);
 
+      zeroRef.current = zeroObj;
       setZero(prev => {
         void prev?.close();
         return zeroObj;
@@ -106,7 +110,20 @@ const ZeroProvider: React.FC<ZeroProviderProps> = ({ children }): ReactElement |
     };
 
     void initZero();
+    return (): void => {
+      cancelled = true;
+    };
   }, [user, refreshCount, encryptionReady]);
+
+  // A replaced client is closed when its successor is set; this closes the last one on unmount,
+  // which otherwise stays connected and keeps syncing.
+  useEffect(
+    () => (): void => {
+      void zeroRef.current?.close();
+      zeroRef.current = null;
+    },
+    [],
+  );
 
   if (!zero) {
     return null;
