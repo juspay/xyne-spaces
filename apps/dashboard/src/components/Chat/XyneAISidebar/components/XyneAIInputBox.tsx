@@ -172,6 +172,8 @@ export interface XyneAIInputBoxProps {
   selectedAgentSlug?: string | null;
   agents?: AgentOption[];
   onSelectAgent?: (slug: string | null) => void;
+  isAuto?: boolean;
+  onSelectAuto?: () => void;
   /** Models the selected agent's LiteLLM key can serve. Empty ⇒ picker hides. */
   models?: ClawAgentModel[];
   /** The agent's configured model, shown against the default row. */
@@ -291,6 +293,8 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       selectedAgentSlug = null,
       agents = [],
       onSelectAgent,
+      isAuto = false,
+      onSelectAuto,
       models = [],
       defaultModel = null,
       selectedModel = null,
@@ -1978,6 +1982,8 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                         selectedAgentSlug={selectedAgentSlug}
                         agents={agents}
                         onSelect={onSelectAgent}
+                        auto={isAuto}
+                        {...(onSelectAuto ? { onSelectAuto } : {})}
                         compact={true}
                       />
                     </div>

@@ -61,6 +61,8 @@ import { useDesignStudio } from './Workspace/design/designStudioContext';
 import { usePageSelection } from './Workspace/pageSelectionContext';
 import { fetchAccessibleClawAgents } from '../../services/clawAgentListService';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
+import { useAskAIAuto } from '../../hooks/useAskAIAuto';
+import { useRoutedSubmit, type AssistantRouting } from '../Assistant/useRoutedSubmit';
 import useMeasure from '../../hooks/useMeasure';
 
 export interface AIComposerAttachment {
@@ -102,6 +104,7 @@ interface AIComposerProps {
   hideDisclaimer?: boolean;
   pending?: boolean;
   onStop?: () => void;
+  assistant?: AssistantRouting | undefined;
   /** Forwarded to AIAgentSelector — fires when the user picks a different
    *  agent, so the parent can open a fresh chat for that agent. The current
    *  composer context is passed along so the parent can preserve the user's
@@ -232,6 +235,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
     placeholder = 'Ask anything',
     pending = false,
     onStop,
+    assistant,
     hideDisclaimer,
     onAgentChange,
     showAgentSelector = true,
@@ -311,6 +315,8 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
   // choice; the same `['accessible-claw-agents']` query the agent selector
   // uses is free here via the React Query cache.
   const { selectedAgentSlug } = useSelectedAgent();
+  const { isAuto } = useAskAIAuto();
+  const isAutoOn = isAuto && assistant !== undefined && selectedAgentSlug === null;
   const { data: composerAgents } = useQuery({
     queryKey: ['accessible-claw-agents'],
     queryFn: fetchAccessibleClawAgents,
@@ -570,12 +576,21 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
     [handleFilesAdded, pending, onSubmit, buildContext],
   );
 
-  const submit = (trigger: 'button' | 'enter'): void => {
-    if (pending) return;
-    const trimmed = value.trim();
-    if (!trimmed) return;
+  const routedSubmit = useRoutedSubmit<'button' | 'enter'>({
+    assistant,
+    value,
+    clear: () => setValue(''),
+    submit: send,
+  });
+
+  const handleStop = (): void => {
+    if (routedSubmit.stop()) return;
+    onStop?.();
+  };
+
+  function send(trigger: 'button' | 'enter'): void {
     onSubmit?.(
-      applyStudioMode(trimmed),
+      applyStudioMode(value.trim()),
       attachments.length > 0 ? attachments : undefined,
       buildContext(),
       trigger,
@@ -585,7 +600,16 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
     setDismissedStudioIntent(null);
     // Toggles/context persist across turns (mirrors the sidebar), so they are
     // intentionally NOT reset here.
-  };
+  }
+
+  function submit(trigger: 'button' | 'enter'): void {
+    if (pending) return;
+    const trimmed = value.trim();
+    if (!trimmed) return;
+    const isRoutable = isAutoOn && attachments.length === 0 && applyStudioMode(trimmed) === trimmed;
+    if (isRoutable && routedSubmit.route(trigger)) return;
+    send(trigger);
+  }
 
   // Form submit only happens through the send button (Enter is intercepted in
   // handleKeyDown), so this is the 'button' trigger.
@@ -733,7 +757,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
 
   // Labels for the "+" menu's agent/model rows, so a folded toolbar still shows
   // what is selected without opening either picker. Mirrors what the pills read.
-  const agentLabel = selectedAgent?.name ?? 'Ask AI';
+  const agentLabel = isAutoOn ? 'Auto' : (selectedAgent?.name ?? 'Ask AI');
   const modelLabel = useMemo(() => {
     const pinned = (agentModelsData?.models ?? []).find(m => m.id === selectedModel);
     if (pinned) return formatModelLabel(pinned.name);
@@ -745,6 +769,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
     <AIAgentSelector
       disabled={pending}
       onAgentChange={slug => onAgentChange?.(slug, buildContext())}
+      {...(assistant && { onSelectAuto: () => textareaRef.current?.focus() })}
       hideTrigger={compactToolbar}
       {...(compactToolbar && { open: showAgentPicker, onOpenChange: setShowAgentPicker })}
     />
@@ -1220,7 +1245,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
               {pending ? (
                 <button
                   type='button'
-                  onClick={onStop}
+                  onClick={handleStop}
                   aria-label='Stop generating'
                   title='Stop'
                   className='inline-flex h-8 w-8 items-center justify-center rounded-full bg-primary text-primary-foreground transition hover:opacity-90'

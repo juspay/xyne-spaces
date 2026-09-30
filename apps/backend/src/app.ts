@@ -105,6 +105,7 @@ import sdlcRepoCredentialBackfillRoutes from '@/routes/sdlcRepoCredentialBackfil
 import searchMetricsRoutes from '@/routes/searchMetrics';
 import knowledgeRoutes from '@/routes/knowledge';
 import vespaSearchRoutes, { relatedContextRouter } from '@/routes/vespaSearch';
+import assistantRouteRoutes from '@/routes/assistantRoute';
 import { dashboardClawRouter } from '@/routes/dashboardClaw';
 import summarizeRoutes from '@/routes/summarize';
 import xyneAIRoutes from '@/routes/xyneAI';
@@ -769,6 +770,8 @@ export class App {
     // Ahead of the general mount, so a lookup is answered here and nothing else runs.
     this.app.use('/api/vespaSearch/related', authMiddleware.authenticate, relatedContextRouter);
     this.app.use('/api/vespaSearch', authMiddleware.authenticate, vespaSearchRoutes);
+
+    this.app.use('/api/assistant/route', authMiddleware.authenticate, assistantRouteRoutes);
 
     // API Key management routes (admin only, no ACL needed as it has requireAdmin middleware)
     this.app.use('/api/admin/api-keys', apiKeyRoutes);

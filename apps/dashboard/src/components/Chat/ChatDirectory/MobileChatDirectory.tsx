@@ -1,5 +1,5 @@
-import { ReactElement, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { ReactElement, useEffect, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   ChevronRight,
   PlusDefault,
@@ -45,6 +45,7 @@ const MobileChatDirectory = ({
   allChannelsUserStatus,
 }: ChatDirectoryProps): ReactElement | null => {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const context = useAuthContextValues();
   const zero = useZero();
 
@@ -52,6 +53,18 @@ const MobileChatDirectory = ({
     useChannelSort(channelData, allChannelsUserStatus, context.userID);
 
   const [showAddChannelForm, setShowAddChannelForm] = useState(false);
+  // Opened by the Ask AI assistant; the param is removed so a refresh does not reopen it.
+  useEffect(() => {
+    if (searchParams.get('dialog') !== 'add_channel') return;
+    setShowAddChannelForm(true);
+    setSearchParams(
+      prev => {
+        prev.delete('dialog');
+        return prev;
+      },
+      { replace: true },
+    );
+  }, [searchParams, setSearchParams]);
   const [showAddDmForm, setShowAddDmForm] = useState(false);
   const [isCommandMenuOpen, setIsCommandMenuOpen] = useState(false);
   const [showAddPeopleDialog, setShowAddPeopleDialog] = useState(false);

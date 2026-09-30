@@ -192,6 +192,7 @@ import {
 } from '../contexts/AIOnboardingContext';
 import UnreadsInbox from '../components/Chat/UnreadsInbox/UnreadsInbox';
 import { AIOnboardingOverlay } from '../components/AIOnboarding/AIOnboardingOverlay';
+import { AssistantPanelTrigger } from '../components/AIOnboarding/AssistantPanelTrigger';
 import XyneAISidebar from '../components/Chat/XyneAISidebar/XyneAISidebar';
 import {
   XyneCalendarSidebar,
@@ -563,12 +564,8 @@ const AppRoot = (): ReactElement => {
   // like "/<workspaceId>/ai" or "/<workspaceId>/ai/<sub>". Match that
   // structure rather than a leading "/ai" prefix (which never matches).
   const isOnAIPage = /^\/[^/]+\/ai(\/|$)/.test(location.pathname);
-  // /ai/knowledge is a KB browser (AIKnowledgeScreen), not the full-screen
-  // chat experience the isOnAIPage suppression below exists for — it has no
-  // embedded chat pane of its own, so "Ask AI" there needs the same global
-  // XyneAISidebar drawer /knowledge-base uses, or clicking it does nothing.
-  const isOnAIKnowledgePage = /^\/[^/]+\/ai\/knowledge(\/|$)/.test(location.pathname);
-  const isOnAIChatExperiencePage = isOnAIPage && !isOnAIKnowledgePage;
+  // Only /ai/chat has its own full-screen chat; other /ai pages keep the global XyneAISidebar.
+  const isOnAIChatExperiencePage = /^\/[^/]+\/ai\/chat(\/|$)/.test(location.pathname);
   // Streams turns Ask AI into a column in the stream, so the floating drawer must
   // not also appear — otherwise one trigger produces two chats. Same suppression
   // shape as the /ai page, which has the same "already showing this" problem.
@@ -702,7 +699,6 @@ const AppRoot = (): ReactElement => {
   // global XyneAISidebar must never be open there. Close it on any pathname
   // change that lands inside /ai — this covers both opening it elsewhere and
   // then navigating in, and any code path that tries to open it while here.
-  // /ai/knowledge is exempt — see isOnAIKnowledgePage above.
   useEffect(() => {
     if (!isOnAIChatExperiencePage) return;
     if (xyneAIActor.getSnapshot().matches('open')) {
@@ -791,6 +787,7 @@ const AppRoot = (): ReactElement => {
               <ShareRecordingHandler />
               <AIOnboardingProvider>
                 <AIOnboardingTrigger isOnboarding={isOnboarding} />
+                <AssistantPanelTrigger isOnboarding={isOnboarding} />
                 <AIOnboardingOverlay />
                 <SlashCommandArtifactSideEffectProvider>
                   {!isInPanelWebview && <SlashCommandArtifactBanner />}

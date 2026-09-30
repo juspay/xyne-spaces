@@ -263,6 +263,15 @@ const ChatDirectory = ({
   const { unreadCount: recapUnreadCount } = useRecapUnreadCount();
   const prefetchRecap = usePrefetchRecap();
   const [showAddChannelForm, setShowAddChannelForm] = useState(false);
+  // Opened by the Ask AI assistant; the param is removed so a refresh does not reopen it.
+  const opensAddChannel = useRouterSelector(
+    snapshot => new URLSearchParams(snapshot.location.search).get('dialog') === 'add_channel',
+  );
+  useEffect(() => {
+    if (!opensAddChannel) return;
+    setShowAddChannelForm(true);
+    void navigate(pathname, { replace: true });
+  }, [opensAddChannel, navigate, pathname]);
   const [showAddSectionForm, setShowAddSectionForm] = useState(false);
   const [addSectionSource, setAddSectionSource] = useState<'channels' | 'dms'>('channels');
   const [sectionToRename, setSectionToRename] = useState<ChannelSection | null>(null);
