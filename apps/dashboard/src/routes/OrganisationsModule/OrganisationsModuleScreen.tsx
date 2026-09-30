@@ -3,6 +3,9 @@ import { Navigate, Outlet, useLocation, useParams } from 'react-router-dom';
 import { Panel, ResizableGroup, Separator } from '../../components/ui/Resizable/Resizable';
 import AppLoader from '../../components/AppLoader/AppLoader';
 import { useUserGroupsHydrated } from '../../hooks/useUserGroup';
+import { useSelf } from '../../hooks/useUsers';
+import { useCachedQuery } from '../../hooks/useCachedQuery';
+import { queries } from '../../zero/queries';
 import OrganisationsSidebar from './OrganisationsSidebar';
 import OrganisationsTabBar from './OrganisationsTabBar';
 import {
@@ -90,14 +93,19 @@ export const OrganisationsPage = ({ children }: { children: ReactNode }): ReactE
 );
 
 /**
- * Sidebar with Organisations, User Groups and Roles. Organisations shows its
- * sections (workspace settings, members, organisations list) as one row of
- * tabs; User Groups and Roles bring their own headers.
+ * Sidebar with Organisations, Workspace, User Groups and Roles. Workspace
+ * shows its sections as one row of tabs; the others bring their own headers.
  */
 const OrganisationsModuleScreen = (): ReactElement => {
   const { pathname } = useLocation();
   const activeGroup = useActiveOrganisationsGroup(pathname);
   const tabbed = activeGroup && activeGroup.sections.length > 1 ? activeGroup : undefined;
+  // Same workspace the tabs read and save (self.workspaceId), not the URL's.
+  const self = useSelf();
+  const [workspace] = useCachedQuery(
+    queries.getWorkspaceById({ workspaceId: self?.workspaceId ?? '' }),
+    { enabled: !!self?.workspaceId && !!tabbed?.showsWorkspaceName },
+  );
 
   return (
     <div className='h-full relative overflow-hidden' data-component='OrganisationsModuleScreen'>
@@ -129,10 +137,20 @@ const OrganisationsModuleScreen = (): ReactElement => {
           >
             {tabbed && (
               <div className='shrink-0 border-b border-border bg-card px-6 pt-4'>
-                <h1 className='text-xl font-semibold text-foreground'>{tabbed.label}</h1>
-                <p className='mt-1 text-sm text-muted-foreground'>
-                  Workspace settings, members and linked organisations.
-                </p>
+                <div className='flex min-w-0 items-center gap-2'>
+                  <h1 className='text-xl font-semibold text-foreground'>{tabbed.label}</h1>
+                  {tabbed.showsWorkspaceName && workspace?.name && (
+                    <span
+                      title={`These settings apply to ${workspace.name}`}
+                      className='min-w-0 truncate rounded-full border border-border bg-muted px-2.5 py-0.5 text-sm font-medium text-foreground'
+                    >
+                      {workspace.name}
+                    </span>
+                  )}
+                </div>
+                {tabbed.description && (
+                  <p className='mt-1 text-sm text-muted-foreground'>{tabbed.description}</p>
+                )}
                 <OrganisationsTabBar group={tabbed} pathname={pathname} />
               </div>
             )}
