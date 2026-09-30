@@ -2,8 +2,8 @@ apiVersion: v2
 name: xyne-dashboard
 description: Xyne Spaces dashboard (React SPA) - static bundle served by nginx
 type: application
-version: 0.1.0-app.1.419.0-release-20260929.4
-appVersion: "1.419.0-release-20260929.4"
+version: 0.1.0-app.1.442.3
+appVersion: "1.442.3"
 keywords:
   - xyne
   - dashboard
