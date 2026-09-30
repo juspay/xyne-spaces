@@ -4,6 +4,7 @@ import { getSubagentDefinition,
   openPaletteModeFromTools,
 } from "xyne-claw-shared";
 import type { McpServerTools, McpToolInfo } from "../mcp/types.js";
+import type { KnownMcpTool } from "../lib/mcp-tool-name-index.js";
 import {
   gatewayCatalogSource,
   gatewayToolSelectionKey,
@@ -330,4 +331,37 @@ export function filterMcpServerToolsForAgentConfig(
   if (tools.length === 0) return null;
   const keptToolNames = new Set(tools.map((tool) => tool.name));
   return { ...serverTools, tools, writeTools: serverTools.writeTools.filter((toolName) => keptToolNames.has(toolName)) };
+}
+
+function scopedPicksNameServer(allow: AgentToolAllowSet, serverType: string, serverName: string): boolean {
+  const servers = new Set([normToolKey(serverType), normToolKey(serverName)]);
+  for (const key of allow.scopedToolNorm) {
+    const server = key.slice(0, key.indexOf("\u0000"));
+    if (servers.has(server)) return true;
+  }
+  return false;
+}
+
+export function mcpServerMayServeAgentConfig(input: {
+  config: AgentToolsConfig | undefined;
+  serverType: string;
+  serverName: string;
+  knownTools: ReadonlyArray<KnownMcpTool> | null;
+  parseGatewayServerType: (serverType: string) => GatewayServerTarget | null;
+  subagentRefs?: SubagentToolRefs[];
+}): boolean {
+  const { config, serverType, serverName, knownTools, parseGatewayServerType } = input;
+  if (!config) return true;
+  if (shouldBypassMcpToolAgentFilter(serverType)) return true;
+  if (openPaletteModeFromTools(config) !== "off") return true;
+  const allow = buildAgentToolAllowSet(config);
+  if (isMcpServerAllowedByAgentAllowSet(allow, serverType, serverName, parseGatewayServerType)) return true;
+  if (scopedPicksNameServer(allow, serverType, serverName)) return true;
+  if (!knownTools) return true;
+  const refs = input.subagentRefs ?? [];
+  return knownTools.some(
+    (tool) =>
+      isMcpToolAllowedByAgentAllowSet(allow, serverType, serverName, tool, parseGatewayServerType) ||
+      subagentReferencingTool(refs, tool) !== null,
+  );
 }
