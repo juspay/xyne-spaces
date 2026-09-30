@@ -189,6 +189,14 @@ export interface CallSharingResult {
   shares?: Array<{ id: string; target: CallShareTarget; access: string }>;
 }
 
+function extractApiError(error: unknown, fallback: string): string {
+  if (error instanceof AxiosError) {
+    const data = error.response?.data as { error?: unknown } | undefined;
+    if (data && typeof data.error === 'string') return data.error;
+  }
+  return fallback;
+}
+
 export class CallService {
   /**
    * Replace a call's labels. Returns the resolved Tag ids — raw text typed in the
@@ -897,6 +905,38 @@ export class CallService {
       params: { from: from.toISOString(), to: to.toISOString() },
     });
     return response.data;
+  }
+
+  /**
+   * Approve one item on a call's "ticket updates" card: post the note on the
+   * ticket thread and/or move the ticket's stage, as the signed-in user.
+   */
+  async applyTicketUpdate(
+    callId: string,
+    updateId: string,
+    body: { postComment: boolean; changeStatus: boolean; message?: string; stageName?: string },
+  ): Promise<{ content: string }> {
+    try {
+      const response = await apiInstance.post<{ success: true; content: string }>(
+        `/calls/${callId}/ticket-updates/${updateId}/apply`,
+        body,
+      );
+      return { content: response.data.content };
+    } catch (error) {
+      throw new Error(extractApiError(error, 'Failed to apply the ticket update'));
+    }
+  }
+
+  /** Ignore one item on a call's "ticket updates" card. */
+  async ignoreTicketUpdate(callId: string, updateId: string): Promise<{ content: string }> {
+    try {
+      const response = await apiInstance.post<{ success: true; content: string }>(
+        `/calls/${callId}/ticket-updates/${updateId}/ignore`,
+      );
+      return { content: response.data.content };
+    } catch (error) {
+      throw new Error(extractApiError(error, 'Failed to ignore the ticket update'));
+    }
   }
 }
 
