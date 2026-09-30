@@ -1,5 +1,12 @@
 import { useLayoutEffect, useRef, useState, type ReactElement, type ReactNode } from 'react';
+import { ThreeDotsMenuVertical } from '@xyne/icons';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { cn } from '@/utils/classNames';
+import { PROPERTY_MENU_PANEL } from './AddPropertyMenu';
 
 interface PropertyRowProps {
   label: ReactNode;
@@ -11,9 +18,20 @@ interface PropertyRowProps {
    * vertical center of the first line, for a placeholder and after the value grows.
    */
   align?: 'center' | 'start';
+  /** Items for the three-dot menu that appears left of the label on row hover. */
+  menu?: ReactNode;
+  /** Names the menu button for assistive tech, e.g. the property title. */
+  menuLabel?: string;
+  menuTestId?: string;
+  /** No menu at all: a read-only row (a saved agent before Edit) has nothing to remove. */
+  menuDisabled?: boolean;
 }
 
 const LABEL_CLASS = 'w-[200px] text-sm font-normal leading-[1.3] tracking-[-0.1px] text-foreground';
+
+/** Sits just left of the label, with a gap, and reveals on row hover, focus or while open. */
+const MENU_HANDLE_CLASS =
+  'pointer-events-none absolute right-full top-1/2 z-10 mr-1.5 inline-flex -translate-y-1/2 items-center justify-center rounded-md p-1 pr-1.5 text-muted-foreground opacity-0 outline-none transition-opacity hover:bg-accent hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover/proprow:pointer-events-auto group-hover/proprow:opacity-100 data-[state=open]:pointer-events-auto data-[state=open]:bg-accent data-[state=open]:opacity-100';
 
 function isInFlowBox(el: HTMLElement): boolean {
   const style = getComputedStyle(el);
@@ -67,6 +85,10 @@ export function PropertyRow({
   labelClassName,
   className,
   align = 'center',
+  menu,
+  menuLabel,
+  menuTestId,
+  menuDisabled = false,
 }: PropertyRowProps): ReactElement {
   const labelRef = useRef<HTMLDivElement>(null);
   const valueRef = useRef<HTMLDivElement>(null);
@@ -93,14 +115,31 @@ export function PropertyRow({
 
   return (
     <div
-      className={cn('flex min-h-9 w-full items-start gap-12', className)}
+      className={cn(
+        'group/proprow relative flex min-h-9 w-full items-start gap-12 before:absolute before:right-full before:top-0 before:h-full before:w-10 before:content-[""]',
+        className,
+      )}
       data-component='PropertyRow'
       data-align={align}
     >
       <div
         ref={labelRef}
-        className={cn(labelClassName ?? LABEL_CLASS, 'flex h-9 shrink-0 items-center')}
+        className={cn(labelClassName ?? LABEL_CLASS, 'relative flex h-9 shrink-0 items-center')}
       >
+        {menu && !menuDisabled ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              className={MENU_HANDLE_CLASS}
+              data-testid={menuTestId}
+              aria-label={`${menuLabel ?? 'Property'} options`}
+            >
+              <ThreeDotsMenuVertical className='size-4' aria-hidden />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align='start' sideOffset={6} className={PROPERTY_MENU_PANEL}>
+              {menu}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : null}
         {label}
       </div>
       <div

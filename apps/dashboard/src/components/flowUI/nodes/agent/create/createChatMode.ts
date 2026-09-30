@@ -18,7 +18,38 @@ import type {
 } from './types.ts';
 import { slicePatch } from './mergeChatPatch.ts';
 
-const ANTICIPATE_MS = 520;
+/** Beat between pointing at a section and writing into it: long enough to see the shimmer move. */
+const ANTICIPATE_MS = 120;
+/** A text reveal never takes longer than this, whatever the length (instructions). */
+const REVEAL_LONG_MS = 900;
+/** Name, handle and description: quick, but still visibly written in. */
+const REVEAL_SHORT_MS = 260;
+const REVEAL_SETTLE_MS = 60;
+const REVEAL_MAX_STEPS = 48;
+const SHORT_TEXT = 60;
+
+/**
+ * Where a reveal pauses: every few characters for short text, word ends for long
+ * text, thinned to at most `maxSteps` evenly spaced cuts. The last cut is always
+ * the full length.
+ */
+export function revealCutPoints(text: string, maxSteps = REVEAL_MAX_STEPS): number[] {
+  if (!text) return [];
+  const ends: number[] = [];
+  if (text.length <= SHORT_TEXT) {
+    const chunk = Math.max(1, Math.ceil(text.length / 14));
+    for (let end = chunk; end < text.length; end += chunk) ends.push(end);
+  } else {
+    for (const match of text.matchAll(/\S+\s*/g)) ends.push(match.index + match[0].length);
+  }
+  if (ends[ends.length - 1] !== text.length) ends.push(text.length);
+  if (ends.length <= maxSteps) return ends;
+  const thinned = new Set<number>();
+  for (let step = 1; step <= maxSteps; step++) {
+    thinned.add(ends[Math.round((step * ends.length) / maxSteps) - 1] ?? text.length);
+  }
+  return [...thinned];
+}
 
 type SetWritingField = (field: AgentCreateField | null, hubRow?: AgentCreateHubRow | null) => void;
 type SetAttentionField = (
@@ -68,12 +99,13 @@ async function revealTextField(args: {
     sleep: args.sleep,
   });
   args.setWritingField(args.field, args.hubRow);
-  await args.sleep(Math.max(48, Math.min(args.writeMs, 120)));
-  const chunk = full.length > 120 ? 3 : 1;
-  const steps = Math.ceil(full.length / chunk);
-  const stepMs = Math.max(18, Math.min(Math.floor(args.writeMs / Math.max(steps, 1)), 55));
-  for (let end = chunk; end <= full.length + chunk - 1; end += chunk) {
-    const partial = full.slice(0, Math.min(end, full.length));
+  await args.sleep(REVEAL_SETTLE_MS);
+  // Time-boxed: a long prompt lands in under a second instead of being typed out.
+  const cuts = revealCutPoints(full);
+  const budgetMs = full.length > SHORT_TEXT * 2 ? REVEAL_LONG_MS : REVEAL_SHORT_MS;
+  const stepMs = Math.max(16, Math.floor(budgetMs / Math.max(cuts.length, 1)));
+  for (const end of cuts) {
+    const partial = full.slice(0, end);
     args.applyChatPatch(
       `${args.sourceId}-${args.field}-${partial.length}`,
       args.patchForText(partial),
@@ -83,7 +115,7 @@ async function revealTextField(args: {
     );
     await args.sleep(stepMs);
   }
-  await args.sleep(Math.max(48, Math.min(args.writeMs, 120)));
+  await args.sleep(REVEAL_SETTLE_MS);
   args.setWritingField(null);
 }
 
@@ -268,7 +300,7 @@ export async function revealCreatePatchFields(args: {
       sleep: args.sleep,
     });
     args.setWritingField(field, hubRow);
-    await args.sleep(Math.max(48, Math.min(args.writeMs, 120)));
+    await args.sleep(REVEAL_SETTLE_MS);
     const changed = args.applyChatPatch(`${args.sourceId}-${field}`, slice, { highlight: false });
     if (!changed.includes(field)) {
       args.setWritingField(null);
@@ -649,7 +681,7 @@ export function decideCreateCanvasAction(args: {
  * How long past the identity prelude the hub plan may still take before the
  * regex binds go on the canvas and the late picks arrive as chips only.
  */
-export const HUB_PLAN_SOFT_DEADLINE_MS = 2_500;
+export const HUB_PLAN_SOFT_DEADLINE_MS = 1_200;
 
 const HUB_FIELDS: readonly HubPlanField[] = ['tools', 'skills', 'knowledge'];
 
@@ -800,7 +832,6 @@ export async function applyCreateHubDraft(args: {
         ...revealArgs,
         fields: ['name'],
       });
-      await args.sleep(args.writeMs * 2);
     }
     const restPrelude = preludeFields.filter(field => field !== 'name');
     if (restPrelude.length > 0) {
@@ -824,7 +855,7 @@ export async function applyCreateHubDraft(args: {
       sleep: args.sleep,
     });
     args.setWritingField(field, row);
-    await args.sleep(Math.max(48, Math.min(args.writeMs, 120)));
+    await args.sleep(REVEAL_SETTLE_MS);
   };
   // Hubs whose chips the plan may decide; edits only touch what the user asked for.
   const suggestionHubs = (): HubPlanField[] =>

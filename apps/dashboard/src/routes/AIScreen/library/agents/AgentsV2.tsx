@@ -96,7 +96,8 @@ const AgentsV2 = ({ query }: { query: string }): ReactElement => {
               key={agent.id}
               to={prefixWs(`/ai/library/agent/${agent.slug}?tab=persona`)}
               testId='claw-agent-card'
-              icon={<AgentBotAvatar agentKey={agent.id} asleep={!agent.enabled} size={36} />}
+              variant='flat'
+              icon={<AgentBotAvatar agentKey={agent.id} asleep={!agent.enabled} size={44} />}
               name={agent.name}
               description={agent.description}
             />

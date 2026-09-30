@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { EMPTY_CREATE_FORM } from '@/components/flowUI/nodes/agent/create/types';
-import { buildCreateAgentPayload } from './agentCreatePayload';
+import { AGENT_PROPERTIES_HEADING, buildCreateAgentPayload } from './agentCreatePayload';
 
 const form = {
   ...EMPTY_CREATE_FORM,
@@ -49,5 +49,39 @@ describe('buildCreateAgentPayload', () => {
     expect(payload.knowledgeBase).toBeUndefined();
     expect(payload.skills).toBeUndefined();
     expect(payload.ownerUserId).toBeUndefined();
+  });
+
+  it('saves custom properties and the schedule, and tells the agent about them', () => {
+    const payload = buildCreateAgentPayload(
+      {
+        ...form,
+        customProperties: [
+          { id: 'p1', type: 'number', title: 'Budget', value: '500' },
+          { id: 'p2', type: 'checkbox', title: 'Needs approval', value: 'true' },
+          { id: 'p3', type: 'text', title: 'Empty', value: '' },
+        ],
+        schedule: { kind: 'repeat', cron: '0 9 * * 1-5', timezone: 'UTC', task: 'Send the brief' },
+      },
+      'morning-brief',
+      'user_1',
+    );
+    expect(payload.config).toMatchObject({
+      customProperties: [{ title: 'Budget' }, { title: 'Needs approval' }, { title: 'Empty' }],
+      schedule: { kind: 'repeat', cron: '0 9 * * 1-5' },
+    });
+    const [instructions, section] = payload.systemPrompt.split(
+      `\n\n${AGENT_PROPERTIES_HEADING}\n\n`,
+    );
+    expect(instructions).toBe('prompt');
+    expect(section).toContain('- Budget: 500');
+    expect(section).toContain('- Needs approval: Yes');
+    expect(section).not.toContain('Empty');
+    expect(section).toMatch(
+      /- Runs on a schedule: weekdays at 9:00.*\(UTC\)\. Each run: Send the brief/,
+    );
+  });
+
+  it('leaves the instructions alone when there are no properties', () => {
+    expect(buildCreateAgentPayload(form, 'morning-brief', 'user_1').systemPrompt).toBe('prompt');
   });
 });

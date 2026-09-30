@@ -1,6 +1,7 @@
 import { useEffect, useRef, type ReactElement } from 'react';
 import { AIComposer } from '@/components/AIScreen/AIComposer';
 import { AgentBotAvatar } from '@/components/agents/AgentBotAvatar';
+import { CreateEmptyState } from './CreateEmptyState';
 import type { AgentCreateFormState } from './types';
 import { useDraftChat } from './useDraftChat';
 
@@ -21,7 +22,14 @@ export function AgentDraftChatPanel({ getForm, disabled }: AgentDraftChatPanelPr
   return (
     <div className='flex h-full min-h-0 flex-col' data-component='AgentDraftChatPanel'>
       <div className='flex min-h-0 flex-1 flex-col overflow-y-auto px-3 pt-2'>
-        {messages.length === 0 ? null : (
+        {messages.length === 0 ? (
+          <CreateEmptyState
+            media={
+              <AgentBotAvatar type='clover' agentKey={getForm().slug || getForm().name} size={64} />
+            }
+            title='Try out your agent'
+          />
+        ) : (
           <ul className='flex flex-col gap-3 pb-3'>
             {messages.map(message => (
               <li key={message.id} className='px-1'>

@@ -84,8 +84,17 @@ describe("ensurePromptContract", () => {
       { permissionMode: "ask-first" },
     );
     expect(res.text.match(/## Operational Workflow/g)).toHaveLength(1);
-    expect(res.text).toMatch(/## Guardrails/);
+    expect(res.text).not.toMatch(/How you work/);
+    expect(res.text).toMatch(/\n\nRules\n- Never/);
     expect(res.text).toMatch(/asking the user first/);
+  });
+
+  it("repairs in plain text, with no markdown", () => {
+    const res = ensurePromptContract("You are a triage agent. Keep replies short.", { permissionMode: "ask-first" });
+    expect(res.text).toMatch(/\n\nHow you work\n1\. /);
+    expect(res.text).toMatch(/\n\nRules\n- /);
+    expect(res.text).not.toMatch(/#/);
+    expect(validateSystemPromptContract(res.text).ok).toBe(true);
   });
 
   it("builds a valid prompt from nothing", () => {

@@ -1,11 +1,18 @@
 import { useMemo, useState, type ReactElement } from 'react';
-import { InformationCircle, MultipleCrossCancelDefault, PlusDefault } from '@xyne/icons';
+import {
+  FileDefault,
+  FolderDefault,
+  InformationCircle,
+  MultipleCrossCancelDefault,
+  PlusDefault,
+} from '@xyne/icons';
 import { PropertyAddButton } from '@/components/flowUI/nodes/agent/create/PropertyAddButton';
 import type { CreateHubSuggestions } from '@/components/flowUI/nodes/agent/create/types';
 import { Tooltip } from '@/components/ui/Tooltip/Tooltip';
 import { useClawKnowledgeBaseTree } from '@/hooks/useClawKnowledgeBaseTree';
 import type { KbSelection } from '@/services/claw/clawKnowledgeBaseTypes';
 import { CapabilityChip } from '../CapabilityChip';
+import { CapabilityPillList } from '../CapabilityPillList';
 import { BrowseKnowledgeDialog } from './BrowseKnowledgeDialog';
 import { buildKbIndex, describeGrants, removeGrant, type KbScope } from './knowledgeCatalog';
 
@@ -50,60 +57,70 @@ export function KnowledgeCapabilityRow({
   }, [hubSuggestions, scope, grants]);
 
   if (layout === 'profile') {
-    const filled = scope === 'USER' || labels.length > 0;
     return (
       <>
-        {!filled && planChips.length === 0 ? (
-          <PropertyAddButton
-            label='Add knowledge'
-            trackName='Create agent v2: browse knowledge'
-            onClick={() => setBrowseOpen(true)}
-          />
-        ) : (
-          <div className='flex flex-wrap items-start gap-2'>
-            {scope === 'USER' ? (
-              <span className='text-sm font-normal leading-[1.3] tracking-[-0.1px] text-foreground'>
-                Matches the running user’s access
-              </span>
-            ) : (
-              labels.map(grant => (
-                <span
-                  key={grant.key}
-                  className='flex shrink-0 items-center gap-1.5 overflow-hidden rounded-[10px] border-[0.8px] border-solid border-border bg-muted py-1 pl-2.5 pr-2'
-                >
-                  <span className='max-w-[220px] truncate text-sm font-[550] leading-none text-foreground'>
-                    {grant.label}
-                  </span>
-                  <button
-                    type='button'
-                    onClick={() => {
-                      onGrantsChange(removeGrant(grants, grant.selection));
-                      onPickDismissed?.(grant.selection.collectionId);
-                    }}
-                    aria-label={`Remove ${grant.label}`}
-                    data-track-category='Claw Agents'
-                    data-track-name='Create agent v2: remove knowledge'
-                    className='flex shrink-0 items-center text-muted-foreground hover:text-foreground'
-                  >
-                    <MultipleCrossCancelDefault className='size-3 shrink-0' aria-hidden />
-                  </button>
-                </span>
-              ))
-            )}
-            {planChips.map(pick => (
-              <CapabilityChip
-                key={`suggested-${pick.id}`}
-                label={pick.name}
-                selected={false}
-                onToggle={() => {
-                  onGrantsChange([...grants, { collectionId: pick.id, fileId: null }]);
-                  onSuggestionAccepted?.(pick.id);
-                }}
-                trackName='Create agent v2: toggle knowledge chip'
-              />
-            ))}
-          </div>
-        )}
+        <CapabilityPillList
+          className='items-start'
+          add={
+            <PropertyAddButton
+              label='Add knowledge'
+              trackName='Create agent v2: browse knowledge'
+              onClick={() => setBrowseOpen(true)}
+            />
+          }
+          pills={[
+            ...(scope === 'USER'
+              ? [
+                  {
+                    key: '__user-access',
+                    node: (
+                      <span className='text-sm font-normal leading-[1.3] tracking-[-0.1px] text-foreground'>
+                        Matches the running user’s access
+                      </span>
+                    ),
+                  },
+                ]
+              : labels.map(grant => ({
+                  key: grant.key,
+                  node: (
+                    <CapabilityChip
+                      label={grant.label}
+                      meta={grant.meta}
+                      selected
+                      icon={
+                        grant.selection.fileId ? (
+                          <FileDefault className='size-4' aria-hidden />
+                        ) : (
+                          <FolderDefault className='size-4' aria-hidden />
+                        )
+                      }
+                      onOpen={() => setBrowseOpen(true)}
+                      onToggle={() => {
+                        onGrantsChange(removeGrant(grants, grant.selection));
+                        onPickDismissed?.(grant.selection.collectionId);
+                      }}
+                      trackName='Create agent v2: knowledge grant'
+                    />
+                  ),
+                }))),
+            // Keyed like the collection-wide grant it becomes, so accepting restyles it in place.
+            ...planChips.map(pick => ({
+              key: `${pick.id}:*`,
+              node: (
+                <CapabilityChip
+                  label={pick.name}
+                  selected={false}
+                  icon={<FolderDefault className='size-4' aria-hidden />}
+                  onToggle={() => {
+                    onGrantsChange([...grants, { collectionId: pick.id, fileId: null }]);
+                    onSuggestionAccepted?.(pick.id);
+                  }}
+                  trackName='Create agent v2: toggle knowledge chip'
+                />
+              ),
+            })),
+          ]}
+        />
         <BrowseKnowledgeDialog
           open={browseOpen}
           onOpenChange={setBrowseOpen}

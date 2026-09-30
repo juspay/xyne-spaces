@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { CSSProperties, ReactElement } from 'react';
+import type { CSSProperties, ReactElement, ReactNode } from 'react';
 import { ChevronRight } from 'lucide-react';
 import type { ToolInvocation } from '../utils/XyneAITypes';
 import { ToolInvocationList } from './ToolInvocationList';
@@ -63,6 +63,8 @@ interface ActivityBlockProps {
    * `max-h-[28rem]` cap so the parent scrolls the whole reasoning + tool tree.
    */
   fillHeight?: boolean | undefined;
+  /** Replaces the 8-bit cycle loader shown while streaming. */
+  liveIndicator?: ReactNode;
 }
 
 /**
@@ -181,6 +183,7 @@ export function ActivityBlock({
   streaming,
   messageAborted,
   fillHeight = false,
+  liveIndicator,
 }: ActivityBlockProps): ReactElement {
   const hasReasoning = !!reasoning && reasoning.length > 0;
   const hasTools = !!toolInvocations && toolInvocations.length > 0;
@@ -259,7 +262,7 @@ export function ActivityBlock({
               className='inline-flex shrink-0 animate-fade-in'
             >
               {streaming ? (
-                <EightBitLoader />
+                (liveIndicator ?? <EightBitLoader />)
               ) : (
                 <ChevronRight
                   size={14}

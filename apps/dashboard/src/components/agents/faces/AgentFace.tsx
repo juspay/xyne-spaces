@@ -33,6 +33,19 @@ interface AgentFaceProps {
   className?: string;
 }
 
+/** The face's own hue (first stop of its tile gradient), mixed 75% toward black. */
+function eyeColor(defs: string): string {
+  const hex = /id="paint0_linear__U__"[^>]*>\s*<stop stop-color="#([0-9a-fA-F]{6})"/.exec(
+    defs,
+  )?.[1];
+  if (!hex) return '#000';
+  const channel = (i: number): string =>
+    Math.round(Number.parseInt(hex.slice(i, i + 2), 16) * 0.25)
+      .toString(16)
+      .padStart(2, '0');
+  return `#${channel(0)}${channel(2)}${channel(4)}`;
+}
+
 export function AgentFace({
   agent,
   size = 32,
@@ -58,13 +71,13 @@ export function AgentFace({
 
   const u = (s: string): string => s.replaceAll('__U__', `_${uid}`);
   const { x, y } = face;
-  const svg = `<svg viewBox="${x} ${y} 30 30" style="--af-ox:${x + 15}px;--af-oy:${y + 15}px">
+  const svg = `<svg viewBox="${x} ${y} 30 30" style="--af-ox:${x + 15}px;--af-oy:${y + 15}px;--af-eye:${eyeColor(face.defs)}">
 <defs>${u(face.defs)}<clipPath id="c_${uid}"><rect x="${x}" y="${y}" width="30" height="30" rx="10"/></clipPath></defs>
 <g filter="url(#filter0_ddd_${uid})"><g clip-path="url(#c_${uid})">
 <rect x="${x}" y="${y}" width="30" height="30" fill="url(#paint0_linear_${uid})"/>
 ${u(face.body)}
 <g class="af-ef"><g class="af-ebr"><g class="af-eg"><g class="af-eb">${u(face.eyes)}</g></g></g></g>
-</g><rect x="${x + 0.29}" y="${y + 0.29}" width="29.42" height="29.42" rx="9.71" fill="none" stroke="#fff" stroke-opacity=".28" stroke-width=".58"/></g>
+</g><rect class="af-stroke" x="${x + 0.29}" y="${y + 0.29}" width="29.42" height="29.42" rx="9.71" fill="none" stroke="#fff" stroke-opacity=".28" stroke-width=".58"/></g>
 </svg>`;
 
   return (

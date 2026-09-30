@@ -20,7 +20,7 @@ interface McpIdentityProps {
   iconType: string;
   gap?: 'tight' | 'default';
   muted?: boolean;
-  weight?: 'medium' | 'semibold';
+  weight?: 'medium' | 'semibold' | 'pill';
   trailing?: ReactNode;
 }
 
@@ -38,8 +38,12 @@ export function McpIdentity({
       <span className='flex min-w-0 items-center gap-1'>
         <span
           className={cn(
-            'truncate text-sm leading-5',
-            weight === 'medium' ? 'font-medium' : 'font-semibold',
+            'truncate py-0.5 text-sm leading-[1.3]',
+            weight === 'medium'
+              ? 'font-medium'
+              : weight === 'pill'
+                ? 'font-normal'
+                : 'font-semibold',
             muted ? 'text-foreground/80' : 'text-foreground',
           )}
         >

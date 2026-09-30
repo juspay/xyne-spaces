@@ -5,6 +5,7 @@ import type { CreateHubSuggestions } from '@/components/flowUI/nodes/agent/creat
 import { Tooltip } from '@/components/ui/Tooltip/Tooltip';
 import { matchSuggestedTools, suggestionFromPicks } from '../../primitives/suggestionMatch';
 import { disableEntry, enableEntry, isEntryEnabled, type McpSelection } from './mcpCatalog';
+import { CapabilityPillList } from '../CapabilityPillList';
 import { BrowseMcpsDialog } from './BrowseMcpsDialog';
 import { DotGridLoader } from './DotGridLoader';
 import { McpChip } from './McpChip';
@@ -121,47 +122,52 @@ export function McpCapabilityRow({
   if (layout === 'profile') {
     return (
       <>
-        {selectedEntries.length === 0 && planChips.length === 0 ? (
-          <PropertyAddButton
-            label='Add MCP'
-            trackName='Create agent v2: browse MCPs'
-            onClick={() => {
-              setBrowseSlug(null);
-              setBrowseOpen(true);
-            }}
-          />
-        ) : (
-          <div className='flex flex-wrap items-center gap-2'>
-            {selectedEntries.map(entry => (
-              <McpChip
-                key={`selected-${entry.slug}`}
-                label={entry.label}
-                iconType={entry.iconType}
-                selected
-                onOpen={() => {
-                  setBrowseSlug(entry.slug);
-                  setBrowseOpen(true);
-                }}
-                onToggle={() => {
-                  onSelectionChange(disableEntry(entries, selection, entry));
-                  onPickDismissed?.(entry.slug);
-                }}
-              />
-            ))}
-            {planChips.map(match => (
-              <McpChip
-                key={`suggested-${match.entry.slug}`}
-                label={match.entry.label}
-                iconType={match.entry.iconType}
-                selected={false}
-                onToggle={() => {
-                  onSelectionChange(enableEntry(entries, selection, match.entry, match.tools));
-                  onSuggestionAccepted?.(match.entry.slug);
-                }}
-              />
-            ))}
-          </div>
-        )}
+        <CapabilityPillList
+          add={
+            <PropertyAddButton
+              label='Add MCP'
+              trackName='Create agent v2: browse MCPs'
+              onClick={() => {
+                setBrowseSlug(null);
+                setBrowseOpen(true);
+              }}
+            />
+          }
+          pills={[
+            ...selectedEntries.map(entry => ({
+              key: entry.slug,
+              node: (
+                <McpChip
+                  label={entry.label}
+                  iconType={entry.iconType}
+                  selected
+                  onOpen={() => {
+                    setBrowseSlug(entry.slug);
+                    setBrowseOpen(true);
+                  }}
+                  onToggle={() => {
+                    onSelectionChange(disableEntry(entries, selection, entry));
+                    onPickDismissed?.(entry.slug);
+                  }}
+                />
+              ),
+            })),
+            ...planChips.map(match => ({
+              key: match.entry.slug,
+              node: (
+                <McpChip
+                  label={match.entry.label}
+                  iconType={match.entry.iconType}
+                  selected={false}
+                  onToggle={() => {
+                    onSelectionChange(enableEntry(entries, selection, match.entry, match.tools));
+                    onSuggestionAccepted?.(match.entry.slug);
+                  }}
+                />
+              ),
+            })),
+          ]}
+        />
         <BrowseMcpsDialog
           open={browseOpen}
           onOpenChange={next => {

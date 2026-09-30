@@ -200,9 +200,16 @@ export {
   ensurePromptContract,
   isReadOnlyMode,
 } from "./agent-prompt-contract.js";
-export { frameDraftEvent } from "./stream/agent-draft-events.js";
+export {
+  DRAFT_HISTORY_TURNS,
+  DRAFT_HISTORY_TURN_CHARS,
+  frameDraftEvent,
+} from "./stream/agent-draft-events.js";
 export type {
   AgentDraftBody,
+  DraftActivity,
+  DraftQuestion,
+  DraftSuggestion,
   AgentDraftEvent,
   AgentDraftRequest,
   AgentDraftCanvas,
@@ -216,7 +223,11 @@ export type {
   DraftMode,
   DraftPick,
   DraftSchedule,
+  DraftCustomProperty,
+  DraftPropertyOp,
+  DraftPropertyType,
   DraftTimings,
+  DraftToolPlan,
 } from "./stream/agent-draft-events.js";
 export type {
   ClawStreamEvent,

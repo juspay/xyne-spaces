@@ -6,17 +6,18 @@ import {
   type ClipboardEvent,
   type KeyboardEvent,
   type ReactElement,
+  type ReactNode,
   type Ref,
   type RefObject,
 } from 'react';
+import { ThinkingOrb, type OrbState } from 'thinking-orbs';
+import { AnimatePresence, motion } from 'motion/react';
 import {
   AIComposer,
   type AIComposerAttachment,
   type AIComposerHandle,
 } from '@/components/AIScreen/AIComposer';
-import { AIEmptyState } from '@/components/AIScreen/AIEmptyState';
 import { AnimatedLabel, useStableLabel } from '@/components/AIScreen/ReasoningLoader';
-import { AgentBotAvatar } from '@/components/agents/AgentBotAvatar';
 import { ActivityBlock } from '@/components/Chat/XyneAISidebar/components/ActivityBlock';
 import { type ComposerContext, toStreamOverrides } from '@/components/AIScreen/composerContext';
 import type { Message, MessageAttachment } from '@/components/Chat/XyneAISidebar/utils/XyneAITypes';
@@ -25,6 +26,21 @@ import { xyneAIStreamManager } from '@/services/XyneAI';
 import { clawErrorText } from '@/services/claw/clawRequest';
 import { cn } from '@/utils/classNames';
 import { buildXyneAIStreamThreadId, newStreamSlotKey } from '@/utils/xyneAIStreamThreadId';
+import { CreateEmptyState } from './CreateEmptyState';
+import {
+  BuildQuestionCard,
+  BuildReplyMarkdown,
+  BuildSearchLine,
+  BuildSuggestionChips,
+  type BuildQuestionState,
+} from './BuildChatExtras';
+import {
+  buildDraftHistory,
+  guardQuestions,
+  type DraftActivity,
+  type DraftQuestion,
+  type DraftSuggestion,
+} from './agentDraftStream';
 import {
   createModeQuery,
   decideCreateCanvasAction,
@@ -34,9 +50,15 @@ import {
   type CreateCanvasSnapshot,
   type ParsedCreateChatAction,
 } from './createChatMode';
+import { orbStateForProgress } from './createProgressLabel';
 
 const SCRIPTED_THINK_PHASES = ['Thinking', 'Weighing it up', 'Reasoning'] as const;
 const SCRIPTED_THINK_PHASE_MS = 1600;
+
+/** The builder model's live indicator; the label beside it carries the words. */
+function BuildOrb({ state = 'working' }: { state?: OrbState }): ReactElement {
+  return <ThinkingOrb state={state} size={20} aria-hidden />;
+}
 
 function WorkingProgressRow({ label }: { label: string }): ReactElement {
   const stable = useStableLabel(label);
@@ -46,7 +68,8 @@ function WorkingProgressRow({ label }: { label: string }): ReactElement {
       data-testid='agent-create-progress'
       data-progress-label={label}
     >
-      <AgentBotAvatar type='clover' busy size={22} />
+      {/* Keyed off the held label so the orb and its words change together. */}
+      <BuildOrb state={orbStateForProgress(stable)} />
       <span className='select-none'>
         <AnimatedLabel text={stable} />
       </span>
@@ -70,7 +93,7 @@ function ScriptedThinkLabel(): ReactElement {
       className='-ml-1 inline-flex items-center gap-1.5 rounded-md px-1.5 py-1 text-xs text-muted-foreground'
       data-testid='agent-create-chat-thinking'
     >
-      <AgentBotAvatar type='clover' busy size={22} />
+      <BuildOrb />
       <span className='select-none'>
         <AnimatedLabel text={label} />
       </span>
@@ -85,6 +108,24 @@ const toMessageAttachments = (attachments: AIComposerAttachment[]): MessageAttac
     data: att.data,
   }));
 
+/** One streamed draft turn, run by the page; the panel owns the chat bubbles. */
+export interface DraftTurnArgs {
+  userText: string;
+  /** Earlier turns, oldest first (the draft reads the last few). */
+  history: Array<{ role: 'user' | 'assistant'; text: string }>;
+  signal: AbortSignal;
+  /** Stream text into this turn's reply bubble. */
+  appendReply: (text: string) => void;
+  /** Add a line to the reply (an ack, a warning). */
+  announce: (line: string) => void;
+  /** A research step before the answer ("Searching the web…"), added or updated by id. */
+  activity: (activity: DraftActivity) => void;
+  /** Changes the user can apply with one tap, under the reply. */
+  suggest: (suggestions: DraftSuggestion[]) => void;
+  /** Follow-up questions, shown as a card under the reply. */
+  ask: (card: { id: string; questions: DraftQuestion[] }) => void;
+}
+
 export interface CreateChatTurn {
   userText: string;
   marker: ParsedCreateChatAction;
@@ -95,6 +136,16 @@ export interface CreateChatTurn {
 interface AgentCreateChatPanelProps {
   canvas: CreateCanvasSnapshot;
   onTurnComplete: (turn: CreateChatTurn) => Promise<void>;
+  /**
+   * Fires as the user sends, before the model answers, so work that needs only
+   * the user's words (the hub plan) can start while the model is still thinking.
+   */
+  onSend?: (userText: string) => void;
+  /**
+   * Streamed draft path: when set, sends go to the page's draft stream instead
+   * of the Ask AI run, and the canvas fills as events arrive.
+   */
+  onDraftTurn?: (turn: DraftTurnArgs) => Promise<void>;
   disabled?: boolean;
   /** Live draft pipeline phase — Braille + AnimatedLabel, not chat bubbles. */
   progressLabel?: string | null;
@@ -112,12 +163,246 @@ export function AgentCreateChatPanel(props: AgentCreateChatPanelProps): ReactEle
   if (props.scripted) {
     return <ScriptedAgentCreateChatPanel {...props} />;
   }
+  if (props.onDraftTurn) {
+    return <StreamedAgentCreateChatPanel {...props} onDraftTurn={props.onDraftTurn} />;
+  }
   return <LiveAgentCreateChatPanel {...props} />;
+}
+
+let draftMessageSeq = 0;
+const draftMessageId = (kind: string): string => `draft-${kind}-${Date.now()}-${++draftMessageSeq}`;
+
+/** What a Build reply carries besides its text. */
+interface TurnExtras {
+  activities: DraftActivity[];
+  suggestions: DraftSuggestion[];
+  question?: BuildQuestionState;
+}
+
+/**
+ * Chat for the streamed draft. Each send is one draft turn: the reply text and
+ * the canvas both fill from the same stream, so there is no "wait for the
+ * model, then animate the canvas" gap. A conversational turn may also carry a
+ * web search line, one-tap suggestions, or a question card.
+ */
+function StreamedAgentCreateChatPanel({
+  onDraftTurn,
+  disabled,
+  progressLabel = null,
+}: AgentCreateChatPanelProps & {
+  onDraftTurn: (turn: DraftTurnArgs) => Promise<void>;
+}): ReactElement {
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [extras, setExtras] = useState<Record<string, TurnExtras>>({});
+  /** User turns sent from a question card: the answered card stands in for their bubble. */
+  const [fromCard, setFromCard] = useState<ReadonlySet<string>>(() => new Set());
+  const [error, setError] = useState<string | null>(null);
+  const [running, setRunning] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
+  const bottomRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ block: 'end' });
+  }, [messages, extras, error, progressLabel]);
+
+  useEffect(() => (): void => abortRef.current?.abort(), []);
+
+  const updateExtras = useCallback(
+    (id: string, next: (prior: TurnExtras) => TurnExtras): void =>
+      setExtras(prev => ({
+        ...prev,
+        [id]: next(prev[id] ?? { activities: [], suggestions: [] }),
+      })),
+    [],
+  );
+
+  const submit = useCallback(
+    async (text: string, options: { viaCard?: boolean } = {}): Promise<void> => {
+      const trimmed = text.trim();
+      if (!trimmed || disabled || running) return;
+      setError(null);
+      // Earlier suggestions go stale, and a card still waiting is passed over.
+      setExtras(prev => {
+        const next: Record<string, TurnExtras> = {};
+        for (const [id, value] of Object.entries(prev)) {
+          next[id] = {
+            ...value,
+            suggestions: [],
+            ...(value.question?.phase === 'pending'
+              ? { question: { ...value.question, phase: 'declined' } }
+              : {}),
+          };
+        }
+        return next;
+      });
+      const history = buildDraftHistory(
+        messages.map(message => ({
+          type: message.type === 'user' ? 'user' : 'bot',
+          content: message.content ?? '',
+          failed: Boolean(message.errorInfo),
+          ...(extras[message.id]?.question
+            ? { asked: extras[message.id]!.question!.questions }
+            : {}),
+        })),
+      );
+      const userId = draftMessageId('user');
+      const botId = draftMessageId('bot');
+      if (options.viaCard) setFromCard(prev => new Set(prev).add(userId));
+      setMessages(prev => [
+        ...prev,
+        { id: userId, type: 'user', content: trimmed, timestamp: new Date() },
+        {
+          id: botId,
+          type: 'bot',
+          content: '',
+          streamingContent: '',
+          isStreaming: true,
+          timestamp: new Date(),
+        },
+      ]);
+      const write = (next: (prior: string) => string): void =>
+        setMessages(prev =>
+          prev.map(message => {
+            if (message.id !== botId) return message;
+            const content = next(message.content ?? '');
+            return { ...message, content, streamingContent: content };
+          }),
+        );
+      const controller = new AbortController();
+      abortRef.current = controller;
+      setRunning(true);
+      try {
+        await onDraftTurn({
+          userText: trimmed,
+          history,
+          signal: controller.signal,
+          appendReply: delta => write(prior => prior + delta),
+          announce: line => write(prior => (prior.trim() ? `${prior.trimEnd()}\n${line}` : line)),
+          activity: activity =>
+            updateExtras(botId, prior => ({
+              ...prior,
+              activities: [...prior.activities.filter(a => a.id !== activity.id), activity],
+            })),
+          suggest: suggestions => updateExtras(botId, prior => ({ ...prior, suggestions })),
+          ask: card => {
+            const questions = guardQuestions(card.questions);
+            if (questions.length === 0) return;
+            updateExtras(botId, prior => ({
+              ...prior,
+              question: { id: card.id, questions, phase: 'pending', answers: {}, notes: {} },
+            }));
+          },
+        });
+      } catch (err: unknown) {
+        if (!controller.signal.aborted) {
+          setError(clawErrorText(err, 'Could not draft from chat. Try again.'));
+        }
+      } finally {
+        setMessages(prev =>
+          prev.map(message =>
+            message.id === botId
+              ? { ...message, isStreaming: false, isAborted: controller.signal.aborted }
+              : message,
+          ),
+        );
+        if (abortRef.current === controller) abortRef.current = null;
+        setRunning(false);
+      }
+    },
+    [disabled, extras, messages, onDraftTurn, running, updateExtras],
+  );
+
+  const busy = running || Boolean(disabled);
+  const lastBotId = [...messages].reverse().find(message => message.type === 'bot')?.id;
+  // A card still waiting for an answer takes the composer's place; once answered
+  // (or passed over) it lives in the transcript under its reply.
+  const waitingCard = [...messages]
+    .reverse()
+    .find(
+      message =>
+        message.type === 'bot' &&
+        !message.isStreaming &&
+        extras[message.id]?.question?.phase === 'pending',
+    );
+  const waitingState = waitingCard ? extras[waitingCard.id]?.question : undefined;
+
+  return (
+    <CreateChatLayout
+      empty={messages.length === 0 && !error}
+      canvasError={error}
+      messages={messages.filter(message => !fromCard.has(message.id))}
+      bottomRef={bottomRef}
+      pending={running || Boolean(disabled) || Boolean(progressLabel)}
+      progressLabel={progressLabel}
+      pane
+      conversational
+      renderReply={(message, text) => (
+        // Every reply here arrived live, so each keeps the streaming renderer for its lifetime.
+        <BuildReplyMarkdown id={message.id} content={text} streamed />
+      )}
+      renderBeforeReply={message =>
+        extras[message.id]?.activities.length ? (
+          <BuildSearchLine activities={extras[message.id]!.activities} />
+        ) : null
+      }
+      renderAfterReply={message => {
+        const turn = extras[message.id];
+        if (!turn || message.isStreaming) return null;
+        return (
+          <>
+            {turn.question && turn.question.phase !== 'pending' ? (
+              <BuildQuestionCard
+                state={turn.question}
+                disabled
+                onChange={question => updateExtras(message.id, prior => ({ ...prior, question }))}
+                onAnswer={answer => {
+                  void submit(answer, { viaCard: true });
+                }}
+              />
+            ) : null}
+            {turn.suggestions.length > 0 && message.id === lastBotId ? (
+              <BuildSuggestionChips
+                suggestions={turn.suggestions}
+                disabled={busy}
+                onApply={suggestion => {
+                  void submit(suggestion.message);
+                }}
+              />
+            ) : null}
+          </>
+        );
+      }}
+      {...(running ? { onStop: () => abortRef.current?.abort() } : {})}
+      onSubmit={text => {
+        void submit(text);
+      }}
+      {...(waitingCard && waitingState
+        ? {
+            composerSlot: (
+              <BuildQuestionCard
+                key={waitingState.id}
+                docked
+                state={waitingState}
+                disabled={busy}
+                onChange={question =>
+                  updateExtras(waitingCard.id, prior => ({ ...prior, question }))
+                }
+                onAnswer={answer => {
+                  void submit(answer, { viaCard: true });
+                }}
+              />
+            ),
+            composerSlotKey: `question-${waitingState.id}`,
+          }
+        : {})}
+    />
+  );
 }
 
 function LiveAgentCreateChatPanel({
   canvas,
   onTurnComplete,
+  onSend,
   disabled,
   progressLabel = null,
 }: AgentCreateChatPanelProps): ReactElement {
@@ -322,6 +607,8 @@ function LiveAgentCreateChatPanel({
         handledUserIdsRef.current.clear();
       }
 
+      if (trimmed) onSend?.(trimmed);
+
       let parentMessageId: string | undefined;
       if (!usesDraftStreamKeyRef.current && messages.length > 0) {
         parentMessageId = messages[messages.length - 1]?.id;
@@ -348,7 +635,7 @@ function LiveAgentCreateChatPanel({
         },
       );
     },
-    [disabled, messages, streaming, submitQuery],
+    [disabled, messages, onSend, streaming, submitQuery],
   );
 
   const empty = messages.length === 0 && !streaming && !canvasError;
@@ -439,6 +726,12 @@ function CreateChatLayout({
   onEngage,
   progressLabel = null,
   pane = false,
+  conversational = false,
+  renderReply,
+  renderBeforeReply,
+  renderAfterReply,
+  composerSlot,
+  composerSlotKey,
 }: {
   empty: boolean;
   canvasError: string | null;
@@ -460,8 +753,23 @@ function CreateChatLayout({
   onReplay?: () => void;
   onEngage?: () => void;
   progressLabel?: string | null;
-  /** Figma pane: no "Chat" bar and no empty-state illustration. */
+  /** Figma pane: no "Chat" bar. The empty state shows in every overlay version. */
   pane?: boolean;
+  /**
+   * Replies are real answers, not canvas acks: shown as written (no profile-dump
+   * rewrite), and the page's progress row is the only live indicator.
+   */
+  conversational?: boolean;
+  /** Renders a bot reply's text (markdown in the streamed chat). */
+  renderReply?: (message: Message, text: string) => ReactNode;
+  /** Above a bot reply: its research line. */
+  renderBeforeReply?: (message: Message) => ReactNode;
+  /** Under a bot reply: suggestion chips or a question card. */
+  renderAfterReply?: (message: Message) => ReactNode;
+  /** Shown in place of the composer (a question card waiting for an answer). */
+  composerSlot?: ReactNode;
+  /** Changes when the slot holds something new, so it animates in again. */
+  composerSlotKey?: string;
 }): ReactElement {
   return (
     <div
@@ -498,23 +806,15 @@ function CreateChatLayout({
         </div>
       )}
       <div className='flex-1 overflow-y-auto'>
-        {empty && !progressLabel && !pane ? (
-          <div className='flex h-full min-h-[12rem] flex-col items-center justify-center px-6'>
-            <AIEmptyState />
-            <p
-              className='mt-3 text-center text-sm leading-5 text-muted-foreground'
-              data-testid='agent-create-empty-hint'
-            >
-              The canvas on the right is the agent.
-            </p>
-          </div>
+        {empty && !progressLabel ? (
+          <CreateEmptyState />
         ) : (
           <ul className='flex flex-col pb-2'>
             {messages.map(message => {
-              const streamingText = visibleCreateReply(
-                message.content || message.streamingContent || '',
-                Boolean(message.isStreaming),
-              );
+              const rawText = message.content || message.streamingContent || '';
+              const streamingText = conversational
+                ? rawText
+                : visibleCreateReply(rawText, Boolean(message.isStreaming));
               const hasReasoning =
                 message.type === 'bot' &&
                 typeof message.reasoning === 'string' &&
@@ -552,7 +852,7 @@ function CreateChatLayout({
                           className='-ml-1 inline-flex items-center gap-1.5 rounded-md px-1.5 py-1 text-xs text-muted-foreground'
                           data-testid='agent-create-chat-thinking'
                         >
-                          <AgentBotAvatar type='clover' busy size={22} />
+                          <BuildOrb />
                           <span className='select-none'>
                             <AnimatedLabel text={thinkLabel} />
                           </span>
@@ -576,30 +876,38 @@ function CreateChatLayout({
                       className='flex min-w-0 flex-col gap-2'
                       data-testid='agent-create-chat-bot'
                     >
-                      {hasReasoning || (message.isStreaming && !progressLabel) ? (
+                      {hasReasoning ||
+                      (!conversational && message.isStreaming && !progressLabel) ? (
                         <div data-testid='agent-create-chat-reasoning'>
                           <ActivityBlock
                             reasoning={message.reasoning ?? ''}
                             streaming={Boolean(message.isStreaming)}
                             toolInvocations={message.toolInvocations}
                             messageAborted={Boolean(message.isAborted)}
+                            liveIndicator={<BuildOrb />}
                           />
                         </div>
                       ) : thinking ? (
                         <WorkingProgressRow label={thinkLabel} />
                       ) : null}
+                      {renderBeforeReply?.(message)}
                       {message.errorInfo ? (
                         <p className='text-sm leading-5 text-destructive' role='alert'>
                           {message.errorInfo.message || message.errorInfo.title}
                         </p>
                       ) : streamingText.trim().length > 0 ? (
-                        <p
-                          className='whitespace-pre-wrap text-sm leading-relaxed text-foreground'
-                          data-testid='agent-create-chat-reply'
-                        >
-                          {streamingText}
-                        </p>
+                        renderReply ? (
+                          renderReply(message, streamingText)
+                        ) : (
+                          <p
+                            className='whitespace-pre-wrap text-sm leading-relaxed text-foreground'
+                            data-testid='agent-create-chat-reply'
+                          >
+                            {streamingText}
+                          </p>
+                        )
                       ) : null}
+                      {renderAfterReply?.(message)}
                     </div>
                   )}
                 </li>
@@ -648,17 +956,39 @@ function CreateChatLayout({
             }
           : {})}
       >
-        <AIComposer
-          ref={composerRef}
-          appearance='create'
-          autoFocus={autoFocus}
-          placeholder='Describe what agent you want to build...'
-          hideDisclaimer
-          showAgentSelector={false}
-          pending={pending}
-          {...(onStop ? { onStop } : {})}
-          onSubmit={onSubmit}
-        />
+        <AnimatePresence initial={false} mode='wait'>
+          {composerSlot ? (
+            <motion.div
+              key={composerSlotKey ?? 'slot'}
+              initial={{ opacity: 0, y: 12, filter: 'blur(4px)' }}
+              animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+              exit={{ opacity: 0, y: 8, transition: { duration: 0.14, ease: 'easeOut' } }}
+              transition={{ type: 'spring', visualDuration: 0.32, bounce: 0.12 }}
+            >
+              {composerSlot}
+            </motion.div>
+          ) : (
+            <motion.div
+              key='composer'
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 8, transition: { duration: 0.14, ease: 'easeOut' } }}
+              transition={{ type: 'spring', visualDuration: 0.28, bounce: 0 }}
+            >
+              <AIComposer
+                ref={composerRef}
+                appearance='create'
+                autoFocus={autoFocus}
+                placeholder='Describe what agent you want to build...'
+                hideDisclaimer
+                showAgentSelector={false}
+                pending={pending}
+                {...(onStop ? { onStop } : {})}
+                onSubmit={onSubmit}
+              />
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </div>
   );

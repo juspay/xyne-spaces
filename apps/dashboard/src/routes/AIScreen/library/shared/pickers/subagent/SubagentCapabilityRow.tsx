@@ -4,6 +4,7 @@ import { PropertyAddButton } from '@/components/flowUI/nodes/agent/create/Proper
 import type { CreateHubSuggestions } from '@/components/flowUI/nodes/agent/create/types';
 import { Tooltip } from '@/components/ui/Tooltip/Tooltip';
 import { DotGridLoader } from '../mcp/DotGridLoader';
+import { CapabilityPillList } from '../CapabilityPillList';
 import { BrowseSubagentsDialog } from './BrowseSubagentsDialog';
 import { SubagentChip } from './SubagentChip';
 import {
@@ -113,45 +114,51 @@ export function SubagentCapabilityRow({
   if (layout === 'profile') {
     return (
       <>
-        {selectedEntries.length === 0 && planChips.length === 0 ? (
-          <PropertyAddButton
-            label='Add subagent'
-            trackName='Create agent v2: browse subagents'
-            onClick={() => {
-              setBrowseName(null);
-              setBrowseOpen(true);
-            }}
-          />
-        ) : (
-          <div className='flex flex-wrap items-center gap-3'>
-            {selectedEntries.map(entry => (
-              <SubagentChip
-                key={`selected-${entry.name}`}
-                label={entry.name}
-                selected
-                onOpen={() => {
-                  setBrowseName(entry.name);
-                  setBrowseOpen(true);
-                }}
-                onToggle={() => {
-                  onSelectionChange(disableSubagent(selection, entry));
-                  onPickDismissed?.(entry.name);
-                }}
-              />
-            ))}
-            {planChips.map(entry => (
-              <SubagentChip
-                key={`suggested-${entry.name}`}
-                label={entry.name}
-                selected={false}
-                onToggle={() => {
-                  onSelectionChange(enableSubagent(selection, entry));
-                  onSuggestionAccepted?.(entry.name);
-                }}
-              />
-            ))}
-          </div>
-        )}
+        <CapabilityPillList
+          className='gap-3'
+          add={
+            <PropertyAddButton
+              label='Add subagent'
+              trackName='Create agent v2: browse subagents'
+              onClick={() => {
+                setBrowseName(null);
+                setBrowseOpen(true);
+              }}
+            />
+          }
+          pills={[
+            ...selectedEntries.map(entry => ({
+              key: entry.name,
+              node: (
+                <SubagentChip
+                  label={entry.name}
+                  selected
+                  onOpen={() => {
+                    setBrowseName(entry.name);
+                    setBrowseOpen(true);
+                  }}
+                  onToggle={() => {
+                    onSelectionChange(disableSubagent(selection, entry));
+                    onPickDismissed?.(entry.name);
+                  }}
+                />
+              ),
+            })),
+            ...planChips.map(entry => ({
+              key: entry.name,
+              node: (
+                <SubagentChip
+                  label={entry.name}
+                  selected={false}
+                  onToggle={() => {
+                    onSelectionChange(enableSubagent(selection, entry));
+                    onSuggestionAccepted?.(entry.name);
+                  }}
+                />
+              ),
+            })),
+          ]}
+        />
         <BrowseSubagentsDialog
           open={browseOpen}
           onOpenChange={next => {

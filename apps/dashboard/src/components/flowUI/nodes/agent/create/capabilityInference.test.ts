@@ -24,6 +24,16 @@ void describe('capabilityInference', () => {
     assert.deepEqual(inferredCapabilityFields(text), ['tools', 'knowledge']);
   });
 
+  void it('reads "on a schedule" as run timing, not a calendar', () => {
+    assert.equal(
+      softProductNeedles('run this every weekday on a schedule').includes('calendar'),
+      false,
+    );
+    assert.equal(softProductNeedles('schedule it daily at 9am').includes('calendar'), false);
+    assert.ok(softProductNeedles('schedule a meeting with the team').includes('calendar'));
+    assert.ok(softProductNeedles('check my calendar each morning').includes('calendar'));
+  });
+
   void it('soft-cues Slack from standup (not bare DM)', () => {
     assert.ok(softProductNeedles('standup scribe for eng channel').includes('slack'));
     assert.equal(softProductNeedles('DM Devesh the digest').includes('slack'), false);

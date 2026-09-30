@@ -1382,7 +1382,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
           await prisma.scheduledJob.update({ where: { id: row.id }, data: { status: "active", bullJobId } });
         } else {
           const schedulerId = `cron-${row.id}`;
-          await enqueueCronJob(schedulerId, jobData, row.cronExpression!);
+          await enqueueCronJob(schedulerId, jobData, row.cronExpression!, row.timezone);
           await prisma.scheduledJob.update({ where: { id: row.id }, data: { status: "active", bullSchedulerId: schedulerId } });
         }
         resp = { type: "close_screen", finalMessage: "✓ Scheduled." };

@@ -100,11 +100,11 @@ export function ensurePromptContract(
   }
   if (!WORKFLOW_RE.test(text)) {
     text +=
-      "\n\n## Operational Workflow\n1. Read the request and gather what you need with your tools.\n2. Do the work in small steps and check each result.\n3. Report what you did and anything you could not finish.";
+      "\n\nHow you work\n1. Read the request and gather what you need with your tools.\n2. Do the work in small steps and check each result.\n3. Report what you did and anything you could not finish.";
     repaired = true;
   }
   if (!GUARDRAIL_RE.test(text)) {
-    text += `\n\n## Guardrails\n${defaultGuardrails(options.permissionMode)}`;
+    text += `\n\nRules\n${defaultGuardrails(options.permissionMode)}`;
     repaired = true;
   }
   if (text.length < MIN_SYSTEM_PROMPT_CHARS) {

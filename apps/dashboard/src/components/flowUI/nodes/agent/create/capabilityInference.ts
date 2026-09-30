@@ -45,7 +45,9 @@ export const SOFT_PRODUCT_CUES: ReadonlyArray<{ re: RegExp; needles: readonly st
   { re: /\b(discord)\b/i, needles: ['discord'] },
   { re: /\b(teams|microsoft\s*teams)\b/i, needles: ['teams', 'microsoft-teams'] },
   {
-    re: /\b(calendar|schedule|meeting|invite)\b/i,
+    // "Schedule a meeting" is a calendar job; "run on a schedule" / "schedule it
+    // daily" is when the agent runs (the Schedule property), not a calendar.
+    re: /\b(calendars?|meetings?|invites?|schedule\s+(?:a\s+|the\s+)?(?:meeting|call|event|invite)s?)\b/i,
     needles: ['calendar', 'google-calendar'],
   },
   {
@@ -100,7 +102,7 @@ const KNOWLEDGE_JOB =
 
 /** External IO / messaging / tickets — implies an MCP (or gateway) even without product names. */
 const MCP_JOB_IO =
-  /\b(post|posts|send|sends|notify|notifies|message|messages|channel|inbox|e-?mails?|digest|standup|stand-?up|ticket|tickets|pull.?request|\bprs?\b|repo|repos|calendar|schedule|x\.com|twitter|spaces?\s*dms?|xyne\s*spaces)\b/i;
+  /\b(post|posts|send|sends|notify|notifies|message|messages|channel|inbox|e-?mails?|digest|standup|stand-?up|ticket|tickets|pull.?request|\bprs?\b|repo|repos|calendars?|meetings?|x\.com|twitter|spaces?\s*dms?|xyne\s*spaces)\b/i;
 
 const EXPLICIT_SLACK = /\bslack\b/i;
 const SPACES_MESSAGING =

@@ -227,6 +227,7 @@
     "sonner": "^1.7.1",
     "stopword": "^3.1.5",
     "tailwind-merge": "^3.3.1",
+    "thinking-orbs": "^0.3.2",
     "typescript": "^5.9.3",
     "typescript-eslint": "8.53.0",
     "unified": "^11.0.5",

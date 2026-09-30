@@ -1,31 +1,21 @@
-import { useCallback, useState, type ReactElement } from 'react';
+import { useCallback, useState, type ReactElement, type ReactNode } from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { PencilEditLine } from '@xyne/icons';
-import { cn } from '@/utils/classNames';
 import { Skeleton } from '@/components/ui/Skeleton';
-import { useClawAgentDetail } from '@/hooks/useClawAgentDetail';
-import { Pill } from '../../shared/primitives/Pill';
+import { Button } from '@/components/ui/Button/index';
 import { AgentBotAvatar } from '@/components/agents/AgentBotAvatar';
-import { AutoWidthInput } from '../../shared/primitives/AutoWidthInput';
+import { AgentCreateCanvas } from '@/components/flowUI/nodes/agent/create/AgentCreateCanvas';
+import { useClawAgentDetail } from '@/hooks/useClawAgentDetail';
+import { useOpenAgentChat } from '@/hooks/useOpenAgentChat';
+import type { Agent } from '@/services/claw/clawAuthAgentTypes';
+import { Pill } from '../../shared/primitives/Pill';
 import { AgentCreatedBanner } from './AgentCreatedBanner';
 import { isSpacesRegistered } from './agentRegistration';
 import { AgentDetailHeaderV2 } from './AgentDetailHeaderV2';
-import { AgentPersonaTabV2 } from './persona/AgentPersonaTabV2';
-import { AgentActivityTabV2 } from './activity/AgentActivityTabV2';
-import { AgentBehaviourTabV2 } from './behaviour/AgentBehaviourTabV2';
-import { AgentKnowledgeTabV2 } from './knowledge/AgentKnowledgeTabV2';
-import { AgentPeopleTabV2 } from './people/AgentPeopleTabV2';
-import { AgentToolsTabV2 } from './tools/AgentToolsTabV2';
-import { AGENT_DETAIL_TABS, resolveTab, type AgentDetailTabId } from './detailTabs';
-import { AgentCallGraphTabV2 } from './callGraph/AgentCallGraphTabV2';
-import { useAgentDetailActions } from './useAgentDetailActions';
-import { useAgentDraft } from './useAgentDraft';
-import { Button } from '@/components/ui/Button/index';
-import { useOpenAgentChat } from '@/hooks/useOpenAgentChat';
-
-const NAME_TEXT = 'text-sm font-semibold leading-[22px] text-foreground';
-
-const HANDLE_TEXT = 'text-xs leading-[22px]';
+import { SETTINGS_PARAM, settingsTabFromParams, type AgentSettingsTabId } from './detailTabs';
+import { SavedAgentSettings } from './settings/AgentSettingsView';
+import { useAgentDetailActions, type AgentDetailActions } from './useAgentDetailActions';
+import { useAgentProfileForm, type AgentProfileForm } from './useAgentProfileForm';
 
 const DATE = new Intl.DateTimeFormat('en-GB', {
   day: 'numeric',
@@ -39,23 +29,209 @@ const DATE = new Intl.DateTimeFormat('en-GB', {
 function formatUpdated(value: string | undefined): string | null {
   if (!value) return null;
   const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? null : DATE.format(parsed).replace(',', ',');
+  return Number.isNaN(parsed.getTime()) ? null : DATE.format(parsed);
+}
+
+const NO_HIGHLIGHTS: ReadonlySet<never> = new Set();
+const noop = (): void => undefined;
+
+const HANDLE_WARNING = 'Changing the handle breaks existing @mentions and links to this agent.';
+
+/**
+ * The agent's profile: the same canvas the agent was created on, without the
+ * chat, and read-only until Edit. Everything else about the agent (model,
+ * behaviour, members, activity…) is under the gear.
+ */
+function AgentProfileCanvas({
+  agent,
+  actions,
+  profile,
+  topBar,
+  banner,
+  onOpenSettings,
+}: {
+  agent: Agent;
+  actions: AgentDetailActions;
+  profile: AgentProfileForm;
+  topBar: ReactNode;
+  banner: ReactNode;
+  onOpenSettings: () => void;
+}): ReactElement {
+  const canEdit = actions.permissions?.canEdit ?? false;
+  const updated = formatUpdated(agent.updatedAt);
+  const version = agent.activePromptVersion;
+
+  const meta = [
+    version !== null && version !== undefined ? `v${version}` : null,
+    updated ? `Last updated ${updated}` : null,
+  ].filter((part): part is string => part !== null);
+
+  const editActions = !canEdit ? null : profile.editing ? (
+    <>
+      <Button
+        type='button'
+        variant='ghost'
+        size='sm'
+        onClick={profile.cancel}
+        disabled={profile.saving}
+        className='rounded-lg'
+        data-track-category='Claw Agents'
+        data-track-name='Agent profile: cancel edits'
+      >
+        Cancel
+      </Button>
+      <Button
+        type='button'
+        variant='default'
+        size='sm'
+        onClick={() => void profile.save()}
+        disabled={!profile.canSave}
+        loading={profile.saving}
+        className='rounded-lg'
+        data-track-category='Claw Agents'
+        data-track-name='Agent profile: save edits'
+        data-testid='agent-profile-save'
+      >
+        Save
+      </Button>
+    </>
+  ) : (
+    <Button
+      type='button'
+      variant='outline'
+      size='sm'
+      onClick={profile.start}
+      className='rounded-lg'
+      data-track-category='Claw Agents'
+      data-track-name='Agent profile: start editing'
+      data-testid='agent-profile-edit'
+    >
+      <PencilEditLine size={14} className='mr-1 shrink-0' />
+      Edit
+    </Button>
+  );
+
+  return (
+    <AgentCreateCanvas
+      form={profile.form}
+      onFormChange={profile.patch}
+      onFieldFocus={noop}
+      highlights={NO_HIGHLIGHTS}
+      conflicts={[]}
+      onResolveConflict={noop}
+      phase='draft'
+      layout='profile'
+      viewOnly={!profile.editing}
+      handleLocked={!actions.isOwner}
+      scheduleLocked
+      saving={profile.saving}
+      handleError={profile.error ?? (profile.slugChanged ? HANDLE_WARNING : null)}
+      topBar={topBar}
+      banner={banner}
+      avatar={<AgentBotAvatar agentKey={agent.id} asleep={!agent.enabled} size={56} />}
+      nameBadge={
+        <Pill tone={agent.enabled ? 'success' : 'neutral'}>
+          {agent.enabled ? 'Enabled' : 'Disabled'}
+        </Pill>
+      }
+      handleMeta={
+        meta.length > 0 ? (
+          <span className='text-[13px] font-medium leading-4 tracking-[-0.14px] text-muted-foreground'>
+            · {meta.join(' · ')}
+          </span>
+        ) : null
+      }
+      identityActions={editActions}
+      onOpenSettings={onOpenSettings}
+    />
+  );
+}
+
+function ProfileSkeleton(): ReactElement {
+  return (
+    <div className='flex w-full flex-col items-center px-4 pt-[4.5rem]'>
+      <div className='flex w-full max-w-[860px] flex-col gap-4'>
+        <div className='flex items-center gap-4'>
+          <Skeleton className='size-14 rounded-2xl' />
+          <div className='flex flex-col gap-2'>
+            <Skeleton className='h-6 w-52' />
+            <Skeleton className='h-4 w-32' />
+          </div>
+        </div>
+        <Skeleton className='mt-10 h-4 w-24' />
+        <Skeleton className='h-9 w-full' />
+        <Skeleton className='h-9 w-full' />
+        <Skeleton className='mt-10 h-32 w-full rounded-2xl' />
+      </div>
+    </div>
+  );
+}
+
+/** The loaded agent's profile, with its settings in a modal on top (`?settings=<tab>`). */
+function AgentProfile({
+  agent,
+  actions,
+  topBar,
+  banner,
+}: {
+  agent: Agent;
+  actions: AgentDetailActions;
+  topBar: ReactNode;
+  banner: ReactNode;
+}): ReactElement {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const location = useLocation();
+  const profile = useAgentProfileForm(agent, actions.isOwner);
+
+  const settingsTab = settingsTabFromParams(searchParams);
+  // The tab stays put while the modal closes, so it doesn't flash back to Persona.
+  const [shownTab, setShownTab] = useState<AgentSettingsTabId>(settingsTab ?? 'persona');
+  if (settingsTab && settingsTab !== shownTab) setShownTab(settingsTab);
+
+  const showSettings = (tab: AgentSettingsTabId | null): void => {
+    const params = new URLSearchParams(searchParams);
+    params.delete('tab');
+    if (tab) params.set(SETTINGS_PARAM, tab);
+    else params.delete(SETTINGS_PARAM);
+    // Keep the router state (where Back goes, the just-created banner).
+    const state: unknown = location.state;
+    setSearchParams(params, { replace: true, state });
+  };
+
+  return (
+    <>
+      <AgentProfileCanvas
+        agent={agent}
+        actions={actions}
+        profile={profile}
+        topBar={topBar}
+        banner={banner}
+        onOpenSettings={() => showSettings('persona')}
+      />
+      <SavedAgentSettings
+        open={settingsTab !== null}
+        onClose={() => showSettings(null)}
+        agent={agent}
+        actions={actions}
+        tab={settingsTab ?? shownTab}
+        onTabChange={showSettings}
+        onPromptRestored={profile.promptRestored}
+      />
+    </>
+  );
 }
 
 const ClawAgentDetailV2 = (): ReactElement => {
   const location = useLocation();
   const navigate = useNavigate();
   const { workspaceId, slug } = useParams<{ workspaceId?: string; slug?: string }>();
-  const [searchParams, setSearchParams] = useSearchParams();
 
   const libraryPath = workspaceId ? `/${workspaceId}/ai/library` : '/ai/library';
   const requestedReturnPath = (location.state as { returnTo?: unknown } | null)?.returnTo;
-  const navigationState: { returnTo: string } | null =
+  const returnPath =
     typeof requestedReturnPath === 'string' && requestedReturnPath.startsWith('/')
-      ? { returnTo: requestedReturnPath }
-      : null;
-  const returnPath = navigationState?.returnTo ?? `${libraryPath}?tab=agents`;
-  const tab = resolveTab(searchParams.get('tab'));
+      ? requestedReturnPath
+      : `${libraryPath}?tab=agents`;
   const justCreated = (location.state as { justCreated?: unknown } | null)?.justCreated === true;
   const [bannerDismissed, setBannerDismissed] = useState(false);
   const dismissBanner = useCallback(() => setBannerDismissed(true), []);
@@ -64,36 +240,21 @@ const ClawAgentDetailV2 = (): ReactElement => {
   const pendingRegistration = agent !== undefined && !isSpacesRegistered(agent);
   const showBanner = !bannerDismissed && (justCreated || pendingRegistration);
   const actions = useAgentDetailActions(agent);
-  const canEdit = actions.permissions?.canEdit ?? false;
-  const canRenameHandle = actions.isOwner;
-  const draft = useAgentDraft(agent, canRenameHandle);
-  const [focusField, setFocusField] = useState<'name' | 'slug'>('name');
   const { canOpenAgentChat, openAgentChat } = useOpenAgentChat();
 
-  const startEditing = (field: 'name' | 'slug'): void => {
-    setFocusField(field);
-    draft.start();
-  };
-
-  // Delegation approvals spend the callee's credentials and quota, so the
-  // inbox is the owner's (or an admin's) — mirrors claw's canManageRequests.
-  const canManageDelegation = actions.isOwner || actions.isAdmin;
-  const visibleTabs = AGENT_DETAIL_TABS.filter(entry => !entry.ownerOnly || canManageDelegation);
-
-  const setTab = (next: AgentDetailTabId): void => {
-    const params = new URLSearchParams(searchParams);
-    params.set('tab', next);
-    setSearchParams(params, { replace: true, state: navigationState });
-  };
-
-  const updated = formatUpdated(agent?.updatedAt);
-  const version = agent?.activePromptVersion;
-
   return (
-    <div className='h-full overflow-y-auto no-scrollbar' data-component='ClawAgentDetailV2'>
-      <div className='mx-auto flex w-full max-w-[800px] flex-col gap-6 px-6 pb-6'>
-        <div className='bg-background sticky top-0 z-10 flex flex-col gap-6 pb-3 pt-6'>
-          {agent && (
+    <div className='flex h-full min-h-0 flex-col' data-component='ClawAgentDetailV2'>
+      {isLoading ? (
+        <ProfileSkeleton />
+      ) : isError || !agent ? (
+        <p className='py-16 text-center text-sm text-muted-foreground'>
+          Couldn&apos;t load this agent.
+        </p>
+      ) : (
+        <AgentProfile
+          agent={agent}
+          actions={actions}
+          topBar={
             <AgentDetailHeaderV2
               agent={agent}
               actions={actions}
@@ -101,188 +262,18 @@ const ClawAgentDetailV2 = (): ReactElement => {
               canChat={canOpenAgentChat}
               onBack={() => void navigate(returnPath)}
             />
-          )}
-
-          <div className='flex w-full items-center gap-1'>
-            {visibleTabs.map(entry => (
-              <button
-                key={entry.id}
-                type='button'
-                onClick={() => setTab(entry.id)}
-                aria-current={entry.id === tab ? 'page' : undefined}
-                data-track-category='Claw Agents'
-                data-track-name={`Agent detail v2 tab: ${entry.label}`}
-                className={cn(
-                  'flex h-8 items-center justify-center rounded-[10px] px-3 py-1 text-sm transition-colors',
-                  entry.id === tab
-                    ? 'bg-muted text-foreground'
-                    : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
-                )}
-              >
-                {entry.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {isLoading ? (
-          <div className='flex w-full flex-col gap-4'>
-            <Skeleton className='size-10 rounded-xl' />
-            <Skeleton className='h-6 w-52' />
-            <Skeleton className='h-4 w-80' />
-            <Skeleton className='h-32 w-full rounded-2xl' />
-          </div>
-        ) : isError || !agent ? (
-          <p className='py-16 text-center text-sm text-muted-foreground'>
-            Couldn&apos;t load this agent.
-          </p>
-        ) : (
-          <>
-            {showBanner && (
+          }
+          banner={
+            showBanner ? (
               <AgentCreatedBanner
                 agent={agent}
                 pendingRegistration={pendingRegistration}
                 onDismiss={dismissBanner}
               />
-            )}
-
-            <div className='flex w-full items-start gap-3'>
-              <AgentBotAvatar agentKey={agent.id} asleep={!agent.enabled} size={40} />
-
-              <div className='flex min-w-0 flex-1 flex-col gap-0.5 overflow-hidden'>
-                <div className='flex min-w-0 items-center gap-2'>
-                  {draft.editing && canEdit ? (
-                    <AutoWidthInput
-                      value={draft.name}
-                      onChange={draft.setName}
-                      aria-label='Agent name'
-                      placeholder='Agent name'
-                      autoFocus={focusField === 'name'}
-                      className={NAME_TEXT}
-                      data-track-category='Claw Agents'
-                      data-track-name='Agent detail v2: edit name'
-                    />
-                  ) : (
-                    <span
-                      {...(canEdit ? { onClick: () => startEditing('name') } : {})}
-                      className={cn('truncate', NAME_TEXT, canEdit && 'cursor-text')}
-                    >
-                      {agent.name}
-                    </span>
-                  )}
-                  <Pill tone={agent.enabled ? 'success' : 'neutral'}>
-                    {agent.enabled ? 'Enabled' : 'Disabled'}
-                  </Pill>
-                </div>
-
-                <div className='flex flex-wrap items-center gap-1.5 text-xs leading-[22px] text-foreground/80 opacity-70'>
-                  {draft.editing && canRenameHandle ? (
-                    <span className='inline-flex items-center'>
-                      <span aria-hidden>@</span>
-                      <AutoWidthInput
-                        value={draft.slug}
-                        onChange={draft.setSlug}
-                        aria-label='Agent handle'
-                        placeholder='handle'
-                        autoFocus={focusField === 'slug'}
-                        className={HANDLE_TEXT}
-                        data-track-category='Claw Agents'
-                        data-track-name='Agent detail v2: edit handle'
-                      />
-                    </span>
-                  ) : (
-                    <span
-                      {...(canRenameHandle ? { onClick: () => startEditing('slug') } : {})}
-                      className={cn(canRenameHandle && 'cursor-text')}
-                    >
-                      @{agent.slug}
-                    </span>
-                  )}
-                  {version !== null && version !== undefined && (
-                    <>
-                      <span aria-hidden>·</span>
-                      <span>v{version}</span>
-                    </>
-                  )}
-                  {updated && (
-                    <>
-                      <span aria-hidden>·</span>
-                      <span>Last updated on: {updated}</span>
-                    </>
-                  )}
-                </div>
-
-                {draft.editing && draft.slugError && (
-                  <span className='text-xs leading-4 text-destructive'>{draft.slugError}</span>
-                )}
-                {draft.editing && draft.slugChanged && !draft.slugError && (
-                  <span className='text-xs leading-4 text-muted-foreground'>
-                    Changing the handle breaks existing @mentions and links to @{agent.slug}.
-                  </span>
-                )}
-              </div>
-
-              {canEdit && (
-                <div className='flex shrink-0 items-center gap-1.5'>
-                  {draft.editing && (
-                    <Button
-                      type='button'
-                      variant='ghost'
-                      size='sm'
-                      onClick={draft.cancel}
-                      disabled={draft.saving}
-                      className='rounded-lg'
-                      data-track-category='Claw Agents'
-                      data-track-name='Agent detail v2: cancel edits'
-                    >
-                      Cancel
-                    </Button>
-                  )}
-                  <Button
-                    type='button'
-                    variant={draft.dirty ? 'default' : 'outline'}
-                    size='sm'
-                    onClick={
-                      draft.dirty ? (): void => void draft.save() : (): void => startEditing('name')
-                    }
-                    disabled={draft.dirty ? !draft.canSave : draft.editing}
-                    loading={draft.saving}
-                    className='rounded-lg'
-                    data-track-category='Claw Agents'
-                    data-track-name={
-                      draft.dirty ? 'Agent detail v2: save edits' : 'Agent detail v2: start editing'
-                    }
-                  >
-                    {!draft.dirty && <PencilEditLine size={14} className='mr-1 shrink-0' />}
-                    {draft.dirty ? 'Save' : 'Edit'}
-                  </Button>
-                </div>
-              )}
-            </div>
-
-            {tab === 'persona' ? (
-              <AgentPersonaTabV2
-                agent={agent}
-                canEdit={canEdit}
-                canManageCredentials={actions.isOwner || actions.isAdmin}
-                draft={draft}
-              />
-            ) : tab === 'behaviour' ? (
-              <AgentBehaviourTabV2 agent={agent} canEdit={canEdit} />
-            ) : tab === 'tools' ? (
-              <AgentToolsTabV2 agent={agent} canEdit={canEdit} />
-            ) : tab === 'knowledge' ? (
-              <AgentKnowledgeTabV2 agent={agent} canEdit={canEdit} />
-            ) : tab === 'people' ? (
-              <AgentPeopleTabV2 agent={agent} actions={actions} />
-            ) : tab === 'call-graph' && canManageDelegation ? (
-              <AgentCallGraphTabV2 agent={agent} />
-            ) : (
-              <AgentActivityTabV2 agent={agent} canEdit={actions.permissions?.canEdit ?? false} />
-            )}
-          </>
-        )}
-      </div>
+            ) : null
+          }
+        />
+      )}
     </div>
   );
 };

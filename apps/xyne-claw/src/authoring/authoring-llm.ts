@@ -4,8 +4,40 @@
  * All three go to the suggest model (`LITELLM_SUGGEST_*`, a fast proxy model
  * such as gemini-2.5-flash) with thinking turned off: these are short
  * structured jobs, and a reasoning model spends most of its budget thinking.
+ *
+ * When that endpoint can't be reached (a local proxy that isn't running is the
+ * usual case) the call goes to the main LiteLLM endpoint and fast model instead,
+ * and the suggest endpoint is skipped for a minute, so a draft never quietly
+ * degrades to templates just because one proxy is down.
  */
 import { LITELLM } from "../config.js";
+import { createLogger } from "../logger.js";
+
+const log = createLogger("authoring-llm");
+
+interface Endpoint {
+  url: string;
+  apiKey: string;
+  model: string;
+}
+
+const SUGGEST_ENDPOINT: Endpoint = {
+  url: LITELLM.suggestUrl,
+  apiKey: LITELLM.suggestApiKey,
+  model: LITELLM.suggestModel,
+};
+const MAIN_ENDPOINT: Endpoint = { url: LITELLM.url, apiKey: LITELLM.apiKey, model: LITELLM.fastModel };
+/** The Build chat's conversational answers. No fallback here: the caller retries on the fast one. */
+const TALK_ENDPOINT: Endpoint = { url: LITELLM.url, apiKey: LITELLM.apiKey, model: LITELLM.talkModel };
+const SUGGEST_DOWN_MS = 60_000;
+let suggestDownUntil = 0;
+
+/** Endpoints to try, in order: the suggest proxy (unless it just failed to connect), then the main one. */
+function endpoints(): Endpoint[] {
+  const distinct = MAIN_ENDPOINT.url !== SUGGEST_ENDPOINT.url && Boolean(MAIN_ENDPOINT.url);
+  if (!distinct) return [SUGGEST_ENDPOINT];
+  return Date.now() < suggestDownUntil ? [MAIN_ENDPOINT] : [SUGGEST_ENDPOINT, MAIN_ENDPOINT];
+}
 
 export type AuthoringLlmErrorKind = "timeout" | "aborted" | "http" | "parse";
 
@@ -31,6 +63,8 @@ export interface AuthoringLlmOptions {
   temperature?: number;
   /** Caller cancellation (client closed the stream, the turn timed out). */
   signal?: AbortSignal;
+  /** `talk` sends the call to the main model for a conversational answer. */
+  endpoint?: "suggest" | "talk";
 }
 
 /** Fast models wrap JSON in ```json fences or add prose despite response_format. */
@@ -58,12 +92,13 @@ function linkSignals(options: AuthoringLlmOptions): { signal: AbortSignal; timed
 }
 
 function requestBody(
+  model: string,
   messages: AuthoringMessage[],
   options: AuthoringLlmOptions,
   extras: { json?: boolean; stream?: boolean; thinkingOff: boolean },
 ): string {
   return JSON.stringify({
-    model: LITELLM.suggestModel,
+    model,
     messages,
     max_tokens: options.maxTokens,
     temperature: options.temperature ?? 0.3,
@@ -78,18 +113,32 @@ async function post(
   messages: AuthoringMessage[],
   options: AuthoringLlmOptions,
   extras: { json?: boolean; stream?: boolean },
-): Promise<Response> {
+): Promise<{ res: Response; timedOut: () => boolean }> {
+  const [first, ...rest] = options.endpoint === "talk" ? [TALK_ENDPOINT] : endpoints();
+  let endpoint = first!;
   const { signal, timedOut } = linkSignals(options);
-  const send = (thinkingOff: boolean): Promise<Response> =>
-    fetch(`${LITELLM.suggestUrl}/v1/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${LITELLM.suggestApiKey}`,
-      },
-      body: requestBody(messages, options, { ...extras, thinkingOff }),
-      signal,
-    });
+  const send = async (thinkingOff: boolean): Promise<Response> => {
+    const request = (target: Endpoint): Promise<Response> =>
+      fetch(`${target.url}/v1/chat/completions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${target.apiKey}` },
+        body: requestBody(target.model, messages, options, { ...extras, thinkingOff }),
+        signal,
+      });
+    try {
+      return await request(endpoint);
+    } catch (err) {
+      // Could not connect at all (not a timeout or a cancel): try the next endpoint.
+      const next = rest.shift();
+      if (!next || signal.aborted) throw err;
+      suggestDownUntil = Date.now() + SUGGEST_DOWN_MS;
+      log.warn(
+        `[authoring] ${endpoint.url} unreachable (${err instanceof Error ? err.message : String(err)}); using ${next.url} (${next.model}) for ${SUGGEST_DOWN_MS / 1000}s`,
+      );
+      endpoint = next;
+      return request(endpoint);
+    }
+  };
   try {
     let res = await send(true);
     if (res.status === 400) {
@@ -102,7 +151,7 @@ async function post(
       const text = await res.text().catch(() => "");
       throw new AuthoringLlmError("http", `LLM returned ${res.status}: ${text.slice(0, 160)}`, res.status);
     }
-    return res;
+    return { res, timedOut };
   } catch (err) {
     if (err instanceof AuthoringLlmError) throw err;
     if (timedOut()) throw new AuthoringLlmError("timeout", `LLM timed out after ${options.timeoutMs}ms`);
@@ -116,7 +165,7 @@ export async function chatJson<T>(
   messages: AuthoringMessage[],
   options: AuthoringLlmOptions,
 ): Promise<T> {
-  const res = await post(messages, options, { json: true });
+  const { res } = await post(messages, options, { json: true });
   const data = (await res.json().catch(() => ({}))) as {
     choices?: Array<{ message?: { content?: string } }>;
   };
@@ -133,7 +182,7 @@ export async function* chatStream(
   messages: AuthoringMessage[],
   options: AuthoringLlmOptions,
 ): AsyncGenerator<string> {
-  const res = await post(messages, options, { stream: true });
+  const { res, timedOut } = await post(messages, options, { stream: true });
   if (!res.body) throw new AuthoringLlmError("http", "LLM stream had no body");
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
@@ -163,6 +212,7 @@ export async function* chatStream(
     }
   } catch (err) {
     if (err instanceof AuthoringLlmError) throw err;
+    if (timedOut()) throw new AuthoringLlmError("timeout", `LLM timed out after ${options.timeoutMs}ms`);
     if (options.signal?.aborted) throw new AuthoringLlmError("aborted", "cancelled");
     throw new AuthoringLlmError("http", err instanceof Error ? err.message : String(err));
   } finally {

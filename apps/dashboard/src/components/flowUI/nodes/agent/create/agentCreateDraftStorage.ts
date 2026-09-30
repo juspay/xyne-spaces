@@ -1,3 +1,5 @@
+import { parseCreateSchedule } from './agentSchedule';
+import { parseCustomProperties } from './customProperty';
 import { EMPTY_CREATE_FORM, isFormDirty, type AgentCreateFormState } from './types';
 
 /**
@@ -56,6 +58,10 @@ export function parseStoredDraft(
         ? (stored['tools'] as Partial<AgentCreateFormState['tools']>)
         : {}),
     },
+    // Drafts saved before these existed (or hand-edited ones) load without them.
+    schedule: parseCreateSchedule(stored['schedule']),
+    customProperties: parseCustomProperties(stored['customProperties']),
+    settings: isRecord(stored['settings']) ? stored['settings'] : {},
   };
   return isDraftWorthKeeping(form) ? { v: VERSION, savedAt, form } : null;
 }

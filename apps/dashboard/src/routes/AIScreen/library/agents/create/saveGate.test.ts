@@ -59,6 +59,12 @@ describe('computeSaveGate', () => {
     expect(gate.reason).toMatch(/Workflow/);
   });
 
+  it('blocks a schedule that cannot be armed', () => {
+    const gate = computeSaveGate({ ...READY, scheduleProblem: 'The scheduled time has passed.' });
+    expect(gate).toEqual({ canSave: false, reason: 'The scheduled time has passed.' });
+    expect(computeSaveGate({ ...READY, scheduleProblem: null }).canSave).toBe(true);
+  });
+
   it('reports the first missing field', () => {
     expect(computeSaveGate({ ...READY, name: ' ' }).reason).toBe('Add a name.');
     expect(computeSaveGate({ ...READY, description: '' }).reason).toBe('Add a description.');

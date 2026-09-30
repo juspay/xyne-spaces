@@ -10,6 +10,8 @@ export interface SaveGateInput {
   description: string;
   instructions: string;
   conflictCount: number;
+  /** Why the Schedule property can't be armed (a past time, a bad cron), if it can't. */
+  scheduleProblem?: string | null;
   nameCheck: { checking: boolean; nameError: string | null; slugError: string | null };
 }
 
@@ -38,5 +40,6 @@ export function computeSaveGate(input: SaveGateInput): SaveGate {
   if (input.nameCheck.nameError) return blocked(input.nameCheck.nameError);
   const contract = validateSystemPromptContract(input.instructions);
   if (!contract.ok) return blocked(contract.error ?? 'Instructions are incomplete.');
+  if (input.scheduleProblem) return blocked(input.scheduleProblem);
   return { canSave: true, reason: null };
 }

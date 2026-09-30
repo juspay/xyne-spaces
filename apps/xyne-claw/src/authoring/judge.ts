@@ -221,6 +221,46 @@ export function resolveJudgement(raw: Record<string, unknown>, input: JudgeInput
   return { hubs, bound, suggested };
 }
 
+/**
+ * Every catalog item in the given hubs, for "add all the MCPs" and the like: no
+ * model call and none of the judge's caps, since the user asked for all of them.
+ * MCPs get read access (writes stay something to ask for by name), so one with
+ * no read tools is left out: the canvas would have nothing to turn on. A product
+ * the user hasn't connected is only suggested, so the canvas can offer to connect it.
+ */
+export function catalogPicks(
+  hubs: readonly DraftHub[],
+  input: Pick<JudgeInput, "catalog" | "skills" | "knowledge">,
+): { bound: DraftPick[]; suggested: DraftPick[] } {
+  const wanted = new Set(hubs);
+  const bound: DraftPick[] = [];
+  const suggested: DraftPick[] = [];
+  const item = (hub: DraftHub, id: string, label: string): DraftPick => ({ hub, id, label, confidence: 1, reason: "" });
+  if (wanted.has("mcp")) {
+    for (const i of input.catalog.integrations) {
+      if ((i.kind !== "mcp" && i.kind !== "gateway") || i.readTools.length === 0) continue;
+      const pick: DraftPick = { ...item("mcp", i.slug, i.label), access: "read" };
+      if (i.requiresConnection) suggested.push({ ...pick, requiresConnection: i.requiresConnection });
+      else bound.push(pick);
+    }
+  }
+  if (wanted.has("builtin")) {
+    for (const i of input.catalog.integrations) {
+      if (i.kind === "builtin" || i.kind === "custom") bound.push(item("builtin", i.slug, i.label));
+    }
+  }
+  if (wanted.has("subagent")) {
+    for (const s of input.catalog.subagents) bound.push(item("subagent", s.name, s.name));
+  }
+  if (wanted.has("skill")) {
+    for (const s of input.skills) bound.push(item("skill", s.slug, s.name));
+  }
+  if (wanted.has("knowledge")) {
+    for (const k of input.knowledge) bound.push(item("knowledge", k.id, k.name));
+  }
+  return { bound, suggested };
+}
+
 export async function judgeCapabilities(input: JudgeInput, signal?: AbortSignal): Promise<JudgedCapabilities> {
   const messages: AuthoringMessage[] = [
     {

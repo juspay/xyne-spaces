@@ -2097,6 +2097,9 @@ model ScheduledJob {
   type            String
   delayMs         BigInt?
   cronExpression  String?
+  // IANA zone the cron is read in ("0 9 * * *" = 9am there). NULL keeps the
+  // original Asia/Kolkata behaviour for rows created before this column.
+  timezone        String?
   maxRuns         Int?
   runCount        Int               @default(0)
   status          String            @default("active")

@@ -84,6 +84,10 @@ export const LITELLM = {
     5_000,
     Number(process.env["LITELLM_SUGGEST_TIMEOUT_MS"] ?? 45_000) || 45_000,
   ),
+  // The Build chat's conversational answers ("what does X's agent do?"). A real
+  // answer, not a structured pick, so the main model by default; it also keeps
+  // these calls off the fast endpoint the draft's planning and judge share.
+  talkModel: process.env["LITELLM_TALK_MODEL"]?.trim() || litellmModel,
   subagentFastModel: process.env["LITELLM_SUBAGENT_FAST_MODEL"]?.trim() || litellmFastModel,
   subagentFastModelPercent: clampPercent(process.env["LITELLM_SUBAGENT_FAST_MODEL_PERCENT"], 100),
 } as const;

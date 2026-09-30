@@ -77,6 +77,8 @@ export interface LibraryCardProps {
    */
   footer?: ReactNode;
   dimmed?: boolean;
+  /** Borderless card that only tints on hover (Figma 1959:34563). Agents tab. */
+  variant?: 'outlined' | 'flat';
 }
 
 export function LibraryCard({
@@ -89,20 +91,30 @@ export function LibraryCard({
   description,
   footer,
   dimmed = false,
+  variant = 'outlined',
 }: LibraryCardProps): ReactElement {
+  const flat = variant === 'flat';
   return (
     <Link
       to={to}
       data-testid={testId}
       className={cn(
-        'flex items-start gap-3 overflow-hidden rounded-[20px] border border-border bg-background p-4 transition-colors hover:bg-muted/40',
+        'flex overflow-hidden transition-colors',
+        flat
+          ? 'items-center gap-2 rounded-2xl p-3 hover:bg-foreground/[0.04]'
+          : 'items-start gap-3 rounded-[20px] border border-border bg-background p-4 hover:bg-muted/40',
         dimmed && 'opacity-60',
       )}
     >
       {icon}
       <div className='flex min-w-0 flex-1 flex-col gap-0.5 overflow-hidden'>
         <div className='flex min-w-0 items-center gap-2'>
-          <span className='truncate text-sm font-medium leading-[22px] text-foreground'>
+          <span
+            className={cn(
+              'truncate text-sm text-foreground',
+              flat ? 'font-[550] leading-5' : 'font-medium leading-[22px]',
+            )}
+          >
             {name}
           </span>
           {meta ? (
@@ -117,7 +129,14 @@ export function LibraryCard({
           {statusDot}
         </div>
         {footer ?? (
-          <p className='truncate text-sm leading-5 text-foreground/60'>
+          <p
+            className={cn(
+              'truncate leading-5',
+              flat
+                ? 'text-xs font-normal tracking-[-0.24px] text-muted-foreground'
+                : 'text-sm text-foreground/60',
+            )}
+          >
             {description || 'No description added'}
           </p>
         )}

@@ -7,6 +7,8 @@
  */
 import { Router, type Request, type Response } from "express";
 import {
+  DRAFT_HISTORY_TURN_CHARS,
+  DRAFT_HISTORY_TURNS,
   frameDraftEvent,
   KEEPALIVE_FRAME,
   type AgentDraftBody,
@@ -23,7 +25,7 @@ const router = Router();
 
 const KEEPALIVE_MS = 15_000;
 const FIELDS: readonly DraftField[] = [
-  "name", "handle", "description", "instructions", "tools", "skills", "knowledge", "permission", "schedule",
+  "name", "handle", "description", "instructions", "tools", "skills", "knowledge", "permission", "schedule", "properties",
 ];
 
 const isString = (value: unknown): value is string => typeof value === "string";
@@ -46,7 +48,11 @@ export function parseDraftRequest(body: unknown): ClawDraftRequest | string {
   const req = b as unknown as ClawDraftRequest;
   return {
     ...req,
-    history: Array.isArray(req.history) ? req.history.slice(-6) : [],
+    history: Array.isArray(req.history)
+      ? req.history
+          .slice(-DRAFT_HISTORY_TURNS)
+          .map((turn) => ({ role: turn.role, text: String(turn.text ?? "").slice(0, DRAFT_HISTORY_TURN_CHARS) }))
+      : [],
     userOwned: Array.isArray(req.userOwned) ? req.userOwned.filter((f): f is DraftField => FIELDS.includes(f)) : [],
     skillCandidates: Array.isArray(req.skillCandidates) ? req.skillCandidates : [],
     knowledgeCandidates: Array.isArray(req.knowledgeCandidates) ? req.knowledgeCandidates : [],

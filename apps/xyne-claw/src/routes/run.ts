@@ -64,7 +64,7 @@ import { loadCustomTools } from "../custom-tools.js";
 import { buildCopilotTool } from "../copilot.js";
 import { pinRunJudgeBackend } from "../judge-backend.js";
 import { optEnabled, pinRunOptimizations } from "../optimizations.js";
-import { pinRunFlags } from "../run-context.js";
+import { getRunFlags, pinRunFlags } from "../run-context.js";
 import { activeToolCap, demotedCatalogItem, planActiveToolCap, readToolUsageRank } from "../active-tool-cap.js";
 import { buildExperimentTools, buildExperimentReviewTools, type ExperimentContext } from "../experiment.js";
 import {
@@ -190,6 +190,14 @@ import {
   startPrefetchExtraction,
   type ExecutableTool,
 } from "../prefetch.js";
+
+/** MCP load result for a run with an empty tool palette: nothing listed, nothing to clean up. */
+const NO_MCP_TOOLS: Awaited<ReturnType<typeof loadMcpToolsForUser>> = {
+  groups: [],
+  cleanup: async () => {},
+  getPendingActions: () => [],
+  getAttachments: () => [],
+};
 
 const clog = createLogger("run");
 const XYNE_CLAW_PACKAGE_DIR = fileURLToPath(new URL("../../", import.meta.url));
@@ -1784,22 +1792,28 @@ export async function processTask(
     // the workspace is still used for binary attachments. See toolOutputBaseDir.
     const mcpOutputDir = toolOutputBaseDir(conversationId, workspaceDir);
     const trustedSdlcBindings = trustedSdlcToolBindings(agentConfig?.["sdlcContext"]);
+    // An empty tool palette (the create-agent chat) never calls an MCP tool, so
+    // don't list every connected server just to throw the result away.
+    const noToolPalette = getRunFlags().disableTools;
+    if (noToolPalette) log("[run] disableTools — skipping MCP tool listing");
     const {
       groups: mcpGroups,
       cleanup,
       getPendingActions,
       getAttachments: getMcpAttachments,
-    } = await loadMcpToolsForUser(
-      sessionId,
-      sessionToken,
-      workspaceDir,
-      toolPermissions,
-      agentSlug,
-      mcpOutputDir,
-      (att) => pushAttachment(progressUrl, sessionId, att),
-      trustedSdlcBindings,
-      (serverType) => blockedConnectors.add(serverType),
-    );
+    } = noToolPalette
+      ? NO_MCP_TOOLS
+      : await loadMcpToolsForUser(
+          sessionId,
+          sessionToken,
+          workspaceDir,
+          toolPermissions,
+          agentSlug,
+          mcpOutputDir,
+          (att) => pushAttachment(progressUrl, sessionId, att),
+          trustedSdlcBindings,
+          (serverType) => blockedConnectors.add(serverType),
+        );
     mcpGetAttachments = getMcpAttachments;
     // Expose the MCP-layer pendingActions getter to the catch handler so
     // copilot-mode respond-to-user terminations can still recover signed
@@ -2944,6 +2958,8 @@ export async function processTask(
       agentConfig?.["planTracking"] !== false && agentConfig?.["planTracking"] !== "false";
     const planGateEligible =
       planTrackingEnabled &&
+      // No tools means no plan tools to gate; skip the XOR round trip.
+      !getRunFlags().disableTools &&
       (!!channelId || (progressUrl && typeof progressUrl !== "string")) &&
       !isScheduledOrAutomationRun(eventType, conversationId) &&
       !isTwinMentionFlow &&

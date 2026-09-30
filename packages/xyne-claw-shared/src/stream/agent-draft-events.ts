@@ -9,9 +9,10 @@
  *   claw-auth ⇄ xyne-claw  POST /agents/draft               (ClawDraftRequest)
  *
  * xyne-claw runs the LLM work and knows nothing about the database, so it
- * reports raw `capabilities`, `ack` and unadjusted identity. claw-auth turns
- * those into the `tools` / `skills` / `knowledge` events the canvas applies,
- * fixes handle collisions, validates the schedule, and composes the reply.
+ * reports raw `capabilities` and unadjusted identity. claw-auth turns the
+ * capabilities into one `plan` event (the POST /agents/suggest-tools shape, so
+ * the canvas reuses the Suggest mapping), fixes handle collisions and checks
+ * the schedule. Everything else passes through.
  */
 
 import type { AgentPermissionMode } from "../agent-prompt-contract.js";
@@ -27,7 +28,9 @@ export type DraftField =
   | "skills"
   | "knowledge"
   | "permission"
-  | "schedule";
+  | "schedule"
+  /** The user's typed custom properties (Budget: 500, Priority: high). */
+  | "properties";
 
 export type DraftHub = "mcp" | "builtin" | "subagent" | "skill" | "knowledge";
 
@@ -66,15 +69,37 @@ export interface DraftCapabilityRemoval {
   id: string;
 }
 
-export interface DraftSchedule {
-  /** 5-field cron, evaluated in `timezone`. */
-  cron: string;
+interface DraftScheduleBase {
   timezone: string;
-  /** Human text, e.g. "Weekdays at 9:00 AM". */
+  /** Human text, e.g. "Weekdays at 9:00 AM" or "Oct 3, 9:00 AM". */
   label: string;
   /** What the agent is asked to do each time it runs. */
   task: string;
 }
+
+export type DraftSchedule =
+  /** Repeats on a 5-field cron, evaluated in `timezone`. */
+  | (DraftScheduleBase & { kind: "repeat"; cron: string })
+  /** Runs once, at an absolute instant (ISO string). */
+  | (DraftScheduleBase & { kind: "once"; at: string });
+
+export type DraftPropertyType = "text" | "number" | "checkbox" | "tags" | "date" | "datetime";
+
+/**
+ * A custom property row on the canvas. `value` is the row's own string form:
+ * "true"/"false" for checkbox, "YYYY-MM-DD" for date, "YYYY-MM-DDTHH:mm" for
+ * datetime, comma-separated for tags.
+ */
+export interface DraftCustomProperty {
+  title: string;
+  type: DraftPropertyType;
+  value: string;
+}
+
+/** Properties are matched by title (case-insensitive): set adds or replaces, remove drops. */
+export type DraftPropertyOp =
+  | ({ op: "set" } & DraftCustomProperty)
+  | { op: "remove"; title: string };
 
 export interface DraftTimings {
   firstFieldMs?: number;
@@ -91,6 +116,46 @@ export interface AgentDraftCanvas {
   permissionMode: AgentPermissionMode;
   schedule: DraftSchedule | null;
   capabilities: DraftCapabilityRef[];
+  /** Custom property rows already on the canvas. */
+  customProperties?: DraftCustomProperty[];
+}
+
+/**
+ * How much conversation each hop keeps: enough for a chat about other agents
+ * to stay coherent. The planning call keeps its own, shorter slice.
+ */
+export const DRAFT_HISTORY_TURNS = 12;
+export const DRAFT_HISTORY_TURN_CHARS = 2_000;
+
+/** A step the Build chat took before answering, shown above the reply. */
+export interface DraftActivity {
+  id: string;
+  kind: "search";
+  status: "running" | "done" | "failed";
+  /** "Searching the web: Codex review agent" */
+  label: string;
+  detail?: string;
+  sources?: Array<{ title: string; url: string }>;
+}
+
+/** A change the conversation points at. Tapping it sends `message` as the next turn. */
+export interface DraftSuggestion {
+  id: string;
+  /** Short, imperative: "Add a PR review step". */
+  label: string;
+  /** The full request the user would send. */
+  message: string;
+}
+
+/** One follow-up question, in the UserQuestion shape the question card renders. */
+export interface DraftQuestion {
+  id: string;
+  /** One or two words, shown as the question's chip: "Job", "Schedule". */
+  label: string;
+  question: string;
+  type: "single_choice" | "multiple_choice";
+  /** Two to four. The card adds its own "Something else" and skip. */
+  options: Array<{ label: string; description?: string }>;
 }
 
 /** Dashboard → claw-auth. */
@@ -133,8 +198,8 @@ export interface ClawDraftRequest extends AgentDraftRequest {
 }
 
 /**
- * Event bodies. `capabilities` and `ack` are xyne-claw → claw-auth only;
- * `tools`, `skills` and `knowledge` are claw-auth → dashboard only.
+ * Event bodies. `capabilities` is xyne-claw → claw-auth only; `plan` is
+ * claw-auth → dashboard only.
  */
 export type AgentDraftBody =
   | { event: "started"; draftId: string }
@@ -151,6 +216,7 @@ export type AgentDraftBody =
   | ({ event: "schedule"; op: "set" } & DraftSchedule)
   | { event: "schedule"; op: "clear" }
   | { event: "schedule"; op: "invalid"; text: string; error: string }
+  | { event: "properties"; ops: DraftPropertyOp[] }
   | { event: "field.start"; field: DraftField }
   | {
       event: "capabilities";
@@ -160,33 +226,11 @@ export type AgentDraftBody =
       remove: DraftCapabilityRemoval[];
     }
   | {
-      event: "tools";
-      op: "replace" | "add" | "remove";
-      /** Same shape the picker's Suggest uses; the canvas maps it with the cached tool catalog. */
-      suggestion: {
-        subagents: string[];
-        integrations: Array<{ slug: string; readTools: string[]; writeTools: string[] }>;
-      };
-      /** Selection strings to drop (subagent names, tool names, gateway services, custom slugs). */
-      removeIds: string[];
-      bound: DraftPick[];
-      suggested: DraftPick[];
-    }
-  | {
-      event: "skills";
-      op: "replace" | "add" | "remove";
-      skillIds: string[];
-      removeIds: string[];
-      bound: DraftPick[];
-      suggested: DraftPick[];
-    }
-  | {
-      event: "knowledge";
-      op: "replace" | "add" | "remove";
-      collectionIds: string[];
-      removeIds: string[];
-      bound: DraftPick[];
-      suggested: DraftPick[];
+      event: "plan";
+      /** `replace` on a first draft, `add` on an edit. */
+      op: "replace" | "add";
+      plan: DraftToolPlan;
+      remove: DraftCapabilityRemoval[];
     }
   | { event: "instructions.delta"; text: string }
   | { event: "instructions.section"; heading: string; markdown: string }
@@ -199,9 +243,35 @@ export type AgentDraftBody =
     }
   | { event: "ack"; text: string }
   | { event: "reply.delta"; text: string }
+  /** A chat turn's research step, sent as it starts and again when it ends. */
+  | ({ event: "activity" } & DraftActivity)
+  /** After a chat reply: changes the user can apply with one tap. */
+  | { event: "suggestion"; suggestions: DraftSuggestion[] }
+  /** Follow-up questions, shown as a card; the answers come back as the next turn. */
+  | { event: "question"; id: string; questions: DraftQuestion[] }
   | { event: "warning"; stage: string; message: string }
   | { event: "done"; status: "completed" | "partial" | "cancelled"; timings: DraftTimings }
   | { event: "error"; code: DraftErrorCode; message: string; retryable: boolean };
+
+/**
+ * Capabilities as the canvas applies them: the POST /agents/suggest-tools
+ * response shape. `integrations` / `subagents` / `skillSlugs` / `knowledgeIds`
+ * are bound; `suggested` become one-click chips.
+ */
+export interface DraftToolPlan {
+  subagents: string[];
+  integrations: Array<{ slug: string; readTools: string[]; writeTools: string[] }>;
+  skillSlugs: string[];
+  knowledgeIds: string[];
+  suggested: {
+    integrations: Array<{ slug: string; label: string; confidence: number; readTools: string[]; writeTools: string[] }>;
+    subagents: Array<{ name: string; confidence: number }>;
+    skills: Array<{ slug: string; confidence: number }>;
+    knowledge: Array<{ id: string; name: string; confidence: number }>;
+  };
+  reasoning: Record<string, string>;
+  source: string;
+}
 
 /** What goes on the wire: every body plus its position in the turn. */
 export type AgentDraftEvent = AgentDraftBody & { seq: number; turnId: string };

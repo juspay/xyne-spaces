@@ -45,6 +45,12 @@ export function customPropertyTitleValue(title: string, type: CustomPropertyType
   return trimmed;
 }
 
+/** Whether the row holds a value. An unticked checkbox is its empty state. */
+export function propertyHasValue(property: Pick<CustomProperty, 'type' | 'value'>): boolean {
+  if (property.type === 'checkbox') return property.value === 'true';
+  return property.value.trim().length > 0;
+}
+
 export function createCustomProperty(type: CustomPropertyType): CustomProperty {
   return {
     id: `prop-${crypto.randomUUID()}`,
@@ -52,6 +58,38 @@ export function createCustomProperty(type: CustomPropertyType): CustomProperty {
     title: '',
     value: type === 'checkbox' ? 'false' : '',
   };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** Stored (or chat-supplied) rows, dropping anything that isn't a well-formed property. */
+export function parseCustomProperties(value: unknown): CustomProperty[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((row): CustomProperty[] => {
+    if (!isRecord(row)) return [];
+    const type = row['type'];
+    if (!CUSTOM_PROPERTY_TYPES.includes(type as CustomPropertyType)) return [];
+    return [
+      {
+        id: typeof row['id'] === 'string' && row['id'] ? row['id'] : `prop-${crypto.randomUUID()}`,
+        type: type as CustomPropertyType,
+        title: typeof row['title'] === 'string' ? row['title'] : '',
+        value: typeof row['value'] === 'string' ? row['value'] : '',
+      },
+    ];
+  });
+}
+
+/** How a property reads in the saved instructions, or null when it says nothing yet. */
+export function customPropertyPromptLine(property: CustomProperty): string | null {
+  const title = property.title.trim() || CUSTOM_PROPERTY_LABEL[property.type];
+  const raw = property.value.trim();
+  if (property.type === 'checkbox') return `${title}: ${raw === 'true' ? 'Yes' : 'No'}`;
+  if (!raw) return null;
+  const value = property.type === 'datetime' ? raw.replace('T', ' ') : raw;
+  return `${title}: ${value}`;
 }
 
 let memoryClipboard = '';

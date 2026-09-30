@@ -26,6 +26,9 @@ const PATCH_FIELDS: AgentCreateField[] = [
   'tools',
   'skills',
   'knowledge',
+  'schedule',
+  'properties',
+  'permissionMode',
 ];
 
 function hasPatchValue(patch: AgentCreateChatPatch, field: AgentCreateField): boolean {
@@ -44,6 +47,13 @@ function hasPatchValue(patch: AgentCreateChatPatch, field: AgentCreateField): bo
       return patch.selectedSkillIds !== undefined;
     case 'knowledge':
       return patch.selectedKbResources !== undefined || patch.selectedKbScope !== undefined;
+    // null is a value here: it clears the schedule.
+    case 'schedule':
+      return patch.schedule !== undefined;
+    case 'properties':
+      return patch.customProperties !== undefined;
+    case 'permissionMode':
+      return patch.permissionMode !== undefined;
     default:
       return false;
   }
@@ -77,6 +87,14 @@ function fieldEquals(
         (patch.selectedKbResources === undefined ||
           JSON.stringify(current.selectedKbResources) === JSON.stringify(patch.selectedKbResources))
       );
+    case 'schedule':
+      return JSON.stringify(current.schedule) === JSON.stringify(patch.schedule ?? null);
+    case 'properties':
+      return (
+        JSON.stringify(current.customProperties) === JSON.stringify(patch.customProperties ?? [])
+      );
+    case 'permissionMode':
+      return (patch.permissionMode ?? current.permissionMode) === current.permissionMode;
     default:
       return true;
   }
@@ -117,6 +135,14 @@ function applyField(
         ...(patch.selectedKbScope ? { selectedKbScope: patch.selectedKbScope } : {}),
         ...(patch.selectedKbResources ? { selectedKbResources: patch.selectedKbResources } : {}),
       };
+    case 'schedule':
+      return patch.schedule !== undefined ? { ...current, schedule: patch.schedule } : current;
+    case 'properties':
+      return patch.customProperties
+        ? { ...current, customProperties: patch.customProperties }
+        : current;
+    case 'permissionMode':
+      return patch.permissionMode ? { ...current, permissionMode: patch.permissionMode } : current;
     default:
       return current;
   }
@@ -148,6 +174,14 @@ export function slicePatch(
         next.selectedKbResources = patch.selectedKbResources;
       return next;
     }
+    case 'schedule':
+      return patch.schedule !== undefined ? { schedule: patch.schedule } : {};
+    case 'properties':
+      return patch.customProperties !== undefined
+        ? { customProperties: patch.customProperties }
+        : {};
+    case 'permissionMode':
+      return patch.permissionMode !== undefined ? { permissionMode: patch.permissionMode } : {};
     default:
       return {};
   }

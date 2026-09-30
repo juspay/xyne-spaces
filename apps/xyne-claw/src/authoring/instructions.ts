@@ -23,16 +23,22 @@ export interface InstructionsInput {
   existing?: { text: string; change: string };
 }
 
-const SYSTEM =
-  "You write system prompts for AI agents in Xyne Spaces. Return only the prompt, in markdown, with no preface and no code fence.";
+const SYSTEM = [
+  "You write the instructions (the system prompt) for AI agents in Xyne Spaces. Write them the way a good teammate briefs a new colleague: plain text a person can read at a glance and a model can follow exactly. Return only the instructions, with no preface.",
+  "Your own output is plain text: no # headings, no ** or other bold and italics, no tables, no code blocks, no emoji. That is how you write, not something the agent is told, so it never appears in the agent's Rules.",
+].join("\n\n");
 
-const HEADINGS = [
-  "## Identity & tone",
-  "## Operational Workflow",
-  "## When to use each tool",
-  "## Guardrails",
-  "## Decision rules",
-  "## Error recovery",
+/** Title of the tools section, and the titles a late tools section goes in front of. */
+export const TOOLS_HEADING = "Tools";
+export const TOOLS_INSERT_BEFORE: readonly string[] = ["Rules", "Guardrails"];
+
+/** Section titles, in order. Each sits alone on its line; the opening paragraph has none. */
+export const INSTRUCTION_SECTIONS = [
+  "How you work",
+  TOOLS_HEADING,
+  "Rules",
+  "When you're unsure",
+  "When something goes wrong",
 ] as const;
 
 const PERMISSION_RULES: Record<AgentPermissionMode, string> = {
@@ -41,11 +47,67 @@ const PERMISSION_RULES: Record<AgentPermissionMode, string> = {
   "can-write": "The agent may act without asking, except it never deletes data, spends money or posts publicly without confirmation.",
 };
 
+/** The same rules, as the agent reads them in its own instructions. */
+const PERMISSION_RULE_LINES: Record<AgentPermissionMode, string> = {
+  "ask-first": "Never send, post, create, edit or delete anything without asking first.",
+  "read-only": "Only read and report. Never send, post, create, edit or delete anything.",
+  "can-write": "You may act without asking, but never delete data, spend money or post publicly without confirmation.",
+};
+
 function capabilityLines(capabilities: DraftPick[]): string {
   if (capabilities.length === 0) return "none chosen; the agent works from what the user gives it.";
+  // A long list is summed up per kind, the way the Tools section will show it.
+  if (capabilities.length > GROUP_TOOLS_OVER) return toolLines(capabilities).join("\n");
   return capabilities
     .map((c) => `- ${c.label} (${c.hub}${c.access === "write" ? ", may write" : ""})${c.reason ? `: ${c.reason}` : ""}`)
     .join("\n");
+}
+
+/** `- Slack: post the standup summary.` One line of the tools section. */
+function toolLine(c: Pick<DraftPick, "label" | "reason">): string {
+  const reason = c.reason?.trim().replace(/[.\s]+$/, "");
+  return `- ${c.label}: ${reason ? `${reason.charAt(0).toLowerCase()}${reason.slice(1)}` : "use it when the job needs it"}.`;
+}
+
+/** Over this many tools, a kind with more than GROUP_KIND_OVER of them gets one line. */
+export const GROUP_TOOLS_OVER = 8;
+const GROUP_KIND_OVER = 3;
+
+const KIND_LABEL: Record<DraftPick["hub"], string> = {
+  mcp: "MCP servers",
+  builtin: "Built-in tools",
+  subagent: "Subagents",
+  skill: "Skills",
+  knowledge: "Knowledge",
+};
+
+const KIND_HINT: Partial<Record<DraftPick["hub"], string>> = {
+  subagent: " Hand a task to the one that owns that product.",
+  knowledge: " Search them before answering from memory.",
+};
+
+/**
+ * The tools section's lines: one per tool, or for a long list one per kind
+ * ("- MCP servers, read only: Jira, GitHub."). `previous` keeps the line an
+ * earlier prompt already had for a tool, keyed by lowercased label.
+ */
+function toolLines(capabilities: DraftPick[], previous?: ReadonlyMap<string, string>): string[] {
+  const single = (c: DraftPick): string => previous?.get(c.label.toLowerCase()) ?? toolLine(c);
+  if (capabilities.length <= GROUP_TOOLS_OVER) return capabilities.map(single);
+  const lines: string[] = [];
+  for (const hub of Object.keys(KIND_LABEL) as Array<DraftPick["hub"]>) {
+    const ofKind = capabilities.filter((c) => c.hub === hub);
+    if (ofKind.length === 0) continue;
+    if (ofKind.length <= GROUP_KIND_OVER) {
+      lines.push(...ofKind.map(single));
+      continue;
+    }
+    const readOnly = hub === "mcp" && ofKind.every((c) => c.access !== "write");
+    lines.push(
+      `- ${KIND_LABEL[hub]}${readOnly ? ", read only" : ""}: ${[...new Set(ofKind.map((c) => c.label))].join(", ")}.${KIND_HINT[hub] ?? ""}`,
+    );
+  }
+  return lines;
 }
 
 export function buildInstructionsMessages(input: InstructionsInput): AuthoringMessage[] {
@@ -60,11 +122,15 @@ export function buildInstructionsMessages(input: InstructionsInput): AuthoringMe
     `Tools it has:\n${capabilityLines(input.capabilities)}`,
   ].filter(Boolean);
   const format = [
-    "Use exactly these headings, in this order:",
-    ...HEADINGS,
-    "Operational Workflow is a numbered list. Guardrails is a bulleted list of what the agent must never do.",
-    "Name only the tools listed above, in the section \"When to use each tool\".",
-    "Write 350 to 600 words. Second person (\"You are…\"). No filler.",
+    "Format:",
+    "- Open with two or three sentences and no title: who you are (\"You are …\"), who you help, and your tone.",
+    "- Then these sections, in this order. Put each title alone on its own line, exactly as written, with a blank line before it:",
+    ...INSTRUCTION_SECTIONS.map((title) => `  ${title}`),
+    "- How you work: numbered steps (1., 2., 3.), one action per step.",
+    `- ${TOOLS_HEADING}: one line per tool listed above, like "- Slack: post the standup summary in the team channel.", saying when to use it. A line that lists several tools stays one line. Name no other tools. Leave the section out when there are none.`,
+    "- Rules: lines starting with \"- \" for what you must always or never do.",
+    "- When you're unsure, and When something goes wrong: one to three lines each, starting with \"- \".",
+    "Short, concrete sentences in everyday words. Second person. 180 to 400 words.",
   ].join("\n");
   const user = input.existing
     ? [
@@ -75,7 +141,7 @@ export function buildInstructionsMessages(input: InstructionsInput): AuthoringMe
         input.existing.text,
         "---",
         `Change requested: ${input.existing.change}`,
-        "Apply the change. Keep every part that is unaffected exactly as written. Return the full prompt.",
+        "Apply the change and return the full prompt. Keep the wording of every part the change does not touch. If the current prompt uses markdown (# headings, ** bold), drop the symbols and use the format below.",
         format,
       ].join("\n")
     : [...facts, "", format].join("\n");
@@ -114,44 +180,57 @@ export async function streamInstructions(
   return finishInstructions(full, input);
 }
 
+/**
+ * Markdown the writer slipped in anyway (heading marks, bold markers, star
+ * bullets), and the blank line it likes to leave between a title and its list.
+ * The canvas shows the prompt as plain text, where these read as noise.
+ */
+export function plainInstructions(text: string): string {
+  return text
+    .replace(/^[ \t]*#{1,6}[ \t]+/gm, "")
+    .replace(/\*\*([^*\n]+?)\*\*/g, "$1")
+    .replace(/__([^_\n]+?)__/g, "$1")
+    .replace(/^([ \t]*)[*•][ \t]+/gm, "$1- ")
+    .replace(/^([^\s\d-][^\n.!?]{0,40})\n[ \t]*\n(?=[ \t]*(?:-|\d+\.)[ \t])/gm, "$1\n");
+}
+
 /** Apply the contract to text produced by any path (streamed, or a template fallback). */
 export function finishInstructions(text: string, input: Pick<InstructionsInput, "permissionMode" | "name">): InstructionsResult {
-  const stripped = text.replace(/^```(?:markdown|md)?\s*/i, "").replace(/\s*```\s*$/i, "");
+  const stripped = plainInstructions(text.replace(/^```(?:markdown|md|text)?\s*/i, "").replace(/\s*```\s*$/i, ""));
   const ensured = ensurePromptContract(stripped, { permissionMode: input.permissionMode, name: input.name });
   return { text: ensured.text, contract: validateSystemPromptContract(ensured.text), repaired: ensured.repaired };
 }
 
-/** Section for tools that were chosen after the instructions started streaming. */
-export function toolsSection(capabilities: DraftPick[]): { heading: string; markdown: string } {
-  const lines = capabilities.map((c) => `- Use ${c.label} ${c.reason ? `to ${c.reason.replace(/\.$/, "").toLowerCase()}` : "when the job needs it"}.`);
-  return { heading: "When to use each tool", markdown: `## When to use each tool\n${lines.join("\n")}` };
+/**
+ * The tools section, rebuilt from the agent's full tool list: for tools chosen
+ * after the instructions started streaming, a long list, or a tools-only edit.
+ */
+export function toolsSection(
+  capabilities: DraftPick[],
+  previous?: ReadonlyMap<string, string>,
+): { heading: string; markdown: string } {
+  return { heading: TOOLS_HEADING, markdown: [TOOLS_HEADING, ...toolLines(capabilities, previous)].join("\n") };
 }
 
 /** Plain prompt used when the instructions call fails or times out, so the canvas is never left empty. */
 export function templateInstructions(input: InstructionsInput): string {
   const name = input.name || "a focused assistant";
-  const tools = input.capabilities.length
-    ? input.capabilities.map((c) => `- ${c.label}`).join("\n")
-    : "- None. Work from what the user gives you.";
   return [
-    "## Identity & tone",
-    `You are ${name}. ${input.brief}`,
+    `You are ${name}. ${input.brief}`.trim(),
     "",
-    "## Operational Workflow",
+    "How you work",
     "1. Read the request and gather what you need.",
     "2. Do the work in small steps and check each result.",
     "3. Report what you did and anything you could not finish.",
+    ...(input.capabilities.length > 0 ? ["", TOOLS_HEADING, ...toolLines(input.capabilities)] : []),
     "",
-    "## When to use each tool",
-    tools,
+    "Rules",
+    `- ${PERMISSION_RULE_LINES[input.permissionMode]}`,
     "",
-    "## Guardrails",
-    `- ${PERMISSION_RULES[input.permissionMode]}`,
-    "",
-    "## Decision rules",
+    "When you're unsure",
     "- If the request is unclear, ask one short question.",
     "",
-    "## Error recovery",
-    "- If a tool fails, say so and continue with what you have.",
+    "When something goes wrong",
+    "- If a tool fails, say so and carry on with what you have.",
   ].join("\n");
 }

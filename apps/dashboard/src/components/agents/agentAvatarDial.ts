@@ -1,4 +1,4 @@
-import { useMemo, type CSSProperties } from 'react';
+import { useEffect, useMemo, type CSSProperties } from 'react';
 import { useDialKit, type DialConfig } from 'dialkit';
 import { AGENT_FACES } from './faces/agentFaces.data';
 
@@ -7,10 +7,32 @@ export const AGENT_AVATAR_DIAL_ID = 'agent-avatars';
 
 const FACE_NAMES = AGENT_FACES.map(face => face.name);
 
+/**
+ * DialKit's own `persist` was not holding the picked version across reloads, so the
+ * two picks are also kept here and used as the dial's defaults. That way the first
+ * render already has the right version too, instead of flashing Version 1.
+ */
+const SAVED_KEY = 'agent-avatars:picks';
+const VERSIONS = ['Version 1', 'Version 2'] as const;
+
+function readSaved(): { version?: string; builderFace?: string } {
+  try {
+    const raw = window.localStorage.getItem(SAVED_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : null;
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+const saved = readSaved();
+const DEFAULT_VERSION = VERSIONS.find(v => v === saved.version) ?? 'Version 1';
+const DEFAULT_FACE = FACE_NAMES.find(n => n === saved.builderFace) ?? 'Pink';
+
 /** Scan numbers and ranges match the Agent Faces handoff page. */
 const AGENT_AVATAR_DIAL = {
-  version: { type: 'select', options: ['Version 1', 'Version 2'], default: 'Version 1' },
-  builderFace: { type: 'select', options: FACE_NAMES, default: 'Pink' },
+  version: { type: 'select', options: [...VERSIONS], default: DEFAULT_VERSION },
+  builderFace: { type: 'select', options: FACE_NAMES, default: DEFAULT_FACE },
   scan: {
     eyeX: [2.4, 0, 4.5, 0.1],
     eyeY: [1.3, 0, 3, 0.1],
@@ -35,6 +57,16 @@ export function useAgentAvatarDial(): AgentAvatarDial {
     id: AGENT_AVATAR_DIAL_ID,
     persist: true,
   });
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        SAVED_KEY,
+        JSON.stringify({ version: dial.version, builderFace: dial.builderFace }),
+      );
+    } catch {
+      /* storage blocked: the pick just won't survive a reload */
+    }
+  }, [dial.version, dial.builderFace]);
   const { eyeX, eyeY, follow, lean, breathe, lag, loop } = dial.scan;
   const scanStyle = useMemo(
     () =>

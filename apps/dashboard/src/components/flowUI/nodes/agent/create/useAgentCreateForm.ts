@@ -115,6 +115,8 @@ export function useAgentCreateForm(initial: AgentCreateFormState = EMPTY_CREATE_
           if (keys.includes('selectedKbResources') || keys.includes('selectedKbScope')) {
             next.knowledge = true;
           }
+          if (keys.includes('schedule')) next.schedule = true;
+          if (keys.includes('customProperties')) next.properties = true;
         }
         dirtyRef.current = next;
         return next;

@@ -5,6 +5,8 @@ import type {
   SuggestHub,
 } from '@/services/claw/clawToolsTypes';
 import { COLORS, INITIAL_WIZARD_STATE } from '@/routes/ClawAgentsScreen/create/wizardState';
+import type { CreateSchedule } from './agentSchedule';
+import type { CustomProperty } from './customProperty';
 
 export type AgentCreateField =
   | 'name'
@@ -14,7 +16,10 @@ export type AgentCreateField =
   | 'tools'
   | 'skills'
   | 'knowledge'
-  | 'permissionMode';
+  | 'permissionMode'
+  | 'schedule'
+  /** The custom property rows, as one field (chat edits them as a set). */
+  | 'properties';
 
 /** Hub capability row the write pointer should rest on during scripted fills. */
 export type AgentCreateHubRow = 'mcp' | 'builtin' | 'subagent' | 'skills' | 'knowledge';
@@ -54,6 +59,12 @@ export interface AgentCreateFormState {
   selectedSkillIds: string[];
   selectedKbScope: 'COLLECTIONS' | 'USER';
   selectedKbResources: KbSelection[];
+  /** When the agent runs on its own. Armed as a ScheduledJob after Save. */
+  schedule: CreateSchedule | null;
+  /** User- or chat-added typed properties, saved on the agent config. */
+  customProperties: CustomProperty[];
+  /** Model and behaviour set in Settings before the agent exists; merged into its config on Save. */
+  settings: Record<string, unknown>;
 }
 
 export type AgentCreateChatPatch = Partial<
@@ -68,6 +79,8 @@ export type AgentCreateChatPatch = Partial<
     | 'selectedSkillIds'
     | 'selectedKbScope'
     | 'selectedKbResources'
+    | 'schedule'
+    | 'customProperties'
   >
 >;
 
@@ -109,6 +122,9 @@ export const EMPTY_CREATE_FORM: AgentCreateFormState = {
   selectedSkillIds: [],
   selectedKbScope: 'COLLECTIONS',
   selectedKbResources: [],
+  schedule: null,
+  customProperties: [],
+  settings: {},
 };
 
 export function formFromWizardDefaults(): AgentCreateFormState {
@@ -124,6 +140,9 @@ export function formFromWizardDefaults(): AgentCreateFormState {
     selectedSkillIds: [...INITIAL_WIZARD_STATE.selectedSkillIds],
     selectedKbScope: INITIAL_WIZARD_STATE.selectedKbScope,
     selectedKbResources: [...INITIAL_WIZARD_STATE.selectedKbResources],
+    schedule: null,
+    customProperties: [],
+    settings: {},
   };
 }
 
@@ -158,6 +177,9 @@ export function isFormDirty(form: AgentCreateFormState, baseline: AgentCreateFor
     JSON.stringify(toolIdsFromForm(form)) !== JSON.stringify(toolIdsFromForm(baseline)) ||
     JSON.stringify(form.selectedSkillIds) !== JSON.stringify(baseline.selectedSkillIds) ||
     form.selectedKbScope !== baseline.selectedKbScope ||
-    JSON.stringify(form.selectedKbResources) !== JSON.stringify(baseline.selectedKbResources)
+    JSON.stringify(form.selectedKbResources) !== JSON.stringify(baseline.selectedKbResources) ||
+    JSON.stringify(form.schedule) !== JSON.stringify(baseline.schedule) ||
+    JSON.stringify(form.customProperties) !== JSON.stringify(baseline.customProperties) ||
+    JSON.stringify(form.settings) !== JSON.stringify(baseline.settings)
   );
 }

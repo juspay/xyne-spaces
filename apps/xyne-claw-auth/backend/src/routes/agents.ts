@@ -67,6 +67,17 @@ import {
 } from "../lib/suggest-tools-service.js";
 import type { KnowledgeCandidate } from "../lib/tool-selection.js";
 import { xorAsk, xorEnabled } from "../lib/xor-client.js";
+import {
+  buildClawDraftRequest,
+  cronIntervalProblem,
+  frameSse,
+  freeHandle,
+  parseAgentDraftRequest,
+  planFromCapabilities,
+  readSseMessages,
+  type SseMessage,
+} from "../lib/agent-draft-proxy.js";
+import type { DraftPick } from "xyne-claw-shared";
 const log = createLogger("agents");
 
 const router = Router();
@@ -434,6 +445,180 @@ router.post("/suggest-tools", async (req: Request, res: Response) => {
   } catch (err) {
     log.error("[agents] suggest-tools proxy error:", err);
     res.status(500).json({ success: false, error: "Failed to suggest tools" });
+  }
+});
+
+const DRAFT_KEEPALIVE_MS = 15_000;
+
+/**
+ * Streamed create-canvas draft. One call drafts or edits the whole canvas and
+ * answers as SSE (see packages/xyne-claw-shared/src/stream/agent-draft-events.ts):
+ * this route adds the org's catalog, skills and knowledge, proxies xyne-claw's
+ * POST /agents/draft, and rewrites capabilities and taken handles on the way back.
+ */
+router.post("/draft", async (req: Request, res: Response) => {
+  const parsed = parseAgentDraftRequest(req.body);
+  if (typeof parsed === "string") {
+    res.status(400).json({ success: false, error: parsed });
+    return;
+  }
+  const requesterId = getRequesterId(req);
+  if (!requesterId) {
+    res.status(401).json({ success: false, error: "Sign in to draft an agent" });
+    return;
+  }
+  const orgId = getOrgId(req)
+    ?? (await prisma.user.findUnique({ where: { id: requesterId }, select: { orgId: true } }))?.orgId;
+  if (!orgId) {
+    res.status(400).json({ success: false, error: "orgId is required" });
+    return;
+  }
+
+  const started = Date.now();
+  let clawBody;
+  try {
+    const [full, skillRows, knowledge] = await Promise.all([
+      buildAvailableToolsCatalog(undefined, orgId),
+      skillRepository.listVisible({ userId: requesterId, orgId }),
+      loadKnowledgeCandidates(requesterId),
+    ]);
+    clawBody = buildClawDraftRequest({
+      request: parsed,
+      userId: requesterId,
+      now: new Date(),
+      catalog: {
+        subagents: full.subagents.map((s) => ({ name: s.name, description: s.description })),
+        integrations: full.integrations.map((i) => ({
+          slug: i.slug,
+          label: i.label,
+          kind: i.kind,
+          ...(i.kind === "mcp" && !i.connected ? { requiresConnection: i.label } : {}),
+          readTools: i.readTools.map((t) => ({ name: t.name, description: t.description, riskLevel: t.riskLevel })),
+          writeTools: i.writeTools.map((t) => ({ name: t.name, description: t.description, riskLevel: t.riskLevel })),
+        })),
+      },
+      skills: skillRows.map((s) => ({ slug: s.slug, name: s.name, description: s.description ?? "" })),
+      knowledge,
+    });
+  } catch (err) {
+    log.error("[agents/draft] catalog load failed:", err);
+    res.status(503).json({ success: false, error: "Couldn't load your tools. Try again." });
+    return;
+  }
+
+  // A closed browser tab stops the upstream turn (and every LLM call in it).
+  const abort = new AbortController();
+  res.on("close", () => {
+    if (!res.writableEnded) abort.abort();
+  });
+
+  let upstream: globalThis.Response;
+  try {
+    upstream = await fetch(`${CONFIG.xyneClawUrl}/agents/draft`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+      },
+      body: JSON.stringify(clawBody),
+      signal: abort.signal,
+    });
+  } catch (err) {
+    log.warn(`[agents/draft] xyne-claw unreachable: ${errMsg(err)}`);
+    res.status(502).json({ success: false, error: "The draft service is unavailable." });
+    return;
+  }
+  if (!upstream.ok || !upstream.body) {
+    const detail = await upstream.text().catch(() => "");
+    log.warn(`[agents/draft] xyne-claw ${upstream.status}: ${detail.slice(0, 200)}`);
+    res.status(upstream.status === 503 ? 503 : 502).json({ success: false, error: "The draft service is unavailable." });
+    return;
+  }
+
+  res.status(200);
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+  res.flushHeaders();
+  const keepalive = setInterval(() => {
+    if (!res.writableEnded) res.write(": keepalive\n\n");
+  }, DRAFT_KEEPALIVE_MS);
+
+  const handleTaken = async (candidate: string): Promise<boolean> =>
+    Boolean(await agentRepository.findBySlug(candidate, orgId).catch(() => null));
+  const rewrite = async (message: SseMessage): Promise<SseMessage> => {
+    const data = message.data;
+    if (message.event === "capabilities") {
+      return {
+        event: "plan",
+        data: {
+          seq: data["seq"],
+          turnId: data["turnId"],
+          op: data["op"],
+          remove: data["remove"] ?? [],
+          plan: planFromCapabilities(
+            {
+              bound: (data["bound"] as DraftPick[] | undefined) ?? [],
+              suggested: (data["suggested"] as DraftPick[] | undefined) ?? [],
+            },
+            { intent: parsed.message, catalog: clawBody.catalog, knowledge: clawBody.knowledgeCandidates },
+          ),
+        },
+      };
+    }
+    if (message.event === "identity" && typeof data["handle"] === "string" && data["handle"]) {
+      const requested = data["handle"];
+      const handle = requested === parsed.canvas.handle ? requested : await freeHandle(requested, handleTaken);
+      return handle === requested
+        ? message
+        : { event: "identity", data: { ...data, handle, handleAdjusted: { requested, reason: "taken" } } };
+    }
+    if (message.event === "schedule" && data["op"] === "set" && data["kind"] === "repeat" && typeof data["cron"] === "string") {
+      const problem = cronIntervalProblem(data["cron"], CONFIG.minCronIntervalMinutes);
+      if (problem) {
+        return {
+          event: "schedule",
+          data: { seq: data["seq"], turnId: data["turnId"], op: "invalid", text: data["label"] ?? data["cron"], error: problem },
+        };
+      }
+    }
+    return message;
+  };
+
+  const reader = upstream.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const { messages, rest } = readSseMessages(buffer);
+      buffer = rest;
+      for (const message of messages) {
+        const out = await rewrite(message);
+        if (res.writableEnded) break;
+        res.write(frameSse(out.event, out.data));
+      }
+    }
+    log.info(`[agents/draft] turn ${parsed.turnId} streamed in ${Date.now() - started}ms`);
+  } catch (err) {
+    if (!abort.signal.aborted) {
+      log.warn(`[agents/draft] stream broke: ${errMsg(err)}`);
+      if (!res.writableEnded) {
+        res.write(frameSse("error", {
+          turnId: parsed.turnId,
+          seq: -1,
+          code: "internal",
+          message: "The draft stream broke. What landed is on the canvas; try again for the rest.",
+          retryable: true,
+        }));
+      }
+    }
+  } finally {
+    clearInterval(keepalive);
+    if (!res.writableEnded) res.end();
   }
 });
 

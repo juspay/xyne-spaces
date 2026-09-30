@@ -38,6 +38,23 @@
   transform-origin: 50% 50%;
 }
 
+/* Light themes: white eyes. A CSS fill overrides the gradient fill in the face data. */
+.af .af-eb path {
+  fill: #fff;
+}
+
+/* Midnight (the only dark theme): dark eyes in the face's own hue (--af-eye, set per face). */
+[data-theme="midnight"] .af .af-eb path {
+  fill: var(--af-eye, #000);
+}
+
+/* Tile stroke. Light themes keep the white 28% set on the rect itself; a CSS rule beats that
+   presentation attribute, so midnight swaps it for #1b1b1b at 40%. */
+[data-theme="midnight"] .af .af-stroke {
+  stroke: #1b1b1b;
+  stroke-opacity: 0.4;
+}
+
 /* ---- Working: Scan ---- */
 .af--working .af-eg {
   animation: af-gaze var(--af-dur) cubic-bezier(0.2, 0.75, 0.25, 1) infinite;

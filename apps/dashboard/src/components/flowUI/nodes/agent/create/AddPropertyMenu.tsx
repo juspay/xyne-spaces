@@ -1,5 +1,6 @@
 import type { ReactElement } from 'react';
 import {
+  AlarmDefault,
   CalendarDefault,
   CalendarTimer,
   FolderDefault,
@@ -65,6 +66,8 @@ interface AddPropertyMenuProps {
   added: ReadonlySet<AgentCreateHubRow>;
   onAdd: (row: AgentCreateHubRow) => void;
   onAddCustom: (type: CustomPropertyType) => void;
+  /** Omitted when the Schedule row is already on the canvas. */
+  onAddSchedule?: (() => void) | undefined;
   disabled?: boolean;
 }
 
@@ -72,9 +75,11 @@ export function AddPropertyMenu({
   added,
   onAdd,
   onAddCustom,
+  onAddSchedule,
   disabled,
 }: AddPropertyMenuProps): ReactElement {
   const hubItems = HUB_ITEMS.filter(item => !added.has(item.row));
+  const hasBuiltins = hubItems.length > 0 || Boolean(onAddSchedule);
 
   return (
     <DropdownMenu>
@@ -111,7 +116,19 @@ export function AddPropertyMenu({
               </DropdownMenuItem>
             );
           })}
-          {hubItems.length > 0 ? (
+          {onAddSchedule ? (
+            <DropdownMenuItem
+              onSelect={onAddSchedule}
+              className={ADD_PROPERTY_MENU_ITEM}
+              data-testid='add-property-schedule'
+              data-track-category='Claw Agents'
+              data-track-name='Create agent: add Schedule'
+            >
+              <AlarmDefault className='size-4 shrink-0 text-muted-foreground' aria-hidden />
+              Schedule
+            </DropdownMenuItem>
+          ) : null}
+          {hasBuiltins ? (
             <div
               aria-hidden
               data-testid='add-property-menu-divider'

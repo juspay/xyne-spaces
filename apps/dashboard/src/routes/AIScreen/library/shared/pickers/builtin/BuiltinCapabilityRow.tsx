@@ -4,6 +4,8 @@ import type { CreateHubSuggestions } from '@/components/flowUI/nodes/agent/creat
 import { Tooltip } from '@/components/ui/Tooltip/Tooltip';
 import { matchSuggestedTools, suggestionFromPicks } from '../../primitives/suggestionMatch';
 import { DotGridLoader } from '../mcp/DotGridLoader';
+import { PropertyAddButton } from '@/components/flowUI/nodes/agent/create/PropertyAddButton';
+import { CapabilityPillList } from '../CapabilityPillList';
 import { BrowseBuiltinToolsDialog } from './BrowseBuiltinToolsDialog';
 import { BuiltinChip } from './BuiltinChip';
 import { disableEntry, enableEntry, isEntryEnabled, type BuiltinSelection } from './builtinCatalog';
@@ -116,49 +118,51 @@ export function BuiltinCapabilityRow({
   if (layout === 'profile') {
     return (
       <>
-        {selectedEntries.length === 0 && planChips.length === 0 ? (
-          <button
-            type='button'
-            onClick={() => {
-              setBrowseSource(null);
-              setBrowseOpen(true);
-            }}
-            data-track-category='Claw Agents'
-            data-track-name='Create agent v2: browse built-in tools'
-            className='text-left text-sm font-normal leading-[1.3] tracking-[-0.1px] text-fg-placeholder'
-          >
-            Add a built-in tool for your agent
-          </button>
-        ) : (
-          <div className='flex flex-wrap items-start gap-2'>
-            {selectedEntries.map(entry => (
-              <BuiltinChip
-                key={`selected-${entry.source}`}
-                label={entry.label}
-                selected
-                onOpen={() => {
-                  setBrowseSource(entry.source);
-                  setBrowseOpen(true);
-                }}
-                onToggle={() => {
-                  onSelectionChange(disableEntry(selection, entry));
-                  onPickDismissed?.(entry.source);
-                }}
-              />
-            ))}
-            {planChips.map(match => (
-              <BuiltinChip
-                key={`suggested-${match.entry.source}`}
-                label={match.entry.label}
-                selected={false}
-                onToggle={() => {
-                  onSelectionChange(enableEntry(selection, match.entry, match.tools));
-                  onSuggestionAccepted?.(match.entry.source);
-                }}
-              />
-            ))}
-          </div>
-        )}
+        <CapabilityPillList
+          className='items-start'
+          add={
+            <PropertyAddButton
+              label='Add built-in tool'
+              trackName='Create agent v2: browse built-in tools'
+              onClick={() => {
+                setBrowseSource(null);
+                setBrowseOpen(true);
+              }}
+            />
+          }
+          pills={[
+            ...selectedEntries.map(entry => ({
+              key: entry.source,
+              node: (
+                <BuiltinChip
+                  label={entry.label}
+                  selected
+                  onOpen={() => {
+                    setBrowseSource(entry.source);
+                    setBrowseOpen(true);
+                  }}
+                  onToggle={() => {
+                    onSelectionChange(disableEntry(selection, entry));
+                    onPickDismissed?.(entry.source);
+                  }}
+                />
+              ),
+            })),
+            ...planChips.map(match => ({
+              key: match.entry.source,
+              node: (
+                <BuiltinChip
+                  label={match.entry.label}
+                  selected={false}
+                  onToggle={() => {
+                    onSelectionChange(enableEntry(selection, match.entry, match.tools));
+                    onSuggestionAccepted?.(match.entry.source);
+                  }}
+                />
+              ),
+            })),
+          ]}
+        />
         <BrowseBuiltinToolsDialog
           open={browseOpen}
           onOpenChange={next => {
