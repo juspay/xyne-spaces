@@ -1,3 +1,10 @@
+## [1.434.0](https://github.com/juspay/xyne-spaces/compare/v1.433.1...v1.434.0) (2026-09-30)
+
+
+### Features
+
+* search tickets within the current view from the ticket screen ([#2423](https://github.com/juspay/xyne-spaces/issues/2423)) ([2e0c2f7](https://github.com/juspay/xyne-spaces/commit/2e0c2f7523648a2664bbcac95c3565bf81d4bdc1))
+
 ## [1.433.1](https://github.com/juspay/xyne-spaces/compare/v1.433.0...v1.433.1) (2026-09-30)
 
 
