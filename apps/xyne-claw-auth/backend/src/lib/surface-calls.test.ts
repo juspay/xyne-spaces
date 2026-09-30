@@ -17,10 +17,11 @@ const device = (
 });
 
 describe("which tools go to the window", () => {
-  it("claims the app tools only", () => {
+  it("claims the app tools and the browser panel tools only", () => {
     expect(isSurfaceTool("app-navigate")).toBe(true);
     expect(isSurfaceTool("app-screenshot")).toBe(true);
-    expect(isSurfaceTool("page-read")).toBe(false);
+    expect(isSurfaceTool("page-read")).toBe(true);
+    expect(isSurfaceTool("page-click")).toBe(true);
     expect(isSurfaceTool("spaces-users")).toBe(false);
   });
 });

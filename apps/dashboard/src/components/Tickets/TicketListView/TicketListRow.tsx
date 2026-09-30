@@ -11,7 +11,7 @@ import type { TicketListItem } from './TicketListView.types';
 import { UserSelector } from '../CreateTicketModal/UserSelector';
 import { useTicketAssignee, resolveAssigneeRef } from '../../../hooks/useTicketAssignee';
 import { PriorityPicker } from './PriorityPicker';
-import { AutoDraftStatus } from '@xyne/shared';
+import { AutoDraftStatus, DeskType } from '@xyne/shared';
 import {
   getTicketListColumnAlignClass,
   type TicketListColumnDefinition,
@@ -30,6 +30,7 @@ interface TicketListRowProps {
   gridTemplate: string;
   columns: readonly TicketListColumnDefinition[];
   dynamicFieldByKey: ReadonlyMap<string, ResolvedDisplayFormField>;
+  deskType?: string;
 }
 
 const formatStatusText = (status: string): string => {
@@ -107,7 +108,9 @@ export const TicketListRow = ({
   gridTemplate,
   columns,
   dynamicFieldByKey,
+  deskType,
 }: TicketListRowProps): ReactElement => {
+  const isSocialMedia = deskType === DeskType.SOCIAL_MEDIA;
   const ticketIdValue = ticket.xyneId || ticket.id || '';
   const isHumanInterventionTicket = ticket.stageName?.toLowerCase().includes('human') ?? false;
   const assignee = resolveAssigneeRef(ticket.assignedTo, ticket.userGroupId);
@@ -116,8 +119,8 @@ export const TicketListRow = ({
   const metadata = ticket.metadata as { fromEmailAddress?: string | null } | null | undefined;
   const fromEmailAddress = metadata?.fromEmailAddress;
   const { name: senderName, email: senderEmail } = useMemo(
-    () => parseSender(fromEmailAddress),
-    [fromEmailAddress],
+    () => (isSocialMedia ? { name: null, email: null } : parseSender(fromEmailAddress)),
+    [isSocialMedia, fromEmailAddress],
   );
 
   // Display the date that drives the row's sort position so the column
@@ -128,15 +131,15 @@ export const TicketListRow = ({
   const createdDate = useMemo(() => new Date(ticket.createdAt), [ticket.createdAt]);
 
   const displayEmail = senderEmail || (showExtraFields ? fromEmailAddress?.trim() || null : null);
-  // Show the sender's display name when the email carries one (like Gmail),
-  // otherwise fall back to the email address.
-  const displaySender = senderName || displayEmail;
-  // Keep the full identity on hover even when only the name is shown. Mirrors the
-  // rendered text exactly, so it is also what the truncation tooltip reveals.
+  // For social media desks the from field is a plain username (not an email address),
+  // so use it directly instead of going through parseSender.
+  const displaySender = isSocialMedia
+    ? fromEmailAddress?.trim() || null
+    : senderName || displayEmail;
   const senderTitle =
     senderName && displayEmail
       ? `${senderName} <${displayEmail}>`
-      : (displayEmail ?? senderName ?? '');
+      : (displayEmail ?? senderName ?? fromEmailAddress?.trim() ?? '');
   const statusLabel = isHumanInterventionTicket
     ? 'Human Intervention'
     : (ticket.stageName ?? formatStatusText(ticket.status));
@@ -235,7 +238,11 @@ export const TicketListRow = ({
             {emailCount > 0 && (
               <span
                 className='inline-flex h-[18px] min-w-[28px] items-center justify-center rounded-sm bg-muted px-1 text-[10px] font-medium tabular-nums text-muted-foreground'
-                title={`${emailCount} email${emailCount === 1 ? '' : 's'}`}
+                title={
+                  isSocialMedia
+                    ? `${emailCount} message${emailCount === 1 ? '' : 's'}`
+                    : `${emailCount} email${emailCount === 1 ? '' : 's'}`
+                }
               >
                 {emailCount}
               </span>
@@ -394,7 +401,7 @@ export const TicketListRow = ({
           >
             <Tooltip
               delayDuration={500}
-              content={`Latest email: ${formatDateTime(dueDate)}`}
+              content={`${isSocialMedia ? 'Latest message' : 'Latest email'}: ${formatDateTime(dueDate)}`}
               side='top'
             >
               <span

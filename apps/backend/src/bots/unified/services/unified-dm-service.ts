@@ -10,6 +10,7 @@ import { ChannelScopeType, ChannelVisibility, ChannelRole } from '@xyne/shared';
 import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { ChannelParticipantRepository } from '@/database/repositories/channelParticipantRepository';
 import { ChannelUserStatusRepository } from '@/database/repositories/channelUserStatusRepository';
+import { ProjectRepository } from '@/database/repositories/projectRepository';
 import { botCatalog } from '../index.js';
 import { unifiedBotUserService } from './unified-bot-user-service.js';
 import {logger} from '@/utils/logger';
@@ -17,6 +18,7 @@ import {logger} from '@/utils/logger';
 const channelRepository = new ChannelRepository();
 const channelParticipantRepository = new ChannelParticipantRepository();
 const channelUserStatusRepository = new ChannelUserStatusRepository();
+const projectRepository = new ProjectRepository();
 
 /**
  * Unified DM Service
@@ -56,12 +58,13 @@ class UnifiedDMService {
 
     // Create new DM channel with bot
     const channelName = [userId, botUserId].sort().join(',');
+    const dmProjectId = await projectRepository.getDMProjectId(workspaceId);
     const channel = await channelRepository.create({
       scopeType: ChannelScopeType.DM,
       name: channelName,
       visibility: ChannelVisibility.PRIVATE,
       createdBy: userId,
-      projectId: 'default',
+      projectId: dmProjectId ?? '',
       workspaceId,
     });
 

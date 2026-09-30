@@ -1,4 +1,4 @@
-import { useParams } from 'react-router-dom';
+import { useRouterSelector } from './useStableRouter';
 
 /** Add the active workspace segment to a same-origin app URL when missing. */
 export function withWorkspacePrefix(url: string, workspaceId?: string): string {
@@ -37,6 +37,6 @@ export function withWorkspacePrefix(url: string, workspaceId?: string): string {
  *   const link = `${shareableOrigin}/chat/dir/${channelId}`;
  */
 export function useShareableOrigin(): string {
-  const { workspaceId } = useParams<{ workspaceId?: string }>();
+  const workspaceId = useRouterSelector(snapshot => snapshot.params['workspaceId']);
   return workspaceId ? `${window.location.origin}/${workspaceId}` : window.location.origin;
 }

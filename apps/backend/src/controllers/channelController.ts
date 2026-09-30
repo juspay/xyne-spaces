@@ -1395,7 +1395,7 @@ export class ChannelController {
         );
       } else if (source?.sourceType === ExternalSourcePlatform.SLACK_DESK) {
         connectedLabel = extractSlackChannelId(source.name);
-      } else if (sourceType && isSocialMediaPlatform(sourceType)) {
+      } else if (sourceType && isSocialMediaPlatform(sourceType) && sourceType !== ExternalSourcePlatform.INSTAGRAM) {
         const reviewSources = await db.externalSource.findMany({
           where: { channelId, workspaceId, sourceType: { in: [...SOCIAL_MEDIA_PLATFORMS] } },
           select: {
@@ -1418,6 +1418,27 @@ export class ChannelController {
         connectedLabel = activeReviewSources
           .map(reviewSource => reviewSource.displayName)
           .join(', ') || 'No active apps';
+      } else if (source?.sourceType === ExternalSourcePlatform.INSTAGRAM) {
+        const igSources = await db.externalSource.findMany({
+          where: { channelId, workspaceId, sourceType: ExternalSourcePlatform.INSTAGRAM },
+          select: {
+            id: true,
+            displayName: true,
+            externalIdentifier: true,
+            isActive: true,
+          },
+          orderBy: { createdAt: 'asc' },
+        });
+        const activeIgSources = igSources.filter(s => s.isActive);
+        isConnected = activeIgSources.length > 0;
+        deskApps = igSources.map(s => ({
+          id: s.id,
+          displayName: s.displayName ?? s.externalIdentifier ?? '',
+          externalIdentifier: s.externalIdentifier,
+          packageName: s.externalIdentifier,
+          isActive: s.isActive,
+        }));
+        connectedLabel = activeIgSources.map(s => s.displayName ? `@${s.displayName}` : s.externalIdentifier).join(', ') || null;
       }
 
       const fromDisplay = (source?.displayName ?? '').match(/[\w.+-]+@[\w.-]+\.[\w.-]+/)?.[0];
