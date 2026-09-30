@@ -1,3 +1,10 @@
+## [1.440.0](https://github.com/juspay/xyne-spaces/compare/v1.439.2...v1.440.0) (2026-09-30)
+
+
+### Features
+
+* Xyne Spaces and Claw MCP in mcp.json ([#2490](https://github.com/juspay/xyne-spaces/issues/2490)) ([9dfe431](https://github.com/juspay/xyne-spaces/commit/9dfe4317dd83ba18de83cc1a894934194f14d46b))
+
 ## [1.439.2](https://github.com/juspay/xyne-spaces/compare/v1.439.1...v1.439.2) (2026-09-30)
 
 
