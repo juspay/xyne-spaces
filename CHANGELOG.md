@@ -1,3 +1,10 @@
+## [1.444.3](https://github.com/juspay/xyne-spaces/compare/v1.444.2...v1.444.3) (2026-09-30)
+
+
+### Bug Fixes
+
+* run workflow-engine agent steps on the agent's premium model ([#2540](https://github.com/juspay/xyne-spaces/issues/2540)) ([e890a44](https://github.com/juspay/xyne-spaces/commit/e890a4478dff00e6a5d5e989415c7a4b4790a641))
+
 ## [1.444.2](https://github.com/juspay/xyne-spaces/compare/v1.444.1...v1.444.2) (2026-09-30)
 
 
