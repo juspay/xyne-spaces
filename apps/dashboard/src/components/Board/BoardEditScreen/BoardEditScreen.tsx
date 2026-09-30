@@ -14,6 +14,7 @@ import { mutators } from '../../../zero/mutators';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { v4 as uuidv4 } from 'uuid';
 import { Button } from '../../../components/ui/Button';
+import { SingleSelect } from '@juspay/blend-design-system';
 import {
   BoardType,
   FormContextType,
@@ -222,6 +223,11 @@ const BoardEditScreen = ({
     enabled: !!projectId,
   });
 
+  const [namespaces] = useCachedQuery(
+    queries.ticketNamespacesByProject({ projectId: projectId || '' }),
+    { enabled: !!projectId },
+  );
+
   // Fetch custom fields form mapping for this board
   const [formMapping] = useCachedQuery(
     queries.getFormMappingByContextId({
@@ -243,6 +249,34 @@ const BoardEditScreen = ({
   );
 
   const [boardName, setBoardName] = useState('');
+  const [namespaceId, setNamespaceId] = useState<string | undefined>();
+
+  // Initialise the ticket-code dropdown: the board's current code on edit, the
+  // project's default on create.
+  useEffect(() => {
+    if (namespaceId !== undefined) return;
+    if (!namespaces || namespaces instanceof Error || namespaces.length === 0) return;
+    const fallback = namespaces[0];
+    if (!fallback) return;
+    if (mode === 'edit') {
+      const boardRow = board && !(board instanceof Error) ? board : undefined;
+      if (
+        boardRow?.ticketNamespaceId &&
+        namespaces.some(namespace => namespace.id === boardRow.ticketNamespaceId)
+      ) {
+        setNamespaceId(boardRow.ticketNamespaceId);
+      }
+      return;
+    }
+    const proj = project && !(project instanceof Error) ? project : undefined;
+    const preferred =
+      proj?.defaultTicketNamespaceId &&
+      namespaces.some(namespace => namespace.id === proj.defaultTicketNamespaceId)
+        ? proj.defaultTicketNamespaceId
+        : fallback.id;
+    setNamespaceId(preferred);
+  }, [mode, namespaceId, namespaces, project, board]);
+
   const [fields, setFields] = useState<TicketField[]>(DEFAULT_TICKET_FIELDS);
   const [isDragging, setIsDragging] = useState<string | null>(null);
   const [hoveredFieldId, setHoveredFieldId] = useState<string | null>(null);
@@ -1160,6 +1194,7 @@ const BoardEditScreen = ({
         }>('/boards', {
           name: boardName.trim(),
           projectId: projectId,
+          ...(namespaceId && { namespaceId }),
           ...(sourceBoardId &&
             asDuplicateSourceBoard(sourceBoard)?.boardType && {
               boardType: asDuplicateSourceBoard(sourceBoard)?.boardType,
@@ -1380,12 +1415,30 @@ const BoardEditScreen = ({
         ...(nextCustomFieldsFormId && { customFieldsFormId: nextCustomFieldsFormId }),
       };
 
+      // Changing the board's code affects only future tickets; existing ids stay put.
+      const boardRow = board && !(board instanceof Error) ? board : undefined;
+      if (namespaceId && namespaceId !== boardRow?.ticketNamespaceId) {
+        const selectedCode =
+          namespaces && !(namespaces instanceof Error)
+            ? namespaces.find(namespace => namespace.id === namespaceId)?.code
+            : undefined;
+        const confirmed = await confirm({
+          title: 'Change ticket code',
+          description: `New tickets on this board will use ${
+            selectedCode ?? 'the new code'
+          }-0001. Existing tickets keep their current codes.`,
+          confirmLabel: 'Change code',
+        });
+        if (!confirmed) return;
+      }
+
       const mutatorArgs = {
         boardId,
         name: boardName,
         metadata: newMetadata,
         timestamp: Date.now(),
         stageIds,
+        ...(namespaceId && { ticketNamespaceId: namespaceId }),
       };
 
       const result = zero.mutate(mutators.board.update(mutatorArgs));
@@ -1425,6 +1478,10 @@ const BoardEditScreen = ({
     sourceBoardId,
     cloneSourceBoardWorkflow,
     hasPendingOptionDecision,
+    namespaceId,
+    namespaces,
+    board,
+    confirm,
   ]);
 
   if (!isOpen) return null;
@@ -1548,6 +1605,29 @@ const BoardEditScreen = ({
                   data-track-name='board-name-input'
                 />
               </div>
+              {namespaces && !(namespaces instanceof Error) && namespaces.length > 0 && (
+                <div className='pl-5'>
+                  <SingleSelect
+                    label='Ticket code'
+                    placeholder='Select ticket code'
+                    items={[
+                      {
+                        items: namespaces.map(namespace => ({
+                          label: namespace.name
+                            ? `${namespace.code} · ${namespace.name}`
+                            : namespace.code,
+                          value: namespace.id,
+                        })),
+                      },
+                    ]}
+                    selected={namespaceId ?? ''}
+                    onSelect={value => setNamespaceId(value as string)}
+                  />
+                  <p className='mt-1 text-xs text-muted-foreground'>
+                    The prefix for new tickets on this board; existing tickets keep their code.
+                  </p>
+                </div>
+              )}
               <div className='bg-background rounded-lg'>
                 <div className='divide'>
                   {fields

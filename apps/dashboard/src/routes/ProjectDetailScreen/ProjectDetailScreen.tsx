@@ -35,6 +35,7 @@ import { ProjectForm } from '../../components/Project';
 import { ReleaseConfigWizard } from '../../components/Release/ReleaseConfigWizard/ReleaseConfigWizard';
 import { ReleasesSection } from './ReleasesSection';
 import { CreateTicketModal } from '../../components/Tickets/CreateTicketModal/CreateTicketModal';
+import { TicketNamespacesModal } from '../../components/Project/TicketNamespacesModal/TicketNamespacesModal';
 import { Button } from '../../components/ui/Button';
 import { Dialog } from '../../components/ui/Dialog/Dialog';
 import { queries } from '../../zero/queries';
@@ -129,6 +130,7 @@ const ProjectDetailScreen = (): ReactElement => {
   const [showFlowBoardCreate, setShowFlowBoardCreate] = useState(false);
   const [showBoardEditModal, setShowBoardEditModal] = useState(false);
   const [showReleaseConfigModal, setShowReleaseConfigModal] = useState(false);
+  const [showManageNamespaces, setShowManageNamespaces] = useState(false);
   const [releaseBoardFlow, setReleaseBoardFlow] = useState<ReleaseBoardFlow>(null);
   const [createdBoardId, setCreatedBoardId] = useState<string | null>(null);
   const [createdBoardData, setCreatedBoardData] = useState<BoardData | null>(null);
@@ -155,6 +157,34 @@ const ProjectDetailScreen = (): ReactElement => {
       enabled: !!projectId,
     },
   );
+
+  // Ticket namespaces for this project, used to show each board's code badge.
+  const [namespaces] = useCachedQuery(
+    queries.ticketNamespacesByProject({ projectId: projectId || '' }),
+    { enabled: !!projectId },
+  );
+  const namespaceCodeByBoardId = useMemo(() => {
+    const codeByNamespace = new Map<string, string>();
+    (namespaces && !(namespaces instanceof Error) ? namespaces : []).forEach(namespace =>
+      codeByNamespace.set(namespace.id, namespace.code),
+    );
+    const byBoard = new Map<string, string>();
+    (boards && !(boards instanceof Error) ? boards : []).forEach(board => {
+      if (board.ticketNamespaceId) {
+        const code = codeByNamespace.get(board.ticketNamespaceId);
+        if (code) byBoard.set(board.id, code);
+      }
+    });
+    return byBoard;
+  }, [namespaces, boards]);
+
+  // The namespace feature is live for a project only once it has a namespace (the
+  // backfill bootstraps them; auto-seed handles new projects post-activation). Until
+  // then there's nothing to manage and creating one is rejected server-side, so hide
+  // the entry point.
+  const ticketNamespacesActive =
+    (Array.isArray(namespaces) && namespaces.length > 0) ||
+    (!!project && !(project instanceof Error) && !!project.defaultTicketNamespaceId);
 
   // Consume the Ticket view's edit-board intent once.
   const requestedEditBoardId = searchParams.get('editBoard');
@@ -540,15 +570,28 @@ const ProjectDetailScreen = (): ReactElement => {
                         : 'Releases'}
                 </h2>
                 {activeTab === 'boards' && (
-                  <Button
-                    variant='default'
-                    onClick={() => setShowBoardTypeChooser(true)}
-                    data-track-category='ProjectDetail'
-                    data-track-name='CreateBoard'
-                    data-track-metadata={JSON.stringify({ projectId })}
-                  >
-                    Create Board
-                  </Button>
+                  <div className='flex items-center gap-2'>
+                    {ticketNamespacesActive && (
+                      <Button
+                        variant='secondary'
+                        onClick={() => setShowManageNamespaces(true)}
+                        data-track-category='ProjectDetail'
+                        data-track-name='ManageNamespaces'
+                        data-track-metadata={JSON.stringify({ projectId })}
+                      >
+                        Manage codes
+                      </Button>
+                    )}
+                    <Button
+                      variant='default'
+                      onClick={() => setShowBoardTypeChooser(true)}
+                      data-track-category='ProjectDetail'
+                      data-track-name='CreateBoard'
+                      data-track-metadata={JSON.stringify({ projectId })}
+                    >
+                      Create Board
+                    </Button>
+                  </div>
                 )}
                 {fromReleaseManager && activeTab === 'release' && (
                   <Button
@@ -591,6 +634,7 @@ const ProjectDetailScreen = (): ReactElement => {
                   onCopyConfig={board => setCopyConfigTargetBoard(board)}
                   applicationBoardIds={applicationBoardIds}
                   applicationByBoardId={applicationByBoardId}
+                  namespaceCodeByBoardId={namespaceCodeByBoardId}
                   {...(fromReleaseManager ? { onWorkflowFields: setEditingBoard } : {})}
                   {...(workspaceId && projectId
                     ? {
@@ -1117,6 +1161,17 @@ const ProjectDetailScreen = (): ReactElement => {
           />
         </div>
       </Dialog>
+
+      {projectId && (
+        <TicketNamespacesModal
+          projectId={projectId}
+          defaultNamespaceId={
+            project && !(project instanceof Error) ? project.defaultTicketNamespaceId ?? null : null
+          }
+          open={showManageNamespaces}
+          onOpenChange={setShowManageNamespaces}
+        />
+      )}
 
       <Dialog
         open={showAddRepositoryModal}

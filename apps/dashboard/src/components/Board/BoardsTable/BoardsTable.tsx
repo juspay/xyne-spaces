@@ -4,6 +4,7 @@ import { BoardType } from '@xyne/shared';
 import { EmptyState } from '../EmptyState';
 import { DelayedSpinner } from '../../ui/DelayedSpinner';
 import { Button } from '../../ui/Button';
+import { Badge } from '../../ui/Badge';
 import { copyTextToClipboard } from '../../../utils/clipboardUtils';
 import { toast } from 'sonner';
 import { getBoardEditLabel } from '../BoardCard';
@@ -34,6 +35,8 @@ interface BoardsTableProps {
   // Map app-board-id → Application row; used to detect app boards, show the app
   // name, and group them under mainReleaseBoardId. Omitted = flat table (old behaviour).
   applicationByBoardId?: Map<string, ApplicationLite>;
+  // Map board-id → its ticket namespace code, for the code badge next to the board name.
+  namespaceCodeByBoardId?: Map<string, string>;
   // Fired on row click (outside the action buttons). Rows are styled
   // cursor-pointer, so without a handler they look clickable but do nothing.
   onBoardClick?: (board: BoardWithStages) => void;
@@ -58,6 +61,7 @@ export const BoardsTable = ({
   onCopyConfig,
   applicationBoardIds,
   applicationByBoardId,
+  namespaceCodeByBoardId,
   onBoardClick,
   onWorkflowFields,
   loading = false,
@@ -388,7 +392,14 @@ export const BoardsTable = ({
                 data-track-name='Open_Board_Row'
               >
                 <td className='px-6 py-4 whitespace-nowrap'>
-                  <span className='text-sm font-medium text-muted-foreground'>{board.name}</span>
+                  <div className='flex items-center gap-2'>
+                    <span className='text-sm font-medium text-muted-foreground'>{board.name}</span>
+                    {namespaceCodeByBoardId?.get(board.id) && (
+                      <Badge variant='secondary' className='font-mono'>
+                        {namespaceCodeByBoardId.get(board.id)}
+                      </Badge>
+                    )}
+                  </div>
                 </td>
                 <td className='px-6 py-4 whitespace-nowrap'>
                   <span
