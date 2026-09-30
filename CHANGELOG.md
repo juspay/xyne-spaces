@@ -3,6 +3,15 @@
 
 ### Bug Fixes
 
+* fix-forpersonal-dm ([#2527](https://github.com/juspay/xyne-spaces/issues/2527)) ([d615d5b](https://github.com/juspay/xyne-spaces/commit/d615d5b318717d0b57078f03153a5d78d8670e04))
+* flow release 29 ([#2520](https://github.com/juspay/xyne-spaces/issues/2520)) ([d79a238](https://github.com/juspay/xyne-spaces/commit/d79a2388dce6c89e7622cd8d31e1d022a88876a0))
+* open sandbox preview and VS Code links in the desktop browser panel ([#2517](https://github.com/juspay/xyne-spaces/issues/2517)) ([937aae4](https://github.com/juspay/xyne-spaces/commit/937aae431fadf885c36a45b7ce04608b89b263e6))
+
+## [1.419.0-release-20260929.4](https://github.com/juspay/xyne-spaces/compare/v1.419.0-release-20260929.3...v1.419.0-release-20260929.4) (2026-09-30)
+
+
+### Bug Fixes
+
 * flow release 29 ([#2520](https://github.com/juspay/xyne-spaces/issues/2520)) ([d79a238](https://github.com/juspay/xyne-spaces/commit/d79a2388dce6c89e7622cd8d31e1d022a88876a0))
 * open sandbox preview and VS Code links in the desktop browser panel ([#2517](https://github.com/juspay/xyne-spaces/issues/2517)) ([937aae4](https://github.com/juspay/xyne-spaces/commit/937aae431fadf885c36a45b7ce04608b89b263e6))
 
