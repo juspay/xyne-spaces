@@ -148,6 +148,9 @@ export interface CreateConversationWithEmailParams {
   // detection when the channel's duplicateScopeConfig has no matching values.
   scopeFieldValues?: DuplicateScopeFieldValue[];
   deferChannelSideEffects?: boolean;
+  // Called once the conversation/email/ticket/thread-link transaction commits,
+  // before the slower post-create side effects run.
+  onThreadCommitted?: () => Promise<void>;
 }
 
 export interface AddEmailToConversationParams {
@@ -1068,6 +1071,7 @@ export class EmailService {
       clientVersionCode,
       scopeFieldValues,
       deferChannelSideEffects = false,
+      onThreadCommitted,
     } = params;
     const normalizedRfcMessageId = normalizeRfcMessageId(rfcMessageId);
 
@@ -1167,6 +1171,7 @@ export class EmailService {
       throw err;
     }
     const { conversation, ticket, email } = txResult;
+    await onThreadCommitted?.();
 
     // Direct DB ticket create bypasses Zero side-effects — invalidate the
     // channel's label unread counts so sidebar badges refresh.
