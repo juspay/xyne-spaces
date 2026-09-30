@@ -622,6 +622,8 @@ export default function SdlcScreen(): ReactElement {
   // State, not a ref: the folder page only portals its tabs once the node exists.
   const [folderTabsSlot, setFolderTabsSlot] = useState<HTMLElement | null>(null);
   const [createTicketOpen, setCreateTicketOpen] = useState(false);
+  // What a new ticket is filed on, fixed when its form opens, as a call's scope is.
+  const [createTicketScope, setCreateTicketScope] = useState<EntityLinkScope | null>(null);
   // The call being set up, and where: fixed when the picker opens, so what's on screen
   // moving underneath it can't change where the call goes.
   const [callPicker, setCallPicker] = useState<SdlcCallScope | null>(null);
@@ -1443,6 +1445,13 @@ export default function SdlcScreen(): ReactElement {
     : section === 'tracks' && selectedTrack
       ? { link: { ownerType: 'TRACK', ownerId: selectedTrack.id }, name: selectedTrack.name }
       : { link: null, name: channel?.name ?? 'this hub' };
+  // The header's ticket is for the page too, for the same reason its call is: the
+  // item the panel was last about stays in the url while the panel is shut.
+  const pageEntityLinkScope: EntityLinkScope | null = pageOwner
+    ? { sourceType: 'CANVAS', sourceId: pageOwner.canvasId }
+    : section === 'tracks' && selectedTrack
+      ? { sourceType: 'TRACK', sourceId: selectedTrack.id }
+      : null;
   const isHubMember = Boolean(
     channel?.participants?.some(participant => participant.userId === auth.userID),
   );
@@ -1450,6 +1459,7 @@ export default function SdlcScreen(): ReactElement {
   const panelScopeActions = (place: 'header' | 'panel'): ReactNode => {
     if (!channel) return null;
     const scope = place === 'header' ? pageCallScope : callScope;
+    const ticketScope = place === 'header' ? pageEntityLinkScope : entityLinkScope;
     return (
       <>
         {/* Ask AI, then call, then ticket: the order a thread's own actions take, so
@@ -1491,13 +1501,14 @@ export default function SdlcScreen(): ReactElement {
           title='Create ticket'
           onClick={() => {
             setCreateTicketSource('sdlc_header');
+            setCreateTicketScope(ticketScope);
             setCreateTicketOpen(true);
           }}
           data-track-category='SdlcHub'
           data-track-name='HeaderCreateTicketClicked'
           data-track-metadata={JSON.stringify({
             place,
-            scope: entityLinkScope?.sourceType ?? null,
+            scope: ticketScope?.sourceType ?? null,
             source: 'sdlc_header',
           })}
         >
@@ -4143,7 +4154,7 @@ export default function SdlcScreen(): ReactElement {
       ) : null}
 
       {createTicketOpen ? (
-        <EntityLinkContext.Provider value={entityLinkScope}>
+        <EntityLinkContext.Provider value={createTicketScope}>
           <CreateTicketModal
             isOpen={createTicketOpen}
             onClose={() => setCreateTicketOpen(false)}
