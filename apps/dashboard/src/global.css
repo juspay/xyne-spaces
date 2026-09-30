@@ -5017,45 +5017,9 @@ img.inline-emoji,
   transition: opacity 520ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-.cmdk-ai-overview[data-state="thinking"]::before,
 .cmdk-ai-overview[data-state="answering"]::before {
   animation-play-state: running;
   opacity: 1;
-}
-
-@keyframes cmdk-ai-sheen {
-  from {
-    background-position: 100% 0;
-  }
-  to {
-    background-position: 0% 0;
-  }
-}
-
-.cmdk-ai-status {
-  background-image: linear-gradient(
-    100deg,
-    hsl(var(--muted-foreground)) 40%,
-    var(--cmdk-ai-peach) 50%,
-    hsl(var(--muted-foreground)) 60%
-  );
-  background-size: 300% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  animation: cmdk-ai-sheen 2s linear infinite;
-}
-
-.cmdk-ai-skeleton-bar {
-  border-radius: 9999px;
-  background-image: linear-gradient(
-    100deg,
-    hsl(var(--muted-foreground) / 0.14) 30%,
-    rgba(255, 160, 107, 0.34) 50%,
-    hsl(var(--muted-foreground) / 0.14) 70%
-  );
-  background-size: 300% 100%;
-  animation: cmdk-ai-sheen 1.6s linear infinite;
 }
 
 .cmdk-ai-cite {
@@ -5144,20 +5108,12 @@ img.inline-emoji,
 
 @media (prefers-reduced-motion: reduce) {
   .cmdk-ai-overview::before,
-  .cmdk-ai-skeleton-bar,
   .cmdk-ai-answer[data-streaming="true"] .bot-markdown-content > p:last-child::after {
     animation: none;
   }
 
-  .cmdk-ai-overview[data-state="thinking"]::before,
   .cmdk-ai-overview[data-state="answering"]::before {
     background: rgba(255, 138, 92, 0.55);
-  }
-
-  .cmdk-ai-status {
-    animation: none;
-    background: none;
-    color: hsl(var(--muted-foreground));
   }
 }
 

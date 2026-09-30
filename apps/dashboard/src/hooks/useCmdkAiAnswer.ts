@@ -1,102 +1,97 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { isRelatedDraftWorthLookingUp, normalizeRelatedDraft } from '@xyne/shared';
 import { useAuthContextValues } from './useAuth';
+import { MIN_RELATED_CONTEXT_DEBOUNCE_MS } from './useRelatedContext';
 import { searchService } from '../services/searchService';
-import type { CmdkAnswerEvent, CmdkAnswerSource } from '../types/search';
-
-export type CmdkAiAnswerStatus = 'idle' | 'streaming' | 'completed' | 'error';
+import type { CmdkAnswerSource } from '../types/search';
 
 export interface CmdkAiAnswer {
-  status: CmdkAiAnswerStatus;
-  /** The query the current answer is for. */
-  askedQuery: string | null;
-  /** Answer markdown so far (grows while streaming). */
+  query: string;
   content: string;
   sources: CmdkAnswerSource[];
-  error: string | null;
+  streaming: boolean;
 }
 
-const IDLE: CmdkAiAnswer = {
-  status: 'idle',
-  askedQuery: null,
-  content: '',
-  sources: [],
-  error: null,
-};
+const QUIET_MS = 60_000;
+const CACHE_SIZE = 20;
 
-const FAILED = 'Could not load the AI overview';
+const continues = (draft: string, foundFor: string): boolean =>
+  foundFor !== '' && draft.startsWith(foundFor);
 
-const applyEvent = (answer: CmdkAiAnswer, event: CmdkAnswerEvent): CmdkAiAnswer => {
-  switch (event.type) {
-    case 'sources':
-      return { ...answer, sources: event.sources };
-    case 'delta':
-      return { ...answer, content: answer.content + event.content };
-    case 'error':
-      return { ...answer, status: 'error', error: FAILED };
-    default:
-      return { ...answer, status: 'completed' };
-  }
-};
-
-export function useCmdkAiAnswer(): {
-  answer: CmdkAiAnswer;
-  ask: (query: string) => void;
-} {
+export function useCmdkAiAnswer(query: string, enabled: boolean): CmdkAiAnswer | null {
   const { workspaceId } = useAuthContextValues();
-  const [answer, setAnswer] = useState<CmdkAiAnswer>(IDLE);
-  const runRef = useRef<{ query: string; controller: AbortController } | null>(null);
+  const [shown, setShown] = useState<CmdkAiAnswer | null>(null);
+  const cache = useRef(new Map<string, CmdkAiAnswer | null>());
+  const quietUntil = useRef(0);
 
-  const abortCurrent = useCallback((): void => {
-    runRef.current?.controller.abort();
-    runRef.current = null;
-  }, []);
+  useEffect(() => {
+    const draft = normalizeRelatedDraft(query);
+    if (!enabled || !isRelatedDraftWorthLookingUp(draft)) {
+      setShown(null);
+      return;
+    }
 
-  useEffect(() => abortCurrent, [abortCurrent]);
+    const controller = new AbortController();
+    const keepIfContinued = (): void =>
+      setShown(current => (current && continues(draft, current.query) ? current : null));
+    const remember = (answer: CmdkAiAnswer | null): void => {
+      cache.current.set(draft, answer);
+      if (cache.current.size > CACHE_SIZE) {
+        cache.current.delete(cache.current.keys().next().value as string);
+      }
+    };
 
-  const ask = useCallback(
-    (query: string): void => {
-      const trimmed = query.trim();
-      if (!trimmed || runRef.current?.query === trimmed) return;
-      abortCurrent();
+    const timer = setTimeout(() => {
+      const cached = cache.current.get(draft);
+      if (cached !== undefined) {
+        setShown(cached);
+        return;
+      }
+      if (Date.now() < quietUntil.current) return;
 
-      const controller = new AbortController();
-      runRef.current = { query: trimmed, controller };
-      setAnswer({ ...IDLE, status: 'streaming', askedQuery: trimmed });
-
-      const release = (): void => {
-        if (runRef.current?.controller === controller) runRef.current = null;
-      };
-
+      let answer: CmdkAiAnswer = { query: draft, content: '', sources: [], streaming: true };
       searchService
         .streamCmdkAnswer(
-          trimmed,
+          draft,
           workspaceId,
           event => {
             if (controller.signal.aborted) return;
-            if (event.type === 'error') release();
-            setAnswer(current => applyEvent(current, event));
+            if (event.type === 'sources') {
+              answer = { ...answer, sources: event.sources };
+            } else if (event.type === 'delta') {
+              answer = { ...answer, content: answer.content + event.content };
+              setShown(answer);
+            } else if (event.type === 'done') {
+              answer = { ...answer, streaming: false };
+              remember(answer);
+              setShown(answer);
+            } else if (event.type === 'skip' && event.reason === 'nothing') {
+              remember(null);
+              setShown(null);
+            } else {
+              if (event.type === 'skip' && event.reason === 'off') {
+                quietUntil.current = Date.now() + QUIET_MS;
+              }
+              keepIfContinued();
+            }
           },
           controller.signal,
         )
-        .then(() => {
-          if (controller.signal.aborted) return;
-          setAnswer(current =>
-            current.status === 'streaming' ? { ...current, status: 'completed' } : current,
-          );
-        })
         .catch((error: unknown) => {
           if (controller.signal.aborted) return;
-          release();
-          setAnswer({
-            ...IDLE,
-            status: 'error',
-            askedQuery: trimmed,
-            error: error instanceof Error ? error.message : FAILED,
-          });
+          if ((error as { status?: number }).status === 429) {
+            quietUntil.current = Date.now() + QUIET_MS;
+          }
+          keepIfContinued();
         });
-    },
-    [abortCurrent, workspaceId],
-  );
+    }, MIN_RELATED_CONTEXT_DEBOUNCE_MS);
 
-  return { answer, ask };
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+      setShown(current => (current?.streaming ? null : current));
+    };
+  }, [query, enabled, workspaceId]);
+
+  return shown;
 }

@@ -125,7 +125,7 @@ const IS_COMPLETE: JevNoulQuestion = {
 };
 
 /** The gate: the cleanest signal Jev gives here, far cleaner than the label's own score. */
-export const RELEVANT_CRITERIA = {
+const RELEVANT_CRITERIA = {
   true: 'The same problem or topic, even in different words',
   false: 'A different subject, even if some words match',
 };
@@ -153,7 +153,7 @@ const LABELS: RelatedLabel[] = ['answers_it', 'same_question', 'related_discussi
  * become plain quotes: in Jev's instructions they point into the state, and a quoted
  * `draft` would pull the user's own draft into someone else's message.
  */
-export const quoteCandidate = (candidate: Candidate): string => {
+const quoteCandidate = (candidate: Candidate): string => {
   const text = candidate.text.replace(/"{3,}/g, '"').replace(/`/g, "'");
   return `Candidate ${KIND_NAMES[candidate.kind]}:\n"""\n${text}\n"""`;
 };
@@ -305,7 +305,8 @@ async function classify(
 export async function findRelatedContext(
   text: string,
   req: RelatedContextRequest,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  onCandidates?: (candidates: Candidate[]) => void
 ): Promise<RelatedContext | null> {
   if (!isJevConfigured() || !envConfig.jev.url || !envConfig.jev.model) return null;
   let config: RelatedContextConfig;
@@ -360,6 +361,7 @@ export async function findRelatedContext(
     );
     const retrievalMs = Date.now() - retrievalStarted;
     const candidates = found ?? [];
+    onCandidates?.(candidates);
     // One line per lookup: where the time went and how it ended. Never the draft.
     const summary = (extra: Record<string, unknown>): void => {
       logger.info('[RelatedContext] lookup', {

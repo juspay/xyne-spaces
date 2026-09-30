@@ -1,7 +1,6 @@
 import {
   createContext,
   useContext,
-  useEffect,
   useMemo,
   useState,
   type AnchorHTMLAttributes,
@@ -9,7 +8,7 @@ import {
   type MouseEvent,
   type ReactElement,
 } from 'react';
-import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
+import { motion, useReducedMotion } from 'framer-motion';
 import { MessageSquareText } from 'lucide-react';
 import type { Components } from 'react-markdown';
 import { useCmdkAiAnswer } from '../../../hooks/useCmdkAiAnswer';
@@ -23,15 +22,7 @@ import type { CmdkAnswerSource, DisplaySearchResult } from '../../../types/searc
 import { citationOrder, linkCitations, senderOf, sourceNumberOf } from './AiAnswerCard.utils';
 
 interface AiAnswerCardProps {
-  /** What is in the search box: asked once typing settles, shown only while it still matches. */
   query: string;
-  question: string | null;
-  /**
-   * Whether the query currently reads as a question. False draws nothing, but the card
-   * stays mounted and keeps the answer it is holding: the verdict drops out for a moment
-   * on every edit (a shortened query is not reclassified until the new verdict lands), and
-   * unmounting would throw away a good answer and pay for it again on the way back.
-   */
   active: boolean;
   onOpenSource: (result: DisplaySearchResult, event: MouseEvent<HTMLButtonElement>) => void;
   onContinue: (question: string) => void;
@@ -48,15 +39,13 @@ const HEADING_CLASS = 'text-xs font-medium uppercase tracking-wide font-mono tex
  */
 const ANSWER_MAX_HEIGHT = 'max-h-36';
 
-const ANSWER_LINE_WIDTHS = ['w-full', 'w-[92%]', 'w-[58%]'];
+const NO_SOURCES: CmdkAnswerSource[] = [];
 const EASE_OUT: [number, number, number, number] = [0.22, 1, 0.36, 1];
 const CHIP_CLASS =
   'cmdk-ai-source flex h-7 max-w-[22rem] items-center gap-1.5 rounded-md bg-activity-chip px-2 text-xs text-muted-foreground transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-activity-chip-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.96]';
 const CONTINUE_CLASS =
   'flex h-7 items-center gap-1.5 rounded-lg px-2 text-xs font-medium text-muted-foreground transition-[background-color,color,transform] duration-150 hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.96]';
 const PREVIEW_CLASS = 'z-[10002] w-72 rounded-lg p-3';
-
-type Phase = 'thinking' | 'answering' | 'done';
 
 interface CitationContextValue {
   sources: CmdkAnswerSource[];
@@ -67,18 +56,6 @@ interface CitationContextValue {
 }
 
 const CitationContext = createContext<CitationContextValue | null>(null);
-
-const AnswerSkeleton = (): ReactElement => (
-  <div aria-hidden='true' className='flex flex-col gap-2.5 py-1.5'>
-    {ANSWER_LINE_WIDTHS.map((width, index) => (
-      <div
-        key={width}
-        className={`cmdk-ai-skeleton-bar h-2.5 ${width}`}
-        style={{ animationDelay: `${index * 120}ms` }}
-      />
-    ))}
-  </div>
-);
 
 const SourcePreview = ({ source }: { source: CmdkAnswerSource }): ReactElement => {
   const where = useWhereOf(source);
@@ -219,8 +196,8 @@ const SourceChip = ({ source, number, label, index }: SourceChipProps): ReactEle
 
 /**
  * AI answer shown above the current tab's results, Google "AI Overview" style, when the
- * query needs AI. The backend searches the workspace, Jev keeps the results that are
- * about the question, and one fast model call streams the answer over them; the tab's
+ * workspace can answer the query. The backend runs the composer's related-context lookup,
+ * and one fast model call streams the answer over what it keeps; the tab's
  * own results stay right below it. One question, one answer — "Continue in Xyne AI"
  * takes it into a chat. A new query asks again, replacing the answer.
  *
@@ -228,75 +205,41 @@ const SourceChip = ({ source, number, label, index }: SourceChipProps): ReactEle
  */
 export const AiAnswerCard = ({
   query,
-  question,
   active,
   onOpenSource,
   onContinue,
 }: AiAnswerCardProps): ReactElement | null => {
-  const { answer, ask } = useCmdkAiAnswer();
+  const answer = useCmdkAiAnswer(query, active);
+  const content = answer?.content ?? '';
+  const sources = answer?.sources ?? NO_SOURCES;
+  const streaming = answer?.streaming ?? false;
   const reduceMotion = useReducedMotion();
   const [focused, setFocused] = useState<number | null>(null);
 
-  useEffect(() => {
-    if (question) ask(question);
-  }, [ask, question]);
-
-  const order = useMemo(
-    () => citationOrder(answer.content, answer.sources.length),
-    [answer.content, answer.sources.length],
-  );
-  const renderedContent = useMemo(
-    () => linkCitations(answer.content, order),
-    [answer.content, order],
-  );
+  const order = useMemo(() => citationOrder(content, sources.length), [content, sources.length]);
+  const renderedContent = useMemo(() => linkCitations(content, order), [content, order]);
   const shown = useMemo((): Array<{ source: CmdkAnswerSource; number: number }> => {
     if (order.length > 0) {
       return order.flatMap(number => {
-        const source = answer.sources[number - 1];
+        const source = sources[number - 1];
         return source ? [{ source, number }] : [];
       });
     }
-    return answer.status === 'completed'
-      ? answer.sources.map((source, index) => ({ source, number: index + 1 }))
-      : [];
-  }, [order, answer.sources, answer.status]);
+    return streaming ? [] : sources.map((source, index) => ({ source, number: index + 1 }));
+  }, [order, sources, streaming]);
   const context = useMemo(
     (): CitationContextValue => ({
-      sources: answer.sources,
+      sources,
       focused,
       setFocused,
       labelOf: number => order.indexOf(number) + 1 || number,
       onOpenSource,
     }),
-    [answer.sources, focused, order, onOpenSource],
+    [sources, focused, order, onOpenSource],
   );
 
-  // Shown from the moment the answer is asked for: a skeleton until the text streams in.
-  // Hidden if the run fails, or when the results can't answer the query.
-  if (!active || answer.status === 'idle' || answer.status === 'error') return null;
-
-  // The box has moved on since this answer was asked for (still typing, or a newer answer
-  // is on its way), so the answer on hand is for a different question: show the skeleton
-  // until the new one arrives rather than an answer that no longer matches the query.
-  const current = answer.askedQuery !== null && query.trim() === answer.askedQuery;
-
-  // The run for this exact query finished with nothing to show: drop the card instead of
-  // leaving the skeleton shimmering over the results for a reply that will never come.
-  if (current && answer.status === 'completed' && !answer.content) return null;
-
-  const showAnswer = Boolean(answer.content) && current;
-  const phase: Phase = !showAnswer
-    ? 'thinking'
-    : answer.status === 'streaming'
-      ? 'answering'
-      : 'done';
-  const swap = reduceMotion
-    ? { initial: { opacity: 0 }, animate: { opacity: 1 }, exit: { opacity: 0 } }
-    : {
-        initial: { opacity: 0, filter: 'blur(2px)' },
-        animate: { opacity: 1, filter: 'blur(0px)' },
-        exit: { opacity: 0, filter: 'blur(2px)' },
-      };
+  if (!active || !answer?.content) return null;
+  const phase = streaming ? 'answering' : 'done';
 
   return (
     <CitationContext.Provider value={context}>
@@ -313,69 +256,49 @@ export const AiAnswerCard = ({
           <XyneAIStar size={14} />
           <span className={HEADING_CLASS}>AI overview</span>
           <div className='ml-auto flex items-center'>
-            <AnimatePresence initial={false} mode='wait'>
-              {phase === 'thinking' ? (
-                <motion.span
-                  key='status'
-                  className='cmdk-ai-status px-2 text-xs'
-                  transition={{ duration: 0.16, ease: EASE_OUT }}
-                  {...swap}
-                >
-                  Reading your workspace
-                </motion.span>
-              ) : (
-                <motion.button
-                  key='continue'
-                  type='button'
-                  className={CONTINUE_CLASS}
-                  data-track-category='SEARCH'
-                  data-track-name='AI_OVERVIEW_CONTINUE'
-                  onClick={() => onContinue(query.trim())}
-                  transition={{ duration: 0.16, ease: EASE_OUT }}
-                  {...swap}
-                >
-                  <MessageSquareText aria-hidden className='size-3.5' strokeWidth={2} />
-                  Continue in Xyne AI
-                </motion.button>
-              )}
-            </AnimatePresence>
+            <button
+              type='button'
+              className={CONTINUE_CLASS}
+              data-track-category='SEARCH'
+              data-track-name='AI_OVERVIEW_CONTINUE'
+              onClick={() => onContinue(query.trim())}
+            >
+              <MessageSquareText aria-hidden className='size-3.5' strokeWidth={2} />
+              Continue in Xyne AI
+            </button>
           </div>
         </header>
 
-        {showAnswer ? (
-          // Capped so a long answer never pushes the results out of reach; it scrolls.
-          <motion.div
-            key={answer.askedQuery}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 0.18, ease: EASE_OUT }}
+        {/* Capped so a long answer never pushes the results out of reach; it scrolls. */}
+        <motion.div
+          key={answer.query}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.18, ease: EASE_OUT }}
+        >
+          <div
+            className={`cmdk-ai-answer ${ANSWER_MAX_HEIGHT} overflow-y-auto text-pretty text-sm leading-6 text-foreground [&_p]:my-1.5 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0`}
+            data-streaming={phase === 'answering'}
           >
-            <div
-              className={`cmdk-ai-answer ${ANSWER_MAX_HEIGHT} overflow-y-auto text-pretty text-sm leading-6 text-foreground [&_p]:my-1.5 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0`}
-              data-streaming={phase === 'answering'}
-            >
-              <MarkdownMessageRenderer
-                content={renderedContent}
-                markdownComponents={MARKDOWN_COMPONENTS}
-              />
-            </div>
-            {shown.length > 0 && (
-              <ul aria-label='Sources' className='mt-2.5 flex flex-wrap gap-1.5'>
-                {shown.map(({ source, number }, index) => (
-                  <SourceChip
-                    key={source.id}
-                    source={source}
-                    number={number}
-                    label={order.length > 0 ? index + 1 : number}
-                    index={index}
-                  />
-                ))}
-              </ul>
-            )}
-          </motion.div>
-        ) : (
-          <AnswerSkeleton />
-        )}
+            <MarkdownMessageRenderer
+              content={renderedContent}
+              markdownComponents={MARKDOWN_COMPONENTS}
+            />
+          </div>
+          {shown.length > 0 && (
+            <ul aria-label='Sources' className='mt-2.5 flex flex-wrap gap-1.5'>
+              {shown.map(({ source, number }, index) => (
+                <SourceChip
+                  key={source.id}
+                  source={source}
+                  number={number}
+                  label={order.length > 0 ? index + 1 : number}
+                  index={index}
+                />
+              ))}
+            </ul>
+          )}
+        </motion.div>
       </motion.section>
     </CitationContext.Provider>
   );

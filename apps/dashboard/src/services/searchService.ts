@@ -2,7 +2,6 @@ import { apiInstance, BASE_URL } from './clients/apiClient';
 import {
   CmdkAnswerEvent,
   DisplaySearchResult,
-  QueryIntent,
   RelatedContext,
   VespaSearchResponse,
   VespaSearchFilters,
@@ -139,19 +138,6 @@ export class SearchService {
   }
 
   /**
-   * Classify a cmd+K query as a keyword lookup or a question that needs AI.
-   * Separate from vespaSearch so a slow classifier never delays results.
-   * Null means "no verdict" (feature off, clearly lexical, or classifier down).
-   */
-  async getQueryIntent(query: string, signal?: AbortSignal): Promise<QueryIntent | null> {
-    const response = await apiInstance.get<{ success: boolean; data: QueryIntent | null }>(
-      `${this.vespaBaseUrl}/intent`,
-      { params: { q: query }, ...(signal ? { signal } : {}) },
-    );
-    return response.data.success ? response.data.data : null;
-  }
-
-  /**
    * What a composer draft relates to: threads, tickets, canvases and calls where it
    * is answered, was asked before, or was discussed. POST so the unsent draft never
    * lands in a URL. Null means "no verdict" (feature off or classifier down).
@@ -188,7 +174,9 @@ export class SearchService {
       signal,
     });
     if (!response.ok || !response.body) {
-      throw new Error(`AI overview request failed (${response.status})`);
+      throw Object.assign(new Error(`AI overview request failed (${response.status})`), {
+        status: response.status,
+      });
     }
 
     const reader = response.body.getReader();

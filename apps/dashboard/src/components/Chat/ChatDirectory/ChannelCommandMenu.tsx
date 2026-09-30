@@ -878,8 +878,6 @@ const ChannelCommandMenu = ({
     text: searchText,
     setText: setSearchText,
     inputRef,
-    isAiQuery,
-    aiQuestion,
     // New hookstate
     activeTab,
     setActiveTab,
@@ -906,9 +904,6 @@ const ChannelCommandMenu = ({
     // unless we're restoring a search that ran at a different scope.
     defaultOnlyMyChannels: initialToggles?.onlyMyChannels ?? true,
     defaultIncludeBotMessages: initialToggles?.includeBotMessages ?? false,
-    // Classifying costs a request per settled query, so only surfaces that can show the
-    // overview ask for it (the backend gates the feature itself on cmdk_ai_intent_config.enabled).
-    classifyIntent: aiOverview && !isInTicketView,
     // cmd+k hides archived tickets on its Desk and Tickets tabs (the hook gates this by
     // active tab). There is no toggle here to opt back in.
     defaultExcludeArchived: true,
@@ -4732,8 +4727,7 @@ const ChannelCommandMenu = ({
                 {aiOverview && !isInTicketView && (
                   <AiAnswerCard
                     query={searchText}
-                    question={mentionSearchType ? null : aiQuestion}
-                    active={isAiQuery && !mentionSearchType}
+                    active={!mentionSearchType}
                     onOpenSource={(result, event) => void handleAiSourceOpen(result, event)}
                     onContinue={handleAiContinue}
                   />

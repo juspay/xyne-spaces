@@ -4,37 +4,29 @@ import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { superpositionClient } from '@/services/superpositionClient';
 import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
-import { askJev, isJevConfigured, type JevQuestion } from '@/services/queryIntent/jevClient';
 import { getIntentConfig } from '@/services/queryIntent';
-import { quoteCandidate, RELEVANT_CRITERIA } from '@/services/relatedContext';
-import {
-  retrieveCandidates,
-  type Candidate,
-  type RetrievalContext,
-} from '@/services/relatedContext/retrieval';
+import { findRelatedContext } from '@/services/relatedContext';
+import type { Candidate, RetrievalContext } from '@/services/relatedContext/retrieval';
+
+export type CmdkAnswerSkipReason = 'off' | 'not_ready' | 'failed' | 'nothing';
 
 export type CmdkAnswerEvent =
   | { type: 'sources'; sources: Array<Pick<Candidate, 'id' | 'kind' | 'result'>> }
   | { type: 'delta'; content: string }
   | { type: 'done' }
-  | { type: 'skip' }
+  | { type: 'skip'; reason: CmdkAnswerSkipReason }
   | { type: 'error' };
 
 const CONFIG_KEY = 'cmdk_ai_answer_config';
 
 interface CmdkAnswerConfig {
   model: string;
-  minRelevance: number;
-  jevTimeoutMs: number;
 }
 
 const DEFAULT_CONFIG: CmdkAnswerConfig = {
   model: 'glm-flash-experimental',
-  minRelevance: 0.4,
-  jevTimeoutMs: 3000,
 };
 
-const RETRIEVAL_LIMITS = { messageHits: 20, perKind: 3 };
 const MAX_SOURCES = 5;
 const LLM_TIMEOUT_MS = 20000;
 const MAX_TOKENS = 350;
@@ -55,18 +47,6 @@ const getConfig = async (auth: RetrievalContext['auth']): Promise<CmdkAnswerConf
   })) as Partial<CmdkAnswerConfig> | null;
   return { ...DEFAULT_CONFIG, ...remote };
 };
-
-const relevanceQuestions = (candidates: Candidate[]): Record<string, JevQuestion> =>
-  Object.fromEntries(
-    candidates.map((candidate, i): [string, JevQuestion] => [
-      `relevant${i}`,
-      {
-        type: 'noul',
-        instructions: `${quoteCandidate(candidate)}\nIs this candidate about what \`query\` asks?`,
-        criteria: RELEVANT_CRITERIA,
-      },
-    ])
-  );
 
 const buildPrompt = (query: string, sources: Candidate[]): string =>
   [
@@ -91,52 +71,40 @@ export async function answerCmdkQuery(
       ...extra,
     });
   };
-  const skip = (outcome: string, extra: Record<string, unknown> = {}): void => {
-    emit({ type: 'skip' });
+  const skip = (
+    reason: CmdkAnswerSkipReason,
+    outcome: string,
+    extra: Record<string, unknown> = {}
+  ): void => {
+    emit({ type: 'skip', reason });
     finish(outcome, extra);
   };
 
   try {
-    const auth = { userId: ctx.auth.userId, workspaceId: ctx.auth.workspaceId };
-    if (!isJevConfigured() || !(await getIntentConfig(auth)).enabled) return skip('off');
+    if (!(await getIntentConfig(ctx.auth)).enabled) return skip('off', 'off');
     const config = await getConfig(ctx.auth);
 
-    const candidates = await retrieveCandidates(query, ctx, RETRIEVAL_LIMITS, signal);
-    const retrieved = Date.now();
-    timings.retrievalMs = retrieved - started;
+    let pool: Candidate[] = [];
+    const related = await findRelatedContext(query, ctx, signal, (candidates) => {
+      pool = candidates;
+    });
+    timings.relatedMs = Date.now() - started;
     if (signal.aborted) return finish('abandoned');
-    if (!candidates) return skip('search_failed');
-    if (candidates.length === 0) return skip('no_candidates');
+    if (!related) return skip('off', 'related_off');
+    if (related.failed) return skip('failed', 'related_failed');
+    if (related.ready === false) return skip('not_ready', 'not_ready');
 
-    const answers = await askJev(
-      { query },
-      relevanceQuestions(candidates),
-      config.jevTimeoutMs,
-      signal,
-      { partial: true }
-    );
-    timings.jevMs = Date.now() - retrieved;
-    if (signal.aborted) return finish('abandoned');
-    if (!answers) return skip('jev_failed', { candidates: candidates.length });
-
-    const sources = candidates
-      .map((candidate, i) => {
-        const answer = answers[`relevant${i}`];
-        return { candidate, relevance: answer?.type === 'noul' ? answer.noul : 0 };
-      })
-      .filter(({ relevance }) => relevance >= config.minRelevance)
-      .sort((a, b) => b.relevance - a.relevance)
-      .slice(0, MAX_SOURCES)
-      .map(({ candidate }) => candidate);
+    const byId = new Map(pool.map((candidate) => [candidate.id, candidate]));
+    const sources = related.items.slice(0, MAX_SOURCES).flatMap((item) => byId.get(item.id) ?? []);
     if (sources.length === 0) {
-      return skip('not_relevant', { candidates: candidates.length });
+      return skip('nothing', 'not_relevant', { candidates: pool.length });
     }
 
     const credential = await orgLLMCredentialService.getCredentialByWorkspaceId(
       ctx.auth.workspaceId,
       OrgLLMServiceAccountPurpose.ASK_AI
     );
-    if (!credential) return skip('no_credential');
+    if (!credential) return skip('off', 'no_credential');
 
     const llm = new LLMClient({
       provider: {
@@ -179,9 +147,9 @@ export async function answerCmdkQuery(
       emit({ type: 'delta', content: head });
     }
     if (signal.aborted) return finish('abandoned');
-    if (!answering) return skip('no_answer', { sources: sources.length });
+    if (!answering) return skip('nothing', 'no_answer', { sources: sources.length });
     emit({ type: 'done' });
-    finish('ok', { candidates: candidates.length, sources: sources.length });
+    finish('ok', { candidates: pool.length, sources: sources.length });
   } catch (error) {
     if (signal.aborted) return finish('abandoned');
     logger.error('[CmdkAnswer] answer failed', {
