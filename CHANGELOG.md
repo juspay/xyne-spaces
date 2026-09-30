@@ -1,3 +1,10 @@
+## [1.439.2](https://github.com/juspay/xyne-spaces/compare/v1.439.1...v1.439.2) (2026-09-30)
+
+
+### Bug Fixes
+
+* repair Alertmanager graph links with unescaped > in URL ([#458](https://github.com/juspay/xyne-spaces/issues/458)) ([a0bf825](https://github.com/juspay/xyne-spaces/commit/a0bf825ace76a83b478d3333fa115e8aedb78e84))
+
 ## [1.439.1](https://github.com/juspay/xyne-spaces/compare/v1.439.0...v1.439.1) (2026-09-30)
 
 
