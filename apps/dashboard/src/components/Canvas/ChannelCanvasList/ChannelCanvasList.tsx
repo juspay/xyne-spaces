@@ -13,8 +13,6 @@ import { cn } from '../../../utils/classNames';
 import type { Canvas, CanvasFolder } from '../Canvas.types';
 import Input from '../../ui/Input';
 
-import { Dialog } from '../../ui/Dialog';
-import { CanvasDeleteModal } from '../CanvasDeleteModal';
 import { CanvasRow } from '../CanvasRow';
 import { getDisplayedCanvases } from '../canvasListFilters';
 import { filterStarredCanvases, withStarredCanvasState } from '../canvasFilters';
@@ -86,7 +84,7 @@ export const ChannelCanvasList: React.FC<ChannelCanvasListProps> = ({
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set());
-  const [deletingCanvas, setDeletingCanvas] = useState<Canvas | null>(null);
+  const [locallyDeletedCanvasIds, setLocallyDeletedCanvasIds] = useState<Set<string>>(new Set());
 
   const canvasesWithLabels = useCanvasesWithRestLabels(canvases);
   const canvasesWithStarState = useMemo(
@@ -98,14 +96,21 @@ export const ChannelCanvasList: React.FC<ChannelCanvasListProps> = ({
     () =>
       filterStarredCanvases(
         getDisplayedCanvases({
-          canvases: canvasesWithStarState,
+          canvases: canvasesWithStarState.filter(canvas => !locallyDeletedCanvasIds.has(canvas.id)),
           activeFilter,
           currentUserId,
           searchQuery,
         }),
         showStarredOnly,
       ),
-    [activeFilter, canvasesWithStarState, currentUserId, searchQuery, showStarredOnly],
+    [
+      activeFilter,
+      canvasesWithStarState,
+      currentUserId,
+      locallyDeletedCanvasIds,
+      searchQuery,
+      showStarredOnly,
+    ],
   );
 
   const displayedFolders = useMemo(() => {
@@ -171,8 +176,8 @@ export const ChannelCanvasList: React.FC<ChannelCanvasListProps> = ({
           onDelete={
             onDelete
               ? (id): void => {
-                  const targetCanvas = canvases.find(item => item.id === id) ?? null;
-                  if (targetCanvas) setDeletingCanvas(targetCanvas);
+                  setLocallyDeletedCanvasIds(previous => new Set(previous).add(id));
+                  onDelete(id);
                 }
               : undefined
           }
@@ -369,23 +374,6 @@ export const ChannelCanvasList: React.FC<ChannelCanvasListProps> = ({
           </div>
         </div>
       </ChannelCanvasMoveDndProvider>
-
-      <Dialog
-        open={!!deletingCanvas}
-        onOpenChange={open => !open && setDeletingCanvas(null)}
-        title='Delete Canvas'
-      >
-        <CanvasDeleteModal
-          onClose={() => setDeletingCanvas(null)}
-          onConfirm={() => {
-            if (deletingCanvas && onDelete) {
-              onDelete(deletingCanvas.id);
-              setDeletingCanvas(null);
-            }
-          }}
-          canvasTitle={deletingCanvas?.title}
-        />
-      </Dialog>
     </>
   );
 };

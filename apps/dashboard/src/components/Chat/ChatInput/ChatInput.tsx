@@ -241,10 +241,10 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
     const [activeArtifactCommand, setActiveArtifactCommand] = useState<string | null>(null);
     const [shortcutModalOpen, setShortcutModalOpen] = useState(false);
 
-    // Threads, tickets, canvases and calls the draft relates to. Opt-in per device
+    // Threads, tickets, canvases and calls the draft relates to. On by default, per device
     // (Preferences → Messaging), for new messages only — not edits, twin replies or a
     // slash-command artifact being declared.
-    const relatedPreferenceOn = useUserPreference('relatedContextEnabled');
+    const relatedPreferenceOn = useUserPreference('relatedContextOn');
     const relatedDebounceMs = useUserPreference('relatedContextDebounceMs');
     // Off in the screens the related-context popup embeds, so a reply typed there
     // doesn't open a popup of its own.

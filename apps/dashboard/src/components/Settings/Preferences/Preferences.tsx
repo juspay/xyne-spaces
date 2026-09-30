@@ -836,14 +836,14 @@ const MessagingSection: FC<{ state: PreferencesState }> = ({ state }) => (
 
 /**
  * Related conversations while writing — kept on this device (userPreferencesMachine),
- * off by default. The delay is how long after the last keystroke to look, never
+ * on by default. The delay is how long after the last keystroke to look, never
  * under a second: every lookup is a search and a round of classification.
  *
  * TODO: move to the server-side user_preferences table, like the other Messaging
  * preferences, once the feature is confirmed.
  */
 const RelatedContextPreference: FC = () => {
-  const enabled = useUserPreference('relatedContextEnabled');
+  const enabled = useUserPreference('relatedContextOn');
   const debounceMs = useUserPreference('relatedContextDebounceMs');
   const [delayDraft, setDelayDraft] = useState(String(debounceMs));
   useEffect(() => setDelayDraft(String(debounceMs)), [debounceMs]);
@@ -870,7 +870,7 @@ const RelatedContextPreference: FC = () => {
         <Switch
           id='related-context-enabled'
           checked={enabled}
-          onCheckedChange={value => setUserPreference('relatedContextEnabled', value)}
+          onCheckedChange={value => setUserPreference('relatedContextOn', value)}
         />
       </div>
       {enabled && (
