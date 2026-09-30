@@ -125,3 +125,10 @@ describe("executeApprovedWrite — MCP gateway tools", () => {
     ).resolves.toMatchObject({ ok: false, reason: "unsupported" });
   });
 });
+
+describe("needsSpacesApproval for fork-to-conversation", () => {
+  it("routes the fork to the Spaces approval path", async () => {
+    const { needsSpacesApproval } = await import("./approved-write.js");
+    expect(needsSpacesApproval("agent-tools", "fork-to-conversation")).toBe(true);
+  });
+});
