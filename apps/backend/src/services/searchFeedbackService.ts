@@ -12,6 +12,7 @@ import { MessagesSideEffectHandler } from '@/zero/side-effects/tables/messages-h
 import { buildUserQueryContext } from '@/utils/queryContext';
 import { runAsServiceActor, runAsSystem } from '@/database/tenant/context';
 import { UserRepository } from '@/database/repositories/users';
+import { sanitizeForLog } from '@/git-providers/github/apis';
 import {
   buildSearchFeedbackContent,
   type SearchFeedbackSource,
@@ -73,7 +74,7 @@ export class SearchFeedbackService {
     if (raw && typeof raw === 'object') return raw as SearchFeedbackTarget;
     if (raw !== null) {
       logger.warn(
-        `[SearchFeedback] ${FEEDBACK_TARGET_CAC_KEY} is not an object for workspace ${workspaceId}; ignoring`
+        `[SearchFeedback] ${FEEDBACK_TARGET_CAC_KEY} is not an object for workspace ${sanitizeForLog(workspaceId)}; ignoring`
       );
     }
     return {};
@@ -103,7 +104,7 @@ export class SearchFeedbackService {
       );
       if (byId) return byId;
       logger.error(
-        `[SearchFeedback] ${FEEDBACK_TARGET_CAC_KEY}.channelId=${target.channelId} does not exist; falling back to #${FEEDBACK_CHANNEL_NAME} in workspace ${workspaceId}`
+        `[SearchFeedback] ${FEEDBACK_TARGET_CAC_KEY}.channelId=${sanitizeForLog(target.channelId ?? '')} does not exist; falling back to #${FEEDBACK_CHANNEL_NAME} in workspace ${sanitizeForLog(workspaceId)}`
       );
     }
     return db.channel.findFirst({
@@ -131,7 +132,7 @@ export class SearchFeedbackService {
       );
       if (byId) return byId;
       logger.error(
-        `[SearchFeedback] ${FEEDBACK_TARGET_CAC_KEY}.userGroupId=${target.userGroupId} does not exist; falling back to @${FEEDBACK_GROUP} in workspace ${workspaceId}`
+        `[SearchFeedback] ${FEEDBACK_TARGET_CAC_KEY}.userGroupId=${sanitizeForLog(target.userGroupId ?? '')} does not exist; falling back to @${FEEDBACK_GROUP} in workspace ${sanitizeForLog(workspaceId)}`
       );
     }
     return runAsSystem(
@@ -168,7 +169,7 @@ export class SearchFeedbackService {
     const channel = await this.resolveChannel(workspaceId, target);
     if (!channel) {
       logger.warn(
-        `[SearchFeedback] Channel #${FEEDBACK_CHANNEL_NAME} not found in workspace ${workspaceId}`
+        `[SearchFeedback] Channel #${FEEDBACK_CHANNEL_NAME} not found in workspace ${sanitizeForLog(workspaceId)}`
       );
       throw new SearchFeedbackUnavailableError(
         `Feedback channel #${FEEDBACK_CHANNEL_NAME} is not available in this workspace`
@@ -186,7 +187,7 @@ export class SearchFeedbackService {
       groupMentionHtml = formatGroupMention(group.id, group.name, group.alias, memberCount);
     } else {
       logger.warn(
-        `[SearchFeedback] User group @${FEEDBACK_GROUP} not found by id, alias or name in workspace ${channel.workspaceId}; posting without a mention`
+        `[SearchFeedback] User group @${FEEDBACK_GROUP} not found by id, alias or name in workspace ${sanitizeForLog(channel.workspaceId)}; posting without a mention`
       );
     }
 
@@ -246,7 +247,7 @@ export class SearchFeedbackService {
     );
 
     logger.info(
-      `[SearchFeedback] Posted ${source} feedback to #${FEEDBACK_CHANNEL_NAME} (conversation ${result.conversation.conversationId})`
+      `[SearchFeedback] Posted ${sanitizeForLog(source)} feedback to #${FEEDBACK_CHANNEL_NAME} (conversation ${sanitizeForLog(result.conversation.conversationId)})`
     );
 
     return {
