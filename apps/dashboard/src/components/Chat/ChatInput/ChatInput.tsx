@@ -320,6 +320,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
           { modifier: event.metaKey || event.ctrlKey, isElectron: isElectronApp(), isMobile },
           navigate,
           getAllChannels(),
+          { callerUserId: context.userID },
         ).catch((error: unknown) => {
           logger.error(Event.FRONTEND_ERROR, {
             message: 'Opening a related-context item failed',
@@ -327,7 +328,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
           });
         });
       },
-      [isMobile, navigate],
+      [isMobile, navigate, context.userID],
     );
     const openRelated = useCallback(
       (item: RelatedItem, event: React.MouseEvent): void => {
@@ -1453,7 +1454,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
                       <button
                         type='button'
                         onClick={() => setShortcutModalOpen(true)}
-                        className='p-1.5 rounded hover:bg-accent transition-all duration-200 ease-in-out'
+                        className='p-1.5 rounded hover:bg-accent transition duration-200 ease-in-out'
                         aria-label='Open shortcuts'
                         data-track-category='CHAT_INPUT'
                         data-track-name='open-global-shortcuts'

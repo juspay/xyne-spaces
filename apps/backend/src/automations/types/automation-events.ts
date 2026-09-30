@@ -12,14 +12,22 @@ import { MESSAGE_RECEIVED_EVENT } from '../triggers/message-received.trigger';
 import { CALL_EVENT, CALL_STARTED, CALL_ENDED } from '../triggers/call.trigger';
 import { TAG_GENERATED_EVENT } from '../triggers/tag-generated.trigger';
 
+export interface TicketEventScope {
+  boardId: string | null;
+  projectId: string | null;
+  channelId: string | null;
+}
+
 export interface TicketCreatedEventPayload {
   ticketId: string;
+  scope: TicketEventScope;
   formFieldChanges?: FormFieldChanges;
   performedBy?: { id: string | null };
 }
 
 export interface TicketUpdatedEventPayload {
   ticketId: string;
+  scope: TicketEventScope;
   changes: TicketChanges;
   formFieldChanges?: FormFieldChanges;
   performedBy: { id: string | null };

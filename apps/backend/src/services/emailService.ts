@@ -1,3 +1,4 @@
+import { emitDomainEvent } from '@/events/emitDomainEvent';
 import { ingestEmailThreadTx } from '@/bypassAcl/transactions/emailService';
 /**
  * Email Service
@@ -66,7 +67,6 @@ import { dispatchEmailEventForEmailId } from '@/apps/core/emailUtils';
 import { normalizeRfcMessageId } from '@/utils/emailRfcMessageId';
 import { TICKET_CREATED_EVENT } from '@/automations/triggers/ticket-created.trigger';
 import { emitTicketUpdated } from '@/automations/triggers/ticket-updated.trigger';
-import { eventRouter } from '@/automations/engine/event-router';
 import { v4 as uuidv4 } from 'uuid';
 import { marked } from 'marked';
 import { findDuplicateEmailConversation } from '@/utils/vespaDuplicateDetector';
@@ -1177,8 +1177,18 @@ export class EmailService {
     // Direct DB insert bypasses Zero side-effects, so dispatch the EMAIL app event ourselves.
     void dispatchEmailEventForEmailId(email.id);
 
-    void eventRouter.emit(
-      { type: TICKET_CREATED_EVENT, payload: { ticketId: ticket.id } },
+    void emitDomainEvent(
+      {
+        type: TICKET_CREATED_EVENT,
+        payload: {
+          ticketId: ticket.id,
+          scope: {
+            boardId: ticket.boardId ?? null,
+            projectId: ticket.projectId ?? null,
+            channelId: ticket.channelId ?? null,
+          },
+        },
+      },
       ticket.workspaceId,
     ).catch((err: unknown) => logger.error(`[EmailService] TICKET_CREATED emit failed for ticket ${ticket.id}:`, err));
 
@@ -1611,8 +1621,18 @@ export class EmailService {
       logger.error(`[EmailService] Error pushing Vespa job for ticket ${ticket.id}:`, error);
     });
 
-    void eventRouter.emit(
-      { type: TICKET_CREATED_EVENT, payload: { ticketId: ticket.id } },
+    void emitDomainEvent(
+      {
+        type: TICKET_CREATED_EVENT,
+        payload: {
+          ticketId: ticket.id,
+          scope: {
+            boardId: ticket.boardId ?? null,
+            projectId: ticket.projectId ?? null,
+            channelId: ticket.channelId ?? null,
+          },
+        },
+      },
       ticket.workspaceId,
     ).catch((err: unknown) => logger.error(`[EmailService] TICKET_CREATED emit failed for ticket ${ticket.id}:`, err));
 
@@ -2103,8 +2123,18 @@ export class EmailService {
         logger.warn('[EmailService] failed to sync initial message md', error);
       }
 
-      void eventRouter.emit(
-        { type: TICKET_CREATED_EVENT, payload: { ticketId: txResult.ticketId } },
+      void emitDomainEvent(
+        {
+          type: TICKET_CREATED_EVENT,
+          payload: {
+            ticketId: txResult.ticketId,
+            scope: {
+              boardId: boardId ?? null,
+              projectId: projectId ?? null,
+              channelId: channelId ?? null,
+            },
+          },
+        },
         channel.workspaceId,
       ).catch((err: unknown) => logger.error(`[EmailService] TICKET_CREATED emit failed for ticket ${txResult.ticketId}:`, err));
 

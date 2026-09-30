@@ -2,7 +2,6 @@ import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { RenderMessageWithHTML } from '../RenderMessageWithHTML/RenderMessageWithHTML';
 import { ExpandableMessageContext } from './ExpandableMessageContext';
 import { MaximizeTwoArrow } from '@xyne/icons';
-import useMeasure from '../../../hooks/useMeasure';
 
 interface ExpandableMessageProps {
   message?: string;
@@ -38,16 +37,18 @@ export const ExpandableMessage: React.FC<ExpandableMessageProps> = ({
   const [shouldShowButton, setShouldShowButton] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
 
-  // Use ResizeObserver via useMeasure hook for reliable size detection
-  const { height: contentHeight } = useMeasure({ ref: contentRef, observeResize: true });
-
+  // Measure only after layout: a sync read here forced a style recalc per mounted message.
+  // Re-subscribing on `message` re-measures, since `observe()` delivers an initial entry.
   useEffect(() => {
-    if (contentRef.current) {
-      const fullHeight = contentRef.current.scrollHeight;
+    const node = contentRef.current;
+    if (!node) return undefined;
+    const observer = new ResizeObserver((): void => {
       // Add a small buffer to account for rounding errors
-      setShouldShowButton(fullHeight > maxHeight + 10);
-    }
-  }, [contentHeight, message, maxHeight]);
+      setShouldShowButton(node.scrollHeight > maxHeight + 10);
+    });
+    observer.observe(node);
+    return (): void => observer.disconnect();
+  }, [message, maxHeight]);
 
   const toggleExpanded = () => {
     setIsExpanded(!isExpanded);
@@ -70,7 +71,7 @@ export const ExpandableMessage: React.FC<ExpandableMessageProps> = ({
     <div className={`expandable-message relative ${className}`}>
       <div
         ref={contentRef}
-        className='transition-all duration-300 ease-in-out overflow-hidden'
+        className='overflow-hidden'
         style={{
           maxHeight: isExpanded || hasExpandedChild ? 'none' : `${maxHeight}px`,
         }}

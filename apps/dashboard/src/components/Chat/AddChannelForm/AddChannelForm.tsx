@@ -45,6 +45,10 @@ import { usePlatform } from '../../../hooks/usePlatform';
 import { getWorkspaceSharedMailboxStatus } from '../../../services/clients/workspaceDeskApi';
 import { getOzonetelConfig } from '../../../services/clients/telephonyApi';
 import { DeskType } from '@xyne/shared';
+import {
+  GooglePlayServiceAccountKeyInput,
+  getServiceAccountEmail,
+} from '../../xyne-desk/DeskIntegrationCard/GooglePlayServiceAccountKeyInput';
 
 type ChannelFormMode = 'create' | 'promote';
 type ChannelFormData = CreateChannelFormData | PromoteGroupDmRequest;
@@ -181,6 +185,7 @@ interface AddChannelFormProps {
       installedAppId?: string;
       socialProvider?: SocialProvider;
       applications?: GooglePlayApplicationInput[];
+      serviceAccountKey?: string;
       appStore?: AppStoreDeskInput;
     },
   ) => void;
@@ -217,6 +222,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
     createGooglePlayApplication(),
   ]);
   const [socialProvider, setSocialProvider] = useState<SocialProvider>('GOOGLE_PLAY');
+  const [googlePlayServiceAccountKey, setGooglePlayServiceAccountKey] = useState('');
   const [appStoreApplications, setAppStoreApplications] = useState<AppStoreApplicationRow[]>([
     createAppStoreApplication(),
   ]);
@@ -226,7 +232,8 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
   const isSocialMediaDeskValid = (boardId?: string): boolean => {
     if (!boardId) return false;
     return socialProvider === 'GOOGLE_PLAY'
-      ? areGooglePlayApplicationsValid(googlePlayApplications)
+      ? Boolean(getServiceAccountEmail(googlePlayServiceAccountKey)) &&
+          areGooglePlayApplicationsValid(googlePlayApplications)
       : APP_STORE_KEY_ID_PATTERN.test(appStoreKeyId.trim()) &&
           isAppStorePrivateKey(appStorePrivateKey) &&
           areAppStoreApplicationsValid(appStoreApplications);
@@ -382,6 +389,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
                     displayName: application.displayName.trim(),
                     packageName: application.packageName,
                   })),
+                  serviceAccountKey: googlePlayServiceAccountKey,
                 }
               : {
                   appStore: {
@@ -479,6 +487,8 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
       if (deskType === DeskType.SLACK && !selectedSlackChannelId)
         return 'Please select a Slack channel';
       if (deskType === DeskType.SOCIAL_MEDIA && socialProvider === 'GOOGLE_PLAY') {
+        if (!getServiceAccountEmail(googlePlayServiceAccountKey))
+          return 'Upload the service account JSON key';
         if (googlePlayApplications.some(application => !application.displayName.trim()))
           return 'Please enter a display name for every application';
         if (
@@ -874,6 +884,12 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
           </div>
           {socialProvider === 'GOOGLE_PLAY' && (
             <div className='space-y-3'>
+              <GooglePlayServiceAccountKeyInput
+                id='google-play-service-account-key'
+                value={googlePlayServiceAccountKey}
+                onChange={setGooglePlayServiceAccountKey}
+                trackCategory='ADD_CHANNEL_FORM'
+              />
               <div className='flex items-center justify-between'>
                 <div className='text-sm font-medium text-foreground'>
                   Google Play applications <span className='text-muted-foreground'>*</span>

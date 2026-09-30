@@ -1108,6 +1108,15 @@ export async function snapshotLiveSessionHandle(
   }
 }
 
+export async function sessionExistsAnywhere(conversationId: string): Promise<boolean> {
+  const root = path.resolve(sessionsRoot());
+  const dir = path.resolve(root, conversationId);
+  if (!dir.startsWith(root + path.sep) || path.dirname(dir) !== root) return false;
+  if (existsSync(dir)) return true;
+  await restoreSessionFromArchive(conversationId).catch(() => false);
+  return existsSync(dir);
+}
+
 export async function branchSession(
   sourceConversationId: string,
   targetConversationId: string,
