@@ -1,3 +1,10 @@
+## [1.446.0](https://github.com/juspay/xyne-spaces/compare/v1.445.0...v1.446.0) (2026-09-30)
+
+
+### Features
+
+* let Xyne AI screen runs open and drive the desktop browser panel ([#2538](https://github.com/juspay/xyne-spaces/issues/2538)) ([2df32a5](https://github.com/juspay/xyne-spaces/commit/2df32a5cfe2315ce5e0343dc4749b5cc17d4e93f)), closes [#2542](https://github.com/juspay/xyne-spaces/issues/2542)
+
 ## [1.445.0](https://github.com/juspay/xyne-spaces/compare/v1.444.3...v1.445.0) (2026-09-30)
 
 
