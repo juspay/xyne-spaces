@@ -16,13 +16,9 @@ import { createAgent, generateAgentPrompt } from '@/services/claw/clawAgentWizar
 import { ClawApiError } from '@/services/claw/clawRequest';
 import { effectiveSlug, slugify } from '@/routes/ClawAgentsScreen/create/wizardState';
 import { AgentCreateCanvas } from '@/components/flowUI/nodes/agent/create/AgentCreateCanvas';
-import { AgentDraftChatPanel } from '@/components/flowUI/nodes/agent/create/AgentDraftChatPanel';
+import { DraftAgentChat } from '@/components/flowUI/nodes/agent/create/DraftAgentChat';
 import type { AgentSettingsTabId } from '../detail/detailTabs';
 import { DraftAgentSettings } from '../detail/settings/AgentSettingsView';
-import {
-  BuildChatTabs,
-  type CreateSideTab,
-} from '@/components/flowUI/nodes/agent/create/BuildChatTabs';
 import {
   AgentCreateChatPanel,
   type CreateChatTurn,
@@ -107,10 +103,12 @@ import {
 import { WarmHubCatalogs } from '@/components/flowUI/nodes/agent/create/WarmHubCatalogs';
 import {
   agentDraftStorageKey,
+  buildChatStorageKey,
   clearAgentDraft,
   readAgentDraft,
   writeAgentDraft,
 } from '@/components/flowUI/nodes/agent/create/agentCreateDraftStorage';
+import { readBuildChat } from '@/components/flowUI/nodes/agent/create/buildChatStorage';
 import { buildCreateAgentPayload } from './agentCreatePayload';
 import { computeSaveGate } from './saveGate';
 import {
@@ -264,7 +262,6 @@ export function AgentCreateSplitPage({
   const queryClient = useQueryClient();
   const createForm = useAgentCreateForm(EMPTY_CREATE_FORM);
   const [phase, setPhase] = useState<AgentCreatePhase>('empty');
-  const [sideTab, setSideTab] = useState<CreateSideTab>('build');
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [discardOpen, setDiscardOpen] = useState(false);
@@ -304,6 +301,8 @@ export function AgentCreateSplitPage({
   const [draftStreamDown, setDraftStreamDown] = useState(false);
   const draftKey = agentDraftStorageKey(workspaceId, user?.id);
   const storageReady = !scripted && Boolean(user?.id);
+  /** Bumped by Start over: the Build chat starts again with the canvas. */
+  const [chatEpoch, setChatEpoch] = useState(0);
 
   const slug = effectiveSlug({
     name: createForm.form.name,
@@ -331,9 +330,13 @@ export function AgentCreateSplitPage({
   useEffect(() => {
     if (!storageReady) return;
     const stored = readAgentDraft(draftKey);
-    if (!stored) return;
-    restoreForm(stored.form);
-    setPhase('draft');
+    // A first turn can leave only a conversation (a question card) and no canvas yet.
+    const chat = readBuildChat(buildChatStorageKey(draftKey));
+    if (!stored && !chat) return;
+    if (stored) {
+      restoreForm(stored.form);
+      setPhase('draft');
+    }
     toast('Restored your unsaved agent draft', {
       id: 'agent-draft-restored',
       action: { label: 'Start over', onClick: () => discardRef.current() },
@@ -757,11 +760,17 @@ export function AgentCreateSplitPage({
       const context = hasCapabilities ? await contextPromise : null;
       const turnId = crypto.randomUUID();
       let applied = 0;
+      // An edit is the user asking for a change: it lands over their own edits.
+      // A first draft fills in around them.
+      let overrideEdits = false;
       const apply = (patch: AgentCreateChatPatch): void => {
         if (Object.keys(patch).length === 0) return;
         if (applied === 0) markCreate('turn');
         applied += 1;
-        createForm.applyChatPatch(`draft-${turnId}-${applied}`, patch, { highlight: false });
+        createForm.applyChatPatch(`draft-${turnId}-${applied}`, patch, {
+          highlight: false,
+          overrideEdits,
+        });
       };
 
       const { signal } = turn;
@@ -849,6 +858,7 @@ export function AgentCreateSplitPage({
         switch (event.event) {
           case 'mode':
             mode = event.mode;
+            overrideEdits = event.mode === 'edit';
             if (event.mode === 'draft') liveInstructions = true;
             if (event.mode === 'draft' || event.mode === 'edit') {
               setProgressLabel(PROGRESS_THINKING);
@@ -1148,6 +1158,7 @@ export function AgentCreateSplitPage({
 
   const discardDraft = useCallback((): void => {
     clearAgentDraft(draftKey);
+    setChatEpoch(epoch => epoch + 1);
     createForm.resetFrom(EMPTY_CREATE_FORM);
     setPhase('empty');
     setCreateError(null);
@@ -1198,7 +1209,19 @@ export function AgentCreateSplitPage({
       saving={creating}
       saveError={createError}
       readOnly={phase === 'created' || (scripted && scriptedPlayer.playing)}
-      {...(scripted ? {} : { onOpenSettings: () => setSettingsOpen(true) })}
+      {...(scripted
+        ? {}
+        : {
+            onOpenSettings: () => setSettingsOpen(true),
+            floatingChat: (
+              <DraftAgentChat
+                getForm={createForm.getForm}
+                agentName={createForm.form.name}
+                agentKey={createForm.form.slug || createForm.form.name}
+                disabled={phase === 'created'}
+              />
+            ),
+          })}
     />
   );
 
@@ -1285,18 +1308,17 @@ export function AgentCreateSplitPage({
               onWidthChange={overlay.setWidth}
               onDraggingChange={setSideCardDragging}
             />
-            <BuildChatTabs
-              tab={sideTab}
-              onTabChange={setSideTab}
-              suspendLayout={sideCardDragging}
-            />
-            <div aria-hidden className='pointer-events-none mt-3 h-8 shrink-0' />
-            <div className={sideTab === 'build' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}>
+            <div className='flex min-h-0 flex-1 flex-col pt-3'>
               <AgentCreateChatPanel
+                // Remounts to read the stored chat once the user is known, and on Start over.
+                key={`${storageReady ? draftKey : 'no-storage'}:${chatEpoch}`}
                 canvas={canvasSnapshot}
                 onTurnComplete={onTurnComplete}
                 onSend={onSend}
                 {...(DRAFT_STREAM_ENABLED && !draftStreamDown ? { onDraftTurn } : {})}
+                chatStorageKey={
+                  storageReady && phase !== 'created' ? buildChatStorageKey(draftKey) : null
+                }
                 disabled={phase === 'created'}
                 progressLabel={scripted ? null : progressLabel}
                 {...(scripted
@@ -1312,9 +1334,6 @@ export function AgentCreateSplitPage({
                     }
                   : {})}
               />
-            </div>
-            <div className={sideTab === 'chat' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}>
-              <AgentDraftChatPanel getForm={createForm.getForm} disabled={phase === 'created'} />
             </div>
           </div>
         </div>

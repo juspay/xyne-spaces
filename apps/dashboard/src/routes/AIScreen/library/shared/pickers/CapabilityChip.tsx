@@ -92,8 +92,12 @@ const ICON_VARIANTS: Variants = {
 const OVERLAY_FADE: Transition = { duration: 0.14, ease: 'easeOut' };
 const ICON_SPRING: Transition = { type: 'spring', duration: 0.28, bounce: 0.35 };
 
-/** Hover or focus anywhere on the pill reveals its action. */
-function useRevealAction(): {
+/**
+ * Hover or focus anywhere on the pill reveals its action. `shape` names the pill's
+ * root element: accepting or removing swaps it, and the old element takes its focus
+ * with it without a blur event, so focus starts over on the new one.
+ */
+function useRevealAction(shape: string): {
   revealed: boolean;
   handlers: {
     onPointerEnter?: () => void;
@@ -104,6 +108,11 @@ function useRevealAction(): {
 } {
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
+  const [focusedShape, setFocusedShape] = useState(shape);
+  if (focusedShape !== shape) {
+    setFocusedShape(shape);
+    setFocused(false);
+  }
   if (NO_HOVER) return { revealed: true, handlers: {} };
   return {
     revealed: hovered || focused,
@@ -141,7 +150,8 @@ export function CapabilityChip({
   shellClassName,
   trackName,
 }: CapabilityChipProps): ReactElement {
-  const { revealed, handlers } = useRevealAction();
+  const openable = selected && Boolean(onOpen);
+  const { revealed, handlers } = useRevealAction(openable ? 'span' : 'button');
   const overlayMotion = {
     initial: false,
     animate: revealed ? 'shown' : 'rest',
@@ -169,7 +179,7 @@ export function CapabilityChip({
     ));
 
   // aria-labels only: a native `title` tooltip would pop up over the pill on hover.
-  if (!selected || !onOpen) {
+  if (!openable) {
     return (
       <button
         type='button'

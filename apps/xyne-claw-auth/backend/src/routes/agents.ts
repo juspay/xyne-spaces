@@ -48,7 +48,12 @@ import { validateKbGrants } from "../lib/spaces-kb.js";
 import { ORG_SCOPED_SLUGS } from "../lib/org-scoped-slugs.js";
 import { getAdminOrgScope, getOrgNameMap, withOrgLabel } from "../lib/admin-org-scope.js";
 import { asyncHandler, ok, badRequest, unauthorized, forbidden, notFound, conflict, HttpError } from "../lib/http.js";
-import { buildDraftRunBody, draftAgentSlug, parseDraftSnapshot } from "../lib/draft-chat.js";
+import {
+  buildDraftRunBody,
+  draftAgentSlug,
+  parseDraftAttachments,
+  parseDraftSnapshot,
+} from "../lib/draft-chat.js";
 import { mintSessionToken } from "../lib/session-tokens.js";
 import { createAgentRecord } from "../lib/agent-create.js";
 import { fetchClawRunWithRetry } from "../lib/claw-fetch.js";
@@ -5362,6 +5367,14 @@ router.post("/draft-chat", asyncHandler(async (req: Request, res: Response) => {
     res.status(400).json({ success: false, error: "snapshot is required" });
     return;
   }
+  const attachments = parseDraftAttachments(req.body?.attachments);
+  if (!attachments) {
+    res.status(400).json({
+      success: false,
+      error: "Attach up to 20 files, 25MB in total, as base64.",
+    });
+    return;
+  }
 
   const orgId = getOrgId(req);
   const loaded = snapshot.skillIds.length > 0
@@ -5396,6 +5409,9 @@ router.post("/draft-chat", asyncHandler(async (req: Request, res: Response) => {
     draftConversationId,
     snapshot,
     skills,
+    attachments,
+    webSearch: req.body?.webSearchEnabled === true,
+    deepResearch: req.body?.deepResearchEnabled === true,
   });
 
   const controller = new AbortController();

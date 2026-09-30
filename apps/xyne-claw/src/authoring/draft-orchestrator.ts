@@ -225,6 +225,7 @@ function joinWords(words: readonly string[]): string {
   return words.length <= 1 ? (words[0] ?? "") : `${words.slice(0, -1).join(", ")} and ${words.at(-1)}`;
 }
 
+
 /** Singular and plural names of each kind, for chat replies. */
 const HUB_NOUN: Record<DraftHub, readonly [string, string]> = {
   mcp: ["MCP server", "MCP servers"],
@@ -416,9 +417,8 @@ export async function runDraftTurn(
   emit({ event: "started", draftId: input.draftId });
 
   const owned = new Set(input.userOwned);
-  const wantedHubs = ALL_HUBS.filter((hub) =>
-    hub === "skill" ? !owned.has("skills") : hub === "knowledge" ? !owned.has("knowledge") : !owned.has("tools"),
-  );
+  const ownsHub = (hub: DraftHub): boolean =>
+    owned.has(hub === "skill" ? "skills" : hub === "knowledge" ? "knowledge" : "tools");
   const onCanvas = new Set(input.canvas.capabilities.map((c) => `${c.hub}:${c.id}`));
 
   /** Judge calls that failed this turn (not cancelled). Said in chat once the tools step settles. */
@@ -441,11 +441,13 @@ export async function runDraftTurn(
       });
 
   try {
-    // Start the judge with classify: it only needs the message.
+    // Start the judge with classify: it only needs the message. The mode isn't
+    // known yet, so it reads every kind; a first draft drops the ones the user
+    // filled in by hand once it is.
     const judgeIntent = input.message.trim();
-    const judgeWanted = wantedHubs.length > 0 && !VAGUE_CREATE.test(judgeIntent) && judgeIntent.length >= 8;
+    const judgeWanted = !VAGUE_CREATE.test(judgeIntent) && judgeIntent.length >= 8;
     const judgePromise: Promise<JudgedCapabilities | null> = judgeWanted
-      ? runJudge(judgeIntent, wantedHubs, "first")
+      ? runJudge(judgeIntent, ALL_HUBS, "first")
       : Promise.resolve(null);
 
     let decision: ClassifyDecision;
@@ -548,9 +550,13 @@ export async function runDraftTurn(
       return;
     }
 
-    // classify already skips user-owned fields; enforce it here too so a model slip
-    // can never overwrite something the user is editing.
-    const fields = new Set(decision.fields.filter((f) => !owned.has(f)));
+    // A first draft fills in around what the user wrote by hand (classify skips
+    // those too; this holds even if the model slips). An edit is the user asking
+    // for a change, so it writes over their own text; the field they are typing
+    // in right now is still guarded on the canvas.
+    const editing = decision.mode === "edit";
+    const fields = new Set(editing ? decision.fields : decision.fields.filter((f) => !owned.has(f)));
+    const hubWritable = (hub: DraftHub): boolean => editing || !ownsHub(hub);
     const newName = fields.has("name") ? decision.name : undefined;
     const newHandle = fields.has("handle") ? decision.handle : undefined;
     const newDescription = fields.has("description") ? decision.description : undefined;
@@ -585,11 +591,9 @@ export async function runDraftTurn(
 
     // Capabilities: removals need no model call; "all the MCPs" is the catalog
     // itself; named additions use the judge.
-    const removals = decision.capabilityRemovals.filter((r) =>
-      r.hub === "skill" ? !owned.has("skills") : r.hub === "knowledge" ? !owned.has("knowledge") : !owned.has("tools"),
-    );
+    const removals = decision.capabilityRemovals.filter((r) => hubWritable(r.hub));
     const adds = decision.capabilityAdds;
-    const addAll = (decision.capabilityAddAll ?? []).filter((hub) => wantedHubs.includes(hub));
+    const addAll = (decision.capabilityAddAll ?? []).filter(hubWritable);
     const capsAsked = adds.length > 0 || addAll.length > 0;
     const wantsCaps =
       decision.mode === "draft" ||
@@ -602,7 +606,7 @@ export async function runDraftTurn(
     // The first judge read only this message. Additions it never saw (named in
     // earlier messages) get their own pass now, without waiting for it; if it
     // failed, the ones it did see get one more try.
-    const namedHubs = wantedHubs.filter((hub) => !addAll.includes(hub));
+    const namedHubs = ALL_HUBS.filter((hub) => hubWritable(hub) && !addAll.includes(hub));
     const saw = (phrase: string): boolean => judgeWanted && squash(input.message).includes(squash(phrase));
     const addPass = (phrases: string[]): Promise<JudgedCapabilities | null> =>
       phrases.length > 0 && namedHubs.length > 0
@@ -621,7 +625,9 @@ export async function runDraftTurn(
       // For a kind the user wants all of, the catalog decides what is bound or only
       // offered; the judge adds nothing there but the write access it was asked for.
       const judgedPicks = (list: "bound" | "suggested"): DraftPick[] =>
-        passes.flatMap((p) => p?.[list] ?? []).filter((pick) => !addAll.includes(pick.hub));
+        passes
+          .flatMap((p) => p?.[list] ?? [])
+          .filter((pick) => hubWritable(pick.hub) && !addAll.includes(pick.hub));
       const writes = new Set(
         passes.flatMap((p) => p?.bound ?? []).filter((pick) => pick.access === "write").map(pickKey),
       );
@@ -747,7 +753,11 @@ export async function runDraftTurn(
       }
     }
 
-    let ack = decision.ack || defaultAck(decision.mode, name, [...fields], landed);
+    // The model's ack can claim an edit that never reached the canvas.
+    let ack =
+      editing && !landed
+        ? defaultAck("edit", name, [], false)
+        : decision.ack || defaultAck(decision.mode, name, [...fields], landed);
     const nothingAdded = outcome.bound.length === 0 && outcome.suggested.length === 0;
     if (capsAsked) {
       // Say what the tools step actually did, never what the planner expected it to.

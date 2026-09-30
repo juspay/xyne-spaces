@@ -10,6 +10,17 @@ import { EMPTY_CREATE_FORM, isFormDirty } from './types';
 import { applyConflictChoice, mergeChatPatch, type FieldLock } from './mergeChatPatch';
 import { sanitizeAgentCanvasName } from './canvasFromIdentity.ts';
 
+/**
+ * The field the user is typing in, if the page still has focus inside it. A blur
+ * can go unheard (dev overlays capture focus events), and a stale lock would turn
+ * a change the user asked chat for into a conflict.
+ */
+function stillFocused(field: AgentCreateField | null): AgentCreateField | null {
+  if (!field || typeof document === 'undefined') return field;
+  const host = document.activeElement?.closest('[data-create-field]');
+  return host?.getAttribute('data-create-field') === field ? field : null;
+}
+
 export function useAgentCreateForm(initial: AgentCreateFormState = EMPTY_CREATE_FORM) {
   const [form, setForm] = useState<AgentCreateFormState>(initial);
   const [baseline, setBaseline] = useState<AgentCreateFormState>(initial);
@@ -129,18 +140,32 @@ export function useAgentCreateForm(initial: AgentCreateFormState = EMPTY_CREATE_
     (
       sourceId: string,
       incoming: AgentCreateChatPatch,
-      options?: { highlight?: boolean },
+      /**
+       * `overrideEdits`: the user asked chat for this change, so it lands over
+       * fields they edited by hand, which then hold chat's text. The field they
+       * are typing in stays theirs.
+       */
+      options?: { highlight?: boolean; overrideEdits?: boolean },
     ): AgentCreateField[] => {
       if (lastSourceRef.current === sourceId) {
         return [];
       }
       lastSourceRef.current = sourceId;
-      const lock: FieldLock = { focused: focusedRef.current, dirty: dirtyRef.current };
+      const lock: FieldLock = {
+        focused: stillFocused(focusedRef.current),
+        dirty: options?.overrideEdits ? {} : dirtyRef.current,
+      };
       const result = mergeChatPatch(formRef.current, incoming, lock, conflictsRef.current);
       formRef.current = result.next;
       setForm(result.next);
       setConflicts(result.conflicts);
       conflictsRef.current = result.conflicts;
+      if (options?.overrideEdits && result.changed.some(field => dirtyRef.current[field])) {
+        const next = { ...dirtyRef.current };
+        for (const field of result.changed) delete next[field];
+        dirtyRef.current = next;
+        setDirty(next);
+      }
       if (options?.highlight !== false) {
         markHighlights(result.changed);
       }

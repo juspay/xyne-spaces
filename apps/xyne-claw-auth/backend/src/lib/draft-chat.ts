@@ -29,6 +29,19 @@ export interface DraftSkillPayload {
   content: string;
 }
 
+/** A file sent with one test message; claw /run takes this shape as-is. */
+export interface DraftAttachment {
+  fileName: string;
+  mimeType: string;
+  data: string;
+}
+
+/** Same caps as the Ask AI composer. */
+export const DRAFT_ATTACHMENT_MAX_COUNT = 20;
+export const DRAFT_ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024;
+
+const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
+
 const EMPTY_TOOLS: DraftChatTools = {
   subagents: [],
   direct: [],
@@ -80,6 +93,29 @@ export function parseDraftSnapshot(value: unknown): DraftChatSnapshot | null {
   };
 }
 
+/**
+ * Files for one test message. Missing means none; null means the list is
+ * malformed or over the count / size caps.
+ */
+export function parseDraftAttachments(value: unknown): DraftAttachment[] | null {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value) || value.length > DRAFT_ATTACHMENT_MAX_COUNT) return null;
+  let bytes = 0;
+  const files: DraftAttachment[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") return null;
+    const raw = item as Record<string, unknown>;
+    const fileName = typeof raw["fileName"] === "string" ? raw["fileName"].trim() : "";
+    const mimeType = typeof raw["mimeType"] === "string" ? raw["mimeType"].trim() : "";
+    const data = typeof raw["data"] === "string" ? raw["data"] : "";
+    if (!fileName || !mimeType || !data || data.length % 4 !== 0 || !BASE64.test(data)) return null;
+    bytes += (data.length / 4) * 3 - (data.endsWith("==") ? 2 : data.endsWith("=") ? 1 : 0);
+    if (bytes > DRAFT_ATTACHMENT_MAX_BYTES) return null;
+    files.push({ fileName: fileName.slice(0, 255), mimeType, data });
+  }
+  return files;
+}
+
 export function draftAgentSlug(userId: string): string {
   const safe = userId.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 40);
   return `draft-${safe || "user"}`;
@@ -106,9 +142,20 @@ export function buildDraftRunBody(input: {
   draftConversationId: string;
   snapshot: DraftChatSnapshot;
   skills?: DraftSkillPayload[] | undefined;
+  attachments?: DraftAttachment[] | undefined;
+  /** The composer's Web Search / Deep research switches, for this message only. */
+  webSearch?: boolean | undefined;
+  deepResearch?: boolean | undefined;
 }): Record<string, unknown> {
   const snapshot = input.snapshot;
   const tools = snapshot.tools ?? EMPTY_TOOLS;
+  const custom = [
+    ...new Set([
+      ...tools.custom,
+      ...(input.webSearch ? ["web-search"] : []),
+      ...(input.deepResearch ? ["deep-research"] : []),
+    ]),
+  ];
   const persona = [
     snapshot.systemPrompt.trim(),
     snapshot.name.trim() ? `Your name is ${snapshot.name.trim()}.` : "",
@@ -129,6 +176,12 @@ export function buildDraftRunBody(input: {
       notes.push(`Selected knowledge collections (not mounted on a draft run): ${labels.join(", ")}.`);
     }
   }
+  if (input.webSearch) {
+    notes.push("The user turned on web search for this message: search the web with web-search before answering.");
+  }
+  if (input.deepResearch) {
+    notes.push("The user turned on deep research for this message: use deep-research for a thorough, cited answer.");
+  }
 
   return {
     sessionId: input.sessionId,
@@ -147,12 +200,13 @@ export function buildDraftRunBody(input: {
       tools: {
         subagents: tools.subagents,
         direct: tools.direct,
-        custom: tools.custom,
+        custom,
         gateway: [],
       },
     },
     ...(tools.callableAgents.length > 0 ? { callableAgents: tools.callableAgents } : {}),
     ...(input.skills && input.skills.length > 0 ? { skills: input.skills } : {}),
+    ...(input.attachments && input.attachments.length > 0 ? { attachments: input.attachments } : {}),
     additionalInstructions: notes.join("\n"),
   };
 }

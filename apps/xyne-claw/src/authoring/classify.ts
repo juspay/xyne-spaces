@@ -27,7 +27,10 @@ export interface ClassifyDecision {
   mode: DraftMode;
   /** What to say for `chat` and `ask`; empty for draft and edit. */
   reply: string;
-  /** Canvas fields this turn writes. Never includes user-owned fields. */
+  /**
+   * Canvas fields this turn writes. A first draft skips user-owned fields; an edit
+   * writes what the user asked for, even over their own text.
+   */
   fields: DraftField[];
   name?: string;
   handle?: string;
@@ -90,7 +93,7 @@ Modes
 - "draft": the canvas is empty and a job is named. Fill everything and never return questions. Never ask about risk when the job is named; choose the permission mode yourself. "just draft" or "you pick" means draft with sensible defaults.
 - "edit": the canvas already has content and the user asks to change something. Put only the fields that change in "fields" and leave the other keys empty.
 
-"fields" lists what this turn writes, from: name, handle, description, instructions, tools, skills, knowledge, permission, schedule, properties. Never list a field in userOwned.
+"fields" lists what this turn writes, from: name, handle, description, instructions, tools, skills, knowledge, permission, schedule, properties. For an edit, list only what the message asks to change. userOwned fields hold text the user wrote: list one only when the message asks to change that field itself, and then it is rewritten.
 
 Fields
 - name: 2 to 4 words, Title Case, keep acronyms (DM, PR, QA). handle: lowercase, hyphens, no spaces.
@@ -293,7 +296,8 @@ export function normalizeDecision(raw: Record<string, unknown>, input: ClawDraft
     ];
     for (const row of rows) if (!fields.includes(row)) fields.push(row);
   }
-  const writable = fields.filter((f) => !owned.has(f));
+  // A first draft fills in around what the user wrote; an edit is the user asking.
+  const writable = mode === "edit" ? fields : fields.filter((f) => !owned.has(f));
 
   const name = text(raw["name"], 60);
   const handle = slugFromName(text(raw["handle"], 60) || name);

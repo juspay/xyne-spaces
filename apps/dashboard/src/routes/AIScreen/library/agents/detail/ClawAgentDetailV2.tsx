@@ -12,6 +12,7 @@ import { Pill } from '../../shared/primitives/Pill';
 import { AgentCreatedBanner } from './AgentCreatedBanner';
 import { isSpacesRegistered } from './agentRegistration';
 import { AgentDetailHeaderV2 } from './AgentDetailHeaderV2';
+import { AgentProfileChat } from './AgentProfileChat';
 import { SETTINGS_PARAM, settingsTabFromParams, type AgentSettingsTabId } from './detailTabs';
 import { SavedAgentSettings } from './settings/AgentSettingsView';
 import { useAgentDetailActions, type AgentDetailActions } from './useAgentDetailActions';
@@ -46,6 +47,7 @@ function AgentProfileCanvas({
   agent,
   actions,
   profile,
+  chat,
   topBar,
   banner,
   onOpenSettings,
@@ -53,6 +55,8 @@ function AgentProfileCanvas({
   agent: Agent;
   actions: AgentDetailActions;
   profile: AgentProfileForm;
+  /** The floating chat with this agent, docked over the bottom of the profile. */
+  chat: ReactNode;
   topBar: ReactNode;
   banner: ReactNode;
   onOpenSettings: () => void;
@@ -143,6 +147,7 @@ function AgentProfileCanvas({
       }
       identityActions={editActions}
       onOpenSettings={onOpenSettings}
+      floatingChat={chat}
     />
   );
 }
@@ -171,11 +176,13 @@ function ProfileSkeleton(): ReactElement {
 function AgentProfile({
   agent,
   actions,
+  chat,
   topBar,
   banner,
 }: {
   agent: Agent;
   actions: AgentDetailActions;
+  chat: ReactNode;
   topBar: ReactNode;
   banner: ReactNode;
 }): ReactElement {
@@ -204,6 +211,7 @@ function AgentProfile({
         agent={agent}
         actions={actions}
         profile={profile}
+        chat={chat}
         topBar={topBar}
         banner={banner}
         onOpenSettings={() => showSettings('persona')}
@@ -240,7 +248,8 @@ const ClawAgentDetailV2 = (): ReactElement => {
   const pendingRegistration = agent !== undefined && !isSpacesRegistered(agent);
   const showBanner = !bannerDismissed && (justCreated || pendingRegistration);
   const actions = useAgentDetailActions(agent);
-  const { canOpenAgentChat, openAgentChat } = useOpenAgentChat();
+  // The floating chat below replaces the top bar's "Chat with agent".
+  const { canOpenAgentChat } = useOpenAgentChat();
 
   return (
     <div className='flex h-full min-h-0 flex-col' data-component='ClawAgentDetailV2'>
@@ -254,12 +263,13 @@ const ClawAgentDetailV2 = (): ReactElement => {
         <AgentProfile
           agent={agent}
           actions={actions}
+          chat={canOpenAgentChat ? <AgentProfileChat agent={agent} /> : null}
           topBar={
             <AgentDetailHeaderV2
               agent={agent}
               actions={actions}
-              onChat={() => openAgentChat(agent.slug)}
-              canChat={canOpenAgentChat}
+              onChat={noop}
+              canChat={false}
               onBack={() => void navigate(returnPath)}
             />
           }

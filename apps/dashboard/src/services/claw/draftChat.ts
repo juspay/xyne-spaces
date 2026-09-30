@@ -23,10 +23,42 @@ export function snapshotFromForm(form: AgentCreateFormState): DraftChatSnapshot 
   };
 }
 
+/** A file sent with one test message, base64 without the data-URL prefix. */
+export interface DraftChatAttachment {
+  id: string;
+  fileName: string;
+  mimeType: string;
+  size: number;
+  data: string;
+}
+
+/** What the composer adds to a test message besides its text. */
+export interface DraftChatExtras {
+  attachments: DraftChatAttachment[];
+  webSearchEnabled: boolean;
+  deepResearchEnabled: boolean;
+}
+
+export const EMPTY_DRAFT_CHAT_EXTRAS: DraftChatExtras = {
+  attachments: [],
+  webSearchEnabled: false,
+  deepResearchEnabled: false,
+};
+
 export interface DraftChatHandlers {
   onDelta: (text: string) => void;
   onDone: (finalText: string | null) => void;
   onError: (message: string) => void;
+}
+
+/**
+ * What goes in front of text that resumes after a tool call: a paragraph break,
+ * so "Let me read the file." and the "# Digest" that follows the read don't fuse
+ * into one line where the heading never renders.
+ */
+export function afterToolBreak(streamed: string): string {
+  if (!streamed.trim() || streamed.endsWith('\n\n')) return '';
+  return streamed.endsWith('\n') ? '\n' : '\n\n';
 }
 
 /** Streams a turn against the unsaved agent. Resolves when the SSE stream ends. */
@@ -34,9 +66,11 @@ export async function streamDraftChat(input: {
   message: string;
   draftConversationId: string;
   snapshot: DraftChatSnapshot;
+  extras?: DraftChatExtras;
   signal: AbortSignal;
   handlers: DraftChatHandlers;
 }): Promise<void> {
+  const extras = input.extras ?? EMPTY_DRAFT_CHAT_EXTRAS;
   // Streaming body — clawRequest parses JSON and would consume the stream.
   // eslint-disable-next-line local-rules/no-fetch-use-axios
   const res = await fetch(`${CLAW_API_BASE}/api/v1/agents/draft-chat`, {
@@ -51,6 +85,17 @@ export async function streamDraftChat(input: {
       message: input.message,
       draftConversationId: input.draftConversationId,
       snapshot: input.snapshot,
+      ...(extras.attachments.length > 0
+        ? {
+            attachments: extras.attachments.map(({ fileName, mimeType, data }) => ({
+              fileName,
+              mimeType,
+              data,
+            })),
+          }
+        : {}),
+      ...(extras.webSearchEnabled ? { webSearchEnabled: true } : {}),
+      ...(extras.deepResearchEnabled ? { deepResearchEnabled: true } : {}),
     }),
   });
 
@@ -64,11 +109,18 @@ export async function streamDraftChat(input: {
   const decoder = new TextDecoder();
   let buffer = '';
   let streamed = '';
+  let toolSinceText = false;
 
   const handleFrame = (event: string, data: Record<string, unknown>): void => {
+    if (event === 'invocation') {
+      toolSinceText = true;
+      return;
+    }
     if (event === 'delta' && typeof data['textDelta'] === 'string') {
-      streamed += data['textDelta'];
-      input.handlers.onDelta(data['textDelta']);
+      const text = (toolSinceText ? afterToolBreak(streamed) : '') + data['textDelta'];
+      toolSinceText = false;
+      streamed += text;
+      input.handlers.onDelta(text);
       return;
     }
     if (event === 'done') {

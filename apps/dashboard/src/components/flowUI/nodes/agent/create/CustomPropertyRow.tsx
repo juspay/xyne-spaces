@@ -1,10 +1,11 @@
-import { useRef, type ReactElement } from 'react';
+import { useRef, useState, type ReactElement } from 'react';
 import {
   CalendarDefault,
   CalendarTimer,
   CheckTickSingle,
   ChevronRight,
   ListCheckBox,
+  MultipleCrossCancelDefault,
   Number123,
   Tag,
   Text,
@@ -27,8 +28,12 @@ import {
   CUSTOM_PROPERTY_TYPES,
   copyPropertyValue,
   customPropertyTitleValue,
+  joinTags,
+  mergeTags,
   propertyHasValue,
   readPropertyValue,
+  splitTags,
+  tagsFromText,
   type CustomProperty,
   type CustomPropertyType,
 } from './customProperty';
@@ -196,6 +201,10 @@ function CustomPropertyValue({
     return <DateValue property={property} disabled={disabled} onValue={onValue} />;
   }
 
+  if (property.type === 'tags') {
+    return <TagsValue property={property} disabled={disabled} onValue={onValue} />;
+  }
+
   const inputType = property.type === 'number' ? 'number' : 'text';
 
   return (
@@ -211,6 +220,84 @@ function CustomPropertyValue({
       data-testid={`custom-property-value-${property.id}`}
       className={cn(VALUE_CLASS, property.type === 'number' && '[appearance:textfield]')}
     />
+  );
+}
+
+/**
+ * Tags as chips. A space, comma or Enter turns what was typed into a tag, and
+ * Backspace in the empty box takes the last one off. Stored as "a, b".
+ */
+function TagsValue({
+  property,
+  disabled,
+  onValue,
+}: {
+  property: CustomProperty;
+  disabled: boolean;
+  onValue: (value: string) => void;
+}): ReactElement {
+  const [draft, setDraft] = useState('');
+  const tags = splitTags(property.value);
+  const add = (text: string): void => {
+    setDraft('');
+    const next = mergeTags(tags, tagsFromText(text));
+    if (next.length !== tags.length) onValue(joinTags(next));
+  };
+  const remove = (index: number): void => onValue(joinTags(tags.filter((_, i) => i !== index)));
+
+  return (
+    <div
+      className='flex min-h-[1.3em] min-w-0 flex-wrap items-center gap-1'
+      data-testid={`custom-property-tags-${property.id}`}
+    >
+      {tags.map((tag, index) => (
+        <span
+          key={tag}
+          className='inline-flex h-[22px] max-w-full items-center gap-1 rounded-md bg-muted px-1.5 text-[13px] leading-none text-foreground'
+        >
+          <span className='truncate'>{tag}</span>
+          {disabled ? null : (
+            <button
+              type='button'
+              onClick={() => remove(index)}
+              aria-label={`Remove ${tag}`}
+              data-track-category='Claw Agents'
+              data-track-name='Create agent: remove tag'
+              className='flex shrink-0 items-center rounded-sm text-muted-foreground transition-colors hover:text-foreground'
+            >
+              <MultipleCrossCancelDefault className='size-3' aria-hidden />
+            </button>
+          )}
+        </span>
+      ))}
+      {disabled ? null : (
+        <input
+          type='text'
+          value={draft}
+          onChange={event => {
+            // A space or comma, typed or pasted, ends the tag before it.
+            if (/[\s,]/.test(event.target.value)) add(event.target.value);
+            else setDraft(event.target.value);
+          }}
+          onKeyDown={event => {
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              add(draft);
+            } else if (event.key === 'Backspace' && draft === '' && tags.length > 0) {
+              event.preventDefault();
+              remove(tags.length - 1);
+            }
+          }}
+          onBlur={() => add(draft)}
+          data-track-category='Claw Agents'
+          data-track-name='Create agent: custom property tags'
+          placeholder={tags.length === 0 ? CUSTOM_PROPERTY_PLACEHOLDER.tags : ''}
+          aria-label={property.title.trim() || CUSTOM_PROPERTY_LABEL.tags}
+          data-testid={`custom-property-value-${property.id}`}
+          className={cn(VALUE_CLASS, 'w-auto min-w-[6ch] flex-1')}
+        />
+      )}
+    </div>
   );
 }
 

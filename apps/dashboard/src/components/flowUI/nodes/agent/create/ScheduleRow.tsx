@@ -218,7 +218,8 @@ function ScheduleEditor({
                 ))}
               </select>
             </label>
-            <label className='flex w-[104px] flex-col gap-1.5'>
+            {/* Room for a 12-hour "10:00 AM" plus the picker icon. */}
+            <label className='flex w-[124px] flex-col gap-1.5'>
               <span className={FIELD_LABEL}>At</span>
               <input
                 type='time'

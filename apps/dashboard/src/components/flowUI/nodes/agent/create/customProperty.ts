@@ -31,7 +31,7 @@ export const CUSTOM_PROPERTY_PLACEHOLDER: Record<
   Exclude<CustomPropertyType, 'checkbox'>,
   string
 > = {
-  text: 'Give instructions to your agent',
+  text: 'Add text',
   number: 'Add a number',
   tags: 'Add tags',
   date: 'Add a date',
@@ -43,6 +43,33 @@ export function customPropertyTitleValue(title: string, type: CustomPropertyType
   const trimmed = title.trim();
   if (trimmed.length === 0 || trimmed === CUSTOM_PROPERTY_LABEL[type]) return '';
   return trimmed;
+}
+
+/** A tags value's tags. Stored as "billing, refunds"; blanks and repeats drop out. */
+export function splitTags(value: string): string[] {
+  return mergeTags([], value.split(','));
+}
+
+/** The stored form of a tag list. */
+export function joinTags(tags: readonly string[]): string {
+  return tags.join(', ');
+}
+
+/** Tags typed or pasted into the field: a space or comma ends each one. */
+export function tagsFromText(text: string): string[] {
+  return text.split(/[\s,]+/).filter(Boolean);
+}
+
+/** `tags` plus `added`, trimmed, keeping the first of any that match ignoring case. */
+export function mergeTags(tags: readonly string[], added: readonly string[]): string[] {
+  const seen = new Set<string>();
+  return [...tags, ...added].flatMap(raw => {
+    const tag = raw.trim();
+    const key = tag.toLowerCase();
+    if (!tag || seen.has(key)) return [];
+    seen.add(key);
+    return [tag];
+  });
 }
 
 /** Whether the row holds a value. An unticked checkbox is its empty state. */

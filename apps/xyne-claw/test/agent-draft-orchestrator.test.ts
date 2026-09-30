@@ -653,6 +653,65 @@ describe("blank ack", () => {
   });
 });
 
+describe("fields the user wrote by hand", () => {
+  const ackText = (events: AgentDraftBody[]): string | undefined =>
+    (events.find((e) => e.event === "ack") as { text: string } | undefined)?.text;
+  const filled = { ...request().canvas, name: "Brief", description: "Mine.", instructions: GOOD_PROMPT };
+  const edit = (over: Partial<ClassifyDecision>): ClassifyDecision => ({
+    mode: "edit",
+    reply: "",
+    fields: [],
+    capabilityQuery: "",
+    capabilityAdds: [],
+    capabilityRemovals: [],
+    instructionsBrief: "",
+    ack: "Made the description formal.",
+    ...over,
+  });
+
+  it("lets an edit rewrite a field the user owns, but not a first draft", () => {
+    const raw = { mode: "edit", fields: ["description"], description: "A formal brief." };
+    const edited = normalizeDecision(raw, request({ canvas: filled, userOwned: ["description"] }));
+    expect(edited.fields).toEqual(["description"]);
+    expect(edited.description).toBe("A formal brief.");
+    const drafted = normalizeDecision({ ...raw, mode: "draft" }, request({ userOwned: ["description"] }));
+    expect(drafted.fields).not.toContain("description");
+    expect(drafted.description).toBeUndefined();
+  });
+
+  it("writes what an edit asked for over the user's own text", async () => {
+    const r = rig({ classify: async () => edit({ fields: ["description"], description: "A formal brief." }) });
+    await run(request({ message: "make the description formal", canvas: filled, userOwned: ["description"] }), r);
+    expect(r.events).toContainEqual({ event: "identity", description: "A formal brief." });
+    expect(ackText(r.events)).toBe("Made the description formal.");
+  });
+
+  it("adds a named tool to a row the user filled by hand", async () => {
+    const r = rig({
+      classify: async () => edit({ fields: ["tools"], capabilityAdds: ["Web Search"], ack: "" }),
+      // Only a judge asked about built-in tools can find it.
+      judge: async (input: JudgeInput) =>
+        judged(input.hubs.includes("builtin") ? [pick("builtin", "custom:web-search", "Web Search")] : []),
+    });
+    await run(request({ message: "add web search", canvas: filled, userOwned: ["tools"] }), r);
+    const caps = r.events.find((e) => e.event === "capabilities") as { bound: DraftPick[] } | undefined;
+    expect(caps?.bound.map((p) => p.id)).toEqual(["custom:web-search"]);
+  });
+
+  it("leaves a hand-filled tools row alone on a first draft", async () => {
+    const r = rig();
+    await run(request({ userOwned: ["tools"] }), r);
+    const caps = r.events.find((e) => e.event === "capabilities") as { bound: DraftPick[] } | undefined;
+    expect(caps?.bound.filter((p) => p.hub === "mcp" || p.hub === "builtin" || p.hub === "subagent") ?? []).toEqual([]);
+  });
+
+  it("does not take the model's word for a change when nothing landed", async () => {
+    const r = rig({ classify: async () => edit({}) });
+    await run(request({ message: "make the description formal", canvas: filled }), r);
+    expect(ackText(r.events)).toBe("Nothing on the canvas needed changing.");
+  });
+});
+
 describe("fallback names", () => {
   it("names the job, not the verb", async () => {
     const r = rig({

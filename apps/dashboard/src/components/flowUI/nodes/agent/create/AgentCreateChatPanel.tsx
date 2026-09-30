@@ -32,8 +32,8 @@ import {
   BuildReplyMarkdown,
   BuildSearchLine,
   BuildSuggestionChips,
-  type BuildQuestionState,
 } from './BuildChatExtras';
+import { readBuildChat, writeBuildChat, type BuildTurnExtras } from './buildChatStorage';
 import {
   buildDraftHistory,
   guardQuestions,
@@ -146,6 +146,8 @@ interface AgentCreateChatPanelProps {
    * of the Ask AI run, and the canvas fills as events arrive.
    */
   onDraftTurn?: (turn: DraftTurnArgs) => Promise<void>;
+  /** Streamed path: where the Build chat is kept so a reload brings it back. */
+  chatStorageKey?: string | null;
   disabled?: boolean;
   /** Live draft pipeline phase — Braille + AnimatedLabel, not chat bubbles. */
   progressLabel?: string | null;
@@ -172,12 +174,7 @@ export function AgentCreateChatPanel(props: AgentCreateChatPanelProps): ReactEle
 let draftMessageSeq = 0;
 const draftMessageId = (kind: string): string => `draft-${kind}-${Date.now()}-${++draftMessageSeq}`;
 
-/** What a Build reply carries besides its text. */
-interface TurnExtras {
-  activities: DraftActivity[];
-  suggestions: DraftSuggestion[];
-  question?: BuildQuestionState;
-}
+type TurnExtras = BuildTurnExtras;
 
 /**
  * Chat for the streamed draft. Each send is one draft turn: the reply text and
@@ -187,15 +184,20 @@ interface TurnExtras {
  */
 function StreamedAgentCreateChatPanel({
   onDraftTurn,
+  chatStorageKey = null,
   disabled,
   progressLabel = null,
 }: AgentCreateChatPanelProps & {
   onDraftTurn: (turn: DraftTurnArgs) => Promise<void>;
 }): ReactElement {
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [extras, setExtras] = useState<Record<string, TurnExtras>>({});
+  // The page remounts this panel when the key changes, so it is read once here.
+  const [stored] = useState(() => (chatStorageKey ? readBuildChat(chatStorageKey) : null));
+  const [messages, setMessages] = useState<Message[]>(() => stored?.messages ?? []);
+  const [extras, setExtras] = useState<Record<string, TurnExtras>>(() => stored?.extras ?? {});
   /** User turns sent from a question card: the answered card stands in for their bubble. */
-  const [fromCard, setFromCard] = useState<ReadonlySet<string>>(() => new Set());
+  const [fromCard, setFromCard] = useState<ReadonlySet<string>>(
+    () => new Set(stored?.fromCard ?? []),
+  );
   const [error, setError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
@@ -204,6 +206,16 @@ function StreamedAgentCreateChatPanel({
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: 'end' });
   }, [messages, extras, error, progressLabel]);
+
+  // Keep the stored chat in step, a beat behind so a streaming reply isn't written per token.
+  useEffect(() => {
+    if (!chatStorageKey) return undefined;
+    const timer = window.setTimeout(
+      () => writeBuildChat(chatStorageKey, { messages, extras, fromCard: [...fromCard] }),
+      400,
+    );
+    return () => window.clearTimeout(timer);
+  }, [chatStorageKey, extras, fromCard, messages]);
 
   useEffect(() => (): void => abortRef.current?.abort(), []);
 

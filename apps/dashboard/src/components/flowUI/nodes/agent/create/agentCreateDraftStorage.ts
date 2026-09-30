@@ -91,9 +91,15 @@ export function writeAgentDraft(
   }
 }
 
+/** Where the Build chat for a draft is kept (buildChatStorage.ts). It goes when the draft does. */
+export function buildChatStorageKey(draftKey: string): string {
+  return `${draftKey}:chat`;
+}
+
 export function clearAgentDraft(key: string): void {
   try {
     window.localStorage.removeItem(key);
+    window.localStorage.removeItem(buildChatStorageKey(key));
   } catch {
     // Nothing to clear when storage is blocked.
   }
