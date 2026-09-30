@@ -7,19 +7,19 @@ import {
 import { z } from 'zod';
 import { authV2Middleware } from '@/middleware/authV2Middleware';
 import { db } from '@/database/client';
-import { decrypt, encrypt } from '@/services/encryptionService';
-import { getBackendUrl, getFrontendUrl } from '@/utils/publicUrls';
+import { encrypt } from '@/services/encryptionService';
 import { logger } from '@/utils/logger';
-import { buildSupportPath } from '../urlHelpers';
 import { ExternalSourcePlatform } from '../../core/types';
 import {
   googlePlayClient,
+  parseServiceAccountKey,
+  readSourceCredentials,
+  toGooglePlayErrorResponse,
   type GooglePlayCredentials,
 } from '../../adapters/social-media/google-play/client';
-import { googlePlayOAuthStateService } from '../../adapters/social-media/google-play/oauthStateService';
 import { buildGooglePlaySourceRecords } from '../../adapters/social-media/google-play/sourceRecords';
 import { authorizeSocialMediaManager } from './access';
-import { getGooglePlayOauthCallbackTx } from '@/bypassAcl/transactions/googlePlay';
+import { postGooglePlayConnectTx } from '@/bypassAcl/transactions/googlePlay';
 
 const TAG = '[GooglePlayRoutes]';
 const router = express.Router();
@@ -33,7 +33,11 @@ class GooglePlayPackageValidationError extends Error {
   }
 }
 
-const startSchema = z.object({
+const serviceAccountKeySchema = z.object({
+  serviceAccountKey: z.string().min(1),
+});
+
+const connectSchema = serviceAccountKeySchema.extend({
   channelName: z.string().trim().min(1).max(120),
   applications: z
     .array(
@@ -54,20 +58,11 @@ const startSchema = z.object({
   boardId: z.string().min(1),
   assigneeUserGroupId: z.string().min(1).optional(),
   visibility: z.enum(['PUBLIC', 'PRIVATE', 'public', 'private']).default('PUBLIC'),
-  platform: z.enum(['web', 'electron']).default('web'),
 });
 
 const addApplicationsSchema = z.object({
-  applications: startSchema.shape.applications,
+  applications: connectSchema.shape.applications,
 });
-
-const reconnectSchema = z.object({
-  platform: startSchema.shape.platform,
-});
-
-function callbackUri(req: Request): string {
-  return `${getBackendUrl(req)}/api/integrations/social-media/google-play/oauth/callback`;
-}
 
 async function validatePackages(
   credentials: GooglePlayCredentials,
@@ -84,48 +79,35 @@ async function validatePackages(
   );
 }
 
-function postOAuthRedirect(
-  frontendUrl: string,
-  path: string,
-  platform: 'web' | 'electron'
-): string {
-  return platform === 'electron'
-    ? `${frontendUrl}/launch?path=${encodeURIComponent(path)}`
-    : `${frontendUrl}${path}`;
-}
-
-function redirectToDesk(
-  req: Request,
+function sendAccessError(
   res: Response,
-  params: {
-    workspaceId?: string;
-    channelId?: string;
-    platform?: 'web' | 'electron';
-    error?: string;
-    packageName?: string;
-  }
-): void {
-  const query = new URLSearchParams();
-  if (params.error) {
-    query.set('socialMediaError', params.error);
-    if (params.packageName) query.set('socialMediaPackage', params.packageName);
-  } else {
-    query.set('socialMediaOAuth', 'success');
-  }
-  const path = buildSupportPath(params.workspaceId, params.channelId, query);
-  res.redirect(postOAuthRedirect(getFrontendUrl(req), path, params.platform ?? 'web'));
+  error: unknown,
+  credentials: GooglePlayCredentials | undefined,
+): boolean {
+  const validationError = error instanceof GooglePlayPackageValidationError ? error : undefined;
+  const mapped = toGooglePlayErrorResponse(validationError?.providerError ?? error, {
+    clientEmail: credentials?.clientEmail,
+    packageName: validationError?.packageName,
+  });
+  if (!mapped) return false;
+  res.status(mapped.status).json({ error: mapped.error });
+  return true;
 }
 
 router.post(
-  '/google-play/oauth/start',
+  '/google-play/connect',
   authV2Middleware.authenticate,
   async (req: Request, res: Response): Promise<void> => {
+    let credentials: GooglePlayCredentials | undefined;
     try {
-      const parsed = startSchema.safeParse(req.body);
+      const parsed = connectSchema.safeParse(req.body);
       if (!parsed.success) {
         res
           .status(400)
-          .json({ error: 'Valid applications, channel name, project and board are required' });
+          .json({
+            error:
+              'A service account key, valid applications, channel name, project and board are required',
+          });
         return;
       }
       const userId = req.user!.id;
@@ -184,26 +166,31 @@ router.post(
         return;
       }
 
-      const { state, codeChallenge } = await googlePlayOAuthStateService.create({
-        userId,
-        workspaceId,
-        channelName: input.channelName,
-        applications: input.applications,
-        projectId: input.projectId,
-        boardId: input.boardId,
-        assigneeUserGroupId: input.assigneeUserGroupId,
-        visibility: input.visibility.toUpperCase() as 'PUBLIC' | 'PRIVATE',
-        platform: input.platform,
-      });
-      const authorizationUrl = googlePlayClient.createAuthorizationUrl({
-        redirectUri: callbackUri(req),
-        state,
-        codeChallenge,
-      });
-      res.json({ authorizationUrl });
+      credentials = parseServiceAccountKey(input.serviceAccountKey);
+      await validatePackages(credentials, input.applications);
+      const { channelId } = await postGooglePlayConnectTx(
+        {
+          userId,
+          workspaceId,
+          channelName: input.channelName,
+          applications: input.applications,
+          projectId: input.projectId,
+          boardId: input.boardId,
+          assigneeUserGroupId: input.assigneeUserGroupId,
+          visibility: input.visibility.toUpperCase() as 'PUBLIC' | 'PRIVATE',
+        },
+        encrypt(JSON.stringify(credentials)),
+        new Date(),
+      );
+      res.status(201).json({ channelId });
     } catch (error) {
-      logger.error(`${TAG} Failed to start Google Play OAuth`, { error });
-      res.status(500).json({ error: 'Failed to start Google Play authorization' });
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        res.status(409).json({ error: 'One or more Google Play apps are already connected' });
+        return;
+      }
+      if (sendAccessError(res, error, credentials)) return;
+      logger.error(`${TAG} Failed to connect Google Play desk`, { error });
+      res.status(500).json({ error: 'Failed to connect Google Play desk' });
     }
   }
 );
@@ -212,6 +199,7 @@ router.post(
   '/:channelId/google-play/apps',
   authV2Middleware.authenticate,
   async (req: Request, res: Response): Promise<void> => {
+    let credentials: GooglePlayCredentials | undefined;
     try {
       const parsed = addApplicationsSchema.safeParse(req.body);
       if (!parsed.success) {
@@ -290,9 +278,7 @@ router.post(
         return;
       }
 
-      const credentials = JSON.parse(
-        decrypt(credentialSource.credentials)
-      ) as GooglePlayCredentials;
+      credentials = readSourceCredentials(credentialSource);
       await validatePackages(credentials, parsed.data.applications);
 
       const sourceRecords = buildGooglePlaySourceRecords({
@@ -321,25 +307,7 @@ router.post(
         return;
       }
 
-      const providerError =
-        error instanceof GooglePlayPackageValidationError ? error.providerError : error;
-      const providerStatus =
-        typeof providerError === 'object' &&
-        providerError !== null &&
-        'response' in providerError &&
-        typeof providerError.response === 'object' &&
-        providerError.response !== null &&
-        'status' in providerError.response
-          ? providerError.response.status
-          : undefined;
-      if (providerStatus === 401 || providerStatus === 403 || providerStatus === 404) {
-        res.status(403).json({
-          error: error instanceof GooglePlayPackageValidationError
-            ? `The existing Google Play authorization cannot access ${error.packageName}. Check the package name and Play Console permissions.`
-            : 'The existing Google Play authorization is expired or cannot access one or more packages. Check the package names and Play Console permissions.',
-        });
-        return;
-      }
+      if (sendAccessError(res, error, credentials)) return;
 
       logger.error(`${TAG} Failed to add Google Play applications`, {
         channelId: req.params.channelId,
@@ -351,169 +319,63 @@ router.post(
 );
 
 router.post(
-  '/:channelId/reconnect',
+  '/:channelId/google-play/credentials',
   authV2Middleware.authenticate,
   async (req: Request, res: Response): Promise<void> => {
+    let credentials: GooglePlayCredentials | undefined;
     try {
-      const parsed = reconnectSchema.safeParse(req.body ?? {});
+      const parsed = serviceAccountKeySchema.safeParse(req.body);
       if (!parsed.success) {
-        res.status(400).json({ error: 'Invalid platform' });
+        res.status(400).json({ error: 'A service account key is required' });
         return;
       }
 
-      const userId = req.user!.id;
       const workspaceId = req.user!.workspaceId!;
       if (
-        !(await authorizeSocialMediaManager(req.params.channelId, userId, workspaceId, res))
+        !(await authorizeSocialMediaManager(req.params.channelId, req.user!.id, workspaceId, res))
       ) {
         return;
       }
 
-      const [channel, preference, sources] = await Promise.all([
-        db.channel.findFirst({
-          where: {
-            id: req.params.channelId,
-            workspaceId,
-            type: ChannelType.SOCIAL_MEDIA,
-          },
-          select: {
-            id: true,
-            name: true,
-            visibility: true,
-          },
-        }),
-        db.emailChannelPreference.findUnique({
-          where: { channelId: req.params.channelId },
-          select: {
-            boardId: true,
-            assigneeUserGroupId: true,
-          },
-        }),
-        db.externalSource.findMany({
-          where: {
-            channelId: req.params.channelId,
-            workspaceId,
-            sourceType: ExternalSourcePlatform.GOOGLE_PLAY,
-          },
-          select: {
-            externalIdentifier: true,
-            displayName: true,
-            isActive: true,
-          },
-          orderBy: { createdAt: 'asc' },
-        }),
-      ]);
-      if (!channel || !preference?.boardId || sources.length === 0) {
-        res.status(404).json({ error: 'Social media desk configuration not found' });
-        return;
-      }
-      const stateBoard = await db.board.findUnique({
-        where: { id: preference.boardId },
-        select: { projectId: true },
+      credentials = parseServiceAccountKey(parsed.data.serviceAccountKey);
+      const sources = await db.externalSource.findMany({
+        where: {
+          channelId: req.params.channelId,
+          workspaceId,
+          sourceType: ExternalSourcePlatform.GOOGLE_PLAY,
+        },
+        select: { id: true, externalIdentifier: true, isActive: true },
       });
-      if (!stateBoard?.projectId) {
-        res.status(404).json({ error: 'Social media desk configuration not found' });
+      if (sources.length === 0) {
+        res.status(404).json({ error: 'Google Play desk not found' });
         return;
       }
-      if (sources.some((source) => !source.externalIdentifier)) {
-        res.status(409).json({ error: 'One or more Google Play sources are incomplete' });
-        return;
-      }
-      const activeSources = sources.filter((source) => source.isActive);
-      const reactivateAll = activeSources.length === 0;
-      const sourcesToValidate = reactivateAll ? sources : activeSources;
 
-      const { state, codeChallenge } = await googlePlayOAuthStateService.create({
-        mode: 'reconnect',
-        reactivateAll,
-        userId,
-        workspaceId,
-        channelId: channel.id,
-        channelName: channel.name,
-        applications: sourcesToValidate.map((source) => ({
-          packageName: source.externalIdentifier!,
-          displayName: source.displayName,
-        })),
-        projectId: stateBoard.projectId,
-        boardId: preference.boardId,
-        assigneeUserGroupId: preference.assigneeUserGroupId ?? undefined,
-        visibility: channel.visibility as 'PUBLIC' | 'PRIVATE',
-        platform: parsed.data.platform,
+      await validatePackages(
+        credentials,
+        sources.flatMap((source) =>
+          source.externalIdentifier ? [{ packageName: source.externalIdentifier }] : []
+        ),
+      );
+      const reactivateAll = sources.every((source) => !source.isActive);
+      await db.externalSource.updateMany({
+        where: { id: { in: sources.map((source) => source.id) } },
+        data: {
+          credentials: encrypt(JSON.stringify(credentials)),
+          ...(reactivateAll && { isActive: true }),
+        },
       });
-      const authorizationUrl = googlePlayClient.createAuthorizationUrl({
-        redirectUri: callbackUri(req),
-        state,
-        codeChallenge,
-      });
-      res.json({ authorizationUrl });
+      res.json({ updated: sources.length });
     } catch (error) {
-      logger.error(`${TAG} Failed to start Google Play reconnection`, {
+      if (sendAccessError(res, error, credentials)) return;
+      logger.error(`${TAG} Failed to replace Google Play credentials`, {
         channelId: req.params.channelId,
         error,
       });
-      res.status(500).json({ error: 'Failed to start Google Play reconnection' });
+      res.status(500).json({ error: 'Failed to replace Google Play credentials' });
     }
   }
 );
-
-router.get('/google-play/oauth/callback', async (req: Request, res: Response): Promise<void> => {
-  const stateToken = typeof req.query.state === 'string' ? req.query.state : '';
-  const code = typeof req.query.code === 'string' ? req.query.code : '';
-  const state = stateToken ? await googlePlayOAuthStateService.consume(stateToken) : null;
-  if (!state || !code) {
-    redirectToDesk(req, res, { error: 'invalid_or_expired_google_play_oauth_state' });
-    return;
-  }
-
-  try {
-    const user = await db.user.findFirst({
-      where: { id: state.userId, workspaceId: state.workspaceId, leftAt: null },
-      select: { id: true },
-    });
-    if (!user) throw new Error('The user who started authorization is no longer available');
-
-    const authorization = await googlePlayClient.exchangeAuthorizationCode({
-      code,
-      codeVerifier: state.codeVerifier,
-      redirectUri: callbackUri(req),
-    });
-    await validatePackages(authorization.credentials, state.applications);
-
-    const encryptedCredentials = encrypt(JSON.stringify(authorization.credentials));
-    const now = new Date();
-    const result = await getGooglePlayOauthCallbackTx(state, encryptedCredentials, now);
-
-    redirectToDesk(req, res, {
-      workspaceId: state.workspaceId,
-      channelId: result.channelId,
-      platform: state.platform,
-    });
-  } catch (error) {
-    if (error instanceof GooglePlayPackageValidationError) {
-      logger.error(`${TAG} Google Play package validation failed`, {
-        packageName: error.packageName,
-        error: error.providerError,
-      });
-      redirectToDesk(req, res, {
-        workspaceId: state.workspaceId,
-        channelId: state.channelId,
-        platform: state.platform,
-        error: 'google_play_package_validation_failed',
-        packageName: error.packageName,
-      });
-      return;
-    }
-    logger.error(`${TAG} Google Play OAuth callback failed`, { error });
-    const duplicate =
-      error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
-    redirectToDesk(req, res, {
-      workspaceId: state.workspaceId,
-      channelId: state.channelId,
-      platform: state.platform,
-      error: duplicate ? 'google_play_app_already_connected' : 'google_play_connection_failed',
-    });
-  }
-});
 
 router.post(
   '/:channelId/google-play/apps/:sourceId/disconnect',
@@ -561,6 +423,7 @@ router.post(
   '/:channelId/google-play/apps/:sourceId/reconnect',
   authV2Middleware.authenticate,
   async (req: Request, res: Response): Promise<void> => {
+    let credentials: GooglePlayCredentials | undefined;
     try {
       const workspaceId = req.user!.workspaceId!;
       if (
@@ -592,7 +455,7 @@ router.post(
         return;
       }
 
-      const credentials = JSON.parse(decrypt(source.credentials)) as GooglePlayCredentials;
+      credentials = readSourceCredentials(source);
       await googlePlayClient.validatePackage(credentials, source.externalIdentifier);
       await db.externalSource.update({
         where: { id: source.id },
@@ -600,22 +463,7 @@ router.post(
       });
       res.json({ message: 'Google Play app reconnected' });
     } catch (error) {
-      const providerStatus =
-        typeof error === 'object' &&
-        error !== null &&
-        'response' in error &&
-        typeof error.response === 'object' &&
-        error.response !== null &&
-        'status' in error.response
-          ? error.response.status
-          : undefined;
-      if (providerStatus === 401 || providerStatus === 403 || providerStatus === 404) {
-        res.status(403).json({
-          error:
-            'The existing Google authorization cannot access this app. Reauthorize Google and check Play Console permissions.',
-        });
-        return;
-      }
+      if (sendAccessError(res, error, credentials)) return;
       logger.error(`${TAG} Failed to reconnect Google Play app`, {
         channelId: req.params.channelId,
         sourceId: req.params.sourceId,

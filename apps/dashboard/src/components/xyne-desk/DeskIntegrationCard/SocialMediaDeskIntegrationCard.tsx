@@ -1,13 +1,13 @@
 import { ReactElement, useState } from 'react';
 import { ANDROID_PACKAGE_NAME_PATTERN, SOCIAL_MEDIA_SOURCE_TYPE } from '@xyne/shared';
-import { Plug, Plus, RefreshCw, Trash2, Unplug } from 'lucide-react';
+import { KeyRound, Plug, Plus, Trash2, Unplug } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   addGooglePlayApps,
   disconnectGooglePlayApp,
   disconnectSocialMediaDesk,
   reconnectGooglePlayApp,
-  reconnectSocialMediaDesk,
+  rotateGooglePlayCredentials,
 } from '../../../services/clients/socialMediaDeskApi';
 import {
   clearChannelConnectedEmailCache,
@@ -17,6 +17,10 @@ import { Dialog } from '../../ui/Dialog';
 import Button from '../../ui/Button';
 import Input from '../../ui/Input';
 import { DeskConnectionCard } from './DeskConnectionCard';
+import {
+  GooglePlayServiceAccountKeyInput,
+  getServiceAccountEmail,
+} from './GooglePlayServiceAccountKeyInput';
 
 interface GooglePlayApplicationInput {
   id: string;
@@ -26,6 +30,13 @@ interface GooglePlayApplicationInput {
 
 function createGooglePlayApplication(): GooglePlayApplicationInput {
   return { id: crypto.randomUUID(), displayName: '', packageName: '' };
+}
+
+function apiErrorMessage(error: unknown, fallback: string): string {
+  return (
+    (error as { response?: { data?: { error?: string } } })?.response?.data?.error ??
+    (error instanceof Error ? error.message : fallback)
+  );
 }
 
 interface SocialMediaDeskIntegrationCardProps {
@@ -42,12 +53,14 @@ export const SocialMediaDeskIntegrationCard = ({
     createGooglePlayApplication(),
   ]);
   const [isAdding, setIsAdding] = useState(false);
-  const [isReauthorizing, setIsReauthorizing] = useState(false);
+  const [showReplaceKey, setShowReplaceKey] = useState(false);
+  const [serviceAccountKey, setServiceAccountKey] = useState('');
+  const [isReplacingKey, setIsReplacingKey] = useState(false);
   const [appAction, setAppAction] = useState<string | null>(null);
   const { isConnected, hasSource, sourceType, connectedLabel, deskApps } =
     useChannelIntegrationInfo(channelId);
 
-  // Play-only by design: every action below is a Play OAuth/package flow. App Store needs its own card.
+  // Play-only by design: every action below is a Play key/package flow. App Store needs its own card.
   if (sourceType !== SOCIAL_MEDIA_SOURCE_TYPE.GOOGLE_PLAY || !hasSource) {
     return null;
   }
@@ -59,29 +72,29 @@ export const SocialMediaDeskIntegrationCard = ({
       clearChannelConnectedEmailCache(channelId);
       toast.success('Google Play apps disconnected. Existing tickets are preserved.');
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to disconnect review source.');
+      toast.error(apiErrorMessage(error, 'Failed to disconnect review source.'));
       throw error;
     }
   };
 
-  const handleReconnect = async (): Promise<void> => {
-    setIsReauthorizing(true);
+  const openReplaceKey = (): Promise<void> => {
+    setServiceAccountKey('');
+    setShowReplaceKey(true);
+    return Promise.resolve();
+  };
+
+  const handleReplaceKey = async (): Promise<void> => {
+    setIsReplacingKey(true);
     try {
-      const isElectron = typeof window.electronAPI?.openExternal === 'function';
-      const authorizationUrl = await reconnectSocialMediaDesk(
-        channelId,
-        isElectron ? 'electron' : 'web',
-      );
-      if (isElectron && window.electronAPI?.openExternal) {
-        window.electronAPI.openExternal(authorizationUrl);
-      } else {
-        window.location.href = authorizationUrl;
-      }
+      await rotateGooglePlayCredentials(channelId, serviceAccountKey);
+      clearChannelConnectedEmailCache(channelId);
+      setShowReplaceKey(false);
+      setServiceAccountKey('');
+      toast.success('Google Play service account key replaced.');
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to reconnect review source.');
-      throw error;
+      toast.error(apiErrorMessage(error, 'Failed to replace the key.'));
     } finally {
-      setIsReauthorizing(false);
+      setIsReplacingKey(false);
     }
   };
 
@@ -97,9 +110,10 @@ export const SocialMediaDeskIntegrationCard = ({
       toast.success(reconnect ? 'Google Play app reconnected.' : 'Google Play app disconnected.');
     } catch (error) {
       toast.error(
-        error instanceof Error
-          ? error.message
-          : `Failed to ${reconnect ? 'reconnect' : 'disconnect'} Google Play app.`,
+        apiErrorMessage(
+          error,
+          `Failed to ${reconnect ? 'reconnect' : 'disconnect'} Google Play app.`,
+        ),
       );
     } finally {
       setAppAction(null);
@@ -149,9 +163,7 @@ export const SocialMediaDeskIntegrationCard = ({
         `${result.added} Google Play app${result.added === 1 ? '' : 's'} added successfully.`,
       );
     } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : 'Failed to add Google Play applications.',
-      );
+      toast.error(apiErrorMessage(error, 'Failed to add Google Play applications.'));
     } finally {
       setIsAdding(false);
     }
@@ -164,7 +176,7 @@ export const SocialMediaDeskIntegrationCard = ({
         value={connectedLabel}
         isConnected={isConnected}
         onDisconnect={handleDisconnect}
-        onReconnect={handleReconnect}
+        onReconnect={openReplaceKey}
         disconnectTitle='Disconnect review integration'
         disconnectPrompt='Disconnect all Google Play apps from this desk?'
         disconnectBullets={[
@@ -232,13 +244,12 @@ export const SocialMediaDeskIntegrationCard = ({
             type='button'
             variant='outline'
             size='sm'
-            loading={isReauthorizing}
-            onClick={() => void handleReconnect()}
+            onClick={() => void openReplaceKey()}
             data-track-category='social-media-desk-integration'
-            data-track-name='reauthorize-google-play'
+            data-track-name='replace-google-play-key'
           >
-            <RefreshCw size={14} />
-            Reauthorize Google
+            <KeyRound size={14} />
+            Replace key
           </Button>
         </div>
       )}
@@ -359,6 +370,38 @@ export const SocialMediaDeskIntegrationCard = ({
                 Add apps
               </Button>
             </div>
+          </div>
+        </div>
+      </Dialog>
+
+      <Dialog
+        open={showReplaceKey}
+        onOpenChange={open => {
+          setShowReplaceKey(open);
+          if (!open) setServiceAccountKey('');
+        }}
+        title='Replace service account key'
+        description='Upload a new key. It is verified against every app on this desk before it is stored.'
+      >
+        <div className='flex flex-col gap-3 p-5'>
+          <GooglePlayServiceAccountKeyInput
+            id='google-play-replace-service-account-key'
+            value={serviceAccountKey}
+            onChange={setServiceAccountKey}
+            trackCategory='social-media-desk-integration'
+          />
+          <div className='flex justify-end gap-2'>
+            <Button type='button' variant='outline' onClick={() => setShowReplaceKey(false)}>
+              Cancel
+            </Button>
+            <Button
+              type='button'
+              loading={isReplacingKey}
+              disabled={!getServiceAccountEmail(serviceAccountKey)}
+              onClick={() => void handleReplaceKey()}
+            >
+              Replace key
+            </Button>
           </div>
         </div>
       </Dialog>

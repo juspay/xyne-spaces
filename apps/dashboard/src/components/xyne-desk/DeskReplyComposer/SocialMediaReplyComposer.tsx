@@ -61,8 +61,11 @@ export const SocialMediaReplyComposer = ({
       setContent('');
       loadedDraftRef.current = '';
       deleteDraft();
-    } catch {
-      toast.error('Failed to send reply');
+    } catch (error) {
+      toast.error(
+        (error as { response?: { data?: { error?: string } } })?.response?.data?.error ??
+          'Failed to send reply',
+      );
     } finally {
       setSending(false);
     }

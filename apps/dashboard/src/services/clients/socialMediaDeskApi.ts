@@ -1,6 +1,7 @@
 import { apiInstance } from './apiClient';
 
-export async function startGooglePlayOAuth(input: {
+export async function connectGooglePlayDesk(input: {
+  serviceAccountKey: string;
   channelName: string;
   applications: Array<{
     packageName: string;
@@ -10,13 +11,12 @@ export async function startGooglePlayOAuth(input: {
   boardId: string;
   assigneeUserGroupId?: string;
   visibility: 'PUBLIC' | 'PRIVATE';
-  platform: 'web' | 'electron';
 }): Promise<string> {
-  const response = await apiInstance.post<{ authorizationUrl: string }>(
-    '/integrations/social-media/google-play/oauth/start',
+  const response = await apiInstance.post<{ channelId: string }>(
+    '/integrations/social-media/google-play/connect',
     input,
   );
-  return response.data.authorizationUrl;
+  return response.data.channelId;
 }
 
 export async function addGooglePlayApps(
@@ -63,15 +63,13 @@ export async function reconnectGooglePlayApp(channelId: string, sourceId: string
   );
 }
 
-export async function reconnectSocialMediaDesk(
+export async function rotateGooglePlayCredentials(
   channelId: string,
-  platform: 'web' | 'electron',
-): Promise<string> {
-  const response = await apiInstance.post<{ authorizationUrl: string }>(
-    `/integrations/social-media/${channelId}/reconnect`,
-    { platform },
-  );
-  return response.data.authorizationUrl;
+  serviceAccountKey: string,
+): Promise<void> {
+  await apiInstance.post(`/integrations/social-media/${channelId}/google-play/credentials`, {
+    serviceAccountKey,
+  });
 }
 
 export interface AppStoreCredentialsInput {
