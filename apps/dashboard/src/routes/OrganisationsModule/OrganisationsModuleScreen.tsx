@@ -47,8 +47,12 @@ export const OrganisationsSectionGuard = ({
   children: ReactElement;
 }): ReactElement => {
   const access = useOrganisationsAccess();
+  const userGroupsHydrated = useUserGroupsHydrated();
   const base = useWorkspaceBase();
-  return access[section] ? children : <Navigate to={`${base}/organisations`} replace />;
+  if (access[section]) return children;
+  // Owning a group is enough for User Groups; don't bounce before groups load.
+  if (section === 'user-groups' && !userGroupsHydrated) return <AppLoader />;
+  return <Navigate to={`${base}/organisations`} replace />;
 };
 
 /**
