@@ -2,6 +2,9 @@
 # AI-Native Autonomous Code Review Configuration
 # For more information, visit: https://github.com/your-org/yama
 
+
+#Dummy change for a dummy pr
+
 version: 2
 configType: "yama-v2"
 
