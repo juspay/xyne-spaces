@@ -14,7 +14,7 @@ services:
     env_file:
       - ./apps/backend/.env.test
     restart: "no"
-    command: sh -c "pnpm run db:push && pnpm exec prisma db push --schema prisma-common/schema.prisma --accept-data-loss --skip-generate && pnpm exec prisma db execute --file prisma/migrations/20251127175400_add_ticket_xyne_id_sequence/migration.sql --schema prisma/schema.prisma"
+    command: sh -c "pnpm run db:push && pnpm exec prisma db push --schema prisma-common/schema.prisma --accept-data-loss --skip-generate && pnpm exec prisma db execute --file prisma/migrations/20251127175400_add_ticket_xyne_id_sequence/migration.sql --schema prisma/schema.prisma && pnpm exec prisma db execute --file prisma/migrations/20260930090000_ticket_status_updated_at_trigger/migration.sql --schema prisma/schema.prisma"
     depends_on:
       postgres:
         condition: service_healthy

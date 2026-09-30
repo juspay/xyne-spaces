@@ -68,5 +68,6 @@ RUN pnpm run db:common:generate
 CMD ["sh", "-c", "\
   pnpm run db:push && \
   pnpm exec prisma db execute --file prisma/migrations/20251127175400_add_ticket_xyne_id_sequence/migration.sql --schema prisma/schema.prisma && \
+  pnpm exec prisma db execute --file prisma/migrations/20260930090000_ticket_status_updated_at_trigger/migration.sql --schema prisma/schema.prisma && \
   /scripts/setup-fake-gcs-test.sh && \
   pnpm run dev:test"]
