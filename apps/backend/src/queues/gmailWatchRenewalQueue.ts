@@ -18,6 +18,7 @@ import { ExternalSourceRepository } from '@/database/repositories/externalSource
 import { GoogleService } from '@/services/googleService';
 import { ExternalSourcePlatform } from '@/integrations/core/types';
 import { logger } from '@/utils/logger';
+import { excludeArchivedChannelSources } from '@/services/deskArchiveWatchService';
 
 const TAG = '[GmailWatchRenewal]';
 const GMAIL_WATCH_RENEWAL_CRON =
@@ -81,10 +82,13 @@ async function renewSource(source: {
 
 async function renewAllGmailWatches(): Promise<void> {
   const startedAt = Date.now();
-  const sources = await externalSourceRepo.findAll({
-    sourceType: { in: [ExternalSourcePlatform.GOOGLE, 'google-channel-email'] },
-    isActive: true,
-  });
+  // Archived desks had their watch stopped on archive; don't silently re-watch them.
+  const sources = await excludeArchivedChannelSources(
+    await externalSourceRepo.findAll({
+      sourceType: { in: [ExternalSourcePlatform.GOOGLE, 'google-channel-email'] },
+      isActive: true,
+    }),
+  );
 
   logger.info(`${TAG} cycle started`, { total: sources.length });
 

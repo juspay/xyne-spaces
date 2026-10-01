@@ -1,9 +1,13 @@
 import { v4 as uuidv4 } from 'uuid';
-import { MessageType, ConversationParticipation, ChannelScopeType } from '@xyne/shared';
+import { MessageType, ConversationParticipation, ChannelScopeType, isDeskChannelType } from '@xyne/shared';
 import { BaseSideEffectHandler } from '../base-handler';
 import type { SideEffectJobConfig, ChannelPreviousValue } from '../types';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
+import {
+  resumeGmailWatchesForUnarchivedDesk,
+  stopGmailWatchesForArchivedDesk,
+} from '@/services/deskArchiveWatchService';
 
 export class ChannelsSideEffectHandler extends BaseSideEffectHandler {
   async onUpdate(job: SideEffectJobConfig): Promise<void> {
@@ -15,6 +19,8 @@ export class ChannelsSideEffectHandler extends BaseSideEffectHandler {
     }
 
     const prev = previousValue as ChannelPreviousValue;
+
+    await this.handleDeskArchiveToggle(channelId, args.isArchived, prev);
 
     // Check if this is a rename operation
     if (args.name === undefined || args.name === prev.name) {
@@ -114,6 +120,30 @@ export class ChannelsSideEffectHandler extends BaseSideEffectHandler {
     } catch (error) {
       logger.error(`[ChannelsSideEffectHandler] Failed to create channel rename system message:`, error);
       // Don't throw - let the channel rename succeed even if side effect fails
+    }
+  }
+
+  /**
+   * Archived desks drop inbound at ingestion; for Gmail-backed desks also stop the
+   * mailbox watch so Gmail stops pushing, and re-establish it on unarchive.
+   * Best-effort: failures are logged and never fail the archive itself.
+   */
+  private async handleDeskArchiveToggle(
+    channelId: string,
+    nextIsArchived: unknown,
+    prev: ChannelPreviousValue,
+  ): Promise<void> {
+    if (typeof nextIsArchived !== 'boolean' || nextIsArchived === !!prev.isArchived) return;
+    if (!prev.type || !isDeskChannelType(prev.type)) return;
+
+    try {
+      if (nextIsArchived) {
+        await stopGmailWatchesForArchivedDesk(channelId);
+      } else {
+        await resumeGmailWatchesForUnarchivedDesk(channelId);
+      }
+    } catch (error) {
+      logger.error(`[ChannelsSideEffectHandler] Desk archive watch toggle failed for ${channelId}:`, error);
     }
   }
 }

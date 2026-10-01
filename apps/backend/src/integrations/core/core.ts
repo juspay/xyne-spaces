@@ -219,6 +219,17 @@ export class ExternalSourceCore {
     if (!channel) {
       throw new Error(`Channel ${source.channelId} not found`);
     }
+    if (channel.isArchived) {
+      // Archived desks stop accepting inbound; ack as skipped so cursors advance
+      // and the event is not retried.
+      logger.info('[INGEST] Dropping inbound for archived channel', {
+        sourceName,
+        channelId: channel.id,
+        externalId: normalizedData.externalId,
+        externalThreadId: normalizedData.externalThreadId,
+      });
+      return { success: true, conversationId: '', entityId: '', action: 'skipped' };
+    }
     const isDeskChannel = isDeskChannelType(channel.type);
 
     if (normalizedData.metadata.isReply) {

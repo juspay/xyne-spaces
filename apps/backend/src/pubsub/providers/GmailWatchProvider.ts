@@ -14,6 +14,7 @@ import { GoogleService } from '@/services/googleService';
 import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
 import { ExternalSourcePlatform } from '@/integrations/core/types';
 import { seedSyncCursor } from '@/services/syncCursorRecovery';
+import { excludeArchivedChannelSources } from '@/services/deskArchiveWatchService';
 
 export class GmailWatchProvider extends BaseWatchProvider {
   readonly name = 'gmail';
@@ -67,10 +68,13 @@ export class GmailWatchProvider extends BaseWatchProvider {
    * Since users.watch() is idempotent and cheap, we renew ALL active sources.
    */
   async findExpiring(_beforeDate: Date): Promise<SubscriptionRecord[]> {
-    const sources = await this.externalSourceRepo.findAll({
-      sourceType: { in: [ExternalSourcePlatform.GOOGLE, 'google-channel-email'] },
-      isActive: true,
-    });
+    // Archived desks had their watch stopped on archive; don't silently re-watch them.
+    const sources = await excludeArchivedChannelSources(
+      await this.externalSourceRepo.findAll({
+        sourceType: { in: [ExternalSourcePlatform.GOOGLE, 'google-channel-email'] },
+        isActive: true,
+      }),
+    );
 
     return sources.map((s) => ({ id: s.id, email: s.displayName }));
   }
