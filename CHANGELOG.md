@@ -1,3 +1,10 @@
+## [1.447.0-release-20261001.2](https://github.com/juspay/xyne-spaces/compare/v1.447.0-release-20261001.1...v1.447.0-release-20261001.2) (2026-10-01)
+
+
+### Bug Fixes
+
+* send updatedAt from the fallback-hydrated delta query ([#2587](https://github.com/juspay/xyne-spaces/issues/2587)) ([6b139f0](https://github.com/juspay/xyne-spaces/commit/6b139f0ebc70a364801ebe620b119ae6bb21346b))
+
 ## [1.447.0-release-20261001.1](https://github.com/juspay/xyne-spaces/compare/v1.446.1-release-20261001.1...v1.447.0-release-20261001.1) (2026-10-01)
 
 
