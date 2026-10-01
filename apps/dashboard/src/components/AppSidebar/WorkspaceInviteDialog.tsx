@@ -202,14 +202,11 @@ export const WorkspaceInviteDialog = ({
       return Promise.all(
         emails.map(async (email): Promise<InviteResult> => {
           try {
-            const response = await apiInstance.post<{ pendingApproval?: boolean }>(
-              '/invitations',
-              {
-                email,
-                role: inviteRole,
-                workspaceId,
-              },
-            );
+            const response = await apiInstance.post<{ pendingApproval?: boolean }>('/invitations', {
+              email,
+              role: inviteRole,
+              workspaceId,
+            });
             return { email, pending: response.data?.pendingApproval === true };
           } catch (error) {
             return { email, error: getInviteErrorMessage(error) };
