@@ -6,7 +6,7 @@ const SYSTEM_PROMPT = [
   'Reply with one JSON object: {"answers": {"<question id>": <answer>}}.',
   'A "noul" question is yes/no: answer {"noul": p} where p is the probability from 0 to 1 that the answer is yes.',
   'A "choice" question lists options: answer {"choice": "<option key>"} using exactly one listed key.',
-  'A "score" question: answer {"score": s} where s is from 0 to 1.',
+  'A "score" question lists criteria as ordered levels from low to high: answer {"score": s} where s is from 0 (first level) to 1 (last level).',
 ].join("\n");
 
 export function llmJudgeConfig(): { url: string; key: string; model: string; timeoutMs: number } {

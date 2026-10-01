@@ -18,7 +18,7 @@
 import { Router, type Request, type Response } from "express";
 import { errMsg } from "../lib/errors.js";
 import type { Prisma } from "@prisma/client";
-import { bankIdForAgent, buildRetainMission, getMemoryProvider } from "xyne-claw-shared";
+import { bankIdForAgent, buildRetainMission, DIGITAL_TWIN_BANK_ID, DIGITAL_TWIN_SLUG, getMemoryProvider, isDigitalTwinAgent } from "xyne-claw-shared";
 import type { MemoryRecord, EntityGraphEdge } from "xyne-claw-shared";
 import { prisma } from "../db.js";
 import { agentRepository } from "../repositories/index.js";
@@ -31,12 +31,14 @@ import { enqueueAgentBackfill, getAgentBackfillQueue } from "../queue/agent-back
 import { runRetentionSweep } from "../services/memoryRetentionService.js";
 import {
   getPromptFiles,
+  getCandidatePromptFiles,
   getFile as getAgentFile,
   listFiles as listAgentFiles,
   upsertFile as upsertAgentFile,
   MAX_FILE_CHARS,
+  MEMORY_FILE_NAME_RE,
 } from "../services/agentMemoryFiles.js";
-import { ensureTwinBank, twinObservationScopes, VERBATIM_IMPORT_STRATEGY } from "../services/userMemoryCuratorClient.js";
+import { ensureTwinBank, twinObservationScopes, VERBATIM_IMPORT_STRATEGY } from "../services/twinMemoryBank.js";
 
 /**
  * Memory-maintenance ACL: the agent's owner, a share holder with EDITOR or
@@ -61,22 +63,6 @@ const logger = createLogger("memory-review", createTraceId());
 // All memory backend operations go through the provider abstraction.
 // Default is HindsightProvider, swappable via the MEMORY_PROVIDER env var.
 const memory = getMemoryProvider();
-
-const DIGITAL_TWIN_SLUG = "digital-twin";
-const DIGITAL_TWIN_BANK = bankIdForAgent(DIGITAL_TWIN_SLUG);
-
-/**
- * Twin detection MUST key on the bank id, not the raw slug. bankIdForAgent
- * sanitizes (lowercase, collapse non-alphanumerics, truncate 44), so slugs
- * like "digital_twin" / "Digital-Twin" / "digital--twin" all resolve to the
- * twin's bank `xyne-digital-twin`. A raw `=== "digital-twin"` check would let
- * such an agent reach the shared twin bank WITHOUT the per-user `user:<id>`
- * scoping — exposing every user's personal memories. Anything that lands in
- * the twin bank gets twin treatment.
- */
-function isDigitalTwinAgent(agentSlug: string | undefined): boolean {
-  return !!agentSlug && bankIdForAgent(agentSlug) === DIGITAL_TWIN_BANK;
-}
 
 async function assertMemoryUserAccess(
   req: Request,
@@ -114,6 +100,24 @@ memoryRouter.get("/agent-prompt-files", requireAuth, async (req, res) => {
       return;
     }
     if (!(await assertMemoryUserAccess(req, res, userId))) return;
+    // candidates=1: every non-empty file with its loadInPrompt flag, so claw can
+    // pick per task (jev_memory_file_pick). Default: today's toggled set.
+    if (req.query["candidates"] === "1") {
+      const files = await getCandidatePromptFiles(agentSlug, userId);
+      res.json({
+        success: true,
+        data: {
+          candidates: true,
+          files: files.map((f) => ({
+            name: f.name,
+            content: f.content,
+            loadInPrompt: f.loadInPrompt,
+            ...(f.description ? { description: f.description } : {}),
+          })),
+        },
+      });
+      return;
+    }
     const files = await getPromptFiles(agentSlug, userId);
     res.json({
       success: true,
@@ -124,8 +128,6 @@ memoryRouter.get("/agent-prompt-files", requireAuth, async (req, res) => {
     res.json({ success: true, data: { files: [] } });
   }
 });
-
-const AGENT_FILE_NAME_RE = /^[a-zA-Z0-9._-]{1,64}$/;
 
 /**
  * GET /memory/agent-file?agentSlug=&userId=&name=
@@ -184,7 +186,7 @@ memoryRouter.post("/agent-file", requireAuth, async (req, res) => {
     const name = typeof body.name === "string" ? body.name.trim() : "";
     const content = typeof body.content === "string" ? body.content : "";
     const mode = body.mode === "replace" ? "replace" : "append";
-    if (!userId || !AGENT_FILE_NAME_RE.test(name) || !content.trim()) {
+    if (!userId || !MEMORY_FILE_NAME_RE.test(name) || !content.trim()) {
       res.status(400).json({ success: false, error: "userId, valid name, and content are required" });
       return;
     }
@@ -301,7 +303,7 @@ async function checkTwinAccess(
       res.status(403).json({ success: false, error: "Cannot verify ownership; delete refused" });
       return false;
     }
-    const memo = await getMemoryFn(bankIdForAgent("digital-twin"), opts.hindsightMemoryId).catch(() => null);
+    const memo = await getMemoryFn(DIGITAL_TWIN_BANK_ID, opts.hindsightMemoryId).catch(() => null);
     if (!memo) {
       res.status(404).json({ success: false, error: "Memory not found" });
       return false;
@@ -2663,7 +2665,7 @@ memoryRouter.post("/banks/:agentSlug/upload-session", requireUserAuth, async (re
     }
     // The twin bank holds per-user private memories; a "shared" upload into it
     // is never correct (twin knowledge flows through the user-memory pipeline).
-    if (bankIdForAgent(agentSlug) === bankIdForAgent("digital-twin")) {
+    if (isDigitalTwinAgent(agentSlug)) {
       res.status(400).json({ success: false, error: "Sessions cannot be uploaded to the digital twin — twin memory is per-user and managed from the Digital Twin page." });
       return;
     }

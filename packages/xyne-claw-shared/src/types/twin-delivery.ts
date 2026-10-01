@@ -3,10 +3,12 @@
  *
  * The Twin agent (xyne-claw) MUST finish by calling the mandatory `twin_deliver`
  * tool; its arguments become a `TwinDelivery`, which rides back on the run's done
- * payload, gets rendered into the approval DM by claw-auth, and is executed
- * (react-as-user and/or post-as-user) only after the user approves. Free-form
- * assistant text is discarded on the Twin path, so assistant-style narration
- * ("Saved to memory", "Searching…", todo chatter) can never leak into a channel.
+ * payload and is rendered by claw-auth as an owner-only in-thread reply draft (the
+ * legacy approval DM is used only when the Spaces draft endpoint returns 401/404;
+ * any other draft failure stays silent, fail-closed). It is executed (react-as-user
+ * and/or post-as-user) only after the owner approves. Free-form assistant text is
+ * discarded on the Twin path, so assistant-style narration ("Saved to memory",
+ * "Searching…", todo chatter) can never leak into a channel.
  */
 
 /** What the Twin does with a turn. `ignore` = a confident decision to post
@@ -14,7 +16,16 @@
  *  distinct from a fail-closed non-delivery: `ignore` is an explicit choice that
  *  still rides back so the caller can tell "chose to stay silent" from "never
  *  delivered". */
-export type TwinDeliveryAction = "react" | "reply" | "react_and_reply" | "ignore";
+export const TWIN_DELIVERY_ACTIONS = ["react", "reply", "react_and_reply", "ignore"] as const;
+export type TwinDeliveryAction = (typeof TWIN_DELIVERY_ACTIONS)[number];
+
+export const isTwinDeliveryAction = (v: unknown): v is TwinDeliveryAction => (TWIN_DELIVERY_ACTIONS as readonly unknown[]).includes(v);
+
+/** Which parts an action carries: `emoji` = it reacts, `message` = it posts a reply. `ignore` (or anything else) carries neither. */
+export const twinDeliveryParts = (action: unknown) => ({
+  emoji: action === "react" || action === "react_and_reply",
+  message: action === "reply" || action === "react_and_reply",
+});
 
 /**
  * Where a REPLY is posted. (A REACT always targets the triggering message — that
@@ -56,36 +67,37 @@ export interface TwinDelivery {
    * when the model provided none. Not applicable to `ignore`.
    */
   reasoning?: string;
+  /**
+   * Classifier self-check of this delivery (advisory, never blocks). Set by claw
+   * after the delivery is accepted; each score is 0..1, higher is better.
+   */
+  check?: TwinDeliveryCheck;
 }
 
-/**
- * A destination the Twin is allowed to reply in — injected into the run so the
- * model names REAL channels/threads (by id) instead of inventing them. Built by
- * claw-auth from the user's Spaces memberships and passed on the run dispatch.
- */
-export interface TwinDestinationCandidate {
-  kind: "channel" | "thread" | "user";
-  /** Human label shown to the model, e.g. "#engineering", "thread: Q3 launch",
-   *  or "Mamtha Venkattaramanujam" for a person the Twin can DM. */
-  label: string;
-  /** For kind="channel"/"thread": the channel id. Absent for kind="user". */
-  channelId?: string;
-  channelName?: string;
-  /** For kind="thread": the conversation id of the specific thread. */
-  conversationId?: string;
-  /** For kind="user": the Spaces user id to DM (offered as a `dm:<userId>` token). */
-  userId?: string;
+export interface TwinDeliveryCheck {
+  /** The reply addresses what was asked (reply actions). */
+  answersAsk?: number;
+  /** Every claim in the reply is supported by the conversation/context (reply actions). */
+  grounded?: number;
+  /** Staying silent / only reacting was the right call (ignore/react actions). */
+  actionFits?: number;
+  /** "right" | "wrong" | "unsure" — the destination (reply actions with a destination). */
+  destination?: string;
+  /** Lowest of the scores above — one number to sort/flag by. */
+  overall: number;
+  source: "jev";
+  ms: number;
 }
 
 /** Runtime type guard — validates an unknown value is a well-formed TwinDelivery. */
 export function isTwinDelivery(v: unknown): v is TwinDelivery {
   if (!v || typeof v !== "object") return false;
   const d = v as Record<string, unknown>;
-  if (d["action"] !== "react" && d["action"] !== "reply" && d["action"] !== "react_and_reply" && d["action"] !== "ignore") return false;
+  const action = d["action"];
+  if (!isTwinDeliveryAction(action)) return false;
   // `ignore` carries no emoji/message — it is valid on its own.
-  const wantsEmoji = d["action"] === "react" || d["action"] === "react_and_reply";
-  const wantsMessage = d["action"] === "reply" || d["action"] === "react_and_reply";
-  if (wantsEmoji && (typeof d["emoji"] !== "string" || !d["emoji"].trim())) return false;
-  if (wantsMessage && (typeof d["message"] !== "string" || !d["message"].trim())) return false;
+  const parts = twinDeliveryParts(action);
+  if (parts.emoji && (typeof d["emoji"] !== "string" || !d["emoji"].trim())) return false;
+  if (parts.message && (typeof d["message"] !== "string" || !d["message"].trim())) return false;
   return true;
 }

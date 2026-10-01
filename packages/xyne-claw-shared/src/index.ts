@@ -15,8 +15,9 @@ export { openPaletteMode, openPaletteModeFromTools, openPaletteAdmits, type Open
 export { getSandboxSession, probeSession, cleanupSdlcSandboxCredentialsForContext, buildSandboxStoreKey, sandboxConversationIdFromMeta, sandboxContentType, REPO_CONFIGS, SBX_GIT, type RepoSetupConfig, type SetupStep } from "./tools/sandbox/index.js";
 export type { Citation, CitationIconKey } from "./types/citation.js";
 export { citationIconUrl, citationIconKey, iconUrlForKey, toolIconKey, CITATION_ICONS } from "./types/citation.js";
-export type { TwinDelivery, TwinDeliveryAction, TwinReplyDestination, TwinDestinationCandidate } from "./types/twin-delivery.js";
-export { isTwinDelivery } from "./types/twin-delivery.js";
+export type { ClassifierExchange } from "./types/classifier-exchange.js";
+export type { TwinDelivery, TwinDeliveryAction, TwinDeliveryCheck, TwinReplyDestination } from "./types/twin-delivery.js";
+export { TWIN_DELIVERY_ACTIONS, isTwinDelivery, isTwinDeliveryAction, twinDeliveryParts } from "./types/twin-delivery.js";
 export type {
   LocalHarnessProvider,
   LocalHarnessInstallation,
@@ -64,7 +65,7 @@ export {
 export type { SkillDiff, SkillForAuthz, ApproverResolution, SkillApprovalAuthz, SkillFileUpdateAuthz } from "./skill-diff/index.js";
 export { createSkillTool, updateSkillTool } from "./tools/skill-management/index.js";
 export { FORK_TO_CONVERSATION_TOOL, forkToConversationTool } from "./tools/conversation-fork/index.js";
-export { FlowBuilder, mdToMrkdwn, buildWriteApprovalFlow, buildWriteResultFlow, buildTwinApprovalFlow, buildUserQuestionFlow, buildCapacityRetryFlow, buildGoalSuggestionFlow, buildAgentCallProposalFlow, buildCloneApprovalFlow, buildSkillUpdateApprovalFlow, buildMcpConfigureFlow, buildMcpSuggestFlow, type McpSuggestConnector, buildProviderSuggestFlow, type ProviderSuggestItem, buildCodeFlow, buildDiffFlow, buildTicketFlow, buildTicketProposalFlow, buildChartFlow, buildScheduledJobApprovalFlow, type ScheduledJobApprovalFlowParams } from "./flow/builder.js";
+export { FlowBuilder, mdToMrkdwn, buildWriteApprovalFlow, buildWriteResultFlow, buildTwinApprovalFlow, buildUserQuestionFlow, buildCapacityRetryFlow, buildGoalSuggestionFlow, buildAgentCallProposalFlow, buildCloneApprovalFlow, buildSkillUpdateApprovalFlow, buildMcpConfigureFlow, buildMcpSuggestFlow, type McpSuggestConnector, buildProviderSuggestFlow, type ProviderSuggestItem, buildCodeFlow, buildDiffFlow, buildTicketFlow, buildTicketProposalFlow, buildChartFlow, buildScheduledJobApprovalFlow, type ScheduledJobApprovalFlowParams, withSpacesAppId } from "./flow/builder.js";
 export type { FlowDefinition, FlowComponent, FlowAction, SelectOption, TicketArtifact, ChartArtifact } from "./flow/builder.js";
 export { buildPlanFlow, PLAN_COMPONENT_ID } from "./flow/plan-flow.js";
 export { isFlowJsonContent, parseFlowJsonComponents, extractTextFromFlowJson, extractCleanTextFromFlowJson } from "./flow/flow-text.js";
@@ -108,6 +109,9 @@ export {
   listMemoryProviders,
   bankIdForAgent,
   bankIdForAgentOrg,
+  DIGITAL_TWIN_SLUG,
+  DIGITAL_TWIN_BANK_ID,
+  isDigitalTwinAgent,
   buildRetainMission,
   HindsightProvider,
   StubMemoryProvider,
@@ -126,22 +130,12 @@ export type {
   TagGroup,
   SessionTranscriptForCurator,
   SubsystemUpdate,
-  UserMemoryRecord,
-  UserMemoryChannelType,
-  UserMemoryThreadMessage,
-  UserMemoryThreadContext,
-  UserMemorySubsystem,
-  UserMemoryCandidatePayload,
-  UserMemoryDistillRequest,
-  UserMemoryDistillResponse,
-  ExistingUserMemory,
-  UserMemoryCuratorTrace,
-  UserMemoryCuratorEmittedCandidate,
   EntityGraph,
   EntityGraphNode,
   EntityGraphEdge,
 } from "./memory/index.js";
-export { USER_MEMORY_SUBSYSTEMS } from "./memory/index.js";
+export type * from "./memory/user-memory-types.js";
+export { USER_MEMORY_SUBSYSTEMS, isUserMemorySubsystem } from "./memory/index.js";
 export {
   ClawSseParser,
   KEEPALIVE_FRAME,

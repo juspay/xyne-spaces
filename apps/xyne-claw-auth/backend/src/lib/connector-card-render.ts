@@ -1,6 +1,7 @@
 import {
   buildMcpSuggestFlow,
   buildProviderSuggestFlow,
+  withSpacesAppId,
   type FlowDefinition,
 } from "xyne-claw-shared";
 import { SUPPORTED_PROVIDERS } from "../constants.js";
@@ -47,14 +48,6 @@ export interface ConnectorCardIdentity {
   conversationId: string;
   channelId: string;
   spacesAppId: string | undefined;
-}
-
-function withSpacesAppId<T extends { data?: Record<string, unknown> }>(
-  flow: T,
-  spacesAppId?: string | null,
-): T {
-  if (!spacesAppId) return flow;
-  return { ...flow, data: { ...(flow.data ?? {}), spacesAppId } };
 }
 
 /**
