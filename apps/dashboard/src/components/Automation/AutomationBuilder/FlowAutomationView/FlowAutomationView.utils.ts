@@ -301,6 +301,81 @@ export function insertStepAtPath(
   });
 }
 
+/** Path of the step with `id`, searching every branch. */
+export function findStepPath(
+  config: AutomationConfig,
+  id: string,
+  container: ViewStepPath = ROOT_CONTAINER,
+): ViewStepPath | undefined {
+  const steps = getContainerSteps(config, container);
+  for (let i = 0; i < steps.length; i++) {
+    const step = steps[i]!;
+    const path = [...container, i];
+    if (step.id === id) return path;
+    for (const branchKey of listBranchKeys(step)) {
+      const found = findStepPath(config, id, [...path, branchKey]);
+      if (found) return found;
+    }
+  }
+  return undefined;
+}
+
+/** A "Move to…" destination: a branch of a control step, or the top level (nulls). */
+export interface MoveTarget {
+  ownerId: string | null;
+  branchKey: string | null;
+  label: string;
+}
+
+/** Top level and every branch, minus the step's own container and anything inside the step. */
+export function listMoveTargets(config: AutomationConfig, stepId: string): MoveTarget[] {
+  const path = findStepPath(config, stepId);
+  if (!path) return [];
+  const nested = path.length > 2;
+  const currentOwnerId = nested ? getStepAtPath(config, path.slice(0, -2))?.id : undefined;
+  const currentBranch = nested ? String(path[path.length - 2]) : undefined;
+  const targets: MoveTarget[] = nested
+    ? [{ ownerId: null, branchKey: null, label: 'Top level' }]
+    : [];
+  const visit = (container: ViewStepPath): void => {
+    getContainerSteps(config, container).forEach((step, i) => {
+      if (step.id === stepId) return;
+      const stepPath = [...container, i];
+      const kind = step.type === CONDITIONAL_STEP_TYPE ? 'If/else' : 'Switch';
+      for (const branchKey of listBranchKeys(step)) {
+        if (step.id !== currentOwnerId || branchKey !== currentBranch) {
+          const number = stepNumberForPrefix(buildPathPrefix(stepPath));
+          const label = `Step ${number} · ${kind} › ${branchLabel(step, branchKey)}`;
+          targets.push({ ownerId: step.id, branchKey, label });
+        }
+        visit([...stepPath, branchKey]);
+      }
+    });
+  };
+  visit(ROOT_CONTAINER);
+  return targets;
+}
+
+/** Moves a step (by id) to the end of a target branch or of the top level. */
+export function moveStepToContainer(
+  config: AutomationConfig,
+  stepId: string,
+  target: Pick<MoveTarget, 'ownerId' | 'branchKey'>,
+): AutomationConfig {
+  const path = findStepPath(config, stepId);
+  const step = path && getStepAtPath(config, path);
+  if (!path || !step) return config;
+  const removed = removeStepAtPath(config, path);
+  if (target.ownerId === null || target.branchKey === null) {
+    return insertStepAtPath(removed, ROOT_CONTAINER, undefined, step);
+  }
+  // Found by id after the removal, so index shifts don't matter; a target inside
+  // the moved step itself is gone now, and the move is a no-op.
+  const ownerPath = findStepPath(removed, target.ownerId);
+  if (!ownerPath) return config;
+  return insertStepAtPath(removed, [...ownerPath, target.branchKey], undefined, step);
+}
+
 /** The steps held by one branch of a control step. */
 export function getBranchSteps(
   step: AutomationStepConfig,

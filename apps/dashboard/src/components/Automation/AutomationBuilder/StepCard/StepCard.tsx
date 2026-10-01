@@ -33,6 +33,7 @@ import { diffHighlightClass, useDiffMark } from '../DiffHighlight/DiffHighlight'
 import { useCollapseAll } from '../CollapseAll/CollapseAll';
 import { StepIssueBadge } from '../ValidationBanner/StepIssueBadge';
 import { stepNumberForPrefix } from '../FlowAutomationView/FlowAutomationView.utils';
+import { MoveStepMenuItem } from '../MoveStep/MoveStep';
 
 export function StepCard({
   step,
@@ -151,7 +152,7 @@ export function StepCard({
             align='end'
             side='bottom'
             sideOffset={4}
-            className='w-[160px] rounded-md p-1'
+            className='w-[240px] rounded-md p-1'
             trigger={
               <button
                 type='button'
@@ -168,6 +169,7 @@ export function StepCard({
               </button>
             }
           >
+            <MoveStepMenuItem stepId={step.id} onDone={() => setMenuOpen(false)} />
             <button
               type='button'
               onClick={() => {

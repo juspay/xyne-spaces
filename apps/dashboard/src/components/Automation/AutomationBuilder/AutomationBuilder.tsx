@@ -84,9 +84,12 @@ import {
   ROOT_CONTAINER,
   TRIGGER_NODE_ID,
   insertStepAtPath,
+  listMoveTargets,
+  moveStepToContainer,
   stepIdsForIssuePath,
 } from './FlowAutomationView/FlowAutomationView.utils';
 import { CollapseAllContext, type CollapseAllSignal } from './CollapseAll/CollapseAll';
+import { MoveStepContext, type MoveStepActions } from './MoveStep/MoveStep';
 import { DiffBadge } from './DiffHighlight/DiffBadge';
 import {
   DiffHighlightContext,
@@ -786,6 +789,19 @@ export function AutomationBuilder({
       return { ...prev, steps: moveStep(prev.steps, index, direction) };
     });
   }, []);
+
+  // "Move to…" on step cards (List view and Flow panel), edit mode only.
+  const moveStepActions = useMemo<MoveStepActions | null>(
+    () =>
+      editMode
+        ? {
+            targetsFor: stepId => listMoveTargets(config, stepId),
+            moveTo: (stepId, target) =>
+              setConfig(prev => moveStepToContainer(prev, stepId, target)),
+          }
+        : null,
+    [editMode, config],
+  );
 
   const trimmedName = name.trim();
   const nameError: string | null =
@@ -1751,7 +1767,9 @@ export function AutomationBuilder({
 
   return (
     <DiffHighlightContext.Provider value={reviewDiff?.highlight ?? outerDiffHighlight}>
-      <CollapseAllContext.Provider value={collapseAll}>{content}</CollapseAllContext.Provider>
+      <CollapseAllContext.Provider value={collapseAll}>
+        <MoveStepContext.Provider value={moveStepActions}>{content}</MoveStepContext.Provider>
+      </CollapseAllContext.Provider>
     </DiffHighlightContext.Provider>
   );
 }
