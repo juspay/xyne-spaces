@@ -78,8 +78,6 @@ jobs:
         run: bash nix/scripts/check-referenced-paths.sh
 
       - name: Prepare workspace through the Nix development shell
-        env:
-          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
         run: nix develop --command just prepare
 
       - name: Check local secrets and development proxy configuration

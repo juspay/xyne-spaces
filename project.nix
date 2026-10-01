@@ -13,6 +13,7 @@ in
 {
   imports = [
     ./nix/modules/devshell.nix
+    ./nix/modules/playwright-version.nix
   ];
 
   packages.transcription-agent-env = transcriptionEnv;
@@ -26,9 +27,25 @@ in
       pnpm
       just
       openssl
+      ffmpeg
+      gitleaks
+      trivy
+      postgresql
+      process-compose
+      kubernetes-helm
+      gauge
+      playwright-driver.browsers
     ];
 
-    environment = prismaEnvironment;
+    environment = prismaEnvironment // {
+      PLAYWRIGHT_BROWSERS_PATH = "${pkgs.playwright-driver.browsers}";
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = "1";
+      PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS = "true";
+    };
+
+    shellHook = lib.optionalString pkgs.stdenv.isLinux ''
+      export LD_LIBRARY_PATH="${lib.makeLibraryPath [ pkgs.stdenv.cc.cc.lib pkgs.zlib ]}''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    '';
 
     banner = ''
       # Xyne Spaces Dev Environment
@@ -80,12 +97,12 @@ in
       echo "🧹 Cleaning up development services..."
       
       # Kill all process-compose instances
-      pkill -f process-compose 2>/dev/null || true
+      ${pkgs.procps}/bin/pkill -f process-compose 2>/dev/null || true
       
       # Kill processes on specific ports
       PORTS=(5433 6379 7880 4848 4849 8080 4443 8001)
       for port in "''${PORTS[@]}"; do
-        lsof -ti:"$port" 2>/dev/null | xargs kill -9 2>/dev/null || true
+        ${pkgs.lsof}/bin/lsof -ti:"$port" 2>/dev/null | xargs kill -9 2>/dev/null || true
       done
       
       sleep 1
@@ -380,11 +397,11 @@ in
         
         # 1. Clean up ports and processes
         echo -e "''${YELLOW}1. Cleaning up ports and processes...''${NC}"
-        pkill -f process-compose 2>/dev/null || true
+        ${pkgs.procps}/bin/pkill -f process-compose 2>/dev/null || true
         
         PORTS=(5433 6379 7880 4848 4849 8080 4443 8001)
         for port in "''${PORTS[@]}"; do
-          lsof -ti:"$port" 2>/dev/null | xargs kill -9 2>/dev/null || true
+          ${pkgs.lsof}/bin/lsof -ti:"$port" 2>/dev/null | xargs kill -9 2>/dev/null || true
         done
         echo -e "''${GREEN}   ✓ Ports and processes cleaned''${NC}"
         echo ""
