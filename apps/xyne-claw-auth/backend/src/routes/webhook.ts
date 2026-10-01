@@ -52,6 +52,8 @@ import { startRun } from "../lib/start-run.js";
 import { runAttachmentRefsEnabled, uploadRunAttachment } from "../lib/run-attachment-store.js";
 import { findEligibleTwins, twinGateAllowsDispatch } from "../services/twinMentionIntake.js";
 import { handleTwinApprovalResult, withTwinSuffix } from "../services/twinResultDelivery.js";
+import { recordTwinApprovalPending } from "../services/twinResponseFeedback.js";
+import { getDigitalTwinAgent } from "../lib/digital-twin-agent.js";
 import { buildSpacesMentionLookups } from "../lib/mention-lookups.js";
 import { mintSessionToken } from "../lib/session-tokens.js";
 import { verifySpacesSignature } from "../middleware/verify-spaces-signature.js";
@@ -132,6 +134,7 @@ import { emitAgentProgressDone, emitAgentProgressWorking } from "../surfaces/spa
 import { systemNote } from "../lib/notice-format.js";
 import {
   buildWriteApprovalFlow,
+  buildTwinApprovalFlow,
   buildUserQuestionFlow,
   buildCapacityRetryFlow,
   buildGoalSuggestionFlow,
@@ -963,7 +966,7 @@ async function sendTwinReplyDraft(
 
 
 async function resolveAgentByAppUserId(appUserId: string): Promise<ResolvedAgent | null> {
-  const agent = await agentRepository.findByAppUserId(appUserId);
+  const agent = await prisma.agent.findFirst({ where: { spacesAppUserId: appUserId } });
 
   if (agent?.spacesAppToken && agent.spacesAppId) {
     return {
