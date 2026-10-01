@@ -290,6 +290,23 @@ router.get(
       return;
     }
 
+    // CSRF guard: if this request carries a session user, verify it's the same person who
+    // started the OAuth flow. Prevents an attacker from tricking a victim into completing
+    // an OAuth flow that attaches their IG account to the attacker's workspace.
+    if (req.user && req.user.id !== state.userId) {
+      logger.warn(`${TAG} OAuth callback rejected — session user doesn't match state initiator`, {
+        sessionUserId: req.user.id,
+        stateUserId: state.userId,
+      });
+      redirectToDesk(req, res, {
+        workspaceId: state.workspaceId,
+        channelId: state.channelId,
+        platform: state.platform,
+        error: 'instagram_auth_denied',
+      });
+      return;
+    }
+
     if (!code && !errorParam) {
       redirectToDesk(req, res, {
         workspaceId: state.workspaceId,
@@ -395,20 +412,37 @@ router.get(
 
       // ── Reconnect: update credentials on the existing source ──────────────
       if (state.mode === 'reconnect' && state.channelId) {
-        await db.externalSource.updateMany({
-          where: {
-            channelId: state.channelId,
-            workspaceId: state.workspaceId,
-            sourceType: ExternalSourcePlatform.INSTAGRAM,
-          },
-          data: {
-            credentials: encryptedCredentials,
-            externalIdentifier: igUserId,
-            name: sourceName,
-            displayName: igUsername || undefined,
-            isActive: true,
-          },
-        });
+        if (state.sourceId) {
+          // Per-source reconnect: update only the specific ExternalSource row.
+          // updateMany would affect ALL Instagram sources on the channel and trigger a
+          // P2002 unique constraint violation on `name` for multi-account channels.
+          await db.externalSource.update({
+            where: { id: state.sourceId },
+            data: {
+              credentials: encryptedCredentials,
+              externalIdentifier: igUserId,
+              name: sourceName,
+              displayName: igUsername || undefined,
+              isActive: true,
+            },
+          });
+        } else {
+          // Legacy channel-level reconnect (single-account channels only).
+          await db.externalSource.updateMany({
+            where: {
+              channelId: state.channelId,
+              workspaceId: state.workspaceId,
+              sourceType: ExternalSourcePlatform.INSTAGRAM,
+            },
+            data: {
+              credentials: encryptedCredentials,
+              externalIdentifier: igUserId,
+              name: sourceName,
+              displayName: igUsername || undefined,
+              isActive: true,
+            },
+          });
+        }
         redirectToDesk(req, res, {
           workspaceId: state.workspaceId,
           channelId: state.channelId,
@@ -612,6 +646,7 @@ router.post(
         userId: req.user!.id,
         workspaceId,
         channelId,
+        sourceId,  // bind the exact source being reconnected so callback updates only it
         channelName: channel.name,
         projectId: channel.projectId,
         boardId: pref?.boardId ?? undefined,

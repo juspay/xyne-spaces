@@ -14,6 +14,9 @@ export interface InstagramOAuthState {
   platform: 'web' | 'electron';
   codeVerifier: string;
   createdAt: number;
+  // Set on per-source reconnect: the ExternalSource.id being reconnected.
+  // Callback uses this to update only that specific row (not all Instagram sources on the channel).
+  sourceId?: string;
   // Set on reconnect: the igUserId the channel was originally connected to.
   // Callback rejects if the re-authenticating account doesn't match.
   expectedIgUserId?: string;

@@ -67,14 +67,8 @@ export async function authenticate(
           webhookEntryId, foundSourceName: source.name,
         });
       } else {
-        // Log all active Instagram sources so we can compare stored IDs with the incoming entry.id.
-        const activeSources = await externalSourceRepository.findAllActiveInstagram();
-        logger.warn('[authenticate] Instagram source not found — stored vs incoming', {
+        logger.warn('[authenticate] Instagram source not found by externalIdentifier', {
           incomingEntryId: webhookEntryId,
-          storedSources: activeSources.map(s => ({
-            name: s.name,
-            externalIdentifier: s.externalIdentifier,
-          })),
         });
       }
     }
