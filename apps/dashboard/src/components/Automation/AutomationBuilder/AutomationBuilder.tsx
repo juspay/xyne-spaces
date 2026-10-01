@@ -320,9 +320,10 @@ export function AutomationBuilder({
   const draftHasRuns = isDraft && hasRunsQuery.data === true;
   const hasRunsUnknown =
     isDraft && !!savedId && hasRunsQuery.data === undefined && !hasRunsQuery.isError;
-  /** PLAYGROUND, or a DRAFT with runs: never edited in place. If the run check failed, fork to be safe. */
+  // PLAYGROUND, or a DRAFT with runs: never edited in place. If the run check failed, fork
+  // to be safe.
   const isFrozenProposal = isPlayground || draftHasRuns || (isDraft && hasRunsQuery.isError);
-  // Webhook-triggered automations can't record: a held run would never answer the caller.
+  // Webhook-triggered automations can't record: the webhook handler bypasses the event router.
   const isWebhookTrigger = config.trigger.type === 'WEBHOOK';
 
   const isLiveRow =

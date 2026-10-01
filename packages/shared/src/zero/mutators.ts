@@ -12666,11 +12666,11 @@ export const mutators = defineMutators({
       async ({ tx, args: { id, timestamp } }) => {
         const existing = await tx.run(zql.workflows.where('id', id).one());
         if (!existing || existing.workflowType !== 'Automations') {
-          throw new Error(`Automation '${id}' not found`);
+          throw new Error(`Automation "${id}" not found`);
         }
         if (existing.status !== 'DRAFT') {
           throw new Error(
-            `Automation '${id}' is ${existing.status}; only DRAFT versions can start recording.`,
+            `Automation "${id}" is ${existing.status}; only DRAFT versions can start recording.`,
           );
         }
         if (existing.eventType === 'WEBHOOK') {
@@ -12704,11 +12704,11 @@ export const mutators = defineMutators({
       async ({ tx, args: { id, timestamp } }) => {
         const existing = await tx.run(zql.workflows.where('id', id).one());
         if (!existing || existing.workflowType !== 'Automations') {
-          throw new Error(`Automation '${id}' not found`);
+          throw new Error(`Automation "${id}" not found`);
         }
         if (existing.status !== 'PLAYGROUND') {
           throw new Error(
-            `Automation '${id}' is ${existing.status}; only PLAYGROUND versions can stop recording.`,
+            `Automation "${id}" is ${existing.status}; only PLAYGROUND versions can stop recording.`,
           );
         }
         await tx.mutate.workflows.update({

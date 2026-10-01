@@ -989,7 +989,9 @@ router.post(
         return;
       }
       if (execution.status !== AutomationRunStatus.HELD || !isPlaygroundRun(execution)) {
-        res.status(409).json({ success: false, error: 'This run is not held, so it cannot be played.' });
+        res
+          .status(409)
+          .json({ success: false, error: 'This run is not held, so it cannot be played.' });
         return;
       }
 

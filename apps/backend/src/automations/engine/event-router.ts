@@ -157,27 +157,19 @@ class EventRouter {
 
         // Playground capture = the live path minus the enqueue: the run is stored HELD and
         // waits for a manual Play. Full trigger filters run in the worker at Play time.
-        if (workflow.status === AutomationStatus.PLAYGROUND) {
-          await createAutomationExecutionForEvent({
-            workspaceId,
-            workflowId: workflow.id,
-            workflowType: workflow.workflowType,
-            initialContext,
-            status: AutomationRunStatus.HELD,
-            tag: PLAYGROUND_RUN_TAG,
-          });
-          held += 1;
-          continue;
-        }
-
+        const isRecording = workflow.status === AutomationStatus.PLAYGROUND;
         const execution = await createAutomationExecutionForEvent({
           workspaceId,
           workflowId: workflow.id,
           workflowType: workflow.workflowType,
           initialContext,
-          status: AutomationRunStatus.PENDING,
-          tag: 'root',
+          status: isRecording ? AutomationRunStatus.HELD : AutomationRunStatus.PENDING,
+          tag: isRecording ? PLAYGROUND_RUN_TAG : 'root',
         });
+        if (isRecording) {
+          held += 1;
+          continue;
+        }
 
         // Priority runs get put near the front of the queue. Normal runs pass no
         // priority, so they just join the back of the line like always.
@@ -188,7 +180,7 @@ class EventRouter {
         enqueued += 1;
       } catch (err) {
         logger.error(
-          `[EVENT-ROUTER] failed to route automation=${workflow.id} event=${eventType}:`,
+          `[EVENT-ROUTER] failed to enqueue automation=${workflow.id} event=${eventType}:`,
           err,
         );
       }

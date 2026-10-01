@@ -18138,7 +18138,7 @@ export function createMutators(
           }
           if (existing.status !== 'DRAFT') {
             throw new Error(
-              `Automation "${id}" is ${existing.status}; only DRAFT versions can start recording.`
+              `Automation "${id}" is ${existing.status}; only DRAFT versions can start recording.`,
             );
           }
           if (isWebhookTriggeredAutomation(existing.eventType, existing.context)) {
@@ -18156,7 +18156,7 @@ export function createMutators(
               .where('automationSeriesId', seriesId)
               .where('workflowType', 'Automations')
               .where('status', 'PLAYGROUND')
-              .where('id', '!=', id)
+              .where('id', '!=', id),
           );
           for (const other of otherRecordings) {
             await tx.mutate.workflows.update({
@@ -18166,9 +18166,9 @@ export function createMutators(
             });
           }
           logger.info(
-            `[Mutator] automations.startRecording OK id=${id} by userId=${authData.sub} demoted=${otherRecordings.map((o) => o.id).join(',') || 'none'}`
+            `[Mutator] automations.startRecording OK id=${id} by userId=${authData.sub} demoted=${otherRecordings.map(o => o.id).join(',') || 'none'}`,
           );
-        }
+        },
       ),
       // Owner-or-admin: PLAYGROUND → DRAFT. Held runs stay listed but can't be played
       // until this version is put back into PLAYGROUND.
@@ -18182,19 +18182,19 @@ export function createMutators(
           }
           if (existing.status !== 'PLAYGROUND') {
             throw new Error(
-              `Automation "${id}" is ${existing.status}; only PLAYGROUND versions can stop recording.`
+              `Automation "${id}" is ${existing.status}; only PLAYGROUND versions can stop recording.`,
             );
           }
           // The ACL lets the owner of a lineage recording demote siblings (startRecording);
           // stopping is only ever for this version's own owner or an admin.
-          const { assertIsOwnerOrAutomationsAdmin } =
-            await import('../automations/services/approval.service');
+          const { assertIsOwnerOrAutomationsAdmin } = await import(
+            '../automations/services/approval.service'
+          );
           await assertIsOwnerOrAutomationsAdmin(existing, authData.sub);
           await tx.mutate.workflows.update({ id, status: 'DRAFT', updatedAt: timestamp });
           logger.info(`[Mutator] automations.stopRecording OK id=${id} by userId=${authData.sub}`);
-        }
+        },
       ),
-
 
       // Admin-only: permanently retire a live automation. ARCHIVED is gated to
       // admins by the workflows ACL, and the event-router only matches ACTIVE and PLAYGROUND

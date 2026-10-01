@@ -94,7 +94,7 @@ export class WOrkflowsAcl extends BaseACL<'workflows'> {
   /** Owner (metadata.createdById) or an Automations admin. */
   private async requireOwnerOrAutomationsAdmin(
     row: { id: string; metadata: string | null },
-    tx: Transaction<Schema>
+    tx: Transaction<Schema>,
   ): Promise<void> {
     if (createdByIdOf(row) === this.ctx.userID) return;
     await this.requireAutomationsAdmin(tx);
@@ -116,13 +116,13 @@ export class WOrkflowsAcl extends BaseACL<'workflows'> {
       automationSeriesId: string | null;
     },
     nextStatus: string,
-    tx: Transaction<Schema>
+    tx: Transaction<Schema>,
   ): Promise<boolean> {
     if (nextStatus === PLAYGROUND_STATUS) {
       if (existing.status !== DRAFT_STATUS && existing.status !== PLAYGROUND_STATUS) {
         throw new MutationACLError(
           'Automation update failed: only a draft can start recording',
-          'workflows'
+          'workflows',
         );
       }
       await this.requireOwnerOrAutomationsAdmin(existing, tx);
@@ -136,9 +136,9 @@ export class WOrkflowsAcl extends BaseACL<'workflows'> {
           .where('automationSeriesId', seriesId)
           .where('workflowType', AUTOMATION_WORKFLOW_TYPE)
           .where('status', PLAYGROUND_STATUS)
-          .where('id', '!=', existing.id)
+          .where('id', '!=', existing.id),
       );
-      if (siblings.some((row) => createdByIdOf(row) === this.ctx.userID)) return true;
+      if (siblings.some(row => createdByIdOf(row) === this.ctx.userID)) return true;
       await this.requireAutomationsAdmin(tx);
       return true;
     }

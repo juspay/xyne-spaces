@@ -201,7 +201,7 @@ export function RunHistory({
           <div className='py-16 text-center text-sm text-muted-foreground'>
             {hasActiveFilters
               ? 'No runs match the current filters.'
-              : 'No runs yet. Activate the automation, or start recording in Playground, and trigger it to see runs here.'}
+              : 'No runs yet. Activate the automation and trigger it to see runs here.'}
           </div>
         ) : (
           <>
@@ -211,9 +211,6 @@ export function RunHistory({
                 run={run}
                 automation={automationRef}
                 onClick={() => onOpenRun(run)}
-                onPlayed={() => {
-                  void refetch();
-                }}
               />
             ))}
             {hasNextPage && (
@@ -243,12 +240,10 @@ function RunRow({
   run,
   automation,
   onClick,
-  onPlayed,
 }: {
   run: AutomationRunSummary;
   automation: RunAutomationRef | null;
   onClick: () => void;
-  onPlayed: () => void;
 }): React.ReactElement {
   const isComplete = run.status === 'COMPLETED' || run.status === 'FAILED';
   const duration =
@@ -258,10 +253,7 @@ function RunRow({
 
   // The row is a container, not a <button>, so the ▶ Play button isn't nested in a button.
   return (
-    <div
-      role='listitem'
-      className='flex h-16 w-full items-center gap-3 border-b border-border px-6 hover:bg-accent/30'
-    >
+    <div className='flex h-16 w-full items-center gap-3 border-b border-border px-6 hover:bg-accent/30'>
       <button
         type='button'
         onClick={onClick}
@@ -306,7 +298,7 @@ function RunRow({
         </div>
       </button>
       {isHeldRunStatus(run.status) && (
-        <PlayRunButton runId={run.id} automation={automation} onPlayed={onPlayed} />
+        <PlayRunButton runId={run.id} automation={automation} />
       )}
     </div>
   );

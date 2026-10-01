@@ -42,7 +42,6 @@ export function RunDetail({ runId, onBack }: RunDetailProps): React.ReactElement
     data,
     isLoading: queryLoading,
     isError,
-    refetch,
   } = useQuery({
     queryKey: ['automation-run', runId],
     queryFn: () => fetchAutomationRun(runId),
@@ -79,13 +78,7 @@ export function RunDetail({ runId, onBack }: RunDetailProps): React.ReactElement
         )}
         {run && isHeldRunStatus(run.status) && (
           <div className='ml-auto'>
-            <PlayRunButton
-              runId={run.id}
-              automation={data?.automation ?? null}
-              onPlayed={() => {
-                void refetch();
-              }}
-            />
+            <PlayRunButton runId={run.id} automation={data?.automation ?? null} />
           </div>
         )}
       </div>

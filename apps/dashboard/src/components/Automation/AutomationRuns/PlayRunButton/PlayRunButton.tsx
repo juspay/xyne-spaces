@@ -16,7 +16,6 @@ export interface PlayRunButtonProps {
   runId: string;
   /** The version the run belongs to; null while loading. */
   automation: RunAutomationRef | null | undefined;
-  onPlayed: () => void;
 }
 
 /** Why ▶ is disabled, or null when the current user can play this held run. */
@@ -42,11 +41,7 @@ function errorMessage(err: unknown): string {
 }
 
 /** ▶ Play for a HELD playground run: confirm, then HELD → PENDING on the server. */
-export function PlayRunButton({
-  runId,
-  automation,
-  onPlayed,
-}: PlayRunButtonProps): React.ReactElement {
+export function PlayRunButton({ runId, automation }: PlayRunButtonProps): React.ReactElement {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const disabledReason = usePlayDisabledReason(automation);
   const queryClient = useQueryClient();
@@ -54,7 +49,6 @@ export function PlayRunButton({
   const refreshRuns = (): void => {
     void queryClient.invalidateQueries({ queryKey: ['automation-runs'] });
     void queryClient.invalidateQueries({ queryKey: ['automation-run', runId] });
-    onPlayed();
   };
 
   const playMutation = useMutation({
@@ -95,9 +89,7 @@ export function PlayRunButton({
       {disabledReason ? (
         <Tooltip content={disabledReason}>
           {/* Disabled buttons swallow pointer events; the span keeps the reason hoverable. */}
-          <span aria-label={disabledReason}>
-            {button}
-          </span>
+          <span aria-label={disabledReason}>{button}</span>
         </Tooltip>
       ) : (
         button
