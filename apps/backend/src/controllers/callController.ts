@@ -1907,18 +1907,13 @@ export class CallController {
     try {
       const call = await repositories.calls.findByExternalId(callId);
 
-      if (!call) {
+      if (!call || call.workspaceId !== req.user!.workspaceId) {
         logger.warn(`[${callId}] download_transcript_call_not_found | user_id=${userId}`);
         res.status(404).json({ success: false, error: 'Call not found' });
         return;
       }
 
-      if (!(await callShareService.isCallAudience(call, userId))) {
-        res.status(403).json({ success: false, error: 'You do not have access to this call' });
-        return;
-      }
-
-      if (!(await this.assertCanViewCallRecordings(callId, userId))) {
+      if (!(await callShareService.canViewRecordings(call, userId))) {
         res.status(403).json({ success: false, error: 'Access denied' });
         return;
       }
@@ -1994,17 +1989,12 @@ export class CallController {
     try {
       const call = await repositories.calls.findByExternalId(callId);
 
-      if (!call) {
+      if (!call || call.workspaceId !== req.user!.workspaceId) {
         res.status(404).json({ success: false, error: 'Call not found' });
         return;
       }
 
-      if (!(await callShareService.isCallAudience(call, userId))) {
-        res.status(403).json({ success: false, error: 'You do not have access to this call' });
-        return;
-      }
-
-      if (!(await this.assertCanViewCallRecordings(callId, userId))) {
+      if (!(await callShareService.canViewRecordings(call, userId))) {
         res.status(403).json({ success: false, error: 'Access denied' });
         return;
       }
