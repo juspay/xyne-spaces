@@ -7,11 +7,11 @@ import jwt from 'jsonwebtoken';
 import { Request, Response } from 'express';
 import { invitationService } from '@/services/invitationService';
 import { DatabaseClient } from '@/database/client';
-import { withWorkspaceScope } from '@/database/tenant/context';
+import { withWorkspaceScope, runAsSystem } from '@/database/tenant/context';
 import { createOwnerInvitation, syncAllBotUsersForNewWorkspace } from '@/bypassAcl/orgServices';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
-import { ProjectType, WorkspaceRole } from '@xyne/shared';
+import { ProjectType, WorkspaceRole, WorkspaceType, OrgRole } from '@xyne/shared';
 import { aiProvisioningService } from '@/services/aiProvisioningService';
 import { isOrganizationPolicyError, organizationDomainService } from '@/services/organizationDomainService';
 import { CacConfigService } from '@/services/cacConfigService';
@@ -61,6 +61,7 @@ export async function buildInvitationLink(params: {
 }
 import { createId } from '@paralleldrive/cuid2';
 import { provisionOrgTx } from '@/bypassAcl/transactions/invitationController';
+import { approveInvitationTx } from '@/bypassAcl/transactions/invitationService';
 
 export class InvitationController {
   /**
@@ -79,14 +80,11 @@ export class InvitationController {
         return;
       }
 
-      // Only workspace admins/owners can send invitations
       const inviterRole = req.user?.role;
-      if (
-        inviterRole !== 'ADMIN' &&
-        inviterRole !== 'OWNER' &&
-        role !== WorkspaceRole.COMMUNITY_MEMBER
-      ) {
-        res.status(403).json({ error: 'Only workspace admins can send invitations' });
+
+      // Guests are scoped to a single channel/canvas — they cannot invite anyone.
+      if (inviterRole === 'GUEST') {
+        res.status(403).json({ error: 'Guests cannot send invitations' });
         return;
       }
 
@@ -110,6 +108,28 @@ export class InvitationController {
         return;
       }
 
+      // Non-admins can only send the invite role matching the workspace type —
+      // MEMBER in an enterprise workspace, COMMUNITY_MEMBER in a community
+      // workspace. Minting any other role (ADMIN, GUEST, cross-type) is admin-only.
+      if (inviterRole !== 'ADMIN' && inviterRole !== 'OWNER') {
+        const workspace = await DatabaseClient.getInstance().workspace.findUnique({
+          where: { id: workspaceId },
+          select: { workspaceType: true },
+        });
+        if (!workspace) {
+          res.status(404).json({ error: 'Workspace not found' });
+          return;
+        }
+        const allowedRole =
+          workspace.workspaceType === WorkspaceType.COMMUNITY
+            ? WorkspaceRole.COMMUNITY_MEMBER
+            : WorkspaceRole.MEMBER;
+        if (role !== allowedRole) {
+          res.status(403).json({ error: 'Only workspace admins can send this invitation type' });
+          return;
+        }
+      }
+
       // Create the invitation (includes workspace data)
       invitation = await invitationService.createInvitation({
         email: email.trim().toLowerCase(),
@@ -123,6 +143,25 @@ export class InvitationController {
 
       const normalizedEmail = email.trim().toLowerCase();
 
+      // Pending invites send the email right away — approval only gates the
+      // accept. Temp password is skipped for them (no orgMember row yet).
+      // Pending approval sends the invite email only after an admin approves —
+      // no email here, and no temp password (that's generated at approval).
+      if (invitation.isOrgApproved === false) {
+        res.status(201).json({
+          success: true,
+          pendingApproval: true,
+          invitation: {
+            id: invitation.id,
+            email: invitation.email,
+            role: invitation.role,
+            workspaceId: invitation.workspaceId,
+            invitedAt: invitation.invitedAt,
+          },
+        });
+        return;
+      }
+
       // Only generate a temp password for brand-new invitees with no existing workspace access.
       // Existing users may have already set their own password; overwriting it would be destructive.
       const existingWorkspaceUsers = await DatabaseClient.getInstance().user.count({
@@ -130,7 +169,11 @@ export class InvitationController {
       });
 
       let tempPassword: string | null = null;
-      if (existingWorkspaceUsers === 0 && role !== 'GUEST') {
+      if (
+        existingWorkspaceUsers === 0 &&
+        role !== 'GUEST' &&
+        role !== WorkspaceRole.COMMUNITY_MEMBER
+      ) {
         tempPassword = await invitationService.generateOrgMemberPassword(normalizedEmail);
       }
 
@@ -158,6 +201,12 @@ export class InvitationController {
           throw new Error(`Failed to send invitation email: ${emailResult.error}`);
         }
       }
+
+      // Email is out (or dev-skipped) — stamp delivery so auto-approved invites
+      // don't render as "Email failed to send" in the approval list. Runs as
+      // system: a MEMBER creator cannot mutate invitation rows under the ACL.
+      const createdInvitationId = invitation.id;
+      await runAsSystem(() => invitationService.markInviteEmailSent(createdInvitationId));
 
       res.status(201).json({
         success: true,
@@ -291,6 +340,7 @@ export class InvitationController {
           entityType,
           entityId,
           entityTitle,
+          pendingApproval: invitation.isOrgApproved === false,
         },
       });
     } catch (error) {
@@ -592,6 +642,251 @@ export class InvitationController {
       }
 
       res.status(500).json({ error: 'Failed to provision organisation' });
+    }
+  };
+
+  /** Caller must be an active org ADMIN/OWNER of the given org. */
+  private async requireOrgAdmin(callerEmail: string, orgId: string): Promise<boolean> {
+    return withWorkspaceScope(async () => {
+      const orgMember = await DatabaseClient.getInstance().orgMember.findFirst({
+        where: {
+          email: callerEmail.toLowerCase(),
+          orgId,
+          leftAt: null,
+          role: { in: [OrgRole.ADMIN, OrgRole.OWNER] },
+        },
+        select: { memberId: true },
+      });
+      return !!orgMember;
+    });
+  }
+
+  /** GET /pending-approvals?orgId= — invites awaiting org-admin approval. */
+  listPendingApprovals = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const orgId = typeof req.query.orgId === 'string' ? req.query.orgId : '';
+      if (!orgId) {
+        res.status(400).json({ error: 'orgId is required' });
+        return;
+      }
+
+      const callerEmail = req.user?.email ?? '';
+      if (!(await this.requireOrgAdmin(callerEmail, orgId))) {
+        res.status(403).json({ error: 'Only organization admins can review invitations' });
+        return;
+      }
+
+      // Org-wide read: the invite may live in any workspace of the org, so this
+      // must run outside the caller's workspace-scoped ACL.
+      const { invitations, inviterById } = await runAsSystem(async () => {
+        const invitations = await DatabaseClient.getInstance().invitation.findMany({
+          where: {
+            orgId,
+            acceptedAt: null,
+            // Pending approvals, plus approved invites whose email never went out (resend needed).
+            AND: [
+              { OR: [{ expiredAt: null }, { expiredAt: { gt: new Date() } }] },
+              { OR: [{ isOrgApproved: false }, { isOrgApproved: true, inviteEmailSentAt: null }] },
+            ],
+          },
+          orderBy: { createdAt: 'desc' },
+          select: {
+            id: true,
+            email: true,
+            role: true,
+            invitedBy: true,
+            invitedAt: true,
+            createdAt: true,
+            isOrgApproved: true,
+            inviteEmailSentAt: true,
+            workspace: { select: { name: true } },
+          },
+        });
+
+        const inviterIds = Array.from(new Set(invitations.map(i => i.invitedBy)));
+        const inviters = inviterIds.length
+          ? await DatabaseClient.getInstance().user.findMany({
+              where: { id: { in: inviterIds } },
+              select: { id: true, name: true, email: true },
+            })
+          : [];
+        return { invitations, inviterById: new Map(inviters.map(u => [u.id, u])) };
+      });
+
+      res.json({
+        invitations: invitations.map(invitation => ({
+          id: invitation.id,
+          email: invitation.email,
+          role: invitation.role,
+          workspaceName: invitation.workspace?.name ?? null,
+          invitedAt: invitation.invitedAt,
+          createdAt: invitation.createdAt,
+          invitedByName: inviterById.get(invitation.invitedBy)?.name ?? null,
+          invitedByEmail: inviterById.get(invitation.invitedBy)?.email ?? null,
+          isOrgApproved: invitation.isOrgApproved,
+          inviteEmailSentAt: invitation.inviteEmailSentAt,
+        })),
+      });
+    } catch (error) {
+      logger.error('[InvitationController] Failed to list pending invitations:', error);
+      res.status(500).json({ error: 'Failed to list pending invitations' });
+    }
+  };
+
+  /** POST /:id/approve — approve a pending invite, create the org member, send the email. Re-running on an approved, unaccepted invite resends the email (retry after a failed send). */
+  approveInvitation = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { id } = req.params;
+      // Org-wide read: the invite may live in any workspace of the org.
+      const invitation = await runAsSystem(() => invitationService.getInvitationById(id ?? ''));
+      if (!invitation) {
+        res.status(404).json({ error: 'Invitation not found' });
+        return;
+      }
+
+      // null = invite never went through the approval flow; false = pending; true = already approved (email retry).
+      if (invitation.isOrgApproved === null) {
+        res.status(400).json({ error: 'Invitation is not pending approval' });
+        return;
+      }
+
+      // Already approved and emailed — a re-approve would send a duplicate email.
+      if (invitation.isOrgApproved === true && invitation.inviteEmailSentAt) {
+        res.status(400).json({ error: 'Invitation email has already been sent' });
+        return;
+      }
+
+      if (invitation.acceptedAt) {
+        res.status(400).json({ error: 'Invitation has already been accepted' });
+        return;
+      }
+
+      if (invitation.expiredAt && invitation.expiredAt < new Date()) {
+        res.status(400).json({ error: 'Invitation has expired' });
+        return;
+      }
+
+      if (!invitation.orgId) {
+        res.status(400).json({ error: 'Invitation has no organization to approve into' });
+        return;
+      }
+
+      const callerEmail = req.user?.email ?? '';
+      if (!(await this.requireOrgAdmin(callerEmail, invitation.orgId))) {
+        res.status(403).json({ error: 'Only organization admins can approve invitations' });
+        return;
+      }
+
+      // The invite may live in any workspace of the org, so the org-wide reads
+      // and writes below run as system — outside the caller's workspace-scoped ACL.
+      const orgId = invitation.orgId;
+      const emailSent = await runAsSystem(async (): Promise<boolean> => {
+        // Seats may have changed since the invite was created.
+        await organizationDomainService.assertOrgMemberLimit(orgId, invitation.email);
+
+        await approveInvitationTx(invitationService, invitation.id, invitation);
+
+        // Approval creates the orgMember row (and its password), so now generate a
+        // temp password (if needed) and send the invite email.
+        if (config.env === 'development') {
+          logger.info(
+            `[InvitationController] DEV MODE — approved invitation ${invitation.id} for ${invitation.email}, skipping email`
+          );
+          await invitationService.markInviteEmailSent(invitation.id);
+          return true;
+        }
+
+        let tempPassword: string | null = null;
+        const existingWorkspaceUsers = await DatabaseClient.getInstance().user.count({
+          where: { email: invitation.email, leftAt: null },
+        });
+        if (existingWorkspaceUsers === 0 && invitation.role !== 'GUEST') {
+          tempPassword = await invitationService.generateOrgMemberPassword(invitation.email);
+        }
+
+        const invitationLink = await buildInvitationLink({
+          req,
+          workspaceId: invitation.workspaceId,
+          invitationId: invitation.invitationId || invitation.id,
+        });
+
+        const emailResult = await invitationService.sendInvitationEmail({
+          to: invitation.email,
+          inviterName: req.user?.name || 'A team member',
+          workspaceName: invitation.workspace?.name || 'the workspace',
+          invitationLink,
+          invitationId: invitation.invitationId || invitation.id,
+          tempPassword: tempPassword ?? undefined,
+        });
+        if (!emailResult.success) {
+          logger.error(
+            `[InvitationController] Approved invitation ${invitation.id} but email failed: ${emailResult.error}`
+          );
+          return false;
+        }
+
+        // Email is out — record it so the invite leaves the resend list.
+        await invitationService.markInviteEmailSent(invitation.id);
+        return true;
+      });
+
+      if (!emailSent) {
+        res.status(502).json({
+          error: 'Invite email failed to send. Click "Resend email" to try again.',
+          emailSent: false,
+        });
+        return;
+      }
+
+      res.json({ success: true, emailSent: true });
+    } catch (error) {
+      logger.error('[InvitationController] Failed to approve invitation:', error);
+      if (isOrganizationPolicyError(error)) {
+        res.status(error.statusCode).json({ error: error.message, code: error.code });
+        return;
+      }
+      res.status(400).json({
+        error: error instanceof Error ? error.message : 'Failed to approve invitation',
+      });
+    }
+  };
+
+  /** POST /:id/reject — delete a pending invite. */
+  rejectInvitation = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { id } = req.params;
+      // Org-wide read: the invite may live in any workspace of the org.
+      const invitation = await runAsSystem(() => invitationService.getInvitationById(id ?? ''));
+      if (!invitation) {
+        res.status(404).json({ error: 'Invitation not found' });
+        return;
+      }
+
+      if (invitation.isOrgApproved !== false) {
+        res.status(400).json({ error: 'Invitation is not pending approval' });
+        return;
+      }
+
+      if (!invitation.orgId) {
+        res.status(400).json({ error: 'Invitation has no organization' });
+        return;
+      }
+
+      const callerEmail = req.user?.email ?? '';
+      if (!(await this.requireOrgAdmin(callerEmail, invitation.orgId))) {
+        res.status(403).json({ error: 'Only organization admins can reject invitations' });
+        return;
+      }
+
+      // Org-wide delete — runs as system so invites from any workspace of the
+      // org can be rejected, not just the caller's own workspace.
+      await runAsSystem(() => invitationService.deleteInvitation(invitation.id));
+      res.json({ success: true });
+    } catch (error) {
+      logger.error('[InvitationController] Failed to reject invitation:', error);
+      res.status(400).json({
+        error: error instanceof Error ? error.message : 'Failed to reject invitation',
+      });
     }
   };
 }

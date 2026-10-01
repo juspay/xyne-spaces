@@ -312,7 +312,7 @@ export class AuthV2Controller {
 
       const authUrl = this.getGoogleClient(isNy).generateAuthUrl({
         access_type: 'offline',
-        scope: ['openid', 'email', 'profile'],
+        scope: ['openid', 'email', 'profile', 'https://www.googleapis.com/auth/contacts.readonly', 'https://www.googleapis.com/auth/contacts.other.readonly'],
         prompt: 'consent',
         redirect_uri: redirectUri,
         state,

@@ -27,6 +27,7 @@ import { ensureUserInGeneralChannel } from '@/utils/workspaceGeneralChannel';
 import { acceptInvitationTx } from '@/bypassAcl/transactions/invitationService';
 import { acceptInvitationTx2 } from '@/bypassAcl/transactions/invitationService';
 import { acceptInvitationTx3 } from '@/bypassAcl/transactions/invitationService';
+import { approveInvitationTx } from '@/bypassAcl/transactions/invitationService';
 
 type TxClient = Parameters<Parameters<PrismaClient['$transaction']>[0]>[0];
 
@@ -90,11 +91,23 @@ export class InvitationService {
     const email = params.email.toLowerCase();
 
     let orgId: string;
+    // null = flow skips the in-org check (read as approved), false = pending admin approval
+    let isOrgApproved: boolean | null = null;
+    let createOrgMemberDirectly = false;
 
     if (explicitOrgId) {
       // orgId supplied directly — skip inviter-org derivation and invitee-in-org check
       // (caller is responsible for having already added the invitee as an org member)
       orgId = explicitOrgId;
+    } else if (role === WorkspaceRole.COMMUNITY_MEMBER) {
+      const communityWorkspace = await this.prisma.workspace.findUnique({
+        where: { id: workspaceId },
+        select: { orgId: true },
+      });
+      if (!communityWorkspace?.orgId) {
+        throw new Error('Community workspace not found');
+      }
+      orgId = communityWorkspace.orgId;
     } else {
       // Derive orgId from the inviting user's active org membership
       const inviter = await this.prisma.user.findUnique({
@@ -103,7 +116,7 @@ export class InvitationService {
       });
       const inviterOrgMember = await this.prisma.orgMember.findFirst({
         where: { email: inviter?.email ?? '', leftAt: null },
-        select: { orgId: true },
+        select: { orgId: true, role: true },
       });
       const derivedOrgId = inviterOrgMember?.orgId;
 
@@ -112,8 +125,9 @@ export class InvitationService {
       }
       orgId = derivedOrgId;
 
-      // Ensure the invitee exists in the org_members table (any org)
-      if (role !== WorkspaceRole.GUEST && role !== WorkspaceRole.COMMUNITY_MEMBER) {
+      // Non-org invitees are no longer rejected — the invite waits for admin approval.
+      // GUEST and COMMUNITY_MEMBER are handled in the branches above.
+      if (role !== WorkspaceRole.GUEST) {
         // Looks the invitee up across any org, not just the caller's, so it runs above the caller's own scope.
         // The query MUST be awaited inside the closure: Prisma promises are lazy, so awaiting
         // outside would execute the query after withWorkspaceScope has exited — back in the
@@ -124,10 +138,18 @@ export class InvitationService {
           });
         });
 
-        if (!inviteeInOrg) {
-          throw new Error(
-            `${email} is not part of any organisation. They must be added to an organisation before being invited to a workspace.`
-          );
+        // orgMember.email is globally unique, so the lookup can hit a member of a
+        // DIFFERENT org — only a same-org member skips the approval queue.
+        isOrgApproved = inviteeInOrg?.orgId === orgId;
+
+        // Org admins/owners bypass the approval queue — the org member is created
+        // directly and the invite email goes out immediately.
+        if (
+          !isOrgApproved &&
+          (inviterOrgMember.role === OrgRole.ADMIN || inviterOrgMember.role === OrgRole.OWNER)
+        ) {
+          isOrgApproved = true;
+          createOrgMemberDirectly = true;
         }
       }
     }
@@ -263,6 +285,7 @@ export class InvitationService {
         entityId: params.entityId,
         entityType: params.entityType,
         channelId: params.channelId,
+        isOrgApproved,
       },
       include: {
         workspace: {
@@ -275,6 +298,18 @@ export class InvitationService {
     });
 
     logger.info(`[InvitationService] Created invitation with id=${invitation.id}, invitationId=${invitationLinkId} for ${email}`);
+
+    // Direct admin invite: create the org member now (idempotent) so the invite
+    // email + temp password can go out immediately instead of queueing for approval.
+    if (createOrgMemberDirectly) {
+      try {
+        await approveInvitationTx(this, invitation.id, invitation);
+      } catch (error) {
+        await this.deleteInvitation(invitation.id);
+        throw error;
+      }
+      return { ...invitation, isOrgApproved: true };
+    }
 
     return invitation;
   }
@@ -322,6 +357,17 @@ export class InvitationService {
     });
 
     logger.info(`[InvitationService] Deleted invitation ${id}`);
+  }
+
+  /**
+   * Mark that the invite email was actually sent (approval flow).
+   * null on an approved invite means the email failed and can be resent.
+   */
+  async markInviteEmailSent(id: string): Promise<void> {
+    await this.prisma.invitation.update({
+      where: { id },
+      data: { inviteEmailSentAt: new Date() },
+    });
   }
 
   /**
@@ -678,6 +724,10 @@ export class InvitationService {
     if (invitation.acceptedAt) {
       logger.warn(`[DEBUG] [acceptInvitation] Invitation ${invitationId} was already accepted at ${invitation.acceptedAt.toISOString()}`);
       throw new Error('Invitation has already been accepted');
+    }
+
+    if (invitation.isOrgApproved === false) {
+      throw new Error('This invitation is pending admin approval');
     }
 
     logger.info(`[DEBUG] [acceptInvitation] Invitation valid. workspaceId=${invitation.workspaceId} orgId=${invitation.orgId ?? 'null'} role=${invitation.role}`);
