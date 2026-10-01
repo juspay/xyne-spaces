@@ -1,5 +1,5 @@
 import { Transaction } from '@rocicorp/zero';
-import { Schema, AccessType, WorkspaceRole, type UserGroup } from '@xyne/shared';
+import { Schema, AccessType, OrgRole, WorkspaceRole, type UserGroup } from '@xyne/shared';
 import { zql } from '../../queries';
 import { MutationACLError, QueryContext } from './types';
 
@@ -183,4 +183,47 @@ export async function hasXyneAppsAdminAccess(ctx: { userID: string }, tx: Transa
   );
 
   return !!access;
+}
+
+/**
+ * Checks if the current user may manage release configuration: workspace/org
+ * ADMIN or OWNER, or WRITE/ADMIN on the RELEASE-MANAGER resource (direct or via
+ * group). Mirrors assertReleaseManageAccess in the Zero mutators.
+ */
+export async function hasReleaseManagerWriteAccess(
+  ctx: { userID: string; role?: string; orgRole?: string },
+  tx: Transaction<Schema>,
+): Promise<boolean> {
+  if (
+    ctx.role === WorkspaceRole.ADMIN ||
+    ctx.role === WorkspaceRole.OWNER ||
+    ctx.orgRole === OrgRole.ADMIN ||
+    ctx.orgRole === OrgRole.OWNER
+  ) {
+    return true;
+  }
+
+  const releaseResource = await tx.run(zql.resources.where('name', 'RELEASE-MANAGER').one());
+  if (!releaseResource) return false;
+
+  const grants = [AccessType.WRITE, AccessType.ADMIN];
+  const directAccess = await tx.run(
+    zql.resource_access
+      .where('userId', ctx.userID)
+      .where('resourceId', releaseResource.id)
+      .where(helpers => helpers.cmp('accessType', 'IN', grants))
+      .one(),
+  );
+  if (directAccess) return true;
+
+  const userGroups = await tx.run(zql.user_group_mappings.where('userId', ctx.userID));
+  if (userGroups.length === 0) return false;
+  const groupAccess = await tx.run(
+    zql.resource_access
+      .where('resourceId', releaseResource.id)
+      .where(helpers => helpers.cmp('accessType', 'IN', grants))
+      .where(helpers => helpers.cmp('groupId', 'IN', userGroups.map(g => g.userGroupId)))
+      .one(),
+  );
+  return Boolean(groupAccess);
 }
