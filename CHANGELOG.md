@@ -1,3 +1,10 @@
+## [1.447.0-release-20261001.1](https://github.com/juspay/xyne-spaces/compare/v1.446.1-release-20261001.1...v1.447.0-release-20261001.1) (2026-10-01)
+
+
+### Features
+
+* answer browser panel calls from the Xyne AI screen (release-20260930) ([#2542](https://github.com/juspay/xyne-spaces/issues/2542)) ([#2569](https://github.com/juspay/xyne-spaces/issues/2569)) ([c4d11ae](https://github.com/juspay/xyne-spaces/commit/c4d11ae6422aafda78ad9d943ac4cedbb44f5a97))
+
 ## [1.446.1-release-20261001.1](https://github.com/juspay/xyne-spaces/compare/v1.446.0...v1.446.1-release-20261001.1) (2026-10-01)
 
 
