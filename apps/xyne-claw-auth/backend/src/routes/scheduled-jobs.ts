@@ -18,6 +18,7 @@ import { spacesAppFetch, spacesAppFetchMultipart } from "../lib/spaces-api.js";
 import { getRequesterId, getOrgId, isClawAdmin, getAgentEditAccess } from "../middleware/agent-acl.js";
 import { getRequesterAliases, matchesAuthenticatedUserId } from "../middleware/pin-user-id-param.js";
 import { resolveCanonicalUserIdOrSelf, spacesUserIdForClawUser, userIdAliasesFor } from "../lib/users-jit.js";
+import { resolveSpacesAppCreds } from "../lib/spaces-agent-install.js";
 import { assertCanControlScheduledJob } from "./scheduled-jobs-auth.js";
 import { requireStrictS2S } from "../middleware/require-auth.js";
 import { getSpacesAuthForUser, getWorkspaceIdForUser, requestWorkspaceHint } from "../lib/spaces-db.js";
@@ -226,8 +227,10 @@ async function postScheduledFailureNotice(row: {
     `Scheduled run failed: ${error?.trim() || "unknown error"}.`,
     ...(next ? [`Next run: ${next}.`] : []),
   ].join("\n");
-  const appToken = decryptStoredField(agent.spacesAppToken);
-  const spacesAppUserId = agent.spacesAppUserId ?? "";
+  // Token scoped to the job's workspace (inline columns = latest install only).
+  const creds = await resolveSpacesAppCreds(agent, effectiveWorkspaceId);
+  const appToken = creds.spacesAppToken ? decryptStoredField(creds.spacesAppToken) : "";
+  const spacesAppUserId = creds.spacesAppUserId ?? "";
 
   if (row.replyMode === "channel" && (row.targetChannelId || row.channelId)) {
     await spacesAppFetch("/chat/postMessage", {
@@ -293,8 +296,10 @@ async function postScheduledJobApprovalCard(opts: {
     throw new Error("Missing workspaceId to post the approval card");
   }
 
-  const appToken = decryptStoredField(agent.spacesAppToken);
-  const spacesAppUserId = agent.spacesAppUserId ?? "";
+  // Token scoped to the job's workspace (inline columns = latest install only).
+  const creds = await resolveSpacesAppCreds(agent, workspaceId);
+  const appToken = creds.spacesAppToken ? decryptStoredField(creds.spacesAppToken) : "";
+  const spacesAppUserId = creds.spacesAppUserId ?? "";
 
   const flow = withSpacesAppId(buildScheduledJobApprovalFlow({
     scheduledJobId: row.id,
@@ -1296,8 +1301,6 @@ router.post("/:id/result", requireStrictS2S, async (req: Request<{ id: string }>
     return;
   }
 
-  const appToken = decryptStoredField(agent.spacesAppToken);
-  const spacesAppUserId = agent.spacesAppUserId ?? "";
   let effectiveWorkspaceId = row.workspaceId;
 
   if (!effectiveWorkspaceId) {
@@ -1313,6 +1316,11 @@ router.post("/:id/result", requireStrictS2S, async (req: Request<{ id: string }>
       log.info(`[scheduled-jobs/result] Job ${id}: backfilled workspaceId=${resolvedWorkspaceId} from Spaces user row`);
     }
   }
+
+  // Token scoped to the workspace the job runs in (inline columns = latest only).
+  const creds = await resolveSpacesAppCreds(agent, effectiveWorkspaceId);
+  const appToken = creds.spacesAppToken ? decryptStoredField(creds.spacesAppToken) : "";
+  const spacesAppUserId = creds.spacesAppUserId ?? "";
 
   // Deterministic tagging for scheduled results. This path used to post
   // payload.result raw, so agent-emitted mentions (`@bowmitha.c`,

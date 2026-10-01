@@ -7,6 +7,8 @@ import { parseFrontierItems, normalizeFocus } from "./experiment-text.js";
 import { registerRunRecovery } from "../queue/run-recovery-worker.js";
 import { createTraceId, createLogger } from "../logger.js";
 import { decryptStoredField, spacesAppFetch } from "../surfaces/spaces/client.js";
+import { resolveSpacesAppCreds } from "./spaces-agent-install.js";
+import { getWorkspaceIdForUser } from "./spaces-db.js";
 
 const log = createLogger("experiment");
 
@@ -414,7 +416,11 @@ async function dispatchExperimentRun(
   if (!agent.spacesAppToken || !agent.spacesAppId || !agent.spacesAppUserId) {
     throw new Error(`Experiment dispatch agent ${run.agentSlug} missing Spaces app identity`);
   }
-  const appToken = decryptStoredField(agent.spacesAppToken);
+  // Token+bot-user for the experiment user's workspace (inline = latest only).
+  const expWsId = await getWorkspaceIdForUser(run.userId, "write-action").catch(() => null);
+  const expCreds = await resolveSpacesAppCreds(agent, expWsId);
+  const expBotUserId = expCreds.spacesAppUserId ?? agent.spacesAppUserId;
+  const appToken = decryptStoredField(expCreds.spacesAppToken ?? agent.spacesAppToken);
 
   const dispatchPayload = {
     userId: run.userId,
@@ -458,7 +464,7 @@ async function dispatchExperimentRun(
   }
 
   const sessionContext: SessionContext = {
-    mentionedUserId: agent.spacesAppUserId,
+    mentionedUserId: expBotUserId,
     targetUserId: run.userId,
     senderId: run.userId,
     senderName: run.userId,
@@ -472,7 +478,8 @@ async function dispatchExperimentRun(
     responseMode: "conversation",
     appToken,
     spacesAppId: agent.spacesAppId,
-    spacesAppUserId: agent.spacesAppUserId,
+    spacesAppUserId: expBotUserId,
+    ...(expWsId ? { workspaceId: expWsId } : {}),
     traceId,
     rootAgentSlug: run.agentSlug,
     // Suppresses the channel agent-chain on every epoch callback (see the field

@@ -38,6 +38,7 @@ import {
   type EffectiveCredentials,
 } from "../lib/credentials-loader.js";
 import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
+import { resolveSpacesAppCreds, resolveSpacesAppTokenByBotUser } from "../lib/spaces-agent-install.js";
 import {
   loadSubagentMcpListingEntries,
   type SubagentMcpListingEntry,
@@ -567,7 +568,11 @@ async function postAgentCallProposal(
   });
   flow.data = { ...(flow.data ?? {}), spacesAppId: proposer.spacesAppId };
 
-  const appToken = decryptStoredToken(proposer.spacesAppToken);
+  // Post the proposal AS the proposer bot in the running user's workspace —
+  // inline columns hold only the latest install's token+user.
+  const proposerWorkspaceId = await getWorkspaceIdForUser(context.userId, "mcp-runner").catch(() => null);
+  const proposerCreds = await resolveSpacesAppCreds(proposer, proposerWorkspaceId);
+  const appToken = decryptStoredToken(proposerCreds.spacesAppToken ?? proposer.spacesAppToken);
   const postRes = await fetch(`${CONFIG.spacesInternalUrl}/api/apps/chat/postMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${appToken}` },
@@ -575,7 +580,7 @@ async function postAgentCallProposal(
       channelId,
       conversationId,
       flow,
-      userId: proposer.spacesAppUserId,
+      userId: proposerCreds.spacesAppUserId ?? proposer.spacesAppUserId,
     }),
     signal: AbortSignal.timeout(15_000),
   });
@@ -749,12 +754,11 @@ function injectCustomTools(data: McpServerTools[], entries: ListEntry[]): void {
  * Looks up the agent by spacesAppUserId and uses its app token.
  */
 async function getAppTokenCredentials(userId: string): Promise<Record<string, unknown> | null> {
-  const agent = await prisma.agent.findFirst({
-    where: { spacesAppUserId: userId },
-    select: { spacesAppToken: true },
-  });
-  if (!agent?.spacesAppToken) return null;
-  const [ciphertext, iv, authTag] = agent.spacesAppToken.split(":");
+  // `userId` is a per-workspace bot user id — resolve that workspace's token
+  // from its install row (inline column holds only the latest install).
+  const stored = await resolveSpacesAppTokenByBotUser(userId);
+  if (!stored) return null;
+  const [ciphertext, iv, authTag] = stored.split(":");
   if (!ciphertext || !iv || !authTag) return null;
   const appToken = decrypt(ciphertext, iv, authTag, CONFIG.encryptionKey);
   const workspaceId = await getWorkspaceIdForUser(userId, "mcp-runner").catch(() => null);
@@ -2219,12 +2223,16 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
         // Store session context for the callback
         const { setSession } = await import("./webhook.js");
         if (targetAgentRow?.spacesAppToken && targetAgentRow.spacesAppId && chanId && convId) {
+          // Target bot acts in the running user's workspace — resolve that
+          // install's token+user (inline columns hold only the latest install).
+          const triggerWorkspaceId = await getWorkspaceIdForUser(userId, "mcp-runner").catch(() => null);
+          const triggerCreds = await resolveSpacesAppCreds(targetAgentRow, triggerWorkspaceId);
           const appToken = decrypt(
-            ...(targetAgentRow.spacesAppToken.split(":") as [string, string, string]),
+            ...((triggerCreds.spacesAppToken ?? targetAgentRow.spacesAppToken).split(":") as [string, string, string]),
             CONFIG.encryptionKey,
           );
           await setSession(runBody.sessionId!, {
-            mentionedUserId: targetAgentRow.spacesAppUserId ?? "",
+            mentionedUserId: triggerCreds.spacesAppUserId ?? "",
             senderId: userId,
             senderName: "",
             channelId: chanId,
@@ -2237,7 +2245,8 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
             responseMode: "conversation",
             appToken,
             spacesAppId: targetAgentRow.spacesAppId,
-            spacesAppUserId: targetAgentRow.spacesAppUserId ?? "",
+            spacesAppUserId: triggerCreds.spacesAppUserId ?? "",
+            ...(triggerWorkspaceId ? { workspaceId: triggerWorkspaceId } : {}),
           });
         }
 

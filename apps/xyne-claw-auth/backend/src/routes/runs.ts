@@ -10,7 +10,8 @@ import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
 import { decrypt } from "../crypto.js";
 import { spacesAppFetch } from "../lib/spaces-api.js";
-import { getDmChannelForUserAndApp } from "../lib/spaces-db.js";
+import { getDmChannelForUserAndApp, getWorkspaceIdForUser } from "../lib/spaces-db.js";
+import { resolveSpacesAppCreds } from "../lib/spaces-agent-install.js";
 import { gcsService } from "../services/storageService.js";
 import { asyncHandler, ok, badRequest, unauthorized, forbidden, notFound } from "../lib/http.js";
 
@@ -608,7 +609,11 @@ router.post("/:sessionId/share", async (req: Request<{ sessionId: string }>, res
       return;
     }
 
-    const appToken = decryptStoredToken(agent.spacesAppToken);
+    // Share posts AS the agent bot into the requester's workspace — the inline
+    // Agent columns hold only the latest install's token+user.
+    const shareWorkspaceId = await getWorkspaceIdForUser(requesterId, "unknown").catch(() => null);
+    const shareCreds = await resolveSpacesAppCreds(agent, shareWorkspaceId);
+    const appToken = decryptStoredToken(shareCreds.spacesAppToken ?? agent.spacesAppToken);
     if (!appToken) {
       res.status(409).json({
         success: false,
@@ -640,7 +645,7 @@ router.post("/:sessionId/share", async (req: Request<{ sessionId: string }>, res
     const postResult = (await spacesAppFetch("/chat/postMessage", {
       channelId: targetChannelId,
       markdownText,
-      userId: agent.spacesAppUserId,
+      userId: shareCreds.spacesAppUserId ?? agent.spacesAppUserId,
       metadata: { contentFormat: "markdown" },
     }, appToken)) as { conversationId?: string; messageId?: string };
     const newConversationId = postResult.conversationId;

@@ -22,6 +22,7 @@ import { CONFIG } from "../config.js";
 import { decrypt } from "../crypto.js";
 import { agentRunRepository } from "../repositories/index.js";
 import { ensureUserExists } from "../lib/users-jit.js";
+import { resolveSpacesAppCreds } from "../lib/spaces-agent-install.js";
 import { chatMessageRepository } from "../repositories/index.js";
 import { setSession } from "../lib/session-context.js";
 import { resolveAgentProviderConfigs } from "../lib/agent-provider-config.js";
@@ -55,12 +56,17 @@ interface AgentIdentityRow {
  * Decrypt and validate the agent's Spaces app identity.
  * Throws rather than degrading — see the fail-closed note above.
  */
-export function resolveAgentIdentity(agent: AgentIdentityRow, workspaceId: string): AgentSpacesIdentity {
+export async function resolveAgentIdentity(agent: AgentIdentityRow, workspaceId: string): Promise<AgentSpacesIdentity> {
   if (!agent.spacesAppId) throw new AwakeningIdentityError(agent.slug, "no Spaces app is linked");
-  if (!agent.spacesAppUserId) throw new AwakeningIdentityError(agent.slug, "no Spaces app user id");
-  if (!agent.spacesAppToken) throw new AwakeningIdentityError(agent.slug, "no Spaces app token");
 
-  const [ciphertext, iv, authTag] = agent.spacesAppToken.split(":");
+  // Resolve the token+bot-user for THIS workspace (per-workspace install row),
+  // falling back to the inline Agent columns. Both belong to the same install,
+  // so the bot user id and token always match the workspace being dispatched.
+  const creds = await resolveSpacesAppCreds(agent, workspaceId);
+  if (!creds.spacesAppUserId) throw new AwakeningIdentityError(agent.slug, "no Spaces app user id");
+  if (!creds.spacesAppToken) throw new AwakeningIdentityError(agent.slug, "no Spaces app token");
+
+  const [ciphertext, iv, authTag] = creds.spacesAppToken.split(":");
   if (!ciphertext || !iv || !authTag) {
     throw new AwakeningIdentityError(agent.slug, "app token is not in the expected encrypted format");
   }
@@ -76,7 +82,7 @@ export function resolveAgentIdentity(agent: AgentIdentityRow, workspaceId: strin
   }
   if (!appToken) throw new AwakeningIdentityError(agent.slug, "app token decrypted to an empty string");
 
-  return { appToken, spacesAppId: agent.spacesAppId, spacesAppUserId: agent.spacesAppUserId, workspaceId };
+  return { appToken, spacesAppId: agent.spacesAppId, spacesAppUserId: creds.spacesAppUserId, workspaceId };
 }
 
 /** The task text the agent is woken with. The window artifact carries the data. */

@@ -11,6 +11,7 @@ import { STATIC_ADAPTERS } from "./static-adapters.js";
 import { resolveConnectorDefinition } from "./connector-definitions.js";
 import { getSpacesAuthForUser, getWorkspaceIdForUser } from "../lib/spaces-db.js";
 import { spacesUserIdForClawUser } from "../lib/users-jit.js";
+import { resolveSpacesAppTokenByBotUser } from "../lib/spaces-agent-install.js";
 import { SPACES_SESSION_CREDENTIAL_SERVER_TYPES } from "../lib/spaces-session-server-types.js";
 import { provisionStdioCommand } from "./provision.js";
 import { prisma } from "../db.js";
@@ -63,12 +64,12 @@ const tolerantSchemaValidator: Pick<AjvJsonSchemaValidator, "getValidator"> = {
  */
 async function resolveAppTokenForAppUser(appUserId: string): Promise<string | null> {
   try {
-    const agent = await prisma.agent.findFirst({
-      where: { spacesAppUserId: appUserId },
-      select: { spacesAppToken: true },
-    });
-    if (!agent?.spacesAppToken) return null;
-    const [ciphertext, iv, authTag] = agent.spacesAppToken.split(":");
+    // The bot user id is per-workspace, so the matching install row carries the
+    // right token; resolveSpacesAppTokenByBotUser checks SurfaceAgentInstall
+    // first (every workspace) and falls back to the inline Agent column.
+    const stored = await resolveSpacesAppTokenByBotUser(appUserId);
+    if (!stored) return null;
+    const [ciphertext, iv, authTag] = stored.split(":");
     if (!ciphertext || !iv || !authTag) return null;
     return decrypt(ciphertext, iv, authTag, CONFIG.encryptionKey);
   } catch (err) {

@@ -7,6 +7,7 @@ import { s2sKeyMatches } from "../middleware/require-auth.js";
 import { writeAuditLog } from "../lib/audit.js";
 import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
 import { spacesUserIdForClawUser } from "../lib/users-jit.js";
+import { resolveSpacesAppCreds } from "../lib/spaces-agent-install.js";
 import { decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 import { spacesAppFetch } from "../lib/spaces-api.js";
@@ -447,15 +448,17 @@ async function notifyApproverOfSkillUpdateInSpaces(args: {
       log.info(`[skills/propose-update] owner DM skipped for ${args.skillSlug}: agent ${agent.slug} not Spaces-registered`);
       return;
     }
-    const [ciphertext, iv, authTag] = agent.spacesAppToken.split(":");
-    if (!ciphertext || !iv || !authTag) return;
-    const token = decrypt(ciphertext, iv, authTag, CONFIG.encryptionKey);
-
     const workspaceId = (await getWorkspaceIdForUser(args.approverUserId, "skill-update-owner-dm")) ?? "";
     if (!workspaceId) {
       log.warn(`[skills/propose-update] owner DM skipped for ${args.skillSlug}: no workspaceId for approver ${args.approverUserId}`);
       return;
     }
+    // Token+bot-user for the approver's workspace (inline columns = latest only).
+    const creds = await resolveSpacesAppCreds(agent, workspaceId);
+    const [ciphertext, iv, authTag] = (creds.spacesAppToken ?? agent.spacesAppToken).split(":");
+    if (!ciphertext || !iv || !authTag) return;
+    const token = decrypt(ciphertext, iv, authTag, CONFIG.encryptionKey);
+    const botUserId = creds.spacesAppUserId ?? agent.spacesAppUserId;
     // openDm is keyed by Spaces' workspace-scoped user id; approverUserId is
     // the canonical Claw id — translate or the DM silently never opens.
     const spacesApproverUserId = await spacesUserIdForClawUser(args.approverUserId, workspaceId).catch(() => args.approverUserId);
@@ -480,7 +483,7 @@ async function notifyApproverOfSkillUpdateInSpaces(args: {
     await spacesAppFetch("/chat/postMessage", {
       channelId: dm.channelId,
       flow,
-      userId: agent.spacesAppUserId,
+      userId: botUserId,
     }, token);
     log.info(`[skills/propose-update] sent skill-update DM to approver ${args.approverUserId} for ${args.skillSlug}`);
   } catch (err) {

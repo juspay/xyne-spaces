@@ -32,6 +32,7 @@ import { decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 import { getFreshCredentials } from "./credentials-refresh.js";
 import { getSpacesAuthForUser, getWorkspaceIdForUser } from "./spaces-db.js";
+import { resolveSpacesAppCreds } from "./spaces-agent-install.js";
 import { resolveFreshOAuthCreds, TokenRefreshError } from "./oauth-token-endpoint.js";
 import { getOAuthProvider } from "../routes/oauth-token.js";
 
@@ -230,11 +231,14 @@ export async function loadEffectiveCredentials(
       where: { orgId_slug: { orgId: credOrgId, slug: agentSlug } },
     });
     if (agent?.spacesAppToken) {
-      const parts = agent.spacesAppToken.split(":");
+      // Resolve the per-workspace install credential: the agent's app tools must
+      // act with the bot token+user for THIS workspace, not the latest install.
+      const workspaceId = await resolveSpacesAppToolsWorkspaceId(userId, credOrgId, agentSlug, workspaceHint);
+      const creds = await resolveSpacesAppCreds(agent, workspaceId);
+      const parts = (creds.spacesAppToken ?? agent.spacesAppToken).split(":");
       if (parts.length === 3 && parts[0] && parts[1] && parts[2]) {
         try {
           const appToken = decrypt(parts[0], parts[1], parts[2], CONFIG.encryptionKey);
-          const workspaceId = await resolveSpacesAppToolsWorkspaceId(userId, credOrgId, agentSlug, workspaceHint);
           log.info(`[creds-loader] xyne-spaces-app-tools userId=${userId} agent=${agentSlug} → resolved app_token from agent row workspaceId=${workspaceId ?? "(none)"}`);
           return {
             source: "agent",
@@ -246,7 +250,7 @@ export async function loadEffectiveCredentials(
               // XYNE_USER_ID reaches the child empty and every tool that needs
               // to know who it is — spaces-whoami first among them — fails with
               // "Could not determine current user."
-              ...(agent.spacesAppUserId ? { userId: agent.spacesAppUserId } : {}),
+              ...(creds.spacesAppUserId ? { userId: creds.spacesAppUserId } : {}),
               ...(workspaceId ? { workspaceId } : {}),
             },
             isUserOwned: false,

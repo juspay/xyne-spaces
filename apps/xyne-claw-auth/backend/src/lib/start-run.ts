@@ -24,6 +24,7 @@ import { storeRunScalars } from "../mcp/run-scalars.js";
 import { parseSdlcAgentRunContext } from "../mcp/sdlc-agent-run-context.js";
 import type { SpacesAuthContext } from "../mcp/servers/xyne-spaces-client.js";
 import { resolveCustomSubagentsForRun } from "./subagent-resolver.js";
+import { resolveSpacesAppCreds } from "./spaces-agent-install.js";
 import {
   resolveCallableAgentsForRun,
   resolveOrchestratorCallableAgentsForRun,
@@ -712,6 +713,24 @@ export async function prepareRun(
       return { ok: false, status: 400, error: agent.error };
     }
 
+    // Per-workspace Spaces app credential: prefer the SurfaceAgentInstall row
+    // for the workspace this run lives in; the inline Agent columns (latest
+    // install only) stay the fallback. Overriding the local object routes
+    // every downstream decrypt — the service-token channel precheck, the
+    // awakening session context and the injected-callback session context —
+    // through the right install. resolveSpacesAppCreds is fail-open.
+    const requestSpacesAuth =
+      (await input.resolveSpacesAuth?.(resolved.userId).catch(() => undefined)) ?? undefined;
+    const bodyWorkspaceRaw = (body as { workspaceId?: unknown }).workspaceId;
+    const bodyWorkspaceId =
+      typeof bodyWorkspaceRaw === "string" && bodyWorkspaceRaw.trim() ? bodyWorkspaceRaw.trim() : undefined;
+    const runWorkspaceId = requestSpacesAuth?.workspaceId ?? bodyWorkspaceId;
+    if (agent.spacesAppId) {
+      const runCreds = await resolveSpacesAppCreds(agent, runWorkspaceId);
+      agent.spacesAppToken = runCreds.spacesAppToken;
+      agent.spacesAppUserId = runCreds.spacesAppUserId;
+    }
+
     // Invocation whitelist — the universal chokepoint for CLI / service-token /
     // external-API runs (they all enter here). Enforced on the RESOLVED caller
     // (resolved.userId), in addition to any service-token scope gate. Refused
@@ -848,7 +867,7 @@ export async function prepareRun(
       attachedWorkflowExecutionId
     ) {
       // Try to get Spaces auth from request cookies
-      const spacesAuth = (await input.resolveSpacesAuth?.(resolved.userId)) ?? undefined;
+      const spacesAuth = requestSpacesAuth;
       if (spacesAuth) {
         try {
           resolvedAttachedContext = await buildAttachedContextPayload(normalizedAttached, spacesAuth, {

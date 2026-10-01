@@ -19,6 +19,8 @@ import { prisma } from "../db.js";
 import { decrypt } from "../crypto.js";
 import { expandSpacesMentions } from "../lib/mention-transform.js";
 import { resolveClawUserIdForSpacesIdentity } from "../lib/users-jit.js";
+import { resolveSpacesAppCreds } from "../lib/spaces-agent-install.js";
+import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
 import { agentRunRepository } from "../repositories/index.js";
 
 import { createLogger } from "../logger.js";
@@ -241,7 +243,12 @@ async function startWriteRetryRun(opts: {
     return;
   }
 
-  const appToken = decrypt(...agent.spacesAppToken.split(":") as [string, string, string], CONFIG.encryptionKey);
+  // Retry posts AS the agent bot into the write user's workspace — the inline
+  // Agent columns hold only the latest install's token+user.
+  const retryWorkspaceId = await getWorkspaceIdForUser(writeUserId, "write-action").catch(() => null);
+  const retryCreds = await resolveSpacesAppCreds(agent, retryWorkspaceId);
+  const retryBotUserId = retryCreds.spacesAppUserId ?? agent.spacesAppUserId ?? "";
+  const appToken = decrypt(...(retryCreds.spacesAppToken ?? agent.spacesAppToken).split(":") as [string, string, string], CONFIG.encryptionKey);
 
   const paramsPreview = paramsStr.length > 500 ? paramsStr.slice(0, 500) + "…" : paramsStr;
   const retryTask = originalTask
@@ -280,7 +287,7 @@ async function startWriteRetryRun(opts: {
     if (runBody.success && runBody.sessionId) {
       const { setSession } = await import("./webhook.js");
       const sessionContext = {
-        mentionedUserId: agent.spacesAppUserId ?? "",
+        mentionedUserId: retryBotUserId,
         senderId: writeUserId,
         senderName: "",
         channelId: channelId ?? "",
@@ -293,7 +300,8 @@ async function startWriteRetryRun(opts: {
         responseMode: "conversation" as const,
         appToken,
         spacesAppId: agent.spacesAppId,
-        spacesAppUserId: agent.spacesAppUserId ?? "",
+        spacesAppUserId: retryBotUserId,
+        ...(retryWorkspaceId ? { workspaceId: retryWorkspaceId } : {}),
       };
       await setSession(runBody.sessionId, sessionContext);
 
@@ -381,8 +389,12 @@ router.post("/callback", async (req: Request, res: Response) => {
 
     try {
       const agent = await findAgent(answerAgentSlug, answerSpacesAppId);
-      const appToken = agent?.spacesAppToken
-        ? decrypt(...agent.spacesAppToken.split(":") as [string, string, string], CONFIG.encryptionKey)
+      // Token+bot-user for the answering user's workspace (inline = latest).
+      const answerWorkspaceId = await getWorkspaceIdForUser(answerUserId, "write-action").catch(() => null);
+      const answerCreds = await resolveSpacesAppCreds(agent ?? {}, answerWorkspaceId);
+      const answerBotUserId = answerCreds.spacesAppUserId ?? agent?.spacesAppUserId ?? "";
+      const appToken = answerCreds.spacesAppToken
+        ? decrypt(...(answerCreds.spacesAppToken.split(":") as [string, string, string]), CONFIG.encryptionKey)
         : "";
       const answerOrgId = agent?.orgId
         ?? (await prisma.user.findUnique({ where: { id: answerUserId }, select: { orgId: true } }))?.orgId;
@@ -413,7 +425,7 @@ router.post("/callback", async (req: Request, res: Response) => {
       const runBody = (await runRes.json()) as { success: boolean; sessionId?: string };
       if (runBody.success && runBody.sessionId && agent) {
         await setSession(runBody.sessionId, {
-          mentionedUserId: agent.spacesAppUserId ?? "",
+          mentionedUserId: answerBotUserId,
           senderId: answerUserId,
           senderName: "",
           channelId: answerChannelId,
@@ -426,7 +438,8 @@ router.post("/callback", async (req: Request, res: Response) => {
           responseMode: "conversation",
           appToken,
           spacesAppId: agent.spacesAppId ?? "",
-          spacesAppUserId: agent.spacesAppUserId ?? "",
+          spacesAppUserId: answerBotUserId,
+          ...(answerWorkspaceId ? { workspaceId: answerWorkspaceId } : {}),
         });
       }
 
@@ -537,7 +550,10 @@ router.post("/callback", async (req: Request, res: Response) => {
           log.error(`[app-callback] spaces-send-message: no spacesAppToken for agent ${agentSlug ?? "(default)"}`);
           return;
         }
-        const tokenParts = agent.spacesAppToken.split(":");
+        // Token for the write user's workspace (inline columns = latest only).
+        const sendWorkspaceId = await getWorkspaceIdForUser(writeUserId, "write-action").catch(() => null);
+        const sendCreds = await resolveSpacesAppCreds(agent, sendWorkspaceId);
+        const tokenParts = (sendCreds.spacesAppToken ?? agent.spacesAppToken).split(":");
         if (tokenParts.length < 3 || !tokenParts[0] || !tokenParts[1] || !tokenParts[2]) {
           log.error("[app-callback] spaces-send-message: invalid spacesAppToken format");
           return;

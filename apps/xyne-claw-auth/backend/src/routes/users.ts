@@ -16,6 +16,7 @@ import {
 } from "../lib/users-jit.js";
 import { getOrgId, getRequesterId } from "../middleware/agent-acl.js";
 import { getWorkspaceIdForUser, requestWorkspaceHint } from "../lib/spaces-db.js";
+import { resolveSpacesAppCreds } from "../lib/spaces-agent-install.js";
 import { getCanonicalRequesterId, matchesAuthenticatedUserId } from "../middleware/pin-user-id-param.js";
 
 import { createLogger } from "../logger.js";

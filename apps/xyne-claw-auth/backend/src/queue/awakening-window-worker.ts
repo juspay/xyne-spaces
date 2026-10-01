@@ -141,7 +141,7 @@ async function processWindow(job: Job<AwakeningWindowJobData>): Promise<void> {
 
   try {
     const workspaceId = await resolveWorkspaceId(orgId, agent.spacesAppUserId, config.workspaceId);
-    const identity = resolveAgentIdentity(agent, workspaceId);
+    const identity = await resolveAgentIdentity(agent, workspaceId);
 
     const rate = await peekRunRate(agentId, config.limits.maxRunsPerHour);
     if (!rate.allowed) {

@@ -18,6 +18,7 @@ import { encrypt } from "../crypto.js";
 import { createLogger } from "../logger.js";
 import { errMsg } from "./errors.js";
 import { DEFAULT_AGENT_SLUGS } from "./provision-org-agents.js";
+import { ensureSpacesSurfaceAgent, upsertSpacesInstall } from "./spaces-agent-install.js";
 
 const log = createLogger("provision-workspace-agents");
 
@@ -89,13 +90,17 @@ export async function ensureDefaultAgentSpacesApps(input: {
         continue;
       }
       const enc = encrypt(body.signingSecret, CONFIG.encryptionKey);
+      const encSigningSecret = `${enc.ciphertext}:${enc.iv}:${enc.authTag}`;
       await prisma.agent.update({
         where: { id: agent.id },
         data: {
           spacesAppId: body.id,
-          signingSecret: `${enc.ciphertext}:${enc.iv}:${enc.authTag}`,
+          signingSecret: encSigningSecret,
         },
       });
+      // Anchor the org-level SurfaceAgent row so per-workspace installs
+      // (SurfaceAgentInstall) can hang off it. See spaces-agent-install.ts.
+      await ensureSpacesSurfaceAgent({ agentId: agent.id, spacesAppId: body.id, signingSecret: encSigningSecret });
       log.info(`[provision-workspace-agents] bound spaces app ${body.id} to slug=${agent.slug} orgId=${input.orgId}`);
     } catch (err) {
       log.warn(`[provision-workspace-agents] app create errored slug=${agent.slug}: ${errMsg(err)}`);
@@ -167,11 +172,23 @@ export async function installDefaultAgentsToWorkspace(input: {
       }
 
       const enc = encrypt(body.jwtToken, CONFIG.encryptionKey);
+      const encBotToken = `${enc.ciphertext}:${enc.iv}:${enc.authTag}`;
+      // Per-workspace credential: one row per (app, workspace). This is the
+      // authoritative store read back by resolveSpacesAppCreds(agent, workspaceId).
+      await upsertSpacesInstall({
+        agentId: agent.id,
+        spacesAppId: agent.spacesAppId!,
+        workspaceId: input.spacesWorkspaceId,
+        botUserId: appUserId,
+        encryptedBotToken: encBotToken,
+      });
+      // Keep the inline columns as a FALLBACK (latest install wins) for callers
+      // with no workspace in scope and pre-backfill rows.
       await prisma.agent.update({
         where: { id: agent.id },
         data: {
           spacesAppUserId: appUserId,
-          spacesAppToken: `${enc.ciphertext}:${enc.iv}:${enc.authTag}`,
+          spacesAppToken: encBotToken,
         },
       });
       log.info(`[provision-workspace-agents] installed slug=${agent.slug} app=${agent.spacesAppId} into workspace=${input.spacesWorkspaceId} (botUser=${appUserId})`);

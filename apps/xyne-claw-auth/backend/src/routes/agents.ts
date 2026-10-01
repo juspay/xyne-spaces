@@ -37,6 +37,7 @@ import {
 } from "../middleware/agent-acl.js";
 import { getRequesterAliases, matchesAuthenticatedUserId, pinUserIdParam } from "../middleware/pin-user-id-param.js";
 import { findUserByAnyId, resolveCanonicalUserIdOrSelf, spacesUserIdForClawUser } from "../lib/users-jit.js";
+import { resolveSpacesAppCreds, upsertSpacesInstall, SPACES_SURFACE_ID } from "../lib/spaces-agent-install.js";
 import { s2sKeyMatches } from "../middleware/require-auth.js";
 import { writeAuditLog } from "../lib/audit.js";
 import { buildAvailableToolsCatalog } from "./tools.js";
@@ -1029,16 +1030,19 @@ async function postDelegationDmWithCalleeIdentity(args: {
     log.info(`[agents/delegation] DM skipped ${logContext}: callee agent ${callee.slug} not Spaces-registered`);
     return;
   }
-  const token = decryptStoredToken(callee.spacesAppToken);
-  if (!token) {
-    log.warn(`[agents/delegation] DM skipped ${logContext}: invalid app token for callee agent ${callee.slug}`);
-    return;
-  }
   const workspaceId = await getWorkspaceIdForUser(targetUserId, "clone-owner-dm");
   if (!workspaceId) {
     log.warn(`[agents/delegation] DM skipped ${logContext}: no workspaceId for user ${targetUserId}`);
     return;
   }
+  // Token+bot-user for the target's workspace (inline columns = latest only).
+  const calleeCreds = await resolveSpacesAppCreds(callee, workspaceId);
+  const token = decryptStoredToken(calleeCreds.spacesAppToken ?? callee.spacesAppToken);
+  if (!token) {
+    log.warn(`[agents/delegation] DM skipped ${logContext}: invalid app token for callee agent ${callee.slug}`);
+    return;
+  }
+  const calleeBotUserId = calleeCreds.spacesAppUserId ?? callee.spacesAppUserId;
 
   // openDm is keyed by Spaces' workspace-scoped user id; targetUserId is the
   // canonical Claw id — translate or the DM silently never opens.
@@ -1051,7 +1055,7 @@ async function postDelegationDmWithCalleeIdentity(args: {
   await spacesAppFetch("/chat/postMessage", {
     channelId: dm.channelId,
     markdownText: text,
-    userId: callee.spacesAppUserId,
+    userId: calleeBotUserId,
     workspaceId,
     metadata: { contentFormat: "markdown" },
   }, token);
@@ -1794,9 +1798,6 @@ async function notifyOwnerOfCloneRequestInSpaces(args: {
     return;
   }
   try {
-    const [ciphertext, iv, authTag] = agent.spacesAppToken.split(":");
-    if (!ciphertext || !iv || !authTag) return;
-    const token = decrypt(ciphertext, iv, authTag, CONFIG.encryptionKey);
     // openDm requires the owner's own workspace. Resolve from the Spaces user
     // row (or the claw SurfaceTenantLink fallback inside getWorkspaceIdForUser);
     // never pin a per-user DM to the deployment-wide default workspace.
@@ -1805,6 +1806,12 @@ async function notifyOwnerOfCloneRequestInSpaces(args: {
       log.warn(`[agents/clone] owner DM skipped for ${agent.slug}: no workspaceId for owner ${agent.ownerUserId}`);
       return;
     }
+    // Token+bot-user for the owner's workspace (inline columns = latest only).
+    const ownerCreds = await resolveSpacesAppCreds(agent, workspaceId);
+    const [ciphertext, iv, authTag] = (ownerCreds.spacesAppToken ?? agent.spacesAppToken).split(":");
+    if (!ciphertext || !iv || !authTag) return;
+    const token = decrypt(ciphertext, iv, authTag, CONFIG.encryptionKey);
+    const ownerBotUserId = ownerCreds.spacesAppUserId ?? agent.spacesAppUserId;
 
     // openDm is keyed by Spaces' workspace-scoped user id; ownerUserId is the
     // canonical Claw id — translate or the DM silently never opens.
@@ -1826,7 +1833,7 @@ async function notifyOwnerOfCloneRequestInSpaces(args: {
     await spacesAppFetch("/chat/postMessage", {
       channelId: dm.channelId,
       flow,
-      userId: agent.spacesAppUserId,
+      userId: ownerBotUserId,
     }, token);
 
     log.info(`[agents/clone] sent clone-approval DM to owner ${agent.ownerUserId} for agent ${agent.slug}`);
@@ -2712,11 +2719,22 @@ router.post("/:slug/install-app", requireAgentOwnerOrAdmin, async (req: Request<
     const agent = await agentRepository.findBySlug(req.params.slug, getOrgId(req));
     if (!agent) { logAgentScopedMiss(req, "agents/install-app", req.params.slug); res.status(404).json({ success: false, error: "Agent not found" }); return; }
     if (!agent.spacesAppId) { res.status(400).json({ success: false, error: "Create app first" }); return; }
-    if (agent.spacesAppToken) { res.status(400).json({ success: false, error: "App already installed" }); return; }
 
     const spacesUrl = CONFIG.spacesInternalUrl;
     const sessionId = extractSessionId(req);
     const workspaceId = extractWorkspaceId(req);
+    // A second workspace is a NEW per-workspace credential, not a duplicate — so
+    // block only a redundant install into the SAME workspace. With no workspace
+    // in scope fall back to the legacy single-token guard.
+    if (workspaceId) {
+      const existing = await prisma.surfaceAgentInstall.findFirst({
+        where: { surfaceTenantId: workspaceId, surfaceAgent: { surfaceId: SPACES_SURFACE_ID, externalAppId: agent.spacesAppId } },
+        select: { id: true },
+      });
+      if (existing) { res.status(400).json({ success: false, error: "App already installed in this workspace" }); return; }
+    } else if (agent.spacesAppToken) {
+      res.status(400).json({ success: false, error: "App already installed" }); return;
+    }
     const installRes = await fetch(`${spacesUrl}/api/apps/install/${agent.spacesAppId}`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...spacesUserAuthHeaders(userToken, sessionId, workspaceId) },
@@ -2742,9 +2760,21 @@ router.post("/:slug/install-app", requireAgentOwnerOrAdmin, async (req: Request<
     }
 
     const encToken = encrypt(body.jwtToken, CONFIG.encryptionKey);
+    const encBotToken = `${encToken.ciphertext}:${encToken.iv}:${encToken.authTag}`;
+    // Per-workspace credential (authoritative; read by resolveSpacesAppCreds).
+    if (workspaceId) {
+      await upsertSpacesInstall({
+        agentId: agent.id,
+        spacesAppId: agent.spacesAppId,
+        workspaceId,
+        botUserId: appUserId,
+        encryptedBotToken: encBotToken,
+      });
+    }
+    // Inline columns kept as a FALLBACK (latest install wins).
     await agentRepository.update(req.params.slug, agent.orgId, {
       spacesAppUserId: appUserId,
-      spacesAppToken: `${encToken.ciphertext}:${encToken.iv}:${encToken.authTag}`,
+      spacesAppToken: encBotToken,
     });
 
     log.info(`[agents] Installed Spaces App ${agent.spacesAppId} for ${req.params.slug} (botUser=${appUserId})`);

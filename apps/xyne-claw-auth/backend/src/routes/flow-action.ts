@@ -68,6 +68,8 @@ import { registerRunRecovery } from "../queue/run-recovery-worker.js";
 import { enqueueDelayedJob, enqueueCronJob, type ScheduledJobData } from "../queue/scheduled-jobs-queue.js";
 import { retryNowByToken, cancelProviderRetry } from "../queue/provider-retry-worker.js";
 import { resolveClawUserIdForSpacesIdentity } from "../lib/users-jit.js";
+import { resolveSpacesAppCreds } from "../lib/spaces-agent-install.js";
+import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("flow-action");
@@ -316,13 +318,20 @@ async function findAgentForFlow(agentSlug: string | undefined, spacesAppId?: str
   return matches[0] ?? null;
 }
 
-async function getAgentTokenAndUserId(agentSlug: string | undefined, spacesAppId?: string): Promise<{ token: string; userId: string } | null> {
+async function getAgentTokenAndUserId(agentSlug: string | undefined, spacesAppId?: string, workspaceId?: string): Promise<{ token: string; userId: string } | null> {
   const agent = await findAgentForFlow(agentSlug, spacesAppId);
   if (!agent?.spacesAppToken || !agent.spacesAppUserId) return null;
-  const [ciphertext, iv, authTag] = agent.spacesAppToken.split(":");
+  // Prefer the per-workspace install credential for the card's workspace; the
+  // inline Agent columns hold only the latest install (fallback).
+  const creds = await resolveSpacesAppCreds(
+    { spacesAppId: spacesAppId ?? agent.spacesAppId, spacesAppToken: agent.spacesAppToken, spacesAppUserId: agent.spacesAppUserId },
+    workspaceId,
+  );
+  const stored = creds.spacesAppToken ?? agent.spacesAppToken;
+  const [ciphertext, iv, authTag] = stored.split(":");
   if (!ciphertext || !iv || !authTag) return null;
   const token = decrypt(ciphertext, iv, authTag, CONFIG.encryptionKey);
-  return { token, userId: agent.spacesAppUserId };
+  return { token, userId: creds.spacesAppUserId ?? agent.spacesAppUserId };
 }
 
 // ── Route ─────────────────────────────────────────────────────────────────────
@@ -459,8 +468,12 @@ async function dispatchContinuationRun(opts: {
       return;
     }
     const agent = await findAgentForFlow(opts.agentSlug, opts.spacesAppId, orgId);
-    const appToken = agent?.spacesAppToken
-      ? decrypt(...(agent.spacesAppToken.split(":") as [string, string, string]), CONFIG.encryptionKey)
+    // Token+bot-user for the write user's workspace (inline columns = latest).
+    const contWorkspaceId = await getWorkspaceIdForUser(writeUserId, "write-action").catch(() => null);
+    const contCreds = await resolveSpacesAppCreds(agent ?? {}, contWorkspaceId);
+    const contBotUserId = contCreds.spacesAppUserId ?? agent?.spacesAppUserId ?? "";
+    const appToken = contCreds.spacesAppToken
+      ? decrypt(...(contCreds.spacesAppToken.split(":") as [string, string, string]), CONFIG.encryptionKey)
       : "";
     const trimmed = trimForPrompt(opts.resultText);
     const runRes = await fetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run`, {
@@ -484,7 +497,7 @@ async function dispatchContinuationRun(opts: {
     const runBody = (await runRes.json()) as { success: boolean; sessionId?: string };
     if (runBody.success && runBody.sessionId && agent) {
       await setSession(runBody.sessionId, {
-        mentionedUserId: agent.spacesAppUserId ?? "",
+        mentionedUserId: contBotUserId,
         senderId: writeUserId,
         senderName: "",
         channelId: opts.channelId ?? "",
@@ -497,7 +510,8 @@ async function dispatchContinuationRun(opts: {
         responseMode: "conversation",
         appToken,
         spacesAppId: agent.spacesAppId ?? "",
-        spacesAppUserId: agent.spacesAppUserId ?? "",
+        spacesAppUserId: contBotUserId,
+        ...(contWorkspaceId ? { workspaceId: contWorkspaceId } : {}),
       });
     }
     log.info(`[flow-action] continuation run dispatched after ${opts.tool} (session=${runBody.sessionId})`);
@@ -953,8 +967,11 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
           res.json({ type: "error", message: `No spacesAppToken for agent ${agentSlug ?? "(default)"}` } satisfies AppActionResponse);
           return;
         }
-        const appToken = decryptSpacesAppToken(agent.spacesAppToken);
-        if (!appToken) {
+        // Token for the write user's workspace (inline columns = latest only).
+        const sendWorkspaceId = await getWorkspaceIdForUser(writeUserId, "write-action").catch(() => null);
+        const sendCreds = await resolveSpacesAppCreds(agent, sendWorkspaceId);
+        const parts = (sendCreds.spacesAppToken ?? agent.spacesAppToken).split(":");
+        if (parts.length < 3 || !parts[0] || !parts[1] || !parts[2]) {
           res.json({ type: "error", message: "Invalid spacesAppToken format" } satisfies AppActionResponse);
           return;
         }
@@ -1622,8 +1639,12 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         }
 
         const agent = await findAgentForFlow(answerAgentSlug, answerSpacesAppId);
-        const appToken = agent?.spacesAppToken
-          ? decrypt(...(agent.spacesAppToken.split(":") as [string, string, string]), CONFIG.encryptionKey)
+        // Token+bot-user for the answering user's workspace (inline = latest).
+        const answerWorkspaceId = await getWorkspaceIdForUser(answerUserId, "write-action").catch(() => null);
+        const answerCreds = await resolveSpacesAppCreds(agent ?? {}, answerWorkspaceId);
+        const answerBotUserId = answerCreds.spacesAppUserId ?? agent?.spacesAppUserId ?? "";
+        const appToken = answerCreds.spacesAppToken
+          ? decrypt(...(answerCreds.spacesAppToken.split(":") as [string, string, string]), CONFIG.encryptionKey)
           : "";
         const answerOrgId = agent?.orgId
           ?? (await prisma.user.findUnique({ where: { id: await resolveCardUserId(answerUserId) }, select: { orgId: true } }))?.orgId;
@@ -1674,12 +1695,12 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
             conversationId: answerConversationId,
             channelId: answerChannelId,
             agentSlug: answerAgentSlug,
-            spacesAppUserId: agent.spacesAppUserId ?? undefined,
+            spacesAppUserId: answerBotUserId || undefined,
             appToken,
             toolLabel: "Working on your answers…",
           });
           await setSession(runBody.sessionId, {
-            mentionedUserId: agent.spacesAppUserId ?? "",
+            mentionedUserId: answerBotUserId,
             senderId: answerUserId,
             senderName: "",
             channelId: answerChannelId,
@@ -1692,7 +1713,8 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
             responseMode: "conversation",
             appToken,
             spacesAppId: agent.spacesAppId ?? "",
-            spacesAppUserId: agent.spacesAppUserId ?? "",
+            spacesAppUserId: answerBotUserId,
+            ...(answerWorkspaceId ? { workspaceId: answerWorkspaceId } : {}),
           });
         }
 
@@ -1896,9 +1918,13 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
 
       if (targetAgent.spacesAppToken && targetAgent.spacesAppId) {
         const { setSession } = await import("./webhook.js");
-        const appToken = decrypt(...(targetAgent.spacesAppToken.split(":") as [string, string, string]), CONFIG.encryptionKey);
+        // Token+bot-user for the caller's workspace (inline columns = latest).
+        const proposalWorkspaceId = await getWorkspaceIdForUser(callerUserId, "write-action").catch(() => null);
+        const proposalCreds = await resolveSpacesAppCreds(targetAgent, proposalWorkspaceId);
+        const proposalBotUserId = proposalCreds.spacesAppUserId ?? targetAgent.spacesAppUserId ?? "";
+        const appToken = decrypt(...((proposalCreds.spacesAppToken ?? targetAgent.spacesAppToken).split(":") as [string, string, string]), CONFIG.encryptionKey);
         const sessionContext = {
-          mentionedUserId: targetAgent.spacesAppUserId ?? "",
+          mentionedUserId: proposalBotUserId,
           senderId: callerUserId,
           senderName: "",
           channelId: proposalChannelId,
@@ -1911,9 +1937,10 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
           responseMode: "conversation" as const,
           appToken,
           spacesAppId: targetAgent.spacesAppId,
-          spacesAppUserId: targetAgent.spacesAppUserId ?? "",
+          spacesAppUserId: proposalBotUserId,
           traceId,
           rootAgentSlug: targetAgent.slug,
+          ...(proposalWorkspaceId ? { workspaceId: proposalWorkspaceId } : {}),
         };
         await setSession(runBody.sessionId, sessionContext);
         await registerRunRecovery({
@@ -2310,8 +2337,12 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       // a stuck dispatch is recoverable; a broken UI promise is not.
       (async () => {
         try {
-          const appToken = agent.spacesAppToken
-            ? decrypt(...(agent.spacesAppToken.split(":") as [string, string, string]), CONFIG.encryptionKey)
+          // Token+bot-user for the goal user's workspace (inline = latest only).
+          const goalWorkspaceId = await getWorkspaceIdForUser(goalUserId, "write-action").catch(() => null);
+          const goalCreds = await resolveSpacesAppCreds(agent, goalWorkspaceId);
+          const goalBotUserId = goalCreds.spacesAppUserId ?? agent.spacesAppUserId ?? "";
+          const appToken = goalCreds.spacesAppToken
+            ? decrypt(...(goalCreds.spacesAppToken.split(":") as [string, string, string]), CONFIG.encryptionKey)
             : "";
 
           const { handleSlashCommandBeforeRun, persistGoalStart } = await import("../services/goalRelooper.js");
@@ -2356,7 +2387,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
             // Register session so /webhook/result can resolve agent context
             // when turn-1 finishes — no prior /webhook event for this run.
             await setSession(runBody.sessionId, {
-              mentionedUserId: agent.spacesAppUserId ?? "",
+              mentionedUserId: goalBotUserId,
               senderId: goalUserId,
               senderName: "",
               channelId: goalChannelId,
@@ -2369,7 +2400,8 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
               responseMode: "conversation",
               appToken,
               spacesAppId: agent.spacesAppId ?? "",
-              spacesAppUserId: agent.spacesAppUserId ?? "",
+              spacesAppUserId: goalBotUserId,
+              ...(goalWorkspaceId ? { workspaceId: goalWorkspaceId } : {}),
             });
 
             // Persist after /run has acknowledged — persisting earlier risks
@@ -2639,8 +2671,12 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
             log.error(`[flow-action] plan-approval: agent ${planAgentSlug} not found`);
             return;
           }
-          const appToken = agent.spacesAppToken
-            ? decrypt(...(agent.spacesAppToken.split(":") as [string, string, string]), CONFIG.encryptionKey)
+          // Token+bot-user for the plan user's workspace (inline = latest only).
+          const planWorkspaceId = await getWorkspaceIdForUser(planUserId, "write-action").catch(() => null);
+          const planCreds = await resolveSpacesAppCreds(agent, planWorkspaceId);
+          const planBotUserId = planCreds.spacesAppUserId ?? agent.spacesAppUserId ?? "";
+          const appToken = planCreds.spacesAppToken
+            ? decrypt(...(planCreds.spacesAppToken.split(":") as [string, string, string]), CONFIG.encryptionKey)
             : "";
 
           const { setSession } = await import("./webhook.js");
@@ -2704,7 +2740,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
               channelId: planChannelId,
               agentSlug: planAgentSlug,
               agentName: agent.name,
-              spacesAppUserId: agent.spacesAppUserId ?? undefined,
+              spacesAppUserId: planBotUserId || undefined,
               appToken,
               toolLabel: "Starting the plan…",
             });
@@ -2727,7 +2763,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
               });
             } else {
               await setSession(runBody.sessionId, {
-                mentionedUserId: agent.spacesAppUserId ?? "",
+                mentionedUserId: planBotUserId,
                 senderId: planUserId,
                 senderName: "",
                 channelId: planChannelId ?? "",
@@ -2740,7 +2776,8 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
                 responseMode: "conversation",
                 appToken,
                 spacesAppId: agent.spacesAppId ?? "",
-                spacesAppUserId: agent.spacesAppUserId ?? "",
+                spacesAppUserId: planBotUserId,
+                ...(planWorkspaceId ? { workspaceId: planWorkspaceId } : {}),
                 mode: "auto",
                 pendingPlan: { todos: approvedTodos },
                 ...planMessageIdField,

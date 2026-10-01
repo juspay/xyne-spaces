@@ -8,6 +8,7 @@ import { CONFIG } from "../config.js";
 import { prisma } from "../db.js";
 import { decrypt } from "../crypto.js";
 import { getSpacesAuthForUser, getWorkspaceIdForUser, requestWorkspaceHint } from "../lib/spaces-db.js";
+import { resolveSpacesAppCreds } from "../lib/spaces-agent-install.js";
 import { setSession, type SessionContext } from "./webhook.js";
 import { spacesAppFetch } from "../lib/spaces-api.js";
 import { getAdminOrgScope, getOrgNameMap, withOrgLabel } from "../lib/admin-org-scope.js";
@@ -1094,7 +1095,10 @@ router.post("/:id/trigger", requireS2S, asyncHandler(async (req: Request<{ id: s
       if (channelId) {
         const agentRecord = await agentRepository.findBySlug(entryAgentSlug, workflowOrgId);
         if (agentRecord?.spacesAppToken) {
-          const [ciphertext, iv, authTag] = agentRecord.spacesAppToken.split(":");
+          // Token for the triggering user's workspace (inline columns = latest).
+          const convWorkspaceId = await getWorkspaceIdForUser(effectiveUserId, "unknown").catch(() => null);
+          const convCreds = await resolveSpacesAppCreds(agentRecord, convWorkspaceId);
+          const [ciphertext, iv, authTag] = (convCreds.spacesAppToken ?? agentRecord.spacesAppToken).split(":");
           const appToken = ciphertext && iv && authTag
             ? decrypt(ciphertext, iv, authTag, CONFIG.encryptionKey) : "";
           if (appToken) {
@@ -1152,11 +1156,15 @@ router.post("/:id/trigger", requireS2S, asyncHandler(async (req: Request<{ id: s
   if (runBody.sessionId && conversationId) {
     try {
       if (entryAgentRecord?.spacesAppToken && entryAgentRecord.spacesAppId) {
-        const [ciphertext, iv, authTag] = entryAgentRecord.spacesAppToken.split(":");
+        // Token+bot-user for the triggering user's workspace (inline = latest).
+        const ctxWorkspaceId = await getWorkspaceIdForUser(effectiveUserId, "unknown").catch(() => null);
+        const ctxCreds = await resolveSpacesAppCreds(entryAgentRecord, ctxWorkspaceId);
+        const ctxBotUserId = ctxCreds.spacesAppUserId ?? entryAgentRecord.spacesAppUserId;
+        const [ciphertext, iv, authTag] = (ctxCreds.spacesAppToken ?? entryAgentRecord.spacesAppToken).split(":");
         const appToken = ciphertext && iv && authTag
           ? decrypt(ciphertext, iv, authTag, CONFIG.encryptionKey) : "";
         const sessionContext: SessionContext = {
-          mentionedUserId: entryAgentRecord.spacesAppUserId ?? userId,
+          mentionedUserId: ctxBotUserId ?? userId,
           senderId, senderName, channelId,
           channelName: channelId, conversationId,
           task, agentSlug: entryAgentSlug,
@@ -1164,7 +1172,8 @@ router.post("/:id/trigger", requireS2S, asyncHandler(async (req: Request<{ id: s
           agentOrgId: entryAgentRecord.orgId,
           responseMode: "conversation", appToken,
           spacesAppId: entryAgentRecord.spacesAppId,
-          spacesAppUserId: entryAgentRecord.spacesAppUserId ?? "",
+          spacesAppUserId: ctxBotUserId ?? "",
+          ...(ctxWorkspaceId ? { workspaceId: ctxWorkspaceId } : {}),
         };
         await setSession(runBody.sessionId, sessionContext);
         log.info(`[chain-workflows/trigger] stored session ctx sessionId=${runBody.sessionId} conversationId=${conversationId}`);

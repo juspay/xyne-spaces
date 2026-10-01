@@ -5,6 +5,7 @@ import { CONFIG } from "../config.js";
 import { decrypt } from "../crypto.js";
 import { agentRunRepository, chatMessageRepository } from "../repositories/index.js";
 import { ensureUserExists, resolveCanonicalUserIdOrSelf } from "../lib/users-jit.js";
+import { resolveSpacesAppCreds } from "../lib/spaces-agent-install.js";
 import { resolveAgentProviderConfigs } from "../lib/agent-provider-config.js";
 import { resolveFastMode } from "../lib/fast-mode.js";
 import { registerRunRecovery, type RecoverySessionContext } from "./run-recovery-worker.js";
@@ -187,14 +188,17 @@ async function processJob(job: Job<ScheduledJobData>): Promise<void> {
       orgId: agentRow?.orgId ?? row.orgId ?? null,
     }).catch((e) => log.warn(`[scheduler] ChatMessage.create failed:`, e instanceof Error ? e.message : e));
 
-    const appToken = agentRow?.spacesAppToken
+    // Resolve the bot token for the workspace this job was created in — the
+    // inline Agent columns only hold the latest workspace's install.
+    const creds = await resolveSpacesAppCreds(agentRow ?? {}, row.workspaceId);
+    const appToken = creds.spacesAppToken
       ? (() => {
-          const [ciphertext, iv, authTag] = agentRow.spacesAppToken.split(":");
+          const [ciphertext, iv, authTag] = creds.spacesAppToken!.split(":");
           return ciphertext && iv && authTag ? decrypt(ciphertext, iv, authTag, CONFIG.encryptionKey) : "";
         })()
       : "";
     const recoveryCtx: RecoverySessionContext = {
-      mentionedUserId: agentRow?.spacesAppUserId ?? "",
+      mentionedUserId: creds.spacesAppUserId ?? "",
       senderId: userId,
       // Display name, not the canonical id — senderName is rendered to humans.
       senderName: await prisma.user.findUnique({ where: { id: userId }, select: { name: true, email: true } })
@@ -208,7 +212,7 @@ async function processJob(job: Job<ScheduledJobData>): Promise<void> {
       responseMode: "conversation",
       appToken,
       spacesAppId: agentRow?.spacesAppId ?? "",
-      spacesAppUserId: agentRow?.spacesAppUserId ?? "",
+      spacesAppUserId: creds.spacesAppUserId ?? "",
       ...(row.workspaceId ? { workspaceId: row.workspaceId } : {}),
     };
     await registerRunRecovery({
