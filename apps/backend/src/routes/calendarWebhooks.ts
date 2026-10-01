@@ -267,8 +267,7 @@ async function processMicrosoftNotification(notification: MicrosoftNotification)
     if (creds?.clientState && creds.clientState !== clientState) {
       logger.error(`${MICROSOFT_TAG} ClientState mismatch`, {
         subscriptionId,
-        expected: creds.clientState.substring(0, 8) + '...',
-        received: clientState?.substring(0, 8) + '...',
+        receivedClientState: clientState ? 'present' : 'missing',
       });
       return;
     }
