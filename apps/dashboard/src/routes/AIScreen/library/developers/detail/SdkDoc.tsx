@@ -13,34 +13,19 @@ import {
 } from './docPrimitives';
 import { WhichToolCompare } from './WhichToolCompare';
 
-/** The client's resources (`sdk.<name>`), as declared on SpacesClient. */
+/**
+ * The resources most apps start with — a curated few, not the full surface, so
+ * this list doesn't need updating as the SDK grows. The npm README has them all.
+ */
 const RESOURCES: { name: string; description: string }[] = [
   { name: 'users', description: 'The signed-in user and people profiles.' },
   { name: 'search', description: 'Full-text search across everything the user can see.' },
   { name: 'channels', description: 'Membership, settings, participants, sidebar sections.' },
   { name: 'conversations', description: 'Threads: listing, reading, pinning, subscriptions.' },
   { name: 'messages', description: 'Messages, reactions, drafts and scheduled sends.' },
-  { name: 'activities', description: 'The activity feed and its read state.' },
   { name: 'tickets', description: 'Tickets, sub-tickets, tags, references and approvals.' },
-  { name: 'supportTickets', description: 'The support-desk view of tickets.' },
-  { name: 'boards', description: 'Boards, stages, transitions and SLA policies.' },
-  { name: 'projects', description: 'Projects and their tags, fields and applications.' },
   { name: 'canvases', description: 'Canvases: content, sharing, comments, versions, folders.' },
-  { name: 'collections', description: 'Knowledge-base collections and permissions.' },
-  { name: 'forms', description: 'Custom forms, mappings and submitted values.' },
-  { name: 'calls', description: 'Calls, scheduling, participation and recordings.' },
-  { name: 'email', description: 'Desk email: drafts, signatures, read state, labels.' },
-  { name: 'recaps', description: 'Daily channel and project recaps, and nudges.' },
-  { name: 'attachments', description: 'File uploads.' },
-  { name: 'userGroups', description: 'Teams, membership and assignment routing.' },
-  { name: 'dashboards', description: 'Dashboards, saved queries and tile layout.' },
-  { name: 'automations', description: 'Automations and their approval lifecycle.' },
-  { name: 'incidents', description: 'RCAs, impacts, corrective actions, release attribution.' },
-  { name: 'preferences', description: "The user's settings, bookmarks and saved views." },
-  { name: 'workspace', description: 'Shared links, repositories, emoji and reference data.' },
-  { name: 'admin', description: 'Workspace and organisation administration.' },
   { name: 'claw', description: 'Run Xyne Claw agents and read their results.' },
-  { name: 'connectors', description: 'External services through the user’s own connections.' },
 ];
 
 export function SdkDoc(): ReactElement {
@@ -61,8 +46,8 @@ console.log(\`Signed in as \${me.email}\`);`;
     <>
       <StatRow
         stats={[
-          { value: '26', label: 'resources' },
-          { value: '488', label: 'typed methods' },
+          { value: 'Typed', label: 'every read and write the app performs' },
+          { value: 'SSO', label: 'sign-in, no keys to manage' },
           { value: '0', label: 'runtime dependencies' },
           { value: 'Node + web', label: 'runs in Node 18+ and browsers' },
         ]}
@@ -139,14 +124,25 @@ console.log(\`Signed in as \${me.email}\`);`;
         title='Resources'
         intro={
           <>
-            Each is a property on the client, for example <InlineCode>sdk.tickets</InlineCode>. The
-            full method list is in the package README on npm.
+            Each is a property on the client, for example <InlineCode>sdk.tickets</InlineCode>.
+            These are the ones most apps start with.
           </>
         }
       >
         <RefTable
           rows={RESOURCES.map(r => ({ name: `sdk.${r.name}`, description: r.description }))}
         />
+        <a
+          href='https://www.npmjs.com/package/@xyne/spaces-sdk'
+          target='_blank'
+          rel='noreferrer'
+          data-track-category='Developer tools'
+          data-track-name='Spaces SDK: see all resources'
+          className='w-fit text-sm text-primary hover:underline'
+        >
+          …and many more: calls, forms, boards, automations, dashboards and others. See the full API
+          on npm →
+        </a>
       </DocSection>
     </>
   );
