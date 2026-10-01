@@ -9,7 +9,6 @@ import { appResourceAccessService } from '@/services/appResourceAccessService';
 import { SDLC_AUTHOR_METADATA_KEY, sdlcAuthorOf } from './agents/sdlc-dispatch';
 import { persistence, workflowRuntime } from './runtime';
 import { attrsOf } from './utils';
-import { subscribeRuns } from './adapters/workspace-run-stream';
 import type { XyneCtx } from './types';
 
 /**
@@ -305,6 +304,10 @@ const mount = (
     authenticate: () => {
       throw Object.assign(new Error('Unauthorized'), { statusCode: 401 });
     },
+    // Powers GET /events?root=1 — the unscoped Executions feed. The SDK's root
+    // scope is this host's workspace; the id comes from the authenticated ctx, so
+    // a caller only ever streams its own.
+    rootId: (ctx) => ctx.workspaceId,
   });
 
   for (const route of routes) {
@@ -352,55 +355,12 @@ const mount = (
   }
 };
 
-/**
- * `GET /executions/stream` — per-workspace SSE feed of run changes.
- *
- * Push behind the global Executions tab: it has no workflow/folder scope to
- * subscribe to, so it watches its whole workspace. Auth is the session's own
- * workspace (`ctxFromRequest`), which the Executions list already shows in full,
- * so no per-resource check is needed. Registered before {@link mount} so the
- * literal `/executions/stream` wins over the SDK's `/executions/:execId`.
- */
-const mountExecutionsStream = (router: Router): void => {
-  router.get('/executions/stream', (req: Request, res: Response) => {
-    void (async () => {
-      let unsubscribe: (() => void) | undefined;
-      let keepalive: ReturnType<typeof setInterval> | undefined;
-      try {
-        const ctx = ctxFromRequest(req);
-        res.status(200);
-        res.setHeader('Content-Type', 'text/event-stream');
-        res.setHeader('Cache-Control', 'no-cache');
-        res.setHeader('Connection', 'keep-alive');
-        res.setHeader('X-Accel-Buffering', 'no'); // don't let a proxy buffer the stream
-        res.flushHeaders();
-        res.write('event: ready\ndata: {}\n\n');
-
-        unsubscribe = await subscribeRuns(ctx.workspaceId, (event) => {
-          res.write(`event: run\ndata: ${JSON.stringify(event)}\n\n`);
-        });
-        keepalive = setInterval(() => res.write(': keepalive\n\n'), 15000);
-
-        req.on('close', () => {
-          if (keepalive) clearInterval(keepalive);
-          unsubscribe?.();
-          res.end();
-        });
-      } catch (err) {
-        if (keepalive) clearInterval(keepalive);
-        unsubscribe?.();
-        const status = (err as { statusCode?: number }).statusCode ?? 500;
-        const message = err instanceof Error ? err.message : 'Internal error';
-        if (status >= 500) logger.error('[workflows] GET /executions/stream failed', err);
-        if (!res.headersSent) res.status(status).json({ error: message });
-        else res.end();
-      }
-    })();
-  });
-};
+// The whole-workspace Executions feed is now served by the SDK's own
+// `GET /events?workspace=1` route (see workspaceId resolver in createWorkflowRouter
+// above); the backend adapter publishes run changes onto the bus channel the route
+// subscribes to. No bespoke backend stream route is needed.
 
 export const workflowsRouter: Router = express.Router();
-mountExecutionsStream(workflowsRouter);
 mount(workflowsRouter, true);
 
 export const workflowsPublicRouter: Router = express.Router();
