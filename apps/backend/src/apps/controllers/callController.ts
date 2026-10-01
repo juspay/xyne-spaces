@@ -17,6 +17,11 @@ const DEFAULT_DURATION_MS = 30 * 60 * 1000;
  */
 export class AppCallController {
 
+  /**
+   * POST /api/apps/calls/schedule — same body as the native schedule route.
+   * An optional `summaryTemplateId` pins the template the call's summary is
+   * generated with; it must be one the app's own user can access.
+   */
   scheduleCall = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const startsAt =
@@ -168,7 +173,7 @@ export class AppCallController {
 
   /**
    * PATCH /api/apps/calls/:callId — edit a scheduled call (title, times,
-   * invitees). Only SCHEDULED calls may be edited.
+   * invitees, summaryTemplateId). Only SCHEDULED calls may be edited.
    */
   updateScheduledCall = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {

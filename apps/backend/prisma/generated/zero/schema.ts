@@ -1797,6 +1797,7 @@ export const recurringCallSeriesTable = table("recurring_call_series")
     endsOn: number().optional(),
     metadata: json().optional(),
     callUpdatesChannel: string().optional(),
+    summaryTemplateId: string().optional(),
     createdAt: number(),
     updatedAt: number(),
   })

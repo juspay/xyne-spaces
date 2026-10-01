@@ -165,6 +165,7 @@ export interface CreateCallWithParticipantsInput {
   externalInvitees?: string[];
   metadata?: Record<string, unknown>; // Optional: e.g. { conversationId } for thread-linked calls
   callUpdatesChannel?: string | null;
+  summaryTemplateId?: string; // Pinned template for the detailed summary; skips LLM selection
 }
 
 export class CallRepository {
@@ -657,6 +658,7 @@ export class CallRepository {
         participantCount: participantUserIds.length + externalInvitees.length,
         ...(params.metadata && { metadata: params.metadata as Prisma.InputJsonValue }),
         ...(params.callUpdatesChannel !== undefined && { callUpdatesChannel: params.callUpdatesChannel }),
+        ...(params.summaryTemplateId && { summaryTemplateId: params.summaryTemplateId }),
       },
     });
 
@@ -1450,11 +1452,12 @@ export class CallRepository {
     metadata?: Record<string, unknown>;
     callUpdatesChannel?: string | null;
     externalInvitees?: string[];
+    summaryTemplateId?: string | null;
   }): Promise<Call> {
-    const { callId, title, startsAt, endsAt, channelId, addUserIds, removeUserIds, invitedByUserId, metadata, callUpdatesChannel, externalInvitees } = params;
+    const { callId, title, startsAt, endsAt, channelId, addUserIds, removeUserIds, invitedByUserId, metadata, callUpdatesChannel, externalInvitees, summaryTemplateId } = params;
     const db = DatabaseClient.getInstance();
 
-    const updatedCall = await updateScheduledCallTx(db, title, startsAt, endsAt, channelId, metadata, callUpdatesChannel, callId, removeUserIds, addUserIds, invitedByUserId, externalInvitees);
+    const updatedCall = await updateScheduledCallTx(db, title, startsAt, endsAt, channelId, metadata, callUpdatesChannel, callId, removeUserIds, addUserIds, invitedByUserId, externalInvitees, summaryTemplateId);
 
     queueCallVespaFeed(callId, { source: CallVespaFeedSource.CallRepositoryUpdateScheduledCall });
     queueScheduledCallPillSync(callId, 'callRepository.updateScheduledCall');

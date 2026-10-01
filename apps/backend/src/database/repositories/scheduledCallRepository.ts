@@ -196,15 +196,17 @@ export class ScheduledCallRepository {
     title?: string | null;
     channelId?: string | null;
     callUpdatesChannel?: string | null;
+    summaryTemplateId?: string | null;
     tx?: Prisma.TransactionClient;
   }): Promise<number> {
-    const { callIds, title, channelId, callUpdatesChannel, tx } = params;
+    const { callIds, title, channelId, callUpdatesChannel, summaryTemplateId, tx } = params;
     if (callIds.length === 0) return 0;
 
     const data: Prisma.CallUncheckedUpdateManyInput = {};
     if (title !== undefined) data.title = title;
     if (channelId !== undefined) data.channelId = channelId;
     if (callUpdatesChannel !== undefined) data.callUpdatesChannel = callUpdatesChannel;
+    if (summaryTemplateId !== undefined) data.summaryTemplateId = summaryTemplateId;
 
     if (Object.keys(data).length === 0) return 0;
 
