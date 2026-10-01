@@ -8,7 +8,9 @@ import {
   type AccessibleClawAgent,
 } from '../../services/clawAgentListService';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
+import { useAskAIAuto } from '../../hooks/useAskAIAuto';
 import { SELECTOR_ROW_CLASS, SELECTOR_ROW_SELECTED_CLASS } from './selectorStyles';
+import { AutoAgentRow } from './AutoAgentRow';
 
 export interface AIAgentSelectorProps {
   /** Whether the selector is disabled (e.g. while streaming). */
@@ -23,6 +25,7 @@ export interface AIAgentSelectorProps {
   onOpenChange?: (open: boolean) => void;
   /** Render only the popover, anchored to a zero-size element in the toolbar. */
   hideTrigger?: boolean;
+  onSelectAuto?: () => void;
 }
 
 export function AgentGlyph({
@@ -63,6 +66,7 @@ export function AIAgentSelector({
   open: controlledOpen,
   onOpenChange,
   hideTrigger = false,
+  onSelectAuto,
 }: AIAgentSelectorProps): ReactElement {
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const isControlled = controlledOpen !== undefined;
@@ -77,6 +81,8 @@ export function AIAgentSelector({
   const [query, setQuery] = useState('');
 
   const { selectedAgentSlug, setSelectedAgentSlug } = useSelectedAgent();
+  const { isAuto, setAuto } = useAskAIAuto();
+  const isAutoShown = isAuto && onSelectAuto !== undefined;
 
   const { data: agents = [], isLoading } = useQuery({
     queryKey: ['accessible-claw-agents'],
@@ -99,7 +105,7 @@ export function AIAgentSelector({
     [agents, selectedAgentSlug],
   );
 
-  const displayText = selectedAgent?.name ?? 'Ask AI';
+  const displayText = isAutoShown ? 'Auto' : (selectedAgent?.name ?? 'Ask AI');
 
   const clearAgent = useCallback(() => {
     if (selectedAgentSlug !== null) {
@@ -107,6 +113,12 @@ export function AIAgentSelector({
       onAgentChange?.(null);
     }
   }, [selectedAgentSlug, setSelectedAgentSlug, onAgentChange]);
+
+  const selectAuto = useCallback(() => {
+    clearAgent();
+    setAuto(true);
+    onSelectAuto?.();
+  }, [clearAgent, setAuto, onSelectAuto]);
 
   // Zero-size anchor when the pill is hidden — Radix positions the popover
   // against the trigger, so it still needs an element in the toolbar.
@@ -122,7 +134,7 @@ export function AIAgentSelector({
       data-track-category='XyneAI'
       data-track-name='OPEN_AGENT_SELECTOR'
     >
-      {selectedAgent ? (
+      {selectedAgent && !isAutoShown ? (
         <AgentGlyph color={selectedAgent.color} name={selectedAgent.name} size={18} />
       ) : (
         <Bot className='w-4 h-4 text-primary shrink-0' />
@@ -174,17 +186,34 @@ export function AIAgentSelector({
         {/* Scrollable list */}
         {!isLoading && (
           <div className='overflow-auto p-1.5'>
+            {onSelectAuto && (
+              <AutoAgentRow
+                selected={isAutoShown}
+                onSelect={() => {
+                  selectAuto();
+                  setOpen(false);
+                }}
+                glyph={
+                  <span className='grid size-6 shrink-0 place-items-center text-primary'>
+                    <Bot className='size-[18px]' aria-hidden />
+                  </span>
+                }
+                labelClassName='font-normal'
+              />
+            )}
+
             {/* First, as it was before the restyle: Ask AI is the default and
                 must not be something you scroll a long agent list to reach. */}
             <button
               onClick={() => {
+                setAuto(false);
                 clearAgent();
                 setOpen(false);
               }}
               className={cn(
                 SELECTOR_ROW_CLASS,
                 'justify-between',
-                selectedAgentSlug === null && SELECTOR_ROW_SELECTED_CLASS,
+                selectedAgentSlug === null && !isAutoShown && SELECTOR_ROW_SELECTED_CLASS,
               )}
               data-track-category='XyneAI'
               data-track-name='SELECT_AGENT'
@@ -196,7 +225,9 @@ export function AIAgentSelector({
                 </span>
                 <span className='font-normal'>Ask AI</span>
               </span>
-              {selectedAgentSlug === null && <Check className='h-3.5 w-3.5 shrink-0' aria-hidden />}
+              {selectedAgentSlug === null && !isAutoShown && (
+                <Check className='h-3.5 w-3.5 shrink-0' aria-hidden />
+              )}
             </button>
 
             {filteredAgents.length === 0 && agents.length > 0 && query.trim() ? (
@@ -208,6 +239,7 @@ export function AIAgentSelector({
                 <button
                   key={agent.slug}
                   onClick={() => {
+                    setAuto(false);
                     if (selectedAgentSlug !== agent.slug) {
                       setSelectedAgentSlug(agent.slug);
                       onAgentChange?.(agent.slug);
@@ -217,7 +249,7 @@ export function AIAgentSelector({
                   className={cn(
                     SELECTOR_ROW_CLASS,
                     'justify-between',
-                    selectedAgentSlug === agent.slug && SELECTOR_ROW_SELECTED_CLASS,
+                    selectedAgentSlug === agent.slug && !isAutoShown && SELECTOR_ROW_SELECTED_CLASS,
                   )}
                   data-track-category='XyneAI'
                   data-track-name='SELECT_AGENT'
@@ -227,7 +259,7 @@ export function AIAgentSelector({
                     <AgentGlyph color={agent.color} name={agent.name} size={24} />
                     <span className='min-w-0 truncate font-normal'>{agent.name}</span>
                   </span>
-                  {selectedAgentSlug === agent.slug && (
+                  {selectedAgentSlug === agent.slug && !isAutoShown && (
                     <Check className='h-3.5 w-3.5 shrink-0' aria-hidden />
                   )}
                 </button>
@@ -244,7 +276,7 @@ export function AIAgentSelector({
   return (
     <div className='flex min-w-0 items-center gap-0.5'>
       {popover}
-      {selectedAgent && (
+      {selectedAgent && !isAutoShown && (
         <button
           type='button'
           disabled={disabled}

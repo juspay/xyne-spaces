@@ -1,6 +1,6 @@
 import { type ReactElement } from 'react';
 import { Mic, Keyboard, Loader2, Sparkles } from 'lucide-react';
-import { cn } from '../../../utils/classNames';
+import { cn } from '../../utils/classNames';
 import type { VoicePhase } from './useVoiceMode';
 
 interface VoiceModeBarProps {
