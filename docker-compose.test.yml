@@ -1,247 +1,657 @@
-# The CI runner injects HTTP(S)_PROXY into every container (squid egress); in-stack
-# hostnames must bypass it. Chromium reads the lower-case var, curl/gaxios/axios either.
-x-test-stack-no-proxy: &test-stack-no-proxy
-  localhost,127.0.0.1,backend,dashboard,zero-cache,livekit,fake-gcs,ysweet,superposition,host.docker.internal
-
+# Standalone test stack: run with this file alone.
+# Includes the inherited infrastructure and preserves optional/disabled profiles.
+# Keep env files and port substitutions unresolved for CI and parallel project names.
+networks:
+  default: {}
 services:
-  # db:push + raw-SQL migration in a one-shot container so backend's healthcheck
-  # window doesn't include schema-apply work (which slows under CI CPU throttling).
-  backend-migrate:
-    build:
-      context: .
-      dockerfile: apps/backend/Dockerfile.test
-    container_name: ${COMPOSE_PROJECT_NAME:-xyne}-backend-migrate
-    env_file:
-      - ./apps/backend/.env.test
-    restart: "no"
-    command: sh -c "pnpm run db:push && pnpm exec prisma db push --schema prisma-common/schema.prisma --accept-data-loss --skip-generate && pnpm exec prisma db execute --file prisma/migrations/20251127175400_add_ticket_xyne_id_sequence/migration.sql --schema prisma/schema.prisma"
-    depends_on:
-      postgres:
-        condition: service_healthy
-
-  # Backend API for testing - builds from Dockerfile.test
-  # Loads .env.local as base, then .env.test overrides container-specific values
   backend:
     build:
       context: .
       dockerfile: apps/backend/Dockerfile.test
+    command: sh -c "/scripts/setup-fake-gcs-test.sh && pnpm run dev:test"
     container_name: ${COMPOSE_PROJECT_NAME:-xyne}-backend
-    # docker/livekit.yaml posts webhooks to host.docker.internal:3001 (the dev stack's
-    # host-run backend). Here the backend is this container, so answer to that name —
-    # without it participant_joined never lands, no call row/message is created, and a
-    # second member never sees the join button.
+    depends_on:
+      backend-migrate:
+        condition: service_completed_successfully
+        required: true
+      fake-gcs:
+        condition: service_healthy
+        required: true
+      livekit:
+        condition: service_healthy
+        required: true
+      redis:
+        condition: service_healthy
+        required: true
+      zero-cache:
+        condition: service_healthy
+        required: true
+    env_file:
+      - path: ./apps/backend/.env.test
+        required: true
+    environment:
+      NO_PROXY: localhost,127.0.0.1,backend,dashboard,zero-cache,livekit,fake-gcs,ysweet,superposition,host.docker.internal
+      no_proxy: localhost,127.0.0.1,backend,dashboard,zero-cache,livekit,fake-gcs,ysweet,superposition,host.docker.internal
+    healthcheck:
+      interval: 5s
+      retries: 60
+      start_period: 240s
+      test:
+        - CMD
+        - curl
+        - -f
+        - --noproxy
+        - '*'
+        - http://localhost:3001/api/health
+      timeout: 10s
     networks:
       default:
         aliases:
           - host.docker.internal
     ports:
-      - "${BACKEND_BIND_PORT:-0}:3001"
-    env_file:
-      - ./apps/backend/.env.test   # Override with container hostnames
-    environment:
-      NO_PROXY: *test-stack-no-proxy
-      no_proxy: *test-stack-no-proxy
-    command: sh -c "/scripts/setup-fake-gcs-test.sh && pnpm run dev:test"
+      - ${BACKEND_BIND_PORT:-0}:3001
+  backend-migrate:
+    build:
+      context: .
+      dockerfile: apps/backend/Dockerfile.test
+    command: sh -c "pnpm run db:push && pnpm exec prisma db push --schema prisma-common/schema.prisma
+      --accept-data-loss --skip-generate && pnpm exec prisma db execute --file prisma/migrations/20251127175400_add_ticket_xyne_id_sequence/migration.sql
+      --schema prisma/schema.prisma"
+    container_name: ${COMPOSE_PROJECT_NAME:-xyne}-backend-migrate
     depends_on:
-      backend-migrate:
-        condition: service_completed_successfully
-      redis:
+      postgres:
         condition: service_healthy
-      fake-gcs:
-        condition: service_healthy
-      zero-cache:
-        condition: service_healthy
-      livekit:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "--noproxy", "*", "http://localhost:3001/api/health"]
-      interval: 5s
-      timeout: 10s
-      retries: 60
-      start_period: 240s  # Kept generous; backend boot is now just fake-gcs + tsx + listen.
-
-  # Dashboard (Frontend) for testing - builds from Dockerfile.test
-  # Loads .env.local as base, then .env.test overrides container-specific values
-  # livekit.yaml posts webhooks to host.docker.internal:3001 (the backend alias above).
-  # LiveKit's Go HTTP client honours the CI-injected HTTP_PROXY for that host too.
-  livekit:
-    environment:
-      NO_PROXY: *test-stack-no-proxy
-      no_proxy: *test-stack-no-proxy
-
+        required: true
+    env_file:
+      - path: ./apps/backend/.env.test
+        required: true
+    networks:
+      default: null
+    restart: 'no'
   dashboard:
     build:
       context: .
       dockerfile: apps/dashboard/Dockerfile.test
     container_name: ${COMPOSE_PROJECT_NAME:-xyne}-dashboard
-    env_file:
-      - ./apps/dashboard/.env.test   # Override with container hostnames
-    environment:
-      NO_PROXY: *test-stack-no-proxy
-      no_proxy: *test-stack-no-proxy
-    ports:
-      - "${DASHBOARD_BIND_PORT:-0}:5173"
     depends_on:
       backend:
         condition: service_healthy
+        required: true
+    env_file:
+      - path: ./apps/dashboard/.env.test
+        required: true
+    environment:
+      NO_PROXY: localhost,127.0.0.1,backend,dashboard,zero-cache,livekit,fake-gcs,ysweet,superposition,host.docker.internal
+      no_proxy: localhost,127.0.0.1,backend,dashboard,zero-cache,livekit,fake-gcs,ysweet,superposition,host.docker.internal
     healthcheck:
-      test: ["CMD", "curl", "-f", "--noproxy", "*", "http://localhost:5173/"]
       interval: 5s
-      timeout: 5s
       retries: 24
-      start_period: 40s  # Phase 1: Consistent with backend approach
-
-  # # Backend (Runs from local source/build in Jenkins) - OLD SETUP
-  # backend:
-  #   image: node:22-slim
-  #   container_name: xyne-jenkins-backend
-  #   working_dir: /app/backend
-  #   command: pnpm run start
-  #   environment:
-  #     - NODE_ENV=production
-  #     - DATABASE_URL=postgresql://xyne:xyne123@postgres:5432/xyne_dev_db
-  #     - REDIS_URL=redis://redis:6379
-  #     - LIVEKIT_URL=ws://livekit:7880
-  #     - LIVEKIT_API_KEY=localdevkey
-  #     - LIVEKIT_API_SECRET=localdevsecret
-  #     - STORAGE_EMULATOR_HOST=http://fake-gcs:4443
-  #     - YSWEET_URL=http://ysweet:8085
-  #     - ZERO_CACHE_URL=http://zero-cache:4848
-  #   volumes:
-  #     - ./:/app
-  #   depends_on:
-  #     postgres:
-  #       condition: service_healthy
-  #     redis:
-  #       condition: service_healthy
-  #     fake-gcs:
-  #       condition: service_healthy
-  #     zero-cache:
-  #       condition: service_healthy
-  #     livekit:
-  #       condition: service_healthy
-  #   healthcheck:
-  #     test: ["CMD", "curl", "-f", "--noproxy", "*", "http://localhost:3001/api/health"]
-  #     interval: 10s
-  #     timeout: 5s
-  #     retries: 15
-  #     start_period: 60s
-  #   networks:
-  #     - xyne-network
-
-  # # Dashboard (Frontend) - Runs from local source/build in Jenkins - OLD SETUP
-  # dashboard:
-  #   image: node:22-slim
-  #   container_name: xyne-jenkins-dashboard
-  #   working_dir: /app/dashboard
-  #   command: pnpm run preview -- --host --port 5173
-  #   environment:
-  #     - VITE_API_URL=http://backend:3001/api
-  #     - VITE_ZERO_SERVER=http://backend:3001/zero
-  #   volumes:
-  #     - ./:/app
-  #   depends_on:
-  #     backend:
-  #       condition: service_healthy
-  #   healthcheck:
-  #     test: ["CMD", "curl", "-f", "--noproxy", "*", "http://localhost:5173/"]
-  #     interval: 10s
-  #     timeout: 5s
-  #     retries: 10
-  #     start_period: 30s
-  #   networks:
-  #     - xyne-network
-
-  # Automation Test Runner (Gauge). Gated behind `--profile gauge`
+      start_period: 40s
+      test:
+        - CMD
+        - curl
+        - -f
+        - --noproxy
+        - '*'
+        - http://localhost:5173/
+      timeout: 5s
+    networks:
+      default: null
+    ports:
+      - ${DASHBOARD_BIND_PORT:-0}:5173
+  fake-gcs:
+    command:
+      - -scheme
+      - http
+      - -port
+      - "4443"
+      - -external-url
+      - http://localhost:4443
+    container_name: ${COMPOSE_PROJECT_NAME:-xyne}-fake-gcs
+    healthcheck:
+      interval: 5s
+      retries: 5
+      start_period: 60s
+      test:
+        - CMD
+        - wget
+        - -Y
+        - 'off'
+        - --spider
+        - -q
+        - http://localhost:4443/storage/v1/b
+      timeout: 3s
+    image: mirror.gcr.io/fsouza/fake-gcs-server:latest
+    networks:
+      default: null
+    ports:
+      - ${FAKE_GCS_BIND_PORT:-4443}:4443
+    volumes:
+      - source: fake_gcs_data
+        target: /data
+        type: volume
+        volume: {}
+  fluent-bit:
+    container_name: ${COMPOSE_PROJECT_NAME:-xyne}-fluent-bit
+    depends_on:
+      victorialogs-errors:
+        condition: service_started
+        required: true
+    image: fluent/fluent-bit:3.1
+    networks:
+      default: null
+    ports:
+      - ${FLUENT_BIT_HTTP_BIND_PORT:-2020}:2020
+      - ${FLUENT_BIT_FORWARD_BIND_PORT:-24224}:24224
+    restart: unless-stopped
+    volumes:
+      - bind:
+          create_host_path: true
+        source: ./docker/fluent-bit/fluent-bit.conf
+        target: /fluent-bit/etc/fluent-bit.conf
+        type: bind
+      - bind:
+          create_host_path: true
+        source: ./docker/fluent-bit/normalize_hash.lua
+        target: /fluent-bit/etc/normalize_hash.lua
+        type: bind
+  grafana:
+    container_name: ${COMPOSE_PROJECT_NAME:-xyne}-grafana
+    depends_on:
+      victorialogs-errors:
+        condition: service_started
+        required: true
+      victoriametrics:
+        condition: service_started
+        required: true
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=http://localhost:3333
+      - GF_INSTALL_PLUGINS=victoriametrics-logs-datasource
+      - GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS=victoriametrics-logs-datasource
+    extra_hosts:
+      - host.containers.internal:host-gateway
+    image: mirror.gcr.io/grafana/grafana:latest
+    networks:
+      default: null
+    ports:
+      - ${GRAFANA_BIND_PORT:-3333}:3000
+    profiles:
+      - disabled
+    restart: unless-stopped
+    volumes:
+      - source: grafana_data
+        target: /var/lib/grafana
+        type: volume
+        volume: {}
+      - bind:
+          create_host_path: true
+        source: ./docker/grafana/provisioning
+        target: /etc/grafana/provisioning
+        type: bind
+  livekit:
+    build:
+      context: ./docker
+      dockerfile: Dockerfile.livekit
+    command: --config /etc/livekit.yaml --dev
+    container_name: ${COMPOSE_PROJECT_NAME:-xyne}-livekit
+    depends_on:
+      redis:
+        condition: service_healthy
+        required: true
+    environment:
+      - LIVEKIT_API_KEY=localdevkey
+      - LIVEKIT_API_SECRET=localdevsecret
+      - NO_PROXY=localhost,127.0.0.1,backend,dashboard,zero-cache,livekit,fake-gcs,ysweet,superposition,host.docker.internal
+      - no_proxy=localhost,127.0.0.1,backend,dashboard,zero-cache,livekit,fake-gcs,ysweet,superposition,host.docker.internal
+    healthcheck:
+      interval: 5s
+      retries: 5
+      start_period: 60s
+      test:
+        - CMD
+        - wget
+        - -Y
+        - 'off'
+        - --spider
+        - -q
+        - http://localhost:7880/
+      timeout: 3s
+    networks:
+      default: null
+    ports:
+      - ${LIVEKIT_HTTP_BIND_PORT:-7880}:7880
+      - ${LIVEKIT_HTTPS_BIND_PORT:-7881}:7881
+      - ${LIVEKIT_UDP_BIND_PORT:-7882}:7882/udp
+    volumes:
+      - bind:
+          create_host_path: true
+        source: ./docker/livekit.yaml
+        target: /etc/livekit.yaml
+        type: bind
+  livekit-egress:
+    container_name: ${COMPOSE_PROJECT_NAME:-xyne}-livekit-egress
+    depends_on:
+      fake-gcs:
+        condition: service_healthy
+        required: true
+      livekit:
+        condition: service_healthy
+        required: true
+      redis:
+        condition: service_healthy
+        required: true
+    environment:
+      - EGRESS_CONFIG_FILE=/etc/egress.yaml
+      - STORAGE_EMULATOR_HOST=http://fake-gcs:4443
+    image: mirror.gcr.io/livekit/egress:latest
+    networks:
+      default: null
+    profiles:
+      - disabled
+    restart: unless-stopped
+    volumes:
+      - bind:
+          create_host_path: true
+        source: ./docker/egress.yaml
+        target: /etc/egress.yaml
+        type: bind
+  minio:
+    container_name: ${COMPOSE_PROJECT_NAME:-xyne}-minio
+    environment:
+      - RUSTFS_VOLUMES=/data
+      - RUSTFS_ADDRESS=0.0.0.0:9000
+      - RUSTFS_CONSOLE_ADDRESS=0.0.0.0:9001
+      - RUSTFS_CONSOLE_ENABLE=true
+      - RUSTFS_ACCESS_KEY=minioadmin
+      - RUSTFS_SECRET_KEY=minioadmin
+    healthcheck:
+      interval: 5s
+      retries: 5
+      start_period: 60s
+      test:
+        - CMD
+        - curl
+        - -fsS
+        - http://127.0.0.1:9000/health
+      timeout: 3s
+    image: rustfs/rustfs:latest
+    networks:
+      default: null
+    ports:
+      - ${MINIO_API_BIND_PORT:-9000}:9000
+      - ${MINIO_CONSOLE_BIND_PORT:-9001}:9001
+    profiles:
+      - disabled
+    volumes:
+      - source: minio_data
+        target: /data
+        type: volume
+        volume: {}
+  otel-collector:
+    command:
+      - --config=/etc/otel-collector-config.yaml
+    container_name: ${COMPOSE_PROJECT_NAME:-xyne}-otel-collector
+    depends_on:
+      victoriametrics:
+        condition: service_started
+        required: true
+    image: mirror.gcr.io/otel/opentelemetry-collector-contrib:latest
+    networks:
+      default: null
+    ports:
+      - ${OTEL_HTTP_BIND_PORT:-4318}:4318
+      - ${OTEL_GRPC_BIND_PORT:-4317}:4317
+      - ${OTEL_METRICS_BIND_PORT:-8888}:8888
+    profiles:
+      - disabled
+    restart: unless-stopped
+    volumes:
+      - bind:
+          create_host_path: true
+        source: ./docker/otel-collector-config.yaml
+        target: /etc/otel-collector-config.yaml
+        type: bind
+  postgres:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.postgres
+    container_name: ${COMPOSE_PROJECT_NAME:-xyne}-postgres
+    environment:
+      POSTGRES_DB: xyne_dev_db
+      POSTGRES_PASSWORD: xyne123
+      POSTGRES_USER: xyne
+    healthcheck:
+      interval: 5s
+      retries: 10
+      start_period: 180s
+      test:
+        - CMD-SHELL
+        - pg_isready -h 127.0.0.1 -U xyne -d xyne_dev_db
+      timeout: 5s
+    networks:
+      default: null
+    ports:
+      - ${POSTGRES_BIND_PORT:-5433}:5432
+    shm_size: 512mb
+    volumes:
+      - source: postgres_data
+        target: /var/lib/postgresql/data
+        type: volume
+        volume: {}
+  redis:
+    container_name: ${COMPOSE_PROJECT_NAME:-xyne}-redis
+    healthcheck:
+      interval: 5s
+      retries: 5
+      start_period: 60s
+      test:
+        - CMD
+        - redis-cli
+        - ping
+      timeout: 3s
+    image: mirror.gcr.io/library/redis:7-alpine
+    networks:
+      default: null
+    ports:
+      - ${REDIS_BIND_PORT:-6379}:6379
+    volumes:
+      - source: redis_data
+        target: /data
+        type: volume
+        volume: {}
+  superposition:
+    container_name: ${COMPOSE_PROJECT_NAME:-xyne}-superposition
+    depends_on:
+      redis:
+        condition: service_healthy
+        required: true
+    environment:
+      - SUPERPOSITION_TOKEN=123456
+      - SUPERPOSITION_ORG_ID=localorg
+      - SUPERPOSITION_WORKSPACE_ID=test
+      - REDIS_URL=redis://redis:6379
+    healthcheck:
+      interval: 10s
+      retries: 5
+      start_period: 30s
+      test:
+        - CMD
+        - curl
+        - -f
+        - --noproxy
+        - '*'
+        - http://localhost:8080/health
+      timeout: 5s
+    image: ghcr.io/juspay/superposition-demo:latest
+    networks:
+      default: null
+    ports:
+      - ${SUPERPOSITION_BIND_PORT:-9999}:8080
+    restart: unless-stopped
+  transcription-agent:
+    build:
+      context: ./apps/backend/python-agent
+      dockerfile: Dockerfile
+    container_name: ${COMPOSE_PROJECT_NAME:-xyne}-transcription-agent
+    depends_on:
+      livekit:
+        condition: service_started
+        required: true
+      redis:
+        condition: service_started
+        required: true
+    env_file:
+      - path: ./apps/backend/.env.local
+        required: false
+    environment:
+      - LIVEKIT_URL=ws://livekit:7880
+      - LIVEKIT_API_KEY=localdevkey
+      - LIVEKIT_API_SECRET=localdevsecret
+      - BACKEND_URL=http://host.containers.internal:3001
+      - REDIS_URL=redis://redis:6379
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - STORAGE_EMULATOR_HOST=http://fake-gcs:4443
+    extra_hosts:
+      - host.containers.internal:host-gateway
+    networks:
+      default: null
+    ports:
+      - ${TRANSCRIPTION_AGENT_BIND_PORT:-8001}:8080
+    profiles:
+      - disabled
+    restart: unless-stopped
+    shm_size: 512mb
+    volumes:
+      - bind:
+          create_host_path: true
+        source: ./apps/backend/python-agent/transcriptions
+        target: /app/transcriptions
+        type: bind
+      - bind:
+          create_host_path: true
+        source: ./apps/backend/python-agent
+        target: /app
+        type: bind
+      - source: transcription-agent-cache
+        target: /app/.cache/huggingface
+        type: volume
+        volume: {}
+  victorialogs-errors:
+    command:
+      - --storageDataPath=/storage
+      - --httpListenAddr=:9428
+      - --retentionPeriod=1
+    container_name: ${COMPOSE_PROJECT_NAME:-xyne}-victorialogs-errors
+    image: victoriametrics/victoria-logs:latest
+    networks:
+      default: null
+    ports:
+      - ${VICTORIALOGS_ERRORS_BIND_PORT:-9428}:9428
+    restart: unless-stopped
+    volumes:
+      - source: victorialogs_errors_data
+        target: /storage
+        type: volume
+        volume: {}
+  victoriametrics:
+    command:
+      - --storageDataPath=/storage
+      - --httpListenAddr=:8428
+      - --retentionPeriod=12
+      - --promscrape.config=/etc/victoriametrics/scrape.yml
+    container_name: ${COMPOSE_PROJECT_NAME:-xyne}-victoriametrics
+    image: mirror.gcr.io/victoriametrics/victoria-metrics:latest
+    networks:
+      default: null
+    ports:
+      - ${VICTORIAMETRICS_BIND_PORT:-8428}:8428
+    profiles:
+      - disabled
+    restart: unless-stopped
+    volumes:
+      - source: victoriametrics_data
+        target: /storage
+        type: volume
+        volume: {}
+      - bind:
+          create_host_path: true
+        source: ./scrape.yml
+        target: /etc/victoriametrics/scrape.yml
+        type: bind
   xyne-automation:
-    profiles: ["gauge"]
     build:
       context: ./tools/xyne-automation
       dockerfile: Dockerfile
     container_name: ${COMPOSE_PROJECT_NAME:-xyne-test}-automation
-    # Parallel Gauge workers each launch Chromium, all sharing this container's /dev/shm.
-    shm_size: '4gb'
-    environment:
-      TEST_ENV: test
-      BACKEND_URL: http://backend:3001
-      DASHBOARD_URL: http://dashboard:5173
-      BROWSER: chromium
-      # Use the pre-baked image deps as-is: make pnpm non-interactive and stop it
-      # re-verifying/reinstalling (a reinstall re-blocks @getgauge/cli's build script).
-      CI: true
-      NPM_CONFIG_VERIFY_DEPS_BEFORE_RUN: false
-      NPM_CONFIG_CONFIRM_MODULES_PURGE: false
-      # Container-scoped log-noise suppression for the test run.
-      NPM_CONFIG_LOGLEVEL: error
-      NODE_NO_WARNINGS: 1
-      COREPACK_ENABLE_DOWNLOAD_PROMPT: 0
-      NO_PROXY: *test-stack-no-proxy
-      no_proxy: *test-stack-no-proxy
     depends_on:
       backend:
         condition: service_healthy
+        required: true
       dashboard:
         condition: service_healthy
-
-  # Automation Test Runner (Legacy Cucumber). Default for Jenkins; 
+        required: true
+    environment:
+      BACKEND_URL: http://backend:3001
+      BROWSER: chromium
+      CI: true
+      COREPACK_ENABLE_DOWNLOAD_PROMPT: 0
+      DASHBOARD_URL: http://dashboard:5173
+      NO_PROXY: localhost,127.0.0.1,backend,dashboard,zero-cache,livekit,fake-gcs,ysweet,superposition,host.docker.internal
+      NODE_NO_WARNINGS: 1
+      NPM_CONFIG_CONFIRM_MODULES_PURGE: false
+      NPM_CONFIG_LOGLEVEL: error
+      NPM_CONFIG_VERIFY_DEPS_BEFORE_RUN: false
+      TEST_ENV: test
+      no_proxy: localhost,127.0.0.1,backend,dashboard,zero-cache,livekit,fake-gcs,ysweet,superposition,host.docker.internal
+    networks:
+      default: null
+    profiles:
+      - gauge
+    shm_size: 4gb
   xyne-automation-old:
-    profiles: ["cucumber"]
     build:
       context: ./tools/xyne-automation-old
       dockerfile: Dockerfile
     container_name: ${COMPOSE_PROJECT_NAME:-xyne-test}-automation-old
-    shm_size: '2gb'
+    depends_on:
+      backend:
+        condition: service_healthy
+        required: true
+      dashboard:
+        condition: service_healthy
+        required: true
     environment:
       - TEST_ENV=test
       - BACKEND_URL=http://backend:3001
       - DASHBOARD_URL=http://dashboard:5173
       - BROWSER=chromium
-    depends_on:
-      backend:
-        condition: service_healthy
-      dashboard:
-        condition: service_healthy
-  
-  # Override Zero Cache to use internal container networking for tests
+    networks:
+      default: null
+    profiles:
+      - cucumber
+    shm_size: 2gb
+  ysweet:
+    command:
+      - serve
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - --checkpoint-freq-seconds
+      - "10"
+      - /data
+    container_name: ${COMPOSE_PROJECT_NAME:-xyne}-ysweet
+    entrypoint:
+      - y-sweet
+    environment:
+      - Y_SWEET_OTEL_ENDPOINT=${Y_SWEET_OTEL_ENDPOINT:-http://otel-collector:4318/v1/metrics}
+      - Y_SWEET_OTEL_SERVICE_NAME=${Y_SWEET_OTEL_SERVICE_NAME:-y-sweet}
+      - Y_SWEET_OTEL_PUSH_INTERVAL=${Y_SWEET_OTEL_PUSH_INTERVAL:-30}
+    healthcheck:
+      interval: 30s
+      retries: 3
+      start_period: 10s
+      test:
+        - CMD
+        - bash
+        - -c
+        - timeout 5 bash -c '</dev/tcp/localhost/8080'
+      timeout: 10s
+    image: ghcr.io/juspay/y-sweet:sha-221d5af
+    networks:
+      default: null
+    ports:
+      - ${YSWEET_BIND_PORT:-8080}:8080
+    restart: unless-stopped
+    volumes:
+      - source: ysweet_data
+        target: /data
+        type: volume
+        volume: {}
   zero-cache:
+    container_name: ${COMPOSE_PROJECT_NAME:-xyne}-zero-cache
     depends_on:
       backend-migrate:
         condition: service_completed_successfully
+        required: true
+      postgres:
+        condition: service_healthy
+        required: true
+    env_file:
+      - path: ./apps/backend/.env.local
+        required: false
     environment:
-      ZERO_MUTATE_URL: http://backend:3001/api/zero/push
-      ZERO_QUERY_URL: http://backend:3001/api/zero/query
-      # Higher sync capacity for parallel automation runs (test-only; dev keeps 5/10/10).
-      # Parallel Gauge workers each open sync sessions, so the default worker/pool sizes
-      # starve and channel/message queries don't land in time.
-      ZERO_NUM_SYNC_WORKERS: "10"
-      ZERO_CVR_MAX_CONNS: "30"
-      ZERO_UPSTREAM_MAX_CONNS: "30"
-
-  # Override Transcription Agent to use test Dockerfile (minimal deps, no torch/pyannote)
-  # DISABLED: Tests only verify UI text, not actual transcription functionality
-  transcription-agent:
-    profiles: ["disabled"]
-
-  # DISABLED: Tests don't use MinIO (S3-compatible storage)
-  minio:
-    profiles: ["disabled"]
-
-  # DISABLED: Tests don't use call recording functionality
-  livekit-egress:
-    profiles: ["disabled"]
-
-  # Disable monitoring services in test environment
-  otel-collector:
-    profiles: ["disabled"]
-  
-  victoriametrics:
-    profiles: ["disabled"]
-
-  grafana:
-    profiles: ["disabled"]
-
+      - ZERO_UPSTREAM_DB=postgresql://xyne:xyne123@postgres:5432/xyne_dev_db
+      - ZERO_CVR_DB=postgresql://xyne:xyne123@postgres:5432/xyne_dev_db
+      - ZERO_CHANGE_DB=postgresql://xyne:xyne123@postgres:5432/xyne_dev_db
+      - ZERO_REPLICA_FILE=/var/zero/replica.db
+      - ZERO_LOG_LEVEL=info
+      - ZERO_ADMIN_PASSWORD=dev-admin-password
+      - ZERO_MUTATE_URL=http://backend:3001/api/zero/push
+      - ZERO_QUERY_URL=http://backend:3001/api/zero/query
+      - ZERO_QUERY_FORWARD_COOKIES=true
+      - ZERO_MUTATE_FORWARD_COOKIES=true
+      - ZERO_CVR_MAX_CONNS=30
+      - ZERO_UPSTREAM_MAX_CONNS=30
+      - ZERO_NUM_SYNC_WORKERS=10
+      - NODE_ENV=development
+      - ZERO_PORT=4848
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+      - OTEL_RESOURCE_ATTRIBUTES=service.name=zero-cache,service.version=1.9.0
+      - OTEL_NODE_RESOURCE_DETECTORS=env,host,os
+    extra_hosts:
+      - host.containers.internal:host-gateway
+    healthcheck:
+      interval: 5s
+      retries: 10
+      start_period: 60s
+      test:
+        - CMD
+        - wget
+        - -Y
+        - 'off'
+        - --spider
+        - -q
+        - http://localhost:4848/
+      timeout: 3s
+    image: mirror.gcr.io/rocicorp/zero:1.9.0
+    networks:
+      default: null
+    ports:
+      - ${ZERO_BIND_PORT_1:-4848}:4848
+      - ${ZERO_BIND_PORT_2:-4849}:4849
+    volumes:
+      - source: zero_cache_data
+        target: /var/zero
+        type: volume
+        volume: {}
 volumes:
-  transcription-agent-test-data:
+  fake_gcs_data:
+    driver: local
+  grafana_data:
+    driver: local
+  minio_data:
+    driver: local
+  postgres_data:
+    driver: local
+  redis_data:
     driver: local
   transcription-agent-app:
     driver: local
+  transcription-agent-cache:
+    driver: local
+  transcription-agent-test-data:
+    driver: local
+  victorialogs_errors_data:
+    driver: local
+  victoriametrics_data:
+    driver: local
+  ysweet_data:
+    driver: local
+  zero_cache_data:
+    driver: local
+x-test-stack-no-proxy: localhost,127.0.0.1,backend,dashboard,zero-cache,livekit,fake-gcs,ysweet,superposition,host.docker.internal
