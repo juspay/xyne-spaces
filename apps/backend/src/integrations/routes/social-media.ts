@@ -81,7 +81,7 @@ router.post(
         res.status(googlePlayError.status).json({ error: googlePlayError.error });
         return;
       }
-      logger.error(`${TAG} Failed to send reply`, {
+      logger.error(`${TAG} Failed to send review reply`, {
         conversationId: req.params.conversationId,
         error,
       });

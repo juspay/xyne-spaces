@@ -1,3 +1,37 @@
+## [1.447.0](https://github.com/juspay/xyne-spaces/compare/v1.446.3...v1.447.0) (2026-10-01)
+
+
+### Features
+
+* added-ability-to-share-views-with-channel  ([#2285](https://github.com/juspay/xyne-spaces/issues/2285)) ([4cd7039](https://github.com/juspay/xyne-spaces/commit/4cd7039d521d911be2c1367d9194f1732974dba3))
+
+
+### Reverts
+
+* turn related conversations back off by default ([#2560](https://github.com/juspay/xyne-spaces/issues/2560)) ([3c9f011](https://github.com/juspay/xyne-spaces/commit/3c9f011e25b720ecb4238c4f4588914dd9c59517)), closes [#2504](https://github.com/juspay/xyne-spaces/issues/2504)
+
+## [1.446.3](https://github.com/juspay/xyne-spaces/compare/v1.446.2...v1.446.3) (2026-10-01)
+
+
+### Bug Fixes
+
+* hide cancelled calls from search ([#2425](https://github.com/juspay/xyne-spaces/issues/2425)) ([a11e44a](https://github.com/juspay/xyne-spaces/commit/a11e44ae5e6b48d7fb156aadf773d387950062a5))
+
+## [1.446.2](https://github.com/juspay/xyne-spaces/compare/v1.446.1...v1.446.2) (2026-10-01)
+
+
+### Bug Fixes
+
+* open KB files from channels without a project ([#2556](https://github.com/juspay/xyne-spaces/issues/2556)) ([a29fcae](https://github.com/juspay/xyne-spaces/commit/a29fcae5c27899f066cdbf231f6dadd6d684afd6))
+
+## [1.446.1](https://github.com/juspay/xyne-spaces/compare/v1.446.0...v1.446.1) (2026-10-01)
+
+
+### Bug Fixes
+
+* navigate terms/privacy via router Link so workspace prefix rewrite skips them ([#2525](https://github.com/juspay/xyne-spaces/issues/2525)) ([3a31f79](https://github.com/juspay/xyne-spaces/commit/3a31f79211b5b3919dd26e2253d78ba324303eab))
+
+
 ## [1.446.0](https://github.com/juspay/xyne-spaces/compare/v1.445.0...v1.446.0) (2026-09-30)
 
 
