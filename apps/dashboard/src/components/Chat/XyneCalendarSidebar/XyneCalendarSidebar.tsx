@@ -1081,9 +1081,25 @@ const XyneCalendarSidebarTimeline = memo(
     onToday,
   }: XyneCalendarSidebarTimelineProps): ReactElement => {
     const { user } = useAuth();
+
+    // The dates this sidebar is showing. Day/week/month each have their own span, and
+    // the query fetches exactly that — no list-shaped pool to filter down.
+    const calendarWindow = useMemo(() => {
+      const [from, to] =
+        viewMode === 'week'
+          ? [
+              startOfWeek(selectedDate, { weekStartsOn: 0 }),
+              endOfWeek(selectedDate, { weekStartsOn: 0 }),
+            ]
+          : viewMode === 'month'
+            ? [startOfMonth(selectedDate), endOfMonth(selectedDate)]
+            : [startOfDay(selectedDate), addDays(startOfDay(selectedDate), 1)];
+      return { from: from.getTime(), to: to.getTime() };
+    }, [viewMode, selectedDate]);
+
     const {
       calls,
-      calendarScheduledCalls,
+      calendarRangeCalls,
       isLoading,
       isScheduledCallsLoading,
       handleCallRowClick,
@@ -1099,7 +1115,7 @@ const XyneCalendarSidebarTimeline = memo(
       deleteModalCall,
       handleDeleteConfirm,
       closeDeleteModal,
-    } = useCallHistory(user?.id, { isCalendarView: true });
+    } = useCallHistory(user?.id, { calendarWindow });
     const visibleChannels = useAllVisibleChannels();
     const currentRoomExternalId = useSelector(roomActor, state => state.context.externalId);
     const isRoomSessionActive = useSelector(
@@ -1108,7 +1124,6 @@ const XyneCalendarSidebarTimeline = memo(
         state.matches('joining') || state.matches('connecting') || state.matches('connected'),
     );
     const selectedCallSnapshotRef = useRef<Call | null>(null);
-    const [now, setNow] = useState(() => new Date());
     const [scheduleInitialTime, setScheduleInitialTime] = useState<{
       startsAt: Date;
       endsAt: Date;
@@ -1119,18 +1134,16 @@ const XyneCalendarSidebarTimeline = memo(
       return displayName !== 'Unknown' ? `${displayName.split(' ')[0]}'s Call` : '';
     }, [user]);
 
-    const upcomingCallDates = useMemo(() => {
+    const callDates = useMemo(() => {
       const dates = new Set<number>();
-      const nowTime = now.getTime();
 
-      for (const call of calendarScheduledCalls ?? []) {
+      for (const call of calendarRangeCalls ?? []) {
         if (!call.startsAt) continue;
-        const startsAt = new Date(call.startsAt).getTime();
-        if (startsAt > nowTime) dates.add(startOfDay(new Date(startsAt)).getTime());
+        dates.add(startOfDay(new Date(call.startsAt)).getTime());
       }
 
       return Array.from(dates, date => new Date(date));
-    }, [calendarScheduledCalls, now]);
+    }, [calendarRangeCalls]);
 
     const handleCreateCallAtSlot = useCallback((startsAt: Date, endsAt: Date): void => {
       setScheduleInitialTime({ startsAt, endsAt });
@@ -1146,30 +1159,17 @@ const XyneCalendarSidebarTimeline = memo(
       [handleCreateCallAtSlot],
     );
 
-    // Week/month aren't day-scoped, so they need the full pool `dailyCalls` filters down from.
-    const allCalls = useMemo(
-      () => mergeCallsById([...(calls ?? []), ...(calendarScheduledCalls ?? [])]),
-      [calls, calendarScheduledCalls],
-    );
-
-    useEffect(() => {
-      const intervalId = window.setInterval(() => setNow(new Date()), 12_000);
-      return (): void => window.clearInterval(intervalId);
-    }, []);
+    // Week/month aren't day-scoped, so they need the full window `dailyCalls` narrows down from.
+    const allCalls = useMemo(() => mergeCallsById(calendarRangeCalls ?? []), [calendarRangeCalls]);
 
     const dailyCalls = useMemo(
       () =>
-        mergeCallsById(
-          getCallsOverlappingDay(
-            [...(calls ?? []), ...(calendarScheduledCalls ?? [])],
-            selectedDate,
-          ),
-        ).sort(
+        mergeCallsById(getCallsOverlappingDay(calendarRangeCalls ?? [], selectedDate)).sort(
           (firstCall, secondCall) =>
             new Date(firstCall.startsAt ?? 0).getTime() -
             new Date(secondCall.startsAt ?? 0).getTime(),
         ),
-      [calendarScheduledCalls, calls, selectedDate],
+      [calendarRangeCalls, selectedDate],
     );
 
     // Header count badge — Day reuses dailyCalls; Week/Month filter the full pool
@@ -1201,16 +1201,16 @@ const XyneCalendarSidebarTimeline = memo(
       [visibleChannels],
     );
 
-    // Not `dailyCalls`: that list requires `startsAt` (getCallsOverlappingDay) and only
-    // covers SCHEDULED/ended-history statuses.
+    // Not `dailyCalls`: that list is day-scoped and requires `startsAt`
+    // (getCallsOverlappingDay), so a selected call outside the day would vanish.
     const queriedSelectedCall = useMemo(() => {
       if (!selectedCallId) return null;
       return (
         calls?.find(call => call.id === selectedCallId) ??
-        calendarScheduledCalls?.find(call => call.id === selectedCallId) ??
+        calendarRangeCalls?.find(call => call.id === selectedCallId) ??
         null
       );
-    }, [calls, calendarScheduledCalls, selectedCallId]);
+    }, [calls, calendarRangeCalls, selectedCallId]);
 
     useEffect(() => {
       if (queriedSelectedCall) selectedCallSnapshotRef.current = queriedSelectedCall;
@@ -1241,7 +1241,7 @@ const XyneCalendarSidebarTimeline = memo(
         onPreviousDay={onPreviousDay}
         onNextDay={onNextDay}
         onToday={onToday}
-        markedDates={upcomingCallDates}
+        markedDates={callDates}
         callCount={viewPeriodCalls.length}
         liveCount={liveCount}
         scheduledCount={scheduledCount}

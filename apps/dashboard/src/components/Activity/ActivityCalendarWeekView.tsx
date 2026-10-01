@@ -47,9 +47,18 @@ export const ActivityCalendarWeekView = (): ReactElement => {
   }, []);
 
   const { user } = useAuth();
+
+  // This view is always a single week — fetch exactly that week.
+  const calendarWindow = useMemo(
+    () => ({
+      from: startOfWeek(currentWeekStart, { weekStartsOn: 0 }).getTime(),
+      to: endOfWeek(currentWeekStart, { weekStartsOn: 0 }).getTime(),
+    }),
+    [currentWeekStart],
+  );
+
   const {
-    calls,
-    calendarScheduledCalls,
+    calendarRangeCalls,
     isLoading,
     isScheduledCallsLoading,
     handleCallRowClick,
@@ -64,26 +73,22 @@ export const ActivityCalendarWeekView = (): ReactElement => {
     deleteModalCall,
     handleDeleteConfirm,
     closeDeleteModal,
-  } = useCallHistory(user?.id, { isCalendarView: true });
+  } = useCallHistory(user?.id, { calendarWindow });
 
-  // Week view isn't day-scoped, so it needs calls + scheduled calls merged, deduped by id.
-  const allCalls = useMemo(
-    () => mergeCallsById([...(calls ?? []), ...(calendarScheduledCalls ?? [])]),
-    [calls, calendarScheduledCalls],
-  );
+  const allCalls = useMemo(() => mergeCallsById(calendarRangeCalls ?? []), [calendarRangeCalls]);
 
-  const upcomingCallDates = useMemo(() => {
+  // Every day in the week that holds a call, past ones included — a call is placeable
+  // as soon as it has both ends of its interval.
+  const callDates = useMemo(() => {
     const dates = new Set<number>();
-    const now = Date.now();
 
-    for (const call of calendarScheduledCalls ?? []) {
+    for (const call of calendarRangeCalls ?? []) {
       if (!call.startsAt) continue;
-      const startsAt = new Date(call.startsAt).getTime();
-      if (startsAt > now) dates.add(startOfDay(new Date(startsAt)).getTime());
+      dates.add(startOfDay(new Date(call.startsAt)).getTime());
     }
 
     return Array.from(dates, date => new Date(date));
-  }, [calendarScheduledCalls]);
+  }, [calendarRangeCalls]);
 
   const channelPresentationsById = useXyneCalendarChannelPresentations(user?.id);
 
@@ -163,7 +168,7 @@ export const ActivityCalendarWeekView = (): ReactElement => {
               inputClassName='min-w-0 flex-1 border-0 bg-transparent px-2 shadow-none rounded-lg'
               contentClassName='z-50'
               displayLabel={formatWeekRangeLabel(currentWeekStart)}
-              markedDates={upcomingCallDates}
+              markedDates={callDates}
             />
 
             <span className='shrink-0 whitespace-nowrap text-xs text-muted-foreground'>
