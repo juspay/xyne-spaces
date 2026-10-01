@@ -215,6 +215,7 @@ locals {
         enabled = var.argocd_expose
         host    = var.argocd_host
       }
+      extraDestinations = var.argocd_extra_destinations
     }
     global = {
       cloud           = var.cluster.cloud
