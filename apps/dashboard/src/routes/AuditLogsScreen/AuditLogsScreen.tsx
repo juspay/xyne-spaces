@@ -18,14 +18,14 @@ import {
   SelectValue,
 } from '../../components/ui/Select';
 import { fetchAuditLogEntities, fetchAuditLogExport } from '../../services/auditLogService';
-import { buildAuditLogCsv, downloadCsvFile } from '../../utils/auditLogCsv';
+import { downloadAuditLogXlsx } from '../../utils/auditLogExport';
 import { showDownloadCompleteToast } from '../../utils/downloadToast';
 import { cn } from '../../utils/classNames';
 
 interface AuditSource {
   type: AuditEntityType;
   label: string;
-  /** Singular noun for the entity column / CSV header. */
+  /** Singular noun for the entity column / export header. */
   entityLabel: string;
   allLabel: string;
   slug: string;
@@ -190,7 +190,7 @@ const AuditEntityPicker = ({
 
 /**
  * Workspace-wide audit trail: pick a source (boards / user groups / desks), optionally
- * one entity, and a time window; the feed and the CSV download share those filters.
+ * one entity, and a time window; the feed and the Excel download share those filters.
  */
 const AuditLogsScreen = (): ReactElement => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -249,8 +249,8 @@ const AuditLogsScreen = (): ReactElement => {
         toast.info('No changes in this period to download');
         return;
       }
-      const filename = `audit-logs-${source.slug}-${format(from, 'yyyy-MM-dd')}-to-${format(to, 'yyyy-MM-dd')}.csv`;
-      downloadCsvFile(filename, buildAuditLogCsv(logs, source.entityLabel));
+      const filename = `audit-logs-${source.slug}-${format(from, 'yyyy-MM-dd')}-to-${format(to, 'yyyy-MM-dd')}.xlsx`;
+      await downloadAuditLogXlsx(filename, logs, source.entityLabel);
       showDownloadCompleteToast(filename);
       if (truncated) {
         toast.warning(
@@ -282,11 +282,11 @@ const AuditLogsScreen = (): ReactElement => {
             onClick={() => void handleDownload()}
             disabled={isExporting}
             data-track-category='AuditLogs'
-            data-track-name='DownloadCsv'
+            data-track-name='DownloadXlsx'
             data-track-metadata={JSON.stringify({ source: source.type, scoped: !!entityId })}
           >
             <Download className='size-4' />
-            {isExporting ? 'Preparing…' : 'Download CSV'}
+            {isExporting ? 'Preparing…' : 'Download Excel'}
           </Button>
         </div>
 
