@@ -10,7 +10,7 @@ import { errMsg } from "../lib/errors.js";
 import { deliveredDesignCommand, recordDeliveredArtifacts } from "../lib/delivered-artifacts.js";
 import crypto from "node:crypto";
 import { claimAutomationStep } from "../lib/automation-step-dedup.js";
-import { automationRunAllowsSandboxWrite } from "../lib/automation-write-policy.js";
+import { automationRunAllowsSandboxWrite, automationRunIsHeadlessBulk } from "../lib/automation-write-policy.js";
 import { CONFIG } from "../config.js";
 import {
   agentRepository,
@@ -2418,7 +2418,7 @@ export async function handleAutomationWebhook(
       providerConfigs,
       providerOrder,
       parent: providerParent,
-    } = await resolveAgentProviderConfigs(agent, { headlessBulk: true }));
+    } = await resolveAgentProviderConfigs(agent, { headlessBulk: automationRunIsHeadlessBulk(sessionId) }));
   } catch (provErr) {
     clog.error(
       `[webhook] AUTODBG ${sessionId}: resolveAgentProviderConfigs THREW: ${provErr instanceof Error ? provErr.stack || provErr.message : String(provErr)}`,
@@ -3473,9 +3473,28 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     if (payload.emptyReason === "no_output") {
       clog.warn(`[webhook/result] channel run produced no output session=${sessionId}`);
     }
+    const channelStatus = payload.emptyReason === "no_output" ? "failed" : (payload.status ?? "failed");
+    // Transcript row, same as the conversation path below — without it the
+    // channel conversation shows only the person's side in Claw.
+    if (resultWithCitations.trim() && channelUserId && ctx.conversationId && ctx.agentSlug && ctx.agentOrgId) {
+      const parentId = await chatMessageRepository.latestMessageId(ctx.conversationId, ctx.agentSlug).catch(() => null);
+      chatMessageRepository.create({
+        conversationId: ctx.conversationId,
+        agentSlug: ctx.agentSlug,
+        userId: channelUserId,
+        orgId: ctx.agentOrgId,
+        ...(parentId ? { parentId } : {}),
+        role: "assistant",
+        content: resultWithCitations,
+        status: channelStatus === "completed" ? "completed" : "failed",
+        ...(payload.reasoning ? { reasoning: payload.reasoning } : {}),
+      })
+        .then((msg) => persistCallbackAttachments(msg.id, channelUserId, payload.attachments))
+        .catch((e) => clog.warn(`[webhook/result] failed to save channel assistant ChatMessage session=${sessionId}: ${errMsg(e)}`));
+    }
     await deliverChannelResult({
       target: channelTarget,
-      status: payload.emptyReason === "no_output" ? "failed" : (payload.status ?? "failed"),
+      status: channelStatus,
       result: resultWithCitations,
       ...(payload.attachments?.length ? { attachments: payload.attachments } : {}),
     }).catch((err) => {
@@ -6159,12 +6178,13 @@ async function renderUiWidget(
 // We look up the session, then call updateMessage on the progress placeholder.
 
 router.post("/progress", requireStrictS2S, async (req: Request, res: Response) => {
-  const { sessionId, toolLabel, toolInvocation, sandboxPreviewUrl, sandboxCodePreviewUrl, sandboxId, conversationId, agentSlug } = req.body as {
+  const { sessionId, toolLabel, toolInvocation, sandboxPreviewUrl, sandboxCodePreviewUrl, sandboxTermUrl, sandboxId, conversationId, agentSlug } = req.body as {
     sessionId?: string;
     toolLabel?: string;
     toolInvocation?: unknown;
     sandboxPreviewUrl?: string;
     sandboxCodePreviewUrl?: string;
+    sandboxTermUrl?: string;
     sandboxId?: string;
     // Conversation identity claw ships on progress callbacks that need ctx
     // (sandbox-preview announce, label updates), mirroring /result. Lets the
@@ -6342,6 +6362,7 @@ router.post("/progress", requireStrictS2S, async (req: Request, res: Response) =
             "",
             systemNote(`Browser: ${sandboxPreviewUrl}`),
             ...(sandboxCodePreviewUrl ? [systemNote(`Code changes: ${sandboxCodePreviewUrl}/`)] : []),
+            ...(sandboxTermUrl ? [systemNote(`Terminal: ${sandboxTermUrl}`)] : []),
           ].join("\n"),
           metadata: { contentFormat: "markdown" },
         }

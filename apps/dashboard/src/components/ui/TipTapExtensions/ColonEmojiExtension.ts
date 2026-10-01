@@ -101,7 +101,7 @@ export const ColonEmojiExtension = Extension.create<{
             const text = event.clipboardData?.getData('text/plain');
             if (!text) return false;
 
-            const match = text.match(EMOJI_NAME_REGEX);
+            const match = text.match(/^:([a-zA-Z0-9_+-]+):$/);
             if (!match) return false;
 
             const emojiName = match[1];

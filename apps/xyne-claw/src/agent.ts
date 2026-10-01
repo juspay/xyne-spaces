@@ -1495,7 +1495,7 @@ export function pushAttachment(
 export function pushSandboxPreview(
   progressUrl: ProgressDest,
   sessionId: string,
-  payload: { sandboxId: string; sandboxPreviewUrl: string; sandboxCodePreviewUrl: string },
+  payload: { sandboxId: string; sandboxPreviewUrl: string; sandboxCodePreviewUrl: string; sandboxTermUrl?: string },
   progressMeta?: { conversationId?: string | null; agentSlug?: string | null },
 ): void {
   if (!progressUrl) return;
@@ -3174,12 +3174,13 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
             const previewBase = SANDBOX_PREVIEW.baseUrl.replace(/\/+$/, "");
             const sandboxPreviewUrl = `${previewBase}/claw-preview/${sbx.id}/`;
             const sandboxCodePreviewUrl = `${previewBase}/claw-code/${sbx.id}`;
+            const sandboxTermUrl = `${previewBase}/claw-term/${sbx.id}/`;
             sandboxPreviewEmitted = true;
-            log.info(`[agent] Sandbox preview ready: ${sandboxPreviewUrl} | code: ${sandboxCodePreviewUrl} (storeKey=${storeKey})`);
+            log.info(`[agent] Sandbox preview ready: ${sandboxPreviewUrl} | code: ${sandboxCodePreviewUrl} | term: ${sandboxTermUrl} (storeKey=${storeKey})`);
             // pushSandboxPreview goes to /webhook/progress which is keyed by
             // the run sessionId (the UUID), NOT the storeKey — claw-auth
             // looks the run session up. Use sessionId here.
-            pushSandboxPreview(progressUrl, sessionId ?? conversationId ?? "unknown", { sandboxId: sbx.id, sandboxPreviewUrl, sandboxCodePreviewUrl }, progressMeta);
+            pushSandboxPreview(progressUrl, sessionId ?? conversationId ?? "unknown", { sandboxId: sbx.id, sandboxPreviewUrl, sandboxCodePreviewUrl, sandboxTermUrl }, progressMeta);
           } else {
             log.info(`[agent] Sandbox preview skipped: no SESSION_STORE entry for storeKey=${storeKey} (tool=${event.toolName})`);
           }

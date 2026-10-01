@@ -1,8 +1,8 @@
+import { emitDomainEvent } from '@/events/emitDomainEvent';
 import { z } from 'zod';
 import { EmailType } from '@xyne/shared';
 import { BaseTrigger } from './base-trigger';
 import { TriggerCategory } from '../types/categories';
-import { eventRouter } from '../engine/event-router';
 import { repositories } from '@/database/repositories';
 import { logger } from '@/utils/logger';
 import { TicketContextSchema } from './ticket-context';
@@ -303,7 +303,7 @@ export async function emitEmailReceived(emailId: string): Promise<void> {
       return;
     }
 
-    await eventRouter.emit(
+    await emitDomainEvent(
       { type: EMAIL_RECEIVED_EVENT, payload: { emailId, channelId: email.channelId } },
       workspaceId,
     );

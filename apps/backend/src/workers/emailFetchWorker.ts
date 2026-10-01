@@ -16,6 +16,7 @@ import {
 import { catchUpEmailSource, refetchEmailSource, syncSocialMediaSources } from '@/bypassAcl/emailFetchServices';
 import { getHttpStatus } from '@/services/googleService';
 import { seedSyncCursor } from '@/services/syncCursorRecovery';
+import { toGooglePlayErrorResponse } from '@/integrations/adapters/social-media/google-play/client';
 
 const externalSourceRepo = new ExternalSourceRepository();
 
@@ -373,7 +374,7 @@ class EmailFetchWorker {
         data.requesterUserId,
         NotificationType.EMAIL_FETCH_FAILED,
         'Review fetch failed',
-        error.message.substring(0, 200),
+        (toGooglePlayErrorResponse(error)?.error ?? error.message).substring(0, 400),
         {
           channelId: data.channelId,
           sourceCount: data.sourceIds.length,

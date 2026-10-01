@@ -7,6 +7,7 @@ import { emailFetchQueue } from '@/queues/emailFetchQueue';
 import { InteractionReplyValidationError } from '../core/baseInteractionReplySender';
 import { ExternalSourcePlatform } from '../core/types';
 import { SOCIAL_MEDIA_PLATFORMS } from '../social-media/constants';
+import { toGooglePlayErrorResponse } from '../adapters/social-media/google-play/client';
 import { socialMediaService } from '../social-media/socialMediaService';
 import {
   authorizeSocialMediaManager,
@@ -69,6 +70,11 @@ router.post(
     } catch (error) {
       if (error instanceof InteractionReplyValidationError) {
         res.status(400).json({ error: error.message });
+        return;
+      }
+      const googlePlayError = toGooglePlayErrorResponse(error);
+      if (googlePlayError) {
+        res.status(googlePlayError.status).json({ error: googlePlayError.error });
         return;
       }
       logger.error(`${TAG} Failed to send review reply`, {
@@ -147,6 +153,11 @@ router.post(
       }
       res.json({ synced, sourceCount: sources.length });
     } catch (error) {
+      const googlePlayError = toGooglePlayErrorResponse(error);
+      if (googlePlayError) {
+        res.status(googlePlayError.status).json({ error: googlePlayError.error });
+        return;
+      }
       logger.error(`${TAG} Manual source sync failed`, { error });
       res.status(500).json({ error: 'Failed to synchronize review source' });
     }
@@ -183,14 +194,13 @@ router.post(
         return;
       }
 
-      // An App Store .p8 is a team-wide key with no programmatic revocation, so disconnecting a
-      // desk must actually destroy our copy. Play's refresh token is scoped and user-revocable,
-      // and its reconnect path re-consents, so it is left alone here.
+      // App Store .p8 and Play service-account keys are long-lived and not revocable from here,
+      // so disconnecting a desk destroys our copy; "Replace key" restores it.
       await db.externalSource.updateMany({
         where: {
           channelId: req.params.channelId,
           workspaceId,
-          sourceType: ExternalSourcePlatform.APP_STORE,
+          sourceType: { in: [ExternalSourcePlatform.APP_STORE, ExternalSourcePlatform.GOOGLE_PLAY] },
         },
         data: { credentials: '' },
       });

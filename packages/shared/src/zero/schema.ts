@@ -1083,6 +1083,7 @@ export const activityTable = table('activities')
     conversationId: string().optional(),
     channelId: string().optional(),
     canvasId: string().optional(),
+    savedViewId: string().optional(),
     trackId: string().optional(),
     blockId: string().optional(),
     conversationSeenCutoffAt: number().optional(),
@@ -3730,6 +3731,11 @@ export const activityTableRelationships = relationships(activityTable, ({ one })
     destField: ['id'],
     destSchema: canvasTable,
   }),
+  savedView: one({
+    sourceField: ['savedViewId'],
+    destField: ['id'],
+    destSchema: savedUserConfigurationTable,
+  }),
   actor: one({
     sourceField: ['actorId'],
     destField: ['id'],
@@ -4725,6 +4731,14 @@ export const viewAccessTableRelationships = relationships(
       sourceField: ['viewId'],
       destField: ['id'],
       destSchema: savedUserConfigurationTable,
+    }),
+    // CHANNEL grants store the channelId in entityId; USER grants store a userId here
+    // (which never matches a channel id, so this relation is simply empty for them).
+    // Lets ACLs/queries resolve channel membership for channel-scoped shares.
+    channel: one({
+      sourceField: ['entityId'],
+      destField: ['id'],
+      destSchema: channelTable,
     }),
   }),
 );

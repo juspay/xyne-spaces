@@ -56,6 +56,8 @@ export interface MediaDescriptor {
  *  `attachments` the plugin produces from it. */
 export interface InboundWithMedia extends InboundMessage {
   media?: MediaDescriptor;
+  /** JIDs of the other people @mentioned in the text (never us). */
+  mentions?: string[];
 }
 
 function mediaOf(content: proto.IMessage | null | undefined): MediaDescriptor | null {
@@ -118,7 +120,9 @@ function stripSelfMention(text: string, self: SelfIdentity): string {
   const phone = phoneFromJid(self.jid);
   let out = text;
   if (phone) out = out.replace(new RegExp(`@${phone}\\b`, "g"), " ");
-  const lidUser = self.lid ? self.lid.split("@")[0] : undefined;
+  // The stored LID can carry a device suffix ("<lid>:12@lid"); the mention
+  // token WhatsApp inlines never does.
+  const lidUser = self.lid ? self.lid.split("@")[0]?.split(":")[0] : undefined;
   if (lidUser) out = out.replace(new RegExp(`@${lidUser}\\b`, "g"), " ");
   return out.replace(/\s+/g, " ").trim();
 }
@@ -177,6 +181,10 @@ export function toInbound(msg: WAMessage, self: SelfIdentity, opts: ToInboundOpt
   const mentionedSelf = (ctx?.mentionedJid ?? []).some((jid) => sameUser(jid, self));
   const replyToSelf = !!ctx?.stanzaId && sameUser(ctx.participant, self);
 
+  const mentions = [
+    ...new Set((ctx?.mentionedJid ?? []).filter((jid) => !!jid && !sameUser(jid, self)).map((jid) => normalize(jid))),
+  ];
+
   const text = stripSelfMention(extractText(content), self);
   const ref: MessageRef = {
     chatId,
@@ -197,10 +205,31 @@ export function toInbound(msg: WAMessage, self: SelfIdentity, opts: ToInboundOpt
     mentionedSelf,
     replyToSelf,
     ...(media ? { media } : {}),
+    ...(mentions.length ? { mentions } : {}),
     fromSelf: fromMe && !fromOwner,
     ...(fromOwner ? { fromOwner: true } : {}),
     ...(selfChat ? { selfChat: true } : {}),
     ref,
     ...(timestamp !== undefined ? { timestamp } : {}),
   };
+}
+
+/**
+ * Replace the "@<number>" tokens WhatsApp inlines for mentions with a readable
+ * label, in both the text the agent reads and the quoted copy phones render
+ * a reply from. Baileys drops the mention list from that quoted copy, so the
+ * phone has no way to turn the digits into a name on its own.
+ */
+export function labelMentions(msg: InboundMessage, labels: ReadonlyMap<string, string>): void {
+  const relabel = (text: string): string => {
+    let out = text;
+    for (const [jid, label] of labels) {
+      const user = jid.split("@")[0]?.split(":")[0];
+      if (user) out = out.replace(new RegExp(`@${user}\\b`, "g"), () => `@${label}`);
+    }
+    return out;
+  };
+  msg.text = relabel(msg.text);
+  const raw = msg.ref.raw as { message?: { conversation?: string } } | undefined;
+  if (raw?.message?.conversation) raw.message.conversation = relabel(raw.message.conversation);
 }

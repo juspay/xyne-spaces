@@ -128,7 +128,9 @@ export async function handleInbound(ctx: InboundContext, msg: InboundMessage): P
     log.info(`[inbound] skipped our own echo account=${account.id} chat=${msg.chatId}`);
     return;
   }
-  if (!msg.text.trim() && !msg.cardReplyId && !hasMedia) {
+  // A bare @mention of the account is someone getting its attention: it is
+  // answered with a prompt below rather than dropped as empty.
+  if (!msg.text.trim() && !msg.cardReplyId && !hasMedia && !msg.mentionedSelf) {
     log.info(`[inbound] nothing in it account=${account.id} chat=${msg.chatId}`);
     return;
   }
@@ -344,6 +346,13 @@ async function handleOne(ctx: InboundContext, msg: InboundMessage): Promise<void
       await reply("This number has no agent assigned yet — ask your admin to bind one.");
       return;
     }
+  }
+
+  // Nothing to do yet — a bare tag or a bare "/slug". Asked before typing
+  // starts, since this reply ends nothing that would switch it off again.
+  if (!route.task && !msg.attachments?.length && !msg.loadAttachments) {
+    await reply(`What would you like /${agent.slug} to do?`);
+    return;
   }
 
   // Show life NOW. Everything above was cheap; everything below is not — a

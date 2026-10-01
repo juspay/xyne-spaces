@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { toInbound, type SelfIdentity } from "./messages.js";
+import { labelMentions, toInbound, type SelfIdentity } from "./messages.js";
 
 const self: SelfIdentity = { jid: "918667338331@s.whatsapp.net", lid: "233079436239007@lid" };
 const GROUP = "120363409771359214@g.us";
@@ -90,6 +90,53 @@ describe("toInbound: what it says", () => {
     expect(toInbound(mentionByLid, self)?.text).toBe("what is the status");
     // Why the plugin learns the LID from the group before giving up on it.
     expect(toInbound(mentionByLid, { jid: self.jid })?.mentionedSelf).toBe(false);
+  });
+
+  it("strips a LID @mention when our stored LID carries a device suffix", () => {
+    const deviceSelf: SelfIdentity = { jid: self.jid, lid: "233079436239007:12@lid" };
+    const mentionByLid = wa({ remoteJid: GROUP, participant: "919028716240@s.whatsapp.net" }, {
+      extendedTextMessage: { text: "@233079436239007 what is the status", contextInfo: { mentionedJid: ["233079436239007@lid"] } },
+    });
+    const msg = toInbound(mentionByLid, deviceSelf);
+    expect(msg?.mentionedSelf).toBe(true);
+    expect(msg?.text).toBe("what is the status");
+  });
+
+  it("quotes the text without our own LID tag, which phones would show as raw digits", () => {
+    const deviceSelf: SelfIdentity = { jid: self.jid, lid: "233079436239007:12@lid" };
+    const mentionByLid = wa({ remoteJid: GROUP, participant: "919028716240@s.whatsapp.net" }, {
+      extendedTextMessage: { text: "@233079436239007 hi", contextInfo: { mentionedJid: ["233079436239007@lid"] } },
+    });
+    const raw = toInbound(mentionByLid, deviceSelf)?.ref.raw as { message?: unknown };
+    expect(raw.message).toEqual({ conversation: "hi" });
+  });
+
+  it("lists other people's mentions but never our own", () => {
+    const msg = toInbound(
+      wa({ remoteJid: GROUP, participant: "919028716240@s.whatsapp.net" }, {
+        extendedTextMessage: {
+          text: "@233079436239007 ask @25606746030208 hi",
+          contextInfo: { mentionedJid: ["233079436239007@lid", "25606746030208@lid"] },
+        },
+      }),
+      self,
+    );
+    expect(msg?.mentions).toEqual(["25606746030208@lid"]);
+  });
+
+  it("labels other people's mentions in the text and in the quoted copy", () => {
+    const msg = toInbound(
+      wa({ remoteJid: GROUP, participant: "919028716240@s.whatsapp.net" }, {
+        extendedTextMessage: {
+          text: "@233079436239007 ask @25606746030208 and @919876543210 hi",
+          contextInfo: { mentionedJid: ["233079436239007@lid", "25606746030208@lid", "919876543210@s.whatsapp.net"] },
+        },
+      }),
+      self,
+    )!;
+    labelMentions(msg, new Map([["25606746030208@lid", "Priya"], ["919876543210@s.whatsapp.net", "+919876543210"]]));
+    expect(msg.text).toBe("ask @Priya and @+919876543210 hi");
+    expect((msg.ref.raw as { message?: unknown }).message).toEqual({ conversation: "ask @Priya and @+919876543210 hi" });
   });
 
   it("keeps a captionless photo, which is a message even with no text", () => {

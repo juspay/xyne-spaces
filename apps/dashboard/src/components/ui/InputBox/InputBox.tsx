@@ -1736,7 +1736,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         >
           <div
             className={`
-            overflow-hidden transition-all flex flex-col relative
+            overflow-hidden transition flex flex-col relative
             ${isMobile ? 'bg-background rounded-[26px] text-foreground shadow-sm' : 'bg-background rounded-2xl border text-foreground shadow-none'}
             ${
               !isMobile && artifactComposerDefinition
@@ -2017,7 +2017,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                         <DropdownMenuTrigger asChild>
                           <button
                             type='button'
-                            className='p-1.5 rounded hover:bg-accent transition-all duration-200 ease-in-out'
+                            className='p-1.5 rounded hover:bg-accent transition duration-200 ease-in-out'
                             aria-label='Add content'
                             disabled={disabled || isSending}
                           >
@@ -2107,7 +2107,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                         }}
                         data-track-category='CHAT_INPUT'
                         data-track-name='INSERT_USER_MENTION'
-                        className='p-1.5 rounded hover:bg-accent transition-all duration-200 ease-in-out'
+                        className='p-1.5 rounded hover:bg-accent transition duration-200 ease-in-out'
                         aria-label='Mention user'
                         data-testid='mention-user-btn'
                         disabled={disabled || isSending}
@@ -2131,7 +2131,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                         }}
                         data-track-category='CHAT_INPUT'
                         data-track-name='INSERT_CHANNEL_MENTION'
-                        className='p-1.5 rounded hover:bg-accent transition-all duration-200 ease-in-out'
+                        className='p-1.5 rounded hover:bg-accent transition duration-200 ease-in-out'
                         aria-label='Mention channel'
                         disabled={disabled || isSending}
                       >
@@ -2220,7 +2220,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                     <div className='relative flex items-center'>
                       {onCreateTicket ? (
                         <div
-                          className={`flex items-stretch rounded-md overflow-hidden transition-all duration-200 ease-in-out ${
+                          className={`flex items-stretch rounded-md overflow-hidden transition duration-200 ease-in-out ${
                             hasSendableContent && !sendDisabled
                               ? artifactComposerDefinition
                                 ? 'bg-orange-500 text-white'
@@ -2307,7 +2307,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                       ) : onScheduleSend ? (
                         // No ticket creation but schedule send is available — split button
                         <div
-                          className={`flex items-stretch rounded-md overflow-hidden transition-all duration-200 ease-in-out ${
+                          className={`flex items-stretch rounded-md overflow-hidden transition duration-200 ease-in-out ${
                             hasSendableContent
                               ? artifactComposerDefinition
                                 ? 'bg-orange-500 text-white'

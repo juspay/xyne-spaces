@@ -4,6 +4,7 @@ import { AuthProvider } from './providers/AuthProvider';
 import { AnalyticsProvider } from './providers/AnalyticsProvider';
 import { RouterProvider } from 'react-router-dom';
 import { router } from './routes/AppRoot';
+import { createStableRouter, StableRouterContext } from './hooks/useStableRouter';
 import { ThemeProvider } from '@juspay/blend-design-system';
 import { Toaster } from 'sonner';
 import './styles/sonner-overrides.css';
@@ -27,9 +28,11 @@ import { InterruptGuard } from './components/InterruptGuard/InterruptGuard';
 import { WorkspaceSwitchToastListener } from './components/WorkspaceSwitchToastListener';
 import { TRUSTED_ORIGINS } from '@xyne/shared';
 import {
+  isSandboxViewLink,
   parseCallInviteLink,
   parseInternalXyneLink,
 } from './components/Chat/RenderMessageWithHTML/internalLinkUtils';
+import { openLink } from './utils/openLink';
 import { crossWorkspaceNavigate } from './hooks/useCrossWorkspaceNavigate';
 import { joinCallSwitchingIfNeeded } from './machines/roomMachine';
 import { detectPlatform } from './hooks/usePlatform';
@@ -41,6 +44,8 @@ import {
   InformationCircle,
   MultipleCrossCancelDefault,
 } from '@xyne/icons';
+
+const stableRouter = createStableRouter(router);
 
 const App = (): ReactElement => {
   // Initialize theme on app load
@@ -100,6 +105,12 @@ const App = (): ReactElement => {
           viewMode: detectPlatform() === 'mobile' ? 'full' : 'mini',
           externalLobbyUrl: anchor.href,
         });
+        return;
+      }
+
+      if (isSandboxViewLink(anchor.href)) {
+        event.preventDefault();
+        openLink(anchor.href, event, { force: 'in-app' });
         return;
       }
 
@@ -187,7 +198,9 @@ const App = (): ReactElement => {
                   <TooltipProvider delayDuration={0}>
                     <main className='h-screen' style={{ background: 'var(--root-bg)' }}>
                       <Wallpaper />
-                      <RouterProvider router={router}></RouterProvider>
+                      <StableRouterContext.Provider value={stableRouter}>
+                        <RouterProvider router={router}></RouterProvider>
+                      </StableRouterContext.Provider>
                     </main>
                     <SwitchLoadingOverlay />
                     <InterruptGuard />

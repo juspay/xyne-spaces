@@ -198,9 +198,9 @@ const ChatView = (): ReactElement => {
   const isFocusThread = isThreadActive && searchParams.get('focusThread') === '1';
   const isProfileActive = !!userId;
   const isThreadProfileActive = isThreadActive && isProfileActive;
-  // Deactivated-user profile: routed to from Cmd+K's fallback when the target
-  // has no prior DM. Render just the ProfileSidebar full-viewport (like the
-  // focus-thread branch below), so the anchor channel behind it is hidden and
+  // Deactivated-user profile: reached from Cmd+K's fallback when the target
+  // has no prior DM. Render the profile route full-viewport (like the
+  // focus-thread branch below), so the anchor channel behind is suppressed and
   // the Slack-style layout inside ProfileSidebar owns the screen.
   const deactivatedProfileUser = useUser(userId ?? '');
   const isDeactivatedProfileActive =

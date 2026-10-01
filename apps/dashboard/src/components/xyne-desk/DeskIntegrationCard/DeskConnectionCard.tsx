@@ -10,6 +10,7 @@ interface DeskConnectionCardProps {
   isConnected: boolean;
   onDisconnect: () => Promise<void>;
   onReconnect?: () => Promise<void>;
+  reconnectLabel?: string;
   disconnectTitle: string;
   disconnectPrompt: string;
   disconnectBullets: string[];
@@ -24,6 +25,7 @@ export const DeskConnectionCard = ({
   isConnected,
   onDisconnect,
   onReconnect,
+  reconnectLabel = 'Reconnect',
   disconnectTitle,
   disconnectPrompt,
   disconnectBullets,
@@ -116,7 +118,7 @@ export const DeskConnectionCard = ({
               data-track-name='reconnect'
             >
               <Plug size={14} className='shrink-0' />
-              {isReconnecting ? 'Reconnecting…' : 'Reconnect'}
+              {isReconnecting ? 'Reconnecting…' : reconnectLabel}
             </button>
           )
         )}
