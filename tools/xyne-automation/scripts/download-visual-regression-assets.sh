@@ -30,7 +30,7 @@ if gsutil -m cp -r "${GCS_PATH}/*" "${DEST_DIR}/" 2>&1; then
   echo "✓ Successfully downloaded assets to ${DEST_DIR}"
 
   echo "Looking for xyne-automation container..."
-  CONTAINER_ID=$(docker compose -f docker-compose.dev.yml -f docker-compose.test.yml ps -q xyne-automation)
+  CONTAINER_ID=$(docker compose -f docker-compose.test.yml ps -q xyne-automation)
 
   if [ -n "$CONTAINER_ID" ]; then
     echo "Copying baselines to container $CONTAINER_ID..."
