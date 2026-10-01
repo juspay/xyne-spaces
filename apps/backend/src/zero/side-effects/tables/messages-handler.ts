@@ -443,6 +443,8 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       : { hasChannel: false, hasHere: false };
     // Reuses the @channel pipeline wholesale: mention-tier notification
     // filtering, per-user activities, and thread-aware action URLs all follow.
+    // Describes the message, not each recipient. Never pass it for personally
+    // mentioned users — it would subject them to the @channel/@here mute.
     const mentionType =
       artifactBroadcastsToChannel || specialMentions.hasChannel
         ? '@channel'
@@ -642,6 +644,11 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
           )
       ),
     ];
+    // Direct/group mentions must not be gated by the @channel/@here toggle, so they
+    // are notified separately from users reached only through the broadcast.
+    const personallyMentionedIds = new Set(finalMentionedUserIds);
+    const directNotificationUserIds = notificationUserIds.filter(id => personallyMentionedIds.has(id));
+    const broadcastNotificationUserIds = notificationUserIds.filter(id => !personallyMentionedIds.has(id));
 
     if (validMentionedUsers.length > 0) {
       const isThreadActivity = conversation.initialMessageId !== messageId;
@@ -726,27 +733,35 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         channelParticipants,
         senderId
       );
-      deliveredMentionUserIds = await notifyMentioned(notificationUserIds, {
-        workspaceId: this.ctx.workspaceId,
-        messageId,
-        conversationId,
-        channelId,
-        channelName,
-        senderId,
-        senderName,
-        senderPicture: sender?.picture ?? '',
-        cleanContent,
-        isReply: !!isReply,
-        isDM: isOneToOneDM,
-        mentionType,
-        prefetchedData,
-        slackEmails: new Map(
-          notificationUserIds
-            .map(id => channelParticipants.find(p => p.userId === id))
-            .filter(p => p?.user?.email)
-            .map(p => [p!.userId, p!.user.email]),
-        ),
-      });
+      const notifyMentionGroup = (userIds: string[], groupMentionType: typeof mentionType) =>
+        userIds.length === 0
+          ? Promise.resolve<string[]>([])
+          : notifyMentioned(userIds, {
+              workspaceId: this.ctx.workspaceId,
+              messageId,
+              conversationId,
+              channelId,
+              channelName,
+              senderId,
+              senderName,
+              senderPicture: sender?.picture ?? '',
+              cleanContent,
+              isReply: !!isReply,
+              isDM: isOneToOneDM,
+              mentionType: groupMentionType,
+              prefetchedData,
+              slackEmails: new Map(
+                userIds
+                  .map(id => channelParticipants.find(p => p.userId === id))
+                  .filter(p => p?.user?.email)
+                  .map(p => [p!.userId, p!.user.email]),
+              ),
+            });
+      const [directDelivered, broadcastDelivered] = await Promise.all([
+        notifyMentionGroup(directNotificationUserIds, undefined),
+        notifyMentionGroup(broadcastNotificationUserIds, mentionType),
+      ]);
+      deliveredMentionUserIds = [...directDelivered, ...broadcastDelivered];
     }
 
     // Keyword-match notifications: delivered like a mention (activity feed +
@@ -1500,28 +1515,41 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
 
         if (mentionType) {
           // @channel/@here in GROUP_DM thread: use 'thread_mention' context.
-          try {
-            const { deliveredUserIds } = await notificationService.createMentionNotifications(
-              recipientIds,
-              messageId,
-              conversationId,
-              channelId,
-              channelName,
-              senderId,
-              senderName,
-              cleanContent,
-              this.ctx.workspaceId,
-              mentionType,
-              false,
-              true,
-              senderPicture,
-              prefetchedData,
-              true, // isGroupDM
-            );
-            groupDMThreadMentionedUserIds = deliveredUserIds;
-          } catch (error) {
-            logger.error('[SIDE-EFFECT] GROUP_DM thread @channel/@here notifications failed', { error });
-          }
+          // Personally mentioned members are sent without mentionType so the
+          // @channel/@here toggle can't suppress their mention.
+          const personalIds = await this.getPersonalGroupDMMentionIds(htmlContent, channelParticipants, senderId);
+          const personalSet = new Set(personalIds);
+          const sendThreadMentions = async (userIds: string[], groupMentionType: '@channel' | '@here' | undefined) => {
+            if (userIds.length === 0) return [];
+            try {
+              const { deliveredUserIds } = await notificationService.createMentionNotifications(
+                userIds,
+                messageId,
+                conversationId,
+                channelId,
+                channelName,
+                senderId,
+                senderName,
+                cleanContent,
+                this.ctx.workspaceId,
+                groupMentionType,
+                false,
+                true,
+                senderPicture,
+                prefetchedData,
+                true, // isGroupDM
+              );
+              return deliveredUserIds;
+            } catch (error) {
+              logger.error('[SIDE-EFFECT] GROUP_DM thread @channel/@here notifications failed', { error });
+              return [];
+            }
+          };
+          const [personalDelivered, broadcastDelivered] = await Promise.all([
+            sendThreadMentions(personalIds, undefined),
+            sendThreadMentions(recipientIds.filter(id => !personalSet.has(id)), mentionType),
+          ]);
+          groupDMThreadMentionedUserIds = [...personalDelivered, ...broadcastDelivered];
         } else {
           // @username mentions in GROUP_DM thread.
           const flowRawText = getFlowJsonRawTextForMentions(htmlContent);
@@ -1663,28 +1691,41 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
 
       if (scopeType === ChannelScopeType.GROUP_DM && mentionType) {
         // Case 1: GROUP_DM @channel/@here — route through createMentionNotifications.
-        try {
-          const { deliveredUserIds } = await notificationService.createMentionNotifications(
-            recipientIds,
-            messageId,
-            conversationId,
-            channelId,
-            channelName,
-            senderId,
-            senderName,
-            cleanContent,
-            this.ctx.workspaceId,
-            mentionType,
-            false,
-            false,
-            senderPicture,
-            prefetchedData,
-            true, // isGroupDM
-          );
-          allDeliveredUserIds = deliveredUserIds;
-        } catch (error) {
-          logger.error('[SIDE-EFFECT] GROUP_DM @channel/@here mention notifications failed', { error });
-        }
+        // Personally mentioned members are sent without mentionType so the
+        // @channel/@here toggle can't suppress their mention.
+        const personalIds = await this.getPersonalGroupDMMentionIds(htmlContent, channelParticipants, senderId);
+        const personalSet = new Set(personalIds);
+        const sendMentions = async (userIds: string[], groupMentionType: '@channel' | '@here' | undefined) => {
+          if (userIds.length === 0) return [];
+          try {
+            const { deliveredUserIds } = await notificationService.createMentionNotifications(
+              userIds,
+              messageId,
+              conversationId,
+              channelId,
+              channelName,
+              senderId,
+              senderName,
+              cleanContent,
+              this.ctx.workspaceId,
+              groupMentionType,
+              false,
+              false,
+              senderPicture,
+              prefetchedData,
+              true, // isGroupDM
+            );
+            return deliveredUserIds;
+          } catch (error) {
+            logger.error('[SIDE-EFFECT] GROUP_DM @channel/@here mention notifications failed', { error });
+            return [];
+          }
+        };
+        const [personalDelivered, broadcastDelivered] = await Promise.all([
+          sendMentions(personalIds, undefined),
+          sendMentions(recipientIds.filter(id => !personalSet.has(id)), mentionType),
+        ]);
+        allDeliveredUserIds = [...personalDelivered, ...broadcastDelivered];
         } else {
         // Case 2: GROUP_DM @username mentions + regular DM notifications.
         let groupDMMentionedUserIds: string[] = [];
@@ -1872,6 +1913,21 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         logger.error(`[MessagesSideEffectHandler] Failed to queue Vespa job for attachment ${attachment.id}:`, error);
       }
     }
+  }
+
+  /** Group-DM members @mentioned directly or via a user group, excluding the sender. */
+  private async getPersonalGroupDMMentionIds(
+    htmlContent: string,
+    channelParticipants: Array<{ userId: string }>,
+    senderId: string,
+  ): Promise<string[]> {
+    // No channelId: @channel/@here expansion isn't needed here.
+    const mentioned = await extractAllUsersForNotification(
+      getFlowJsonRawTextForMentions(htmlContent) ?? htmlContent,
+      this.ctx.workspaceId,
+    );
+    const participantIds = new Set(channelParticipants.map(p => p.userId));
+    return mentionRecipients(mentioned, { participantIds, senderId }).map(u => u.userId);
   }
 
   private async handleSpecialMentionActivities(
