@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft, CheckCircle2, Hourglass, Loader2, XCircle } from 'lucide-react';
 import { cn } from '../../../../utils/classNames';
-import { fetchAutomationRun, isHeldRunStatus } from '../../../../api/automationsApi';
+import { fetchAutomationRun } from '../../../../api/automationsApi';
 import { PlayRunButton } from '../PlayRunButton/PlayRunButton';
 import type { AutomationRunStatus } from '../../Automation.types';
 import type { RunDetailProps } from './RunDetail.types';
@@ -76,7 +76,7 @@ export function RunDetail({ runId, onBack }: RunDetailProps): React.ReactElement
             {STATUS_LABELS[run.status] ?? run.status}
           </span>
         )}
-        {run && isHeldRunStatus(run.status) && (
+        {run?.status === 'HELD' && (
           <div className='ml-auto'>
             <PlayRunButton runId={run.id} automation={data?.automation ?? null} />
           </div>

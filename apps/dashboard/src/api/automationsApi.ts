@@ -60,16 +60,6 @@ export const AutomationRunStatusValues = {
 export type AutomationRunStatus =
   (typeof AutomationRunStatusValues)[keyof typeof AutomationRunStatusValues];
 
-/** Recording status: matching events are held, and held runs can be played. */
-export function isPlaygroundStatus(status: string): boolean {
-  return status === AutomationStatusValues.PLAYGROUND;
-}
-
-/** A captured run waiting for a manual Play. */
-export function isHeldRunStatus(status: string): boolean {
-  return status === AutomationRunStatusValues.HELD;
-}
-
 export const StepKindValues = {
   ACTION: 'ACTION',
   CONTROL_FLOW: 'CONTROL_FLOW',

@@ -6,11 +6,7 @@ import { Dialog } from '../../../ui/Dialog/Dialog';
 import { Tooltip } from '../../../ui/Tooltip';
 import { useSelf } from '../../../../hooks/useUsers';
 import { useIsAutomationsAdmin } from '../../useIsAutomationsAdmin';
-import {
-  isPlaygroundStatus,
-  playAutomationRun,
-  type RunAutomationRef,
-} from '../../../../api/automationsApi';
+import { playAutomationRun, type RunAutomationRef } from '../../../../api/automationsApi';
 
 export interface PlayRunButtonProps {
   runId: string;
@@ -19,13 +15,13 @@ export interface PlayRunButtonProps {
 }
 
 /** Why ▶ is disabled, or null when the current user can play this held run. */
-export function usePlayDisabledReason(
+function usePlayDisabledReason(
   automation: RunAutomationRef | null | undefined,
 ): string | null {
   const me = useSelf();
   const isAdmin = useIsAutomationsAdmin();
   if (!automation) return 'Loading…';
-  if (!isPlaygroundStatus(automation.status)) {
+  if (automation.status !== 'PLAYGROUND') {
     return `Held runs can only be played while this version is in Playground (it is now ${automation.status}).`;
   }
   if (!isAdmin && me?.id !== automation.createdById) {

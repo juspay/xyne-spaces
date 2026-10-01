@@ -318,11 +318,10 @@ export function AutomationBuilder({
     enabled: !!savedId && isDraft && !readOnlyPreview,
   });
   const draftHasRuns = isDraft && hasRunsQuery.data === true;
-  const hasRunsUnknown =
-    isDraft && !!savedId && hasRunsQuery.data === undefined && !hasRunsQuery.isError;
-  // PLAYGROUND, or a DRAFT with runs: never edited in place. If the run check failed, fork
-  // to be safe.
-  const isFrozenProposal = isPlayground || draftHasRuns || (isDraft && hasRunsQuery.isError);
+  // PLAYGROUND, or a saved DRAFT with runs: never edited in place. Until the run check
+  // answers "no runs" (loading or failed), fork to be safe.
+  const isFrozenProposal =
+    isPlayground || (isDraft && !!savedId && hasRunsQuery.data !== false);
   // Webhook-triggered automations can't record: the webhook handler bypasses the event router.
   const isWebhookTrigger = config.trigger.type === 'WEBHOOK';
 
@@ -1254,7 +1253,6 @@ export function AutomationBuilder({
                   — the body differs per case. */}
               {canEdit ? (
                 <Button
-                  disabled={hasRunsUnknown}
                   onClick={() => {
                     if (forksOnEdit) setProposeChangeConfirmOpen(true);
                     else setEditConfirmOpen(true);
@@ -1345,7 +1343,6 @@ export function AutomationBuilder({
         {...(!editMode && canEdit && !readOnlyPreview
           ? {
               onClick: (): void => {
-                if (hasRunsUnknown) return;
                 if (forksOnEdit) setProposeChangeConfirmOpen(true);
                 else setEditConfirmOpen(true);
               },

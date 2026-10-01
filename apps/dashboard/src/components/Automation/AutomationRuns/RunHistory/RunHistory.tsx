@@ -22,11 +22,7 @@ import { Skeleton } from '../../../ui/Skeleton';
 import { Button } from '../../../ui/Button/Button';
 import { DateRangeFilter, type DateRangeValue } from '../../../ui/DateRangeFilter/DateRangeFilter';
 import { loadRunFilters, saveRunFilters } from '../../AutomationsList/AutomationFiltersBar/filters';
-import {
-  fetchAutomationRuns,
-  isHeldRunStatus,
-  type RunAutomationRef,
-} from '../../../../api/automationsApi';
+import { fetchAutomationRuns, type RunAutomationRef } from '../../../../api/automationsApi';
 import type { AutomationRunStatus, AutomationRunSummary } from '../../Automation.types';
 import { PlayRunButton } from '../PlayRunButton/PlayRunButton';
 import type { RunHistoryProps } from './RunHistory.types';
@@ -272,7 +268,7 @@ function RunRow({
             <MinusCircle className='size-4 text-muted-foreground' />
           ) : run.status === 'PENDING' ? (
             <ClockDefault className='size-4 text-muted-foreground' />
-          ) : isHeldRunStatus(run.status) ? (
+          ) : run.status === 'HELD' ? (
             <PauseCircle className='size-4 text-sky-600' />
           ) : (
             <Spinner className='size-4 animate-spin text-blue-600' />
@@ -297,7 +293,7 @@ function RunRow({
           {duration && <span>Took {duration}</span>}
         </div>
       </button>
-      {isHeldRunStatus(run.status) && (
+      {run.status === 'HELD' && (
         <PlayRunButton runId={run.id} automation={automation} />
       )}
     </div>

@@ -31,20 +31,8 @@ const ADMIN_ONLY_STATUSES = new Set<string>(['DISABLED', 'REJECTED', 'ARCHIVED']
  */
 const AUTHOR_OR_ADMIN_STATUSES = new Set<string>(['PENDING_APPROVAL', 'REVOKED']);
 
-const PLAYGROUND_STATUS = 'PLAYGROUND';
-const DRAFT_STATUS = 'DRAFT';
-const ARCHIVED_STATUS = 'ARCHIVED';
-
-function createdByIdOf(row: { id: string; metadata: string | null }): string | undefined {
-  try {
-    return parseAutomationMetadata(row.metadata).createdById || undefined;
-  } catch (e) {
-    logger.warn('[workflows-acl] Failed to parse automation metadata for owner check', {
-      workflowId: row.id,
-      error: e instanceof Error ? e.message : String(e),
-    });
-    return undefined;
-  }
+function createdByIdOf(row: { metadata: string | null }): string | undefined {
+  return parseAutomationMetadata(row.metadata).createdById || undefined;
 }
 
 export class WOrkflowsAcl extends BaseACL<'workflows'> {
@@ -91,15 +79,6 @@ export class WOrkflowsAcl extends BaseACL<'workflows'> {
     }
   }
 
-  /** Owner (metadata.createdById) or an Automations admin. */
-  private async requireOwnerOrAutomationsAdmin(
-    row: { id: string; metadata: string | null },
-    tx: Transaction<Schema>,
-  ): Promise<void> {
-    if (createdByIdOf(row) === this.ctx.userID) return;
-    await this.requireAutomationsAdmin(tx);
-  }
-
   /**
    * Playground transitions (owner-or-admin, never open to every member):
    *  - DRAFT → PLAYGROUND (start recording). No other status may enter PLAYGROUND.
@@ -118,32 +97,32 @@ export class WOrkflowsAcl extends BaseACL<'workflows'> {
     nextStatus: string,
     tx: Transaction<Schema>,
   ): Promise<boolean> {
-    if (nextStatus === PLAYGROUND_STATUS) {
-      if (existing.status !== DRAFT_STATUS && existing.status !== PLAYGROUND_STATUS) {
+    if (nextStatus === 'PLAYGROUND') {
+      if (existing.status !== 'DRAFT' && existing.status !== 'PLAYGROUND') {
         throw new MutationACLError(
           'Automation update failed: only a draft can start recording',
           'workflows',
         );
       }
-      await this.requireOwnerOrAutomationsAdmin(existing, tx);
+      if (createdByIdOf(existing) !== this.ctx.userID) await this.requireAutomationsAdmin(tx);
       return true;
     }
-    if (existing.status === PLAYGROUND_STATUS && nextStatus === DRAFT_STATUS) {
+    if (existing.status === 'PLAYGROUND' && nextStatus === 'DRAFT') {
       if (createdByIdOf(existing) === this.ctx.userID) return true;
       const seriesId = existing.automationSeriesId ?? existing.id;
       const siblings = await tx.run(
         zql.workflows
           .where('automationSeriesId', seriesId)
           .where('workflowType', AUTOMATION_WORKFLOW_TYPE)
-          .where('status', PLAYGROUND_STATUS)
+          .where('status', 'PLAYGROUND')
           .where('id', '!=', existing.id),
       );
       if (siblings.some(row => createdByIdOf(row) === this.ctx.userID)) return true;
       await this.requireAutomationsAdmin(tx);
       return true;
     }
-    if (existing.status === DRAFT_STATUS && nextStatus === ARCHIVED_STATUS) {
-      await this.requireOwnerOrAutomationsAdmin(existing, tx);
+    if (existing.status === 'DRAFT' && nextStatus === 'ARCHIVED') {
+      if (createdByIdOf(existing) !== this.ctx.userID) await this.requireAutomationsAdmin(tx);
       return true;
     }
     return false;

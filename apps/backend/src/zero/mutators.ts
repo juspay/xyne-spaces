@@ -1049,17 +1049,6 @@ async function countAutomationRuns(workflowId: string): Promise<number> {
   return db.workflowExecution.count({ where: { workflowId } });
 }
 
-/** Webhook triggers bypass the event router, so they can never capture in PLAYGROUND. */
-function isWebhookTriggeredAutomation(eventType: string | null, context: string | null): boolean {
-  if (eventType === 'WEBHOOK') return true;
-  try {
-    const parsed = context ? (JSON.parse(context) as { trigger?: { type?: string } }) : null;
-    return parsed?.trigger?.type === 'WEBHOOK';
-  } catch {
-    return false;
-  }
-}
-
 export function createMutators(
   authData: AuthData,
   asyncTasks: Array<() => Promise<void>>,
@@ -17893,11 +17882,7 @@ export function createMutators(
               `Cannot delete "${id}": only DRAFT proposals can be deleted (status is ${existing.status}).`,
             );
           }
-          if (
-            existing &&
-            existing.workflowType === 'Automations' &&
-            (await countAutomationRuns(id)) > 0
-          ) {
+          if (existing?.workflowType === 'Automations' && (await countAutomationRuns(id)) > 0) {
             throw new Error(`Cannot delete "${id}": it has runs. Archive it instead.`);
           }
           await tx.mutate.workflows.delete({ id });
@@ -18131,7 +18116,6 @@ export function createMutators(
       startRecording: defineMutator(
         z.object({ id: z.string(), timestamp: z.number() }),
         async ({ tx, args: { id, timestamp } }) => {
-          logger.info(`[Mutator] automations.startRecording START id=${id}`);
           const existing = await tx.run(zql.workflows.where('id', id).one());
           if (!existing || existing.workflowType !== 'Automations') {
             throw new Error(`Automation "${id}" not found`);
@@ -18141,7 +18125,8 @@ export function createMutators(
               `Automation "${id}" is ${existing.status}; only DRAFT versions can start recording.`,
             );
           }
-          if (isWebhookTriggeredAutomation(existing.eventType, existing.context)) {
+          // Webhook triggers bypass the event router, so they can never capture.
+          if (existing.eventType === 'WEBHOOK') {
             throw new Error('Webhook-triggered automations cannot record in Playground.');
           }
 
@@ -18175,7 +18160,6 @@ export function createMutators(
       stopRecording: defineMutator(
         z.object({ id: z.string(), timestamp: z.number() }),
         async ({ tx, args: { id, timestamp } }) => {
-          logger.info(`[Mutator] automations.stopRecording START id=${id}`);
           const existing = await tx.run(zql.workflows.where('id', id).one());
           if (!existing || existing.workflowType !== 'Automations') {
             throw new Error(`Automation "${id}" not found`);
