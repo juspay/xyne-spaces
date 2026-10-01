@@ -1,5 +1,5 @@
 import { Router, type Request, type Response } from "express";
-import { executeTwinApprovalDelivery, type TwinDeliveryContext } from "../lib/twin-delivery.js";
+import { executeTwinApprovalDelivery, type TwinDeliveryContext } from "../lib/twin-approval-delivery.js";
 import { recordTwinApprovalOutcome } from "../services/twinResponseFeedback.js";
 import { createLogger } from "../logger.js";
 
@@ -10,7 +10,7 @@ const log = createLogger("twin-draft");
  * for the approval DM card). The Spaces backend owns the draft (Redis, owner-
  * only) and forwards the user's approve/decline here — claw-auth owns the Twin's
  * tested DELIVERY (react/post as the user) and FEEDBACK recording. Mounted under
- * requireStrictS2S, so only a trusted service (Spaces) reaches it.
+ * requireInternalS2S, so only a trusted service (Spaces) reaches it.
  *
  * The delivery-execution context comes from the SERVER-SIDE Redis draft (Spaces
  * reads it, not the client), so the reply's destination can't be tampered with.
@@ -67,28 +67,6 @@ twinDraftInternalRouter.post("/action", async (req: Request, res: Response) => {
     return;
   }
 
-  // Feedback row shape read by recordTwinApprovalOutcome (mirrors flow-data keys).
-  const feedbackData: Record<string, unknown> = {
-    mentionedUserId: ownerId,
-    sourceMessageId: draft.sourceMessageId,
-    targetConversationId: draft.conversationId,
-    targetChannelId: draft.channelId,
-    channelName: draft.channelName,
-    incomingTask: draft.incomingTask,
-    deliveryAction: draft.action,
-    deliveryEmoji: draft.emoji,
-    destinationKind: draft.destinationKind,
-    messageContent: draft.message,
-  };
-
-  if (action === "decline") {
-    void recordTwinApprovalOutcome(feedbackData, "declined");
-    log.info(`[twin-draft] declined by ${ownerId} (msg ${draft.sourceMessageId ?? "(none)"})`);
-    res.json({ ok: true });
-    return;
-  }
-
-  // approve — deliver, then record the outcome.
   const ctx: TwinDeliveryContext = {
     mentionedUserId: ownerId,
     workspaceId: draft.workspaceId,
@@ -104,7 +82,23 @@ twinDraftInternalRouter.post("/action", async (req: Request, res: Response) => {
     destinationUserId: draft.destinationUserId,
     senderId: draft.senderId,
   };
+  // Feedback row shape read by recordTwinApprovalOutcome (mirrors flow-data keys).
+  // destinationKind stays the draft's own so a draft without one records NULL.
+  const feedbackData: Record<string, unknown> = {
+    ...ctx,
+    channelName: draft.channelName,
+    incomingTask: draft.incomingTask,
+    destinationKind: draft.destinationKind,
+  };
 
+  if (action === "decline") {
+    void recordTwinApprovalOutcome(feedbackData, "declined");
+    log.info(`[twin-draft] declined by ${ownerId} (msg ${draft.sourceMessageId ?? "(none)"})`);
+    res.json({ ok: true });
+    return;
+  }
+
+  // approve — deliver, then record the outcome.
   try {
     const result = await executeTwinApprovalDelivery(ctx, { editedContent: editedMessage });
     if (!result.ok) {

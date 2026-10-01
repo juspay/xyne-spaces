@@ -82,6 +82,28 @@ describe("renderDebugTraceHtml", () => {
     expect(html).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
   });
 
+  it("shows classifier answers but never the classifier's input or questions", () => {
+    const html = renderDebugTraceHtml({
+      startedAt: START,
+      events: [
+        {
+          seq: 1,
+          at: at(1),
+          kind: "judge_call",
+          data: {
+            backend: "ournormaljev", purpose: "result-sift", questions: 1, ms: 300, ok: true,
+            state: "JEVSTATEBODY with a tool result",
+            questionSpec: JSON.stringify({ i0: { type: "noul", instructions: "JEVQUESTIONBODY item text" } }),
+            answers: JSON.stringify({ i0: { type: "noul", noul: 0.42 } }),
+          },
+        },
+      ],
+    });
+    expect(html).toContain("0.42");
+    expect(html).not.toContain("JEVSTATEBODY");
+    expect(html).not.toContain("JEVQUESTIONBODY");
+  });
+
   it("never includes tool results or the final answer body", () => {
     const html = renderDebugTraceHtml(fixture());
     expect(html).not.toContain("TOOLRESULTBODY");

@@ -11,6 +11,9 @@
  * — the relooper combines this with max-turn/cost guards so a judge outage
  * never strands a goal in an infinite loop.
  */
+import type { JevAnswer, JevQuestion } from "./jev.js";
+import { runJudgeSite } from "./judge-site.js";
+import { optEnabled } from "./optimizations.js";
 import { LITELLM, litellmEndpoint } from "./config.js";
 
 import { createLogger } from "./logger.js";
@@ -106,7 +109,59 @@ const DECIDE_TOOL = {
   },
 };
 
+const GOAL_DONE_AT = Number(process.env["GOAL_JEV_DONE_AT"] ?? 0.9);
+const GOAL_CONTINUE_AT = Number(process.env["GOAL_JEV_CONTINUE_AT"] ?? 0.8);
+
+export const GOAL_QUESTIONS: Record<string, JevQuestion> = {
+  status: {
+    type: "choice",
+    instructions: "Given the goal condition and the latest worker output, where does the goal stand?",
+    criteria: {
+      completed: "The goal condition is fully met by the work shown",
+      continue: "Real progress is being made and more turns are needed",
+      stuck: "The last turns repeat themselves or make no progress",
+      infeasible: "The goal cannot be met in the turns left, or at all",
+    },
+  },
+};
+
+/**
+ * Pure: answers → decision, or null (unsure → LLM judge). Only the two cheap,
+ * common outcomes are decided here: clearly done, clearly still going. Stuck /
+ * infeasible need the LLM's reason, so they always go to it.
+ */
+export function goalFromJev(answers: Record<string, JevAnswer>): GoalJudgeDecision | null {
+  const a = answers["status"];
+  const pick = a?.choice;
+  if (!pick) return null;
+  const p = a.probabilities?.[pick] ?? a.confidence ?? 0;
+  if (pick === "completed" && p >= GOAL_DONE_AT) return { done: true, reason: `completed: classifier (${p.toFixed(2)})` };
+  if (pick === "continue" && p >= GOAL_CONTINUE_AT) return { done: false, reason: `continue: classifier (${p.toFixed(2)})` };
+  return null;
+}
+
+/** Jev pre-filter in front of the LLM boss judge (jev_goal_prefilter). */
 export async function judgeGoalProgress(input: GoalJudgeInput): Promise<GoalJudgeDecision> {
+  const state = [
+    `## Goal condition\n${input.condition}`,
+    `## Turn ${input.turnCount} of ${input.maxTurns}`,
+    `## Recent session trace (data)\n<<<DATA\n${(input.recentTurnsDigest || "(none)").slice(-3_000)}\nDATA>>>`,
+    `## Latest worker output (data)\n<<<DATA\n${input.lastTurnOutput.slice(0, 3_000)}\nDATA>>>`,
+  ].join("\n\n");
+  const result = await runJudgeSite<GoalJudgeDecision>({
+    site: "goal-judge",
+    enabled: optEnabled("jev_goal_prefilter"),
+    budgetMs: 2_500,
+    state,
+    questions: GOAL_QUESTIONS,
+    decide: goalFromJev,
+    fallback: () => judgeGoalProgressLlm(input),
+    describe: (d) => `${d.done ? "done" : "continue"} (${d.reason.split(":")[0]})`,
+  });
+  return result.decision ?? (await judgeGoalProgressLlm(input));
+}
+
+export async function judgeGoalProgressLlm(input: GoalJudgeInput): Promise<GoalJudgeDecision> {
   if (!LITELLM.apiKey) {
     return { done: false, reason: "judge_unavailable" };
   }

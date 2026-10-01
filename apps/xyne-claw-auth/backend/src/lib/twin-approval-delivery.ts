@@ -4,8 +4,7 @@ import { expandSpacesMentions, resolveUnboundMentions } from "./mention-transfor
 import { buildSpacesMentionLookupsDb } from "./mention-lookups.js";
 import { createLogger } from "../logger.js";
 import { resolveTwinReplyTarget } from "./twin-reply-target.js";
-
-export { resolveTwinReplyTarget } from "./twin-reply-target.js";
+import { twinDeliveryParts } from "xyne-claw-shared";
 
 const log = createLogger("twin-delivery");
 
@@ -42,6 +41,28 @@ export interface TwinDeliveryContext {
   senderId?: string | undefined;
 }
 
+/** Build the delivery context from approval-card flow-data (the raw, untyped
+ *  `flowJSON.data`), applying the same defaults the card was built with. */
+export function twinDeliveryContextFromFlowData(data: Record<string, unknown>): TwinDeliveryContext {
+  return {
+    mentionedUserId: data["mentionedUserId"] as string,
+    workspaceId: data["workspaceId"] as string,
+    targetChannelId: data["targetChannelId"] as string,
+    targetConversationId: data["targetConversationId"] as string,
+    sourceMessageId: data["sourceMessageId"] as string | undefined,
+    messageContent: (data["messageContent"] as string | undefined) ?? "",
+    deliveryAction: (data["deliveryAction"] as string | undefined) ?? "reply",
+    deliveryEmoji: data["deliveryEmoji"] as string | undefined,
+    destinationKind: (data["destinationKind"] as string | undefined) ?? "origin_thread",
+    destinationChannelId: data["destinationChannelId"] as string | undefined,
+    destinationConversationId: data["destinationConversationId"] as string | undefined,
+    // DM destinations: `dm_sender` → the person who mentioned the user (senderId);
+    // `dm` → a specific person the Twin chose (destinationUserId).
+    destinationUserId: data["destinationUserId"] as string | undefined,
+    senderId: data["senderId"] as string | undefined,
+  };
+}
+
 export type TwinDeliveryResult =
   | {
       ok: true;
@@ -54,6 +75,16 @@ export type TwinDeliveryResult =
     }
   | { ok: false; error: string };
 
+/** POST a JSON body to a Spaces S2S route (30s timeout). */
+export function spacesInternalPost(path: string, body: unknown): Promise<Response> {
+  return fetch(`${CONFIG.spacesInternalUrl}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-s2s-key": process.env["INTERNAL_S2S_KEY"] ?? "" },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(30_000),
+  });
+}
+
 /**
  * Deliver an approved Twin response. Returns a structured result; NEVER writes
  * an HTTP response or records feedback (the caller does both).
@@ -62,28 +93,19 @@ export async function executeTwinApprovalDelivery(
   ctx: TwinDeliveryContext,
   opts: { editedContent?: string | undefined } = {},
 ): Promise<TwinDeliveryResult> {
-  const willReact = ctx.deliveryAction === "react" || ctx.deliveryAction === "react_and_reply";
-  const willReply = ctx.deliveryAction === "reply" || ctx.deliveryAction === "react_and_reply";
+  const { emoji: willReact, message: willReply } = twinDeliveryParts(ctx.deliveryAction);
 
-  const messageContent = ctx.messageContent ?? "";
+  const original = willReply ? (ctx.messageContent ?? "").trim() : "";
   const edited = opts.editedContent?.trim();
-  const finalContent = willReply
-    ? edited && edited.length > 0
-      ? edited
-      : messageContent.trim()
-    : "";
-  const wasEdited = willReply && !!edited && edited.length > 0 && edited !== messageContent.trim();
-
-  const s2sKey = process.env["INTERNAL_S2S_KEY"] ?? "";
-  const s2sHeaders = { "Content-Type": "application/json", "x-s2s-key": s2sKey };
+  const finalContent = willReply ? edited || original : "";
+  const wasEdited = willReply && !!edited && edited !== original;
 
   // 1) React AS the user on the triggering message.
   if (willReact && ctx.sourceMessageId && ctx.deliveryEmoji) {
-    const rr = await fetch(`${CONFIG.spacesInternalUrl}/api/internal/reactAsUser`, {
-      method: "POST",
-      headers: s2sHeaders,
-      body: JSON.stringify({ messageId: ctx.sourceMessageId, emojiName: ctx.deliveryEmoji, userId: ctx.mentionedUserId }),
-      signal: AbortSignal.timeout(30_000),
+    const rr = await spacesInternalPost("/api/internal/reactAsUser", {
+      messageId: ctx.sourceMessageId,
+      emojiName: ctx.deliveryEmoji,
+      userId: ctx.mentionedUserId,
     });
     if (!rr.ok) {
       const text = await rr.text().catch(() => "");
@@ -104,11 +126,10 @@ export async function executeTwinApprovalDelivery(
         log.error(`[twin-delivery] DM has no target user (kind=${ctx.destinationKind})`);
         return { ok: false, error: "Couldn't resolve who to DM" };
       }
-      const dmRes = await fetch(`${CONFIG.spacesInternalUrl}/api/internal/getOrCreateDm`, {
-        method: "POST",
-        headers: s2sHeaders,
-        body: JSON.stringify({ userId: ctx.mentionedUserId, targetUserId: dmTarget, workspaceId: ctx.workspaceId }),
-        signal: AbortSignal.timeout(30_000),
+      const dmRes = await spacesInternalPost("/api/internal/getOrCreateDm", {
+        userId: ctx.mentionedUserId,
+        targetUserId: dmTarget,
+        workspaceId: ctx.workspaceId,
       });
       if (!dmRes.ok) {
         const text = await dmRes.text().catch(() => "");
@@ -144,18 +165,13 @@ export async function executeTwinApprovalDelivery(
     }
     markdownText = expandSpacesMentions(markdownText);
 
-    const postRes = await fetch(`${CONFIG.spacesInternalUrl}/api/internal/postAsUser`, {
-      method: "POST",
-      headers: s2sHeaders,
-      body: JSON.stringify({
-        channelId: target.channelId,
-        ...(target.conversationId ? { conversationId: target.conversationId } : {}),
-        markdownText,
-        userId: ctx.mentionedUserId,
-        workspaceId: ctx.workspaceId,
-        metadata: { contentFormat: "markdown" },
-      }),
-      signal: AbortSignal.timeout(30_000),
+    const postRes = await spacesInternalPost("/api/internal/postAsUser", {
+      channelId: target.channelId,
+      ...(target.conversationId ? { conversationId: target.conversationId } : {}),
+      markdownText,
+      userId: ctx.mentionedUserId,
+      workspaceId: ctx.workspaceId,
+      metadata: { contentFormat: "markdown" },
     });
     if (!postRes.ok) {
       const text = await postRes.text().catch(() => "");
