@@ -407,14 +407,22 @@ export class AppDeskRefetch extends BaseRefetch {
         // ingestThread, so a duplicate also costs no attachment download.
         let pageMessages = page.messages;
         if (pageMessages.length > 0) {
+          // Both id forms are looked up. Source-scoping (#1248) is recent, so
+          // anything this app pushed before it is stored under the RAW id.
           const scopedIds = pageMessages.map(m =>
             scopeExternalMessageIdToSource(source.id, m.externalId),
           );
-          const existingRows = await externalMessageRepo.findByExternalIds(source.id, scopedIds);
+          const rawIds = pageMessages.map(m => m.externalId);
+          const existingRows = await externalMessageRepo.findByExternalIds(source.id, [
+            ...scopedIds,
+            ...rawIds,
+          ]);
           if (existingRows.length > 0) {
             const existing = new Set(existingRows.map(r => r.externalId));
             const remaining = pageMessages.filter(
-              m => !existing.has(scopeExternalMessageIdToSource(source.id, m.externalId)),
+              m =>
+                !existing.has(scopeExternalMessageIdToSource(source.id, m.externalId)) &&
+                !existing.has(m.externalId),
             );
             skipped += pageMessages.length - remaining.length;
             logger.info(`${TAG} pre-dedup: skipped ${pageMessages.length - remaining.length} already-ingested messages`, {
