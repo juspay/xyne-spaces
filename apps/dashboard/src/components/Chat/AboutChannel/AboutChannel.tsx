@@ -397,10 +397,13 @@ const AboutChannel = ({
           </div>
         )}
 
-        <div className='text-[14px] text-muted-foreground py-4 text-center'>
-          Created By <span className='text-primary'>{getUserDisplayName(createdByUser)}</span> on{' '}
-          <span className='visual-regression-hide'>{formatDate(channel.createdAt)}</span>
-        </div>
+        {/* Created-by line — hidden for 1:1 DMs; shown for group DMs and channels */}
+        {!isDM && (
+          <div className='text-[14px] text-muted-foreground py-4 text-center'>
+            Created By <span className='text-primary'>{getUserDisplayName(createdByUser)}</span> on{' '}
+            <span className='visual-regression-hide'>{formatDate(channel.createdAt)}</span>
+          </div>
+        )}
       </div>
       <div className='mt-auto p-[12px] text-[12px] flex items-center justify-center text-muted-foreground font-light border-t border-border visual-regression-hide'>
         Channel ID: {channel.id}
